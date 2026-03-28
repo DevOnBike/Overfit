@@ -216,5 +216,115 @@ namespace DevOnBike.Overfit
                 backwardAction: backward
             );
         }
+        
+        // ====================================================================
+        // 5. ACTIVATION FUNCTIONS
+        // ====================================================================
+
+        /// <summary>
+        /// Rectified Linear Unit (ReLU) activation function.
+        /// Math: f(x) = max(0, x).
+        /// SIMD-accelerated forward pass.
+        /// </summary>
+        public static Tensor ReLU(Tensor input)
+        {
+            var resultData = new FastMatrix<double>(input.Data.Rows, input.Data.Cols);
+            
+            // 1. FORWARD PASS: Hardware-accelerated max(0, x)
+            TensorPrimitives.Max(input.Data.AsReadOnlySpan(), 0.0, resultData.AsSpan());
+
+            // 2. BACKWARD PASS REGISTRATION
+            Action<Tensor> backward = (resultNode) =>
+            {
+                if (input.RequiresGrad)
+                {
+                    var inSpan = input.Data.AsReadOnlySpan();
+                    var gradOutSpan = resultNode.Grad.AsReadOnlySpan();
+                    var gradInSpan = input.Grad.AsSpan();
+
+                    // Math: Derivative of ReLU is 1 if x > 0, else 0.
+                    // grad_input += grad_output * (input > 0 ? 1 : 0)
+                    // RyuJIT will heavily optimize this tight Span loop.
+                    for (int i = 0; i < inSpan.Length; i++)
+                    {
+                        if (inSpan[i] > 0)
+                        {
+                            gradInSpan[i] += gradOutSpan[i];
+                        }
+                    }
+                }
+            };
+
+            return Tensor.CreateOperationResult(
+                data: resultData,
+                dependencies: new List<Tensor> { input },
+                backwardAction: backward
+            );
+        }
+
+        // ====================================================================
+        // 6. LOSS FUNCTIONS
+        // ====================================================================
+
+        /// <summary>
+        /// Mean Squared Error (MSE) Loss.
+        /// Math: L = (1/N) * sum((predictions - targets)^2)
+        /// Returns a 1x1 Tensor representing the scalar loss.
+        /// </summary>
+        public static Tensor MSE(Tensor predictions, Tensor targets)
+        {
+            if (predictions.Data.Rows != targets.Data.Rows || predictions.Data.Cols != targets.Data.Cols)
+            {
+                throw new ArgumentException("Shape mismatch between predictions and targets in MSE.");
+            }
+
+            int n = predictions.Data.Rows * predictions.Data.Cols;
+            var resultData = new FastMatrix<double>(1, 1);
+
+            // 1. FORWARD PASS: Wyciągamy Spany lokalnie tylko na potrzeby Forward
+            var predSpanForward = predictions.Data.AsReadOnlySpan();
+            var targetSpanForward = targets.Data.AsReadOnlySpan();
+
+            double dist = TensorPrimitives.Distance(predSpanForward, targetSpanForward);
+            resultData[0, 0] = (dist * dist) / n;
+
+            // 2. BACKWARD PASS REGISTRATION
+            Action<Tensor> backward = (resultNode) =>
+            {
+                double gradC = resultNode.Grad[0, 0];
+                double factor = (2.0 / n) * gradC;
+
+                // FIX: Wyciągamy Spany od nowa WEWNĄTRZ lambdy!
+                // Dzięki temu żyją one krótko, bezpiecznie na stosie podczas wykonywania .Backward()
+                var pData = predictions.Data.AsReadOnlySpan();
+                var tData = targets.Data.AsReadOnlySpan();
+
+                if (predictions.RequiresGrad)
+                {
+                    var pGrad = predictions.Grad.AsSpan();
+                    
+                    for (int i = 0; i < pData.Length; i++)
+                    {
+                        pGrad[i] += factor * (pData[i] - tData[i]);
+                    }
+                }
+
+                if (targets.RequiresGrad)
+                {
+                    var tGrad = targets.Grad.AsSpan();
+                    
+                    for (int i = 0; i < tData.Length; i++)
+                    {
+                        tGrad[i] += factor * (tData[i] - pData[i]);
+                    }
+                }
+            };
+
+            return Tensor.CreateOperationResult(
+                data: resultData,
+                dependencies: new List<Tensor> { predictions, targets },
+                backwardAction: backward
+            );
+        }
     }
 }

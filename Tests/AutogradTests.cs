@@ -119,5 +119,76 @@ namespace DevOnBike.Overfit.Tests
             // Gradient dla b policzony normalnie
             Assert.True(b.Grad[0, 0] > 0.0);
         }
+        
+        [Fact]
+        public void ReLU_ForwardAndBackward_FiltersNegativeValuesAndGradients()
+        {
+            // Arrange
+            using var matA = new FastMatrix<double>(2, 2);
+            matA[0, 0] = 5.0;  matA[0, 1] = -2.0;
+            matA[1, 0] = -0.1; matA[1, 1] = 10.0;
+
+            using var a = new Tensor(matA);
+
+            // Act - Forward
+            using var relu = TensorMath.ReLU(a);
+
+            // Assert - Forward (Ujemne wyzerowane, dodatnie przepuszczone)
+            Assert.Equal(5.0, relu.Data[0, 0]);
+            Assert.Equal(0.0, relu.Data[0, 1]);
+            Assert.Equal(0.0, relu.Data[1, 0]);
+            Assert.Equal(10.0, relu.Data[1, 1]);
+
+            // Symulujemy gradient przychodzący z góry równy 2.0 dla wszystkich komórek
+            FillGradient(relu, 2.0);
+
+            // Act - Backward
+            relu.Backward();
+
+            // Assert - Backward 
+            // (Gradient przepływa tylko tam, gdzie wejście było > 0)
+            Assert.Equal(2.0, a.Grad[0, 0]); // Przepuszczony
+            Assert.Equal(0.0, a.Grad[0, 1]); // Zablokowany (bo x <= 0)
+            Assert.Equal(0.0, a.Grad[1, 0]); // Zablokowany
+            Assert.Equal(2.0, a.Grad[1, 1]); // Przepuszczony
+        }
+
+        [Fact]
+        public void MSE_ForwardAndBackward_CalculatesCorrectLossAndDerivative()
+        {
+            // Arrange
+            using var matPred = new FastMatrix<double>(2, 1);
+            matPred[0, 0] = 3.0; 
+            matPred[1, 0] = 5.0;
+
+            using var matTarget = new FastMatrix<double>(2, 1);
+            matTarget[0, 0] = 1.0; 
+            matTarget[1, 0] = 9.0;
+
+            // N = 2
+            // MSE = ((3-1)^2 + (5-9)^2) / 2 = (4 + 16) / 2 = 10.0
+            
+            // Pochodna dL/d(pred) = (2/N) * (pred - target)
+            // dL/d(pred[0]) = (2/2) * (3 - 1) = 2.0
+            // dL/d(pred[1]) = (2/2) * (5 - 9) = -4.0
+
+            using var predictions = new Tensor(matPred, requiresGrad: true);
+            using var targets = new Tensor(matTarget, requiresGrad: false);
+
+            // Act - Forward
+            using var loss = TensorMath.MSE(predictions, targets);
+
+            // Assert - Forward
+            Assert.Equal(10.0, loss.Data[0, 0], Precision);
+
+            // Act - Backward
+            // UWAGA: Funkcja straty zawsze startuje z gradientem bazowym 1.0
+            loss.Grad[0, 0] = 1.0;
+            loss.Backward();
+
+            // Assert - Backward (Gradienty dla predykcji)
+            Assert.Equal(2.0, predictions.Grad[0, 0], Precision);
+            Assert.Equal(-4.0, predictions.Grad[1, 0], Precision);
+        }
     }
 }
