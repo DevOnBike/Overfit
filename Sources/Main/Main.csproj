@@ -29,4 +29,8 @@
 		<InternalsVisibleTo Include="Tests" />
 	</ItemGroup>
 
+	<ItemGroup>
+	  <PackageReference Include="System.Numerics.Tensors" />
+	</ItemGroup>
+
 </Project>
