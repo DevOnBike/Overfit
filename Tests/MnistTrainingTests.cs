@@ -25,7 +25,8 @@ namespace DevOnBike.Overfit.Tests
             var layer1 = new LinearLayer(784, 128);
             var layer2 = new LinearLayer(128, 10);
 
-            var optimizer = new SGD(layer1.Parameters().Concat(layer2.Parameters()), learningRate);
+            // var optimizer = new SGD(layer1.Parameters().Concat(layer2.Parameters()), learningRate);
+            var optimizer = new Adam(layer1.Parameters().Concat(layer2.Parameters()), learningRate: 0.001);
 
             var numBatches = trainSize / batchSize;
             double initialLoss = 0;
