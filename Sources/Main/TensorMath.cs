@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using System.Numerics.Tensors;
 
 namespace DevOnBike.Overfit
@@ -60,6 +60,48 @@ namespace DevOnBike.Overfit
 
                 // Fire up hardware AVX-512 on the extracted Spans
                 TensorPrimitives.Add(leftRow, rightRow, resultRow);
+            }
+        }
+
+        // ====================================================================
+        // 3. GEMM (General Matrix Multiply)
+        // ====================================================================
+
+        /// <summary>
+        /// Wykonuje operację C = A * B.
+        /// Używa optymalizacji "Linear Combination of Rows" (Cache-friendly) 
+        /// oraz instrukcji wektorowych FMA (Fused Multiply-Add).
+        /// </summary>
+        public static void MatMul<T>(FastMatrixView<T> A, FastMatrixView<T> B, FastMatrixView<T> C)
+            where T : struct, IFloatingPointIeee754<T>
+        {
+            if (A.Cols != B.Rows || A.Rows != C.Rows || B.Cols != C.Cols)
+            {
+                throw new ArgumentException("Shape mismatch in MatMul.");
+            }
+
+            // Zewnętrzna pętla idzie po wierszach A i C
+            for (var i = 0; i < A.Rows; i++)
+            {
+                var rowC = C.Row(i);
+
+                // Zerujemy wiersz wynikowy przed akumulacją
+                rowC.Clear();
+
+                // Wewnętrzna pętla idzie po kolumnach A (i wierszach B)
+                for (var k = 0; k < A.Cols; k++)
+                {
+                    // Pobieramy jeden, samotny skalar z macierzy A
+                    var a_ik = A[i, k];
+
+                    // Pobieramy CIĄGŁY wiersz z macierzy B
+                    var rowB = B.Row(k);
+
+                    // Odpalamy sprzętowe AVX-512 FMA:
+                    // Matematycznie: rowC = (rowB * a_ik) + rowC
+                    // Wykonuje się to z prędkością światła, bo rowB i rowC są ciągłe i siedzą w L1 Cache!
+                    TensorPrimitives.MultiplyAdd(rowB, a_ik, rowC, rowC);
+                }
             }
         }
     }
