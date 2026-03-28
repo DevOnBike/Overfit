@@ -1,0 +1,16 @@
+﻿<Project>
+  <PropertyGroup>
+    <Version>2026.03.28</Version>
+    <FileVersion>2026.03.28</FileVersion>
+    <InformationalVersion>release+id</InformationalVersion>
+    <Authors>DevOnBike</Authors>
+    <Company>Sharp IT</Company>
+    <Product>Overfit</Product>
+	<NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <WarningsAsErrors>$(WarningsAsErrors);NU1901;NU1902;NU1903;NU1904;CS4014</WarningsAsErrors>
+	
+	<ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+</Project>

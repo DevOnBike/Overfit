@@ -1,0 +1,52 @@
+# This workflow will build a .NET project
+# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-net
+
+name: .NET 10
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Install linux components
+      run: |
+        sudo apt-get update -y
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 10.0.x
+    - name: Restore dependencies
+      run: dotnet restore
+
+    - name: Security Audit (Vulnerable Packages)
+      run: dotnet list package --vulnerable --include-transitive
+
+    - name: Build
+      run: dotnet build -c Release --no-restore 
+    - name: Test
+      run: dotnet test -c Release --no-build --verbosity normal
+
+  windows:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Set up .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 10.0.x
+    - name: Restore dependencies
+      run: dotnet restore
+    - name: Build
+      run: dotnet build -c Release --no-restore 
+    - name: Test
+      run: dotnet test -c Release --no-build --verbosity normal

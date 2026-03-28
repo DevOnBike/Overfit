@@ -1,0 +1,32 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<DebugType>embedded</DebugType>
+		<NoWarn>$(NoWarn);1591</NoWarn>
+		<RootNamespace>DevOnBike.Overfit</RootNamespace>
+		<AssemblyName>DevOnBike.Overfit</AssemblyName>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<SourceRevisionId>N/A</SourceRevisionId>
+		<InformationalVersion>$(Version)+$(SourceRevisionId)</InformationalVersion>
+		<PackageId>DevOnBike.Overfit</PackageId>
+		<Version>10.0.0</Version>
+		<Authors>DevOnBike</Authors>
+		<Description>Machine Learning</Description>
+		<RepositoryUrl>https://github.com/DevOnBike/Overfit</RepositoryUrl>
+		<RepositoryType>git</RepositoryType>
+		<PackageTags>ml</PackageTags>
+		<PackageLicenseExpression>MIT</PackageLicenseExpression>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<PackageIcon>logo.png</PackageIcon>
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<None Include="logo.png" Pack="true" PackagePath="\" />
+		<None Include="README.md" Pack="true" PackagePath="\" />
+		<InternalsVisibleTo Include="Tests" />
+	</ItemGroup>
+
+</Project>

@@ -1,0 +1,49 @@
+name: nuget.org
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'SemVer to publish (e.g. 1.2.3 or 1.2.3-beta.4). Leave empty to use the <Version> from .csproj'
+        required: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 10.x
+
+    - name: Get commit hash
+      id: vars
+      run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+    - name: Restore dependencies
+      run: dotnet restore
+
+    - name: Build
+      run: dotnet build -c Release --no-restore -p:SourceRevisionId=${{ steps.vars.outputs.sha_short }}
+
+    - name: Test
+      run: dotnet test -c Release --no-build --verbosity normal
+
+    - name: Pack
+      run: |
+        VERSION_ARG=""
+        
+        if [ -n "${{ inputs.version }}" ]; then
+          VERSION_ARG="-p:Version=${{ inputs.version }}"
+          echo "Packing with specific version: ${{ inputs.version }}"
+        else
+          echo "Packing with version from .csproj file."
+        fi
+        
+        dotnet pack -c Release --no-build -p:RepositoryCommit=${{ github.sha }} --output ./packages $VERSION_ARG
+
+    - name: Push to NuGet.org
+      run: dotnet nuget push "./packages/*.nupkg" --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json"
