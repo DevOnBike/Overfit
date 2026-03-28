@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 namespace DevOnBike.Overfit.Layers
 {
     /// <summary>
@@ -54,6 +56,27 @@ namespace DevOnBike.Overfit.Layers
         {
             yield return Weights;
             yield return Biases;
+        }
+        
+        public void Save(string path)
+        {
+            // Zamieniamy Span<double> na Span<byte> bez kopiowania danych!
+            // To jest najszybszy możliwy sposób zapisu w .NET.
+            ReadOnlySpan<byte> weightBytes = MemoryMarshal.AsBytes(Weights.Data.AsSpan());
+            ReadOnlySpan<byte> biasBytes = MemoryMarshal.AsBytes(Biases.Data.AsSpan());
+
+            File.WriteAllBytes($"{path}.weights.bin", weightBytes.ToArray());
+            File.WriteAllBytes($"{path}.biases.bin", biasBytes.ToArray());
+        }
+
+        public void Load(string path)
+        {
+            var weightBytes = File.ReadAllBytes($"{path}.weights.bin");
+            var biasBytes = File.ReadAllBytes($"{path}.biases.bin");
+
+            // Rzutujemy bajty z powrotem na double i kopiujemy do istniejącej macierzy
+            MemoryMarshal.Cast<byte, double>(weightBytes).CopyTo(Weights.Data.AsSpan());
+            MemoryMarshal.Cast<byte, double>(biasBytes).CopyTo(Biases.Data.AsSpan());
         }
     }
 }
