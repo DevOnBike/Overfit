@@ -326,5 +326,52 @@ namespace DevOnBike.Overfit
                 backwardAction: backward
             );
         }
+        
+        /// <summary>
+        /// Dodaje wektor Biasu do każdego wiersza macierzy wejściowej (Broadcasting).
+        /// Wspiera Autograd: gradient biasu jest sumowany po wszystkich wierszach (Batchu).
+        /// </summary>
+        public static Tensor AddBias(Tensor input, Tensor bias)
+        {
+            if (bias.Data.Rows != 1 || bias.Data.Cols != input.Data.Cols)
+            {
+                throw new ArgumentException("Bias musi być wektorem 1xD, gdzie D to liczba kolumn wejścia.");
+            }
+
+            // 1. FORWARD PASS z bezalokacyjnym Broadcastingiem
+            var resultData = new FastMatrix<double>(input.Data.Rows, input.Data.Cols);
+            var broadcastedBias = BroadcastRowVector(bias.Data.AsSpan(), input.Data.Rows);
+            Add(input.Data.AsView(), broadcastedBias, resultData.AsView());
+
+            // 2. BACKWARD PASS REGISTRATION
+            Action<Tensor> backward = (resultNode) =>
+            {
+                var gradC = resultNode.Grad.AsView();
+
+                // Gradient wejścia przepływa bez zmian (jak w zwykłym dodawaniu)
+                if (input.RequiresGrad)
+                {
+                    Add(input.Grad.AsView(), gradC, input.Grad.AsView());
+                }
+
+                // Gradient biasu to SUMA gradientów po wszystkich wierszach (Batchu)
+                if (bias.RequiresGrad)
+                {
+                    var biasGradSpan = bias.Grad.AsSpan();
+                    for (int r = 0; r < resultNode.Grad.Rows; r++)
+                    {
+                        var rowGrad = resultNode.Grad.Row(r);
+                        // SIMD Akumulacja: biasGrad += rowGrad
+                        TensorPrimitives.Add(biasGradSpan, rowGrad, biasGradSpan);
+                    }
+                }
+            };
+
+            return Tensor.CreateOperationResult(
+            data: resultData,
+            dependencies: new List<Tensor> { input, bias },
+            backwardAction: backward
+            );
+        }
     }
 }
