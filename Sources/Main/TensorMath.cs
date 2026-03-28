@@ -245,7 +245,7 @@ namespace DevOnBike.Overfit
                     // Math: Derivative of ReLU is 1 if x > 0, else 0.
                     // grad_input += grad_output * (input > 0 ? 1 : 0)
                     // RyuJIT will heavily optimize this tight Span loop.
-                    for (int i = 0; i < inSpan.Length; i++)
+                    for (var i = 0; i < inSpan.Length; i++)
                     {
                         if (inSpan[i] > 0)
                         {
@@ -278,21 +278,21 @@ namespace DevOnBike.Overfit
                 throw new ArgumentException("Shape mismatch between predictions and targets in MSE.");
             }
 
-            int n = predictions.Data.Rows * predictions.Data.Cols;
+            var n = predictions.Data.Rows * predictions.Data.Cols;
             var resultData = new FastMatrix<double>(1, 1);
 
             // 1. FORWARD PASS: Wyciągamy Spany lokalnie tylko na potrzeby Forward
             var predSpanForward = predictions.Data.AsReadOnlySpan();
             var targetSpanForward = targets.Data.AsReadOnlySpan();
 
-            double dist = TensorPrimitives.Distance(predSpanForward, targetSpanForward);
+            var dist = TensorPrimitives.Distance(predSpanForward, targetSpanForward);
             resultData[0, 0] = (dist * dist) / n;
 
             // 2. BACKWARD PASS REGISTRATION
             Action<Tensor> backward = (resultNode) =>
             {
-                double gradC = resultNode.Grad[0, 0];
-                double factor = (2.0 / n) * gradC;
+                var gradC = resultNode.Grad[0, 0];
+                var factor = (2.0 / n) * gradC;
 
                 // FIX: Wyciągamy Spany od nowa WEWNĄTRZ lambdy!
                 // Dzięki temu żyją one krótko, bezpiecznie na stosie podczas wykonywania .Backward()
@@ -303,7 +303,7 @@ namespace DevOnBike.Overfit
                 {
                     var pGrad = predictions.Grad.AsSpan();
                     
-                    for (int i = 0; i < pData.Length; i++)
+                    for (var i = 0; i < pData.Length; i++)
                     {
                         pGrad[i] += factor * (pData[i] - tData[i]);
                     }
@@ -313,7 +313,7 @@ namespace DevOnBike.Overfit
                 {
                     var tGrad = targets.Grad.AsSpan();
                     
-                    for (int i = 0; i < tData.Length; i++)
+                    for (var i = 0; i < tData.Length; i++)
                     {
                         tGrad[i] += factor * (tData[i] - pData[i]);
                     }
@@ -358,7 +358,7 @@ namespace DevOnBike.Overfit
                 if (bias.RequiresGrad)
                 {
                     var biasGradSpan = bias.Grad.AsSpan();
-                    for (int r = 0; r < resultNode.Grad.Rows; r++)
+                    for (var r = 0; r < resultNode.Grad.Rows; r++)
                     {
                         var rowGrad = resultNode.Grad.Row(r);
                         // SIMD Akumulacja: biasGrad += rowGrad

@@ -37,13 +37,13 @@ namespace DevOnBike.Overfit.Tests
             // Używamy nieco wyższego Learning Rate w teście, aby szybciej zbiegł
             var sgd = new SGD(allParameters, learningRate: 0.1); 
 
-            int epochs = 2000;
-            double finalLoss = double.MaxValue;
+            var epochs = 2000;
+            var finalLoss = double.MaxValue;
 
             // ==========================================
             // ACT (Trening)
             // ==========================================
-            for (int epoch = 0; epoch < epochs; epoch++)
+            for (var epoch = 0; epoch < epochs; epoch++)
             {
                 sgd.ZeroGrad();
 
@@ -89,7 +89,7 @@ namespace DevOnBike.Overfit.Tests
             // ==========================================
             // ARRANGE: Generowanie 300 punktów danych
             // ==========================================
-            int numSamples = 300;
+            var numSamples = 300;
             using var xData = new FastMatrix<double>(numSamples, 2);
             using var yData = new FastMatrix<double>(numSamples, 1);
 
@@ -97,12 +97,12 @@ namespace DevOnBike.Overfit.Tests
             // i nie wybuchł losowo na CI/CD przez niefortunną inicjalizację danych.
             var rnd = new Random(42);
 
-            for (int i = 0; i < numSamples; i++)
+            for (var i = 0; i < numSamples; i++)
             {
-                bool isOuter = i % 2 == 0;
+                var isOuter = i % 2 == 0;
                 // Wewnętrzne koło: r < 0.4. Zewnętrzny pierścień: 0.5 < r < 1.0
-                double radius = isOuter ? rnd.NextDouble() * 0.5 + 0.5 : rnd.NextDouble() * 0.4;
-                double angle = rnd.NextDouble() * 2 * Math.PI;
+                var radius = isOuter ? rnd.NextDouble() * 0.5 + 0.5 : rnd.NextDouble() * 0.4;
+                var angle = rnd.NextDouble() * 2 * Math.PI;
 
                 xData[i, 0] = radius * Math.Cos(angle);
                 xData[i, 1] = radius * Math.Sin(angle);
@@ -126,13 +126,13 @@ namespace DevOnBike.Overfit.Tests
 
             var sgd = new SGD(allParameters, learningRate: 0.05);
 
-            int epochs = 3000;
-            double finalLoss = double.MaxValue;
+            var epochs = 3000;
+            var finalLoss = double.MaxValue;
 
             // ==========================================
             // ACT: Pętla Treningowa (CPU Sweat Mode)
             // ==========================================
-            for (int epoch = 0; epoch < epochs; epoch++)
+            for (var epoch = 0; epoch < epochs; epoch++)
             {
                 sgd.ZeroGrad();
 

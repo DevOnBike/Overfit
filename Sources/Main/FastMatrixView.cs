@@ -79,9 +79,9 @@ namespace DevOnBike.Overfit
         public FastMatrix<T> ToContiguousFastMatrix()
         {
             var result = new FastMatrix<T>(Rows, Cols);
-            for (int r = 0; r < Rows; r++)
+            for (var r = 0; r < Rows; r++)
             {
-                for (int c = 0; c < Cols; c++)
+                for (var c = 0; c < Cols; c++)
                 {
                     result[r, c] = this[r, c];
                 }

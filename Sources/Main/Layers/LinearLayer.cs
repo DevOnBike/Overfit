@@ -26,13 +26,13 @@ namespace DevOnBike.Overfit.Layers
         /// </summary>
         private void InitializeWeights(Span<double> span, int fanIn)
         {
-            double stdDev = Math.Sqrt(2.0 / fanIn);
-            for (int i = 0; i < span.Length; i++)
+            var stdDev = Math.Sqrt(2.0 / fanIn);
+            for (var i = 0; i < span.Length; i++)
             {
                 // Generowanie rozkładu normalnego (Box-Muller transform)
-                double u1 = 1.0 - Random.Shared.NextDouble();
-                double u2 = 1.0 - Random.Shared.NextDouble();
-                double randStdNormal = Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Sin(2.0 * Math.PI * u2);
+                var u1 = 1.0 - Random.Shared.NextDouble();
+                var u2 = 1.0 - Random.Shared.NextDouble();
+                var randStdNormal = Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Sin(2.0 * Math.PI * u2);
                 
                 span[i] = randStdNormal * stdDev;
             }

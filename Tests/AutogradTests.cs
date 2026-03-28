@@ -9,7 +9,7 @@ namespace DevOnBike.Overfit.Tests
         private void FillGradient(Tensor tensor, double value)
         {
             var span = tensor.Grad.AsSpan();
-            for (int i = 0; i < span.Length; i++)
+            for (var i = 0; i < span.Length; i++)
             {
                 span[i] = value;
             }
