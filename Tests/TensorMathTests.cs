@@ -194,5 +194,54 @@ namespace DevOnBike.Overfit.Tests
 
             Assert.Contains("Shape mismatch", ex.Message);
         }
+        
+        [Fact]
+        public void MatMulAdd_ValidMatrices_AccumulatesToExistingResult()
+        {
+            // Arrange
+            using var A = new FastMatrix<double>(2, 2);
+            A[0, 0] = 1; A[0, 1] = 2;
+            A[1, 0] = 3; A[1, 1] = 4;
+
+            using var B = new FastMatrix<double>(2, 2);
+            B[0, 0] = 5; B[0, 1] = 6;
+            B[1, 0] = 7; B[1, 1] = 8;
+
+            // Oczekiwany wynik A*B = [19, 22]
+            //                        [43, 50]
+
+            using var C = new FastMatrix<double>(2, 2);
+            // Inicjalizujemy C wartościami początkowymi (np. poprzedni gradient)
+            C[0, 0] = 100; C[0, 1] = 100;
+            C[1, 0] = 100; C[1, 1] = 100;
+
+            // Act: C += A * B
+            TensorMath.MatMulAdd(A.AsView(), B.AsView(), C.AsView());
+
+            // Assert: Wartości z A*B powinny zostać dodane do 100
+            Assert.Equal(119.0, C[0, 0], Precision);
+            Assert.Equal(122.0, C[0, 1], Precision);
+            Assert.Equal(143.0, C[1, 0], Precision);
+            Assert.Equal(150.0, C[1, 1], Precision);
+        }
+
+        [Fact]
+        public void MatMulAdd_NonContiguousRightMatrix_ThrowsArgumentException()
+        {
+            // Arrange
+            using var A = new FastMatrix<double>(2, 2);
+            using var B = new FastMatrix<double>(2, 2); // Ciągła
+            using var C = new FastMatrix<double>(2, 2);
+
+            
+
+            // Act & Assert
+            var ex = Assert.Throws<ArgumentException>(() => {
+                var B_Transposed = B.Transpose(); // Nieciągła (ColStride > 1)
+                TensorMath.MatMulAdd(A.AsView(), B_Transposed, C.AsView());
+            });
+            
+            Assert.Contains("requires contiguous rows in B", ex.Message);
+        }
     }
 }

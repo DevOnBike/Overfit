@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Runtime.CompilerServices;
 
 namespace DevOnBike.Overfit
@@ -6,7 +7,7 @@ namespace DevOnBike.Overfit
     /// Bezalokacyjny widok na pamięć macierzy.
     /// Definiuje kształt (Rows, Cols) oraz fizyczny układ w pamięci (Strides, Offset).
     /// </summary>
-    public readonly ref struct FastMatrixView<T>
+    public readonly ref struct FastMatrixView<T> where T : struct, IFloatingPointIeee754<T>
     {
         private readonly Span<T> _data;
 
@@ -68,6 +69,24 @@ namespace DevOnBike.Overfit
             var newOffset = Offset + startRow * RowStride + startCol * ColStride;
 
             return new FastMatrixView<T>(_data, rows: rows, cols: cols, rowStride: RowStride, colStride: ColStride, offset: newOffset);
+        }
+        
+        /// <summary>
+        /// Materializes the view into a new, contiguous FastMatrix.
+        /// Essential for Autograd when a transposed view needs to be the right-hand operand in SIMD GEMM.
+        /// Caller is responsible for disposing the returned FastMatrix.
+        /// </summary>
+        public FastMatrix<T> ToContiguousFastMatrix()
+        {
+            var result = new FastMatrix<T>(Rows, Cols);
+            for (int r = 0; r < Rows; r++)
+            {
+                for (int c = 0; c < Cols; c++)
+                {
+                    result[r, c] = this[r, c];
+                }
+            }
+            return result;
         }
 
         /// <summary>

@@ -152,6 +152,26 @@ namespace DevOnBike.Overfit
         {
             return AsView().Slice(startRow, startCol, rows, cols);
         }
+        
+        /// <summary>
+        /// Materializes the view into a new, contiguous FastMatrix.
+        /// Essential for Autograd when a transposed view needs to be the right-hand operand in SIMD GEMM.
+        /// Caller is responsible for disposing the returned FastMatrix.
+        /// </summary>
+        public FastMatrix<T> ToContiguousFastMatrix()
+        {
+            var result = new FastMatrix<T>(Rows, Cols);
+            
+            for (var r = 0; r < Rows; r++)
+            {
+                for (var c = 0; c < Cols; c++)
+                {
+                    result[r, c] = this[r, c];
+                }
+            }
+            
+            return result;
+        }
 
         public void Dispose()
         {
