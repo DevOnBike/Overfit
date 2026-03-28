@@ -7,7 +7,7 @@ namespace DevOnBike.Overfit
 {
     public sealed class FastMatrix<T> : IDisposable where T : struct, IFloatingPointIeee754<T>
     {
-        private T[] _data; 
+        private T[] _data;
         private readonly int _size;
         private bool _disposed;
 
@@ -79,6 +79,15 @@ namespace DevOnBike.Overfit
             AsSpan().Clear();
         }
 
+        public void CopyFrom(ReadOnlySpan<T> source)
+        {
+            if (source.Length != _size)
+            {
+                throw new ArgumentException($"Expected {_size} elements, got {source.Length}.");
+            }
+            source.CopyTo(AsSpan());
+        }
+
         // ── SIMD  (TensorPrimitives .NET 10) ─────────────────────────
 
         /// <summary>this += other (in-place, element-wise). SIMD-accelerated.</summary>
@@ -117,6 +126,31 @@ namespace DevOnBike.Overfit
         public void Softmax()
         {
             TensorPrimitives.SoftMax(AsReadOnlySpan(), AsSpan());
+        }
+
+        // ── (Strides & Views) ─────────────────────────
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public FastMatrixView<T> AsView()
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+
+            return new FastMatrixView<T>(AsSpan(), Rows, Cols, rowStride: Cols, colStride: 1, offset: 0);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public FastMatrixView<T> Transpose()
+        {
+            return AsView().Transpose();
+        }
+
+        /// <summary>
+        /// Zwraca wycinek macierzy (tzw. okno lub ROI) w czasie O(1).
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public FastMatrixView<T> Slice(int startRow, int startCol, int rows, int cols)
+        {
+            return AsView().Slice(startRow, startCol, rows, cols);
         }
 
         public void Dispose()

@@ -86,16 +86,16 @@
         public void CalculateLogNormConstant_ValidIdentityMatrix_ReturnsCorrectConstant()
         {
             // Arrange
-            int dimensions = 2;
+            var dimensions = 2;
             using var L = new FastMatrix<double>(dimensions, dimensions);
             L[0, 0] = 1.0; L[0, 1] = 0.0;
             L[1, 0] = 0.0; L[1, 1] = 1.0;
 
             // Constant dla macierzy identycznościowej: -0.5 * 2 * ln(2PI) - 0
-            double expectedConstant = -1.0 * Math.Log(2.0 * Math.PI);
+            var expectedConstant = -1.0 * Math.Log(2.0 * Math.PI);
 
             // Act
-            double result = CholeskyMultivariateGaussianLogic.CalculateLogNormConstant(dimensions, L);
+            var result = CholeskyMultivariateGaussianLogic.CalculateLogNormConstant(dimensions, L);
 
             // Assert
             Assert.Equal(expectedConstant, result, Precision);
@@ -105,20 +105,20 @@
         public void LogProbabilityDensity_ValidInputs_ReturnsCorrectDensity()
         {
             // Arrange
-            int dimensions = 2;
+            var dimensions = 2;
             var observation = new double[] { 0.5, 0.5 };
             var mean = new double[] { 0.5, 0.5 }; // Obserwacja == Średnia -> odległość Mahalanobisa = 0
 
             using var L = new FastMatrix<double>(dimensions, dimensions);
             L[0, 0] = 1.0; L[1, 1] = 1.0; // Macierz identycznościowa
 
-            double logNormConst = CholeskyMultivariateGaussianLogic.CalculateLogNormConstant(dimensions, L);
+            var logNormConst = CholeskyMultivariateGaussianLogic.CalculateLogNormConstant(dimensions, L);
 
             // Skoro distance = 0, LogProbabilityDensity powinno być równe logNormConst
-            double expectedLogProb = logNormConst - 0.0;
+            var expectedLogProb = logNormConst - 0.0;
 
             // Act
-            double result = CholeskyMultivariateGaussianLogic.LogProbabilityDensity(observation, mean, L, logNormConst);
+            var result = CholeskyMultivariateGaussianLogic.LogProbabilityDensity(observation, mean, L, logNormConst);
 
             // Assert
             Assert.Equal(expectedLogProb, result, Precision);

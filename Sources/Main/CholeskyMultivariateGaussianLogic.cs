@@ -97,6 +97,14 @@ namespace DevOnBike.Overfit
             {
                 throw new ArgumentException("Mean vector cannot be empty.", nameof(mean));
             }
+            
+            for (var i = 0; i < n; i++)
+            {
+                if (!double.IsFinite(mean[i]))
+                {
+                    throw new ArgumentException($"mean[{i}] = {mean[i]} is not finite.", nameof(mean));
+                }
+            }
 
             if (covariance.Rows != n || covariance.Cols != n)
             {
