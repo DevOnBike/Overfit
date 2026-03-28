@@ -1,12 +1,13 @@
 using System.Buffers;
+using System.Numerics;
 using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
 
 namespace DevOnBike.Overfit
 {
-    public sealed class FastMatrix : IDisposable
+    public sealed class FastMatrix<T> : IDisposable where T : struct, IFloatingPointIeee754<T>
     {
-        private double[] _data;
+        private T[] _data; 
         private readonly int _size;
         private bool _disposed;
 
@@ -22,47 +23,53 @@ namespace DevOnBike.Overfit
             Cols = cols;
 
             _size = checked(rows * cols);
-            _data = ArrayPool<double>.Shared.Rent(_size);
+            _data = ArrayPool<T>.Shared.Rent(_size);
 
             _data.AsSpan(0, _size).Clear();
         }
 
-        public ref double this[int row, int col]
+        public ref T this[int row, int col]
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => ref _data[row * Cols + col];
+            get
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                return ref _data![row * Cols + col];
+            }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public Span<double> Row(int row)
+        public Span<T> Row(int row)
         {
-            return _data.AsSpan(row * Cols, Cols);
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return _data!.AsSpan(row * Cols, Cols);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public ReadOnlySpan<double> ReadOnlyRow(int row)
+        public ReadOnlySpan<T> ReadOnlyRow(int row)
         {
-            return _data.AsSpan(row * Cols, Cols);
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return _data!.AsSpan(row * Cols, Cols);
         }
 
-        public Span<double> AsSpan()
+        public Span<T> AsSpan()
         {
-            return _data.AsSpan(0, _size);
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return _data!.AsSpan(0, _size);
         }
 
-        public ReadOnlySpan<double> AsReadOnlySpan()
+        public ReadOnlySpan<T> AsReadOnlySpan()
         {
-            return _data.AsSpan(0, _size);
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return _data!.AsSpan(0, _size);
         }
 
-        /// <summary>Eksponuje macierz jako TensorSpan do operacji zapis/odczyt. Zero alokacji.</summary>
-        public TensorSpan<double> AsTensor()
+        public TensorSpan<T> AsTensor()
         {
             return new(AsSpan(), [Rows, Cols], default);
         }
 
-        /// <summary>Eksponuje macierz jako ReadOnlyTensorSpan do bezpiecznych operacji odczytu. Zero alokacji.</summary>
-        public ReadOnlyTensorSpan<double> AsReadOnlyTensor()
+        public ReadOnlyTensorSpan<T> AsReadOnlyTensor()
         {
             return new(AsReadOnlySpan(), [Rows, Cols], default);
         }
@@ -72,43 +79,41 @@ namespace DevOnBike.Overfit
             AsSpan().Clear();
         }
 
-        // ── SIMD operacje (TensorPrimitives .NET 10) ─────────────────────────
+        // ── SIMD  (TensorPrimitives .NET 10) ─────────────────────────
 
         /// <summary>this += other (in-place, element-wise). SIMD-accelerated.</summary>
-        public void Add(FastMatrix other)
+        public void Add(FastMatrix<T> other)
         {
             ThrowIfShapeMismatch(other);
-
             TensorPrimitives.Add(AsReadOnlySpan(), other.AsReadOnlySpan(), AsSpan());
         }
 
         /// <summary>this -= other (in-place, element-wise). SIMD-accelerated.</summary>
-        public void Subtract(FastMatrix other)
+        public void Subtract(FastMatrix<T> other)
         {
             ThrowIfShapeMismatch(other);
-
             TensorPrimitives.Subtract(AsReadOnlySpan(), other.AsReadOnlySpan(), AsSpan());
         }
 
         /// <summary>this *= scalar (in-place). SIMD-accelerated.</summary>
-        public void MultiplyScalar(double scalar)
+        public void MultiplyScalar(T scalar)
         {
             TensorPrimitives.Multiply(AsReadOnlySpan(), scalar, AsSpan());
         }
 
         /// <summary>Suma kwadratów wszystkich elementów (‖A‖_F²). Używane do Mahalanobis distance.</summary>
-        public double SumOfSquares()
+        public T SumOfSquares()
         {
+            // Metoda Dot dla generics zwraca typ T
             return TensorPrimitives.Dot(AsReadOnlySpan(), AsReadOnlySpan());
         }
 
         /// <summary>Norma Frobeniusa ‖A‖_F = sqrt(Σ aᵢⱼ²). SIMD-accelerated.</summary>
-        public double FrobeniusNorm()
+        public T FrobeniusNorm()
         {
             return TensorPrimitives.Norm(AsReadOnlySpan());
         }
 
-        /// <summary>Softmax in-place na płaskiej reprezentacji. Używane w normalizacji gamma w Baum-Welch.</summary>
         public void Softmax()
         {
             TensorPrimitives.SoftMax(AsReadOnlySpan(), AsSpan());
@@ -125,14 +130,14 @@ namespace DevOnBike.Overfit
 
             if (rented != null)
             {
-                ArrayPool<double>.Shared.Return(rented);
+                ArrayPool<T>.Shared.Return(rented);
             }
 
             GC.SuppressFinalize(this);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void ThrowIfShapeMismatch(FastMatrix other)
+        private void ThrowIfShapeMismatch(FastMatrix<T> other)
         {
             if (other.Rows != Rows || other.Cols != Cols)
             {
