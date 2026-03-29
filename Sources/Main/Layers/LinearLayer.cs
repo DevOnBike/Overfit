@@ -1,82 +1,84 @@
-using System.Runtime.InteropServices;
-
 namespace DevOnBike.Overfit.Layers
 {
-    /// <summary>
-    /// W pełni połączona warstwa liniowa sieci neuronowej (Dense Layer).
-    /// Wykonuje operację: Y = X * W + B
-    /// </summary>
-    public sealed class LinearLayer
+    public class LinearLayer
     {
-        public Tensor Weights { get; }
-        public Tensor Biases { get; }
+        public Tensor Weights { get; private set; }
+        public Tensor Biases { get; private set; } // Nazwa zgodna z Twoim Dispose()
 
         public LinearLayer(int inputSize, int outputSize)
         {
             var wData = new FastMatrix<double>(inputSize, outputSize);
-            var bData = new FastMatrix<double>(1, outputSize); // 1xD wektor
-
-            InitializeWeights(wData.AsSpan(), inputSize);
-            bData.AsSpan().Clear(); // Biasy na start mogą być zerami
-
-            Weights = new Tensor(wData, requiresGrad: true);
-            Biases = new Tensor(bData, requiresGrad: true);
-        }
-
-        /// <summary>
-        /// Inicjalizacja Kaiming (He) - zapobiega eksplozji i zanikaniu gradientów.
-        /// </summary>
-        private void InitializeWeights(Span<double> span, int fanIn)
-        {
-            var stdDev = Math.Sqrt(2.0 / fanIn);
-            for (var i = 0; i < span.Length; i++)
+            var stdDev = Math.Sqrt(2.0 / inputSize);
+            for (var i = 0; i < wData.AsSpan().Length; i++)
             {
-                // Generowanie rozkładu normalnego (Box-Muller transform)
-                var u1 = 1.0 - Random.Shared.NextDouble();
-                var u2 = 1.0 - Random.Shared.NextDouble();
-                var randStdNormal = Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Sin(2.0 * Math.PI * u2);
-                
-                span[i] = randStdNormal * stdDev;
+                wData.AsSpan()[i] = (Random.Shared.NextDouble() * 2 - 1) * stdDev;
             }
+
+            Weights = new Tensor(wData, true);
+            Biases = new Tensor(new FastMatrix<double>(1, outputSize), true);
         }
 
-        /// <summary>
-        /// Przepływ sygnału przez warstwę: MatMul + Bias
-        /// </summary>
         public Tensor Forward(Tensor input)
         {
-            var matMulResult = TensorMath.MatMul(input, Weights);
-            return TensorMath.AddBias(matMulResult, Biases);
+            var mul = TensorMath.MatMul(input, Weights);
+            return TensorMath.AddBias(mul, Biases);
         }
 
-        /// <summary>
-        /// Zwraca parametry (wagi i biasy), by Optymalizator (SGD) mógł je zaktualizować.
-        /// </summary>
-        public IEnumerable<Tensor> Parameters()
-        {
-            yield return Weights;
-            yield return Biases;
-        }
-        
+        // --- METODY PROSTEGO ZAPISU I ODCZYTU (FIX CS1061) ---
+
         public void Save(string path)
         {
-            // Zamieniamy Span<double> na Span<byte> bez kopiowania danych!
-            // To jest najszybszy możliwy sposób zapisu w .NET.
-            ReadOnlySpan<byte> weightBytes = MemoryMarshal.AsBytes(Weights.Data.AsSpan());
-            ReadOnlySpan<byte> biasBytes = MemoryMarshal.AsBytes(Biases.Data.AsSpan());
-
-            File.WriteAllBytes($"{path}.weights.bin", weightBytes.ToArray());
-            File.WriteAllBytes($"{path}.biases.bin", biasBytes.ToArray());
+            using var fs = new FileStream(path, FileMode.Create);
+            using var bw = new BinaryWriter(fs);
+            Save(bw); // Wywołuje wersję niskopoziomową
         }
 
         public void Load(string path)
         {
-            var weightBytes = File.ReadAllBytes($"{path}.weights.bin");
-            var biasBytes = File.ReadAllBytes($"{path}.biases.bin");
+            if (!File.Exists(path)) throw new FileNotFoundException($"Brak pliku wag: {path}");
 
-            // Rzutujemy bajty z powrotem na double i kopiujemy do istniejącej macierzy
-            MemoryMarshal.Cast<byte, double>(weightBytes).CopyTo(Weights.Data.AsSpan());
-            MemoryMarshal.Cast<byte, double>(biasBytes).CopyTo(Biases.Data.AsSpan());
+            using var fs = new FileStream(path, FileMode.Open);
+            using var br = new BinaryReader(fs);
+            Load(br); // Wywołuje wersję niskopoziomową
+        }
+
+        // --- WERSJE NISKOPOZIOMOWE (Dla BinaryReader/Writer) ---
+
+        public void Save(BinaryWriter bw)
+        {
+            // Wagi
+            bw.Write(Weights.Data.Rows);
+            bw.Write(Weights.Data.Cols);
+            foreach (var val in Weights.Data.AsSpan()) bw.Write(val);
+
+            // Biasy
+            bw.Write(Biases.Data.Rows);
+            bw.Write(Biases.Data.Cols);
+            foreach (var val in Biases.Data.AsSpan()) bw.Write(val);
+        }
+
+        public void Load(BinaryReader br)
+        {
+            // Odczyt wag (z prostą weryfikacją wymiarów)
+            var wRows = br.ReadInt32();
+            var wCols = br.ReadInt32();
+            if (wRows != Weights.Data.Rows || wCols != Weights.Data.Cols)
+                throw new Exception("Wymiary wag w pliku nie pasują do architektury!");
+
+            var wSpan = Weights.Data.AsSpan();
+            for (var i = 0; i < wSpan.Length; i++) wSpan[i] = br.ReadDouble();
+
+            // Odczyt biasów
+            var bRows = br.ReadInt32();
+            var bCols = br.ReadInt32();
+            var bSpan = Biases.Data.AsSpan();
+            for (var i = 0; i < bSpan.Length; i++) bSpan[i] = br.ReadDouble();
+        }
+
+        public IEnumerable<Tensor> Parameters()
+        {
+            yield return Weights;
+            yield return Biases;
         }
     }
 }

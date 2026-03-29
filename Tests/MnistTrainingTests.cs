@@ -226,11 +226,11 @@ namespace DevOnBike.Overfit.Tests
 
         private void PrintConfusionMatrix(ConvLayer conv, LinearLayer fc, FastMatrix<double> testX, FastMatrix<double> testY)
         {
-            int[,] matrix = new int[10, 10];
-            int samples = 1000;
+            var matrix = new int[10, 10];
+            var samples = 1000;
 
             // Zbieranie danych
-            for (int i = 0; i < samples; i++)
+            for (var i = 0; i < samples; i++)
             {
                 var rowView = testX.AsView().Slice(i, 0, 1, 784);
                 using var input = new Tensor(rowView.ToContiguousFastMatrix(), false);
@@ -240,8 +240,8 @@ namespace DevOnBike.Overfit.Tests
                 using var p1 = TensorMath.MaxPool2D(a1, 8, 26, 26, 2);
                 using var output = fc.Forward(p1);
 
-                int predicted = output.Data.ArgMax();
-                int actual = testY.ArgMax(i);
+                var predicted = output.Data.ArgMax();
+                var actual = testY.ArgMax(i);
                 matrix[actual, predicted]++;
             }
 
@@ -252,16 +252,16 @@ namespace DevOnBike.Overfit.Tests
 
             // Nagłówek kolumn
             sb.Append("A\\P |");
-            for (int i = 0; i < 10; i++) sb.Append($"{i,4}|");
+            for (var i = 0; i < 10; i++) sb.Append($"{i,4}|");
             sb.AppendLine("\n" + new string('-', 55));
 
             // Wiersze
-            for (int r = 0; r < 10; r++)
+            for (var r = 0; r < 10; r++)
             {
                 sb.Append($"{r,3} |");
-                for (int c = 0; c < 10; c++)
+                for (var c = 0; c < 10; c++)
                 {
-                    int val = matrix[r, c];
+                    var val = matrix[r, c];
                     if (r != c && val > 0)
                     {
                         // Błędy oznaczamy klamrami, skoro nie mamy kolorów

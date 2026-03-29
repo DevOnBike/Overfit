@@ -93,10 +93,10 @@ namespace DevOnBike.Overfit.Tests
 
         public void PrintConfusionMatrix(ConvLayer conv, LinearLayer fc, FastMatrix<double> testX, FastMatrix<double> testY)
         {
-            int[,] matrix = new int[10, 10];
-            int total = testX.Rows;
+            var matrix = new int[10, 10];
+            var total = testX.Rows;
 
-            for (int i = 0; i < total; i++)
+            for (var i = 0; i < total; i++)
             {
                 // 1. Forward pass (bez Dropoutu - isTraining: false!)
                 var rowView = testX.AsView().Slice(i, 0, 1, 784);
@@ -107,8 +107,8 @@ namespace DevOnBike.Overfit.Tests
                 using var output = fc.Forward(p1);
 
                 // 2. Wyciągamy predykcję i prawdę
-                int predicted = output.Data.ArgMax();
-                int actual = testY.ArgMax(i);
+                var predicted = output.Data.ArgMax();
+                var actual = testY.ArgMax(i);
 
                 matrix[actual, predicted]++;
             }
@@ -116,13 +116,13 @@ namespace DevOnBike.Overfit.Tests
             // 3. Ładne wypisanie tabeli
             Console.WriteLine("\n--- CONFUSION MATRIX ---");
             Console.Write("Act\\Pred|");
-            for (int i = 0; i < 10; i++) Console.Write($"{i,4}|");
+            for (var i = 0; i < 10; i++) Console.Write($"{i,4}|");
             Console.WriteLine("\n" + new string('-', 55));
 
-            for (int r = 0; r < 10; r++)
+            for (var r = 0; r < 10; r++)
             {
                 Console.Write($"{r,8}|");
-                for (int c = 0; c < 10; c++)
+                for (var c = 0; c < 10; c++)
                 {
                     if (r == c) Console.ForegroundColor = ConsoleColor.Green; // Poprawne na zielono
                     else if (matrix[r, c] > 0) Console.ForegroundColor = ConsoleColor.Red; // Błędy na czerwono
