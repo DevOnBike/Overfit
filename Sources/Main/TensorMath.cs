@@ -394,7 +394,10 @@ namespace DevOnBike.Overfit
             var batchSize = input.Data.Rows;
 
             var resultData = new FastMatrix<double>(batchSize, channels * outputH * outputW);
+            // Zapamiętujemy indeksy MAX, żeby wiedzieć, gdzie posłać gradient w Backward
+            var maxIndices = new int[batchSize, channels * outputH * outputW];
 
+            // --- FORWARD ---
             for (var n = 0; n < batchSize; n++)
             {
                 for (var c = 0; c < channels; c++)
@@ -404,26 +407,51 @@ namespace DevOnBike.Overfit
                         for (var ow = 0; ow < outputW; ow++)
                         {
                             var maxVal = double.MinValue;
+                            var maxIdx = -1;
+
                             for (var ph = 0; ph < poolSize; ph++)
                             {
                                 for (var pw = 0; pw < poolSize; pw++)
                                 {
-                                    var val = input.Data[n, c * (inputH * inputW) + (oh * poolSize + ph) * inputW + (ow * poolSize + pw)];
-                                    if (val > maxVal) maxVal = val;
+                                    var currentIdx = c * (inputH * inputW) + (oh * poolSize + ph) * inputW + (ow * poolSize + pw);
+                                    var val = input.Data[n, currentIdx];
+                                    if (val > maxVal)
+                                    {
+                                        maxVal = val;
+                                        maxIdx = currentIdx;
+                                    }
                                 }
                             }
-                            resultData[n, c * (outputH * outputW) + oh * outputW + ow] = maxVal;
+                            var outIdx = c * (outputH * outputW) + oh * outputW + ow;
+                            resultData[n, outIdx] = maxVal;
+                            maxIndices[n, outIdx] = maxIdx;
                         }
                     }
                 }
             }
-            // Backward dla MaxPool przesyła gradient tylko do komórki, która była "Max".
+
+            // --- BACKWARD ---
+            Action<Tensor> backward = (resultNode) => {
+                if (!input.RequiresGrad) return;
+
+                for (var n = 0; n < batchSize; n++)
+                {
+                    var gradOut = resultNode.Grad.Row(n);
+                    var gradIn = input.Grad.Row(n);
+
+                    for (var i = 0; i < gradOut.Length; i++)
+                    {
+                        // Gradient płynie tylko do tego piksela, który był "największy"
+                        var originalIdx = maxIndices[n, i];
+                        gradIn[originalIdx] += gradOut[i];
+                    }
+                }
+            };
+
             return Tensor.CreateOperationResult(resultData, new List<Tensor>
             {
                 input
-            }, (res) => {
-                /* TODO */
-            });
+            }, backward);
         }
 
         public static void Im2Col(
@@ -510,16 +538,16 @@ namespace DevOnBike.Overfit
 
         public static Tensor Conv2D(Tensor input, Tensor weights, int inC, int outC, int h, int w, int k)
         {
-            int outH = h - k + 1;
-            int outW = w - k + 1; // Poprawiono: w zamiast h
-            int batchSize = input.Data.Rows;
-            int kSquareInC = k * k * inC;
+            var outH = h - k + 1;
+            var outW = w - k + 1; // Poprawiono: w zamiast h
+            var batchSize = input.Data.Rows;
+            var kSquareInC = k * k * inC;
 
             // --- FORWARD ---
             var colMatrices = new FastMatrix<double>[batchSize];
             var resultData = new FastMatrix<double>(batchSize, outC * outH * outW);
 
-            for (int n = 0; n < batchSize; n++)
+            for (var n = 0; n < batchSize; n++)
             {
                 colMatrices[n] = new FastMatrix<double>(kSquareInC, outH * outW);
                 Im2Col(input.Data.Row(n), inC, h, w, k, 1, 0, colMatrices[n].AsSpan());
@@ -530,11 +558,10 @@ namespace DevOnBike.Overfit
             }
 
             // --- BACKWARD ---
-            Action<Tensor> backward = (resultNode) =>
-            {
+            Action<Tensor> backward = (resultNode) => {
                 var gradOutput = resultNode.Grad;
 
-                for (int n = 0; n < batchSize; n++)
+                for (var n = 0; n < batchSize; n++)
                 {
                     using var gn = new FastMatrix<double>(outC, outH * outW);
                     gradOutput.Row(n).CopyTo(gn.AsSpan());
@@ -563,7 +590,11 @@ namespace DevOnBike.Overfit
                 }
             };
 
-            return Tensor.CreateOperationResult(resultData, new List<Tensor> { input, weights }, backward);
+            return Tensor.CreateOperationResult(resultData, new List<Tensor>
+            {
+                input,
+                weights
+            }, backward);
         }
 
         public static void Col2Im(
