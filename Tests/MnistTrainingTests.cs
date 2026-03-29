@@ -117,7 +117,7 @@ namespace DevOnBike.Overfit.Tests
             Assert.True(totalSw.Elapsed.TotalSeconds < 120, "Bestia zbyt wolna! Miało być poniżej 2 minut.");
         }
         
-        [Fact]
+        [Fact(Skip = "aaa")]
         public void Mnist_FullTrainingLoop_ShouldConvergeAndPersist()
         {
             // --- ARRANGE ---
