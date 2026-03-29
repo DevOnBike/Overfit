@@ -10,8 +10,8 @@ namespace DevOnBike.Overfit
         public FastMatrix<double> Grad { get; }
         public bool RequiresGrad { get; }
 
-        private readonly List<Tensor> _dependencies = [];
-        private Action<Tensor> _backwardAction;
+        internal readonly List<Tensor> _dependencies = [];
+        internal Action<Tensor> _backwardAction;
 
         private readonly bool _ownsData;
 

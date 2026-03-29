@@ -754,6 +754,57 @@ namespace DevOnBike.Overfit
 
             return Tensor.CreateOperationResult(resultData, [input, gamma, beta], backward);
         }
+        
+        public static Tensor GlobalAveragePool2D(Tensor input, int channels, int h, int w)
+        {
+            int batchSize = input.Data.Rows;
+            int spatialSize = h * w;
+            var outputData = new FastMatrix<double>(batchSize, channels);
+    
+            // FORWARD: Liczymy średnią dla każdego kanału
+            Parallel.For(0, batchSize, b =>
+            {
+                for (int c = 0; c < channels; c++)
+                {
+                    double sum = 0;
+                    int offset = c * spatialSize;
+            
+                    for (int i = 0; i < spatialSize; i++)
+                    {
+                        sum += input.Data[b, offset + i];
+                    }
+                    outputData[b, c] = sum / spatialSize;
+                }
+            });
+
+            var result = new Tensor(outputData, input.RequiresGrad);
+
+            if (input.RequiresGrad)
+            {
+                result._dependencies.Add(input);
+                result._backwardAction = (node) =>
+                {
+                    double invSpatialSize = 1.0 / spatialSize;
+            
+                    Parallel.For(0, batchSize, b =>
+                    {
+                        for (int c = 0; c < channels; c++)
+                        {
+                            double gradOut = node.Grad[b, c];
+                            int offset = c * spatialSize;
+                    
+                            for (int i = 0; i < spatialSize; i++)
+                            {
+                                // BACKWARD: Gradient średniej to 1/N rozdzielone na wszystkie elementy
+                                input.Grad[b, offset + i] += gradOut * invSpatialSize;
+                            }
+                        }
+                    });
+                };
+            }
+
+            return result;
+        }
 
         // ====================================================================
         // 7. UTILS
