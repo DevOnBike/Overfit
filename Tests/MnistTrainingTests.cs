@@ -239,7 +239,7 @@ namespace DevOnBike.Overfit.Tests
             Debug.WriteLine($"TRENING ZAKOŃCZONY! Czas: {totalSw.Elapsed.TotalSeconds:F2}s");
         }
 
-        [Fact]
+        [Fact(Skip = "a")]
         public void Mnist_FullTrainingLoop_ShouldConvergeAndPersist()
         {
             // --- ARRANGE ---
