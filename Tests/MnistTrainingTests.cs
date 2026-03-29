@@ -105,7 +105,7 @@ namespace DevOnBike.Overfit.Tests
             using var newPred = loadedL2.Forward(newA);
 
             // Sprawdzamy, czy wyniki są identyczne (Precision = 10 miejsc po przecinku)
-            for (int i = 0; i < 10; i++)
+            for (var i = 0; i < 10; i++)
             {
                 Assert.Equal(oldPred.Data[0, i], newPred.Data[0, i], 10);
             }
