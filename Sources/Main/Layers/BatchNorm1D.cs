@@ -45,8 +45,8 @@ namespace DevOnBike.Overfit.Layers
 
         public void Save(string path)
         {
-            using var fs = new System.IO.FileStream(path, System.IO.FileMode.Create);
-            using var bw = new System.IO.BinaryWriter(fs);
+            using var fs = new FileStream(path, FileMode.Create);
+            using var bw = new BinaryWriter(fs);
             
             foreach (var val in Gamma.Data.AsSpan()) bw.Write(val);
             foreach (var val in Beta.Data.AsSpan()) bw.Write(val);
@@ -56,8 +56,8 @@ namespace DevOnBike.Overfit.Layers
 
         public void Load(string path)
         {
-            using var fs = new System.IO.FileStream(path, System.IO.FileMode.Open);
-            using var br = new System.IO.BinaryReader(fs);
+            using var fs = new FileStream(path, FileMode.Open);
+            using var br = new BinaryReader(fs);
             
             var gSpan = Gamma.Data.AsSpan();
             for (var i = 0; i < gSpan.Length; i++) gSpan[i] = br.ReadDouble();

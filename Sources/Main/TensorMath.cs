@@ -757,19 +757,19 @@ namespace DevOnBike.Overfit
         
         public static Tensor GlobalAveragePool2D(Tensor input, int channels, int h, int w)
         {
-            int batchSize = input.Data.Rows;
-            int spatialSize = h * w;
+            var batchSize = input.Data.Rows;
+            var spatialSize = h * w;
             var outputData = new FastMatrix<double>(batchSize, channels);
     
             // FORWARD: Liczymy średnią dla każdego kanału
             Parallel.For(0, batchSize, b =>
             {
-                for (int c = 0; c < channels; c++)
+                for (var c = 0; c < channels; c++)
                 {
                     double sum = 0;
-                    int offset = c * spatialSize;
+                    var offset = c * spatialSize;
             
-                    for (int i = 0; i < spatialSize; i++)
+                    for (var i = 0; i < spatialSize; i++)
                     {
                         sum += input.Data[b, offset + i];
                     }
@@ -784,16 +784,16 @@ namespace DevOnBike.Overfit
                 result._dependencies.Add(input);
                 result._backwardAction = (node) =>
                 {
-                    double invSpatialSize = 1.0 / spatialSize;
+                    var invSpatialSize = 1.0 / spatialSize;
             
                     Parallel.For(0, batchSize, b =>
                     {
-                        for (int c = 0; c < channels; c++)
+                        for (var c = 0; c < channels; c++)
                         {
-                            double gradOut = node.Grad[b, c];
-                            int offset = c * spatialSize;
+                            var gradOut = node.Grad[b, c];
+                            var offset = c * spatialSize;
                     
-                            for (int i = 0; i < spatialSize; i++)
+                            for (var i = 0; i < spatialSize; i++)
                             {
                                 // BACKWARD: Gradient średniej to 1/N rozdzielone na wszystkie elementy
                                 input.Grad[b, offset + i] += gradOut * invSpatialSize;

@@ -39,49 +39,60 @@ namespace DevOnBike.Overfit
         // MAGIA AUTOGRADA - Wsteczna Propagacja
         // ====================================================================
 
-        // Zmieniamy na listę, żeby wiedzieć co usunąć po batchu
         public List<Tensor> Backward()
         {
+            // 1. BUDOWA GRAFU OBLICZENIOWEGO (Sortowanie Topologiczne)
+            // Musimy przetwarzać węzły od końca (Loss) do początku (Inputs)
             var topo = new List<Tensor>();
             var visited = new HashSet<Tensor>();
-            var stack = new Stack<Tensor>();
 
-            stack.Push(this);
-            visited.Add(this);
-
-            while (stack.Count > 0)
+            void BuildTopo(Tensor node)
             {
-                var node = stack.Peek();
-                var allChildrenProcessed = true;
-                
-                foreach (var child in node._dependencies)
+                if (!visited.Contains(node))
                 {
-                    if (!visited.Contains(child))
+                    visited.Add(node);
+                    foreach (var dep in node._dependencies)
                     {
-                        visited.Add(child);
-                        stack.Push(child);
-                        allChildrenProcessed = false;
+                        BuildTopo(dep);
                     }
-                }
-
-                if (allChildrenProcessed)
-                {
-                    stack.Pop();
-                    if (!topo.Contains(node)) topo.Add(node);
+                    topo.Add(node);
                 }
             }
 
-            topo.Reverse();
-            // Najpierw zerujemy gradient wyjściowy (root)
-            Grad.AsSpan().Fill(0);
-            Grad[0, 0] = 1.0;
+            BuildTopo(this);
+            topo.Reverse(); // Odwracamy, aby zacząć od 'this' (zazwyczaj Loss)
 
+            // 2. INTELIGENTNY START GRADIENTU
+            // Reguła łańcuchowa (Chain Rule) wymaga punktu startowego: dLoss/dLoss = 1.0
+            // Sprawdzamy, czy ktoś już ręcznie nie wpisał gradientu (np. w testach)
+            var isGradZero = true;
+            var gradSpan = Grad.AsSpan();
+            for (var i = 0; i < gradSpan.Length; i++)
+            {
+                if (gradSpan[i] != 0)
+                {
+                    isGradZero = false;
+                    break;
+                }
+            }
+
+            if (isGradZero)
+            {
+                // Jeśli gradient jest pusty, inicjujemy go jedynką (neutralny element mnożenia)
+                Grad[0, 0] = 1.0;
+            }
+
+            // 3. PROPAGACJA WSTECZNA
+            // Przechodzimy przez graf i dla każdego węzła odpalamy jego "przepis na pochodną"
             foreach (var node in topo)
             {
                 node._backwardAction?.Invoke(node);
             }
 
-            return topo; // Zwracamy listę wszystkich węzłów grafu!
+            // 4. ZWROT GRAFU
+            // Zwracamy listę wszystkich Tensorów, które brały udział w obliczeniach,
+            // aby Janitor mógł je bezpiecznie usunąć z RAM-u po kroku optymalizatora.
+            return topo;
         }
 
         public void Dispose()
