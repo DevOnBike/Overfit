@@ -45,23 +45,44 @@ namespace DevOnBike.Overfit
         public void Backward()
         {
             var topo = new List<Tensor>();
-            var visited = new HashSet<Tensor>();
+            var visited = new HashSet<Tensor>();    // Węzły wrzucone na stos
+            var processed = new HashSet<Tensor>();  // Węzły w pełni przetworzone (dodane do topo)
+            var stack = new Stack<Tensor>();
 
-            void BuildTopo(Tensor node)
+            stack.Push(this);
+            visited.Add(this);
+
+            // Iteracyjny Post-Order DFS
+            while (stack.Count > 0)
             {
-                if (!visited.Contains(node))
+                var node = stack.Peek();
+                bool allChildrenProcessed = true;
+
+                foreach (var child in node._dependencies)
                 {
-                    visited.Add(node);
-                    foreach (var child in node._dependencies)
+                    if (!visited.Contains(child))
                     {
-                        BuildTopo(child);
+                        visited.Add(child);
+                        stack.Push(child);
+                        allChildrenProcessed = false;
                     }
-                    topo.Add(node);
+                }
+
+                // Gdy wszystkie dzieci zostały wrzucone na stos (lub już na nim są), 
+                // zdejmujemy węzeł i dodajemy go do posortowanej listy
+                if (allChildrenProcessed)
+                {
+                    stack.Pop();
+                    
+                    if (!processed.Contains(node))
+                    {
+                        processed.Add(node);
+                        topo.Add(node);
+                    }
                 }
             }
 
-            BuildTopo(this);
-
+            // Odwracamy listę i odpalamy propagację wstecz
             topo.Reverse();
             foreach (var node in topo)
             {
