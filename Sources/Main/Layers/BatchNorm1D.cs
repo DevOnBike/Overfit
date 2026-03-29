@@ -60,16 +60,16 @@ namespace DevOnBike.Overfit.Layers
             using var br = new System.IO.BinaryReader(fs);
             
             var gSpan = Gamma.Data.AsSpan();
-            for (int i = 0; i < gSpan.Length; i++) gSpan[i] = br.ReadDouble();
+            for (var i = 0; i < gSpan.Length; i++) gSpan[i] = br.ReadDouble();
             
             var bSpan = Beta.Data.AsSpan();
-            for (int i = 0; i < bSpan.Length; i++) bSpan[i] = br.ReadDouble();
+            for (var i = 0; i < bSpan.Length; i++) bSpan[i] = br.ReadDouble();
             
             var rmSpan = RunningMean.AsSpan();
-            for (int i = 0; i < rmSpan.Length; i++) rmSpan[i] = br.ReadDouble();
+            for (var i = 0; i < rmSpan.Length; i++) rmSpan[i] = br.ReadDouble();
             
             var rvSpan = RunningVar.AsSpan();
-            for (int i = 0; i < rvSpan.Length; i++) rvSpan[i] = br.ReadDouble();
+            for (var i = 0; i < rvSpan.Length; i++) rvSpan[i] = br.ReadDouble();
         }
     }
 }

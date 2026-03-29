@@ -608,8 +608,8 @@ namespace DevOnBike.Overfit
             double eps,
             bool isTraining)
         {
-            int N = input.Data.Rows;
-            int C = input.Data.Cols;
+            var N = input.Data.Rows;
+            var C = input.Data.Cols;
 
             var resultData = new FastMatrix<double>(N, C);
 
@@ -627,10 +627,10 @@ namespace DevOnBike.Overfit
                     var rmSpan = runningMean.AsReadOnlySpan();
                     var rvSpan = runningVar.AsReadOnlySpan();
 
-                    for (int j = 0; j < C; j++)
+                    for (var j = 0; j < C; j++)
                     {
-                        double invStd = 1.0 / Math.Sqrt(rvSpan[j] + eps);
-                        double xHat = (rowIn[j] - rmSpan[j]) * invStd;
+                        var invStd = 1.0 / Math.Sqrt(rvSpan[j] + eps);
+                        var xHat = (rowIn[j] - rmSpan[j]) * invStd;
                         rowOut[j] = gSpan[j] * xHat + bSpan[j];
                     }
                 });
@@ -649,17 +649,17 @@ namespace DevOnBike.Overfit
             Parallel.For(0, C, j =>
             {
                 double sum = 0;
-                for (int i = 0; i < N; i++) sum += input.Data[i, j];
-                double mean = sum / N;
+                for (var i = 0; i < N; i++) sum += input.Data[i, j];
+                var mean = sum / N;
                 batchMean[j] = mean;
 
                 double sqSum = 0;
-                for (int i = 0; i < N; i++)
+                for (var i = 0; i < N; i++)
                 {
-                    double diff = input.Data[i, j] - mean;
+                    var diff = input.Data[i, j] - mean;
                     sqSum += diff * diff;
                 }
-                double var = sqSum / N;
+                var var = sqSum / N;
                 batchVar[j] = var;
 
                 // ROZWIĄZANIE: Tworzymy spany wewnątrz lambdy!
@@ -684,15 +684,15 @@ namespace DevOnBike.Overfit
                 var gSpanLocal = gamma.Data.AsReadOnlySpan();
                 var bSpanLocal = beta.Data.AsReadOnlySpan();
 
-                for (int j = 0; j < C; j++)
+                for (var j = 0; j < C; j++)
                 {
-                    double xHat = (rowIn[j] - batchMean[j]) * invStdVec[j];
+                    var xHat = (rowIn[j] - batchMean[j]) * invStdVec[j];
                     rowXHat[j] = xHat;
                     rowOut[j] = gSpanLocal[j] * xHat + bSpanLocal[j];
                 }
             });
 
-            bool needsGrad = input.RequiresGrad || gamma.RequiresGrad || beta.RequiresGrad;
+            var needsGrad = input.RequiresGrad || gamma.RequiresGrad || beta.RequiresGrad;
             if (!needsGrad) xHatMat.Dispose();
 
             // 3. Wsteczna Propagacja (Fused BatchNorm)
@@ -705,11 +705,11 @@ namespace DevOnBike.Overfit
                 var dBeta = new double[C];
 
                 // Krok A: Zbieranie gradientów dla wag Gamma i Beta (pętla sekwencyjna, bezpieczna)
-                for (int i = 0; i < N; i++)
+                for (var i = 0; i < N; i++)
                 {
                     var gradOutRow = gradOut.Row(i);
                     var xHatRow = xHatMat.Row(i);
-                    for (int j = 0; j < C; j++)
+                    for (var j = 0; j < C; j++)
                     {
                         dGamma[j] += gradOutRow[j] * xHatRow[j];
                         dBeta[j] += gradOutRow[j];
@@ -719,13 +719,13 @@ namespace DevOnBike.Overfit
                 if (gamma.RequiresGrad)
                 {
                     var gGrad = gamma.Grad.AsSpan();
-                    for (int j = 0; j < C; j++) gGrad[j] += dGamma[j];
+                    for (var j = 0; j < C; j++) gGrad[j] += dGamma[j];
                 }
 
                 if (beta.RequiresGrad)
                 {
                     var bGrad = beta.Grad.AsSpan();
-                    for (int j = 0; j < C; j++) bGrad[j] += dBeta[j];
+                    for (var j = 0; j < C; j++) bGrad[j] += dBeta[j];
                 }
 
                 if (input.RequiresGrad)
@@ -740,10 +740,10 @@ namespace DevOnBike.Overfit
                         // ROZWIĄZANIE: Span wewnątrz lambdy!
                         var gSpanLocal = gamma.Data.AsReadOnlySpan();
 
-                        for (int j = 0; j < C; j++)
+                        for (var j = 0; j < C; j++)
                         {
-                            double dx = (gSpanLocal[j] * invStdVec[j] / N) * 
-                                        (N * gradOutRow[j] - dBeta[j] - xHatRow[j] * dGamma[j]);
+                            var dx = (gSpanLocal[j] * invStdVec[j] / N) * 
+                                     (N * gradOutRow[j] - dBeta[j] - xHatRow[j] * dGamma[j]);
                             gradInRow[j] += dx;
                         }
                     });

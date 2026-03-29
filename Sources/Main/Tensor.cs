@@ -39,22 +39,21 @@ namespace DevOnBike.Overfit
         // MAGIA AUTOGRADA - Wsteczna Propagacja
         // ====================================================================
 
-        public void Backward()
+        // Zmieniamy na listę, żeby wiedzieć co usunąć po batchu
+        public List<Tensor> Backward()
         {
             var topo = new List<Tensor>();
-            var visited = new HashSet<Tensor>();    // Węzły wrzucone na stos
-            var processed = new HashSet<Tensor>();  // Węzły w pełni przetworzone (dodane do topo)
+            var visited = new HashSet<Tensor>();
             var stack = new Stack<Tensor>();
 
             stack.Push(this);
             visited.Add(this);
 
-            // Iteracyjny Post-Order DFS
             while (stack.Count > 0)
             {
                 var node = stack.Peek();
                 var allChildrenProcessed = true;
-
+                
                 foreach (var child in node._dependencies)
                 {
                     if (!visited.Contains(child))
@@ -65,26 +64,32 @@ namespace DevOnBike.Overfit
                     }
                 }
 
-                // Gdy wszystkie dzieci zostały wrzucone na stos (lub już na nim są), 
-                // zdejmujemy węzeł i dodajemy go do posortowanej listy
                 if (allChildrenProcessed)
                 {
                     stack.Pop();
-                    
-                    if (!processed.Contains(node))
-                    {
-                        processed.Add(node);
-                        topo.Add(node);
-                    }
+                    if (!topo.Contains(node)) topo.Add(node);
                 }
             }
 
-            // Odwracamy listę i odpalamy propagację wstecz
             topo.Reverse();
+            // Najpierw zerujemy gradient wyjściowy (root)
+            Grad.AsSpan().Fill(0);
+            Grad[0, 0] = 1.0;
+
             foreach (var node in topo)
             {
                 node._backwardAction?.Invoke(node);
             }
+
+            return topo; // Zwracamy listę wszystkich węzłów grafu!
+        }
+
+        public void Dispose()
+        {
+            Data?.Dispose();
+            Grad?.Dispose();
+            _dependencies.Clear();
+            _backwardAction = null;
         }
 
         public static Tensor CreateOperationResult(FastMatrix<double> data, List<Tensor> dependencies, Action<Tensor> backwardAction)
@@ -92,19 +97,5 @@ namespace DevOnBike.Overfit
             return new Tensor(data, dependencies, backwardAction);
         }
 
-        public void Dispose()
-        {
-            // Sprzątamy Data TYLKO, gdy Tensor jest jej prawnym właścicielem
-            if (_ownsData)
-            {
-#pragma warning disable IDISP007 // Don't dispose disposables you do not own
-                Data?.Dispose();
-#pragma warning restore IDISP007
-            }
-            
-            Grad?.Dispose();
-            _dependencies.Clear();
-            _backwardAction = null;
-        }
     }
 }

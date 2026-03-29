@@ -18,31 +18,31 @@ namespace DevOnBike.Overfit.Tests
         public void Mnist_FullTrain60k_CnnBeastMode()
         {
             // --- ARRANGE ---
-            var trainSize = 60000; 
-            var batchSize = 64; 
+            var trainSize = 60000;
+            var batchSize = 64;
             var epochs = 5;
             var learningRate = 0.001;
 
             Debug.WriteLine("Ładowanie pełnego zbioru 60,000 obrazów...");
             var (trainX, trainY) = MnistLoader.Load(
-                "d:/ml/train-images.idx3-ubyte", 
-                "d:/ml/train-labels.idx1-ubyte", 
+                "d:/ml/train-images.idx3-ubyte",
+                "d:/ml/train-labels.idx1-ubyte",
                 trainSize);
 
             using var X = new Tensor(trainX, requiresGrad: false);
             using var Y = new Tensor(trainY, requiresGrad: false);
 
             var conv1 = new ConvLayer(inChannels: 1, outChannels: 8, h: 28, w: 28, kSize: 3);
-            
+
             // Wpinamy BatchNorm po Poolingu (rozmiar spłaszczony to 8 * 13 * 13 = 1352)
-            var bn1 = new BatchNorm1D(1352); 
-            
+            var bn1 = new BatchNorm1D(1352);
+
             var fc1 = new LinearLayer(1352, 10);
 
             // Rejestrujemy parametry ze wszystkich warstw do optymalizatora!
             var allParams = new[] { conv1.Kernels }.Concat(bn1.Parameters()).Concat(fc1.Parameters());
             var optimizer = new Adam(allParams, learningRate);
-            
+
             var numBatches = trainSize / batchSize;
             var totalSw = Stopwatch.StartNew();
 
@@ -69,10 +69,10 @@ namespace DevOnBike.Overfit.Tests
                     using var h1 = conv1.Forward(xBatch);
                     using var a1 = TensorMath.ReLU(h1);
                     using var p1 = TensorMath.MaxPool2D(a1, 8, 26, 26, 2);
-                    
+
                     // Przepuszczamy przez BatchNorm z flagą isTraining: true
                     using var bnOut = bn1.Forward(p1, isTraining: true);
-                    
+
                     using var d1 = TensorMath.Dropout(bnOut, 0.25, isTraining: true);
                     using var predictionLogits = fc1.Forward(d1); // Uwaga: To są surowe logity!
 
@@ -89,7 +89,7 @@ namespace DevOnBike.Overfit.Tests
 
                     if (b % 200 == 0 && b > 0)
                     {
-                        Debug.WriteLine($"  Batch {b}/{numBatches} | Current Loss: {loss.Data[0,0]:F6}");
+                        Debug.WriteLine($"  Batch {b}/{numBatches} | Current Loss: {loss.Data[0, 0]:F6}");
                     }
                 }
 
@@ -115,8 +115,131 @@ namespace DevOnBike.Overfit.Tests
 
             Assert.True(totalSw.Elapsed.TotalSeconds < 120, "Bestia zbyt wolna! Miało być poniżej 2 minut.");
         }
-        
+
         [Fact(Skip = "aaa")]
+        public void Mnist_FullTrain60k_CnnBeastModeWithJanitor()
+        {
+            // --- ARRANGE ---
+            var trainSize = 10000;
+            var batchSize = 32; // Mniejszy batch = mniejszy nacisk na RAM
+            var epochs = 2;
+            var learningRate = 0.001;
+
+            Debug.WriteLine("Inicjalizacja GigaBestii ResNet (60k)...");
+            var (trainX, trainY) = MnistLoader.Load(
+                "d:/ml/train-images.idx3-ubyte",
+                "d:/ml/train-labels.idx1-ubyte",
+                trainSize);
+
+            using var X = new Tensor(trainX, requiresGrad: false);
+            using var Y = new Tensor(trainY, requiresGrad: false);
+
+            // Architektura: Conv -> BN -> ReLU -> MaxPool -> ResNet x2 -> FC
+            var conv1 = new ConvLayer(inChannels: 1, outChannels: 16, h: 28, w: 28, kSize: 3);
+            var bn_conv = new BatchNorm1D(16 * 26 * 26);
+
+            // 16 filtrów * 13x13 (po poolingu) = 2704
+            var resBlock1 = new ResidualBlock(2704);
+            var resBlock2 = new ResidualBlock(2704);
+            var fcOut = new LinearLayer(2704, 10);
+
+            // Zbieramy parametry i tworzymy HashSet dla błyskawicznego sprawdzania w pętli sprzątającej
+            var allParams = conv1.Parameters()
+                .Concat(bn_conv.Parameters())
+                .Concat(resBlock1.Parameters())
+                .Concat(resBlock2.Parameters())
+                .Concat(fcOut.Parameters())
+                .ToList();
+
+            var allParamsSet = new HashSet<Tensor>(allParams);
+            var optimizer = new Adam(allParams, learningRate);
+
+            var numBatches = trainSize / batchSize;
+            var totalSw = Stopwatch.StartNew();
+
+            // --- ACT ---
+            for (var epoch = 1; epoch <= epochs; epoch++)
+            {
+                var epochSw = Stopwatch.StartNew();
+                double epochLoss = 0;
+
+                for (var b = 0; b < numBatches; b++)
+                {
+                    optimizer.ZeroGrad();
+
+                    // 1. Przygotowanie Batcha (używamy using, by zwolnić macierz widoku)
+                    var xView = X.Data.AsView().Slice(b * batchSize, 0, batchSize, 784);
+                    var yView = Y.Data.AsView().Slice(b * batchSize, 0, batchSize, 10);
+
+                    var xBatch = new Tensor(xView.ToContiguousFastMatrix(), false);
+                    var yBatch = new Tensor(yView.ToContiguousFastMatrix(), false);
+
+                    // 2. Forward Pass
+                    var c1 = conv1.Forward(xBatch);
+                    var bc1 = bn_conv.Forward(c1, isTraining: true);
+                    var a1 = TensorMath.ReLU(bc1);
+                    var p1 = TensorMath.MaxPool2D(a1, 16, 26, 26, 2);
+
+                    var r1 = resBlock1.Forward(p1, isTraining: true);
+                    var r2 = resBlock2.Forward(r1, isTraining: true);
+
+                    var d1 = TensorMath.Dropout(r2, 0.2, isTraining: true);
+                    var logits = fcOut.Forward(d1);
+
+                    // 3. Loss & Backward
+                    var loss = TensorMath.SoftmaxCrossEntropy(logits, yBatch);
+                    epochLoss += loss.Data[0, 0];
+
+                    // POBIERAMY LISTĘ WSZYSTKICH WĘZŁÓW GRAFU (wymaga poprawki w Tensor.cs!)
+                    var graphNodes = loss.Backward();
+
+                    // 4. Update Wag
+                    optimizer.Step();
+
+                    // 5. JANITOR MODE: Atomowe sprzątanie RAM
+                    // Czyścimy wszystko poza wagami zapisanymi w optimizerze
+                    foreach (var node in graphNodes)
+                    {
+                        if (!allParamsSet.Contains(node))
+                        {
+                            node.Dispose();
+                        }
+                    }
+
+                    // Ręcznie czyścimy wejścia batcha, bo nie są w grafie Backward od loss
+                    xBatch.Dispose();
+                    yBatch.Dispose();
+                    graphNodes.Clear();
+
+                    if (b % 200 == 0 && b > 0)
+                        Debug.WriteLine($"  Batch {b}/{numBatches} | Avg Loss: {epochLoss / (b + 1):F6}");
+                }
+
+                epochSw.Stop();
+                Debug.WriteLine($"> EPOCH {epoch} | Loss: {epochLoss / numBatches:F6} | Time: {epochSw.ElapsedMilliseconds}ms");
+
+                // Wymuś na GC zebranie drobnych obiektów C#
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+            }
+
+            totalSw.Stop();
+
+            // --- ZAPIS MODELU ---
+            conv1.Save("d:/ml/beast_resnet_conv1.bin");
+            bn_conv.Save("d:/ml/beast_resnet_bn.bin");
+            resBlock1.Save("d:/ml/beast_resnet_r1");
+            resBlock2.Save("d:/ml/beast_resnet_r2");
+            fcOut.Save("d:/ml/beast_resnet_fc.bin");
+
+            // --- EVALUATION ---
+            var (testX, testY) = MnistLoader.Load("d:/ml/t10k-images.idx3-ubyte", "d:/ml/t10k-labels.idx1-ubyte", 1000);
+            PrintResNetConfusionMatrix(conv1, bn_conv, resBlock1, resBlock2, fcOut, testX, testY);
+
+            Debug.WriteLine($"TRENING ZAKOŃCZONY! Czas: {totalSw.Elapsed.TotalSeconds:F2}s");
+        }
+
+        [Fact]
         public void Mnist_FullTrainingLoop_ShouldConvergeAndPersist()
         {
             // --- ARRANGE ---
@@ -252,6 +375,36 @@ namespace DevOnBike.Overfit.Tests
             }
 
             Debug.WriteLine($"Training & Persistence check finished in {sw.ElapsedMilliseconds}ms");
+        }
+
+        private void PrintResNetConfusionMatrix(ConvLayer conv, BatchNorm1D bn, ResidualBlock r1, ResidualBlock r2, LinearLayer fc, FastMatrix<double> testX, FastMatrix<double> testY)
+        {
+            var matrix = new int[10, 10];
+            for (var i = 0; i < 1000; i++)
+            {
+                var rowView = testX.AsView().Slice(i, 0, 1, 784);
+                using var input = new Tensor(rowView.ToContiguousFastMatrix(), false);
+
+                using var c1 = conv.Forward(input);
+                using var bc = bn.Forward(c1, isTraining: false);
+                using var a1 = TensorMath.ReLU(bc);
+                using var p1 = TensorMath.MaxPool2D(a1, 16, 26, 26, 2);
+                using var res1 = r1.Forward(p1, isTraining: false);
+                using var res2 = r2.Forward(res1, isTraining: false);
+                using var output = fc.Forward(res2);
+
+                matrix[testY.ArgMax(i), output.Data.ArgMax()]++;
+            }
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("\n=== MACIERZ POMYŁEK (GIGABESTIA) ===");
+            for (var r = 0; r < 10; r++)
+            {
+                sb.Append($"{r} |");
+                for (var c = 0; c < 10; c++) sb.Append($"{matrix[r, c],4}|");
+                sb.AppendLine();
+            }
+            _output.WriteLine(sb.ToString());
         }
 
         private void PrintConfusionMatrix(ConvLayer conv, BatchNorm1D bn, LinearLayer fc, FastMatrix<double> testX, FastMatrix<double> testY)
