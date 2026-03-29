@@ -56,7 +56,7 @@ namespace DevOnBike.Overfit
             while (stack.Count > 0)
             {
                 var node = stack.Peek();
-                bool allChildrenProcessed = true;
+                var allChildrenProcessed = true;
 
                 foreach (var child in node._dependencies)
                 {

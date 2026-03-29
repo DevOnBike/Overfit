@@ -235,7 +235,7 @@ namespace DevOnBike.Overfit
                 }
             }
 
-            bool needsGrad = input.RequiresGrad;
+            var needsGrad = input.RequiresGrad;
             if (!needsGrad) mask.Dispose();
 
             Action<Tensor> backward = (resultNode) => {
@@ -303,7 +303,7 @@ namespace DevOnBike.Overfit
             var resData = new FastMatrix<double>(1, 1);
             var probs = new FastMatrix<double>(logits.Data.Rows, logits.Data.Cols);
             double totalLoss = 0;
-            object lossLock = new object();
+            var lossLock = new object();
 
             Parallel.For(0, logits.Data.Rows, r =>
             {
@@ -324,7 +324,7 @@ namespace DevOnBike.Overfit
 
             resData[0, 0] = totalLoss / logits.Data.Rows;
 
-            bool needsGrad = logits.RequiresGrad;
+            var needsGrad = logits.RequiresGrad;
             if (!needsGrad) probs.Dispose();
 
             Action<Tensor> backward = (resultNode) => {
@@ -509,7 +509,7 @@ namespace DevOnBike.Overfit
                 batchResult.AsSpan().CopyTo(resultData.Row(n));
             });
 
-            bool needsGrad = weights.RequiresGrad || input.RequiresGrad;
+            var needsGrad = weights.RequiresGrad || input.RequiresGrad;
 
             if (!needsGrad)
             {
@@ -588,6 +588,171 @@ namespace DevOnBike.Overfit
             };
 
             return Tensor.CreateOperationResult(resultData, new List<Tensor> { input, weights, bias }, backward);
+        }
+        
+        // ====================================================================
+        // 8. NORMALIZACJA (BATCH NORM)
+        // ====================================================================
+
+// ====================================================================
+        // 8. NORMALIZACJA (BATCH NORM)
+        // ====================================================================
+
+        public static Tensor BatchNorm1D(
+            Tensor input,
+            Tensor gamma,
+            Tensor beta,
+            FastMatrix<double> runningMean,
+            FastMatrix<double> runningVar,
+            double momentum,
+            double eps,
+            bool isTraining)
+        {
+            int N = input.Data.Rows;
+            int C = input.Data.Cols;
+
+            var resultData = new FastMatrix<double>(N, C);
+
+            if (!isTraining)
+            {
+                // INFERENCE: Używamy zapamiętanych statystyk (Running Stats)
+                Parallel.For(0, N, i =>
+                {
+                    var rowIn = input.Data.Row(i);
+                    var rowOut = resultData.Row(i);
+
+                    // ROZWIĄZANIE: Tworzymy spany wewnątrz lambdy!
+                    var gSpan = gamma.Data.AsReadOnlySpan();
+                    var bSpan = beta.Data.AsReadOnlySpan();
+                    var rmSpan = runningMean.AsReadOnlySpan();
+                    var rvSpan = runningVar.AsReadOnlySpan();
+
+                    for (int j = 0; j < C; j++)
+                    {
+                        double invStd = 1.0 / Math.Sqrt(rvSpan[j] + eps);
+                        double xHat = (rowIn[j] - rmSpan[j]) * invStd;
+                        rowOut[j] = gSpan[j] * xHat + bSpan[j];
+                    }
+                });
+
+                return Tensor.CreateOperationResult(resultData, [input], (_) => { });
+            }
+
+            // --- TRENING ---
+            var batchMean = new double[C];
+            var batchVar = new double[C];
+            var invStdVec = new double[C];
+            
+            var xHatMat = new FastMatrix<double>(N, C); 
+
+            // 1. Zrównoleglone liczenie średniej i wariancji
+            Parallel.For(0, C, j =>
+            {
+                double sum = 0;
+                for (int i = 0; i < N; i++) sum += input.Data[i, j];
+                double mean = sum / N;
+                batchMean[j] = mean;
+
+                double sqSum = 0;
+                for (int i = 0; i < N; i++)
+                {
+                    double diff = input.Data[i, j] - mean;
+                    sqSum += diff * diff;
+                }
+                double var = sqSum / N;
+                batchVar[j] = var;
+
+                // ROZWIĄZANIE: Tworzymy spany wewnątrz lambdy!
+                var rmSpanLocal = runningMean.AsSpan();
+                var rvSpanLocal = runningVar.AsSpan();
+
+                // Moving Average (EMA)
+                rmSpanLocal[j] = (1 - momentum) * rmSpanLocal[j] + momentum * mean;
+                rvSpanLocal[j] = (1 - momentum) * rvSpanLocal[j] + momentum * var;
+
+                invStdVec[j] = 1.0 / Math.Sqrt(var + eps);
+            });
+
+            // 2. Aplikowanie normalizacji
+            Parallel.For(0, N, i =>
+            {
+                var rowIn = input.Data.Row(i);
+                var rowOut = resultData.Row(i);
+                var rowXHat = xHatMat.Row(i);
+
+                // ROZWIĄZANIE: Tworzymy spany wewnątrz lambdy!
+                var gSpanLocal = gamma.Data.AsReadOnlySpan();
+                var bSpanLocal = beta.Data.AsReadOnlySpan();
+
+                for (int j = 0; j < C; j++)
+                {
+                    double xHat = (rowIn[j] - batchMean[j]) * invStdVec[j];
+                    rowXHat[j] = xHat;
+                    rowOut[j] = gSpanLocal[j] * xHat + bSpanLocal[j];
+                }
+            });
+
+            bool needsGrad = input.RequiresGrad || gamma.RequiresGrad || beta.RequiresGrad;
+            if (!needsGrad) xHatMat.Dispose();
+
+            // 3. Wsteczna Propagacja (Fused BatchNorm)
+            Action<Tensor> backward = (resultNode) =>
+            {
+                if (!needsGrad) return;
+                var gradOut = resultNode.Grad;
+
+                var dGamma = new double[C];
+                var dBeta = new double[C];
+
+                // Krok A: Zbieranie gradientów dla wag Gamma i Beta (pętla sekwencyjna, bezpieczna)
+                for (int i = 0; i < N; i++)
+                {
+                    var gradOutRow = gradOut.Row(i);
+                    var xHatRow = xHatMat.Row(i);
+                    for (int j = 0; j < C; j++)
+                    {
+                        dGamma[j] += gradOutRow[j] * xHatRow[j];
+                        dBeta[j] += gradOutRow[j];
+                    }
+                }
+
+                if (gamma.RequiresGrad)
+                {
+                    var gGrad = gamma.Grad.AsSpan();
+                    for (int j = 0; j < C; j++) gGrad[j] += dGamma[j];
+                }
+
+                if (beta.RequiresGrad)
+                {
+                    var bGrad = beta.Grad.AsSpan();
+                    for (int j = 0; j < C; j++) bGrad[j] += dBeta[j];
+                }
+
+                if (input.RequiresGrad)
+                {
+                    // Krok B: Cofanie błędu do wejścia
+                    Parallel.For(0, N, i =>
+                    {
+                        var gradInRow = input.Grad.Row(i);
+                        var gradOutRow = gradOut.Row(i);
+                        var xHatRow = xHatMat.Row(i);
+
+                        // ROZWIĄZANIE: Span wewnątrz lambdy!
+                        var gSpanLocal = gamma.Data.AsReadOnlySpan();
+
+                        for (int j = 0; j < C; j++)
+                        {
+                            double dx = (gSpanLocal[j] * invStdVec[j] / N) * 
+                                        (N * gradOutRow[j] - dBeta[j] - xHatRow[j] * dGamma[j]);
+                            gradInRow[j] += dx;
+                        }
+                    });
+                }
+
+                xHatMat.Dispose();
+            };
+
+            return Tensor.CreateOperationResult(resultData, [input, gamma, beta], backward);
         }
 
         // ====================================================================

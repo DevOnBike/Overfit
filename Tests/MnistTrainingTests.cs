@@ -33,9 +33,14 @@ namespace DevOnBike.Overfit.Tests
             using var Y = new Tensor(trainY, requiresGrad: false);
 
             var conv1 = new ConvLayer(inChannels: 1, outChannels: 8, h: 28, w: 28, kSize: 3);
+            
+            // Wpinamy BatchNorm po Poolingu (rozmiar spłaszczony to 8 * 13 * 13 = 1352)
+            var bn1 = new BatchNorm1D(1352); 
+            
             var fc1 = new LinearLayer(1352, 10);
 
-            var allParams = new[] { conv1.Kernels }.Concat(fc1.Parameters());
+            // Rejestrujemy parametry ze wszystkich warstw do optymalizatora!
+            var allParams = new[] { conv1.Kernels }.Concat(bn1.Parameters()).Concat(fc1.Parameters());
             var optimizer = new Adam(allParams, learningRate);
             
             var numBatches = trainSize / batchSize;
@@ -64,7 +69,11 @@ namespace DevOnBike.Overfit.Tests
                     using var h1 = conv1.Forward(xBatch);
                     using var a1 = TensorMath.ReLU(h1);
                     using var p1 = TensorMath.MaxPool2D(a1, 8, 26, 26, 2);
-                    using var d1 = TensorMath.Dropout(p1, 0.25, isTraining: true);
+                    
+                    // Przepuszczamy przez BatchNorm z flagą isTraining: true
+                    using var bnOut = bn1.Forward(p1, isTraining: true);
+                    
+                    using var d1 = TensorMath.Dropout(bnOut, 0.25, isTraining: true);
                     using var predictionLogits = fc1.Forward(d1); // Uwaga: To są surowe logity!
 
                     // --- LOSS: Wdrożenie SoftmaxCrossEntropy ---
@@ -96,7 +105,8 @@ namespace DevOnBike.Overfit.Tests
                 "d:/ml/t10k-labels.idx1-ubyte",
                 1000);
 
-            PrintConfusionMatrix(conv1, fc1, testX, testY);
+            // Przekazujemy warstwę BatchNorm do ewaluacji!
+            PrintConfusionMatrix(conv1, bn1, fc1, testX, testY);
 
             Debug.WriteLine("----------------------------------------------------------");
             Debug.WriteLine($"TRENING ZAKOŃCZONY!");
@@ -122,9 +132,15 @@ namespace DevOnBike.Overfit.Tests
             using var Y = new Tensor(trainY, requiresGrad: false);
 
             var layer1 = new LinearLayer(784, 128);
+            
+            // Wpinamy BatchNorm w sieci gęstej (na 128 cech)
+            var bn1 = new BatchNorm1D(128);
+            
             var layer2 = new LinearLayer(128, 10);
 
-            var optimizer = new Adam(layer1.Parameters().Concat(layer2.Parameters()), learningRate);
+            // Rejestrujemy parametry
+            var allParams = layer1.Parameters().Concat(bn1.Parameters()).Concat(layer2.Parameters());
+            var optimizer = new Adam(allParams, learningRate);
 
             var numBatches = trainSize / batchSize;
             double initialLoss = 0;
@@ -149,8 +165,12 @@ namespace DevOnBike.Overfit.Tests
 
                     // --- FORWARD ---
                     using var h1 = layer1.Forward(xBatch);
-                    using var a1 = TensorMath.ReLU(h1);
-                    using var predictionLogits = layer2.Forward(a1);// Zmieniono na surowe logity
+                    
+                    // Przepuszczamy przez BatchNorm z flagą isTraining: true
+                    using var bnOut = bn1.Forward(h1, isTraining: true);
+                    
+                    using var a1 = TensorMath.ReLU(bnOut);
+                    using var predictionLogits = layer2.Forward(a1);
 
                     // --- LOSS: Wdrożenie SoftmaxCrossEntropy ---
                     using var loss = TensorMath.SoftmaxCrossEntropy(predictionLogits, yBatch);
@@ -170,12 +190,17 @@ namespace DevOnBike.Overfit.Tests
                 Debug.WriteLine($"Epoch {epoch} | Loss: {epochLoss:F6}");
             }
 
+            // --- ZAPIS MODELU ---
             layer1.Save($"{modelPathPrefix}_l1");
+            bn1.Save($"{modelPathPrefix}_bn1");
             layer2.Save($"{modelPathPrefix}_l2");
 
             var loadedL1 = new LinearLayer(784, 128);
+            var loadedBn1 = new BatchNorm1D(128);
             var loadedL2 = new LinearLayer(128, 10);
+            
             loadedL1.Load($"{modelPathPrefix}_l1");
+            loadedBn1.Load($"{modelPathPrefix}_bn1");
             loadedL2.Load($"{modelPathPrefix}_l2");
 
             sw.Stop();
@@ -186,14 +211,19 @@ namespace DevOnBike.Overfit.Tests
             var testXView = X.Data.AsView().Slice(0, 0, 1, 784);
             using var testX = new Tensor(testXView.ToContiguousFastMatrix(), false);
 
+            // Forward starego modelu
             using var oldH = layer1.Forward(testX);
-            using var oldA = TensorMath.ReLU(oldH);
+            using var oldBn = bn1.Forward(oldH, isTraining: false);
+            using var oldA = TensorMath.ReLU(oldBn);
             using var oldPred = layer2.Forward(oldA);
 
+            // Forward nowego (wczytanego z dysku) modelu
             using var newH = loadedL1.Forward(testX);
-            using var newA = TensorMath.ReLU(newH);
+            using var newBn = loadedBn1.Forward(newH, isTraining: false);
+            using var newA = TensorMath.ReLU(newBn);
             using var newPred = loadedL2.Forward(newA);
 
+            // Sprawdzamy czy predykcje się zgadzają
             for (var i = 0; i < 10; i++)
             {
                 Assert.Equal(oldPred.Data[0, i], newPred.Data[0, i], 10);
@@ -202,7 +232,7 @@ namespace DevOnBike.Overfit.Tests
             Debug.WriteLine($"Training & Persistence check finished in {sw.ElapsedMilliseconds}ms");
         }
 
-        private void PrintConfusionMatrix(ConvLayer conv, LinearLayer fc, FastMatrix<double> testX, FastMatrix<double> testY)
+        private void PrintConfusionMatrix(ConvLayer conv, BatchNorm1D bn, LinearLayer fc, FastMatrix<double> testX, FastMatrix<double> testY)
         {
             var matrix = new int[10, 10];
             var samples = 1000;
@@ -215,7 +245,11 @@ namespace DevOnBike.Overfit.Tests
                 using var h1 = conv.Forward(input);
                 using var a1 = TensorMath.ReLU(h1);
                 using var p1 = TensorMath.MaxPool2D(a1, 8, 26, 26, 2);
-                using var output = fc.Forward(p1);
+                
+                // UWAGA: Podczas wnioskowania isTraining JEST FALSE!
+                using var bnOut = bn.Forward(p1, isTraining: false);
+                
+                using var output = fc.Forward(bnOut);
 
                 // Z uwagi na monotoniczność funkcji Softmax, używamy ArgMax bezpośrednio na logitach
                 var predicted = output.Data.ArgMax();
