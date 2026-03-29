@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+
 namespace DevOnBike.Overfit
 {
     /// <summary>
@@ -11,15 +14,16 @@ namespace DevOnBike.Overfit
         public bool RequiresGrad { get; }
 
         private readonly List<Tensor> _dependencies = [];
-        
-        // ZMIANA ARCHITEKTONICZNA: Delegat przyjmuje węzeł, na którym operuje
         private Action<Tensor> _backwardAction;
 
-        public Tensor(FastMatrix<double> data, bool requiresGrad = true)
+        private readonly bool _ownsData;
+
+        public Tensor(FastMatrix<double> data, bool requiresGrad = true, bool ownsData = true)
         {
             Data = data ?? throw new ArgumentNullException(nameof(data));
             RequiresGrad = requiresGrad;
             Grad = new FastMatrix<double>(data.Rows, data.Cols);
+            _ownsData = ownsData;
         }
 
         private Tensor(FastMatrix<double> data, List<Tensor> dependencies, Action<Tensor> backwardAction)
@@ -29,6 +33,9 @@ namespace DevOnBike.Overfit
             Grad = new FastMatrix<double>(data.Rows, data.Cols);
             _dependencies = dependencies;
             _backwardAction = backwardAction;
+            
+            // Węzły tworzone przez TensorMath (np. wynik mnożenia) ZAWSZE są własnością tego Tensora
+            _ownsData = true;
         }
 
         // ====================================================================
@@ -37,10 +44,6 @@ namespace DevOnBike.Overfit
 
         public void Backward()
         {
-            // UWAGA: Nie zerujemy już gradientu korzenia! 
-            // Założenie architektoniczne: Funkcja Straty (lub kod testu) 
-            // wstrzykuje początkowy sygnał do this.Grad PRZED wywołaniem Backward().
-
             var topo = new List<Tensor>();
             var visited = new HashSet<Tensor>();
 
@@ -59,7 +62,6 @@ namespace DevOnBike.Overfit
 
             BuildTopo(this);
 
-            // Odwracamy listę i odpalamy propagację wstecz!
             topo.Reverse();
             foreach (var node in topo)
             {
@@ -74,7 +76,14 @@ namespace DevOnBike.Overfit
 
         public void Dispose()
         {
-            Data?.Dispose();
+            // Sprzątamy Data TYLKO, gdy Tensor jest jej prawnym właścicielem
+            if (_ownsData)
+            {
+#pragma warning disable IDISP007 // Don't dispose disposables you do not own
+                Data?.Dispose();
+#pragma warning restore IDISP007
+            }
+            
             Grad?.Dispose();
             _dependencies.Clear();
             _backwardAction = null;
