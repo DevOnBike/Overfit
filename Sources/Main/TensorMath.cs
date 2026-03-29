@@ -56,11 +56,11 @@ namespace DevOnBike.Overfit
             {
                 var rowC = C.Row(i);
                 rowC.Clear();
-                var rowA = A.Row(i);
+                // Poprawka: Usunięto var rowA = A.Row(i) aby nie wysadzać widoków transponowanych
 
                 for (var k = 0; k < A.Cols; k++)
                 {
-                    var a_ik = A[i, k];
+                    var a_ik = A[i, k]; // Indeksator poprawnie i bezpiecznie nawiguje po Strides
                     var rowB = B.Row(k);
                     TensorPrimitives.MultiplyAdd(rowB, a_ik, rowC, rowC);
                 }
@@ -73,11 +73,10 @@ namespace DevOnBike.Overfit
             for (var i = 0; i < A.Rows; i++)
             {
                 var rowC = C.Row(i);
-                var rowA = A.Row(i);
 
                 for (var k = 0; k < A.Cols; k++)
                 {
-                    var a_ik = A[i, k];
+                    var a_ik = A[i, k]; 
                     var rowB = B.Row(k);
                     TensorPrimitives.MultiplyAdd(rowB, a_ik, rowC, rowC);
                 }
@@ -100,7 +99,7 @@ namespace DevOnBike.Overfit
 
             Parallel.For(0, A.Rows, i =>
             {
-                var rowA = A.Row(i);
+                var rowA = A.Row(i); 
                 var rowC = C.Row(i);
 
                 for (var k = 0; k < A.Cols; k++)
