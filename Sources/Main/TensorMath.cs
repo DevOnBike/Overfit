@@ -635,5 +635,55 @@ namespace DevOnBike.Overfit
                 }
             }
         }
+        
+        public static Tensor Dropout(Tensor input, double p, bool isTraining)
+        {
+            if (!isTraining) return input; // W trybie predykcji Dropout nic nie robi
+
+            var resultData = new FastMatrix<double>(input.Data.Rows, input.Data.Cols);
+            var mask = new FastMatrix<double>(input.Data.Rows, input.Data.Cols);
+    
+            // Skalowanie (Inverted Dropout), aby suma sygnału została stała: 1 / (1 - p)
+            var scale = 1.0 / (1.0 - p);
+
+            // --- FORWARD ---
+            var inSpan = input.Data.AsReadOnlySpan();
+            var resSpan = resultData.AsSpan();
+            var maskSpan = mask.AsSpan();
+
+            for (var i = 0; i < inSpan.Length; i++)
+            {
+                if (Random.Shared.NextDouble() > p)
+                {
+                    maskSpan[i] = scale;
+                    resSpan[i] = inSpan[i] * scale;
+                }
+                else
+                {
+                    maskSpan[i] = 0.0;
+                    resSpan[i] = 0.0;
+                }
+            }
+
+            // --- BACKWARD ---
+            Action<Tensor> backward = (resultNode) =>
+            {
+                if (!input.RequiresGrad) return;
+
+                var gradOut = resultNode.Grad.AsReadOnlySpan();
+                var gradIn = input.Grad.AsSpan();
+                var mSpan = mask.AsReadOnlySpan();
+
+                // Gradient płynie tylko przez "otwarte" przejścia i jest skalowany
+                for (var i = 0; i < gradIn.Length; i++)
+                {
+                    gradIn[i] += gradOut[i] * mSpan[i];
+                }
+        
+                mask.Dispose(); // Czyścimy maskę po użyciu
+            };
+
+            return Tensor.CreateOperationResult(resultData, new List<Tensor> { input }, backward);
+        }
     }
 }

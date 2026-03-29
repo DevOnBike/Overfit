@@ -6,7 +6,101 @@ namespace DevOnBike.Overfit.Tests
 {
     public class MnistTrainingTests
     {
-        [Fact(Skip = "This test requires a training model")]
+        [Fact(Skip = "not unit test")]
+        public void Mnist_FullTrain60k_CnnBeastMode()
+        {
+            // --- ARRANGE ---
+            // PEŁNY ZBIÓR DANYCH
+            var trainSize = 60000; 
+            var batchSize = 64; // Zwiększamy batch dla lepszego wykorzystania SIMD
+            var epochs = 5;
+            var learningRate = 0.001;
+
+            Debug.WriteLine("Ładowanie pełnego zbioru 60,000 obrazów...");
+            var (trainX, trainY) = MnistLoader.Load(
+                "d:/ml/train-images.idx3-ubyte", 
+                "d:/ml/train-labels.idx1-ubyte", 
+                trainSize);
+
+            using var X = new Tensor(trainX, requiresGrad: false);
+            using var Y = new Tensor(trainY, requiresGrad: false);
+
+            // ARCHITEKTURA: Conv(8x3x3) -> ReLU -> MaxPool(2x2) -> Dropout(0.25) -> Linear(1352 -> 10)
+            var conv1 = new ConvLayer(inChannels: 1, outChannels: 8, h: 28, w: 28, kSize: 3);
+            var fc1 = new LinearLayer(1352, 10);
+
+            var allParams = new[] { conv1.Kernels }.Concat(fc1.Parameters());
+            var optimizer = new Adam(allParams, learningRate);
+            
+            var numBatches = trainSize / batchSize;
+            var totalSw = Stopwatch.StartNew();
+
+            Debug.WriteLine($"Start treningu: {epochs} epok, {numBatches} batchy na epokę.");
+            Debug.WriteLine("----------------------------------------------------------");
+
+            // --- ACT ---
+            for (var epoch = 1; epoch <= epochs; epoch++)
+            {
+                var epochSw = Stopwatch.StartNew();
+                double epochLoss = 0;
+
+                for (var b = 0; b < numBatches; b++)
+                {
+                    optimizer.ZeroGrad();
+
+                    // Slicing i materializacja batcha
+                    var xView = X.Data.AsView().Slice(b * batchSize, 0, batchSize, 784);
+                    var yView = Y.Data.AsView().Slice(b * batchSize, 0, batchSize, 10);
+
+                    using var xBatch = new Tensor(xView.ToContiguousFastMatrix(), false);
+                    using var yBatch = new Tensor(yView.ToContiguousFastMatrix(), false);
+
+                    // --- FORWARD ---
+                    using var h1 = conv1.Forward(xBatch);
+                    using var a1 = TensorMath.ReLU(h1);
+                    using var p1 = TensorMath.MaxPool2D(a1, 8, 26, 26, 2);
+                    
+                    // DROPOUT: 25% neuronów "odpoczywa" w tej iteracji
+                    using var d1 = TensorMath.Dropout(p1, 0.25, isTraining: true);
+                    
+                    using var prediction = fc1.Forward(d1);
+
+                    // LOSS
+                    using var loss = TensorMath.MSE(prediction, yBatch);
+                    epochLoss += loss.Data[0, 0];
+
+                    // --- BACKWARD ---
+                    loss.Grad[0, 0] = 1.0;
+                    loss.Backward();
+
+                    // UPDATE
+                    optimizer.Step();
+
+                    // Opcjonalnie: Log co 200 batchy, żeby widzieć progres
+                    if (b % 200 == 0 && b > 0)
+                    {
+                        Debug.WriteLine($"  Batch {b}/{numBatches} | Current Loss: {loss.Data[0,0]:F6}");
+                    }
+                }
+
+                epochSw.Stop();
+                var avgLoss = epochLoss / numBatches;
+                Debug.WriteLine($"> EPOCH {epoch} GOTOWA | Loss: {avgLoss:F6} | Czas: {epochSw.ElapsedMilliseconds}ms");
+            }
+
+            totalSw.Stop();
+            
+            // --- SUMMARY ---
+            Debug.WriteLine("----------------------------------------------------------");
+            Debug.WriteLine($"TRENING ZAKOŃCZONY!");
+            Debug.WriteLine($"Całkowity czas: {totalSw.Elapsed.TotalSeconds:F2}s");
+            Debug.WriteLine($"Średni czas na epokę: {totalSw.ElapsedMilliseconds / epochs}ms");
+
+            // --- ASSERT ---
+            Assert.True(totalSw.Elapsed.TotalSeconds < 120, "Bestia zbyt wolna! Miało być poniżej 2 minut.");
+        }
+        
+        [Fact]
         public void Mnist_FullTrainingLoop_ShouldConvergeAndPersist()
         {
             // --- ARRANGE ---
