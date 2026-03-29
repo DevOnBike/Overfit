@@ -4,9 +4,10 @@ using System.Numerics.Tensors;
 namespace DevOnBike.Overfit
 {
     /// <summary>
-    /// Computational engine operating on views. 
-    /// Implements allocation-free Broadcasting, parallel SIMD operations, and Autograd graph building.
-    /// Memory leaks from ArrayPool exhaustion are strictly prevented via conditional disposal.
+    /// Multi-threaded computational engine. 
+    /// Features: SIMD via TensorPrimitives, O(1) Broadcasting, 
+    /// CPU Multi-threading (Parallel.For), and ArrayPool safety.
+    /// Operates on high-precision FP64 (double).
     /// </summary>
     public static class TensorMath
     {
@@ -14,31 +15,27 @@ namespace DevOnBike.Overfit
         // 1. BROADCASTING FACTORIES
         // ====================================================================
 
-        /// <summary>
-        /// Creates a virtual [targetRows x Cols] matrix from a 1D [Cols] vector.
-        /// ZERO memory copying. Clones the row downwards in O(1) time.
-        /// </summary>
         public static FastMatrixView<T> BroadcastRowVector<T>(Span<T> rowVector, int targetRows)
             where T : struct, IFloatingPointIeee754<T>
         {
             return new FastMatrixView<T>(
-            data: rowVector,
-            rows: targetRows,
-            cols: rowVector.Length,
-            rowStride: 0, // BROADCASTING MAGIC: Step down = stand still in memory
-            colStride: 1,
-            offset: 0);
+                data: rowVector,
+                rows: targetRows,
+                cols: rowVector.Length,
+                rowStride: 0,
+                colStride: 1,
+                offset: 0);
         }
 
         // ====================================================================
-        // 2. MATH ENGINE (SIMD Execution)
+        // 2. CORE MATH ENGINE
         // ====================================================================
 
         public static void Add<T>(FastMatrixView<T> left, FastMatrixView<T> right, FastMatrixView<T> result)
             where T : struct, IFloatingPointIeee754<T>
         {
             if (left.Rows != right.Rows || left.Cols != right.Cols || left.Rows != result.Rows || left.Cols != result.Cols)
-                throw new ArgumentException("Shape mismatch. Views must have identical virtual dimensions.");
+                throw new ArgumentException("Shape mismatch.");
 
             for (var i = 0; i < result.Rows; i++)
             {
@@ -53,12 +50,13 @@ namespace DevOnBike.Overfit
                 throw new ArgumentException("Shape mismatch in MatMul.");
 
             if (B.ColStride != 1)
-                throw new ArgumentException("MatMul requires contiguous rows in B (ColStride == 1).", nameof(B));
+                throw new ArgumentException("MatMul requires contiguous rows in B.", nameof(B));
 
             for (var i = 0; i < A.Rows; i++)
             {
                 var rowC = C.Row(i);
                 rowC.Clear();
+                var rowA = A.Row(i);
 
                 for (var k = 0; k < A.Cols; k++)
                 {
@@ -72,20 +70,16 @@ namespace DevOnBike.Overfit
         public static void MatMulAdd<T>(FastMatrixView<T> A, FastMatrixView<T> B, FastMatrixView<T> C)
             where T : struct, IFloatingPointIeee754<T>
         {
-            if (A.Cols != B.Rows || A.Rows != C.Rows || B.Cols != C.Cols)
-                throw new ArgumentException("Shape mismatch in MatMulAdd.");
-
-            if (B.ColStride != 1)
-                throw new ArgumentException("MatMulAdd requires contiguous rows in B (ColStride == 1).", nameof(B));
-
             for (var i = 0; i < A.Rows; i++)
             {
                 var rowC = C.Row(i);
+                var rowA = A.Row(i);
+
                 for (var k = 0; k < A.Cols; k++)
                 {
                     var a_ik = A[i, k];
                     var rowB = B.Row(k);
-                    TensorPrimitives.MultiplyAdd(rowB, a_ik, rowC, rowC); // Accumulates automatically
+                    TensorPrimitives.MultiplyAdd(rowB, a_ik, rowC, rowC);
                 }
             }
         }
@@ -103,7 +97,8 @@ namespace DevOnBike.Overfit
                 throw new ArgumentException($"Shape mismatch: {A.Cols} != {B.Rows}");
 
             var C = new FastMatrix<double>(A.Rows, B.Cols);
-            for (var i = 0; i < A.Rows; i++)
+
+            Parallel.For(0, A.Rows, i =>
             {
                 var rowA = A.Row(i);
                 var rowC = C.Row(i);
@@ -114,7 +109,7 @@ namespace DevOnBike.Overfit
                     var rowB = B.Row(k);
                     TensorPrimitives.MultiplyAdd(rowB, valA, rowC, rowC);
                 }
-            }
+            });
             return C;
         }
 
@@ -129,23 +124,15 @@ namespace DevOnBike.Overfit
 
             Action<Tensor> backward = (resultNode) => {
                 var gradC = resultNode.Grad.AsView();
-
                 if (left.RequiresGrad) Add(left.Grad.AsView(), gradC, left.Grad.AsView());
                 if (right.RequiresGrad) Add(right.Grad.AsView(), gradC, right.Grad.AsView());
             };
 
-            return Tensor.CreateOperationResult(resultData, new List<Tensor>
-            {
-                left,
-                right
-            }, backward);
+            return Tensor.CreateOperationResult(resultData, [left, right], backward);
         }
 
         public static Tensor AddBias(Tensor input, Tensor bias)
         {
-            if (bias.Data.Rows != 1 || bias.Data.Cols != input.Data.Cols)
-                throw new ArgumentException("Bias must be a 1xD vector.");
-
             var resultData = new FastMatrix<double>(input.Data.Rows, input.Data.Cols);
             var broadcastedBias = BroadcastRowVector(bias.Data.AsSpan(), input.Data.Rows);
             Add(input.Data.AsView(), broadcastedBias, resultData.AsView());
@@ -167,11 +154,7 @@ namespace DevOnBike.Overfit
                 }
             };
 
-            return Tensor.CreateOperationResult(resultData, new List<Tensor>
-            {
-                input,
-                bias
-            }, backward);
+            return Tensor.CreateOperationResult(resultData, [input, bias], backward);
         }
 
         public static Tensor MatMul(Tensor left, Tensor right)
@@ -194,11 +177,7 @@ namespace DevOnBike.Overfit
                 }
             };
 
-            return Tensor.CreateOperationResult(resultData, new List<Tensor>
-            {
-                left,
-                right
-            }, backward);
+            return Tensor.CreateOperationResult(resultData, [left, right], backward);
         }
 
         // ====================================================================
@@ -223,47 +202,7 @@ namespace DevOnBike.Overfit
                 }
             };
 
-            return Tensor.CreateOperationResult(resultData, new List<Tensor>
-            {
-                input
-            }, backward);
-        }
-
-        public static Tensor Softmax(Tensor input)
-        {
-            var resData = new FastMatrix<double>(input.Data.Rows, input.Data.Cols);
-
-            for (var r = 0; r < input.Data.Rows; r++)
-            {
-                TensorPrimitives.SoftMax(input.Data.Row(r), resData.Row(r));
-            }
-
-            Action<Tensor> backward = (resultNode) => {
-                if (!input.RequiresGrad) return;
-
-                var outGrad = resultNode.Grad;
-                var outVal = resultNode.Data;
-                var inGrad = input.Grad;
-
-                for (var r = 0; r < outVal.Rows; r++)
-                {
-                    var gradRow = outGrad.Row(r);
-                    var valRow = outVal.Row(r);
-                    var targetGradRow = inGrad.Row(r);
-
-                    var dot = TensorPrimitives.Dot(gradRow, valRow);
-
-                    for (var c = 0; c < valRow.Length; c++)
-                    {
-                        targetGradRow[c] += valRow[c] * (gradRow[c] - dot);
-                    }
-                }
-            };
-
-            return Tensor.CreateOperationResult(resData, new List<Tensor>
-            {
-                input
-            }, backward);
+            return Tensor.CreateOperationResult(resultData, [input], backward);
         }
 
         public static Tensor Dropout(Tensor input, double p, bool isTraining)
@@ -293,8 +232,6 @@ namespace DevOnBike.Overfit
             }
 
             bool needsGrad = input.RequiresGrad;
-
-            // IMMEDIATE DISPOSAL IF NO GRADIENT REQUIRED TO PREVENT LEAKS
             if (!needsGrad) mask.Dispose();
 
             Action<Tensor> backward = (resultNode) => {
@@ -308,14 +245,10 @@ namespace DevOnBike.Overfit
                 {
                     gradIn[i] += gradOut[i] * mSpan[i];
                 }
-
                 mask.Dispose();
             };
 
-            return Tensor.CreateOperationResult(resultData, new List<Tensor>
-            {
-                input
-            }, backward);
+            return Tensor.CreateOperationResult(resultData, [input], backward);
         }
 
         // ====================================================================
@@ -346,57 +279,19 @@ namespace DevOnBike.Overfit
                 if (predictions.RequiresGrad)
                 {
                     var pGrad = predictions.Grad.AsSpan();
-                    for (var i = 0; i < pData.Length; i++) pGrad[i] += factor * (pData[i] - tData[i]);
+                    for (var i = 0; i < pData.Length; i++)
+                        pGrad[i] += factor * (pData[i] - tData[i]);
                 }
 
                 if (targets.RequiresGrad)
                 {
                     var tGrad = targets.Grad.AsSpan();
-                    for (var i = 0; i < tData.Length; i++) tGrad[i] += factor * (tData[i] - pData[i]);
+                    for (var i = 0; i < tData.Length; i++)
+                        tGrad[i] += factor * (tData[i] - pData[i]);
                 }
             };
 
-            return Tensor.CreateOperationResult(resultData, new List<Tensor>
-            {
-                predictions,
-                targets
-            }, backward);
-        }
-
-        public static Tensor CrossEntropy(Tensor prediction, Tensor target)
-        {
-            var resData = new FastMatrix<double>(1, 1);
-            double loss = 0;
-            var epsilon = 1e-15;
-
-            for (var r = 0; r < prediction.Data.Rows; r++)
-            {
-                for (var c = 0; c < prediction.Data.Cols; c++)
-                {
-                    if (target.Data[r, c] > 0.5)
-                        loss -= Math.Log(prediction.Data[r, c] + epsilon);
-                }
-            }
-            resData[0, 0] = loss / prediction.Data.Rows;
-
-            Action<Tensor> backward = (resultNode) => {
-                if (!prediction.RequiresGrad) return;
-
-                var scale = resultNode.Grad[0, 0] / prediction.Data.Rows;
-                for (var r = 0; r < prediction.Data.Rows; r++)
-                {
-                    for (var c = 0; c < prediction.Data.Cols; c++)
-                    {
-                        prediction.Grad[r, c] += (prediction.Data[r, c] - target.Data[r, c]) * scale;
-                    }
-                }
-            };
-
-            return Tensor.CreateOperationResult(resData, new List<Tensor>
-            {
-                prediction,
-                target
-            }, backward);
+            return Tensor.CreateOperationResult(resultData, [predictions, targets], backward);
         }
 
         public static Tensor SoftmaxCrossEntropy(Tensor logits, Tensor target)
@@ -404,26 +299,28 @@ namespace DevOnBike.Overfit
             var resData = new FastMatrix<double>(1, 1);
             var probs = new FastMatrix<double>(logits.Data.Rows, logits.Data.Cols);
             double totalLoss = 0;
+            object lossLock = new object();
 
-            for (var r = 0; r < logits.Data.Rows; r++)
+            Parallel.For(0, logits.Data.Rows, r =>
             {
                 var row = logits.Data.Row(r);
                 var pRow = probs.Row(r);
 
                 TensorPrimitives.SoftMax(row, pRow);
 
+                double localLoss = 0;
                 for (var c = 0; c < row.Length; c++)
                 {
                     if (target.Data[r, c] > 0.5)
-                        totalLoss -= Math.Log(pRow[c] + 1e-15);
+                        localLoss -= Math.Log(pRow[c] + 1e-15);
                 }
-            }
+
+                lock (lossLock) { totalLoss += localLoss; }
+            });
 
             resData[0, 0] = totalLoss / logits.Data.Rows;
 
             bool needsGrad = logits.RequiresGrad;
-
-            // IMMEDIATE DISPOSAL IF NO GRADIENT REQUIRED TO PREVENT LEAKS
             if (!needsGrad) probs.Dispose();
 
             Action<Tensor> backward = (resultNode) => {
@@ -431,7 +328,7 @@ namespace DevOnBike.Overfit
 
                 var scale = resultNode.Grad[0, 0] / logits.Data.Rows;
 
-                for (var r = 0; r < logits.Data.Rows; r++)
+                Parallel.For(0, logits.Data.Rows, r =>
                 {
                     var lGrad = logits.Grad.Row(r);
                     var pRow = probs.ReadOnlyRow(r);
@@ -441,16 +338,12 @@ namespace DevOnBike.Overfit
                     {
                         lGrad[c] += (pRow[c] - tRow[c]) * scale;
                     }
-                }
+                });
 
                 probs.Dispose();
             };
 
-            return Tensor.CreateOperationResult(resData, new List<Tensor>
-            {
-                logits,
-                target
-            }, backward);
+            return Tensor.CreateOperationResult(resData, [logits, target], backward);
         }
 
         // ====================================================================
@@ -486,7 +379,7 @@ namespace DevOnBike.Overfit
                                 if (i >= 0 && i < height && j >= 0 && j < width)
                                     output[outIdx] = input[c * channelSize + i * width + j];
                                 else
-                                    output[outIdx] = 0;
+                                    output[outIdx] = 0.0;
                             }
                         }
                     }
@@ -542,7 +435,7 @@ namespace DevOnBike.Overfit
             var resultData = new FastMatrix<double>(batchSize, channels * outputH * outputW);
             var maxIndices = new int[batchSize, channels * outputH * outputW];
 
-            for (var n = 0; n < batchSize; n++)
+            Parallel.For(0, batchSize, n =>
             {
                 for (var c = 0; c < channels; c++)
                 {
@@ -572,12 +465,12 @@ namespace DevOnBike.Overfit
                         }
                     }
                 }
-            }
+            });
 
             Action<Tensor> backward = (resultNode) => {
                 if (!input.RequiresGrad) return;
 
-                for (var n = 0; n < batchSize; n++)
+                Parallel.For(0, batchSize, n =>
                 {
                     var gradOut = resultNode.Grad.Row(n);
                     var gradIn = input.Grad.Row(n);
@@ -587,13 +480,10 @@ namespace DevOnBike.Overfit
                         var originalIdx = maxIndices[n, i];
                         gradIn[originalIdx] += gradOut[i];
                     }
-                }
+                });
             };
 
-            return Tensor.CreateOperationResult(resultData, new List<Tensor>
-            {
-                input
-            }, backward);
+            return Tensor.CreateOperationResult(resultData, [input], backward);
         }
 
         public static Tensor Conv2D(Tensor input, Tensor weights, int inC, int outC, int h, int w, int k)
@@ -606,18 +496,17 @@ namespace DevOnBike.Overfit
             var colMatrices = new FastMatrix<double>[batchSize];
             var resultData = new FastMatrix<double>(batchSize, outC * outH * outW);
 
-            for (var n = 0; n < batchSize; n++)
+            Parallel.For(0, batchSize, n =>
             {
                 colMatrices[n] = new FastMatrix<double>(kSquareInC, outH * outW);
                 Im2Col(input.Data.Row(n), inC, h, w, k, 1, 0, colMatrices[n].AsSpan());
 
                 using var batchResult = MatMulRaw(weights.Data.AsView(), colMatrices[n].AsView());
                 batchResult.AsSpan().CopyTo(resultData.Row(n));
-            }
+            });
 
             bool needsGrad = weights.RequiresGrad || input.RequiresGrad;
 
-            // IMMEDIATE DISPOSAL IF NO GRADIENT REQUIRED TO PREVENT LEAKS
             if (!needsGrad)
             {
                 for (var n = 0; n < batchSize; n++) colMatrices[n].Dispose();
@@ -625,7 +514,6 @@ namespace DevOnBike.Overfit
 
             Action<Tensor> backward = (resultNode) => {
                 if (!needsGrad) return;
-
                 var gradOutput = resultNode.Grad;
 
                 for (var n = 0; n < batchSize; n++)
@@ -651,11 +539,7 @@ namespace DevOnBike.Overfit
                 }
             };
 
-            return Tensor.CreateOperationResult(resultData, new List<Tensor>
-            {
-                input,
-                weights
-            }, backward);
+            return Tensor.CreateOperationResult(resultData, [input, weights], backward);
         }
 
         // ====================================================================
