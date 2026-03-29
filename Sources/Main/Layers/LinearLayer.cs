@@ -20,8 +20,8 @@ namespace DevOnBike.Overfit.Layers
 
         public Tensor Forward(Tensor input)
         {
-            var mul = TensorMath.MatMul(input, Weights);
-            return TensorMath.AddBias(mul, Biases);
+            // Jedno wywołanie, jeden Tensor, zero wycieków
+            return TensorMath.Linear(input, Weights, Biases);
         }
 
         // --- METODY PROSTEGO ZAPISU I ODCZYTU (FIX CS1061) ---

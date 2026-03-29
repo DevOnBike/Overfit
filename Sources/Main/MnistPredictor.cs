@@ -2,7 +2,7 @@ using DevOnBike.Overfit.Layers;
 
 namespace DevOnBike.Overfit
 {
-    public class MnistPredictor : IDisposable
+    public sealed class MnistPredictor : IDisposable
     {
         private readonly LinearLayer _l1;
         private readonly LinearLayer _l2;

@@ -545,6 +545,50 @@ namespace DevOnBike.Overfit
 
             return Tensor.CreateOperationResult(resultData, [input, weights], backward);
         }
+        
+        public static Tensor Linear(Tensor input, Tensor weights, Tensor bias)
+        {
+            // 1. Alokacja wyniku (Y = XW + b)
+            var resultData = new FastMatrix<double>(input.Data.Rows, weights.Data.Cols);
+
+            // 2. Forward pass: Najpierw Y = X * W
+            MatMul(input.Data.AsView(), weights.Data.AsView(), resultData.AsView());
+
+            // 3. Dodanie biasu "w locie" bezpośrednio do macierzy Y (brak alokacji pośredniej!)
+            var broadcastedBias = BroadcastRowVector(bias.Data.AsSpan(), input.Data.Rows);
+            Add(resultData.AsView(), broadcastedBias, resultData.AsView());
+
+            // 4. Backward pass (połączona reguła łańcuchowa dla MatMul i Biasu)
+            Action<Tensor> backward = (resultNode) => {
+                var gradC = resultNode.Grad.AsView();
+
+                // dL/dX = dL/dY * W^T
+                if (input.RequiresGrad)
+                {
+                    using var weightsT = weights.Data.Transpose().ToContiguousFastMatrix();
+                    MatMulAdd(gradC, weightsT.AsView(), input.Grad.AsView());
+                }
+
+                // dL/dW = X^T * dL/dY
+                if (weights.RequiresGrad)
+                {
+                    MatMulAdd(input.Data.Transpose(), gradC, weights.Grad.AsView());
+                }
+
+                // dL/db = Suma kolumn z dL/dY
+                if (bias.RequiresGrad)
+                {
+                    var biasGradSpan = bias.Grad.AsSpan();
+                    for (var r = 0; r < resultNode.Grad.Rows; r++)
+                    {
+                        var rowGrad = resultNode.Grad.Row(r);
+                        TensorPrimitives.Add(biasGradSpan, rowGrad, biasGradSpan);
+                    }
+                }
+            };
+
+            return Tensor.CreateOperationResult(resultData, new List<Tensor> { input, weights, bias }, backward);
+        }
 
         // ====================================================================
         // 7. UTILS
