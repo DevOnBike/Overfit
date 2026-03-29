@@ -18,17 +18,16 @@ namespace DevOnBike.Overfit
         /// ZERO memory copying. Clones the row downwards in O(1) time.
         /// Used in ML to add Bias to an entire Batch of activations.
         /// </summary>
-        public static FastMatrixView<T> BroadcastRowVector<T>(Span<T> rowVector, int targetRows) 
+        public static FastMatrixView<T> BroadcastRowVector<T>(Span<T> rowVector, int targetRows)
             where T : struct, IFloatingPointIeee754<T>
         {
             return new FastMatrixView<T>(
-                data: rowVector,
-                rows: targetRows,
-                cols: rowVector.Length,
-                rowStride: 0, // <--- BROADCASTING MAGIC: Step down = stand still in memory
-                colStride: 1, // Step right = move 1 element in the vector
-                offset: 0
-            );
+            data: rowVector,
+            rows: targetRows,
+            cols: rowVector.Length,
+            rowStride: 0, // <--- BROADCASTING MAGIC: Step down = stand still in memory
+            colStride: 1, // Step right = move 1 element in the vector
+            offset: 0);
         }
 
         // ====================================================================
@@ -80,7 +79,7 @@ namespace DevOnBike.Overfit
             {
                 throw new ArgumentException("Shape mismatch in MatMul.");
             }
-            
+
             if (B.ColStride != 1)
             {
                 throw new ArgumentException("MatMul requires contiguous rows in B (ColStride == 1). For transposed B, materialize the view first.", nameof(B));
@@ -129,7 +128,7 @@ namespace DevOnBike.Overfit
             for (var i = 0; i < A.Rows; i++)
             {
                 var rowC = C.Row(i);
-                
+
                 // NO CLEARING HERE! We accumulate on top of existing values in rowC.
                 for (var k = 0; k < A.Cols; k++)
                 {
@@ -154,8 +153,7 @@ namespace DevOnBike.Overfit
             Add(left.Data.AsView(), right.Data.AsView(), resultData.AsView());
 
             // 2. BACKWARD PASS REGISTRATION (Clean Architecture: node injects itself)
-            Action<Tensor> backward = (resultNode) =>
-            {
+            Action<Tensor> backward = (resultNode) => {
                 var gradC = resultNode.Grad.AsView();
 
                 if (left.RequiresGrad)
@@ -173,9 +171,13 @@ namespace DevOnBike.Overfit
 
             // 3. Create the computation graph node
             return Tensor.CreateOperationResult(
-                data: resultData,
-                dependencies: new List<Tensor> { left, right },
-                backwardAction: backward
+            data: resultData,
+            dependencies: new List<Tensor>
+            {
+                left,
+                right
+            },
+            backwardAction: backward
             );
         }
 
@@ -189,8 +191,7 @@ namespace DevOnBike.Overfit
             MatMul(left.Data.AsView(), right.Data.AsView(), resultData.AsView());
 
             // 2. BACKWARD PASS REGISTRATION (Clean Architecture: node injects itself)
-            Action<Tensor> backward = (resultNode) =>
-            {
+            Action<Tensor> backward = (resultNode) => {
                 var gradC = resultNode.Grad.AsView();
 
                 if (left.RequiresGrad)
@@ -211,12 +212,16 @@ namespace DevOnBike.Overfit
 
             // 3. Create the computation graph node
             return Tensor.CreateOperationResult(
-                data: resultData,
-                dependencies: new List<Tensor> { left, right },
-                backwardAction: backward
+            data: resultData,
+            dependencies: new List<Tensor>
+            {
+                left,
+                right
+            },
+            backwardAction: backward
             );
         }
-        
+
         // ====================================================================
         // 5. ACTIVATION FUNCTIONS
         // ====================================================================
@@ -229,13 +234,12 @@ namespace DevOnBike.Overfit
         public static Tensor ReLU(Tensor input)
         {
             var resultData = new FastMatrix<double>(input.Data.Rows, input.Data.Cols);
-            
+
             // 1. FORWARD PASS: Hardware-accelerated max(0, x)
             TensorPrimitives.Max(input.Data.AsReadOnlySpan(), 0.0, resultData.AsSpan());
 
             // 2. BACKWARD PASS REGISTRATION
-            Action<Tensor> backward = (resultNode) =>
-            {
+            Action<Tensor> backward = (resultNode) => {
                 if (input.RequiresGrad)
                 {
                     var inSpan = input.Data.AsReadOnlySpan();
@@ -256,9 +260,12 @@ namespace DevOnBike.Overfit
             };
 
             return Tensor.CreateOperationResult(
-                data: resultData,
-                dependencies: new List<Tensor> { input },
-                backwardAction: backward
+            data: resultData,
+            dependencies: new List<Tensor>
+            {
+                input
+            },
+            backwardAction: backward
             );
         }
 
@@ -289,8 +296,7 @@ namespace DevOnBike.Overfit
             resultData[0, 0] = (dist * dist) / n;
 
             // 2. BACKWARD PASS REGISTRATION
-            Action<Tensor> backward = (resultNode) =>
-            {
+            Action<Tensor> backward = (resultNode) => {
                 var gradC = resultNode.Grad[0, 0];
                 var factor = (2.0 / n) * gradC;
 
@@ -302,7 +308,7 @@ namespace DevOnBike.Overfit
                 if (predictions.RequiresGrad)
                 {
                     var pGrad = predictions.Grad.AsSpan();
-                    
+
                     for (var i = 0; i < pData.Length; i++)
                     {
                         pGrad[i] += factor * (pData[i] - tData[i]);
@@ -312,7 +318,7 @@ namespace DevOnBike.Overfit
                 if (targets.RequiresGrad)
                 {
                     var tGrad = targets.Grad.AsSpan();
-                    
+
                     for (var i = 0; i < tData.Length; i++)
                     {
                         tGrad[i] += factor * (tData[i] - pData[i]);
@@ -321,12 +327,16 @@ namespace DevOnBike.Overfit
             };
 
             return Tensor.CreateOperationResult(
-                data: resultData,
-                dependencies: new List<Tensor> { predictions, targets },
-                backwardAction: backward
+            data: resultData,
+            dependencies: new List<Tensor>
+            {
+                predictions,
+                targets
+            },
+            backwardAction: backward
             );
         }
-        
+
         /// <summary>
         /// Dodaje wektor Biasu do każdego wiersza macierzy wejściowej (Broadcasting).
         /// Wspiera Autograd: gradient biasu jest sumowany po wszystkich wierszach (Batchu).
@@ -344,8 +354,7 @@ namespace DevOnBike.Overfit
             Add(input.Data.AsView(), broadcastedBias, resultData.AsView());
 
             // 2. BACKWARD PASS REGISTRATION
-            Action<Tensor> backward = (resultNode) =>
-            {
+            Action<Tensor> backward = (resultNode) => {
                 var gradC = resultNode.Grad.AsView();
 
                 // Gradient wejścia przepływa bez zmian (jak w zwykłym dodawaniu)
@@ -369,9 +378,231 @@ namespace DevOnBike.Overfit
 
             return Tensor.CreateOperationResult(
             data: resultData,
-            dependencies: new List<Tensor> { input, bias },
+            dependencies: new List<Tensor>
+            {
+                input,
+                bias
+            },
             backwardAction: backward
             );
+        }
+
+        public static Tensor MaxPool2D(Tensor input, int channels, int inputH, int inputW, int poolSize)
+        {
+            var outputH = inputH / poolSize;
+            var outputW = inputW / poolSize;
+            var batchSize = input.Data.Rows;
+
+            var resultData = new FastMatrix<double>(batchSize, channels * outputH * outputW);
+
+            for (var n = 0; n < batchSize; n++)
+            {
+                for (var c = 0; c < channels; c++)
+                {
+                    for (var oh = 0; oh < outputH; oh++)
+                    {
+                        for (var ow = 0; ow < outputW; ow++)
+                        {
+                            var maxVal = double.MinValue;
+                            for (var ph = 0; ph < poolSize; ph++)
+                            {
+                                for (var pw = 0; pw < poolSize; pw++)
+                                {
+                                    var val = input.Data[n, c * (inputH * inputW) + (oh * poolSize + ph) * inputW + (ow * poolSize + pw)];
+                                    if (val > maxVal) maxVal = val;
+                                }
+                            }
+                            resultData[n, c * (outputH * outputW) + oh * outputW + ow] = maxVal;
+                        }
+                    }
+                }
+            }
+            // Backward dla MaxPool przesyła gradient tylko do komórki, która była "Max".
+            return Tensor.CreateOperationResult(resultData, new List<Tensor>
+            {
+                input
+            }, (res) => {
+                /* TODO */
+            });
+        }
+
+        public static void Im2Col(
+            ReadOnlySpan<double> input,
+            int channels, int height, int width,
+            int kSize, int stride, int padding,
+            Span<double> output)
+        {
+            var outH = (height + 2 * padding - kSize) / stride + 1;
+            var outW = (width + 2 * padding - kSize) / stride + 1;
+            var channelSize = height * width;
+
+            // Każda kolumna w 'output' to jedno rozciągnięte okienko filtra
+            for (var c = 0; c < channels; c++)
+            {
+                for (var kh = 0; kh < kSize; kh++)
+                {
+                    for (var kw = 0; kw < kSize; kw++)
+                    {
+                        var rowOffset = (c * kSize * kSize + kh * kSize + kw) * outH * outW;
+
+                        for (var y = 0; y < outH; y++)
+                        {
+                            var i = y * stride - padding + kh;
+                            for (var x = 0; x < outW; x++)
+                            {
+                                var j = x * stride - padding + kw;
+                                var outIdx = rowOffset + y * outW + x;
+
+                                if (i >= 0 && i < height && j >= 0 && j < width)
+                                    output[outIdx] = input[c * channelSize + i * width + j];
+                                else
+                                    output[outIdx] = 0; // Padding
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        public static FastMatrix<double> MatMulRaw(FastMatrixView<double> A, FastMatrixView<double> B)
+        {
+            // C zawsze tworzymy jako nową, ciągłą macierz
+            var C = new FastMatrix<double>(A.Rows, B.Cols);
+            // Wykorzystujemy istniejący, zoptymalizowany silnik MatMul
+            MatMul(A, B, C.AsView());
+
+            return C;
+        }
+
+        /// <summary>
+        /// Najszybsze możliwe mnożenie macierzy na surowych danych FastMatrix.
+        /// Nie rejestruje operacji w Autogradzie.
+        /// Oblicza: C = A * B
+        /// </summary>
+        public static FastMatrix<double> MatMulRaw(FastMatrix<double> A, FastMatrix<double> B)
+        {
+            if (A.Cols != B.Rows)
+            {
+                throw new ArgumentException($"Błędne wymiary macierzy: {A.Cols} != {B.Rows}");
+            }
+
+            var C = new FastMatrix<double>(A.Rows, B.Cols);
+
+            // Optymalizacja pod kątem cache-friendly: 
+            // Przechodzimy po wierszach A i wierszach B, używając TensorPrimitives.MultiplyAdd
+            for (var i = 0; i < A.Rows; i++)
+            {
+                var rowA = A.Row(i);
+                var rowC = C.Row(i);
+
+                for (var k = 0; k < A.Cols; k++)
+                {
+                    var valA = rowA[k];
+                    var rowB = B.Row(k);
+
+                    // SIMD: rowC += valA * rowB
+                    System.Numerics.Tensors.TensorPrimitives.MultiplyAdd(rowB, valA, rowC, rowC);
+                }
+            }
+
+            return C;
+        }
+
+        public static Tensor Conv2D(Tensor input, Tensor weights, int inC, int outC, int h, int w, int k)
+        {
+            int outH = h - k + 1;
+            int outW = w - k + 1; // Poprawiono: w zamiast h
+            int batchSize = input.Data.Rows;
+            int kSquareInC = k * k * inC;
+
+            // --- FORWARD ---
+            var colMatrices = new FastMatrix<double>[batchSize];
+            var resultData = new FastMatrix<double>(batchSize, outC * outH * outW);
+
+            for (int n = 0; n < batchSize; n++)
+            {
+                colMatrices[n] = new FastMatrix<double>(kSquareInC, outH * outW);
+                Im2Col(input.Data.Row(n), inC, h, w, k, 1, 0, colMatrices[n].AsSpan());
+
+                // Używamy .AsView() dla zgodności z nowym MatMulRaw
+                using var batchResult = MatMulRaw(weights.Data.AsView(), colMatrices[n].AsView());
+                batchResult.AsSpan().CopyTo(resultData.Row(n));
+            }
+
+            // --- BACKWARD ---
+            Action<Tensor> backward = (resultNode) =>
+            {
+                var gradOutput = resultNode.Grad;
+
+                for (int n = 0; n < batchSize; n++)
+                {
+                    using var gn = new FastMatrix<double>(outC, outH * outW);
+                    gradOutput.Row(n).CopyTo(gn.AsSpan());
+
+                    // 1. Gradient Wag (dW = gradOutput * colMatrix^T)
+                    if (weights.RequiresGrad)
+                    {
+                        // colT jest po prawej -> Musi być ciągła (materializacja)[cite: 2]
+                        using var colT = colMatrices[n].AsView().Transpose().ToContiguousFastMatrix();
+                        using var dW_batch = MatMulRaw(gn.AsView(), colT.AsView());
+
+                        TensorPrimitives.Add(weights.Grad.AsSpan(), dW_batch.AsSpan(), weights.Grad.AsSpan());
+                    }
+
+                    // 2. Gradient Wejścia (dX_col = weights^T * gradOutput)
+                    if (input.RequiresGrad)
+                    {
+                        // weightsT jest po lewej -> Może zostać jako widok (dostęp skalarami jest OK)[cite: 2]
+                        var weightsT = weights.Data.AsView().Transpose();
+                        using var dX_col = MatMulRaw(weightsT, gn.AsView());
+
+                        Col2Im(dX_col.AsSpan(), inC, h, w, k, 1, 0, input.Grad.Row(n));
+                    }
+
+                    colMatrices[n].Dispose();
+                }
+            };
+
+            return Tensor.CreateOperationResult(resultData, new List<Tensor> { input, weights }, backward);
+        }
+
+        public static void Col2Im(
+            ReadOnlySpan<double> colData,
+            int channels, int height, int width,
+            int kSize, int stride, int padding,
+            Span<double> gradInput)
+        {
+            gradInput.Clear(); // Zaczynamy od zera, bo będziemy akumulować (+=)
+            var outH = (height + 2 * padding - kSize) / stride + 1;
+            var outW = (width + 2 * padding - kSize) / stride + 1;
+            var channelSize = height * width;
+
+            for (var c = 0; c < channels; c++)
+            {
+                for (var kh = 0; kh < kSize; kh++)
+                {
+                    for (var kw = 0; kw < kSize; kw++)
+                    {
+                        var rowOffset = (c * kSize * kSize + kh * kSize + kw) * outH * outW;
+
+                        for (var y = 0; y < outH; y++)
+                        {
+                            var i = y * stride - padding + kh;
+                            for (var x = 0; x < outW; x++)
+                            {
+                                var j = x * stride - padding + kw;
+                                var colIdx = rowOffset + y * outW + x;
+
+                                if (i >= 0 && i < height && j >= 0 && j < width)
+                                {
+                                    var inputIdx = c * channelSize + i * width + j;
+                                    gradInput[inputIdx] += colData[colIdx];
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
