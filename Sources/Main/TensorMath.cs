@@ -56,11 +56,10 @@ namespace DevOnBike.Overfit
             {
                 var rowC = C.Row(i);
                 rowC.Clear();
-                // Poprawka: Usunięto var rowA = A.Row(i) aby nie wysadzać widoków transponowanych
 
                 for (var k = 0; k < A.Cols; k++)
                 {
-                    var a_ik = A[i, k]; // Indeksator poprawnie i bezpiecznie nawiguje po Strides
+                    var a_ik = A[i, k]; 
                     var rowB = B.Row(k);
                     TensorPrimitives.MultiplyAdd(rowB, a_ik, rowC, rowC);
                 }
@@ -70,13 +69,19 @@ namespace DevOnBike.Overfit
         public static void MatMulAdd<T>(FastMatrixView<T> A, FastMatrixView<T> B, FastMatrixView<T> C)
             where T : struct, IFloatingPointIeee754<T>
         {
+            if (A.Cols != B.Rows || A.Rows != C.Rows || B.Cols != C.Cols)
+                throw new ArgumentException("Shape mismatch in MatMulAdd.");
+
+            if (B.ColStride != 1)
+                throw new ArgumentException("MatMulAdd requires contiguous rows in B.", nameof(B));
+
             for (var i = 0; i < A.Rows; i++)
             {
                 var rowC = C.Row(i);
 
                 for (var k = 0; k < A.Cols; k++)
                 {
-                    var a_ik = A[i, k]; 
+                    var a_ik = A[i, k];
                     var rowB = B.Row(k);
                     TensorPrimitives.MultiplyAdd(rowB, a_ik, rowC, rowC);
                 }
