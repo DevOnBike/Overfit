@@ -1,12 +1,20 @@
-using System.Diagnostics;
 using DevOnBike.Overfit.Layers;
 using DevOnBike.Overfit.Optimizers;
+using System.Diagnostics;
+using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests
 {
     public class MnistTrainingTests
     {
-        [Fact(Skip = "not unit test")]
+        private readonly ITestOutputHelper _output;
+
+        public MnistTrainingTests(ITestOutputHelper output)
+        {
+            _output = output;
+        }
+
+        [Fact(Skip = "aaa")]
         public void Mnist_FullTrain60k_CnnBeastMode()
         {
             // --- ARRANGE ---
@@ -89,7 +97,16 @@ namespace DevOnBike.Overfit.Tests
             }
 
             totalSw.Stop();
-            
+
+            // 1. Ładujemy dane testowe (te, których sieć NIE WIDZIAŁA podczas treningu)
+            var (testX, testY) = MnistLoader.Load(
+                "d:/ml/t10k-images.idx3-ubyte",
+                "d:/ml/t10k-labels.idx1-ubyte",
+                1000);
+
+            // 2. Odpalamy diagnostykę
+            PrintConfusionMatrix(conv1, fc1, testX, testY);
+
             // --- SUMMARY ---
             Debug.WriteLine("----------------------------------------------------------");
             Debug.WriteLine($"TRENING ZAKOŃCZONY!");
@@ -205,6 +222,61 @@ namespace DevOnBike.Overfit.Tests
             }
 
             Debug.WriteLine($"Training & Persistence check finished in {sw.ElapsedMilliseconds}ms");
+        }
+
+        private void PrintConfusionMatrix(ConvLayer conv, LinearLayer fc, FastMatrix<double> testX, FastMatrix<double> testY)
+        {
+            int[,] matrix = new int[10, 10];
+            int samples = 1000;
+
+            // Zbieranie danych
+            for (int i = 0; i < samples; i++)
+            {
+                var rowView = testX.AsView().Slice(i, 0, 1, 784);
+                using var input = new Tensor(rowView.ToContiguousFastMatrix(), false);
+
+                using var h1 = conv.Forward(input);
+                using var a1 = TensorMath.ReLU(h1);
+                using var p1 = TensorMath.MaxPool2D(a1, 8, 26, 26, 2);
+                using var output = fc.Forward(p1);
+
+                int predicted = output.Data.ArgMax();
+                int actual = testY.ArgMax(i);
+                matrix[actual, predicted]++;
+            }
+
+            // Budowanie tabeli w pamięci (xUnit woli jeden duży string lub linia po linii)
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("\n=== MACIERZ POMYŁEK (CONFUSION MATRIX) ===");
+            sb.AppendLine("Oś pionowa: Prawda | Oś pozioma: Predykcja\n");
+
+            // Nagłówek kolumn
+            sb.Append("A\\P |");
+            for (int i = 0; i < 10; i++) sb.Append($"{i,4}|");
+            sb.AppendLine("\n" + new string('-', 55));
+
+            // Wiersze
+            for (int r = 0; r < 10; r++)
+            {
+                sb.Append($"{r,3} |");
+                for (int c = 0; c < 10; c++)
+                {
+                    int val = matrix[r, c];
+                    if (r != c && val > 0)
+                    {
+                        // Błędy oznaczamy klamrami, skoro nie mamy kolorów
+                        sb.Append($"[{val,2}]|");
+                    }
+                    else
+                    {
+                        sb.Append($"{val,4}|");
+                    }
+                }
+                sb.AppendLine();
+            }
+
+            // FINALNY WYDRUK DO XUNIT
+            _output.WriteLine(sb.ToString());
         }
     }
 }
