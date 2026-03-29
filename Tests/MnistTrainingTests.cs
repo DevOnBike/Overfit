@@ -123,23 +123,31 @@ namespace DevOnBike.Overfit.Tests
             var trainSize = 5000;
             var batchSize = 64;
             var epochs = 5;
-            var learningRate = 0.001; 
-            var modelPathPrefix = "mnist_model_v1";
+            var learningRate = 0.001;
+            var modelPathPrefix = "mnist_model_resnet";
 
             var (trainX, trainY) = MnistLoader.Load("d:/ml/train-images.idx3-ubyte", "d:/ml/train-labels.idx1-ubyte", trainSize);
 
             using var X = new Tensor(trainX, requiresGrad: false);
             using var Y = new Tensor(trainY, requiresGrad: false);
 
+            // Architektura Głębokiego ResNetu (1D)
             var layer1 = new LinearLayer(784, 128);
-            
-            // Wpinamy BatchNorm w sieci gęstej (na 128 cech)
             var bn1 = new BatchNorm1D(128);
-            
-            var layer2 = new LinearLayer(128, 10);
 
-            // Rejestrujemy parametry
-            var allParams = layer1.Parameters().Concat(bn1.Parameters()).Concat(layer2.Parameters());
+            // Wpinamy nasze bloki resztkowe (autostrady dla gradientu)
+            var resBlock1 = new ResidualBlock(128);
+            var resBlock2 = new ResidualBlock(128);
+
+            var layerOut = new LinearLayer(128, 10);
+
+            // Rejestrujemy parametry ze wszystkich warstw i bloków
+            var allParams = layer1.Parameters()
+                .Concat(bn1.Parameters())
+                .Concat(resBlock1.Parameters())
+                .Concat(resBlock2.Parameters())
+                .Concat(layerOut.Parameters());
+
             var optimizer = new Adam(allParams, learningRate);
 
             var numBatches = trainSize / batchSize;
@@ -165,12 +173,15 @@ namespace DevOnBike.Overfit.Tests
 
                     // --- FORWARD ---
                     using var h1 = layer1.Forward(xBatch);
-                    
-                    // Przepuszczamy przez BatchNorm z flagą isTraining: true
                     using var bnOut = bn1.Forward(h1, isTraining: true);
-                    
                     using var a1 = TensorMath.ReLU(bnOut);
-                    using var predictionLogits = layer2.Forward(a1);
+
+                    // Przepuszczamy przez głębokie bloki ResNet
+                    using var res1Out = resBlock1.Forward(a1, isTraining: true);
+                    using var res2Out = resBlock2.Forward(res1Out, isTraining: true);
+
+                    // Wyjście do klasyfikacji
+                    using var predictionLogits = layerOut.Forward(res2Out);
 
                     // --- LOSS: Wdrożenie SoftmaxCrossEntropy ---
                     using var loss = TensorMath.SoftmaxCrossEntropy(predictionLogits, yBatch);
@@ -190,18 +201,25 @@ namespace DevOnBike.Overfit.Tests
                 Debug.WriteLine($"Epoch {epoch} | Loss: {epochLoss:F6}");
             }
 
-            // --- ZAPIS MODELU ---
+            // --- ZAPIS MODELU (Z nowymi blokami) ---
             layer1.Save($"{modelPathPrefix}_l1");
             bn1.Save($"{modelPathPrefix}_bn1");
-            layer2.Save($"{modelPathPrefix}_l2");
+            resBlock1.Save($"{modelPathPrefix}_res1");
+            resBlock2.Save($"{modelPathPrefix}_res2");
+            layerOut.Save($"{modelPathPrefix}_out");
 
+            // --- ODTWORZENIE MODELU Z PLIKÓW ---
             var loadedL1 = new LinearLayer(784, 128);
             var loadedBn1 = new BatchNorm1D(128);
-            var loadedL2 = new LinearLayer(128, 10);
-            
+            var loadedRes1 = new ResidualBlock(128);
+            var loadedRes2 = new ResidualBlock(128);
+            var loadedOut = new LinearLayer(128, 10);
+
             loadedL1.Load($"{modelPathPrefix}_l1");
             loadedBn1.Load($"{modelPathPrefix}_bn1");
-            loadedL2.Load($"{modelPathPrefix}_l2");
+            loadedRes1.Load($"{modelPathPrefix}_res1");
+            loadedRes2.Load($"{modelPathPrefix}_res2");
+            loadedOut.Load($"{modelPathPrefix}_out");
 
             sw.Stop();
 
@@ -211,19 +229,23 @@ namespace DevOnBike.Overfit.Tests
             var testXView = X.Data.AsView().Slice(0, 0, 1, 784);
             using var testX = new Tensor(testXView.ToContiguousFastMatrix(), false);
 
-            // Forward starego modelu
+            // Forward starego modelu (Inference)
             using var oldH = layer1.Forward(testX);
             using var oldBn = bn1.Forward(oldH, isTraining: false);
             using var oldA = TensorMath.ReLU(oldBn);
-            using var oldPred = layer2.Forward(oldA);
+            using var oldRes1 = resBlock1.Forward(oldA, isTraining: false);
+            using var oldRes2 = resBlock2.Forward(oldRes1, isTraining: false);
+            using var oldPred = layerOut.Forward(oldRes2);
 
-            // Forward nowego (wczytanego z dysku) modelu
+            // Forward nowego (wczytanego z dysku) modelu (Inference)
             using var newH = loadedL1.Forward(testX);
             using var newBn = loadedBn1.Forward(newH, isTraining: false);
             using var newA = TensorMath.ReLU(newBn);
-            using var newPred = loadedL2.Forward(newA);
+            using var newRes1 = loadedRes1.Forward(newA, isTraining: false);
+            using var newRes2 = loadedRes2.Forward(newRes1, isTraining: false);
+            using var newPred = loadedOut.Forward(newRes2);
 
-            // Sprawdzamy czy predykcje się zgadzają
+            // Sprawdzamy czy predykcje się zgadzają z dokładnością do 10 miejsc po przecinku
             for (var i = 0; i < 10; i++)
             {
                 Assert.Equal(oldPred.Data[0, i], newPred.Data[0, i], 10);
