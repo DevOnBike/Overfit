@@ -1,70 +1,48 @@
-using System.Numerics.Tensors;
+﻿using System.Numerics.Tensors;
 using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.Optimizers
 {
-    /// <summary>
-    /// Stochastic Gradient Descent (SGD) Optimizer.
-    /// Updates tensor weights using their computed gradients and a learning rate.
-    /// Fully SIMD-accelerated and allocation-free during the training loop.
-    /// </summary>
-    public sealed class SGD
+    public sealed class SGD : IOptimizer // Dodano implementację interfejsu
     {
-        private readonly List<AutogradNode> _parameters;
-        
+        // 1. Zmiana List<T> na płaską tablicę dla szybszej iteracji w pamięci
+        private readonly AutogradNode[] _parameters;
+
         public double LearningRate { get; set; }
 
-        /// <summary>
-        /// Creates a new SGD optimizer.
-        /// </summary>
-        /// <param name="parameters">The list of tensors (weights/biases) to optimize.</param>
-        /// <param name="learningRate">The step size for weight updates.</param>
         public SGD(IEnumerable<AutogradNode> parameters, double learningRate)
         {
-            if (parameters == null)
-            {
-                throw new ArgumentNullException(nameof(parameters));
-            }
-            
-            _parameters = new List<AutogradNode>(parameters);
+            if (parameters == null) throw new ArgumentNullException(nameof(parameters));
+
+            // 2. Filtrujemy RequiresGrad TYLKO RAZ w konstruktorze!
+            _parameters = parameters.Where(p => p.RequiresGrad).ToArray();
             LearningRate = learningRate;
         }
 
-        /// <summary>
-        /// Performs a single optimization step (weight update).
-        /// Executes W = W - LR * Grad using hardware FMA.
-        /// </summary>
         public void Step()
         {
+            // 3. Prekalkulacja zmiennej poza pętlą (choć to tylko znak, oszczędza cykle)
+            var negativeLr = -LearningRate;
+
+            // Iteracja po tablicy (JIT w C# uwielbia takie pętle)
             foreach (var p in _parameters)
             {
-                if (!p.RequiresGrad) continue;
-
-                // Hardware AVX-512 FMA: destination = (x * y) + addend
-                // We do: Data = (Grad * -LearningRate) + Data
+                // Czyste, sprzętowe FMA, zero instrukcji warunkowych (if)
                 TensorPrimitives.MultiplyAdd(
-                    x: p.Grad.AsReadOnlySpan(), 
-                    y: -LearningRate, 
-                    addend: p.Data.AsReadOnlySpan(), 
+                    x: p.Grad.AsReadOnlySpan(),
+                    y: negativeLr,
+                    addend: p.Data.AsReadOnlySpan(),
                     destination: p.Data.AsSpan()
                 );
             }
         }
 
-        /// <summary>
-        /// Clears the gradients of all optimized parameters.
-        /// MUST be called before every new forward/backward pass, 
-        /// otherwise gradients will accumulate infinitely.
-        /// </summary>
         public void ZeroGrad()
         {
             foreach (var p in _parameters)
             {
-                if (p.RequiresGrad)
-                {
-                    // Calls Span<T>.Clear() under the hood - blisteringly fast memset
-                    p.Grad.Clear(); 
-                }
+                // Czyste zerowanie pamięci (memset), bez pytania o RequiresGrad
+                p.Grad.Clear();
             }
         }
     }
