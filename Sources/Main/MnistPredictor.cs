@@ -4,44 +4,62 @@ namespace DevOnBike.Overfit
 {
     public sealed class MnistPredictor : IDisposable
     {
-        private readonly LinearLayer _l1;
-        private readonly LinearLayer _l2;
+        // Komponenty architektury "GigaBestia Lightweight"
+        private readonly ConvLayer _conv1;
+        private readonly BatchNorm1D _bn1;
+        private readonly ResidualBlock _res1;
+        private readonly LinearLayer _fcOut;
 
         public MnistPredictor(string modelPrefix)
         {
-            // 1. Definiujemy architekturę (musi być identyczna jak przy treningu!)
-            _l1 = new LinearLayer(784, 128);
-            _l2 = new LinearLayer(128, 10);
+            // 1. Definicja architektury (identyczna jak w teście!)
+            _conv1 = new ConvLayer(1, 8, 28, 28, 3);
+            _bn1 = new BatchNorm1D(8 * 26 * 26);
+            _res1 = new ResidualBlock(8 * 13 * 13); 
+            _fcOut = new LinearLayer(8, 10); 
 
-            // 2. Wstrzykujemy wytrenowaną wiedzę
-            _l1.Load($"{modelPrefix}_l1");
-            _l2.Load($"{modelPrefix}_l2");
+            // 2. Wczytywanie wag z plików .bin
+            _conv1.Load($"{modelPrefix}_conv1.bin");
+            _bn1.Load($"{modelPrefix}_bn1.bin");
+            _res1.Load($"{modelPrefix}_res1"); // ResidualBlock sam dba o sufiksy
+            _fcOut.Load($"{modelPrefix}_fc.bin");
         }
 
         public int Predict(double[] pixelData)
         {
-            if (pixelData.Length != 784) throw new ArgumentException("Obrazek musi mieć 784 piksele.");
+            if (pixelData.Length != 784) 
+                throw new ArgumentException("Obrazek musi mieć 784 piksele.");
 
-            // Tworzymy tensor wejściowy (batch size = 1)
+            // Przygotowanie wejścia (Batch Size = 1)
             using var inputMat = new FastMatrix<double>(1, 784);
             pixelData.CopyTo(inputMat.AsSpan());
             using var input = new Tensor(inputMat, requiresGrad: false);
 
-            // FORWARD PASS (Tylko w przód, bez śledzenia gradientów!)
-            using var h1 = _l1.Forward(input);
-            using var a1 = TensorMath.ReLU(h1);
-            using var output = _l2.Forward(a1);
+            // --- FORWARD PASS (Inference Mode) ---
+            // Ustawiamy isTraining: false dla BatchNorm i ResNet!
+            using var c1 = _conv1.Forward(input);
+            using var bc1 = _bn1.Forward(c1, isTraining: false);
+            using var a1 = TensorMath.ReLU(bc1);
+            using var p1 = TensorMath.MaxPool2D(a1, 8, 26, 26, 2);
+            
+            using var r1 = _res1.Forward(p1, isTraining: false);
+            
+            // Global Average Pooling redukuje wymiary do 8 wartości
+            using var gap = TensorMath.GlobalAveragePool2D(r1, 8, 13, 13);
+            using var output = _fcOut.Forward(gap);
 
-            // Zwracamy indeks o najwyższym prawdopodobieństwie
+            // Zwracamy indeks najsilniejszej odpowiedzi
             return output.Data.ArgMax();
         }
 
         public void Dispose()
         {
-            _l1.Weights.Dispose();
-            _l1.Biases.Dispose();
-            _l2.Weights.Dispose();
-            _l2.Biases.Dispose();
+            // Pamiętaj o zwolnieniu zasobów wszystkich warstw
+            _conv1.Kernels.Dispose();
+            _bn1.Parameters().ToList().ForEach(p => p.Dispose());
+            _res1.Parameters().ToList().ForEach(p => p.Dispose());
+            _fcOut.Weights.Dispose();
+            _fcOut.Biases.Dispose();
         }
     }
 }
