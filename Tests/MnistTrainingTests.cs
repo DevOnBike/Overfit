@@ -1,6 +1,8 @@
-using DevOnBike.Overfit.Layers;
 using DevOnBike.Overfit.Optimizers;
 using System.Diagnostics;
+using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.Data;
+using DevOnBike.Overfit.DeepLearning;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests
@@ -29,8 +31,8 @@ namespace DevOnBike.Overfit.Tests
             "d:/ml/train-labels.idx1-ubyte",
             trainSize);
 
-            using var X = new Tensor(trainX, requiresGrad: false);
-            using var Y = new Tensor(trainY, requiresGrad: false);
+            using var X = new AutogradNode(trainX, requiresGrad: false);
+            using var Y = new AutogradNode(trainY, requiresGrad: false);
 
             var conv1 = new ConvLayer(inChannels: 1, outChannels: 8, h: 28, w: 28, kSize: 3);
 
@@ -65,8 +67,8 @@ namespace DevOnBike.Overfit.Tests
                     var xView = X.Data.AsView().Slice(b * batchSize, 0, batchSize, 784);
                     var yView = Y.Data.AsView().Slice(b * batchSize, 0, batchSize, 10);
 
-                    using var xBatch = new Tensor(xView.ToContiguousFastMatrix(), false);
-                    using var yBatch = new Tensor(yView.ToContiguousFastMatrix(), false);
+                    using var xBatch = new AutogradNode(xView.ToContiguousFastMatrix(), false);
+                    using var yBatch = new AutogradNode(yView.ToContiguousFastMatrix(), false);
 
                     // --- FORWARD ---
                     using var h1 = conv1.Forward(xBatch);
@@ -135,8 +137,8 @@ namespace DevOnBike.Overfit.Tests
                 "d:/ml/train-labels.idx1-ubyte",
                 trainSize);
 
-            using var X = new Tensor(trainX, requiresGrad: false);
-            using var Y = new Tensor(trainY, requiresGrad: false);
+            using var X = new AutogradNode(trainX, requiresGrad: false);
+            using var Y = new AutogradNode(trainY, requiresGrad: false);
 
             var conv1 = new ConvLayer(inChannels: 1, outChannels: 8, h: 28, w: 28, kSize: 3);
             var bn1 = new BatchNorm1D(1352);
@@ -168,10 +170,10 @@ namespace DevOnBike.Overfit.Tests
                     var xView = X.Data.AsView().Slice(b * batchSize, 0, batchSize, 784);
                     using var tempMatrix = xView.ToContiguousFastMatrix();
                     var mutatedMatrix = DataAugmenter.AugmentBatch(tempMatrix, width: 28, height: 28);
-                    using var xBatch = new Tensor(mutatedMatrix, requiresGrad: false);
+                    using var xBatch = new AutogradNode(mutatedMatrix, requiresGrad: false);
 
                     var yView = Y.Data.AsView().Slice(b * batchSize, 0, batchSize, 10);
-                    using var yBatch = new Tensor(yView.ToContiguousFastMatrix(), requiresGrad: false);
+                    using var yBatch = new AutogradNode(yView.ToContiguousFastMatrix(), requiresGrad: false);
 
                     // --- FORWARD ---
                     using var h1 = conv1.Forward(xBatch);
@@ -231,8 +233,8 @@ namespace DevOnBike.Overfit.Tests
             "d:/ml/train-labels.idx1-ubyte",
             trainSize);
 
-            using var X = new Tensor(trainX, requiresGrad: false);
-            using var Y = new Tensor(trainY, requiresGrad: false);
+            using var X = new AutogradNode(trainX, requiresGrad: false);
+            using var Y = new AutogradNode(trainY, requiresGrad: false);
 
             // Architektura: Conv -> BN -> ReLU -> MaxPool -> ResNet x2 -> FC
             var conv1 = new ConvLayer(inChannels: 1, outChannels: 16, h: 28, w: 28, kSize: 3);
@@ -251,7 +253,7 @@ namespace DevOnBike.Overfit.Tests
                 .Concat(fcOut.Parameters())
                 .ToList();
 
-            var allParamsSet = new HashSet<Tensor>(allParams);
+            var allParamsSet = new HashSet<AutogradNode>(allParams);
             var optimizer = new Adam(allParams, learningRate);
 
             var numBatches = trainSize / batchSize;
@@ -271,8 +273,8 @@ namespace DevOnBike.Overfit.Tests
                     var xView = X.Data.AsView().Slice(b * batchSize, 0, batchSize, 784);
                     var yView = Y.Data.AsView().Slice(b * batchSize, 0, batchSize, 10);
 
-                    var xBatch = new Tensor(xView.ToContiguousFastMatrix(), false);
-                    var yBatch = new Tensor(yView.ToContiguousFastMatrix(), false);
+                    var xBatch = new AutogradNode(xView.ToContiguousFastMatrix(), false);
+                    var yBatch = new AutogradNode(yView.ToContiguousFastMatrix(), false);
 
                     // 2. Forward Pass
                     var c1 = conv1.Forward(xBatch);
@@ -351,8 +353,8 @@ namespace DevOnBike.Overfit.Tests
 
             var (trainX, trainY) = MnistLoader.Load("d:/ml/train-images.idx3-ubyte", "d:/ml/train-labels.idx1-ubyte", trainSize);
 
-            using var X = new Tensor(trainX, requiresGrad: false);
-            using var Y = new Tensor(trainY, requiresGrad: false);
+            using var X = new AutogradNode(trainX, requiresGrad: false);
+            using var Y = new AutogradNode(trainY, requiresGrad: false);
 
             // Architektura Głębokiego ResNetu (1D)
             var layer1 = new LinearLayer(784, 128);
@@ -391,8 +393,8 @@ namespace DevOnBike.Overfit.Tests
                     var xView = X.Data.AsView().Slice(b * batchSize, 0, batchSize, 784);
                     var yView = Y.Data.AsView().Slice(b * batchSize, 0, batchSize, 10);
 
-                    using var xBatch = new Tensor(xView.ToContiguousFastMatrix(), requiresGrad: false);
-                    using var yBatch = new Tensor(yView.ToContiguousFastMatrix(), requiresGrad: false);
+                    using var xBatch = new AutogradNode(xView.ToContiguousFastMatrix(), requiresGrad: false);
+                    using var yBatch = new AutogradNode(yView.ToContiguousFastMatrix(), requiresGrad: false);
 
                     // --- FORWARD ---
                     using var h1 = layer1.Forward(xBatch);
@@ -450,7 +452,7 @@ namespace DevOnBike.Overfit.Tests
             Assert.True(finalLoss < initialLoss, $"Loss did not decrease. Initial: {initialLoss}, Final: {finalLoss}");
 
             var testXView = X.Data.AsView().Slice(0, 0, 1, 784);
-            using var testX = new Tensor(testXView.ToContiguousFastMatrix(), false);
+            using var testX = new AutogradNode(testXView.ToContiguousFastMatrix(), false);
 
             // Forward starego modelu (Inference)
             using var oldH = layer1.Forward(testX);
@@ -490,8 +492,8 @@ namespace DevOnBike.Overfit.Tests
             _output.WriteLine("=== START TRENINGU: GigaBestia Lightweight (GAP + L2 + Scheduler) ===");
 
             var (trainX, trainY) = MnistLoader.Load("d:/ml/train-images.idx3-ubyte", "d:/ml/train-labels.idx1-ubyte", trainSize);
-            using var X = new Tensor(trainX, requiresGrad: false);
-            using var Y = new Tensor(trainY, requiresGrad: false);
+            using var X = new AutogradNode(trainX, requiresGrad: false);
+            using var Y = new AutogradNode(trainY, requiresGrad: false);
 
             // --- 2. ARCHITEKTURA ---
             // Conv(8 filtrów) -> BN -> ReLU -> MaxPool -> ResidualBlock -> GAP -> Linear(10)
@@ -507,7 +509,7 @@ namespace DevOnBike.Overfit.Tests
                 .Concat(fcOut.Parameters())
                 .ToList();
 
-            var allParamsSet = new HashSet<Tensor>(allParams);
+            var allParamsSet = new HashSet<AutogradNode>(allParams);
 
             // Inicjalizacja Adama z Weight Decay
             var optimizer = new Adam(allParams, initialLr)
@@ -533,8 +535,8 @@ namespace DevOnBike.Overfit.Tests
                     // Pobranie batcha
                     var xView = X.Data.AsView().Slice(b * batchSize, 0, batchSize, 784);
                     var yView = Y.Data.AsView().Slice(b * batchSize, 0, batchSize, 10);
-                    using var xBatch = new Tensor(xView.ToContiguousFastMatrix(), false);
-                    using var yBatch = new Tensor(yView.ToContiguousFastMatrix(), false);
+                    using var xBatch = new AutogradNode(xView.ToContiguousFastMatrix(), false);
+                    using var yBatch = new AutogradNode(yView.ToContiguousFastMatrix(), false);
 
                     // FORWARD
                     var c1 = conv1.Forward(xBatch);
@@ -583,7 +585,7 @@ namespace DevOnBike.Overfit.Tests
             for (var i = 0; i < 1000; i++)
             {
                 var row = testX.AsView().Slice(i, 0, 1, 784);
-                using var inp = new Tensor(row.ToContiguousFastMatrix(), false);
+                using var inp = new AutogradNode(row.ToContiguousFastMatrix(), false);
 
                 using var c = conv1.Forward(inp);
                 using var b1_ = bn1.Forward(c, false);
@@ -609,7 +611,7 @@ namespace DevOnBike.Overfit.Tests
             for (var i = 0; i < 1000; i++)
             {
                 var rowView = testX.AsView().Slice(i, 0, 1, 784);
-                using var input = new Tensor(rowView.ToContiguousFastMatrix(), false);
+                using var input = new AutogradNode(rowView.ToContiguousFastMatrix(), false);
 
                 using var c1 = conv.Forward(input);
                 using var bc = bn.Forward(c1, isTraining: false);
@@ -641,7 +643,7 @@ namespace DevOnBike.Overfit.Tests
             for (var i = 0; i < samples; i++)
             {
                 var rowView = testX.AsView().Slice(i, 0, 1, 784);
-                using var input = new Tensor(rowView.ToContiguousFastMatrix(), false);
+                using var input = new AutogradNode(rowView.ToContiguousFastMatrix(), false);
 
                 using var h1 = conv.Forward(input);
                 using var a1 = TensorMath.ReLU(h1);

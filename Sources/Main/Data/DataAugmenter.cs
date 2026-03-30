@@ -1,7 +1,5 @@
-using System;
-using System.Threading.Tasks;
-
-namespace DevOnBike.Overfit
+using DevOnBike.Overfit.Core;
+namespace DevOnBike.Overfit.Data
 {
     public static class DataAugmenter
     {

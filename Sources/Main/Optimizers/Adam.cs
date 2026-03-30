@@ -1,10 +1,11 @@
+using DevOnBike.Overfit.Core;
 namespace DevOnBike.Overfit.Optimizers
 {
     public sealed class Adam
     {
-        private readonly List<Tensor> _parameters;
-        private readonly Dictionary<Tensor, FastMatrix<double>> _m = new();
-        private readonly Dictionary<Tensor, FastMatrix<double>> _v = new();
+        private readonly List<AutogradNode> _parameters;
+        private readonly Dictionary<AutogradNode, FastMatrix<double>> _m = new();
+        private readonly Dictionary<AutogradNode, FastMatrix<double>> _v = new();
 
         public double LearningRate { get; set; }
         public double Beta1 { get; set; } = 0.9;
@@ -16,7 +17,7 @@ namespace DevOnBike.Overfit.Optimizers
 
         private int _t = 0;
 
-        public Adam(IEnumerable<Tensor> parameters, double learningRate = 0.001)
+        public Adam(IEnumerable<AutogradNode> parameters, double learningRate = 0.001)
         {
             _parameters = parameters.Where(p => p.RequiresGrad).ToList();
             LearningRate = learningRate;

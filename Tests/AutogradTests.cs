@@ -1,3 +1,4 @@
+using DevOnBike.Overfit.Core;
 namespace DevOnBike.Overfit.Tests
 {
     public class AutogradTests
@@ -6,9 +7,9 @@ namespace DevOnBike.Overfit.Tests
 
         // Pomocnicza metoda do wstrzykiwania sygnału błędu 
         // W prawdziwym ML robi to funkcja straty (Loss Function)
-        private void FillGradient(Tensor tensor, double value)
+        private void FillGradient(AutogradNode autogradNode, double value)
         {
-            var span = tensor.Grad.AsSpan();
+            var span = autogradNode.Grad.AsSpan();
             for (var i = 0; i < span.Length; i++)
             {
                 span[i] = value;
@@ -24,8 +25,8 @@ namespace DevOnBike.Overfit.Tests
             matA.AsSpan().Fill(1.0);
             matB.AsSpan().Fill(2.0);
 
-            using var a = new Tensor(matA);
-            using var b = new Tensor(matB);
+            using var a = new AutogradNode(matA);
+            using var b = new AutogradNode(matB);
 
             // Act - Forward
             using var c = TensorMath.Add(a, b);
@@ -60,8 +61,8 @@ namespace DevOnBike.Overfit.Tests
             matB[0, 0] = 5; matB[0, 1] = 6;
             matB[1, 0] = 7; matB[1, 1] = 8;
 
-            using var a = new Tensor(matA);
-            using var b = new Tensor(matB);
+            using var a = new AutogradNode(matA);
+            using var b = new AutogradNode(matB);
 
             // Act - Forward (C = A * B)
             using var c = TensorMath.MatMul(a, b);
@@ -104,8 +105,8 @@ namespace DevOnBike.Overfit.Tests
             matB.AsSpan().Fill(2.0);
 
             // Wyłączamy śledzenie gradientu dla A (np. gdy to są tylko dane wejściowe, a nie wagi)
-            using var a = new Tensor(matA, requiresGrad: false); 
-            using var b = new Tensor(matB, requiresGrad: true);
+            using var a = new AutogradNode(matA, requiresGrad: false); 
+            using var b = new AutogradNode(matB, requiresGrad: true);
 
             // Act
             using var c = TensorMath.MatMul(a, b);
@@ -128,7 +129,7 @@ namespace DevOnBike.Overfit.Tests
             matA[0, 0] = 5.0;  matA[0, 1] = -2.0;
             matA[1, 0] = -0.1; matA[1, 1] = 10.0;
 
-            using var a = new Tensor(matA);
+            using var a = new AutogradNode(matA);
 
             // Act - Forward
             using var relu = TensorMath.ReLU(a);
@@ -172,8 +173,8 @@ namespace DevOnBike.Overfit.Tests
             // dL/d(pred[0]) = (2/2) * (3 - 1) = 2.0
             // dL/d(pred[1]) = (2/2) * (5 - 9) = -4.0
 
-            using var predictions = new Tensor(matPred, requiresGrad: true);
-            using var targets = new Tensor(matTarget, requiresGrad: false);
+            using var predictions = new AutogradNode(matPred, requiresGrad: true);
+            using var targets = new AutogradNode(matTarget, requiresGrad: false);
 
             // Act - Forward
             using var loss = TensorMath.MSE(predictions, targets);

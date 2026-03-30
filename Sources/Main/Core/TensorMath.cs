@@ -1,7 +1,7 @@
 ﻿using System.Numerics;
 using System.Numerics.Tensors;
 
-namespace DevOnBike.Overfit
+namespace DevOnBike.Overfit.Core
 {
     /// <summary>
     /// Multi-threaded computational engine. 
@@ -121,28 +121,28 @@ namespace DevOnBike.Overfit
         // 3. AUTOGRAD OPERATIONS
         // ====================================================================
 
-        public static Tensor Add(Tensor left, Tensor right)
+        public static AutogradNode Add(AutogradNode left, AutogradNode right)
         {
             var resultData = new FastMatrix<double>(left.Data.Rows, left.Data.Cols);
             Add(left.Data.AsView(), right.Data.AsView(), resultData.AsView());
 
-            Action<Tensor> backward = (resultNode) =>
+            Action<AutogradNode> backward = (resultNode) =>
             {
                 var gradC = resultNode.Grad.AsView();
                 if (left.RequiresGrad) Add(left.Grad.AsView(), gradC, left.Grad.AsView());
                 if (right.RequiresGrad) Add(right.Grad.AsView(), gradC, right.Grad.AsView());
             };
 
-            return Tensor.CreateOperationResult(resultData, [left, right], backward);
+            return AutogradNode.CreateOperationResult(resultData, [left, right], backward);
         }
 
-        public static Tensor AddBias(Tensor input, Tensor bias)
+        public static AutogradNode AddBias(AutogradNode input, AutogradNode bias)
         {
             var resultData = new FastMatrix<double>(input.Data.Rows, input.Data.Cols);
             var broadcastedBias = BroadcastRowVector(bias.Data.AsSpan(), input.Data.Rows);
             Add(input.Data.AsView(), broadcastedBias, resultData.AsView());
 
-            Action<Tensor> backward = (resultNode) =>
+            Action<AutogradNode> backward = (resultNode) =>
             {
                 var gradC = resultNode.Grad.AsView();
 
@@ -160,15 +160,15 @@ namespace DevOnBike.Overfit
                 }
             };
 
-            return Tensor.CreateOperationResult(resultData, [input, bias], backward);
+            return AutogradNode.CreateOperationResult(resultData, [input, bias], backward);
         }
 
-        public static Tensor MatMul(Tensor left, Tensor right)
+        public static AutogradNode MatMul(AutogradNode left, AutogradNode right)
         {
             var resultData = new FastMatrix<double>(left.Data.Rows, right.Data.Cols);
             MatMul(left.Data.AsView(), right.Data.AsView(), resultData.AsView());
 
-            Action<Tensor> backward = (resultNode) =>
+            Action<AutogradNode> backward = (resultNode) =>
             {
                 var gradC = resultNode.Grad.AsView();
 
@@ -184,19 +184,19 @@ namespace DevOnBike.Overfit
                 }
             };
 
-            return Tensor.CreateOperationResult(resultData, [left, right], backward);
+            return AutogradNode.CreateOperationResult(resultData, [left, right], backward);
         }
 
         // ====================================================================
         // 4. ACTIVATION FUNCTIONS
         // ====================================================================
 
-        public static Tensor ReLU(Tensor input)
+        public static AutogradNode ReLU(AutogradNode input)
         {
             var resultData = new FastMatrix<double>(input.Data.Rows, input.Data.Cols);
             TensorPrimitives.Max(input.Data.AsReadOnlySpan(), 0.0, resultData.AsSpan());
 
-            Action<Tensor> backward = (resultNode) =>
+            Action<AutogradNode> backward = (resultNode) =>
             {
                 if (!input.RequiresGrad) return;
 
@@ -210,17 +210,17 @@ namespace DevOnBike.Overfit
                 }
             };
 
-            return Tensor.CreateOperationResult(resultData, [input], backward);
+            return AutogradNode.CreateOperationResult(resultData, [input], backward);
         }
 
-        public static Tensor Dropout(Tensor input, double p, bool isTraining)
+        public static AutogradNode Dropout(AutogradNode input, double p, bool isTraining)
         {
             if (!isTraining) return input;
 
             var resultData = new FastMatrix<double>(input.Data.Rows, input.Data.Cols);
 
             // WĘZEŁ-WIDMO
-            var maskTensor = new Tensor(new FastMatrix<double>(input.Data.Rows, input.Data.Cols), requiresGrad: false);
+            var maskTensor = new AutogradNode(new FastMatrix<double>(input.Data.Rows, input.Data.Cols), requiresGrad: false);
             var mask = maskTensor.Data;
             var scale = 1.0 / (1.0 - p);
 
@@ -243,7 +243,7 @@ namespace DevOnBike.Overfit
             }
 
             var needsGrad = input.RequiresGrad;
-            var deps = new List<Tensor> { input };
+            var deps = new List<AutogradNode> { input };
 
             if (needsGrad)
             {
@@ -254,7 +254,7 @@ namespace DevOnBike.Overfit
                 maskTensor.Dispose();
             }
 
-            Action<Tensor> backward = (resultNode) =>
+            Action<AutogradNode> backward = (resultNode) =>
             {
                 var gradOut = resultNode.Grad.AsReadOnlySpan();
                 var gradIn = input.Grad.AsSpan();
@@ -266,14 +266,14 @@ namespace DevOnBike.Overfit
                 }
             };
 
-            return Tensor.CreateOperationResult(resultData, deps, backward);
+            return AutogradNode.CreateOperationResult(resultData, deps, backward);
         }
 
         // ====================================================================
         // 5. LOSS FUNCTIONS
         // ====================================================================
 
-        public static Tensor MSE(Tensor predictions, Tensor targets)
+        public static AutogradNode MSE(AutogradNode predictions, AutogradNode targets)
         {
             if (predictions.Data.Rows != targets.Data.Rows || predictions.Data.Cols != targets.Data.Cols)
                 throw new ArgumentException("Shape mismatch between predictions and targets in MSE.");
@@ -287,7 +287,7 @@ namespace DevOnBike.Overfit
             var dist = TensorPrimitives.Distance(predSpanForward, targetSpanForward);
             resultData[0, 0] = (dist * dist) / n;
 
-            Action<Tensor> backward = (resultNode) =>
+            Action<AutogradNode> backward = (resultNode) =>
             {
                 var gradC = resultNode.Grad[0, 0];
                 var factor = (2.0 / n) * gradC;
@@ -310,13 +310,13 @@ namespace DevOnBike.Overfit
                 }
             };
 
-            return Tensor.CreateOperationResult(resultData, [predictions, targets], backward);
+            return AutogradNode.CreateOperationResult(resultData, [predictions, targets], backward);
         }
 
-        public static Tensor SoftmaxCrossEntropy(Tensor logits, Tensor target)
+        public static AutogradNode SoftmaxCrossEntropy(AutogradNode logits, AutogradNode target)
         {
             var resData = new FastMatrix<double>(1, 1);
-            var probsTensor = new Tensor(new FastMatrix<double>(logits.Data.Rows, logits.Data.Cols), requiresGrad: false);
+            var probsTensor = new AutogradNode(new FastMatrix<double>(logits.Data.Rows, logits.Data.Cols), requiresGrad: false);
             var probs = probsTensor.Data;
 
             double totalLoss = 0;
@@ -342,12 +342,12 @@ namespace DevOnBike.Overfit
             resData[0, 0] = totalLoss / logits.Data.Rows;
 
             var needsGrad = logits.RequiresGrad;
-            var deps = new List<Tensor> { logits, target };
+            var deps = new List<AutogradNode> { logits, target };
 
             if (needsGrad) deps.Add(probsTensor);
             else probsTensor.Dispose();
 
-            Action<Tensor> backward = (resultNode) =>
+            Action<AutogradNode> backward = (resultNode) =>
             {
                 var scale = resultNode.Grad[0, 0] / logits.Data.Rows;
 
@@ -364,7 +364,7 @@ namespace DevOnBike.Overfit
                 });
             };
 
-            return Tensor.CreateOperationResult(resData, deps, backward);
+            return AutogradNode.CreateOperationResult(resData, deps, backward);
         }
 
         // ====================================================================
@@ -447,14 +447,14 @@ namespace DevOnBike.Overfit
             }
         }
 
-        public static Tensor MaxPool2D(Tensor input, int channels, int inputH, int inputW, int poolSize)
+        public static AutogradNode MaxPool2D(AutogradNode input, int channels, int inputH, int inputW, int poolSize)
         {
             var outputH = inputH / poolSize;
             var outputW = inputW / poolSize;
             var batchSize = input.Data.Rows;
 
             var resultData = new FastMatrix<double>(batchSize, channels * outputH * outputW);
-            var maxIndicesTensor = new Tensor(new FastMatrix<double>(batchSize, channels * outputH * outputW), requiresGrad: false);
+            var maxIndicesTensor = new AutogradNode(new FastMatrix<double>(batchSize, channels * outputH * outputW), requiresGrad: false);
             var maxIndices = maxIndicesTensor.Data;
 
             Parallel.For(0, batchSize, n =>
@@ -489,11 +489,11 @@ namespace DevOnBike.Overfit
                 }
             });
 
-            var deps = new List<Tensor> { input };
+            var deps = new List<AutogradNode> { input };
             if (input.RequiresGrad) deps.Add(maxIndicesTensor);
             else maxIndicesTensor.Dispose();
 
-            Action<Tensor> backward = (resultNode) =>
+            Action<AutogradNode> backward = (resultNode) =>
             {
                 Parallel.For(0, batchSize, n =>
                 {
@@ -508,10 +508,10 @@ namespace DevOnBike.Overfit
                 });
             };
 
-            return Tensor.CreateOperationResult(resultData, deps, backward);
+            return AutogradNode.CreateOperationResult(resultData, deps, backward);
         }
 
-        public static Tensor Conv2D(Tensor input, Tensor weights, int inC, int outC, int h, int w, int k)
+        public static AutogradNode Conv2D(AutogradNode input, AutogradNode weights, int inC, int outC, int h, int w, int k)
         {
             var outH = h - k + 1;
             var outW = w - k + 1;
@@ -521,11 +521,11 @@ namespace DevOnBike.Overfit
             var resultData = new FastMatrix<double>(batchSize, outC * outH * outW);
 
             // Tablica Węzłów-Widm, zamiast tablicy czystych FastMatrix
-            var colTensors = new Tensor[batchSize];
+            var colTensors = new AutogradNode[batchSize];
 
             Parallel.For(0, batchSize, n =>
             {
-                colTensors[n] = new Tensor(new FastMatrix<double>(kSquareInC, outH * outW), requiresGrad: false);
+                colTensors[n] = new AutogradNode(new FastMatrix<double>(kSquareInC, outH * outW), requiresGrad: false);
                 Im2Col(input.Data.Row(n), inC, h, w, k, 1, 0, colTensors[n].Data.AsSpan());
 
                 using var batchResult = MatMulRaw(weights.Data.AsView(), colTensors[n].Data.AsView());
@@ -533,7 +533,7 @@ namespace DevOnBike.Overfit
             });
 
             var needsGrad = weights.RequiresGrad || input.RequiresGrad;
-            var deps = new List<Tensor> { input, weights };
+            var deps = new List<AutogradNode> { input, weights };
 
             if (needsGrad)
             {
@@ -544,7 +544,7 @@ namespace DevOnBike.Overfit
                 for (var n = 0; n < batchSize; n++) colTensors[n].Dispose();
             }
 
-            Action<Tensor> backward = (resultNode) =>
+            Action<AutogradNode> backward = (resultNode) =>
             {
                 var gradOutput = resultNode.Grad;
 
@@ -569,10 +569,10 @@ namespace DevOnBike.Overfit
                 }
             };
 
-            return Tensor.CreateOperationResult(resultData, deps, backward);
+            return AutogradNode.CreateOperationResult(resultData, deps, backward);
         }
 
-        public static Tensor Linear(Tensor input, Tensor weights, Tensor bias)
+        public static AutogradNode Linear(AutogradNode input, AutogradNode weights, AutogradNode bias)
         {
             var resultData = new FastMatrix<double>(input.Data.Rows, weights.Data.Cols);
             MatMul(input.Data.AsView(), weights.Data.AsView(), resultData.AsView());
@@ -580,7 +580,7 @@ namespace DevOnBike.Overfit
             var broadcastedBias = BroadcastRowVector(bias.Data.AsSpan(), input.Data.Rows);
             Add(resultData.AsView(), broadcastedBias, resultData.AsView());
 
-            Action<Tensor> backward = (resultNode) =>
+            Action<AutogradNode> backward = (resultNode) =>
             {
                 var gradC = resultNode.Grad.AsView();
 
@@ -606,17 +606,17 @@ namespace DevOnBike.Overfit
                 }
             };
 
-            return Tensor.CreateOperationResult(resultData, new List<Tensor> { input, weights, bias }, backward);
+            return AutogradNode.CreateOperationResult(resultData, new List<AutogradNode> { input, weights, bias }, backward);
         }
 
         // ====================================================================
         // 8. NORMALIZACJA (BATCH NORM)
         // ====================================================================
 
-        public static Tensor BatchNorm1D(
-            Tensor input,
-            Tensor gamma,
-            Tensor beta,
+        public static AutogradNode BatchNorm1D(
+            AutogradNode input,
+            AutogradNode gamma,
+            AutogradNode beta,
             FastMatrix<double> runningMean,
             FastMatrix<double> runningVar,
             double momentum,
@@ -648,7 +648,7 @@ namespace DevOnBike.Overfit
                     }
                 });
 
-                return Tensor.CreateOperationResult(resultData, [input], (_) => { });
+                return AutogradNode.CreateOperationResult(resultData, [input], (_) => { });
             }
 
             // --- TRENING ---
@@ -657,8 +657,8 @@ namespace DevOnBike.Overfit
             using var batchMeanMat = new FastMatrix<double>(1, C);
             using var batchVarMat = new FastMatrix<double>(1, C);
 
-            var invStdTensor = new Tensor(new FastMatrix<double>(1, C), requiresGrad: false);
-            var xHatTensor = new Tensor(new FastMatrix<double>(N, C), requiresGrad: false);
+            var invStdTensor = new AutogradNode(new FastMatrix<double>(1, C), requiresGrad: false);
+            var xHatTensor = new AutogradNode(new FastMatrix<double>(N, C), requiresGrad: false);
 
             Parallel.For(0, C, j =>
             {
@@ -710,7 +710,7 @@ namespace DevOnBike.Overfit
             });
 
             var needsGrad = input.RequiresGrad || gamma.RequiresGrad || beta.RequiresGrad;
-            var deps = new List<Tensor> { input, gamma, beta };
+            var deps = new List<AutogradNode> { input, gamma, beta };
 
             if (needsGrad)
             {
@@ -723,7 +723,7 @@ namespace DevOnBike.Overfit
                 invStdTensor.Dispose();
             }
 
-            Action<Tensor> backward = (resultNode) =>
+            Action<AutogradNode> backward = (resultNode) =>
             {
                 var gradOut = resultNode.Grad;
 
@@ -781,10 +781,10 @@ namespace DevOnBike.Overfit
                 }
             };
 
-            return Tensor.CreateOperationResult(resultData, deps, backward);
+            return AutogradNode.CreateOperationResult(resultData, deps, backward);
         }
 
-        public static Tensor GlobalAveragePool2D(Tensor input, int channels, int h, int w)
+        public static AutogradNode GlobalAveragePool2D(AutogradNode input, int channels, int h, int w)
         {
             var batchSize = input.Data.Rows;
             var spatialSize = h * w;
@@ -805,7 +805,7 @@ namespace DevOnBike.Overfit
                 }
             });
 
-            var result = new Tensor(outputData, input.RequiresGrad);
+            var result = new AutogradNode(outputData, input.RequiresGrad);
 
             if (input.RequiresGrad)
             {

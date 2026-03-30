@@ -1,9 +1,10 @@
-namespace DevOnBike.Overfit.Layers
+using DevOnBike.Overfit.Core;
+namespace DevOnBike.Overfit.DeepLearning
 {
     public class BatchNorm1D
     {
-        public Tensor Gamma { get; private set; }
-        public Tensor Beta { get; private set; }
+        public AutogradNode Gamma { get; private set; }
+        public AutogradNode Beta { get; private set; }
         
         // Statystyki do użycia w Inference
         public FastMatrix<double> RunningMean { get; private set; }
@@ -17,12 +18,12 @@ namespace DevOnBike.Overfit.Layers
             // Gamma inicjalizujemy na 1.0 (domyślna wariancja)
             var gammaData = new FastMatrix<double>(1, features);
             gammaData.AsSpan().Fill(1.0);
-            Gamma = new Tensor(gammaData, requiresGrad: true);
+            Gamma = new AutogradNode(gammaData, requiresGrad: true);
 
             // Beta inicjalizujemy na 0.0 (domyślna średnia)
             var betaData = new FastMatrix<double>(1, features);
             betaData.AsSpan().Fill(0.0);
-            Beta = new Tensor(betaData, requiresGrad: true);
+            Beta = new AutogradNode(betaData, requiresGrad: true);
 
             RunningMean = new FastMatrix<double>(1, features);
             RunningVar = new FastMatrix<double>(1, features);
@@ -32,12 +33,12 @@ namespace DevOnBike.Overfit.Layers
             Eps = eps;
         }
 
-        public Tensor Forward(Tensor input, bool isTraining)
+        public AutogradNode Forward(AutogradNode input, bool isTraining)
         {
             return TensorMath.BatchNorm1D(input, Gamma, Beta, RunningMean, RunningVar, Momentum, Eps, isTraining);
         }
 
-        public IEnumerable<Tensor> Parameters()
+        public IEnumerable<AutogradNode> Parameters()
         {
             yield return Gamma;
             yield return Beta;

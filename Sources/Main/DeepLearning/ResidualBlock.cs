@@ -1,4 +1,6 @@
-namespace DevOnBike.Overfit.Layers
+using DevOnBike.Overfit.Core;
+
+namespace DevOnBike.Overfit.DeepLearning
 {
     /// <summary>
     /// Klasyczny Blok ResNet (Residual Block).
@@ -22,7 +24,7 @@ namespace DevOnBike.Overfit.Layers
             _bn2 = new BatchNorm1D(hiddenSize);
         }
 
-        public Tensor Forward(Tensor input, bool isTraining)
+        public AutogradNode Forward(AutogradNode input, bool isTraining)
         {
             // --- ŚCIEŻKA GŁÓWNA (F(X)) ---
             // 1. Pierwsza warstwa + stabilizacja + aktywacja
@@ -43,7 +45,7 @@ namespace DevOnBike.Overfit.Layers
             return TensorMath.ReLU(added);
         }
 
-        public IEnumerable<Tensor> Parameters()
+        public IEnumerable<AutogradNode> Parameters()
         {
             return _linear1.Parameters()
                 .Concat(_bn1.Parameters())

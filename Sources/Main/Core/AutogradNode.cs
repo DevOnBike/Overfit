@@ -1,21 +1,21 @@
-namespace DevOnBike.Overfit
+namespace DevOnBike.Overfit.Core
 {
     /// <summary>
     /// Węzeł grafu obliczeniowego. Owija FastMatrix, przechowuje gradienty 
     /// oraz historię operacji do wstecznej propagacji (Autograd).
     /// </summary>
-    public sealed class Tensor : IDisposable
+    public sealed class AutogradNode : IDisposable
     {
         public FastMatrix<double> Data { get; }
         public FastMatrix<double> Grad { get; }
         public bool RequiresGrad { get; }
 
-        internal readonly List<Tensor> _dependencies = [];
-        internal Action<Tensor> _backwardAction;
+        internal readonly List<AutogradNode> _dependencies = [];
+        internal Action<AutogradNode> _backwardAction;
 
         private readonly bool _ownsData;
 
-        public Tensor(FastMatrix<double> data, bool requiresGrad = true, bool ownsData = true)
+        public AutogradNode(FastMatrix<double> data, bool requiresGrad = true, bool ownsData = true)
         {
             Data = data ?? throw new ArgumentNullException(nameof(data));
             RequiresGrad = requiresGrad;
@@ -23,7 +23,7 @@ namespace DevOnBike.Overfit
             _ownsData = ownsData;
         }
 
-        private Tensor(FastMatrix<double> data, List<Tensor> dependencies, Action<Tensor> backwardAction)
+        private AutogradNode(FastMatrix<double> data, List<AutogradNode> dependencies, Action<AutogradNode> backwardAction)
         {
             Data = data;
             RequiresGrad = true;
@@ -39,14 +39,14 @@ namespace DevOnBike.Overfit
         // MAGIA AUTOGRADA - Wsteczna Propagacja
         // ====================================================================
 
-        public List<Tensor> Backward()
+        public List<AutogradNode> Backward()
         {
             // 1. BUDOWA GRAFU OBLICZENIOWEGO (Sortowanie Topologiczne)
             // Musimy przetwarzać węzły od końca (Loss) do początku (Inputs)
-            var topo = new List<Tensor>();
-            var visited = new HashSet<Tensor>();
+            var topo = new List<AutogradNode>();
+            var visited = new HashSet<AutogradNode>();
 
-            void BuildTopo(Tensor node)
+            void BuildTopo(AutogradNode node)
             {
                 if (!visited.Contains(node))
                 {
@@ -103,9 +103,9 @@ namespace DevOnBike.Overfit
             _backwardAction = null;
         }
 
-        public static Tensor CreateOperationResult(FastMatrix<double> data, List<Tensor> dependencies, Action<Tensor> backwardAction)
+        public static AutogradNode CreateOperationResult(FastMatrix<double> data, List<AutogradNode> dependencies, Action<AutogradNode> backwardAction)
         {
-            return new Tensor(data, dependencies, backwardAction);
+            return new AutogradNode(data, dependencies, backwardAction);
         }
 
     }

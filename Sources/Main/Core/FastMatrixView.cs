@@ -1,7 +1,6 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
-
-namespace DevOnBike.Overfit
+namespace DevOnBike.Overfit.Core
 {
     /// <summary>
     /// Bezalokacyjny widok na pamięć macierzy.

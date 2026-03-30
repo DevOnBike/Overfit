@@ -1,4 +1,5 @@
-using DevOnBike.Overfit.Layers;
+using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.DeepLearning;
 
 namespace DevOnBike.Overfit
 {
@@ -33,7 +34,7 @@ namespace DevOnBike.Overfit
             // Przygotowanie wejścia (Batch Size = 1)
             using var inputMat = new FastMatrix<double>(1, 784);
             pixelData.CopyTo(inputMat.AsSpan());
-            using var input = new Tensor(inputMat, requiresGrad: false);
+            using var input = new AutogradNode(inputMat, requiresGrad: false);
 
             // --- FORWARD PASS (Inference Mode) ---
             // Ustawiamy isTraining: false dla BatchNorm i ResNet!

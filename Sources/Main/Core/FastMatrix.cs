@@ -2,8 +2,7 @@ using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
-
-namespace DevOnBike.Overfit
+namespace DevOnBike.Overfit.Core
 {
     public sealed class FastMatrix<T> : IDisposable where T : struct, IFloatingPointIeee754<T>
     {

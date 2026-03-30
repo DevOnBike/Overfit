@@ -1,4 +1,5 @@
-using DevOnBike.Overfit.Layers;
+using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Optimizers;
 
 namespace DevOnBike.Overfit.Tests
@@ -25,8 +26,8 @@ namespace DevOnBike.Overfit.Tests
             yData[2,0] = 1;
             yData[3,0] = 0;
 
-            using var X = new Tensor(xData, requiresGrad: false);
-            using var Y = new Tensor(yData, requiresGrad: false);
+            using var X = new AutogradNode(xData, requiresGrad: false);
+            using var Y = new AutogradNode(yData, requiresGrad: false);
 
             // 2. Architektura Sieci Neuronowej
             var layer1 = new LinearLayer(inputSize: 2, outputSize: 16);
@@ -109,8 +110,8 @@ namespace DevOnBike.Overfit.Tests
                 yData[i, 0] = isOuter ? 1.0 : 0.0;
             }
 
-            using var X = new Tensor(xData, requiresGrad: false);
-            using var Y = new Tensor(yData, requiresGrad: false);
+            using var X = new AutogradNode(xData, requiresGrad: false);
+            using var Y = new AutogradNode(yData, requiresGrad: false);
 
             // ==========================================
             // ARCHITEKTURA: Prawdziwe Deep Learning (3 warstwy)

@@ -1,3 +1,4 @@
+using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.Optimizers;
 
 namespace DevOnBike.Overfit.Tests
@@ -14,7 +15,7 @@ namespace DevOnBike.Overfit.Tests
             mat[0, 0] = 1.0; mat[0, 1] = 2.0;
             mat[1, 0] = 3.0; mat[1, 1] = 4.0;
 
-            using var tensor = new Tensor(mat, requiresGrad: true);
+            using var tensor = new AutogradNode(mat, requiresGrad: true);
 
             // Symulujemy policzone gradienty po wykonaniu .Backward()
             tensor.Grad[0, 0] = 0.5; tensor.Grad[0, 1] = 0.1;
@@ -46,7 +47,7 @@ namespace DevOnBike.Overfit.Tests
         {
             // Arrange
             using var mat = new FastMatrix<double>(2, 2);
-            using var tensor = new Tensor(mat, requiresGrad: true);
+            using var tensor = new AutogradNode(mat, requiresGrad: true);
 
             tensor.Grad.AsSpan().Fill(42.0); // Zanieczyszczamy gradient
 
@@ -70,7 +71,7 @@ namespace DevOnBike.Overfit.Tests
             mat[0, 0] = 10.0;
             
             // Tensor, którego nie chcemy trenować (np. zamrożona warstwa)
-            using var tensor = new Tensor(mat, requiresGrad: false);
+            using var tensor = new AutogradNode(mat, requiresGrad: false);
             tensor.Grad[0, 0] = 5.0; // Gradient sztucznie ustawiony
 
             var optimizer = new SGD(new[] { tensor }, learningRate: 0.1);

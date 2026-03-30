@@ -1,9 +1,10 @@
-namespace DevOnBike.Overfit.Layers
+using DevOnBike.Overfit.Core;
+namespace DevOnBike.Overfit.DeepLearning
 {
     public class LinearLayer
     {
-        public Tensor Weights { get; private set; }
-        public Tensor Biases { get; private set; } // Nazwa zgodna z Twoim Dispose()
+        public AutogradNode Weights { get; private set; }
+        public AutogradNode Biases { get; private set; } // Nazwa zgodna z Twoim Dispose()
 
         public LinearLayer(int inputSize, int outputSize)
         {
@@ -14,11 +15,11 @@ namespace DevOnBike.Overfit.Layers
                 wData.AsSpan()[i] = (Random.Shared.NextDouble() * 2 - 1) * stdDev;
             }
 
-            Weights = new Tensor(wData, true);
-            Biases = new Tensor(new FastMatrix<double>(1, outputSize), true);
+            Weights = new AutogradNode(wData, true);
+            Biases = new AutogradNode(new FastMatrix<double>(1, outputSize), true);
         }
 
-        public Tensor Forward(Tensor input)
+        public AutogradNode Forward(AutogradNode input)
         {
             // Jedno wywołanie, jeden Tensor, zero wycieków
             return TensorMath.Linear(input, Weights, Biases);
@@ -75,7 +76,7 @@ namespace DevOnBike.Overfit.Layers
             for (var i = 0; i < bSpan.Length; i++) bSpan[i] = br.ReadDouble();
         }
 
-        public IEnumerable<Tensor> Parameters()
+        public IEnumerable<AutogradNode> Parameters()
         {
             yield return Weights;
             yield return Biases;

@@ -1,4 +1,5 @@
 using System.Numerics.Tensors;
+using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.Optimizers
 {
@@ -9,7 +10,7 @@ namespace DevOnBike.Overfit.Optimizers
     /// </summary>
     public sealed class SGD
     {
-        private readonly List<Tensor> _parameters;
+        private readonly List<AutogradNode> _parameters;
         
         public double LearningRate { get; set; }
 
@@ -18,14 +19,14 @@ namespace DevOnBike.Overfit.Optimizers
         /// </summary>
         /// <param name="parameters">The list of tensors (weights/biases) to optimize.</param>
         /// <param name="learningRate">The step size for weight updates.</param>
-        public SGD(IEnumerable<Tensor> parameters, double learningRate)
+        public SGD(IEnumerable<AutogradNode> parameters, double learningRate)
         {
             if (parameters == null)
             {
                 throw new ArgumentNullException(nameof(parameters));
             }
             
-            _parameters = new List<Tensor>(parameters);
+            _parameters = new List<AutogradNode>(parameters);
             LearningRate = learningRate;
         }
 

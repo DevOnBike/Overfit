@@ -1,6 +1,7 @@
-using DevOnBike.Overfit.Layers;
+using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.DeepLearning;
 
-namespace DevOnBike.Overfit
+namespace DevOnBike.Overfit.Data
 {
     public static class ModelSerializer
     {

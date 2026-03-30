@@ -37,4 +37,8 @@
 	  <PackageReference Include="System.Numerics.Tensors" />
 	</ItemGroup>
 
+	<ItemGroup>
+	  <Folder Include="Extensions\" />
+	</ItemGroup>
+
 </Project>

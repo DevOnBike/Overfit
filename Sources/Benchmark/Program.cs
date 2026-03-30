@@ -1,4 +1,4 @@
-﻿namespace DevOnBike.Security.Benchmarks
+﻿namespace Benchmarks
 {
     internal static class Program
     {

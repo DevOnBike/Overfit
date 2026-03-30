@@ -1,5 +1,6 @@
 using System.Diagnostics;
-using DevOnBike.Overfit.Layers;
+using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Optimizers;
 
 namespace DevOnBike.Overfit.Tests
@@ -18,8 +19,8 @@ namespace DevOnBike.Overfit.Tests
             // Ścieżki do plików MNIST - upewnij się, że są poprawne!
             var (trainX, trainY) = MnistLoader.Load("d:/ml/train-images.idx3-ubyte", "d:/ml/train-labels.idx1-ubyte", trainSize);
 
-            using var X = new Tensor(trainX, requiresGrad: false);
-            using var Y = new Tensor(trainY, requiresGrad: false);
+            using var X = new AutogradNode(trainX, requiresGrad: false);
+            using var Y = new AutogradNode(trainY, requiresGrad: false);
 
             // 1. Warstwa splotowa: 1 kanał wej, 8 filtrów, filtr 3x3
             var conv1 = new ConvLayer(inChannels: 1, outChannels: 8, h: 28, w: 28, kSize: 3);
@@ -50,8 +51,8 @@ namespace DevOnBike.Overfit.Tests
                     var xView = X.Data.AsView().Slice(b * batchSize, 0, batchSize, 784);
                     var yView = Y.Data.AsView().Slice(b * batchSize, 0, batchSize, 10);
 
-                    using var xBatch = new Tensor(xView.ToContiguousFastMatrix(), false);
-                    using var yBatch = new Tensor(yView.ToContiguousFastMatrix(), false);
+                    using var xBatch = new AutogradNode(xView.ToContiguousFastMatrix(), false);
+                    using var yBatch = new AutogradNode(yView.ToContiguousFastMatrix(), false);
 
                     // --- FORWARD PASS ---
                     // Conv: 28x28 -> 26x26 (8 kanałów)
@@ -100,7 +101,7 @@ namespace DevOnBike.Overfit.Tests
             {
                 // 1. Forward pass (bez Dropoutu - isTraining: false!)
                 var rowView = testX.AsView().Slice(i, 0, 1, 784);
-                using var input = new Tensor(rowView.ToContiguousFastMatrix(), false);
+                using var input = new AutogradNode(rowView.ToContiguousFastMatrix(), false);
                 using var h1 = conv.Forward(input);
                 using var a1 = TensorMath.ReLU(h1);
                 using var p1 = TensorMath.MaxPool2D(a1, 8, 26, 26, 2);

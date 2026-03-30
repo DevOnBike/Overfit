@@ -1,8 +1,9 @@
-namespace DevOnBike.Overfit.Layers
+using DevOnBike.Overfit.Core;
+namespace DevOnBike.Overfit.DeepLearning
 {
     public sealed class ConvLayer
     {
-        public Tensor Kernels { get; }
+        public AutogradNode Kernels { get; }
         private int _inC, _outC, _h, _w, _k;
 
         public ConvLayer(int inChannels, int outChannels, int h, int w, int kSize)
@@ -13,7 +14,7 @@ namespace DevOnBike.Overfit.Layers
             // Inicjalizacja Kaiming dla splotów
             InitializeKernels(kData.AsSpan(), inChannels * kSize * kSize);
         
-            Kernels = new Tensor(kData, true);
+            Kernels = new AutogradNode(kData, true);
         }
 
         private void InitializeKernels(Span<double> span, int fanIn)
@@ -26,13 +27,13 @@ namespace DevOnBike.Overfit.Layers
             }
         }
 
-        public Tensor Forward(Tensor input)
+        public AutogradNode Forward(AutogradNode input)
         {
             return TensorMath.Conv2D(input, Kernels, _inC, _outC, _h, _w, _k);
         }
 
         // --- DODANE: Metoda wymagana przez Optymalizator ---
-        public IEnumerable<Tensor> Parameters()
+        public IEnumerable<AutogradNode> Parameters()
         {
             yield return Kernels;
         }

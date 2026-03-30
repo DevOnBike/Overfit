@@ -1,3 +1,5 @@
+using DevOnBike.Overfit.Core;
+
 namespace DevOnBike.Overfit.Tests
 {
     public static class MnistLoader
