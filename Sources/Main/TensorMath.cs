@@ -59,7 +59,7 @@ namespace DevOnBike.Overfit
 
                 for (var k = 0; k < A.Cols; k++)
                 {
-                    var a_ik = A[i, k]; 
+                    var a_ik = A[i, k];
                     var rowB = B.Row(k);
                     TensorPrimitives.MultiplyAdd(rowB, a_ik, rowC, rowC);
                 }
@@ -104,7 +104,7 @@ namespace DevOnBike.Overfit
 
             Parallel.For(0, A.Rows, i =>
             {
-                var rowA = A.Row(i); 
+                var rowA = A.Row(i);
                 var rowC = C.Row(i);
 
                 for (var k = 0; k < A.Cols; k++)
@@ -126,7 +126,8 @@ namespace DevOnBike.Overfit
             var resultData = new FastMatrix<double>(left.Data.Rows, left.Data.Cols);
             Add(left.Data.AsView(), right.Data.AsView(), resultData.AsView());
 
-            Action<Tensor> backward = (resultNode) => {
+            Action<Tensor> backward = (resultNode) =>
+            {
                 var gradC = resultNode.Grad.AsView();
                 if (left.RequiresGrad) Add(left.Grad.AsView(), gradC, left.Grad.AsView());
                 if (right.RequiresGrad) Add(right.Grad.AsView(), gradC, right.Grad.AsView());
@@ -141,7 +142,8 @@ namespace DevOnBike.Overfit
             var broadcastedBias = BroadcastRowVector(bias.Data.AsSpan(), input.Data.Rows);
             Add(input.Data.AsView(), broadcastedBias, resultData.AsView());
 
-            Action<Tensor> backward = (resultNode) => {
+            Action<Tensor> backward = (resultNode) =>
+            {
                 var gradC = resultNode.Grad.AsView();
 
                 if (input.RequiresGrad)
@@ -166,7 +168,8 @@ namespace DevOnBike.Overfit
             var resultData = new FastMatrix<double>(left.Data.Rows, right.Data.Cols);
             MatMul(left.Data.AsView(), right.Data.AsView(), resultData.AsView());
 
-            Action<Tensor> backward = (resultNode) => {
+            Action<Tensor> backward = (resultNode) =>
+            {
                 var gradC = resultNode.Grad.AsView();
 
                 if (left.RequiresGrad)
@@ -193,7 +196,8 @@ namespace DevOnBike.Overfit
             var resultData = new FastMatrix<double>(input.Data.Rows, input.Data.Cols);
             TensorPrimitives.Max(input.Data.AsReadOnlySpan(), 0.0, resultData.AsSpan());
 
-            Action<Tensor> backward = (resultNode) => {
+            Action<Tensor> backward = (resultNode) =>
+            {
                 if (!input.RequiresGrad) return;
 
                 var inSpan = input.Data.AsReadOnlySpan();
@@ -214,7 +218,10 @@ namespace DevOnBike.Overfit
             if (!isTraining) return input;
 
             var resultData = new FastMatrix<double>(input.Data.Rows, input.Data.Cols);
-            var mask = new FastMatrix<double>(input.Data.Rows, input.Data.Cols);
+
+            // WĘZEŁ-WIDMO
+            var maskTensor = new Tensor(new FastMatrix<double>(input.Data.Rows, input.Data.Cols), requiresGrad: false);
+            var mask = maskTensor.Data;
             var scale = 1.0 / (1.0 - p);
 
             var inSpan = input.Data.AsReadOnlySpan();
@@ -236,11 +243,19 @@ namespace DevOnBike.Overfit
             }
 
             var needsGrad = input.RequiresGrad;
-            if (!needsGrad) mask.Dispose();
+            var deps = new List<Tensor> { input };
 
-            Action<Tensor> backward = (resultNode) => {
-                if (!needsGrad) return;
+            if (needsGrad)
+            {
+                deps.Add(maskTensor);
+            }
+            else
+            {
+                maskTensor.Dispose();
+            }
 
+            Action<Tensor> backward = (resultNode) =>
+            {
                 var gradOut = resultNode.Grad.AsReadOnlySpan();
                 var gradIn = input.Grad.AsSpan();
                 var mSpan = mask.AsReadOnlySpan();
@@ -249,10 +264,9 @@ namespace DevOnBike.Overfit
                 {
                     gradIn[i] += gradOut[i] * mSpan[i];
                 }
-                mask.Dispose();
             };
 
-            return Tensor.CreateOperationResult(resultData, [input], backward);
+            return Tensor.CreateOperationResult(resultData, deps, backward);
         }
 
         // ====================================================================
@@ -273,7 +287,8 @@ namespace DevOnBike.Overfit
             var dist = TensorPrimitives.Distance(predSpanForward, targetSpanForward);
             resultData[0, 0] = (dist * dist) / n;
 
-            Action<Tensor> backward = (resultNode) => {
+            Action<Tensor> backward = (resultNode) =>
+            {
                 var gradC = resultNode.Grad[0, 0];
                 var factor = (2.0 / n) * gradC;
 
@@ -301,7 +316,9 @@ namespace DevOnBike.Overfit
         public static Tensor SoftmaxCrossEntropy(Tensor logits, Tensor target)
         {
             var resData = new FastMatrix<double>(1, 1);
-            var probs = new FastMatrix<double>(logits.Data.Rows, logits.Data.Cols);
+            var probsTensor = new Tensor(new FastMatrix<double>(logits.Data.Rows, logits.Data.Cols), requiresGrad: false);
+            var probs = probsTensor.Data;
+
             double totalLoss = 0;
             var lossLock = new object();
 
@@ -325,11 +342,13 @@ namespace DevOnBike.Overfit
             resData[0, 0] = totalLoss / logits.Data.Rows;
 
             var needsGrad = logits.RequiresGrad;
-            if (!needsGrad) probs.Dispose();
+            var deps = new List<Tensor> { logits, target };
 
-            Action<Tensor> backward = (resultNode) => {
-                if (!needsGrad) return;
+            if (needsGrad) deps.Add(probsTensor);
+            else probsTensor.Dispose();
 
+            Action<Tensor> backward = (resultNode) =>
+            {
                 var scale = resultNode.Grad[0, 0] / logits.Data.Rows;
 
                 Parallel.For(0, logits.Data.Rows, r =>
@@ -343,11 +362,9 @@ namespace DevOnBike.Overfit
                         lGrad[c] += (pRow[c] - tRow[c]) * scale;
                     }
                 });
-
-                probs.Dispose();
             };
 
-            return Tensor.CreateOperationResult(resData, [logits, target], backward);
+            return Tensor.CreateOperationResult(resData, deps, backward);
         }
 
         // ====================================================================
@@ -437,7 +454,8 @@ namespace DevOnBike.Overfit
             var batchSize = input.Data.Rows;
 
             var resultData = new FastMatrix<double>(batchSize, channels * outputH * outputW);
-            var maxIndices = new int[batchSize, channels * outputH * outputW];
+            var maxIndicesTensor = new Tensor(new FastMatrix<double>(batchSize, channels * outputH * outputW), requiresGrad: false);
+            var maxIndices = maxIndicesTensor.Data;
 
             Parallel.For(0, batchSize, n =>
             {
@@ -465,15 +483,18 @@ namespace DevOnBike.Overfit
                             }
                             var outIdx = c * (outputH * outputW) + oh * outputW + ow;
                             resultData[n, outIdx] = maxVal;
-                            maxIndices[n, outIdx] = maxIdx;
+                            maxIndices[n, outIdx] = maxIdx; // Rzutowanie int -> double
                         }
                     }
                 }
             });
 
-            Action<Tensor> backward = (resultNode) => {
-                if (!input.RequiresGrad) return;
+            var deps = new List<Tensor> { input };
+            if (input.RequiresGrad) deps.Add(maxIndicesTensor);
+            else maxIndicesTensor.Dispose();
 
+            Action<Tensor> backward = (resultNode) =>
+            {
                 Parallel.For(0, batchSize, n =>
                 {
                     var gradOut = resultNode.Grad.Row(n);
@@ -481,13 +502,13 @@ namespace DevOnBike.Overfit
 
                     for (var i = 0; i < gradOut.Length; i++)
                     {
-                        var originalIdx = maxIndices[n, i];
+                        var originalIdx = (int)maxIndices[n, i]; // Rzutowanie double -> int
                         gradIn[originalIdx] += gradOut[i];
                     }
                 });
             };
 
-            return Tensor.CreateOperationResult(resultData, [input], backward);
+            return Tensor.CreateOperationResult(resultData, deps, backward);
         }
 
         public static Tensor Conv2D(Tensor input, Tensor weights, int inC, int outC, int h, int w, int k)
@@ -497,27 +518,34 @@ namespace DevOnBike.Overfit
             var batchSize = input.Data.Rows;
             var kSquareInC = k * k * inC;
 
-            var colMatrices = new FastMatrix<double>[batchSize];
             var resultData = new FastMatrix<double>(batchSize, outC * outH * outW);
+
+            // Tablica Węzłów-Widm, zamiast tablicy czystych FastMatrix
+            var colTensors = new Tensor[batchSize];
 
             Parallel.For(0, batchSize, n =>
             {
-                colMatrices[n] = new FastMatrix<double>(kSquareInC, outH * outW);
-                Im2Col(input.Data.Row(n), inC, h, w, k, 1, 0, colMatrices[n].AsSpan());
+                colTensors[n] = new Tensor(new FastMatrix<double>(kSquareInC, outH * outW), requiresGrad: false);
+                Im2Col(input.Data.Row(n), inC, h, w, k, 1, 0, colTensors[n].Data.AsSpan());
 
-                using var batchResult = MatMulRaw(weights.Data.AsView(), colMatrices[n].AsView());
+                using var batchResult = MatMulRaw(weights.Data.AsView(), colTensors[n].Data.AsView());
                 batchResult.AsSpan().CopyTo(resultData.Row(n));
             });
 
             var needsGrad = weights.RequiresGrad || input.RequiresGrad;
+            var deps = new List<Tensor> { input, weights };
 
-            if (!needsGrad)
+            if (needsGrad)
             {
-                for (var n = 0; n < batchSize; n++) colMatrices[n].Dispose();
+                deps.AddRange(colTensors);
+            }
+            else
+            {
+                for (var n = 0; n < batchSize; n++) colTensors[n].Dispose();
             }
 
-            Action<Tensor> backward = (resultNode) => {
-                if (!needsGrad) return;
+            Action<Tensor> backward = (resultNode) =>
+            {
                 var gradOutput = resultNode.Grad;
 
                 for (var n = 0; n < batchSize; n++)
@@ -527,7 +555,7 @@ namespace DevOnBike.Overfit
 
                     if (weights.RequiresGrad)
                     {
-                        using var colT = colMatrices[n].AsView().Transpose().ToContiguousFastMatrix();
+                        using var colT = colTensors[n].Data.AsView().Transpose().ToContiguousFastMatrix();
                         using var dW_batch = MatMulRaw(gn.AsView(), colT.AsView());
                         TensorPrimitives.Add(weights.Grad.AsSpan(), dW_batch.AsSpan(), weights.Grad.AsSpan());
                     }
@@ -538,44 +566,35 @@ namespace DevOnBike.Overfit
                         using var dX_col = MatMulRaw(weightsT, gn.AsView());
                         Col2Im(dX_col.AsSpan(), inC, h, w, k, 1, 0, input.Grad.Row(n));
                     }
-
-                    colMatrices[n].Dispose();
                 }
             };
 
-            return Tensor.CreateOperationResult(resultData, [input, weights], backward);
+            return Tensor.CreateOperationResult(resultData, deps, backward);
         }
-        
+
         public static Tensor Linear(Tensor input, Tensor weights, Tensor bias)
         {
-            // 1. Alokacja wyniku (Y = XW + b)
             var resultData = new FastMatrix<double>(input.Data.Rows, weights.Data.Cols);
-
-            // 2. Forward pass: Najpierw Y = X * W
             MatMul(input.Data.AsView(), weights.Data.AsView(), resultData.AsView());
 
-            // 3. Dodanie biasu "w locie" bezpośrednio do macierzy Y (brak alokacji pośredniej!)
             var broadcastedBias = BroadcastRowVector(bias.Data.AsSpan(), input.Data.Rows);
             Add(resultData.AsView(), broadcastedBias, resultData.AsView());
 
-            // 4. Backward pass (połączona reguła łańcuchowa dla MatMul i Biasu)
-            Action<Tensor> backward = (resultNode) => {
+            Action<Tensor> backward = (resultNode) =>
+            {
                 var gradC = resultNode.Grad.AsView();
 
-                // dL/dX = dL/dY * W^T
                 if (input.RequiresGrad)
                 {
                     using var weightsT = weights.Data.Transpose().ToContiguousFastMatrix();
                     MatMulAdd(gradC, weightsT.AsView(), input.Grad.AsView());
                 }
 
-                // dL/dW = X^T * dL/dY
                 if (weights.RequiresGrad)
                 {
                     MatMulAdd(input.Data.Transpose(), gradC, weights.Grad.AsView());
                 }
 
-                // dL/db = Suma kolumn z dL/dY
                 if (bias.RequiresGrad)
                 {
                     var biasGradSpan = bias.Grad.AsSpan();
@@ -589,12 +608,8 @@ namespace DevOnBike.Overfit
 
             return Tensor.CreateOperationResult(resultData, new List<Tensor> { input, weights, bias }, backward);
         }
-        
-        // ====================================================================
-        // 8. NORMALIZACJA (BATCH NORM)
-        // ====================================================================
 
-// ====================================================================
+        // ====================================================================
         // 8. NORMALIZACJA (BATCH NORM)
         // ====================================================================
 
@@ -615,13 +630,11 @@ namespace DevOnBike.Overfit
 
             if (!isTraining)
             {
-                // INFERENCE: Używamy zapamiętanych statystyk (Running Stats)
                 Parallel.For(0, N, i =>
                 {
                     var rowIn = input.Data.Row(i);
                     var rowOut = resultData.Row(i);
 
-                    // ROZWIĄZANIE: Tworzymy spany wewnątrz lambdy!
                     var gSpan = gamma.Data.AsReadOnlySpan();
                     var bSpan = beta.Data.AsReadOnlySpan();
                     var rmSpan = runningMean.AsReadOnlySpan();
@@ -639,15 +652,23 @@ namespace DevOnBike.Overfit
             }
 
             // --- TRENING ---
-            var batchMean = new double[C];
-            var batchVar = new double[C];
-            var invStdVec = new double[C];
-            
-            var xHatMat = new FastMatrix<double>(N, C); 
 
-            // 1. Zrównoleglone liczenie średniej i wariancji
+            // Macierze żyją na stercie, więc domknięcia (lambdy) mogą je bezpiecznie chwytać
+            using var batchMeanMat = new FastMatrix<double>(1, C);
+            using var batchVarMat = new FastMatrix<double>(1, C);
+
+            var invStdTensor = new Tensor(new FastMatrix<double>(1, C), requiresGrad: false);
+            var xHatTensor = new Tensor(new FastMatrix<double>(N, C), requiresGrad: false);
+
             Parallel.For(0, C, j =>
             {
+                // Spany tworzone bezpiecznie na stosie wątku
+                var batchMean = batchMeanMat.AsSpan();
+                var batchVar = batchVarMat.AsSpan();
+                var invStdVec = invStdTensor.Data.AsSpan();
+                var rmSpanLocal = runningMean.AsSpan();
+                var rvSpanLocal = runningVar.AsSpan();
+
                 double sum = 0;
                 for (var i = 0; i < N; i++) sum += input.Data[i, j];
                 var mean = sum / N;
@@ -662,53 +683,61 @@ namespace DevOnBike.Overfit
                 var var = sqSum / N;
                 batchVar[j] = var;
 
-                // ROZWIĄZANIE: Tworzymy spany wewnątrz lambdy!
-                var rmSpanLocal = runningMean.AsSpan();
-                var rvSpanLocal = runningVar.AsSpan();
-
-                // Moving Average (EMA)
                 rmSpanLocal[j] = (1 - momentum) * rmSpanLocal[j] + momentum * mean;
                 rvSpanLocal[j] = (1 - momentum) * rvSpanLocal[j] + momentum * var;
 
                 invStdVec[j] = 1.0 / Math.Sqrt(var + eps);
             });
 
-            // 2. Aplikowanie normalizacji
             Parallel.For(0, N, i =>
             {
+                // Spany tworzone bezpiecznie na stosie wątku
                 var rowIn = input.Data.Row(i);
                 var rowOut = resultData.Row(i);
-                var rowXHat = xHatMat.Row(i);
+                var rowXHat = xHatTensor.Data.Row(i);
 
-                // ROZWIĄZANIE: Tworzymy spany wewnątrz lambdy!
+                var batchMeanRead = batchMeanMat.AsReadOnlySpan();
+                var invStdVecRead = invStdTensor.Data.AsReadOnlySpan();
                 var gSpanLocal = gamma.Data.AsReadOnlySpan();
                 var bSpanLocal = beta.Data.AsReadOnlySpan();
 
                 for (var j = 0; j < C; j++)
                 {
-                    var xHat = (rowIn[j] - batchMean[j]) * invStdVec[j];
+                    var xHat = (rowIn[j] - batchMeanRead[j]) * invStdVecRead[j];
                     rowXHat[j] = xHat;
                     rowOut[j] = gSpanLocal[j] * xHat + bSpanLocal[j];
                 }
             });
 
             var needsGrad = input.RequiresGrad || gamma.RequiresGrad || beta.RequiresGrad;
-            if (!needsGrad) xHatMat.Dispose();
+            var deps = new List<Tensor> { input, gamma, beta };
 
-            // 3. Wsteczna Propagacja (Fused BatchNorm)
+            if (needsGrad)
+            {
+                deps.Add(xHatTensor);
+                deps.Add(invStdTensor);
+            }
+            else
+            {
+                xHatTensor.Dispose();
+                invStdTensor.Dispose();
+            }
+
             Action<Tensor> backward = (resultNode) =>
             {
-                if (!needsGrad) return;
                 var gradOut = resultNode.Grad;
 
-                var dGamma = new double[C];
-                var dBeta = new double[C];
+                using var dGammaMat = new FastMatrix<double>(1, C);
+                using var dBetaMat = new FastMatrix<double>(1, C);
 
-                // Krok A: Zbieranie gradientów dla wag Gamma i Beta (pętla sekwencyjna, bezpieczna)
+                // Krok A - ta pętla jest sekwencyjna, więc możemy wziąć Span na zewnątrz pętli for
+                var dGamma = dGammaMat.AsSpan();
+                var dBeta = dBetaMat.AsSpan();
+
                 for (var i = 0; i < N; i++)
                 {
                     var gradOutRow = gradOut.Row(i);
-                    var xHatRow = xHatMat.Row(i);
+                    var xHatRow = xHatTensor.Data.Row(i);
                     for (var j = 0; j < C; j++)
                     {
                         dGamma[j] += gradOutRow[j] * xHatRow[j];
@@ -730,45 +759,44 @@ namespace DevOnBike.Overfit
 
                 if (input.RequiresGrad)
                 {
-                    // Krok B: Cofanie błędu do wejścia
                     Parallel.For(0, N, i =>
                     {
                         var gradInRow = input.Grad.Row(i);
                         var gradOutRow = gradOut.Row(i);
-                        var xHatRow = xHatMat.Row(i);
+                        var xHatRow = xHatTensor.Data.Row(i);
 
-                        // ROZWIĄZANIE: Span wewnątrz lambdy!
+                        // LOKALNE SPANY do czytania (zabezpieczenie przed błędem CS8175)
                         var gSpanLocal = gamma.Data.AsReadOnlySpan();
+                        var invStdSpanLocal = invStdTensor.Data.AsReadOnlySpan();
+                        var dGammaRead = dGammaMat.AsReadOnlySpan();
+                        var dBetaRead = dBetaMat.AsReadOnlySpan();
 
                         for (var j = 0; j < C; j++)
                         {
-                            var dx = (gSpanLocal[j] * invStdVec[j] / N) * 
-                                     (N * gradOutRow[j] - dBeta[j] - xHatRow[j] * dGamma[j]);
+                            var dx = (gSpanLocal[j] * invStdSpanLocal[j] / N) *
+                                     (N * gradOutRow[j] - dBetaRead[j] - xHatRow[j] * dGammaRead[j]);
                             gradInRow[j] += dx;
                         }
                     });
                 }
-
-                xHatMat.Dispose();
             };
 
-            return Tensor.CreateOperationResult(resultData, [input, gamma, beta], backward);
+            return Tensor.CreateOperationResult(resultData, deps, backward);
         }
-        
+
         public static Tensor GlobalAveragePool2D(Tensor input, int channels, int h, int w)
         {
             var batchSize = input.Data.Rows;
             var spatialSize = h * w;
             var outputData = new FastMatrix<double>(batchSize, channels);
-    
-            // FORWARD: Liczymy średnią dla każdego kanału
+
             Parallel.For(0, batchSize, b =>
             {
                 for (var c = 0; c < channels; c++)
                 {
                     double sum = 0;
                     var offset = c * spatialSize;
-            
+
                     for (var i = 0; i < spatialSize; i++)
                     {
                         sum += input.Data[b, offset + i];
@@ -785,17 +813,16 @@ namespace DevOnBike.Overfit
                 result._backwardAction = (node) =>
                 {
                     var invSpatialSize = 1.0 / spatialSize;
-            
+
                     Parallel.For(0, batchSize, b =>
                     {
                         for (var c = 0; c < channels; c++)
                         {
                             var gradOut = node.Grad[b, c];
                             var offset = c * spatialSize;
-                    
+
                             for (var i = 0; i < spatialSize; i++)
                             {
-                                // BACKWARD: Gradient średniej to 1/N rozdzielone na wszystkie elementy
                                 input.Grad[b, offset + i] += gradOut * invSpatialSize;
                             }
                         }
