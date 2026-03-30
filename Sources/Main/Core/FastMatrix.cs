@@ -5,14 +5,14 @@ using System.Runtime.CompilerServices;
 
 namespace DevOnBike.Overfit.Core
 {
-    public sealed class FastMatrix<T> : IDisposable where T : struct, IFloatingPointIeee754<T>
+    public class FastMatrix<T> : IDisposable where T : struct, IFloatingPointIeee754<T>
     {
         private T[] _data;
-        private readonly int _size;
         private bool _disposed;
 
         public int Cols { get; }
         public int Rows { get; }
+        public int Size { get; }
 
         public FastMatrix(int rows, int cols)
         {
@@ -22,10 +22,10 @@ namespace DevOnBike.Overfit.Core
             Rows = rows;
             Cols = cols;
 
-            _size = checked(rows * cols);
-            _data = ArrayPool<T>.Shared.Rent(_size);
+            Size = checked(rows * cols);
+            _data = ArrayPool<T>.Shared.Rent(Size);
 
-            _data.AsSpan(0, _size).Clear();
+            _data.AsSpan(0, Size).Clear();
         }
 
         public ref T this[int row, int col]
@@ -55,13 +55,13 @@ namespace DevOnBike.Overfit.Core
         public Span<T> AsSpan()
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            return _data!.AsSpan(0, _size);
+            return _data!.AsSpan(0, Size);
         }
 
         public ReadOnlySpan<T> AsReadOnlySpan()
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            return _data!.AsSpan(0, _size);
+            return _data!.AsSpan(0, Size);
         }
 
         public TensorSpan<T> AsTensor()
@@ -81,9 +81,9 @@ namespace DevOnBike.Overfit.Core
 
         public void CopyFrom(ReadOnlySpan<T> source)
         {
-            if (source.Length != _size)
+            if (source.Length != Size)
             {
-                throw new ArgumentException($"Expected {_size} elements, got {source.Length}.");
+                throw new ArgumentException($"Expected {Size} elements, got {source.Length}.");
             }
             source.CopyTo(AsSpan());
         }
@@ -152,7 +152,7 @@ namespace DevOnBike.Overfit.Core
         {
             return AsView().Slice(startRow, startCol, rows, cols);
         }
-        
+
         /// <summary>
         /// Materializes the view into a new, contiguous FastMatrix.
         /// Essential for Autograd when a transposed view needs to be the right-hand operand in SIMD GEMM.
@@ -161,26 +161,53 @@ namespace DevOnBike.Overfit.Core
         public FastMatrix<T> ToContiguousFastMatrix()
         {
             var result = new FastMatrix<T>(Rows, Cols);
-            
+
             AsReadOnlySpan().CopyTo(result.AsSpan());
-            
+
             return result;
         }
 
-        public void Dispose()
+        // ── Dispose Pattern ───────────────────────────────────────────
+        // Wzorzec z virtual Dispose(bool) — wymagany gdy klasa nie jest sealed.
+        // Podklasy nadpisują Dispose(bool) aby zwolnić własne zasoby,
+        // następnie wywołują base.Dispose(disposing) do zwolnienia _data.
+
+        /// <summary>
+        /// Nadpisz tę metodę w podklasie aby zwolnić własne zasoby.
+        /// Zawsze wywołuj base.Dispose(disposing) na końcu.
+        /// </summary>
+        /// <param name="disposing">
+        /// true  — wywołane przez Dispose(); zwolnij zasoby managed i unmanaged.
+        /// false — wywołane przez finalizer; zwalniaj tylko unmanaged (managed może być już zebrany przez GC).
+        /// </param>
+        protected virtual void Dispose(bool disposing)
         {
+            // Atomowa zamiana: tylko pierwszy wywołujący przechodzi dalej.
+            // Chroni przed double-return do ArrayPool z dwóch wątków jednocześnie.
             if (Interlocked.Exchange(ref _disposed, true))
             {
                 return;
             }
 
-            var rented = Interlocked.Exchange(ref _data, null);
-
-            if (rented != null)
+            if (disposing)
             {
-                ArrayPool<T>.Shared.Return(rented);
+                // Managed resources: zwróć bufor do ArrayPool.
+                var rented = Interlocked.Exchange(ref _data, null!);
+
+                if (rented != null)
+                {
+                    ArrayPool<T>.Shared.Return(rented);
+                }
             }
 
+            // Unmanaged resources: brak — ArrayPool to managed wrapper.
+        }
+
+        /// <inheritdoc/>
+        public void Dispose()
+        {
+            Dispose(disposing: true);
+            // Informuje GC że finalizer jest zbędny — obiekt już posprzątany.
             GC.SuppressFinalize(this);
         }
 
