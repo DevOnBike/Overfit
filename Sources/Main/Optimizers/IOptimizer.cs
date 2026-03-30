@@ -1,4 +1,4 @@
-namespace DevOnBike.Overfit
+namespace DevOnBike.Overfit.Optimizers
 {
     public interface IOptimizer
     {

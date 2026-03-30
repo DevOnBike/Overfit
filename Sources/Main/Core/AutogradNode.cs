@@ -97,8 +97,15 @@ namespace DevOnBike.Overfit.Core
 
         public void Dispose()
         {
-            Data?.Dispose();
+            // Zabezpieczenie: niszczymy macierz TYLKO, jeśli węzeł jest jej wyłącznym właścicielem
+            if (_ownsData)
+            {
+                Data?.Dispose();
+            }
+
+            // Gradient i tak jest zawsze własnością węzła, więc możemy go zwolnić
             Grad?.Dispose();
+
             _dependencies.Clear();
             _backwardAction = null;
         }

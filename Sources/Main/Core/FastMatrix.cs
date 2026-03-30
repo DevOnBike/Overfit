@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
+
 namespace DevOnBike.Overfit.Core
 {
     public sealed class FastMatrix<T> : IDisposable where T : struct, IFloatingPointIeee754<T>
@@ -161,13 +162,7 @@ namespace DevOnBike.Overfit.Core
         {
             var result = new FastMatrix<T>(Rows, Cols);
             
-            for (var r = 0; r < Rows; r++)
-            {
-                for (var c = 0; c < Cols; c++)
-                {
-                    result[r, c] = this[r, c];
-                }
-            }
+            AsReadOnlySpan().CopyTo(result.AsSpan());
             
             return result;
         }
