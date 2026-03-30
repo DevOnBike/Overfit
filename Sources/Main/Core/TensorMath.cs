@@ -630,9 +630,10 @@ namespace DevOnBike.Overfit.Core
 
             if (!isTraining)
             {
+                // Inference: Parallel.For przelatuje po wierszach - idealny Cache Hit
                 Parallel.For(0, N, i =>
                 {
-                    var rowIn = input.Data.Row(i);
+                    var rowIn = input.Data.ReadOnlyRow(i);
                     var rowOut = resultData.Row(i);
 
                     var gSpan = gamma.Data.AsReadOnlySpan();
@@ -652,58 +653,71 @@ namespace DevOnBike.Overfit.Core
             }
 
             // --- TRENING ---
-
-            // Macierze żyją na stercie, więc domknięcia (lambdy) mogą je bezpiecznie chwytać
             using var batchMeanMat = new FastMatrix<double>(1, C);
             using var batchVarMat = new FastMatrix<double>(1, C);
 
             var invStdTensor = new AutogradNode(new FastMatrix<double>(1, C), requiresGrad: false);
             var xHatTensor = new AutogradNode(new FastMatrix<double>(N, C), requiresGrad: false);
 
-            Parallel.For(0, C, j =>
+            var batchMean = batchMeanMat.AsSpan();
+            var batchVar = batchVarMat.AsSpan();
+            var invStdVec = invStdTensor.Data.AsSpan();
+
+            // 1. Średnia: Row-Major + Sprzętowe SIMD (100% Cache Friendly)
+            batchMean.Clear();
+            for (var i = 0; i < N; i++)
             {
-                // Spany tworzone bezpiecznie na stosie wątku
-                var batchMean = batchMeanMat.AsSpan();
-                var batchVar = batchVarMat.AsSpan();
-                var invStdVec = invStdTensor.Data.AsSpan();
-                var rmSpanLocal = runningMean.AsSpan();
-                var rvSpanLocal = runningVar.AsSpan();
+                // Zamiast wchodzić w głąb kolumn, dodajemy wektorowo całe wiersze
+                TensorPrimitives.Add(batchMean, input.Data.ReadOnlyRow(i), batchMean);
+            }
 
-                double sum = 0;
-                for (var i = 0; i < N; i++) sum += input.Data[i, j];
-                var mean = sum / N;
-                batchMean[j] = mean;
+            var invN = 1.0 / N;
+            TensorPrimitives.Multiply(batchMean, invN, batchMean);
 
-                double sqSum = 0;
-                for (var i = 0; i < N; i++)
-                {
-                    var diff = input.Data[i, j] - mean;
-                    sqSum += diff * diff;
-                }
-                var var = sqSum / N;
-                batchVar[j] = var;
+            // 2. Wariancja: Row-Major + Sprzętowe FMA (Fused Multiply-Add)
+            batchVar.Clear();
+            using var tempRowMat = new FastMatrix<double>(1, C);
+            var tempRow = tempRowMat.AsSpan();
+            var batchMeanRead = batchMeanMat.AsReadOnlySpan();
 
-                rmSpanLocal[j] = (1 - momentum) * rmSpanLocal[j] + momentum * mean;
-                rvSpanLocal[j] = (1 - momentum) * rvSpanLocal[j] + momentum * var;
+            for (var i = 0; i < N; i++)
+            {
+                // tempRow = input_row - batchMean
+                TensorPrimitives.Subtract(input.Data.ReadOnlyRow(i), batchMeanRead, tempRow);
 
-                invStdVec[j] = 1.0 / Math.Sqrt(var + eps);
-            });
+                // batchVar = (tempRow * tempRow) + batchVar (Wykonane w jednym cyklu CPU!)
+                TensorPrimitives.MultiplyAdd(tempRow, tempRow, batchVar, batchVar);
+            }
+            TensorPrimitives.Multiply(batchVar, invN, batchVar);
 
+            // 3. Statystyki EMA i InvStd
+            var rmSpanLocal = runningMean.AsSpan();
+            var rvSpanLocal = runningVar.AsSpan();
+
+            for (var j = 0; j < C; j++)
+            {
+                rmSpanLocal[j] = (1 - momentum) * rmSpanLocal[j] + momentum * batchMean[j];
+                rvSpanLocal[j] = (1 - momentum) * rvSpanLocal[j] + momentum * batchVar[j];
+
+                invStdVec[j] = 1.0 / Math.Sqrt(batchVar[j] + eps);
+            }
+
+            // 4. Normalizacja i Skalowanie (Przelot wierszami)
+            var xHatMat = xHatTensor.Data;
             Parallel.For(0, N, i =>
             {
-                // Spany tworzone bezpiecznie na stosie wątku
-                var rowIn = input.Data.Row(i);
+                var rowIn = input.Data.ReadOnlyRow(i);
                 var rowOut = resultData.Row(i);
-                var rowXHat = xHatTensor.Data.Row(i);
+                var rowXHat = xHatMat.Row(i);
 
-                var batchMeanRead = batchMeanMat.AsReadOnlySpan();
-                var invStdVecRead = invStdTensor.Data.AsReadOnlySpan();
+                var bMeanRead = batchMeanMat.AsReadOnlySpan();
+                var invStdRead = invStdTensor.Data.AsReadOnlySpan();
                 var gSpanLocal = gamma.Data.AsReadOnlySpan();
                 var bSpanLocal = beta.Data.AsReadOnlySpan();
 
                 for (var j = 0; j < C; j++)
                 {
-                    var xHat = (rowIn[j] - batchMeanRead[j]) * invStdVecRead[j];
+                    var xHat = (rowIn[j] - bMeanRead[j]) * invStdRead[j];
                     rowXHat[j] = xHat;
                     rowOut[j] = gSpanLocal[j] * xHat + bSpanLocal[j];
                 }
@@ -730,42 +744,43 @@ namespace DevOnBike.Overfit.Core
                 using var dGammaMat = new FastMatrix<double>(1, C);
                 using var dBetaMat = new FastMatrix<double>(1, C);
 
-                // Krok A - ta pętla jest sekwencyjna, więc możemy wziąć Span na zewnątrz pętli for
                 var dGamma = dGammaMat.AsSpan();
                 var dBeta = dBetaMat.AsSpan();
 
+                // KROK A: Cache-friendly Backward dla wag (Row-Major + SIMD)
                 for (var i = 0; i < N; i++)
                 {
-                    var gradOutRow = gradOut.Row(i);
-                    var xHatRow = xHatTensor.Data.Row(i);
-                    for (var j = 0; j < C; j++)
-                    {
-                        dGamma[j] += gradOutRow[j] * xHatRow[j];
-                        dBeta[j] += gradOutRow[j];
-                    }
+                    var gradOutRow = gradOut.ReadOnlyRow(i);
+                    var xHatRow = xHatMat.ReadOnlyRow(i);
+
+                    // dGamma += gradOutRow * xHatRow
+                    TensorPrimitives.MultiplyAdd(gradOutRow, xHatRow, dGamma, dGamma);
+
+                    // dBeta += gradOutRow
+                    TensorPrimitives.Add(dBeta, gradOutRow, dBeta);
                 }
 
                 if (gamma.RequiresGrad)
                 {
                     var gGrad = gamma.Grad.AsSpan();
-                    for (var j = 0; j < C; j++) gGrad[j] += dGamma[j];
+                    TensorPrimitives.Add(gGrad, dGamma, gGrad);
                 }
 
                 if (beta.RequiresGrad)
                 {
                     var bGrad = beta.Grad.AsSpan();
-                    for (var j = 0; j < C; j++) bGrad[j] += dBeta[j];
+                    TensorPrimitives.Add(bGrad, dBeta, bGrad);
                 }
 
                 if (input.RequiresGrad)
                 {
+                    // Krok B: Równoległe, wierszowe cofanie błędu do wejścia
                     Parallel.For(0, N, i =>
                     {
                         var gradInRow = input.Grad.Row(i);
-                        var gradOutRow = gradOut.Row(i);
-                        var xHatRow = xHatTensor.Data.Row(i);
+                        var gradOutRow = gradOut.ReadOnlyRow(i);
+                        var xHatRow = xHatMat.ReadOnlyRow(i);
 
-                        // LOKALNE SPANY do czytania (zabezpieczenie przed błędem CS8175)
                         var gSpanLocal = gamma.Data.AsReadOnlySpan();
                         var invStdSpanLocal = invStdTensor.Data.AsReadOnlySpan();
                         var dGammaRead = dGammaMat.AsReadOnlySpan();
@@ -831,20 +846,6 @@ namespace DevOnBike.Overfit.Core
             }
 
             return result;
-        }
-
-        // ====================================================================
-        // 7. UTILS
-        // ====================================================================
-
-        public static double GetMax(ReadOnlySpan<double> span)
-        {
-            var max = span[0];
-            for (var i = 1; i < span.Length; i++)
-            {
-                if (span[i] > max) max = span[i];
-            }
-            return max;
         }
     }
 }
