@@ -1,89 +1,160 @@
+using System.Numerics.Tensors;
 using DevOnBike.Overfit.Core;
+
 namespace DevOnBike.Overfit.Optimizers
 {
-    public sealed class Adam
+    public sealed class Adam : IOptimizer, IDisposable
     {
-        private readonly List<AutogradNode> _parameters;
-        private readonly Dictionary<AutogradNode, FastMatrix<double>> _m = new();
-        private readonly Dictionary<AutogradNode, FastMatrix<double>> _v = new();
+        // 1. Zamiast słowników - płaska struktura powiązana z obiektem Node
+        private readonly struct ParamState
+        {
+            public readonly AutogradNode Node;
+            public readonly FastMatrix<double> M;
+            public readonly FastMatrix<double> V;
+            public readonly int Size;
+
+            public ParamState(AutogradNode node)
+            {
+                Node = node;
+                Size = node.Data.Rows * node.Data.Cols;
+                M = new FastMatrix<double>(node.Data.Rows, node.Data.Cols);
+                V = new FastMatrix<double>(node.Data.Rows, node.Data.Cols);
+            }
+        }
+
+        private readonly ParamState[] _states;
+
+        // 2. ThreadLocal dla buforów, aby umożliwić równoległe aktualizacje przez Parallel.ForEach
+        // Zapobiega to rywalizacji o te same bufory przez różne wątki.
+        private readonly ThreadLocal<FastBuffer<double>> _bufGl2;
+        private readonly ThreadLocal<FastBuffer<double>> _bufGSq;
+        private readonly ThreadLocal<FastBuffer<double>> _bufMHat;
+        private readonly ThreadLocal<FastBuffer<double>> _bufVHat;
+        private readonly ThreadLocal<FastBuffer<double>> _bufUpd;
 
         public double LearningRate { get; set; }
         public double Beta1 { get; set; } = 0.9;
         public double Beta2 { get; set; } = 0.999;
         public double Epsilon { get; set; } = 1e-8;
-
-        // NOWOŚĆ: Parametr kary L2 (Weight Decay)
         public double WeightDecay { get; set; } = 0.0001;
 
         private int _t = 0;
 
         public Adam(IEnumerable<AutogradNode> parameters, double learningRate = 0.001)
         {
-            _parameters = parameters.Where(p => p.RequiresGrad).ToList();
             LearningRate = learningRate;
 
-            foreach (var p in _parameters)
+            var paramList = parameters.Where(p => p.RequiresGrad).ToList();
+            _states = new ParamState[paramList.Count];
+
+            var maxSize = 1;
+
+            for (var i = 0; i < paramList.Count; i++)
             {
-                _m[p] = new FastMatrix<double>(p.Data.Rows, p.Data.Cols);
-                _v[p] = new FastMatrix<double>(p.Data.Rows, p.Data.Cols);
+                _states[i] = new ParamState(paramList[i]);
+                if (_states[i].Size > maxSize) maxSize = _states[i].Size;
             }
+
+            // Inicjalizacja buforów z gwarancją własnych kopii dla każdego wątku
+            _bufGl2 = new ThreadLocal<FastBuffer<double>>(() => new FastBuffer<double>(maxSize), true);
+            _bufGSq = new ThreadLocal<FastBuffer<double>>(() => new FastBuffer<double>(maxSize), true);
+            _bufMHat = new ThreadLocal<FastBuffer<double>>(() => new FastBuffer<double>(maxSize), true);
+            _bufVHat = new ThreadLocal<FastBuffer<double>>(() => new FastBuffer<double>(maxSize), true);
+            _bufUpd = new ThreadLocal<FastBuffer<double>>(() => new FastBuffer<double>(maxSize), true);
         }
 
         public void Step()
         {
             _t++;
 
-            // Poprawki biasu obliczane raz na krok optymalizatora
             var bc1 = 1.0 - Math.Pow(Beta1, _t);
             var bc2 = 1.0 - Math.Pow(Beta2, _t);
+            var invBc1 = 1.0 / bc1;
+            var invBc2 = 1.0 / bc2;
 
-            foreach (var p in _parameters)
+            // Równoległa aktualizacja momentów wszystkich warstw naraz!
+            Parallel.ForEach(_states, state =>
             {
-                // Bezpiecznik dla Janitora
-                if (p.Data == null || p.Grad == null) continue;
+                var p = state.Node;
+                if (p.Data == null || p.Grad == null) return;
 
+                var n = state.Size;
                 var g = p.Grad.AsReadOnlySpan();
-                var m = _m[p].AsSpan();
-                var v = _v[p].AsSpan();
+                var m = state.M.AsSpan();
+                var v = state.V.AsSpan();
                 var w = p.Data.AsSpan();
 
-                // Cache stałych dla wydajności pętli[cite: 5]
-                var lr = LearningRate;
+                // Pobranie buforów dedykowanych dla obecnego wątku (Zero alokacji, thread-safe)
+                var gl2 = _bufGl2.Value.AsSpan()[..n];
+                var gSq = _bufGSq.Value.AsSpan()[..n];
+                var mHat = _bufMHat.Value.AsSpan()[..n];
+                var vHat = _bufVHat.Value.AsSpan()[..n];
+                var upd = _bufUpd.Value.AsSpan()[..n];
+
                 var wd = WeightDecay;
                 var b1 = Beta1;
-                var b1Inv = 1.0 - Beta1;
                 var b2 = Beta2;
+                var b1Inv = 1.0 - Beta1;
                 var b2Inv = 1.0 - Beta2;
                 var eps = Epsilon;
+                var lr = LearningRate;
 
-                for (var i = 0; i < w.Length; i++)
-                {
-                    // --- L2 Regularization ---
-                    // Dodajemy pochodną kary (wd * w) do aktualnego gradientu
-                    var gWithL2 = g[i] + wd * w[i];
+                // --- 1. gWithL2 = g + wd*w ---
+                TensorPrimitives.MultiplyAdd(w, wd, g, gl2);
 
-                    // 1. Aktualizacja momentów z uwzględnieniem L2[cite: 5]
-                    m[i] = b1 * m[i] + b1Inv * gWithL2;
-                    v[i] = b2 * v[i] + b2Inv * gWithL2 * gWithL2;
+                // --- 2. m = b1*m + b1Inv*gWithL2 ---
+                TensorPrimitives.Multiply(m, b1, mHat);
+                TensorPrimitives.MultiplyAdd(gl2, b1Inv, mHat, m);
 
-                    // 2. Korekta biasu[cite: 5]
-                    var mHat = m[i] / bc1;
-                    var vHat = v[i] / bc2;
+                // --- 3. v = b2*v + b2Inv*gWithL2² ---
+                TensorPrimitives.Multiply(gl2, gl2, gSq);
+                TensorPrimitives.Multiply(v, b2, vHat);
+                TensorPrimitives.MultiplyAdd(gSq, b2Inv, vHat, v);
 
-                    // 3. Aktualizacja wagi[cite: 5]
-                    w[i] -= lr * mHat / (Math.Sqrt(vHat) + eps);
-                }
-            }
+                // --- 4. mHat = m / bc1 ---
+                TensorPrimitives.Multiply(m, invBc1, mHat);
+
+                // --- 5. vHat = sqrt(v/bc2) + eps ---
+                TensorPrimitives.Multiply(v, invBc2, vHat);
+                TensorPrimitives.Sqrt(vHat, vHat);
+                TensorPrimitives.Add(vHat, eps, vHat);
+
+                // --- 6. w -= lr * mHat / vHat ---
+                TensorPrimitives.Divide(mHat, vHat, upd);
+                TensorPrimitives.MultiplyAdd(upd, -lr, w, w);
+            });
         }
 
         public void ZeroGrad()
         {
-            foreach (var p in _parameters)
+            foreach (var state in _states)
             {
-                p.Grad?.Clear();
+                state.Node.Grad?.Clear();
             }
         }
 
         public void ResetTime() => _t = 0;
+
+        public void Dispose()
+        {
+            foreach (var state in _states)
+            {
+                state.M?.Dispose();
+                state.V?.Dispose();
+            }
+
+            // Bezpieczne sprzątanie buforów ThreadLocal
+            if (_bufGl2.IsValueCreated) foreach (var val in _bufGl2.Values) val.Dispose();
+            if (_bufGSq.IsValueCreated) foreach (var val in _bufGSq.Values) val.Dispose();
+            if (_bufMHat.IsValueCreated) foreach (var val in _bufMHat.Values) val.Dispose();
+            if (_bufVHat.IsValueCreated) foreach (var val in _bufVHat.Values) val.Dispose();
+            if (_bufUpd.IsValueCreated) foreach (var val in _bufUpd.Values) val.Dispose();
+
+            _bufGl2.Dispose();
+            _bufGSq.Dispose();
+            _bufMHat.Dispose();
+            _bufVHat.Dispose();
+            _bufUpd.Dispose();
+        }
     }
 }
