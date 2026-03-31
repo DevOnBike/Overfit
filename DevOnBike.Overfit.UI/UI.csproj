@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<OutputType>WinExe</OutputType>
+		<TargetFramework>net10.0-windows</TargetFramework>
+		<RootNamespace>DevOnBike.Overfit.UI</RootNamespace>
+		<AssemblyName>DevOnBike.Overfit.UI</AssemblyName>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<UseWPF>true</UseWPF>
+		<EnableWindowsTargeting>true</EnableWindowsTargeting>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\Sources\Main\Main.csproj" />
+	</ItemGroup>
+
+</Project>
