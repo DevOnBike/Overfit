@@ -1,2 +1,2 @@
 # Overfit
-Machine Lerning stuff
+Machine Learning engine in pure C#
