@@ -120,12 +120,21 @@ namespace DevOnBike.Overfit.Tests
 
             PrintConfusionMatrix(model, testX, testY);
 
-            // Czyste zwalnianie pamięci całego grafu
-            model.Dispose();
-
             _output.WriteLine("----------------------------------------------------------");
             _output.WriteLine($"TRENING AUGMENTOWANY ZAKOŃCZONY!");
             _output.WriteLine($"Całkowity czas: {totalSw.Elapsed.TotalSeconds:F2}s");
+
+            // --- EKSPORT DO WPF ---
+            var exportPath = @"d:\ml\bestia.bin"; // Możesz zmienić ścieżkę
+            using (var fs = new FileStream(exportPath, FileMode.Create))
+            using (var bw = new BinaryWriter(fs))
+            {
+                model.Save(bw); // Magia interfejsu IModule! Zapisuje Conv, BN i FC liniowo.
+            }
+            _output.WriteLine($"Model wyeksportowany do: {exportPath}");
+
+            // Czyste zwalnianie pamięci całego grafu
+            model.Dispose();
         }
 
         [Fact(Skip = "Test strukturalny z użyciem starych metod - omijam ze względu na limit długości")]
