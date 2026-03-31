@@ -22,7 +22,7 @@ namespace DevOnBike.Overfit.Tests
             tensor.Grad[1, 0] = -1.0; tensor.Grad[1, 1] = 2.0;
 
             var learningRate = 0.1;
-            var optimizer = new SGD(new[] { tensor }, learningRate);
+            var optimizer = new SGD([tensor], learningRate);
 
             // Act
             optimizer.Step();
@@ -51,7 +51,7 @@ namespace DevOnBike.Overfit.Tests
 
             tensor.Grad.AsSpan().Fill(42.0); // Zanieczyszczamy gradient
 
-            var optimizer = new SGD(new[] { tensor }, learningRate: 0.1);
+            var optimizer = new SGD([tensor], learningRate: 0.1);
 
             // Act
             optimizer.ZeroGrad();
@@ -74,7 +74,7 @@ namespace DevOnBike.Overfit.Tests
             using var tensor = new AutogradNode(mat, requiresGrad: false);
             tensor.Grad[0, 0] = 5.0; // Gradient sztucznie ustawiony
 
-            var optimizer = new SGD(new[] { tensor }, learningRate: 0.1);
+            var optimizer = new SGD([tensor], learningRate: 0.1);
 
             // Act
             optimizer.Step();

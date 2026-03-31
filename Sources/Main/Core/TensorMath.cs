@@ -606,7 +606,7 @@ namespace DevOnBike.Overfit.Core
                 }
             };
 
-            return AutogradNode.CreateOperationResult(resultData, new List<AutogradNode> { input, weights, bias }, backward);
+            return AutogradNode.CreateOperationResult(resultData, [input, weights, bias], backward);
         }
 
         // ====================================================================
@@ -788,8 +788,7 @@ namespace DevOnBike.Overfit.Core
 
                         for (var j = 0; j < C; j++)
                         {
-                            var dx = (gSpanLocal[j] * invStdSpanLocal[j] / N) *
-                                     (N * gradOutRow[j] - dBetaRead[j] - xHatRow[j] * dGammaRead[j]);
+                            var dx = (gSpanLocal[j] * invStdSpanLocal[j] / N) * (N * gradOutRow[j] - dBetaRead[j] - xHatRow[j] * dGammaRead[j]);
                             gradInRow[j] += dx;
                         }
                     });

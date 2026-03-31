@@ -2,46 +2,53 @@ using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
-    /// <summary>
-    /// Klasyczny Blok ResNet (Residual Block).
-    /// Architektura: Linear -> BatchNorm -> ReLU -> Linear -> BatchNorm -> (+) Dodanie Wejścia -> ReLU
-    /// </summary>
-    public class ResidualBlock
+    public sealed class ResidualBlock : IModule
     {
         private readonly LinearLayer _linear1;
         private readonly BatchNorm1D _bn1;
         private readonly LinearLayer _linear2;
         private readonly BatchNorm1D _bn2;
 
+        public bool IsTraining { get; private set; } = true;
+        
         public ResidualBlock(int hiddenSize)
         {
-            // W bloku resztkowym wymiar wejściowy musi być równy wyjściowemu,
-            // aby można było dodać do siebie macierze (Shape match)
             _linear1 = new LinearLayer(hiddenSize, hiddenSize);
             _bn1 = new BatchNorm1D(hiddenSize);
-            
             _linear2 = new LinearLayer(hiddenSize, hiddenSize);
             _bn2 = new BatchNorm1D(hiddenSize);
         }
-
-        public AutogradNode Forward(AutogradNode input, bool isTraining)
+        
+        public void Train()
         {
-            // --- ŚCIEŻKA GŁÓWNA (F(X)) ---
-            // 1. Pierwsza warstwa + stabilizacja + aktywacja
+            IsTraining = true;
+            _linear1.Train();
+            _bn1.Train();
+            _linear2.Train();
+            _bn2.Train();
+        }
+
+        public void Eval()
+        {
+            IsTraining = false;
+            _linear1.Eval();
+            _bn1.Eval();
+            _linear2.Eval();
+            _bn2.Eval();
+        }
+
+        // Zgodne z interfejsem! Flaga isTraining pobierana jest z właściwości instancji
+        public AutogradNode Forward(AutogradNode input)
+        {
             var out1 = _linear1.Forward(input);
-            var bn1Out = _bn1.Forward(out1, isTraining);
+            var bn1Out = _bn1.Forward(out1);
             var a1 = TensorMath.ReLU(bn1Out);
 
-            // 2. Druga warstwa + stabilizacja (bez aktywacji!)
             var out2 = _linear2.Forward(a1);
-            var bn2Out = _bn2.Forward(out2, isTraining);
+            var bn2Out = _bn2.Forward(out2);
 
-            // --- POŁĄCZENIE RESZTKOWE (SKIP CONNECTION) ---
-            // F(X) + X
-            // Tutaj dzieje się magia Autogradu. Węzeł 'Add' ma dwoje dzieci.
             var added = TensorMath.Add(bn2Out, input);
 
-            // 3. Ostateczna aktywacja po dodaniu
             return TensorMath.ReLU(added);
         }
 
@@ -53,20 +60,46 @@ namespace DevOnBike.Overfit.DeepLearning
                 .Concat(_bn2.Parameters());
         }
 
-        public void Save(string pathPrefix)
+        public void Save(BinaryWriter bw)
         {
-            _linear1.Save($"{pathPrefix}_l1.bin");
-            _bn1.Save($"{pathPrefix}_bn1.bin");
-            _linear2.Save($"{pathPrefix}_l2.bin");
-            _bn2.Save($"{pathPrefix}_bn2.bin");
+            _linear1.Save(bw);
+            _bn1.Save(bw);
+            _linear2.Save(bw);
+            _bn2.Save(bw);
         }
 
-        public void Load(string pathPrefix)
+        public void Save(string path)
         {
-            _linear1.Load($"{pathPrefix}_l1.bin");
-            _bn1.Load($"{pathPrefix}_bn1.bin");
-            _linear2.Load($"{pathPrefix}_l2.bin");
-            _bn2.Load($"{pathPrefix}_bn2.bin");
+            using var fs = new FileStream(path, FileMode.Create);
+            using var bw = new BinaryWriter(fs);
+
+            Save(bw);
+        }
+
+        public void Load(string path)
+        {
+            if (!File.Exists(path)) throw new FileNotFoundException($"Brak pliku wag: {path}");
+
+            using var fs = new FileStream(path, FileMode.Open);
+            using var br = new BinaryReader(fs);
+
+            Load(br);
+        }
+
+        public void Load(BinaryReader br)
+        {
+            _linear1.Load(br);
+            _bn1.Load(br);
+            _linear2.Load(br);
+            _bn2.Load(br);
+        }
+
+        public void Dispose()
+        {
+            _linear1?.Dispose();
+            _bn1?.Dispose();
+            _linear2?.Dispose();
+            _bn2?.Dispose();
         }
     }
 }

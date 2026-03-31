@@ -1,26 +1,26 @@
 using DevOnBike.Overfit.Core;
+
 namespace DevOnBike.Overfit.DeepLearning
 {
-    public class BatchNorm1D
+    public sealed class BatchNorm1D : IModule
     {
         public AutogradNode Gamma { get; private set; }
         public AutogradNode Beta { get; private set; }
-        
-        // Statystyki do użycia w Inference
+
         public FastMatrix<double> RunningMean { get; private set; }
         public FastMatrix<double> RunningVar { get; private set; }
-        
+
         public double Momentum { get; set; }
         public double Eps { get; set; }
 
+        public bool IsTraining { get; private set; } = true;
+
         public BatchNorm1D(int features, double momentum = 0.1, double eps = 1e-5)
         {
-            // Gamma inicjalizujemy na 1.0 (domyślna wariancja)
             var gammaData = new FastMatrix<double>(1, features);
             gammaData.AsSpan().Fill(1.0);
             Gamma = new AutogradNode(gammaData, requiresGrad: true);
 
-            // Beta inicjalizujemy na 0.0 (domyślna średnia)
             var betaData = new FastMatrix<double>(1, features);
             betaData.AsSpan().Fill(0.0);
             Beta = new AutogradNode(betaData, requiresGrad: true);
@@ -33,9 +33,18 @@ namespace DevOnBike.Overfit.DeepLearning
             Eps = eps;
         }
 
-        public AutogradNode Forward(AutogradNode input, bool isTraining)
+        public void Train()
         {
-            return TensorMath.BatchNorm1D(input, Gamma, Beta, RunningMean, RunningVar, Momentum, Eps, isTraining);
+            IsTraining = true;
+        }
+        public void Eval()
+        {
+            IsTraining = false;
+        }
+
+        public AutogradNode Forward(AutogradNode input)
+        {
+            return TensorMath.BatchNorm1D(input, Gamma, Beta, RunningMean, RunningVar, Momentum, Eps, IsTraining);
         }
 
         public IEnumerable<AutogradNode> Parameters()
@@ -48,7 +57,12 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             using var fs = new FileStream(path, FileMode.Create);
             using var bw = new BinaryWriter(fs);
-            
+
+            Save(bw);
+        }
+
+        public void Save(BinaryWriter bw)
+        {
             foreach (var val in Gamma.Data.AsSpan()) bw.Write(val);
             foreach (var val in Beta.Data.AsSpan()) bw.Write(val);
             foreach (var val in RunningMean.AsSpan()) bw.Write(val);
@@ -57,20 +71,35 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void Load(string path)
         {
+            if (!File.Exists(path)) throw new FileNotFoundException($"Brak pliku wag: {path}");
+
             using var fs = new FileStream(path, FileMode.Open);
             using var br = new BinaryReader(fs);
-            
+
+            Load(br);
+        }
+
+        public void Load(BinaryReader br)
+        {
             var gSpan = Gamma.Data.AsSpan();
             for (var i = 0; i < gSpan.Length; i++) gSpan[i] = br.ReadDouble();
-            
+
             var bSpan = Beta.Data.AsSpan();
             for (var i = 0; i < bSpan.Length; i++) bSpan[i] = br.ReadDouble();
-            
+
             var rmSpan = RunningMean.AsSpan();
             for (var i = 0; i < rmSpan.Length; i++) rmSpan[i] = br.ReadDouble();
-            
+
             var rvSpan = RunningVar.AsSpan();
             for (var i = 0; i < rvSpan.Length; i++) rvSpan[i] = br.ReadDouble();
+        }
+
+        public void Dispose()
+        {
+            Gamma?.Dispose();
+            Beta?.Dispose();
+            RunningMean?.Dispose();
+            RunningVar?.Dispose();
         }
     }
 }

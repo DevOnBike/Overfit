@@ -1,6 +1,4 @@
-﻿using System.Buffers;
-
-namespace DevOnBike.Overfit.Core
+﻿namespace DevOnBike.Overfit.Core
 {
     public class FloatFastMatrix : FastMatrix<float>
     {

@@ -133,7 +133,10 @@ namespace DevOnBike.Overfit.Optimizers
             }
         }
 
-        public void ResetTime() => _t = 0;
+        public void ResetTime()
+        {
+            _t = 0;
+        }
 
         public void Dispose()
         {
