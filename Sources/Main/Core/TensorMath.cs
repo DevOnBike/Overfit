@@ -846,5 +846,63 @@ namespace DevOnBike.Overfit.Core
 
             return result;
         }
+
+        public static AutogradNode MSELoss(AutogradNode prediction, AutogradNode target)
+        {
+            var n = prediction.Data.Size;
+            var predData = prediction.Data; // Referencja do obiektu (bezpieczna w lambdzie)
+            var targetData = target.Data;
+
+            // 1. FORWARD: Obliczamy stratę (Loss)
+            using var diffBuffer = new FastBuffer<double>(n);
+            var diffSpan = diffBuffer.AsSpan();
+
+            // diff = prediction - target
+            TensorPrimitives.Subtract(predData.AsSpan(), targetData.AsSpan(), diffSpan);
+
+            // sumSq = suma(diff^2)
+            var sumSq = TensorPrimitives.SumOfSquares((ReadOnlySpan<double>)diffSpan);
+            var finalLoss = sumSq / n;
+
+            var resultMat = new FastMatrix<double>(1, 1);
+            resultMat[0, 0] = finalLoss;
+
+            // 2. PRZEPIS NA GRADIENT (Zero-Alloc Backward)
+            Action<AutogradNode> backwardAction = (self) =>
+            {
+                var m = (2.0 / n) * self.Grad[0, 0];
+
+                // Wyjaśnienie: grad += m * (pred - target)
+                // Możemy to rozbić matematycznie: grad += m * pred - m * target
+                // Dzięki temu nie potrzebujemy bufora na (pred - target)!
+
+                if (prediction.RequiresGrad)
+                {
+                    var gradP = prediction.Grad.AsSpan();
+                    var p = predData.AsSpan();
+                    var t = targetData.AsSpan();
+
+                    // grad = grad + m * pred
+                    TensorPrimitives.MultiplyAdd(p, m, gradP, gradP);
+                    // grad = grad + (-m) * target
+                    TensorPrimitives.MultiplyAdd(t, -m, gradP, gradP);
+                }
+
+                if (target.RequiresGrad)
+                {
+                    var gradT = target.Grad.AsSpan();
+                    var p = predData.AsSpan();
+                    var t = targetData.AsSpan();
+
+                    // Gradient po target jest odwrotny: gradT += -m * (pred - target)
+                    // gradT = gradT + (-m) * pred
+                    TensorPrimitives.MultiplyAdd(p, -m, gradT, gradT);
+                    // gradT = gradT + m * target
+                    TensorPrimitives.MultiplyAdd(t, m, gradT, gradT);
+                }
+            };
+
+            return AutogradNode.CreateOperationResult(resultMat, [prediction, target], backwardAction);
+        }
     }
 }

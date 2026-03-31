@@ -5,14 +5,14 @@ namespace DevOnBike.Overfit.DeepLearning
     public sealed class Sequential : IModule
     {
         private readonly List<IModule> _modules = new();
-        
+
         public bool IsTraining { get; private set; } = true;
-        
+
         public Sequential(params IModule[] modules)
         {
             _modules.AddRange(modules);
         }
-        
+
         public void Train()
         {
             IsTraining = true;
@@ -24,7 +24,7 @@ namespace DevOnBike.Overfit.DeepLearning
             IsTraining = false;
             foreach (var module in _modules) module.Eval();
         }
-        
+
         public void Add(IModule module)
         {
             _modules.Add(module);
@@ -45,9 +45,20 @@ namespace DevOnBike.Overfit.DeepLearning
             return _modules.SelectMany(m => m.Parameters());
         }
 
+        public void Save(string path)
+        {
+            using var fs = new FileStream(path, FileMode.Create);
+            using var bw = new BinaryWriter(fs);
+
+            Save(bw);
+        }
+
         public void Save(BinaryWriter bw)
         {
-            foreach (var module in _modules) module.Save(bw);
+            foreach (var module in _modules)
+            {
+                module.Save(bw);
+            }
         }
 
         public void Load(BinaryReader br)
