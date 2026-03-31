@@ -7,10 +7,11 @@
 		<AssemblyName>DevOnBike.Overfit.UI</AssemblyName>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<UseWPF>true</UseWPF>
+		<EnableWindowsTargeting>true</EnableWindowsTargeting>
 	</PropertyGroup>
 
 	<ItemGroup>
-	  <ProjectReference Include="..\Sources\Main\Main.csproj" />
+		<ProjectReference Include="..\Sources\Main\Main.csproj" />
 	</ItemGroup>
 
 </Project>
