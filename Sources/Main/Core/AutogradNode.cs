@@ -78,8 +78,9 @@ namespace DevOnBike.Overfit.Core
 
             if (isGradZero)
             {
-                // Jeśli gradient jest pusty, inicjujemy go jedynką (neutralny element mnożenia)
-                Grad[0, 0] = 1.0;
+                // Jeśli startujemy od macierzy, traktujemy to jak pochodną sumy wszystkich elementów
+                // Wypełniamy całą przestrzeń jedynkami, a nie tylko [0,0]
+                Grad.AsSpan().Fill(1.0);
             }
 
             // 3. PROPAGACJA WSTECZNA
