@@ -37,6 +37,7 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             IsTraining = true;
         }
+
         public void Eval()
         {
             IsTraining = false;
@@ -57,7 +58,6 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             using var fs = new FileStream(path, FileMode.Create);
             using var bw = new BinaryWriter(fs);
-
             Save(bw);
         }
 
@@ -72,10 +72,8 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Load(string path)
         {
             if (!File.Exists(path)) throw new FileNotFoundException($"Brak pliku wag: {path}");
-
             using var fs = new FileStream(path, FileMode.Open);
             using var br = new BinaryReader(fs);
-
             Load(br);
         }
 

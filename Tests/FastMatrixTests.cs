@@ -1,4 +1,5 @@
 using DevOnBike.Overfit.Core;
+
 namespace DevOnBike.Overfit.Tests
 {
     public class FastMatrixTests

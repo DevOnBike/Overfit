@@ -4,7 +4,7 @@ namespace DevOnBike.Overfit.DeepLearning
 {
     public sealed class Sequential : IModule
     {
-        private readonly List<IModule> _modules = new();
+        private readonly List<IModule> _modules = [];
 
         public bool IsTraining { get; private set; } = true;
 
@@ -16,13 +16,21 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Train()
         {
             IsTraining = true;
-            foreach (var module in _modules) module.Train();
+
+            foreach (var module in _modules)
+            {
+                module.Train();
+            }
         }
 
         public void Eval()
         {
             IsTraining = false;
-            foreach (var module in _modules) module.Eval();
+
+            foreach (var module in _modules)
+            {
+                module.Eval();
+            }
         }
 
         public void Add(IModule module)
@@ -33,10 +41,12 @@ namespace DevOnBike.Overfit.DeepLearning
         public AutogradNode Forward(AutogradNode input)
         {
             var current = input;
+
             foreach (var module in _modules)
             {
                 current = module.Forward(current);
             }
+
             return current;
         }
 
@@ -63,7 +73,10 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void Load(BinaryReader br)
         {
-            foreach (var module in _modules) module.Load(br);
+            foreach (var module in _modules)
+            {
+                module.Load(br);
+            }
         }
 
         public void Dispose()
@@ -72,6 +85,7 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 module.Dispose();
             }
+
             _modules.Clear();
         }
     }
