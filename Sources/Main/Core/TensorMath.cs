@@ -170,15 +170,15 @@ namespace DevOnBike.Overfit.Core
 
         public static AutogradNode SoftmaxCrossEntropy(AutogradNode logits, AutogradNode target)
         {
-            int rows = logits.Data.Rows;
-            int cols = logits.Data.Cols;
-            double totalLoss = 0.0;
+            var rows = logits.Data.Rows;
+            var cols = logits.Data.Cols;
+            var totalLoss = 0.0;
 
             // Żadnego "new double[]". Używamy wynajętego bufora z puli.
             using var pRowBuf = new FastBuffer<double>(cols);
             var pRow = pRowBuf.AsSpan();
 
-            for (int r = 0; r < rows; r++)
+            for (var r = 0; r < rows; r++)
             {
                 var row = logits.Data.ReadOnlyRow(r);
                 var tRow = target.Data.ReadOnlyRow(r);
@@ -212,7 +212,7 @@ namespace DevOnBike.Overfit.Core
             var resultData = new FastMatrix<double>(batchSize, outC * outH * outW);
 
             // Przetwarzanie obrazów w batchu
-            for (int n = 0; n < batchSize; n++)
+            for (var n = 0; n < batchSize; n++)
             {
                 // Zero-Alloc: colData i batchResult są zwalniane (Dispose) po użyciu
                 using var colData = new FastMatrix<double>(kSquareInC, outH * outW);
@@ -247,7 +247,7 @@ namespace DevOnBike.Overfit.Core
             var maxIndicesTensor = new AutogradNode(new FastMatrix<double>(batchSize, channels * outputH * outputW), requiresGrad: false);
             var maxIndices = maxIndicesTensor.Data;
 
-            for (int n = 0; n < batchSize; n++)
+            for (var n = 0; n < batchSize; n++)
             {
                 for (var c = 0; c < channels; c++)
                 {
@@ -289,9 +289,9 @@ namespace DevOnBike.Overfit.Core
             var batchSize = input.Data.Rows;
             var spatialSize = h * w;
             var outputData = new FastMatrix<double>(batchSize, channels);
-            double invSpatialSize = 1.0 / spatialSize;
+            var invSpatialSize = 1.0 / spatialSize;
 
-            for (int b = 0; b < batchSize; b++)
+            for (var b = 0; b < batchSize; b++)
             {
                 var row = input.Data.ReadOnlyRow(b);
                 for (var c = 0; c < channels; c++)
@@ -300,7 +300,7 @@ namespace DevOnBike.Overfit.Core
 
                     // Wycinamy fragment pamięci (Span) dla danego kanału i sumujemy SIMD
                     var spatialSpan = row.Slice(offset, spatialSize);
-                    double sum = TensorPrimitives.Sum(spatialSpan);
+                    var sum = TensorPrimitives.Sum(spatialSpan);
 
                     outputData[b, c] = sum * invSpatialSize;
                 }
@@ -326,7 +326,7 @@ namespace DevOnBike.Overfit.Core
 
             if (!isTraining)
             {
-                for (int i = 0; i < N; i++)
+                for (var i = 0; i < N; i++)
                 {
                     var rowIn = input.Data.ReadOnlyRow(i);
                     var rowOut = resultData.Row(i);
@@ -381,7 +381,7 @@ namespace DevOnBike.Overfit.Core
             }
 
             // Normalizacja i obliczenie xHat
-            for (int i = 0; i < N; i++)
+            for (var i = 0; i < N; i++)
             {
                 var rowIn = input.Data.ReadOnlyRow(i);
                 var rowOut = resultData.Row(i);
@@ -505,14 +505,17 @@ namespace DevOnBike.Overfit.Core
         {
             if (!logits.RequiresGrad) return;
 
-            int rows = logits.Data.Rows;
-            int cols = logits.Data.Cols;
-            double scale = output.Grad.AsReadOnlySpan()[0] / rows;
+            var rows = logits.Data.Rows;
+            var cols = logits.Data.Cols;
+            var scale = output.Grad.AsReadOnlySpan()[0] / rows;
 
             using var pRowBuf = new FastBuffer<double>(cols);
+            using var diffBuf = new FastBuffer<double>(cols); // Nowy bufor na różnice
+            
             var pRow = pRowBuf.AsSpan();
+            var diff = diffBuf.AsSpan();
 
-            for (int r = 0; r < rows; r++)
+            for (var r = 0; r < rows; r++)
             {
                 var lRow = logits.Data.ReadOnlyRow(r);
                 var tRow = target.Data.ReadOnlyRow(r);
@@ -520,8 +523,9 @@ namespace DevOnBike.Overfit.Core
 
                 TensorPrimitives.SoftMax(lRow, pRow);
 
-                for (var c = 0; c < cols; c++)
-                    lGrad[c] += (pRow[c] - tRow[c]) * scale;
+                // dL/dLogits = (probs - target) * scale
+                TensorPrimitives.Subtract(pRow, tRow, diff);
+                TensorPrimitives.MultiplyAdd(diff, scale, lGrad, lGrad);
             }
         }
 
@@ -558,7 +562,7 @@ namespace DevOnBike.Overfit.Core
         public static void MaxPool2DBackward(AutogradNode input, AutogradNode maxIndices, AutogradNode output)
         {
             var batchSize = input.Data.Rows;
-            for (int n = 0; n < batchSize; n++)
+            for (var n = 0; n < batchSize; n++)
             {
                 var gradOut = output.Grad.ReadOnlyRow(n);
                 var gradIn = input.Grad.Row(n);
@@ -578,7 +582,7 @@ namespace DevOnBike.Overfit.Core
             var spatialSize = h * w;
             var invSpatialSize = 1.0 / spatialSize;
 
-            for (int b = 0; b < batchSize; b++)
+            for (var b = 0; b < batchSize; b++)
             {
                 for (var c = 0; c < channels; c++)
                 {
@@ -599,10 +603,11 @@ namespace DevOnBike.Overfit.Core
             var gradOut = output.Grad;
             var xHatMat = xHatTensor.Data;
 
-            using var dGammaMat = new FastMatrix<double>(1, C);
-            using var dBetaMat = new FastMatrix<double>(1, C);
-            var dGamma = dGammaMat.AsSpan();
-            var dBeta = dBetaMat.AsSpan();
+            using var dGammaBuf = new FastBuffer<double>(C);
+            using var dBetaBuf = new FastBuffer<double>(C);
+            
+            var dGamma = dGammaBuf.AsSpan();
+            var dBeta = dBetaBuf.AsSpan();
 
             for (var i = 0; i < N; i++)
             {
@@ -616,21 +621,31 @@ namespace DevOnBike.Overfit.Core
 
             if (input.RequiresGrad)
             {
-                for (int i = 0; i < N; i++)
+                using var factorBuf = new FastBuffer<double>(C);
+                using var temp1Buf = new FastBuffer<double>(C);
+                
+                var factor = factorBuf.AsSpan();
+                var temp1 = temp1Buf.AsSpan();
+
+                // Pre-kalkulacja współczynnika: (gamma * invStd / N)
+                TensorPrimitives.Multiply(gamma.Data.AsReadOnlySpan(), invStdTensor.Data.AsReadOnlySpan(), factor);
+                TensorPrimitives.Multiply(factor, 1.0 / N, factor);
+
+                for (var i = 0; i < N; i++)
                 {
                     var gradInRow = input.Grad.Row(i);
                     var gradOutRow = gradOut.ReadOnlyRow(i);
                     var xHatRow = xHatMat.ReadOnlyRow(i);
-                    var gSpanLocal = gamma.Data.AsReadOnlySpan();
-                    var invStdSpanLocal = invStdTensor.Data.AsReadOnlySpan();
-                    var dGammaRead = dGammaMat.AsReadOnlySpan();
-                    var dBetaRead = dBetaMat.AsReadOnlySpan();
 
-                    for (var j = 0; j < C; j++)
-                    {
-                        var dx = (gSpanLocal[j] * invStdSpanLocal[j] / N) * (N * gradOutRow[j] - dBetaRead[j] - xHatRow[j] * dGammaRead[j]);
-                        gradInRow[j] += dx;
-                    }
+                    // temp1 = N * dY - sum(dY) - xHat * sum(dY * xHat)
+                    // gradInRow += factor * temp1
+                    TensorPrimitives.Multiply(gradOutRow, (double)N, gradInRow); // Używamy gradInRow jako tymczasowego bufora
+                    TensorPrimitives.Subtract(gradInRow, dBeta, gradInRow);
+
+                    TensorPrimitives.Multiply(xHatRow, dGamma, temp1);
+                    TensorPrimitives.Subtract(gradInRow, temp1, gradInRow);
+
+                    TensorPrimitives.MultiplyAdd(gradInRow, factor, input.Grad.Row(i), input.Grad.Row(i));
                 }
             }
         }

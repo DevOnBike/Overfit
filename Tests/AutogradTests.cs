@@ -99,7 +99,7 @@ namespace DevOnBike.Overfit.Tests
             var grads = input.Grad.AsReadOnlySpan();
             var data = res.Data.AsReadOnlySpan();
 
-            for (int i = 0; i < 10; i++)
+            for (var i = 0; i < 10; i++)
             {
                 if (data[i] == 0) Assert.Equal(0.0, grads[i]);
                 else Assert.Equal(2.0, grads[i]); //

@@ -137,16 +137,16 @@ namespace DevOnBike.Overfit.Tests
         {
             using var input = new AutogradNode(new FastMatrix<double>(1, 100));
             input.Data.AsSpan().Fill(1.0);
-            double p = 0.5;
+            var p = 0.5;
 
             using var res = TensorMath.Dropout(input, p, isTraining: true);
             ComputationGraph.Active.Backward(res);
 
             var grad = input.Grad.AsReadOnlySpan();
             var data = res.Data.AsReadOnlySpan();
-            double scale = 1.0 / (1.0 - p);
+            var scale = 1.0 / (1.0 - p);
 
-            for (int i = 0; i < 100; i++)
+            for (var i = 0; i < 100; i++)
             {
                 if (data[i] == 0) Assert.Equal(0.0, grad[i]);
                 else Assert.Equal(scale, grad[i]); // dL/dx = scale
