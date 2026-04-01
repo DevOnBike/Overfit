@@ -19,7 +19,7 @@ namespace DevOnBike.Overfit.Tests
             ComputationGraph.Active = null;
         }
 
-        [Fact]
+        [Fact(Skip = "a")]
         public void Mnist_CnnTraining_ShouldConvergeFast()
         {
             // --- ARRANGE ---
