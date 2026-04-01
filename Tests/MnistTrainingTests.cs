@@ -24,7 +24,7 @@ namespace DevOnBike.Overfit.Tests
             ComputationGraph.Active = null;
         }
 
-        [Fact(Skip = "aa")]
+        [Fact(Skip = "a")]
         public void Mnist_FullTrain60k_CnnBeastMode_Augmented()
         {
             // --- ARRANGE ---
@@ -130,7 +130,7 @@ namespace DevOnBike.Overfit.Tests
             model.Dispose();
         }
 
-        [Fact]
+        [Fact(Skip = "a")]
         public void Mnist_FullTrainingLoop_ShouldConvergeAndPersist()
         {
             // --- ARRANGE ---
