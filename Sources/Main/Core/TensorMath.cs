@@ -100,18 +100,65 @@ namespace DevOnBike.Overfit.Core
         {
             if (a.RequiresGrad)
             {
-                using var bT = b.Data.Transpose(0, 1);
-                using var bTContig = bT.ToContiguous();
-                using var gradA = MatMulRaw(output.Grad, bTContig);
+                // GradA = GradOut * B^T
+                using var gradA = MatMul_A_BT(output.Grad, b.Data);
                 TensorPrimitives.Add(a.Grad.AsSpan(), gradA.AsSpan(), a.Grad.AsSpan());
             }
+            
             if (b.RequiresGrad)
             {
-                using var aT = a.Data.Transpose(0, 1);
-                using var aTContig = aT.ToContiguous();
-                using var gradB = MatMulRaw(aTContig, output.Grad);
+                // GradB = A^T * GradOut
+                using var gradB = MatMul_AT_B(a.Data, output.Grad);
                 TensorPrimitives.Add(b.Grad.AsSpan(), gradB.AsSpan(), b.Grad.AsSpan());
             }
+        }
+
+        // Zoptymalizowane C = A * B^T (Używa SIMD Dot Product)
+        private static FastTensor<float> MatMul_A_BT(FastTensor<float> A, FastTensor<float> B)
+        {
+            int N = A.Shape[0], K = A.Shape[1], M = B.Shape[0];
+            var C = new FastTensor<float>(false, N, M);
+
+            Parallel.For(0, N, i =>
+            {
+                var aRow = A.AsSpan().Slice(i * K, K);
+                var cRow = C.AsSpan().Slice(i * M, M);
+                
+                for (var j = 0; j < M; j++)
+                {
+                    // Iloczyn skalarny na ciągłych wierszach omija potrzebę fizycznej transpozycji B!
+                    cRow[j] = TensorPrimitives.Dot(aRow, B.AsSpan().Slice(j * K, K));
+                }
+            });
+            return C;
+        }
+
+        // Zoptymalizowane C = A^T * B (Używa SIMD MultiplyAdd)
+        private static FastTensor<float> MatMul_AT_B(FastTensor<float> A, FastTensor<float> B)
+        {
+            int K = A.Shape[0], N = A.Shape[1], M = B.Shape[1];
+            // Ważne: true, bo sumujemy wartości do zera
+            var C = new FastTensor<float>(true, N, M);
+
+            Parallel.For(0, N, i =>
+            {
+                var cRow = C.AsSpan().Slice(i * M, M);
+                
+                for (var k = 0; k < K; k++)
+                {
+                    var aVal = A.AsSpan()[k * N + i]; // Bezpośredni dostęp kolumnowy (skalar)
+                    
+                    if (aVal == 0)
+                    {
+                        continue;
+                    }
+                    
+                    // Skalujemy ciągły wiersz macierzy B
+                    TensorPrimitives.MultiplyAdd(B.AsSpan().Slice(k * M, M), aVal, cRow, cRow);
+                }
+            });
+            
+            return C;
         }
 
         // ====================================================================
@@ -426,61 +473,134 @@ namespace DevOnBike.Overfit.Core
             return output;
         }
 
-        public static void BatchNorm1DBackward(AutogradNode input, AutogradNode output, AutogradNode gamma, AutogradNode beta, AutogradNode mean, AutogradNode invStd)
+        // Wklej tę metodę do TensorMath zamiast obecnej BatchNorm1DBackward.
+        // Wymaga: using System.Numerics.Tensors;
+
+        public static void BatchNorm1DBackward(
+            AutogradNode input,
+            AutogradNode output,
+            AutogradNode gamma,
+            AutogradNode beta,
+            AutogradNode mean,
+            AutogradNode invStd)
         {
             if (!input.RequiresGrad && !gamma.RequiresGrad && !beta.RequiresGrad) return;
 
             int N = input.Data.Shape[0], C = input.Data.Shape[1];
+
             var inS = input.Data.AsSpan();
             var outGradS = output.Grad.AsSpan();
-            var inGradS = input.RequiresGrad ? input.Grad.AsSpan() : default;
-            var gammaS = gamma.Data.AsSpan();
-            var meanS = mean.Data.AsSpan();
-            var invStdS = invStd.Data.AsSpan();
+            var meanS = (ReadOnlySpan<float>)mean.Data.AsSpan();
+            var invStdS = (ReadOnlySpan<float>)invStd.Data.AsSpan();
+            var gammaS = (ReadOnlySpan<float>)gamma.Data.AsSpan();
 
-            // 1. Gradienty dla Gamma i Beta
-            if (gamma.RequiresGrad || beta.RequiresGrad)
+            // ── Bufory robocze ───────────────────────────────────────────────────
+            // xHatRow — nadpisywany per wiersz i (nie potrzebujemy wszystkich N naraz)
+            // coeff   — gamma * invStd / N, stałe dla całego backward
+            // sumDy / sumDyXHat — akumulatory redukcji (C elementów, stackalloc)
+            // term    — bufor tymczasowy per wiersz (C elementów, stackalloc)
+            //
+            // stackalloc jest bezpieczny gdy C <= 256 (256 * 4B = 1 KB << typowy limit stosu ~1MB).
+            // Powyżej progu — FastBuffer<float> z ArrayPool (zero GC).
+            const int StackAllocThreshold = 256;
+
+            FastBuffer<float>? xHatBuf = null;
+            FastBuffer<float>? coeffBuf = null;
+            FastBuffer<float>? termBuf = null;
+
+            try
             {
-                var dGammaS = gamma.Grad.AsSpan();
-                var dBetaS = beta.Grad.AsSpan();
+                var xHatRow = C <= StackAllocThreshold
+                    ? stackalloc float[C]
+                    : (xHatBuf = new FastBuffer<float>(C)).AsSpan();
+
+                var coeff = C <= StackAllocThreshold
+                    ? stackalloc float[C]
+                    : (coeffBuf = new FastBuffer<float>(C)).AsSpan();
+
+                var term = C <= StackAllocThreshold
+                    ? stackalloc float[C]
+                    : (termBuf = new FastBuffer<float>(C)).AsSpan();
+
+                // sumDy i sumDyXHat zawsze na stosie — używane tylko przez operacje SIMD,
+                // nie przechwytywane przez lambdy — kompilator pozwala na stackalloc.
+                var sumDy = C <= StackAllocThreshold ? stackalloc float[C] : new float[C];
+                var sumDyXHat = C <= StackAllocThreshold ? stackalloc float[C] : new float[C];
+
+                // ── Krok 0: Pre-kalkulacja coeff = gamma * invStd / N ────────────
+                // Stałe dla wszystkich wierszy — liczymy raz zamiast N razy.
+                TensorPrimitives.Multiply(gammaS, invStdS, coeff);
+                TensorPrimitives.Multiply(coeff, 1f / N, coeff);
+
+                // ── Krok 1A: Redukcja sumDy / sumDyXHat przez wiersze ────────────
+                // sumDy[c]    += gradRow[c]
+                // sumDyXHat[c]+= gradRow[c] * xHat[c]
+                //
+                // Oba wykonane SIMD per wiersz — row-major, cache-friendly.
                 for (var i = 0; i < N; i++)
                 {
-                    for (var c = 0; c < C; c++)
+                    var gradRow = (ReadOnlySpan<float>)outGradS.Slice(i * C, C);
+                    var inRow = (ReadOnlySpan<float>)inS.Slice(i * C, C);
+
+                    // xHatRow = (in - mean) * invStd
+                    TensorPrimitives.Subtract(inRow, meanS, xHatRow);
+                    TensorPrimitives.Multiply(xHatRow, invStdS, xHatRow);
+
+                    // sumDy += gradRow
+                    TensorPrimitives.Add(sumDy, gradRow, sumDy);
+
+                    // sumDyXHat += gradRow * xHatRow
+                    TensorPrimitives.MultiplyAdd(gradRow, xHatRow, sumDyXHat, sumDyXHat);
+
+                    // dBeta  += gradRow  (jeśli RequiresGrad)
+                    if (beta.RequiresGrad)
+                        TensorPrimitives.Add(beta.Grad.AsSpan(), gradRow, beta.Grad.AsSpan());
+
+                    // dGamma += gradRow * xHatRow  (jeśli RequiresGrad)
+                    if (gamma.RequiresGrad)
+                        TensorPrimitives.MultiplyAdd(gradRow, xHatRow, gamma.Grad.AsSpan(), gamma.Grad.AsSpan());
+                }
+
+                // ── Krok 1B: Gradient wejścia ────────────────────────────────────
+                // dx[i,c] = coeff[c] * (N * gradRow[c] - sumDy[c] - xHat[i,c] * sumDyXHat[c])
+                //
+                // Rozkład SIMD:
+                //   term  = N * gradRow - sumDy           (Multiply + Subtract)
+                //   temp  = xHat * sumDyXHat              (Multiply, reużywamy xHatRow)
+                //   term -= temp                           (Subtract)
+                //   inGrad += coeff * term                 (MultiplyAdd)
+                if (input.RequiresGrad)
+                {
+                    var inGradS = input.Grad.AsSpan();
+
+                    for (var i = 0; i < N; i++)
                     {
-                        var go = outGradS[i * C + c];
-                        if (beta.RequiresGrad) dBetaS[c] += go;
-                        if (gamma.RequiresGrad) dGammaS[c] += go * (inS[i * C + c] - meanS[c]) * invStdS[c];
+                        var gradRow = (ReadOnlySpan<float>)outGradS.Slice(i * C, C);
+                        var inRow = (ReadOnlySpan<float>)inS.Slice(i * C, C);
+                        var inGradRow = inGradS.Slice(i * C, C);
+
+                        // xHatRow = (in - mean) * invStd  (ponownie — nie cachujemy N wierszy)
+                        TensorPrimitives.Subtract(inRow, meanS, xHatRow);
+                        TensorPrimitives.Multiply(xHatRow, invStdS, xHatRow);
+
+                        // term = N * gradRow - sumDy
+                        TensorPrimitives.Multiply(gradRow, (float)N, term);
+                        TensorPrimitives.Subtract(term, sumDy, term);
+
+                        // term -= xHat * sumDyXHat  (reużywamy xHatRow jako temp)
+                        TensorPrimitives.Multiply(xHatRow, sumDyXHat, xHatRow); // xHatRow = xHat * sumDyXHat
+                        TensorPrimitives.Subtract(term, xHatRow, term);
+
+                        // inGrad += coeff * term
+                        TensorPrimitives.MultiplyAdd(coeff, term, inGradRow, inGradRow);
                     }
                 }
             }
-
-            // 2. Gradient wejścia (skomplikowana matematyka wyrównania statystycznego)
-            if (input.RequiresGrad)
+            finally
             {
-                Span<float> sumDy = stackalloc float[C];
-                Span<float> sumDyXHat = stackalloc float[C];
-
-                for (var i = 0; i < N; i++)
-                {
-                    for (var c = 0; c < C; c++)
-                    {
-                        var go = outGradS[i * C + c];
-                        var xHat = (inS[i * C + c] - meanS[c]) * invStdS[c];
-                        sumDy[c] += go;
-                        sumDyXHat[c] += go * xHat;
-                    }
-                }
-
-                for (var i = 0; i < N; i++)
-                {
-                    for (var c = 0; c < C; c++)
-                    {
-                        var go = outGradS[i * C + c];
-                        var xHat = (inS[i * C + c] - meanS[c]) * invStdS[c];
-                        var dx = (gammaS[c] * invStdS[c] / N) * (N * go - sumDy[c] - xHat * sumDyXHat[c]);
-                        inGradS[i * C + c] += dx;
-                    }
-                }
+                xHatBuf?.Dispose();
+                coeffBuf?.Dispose();
+                termBuf?.Dispose();
             }
         }
 
