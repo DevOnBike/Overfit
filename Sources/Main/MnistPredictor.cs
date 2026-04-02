@@ -12,16 +12,17 @@ namespace DevOnBike.Overfit
 
         public MnistPredictor(string modelPath)
         {
-            // 1. Definicja architektury (Wymiary zgodne z nowym TensorMath)
-            _conv1 = new ConvLayer(1, 8, 28, 28, 3);
-            _bn1 = new BatchNorm1D(8 * 26 * 26); // 8 kanałów * 26x26
-            _res1 = new ResidualBlock(8 * 13 * 13); // Po MaxPool: 8 * 13x13 = 1352
-            _fcOut = new LinearLayer(8, 10); // Wynik z GAP to 8 wartości
+            // 1. Definicja architektury (Wymiary zgodne z nowym TensorMath i Twoim treningiem)
+            _conv1 = new ConvLayer(1, 8, 28, 28, 3);          // Output: 8x26x26
+            _bn1 = new BatchNorm1D(8 * 26 * 26);             // Rozmiar 5408 - musi być po Conv
+            _res1 = new ResidualBlock(8 * 13 * 13);          // Rozmiar 1352 - po MaxPool
+            _fcOut = new LinearLayer(8, 10);                 // 8 wejść z GAP na 10 wyjść
 
-            // 2. Wczytywanie wag (Używa zaktualizowanego Load opartego na Shape)
-            using (var fs = new FileStream(modelPath, FileMode.Open))
-            using (var br = new BinaryReader(fs))
+            // 2. Wczytywanie wag
+            if (File.Exists(modelPath))
             {
+                using var fs = new FileStream(modelPath, FileMode.Open);
+                using var br = new BinaryReader(fs);
                 _conv1.Load(br);
                 _bn1.Load(br);
                 _res1.Load(br);
@@ -37,44 +38,40 @@ namespace DevOnBike.Overfit
 
         public int Predict(float[] pixelData)
         {
-            if (pixelData.Length != 784)
-                throw new ArgumentException("Obrazek musi mieć 784 piksele.");
+            if (pixelData == null || pixelData.Length != 784)
+                throw new ArgumentException("Niepoprawne dane wejściowe.");
 
-            // Resetujemy taśmę i wyłączamy nagrywanie (Inferencja nie wymaga Autogradu)
-            ComputationGraph.Active.Reset();
+            // Wyłączamy nagrywanie operacji na grafie dla samej predakcji
             ComputationGraph.Active.IsRecording = false;
-
             try
             {
-                // Tworzymy wejście 4D: [Batch: 1, Channel: 1, Height: 28, Width: 28]
+                ComputationGraph.Active.Reset();
+
+                // Konwersja na Tensor 4D (1 batch, 1 kanał, 28x28)
                 using var inputMat = new FastTensor<float>(1, 1, 28, 28);
                 pixelData.CopyTo(inputMat.AsSpan());
                 using var input = new AutogradNode(inputMat, requiresGrad: false);
 
-                // --- FORWARD PASS (Magia Reshape Zero-Copy) ---
+                // --- FORWARD PASS ---
+                // 1. Conv -> BN -> ReLU
+                using var h1 = _conv1.Forward(input);
+                using var bn1Out = _bn1.Forward(h1);
+                using var a1 = TensorMath.ReLU(bn1Out);
 
-                // 1. Splot (Operacja 4D)
-                using var c1 = _conv1.Forward(input); // Wynik: [1, 8, 26, 26]
+                // 2. MaxPool (8x26x26 -> 8x13x13)
+                using var p1 = TensorMath.MaxPool2D(a1, 8, 26, 26, 2);
 
-                // 2. BatchNorm1D (Wymaga 2D: [Batch, Features])
-                using var c1Flat = new AutogradNode(c1.Data.Reshape(1, 8 * 26 * 26), false);
-                using var bc1 = _bn1.Forward(c1Flat);
+                // 3. Reshape -> ResidualBlock (1352 features)
+                using var p1Flat = TensorMath.Reshape(p1, 1, 1352);
+                using var resOut = _res1.Forward(p1Flat);
 
-                // 3. ReLU i MaxPool2D (Wymaga powrotu do 4D)
-                using var a1Flat = TensorMath.ReLU(bc1);
-                using var a1 = new AutogradNode(a1Flat.Data.Reshape(1, 8, 26, 26), false);
-                using var p1 = TensorMath.MaxPool2D(a1, 8, 26, 26, 2); // Wynik: [1, 8, 13, 13]
+                // 4. Global Average Pool (Redukcja 8x13x13 -> 8 kanałów)
+                // Musimy przywrócić kształt 4D dla operacji GAP
+                using var res4D = TensorMath.Reshape(resOut, 1, 8, 13, 13);
+                using var gapOut = TensorMath.GlobalAveragePool2D(res4D, 8, 13, 13);
 
-                // 4. ResidualBlock (Opisany w LinearLayer - wymaga 2D)
-                using var p1Flat = new AutogradNode(p1.Data.Reshape(1, 8 * 13 * 13), false);
-                using var r1 = _res1.Forward(p1Flat); // Wynik: [1, 1352]
-
-                // 5. Global Average Pooling (Wymaga powrotu do 4D)
-                using var r1Spatial = new AutogradNode(r1.Data.Reshape(1, 8, 13, 13), false);
-                using var gap = TensorMath.GlobalAveragePool2D(r1Spatial, 8, 13, 13); // Wynik: [1, 8]
-
-                // 6. Finalna klasyfikacja
-                using var output = _fcOut.Forward(gap); // Wynik: [1, 10]
+                // 5. Linear Output (8 -> 10)
+                using var output = _fcOut.Forward(gapOut); // Poprawione z _fc1 na _fcOut
 
                 return GetArgMax(output.Data.AsSpan());
             }
@@ -84,14 +81,11 @@ namespace DevOnBike.Overfit
             }
         }
 
-        // Pomocnicza metoda do wyciągania predykcji ze Spana
         private int GetArgMax(ReadOnlySpan<float> span)
         {
-            var maxIdx = 0;
-            for (var i = 1; i < span.Length; i++)
-            {
-                if (span[i] > span[maxIdx]) maxIdx = i;
-            }
+            int maxIdx = 0;
+            for (int j = 1; j < span.Length; j++)
+                if (span[j] > span[maxIdx]) maxIdx = j;
             return maxIdx;
         }
 

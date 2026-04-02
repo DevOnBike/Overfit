@@ -24,7 +24,7 @@ namespace DevOnBike.Overfit.Tests
             // --- ARRANGE ---
             var trainSize = 60000;
             var batchSize = 64;
-            var epochs = 10;
+            var epochs = 20;
             var learningRate = 0.001f;
 
             _output.WriteLine("=== START: Trening na Taśmie (Computation Graph) z Augmentacją ===");
@@ -36,8 +36,8 @@ namespace DevOnBike.Overfit.Tests
             using var Y = new AutogradNode(trainY, requiresGrad: false);
 
             var conv1 = new ConvLayer(1, 8, 28, 28, 3);
-            var bn1 = new BatchNorm1D(1352); // 8 kanałów * 13 * 13
-            var fc1 = new LinearLayer(1352, 10);
+            var bn1 = new BatchNorm1D(13 * 13 * 8); // 8 kanałów * 13 * 13
+            var fc1 = new LinearLayer(13 * 13 * 8, 10);
 
             var model = new Sequential(conv1, bn1, fc1);
             using var optimizer = new Adam(model.Parameters(), learningRate);
@@ -62,15 +62,14 @@ namespace DevOnBike.Overfit.Tests
                     ComputationGraph.Active.Reset();
                     optimizer.ZeroGrad();
 
-                    // Slicing NCHW (Batch, Channels, Height, Width)
-                    var xBatchData = new FastTensor<float>(batchSize, 1, 28, 28);
+                    // Używamy 'using' dla wszystkiego, co bierze pamięć z puli
+                    using var xBatchData = new FastTensor<float>(batchSize, 1, 28, 28);
                     X.Data.AsSpan().Slice(b * batchSize * 784, batchSize * 784).CopyTo(xBatchData.AsSpan());
 
-                    // Augmentacja (zakładamy obsługę FastTensor w DataAugmenter)
-                    var mutatedData = DataAugmenter.AugmentBatch(xBatchData, 28, 28);
+                    using var mutatedData = DataAugmenter.AugmentBatch(xBatchData, 28, 28);
                     using var xBatch = new AutogradNode(mutatedData, false);
 
-                    var yBatchData = new FastTensor<float>(batchSize, 10);
+                    using var yBatchData = new FastTensor<float>(batchSize, 10);
                     Y.Data.AsSpan().Slice(b * batchSize * 10, batchSize * 10).CopyTo(yBatchData.AsSpan());
                     using var yBatch = new AutogradNode(yBatchData, false);
 
@@ -79,17 +78,14 @@ namespace DevOnBike.Overfit.Tests
                     using var a1 = TensorMath.ReLU(h1);
                     using var p1 = TensorMath.MaxPool2D(a1, 8, 26, 26, 2);
 
-                    // Zero-Copy Reshape na 2D (spłaszczenie map cech)
-                    using var p1Flat = new AutogradNode(p1.Data.Reshape(batchSize, 1352), false);
+                    // POPRAWKA: Używamy TensorMath.Reshape zamiast przerywania grafu!
+                    using var p1Flat = TensorMath.Reshape(p1, batchSize, 1352);
                     using var bnOut = bn1.Forward(p1Flat);
-                    using var d1 = TensorMath.Dropout(bnOut, 0.25f, isTraining: model.IsTraining);
-                    using var predictionLogits = fc1.Forward(d1);
+                    using var predictionLogits = fc1.Forward(bnOut);
 
-                    // --- LOSS ---
                     using var loss = TensorMath.SoftmaxCrossEntropy(predictionLogits, yBatch);
                     epochLoss += loss.Data[0, 0];
 
-                    // --- BACKWARD ---
                     ComputationGraph.Active.Backward(loss);
                     optimizer.Step();
                 }
@@ -146,7 +142,7 @@ namespace DevOnBike.Overfit.Tests
                     using var a1 = TensorMath.ReLU(h1);
                     using var p1 = TensorMath.MaxPool2D(a1, 8, 26, 26, 2);
 
-                    using var p1Flat = new AutogradNode(p1.Data.Reshape(1, 1352), false); //
+                    using var p1Flat = TensorMath.Reshape(p1, 1, 1352);
                     using var bnOut = bn1.Forward(p1Flat);
                     using var output = fc1.Forward(bnOut);
 
@@ -191,5 +187,7 @@ namespace DevOnBike.Overfit.Tests
             for (var j = 1; j < span.Length; j++) if (span[j] > span[maxIdx]) maxIdx = j;
             return maxIdx;
         }
+
+
     }
 }

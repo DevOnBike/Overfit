@@ -1,4 +1,4 @@
-using DevOnBike.Overfit.Core;
+﻿using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
@@ -8,32 +8,34 @@ namespace DevOnBike.Overfit.DeepLearning
         public AutogradNode Beta { get; private set; }
         public FastTensor<float> RunningMean { get; private set; }
         public FastTensor<float> RunningVar { get; private set; }
-        public float Momentum { get; set; }
-        public float Eps { get; set; }
+
         public bool IsTraining { get; private set; } = true;
+        public float Momentum { get; set; } = 0.1f;
+        public float Eps { get; set; } = 1e-5f;
 
-        public BatchNorm1D(int features, float momentum = 0.1f, float eps = 1e-5f)
+        public BatchNorm1D(int numFeatures)
         {
-            var gammaData = new FastTensor<float>(1, features);
-            gammaData.AsSpan().Fill(1f);
-            Gamma = new AutogradNode(gammaData, requiresGrad: true);
+            // KRYTYCZNA POPRAWKA: Używamy tensorów 1D (numFeatures), a nie 2D (1, numFeatures)
+            Gamma = new AutogradNode(new FastTensor<float>(numFeatures), true);
+            Beta = new AutogradNode(new FastTensor<float>(numFeatures), true);
 
-            var betaData = new FastTensor<float>(1, features);
-            betaData.AsSpan().Fill(0f);
-            Beta = new AutogradNode(betaData, requiresGrad: true);
+            Gamma.Data.AsSpan().Fill(1f); // Domyślnie mnożnik to 1
+            Beta.Data.AsSpan().Fill(0f);  // Domyślnie przesunięcie to 0
 
-            RunningMean = new FastTensor<float>(1, features);
-            RunningVar = new FastTensor<float>(1, features);
-            RunningVar.AsSpan().Fill(1f);
+            RunningMean = new FastTensor<float>(numFeatures);
+            RunningVar = new FastTensor<float>(numFeatures);
 
-            Momentum = momentum;
-            Eps = eps;
+            RunningMean.AsSpan().Fill(0f);
+            RunningVar.AsSpan().Fill(1f); // Domyślna wariancja to 1
         }
 
         public void Train() => IsTraining = true;
         public void Eval() => IsTraining = false;
 
-        public AutogradNode Forward(AutogradNode input) => TensorMath.BatchNorm1D(input, Gamma, Beta, RunningMean, RunningVar, Momentum, Eps, IsTraining);
+        public AutogradNode Forward(AutogradNode input)
+        {
+            return TensorMath.BatchNorm1D(input, Gamma, Beta, RunningMean, RunningVar, Momentum, Eps, IsTraining);
+        }
 
         public IEnumerable<AutogradNode> Parameters()
         {
@@ -41,42 +43,34 @@ namespace DevOnBike.Overfit.DeepLearning
             yield return Beta;
         }
 
-        public void Save(string path)
-        {
-            using var fs = new FileStream(path, FileMode.Create);
-            using var bw = new BinaryWriter(fs);
-            Save(bw);
-        }
-
         public void Save(BinaryWriter bw)
         {
+            var len = Gamma.Data.Size;
+            bw.Write(len);
+
             foreach (var val in Gamma.Data.AsSpan()) bw.Write(val);
             foreach (var val in Beta.Data.AsSpan()) bw.Write(val);
             foreach (var val in RunningMean.AsSpan()) bw.Write(val);
             foreach (var val in RunningVar.AsSpan()) bw.Write(val);
         }
 
-        public void Load(string path)
-        {
-            if (!File.Exists(path)) throw new FileNotFoundException($"Brak pliku wag: {path}");
-            using var fs = new FileStream(path, FileMode.Open);
-            using var br = new BinaryReader(fs);
-            Load(br);
-        }
-
         public void Load(BinaryReader br)
         {
+            var len = br.ReadInt32();
+            if (len != Gamma.Data.Size)
+                throw new Exception($"Wymiary wag w pliku ({len}) nie pasują do architektury ({Gamma.Data.Size})!");
+
             var gSpan = Gamma.Data.AsSpan();
-            for (var i = 0; i < gSpan.Length; i++) gSpan[i] = br.ReadSingle();
+            for (var i = 0; i < len; i++) gSpan[i] = br.ReadSingle();
 
             var bSpan = Beta.Data.AsSpan();
-            for (var i = 0; i < bSpan.Length; i++) bSpan[i] = br.ReadSingle();
+            for (var i = 0; i < len; i++) bSpan[i] = br.ReadSingle();
 
             var rmSpan = RunningMean.AsSpan();
-            for (var i = 0; i < rmSpan.Length; i++) rmSpan[i] = br.ReadSingle();
+            for (var i = 0; i < len; i++) rmSpan[i] = br.ReadSingle();
 
             var rvSpan = RunningVar.AsSpan();
-            for (var i = 0; i < rvSpan.Length; i++) rvSpan[i] = br.ReadSingle();
+            for (var i = 0; i < len; i++) rvSpan[i] = br.ReadSingle();
         }
 
         public void Dispose()

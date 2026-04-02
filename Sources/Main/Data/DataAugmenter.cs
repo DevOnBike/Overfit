@@ -1,4 +1,4 @@
-using DevOnBike.Overfit.Core;
+﻿using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.Data
 {
@@ -6,22 +6,28 @@ namespace DevOnBike.Overfit.Data
     {
         public static FastTensor<float> AugmentBatch(FastTensor<float> originalBatch, int width = 28, int height = 28)
         {
-            var batchSize = originalBatch.Shape[0];
-            var augmented = new FastTensor<float>(originalBatch.Shape);
+            // Tworzymy nowy tensor o identycznym kształcie co wejściowy
+            var augmentedBatch = new FastTensor<float>(originalBatch.Shape);
 
-            Parallel.For(0, batchSize, i =>
+            Parallel.For(0, originalBatch.Shape[0], i =>
             {
-                var input = originalBatch.AsSpan().Slice(i * width * height, width * height);
-                var output = augmented.AsSpan().Slice(i * width * height, width * height);
+                // Pobieramy wiersz (obrazek) jako Span
+                var inputRow = originalBatch.AsSpan().Slice(i * width * height, width * height);
+                var outputRow = augmentedBatch.AsSpan().Slice(i * width * height, width * height);
 
                 if (Random.Shared.NextSingle() > 0.5f)
                 {
-                    ShiftImage(input, output, width, height, Random.Shared.Next(-2, 3), Random.Shared.Next(-2, 3));
+                    var shiftX = Random.Shared.Next(-2, 3);
+                    var shiftY = Random.Shared.Next(-2, 3);
+                    ShiftImage(inputRow, outputRow, width, height, shiftX, shiftY);
                 }
-                else input.CopyTo(output);
+                else
+                {
+                    inputRow.CopyTo(outputRow);
+                }
             });
 
-            return augmented;
+            return augmentedBatch;
         }
 
         private static void ShiftImage(ReadOnlySpan<float> input, Span<float> output, int w, int h, int sx, int sy)

@@ -67,7 +67,8 @@ namespace DevOnBike.Overfit.Tests
                     using var p1 = TensorMath.MaxPool2D(a1, 8, 26, 26, 2); // Wyjście: [batchSize, 8, 13, 13]
 
                     // ZERO-COPY RESHAPE: Spłaszczamy mapy cech do 2D dla warstwy liniowej
-                    using var p1Flat = new AutogradNode(p1.Data.Reshape(batchSize, 1352), false);
+                    // using var p1Flat = new AutogradNode(p1.Data.Reshape(batchSize, 1352), false);
+                    using var p1Flat = TensorMath.Reshape(p1, batchSize, 1352);
                     using var prediction = fc1.Forward(p1Flat);
 
                     // --- LOSS ---

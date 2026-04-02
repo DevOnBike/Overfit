@@ -178,5 +178,127 @@ namespace DevOnBike.Overfit.Tests
             // Gradient MSE: (2/n) * (pred - target) = (2/2) * (10 - 5) = 5
             Assert.Equal(5f, pred.Grad[0, 0]);
         }
+
+        [Fact]
+        public void NumericalCheck_MatMul_ShouldBePrecise()
+        {
+            // Małe wymiary, by test trwał krótko
+            using var a = new AutogradNode(new FastTensor<float>(2, 3));
+            using var b = new AutogradNode(new FastTensor<float>(3, 2));
+
+            // Inicjalizacja małymi wartościami, by uniknąć nasycenia
+            for (int i = 0; i < a.Data.Size; i++) a.Data.AsSpan()[i] = (i + 1) * 0.1f;
+            for (int i = 0; i < b.Data.Size; i++) b.Data.AsSpan()[i] = (i + 1) * 0.2f;
+
+            // Funkcja straty: suma wszystkich elementów wyniku mnożenia macierzy
+            Func<AutogradNode> lossFunc = () => {
+                var mm = TensorMath.MatMul(a, b);
+                var ones = new AutogradNode(new FastTensor<float>(2, 2), false);
+                ones.Data.AsSpan().Fill(1f);
+                return TensorMath.MSELoss(mm, ones); // Używamy MSE, by dostać skalar
+            };
+
+            VerifyGradients(lossFunc, a);
+            VerifyGradients(lossFunc, b);
+        }
+
+        [Fact]
+        public void NumericalCheck_Conv2D_ShouldBePrecise()
+        {
+            // Test splotu: obraz 4x4, filtr 3x3
+            using var input = new AutogradNode(new FastTensor<float>(1, 1, 4, 4));
+            using var weights = new AutogradNode(new FastTensor<float>(1, 9)); // 1 outC * (3*3*1)
+
+            input.Data.AsSpan().Fill(0.5f);
+            weights.Data.AsSpan().Fill(0.1f);
+
+            Func<AutogradNode> lossFunc = () => {
+                var conv = TensorMath.Conv2D(input, weights, 1, 1, 4, 4, 3);
+                var target = new AutogradNode(new FastTensor<float>(1, 1, 2, 2), false);
+                return TensorMath.MSELoss(conv, target);
+            };
+
+            // Sprawdzamy gradienty dla wag (filtrów)
+            VerifyGradients(lossFunc, weights);
+            // Sprawdzamy gradienty dla wejścia (obrazu)
+            VerifyGradients(lossFunc, input);
+        }
+
+        [Fact]
+        public void NumericalCheck_BatchNorm1D_ShouldBePrecise()
+        {
+            using var input = new AutogradNode(new FastTensor<float>(4, 2));
+            using var gamma = new AutogradNode(new FastTensor<float>(2));
+            using var beta = new AutogradNode(new FastTensor<float>(2));
+
+            input.Data.AsSpan().Fill(1.5f);
+            gamma.Data.AsSpan().Fill(1.0f);
+            beta.Data.AsSpan().Fill(0.0f);
+
+            using var rm = new FastTensor<float>(2);
+            using var rv = new FastTensor<float>(2);
+            rv.AsSpan().Fill(1f);
+
+            Func<AutogradNode> lossFunc = () => {
+                var bn = TensorMath.BatchNorm1D(input, gamma, beta, rm, rv, 0.1f, 1e-5f, true);
+                var target = new AutogradNode(new FastTensor<float>(4, 2), false);
+                return TensorMath.MSELoss(bn, target);
+            };
+
+            VerifyGradients(lossFunc, gamma);
+            VerifyGradients(lossFunc, beta);
+            VerifyGradients(lossFunc, input);
+        }
+
+        private void VerifyGradients(Func<AutogradNode> lossFunc, AutogradNode parameter, float epsilon = 1e-4f, float tolerance = 1e-3f)
+        {
+            // 1. Obliczamy gradient analityczny (Twój autograd)
+            ComputationGraph.Active.Reset();
+            using var lossNode = lossFunc();
+            ComputationGraph.Active.Backward(lossNode);
+
+            // Kopiujemy gradienty do tablicy, aby ich nie nadpisać
+            var analyticalGrads = parameter.Grad.AsSpan().ToArray();
+
+            // 2. Obliczamy gradient numeryczny metodą różnic skończonych: [f(x+e) - f(x-e)] / (2e)
+            var numGrads = new float[parameter.Data.Size];
+            var dataSpan = parameter.Data.AsSpan();
+
+            for (int i = 0; i < parameter.Data.Size; i++)
+            {
+                float originalValue = dataSpan[i];
+
+                // f(x + epsilon)
+                dataSpan[i] = originalValue + epsilon;
+                ComputationGraph.Active.Reset();
+                using (var lossPlus = lossFunc())
+                {
+                    float fPlus = lossPlus.Data[0, 0];
+
+                    // f(x - epsilon)
+                    dataSpan[i] = originalValue - epsilon;
+                    ComputationGraph.Active.Reset();
+                    using (var lossMinus = lossFunc())
+                    {
+                        float fMinus = lossMinus.Data[0, 0];
+
+                        // Przybliżenie pochodnej
+                        numGrads[i] = (fPlus - fMinus) / (2 * epsilon);
+                    }
+                }
+
+                // Przywracamy oryginalną wartość parametru
+                dataSpan[i] = originalValue;
+            }
+
+            // 3. Porównujemy wyniki
+            for (int i = 0; i < analyticalGrads.Length; i++)
+            {
+                float diff = Math.Abs(analyticalGrads[i] - numGrads[i]);
+                // Jeśli różnica jest zbyt duża, test padnie
+                Assert.True(diff < tolerance,
+                    $"Błąd gradientu w elemencie {i}! Analityczny: {analyticalGrads[i]}, Numeryczny: {numGrads[i]}, Różnica: {diff}");
+            }
+        }
     }
 }
