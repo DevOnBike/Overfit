@@ -1,10 +1,10 @@
 namespace DevOnBike.Overfit.Core
 {
-    public class AutogradNode : IDisposable
+    public sealed class AutogradNode : IDisposable
     {
         // Migracja na FastTensor
         public FastTensor<float> Data { get; }
-        public FastTensor<float>? Grad { get; private set; }
+        public FastTensor<float> Grad { get; private set; }
         public bool RequiresGrad { get; set; }
 
         public AutogradNode(FastTensor<float> data, bool requiresGrad = true)

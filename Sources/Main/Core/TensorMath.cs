@@ -1,4 +1,6 @@
 ﻿using System.Numerics.Tensors;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace DevOnBike.Overfit.Core
 {
@@ -110,7 +112,7 @@ namespace DevOnBike.Overfit.Core
                 using var gradA = MatMul_A_BT(output.Grad, b.Data);
                 TensorPrimitives.Add(a.Grad.AsSpan(), gradA.AsSpan(), a.Grad.AsSpan());
             }
-            
+
             if (b.RequiresGrad)
             {
                 // GradB = A^T * GradOut
@@ -129,7 +131,7 @@ namespace DevOnBike.Overfit.Core
             {
                 var aRow = A.AsSpan().Slice(i * K, K);
                 var cRow = C.AsSpan().Slice(i * M, M);
-                
+
                 for (var j = 0; j < M; j++)
                 {
                     // Iloczyn skalarny na ciągłych wierszach omija potrzebę fizycznej transpozycji B!
@@ -149,21 +151,21 @@ namespace DevOnBike.Overfit.Core
             Parallel.For(0, N, i =>
             {
                 var cRow = C.AsSpan().Slice(i * M, M);
-                
+
                 for (var k = 0; k < K; k++)
                 {
                     var aVal = A.AsSpan()[k * N + i]; // Bezpośredni dostęp kolumnowy (skalar)
-                    
+
                     if (aVal == 0)
                     {
                         continue;
                     }
-                    
+
                     // Skalujemy ciągły wiersz macierzy B
                     TensorPrimitives.MultiplyAdd(B.AsSpan().Slice(k * M, M), aVal, cRow, cRow);
                 }
             });
-            
+
             return C;
         }
 
@@ -278,25 +280,52 @@ namespace DevOnBike.Overfit.Core
             var resultData = new FastTensor<float>(batchSize, channels, outputH, outputW);
             var maxIndices = new AutogradNode(new FastTensor<float>(batchSize, channels, outputH, outputW), false);
 
-            Parallel.For(0, batchSize, n => {
+            Parallel.For(0, batchSize, n =>
+            {
+                // 1. Pobieramy "nagie" wskaźniki-referencje do początku pamięci (ZERO BOUNDS CHECKING)
+                ref var inRef = ref MemoryMarshal.GetReference(input.Data.AsSpan());
+                ref var outRef = ref MemoryMarshal.GetReference(resultData.AsSpan());
+                ref var idxRef = ref MemoryMarshal.GetReference(maxIndices.Data.AsSpan());
+
+                var bInOffset = n * channels * inputH * inputW;
+                var bOutOffset = n * channels * outputH * outputW;
+
                 for (var c = 0; c < channels; c++)
                 {
+                    var cInOffset = bInOffset + c * inputH * inputW;
+                    var cOutOffset = bOutOffset + c * outputH * outputW;
+
                     for (var oh = 0; oh < outputH; oh++)
                     {
+                        var ohInOffset = cInOffset + oh * poolSize * inputW;
+                        var ohOutOffset = cOutOffset + oh * outputW;
+
                         for (var ow = 0; ow < outputW; ow++)
                         {
-                            var maxVal = float.MinValue; var maxIdx = -1;
+                            var maxVal = float.MinValue;
+                            var maxIdx = -1;
+                            var owInOffset = ohInOffset + ow * poolSize;
+
                             for (var ph = 0; ph < poolSize; ph++)
                             {
+                                var phInOffset = owInOffset + ph * inputW;
+
                                 for (var pw = 0; pw < poolSize; pw++)
                                 {
-                                    int ih = oh * poolSize + ph, iw = ow * poolSize + pw;
-                                    var val = input.Data[n, c, ih, iw];
-                                    if (val > maxVal) { maxVal = val; maxIdx = n * (channels * inputH * inputW) + c * (inputH * inputW) + ih * inputW + iw; }
+                                    var absIdx = phInOffset + pw;
+
+                                    // BŁYSKAWICZNY ODCZYT: Kompiluje się do instrukcji mov w asemblerze!
+                                    var val = Unsafe.Add(ref inRef, absIdx);
+
+                                    if (val > maxVal) { maxVal = val; maxIdx = absIdx; }
                                 }
                             }
-                            resultData[n, c, oh, ow] = maxVal;
-                            maxIndices.Data[n, c, oh, ow] = maxIdx;
+
+                            var outAbsIdx = ohOutOffset + ow;
+
+                            // BŁYSKAWICZNY ZAPIS
+                            Unsafe.Add(ref outRef, outAbsIdx) = maxVal;
+                            Unsafe.Add(ref idxRef, outAbsIdx) = maxIdx;
                         }
                     }
                 }
@@ -309,10 +338,17 @@ namespace DevOnBike.Overfit.Core
 
         public static void MaxPool2DBackward(AutogradNode input, AutogradNode maxIndices, AutogradNode output)
         {
-            var iGS = input.Grad.AsSpan();
-            var oGS = output.Grad.AsSpan();
-            var idxS = maxIndices.Data.AsSpan();
-            for (var i = 0; i < idxS.Length; i++) iGS[(int)idxS[i]] += oGS[i];
+            // Propagacja wsteczna też bez bounds checkingu!
+            ref var iGRef = ref MemoryMarshal.GetReference(input.Grad.AsSpan());
+            ref var oGRef = ref MemoryMarshal.GetReference(output.Grad.AsSpan());
+            ref var idxRef = ref MemoryMarshal.GetReference(maxIndices.Data.AsSpan());
+
+            var len = maxIndices.Data.Size;
+            for (var i = 0; i < len; i++)
+            {
+                var maxIdx = (int)Unsafe.Add(ref idxRef, i);
+                Unsafe.Add(ref iGRef, maxIdx) += Unsafe.Add(ref oGRef, i);
+            }
         }
 
         public static AutogradNode GlobalAveragePool2D(AutogradNode input, int channels, int h, int w)
@@ -321,7 +357,8 @@ namespace DevOnBike.Overfit.Core
             var resData = new FastTensor<float>(batchSize, channels);
             float spatialSize = h * w;
 
-            Parallel.For(0, batchSize, n => {
+            Parallel.For(0, batchSize, n =>
+            {
                 for (var c = 0; c < channels; c++)
                     resData[n, c] = TensorPrimitives.Sum(input.Data.AsSpan().Slice(n * channels * h * w + c * h * w, h * w)) / spatialSize;
             });
@@ -334,7 +371,8 @@ namespace DevOnBike.Overfit.Core
         public static void GlobalAvgPool2DBackward(AutogradNode input, AutogradNode output, int h, int w, int channels)
         {
             var batchSize = input.Data.Shape[0]; float spatialSize = h * w;
-            Parallel.For(0, batchSize, n => {
+            Parallel.For(0, batchSize, n =>
+            {
                 for (var c = 0; c < channels; c++)
                     input.Grad.AsSpan().Slice(n * channels * h * w + c * h * w, h * w).Fill(output.Grad[n, c] / spatialSize);
             });
@@ -425,13 +463,13 @@ namespace DevOnBike.Overfit.Core
         public static AutogradNode MSELoss(AutogradNode prediction, AutogradNode target)
         {
             using var diff = new FastTensor<float>(prediction.Data.Shape);
-            
+
             TensorPrimitives.Subtract(prediction.Data.AsSpan(), target.Data.AsSpan(), diff.AsSpan());
             var mse = TensorPrimitives.Dot(diff.AsSpan(), diff.AsSpan()) / prediction.Data.Size;
             var res = new FastTensor<float>(1, 1) { [0, 0] = mse };
             var output = new AutogradNode(res, prediction.RequiresGrad);
             if (output.RequiresGrad) ComputationGraph.Active.Record(OpCode.MSELoss, output, prediction, target);
-            
+
             return output;
         }
 
@@ -510,9 +548,9 @@ namespace DevOnBike.Overfit.Core
             // Powyżej progu — FastBuffer<float> z ArrayPool (zero GC).
             const int StackAllocThreshold = 256;
 
-            FastBuffer<float>? xHatBuf = null;
-            FastBuffer<float>? coeffBuf = null;
-            FastBuffer<float>? termBuf = null;
+            FastBuffer<float> xHatBuf = null;
+            FastBuffer<float> coeffBuf = null;
+            FastBuffer<float> termBuf = null;
 
             try
             {
