@@ -1,4 +1,5 @@
 ﻿using DevOnBike.Overfit.Core;
+using System.Numerics.Tensors;
 
 namespace DevOnBike.Overfit.Tests
 {
@@ -98,6 +99,84 @@ namespace DevOnBike.Overfit.Tests
             Assert.Equal(1352, reshaped.Shape[1]);
             // Dostęp do spłaszczonego tensora 2D
             Assert.Equal(7f, reshaped[0, 1351]);
+        }
+
+        [Fact]
+        public void MatMul_FullGradientCheck_MathematicalTruth()
+        {
+            // Test mnożenia macierzy [2x3] * [3x2] = [2x2]
+            using var a = new AutogradNode(new FastTensor<float>(2, 3));
+            using var b = new AutogradNode(new FastTensor<float>(3, 2));
+
+            a.Data.AsSpan().Fill(1f);
+            b.Data.AsSpan().Fill(2f);
+
+            using var output = TensorMath.MatMul(a, b);
+
+            // Forward: każdy element to 1*2 + 1*2 + 1*2 = 6
+            Assert.Equal(6f, output.Data[0, 0]);
+
+            // Backward: Grad A = GradOut * B^T
+            output.Grad.AsSpan().Fill(1f);
+            ComputationGraph.Active.Backward(output);
+
+            // Grad A powinien wynosić sumę wierszy B (2+2=4)
+            Assert.Equal(4f, a.Grad[0, 0]);
+            // Grad B powinien wynosić sumę kolumn A (1+1=2)
+            Assert.Equal(2f, b.Grad[0, 0]);
+        }
+
+        [Fact]
+        public void Dropout_Scaling_And_InferenceMode()
+        {
+            using var input = new AutogradNode(new FastTensor<float>(1, 100));
+            input.Data.AsSpan().Fill(1f);
+
+            // Tryb treningowy: wartości powinny być skalowane o 1/(1-p)
+            using var outputTrain = TensorMath.Dropout(input, 0.5f, isTraining: true);
+            var sumTrain = TensorPrimitives.Sum(outputTrain.Data.AsSpan());
+
+            // Statystycznie suma powinna oscylować wokół 100 (50*0 + 50*2)
+            Assert.InRange(sumTrain, 60f, 140f);
+
+            // Tryb inferencji: Dropout musi być przezroczysty
+            using var outputEval = TensorMath.Dropout(input, 0.5f, isTraining: false);
+            Assert.Equal(100f, TensorPrimitives.Sum(outputEval.Data.AsSpan()));
+        }
+
+        [Fact]
+        public void GlobalAveragePool2D_NCHW_Reduction_Check()
+        {
+            // Wejście NCHW: 1 batch, 2 kanały, 2x2 przestrzeń
+            using var input = new AutogradNode(new FastTensor<float>(1, 2, 2, 2));
+            var inS = input.Data.AsSpan();
+            inS.Slice(0, 4).Fill(10f); // Kanał 0
+            inS.Slice(4, 4).Fill(20f); // Kanał 1
+
+            using var output = TensorMath.GlobalAveragePool2D(input, 2, 2, 2);
+
+            // Wynik powinien mieć kształt [1, 2]
+            Assert.Equal(10f, output.Data[0, 0]);
+            Assert.Equal(20f, output.Data[0, 1]);
+        }
+
+        [Fact]
+        public void MSELoss_MathematicalGradient_Check()
+        {
+            using var pred = new AutogradNode(new FastTensor<float>(1, 2));
+            using var target = new AutogradNode(new FastTensor<float>(1, 2), false);
+
+            pred.Data[0, 0] = 10f;
+            target.Data[0, 0] = 5f;
+
+            // MSE = ((10-5)^2 + 0) / 2 = 12.5
+            using var loss = TensorMath.MSELoss(pred, target);
+            Assert.Equal(12.5f, loss.Data[0, 0]);
+
+            ComputationGraph.Active.Backward(loss);
+
+            // Gradient MSE: (2/n) * (pred - target) = (2/2) * (10 - 5) = 5
+            Assert.Equal(5f, pred.Grad[0, 0]);
         }
     }
 }

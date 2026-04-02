@@ -68,22 +68,24 @@ namespace DevOnBike.Overfit.Core
 
             var C = new FastTensor<float>(aRows, bCols);
 
-            var aSpan = A.AsSpan();
-            var bSpan = B.AsSpan();
-            var cSpan = C.AsSpan();
-
-            for (var i = 0; i < aRows; i++)
+            Parallel.For(0, aRows, i =>
             {
-                var rowC = cSpan.Slice(i * bCols, bCols);
-                rowC.Clear();
+                // Pobieramy Span lokalnie dla każdego wątku (bezpieczne dla ref struct)
+                var aS = A.AsSpan();
+                var bS = B.AsSpan();
+                var cS = C.AsSpan();
+
+                var rowC = cS.Slice(i * bCols, bCols);
+                rowC.Clear(); // ArrayPool może zawierać stare dane
 
                 for (var k = 0; k < aCols; k++)
                 {
-                    var valA = aSpan[i * aCols + k];
-                    var rowB = bSpan.Slice(k * bCols, bCols);
+                    var valA = aS[i * aCols + k];
+                    var rowB = bS.Slice(k * bCols, bCols);
+                    // Wykorzystanie SIMD do obliczeń wierszowych
                     TensorPrimitives.MultiplyAdd(rowB, valA, rowC, rowC);
                 }
-            }
+            });
 
             return C;
         }
