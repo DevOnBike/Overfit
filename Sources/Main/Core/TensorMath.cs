@@ -208,13 +208,11 @@ namespace DevOnBike.Overfit.Core
             var batchSize = input.Data.Rows;
             var kSquareInC = k * k * inC;
 
-            // Alokacja macierzy wynikowej
             var resultData = new FastMatrix<float>(batchSize, outC * outH * outW);
 
-            // Przetwarzanie obrazów w batchu
-            for (var n = 0; n < batchSize; n++)
+            Parallel.For(0, batchSize, n =>
             {
-                // Zero-Alloc: colData i batchResult są zwalniane (Dispose) po użyciu
+                // Zero-Alloc wewnątrz wątku
                 using var colData = new FastMatrix<float>(kSquareInC, outH * outW);
 
                 Im2Col(input.Data.ReadOnlyRow(n), inC, h, w, k, 1, 0, colData.AsSpan());
@@ -223,14 +221,12 @@ namespace DevOnBike.Overfit.Core
 
                 // Kopiowanie wyniku splotu dla danego obrazu do głównej macierzy
                 batchResult.AsSpan().CopyTo(resultData.Row(n));
-            }
+            });
 
             var outputNode = new AutogradNode(resultData, input.RequiresGrad || weights.RequiresGrad);
 
             if (outputNode.RequiresGrad)
             {
-                // ZOPTYMALIZOWANE: Przekazujemy parametry jako inty (I0..I4) zamiast int[]
-                // Eliminuje to alokację nowej tablicy przy każdym wywołaniu splotu
                 ComputationGraph.Active.Record(OpCode.Conv2D, outputNode, input, weights,
                     i0: inC, i1: outC, i2: h, i3: w, i4: k);
             }
@@ -248,7 +244,7 @@ namespace DevOnBike.Overfit.Core
             var maxIndicesTensor = new AutogradNode(new FastMatrix<float>(batchSize, channels * outputH * outputW), requiresGrad: false);
             var maxIndices = maxIndicesTensor.Data;
 
-            for (var n = 0; n < batchSize; n++)
+            Parallel.For(0, batchSize, n =>
             {
                 for (var c = 0; c < channels; c++)
                 {
@@ -278,7 +274,7 @@ namespace DevOnBike.Overfit.Core
                         }
                     }
                 }
-            }
+            });
 
             var outputNode = new AutogradNode(resultData, input.RequiresGrad);
             if (outputNode.RequiresGrad)
@@ -315,7 +311,6 @@ namespace DevOnBike.Overfit.Core
 
             if (outputNode.RequiresGrad)
             {
-                // ZOPTYMALIZOWANE: Parametry wymiarów przekazane bezpośrednio do struktury TapeOp
                 ComputationGraph.Active.Record(OpCode.GlobalAveragePool2D, outputNode, input, null,
                     i0: channels, i1: h, i2: w);
             }
@@ -349,7 +344,6 @@ namespace DevOnBike.Overfit.Core
                 var rmSpan = runningMean.AsReadOnlySpan();
                 var rvSpan = runningVar.AsReadOnlySpan();
 
-                // 2. Prekalkulacja (BatchNorm Folding) - robimy to tylko raz dla całego kanału/cechy!
                 for (var j = 0; j < C; j++)
                 {
                     var invStd = 1f / MathF.Sqrt(rvSpan[j] + eps);
@@ -359,7 +353,6 @@ namespace DevOnBike.Overfit.Core
 
                 for (var i = 0; i < N; i++)
                 {
-                    // rowOut = rowIn * scale + shift
                     TensorPrimitives.MultiplyAdd(
                         input.Data.ReadOnlyRow(i),
                         scale,
@@ -371,7 +364,6 @@ namespace DevOnBike.Overfit.Core
                 return new AutogradNode(resultData, requiresGrad: false);
             }
 
-            // Zero-Alloc: Używamy FastBuffer zamiast FastMatrix dla średniej i wariancji
             using var batchMeanBuf = new FastBuffer<float>(C);
             using var batchVarBuf = new FastBuffer<float>(C);
             var batchMean = batchMeanBuf.AsSpan();
@@ -381,12 +373,10 @@ namespace DevOnBike.Overfit.Core
             var xHatTensor = new AutogradNode(new FastMatrix<float>(N, C), requiresGrad: false);
             var invStdVec = invStdTensor.Data.AsSpan();
 
-            // Obliczanie średniej batcha
             batchMean.Clear();
             for (var i = 0; i < N; i++) TensorPrimitives.Add(batchMean, input.Data.ReadOnlyRow(i), batchMean);
             TensorPrimitives.Multiply(batchMean, 1f / N, batchMean);
 
-            // Obliczanie wariancji batcha
             batchVar.Clear();
             using var tempRowMat = new FastMatrix<float>(1, C);
             var tempRow = tempRowMat.AsSpan();
@@ -397,7 +387,6 @@ namespace DevOnBike.Overfit.Core
             }
             TensorPrimitives.Multiply(batchVar, 1f / N, batchVar);
 
-            // Aktualizacja statystyk kroczących i przygotowanie invStd
             var rmSpanLocal = runningMean.AsSpan();
             var rvSpanLocal = runningVar.AsSpan();
             for (var j = 0; j < C; j++)
@@ -407,7 +396,6 @@ namespace DevOnBike.Overfit.Core
                 invStdVec[j] = 1f / MathF.Sqrt(batchVar[j] + eps);
             }
 
-            // Normalizacja i obliczenie xHat
             for (var i = 0; i < N; i++)
             {
                 var rowIn = input.Data.ReadOnlyRow(i);
@@ -428,10 +416,8 @@ namespace DevOnBike.Overfit.Core
 
             if (outputNode.RequiresGrad)
             {
-                // --- ROZWIĄZANIE BŁĘDU ---
-                // Używamy nazwanego parametru 'nodeContext', aby pominąć 5 opcjonalnych intów
                 ComputationGraph.Active.Record(OpCode.BatchNorm1D, outputNode, input, null,
-                    nodeContext: new AutogradNode[] { gamma, beta, xHatTensor, invStdTensor });
+                    nodeContext: [gamma, beta, xHatTensor, invStdTensor]);
             }
             else
             {
@@ -537,7 +523,7 @@ namespace DevOnBike.Overfit.Core
             var scale = output.Grad.AsReadOnlySpan()[0] / rows;
 
             using var pRowBuf = new FastBuffer<float>(cols);
-            using var diffBuf = new FastBuffer<float>(cols); // Nowy bufor na różnice
+            using var diffBuf = new FastBuffer<float>(cols);
 
             var pRow = pRowBuf.AsSpan();
             var diff = diffBuf.AsSpan();
@@ -550,7 +536,6 @@ namespace DevOnBike.Overfit.Core
 
                 TensorPrimitives.SoftMax(lRow, pRow);
 
-                // dL/dLogits = (probs - target) * scale
                 TensorPrimitives.Subtract(pRow, tRow, diff);
                 TensorPrimitives.MultiplyAdd(diff, scale, lGrad, lGrad);
             }
@@ -563,7 +548,7 @@ namespace DevOnBike.Overfit.Core
             var batchSize = input.Data.Rows;
             var kSquareInC = k * k * inC;
 
-            for (var n = 0; n < batchSize; n++)
+            Parallel.For(0, batchSize, n =>
             {
                 using var gn = new FastMatrix<float>(outC, outH * outW);
                 output.Grad.ReadOnlyRow(n).CopyTo(gn.AsSpan());
@@ -575,7 +560,12 @@ namespace DevOnBike.Overfit.Core
 
                     using var colT = colData.AsView().Transpose().ToContiguousFastMatrix();
                     using var dW_batch = MatMulRaw(gn.AsView(), colT.AsView());
-                    TensorPrimitives.Add(weights.Grad.AsReadOnlySpan(), dW_batch.AsReadOnlySpan(), weights.Grad.AsSpan());
+
+                    // LOCK GWARANTUJE BEZPIECZNĄ AKUMULACJĘ GRADIENTU WAG Z WIELU WĄTKÓW
+                    lock (weights.Grad)
+                    {
+                        TensorPrimitives.Add(weights.Grad.AsReadOnlySpan(), dW_batch.AsReadOnlySpan(), weights.Grad.AsSpan());
+                    }
                 }
 
                 if (input.RequiresGrad)
@@ -583,13 +573,14 @@ namespace DevOnBike.Overfit.Core
                     using var dX_col = MatMulRaw(weights.Data.AsView().Transpose(), gn.AsView());
                     Col2Im(dX_col.AsReadOnlySpan(), inC, h, w, k, 1, 0, input.Grad.Row(n));
                 }
-            }
+            });
         }
 
         public static void MaxPool2DBackward(AutogradNode input, AutogradNode maxIndices, AutogradNode output)
         {
             var batchSize = input.Data.Rows;
-            for (var n = 0; n < batchSize; n++)
+
+            Parallel.For(0, batchSize, n =>
             {
                 var gradOut = output.Grad.ReadOnlyRow(n);
                 var gradIn = input.Grad.Row(n);
@@ -600,7 +591,7 @@ namespace DevOnBike.Overfit.Core
                     var originalIdx = (int)idxRow[i];
                     gradIn[originalIdx] += gradOut[i];
                 }
-            }
+            });
         }
 
         public static void GlobalAvgPool2DBackward(AutogradNode input, AutogradNode output, int channels, int h, int w)
@@ -616,7 +607,6 @@ namespace DevOnBike.Overfit.Core
                     var gradOut = output.Grad[b, c];
                     var offset = c * spatialSize;
 
-                    // SIMD gradient accumulation
                     var gradInSpan = input.Grad.Row(b).Slice(offset, spatialSize);
                     TensorPrimitives.Add(gradInSpan, gradOut * invSpatialSize, gradInSpan);
                 }
@@ -657,13 +647,12 @@ namespace DevOnBike.Overfit.Core
             {
                 using var factorBuf = new FastBuffer<float>(C);
                 using var temp1Buf = new FastBuffer<float>(C);
-                using var termBuf = new FastBuffer<float>(C); // Nowy, izolowany bufor
+                using var termBuf = new FastBuffer<float>(C);
 
                 var factor = factorBuf.AsSpan();
                 var temp1 = temp1Buf.AsSpan();
                 var term = termBuf.AsSpan();
 
-                // Pre-kalkulacja współczynnika: (gamma * invStd / N)
                 TensorPrimitives.Multiply(gamma.Data.AsReadOnlySpan(), invStdTensor.Data.AsReadOnlySpan(), factor);
                 TensorPrimitives.Multiply(factor, 1f / N, factor);
 
@@ -673,14 +662,12 @@ namespace DevOnBike.Overfit.Core
                     var gradOutRow = gradOut.ReadOnlyRow(i);
                     var xHatRow = xHatMat.ReadOnlyRow(i);
 
-                    // term = N * dY - sum(dY) - xHat * sum(dY * xHat)
                     TensorPrimitives.Multiply(gradOutRow, N, term);
                     TensorPrimitives.Subtract(term, dBeta, term);
 
                     TensorPrimitives.Multiply(xHatRow, dGamma, temp1);
                     TensorPrimitives.Subtract(term, temp1, term);
 
-                    // Prawidłowa akumulacja gradientu: gradInRow += factor * term
                     TensorPrimitives.MultiplyAdd(term, factor, gradInRow, gradInRow);
                 }
             }
