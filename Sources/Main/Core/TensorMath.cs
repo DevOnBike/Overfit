@@ -376,11 +376,19 @@ namespace DevOnBike.Overfit.Core
 
         public static void GlobalAvgPool2DBackward(AutogradNode input, AutogradNode output, int h, int w, int channels)
         {
-            var batchSize = input.Data.GetDim(0); float spatialSize = h * w;
+            var batchSize = input.Data.GetDim(0);
+            float spatialSize = h * w;
+
             Parallel.For(0, batchSize, n =>
             {
                 for (var c = 0; c < channels; c++)
-                    input.Grad.AsSpan().Slice(n * channels * h * w + c * h * w, h * w).Fill(output.Grad[n, c] / spatialSize);
+                {
+                    var gradSlice = input.Grad.AsSpan().Slice(n * channels * h * w + c * h * w, h * w);
+                    var val = output.Grad[n, c] / spatialSize;
+
+                    // POPRAWKA: Akumulacja wektorowa (+val) zamiast twardego nadpisania
+                    TensorPrimitives.Add(gradSlice, val, gradSlice);
+                }
             });
         }
 
