@@ -524,13 +524,24 @@ namespace DevOnBike.Overfit.Core
 
         public static void SoftmaxCrossEntropyBackward(AutogradNode logits, AutogradNode target, AutogradNode output)
         {
-            int rows = logits.Data.GetDim(0), cols = logits.Data.GetDim(1);
-            var scale = output.Grad[0, 0] / rows;
+            var rows = logits.Data.GetDim(0);
+            var cols = logits.Data.GetDim(1);
+            var scale = output.Grad.AsSpan()[0] / rows;
+
             using var pRowBuf = new FastTensor<float>(cols);
+
             for (var r = 0; r < rows; r++)
             {
-                TensorPrimitives.SoftMax(logits.Data.AsSpan().Slice(r * cols, cols), pRowBuf.AsSpan());
-                for (var c = 0; c < cols; c++) logits.Grad[r, c] += (pRowBuf.AsSpan()[c] - target.Data[r, c]) * scale;
+                var logS = logits.Data.AsSpan().Slice(r * cols, cols);
+                var pS = pRowBuf.AsSpan();
+                var tS = target.Data.AsSpan().Slice(r * cols, cols);
+                var gS = logits.Grad.AsSpan().Slice(r * cols, cols);
+
+                TensorPrimitives.SoftMax(logS, pS);
+
+                // POPRAWKA: Pełna fuzja SIMD dla Cross Entropy
+                TensorPrimitives.MultiplyAdd(pS, scale, gS, gS);
+                TensorPrimitives.MultiplyAdd(tS, -scale, gS, gS);
             }
         }
 
