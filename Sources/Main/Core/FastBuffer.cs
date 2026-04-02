@@ -69,7 +69,6 @@ namespace DevOnBike.Overfit.Core
                 ArrayPool<T>.Shared.Return(rented);
             }
 
-            GC.SuppressFinalize(this);
         }
     }
 }

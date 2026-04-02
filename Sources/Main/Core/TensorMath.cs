@@ -133,10 +133,13 @@ namespace DevOnBike.Overfit.Core
                 var aRow = A.AsSpan().Slice(i * K, K);
                 var cRow = C.AsSpan().Slice(i * M, M);
 
+                // HOISTING: Wyciągamy Span z B przed wewnętrzną pętlę
+                var bS = B.AsSpan();
+
                 for (var j = 0; j < M; j++)
                 {
-                    // Iloczyn skalarny na ciągłych wierszach omija potrzebę fizycznej transpozycji B!
-                    cRow[j] = TensorPrimitives.Dot(aRow, B.AsSpan().Slice(j * K, K));
+                    // Używamy zbuforowanego bS
+                    cRow[j] = TensorPrimitives.Dot(aRow, bS.Slice(j * K, K));
                 }
             });
             return C;
@@ -153,17 +156,18 @@ namespace DevOnBike.Overfit.Core
             {
                 var cRow = C.AsSpan().Slice(i * M, M);
 
+                // HOISTING: Inicjalizacja Span na stosie tylko raz per wątek/wiersz!
+                var aS = A.AsSpan();
+                var bS = B.AsSpan();
+
                 for (var k = 0; k < K; k++)
                 {
-                    var aVal = A.AsSpan()[k * N + i]; // Bezpośredni dostęp kolumnowy (skalar)
+                    var aVal = aS[k * N + i];
 
-                    if (aVal == 0)
-                    {
-                        continue;
-                    }
+                    if (aVal == 0) continue;
 
-                    // Skalujemy ciągły wiersz macierzy B
-                    TensorPrimitives.MultiplyAdd(B.AsSpan().Slice(k * M, M), aVal, cRow, cRow);
+                    // Używamy zbuforowanego bS
+                    TensorPrimitives.MultiplyAdd(bS.Slice(k * M, M), aVal, cRow, cRow);
                 }
             });
 
@@ -400,41 +404,51 @@ namespace DevOnBike.Overfit.Core
 
         public static void ReluBackward(AutogradNode input, AutogradNode output)
         {
-            var inS = input.Data.AsSpan();
-            var goS = output.Grad.AsSpan();
-            var giS = input.Grad.AsSpan();
+            if (!input.RequiresGrad)
+            {
+                return;
+            }
 
+            // ReadOnlySpan — kompilator wie że nie piszemy przez te spany → może lepiej optymalizować
+            var inS = (ReadOnlySpan<float>)input.Data.AsSpan();
+            var goS = (ReadOnlySpan<float>)output.Grad.AsSpan();
+            var giS = input.Grad.AsSpan();
             var i = 0;
 
-            // OSTATECZNA MAGIA SIMD DLA .NET 10 (Zero Alokacji, Zero Skoków)
+            // SIMD path — Vector<float> zamiast TensorPrimitives.Sign, bo Sign zwraca Span<int>
+            // a nie Span<float> — nie da się go użyć bezpośrednio w MultiplyAdd.
+            //
+            // Na 9950X3D (.NET 10, x64-v4): Vector<float>.Count == 16 (AVX-512)
+            // → 16 float per iteracja, maska w rejestrze, zero alokacji, zero skoków.
             if (Vector.IsHardwareAccelerated)
             {
                 var vZero = Vector<float>.Zero;
-                // W .NET 10 na nowym CPU to będzie 16 (AVX-512)!
                 var vecSize = Vector<float>.Count;
 
-                // Przetwarzamy pełne wektory
                 for (; i <= inS.Length - vecSize; i += vecSize)
                 {
                     var vIn = new Vector<float>(inS.Slice(i));
                     var vGo = new Vector<float>(goS.Slice(i));
                     var vGi = new Vector<float>(giS.Slice(i));
 
-                    // Maska sprzętowa w rejestrze (nigdy nie trafia do RAM)
+                    // GreaterThan → maska bitowa 0xFFFFFFFF / 0x00000000 w rejestrze
                     var vMask = Vector.GreaterThan(vIn, vZero);
 
-                    // Bramka logiczna: przepuszcza vGo dla true, wygasza do vZero dla false
-                    var vFilteredGo = Vector.ConditionalSelect(vMask, vGo, vZero);
+                    // ConditionalSelect: przepuść vGo tam gdzie in > 0, wygaś do 0 gdzie in <= 0
+                    var vFiltered = Vector.ConditionalSelect(vMask, vGo, vZero);
 
-                    // giS += odfiltrowane goS
-                    (vGi + vFilteredGo).CopyTo(giS.Slice(i));
+                    // giS += filtered_go — akumulacja w rejestrze, jeden zapis do pamięci
+                    (vGi + vFiltered).CopyTo(giS.Slice(i));
                 }
             }
 
-            // Resztki (jeśli rozmiar nie jest wielokrotnością wektora)
+            // Scalar tail — obsługuje resztę gdy len % vecSize != 0 (lub gdy brak AVX)
             for (; i < inS.Length; i++)
             {
-                if (inS[i] > 0) giS[i] += goS[i];
+                if (inS[i] > 0f)
+                {
+                    giS[i] += goS[i];
+                }
             }
         }
 
