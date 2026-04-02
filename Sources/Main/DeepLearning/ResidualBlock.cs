@@ -10,7 +10,7 @@ namespace DevOnBike.Overfit.DeepLearning
         private readonly BatchNorm1D _bn2;
 
         public bool IsTraining { get; private set; } = true;
-        
+
         public ResidualBlock(int hiddenSize)
         {
             _linear1 = new LinearLayer(hiddenSize, hiddenSize);
@@ -18,7 +18,7 @@ namespace DevOnBike.Overfit.DeepLearning
             _linear2 = new LinearLayer(hiddenSize, hiddenSize);
             _bn2 = new BatchNorm1D(hiddenSize);
         }
-        
+
         public void Train()
         {
             IsTraining = true;
@@ -37,7 +37,6 @@ namespace DevOnBike.Overfit.DeepLearning
             _bn2.Eval();
         }
 
-        // Zgodne z interfejsem! Flaga isTraining pobierana jest z właściwości instancji
         public AutogradNode Forward(AutogradNode input)
         {
             var out1 = _linear1.Forward(input);
@@ -72,17 +71,14 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             using var fs = new FileStream(path, FileMode.Create);
             using var bw = new BinaryWriter(fs);
-
             Save(bw);
         }
 
         public void Load(string path)
         {
             if (!File.Exists(path)) throw new FileNotFoundException($"Brak pliku wag: {path}");
-
             using var fs = new FileStream(path, FileMode.Open);
             using var br = new BinaryReader(fs);
-
             Load(br);
         }
 

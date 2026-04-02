@@ -70,7 +70,7 @@ namespace DevOnBike.Overfit.UI
         }
 
         // Magia konwersji WPF (280x280 InkCanvas) -> MNIST (28x28 double[])
-        private double[] GetMnistPixelsFromCanvas()
+        private float[] GetMnistPixelsFromCanvas()
         {
             // 1. Renderujemy Canvas do bitmapy
             var rtb = new RenderTargetBitmap(
@@ -89,7 +89,7 @@ namespace DevOnBike.Overfit.UI
             scaled.CopyPixels(pixels, stride, 0);
 
             // 4. Konwertujemy na format, który przyjmuje nasza sieć (tablica 784 x double, 0.0 - 1.0)
-            var mnistData = new double[784];
+            var mnistData = new float[784];
             for (var y = 0; y < 28; y++)
             {
                 for (var x = 0; x < 28; x++)
@@ -100,7 +100,7 @@ namespace DevOnBike.Overfit.UI
                     var brightness = pixels[idx + 2];
 
                     // Normalizacja do 0.0 - 1.0
-                    mnistData[y * 28 + x] = brightness / 255.0;
+                    mnistData[y * 28 + x] = brightness / 255.0f;
                 }
             }
 

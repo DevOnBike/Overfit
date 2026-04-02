@@ -5,42 +5,40 @@ namespace DevOnBike.Overfit.Optimizers
 {
     public sealed class Adam : IOptimizer, IDisposable
     {
-        // 1. Zamiast słowników - płaska struktura powiązana z obiektem Node
         private readonly struct ParamState
         {
             public readonly AutogradNode Node;
-            public readonly FastMatrix<double> M;
-            public readonly FastMatrix<double> V;
+            public readonly FastMatrix<float> M;
+            public readonly FastMatrix<float> V;
             public readonly int Size;
 
             public ParamState(AutogradNode node)
             {
                 Node = node;
                 Size = node.Data.Rows * node.Data.Cols;
-                M = new FastMatrix<double>(node.Data.Rows, node.Data.Cols);
-                V = new FastMatrix<double>(node.Data.Rows, node.Data.Cols);
+                M = new FastMatrix<float>(node.Data.Rows, node.Data.Cols);
+                V = new FastMatrix<float>(node.Data.Rows, node.Data.Cols);
             }
         }
 
         private readonly ParamState[] _states;
 
-        // 2. ThreadLocal dla buforów, aby umożliwić równoległe aktualizacje przez Parallel.ForEach
-        // Zapobiega to rywalizacji o te same bufory przez różne wątki.
-        private readonly ThreadLocal<FastBuffer<double>> _bufGl2;
-        private readonly ThreadLocal<FastBuffer<double>> _bufGSq;
-        private readonly ThreadLocal<FastBuffer<double>> _bufMHat;
-        private readonly ThreadLocal<FastBuffer<double>> _bufVHat;
-        private readonly ThreadLocal<FastBuffer<double>> _bufUpd;
+        // Pojedyncze bufory wielokrotnego użytku! Zero ThreadLocal, zero locków.
+        private readonly FastBuffer<float> _bufGl2;
+        private readonly FastBuffer<float> _bufGSq;
+        private readonly FastBuffer<float> _bufMHat;
+        private readonly FastBuffer<float> _bufVHat;
+        private readonly FastBuffer<float> _bufUpd;
 
-        public double LearningRate { get; set; }
-        public double Beta1 { get; set; } = 0.9;
-        public double Beta2 { get; set; } = 0.999;
-        public double Epsilon { get; set; } = 1e-8;
-        public double WeightDecay { get; set; } = 0.0001;
+        public float LearningRate { get; set; }
+        public float Beta1 { get; set; } = 0.9f;
+        public float Beta2 { get; set; } = 0.999f;
+        public float Epsilon { get; set; } = 1e-8f;
+        public float WeightDecay { get; set; } = 0.0001f;
 
         private int _t = 0;
 
-        public Adam(IEnumerable<AutogradNode> parameters, double learningRate = 0.001)
+        public Adam(IEnumerable<AutogradNode> parameters, float learningRate = 0.001f)
         {
             LearningRate = learningRate;
 
@@ -55,47 +53,45 @@ namespace DevOnBike.Overfit.Optimizers
                 if (_states[i].Size > maxSize) maxSize = _states[i].Size;
             }
 
-            // Inicjalizacja buforów z gwarancją własnych kopii dla każdego wątku
-            _bufGl2 = new ThreadLocal<FastBuffer<double>>(() => new FastBuffer<double>(maxSize), true);
-            _bufGSq = new ThreadLocal<FastBuffer<double>>(() => new FastBuffer<double>(maxSize), true);
-            _bufMHat = new ThreadLocal<FastBuffer<double>>(() => new FastBuffer<double>(maxSize), true);
-            _bufVHat = new ThreadLocal<FastBuffer<double>>(() => new FastBuffer<double>(maxSize), true);
-            _bufUpd = new ThreadLocal<FastBuffer<double>>(() => new FastBuffer<double>(maxSize), true);
+            // Alokujemy globalne bufory tylko pod największą warstwę
+            _bufGl2 = new FastBuffer<float>(maxSize);
+            _bufGSq = new FastBuffer<float>(maxSize);
+            _bufMHat = new FastBuffer<float>(maxSize);
+            _bufVHat = new FastBuffer<float>(maxSize);
+            _bufUpd = new FastBuffer<float>(maxSize);
         }
 
         public void Step()
         {
             _t++;
 
-            var bc1 = 1.0 - Math.Pow(Beta1, _t);
-            var bc2 = 1.0 - Math.Pow(Beta2, _t);
-            var invBc1 = 1.0 / bc1;
-            var invBc2 = 1.0 / bc2;
+            var bc1 = 1f - MathF.Pow(Beta1, _t);
+            var bc2 = 1f - MathF.Pow(Beta2, _t);
+            var invBc1 = 1f / bc1;
+            var invBc2 = 1f / bc2;
 
-            // Równoległa aktualizacja momentów wszystkich warstw naraz!
-            Parallel.ForEach(_states, state =>
+            // Płaska iteracja zamiast Parallel.ForEach
+            foreach (var state in _states)
             {
                 var p = state.Node;
-                if (p.Data == null || p.Grad == null) return;
-
                 var n = state.Size;
                 var g = p.Grad.AsReadOnlySpan();
                 var m = state.M.AsSpan();
                 var v = state.V.AsSpan();
                 var w = p.Data.AsSpan();
 
-                // Pobranie buforów dedykowanych dla obecnego wątku (Zero alokacji, thread-safe)
-                var gl2 = _bufGl2.Value.AsSpan()[..n];
-                var gSq = _bufGSq.Value.AsSpan()[..n];
-                var mHat = _bufMHat.Value.AsSpan()[..n];
-                var vHat = _bufVHat.Value.AsSpan()[..n];
-                var upd = _bufUpd.Value.AsSpan()[..n];
+                // Wycinamy bezpiecznie potrzebny fragment pre-alokowanego bufora
+                var gl2 = _bufGl2.AsSpan()[..n];
+                var gSq = _bufGSq.AsSpan()[..n];
+                var mHat = _bufMHat.AsSpan()[..n];
+                var vHat = _bufVHat.AsSpan()[..n];
+                var upd = _bufUpd.AsSpan()[..n];
 
                 var wd = WeightDecay;
                 var b1 = Beta1;
                 var b2 = Beta2;
-                var b1Inv = 1.0 - Beta1;
-                var b2Inv = 1.0 - Beta2;
+                var b1Inv = 1f - Beta1;
+                var b2Inv = 1f - Beta2;
                 var eps = Epsilon;
                 var lr = LearningRate;
 
@@ -122,14 +118,14 @@ namespace DevOnBike.Overfit.Optimizers
                 // --- 6. w -= lr * mHat / vHat ---
                 TensorPrimitives.Divide(mHat, vHat, upd);
                 TensorPrimitives.MultiplyAdd(upd, -lr, w, w);
-            });
+            }
         }
 
         public void ZeroGrad()
         {
             foreach (var state in _states)
             {
-                state.Node.Grad?.Clear();
+                state.Node.Grad.Clear();
             }
         }
 
@@ -145,13 +141,6 @@ namespace DevOnBike.Overfit.Optimizers
                 state.M?.Dispose();
                 state.V?.Dispose();
             }
-
-            // Bezpieczne sprzątanie buforów ThreadLocal
-            if (_bufGl2.IsValueCreated) foreach (var val in _bufGl2.Values) val.Dispose();
-            if (_bufGSq.IsValueCreated) foreach (var val in _bufGSq.Values) val.Dispose();
-            if (_bufMHat.IsValueCreated) foreach (var val in _bufMHat.Values) val.Dispose();
-            if (_bufVHat.IsValueCreated) foreach (var val in _bufVHat.Values) val.Dispose();
-            if (_bufUpd.IsValueCreated) foreach (var val in _bufUpd.Values) val.Dispose();
 
             _bufGl2.Dispose();
             _bufGSq.Dispose();

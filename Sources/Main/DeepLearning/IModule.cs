@@ -5,19 +5,18 @@ namespace DevOnBike.Overfit.DeepLearning
     public interface IModule : IDisposable
     {
         bool IsTraining { get; }
-        
-        void Train(); 
+
+        void Train();
         void Eval();
-        
-        // 1. Główne przejście w przód
+
+        // Główne przejście w przód
         AutogradNode Forward(AutogradNode input);
 
-        // 2. Pobieranie wag do Optymalizatora
+        // Pobieranie wag do Optymalizatora
         IEnumerable<AutogradNode> Parameters();
 
-        // 3. Zapis i odczyt (Beast Mode)
+        // Zapis i odczyt
         void Save(BinaryWriter bw);
         void Load(BinaryReader br);
     }
-
 }

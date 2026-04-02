@@ -7,19 +7,21 @@ using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests
 {
-    public class MnistTrainingTests
+    public class MnistTrainingTests : IDisposable
     {
         private readonly ITestOutputHelper _output;
 
         public MnistTrainingTests(ITestOutputHelper output)
         {
             _output = output;
+            // Inicjalizacja globalnej Taśmy dla każdego testu w tej klasie
+            ComputationGraph.Active = new ComputationGraph();
         }
 
-        [Fact(Skip = "aaa")]
-        public void Mnist_FullTrain60k_CnnBeastMode()
+        public void Dispose()
         {
-            // Pomijam pełną aktualizację tego testu, skupmy się na aktywnej wersji (Augmented)
+            // Bezpieczne zwolnienie referencji po teście
+            ComputationGraph.Active = null;
         }
 
         [Fact(Skip = "aaa")]
@@ -29,9 +31,9 @@ namespace DevOnBike.Overfit.Tests
             var trainSize = 60000;
             var batchSize = 64;
             var epochs = 10;
-            var learningRate = 0.001;
+            var learningRate = 0.001f;
 
-            _output.WriteLine("=== START: Trening z Augmentacją i Schedulerem ===");
+            _output.WriteLine("=== START: Trening na Taśmie (Computation Graph) z Augmentacją ===");
             _output.WriteLine("Ładowanie pełnego zbioru 60,000 obrazów...");
             var (trainX, trainY) = MnistLoader.Load(
                 "d:/ml/train-images.idx3-ubyte",
@@ -41,16 +43,14 @@ namespace DevOnBike.Overfit.Tests
             using var X = new AutogradNode(trainX, requiresGrad: false);
             using var Y = new AutogradNode(trainY, requiresGrad: false);
 
-            // 1. ZAMIENIONO: Luźne warstwy na spójny model Sequential!
             var conv1 = new ConvLayer(inChannels: 1, outChannels: 8, h: 28, w: 28, kSize: 3);
             var bn1 = new BatchNorm1D(1352);
             var fc1 = new LinearLayer(1352, 10);
 
             var model = new Sequential(conv1, bn1, fc1);
 
-            // 2. Optymalizator pobiera wagi prosto z modelu
             var optimizer = new Adam(model.Parameters(), learningRate);
-            var scheduler = new LRScheduler(optimizer, _output.WriteLine, factor: 0.5, patience: 1);
+            var scheduler = new LRScheduler(optimizer, _output.WriteLine, factor: 0.5f, patience: 1);
 
             var numBatches = trainSize / batchSize;
             var totalSw = Stopwatch.StartNew();
@@ -62,13 +62,14 @@ namespace DevOnBike.Overfit.Tests
             for (var epoch = 1; epoch <= epochs; epoch++)
             {
                 var epochSw = Stopwatch.StartNew();
-                double epochLoss = 0;
+                var epochLoss = 0f;
 
-                // Ustawiamy model w tryb treningu na początku epoki (Dropout, BatchNorm żyją!)
                 model.Train();
 
                 for (var b = 0; b < numBatches; b++)
                 {
+                    // KLUCZOWE: Reset Taśmy na starcie batcha
+                    ComputationGraph.Active.Reset();
                     optimizer.ZeroGrad();
 
                     var xView = X.Data.AsView().Slice(b * batchSize, 0, batchSize, 784);
@@ -83,13 +84,8 @@ namespace DevOnBike.Overfit.Tests
                     using var h1 = conv1.Forward(xBatch);
                     using var a1 = TensorMath.ReLU(h1);
                     using var p1 = TensorMath.MaxPool2D(a1, 8, 26, 26, 2);
-
-                    // 3. ZAMIENIONO: Flaga isTraining usunięta, warstwa wie z wew. stanu
                     using var bnOut = bn1.Forward(p1);
-
-                    // Dropout przeniesiony tu dla czystości, z użyciem IsTraining z modelu
-                    using var d1 = TensorMath.Dropout(bnOut, 0.25, isTraining: model.IsTraining);
-
+                    using var d1 = TensorMath.Dropout(bnOut, 0.25f, isTraining: model.IsTraining);
                     using var predictionLogits = fc1.Forward(d1);
 
                     // --- LOSS ---
@@ -97,8 +93,7 @@ namespace DevOnBike.Overfit.Tests
                     epochLoss += loss.Data[0, 0];
 
                     // --- BACKWARD ---
-                    loss.Grad[0, 0] = 1.0;
-                    loss.Backward();
+                    ComputationGraph.Active.Backward(loss);
 
                     // --- UPDATE ---
                     optimizer.Step();
@@ -124,32 +119,25 @@ namespace DevOnBike.Overfit.Tests
             _output.WriteLine($"TRENING AUGMENTOWANY ZAKOŃCZONY!");
             _output.WriteLine($"Całkowity czas: {totalSw.Elapsed.TotalSeconds:F2}s");
 
-            // --- EKSPORT DO WPF ---
-            var exportPath = @"d:\ml\bestia.bin"; // Możesz zmienić ścieżkę
+            var exportPath = @"d:\ml\bestia.bin";
             using (var fs = new FileStream(exportPath, FileMode.Create))
             using (var bw = new BinaryWriter(fs))
             {
-                model.Save(bw); // Magia interfejsu IModule! Zapisuje Conv, BN i FC liniowo.
+                model.Save(bw);
             }
             _output.WriteLine($"Model wyeksportowany do: {exportPath}");
 
-            // Czyste zwalnianie pamięci całego grafu
             model.Dispose();
         }
 
-        [Fact(Skip = "Test strukturalny z użyciem starych metod - omijam ze względu na limit długości")]
-        public void Mnist_FullTrain60k_CnnBeastModeWithJanitor()
-        {
-        }
-
-        [Fact(Skip = "aaa")]
+        [Fact(Skip = "a")]
         public void Mnist_FullTrainingLoop_ShouldConvergeAndPersist()
         {
             // --- ARRANGE ---
             var trainSize = 5000;
             var batchSize = 64;
             var epochs = 5;
-            var learningRate = 0.001;
+            var learningRate = 0.001f;
             var modelPath = "mnist_model_resnet.bin";
 
             var (trainX, trainY) = MnistLoader.Load("d:/ml/train-images.idx3-ubyte", "d:/ml/train-labels.idx1-ubyte", trainSize);
@@ -157,7 +145,6 @@ namespace DevOnBike.Overfit.Tests
             using var X = new AutogradNode(trainX, requiresGrad: false);
             using var Y = new AutogradNode(trainY, requiresGrad: false);
 
-            // 1. Definiujemy całą sieć jako jeden obiekt Sequential!
             var layer1 = new LinearLayer(784, 128);
             var bn1 = new BatchNorm1D(128);
             var resBlock1 = new ResidualBlock(128);
@@ -177,10 +164,12 @@ namespace DevOnBike.Overfit.Tests
             for (var epoch = 1; epoch <= epochs; epoch++)
             {
                 double epochLoss = 0;
-                model.Train(); // Ustawienie całego grafu w tryb trenowania!
+                model.Train();
 
                 for (var b = 0; b < numBatches; b++)
                 {
+                    // Reset Taśmy!
+                    ComputationGraph.Active.Reset();
                     optimizer.ZeroGrad();
 
                     var xView = X.Data.AsView().Slice(b * batchSize, 0, batchSize, 784);
@@ -191,11 +180,11 @@ namespace DevOnBike.Overfit.Tests
 
                     // --- FORWARD ---
                     using var h1 = layer1.Forward(xBatch);
-                    using var bnOut = bn1.Forward(h1); // Bez isTraining
+                    using var bnOut = bn1.Forward(h1);
                     using var a1 = TensorMath.ReLU(bnOut);
 
-                    using var res1Out = resBlock1.Forward(a1); // Bez isTraining
-                    using var res2Out = resBlock2.Forward(res1Out); // Bez isTraining
+                    using var res1Out = resBlock1.Forward(a1);
+                    using var res2Out = resBlock2.Forward(res1Out);
 
                     using var predictionLogits = layerOut.Forward(res2Out);
 
@@ -203,8 +192,8 @@ namespace DevOnBike.Overfit.Tests
                     using var loss = TensorMath.SoftmaxCrossEntropy(predictionLogits, yBatch);
                     epochLoss += loss.Data[0, 0];
 
-                    loss.Grad[0, 0] = 1.0;
-                    loss.Backward();
+                    // --- BACKWARD ---
+                    ComputationGraph.Active.Backward(loss);
                     optimizer.Step();
                 }
 
@@ -215,14 +204,14 @@ namespace DevOnBike.Overfit.Tests
                 Debug.WriteLine($"Epoch {epoch} | Loss: {epochLoss:F6}");
             }
 
-            // --- ZAPIS MODELU (Z nowym interfejsem IModule) ---
+            // --- ZAPIS MODELU ---
             using (var fs = new FileStream(modelPath, FileMode.Create))
             using (var bw = new BinaryWriter(fs))
             {
-                model.Save(bw); // Cały model idzie do jednego pliku!
+                model.Save(bw);
             }
 
-            // --- ODTWORZENIE MODELU Z PLIKÓW ---
+            // --- ODTWORZENIE MODELU ---
             var loadedModel = new Sequential(
                 new LinearLayer(784, 128),
                 new BatchNorm1D(128),
@@ -234,7 +223,7 @@ namespace DevOnBike.Overfit.Tests
             using (var fs = new FileStream(modelPath, FileMode.Open))
             using (var br = new BinaryReader(fs))
             {
-                loadedModel.Load(br); // Wgrywamy z jednego pliku
+                loadedModel.Load(br);
             }
 
             sw.Stop();
@@ -245,13 +234,14 @@ namespace DevOnBike.Overfit.Tests
             var testXView = X.Data.AsView().Slice(0, 0, 1, 784);
             using var testX = new AutogradNode(testXView.ToContiguousFastMatrix(), false);
 
-            model.Eval(); // Przełączamy stary model w tryb ewaluacji
-            loadedModel.Eval(); // Przełączamy wczytany model w tryb ewaluacji
+            model.Eval();
+            loadedModel.Eval();
 
-            // Forward starego modelu
+            // Czysty forward ewaluacyjny wymaga resetu taśmy
+            ComputationGraph.Active.Reset();
             using var oldPred = ManualForwardForTest(model, testX);
 
-            // Forward nowego modelu
+            ComputationGraph.Active.Reset();
             using var newPred = ManualForwardForTest(loadedModel, testX);
 
             for (var i = 0; i < 10; i++)
@@ -259,29 +249,23 @@ namespace DevOnBike.Overfit.Tests
                 Assert.Equal(oldPred.Data[0, i], newPred.Data[0, i], 10);
             }
 
-            // Czyszczenie
             model.Dispose();
             loadedModel.Dispose();
 
             Debug.WriteLine($"Training & Persistence check finished in {sw.ElapsedMilliseconds}ms");
         }
 
-        // Metoda pomocnicza dla testu persystencji, żeby nie kopiować kodu
-        // Metoda pomocnicza dla testu persystencji, żeby nie kopiować kodu
         private AutogradNode ManualForwardForTest(Sequential model, AutogradNode input)
         {
-            // 1. Czyste wyciągnięcie prywatnej listy modułów przez refleksję
             var fieldInfo = typeof(Sequential).GetField("_modules", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             var modules = (System.Collections.Generic.List<IModule>)fieldInfo.GetValue(model);
 
-            // 2. Proste, bezpieczne rzutowanie
             var l1 = (LinearLayer)modules[0];
             var bn1 = (BatchNorm1D)modules[1];
             var r1 = (ResidualBlock)modules[2];
             var r2 = (ResidualBlock)modules[3];
             var outL = (LinearLayer)modules[4];
 
-            // 3. Ręczny Forward Pass (żeby sprawdzić, czy wczytane wagi dają ten sam wynik)
             var h = l1.Forward(input);
             var bn = bn1.Forward(h);
             var a = TensorMath.ReLU(bn);
@@ -291,19 +275,13 @@ namespace DevOnBike.Overfit.Tests
             return outL.Forward(res2);
         }
 
-        [Fact(Skip = "Test strukturalny z L2 - omijam ze względu na limit długości")]
-        public void Mnist_FastGapTest_WithScheduler_And_L2() { }
-
-        // Odchudzona macierz pomyłek, bazująca na całym Sequential!
-        private void PrintConfusionMatrix(Sequential model, FastMatrix<double> testX, FastMatrix<double> testY)
+        private void PrintConfusionMatrix(Sequential model, FastMatrix<float> testX, FastMatrix<float> testY)
         {
             var matrix = new int[10, 10];
             var samples = 1000;
 
-            // Ustawiamy CAŁY MODEL w tryb wnioskowania! (Wyłącza BatchNorm i Dropout)
             model.Eval();
 
-            // Wyciągamy referencje z modelu na potrzeby specyficznej ścieżki pośrodku (ReLU/MaxPool)
             var modules = (System.Collections.Generic.List<IModule>)model.GetType().GetField("_modules", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).GetValue(model);
             var conv1 = (ConvLayer)modules[0];
             var bn1 = (BatchNorm1D)modules[1];
@@ -311,15 +289,16 @@ namespace DevOnBike.Overfit.Tests
 
             for (var i = 0; i < samples; i++)
             {
+                // Nawet przy Eval, graf nagrywa wagi. Należy zresetować licznik na Taśmie.
+                ComputationGraph.Active.Reset();
+
                 var rowView = testX.AsView().Slice(i, 0, 1, 784);
                 using var input = new AutogradNode(rowView.ToContiguousFastMatrix(), false);
 
                 using var h1 = conv1.Forward(input);
                 using var a1 = TensorMath.ReLU(h1);
                 using var p1 = TensorMath.MaxPool2D(a1, 8, 26, 26, 2);
-
-                using var bnOut = bn1.Forward(p1); // Flaga wewnętrzna modelu
-
+                using var bnOut = bn1.Forward(p1);
                 using var output = fc1.Forward(bnOut);
 
                 var predicted = output.Data.ArgMax();

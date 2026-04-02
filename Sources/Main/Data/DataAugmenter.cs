@@ -1,17 +1,19 @@
 using DevOnBike.Overfit.Core;
+
 namespace DevOnBike.Overfit.Data
 {
     public static class DataAugmenter
     {
-        public static FastMatrix<double> AugmentBatch(FastMatrix<double> originalBatch, int width = 28, int height = 28)
+        public static FastMatrix<float> AugmentBatch(FastMatrix<float> originalBatch, int width = 28, int height = 28)
         {
-            var augmentedBatch = new FastMatrix<double>(originalBatch.Rows, originalBatch.Cols);
+            var augmentedBatch = new FastMatrix<float>(originalBatch.Rows, originalBatch.Cols);
 
-            Parallel.For(0, originalBatch.Rows, i => {
+            Parallel.For(0, originalBatch.Rows, i =>
+            {
                 var inputRow = originalBatch.Row(i);
                 var outputRow = augmentedBatch.Row(i);
 
-                if (Random.Shared.NextDouble() > 0.5)
+                if (Random.Shared.NextSingle() > 0.5f)
                 {
                     var shiftX = Random.Shared.Next(-2, 3);
                     var shiftY = Random.Shared.Next(-2, 3);
@@ -27,7 +29,7 @@ namespace DevOnBike.Overfit.Data
             return augmentedBatch;
         }
 
-        private static void ShiftImage(ReadOnlySpan<double> input, Span<double> output, int width, int height, int shiftX, int shiftY)
+        private static void ShiftImage(ReadOnlySpan<float> input, Span<float> output, int width, int height, int shiftX, int shiftY)
         {
             output.Clear();
 

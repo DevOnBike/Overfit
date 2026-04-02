@@ -4,7 +4,7 @@
     {
         private static void Main(string[] args)
         {
-            // BenchmarkRunner.Run<ChaChaBenchmark>();
+            // BenchmarkRunner.Run<Conv2DBenchmark>();
             // BenchmarkRunner.Run<CholeskyGaussianBenchmark>();
         }
     }
