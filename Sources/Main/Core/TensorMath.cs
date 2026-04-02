@@ -407,6 +407,7 @@ namespace DevOnBike.Overfit.Core
         {
             var resData = new FastTensor<float>(input.Data.Shape);
             var mask = new AutogradNode(new FastTensor<float>(input.Data.Shape), false);
+
             if (isTraining)
             {
                 var scale = 1f / (1f - probability);
@@ -415,10 +416,22 @@ namespace DevOnBike.Overfit.Core
                     if (Random.Shared.NextSingle() > probability) { resData.AsSpan()[i] = input.Data.AsSpan()[i] * scale; mask.Data.AsSpan()[i] = scale; }
                 }
             }
-            else input.Data.AsSpan().CopyTo(resData.AsSpan());
+            else
+            {
+                input.Data.AsSpan().CopyTo(resData.AsSpan());
+            }
 
             var output = new AutogradNode(resData, input.RequiresGrad);
-            if (output.RequiresGrad && isTraining) ComputationGraph.Active.Record(OpCode.Dropout, output, input, mask);
+
+            if (output.RequiresGrad && isTraining)
+            {
+                ComputationGraph.Active.Record(OpCode.Dropout, output, input, mask);
+            }
+            else
+            {
+                mask.Dispose();
+            }
+
             return output;
         }
 
@@ -475,8 +488,16 @@ namespace DevOnBike.Overfit.Core
 
         public static void MSELossBackward(AutogradNode p, AutogradNode t, AutogradNode o)
         {
-            var factor = o.Grad[0, 0] * (2f / p.Data.Size);
-            for (var i = 0; i < p.Data.Size; i++) p.Grad.AsSpan()[i] += (p.Data.AsSpan()[i] - t.Data.AsSpan()[i]) * factor;
+            // Pobieramy skalar z pierwszej pozycji (najszybszy dostęp)
+            var factor = o.Grad.AsSpan()[0] * (2f / p.Data.Size);
+
+            var pGrad = p.Grad.AsSpan();
+            var pData = p.Data.AsSpan();
+            var tData = t.Data.AsSpan();
+
+            // Magia SIMD bez alokacji: (pData - tData) * factor => pData * factor - tData * factor
+            TensorPrimitives.MultiplyAdd(pData, factor, pGrad, pGrad);
+            TensorPrimitives.MultiplyAdd(tData, -factor, pGrad, pGrad);
         }
 
         // ====================================================================
