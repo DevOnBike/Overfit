@@ -326,21 +326,35 @@ namespace DevOnBike.Overfit.Core
 
             if (!isTraining)
             {
+                using var scaleBuf = new FastBuffer<double>(C);
+                using var shiftBuf = new FastBuffer<double>(C);
+                var scale = scaleBuf.AsSpan();
+                var shift = shiftBuf.AsSpan();
+
+                var gSpan = gamma.Data.AsReadOnlySpan();
+                var bSpan = beta.Data.AsReadOnlySpan();
+                var rmSpan = runningMean.AsReadOnlySpan();
+                var rvSpan = runningVar.AsReadOnlySpan();
+
+                // 2. Prekalkulacja (BatchNorm Folding) - robimy to tylko raz dla całego kanału/cechy!
+                for (var j = 0; j < C; j++)
+                {
+                    var invStd = 1.0 / Math.Sqrt(rvSpan[j] + eps);
+                    scale[j] = gSpan[j] * invStd;
+                    shift[j] = bSpan[j] - (rmSpan[j] * scale[j]);
+                }
+
                 for (var i = 0; i < N; i++)
                 {
-                    var rowIn = input.Data.ReadOnlyRow(i);
-                    var rowOut = resultData.Row(i);
-                    var gSpan = gamma.Data.AsReadOnlySpan();
-                    var bSpan = beta.Data.AsReadOnlySpan();
-                    var rmSpan = runningMean.AsReadOnlySpan();
-                    var rvSpan = runningVar.AsReadOnlySpan();
-
-                    for (var j = 0; j < C; j++)
-                    {
-                        var invStd = 1.0 / Math.Sqrt(rvSpan[j] + eps);
-                        rowOut[j] = gSpan[j] * ((rowIn[j] - rmSpan[j]) * invStd) + bSpan[j];
-                    }
+                    // rowOut = rowIn * scale + shift
+                    TensorPrimitives.MultiplyAdd(
+                        input.Data.ReadOnlyRow(i),
+                        scale,
+                        shift,
+                        resultData.Row(i)
+                    );
                 }
+
                 return new AutogradNode(resultData, requiresGrad: false);
             }
 
