@@ -511,7 +511,7 @@ namespace DevOnBike.Overfit.Core
 
             using var pRowBuf = new FastBuffer<double>(cols);
             using var diffBuf = new FastBuffer<double>(cols); // Nowy bufor na różnice
-            
+
             var pRow = pRowBuf.AsSpan();
             var diff = diffBuf.AsSpan();
 
@@ -605,7 +605,7 @@ namespace DevOnBike.Overfit.Core
 
             using var dGammaBuf = new FastBuffer<double>(C);
             using var dBetaBuf = new FastBuffer<double>(C);
-            
+
             var dGamma = dGammaBuf.AsSpan();
             var dBeta = dBetaBuf.AsSpan();
 
@@ -616,16 +616,25 @@ namespace DevOnBike.Overfit.Core
                 TensorPrimitives.Add(dBeta, gradOutRow, dBeta);
             }
 
-            if (gamma.RequiresGrad) TensorPrimitives.Add(gamma.Grad.AsSpan(), dGamma, gamma.Grad.AsSpan());
-            if (beta.RequiresGrad) TensorPrimitives.Add(beta.Grad.AsSpan(), dBeta, beta.Grad.AsSpan());
+            if (gamma.RequiresGrad)
+            {
+                TensorPrimitives.Add(gamma.Grad.AsSpan(), dGamma, gamma.Grad.AsSpan());
+            }
+
+            if (beta.RequiresGrad)
+            {
+                TensorPrimitives.Add(beta.Grad.AsSpan(), dBeta, beta.Grad.AsSpan());
+            }
 
             if (input.RequiresGrad)
             {
                 using var factorBuf = new FastBuffer<double>(C);
                 using var temp1Buf = new FastBuffer<double>(C);
-                
+                using var termBuf = new FastBuffer<double>(C); // Nowy, izolowany bufor
+
                 var factor = factorBuf.AsSpan();
                 var temp1 = temp1Buf.AsSpan();
+                var term = termBuf.AsSpan();
 
                 // Pre-kalkulacja współczynnika: (gamma * invStd / N)
                 TensorPrimitives.Multiply(gamma.Data.AsReadOnlySpan(), invStdTensor.Data.AsReadOnlySpan(), factor);
@@ -637,15 +646,15 @@ namespace DevOnBike.Overfit.Core
                     var gradOutRow = gradOut.ReadOnlyRow(i);
                     var xHatRow = xHatMat.ReadOnlyRow(i);
 
-                    // temp1 = N * dY - sum(dY) - xHat * sum(dY * xHat)
-                    // gradInRow += factor * temp1
-                    TensorPrimitives.Multiply(gradOutRow, (double)N, gradInRow); // Używamy gradInRow jako tymczasowego bufora
-                    TensorPrimitives.Subtract(gradInRow, dBeta, gradInRow);
+                    // term = N * dY - sum(dY) - xHat * sum(dY * xHat)
+                    TensorPrimitives.Multiply(gradOutRow, (double)N, term);
+                    TensorPrimitives.Subtract(term, dBeta, term);
 
                     TensorPrimitives.Multiply(xHatRow, dGamma, temp1);
-                    TensorPrimitives.Subtract(gradInRow, temp1, gradInRow);
+                    TensorPrimitives.Subtract(term, temp1, term);
 
-                    TensorPrimitives.MultiplyAdd(gradInRow, factor, input.Grad.Row(i), input.Grad.Row(i));
+                    // Prawidłowa akumulacja gradientu: gradInRow += factor * term
+                    TensorPrimitives.MultiplyAdd(term, factor, gradInRow, gradInRow);
                 }
             }
         }
