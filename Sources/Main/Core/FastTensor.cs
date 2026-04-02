@@ -59,7 +59,17 @@ namespace DevOnBike.Overfit.Core
             return strides;
         }
 
-        private static int CalculateSize(int[] shape) => shape.Aggregate(1, (a, b) => a * b);
+        private static int CalculateSize(int[] shape)
+        {
+            var size = 1;
+            
+            foreach (var d in shape)
+            {
+                size *= d;
+            }
+            
+            return size;
+        }
 
         public T this[int i] { get => _data[Offset + i * Strides[0]]; set => _data[Offset + i * Strides[0]] = value; }
         public T this[int i, int j] { get => _data[Offset + i * Strides[0] + j * Strides[1]]; set => _data[Offset + i * Strides[0] + j * Strides[1]] = value; }

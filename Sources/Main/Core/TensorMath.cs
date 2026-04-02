@@ -145,11 +145,8 @@ namespace DevOnBike.Overfit.Core
 
             int outH = h - k + 1, outW = w - k + 1, batchSize = input.Data.Shape[0], kSqInC = k * k * inC;
             int colSizePerImg = kSqInC * outH * outW, inSize = inC * h * w, outSize = outC * outH * outW;
+            var K = outH * outW;
 
-            var weightLock = new object();
-
-            // OPTYMALIZACJA LEVEL 3: Wyciągamy transpozycję wag przed pętlę!
-            // Robimy to tylko raz na cały batch, oszczędzając 63 niepotrzebne alokacje
             FastTensor<float> weights2DTContig = null;
             if (input.RequiresGrad)
             {
@@ -158,40 +155,67 @@ namespace DevOnBike.Overfit.Core
                 weights2DTContig = weights2DT.ToContiguous();
             }
 
-            Parallel.For(0, batchSize, n =>
-            {
-                // 1. Odtworzenie 'colData' z oryginalnego wejścia (bez czyszczenia pamięci)
-                using var colData = new FastTensor<float>(false, kSqInC, outH * outW);
-                Im2Col(input.Data.AsSpan().Slice(n * inSize, inSize), inC, h, w, k, 1, 0, colData.AsSpan());
+            var weightLock = new object();
 
-                // 2. Pobranie gradientu wyjściowego
-                var outGradSlice = output.Grad.AsSpan().Slice(n * outSize, outSize);
-                using var outGradMat = new FastTensor<float>(false, outC, outH * outW);
-                outGradSlice.CopyTo(outGradMat.AsSpan());
+            // LEVEL 5: Brak zagnieżdżonej równoległości, zero alokacji w najgłębszych pętlach!
+            Parallel.For(0, batchSize,
+                // 1. Thread-Local Storage dla wątku
+                () => weights.RequiresGrad ? new FastTensor<float>(true, outC, kSqInC) : null,
 
-                // 3. Gradienty Wag (dW)
-                if (weights.RequiresGrad)
+                // 2. Ciało pętli
+                (n, loopState, localDw) =>
                 {
-                    using var colDataT = colData.Transpose(0, 1);
-                    using var colDataTContig = colDataT.ToContiguous();
-                    using var dwLocal = MatMulRaw(outGradMat, colDataTContig);
+                    using var colData = new FastTensor<float>(false, kSqInC, K);
+                    Im2Col(input.Data.AsSpan().Slice(n * inSize, inSize), inC, h, w, k, 1, 0, colData.AsSpan());
 
-                    lock (weightLock)
+                    var outGradSlice = output.Grad.AsSpan().Slice(n * outSize, outSize);
+                    using var outGradMat = new FastTensor<float>(false, outC, K);
+                    outGradSlice.CopyTo(outGradMat.AsSpan());
+
+                    // 3. Gradienty Wag (dW) - MEGA SZYBKI DOT PRODUCT ZAMIAST MATMUL
+                    if (weights.RequiresGrad)
                     {
-                        TensorPrimitives.Add(weights.Grad.AsSpan(), dwLocal.AsSpan(), weights.Grad.AsSpan());
+                        var dwSpan = localDw.AsSpan();
+                        var outGradSpan = outGradMat.AsSpan();
+                        var colSpan = colData.AsSpan();
+
+                        for (var r = 0; r < outC; r++)
+                        {
+                            var outGradRow = outGradSpan.Slice(r * K, K);
+                            for (var c = 0; c < kSqInC; c++)
+                            {
+                                // Bezpośredni SIMD Dot Product wymazuje potrzebę drogiego Transpose/ToContiguous!
+                                dwSpan[r * kSqInC + c] += TensorPrimitives.Dot(outGradRow, colSpan.Slice(c * K, K));
+                            }
+                        }
+                    }
+
+                    // 4. Gradienty Wejścia (dX)
+                    if (input.RequiresGrad)
+                    {
+                        using var dCol = new FastTensor<float>(false, kSqInC, K);
+                        // Używamy MatMulRawSequential, by nie tworzyć równoległości wewnątrz równoległości!
+                        MatMulRawSequential(weights2DTContig.AsSpan(), outGradMat.AsSpan(), kSqInC, outC, K, dCol.AsSpan());
+                        Col2Im(dCol.AsSpan(), inC, h, w, k, 1, 0, input.Grad.AsSpan().Slice(n * inSize, inSize));
+                    }
+
+                    return localDw;
+                },
+
+                // 3. Zrzut danych z wątku do wspólnej puli (tylko raz na zakończenie życia wątku!)
+                (localDw) =>
+                {
+                    if (localDw != null)
+                    {
+                        lock (weightLock)
+                        {
+                            TensorPrimitives.Add(weights.Grad.AsSpan(), localDw.AsSpan(), weights.Grad.AsSpan());
+                        }
+                        localDw.Dispose();
                     }
                 }
+            );
 
-                // 4. Gradienty Wejścia (dX)
-                if (input.RequiresGrad)
-                {
-                    // Używamy wag przygotowanych wcześniej, unikając alokacji w pętli
-                    using var dCol = MatMulRaw(weights2DTContig, outGradMat);
-                    Col2Im(dCol.AsSpan(), inC, h, w, k, 1, 0, input.Grad.AsSpan().Slice(n * inSize, inSize));
-                }
-            });
-
-            // Zwalniamy globalny bufor na wagi po zakończeniu batcha
             weights2DTContig?.Dispose();
         }
 
@@ -347,12 +371,14 @@ namespace DevOnBike.Overfit.Core
 
         public static AutogradNode MSELoss(AutogradNode prediction, AutogradNode target)
         {
-            var diff = new FastTensor<float>(prediction.Data.Shape);
+            using var diff = new FastTensor<float>(prediction.Data.Shape);
+            
             TensorPrimitives.Subtract(prediction.Data.AsSpan(), target.Data.AsSpan(), diff.AsSpan());
             var mse = TensorPrimitives.Dot(diff.AsSpan(), diff.AsSpan()) / prediction.Data.Size;
             var res = new FastTensor<float>(1, 1) { [0, 0] = mse };
             var output = new AutogradNode(res, prediction.RequiresGrad);
             if (output.RequiresGrad) ComputationGraph.Active.Record(OpCode.MSELoss, output, prediction, target);
+            
             return output;
         }
 
