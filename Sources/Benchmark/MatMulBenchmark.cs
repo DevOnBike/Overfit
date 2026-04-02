@@ -18,8 +18,8 @@
         [GlobalSetup]
         public void Setup()
         {
-            _input = new AutogradNode(new FastMatrix<double>(Batch, InC * H * W));
-            _weights = new AutogradNode(new FastMatrix<double>(OutC, InC * K * K));
+            _input = new AutogradNode(new FloatFastMatrix(Batch, InC * H * W));
+            _weights = new AutogradNode(new FloatFastMatrix(OutC, InC * K * K));
             _ctx = new Conv2DContext(InC, OutC, H, W, K, batchSize: Batch); // ← dodaj batchSize
         }
 

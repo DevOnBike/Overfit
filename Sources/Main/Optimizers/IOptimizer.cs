@@ -2,7 +2,7 @@ namespace DevOnBike.Overfit.Optimizers
 {
     public interface IOptimizer
     {
-        double LearningRate { get; set; }
+        float LearningRate { get; set; }
 
         // Krok optymalizacji (aktualizacja wag)
         void Step();

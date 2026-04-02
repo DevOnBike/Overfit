@@ -24,10 +24,10 @@ namespace DevOnBike.Overfit.Tests
             // ==========================================
             // ARRANGE
             // ==========================================
-            using var xData = new FastMatrix<double>(4, 2);
+            using var xData = new FloatFastMatrix(4, 2);
             xData.CopyFrom([0, 0, 0, 1, 1, 0, 1, 1]);
 
-            using var yData = new FastMatrix<double>(4, 1);
+            using var yData = new FloatFastMatrix(4, 1);
             yData.CopyFrom([0, 1, 1, 0]);
 
             using var X = new AutogradNode(xData, requiresGrad: false);
@@ -37,7 +37,7 @@ namespace DevOnBike.Overfit.Tests
             using var layer2 = new LinearLayer(inputSize: 16, outputSize: 1);
 
             var model = new Sequential(layer1, new ReluActivation(), layer2);
-            var sgd = new SGD(model.Parameters(), learningRate: 0.1);
+            var sgd = new SGD(model.Parameters(), learningRate: 0.1f);
 
             var epochs = 2000;
             var finalLoss = double.MaxValue;
@@ -90,19 +90,19 @@ namespace DevOnBike.Overfit.Tests
             // ARRANGE: Generowanie 300 punktów danych
             // ==========================================
             var numSamples = 300;
-            using var xData = new FastMatrix<double>(numSamples, 2);
-            using var yData = new FastMatrix<double>(numSamples, 1);
+            using var xData = new FloatFastMatrix(numSamples, 2);
+            using var yData = new FloatFastMatrix(numSamples, 1);
             var rnd = new Random(42);
 
             for (var i = 0; i < numSamples; i++)
             {
                 var isOuter = i % 2 == 0;
-                var radius = isOuter ? rnd.NextDouble() * 0.5 + 0.5 : rnd.NextDouble() * 0.4;
-                var angle = rnd.NextDouble() * 2 * Math.PI;
+                var radius = isOuter ? rnd.NextSingle() * 0.5f + 0.5f : rnd.NextSingle() * 0.4f;
+                var angle = rnd.NextSingle() * 2 * MathF.PI;
 
-                xData[i, 0] = radius * Math.Cos(angle);
-                xData[i, 1] = radius * Math.Sin(angle);
-                yData[i, 0] = isOuter ? 1.0 : 0.0;
+                xData[i, 0] = radius * MathF.Cos(angle);
+                xData[i, 1] = radius * MathF.Sin(angle);
+                yData[i, 0] = isOuter ? 1.0f : 0.0f;
             }
 
             using var X = new AutogradNode(xData, requiresGrad: false);
@@ -117,7 +117,7 @@ namespace DevOnBike.Overfit.Tests
                 layer2, new ReluActivation(),
                 layer3);
 
-            var sgd = new SGD(model.Parameters(), learningRate: 0.05);
+            var sgd = new SGD(model.Parameters(), learningRate: 0.05f);
             var epochs = 3000;
             var finalLoss = double.MaxValue;
 

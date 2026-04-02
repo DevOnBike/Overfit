@@ -26,7 +26,7 @@ namespace DevOnBike.Overfit.Tests
             var trainSize = 1000;
             var batchSize = 32;
             var epochs = 3;
-            var learningRate = 0.001;
+            var learningRate = 0.001f;
 
             var (trainX, trainY) = MnistLoader.Load("d:/ml/train-images.idx3-ubyte", "d:/ml/train-labels.idx1-ubyte", trainSize);
 
@@ -102,7 +102,7 @@ namespace DevOnBike.Overfit.Tests
             }
         }
 
-        public void PrintConfusionMatrix(ConvLayer conv, LinearLayer fc, FastMatrix<double> testX, FastMatrix<double> testY)
+        public void PrintConfusionMatrix(ConvLayer conv, LinearLayer fc, FloatFastMatrix testX, FloatFastMatrix testY)
         {
             conv.Eval();
             fc.Eval();

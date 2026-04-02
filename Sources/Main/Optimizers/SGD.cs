@@ -7,9 +7,9 @@ namespace DevOnBike.Overfit.Optimizers
     {
         private readonly AutogradNode[] _parameters;
 
-        public double LearningRate { get; set; }
+        public float LearningRate { get; set; }
 
-        public SGD(IEnumerable<AutogradNode> parameters, double learningRate)
+        public SGD(IEnumerable<AutogradNode> parameters, float learningRate)
         {
             if (parameters == null) throw new ArgumentNullException(nameof(parameters));
 

@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Runtime.CompilerServices;
+
 namespace DevOnBike.Overfit.Core
 {
     public sealed class FastBuffer<T> : IDisposable where T : struct

@@ -24,14 +24,14 @@ namespace DevOnBike.Overfit.Tests
             ComputationGraph.Active = null;
         }
 
-        [Fact(Skip = "a")]
+        [Fact]
         public void Mnist_FullTrain60k_CnnBeastMode_Augmented()
         {
             // --- ARRANGE ---
             var trainSize = 60000;
             var batchSize = 64;
             var epochs = 10;
-            var learningRate = 0.001;
+            var learningRate = 0.001f;
 
             _output.WriteLine("=== START: Trening na Taśmie (Computation Graph) z Augmentacją ===");
             _output.WriteLine("Ładowanie pełnego zbioru 60,000 obrazów...");
@@ -50,7 +50,7 @@ namespace DevOnBike.Overfit.Tests
             var model = new Sequential(conv1, bn1, fc1);
 
             var optimizer = new Adam(model.Parameters(), learningRate);
-            var scheduler = new LRScheduler(optimizer, _output.WriteLine, factor: 0.5, patience: 1);
+            var scheduler = new LRScheduler(optimizer, _output.WriteLine, factor: 0.5f, patience: 1);
 
             var numBatches = trainSize / batchSize;
             var totalSw = Stopwatch.StartNew();
@@ -62,7 +62,7 @@ namespace DevOnBike.Overfit.Tests
             for (var epoch = 1; epoch <= epochs; epoch++)
             {
                 var epochSw = Stopwatch.StartNew();
-                double epochLoss = 0;
+                var epochLoss = 0f;
 
                 model.Train();
 
@@ -85,7 +85,7 @@ namespace DevOnBike.Overfit.Tests
                     using var a1 = TensorMath.ReLU(h1);
                     using var p1 = TensorMath.MaxPool2D(a1, 8, 26, 26, 2);
                     using var bnOut = bn1.Forward(p1);
-                    using var d1 = TensorMath.Dropout(bnOut, 0.25, isTraining: model.IsTraining);
+                    using var d1 = TensorMath.Dropout(bnOut, 0.25f, isTraining: model.IsTraining);
                     using var predictionLogits = fc1.Forward(d1);
 
                     // --- LOSS ---
@@ -137,7 +137,7 @@ namespace DevOnBike.Overfit.Tests
             var trainSize = 5000;
             var batchSize = 64;
             var epochs = 5;
-            var learningRate = 0.001;
+            var learningRate = 0.001f;
             var modelPath = "mnist_model_resnet.bin";
 
             var (trainX, trainY) = MnistLoader.Load("d:/ml/train-images.idx3-ubyte", "d:/ml/train-labels.idx1-ubyte", trainSize);
@@ -275,7 +275,7 @@ namespace DevOnBike.Overfit.Tests
             return outL.Forward(res2);
         }
 
-        private void PrintConfusionMatrix(Sequential model, FastMatrix<double> testX, FastMatrix<double> testY)
+        private void PrintConfusionMatrix(Sequential model, FloatFastMatrix testX, FloatFastMatrix testY)
         {
             var matrix = new int[10, 10];
             var samples = 1000;

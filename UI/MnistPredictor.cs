@@ -43,7 +43,7 @@ namespace DevOnBike.Overfit.UI
             }
         }
 
-        public int Predict(double[] pixelData)
+        public int Predict(float[] pixelData)
         {
             if (pixelData == null || pixelData.Length != 784)
                 throw new ArgumentException("Niepoprawne dane wejściowe. Oczekiwano 784 pikseli.");
@@ -57,7 +57,7 @@ namespace DevOnBike.Overfit.UI
                 // Resetujemy licznik operacji, aby zachować Zero-Alloc
                 ComputationGraph.Active.Reset();
 
-                using var inputMat = new FastMatrix<double>(1, 784);
+                using var inputMat = new FloatFastMatrix(1, 784);
                 pixelData.CopyTo(inputMat.AsSpan());
 
                 // Wejście nie wymaga gradientów

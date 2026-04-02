@@ -2,18 +2,18 @@ namespace DevOnBike.Overfit.Core
 {
     public class AutogradNode : IDisposable
     {
-        public FastMatrix<double> Data { get; }
-        public FastMatrix<double> Grad { get; }
+        public FloatFastMatrix Data { get; }
+        public FloatFastMatrix Grad { get; }
         public bool RequiresGrad { get; set; }
 
-        public AutogradNode(FastMatrix<double> data, bool requiresGrad = true)
+        public AutogradNode(FloatFastMatrix data, bool requiresGrad = true)
         {
             Data = data;
             RequiresGrad = requiresGrad;
             
             if (requiresGrad)
             {
-                Grad = new FastMatrix<double>(data.Rows, data.Cols);
+                Grad = new FloatFastMatrix(data.Rows, data.Cols);
             }
         }
 

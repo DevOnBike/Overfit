@@ -28,7 +28,10 @@ namespace DevOnBike.Overfit.Core
         /// </summary>
         public bool IsRecording { get; set; } = true;
 
-        public void Record(OpCode code, AutogradNode output, AutogradNode a, AutogradNode b = null,
+        public void Record(
+            OpCode code,
+            AutogradNode output,
+            AutogradNode a, AutogradNode b = null,
         int i0 = 0, int i1 = 0, int i2 = 0, int i3 = 0, int i4 = 0,
         AutogradNode[] nodeContext = null)
         {
@@ -63,7 +66,7 @@ namespace DevOnBike.Overfit.Core
             }
 
             // Inicjalizacja gradientu wyjściowego (Seed)
-            lossNode.Grad.AsSpan().Fill(1.0);
+            lossNode.Grad.AsSpan().Fill(1f);
 
             // Reverse Pass - wykonujemy operacje w kolejności odwrotnej do nagrywania
             for (var i = _opCount - 1; i >= 0; i--)

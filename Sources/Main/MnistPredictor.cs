@@ -35,7 +35,7 @@ namespace DevOnBike.Overfit
             _fcOut.Eval();
         }
 
-        public int Predict(double[] pixelData)
+        public int Predict(float[] pixelData)
         {
             if (pixelData.Length != 784)
                 throw new ArgumentException("Obrazek musi mieć 784 piksele.");
@@ -46,7 +46,7 @@ namespace DevOnBike.Overfit
 
             try
             {
-                using var inputMat = new FastMatrix<double>(1, 784);
+                using var inputMat = new FloatFastMatrix(1, 784);
                 pixelData.CopyTo(inputMat.AsSpan());
                 using var input = new AutogradNode(inputMat, requiresGrad: false);
 

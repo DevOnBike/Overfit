@@ -10,17 +10,18 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public LinearLayer(int inputSize, int outputSize)
         {
-            var wData = new FastMatrix<double>(inputSize, outputSize);
-            var stdDev = Math.Sqrt(2.0 / inputSize);
+            var wData = new FloatFastMatrix(inputSize, outputSize);
+            var stdDev = MathF.Sqrt(2f / inputSize);
 
             var wSpan = wData.AsSpan();
+
             for (var i = 0; i < wSpan.Length; i++)
             {
                 wSpan[i] = MathUtils.NextGaussian() * stdDev;
             }
 
             Weights = new AutogradNode(wData, true);
-            Biases = new AutogradNode(new FastMatrix<double>(1, outputSize), true);
+            Biases = new AutogradNode(new FloatFastMatrix(1, outputSize), true);
         }
 
         public void Train() => IsTraining = true;
@@ -65,12 +66,12 @@ namespace DevOnBike.Overfit.DeepLearning
                 throw new Exception("Wymiary wag w pliku nie pasują do architektury!");
 
             var wSpan = Weights.Data.AsSpan();
-            for (var i = 0; i < wSpan.Length; i++) wSpan[i] = br.ReadDouble();
+            for (var i = 0; i < wSpan.Length; i++) wSpan[i] = br.ReadSingle();
 
             var bRows = br.ReadInt32();
             var bCols = br.ReadInt32();
             var bSpan = Biases.Data.AsSpan();
-            for (var i = 0; i < bSpan.Length; i++) bSpan[i] = br.ReadDouble();
+            for (var i = 0; i < bSpan.Length; i++) bSpan[i] = br.ReadSingle();
         }
 
         public IEnumerable<AutogradNode> Parameters()

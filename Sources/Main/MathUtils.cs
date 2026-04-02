@@ -10,12 +10,14 @@ namespace DevOnBike.Overfit
         /// <summary>
         /// Zwraca liczbę losową z rozkładu normalnego N(0, 1) używając transformacji Box-Mullera.
         /// </summary>
-        public static double NextGaussian()
+        public static float NextGaussian()
         {
-            var u1 = 1.0 - Rng.NextDouble(); // (0, 1]
-            var u2 = 1.0 - Rng.NextDouble();
+            const float twoPi = 2.0f * MathF.PI;
+            
+            var u1 = 1.0f - Rng.NextSingle(); // (0, 1]
+            var u2 = 1.0f - Rng.NextSingle();
 
-            return Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Sin(2.0 * Math.PI * u2);
+            return MathF.Sqrt(-2.0f * MathF.Log(u1)) * MathF.Sin(twoPi * u2);
         }
     }
 }

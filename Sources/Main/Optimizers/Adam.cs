@@ -8,37 +8,37 @@ namespace DevOnBike.Overfit.Optimizers
         private readonly struct ParamState
         {
             public readonly AutogradNode Node;
-            public readonly FastMatrix<double> M;
-            public readonly FastMatrix<double> V;
+            public readonly FloatFastMatrix M;
+            public readonly FloatFastMatrix V;
             public readonly int Size;
 
             public ParamState(AutogradNode node)
             {
                 Node = node;
                 Size = node.Data.Rows * node.Data.Cols;
-                M = new FastMatrix<double>(node.Data.Rows, node.Data.Cols);
-                V = new FastMatrix<double>(node.Data.Rows, node.Data.Cols);
+                M = new FloatFastMatrix(node.Data.Rows, node.Data.Cols);
+                V = new FloatFastMatrix(node.Data.Rows, node.Data.Cols);
             }
         }
 
         private readonly ParamState[] _states;
 
         // Pojedyncze bufory wielokrotnego użytku! Zero ThreadLocal, zero locków.
-        private readonly FastBuffer<double> _bufGl2;
-        private readonly FastBuffer<double> _bufGSq;
-        private readonly FastBuffer<double> _bufMHat;
-        private readonly FastBuffer<double> _bufVHat;
-        private readonly FastBuffer<double> _bufUpd;
+        private readonly FastBuffer<float> _bufGl2;
+        private readonly FastBuffer<float> _bufGSq;
+        private readonly FastBuffer<float> _bufMHat;
+        private readonly FastBuffer<float> _bufVHat;
+        private readonly FastBuffer<float> _bufUpd;
 
-        public double LearningRate { get; set; }
-        public double Beta1 { get; set; } = 0.9;
-        public double Beta2 { get; set; } = 0.999;
-        public double Epsilon { get; set; } = 1e-8;
-        public double WeightDecay { get; set; } = 0.0001;
+        public float LearningRate { get; set; }
+        public float Beta1 { get; set; } = 0.9f;
+        public float Beta2 { get; set; } = 0.999f;
+        public float Epsilon { get; set; } = 1e-8f;
+        public float WeightDecay { get; set; } = 0.0001f;
 
         private int _t = 0;
 
-        public Adam(IEnumerable<AutogradNode> parameters, double learningRate = 0.001)
+        public Adam(IEnumerable<AutogradNode> parameters, float learningRate = 0.001f)
         {
             LearningRate = learningRate;
 
@@ -54,21 +54,21 @@ namespace DevOnBike.Overfit.Optimizers
             }
 
             // Alokujemy globalne bufory tylko pod największą warstwę
-            _bufGl2 = new FastBuffer<double>(maxSize);
-            _bufGSq = new FastBuffer<double>(maxSize);
-            _bufMHat = new FastBuffer<double>(maxSize);
-            _bufVHat = new FastBuffer<double>(maxSize);
-            _bufUpd = new FastBuffer<double>(maxSize);
+            _bufGl2 = new FastBuffer<float>(maxSize);
+            _bufGSq = new FastBuffer<float>(maxSize);
+            _bufMHat = new FastBuffer<float>(maxSize);
+            _bufVHat = new FastBuffer<float>(maxSize);
+            _bufUpd = new FastBuffer<float>(maxSize);
         }
 
         public void Step()
         {
             _t++;
 
-            var bc1 = 1.0 - Math.Pow(Beta1, _t);
-            var bc2 = 1.0 - Math.Pow(Beta2, _t);
-            var invBc1 = 1.0 / bc1;
-            var invBc2 = 1.0 / bc2;
+            var bc1 = 1f - MathF.Pow(Beta1, _t);
+            var bc2 = 1f - MathF.Pow(Beta2, _t);
+            var invBc1 = 1f / bc1;
+            var invBc2 = 1f / bc2;
 
             // Płaska iteracja zamiast Parallel.ForEach
             foreach (var state in _states)
@@ -90,8 +90,8 @@ namespace DevOnBike.Overfit.Optimizers
                 var wd = WeightDecay;
                 var b1 = Beta1;
                 var b2 = Beta2;
-                var b1Inv = 1.0 - Beta1;
-                var b2Inv = 1.0 - Beta2;
+                var b1Inv = 1f - Beta1;
+                var b2Inv = 1f - Beta2;
                 var eps = Epsilon;
                 var lr = LearningRate;
 

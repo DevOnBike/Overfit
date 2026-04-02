@@ -19,7 +19,7 @@ namespace DevOnBike.Overfit.Tests
             using var layer = new LinearLayer(10, 5);
             Assert.Equal(2, layer.Parameters().Count());
 
-            using var input = new AutogradNode(new FastMatrix<double>(2, 10), false);
+            using var input = new AutogradNode(new FloatFastMatrix(2, 10), false);
             using var output = layer.Forward(input);
 
             Assert.Equal(2, output.Data.Rows);
@@ -51,7 +51,7 @@ namespace DevOnBike.Overfit.Tests
             seq.Train();
             Assert.True(seq.IsTraining);
 
-            using var input = new AutogradNode(new FastMatrix<double>(1, 5), false);
+            using var input = new AutogradNode(new FloatFastMatrix(1, 5), false);
             using var output = seq.Forward(input);
             Assert.Equal(5, output.Data.Cols);
         }
@@ -61,7 +61,7 @@ namespace DevOnBike.Overfit.Tests
         {
             // ResidualBlock musi zachować wymiary wejściowe
             using var res = new ResidualBlock(8);
-            using var input = new AutogradNode(new FastMatrix<double>(1, 8), false);
+            using var input = new AutogradNode(new FloatFastMatrix(1, 8), false);
             using var output = res.Forward(input);
 
             Assert.Equal(input.Data.Cols, output.Data.Cols);

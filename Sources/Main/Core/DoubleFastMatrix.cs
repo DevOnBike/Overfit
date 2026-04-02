@@ -1,6 +1,6 @@
 ﻿namespace DevOnBike.Overfit.Core
 {
-    public class DoubleFastMatrix : FastMatrix<double>
+    public class DoubleFastMatrix : FloatFastMatrix
     {
         public DoubleFastMatrix(int rows, int cols) : base(rows, cols)
         {
