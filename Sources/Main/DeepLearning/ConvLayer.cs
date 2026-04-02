@@ -13,7 +13,7 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             _inC = inChannels; _outC = outChannels; _h = h; _w = w; _k = kSize;
 
-            var kData = new FloatFastMatrix(outChannels, inChannels * kSize * kSize);
+            var kData = new FastMatrix<float>(outChannels, inChannels * kSize * kSize);
 
             InitializeKernels(kData.AsSpan(), inChannels * kSize * kSize);
 

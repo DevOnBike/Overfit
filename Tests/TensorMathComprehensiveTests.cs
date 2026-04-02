@@ -32,8 +32,8 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void Add_ForwardAndBackward_Correct()
         {
-            using var a = new AutogradNode(new FloatFastMatrix(1, 2));
-            using var b = new AutogradNode(new FloatFastMatrix(1, 2));
+            using var a = new AutogradNode(new FastMatrix<float>(1, 2));
+            using var b = new AutogradNode(new FastMatrix<float>(1, 2));
             a.Data.CopyFrom([1.0f, 2.0f]);
             b.Data.CopyFrom([3.0f, 4.0f]);
 
@@ -48,8 +48,8 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void MatMul_FullCheck()
         {
-            using var a = new AutogradNode(new FloatFastMatrix(1, 2));
-            using var b = new AutogradNode(new FloatFastMatrix(2, 1));
+            using var a = new AutogradNode(new FastMatrix<float>(1, 2));
+            using var b = new AutogradNode(new FastMatrix<float>(2, 1));
             a.Data.CopyFrom([2f, 3f]);
             b.Data.CopyFrom([4f, 5f]);
 
@@ -64,9 +64,9 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void MatMulRaw_And_Add_Views_Correct()
         {
-            using var a = new FloatFastMatrix(2, 2);
-            using var b = new FloatFastMatrix(2, 1);
-            using var c = new FloatFastMatrix(2, 1);
+            using var a = new FastMatrix<float>(2, 2);
+            using var b = new FastMatrix<float>(2, 1);
+            using var c = new FastMatrix<float>(2, 1);
             a.CopyFrom([1f, 2f, 3f, 4f]);
             b.CopyFrom([5f, 6f]);
 
@@ -83,9 +83,9 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void AddBias_And_Linear_Correct()
         {
-            using var x = new AutogradNode(new FloatFastMatrix(1, 2));
-            using var w = new AutogradNode(new FloatFastMatrix(2, 1));
-            using var b = new AutogradNode(new FloatFastMatrix(1, 1));
+            using var x = new AutogradNode(new FastMatrix<float>(1, 2));
+            using var w = new AutogradNode(new FastMatrix<float>(2, 1));
+            using var b = new AutogradNode(new FastMatrix<float>(1, 1));
             x.Data.CopyFrom([1f, 2f]); w.Data.CopyFrom([3f, 4f]); b.Data[0, 0] = 5f;
 
             using var res = TensorMath.Linear(x, w, b);
@@ -98,7 +98,7 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void ReLU_Backward_MasksCorrectly()
         {
-            using var input = new AutogradNode(new FloatFastMatrix(1, 2));
+            using var input = new AutogradNode(new FastMatrix<float>(1, 2));
             input.Data.CopyFrom([-5.0f, 5.0f]);
 
             using var res = TensorMath.ReLU(input);
@@ -111,7 +111,7 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void Dropout_Train_ScalesGradients()
         {
-            using var input = new AutogradNode(new FloatFastMatrix(1, 100));
+            using var input = new AutogradNode(new FastMatrix<float>(1, 100));
             input.Data.AsSpan().Fill(1.0f);
             var p = 0.5f;
 
@@ -132,8 +132,8 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void MSELoss_ForwardAndBackward_Correct()
         {
-            using var p = new AutogradNode(new FloatFastMatrix(2, 1));
-            using var t = new AutogradNode(new FloatFastMatrix(2, 1));
+            using var p = new AutogradNode(new FastMatrix<float>(2, 1));
+            using var t = new AutogradNode(new FastMatrix<float>(2, 1));
             p.Data.CopyFrom([3.0f, 5.0f]);
             t.Data.CopyFrom([1.0f, 9.0f]);
 
@@ -148,8 +148,8 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void SoftmaxCrossEntropy_Correct()
         {
-            using var logits = new AutogradNode(new FloatFastMatrix(1, 2));
-            using var target = new AutogradNode(new FloatFastMatrix(1, 2));
+            using var logits = new AutogradNode(new FastMatrix<float>(1, 2));
+            using var target = new AutogradNode(new FastMatrix<float>(1, 2));
             logits.Data.CopyFrom([0.0f, 0.0f]);
             target.Data.CopyFrom([0.0f, 1.0f]);
 
@@ -164,8 +164,8 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void Conv2D_ForwardAndBackward_Check()
         {
-            using var input = new AutogradNode(new FloatFastMatrix(1, 9));
-            using var weights = new AutogradNode(new FloatFastMatrix(1, 4));
+            using var input = new AutogradNode(new FastMatrix<float>(1, 9));
+            using var weights = new AutogradNode(new FastMatrix<float>(1, 4));
             input.Data.AsSpan().Fill(1.0f);
             weights.Data.CopyFrom([1f, 1f, 1f, 1f]);
 
@@ -180,7 +180,7 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void MaxPool2D_And_GlobalAvgPool_Correct()
         {
-            using var input = new AutogradNode(new FloatFastMatrix(1, 4));
+            using var input = new AutogradNode(new FastMatrix<float>(1, 4));
             input.Data.CopyFrom([1f, 2f, 3f, 4f]);
 
             using var maxP = TensorMath.MaxPool2D(input, 1, 2, 2, 2);
@@ -212,21 +212,21 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void BatchNorm1D_FullFlow_WithNonZeroGradients()
         {
-            using var input = new AutogradNode(new FloatFastMatrix(2, 1));
+            using var input = new AutogradNode(new FastMatrix<float>(2, 1));
             input.Data.CopyFrom([10.0f, 20.0f]);
 
-            using var gamma = new AutogradNode(new FloatFastMatrix(1, 1));
-            using var beta = new AutogradNode(new FloatFastMatrix(1, 1));
+            using var gamma = new AutogradNode(new FastMatrix<float>(1, 1));
+            using var beta = new AutogradNode(new FastMatrix<float>(1, 1));
             gamma.Data[0, 0] = 1.0f;
             beta.Data[0, 0] = 0.0f;
 
-            using var rm = new FloatFastMatrix(1, 1);
-            using var rv = new FloatFastMatrix(1, 1);
+            using var rm = new FastMatrix<float>(1, 1);
+            using var rv = new FastMatrix<float>(1, 1);
             rv[0, 0] = 1.0f;
 
             using var bnOut = TensorMath.BatchNorm1D(input, gamma, beta, rm, rv, 0.1f, 1e-5f, isTraining: true);
 
-            using var target = new AutogradNode(new FloatFastMatrix(2, 1), false);
+            using var target = new AutogradNode(new FastMatrix<float>(2, 1), false);
             target.Data.Clear();
             using var loss = TensorMath.MSELoss(bnOut, target);
 

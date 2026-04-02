@@ -7,8 +7,8 @@ namespace DevOnBike.Overfit.DeepLearning
         public AutogradNode Gamma { get; private set; }
         public AutogradNode Beta { get; private set; }
 
-        public FloatFastMatrix RunningMean { get; private set; }
-        public FloatFastMatrix RunningVar { get; private set; }
+        public FastMatrix<float> RunningMean { get; private set; }
+        public FastMatrix<float> RunningVar { get; private set; }
 
         public float Momentum { get; set; }
         public float Eps { get; set; }
@@ -17,16 +17,16 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public BatchNorm1D(int features, float momentum = 0.1f, float eps = 1e-5f)
         {
-            var gammaData = new FloatFastMatrix(1, features);
+            var gammaData = new FastMatrix<float>(1, features);
             gammaData.AsSpan().Fill(1f);
             Gamma = new AutogradNode(gammaData, requiresGrad: true);
 
-            var betaData = new FloatFastMatrix(1, features);
+            var betaData = new FastMatrix<float>(1, features);
             betaData.AsSpan().Fill(0f);
             Beta = new AutogradNode(betaData, requiresGrad: true);
 
-            RunningMean = new FloatFastMatrix(1, features);
-            RunningVar = new FloatFastMatrix(1, features);
+            RunningMean = new FastMatrix<float>(1, features);
+            RunningVar = new FastMatrix<float>(1, features);
             RunningVar.AsSpan().Fill(1f);
 
             Momentum = momentum;

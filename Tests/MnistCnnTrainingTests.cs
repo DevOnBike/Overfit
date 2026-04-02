@@ -102,7 +102,7 @@ namespace DevOnBike.Overfit.Tests
             }
         }
 
-        public void PrintConfusionMatrix(ConvLayer conv, LinearLayer fc, FloatFastMatrix testX, FloatFastMatrix testY)
+        public void PrintConfusionMatrix(ConvLayer conv, LinearLayer fc, FastMatrix<float> testX, FastMatrix<float> testY)
         {
             conv.Eval();
             fc.Eval();

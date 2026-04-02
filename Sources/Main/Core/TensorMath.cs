@@ -17,7 +17,7 @@ namespace DevOnBike.Overfit.Core
 
         public static AutogradNode Add(AutogradNode left, AutogradNode right)
         {
-            var resultData = new FloatFastMatrix(left.Data.Rows, left.Data.Cols);
+            var resultData = new FastMatrix<float>(left.Data.Rows, left.Data.Cols);
 
             // Używa niskopoziomowego TensorPrimitives (void Add) pod spodem
             Add(left.Data.AsView(), right.Data.AsView(), resultData.AsView());
@@ -60,9 +60,9 @@ namespace DevOnBike.Overfit.Core
             }
         }
 
-        public static FloatFastMatrix MatMulRaw(FastMatrixView<float> A, FastMatrixView<float> B)
+        public static FastMatrix<float> MatMulRaw(FastMatrixView<float> A, FastMatrixView<float> B)
         {
-            var C = new FloatFastMatrix(A.Rows, B.Cols);
+            var C = new FastMatrix<float>(A.Rows, B.Cols);
             MatMul(A, B, C.AsView());
             return C;
         }
@@ -73,7 +73,7 @@ namespace DevOnBike.Overfit.Core
 
         public static AutogradNode AddBias(AutogradNode input, AutogradNode bias)
         {
-            var resultData = new FloatFastMatrix(input.Data.Rows, input.Data.Cols);
+            var resultData = new FastMatrix<float>(input.Data.Rows, input.Data.Cols);
             var broadcastedBias = BroadcastRowVector(bias.Data.AsSpan(), input.Data.Rows);
             Add(input.Data.AsView(), broadcastedBias, resultData.AsView());
 
@@ -86,7 +86,7 @@ namespace DevOnBike.Overfit.Core
 
         public static AutogradNode MatMul(AutogradNode left, AutogradNode right)
         {
-            var resultData = new FloatFastMatrix(left.Data.Rows, right.Data.Cols);
+            var resultData = new FastMatrix<float>(left.Data.Rows, right.Data.Cols);
             MatMul(left.Data.AsView(), right.Data.AsView(), resultData.AsView());
 
             var outputNode = new AutogradNode(resultData, left.RequiresGrad || right.RequiresGrad);
@@ -104,7 +104,7 @@ namespace DevOnBike.Overfit.Core
 
         public static AutogradNode ReLU(AutogradNode input)
         {
-            var resultData = new FloatFastMatrix(input.Data.Rows, input.Data.Cols);
+            var resultData = new FastMatrix<float>(input.Data.Rows, input.Data.Cols);
             TensorPrimitives.Max(input.Data.AsReadOnlySpan(), 0f, resultData.AsSpan());
 
             var outputNode = new AutogradNode(resultData, input.RequiresGrad);
@@ -118,8 +118,8 @@ namespace DevOnBike.Overfit.Core
         {
             if (!isTraining) return input;
 
-            var resultData = new FloatFastMatrix(input.Data.Rows, input.Data.Cols);
-            var maskTensor = new AutogradNode(new FloatFastMatrix(input.Data.Rows, input.Data.Cols), requiresGrad: false);
+            var resultData = new FastMatrix<float>(input.Data.Rows, input.Data.Cols);
+            var maskTensor = new AutogradNode(new FastMatrix<float>(input.Data.Rows, input.Data.Cols), requiresGrad: false);
             var scale = 1.0f / (1.0f - p);
 
             var inSpan = input.Data.AsReadOnlySpan();
@@ -158,7 +158,7 @@ namespace DevOnBike.Overfit.Core
             TensorPrimitives.Subtract(prediction.Data.AsReadOnlySpan(), target.Data.AsReadOnlySpan(), diffSpan);
             var finalLoss = TensorPrimitives.SumOfSquares((ReadOnlySpan<float>)diffSpan) / n;
 
-            var resultMat = new FloatFastMatrix(1, 1);
+            var resultMat = new FastMatrix<float>(1, 1);
             resultMat[0, 0] = finalLoss;
 
             var outputNode = new AutogradNode(resultMat, prediction.RequiresGrad || target.RequiresGrad);
@@ -191,7 +191,7 @@ namespace DevOnBike.Overfit.Core
                 }
             }
 
-            var resData = new FloatFastMatrix(1, 1);
+            var resData = new FastMatrix<float>(1, 1);
             resData[0, 0] = totalLoss / rows;
 
             var outputNode = new AutogradNode(resData, logits.RequiresGrad);
@@ -209,13 +209,13 @@ namespace DevOnBike.Overfit.Core
             var kSquareInC = k * k * inC;
 
             // Alokacja macierzy wynikowej
-            var resultData = new FloatFastMatrix(batchSize, outC * outH * outW);
+            var resultData = new FastMatrix<float>(batchSize, outC * outH * outW);
 
             // Przetwarzanie obrazów w batchu
             for (var n = 0; n < batchSize; n++)
             {
                 // Zero-Alloc: colData i batchResult są zwalniane (Dispose) po użyciu
-                using var colData = new FloatFastMatrix(kSquareInC, outH * outW);
+                using var colData = new FastMatrix<float>(kSquareInC, outH * outW);
 
                 Im2Col(input.Data.ReadOnlyRow(n), inC, h, w, k, 1, 0, colData.AsSpan());
 
@@ -244,8 +244,8 @@ namespace DevOnBike.Overfit.Core
             var outputW = inputW / poolSize;
             var batchSize = input.Data.Rows;
 
-            var resultData = new FloatFastMatrix(batchSize, channels * outputH * outputW);
-            var maxIndicesTensor = new AutogradNode(new FloatFastMatrix(batchSize, channels * outputH * outputW), requiresGrad: false);
+            var resultData = new FastMatrix<float>(batchSize, channels * outputH * outputW);
+            var maxIndicesTensor = new AutogradNode(new FastMatrix<float>(batchSize, channels * outputH * outputW), requiresGrad: false);
             var maxIndices = maxIndicesTensor.Data;
 
             for (var n = 0; n < batchSize; n++)
@@ -293,7 +293,7 @@ namespace DevOnBike.Overfit.Core
         {
             var batchSize = input.Data.Rows;
             var spatialSize = h * w;
-            var outputData = new FloatFastMatrix(batchSize, channels);
+            var outputData = new FastMatrix<float>(batchSize, channels);
             var invSpatialSize = 1f / spatialSize;
 
             for (var b = 0; b < batchSize; b++)
@@ -327,15 +327,15 @@ namespace DevOnBike.Overfit.Core
             AutogradNode input,
             AutogradNode gamma,
             AutogradNode beta,
-            FloatFastMatrix runningMean,
-            FloatFastMatrix runningVar,
+            FastMatrix<float> runningMean,
+            FastMatrix<float> runningVar,
             float momentum,
             float eps,
             bool isTraining)
         {
             var N = input.Data.Rows;
             var C = input.Data.Cols;
-            var resultData = new FloatFastMatrix(N, C);
+            var resultData = new FastMatrix<float>(N, C);
 
             if (!isTraining)
             {
@@ -377,8 +377,8 @@ namespace DevOnBike.Overfit.Core
             var batchMean = batchMeanBuf.AsSpan();
             var batchVar = batchVarBuf.AsSpan();
 
-            var invStdTensor = new AutogradNode(new FloatFastMatrix(1, C), requiresGrad: false);
-            var xHatTensor = new AutogradNode(new FloatFastMatrix(N, C), requiresGrad: false);
+            var invStdTensor = new AutogradNode(new FastMatrix<float>(1, C), requiresGrad: false);
+            var xHatTensor = new AutogradNode(new FastMatrix<float>(N, C), requiresGrad: false);
             var invStdVec = invStdTensor.Data.AsSpan();
 
             // Obliczanie średniej batcha
@@ -388,7 +388,7 @@ namespace DevOnBike.Overfit.Core
 
             // Obliczanie wariancji batcha
             batchVar.Clear();
-            using var tempRowMat = new FloatFastMatrix(1, C);
+            using var tempRowMat = new FastMatrix<float>(1, C);
             var tempRow = tempRowMat.AsSpan();
             for (var i = 0; i < N; i++)
             {
@@ -565,12 +565,12 @@ namespace DevOnBike.Overfit.Core
 
             for (var n = 0; n < batchSize; n++)
             {
-                using var gn = new FloatFastMatrix(outC, outH * outW);
+                using var gn = new FastMatrix<float>(outC, outH * outW);
                 output.Grad.ReadOnlyRow(n).CopyTo(gn.AsSpan());
 
                 if (weights.RequiresGrad)
                 {
-                    using var colData = new FloatFastMatrix(kSquareInC, outH * outW);
+                    using var colData = new FastMatrix<float>(kSquareInC, outH * outW);
                     Im2Col(input.Data.ReadOnlyRow(n), inC, h, w, k, 1, 0, colData.AsSpan());
 
                     using var colT = colData.AsView().Transpose().ToContiguousFastMatrix();

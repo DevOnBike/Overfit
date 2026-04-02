@@ -46,7 +46,7 @@ namespace DevOnBike.Overfit
 
             try
             {
-                using var inputMat = new FloatFastMatrix(1, 784);
+                using var inputMat = new FastMatrix<float>(1, 784);
                 pixelData.CopyTo(inputMat.AsSpan());
                 using var input = new AutogradNode(inputMat, requiresGrad: false);
 

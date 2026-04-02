@@ -111,7 +111,7 @@ namespace DevOnBike.Overfit.Tests
             opt.ZeroGrad();
 
             // 1. Forward 
-            using var inputMat = new FloatFastMatrix(1, 9);
+            using var inputMat = new FastMatrix<float>(1, 9);
             inputMat.CopyFrom(s);
             using var inputNode = new AutogradNode(inputMat, requiresGrad: false);
 
@@ -119,13 +119,13 @@ namespace DevOnBike.Overfit.Tests
             using var pred = model.Forward(inputNode);
 
             // 2. Bellman Target
-            using var targetMat = new FloatFastMatrix(1, 9);
+            using var targetMat = new FastMatrix<float>(1, 9);
             pred.Data.AsReadOnlySpan().CopyTo(targetMat.AsSpan());
 
             var targetValue = r;
             if (!done)
             {
-                using var nextInputMat = new FloatFastMatrix(1, 9);
+                using var nextInputMat = new FastMatrix<float>(1, 9);
                 nextInputMat.CopyFrom(nextS);
                 using var nextInputNode = new AutogradNode(nextInputMat, requiresGrad: false);
 
@@ -176,7 +176,7 @@ namespace DevOnBike.Overfit.Tests
             // Resetujemy graf, żeby nie wyciekała wirtualna pamięć w trakcie grania!
             ComputationGraph.Active.Reset();
 
-            using var inputMat = new FloatFastMatrix(1, 9);
+            using var inputMat = new FastMatrix<float>(1, 9);
             inputMat.CopyFrom(board);
 
             // Wymuszamy wejściu brak gradientu

@@ -8,16 +8,16 @@ namespace DevOnBike.Overfit.Optimizers
         private readonly struct ParamState
         {
             public readonly AutogradNode Node;
-            public readonly FloatFastMatrix M;
-            public readonly FloatFastMatrix V;
+            public readonly FastMatrix<float> M;
+            public readonly FastMatrix<float> V;
             public readonly int Size;
 
             public ParamState(AutogradNode node)
             {
                 Node = node;
                 Size = node.Data.Rows * node.Data.Cols;
-                M = new FloatFastMatrix(node.Data.Rows, node.Data.Cols);
-                V = new FloatFastMatrix(node.Data.Rows, node.Data.Cols);
+                M = new FastMatrix<float>(node.Data.Rows, node.Data.Cols);
+                V = new FastMatrix<float>(node.Data.Rows, node.Data.Cols);
             }
         }
 

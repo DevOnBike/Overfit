@@ -33,7 +33,7 @@ namespace DevOnBike.Overfit.Data
             LoadMatrix(br, fc.Biases.Data);
         }
 
-        private static void SaveMatrix(BinaryWriter bw, FloatFastMatrix matrix)
+        private static void SaveMatrix(BinaryWriter bw, FastMatrix<float> matrix)
         {
             bw.Write(matrix.Rows);
             bw.Write(matrix.Cols);
@@ -44,7 +44,7 @@ namespace DevOnBike.Overfit.Data
             }
         }
 
-        private static void LoadMatrix(BinaryReader br, FloatFastMatrix matrix)
+        private static void LoadMatrix(BinaryReader br, FastMatrix<float> matrix)
         {
             var rows = br.ReadInt32();
             var cols = br.ReadInt32();

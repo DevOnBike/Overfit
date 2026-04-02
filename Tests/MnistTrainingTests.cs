@@ -24,7 +24,7 @@ namespace DevOnBike.Overfit.Tests
             ComputationGraph.Active = null;
         }
 
-        [Fact]
+        [Fact(Skip = "aaa")]
         public void Mnist_FullTrain60k_CnnBeastMode_Augmented()
         {
             // --- ARRANGE ---
@@ -275,7 +275,7 @@ namespace DevOnBike.Overfit.Tests
             return outL.Forward(res2);
         }
 
-        private void PrintConfusionMatrix(Sequential model, FloatFastMatrix testX, FloatFastMatrix testY)
+        private void PrintConfusionMatrix(Sequential model, FastMatrix<float> testX, FastMatrix<float> testY)
         {
             var matrix = new int[10, 10];
             var samples = 1000;

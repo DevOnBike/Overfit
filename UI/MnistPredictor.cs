@@ -57,7 +57,7 @@ namespace DevOnBike.Overfit.UI
                 // Resetujemy licznik operacji, aby zachować Zero-Alloc
                 ComputationGraph.Active.Reset();
 
-                using var inputMat = new FloatFastMatrix(1, 784);
+                using var inputMat = new FastMatrix<float>(1, 784);
                 pixelData.CopyTo(inputMat.AsSpan());
 
                 // Wejście nie wymaga gradientów

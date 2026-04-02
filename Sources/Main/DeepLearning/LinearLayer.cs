@@ -10,7 +10,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public LinearLayer(int inputSize, int outputSize)
         {
-            var wData = new FloatFastMatrix(inputSize, outputSize);
+            var wData = new FastMatrix<float>(inputSize, outputSize);
             var stdDev = MathF.Sqrt(2f / inputSize);
 
             var wSpan = wData.AsSpan();
@@ -21,7 +21,7 @@ namespace DevOnBike.Overfit.DeepLearning
             }
 
             Weights = new AutogradNode(wData, true);
-            Biases = new AutogradNode(new FloatFastMatrix(1, outputSize), true);
+            Biases = new AutogradNode(new FastMatrix<float>(1, outputSize), true);
         }
 
         public void Train() => IsTraining = true;

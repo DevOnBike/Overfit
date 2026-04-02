@@ -4,7 +4,7 @@ namespace DevOnBike.Overfit.Tests
 {
     public static class MnistLoader
     {
-        public static (FloatFastMatrix images, FloatFastMatrix labels) Load(string imagesPath, string labelsPath, int maxSamples = 60000)
+        public static (FastMatrix<float> images, FastMatrix<float> labels) Load(string imagesPath, string labelsPath, int maxSamples = 60000)
         {
             using var imgStream = File.OpenRead(imagesPath);
             using var lblStream = File.OpenRead(labelsPath);
@@ -15,8 +15,8 @@ namespace DevOnBike.Overfit.Tests
             imgReader.ReadBytes(16);
             lblReader.ReadBytes(8);
 
-            var images = new FloatFastMatrix(maxSamples, 784);
-            var labels = new FloatFastMatrix(maxSamples, 10); // One-hot encoding
+            var images = new FastMatrix<float>(maxSamples, 784);
+            var labels = new FastMatrix<float>(maxSamples, 10); // One-hot encoding
 
             for (var i = 0; i < maxSamples; i++)
             {

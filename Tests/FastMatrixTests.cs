@@ -7,7 +7,7 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void Constructor_ValidDimensions_SetsPropertiesCorrectly()
         {
-            using var matrix = new FloatFastMatrix(3, 4);
+            using var matrix = new FastMatrix<float>(3, 4);
 
             Assert.Equal(3, matrix.Rows);
             Assert.Equal(4, matrix.Cols);
@@ -16,7 +16,7 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void TensorSpan_ReturnsCorrectDimensions()
         {
-            using var matrix = new FloatFastMatrix(2, 5);
+            using var matrix = new FastMatrix<float>(2, 5);
             var tensor = matrix.AsTensor();
 
             Assert.Equal(2, tensor.Rank);
@@ -27,8 +27,8 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void Add_ValidMatrices_PerformsElementWiseAddition()
         {
-            using var m1 = new FloatFastMatrix(2, 2);
-            using var m2 = new FloatFastMatrix(2, 2);
+            using var m1 = new FastMatrix<float>(2, 2);
+            using var m2 = new FastMatrix<float>(2, 2);
 
             m1[0, 0] = 1.0f; m1[0, 1] = 2.0f;
             m1[1, 0] = 3.0f; m1[1, 1] = 4.0f;
@@ -47,7 +47,7 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void MultiplyScalar_MultipliesAllElements()
         {
-            using var matrix = new FloatFastMatrix(2, 2);
+            using var matrix = new FastMatrix<float>(2, 2);
             matrix[0, 0] = 1.0f; matrix[0, 1] = 2.0f;
             matrix[1, 0] = 3.0f; matrix[1, 1] = 4.0f;
 
@@ -62,8 +62,8 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void Add_ShapeMismatch_ThrowsArgumentException()
         {
-            using var m1 = new FloatFastMatrix(2, 2);
-            using var m2 = new FloatFastMatrix(3, 3);
+            using var m1 = new FastMatrix<float>(2, 2);
+            using var m2 = new FastMatrix<float>(3, 3);
 
             var ex = Assert.Throws<ArgumentException>(() => m1.Add(m2));
             Assert.Contains("Shape mismatch", ex.Message);
@@ -72,7 +72,7 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void AccessingMethodsAfterDispose_ThrowsObjectDisposedException()
         {
-            var matrix = new FloatFastMatrix(2, 2);
+            var matrix = new FastMatrix<float>(2, 2);
             matrix.Dispose();
 
             Assert.Throws<ObjectDisposedException>(() => matrix[0, 0]);
@@ -84,7 +84,7 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void SumOfSquares_ReturnsCorrectValue()
         {
-            using var matrix = new FloatFastMatrix(2, 2);
+            using var matrix = new FastMatrix<float>(2, 2);
             matrix[0, 0] = 1.0f; matrix[0, 1] = 2.0f;
             matrix[1, 0] = 3.0f; matrix[1, 1] = 4.0f;
 

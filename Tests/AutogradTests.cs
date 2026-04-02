@@ -19,8 +19,8 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void TensorAdd_ForwardAndBackward_Correct()
         {
-            using var a = new AutogradNode(new FloatFastMatrix(1, 2));
-            using var b = new AutogradNode(new FloatFastMatrix(1, 2));
+            using var a = new AutogradNode(new FastMatrix<float>(1, 2));
+            using var b = new AutogradNode(new FastMatrix<float>(1, 2));
             a.Data.CopyFrom([1.0f, 2.0f]);
             b.Data.CopyFrom([3.0f, 4.0f]);
 
@@ -35,8 +35,8 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void TensorMatMul_ForwardAndBackward_Correct()
         {
-            using var a = new AutogradNode(new FloatFastMatrix(1, 2));
-            using var b = new AutogradNode(new FloatFastMatrix(2, 1));
+            using var a = new AutogradNode(new FastMatrix<float>(1, 2));
+            using var b = new AutogradNode(new FastMatrix<float>(2, 1));
             a.Data.CopyFrom([2.0f, 3.0f]);
             b.Data.CopyFrom([4.0f, 5.0f]);
 
@@ -50,8 +50,8 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void AddBias_ForwardAndBackward_Correct()
         {
-            using var input = new AutogradNode(new FloatFastMatrix(2, 2));
-            using var bias = new AutogradNode(new FloatFastMatrix(1, 2));
+            using var input = new AutogradNode(new FastMatrix<float>(2, 2));
+            using var bias = new AutogradNode(new FastMatrix<float>(1, 2));
             input.Data.AsSpan().Fill(1.0f);
             bias.Data.CopyFrom([10.0f, 20.0f]);
 
@@ -64,7 +64,7 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void ReLU_ForwardAndBackward_Correct()
         {
-            using var input = new AutogradNode(new FloatFastMatrix(1, 3));
+            using var input = new AutogradNode(new FastMatrix<float>(1, 3));
             input.Data.CopyFrom([-1.0f, 0.0f, 5.0f]);
 
             using var res = TensorMath.ReLU(input);
@@ -77,7 +77,7 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void Dropout_ForwardAndBackward_Correct()
         {
-            using var input = new AutogradNode(new FloatFastMatrix(1, 10));
+            using var input = new AutogradNode(new FastMatrix<float>(1, 10));
             input.Data.AsSpan().Fill(1.0f);
 
             using var res = TensorMath.Dropout(input, 0.5f, isTraining: true);
@@ -96,8 +96,8 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void MSELoss_ForwardAndBackward_Correct()
         {
-            using var p = new AutogradNode(new FloatFastMatrix(2, 1));
-            using var t = new AutogradNode(new FloatFastMatrix(2, 1));
+            using var p = new AutogradNode(new FastMatrix<float>(2, 1));
+            using var t = new AutogradNode(new FastMatrix<float>(2, 1));
             p.Data.CopyFrom([3.0f, 5.0f]);
             t.Data.CopyFrom([1.0f, 9.0f]);
 
@@ -111,8 +111,8 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void SoftmaxCrossEntropy_ForwardAndBackward_Correct()
         {
-            using var logits = new AutogradNode(new FloatFastMatrix(1, 2));
-            using var target = new AutogradNode(new FloatFastMatrix(1, 2));
+            using var logits = new AutogradNode(new FastMatrix<float>(1, 2));
+            using var target = new AutogradNode(new FastMatrix<float>(1, 2));
             logits.Data.CopyFrom([0.0f, 0.0f]);
             target.Data.CopyFrom([0.0f, 1.0f]);
 
@@ -126,8 +126,8 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void Conv2D_ForwardAndBackward_Flows()
         {
-            using var input = new AutogradNode(new FloatFastMatrix(1, 9));
-            using var weights = new AutogradNode(new FloatFastMatrix(1, 4));
+            using var input = new AutogradNode(new FastMatrix<float>(1, 9));
+            using var weights = new AutogradNode(new FastMatrix<float>(1, 4));
             input.Data.AsSpan().Fill(1.0f);
             weights.Data.AsSpan().Fill(1.0f);
 
@@ -143,7 +143,7 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void MaxPool2D_ForwardAndBackward_Correct()
         {
-            using var input = new AutogradNode(new FloatFastMatrix(1, 4));
+            using var input = new AutogradNode(new FastMatrix<float>(1, 4));
             input.Data.CopyFrom([1f, 2f, 3f, 10f]);
 
             using var res = TensorMath.MaxPool2D(input, 1, 2, 2, 2);
@@ -156,7 +156,7 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void GlobalAveragePool2D_ForwardAndBackward_Correct()
         {
-            using var input = new AutogradNode(new FloatFastMatrix(1, 4));
+            using var input = new AutogradNode(new FastMatrix<float>(1, 4));
             input.Data.CopyFrom([1f, 2f, 3f, 4f]);
 
             using var res = TensorMath.GlobalAveragePool2D(input, 1, 2, 2);
@@ -169,15 +169,15 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void BatchNorm1D_ForwardAndBackward_Flows()
         {
-            using var input = new AutogradNode(new FloatFastMatrix(2, 1));
+            using var input = new AutogradNode(new FastMatrix<float>(2, 1));
             input.Data.CopyFrom([10.0f, 20.0f]);
 
-            using var gamma = new AutogradNode(new FloatFastMatrix(1, 1));
-            using var beta = new AutogradNode(new FloatFastMatrix(1, 1));
+            using var gamma = new AutogradNode(new FastMatrix<float>(1, 1));
+            using var beta = new AutogradNode(new FastMatrix<float>(1, 1));
             gamma.Data[0, 0] = 1.0f; beta.Data[0, 0] = 0.0f;
 
-            using var rm = new FloatFastMatrix(1, 1);
-            using var rv = new FloatFastMatrix(1, 1);
+            using var rm = new FastMatrix<float>(1, 1);
+            using var rv = new FastMatrix<float>(1, 1);
             rv[0, 0] = 1.0f;
 
             using var res = TensorMath.BatchNorm1D(input, gamma, beta, rm, rv, 0.1f, 1e-5f, true);
@@ -191,8 +191,8 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void Tensor_RequiresGradFalse_DoesNotCalculateGradient()
         {
-            using var matA = new FloatFastMatrix(1, 1);
-            using var matB = new FloatFastMatrix(1, 1);
+            using var matA = new FastMatrix<float>(1, 1);
+            using var matB = new FastMatrix<float>(1, 1);
 
             using var a = new AutogradNode(matA, requiresGrad: false);
             using var b = new AutogradNode(matB, requiresGrad: true);

@@ -24,10 +24,10 @@ namespace DevOnBike.Overfit.Tests
             // ==========================================
             // ARRANGE
             // ==========================================
-            using var xData = new FloatFastMatrix(4, 2);
+            using var xData = new FastMatrix<float>(4, 2);
             xData.CopyFrom([0, 0, 0, 1, 1, 0, 1, 1]);
 
-            using var yData = new FloatFastMatrix(4, 1);
+            using var yData = new FastMatrix<float>(4, 1);
             yData.CopyFrom([0, 1, 1, 0]);
 
             using var X = new AutogradNode(xData, requiresGrad: false);
@@ -90,8 +90,8 @@ namespace DevOnBike.Overfit.Tests
             // ARRANGE: Generowanie 300 punktów danych
             // ==========================================
             var numSamples = 300;
-            using var xData = new FloatFastMatrix(numSamples, 2);
-            using var yData = new FloatFastMatrix(numSamples, 1);
+            using var xData = new FastMatrix<float>(numSamples, 2);
+            using var yData = new FastMatrix<float>(numSamples, 1);
             var rnd = new Random(42);
 
             for (var i = 0; i < numSamples; i++)
