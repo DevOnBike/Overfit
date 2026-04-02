@@ -13,7 +13,8 @@ namespace DevOnBike.Overfit.Core
 
         public static AutogradNode Add(AutogradNode left, AutogradNode right)
         {
-            var resultData = new FastTensor<float>(left.Data.Shape);
+            var resultData = FastTensor<float>.SameShape(left.Data);
+
             TensorPrimitives.Add(left.Data.AsSpan(), right.Data.AsSpan(), resultData.AsSpan());
 
             var outputNode = new AutogradNode(resultData, left.RequiresGrad || right.RequiresGrad);
@@ -32,7 +33,7 @@ namespace DevOnBike.Overfit.Core
         public static AutogradNode AddBias(AutogradNode input, AutogradNode bias)
         {
             var N = input.Data.GetDim(0); var C = input.Data.GetDim(1);
-            var resultData = new FastTensor<float>(input.Data.Shape);
+            var resultData = new FastTensor<float>(N, C);
             var inS = input.Data.AsSpan(); var bS = bias.Data.AsSpan(); var resS = resultData.AsSpan();
 
             for (var i = 0; i < N; i++)
@@ -390,8 +391,7 @@ namespace DevOnBike.Overfit.Core
         public static AutogradNode ReLU(AutogradNode input)
         {
             // Używamy clearMemory: false, ponieważ funkcja SIMD i tak nadpisze CAŁY bufor.
-            // Oszczędza to czas systemu operacyjnego na czyszczeniu pamięci.
-            var res = new FastTensor<float>(false, input.Data.Shape);
+            var res = FastTensor<float>.SameShape(input.Data, clearMemory: false);
 
             TensorPrimitives.Max(input.Data.AsSpan(), 0f, res.AsSpan());
 
@@ -454,8 +454,8 @@ namespace DevOnBike.Overfit.Core
 
         public static AutogradNode Dropout(AutogradNode input, float probability, bool isTraining)
         {
-            var resData = new FastTensor<float>(input.Data.Shape);
-            var mask = new AutogradNode(new FastTensor<float>(input.Data.Shape), false);
+            var resData = FastTensor<float>.SameShape(input.Data);
+            var mask = new AutogradNode(FastTensor<float>.SameShape(input.Data), false);
 
             if (isTraining)
             {
@@ -528,7 +528,7 @@ namespace DevOnBike.Overfit.Core
 
         public static AutogradNode MSELoss(AutogradNode prediction, AutogradNode target)
         {
-            using var diff = new FastTensor<float>(prediction.Data.Shape);
+            using var diff = FastTensor<float>.SameShape(prediction.Data);
 
             TensorPrimitives.Subtract(prediction.Data.AsSpan(), target.Data.AsSpan(), diff.AsSpan());
             var mse = TensorPrimitives.Dot(diff.AsSpan(), diff.AsSpan()) / prediction.Data.Size;
@@ -560,7 +560,7 @@ namespace DevOnBike.Overfit.Core
         public static AutogradNode BatchNorm1D(AutogradNode input, AutogradNode gamma, AutogradNode beta, FastTensor<float> runningMean, FastTensor<float> runningVar, float momentum, float eps, bool isTraining)
         {
             int N = input.Data.GetDim(0), C = input.Data.GetDim(1);
-            var outputData = new FastTensor<float>(input.Data.Shape);
+            var outputData = new FastTensor<float>(N, C);
             var mean = new AutogradNode(new FastTensor<float>(C), false);
             var invStd = new AutogradNode(new FastTensor<float>(C), false);
 

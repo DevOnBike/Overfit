@@ -34,7 +34,7 @@ namespace DevOnBike.Overfit.Core
             {
                 return _shapeOverflow[index];
             }
-            
+
             return index switch
             {
                 0 => _s0,
@@ -52,7 +52,7 @@ namespace DevOnBike.Overfit.Core
             {
                 return _stridesOverflow[index];
             }
-            
+
             return index switch
             {
                 0 => _st0,
@@ -72,14 +72,14 @@ namespace DevOnBike.Overfit.Core
                 {
                     return _shapeOverflow;
                 }
-                
+
                 var s = new int[Rank];
-                
+
                 if (Rank > 0) s[0] = _s0;
                 if (Rank > 1) s[1] = _s1;
                 if (Rank > 2) s[2] = _s2;
                 if (Rank > 3) s[3] = _s3;
-                
+
                 return s;
             }
         }
@@ -92,13 +92,13 @@ namespace DevOnBike.Overfit.Core
                 {
                     return _stridesOverflow;
                 }
-                
+
                 var st = new int[Rank];
                 if (Rank > 0) st[0] = _st0;
                 if (Rank > 1) st[1] = _st1;
                 if (Rank > 2) st[2] = _st2;
                 if (Rank > 3) st[3] = _st3;
-                
+
                 return st;
             }
         }
@@ -119,7 +119,7 @@ namespace DevOnBike.Overfit.Core
             StoreStrides(shape);
 
             _data = ArrayPool<T>.Shared.Rent(Size);
-            
+
             if (clearMemory)
             {
                 _data.AsSpan(0, Size).Clear();
@@ -185,12 +185,12 @@ namespace DevOnBike.Overfit.Core
         public Span<T> AsSpan()
         {
             ObjectDisposedException.ThrowIf(_disposed == 1, this);
-            
+
             if (!IsContiguous)
             {
                 throw new InvalidOperationException("Tensor nie jest ciągły. Wywołaj ToContiguous() najpierw.");
             }
-            
+
             return new Span<T>(_data, Offset, Size);
         }
 
@@ -219,14 +219,14 @@ namespace DevOnBike.Overfit.Core
             {
                 throw new ArgumentException($"Reshape: rozmiar {newSize} != {Size}.");
             }
-            
+
             if (!IsContiguous)
             {
                 throw new InvalidOperationException("Reshape nieciągłego tensora jest niedozwolone.");
             }
 
             var newStrides = BuildStrides(newShape);
-            
+
             return MakeView(newShape, newStrides, Offset, isContiguous: true);
         }
 
@@ -243,18 +243,18 @@ namespace DevOnBike.Overfit.Core
             var dst = result.AsSpan();
 
             var indices = Rank <= 8 ? stackalloc int[Rank] : new int[Rank];
-            
+
             ReadShapeStrides(out var shapeArr, out var stridesArr);
 
             for (var i = 0; i < Size; i++)
             {
                 var srcOff = Offset;
-                
+
                 for (var d = 0; d < Rank; d++)
                 {
                     srcOff += indices[d] * stridesArr[d];
                 }
-                
+
                 dst[i] = _data[srcOff];
 
                 for (var d = Rank - 1; d >= 0; d--)
@@ -263,12 +263,31 @@ namespace DevOnBike.Overfit.Core
                     {
                         break;
                     }
-                    
+
                     indices[d] = 0;
                 }
             }
-            
+
             return result;
+        }
+
+        /// <summary>
+        /// Zero-alloc factory — tworzy nowy tensor o tym samym kształcie co <paramref name="template"/>.
+        /// Zastępuje wzorzec: new FastTensor&lt;T&gt;(template.Shape) który alokuje new int[Rank].
+        ///
+        /// Dla rank ≤ 4 (100% przypadków CNN): zero alokacji int[].
+        /// Dla rank > 4: fallback na template.Shape (rzadkie, akceptowalne).
+        /// </summary>
+        public static FastTensor<T> SameShape(FastTensor<T> template, bool clearMemory = true)
+        {
+            return template.Rank switch
+            {
+                1 => new FastTensor<T>(clearMemory, template.GetDim(0)),
+                2 => new FastTensor<T>(clearMemory, template.GetDim(0), template.GetDim(1)),
+                3 => new FastTensor<T>(clearMemory, template.GetDim(0), template.GetDim(1), template.GetDim(2)),
+                4 => new FastTensor<T>(clearMemory, template.GetDim(0), template.GetDim(1), template.GetDim(2), template.GetDim(3)),
+                _ => new FastTensor<T>(clearMemory, template.Shape) // rank > 4 — Shape alokuje, ale to przypadek brzegowy
+            };
         }
 
         // ── Dispose — Interlocked, double-dispose safe ───────────────────────────────
@@ -283,7 +302,7 @@ namespace DevOnBike.Overfit.Core
             if (_ownsData)
             {
                 var rented = Interlocked.Exchange(ref _data, null!);
-                
+
                 if (rented != null)
                 {
                     ArrayPool<T>.Shared.Return(rented);
@@ -297,12 +316,12 @@ namespace DevOnBike.Overfit.Core
         private static int CalculateSize(int[] shape)
         {
             var size = 1;
-            
+
             for (var i = 0; i < shape.Length; i++)
             {
                 size *= shape[i];
             }
-            
+
             return size;
         }
 
@@ -310,13 +329,13 @@ namespace DevOnBike.Overfit.Core
         {
             var st = new int[shape.Length];
             var cur = 1;
-            
+
             for (var i = shape.Length - 1; i >= 0; i--)
             {
                 st[i] = cur;
                 cur *= shape[i];
             }
-            
+
             return st;
         }
 
@@ -356,7 +375,7 @@ namespace DevOnBike.Overfit.Core
 
             s = new int[Rank];
             st = new int[Rank];
-            
+
             if (Rank > 0) { s[0] = _s0; st[0] = _st0; }
             if (Rank > 1) { s[1] = _s1; st[1] = _st1; }
             if (Rank > 2) { s[2] = _s2; st[2] = _st2; }
