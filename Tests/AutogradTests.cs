@@ -1,4 +1,4 @@
-using DevOnBike.Overfit.Core;
+﻿using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.Tests
 {
@@ -44,7 +44,7 @@ namespace DevOnBike.Overfit.Tests
         public void AddBias_ForwardAndBackward_Correct()
         {
             using var input = new AutogradNode(new FastTensor<float>(2, 2));
-            using var bias = new AutogradNode(new FastTensor<float>(1, 2));
+            using var bias = new AutogradNode(new FastTensor<float>(2)); // ZMIANA NA 1D
             input.Data.AsSpan().Fill(1.0f);
             ((Span<float>)[10.0f, 20.0f]).CopyTo(bias.Data.AsSpan());
 
@@ -164,13 +164,14 @@ namespace DevOnBike.Overfit.Tests
             using var input = new AutogradNode(new FastTensor<float>(2, 1));
             ((Span<float>)[10.0f, 20.0f]).CopyTo(input.Data.AsSpan());
 
-            using var gamma = new AutogradNode(new FastTensor<float>(1, 1));
-            using var beta = new AutogradNode(new FastTensor<float>(1, 1));
-            gamma.Data[0, 0] = 1.0f; beta.Data[0, 0] = 0.0f;
+            // ZMIANA NA 1D: Ochrona przed IndexOutOfRangeException
+            using var gamma = new AutogradNode(new FastTensor<float>(1));
+            using var beta = new AutogradNode(new FastTensor<float>(1));
+            gamma.Data[0] = 1.0f; beta.Data[0] = 0.0f;
 
-            using var rm = new FastTensor<float>(1, 1);
-            using var rv = new FastTensor<float>(1, 1);
-            rv[0, 0] = 1.0f;
+            using var rm = new FastTensor<float>(1);
+            using var rv = new FastTensor<float>(1);
+            rv[0] = 1.0f;
 
             using var res = TensorMath.BatchNorm1D(input, gamma, beta, rm, rv, 0.1f, 1e-5f, true);
             Assert.Equal(1.0f, res.Data[1, 0], 1e-3f);

@@ -229,10 +229,10 @@ namespace DevOnBike.Overfit.Tests
             using var a = new AutogradNode(new FastTensor<float>(2, 3));
             using var b = new AutogradNode(new FastTensor<float>(3, 2));
 
-            for (int i = 0; i < a.Data.Size; i++) a.Data.AsSpan()[i] = (i + 1) * 0.1f;
-            for (int i = 0; i < b.Data.Size; i++) b.Data.AsSpan()[i] = (i + 1) * 0.2f;
+            for (var i = 0; i < a.Data.Size; i++) a.Data.AsSpan()[i] = (i + 1) * 0.1f;
+            for (var i = 0; i < b.Data.Size; i++) b.Data.AsSpan()[i] = (i + 1) * 0.2f;
 
-            Func<AutogradNode> lossFunc = () => {
+            var lossFunc = () => {
                 var mm = TensorMath.MatMul(a, b);
                 var target = new AutogradNode(new FastTensor<float>(2, 2), false);
                 return TensorMath.MSELoss(mm, target);
@@ -251,7 +251,7 @@ namespace DevOnBike.Overfit.Tests
             input.Data.AsSpan().Fill(1.5f);
             bias.Data.AsSpan().Fill(0.5f);
 
-            Func<AutogradNode> lossFunc = () => {
+            var lossFunc = () => {
                 var res = TensorMath.AddBias(input, bias);
                 var target = new AutogradNode(new FastTensor<float>(3, 2), false);
                 return TensorMath.MSELoss(res, target);
@@ -268,11 +268,11 @@ namespace DevOnBike.Overfit.Tests
             using var weights = new AutogradNode(new FastTensor<float>(3, 2));
             using var bias = new AutogradNode(new FastTensor<float>(2));
 
-            for (int i = 0; i < input.Data.Size; i++) input.Data.AsSpan()[i] = (i + 1) * 0.1f;
-            for (int i = 0; i < weights.Data.Size; i++) weights.Data.AsSpan()[i] = (i + 1) * 0.2f;
-            for (int i = 0; i < bias.Data.Size; i++) bias.Data.AsSpan()[i] = (i + 1) * 0.3f;
+            for (var i = 0; i < input.Data.Size; i++) input.Data.AsSpan()[i] = (i + 1) * 0.1f;
+            for (var i = 0; i < weights.Data.Size; i++) weights.Data.AsSpan()[i] = (i + 1) * 0.2f;
+            for (var i = 0; i < bias.Data.Size; i++) bias.Data.AsSpan()[i] = (i + 1) * 0.3f;
 
-            Func<AutogradNode> lossFunc = () => {
+            var lossFunc = () => {
                 var lin = TensorMath.Linear(input, weights, bias);
                 var target = new AutogradNode(new FastTensor<float>(2, 2), false);
                 return TensorMath.MSELoss(lin, target);
@@ -292,7 +292,7 @@ namespace DevOnBike.Overfit.Tests
             input.Data.AsSpan().Fill(0.5f);
             weights.Data.AsSpan().Fill(0.1f);
 
-            Func<AutogradNode> lossFunc = () => {
+            var lossFunc = () => {
                 var conv = TensorMath.Conv2D(input, weights, 1, 1, 4, 4, 3);
                 var target = new AutogradNode(new FastTensor<float>(1, 1, 2, 2), false);
                 return TensorMath.MSELoss(conv, target);
@@ -317,7 +317,7 @@ namespace DevOnBike.Overfit.Tests
             using var rv = new FastTensor<float>(2);
             rv.AsSpan().Fill(1f);
 
-            Func<AutogradNode> lossFunc = () => {
+            var lossFunc = () => {
                 var bn = TensorMath.BatchNorm1D(input, gamma, beta, rm, rv, 0.1f, 1e-5f, true);
                 var target = new AutogradNode(new FastTensor<float>(4, 2), false);
                 return TensorMath.MSELoss(bn, target);
@@ -342,30 +342,30 @@ namespace DevOnBike.Overfit.Tests
             var numGrads = new float[parameter.Data.Size];
             var dataSpan = parameter.Data.AsSpan();
 
-            for (int i = 0; i < parameter.Data.Size; i++)
+            for (var i = 0; i < parameter.Data.Size; i++)
             {
-                float originalValue = dataSpan[i];
+                var originalValue = dataSpan[i];
 
                 dataSpan[i] = originalValue + epsilon;
                 ComputationGraph.Active.Reset();
                 using (var lossPlus = lossFunc())
                 {
-                    float fPlus = lossPlus.Data[0, 0];
+                    var fPlus = lossPlus.Data[0, 0];
 
                     dataSpan[i] = originalValue - epsilon;
                     ComputationGraph.Active.Reset();
                     using (var lossMinus = lossFunc())
                     {
-                        float fMinus = lossMinus.Data[0, 0];
+                        var fMinus = lossMinus.Data[0, 0];
                         numGrads[i] = (fPlus - fMinus) / (2 * epsilon);
                     }
                 }
                 dataSpan[i] = originalValue;
             }
 
-            for (int i = 0; i < analyticalGrads.Length; i++)
+            for (var i = 0; i < analyticalGrads.Length; i++)
             {
-                float diff = Math.Abs(analyticalGrads[i] - numGrads[i]);
+                var diff = Math.Abs(analyticalGrads[i] - numGrads[i]);
                 Assert.True(diff < tolerance,
                     $"Błąd gradientu w elemencie {i}! Analityczny: {analyticalGrads[i]}, Numeryczny: {numGrads[i]}, Różnica: {diff}");
             }

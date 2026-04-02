@@ -14,20 +14,19 @@ namespace DevOnBike.Overfit.Tests
         public MnistTrainingTests(ITestOutputHelper output)
         {
             _output = output;
-            // Inicjalizacja globalnej Taśmy dla każdego testu
             ComputationGraph.Active = new ComputationGraph();
         }
 
         [Fact(Skip = "a")]
         public void Mnist_FullTrain60k_CnnBeastMode_Augmented()
         {
-            // --- ARRANGE ---
-            var trainSize = 60000;
+            // --- ARRANGE (SMOKE TEST) ---
+            var trainSize = 60000; // Trenujemy na całym zbiorze danych!
             var batchSize = 64;
-            var epochs = 20;
+            var epochs = 5;        // 5 epok x ~24 sekundy = ~120 sekund (2 minuty)
             var learningRate = 0.001f;
 
-            _output.WriteLine("=== START: Trening na Taśmie (Computation Graph) z Augmentacją ===");
+            _output.WriteLine("=== START: Trening ResNet na Taśmie ===");
             _output.WriteLine("Ładowanie danych MNIST...");
 
             var (trainX, trainY) = MnistLoader.Load("d:/ml/train-images.idx3-ubyte", "d:/ml/train-labels.idx1-ubyte", trainSize);
@@ -35,12 +34,19 @@ namespace DevOnBike.Overfit.Tests
             using var X = new AutogradNode(trainX, requiresGrad: false);
             using var Y = new AutogradNode(trainY, requiresGrad: false);
 
+            // --- POPRAWIONA ARCHITEKTURA RESNET ---
             var conv1 = new ConvLayer(1, 8, 28, 28, 3);
-            var bn1 = new BatchNorm1D(13 * 13 * 8); // 8 kanałów * 13 * 13
-            var fc1 = new LinearLayer(13 * 13 * 8, 10);
+            // BN przeniesiony na poziom 1352 (po MaxPool2D)
+            var bn1 = new BatchNorm1D(1352);
+            var res1 = new ResidualBlock(1352);
+            var fcOut = new LinearLayer(8, 10);
 
-            var model = new Sequential(conv1, bn1, fc1);
-            using var optimizer = new Adam(model.Parameters(), learningRate);
+            var parameters = conv1.Parameters()
+                .Concat(bn1.Parameters())
+                .Concat(res1.Parameters())
+                .Concat(fcOut.Parameters());
+
+            using var optimizer = new Adam(parameters, learningRate);
             var scheduler = new LRScheduler(optimizer, _output.WriteLine, factor: 0.5f, patience: 1);
 
             var numBatches = trainSize / batchSize;
@@ -55,14 +61,13 @@ namespace DevOnBike.Overfit.Tests
                 var epochSw = Stopwatch.StartNew();
                 var epochLoss = 0f;
 
-                model.Train();
+                conv1.Train(); bn1.Train(); res1.Train(); fcOut.Train();
 
                 for (var b = 0; b < numBatches; b++)
                 {
                     ComputationGraph.Active.Reset();
                     optimizer.ZeroGrad();
 
-                    // Używamy 'using' dla wszystkiego, co bierze pamięć z puli
                     using var xBatchData = new FastTensor<float>(batchSize, 1, 28, 28);
                     X.Data.AsSpan().Slice(b * batchSize * 784, batchSize * 784).CopyTo(xBatchData.AsSpan());
 
@@ -73,15 +78,25 @@ namespace DevOnBike.Overfit.Tests
                     Y.Data.AsSpan().Slice(b * batchSize * 10, batchSize * 10).CopyTo(yBatchData.AsSpan());
                     using var yBatch = new AutogradNode(yBatchData, false);
 
-                    // --- FORWARD ---
+                    // --- FORWARD PASS (Logiczny i bezpieczny wymiarowo) ---
                     using var h1 = conv1.Forward(xBatch);
                     using var a1 = TensorMath.ReLU(h1);
                     using var p1 = TensorMath.MaxPool2D(a1, 8, 26, 26, 2);
 
-                    // POPRAWKA: Używamy TensorMath.Reshape zamiast przerywania grafu!
+                    // 1. Spłaszczamy na 2D (1352)
                     using var p1Flat = TensorMath.Reshape(p1, batchSize, 1352);
-                    using var bnOut = bn1.Forward(p1Flat);
-                    using var predictionLogits = fc1.Forward(bnOut);
+
+                    // 2. BatchNorm na płaskim wektorze (TERAZ DZIAŁA W 100%)
+                    using var bn1Out = bn1.Forward(p1Flat);
+
+                    // 3. ResNet przetwarza znormalizowane dane
+                    using var resOut = res1.Forward(bn1Out);
+
+                    // 4. Powrót do 4D dla GAP
+                    using var res4D = TensorMath.Reshape(resOut, batchSize, 8, 13, 13);
+                    using var gapOut = TensorMath.GlobalAveragePool2D(res4D, 8, 13, 13);
+
+                    using var predictionLogits = fcOut.Forward(gapOut);
 
                     using var loss = TensorMath.SoftmaxCrossEntropy(predictionLogits, yBatch);
                     epochLoss += loss.Data[0, 0];
@@ -99,35 +114,30 @@ namespace DevOnBike.Overfit.Tests
 
             totalSw.Stop();
 
-            // Ewaluacja końcowa
             var (testX, testY) = MnistLoader.Load("d:/ml/t10k-images.idx3-ubyte", "d:/ml/t10k-labels.idx1-ubyte", 1000);
-            PrintConfusionMatrix(model, testX, testY);
+            PrintConfusionMatrix(conv1, bn1, res1, fcOut, testX, testY);
 
             _output.WriteLine("----------------------------------------------------------");
             _output.WriteLine($"TRENING ZAKOŃCZONY! Całkowity czas: {totalSw.Elapsed.TotalSeconds:F2}s");
 
-            model.Dispose();
+            using var fs = new FileStream("d:/ml/resnet_beast.bin", FileMode.Create);
+            using var bw = new BinaryWriter(fs);
+            conv1.Save(bw); bn1.Save(bw); res1.Save(bw); fcOut.Save(bw);
+
+            _output.WriteLine("Zapisano wagi do pliku: d:/ml/resnet_beast.bin");
         }
 
-        private void PrintConfusionMatrix(Sequential model, FastTensor<float> testX, FastTensor<float> testY)
+        private void PrintConfusionMatrix(ConvLayer conv1, BatchNorm1D bn1, ResidualBlock res1, LinearLayer fcOut, FastTensor<float> testX, FastTensor<float> testY)
         {
             var matrix = new int[10, 10];
             var samples = Math.Min(1000, testX.Shape[0]);
 
-            model.Eval();
-
-            // Pobranie modułów do manualnego przejścia (z uwagi na wymaganą zmianę kształtu)
-            var modulesField = typeof(Sequential).GetField("_modules", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var modules = (List<IModule>)modulesField.GetValue(model);
-            var conv1 = (ConvLayer)modules[0];
-            var bn1 = (BatchNorm1D)modules[1];
-            var fc1 = (LinearLayer)modules[2];
+            conv1.Eval(); bn1.Eval(); res1.Eval(); fcOut.Eval();
 
             _output.WriteLine("\nGenerowanie Macierzy Pomyłek dla 1000 próbek testowych...");
 
             for (var i = 0; i < samples; i++)
             {
-                // Resetujemy Taśmę, aby uniknąć narzutu pamięci przy inferencji
                 ComputationGraph.Active.Reset();
                 ComputationGraph.Active.IsRecording = false;
 
@@ -137,14 +147,17 @@ namespace DevOnBike.Overfit.Tests
                     testX.AsSpan().Slice(i * 784, 784).CopyTo(rowData.AsSpan());
                     using var input = new AutogradNode(rowData, false);
 
-                    // Forward Pass (z manualnym Reshape)
                     using var h1 = conv1.Forward(input);
                     using var a1 = TensorMath.ReLU(h1);
                     using var p1 = TensorMath.MaxPool2D(a1, 8, 26, 26, 2);
 
                     using var p1Flat = TensorMath.Reshape(p1, 1, 1352);
-                    using var bnOut = bn1.Forward(p1Flat);
-                    using var output = fc1.Forward(bnOut);
+                    using var bn1Out = bn1.Forward(p1Flat);
+                    using var resOut = res1.Forward(bn1Out);
+
+                    using var res4D = TensorMath.Reshape(resOut, 1, 8, 13, 13);
+                    using var gapOut = TensorMath.GlobalAveragePool2D(res4D, 8, 13, 13);
+                    using var output = fcOut.Forward(gapOut);
 
                     var predicted = GetArgMax(output.Data.AsSpan());
                     var actual = GetArgMax(testY.AsSpan().Slice(i * 10, 10));
@@ -158,24 +171,12 @@ namespace DevOnBike.Overfit.Tests
 
             var sb = new System.Text.StringBuilder();
             sb.AppendLine("\n=== MACIERZ POMYŁEK (CONFUSION MATRIX) ===");
-            sb.AppendLine("Oś pionowa: Prawda | Oś pozioma: Predykcja\n");
-
-            sb.Append("A\\P |");
-            for (var i = 0; i < 10; i++) sb.Append($"{i,4}|");
-            sb.AppendLine("\n" + new string('-', 55));
-
             for (var r = 0; r < 10; r++)
             {
                 sb.Append($"{r,3} |");
-                for (var c = 0; c < 10; c++)
-                {
-                    var val = matrix[r, c];
-                    if (r != c && val > 0) sb.Append($"[{val,2}]|");
-                    else sb.Append($"{val,4}|");
-                }
+                for (var c = 0; c < 10; c++) sb.Append($"{matrix[r, c],4}|");
                 sb.AppendLine();
             }
-
             _output.WriteLine(sb.ToString());
         }
 
@@ -187,7 +188,5 @@ namespace DevOnBike.Overfit.Tests
             for (var j = 1; j < span.Length; j++) if (span[j] > span[maxIdx]) maxIdx = j;
             return maxIdx;
         }
-
-
     }
 }

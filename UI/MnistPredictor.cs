@@ -90,8 +90,8 @@ namespace DevOnBike.Overfit.UI
         // Pomocniczy helper zastępujący ArgMax z FastMatrix
         private int GetArgMax(ReadOnlySpan<float> span)
         {
-            int maxIdx = 0;
-            for (int i = 1; i < span.Length; i++)
+            var maxIdx = 0;
+            for (var i = 1; i < span.Length; i++)
             {
                 if (span[i] > span[maxIdx]) maxIdx = i;
             }

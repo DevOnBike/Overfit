@@ -17,7 +17,8 @@ namespace DevOnBike.Overfit.DeepLearning
             for (var i = 0; i < wSpan.Length; i++) wSpan[i] = MathUtils.NextGaussian() * stdDev;
 
             Weights = new AutogradNode(wData, true);
-            Biases = new AutogradNode(new FastTensor<float>(1, outputSize), true);
+            // KRYTYCZNA POPRAWKA: Bias to teraz wektor 1D
+            Biases = new AutogradNode(new FastTensor<float>(outputSize), true);
         }
 
         public void Train() => IsTraining = true;
@@ -46,8 +47,8 @@ namespace DevOnBike.Overfit.DeepLearning
             bw.Write(Weights.Data.Shape[1]);
             foreach (var val in Weights.Data.AsSpan()) bw.Write(val);
 
-            bw.Write(Biases.Data.Shape[0]);
-            bw.Write(Biases.Data.Shape[1]);
+            // Bias zapisujemy jako wektor 1D
+            bw.Write(Biases.Data.Size);
             foreach (var val in Biases.Data.AsSpan()) bw.Write(val);
         }
 
@@ -61,8 +62,11 @@ namespace DevOnBike.Overfit.DeepLearning
             var wSpan = Weights.Data.AsSpan();
             for (var i = 0; i < wSpan.Length; i++) wSpan[i] = br.ReadSingle();
 
-            var bRows = br.ReadInt32();
-            var bCols = br.ReadInt32();
+            // Bias ładujemy jako wektor 1D
+            var bSize = br.ReadInt32();
+            if (bSize != Biases.Data.Size)
+                throw new Exception("Wymiary biasu w pliku nie pasują do architektury!");
+
             var bSpan = Biases.Data.AsSpan();
             for (var i = 0; i < bSpan.Length; i++) bSpan[i] = br.ReadSingle();
         }

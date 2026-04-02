@@ -48,7 +48,7 @@ namespace DevOnBike.Overfit.Core
             {
                 var bGS = bias.Grad.AsSpan();
                 var oGS = output.Grad.AsSpan();
-                for (int i = 0; i < N; i++)
+                for (var i = 0; i < N; i++)
                     TensorPrimitives.Add(bGS, oGS.Slice(i * C, C), bGS);
             }
         }
@@ -73,7 +73,7 @@ namespace DevOnBike.Overfit.Core
                 var rowC = cS.Slice(i * bCols, bCols);
                 for (var k = 0; k < aCols; k++)
                 {
-                    float valA = aS[i * aCols + k];
+                    var valA = aS[i * aCols + k];
                     if (valA == 0) continue;
                     TensorPrimitives.MultiplyAdd(bS.Slice(k * bCols, bCols), valA, rowC, rowC);
                 }
@@ -84,12 +84,12 @@ namespace DevOnBike.Overfit.Core
         private static void MatMulRawSequential(ReadOnlySpan<float> aS, ReadOnlySpan<float> bS, int aR, int aC, int bC, Span<float> cS)
         {
             cS.Clear();
-            for (int i = 0; i < aR; i++)
+            for (var i = 0; i < aR; i++)
             {
                 var rowC = cS.Slice(i * bC, bC);
-                for (int k = 0; k < aC; k++)
+                for (var k = 0; k < aC; k++)
                 {
-                    float valA = aS[i * aC + k];
+                    var valA = aS[i * aC + k];
                     if (valA == 0) continue;
                     TensorPrimitives.MultiplyAdd(bS.Slice(k * bC, bC), valA, rowC, rowC);
                 }
@@ -141,19 +141,30 @@ namespace DevOnBike.Overfit.Core
 
         public static void Conv2DBackward(AutogradNode input, AutogradNode weights, AutogradNode output, int inC, int outC, int h, int w, int k)
         {
+            if (!input.RequiresGrad && !weights.RequiresGrad) return;
+
             int outH = h - k + 1, outW = w - k + 1, batchSize = input.Data.Shape[0], kSqInC = k * k * inC;
             int colSizePerImg = kSqInC * outH * outW, inSize = inC * h * w, outSize = outC * outH * outW;
 
-            // Blokada dla bezpiecznej akumulacji gradientów wag w pętli Parallel
-            object weightLock = new object();
+            var weightLock = new object();
+
+            // OPTYMALIZACJA LEVEL 3: Wyciągamy transpozycję wag przed pętlę!
+            // Robimy to tylko raz na cały batch, oszczędzając 63 niepotrzebne alokacje
+            FastTensor<float> weights2DTContig = null;
+            if (input.RequiresGrad)
+            {
+                using var weights2D = weights.Data.Reshape(outC, kSqInC);
+                using var weights2DT = weights2D.Transpose(0, 1);
+                weights2DTContig = weights2DT.ToContiguous();
+            }
 
             Parallel.For(0, batchSize, n =>
             {
-                // 1. Odtworzenie 'colData' z oryginalnego wejścia
+                // 1. Odtworzenie 'colData' z oryginalnego wejścia (bez czyszczenia pamięci)
                 using var colData = new FastTensor<float>(false, kSqInC, outH * outW);
                 Im2Col(input.Data.AsSpan().Slice(n * inSize, inSize), inC, h, w, k, 1, 0, colData.AsSpan());
 
-                // 2. Pobranie i sformatowanie gradientu wyjściowego
+                // 2. Pobranie gradientu wyjściowego
                 var outGradSlice = output.Grad.AsSpan().Slice(n * outSize, outSize);
                 using var outGradMat = new FastTensor<float>(false, outC, outH * outW);
                 outGradSlice.CopyTo(outGradMat.AsSpan());
@@ -174,15 +185,14 @@ namespace DevOnBike.Overfit.Core
                 // 4. Gradienty Wejścia (dX)
                 if (input.RequiresGrad)
                 {
-                    using var weights2D = weights.Data.Reshape(outC, kSqInC);
-                    using var weights2DT = weights2D.Transpose(0, 1);
-                    using var weights2DTContig = weights2DT.ToContiguous();
+                    // Używamy wag przygotowanych wcześniej, unikając alokacji w pętli
                     using var dCol = MatMulRaw(weights2DTContig, outGradMat);
-
-                    // Bezpieczna akumulacja - Col2Im poprawnie zarządza dodawaniem
                     Col2Im(dCol.AsSpan(), inC, h, w, k, 1, 0, input.Grad.AsSpan().Slice(n * inSize, inSize));
                 }
             });
+
+            // Zwalniamy globalny bufor na wagi po zakończeniu batcha
+            weights2DTContig?.Dispose();
         }
 
         public static AutogradNode MaxPool2D(AutogradNode input, int channels, int inputH, int inputW, int poolSize)
@@ -198,7 +208,7 @@ namespace DevOnBike.Overfit.Core
                     {
                         for (var ow = 0; ow < outputW; ow++)
                         {
-                            float maxVal = float.MinValue; int maxIdx = -1;
+                            var maxVal = float.MinValue; var maxIdx = -1;
                             for (var ph = 0; ph < poolSize; ph++)
                             {
                                 for (var pw = 0; pw < poolSize; pw++)
@@ -225,17 +235,17 @@ namespace DevOnBike.Overfit.Core
             var iGS = input.Grad.AsSpan();
             var oGS = output.Grad.AsSpan();
             var idxS = maxIndices.Data.AsSpan();
-            for (int i = 0; i < idxS.Length; i++) iGS[(int)idxS[i]] += oGS[i];
+            for (var i = 0; i < idxS.Length; i++) iGS[(int)idxS[i]] += oGS[i];
         }
 
         public static AutogradNode GlobalAveragePool2D(AutogradNode input, int channels, int h, int w)
         {
-            int batchSize = input.Data.Shape[0];
+            var batchSize = input.Data.Shape[0];
             var resData = new FastTensor<float>(batchSize, channels);
             float spatialSize = h * w;
 
             Parallel.For(0, batchSize, n => {
-                for (int c = 0; c < channels; c++)
+                for (var c = 0; c < channels; c++)
                     resData[n, c] = TensorPrimitives.Sum(input.Data.AsSpan().Slice(n * channels * h * w + c * h * w, h * w)) / spatialSize;
             });
 
@@ -246,9 +256,9 @@ namespace DevOnBike.Overfit.Core
 
         public static void GlobalAvgPool2DBackward(AutogradNode input, AutogradNode output, int h, int w, int channels)
         {
-            int batchSize = input.Data.Shape[0]; float spatialSize = h * w;
+            var batchSize = input.Data.Shape[0]; float spatialSize = h * w;
             Parallel.For(0, batchSize, n => {
-                for (int c = 0; c < channels; c++)
+                for (var c = 0; c < channels; c++)
                     input.Grad.AsSpan().Slice(n * channels * h * w + c * h * w, h * w).Fill(output.Grad[n, c] / spatialSize);
             });
         }
@@ -259,10 +269,16 @@ namespace DevOnBike.Overfit.Core
 
         public static AutogradNode ReLU(AutogradNode input)
         {
-            var res = new FastTensor<float>(input.Data.Shape);
+            // Używamy clearMemory: false, ponieważ funkcja SIMD i tak nadpisze CAŁY bufor.
+            // Oszczędza to czas systemu operacyjnego na czyszczeniu pamięci.
+            var res = new FastTensor<float>(false, input.Data.Shape);
+
             TensorPrimitives.Max(input.Data.AsSpan(), 0f, res.AsSpan());
+
             var output = new AutogradNode(res, input.RequiresGrad);
-            if (output.RequiresGrad) ComputationGraph.Active.Record(OpCode.ReLU, output, input);
+            if (output.RequiresGrad)
+                ComputationGraph.Active.Record(OpCode.ReLU, output, input);
+
             return output;
         }
 
@@ -278,8 +294,8 @@ namespace DevOnBike.Overfit.Core
             var mask = new AutogradNode(new FastTensor<float>(input.Data.Shape), false);
             if (isTraining)
             {
-                float scale = 1f / (1f - probability);
-                for (int i = 0; i < input.Data.Size; i++)
+                var scale = 1f / (1f - probability);
+                for (var i = 0; i < input.Data.Size; i++)
                 {
                     if (Random.Shared.NextSingle() > probability) { resData.AsSpan()[i] = input.Data.AsSpan()[i] * scale; mask.Data.AsSpan()[i] = scale; }
                 }
@@ -294,7 +310,7 @@ namespace DevOnBike.Overfit.Core
         public static void DropoutBackward(AutogradNode input, AutogradNode mask, AutogradNode output)
         {
             var giS = input.Grad.AsSpan(); var goS = output.Grad.AsSpan(); var mS = mask.Data.AsSpan();
-            for (int i = 0; i < giS.Length; i++) giS[i] += goS[i] * mS[i];
+            for (var i = 0; i < giS.Length; i++) giS[i] += goS[i] * mS[i];
         }
 
         // ====================================================================
@@ -304,7 +320,7 @@ namespace DevOnBike.Overfit.Core
         public static AutogradNode SoftmaxCrossEntropy(AutogradNode logits, AutogradNode target)
         {
             int rows = logits.Data.Shape[0], cols = logits.Data.Shape[1];
-            float totalLoss = 0f;
+            var totalLoss = 0f;
             using var pRowBuf = new FastTensor<float>(cols);
             for (var r = 0; r < rows; r++)
             {
@@ -320,7 +336,7 @@ namespace DevOnBike.Overfit.Core
         public static void SoftmaxCrossEntropyBackward(AutogradNode logits, AutogradNode target, AutogradNode output)
         {
             int rows = logits.Data.Shape[0], cols = logits.Data.Shape[1];
-            float scale = output.Grad[0, 0] / rows;
+            var scale = output.Grad[0, 0] / rows;
             using var pRowBuf = new FastTensor<float>(cols);
             for (var r = 0; r < rows; r++)
             {
@@ -333,7 +349,7 @@ namespace DevOnBike.Overfit.Core
         {
             var diff = new FastTensor<float>(prediction.Data.Shape);
             TensorPrimitives.Subtract(prediction.Data.AsSpan(), target.Data.AsSpan(), diff.AsSpan());
-            float mse = TensorPrimitives.Dot(diff.AsSpan(), diff.AsSpan()) / prediction.Data.Size;
+            var mse = TensorPrimitives.Dot(diff.AsSpan(), diff.AsSpan()) / prediction.Data.Size;
             var res = new FastTensor<float>(1, 1) { [0, 0] = mse };
             var output = new AutogradNode(res, prediction.RequiresGrad);
             if (output.RequiresGrad) ComputationGraph.Active.Record(OpCode.MSELoss, output, prediction, target);
@@ -342,8 +358,8 @@ namespace DevOnBike.Overfit.Core
 
         public static void MSELossBackward(AutogradNode p, AutogradNode t, AutogradNode o)
         {
-            float factor = o.Grad[0, 0] * (2f / p.Data.Size);
-            for (int i = 0; i < p.Data.Size; i++) p.Grad.AsSpan()[i] += (p.Data.AsSpan()[i] - t.Data.AsSpan()[i]) * factor;
+            var factor = o.Grad[0, 0] * (2f / p.Data.Size);
+            for (var i = 0; i < p.Data.Size; i++) p.Grad.AsSpan()[i] += (p.Data.AsSpan()[i] - t.Data.AsSpan()[i]) * factor;
         }
 
         // ====================================================================
@@ -359,24 +375,24 @@ namespace DevOnBike.Overfit.Core
 
             if (isTraining)
             {
-                for (int i = 0; i < N; i++) TensorPrimitives.Add(mean.Data.AsSpan(), input.Data.AsSpan().Slice(i * C, C), mean.Data.AsSpan());
+                for (var i = 0; i < N; i++) TensorPrimitives.Add(mean.Data.AsSpan(), input.Data.AsSpan().Slice(i * C, C), mean.Data.AsSpan());
                 foreach (ref var m in mean.Data.AsSpan()) m /= N;
-                for (int c = 0; c < C; c++)
+                for (var c = 0; c < C; c++)
                 {
-                    float varSum = 0; for (int i = 0; i < N; i++) { float d = input.Data[i, c] - mean.Data[c]; varSum += d * d; }
-                    float bVar = varSum / N; invStd.Data[c] = 1f / MathF.Sqrt(bVar + eps);
+                    float varSum = 0; for (var i = 0; i < N; i++) { var d = input.Data[i, c] - mean.Data[c]; varSum += d * d; }
+                    var bVar = varSum / N; invStd.Data[c] = 1f / MathF.Sqrt(bVar + eps);
                     runningMean[c] = (1 - momentum) * runningMean[c] + momentum * mean.Data[c];
                     runningVar[c] = (1 - momentum) * runningVar[c] + momentum * bVar;
                 }
             }
             else
             {
-                for (int c = 0; c < C; c++) { mean.Data[c] = runningMean[c]; invStd.Data[c] = 1f / MathF.Sqrt(runningVar[c] + eps); }
+                for (var c = 0; c < C; c++) { mean.Data[c] = runningMean[c]; invStd.Data[c] = 1f / MathF.Sqrt(runningVar[c] + eps); }
             }
 
-            for (int i = 0; i < N; i++)
+            for (var i = 0; i < N; i++)
             {
-                for (int c = 0; c < C; c++) outputData[i, c] = gamma.Data[c] * (input.Data[i, c] - mean.Data[c]) * invStd.Data[c] + beta.Data[c];
+                for (var c = 0; c < C; c++) outputData[i, c] = gamma.Data[c] * (input.Data[i, c] - mean.Data[c]) * invStd.Data[c] + beta.Data[c];
             }
 
             var output = new AutogradNode(outputData, input.RequiresGrad);
@@ -401,11 +417,11 @@ namespace DevOnBike.Overfit.Core
             {
                 var dGammaS = gamma.Grad.AsSpan();
                 var dBetaS = beta.Grad.AsSpan();
-                for (int i = 0; i < N; i++)
+                for (var i = 0; i < N; i++)
                 {
-                    for (int c = 0; c < C; c++)
+                    for (var c = 0; c < C; c++)
                     {
-                        float go = outGradS[i * C + c];
+                        var go = outGradS[i * C + c];
                         if (beta.RequiresGrad) dBetaS[c] += go;
                         if (gamma.RequiresGrad) dGammaS[c] += go * (inS[i * C + c] - meanS[c]) * invStdS[c];
                     }
@@ -418,24 +434,24 @@ namespace DevOnBike.Overfit.Core
                 Span<float> sumDy = stackalloc float[C];
                 Span<float> sumDyXHat = stackalloc float[C];
 
-                for (int i = 0; i < N; i++)
+                for (var i = 0; i < N; i++)
                 {
-                    for (int c = 0; c < C; c++)
+                    for (var c = 0; c < C; c++)
                     {
-                        float go = outGradS[i * C + c];
-                        float xHat = (inS[i * C + c] - meanS[c]) * invStdS[c];
+                        var go = outGradS[i * C + c];
+                        var xHat = (inS[i * C + c] - meanS[c]) * invStdS[c];
                         sumDy[c] += go;
                         sumDyXHat[c] += go * xHat;
                     }
                 }
 
-                for (int i = 0; i < N; i++)
+                for (var i = 0; i < N; i++)
                 {
-                    for (int c = 0; c < C; c++)
+                    for (var c = 0; c < C; c++)
                     {
-                        float go = outGradS[i * C + c];
-                        float xHat = (inS[i * C + c] - meanS[c]) * invStdS[c];
-                        float dx = (gammaS[c] * invStdS[c] / N) * (N * go - sumDy[c] - xHat * sumDyXHat[c]);
+                        var go = outGradS[i * C + c];
+                        var xHat = (inS[i * C + c] - meanS[c]) * invStdS[c];
+                        var dx = (gammaS[c] * invStdS[c] / N) * (N * go - sumDy[c] - xHat * sumDyXHat[c]);
                         inGradS[i * C + c] += dx;
                     }
                 }
@@ -456,27 +472,37 @@ namespace DevOnBike.Overfit.Core
 
         public static void Im2Col(ReadOnlySpan<float> input, int channels, int height, int width, int kSize, int stride, int padding, Span<float> output)
         {
-            int outH = (height + 2 * padding - kSize) / stride + 1;
-            int outW = (width + 2 * padding - kSize) / stride + 1;
+            var outH = (height + 2 * padding - kSize) / stride + 1;
+            var outW = (width + 2 * padding - kSize) / stride + 1;
+            var channelSize = height * width;
+
             for (var c = 0; c < channels; c++)
             {
                 for (var kh = 0; kh < kSize; kh++)
                 {
                     for (var kw = 0; kw < kSize; kw++)
                     {
-                        int rowOffset = (c * kSize * kSize + kh * kSize + kw) * outH * outW;
+                        var rowOffset = (c * kSize * kSize + kh * kSize + kw) * outH * outW;
                         for (var y = 0; y < outH; y++)
                         {
-                            int i = y * stride - padding + kh;
+                            var i = y * stride - padding + kh;
+                            var outIdxY = rowOffset + y * outW; // Hoisting 1
+
                             if (i >= 0 && i < height)
                             {
+                                var inputRowOffset = c * channelSize + i * width; // Hoisting 2
+
                                 for (var x = 0; x < outW; x++)
                                 {
-                                    int j = x * stride - padding + kw;
-                                    output[rowOffset + y * outW + x] = (j >= 0 && j < width) ? input[c * height * width + i * width + j] : 0f;
+                                    var j = x * stride - padding + kw;
+                                    // W samym sercu pętli mamy już tylko tanie dodawanie indeksów
+                                    output[outIdxY + x] = (j >= 0 && j < width) ? input[inputRowOffset + j] : 0f;
                                 }
                             }
-                            else output.Slice(rowOffset + y * outW, outW).Clear();
+                            else
+                            {
+                                output.Slice(outIdxY, outW).Clear();
+                            }
                         }
                     }
                 }
@@ -485,24 +511,34 @@ namespace DevOnBike.Overfit.Core
 
         public static void Col2Im(ReadOnlySpan<float> colData, int channels, int height, int width, int kSize, int stride, int padding, Span<float> gradInput)
         {
-            int outH = (height + 2 * padding - kSize) / stride + 1;
-            int outW = (width + 2 * padding - kSize) / stride + 1;
+            var outH = (height + 2 * padding - kSize) / stride + 1;
+            var outW = (width + 2 * padding - kSize) / stride + 1;
+            var channelSize = height * width;
+
             for (var c = 0; c < channels; c++)
             {
                 for (var kh = 0; kh < kSize; kh++)
                 {
                     for (var kw = 0; kw < kSize; kw++)
                     {
-                        int rowOffset = (c * kSize * kSize + kh * kSize + kw) * outH * outW;
+                        var rowOffset = (c * kSize * kSize + kh * kSize + kw) * outH * outW;
                         for (var y = 0; y < outH; y++)
                         {
-                            int i = y * stride - padding + kh;
+                            var i = y * stride - padding + kh;
+                            var outIdxY = rowOffset + y * outW; // Hoisting 1
+
                             if (i >= 0 && i < height)
                             {
+                                var inputRowOffset = c * channelSize + i * width; // Hoisting 2
+
                                 for (var x = 0; x < outW; x++)
                                 {
-                                    int j = x * stride - padding + kw;
-                                    if (j >= 0 && j < width) gradInput[c * height * width + i * width + j] += colData[rowOffset + y * outW + x];
+                                    var j = x * stride - padding + kw;
+                                    if (j >= 0 && j < width)
+                                    {
+                                        // Ponownie - minimalizujemy operacje w środku pętli
+                                        gradInput[inputRowOffset + j] += colData[outIdxY + x];
+                                    }
                                 }
                             }
                         }
