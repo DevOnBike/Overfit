@@ -1,7 +1,6 @@
 ﻿using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.DeepLearning;
 using System.IO;
-using System;
 
 namespace DevOnBike.Overfit.UI
 {

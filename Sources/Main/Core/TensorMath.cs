@@ -804,5 +804,30 @@ namespace DevOnBike.Overfit.Core
                 }
             }
         }
+
+        public static void ReshapeBackward(AutogradNode input, AutogradNode output)
+        {
+            if (input.RequiresGrad && input.Grad != null && output.Grad != null)
+            {
+                // Gradient płynie przez Reshape bez zmian wartości, dodajemy go do wejścia
+                TensorPrimitives.Add(input.Grad.AsSpan(), output.Grad.AsSpan(), input.Grad.AsSpan());
+            }
+        }
+
+        public static AutogradNode Reshape(AutogradNode input, params int[] newShape)
+        {
+            // Zero-Copy Reshape na danych
+            var reshapedData = input.Data.Reshape(newShape);
+            var outputNode = new AutogradNode(reshapedData, input.RequiresGrad);
+
+            // Rejestrujemy operację, aby gradienty mogły przepłynąć wstecz
+            if (outputNode.RequiresGrad)
+                ComputationGraph.Active.Record(OpCode.Reshape, outputNode, input);
+
+            return outputNode;
+        }
+
+        // Dodaj też obsługę w ComputationGraph.ExecuteBackward:
+        // case OpCode.Reshape: op.A.Grad.AsSpan().Add(op.Output.Grad.AsSpan()); break;
     }
 }

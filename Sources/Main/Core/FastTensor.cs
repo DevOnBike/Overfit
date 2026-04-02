@@ -25,6 +25,9 @@ namespace DevOnBike.Overfit.Core
             IsContiguous = true;
 
             _data = ArrayPool<T>.Shared.Rent(Size);
+
+            _data.AsSpan(0, Size).Clear();
+
             _ownsData = true;
         }
 
