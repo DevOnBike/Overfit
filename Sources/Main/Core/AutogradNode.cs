@@ -2,25 +2,29 @@ namespace DevOnBike.Overfit.Core
 {
     public class AutogradNode : IDisposable
     {
-        public FastMatrix<float> Data { get; }
-        public FastMatrix<float> Grad { get; }
+        // Migracja na FastTensor
+        public FastTensor<float> Data { get; }
+        public FastTensor<float>? Grad { get; private set; }
         public bool RequiresGrad { get; set; }
 
-        public AutogradNode(FastMatrix<float> data, bool requiresGrad = true)
+        public AutogradNode(FastTensor<float> data, bool requiresGrad = true)
         {
             Data = data;
             RequiresGrad = requiresGrad;
-            
+
             if (requiresGrad)
             {
-                Grad = new FastMatrix<float>(data.Rows, data.Cols);
+                // Inicjalizacja gradientu o identycznym kształcie co dane
+                Grad = new FastTensor<float>(data.Shape);
+
+                // Bezwzględne czyszczenie - pamięć z ArrayPool może zawierać śmieci!
+                Grad.AsSpan().Clear();
             }
         }
 
         public void Backward()
         {
-            // Węzeł przekazuje sterowanie do aktywnego grafu
-            ComputationGraph.Active.Backward(this);
+            ComputationGraph.Active?.Backward(this);
         }
 
         public void Dispose()

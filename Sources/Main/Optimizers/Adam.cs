@@ -8,27 +8,32 @@ namespace DevOnBike.Overfit.Optimizers
         private readonly struct ParamState
         {
             public readonly AutogradNode Node;
-            public readonly FastMatrix<float> M;
-            public readonly FastMatrix<float> V;
+            public readonly FastTensor<float> M;
+            public readonly FastTensor<float> V;
             public readonly int Size;
 
             public ParamState(AutogradNode node)
             {
                 Node = node;
-                Size = node.Data.Rows * node.Data.Cols;
-                M = new FastMatrix<float>(node.Data.Rows, node.Data.Cols);
-                V = new FastMatrix<float>(node.Data.Rows, node.Data.Cols);
+                Size = node.Data.Size;
+
+                // Używamy FastTensor z natywnym kształtem parametrów
+                M = new FastTensor<float>(node.Data.Shape);
+                M.AsSpan().Clear(); // Bezwzględnie czyścimy śmieci z ArrayPool
+
+                V = new FastTensor<float>(node.Data.Shape);
+                V.AsSpan().Clear();
             }
         }
 
         private readonly ParamState[] _states;
 
-        // Pojedyncze bufory wielokrotnego użytku! Zero ThreadLocal, zero locków.
-        private readonly FastBuffer<float> _bufGl2;
-        private readonly FastBuffer<float> _bufGSq;
-        private readonly FastBuffer<float> _bufMHat;
-        private readonly FastBuffer<float> _bufVHat;
-        private readonly FastBuffer<float> _bufUpd;
+        // Używamy FastTensor jako potężnego, w 100% płaskiego bufora 1D!
+        private readonly FastTensor<float> _bufGl2;
+        private readonly FastTensor<float> _bufGSq;
+        private readonly FastTensor<float> _bufMHat;
+        private readonly FastTensor<float> _bufVHat;
+        private readonly FastTensor<float> _bufUpd;
 
         public float LearningRate { get; set; }
         public float Beta1 { get; set; } = 0.9f;
@@ -53,12 +58,12 @@ namespace DevOnBike.Overfit.Optimizers
                 if (_states[i].Size > maxSize) maxSize = _states[i].Size;
             }
 
-            // Alokujemy globalne bufory tylko pod największą warstwę
-            _bufGl2 = new FastBuffer<float>(maxSize);
-            _bufGSq = new FastBuffer<float>(maxSize);
-            _bufMHat = new FastBuffer<float>(maxSize);
-            _bufVHat = new FastBuffer<float>(maxSize);
-            _bufUpd = new FastBuffer<float>(maxSize);
+            // Alokujemy globalne bufory 1D tylko pod największą warstwę
+            _bufGl2 = new FastTensor<float>(maxSize);
+            _bufGSq = new FastTensor<float>(maxSize);
+            _bufMHat = new FastTensor<float>(maxSize);
+            _bufVHat = new FastTensor<float>(maxSize);
+            _bufUpd = new FastTensor<float>(maxSize);
         }
 
         public void Step()
@@ -70,12 +75,14 @@ namespace DevOnBike.Overfit.Optimizers
             var invBc1 = 1f / bc1;
             var invBc2 = 1f / bc2;
 
-            // Płaska iteracja zamiast Parallel.ForEach
             foreach (var state in _states)
             {
                 var p = state.Node;
                 var n = state.Size;
-                var g = p.Grad.AsReadOnlySpan();
+
+                if (p.Grad == null) continue;
+
+                var g = p.Grad.AsSpan();
                 var m = state.M.AsSpan();
                 var v = state.V.AsSpan();
                 var w = p.Data.AsSpan();
@@ -125,7 +132,11 @@ namespace DevOnBike.Overfit.Optimizers
         {
             foreach (var state in _states)
             {
-                state.Node.Grad.Clear();
+                // Zabezpieczenie przed węzłami bez gradientu
+                if (state.Node.Grad != null)
+                {
+                    state.Node.Grad.AsSpan().Clear();
+                }
             }
         }
 

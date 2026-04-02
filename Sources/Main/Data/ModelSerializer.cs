@@ -11,51 +11,73 @@ namespace DevOnBike.Overfit.Data
             using var bw = new BinaryWriter(fs);
 
             // 1. Zapisujemy Kernels (ConvLayer)
-            SaveMatrix(bw, conv.Kernels.Data);
+            SaveTensor(bw, conv.Kernels.Data);
 
             // 2. Zapisujemy Weights i Bias (LinearLayer)
-            SaveMatrix(bw, fc.Weights.Data);
-            SaveMatrix(bw, fc.Biases.Data);
-        
-            // Możesz dodać metadane, np. wersję silnika lub datę
+            SaveTensor(bw, fc.Weights.Data);
+            SaveTensor(bw, fc.Biases.Data);
         }
 
         public static void LoadModel(string path, ConvLayer conv, LinearLayer fc)
         {
+            if (!File.Exists(path)) throw new FileNotFoundException($"Brak pliku modelu: {path}");
+
             using var fs = new FileStream(path, FileMode.Open);
             using var br = new BinaryReader(fs);
 
             // 1. Wczytujemy Kernels
-            LoadMatrix(br, conv.Kernels.Data);
+            LoadTensor(br, conv.Kernels.Data);
 
             // 2. Wczytujemy LinearLayer
-            LoadMatrix(br, fc.Weights.Data);
-            LoadMatrix(br, fc.Biases.Data);
+            LoadTensor(br, fc.Weights.Data);
+            LoadTensor(br, fc.Biases.Data);
         }
 
-        private static void SaveMatrix(BinaryWriter bw, FastMatrix<float> matrix)
+        private static void SaveTensor(BinaryWriter bw, FastTensor<float> tensor)
         {
-            bw.Write(matrix.Rows);
-            bw.Write(matrix.Cols);
-            var data = matrix.AsSpan();
+            // Zapisujemy rangę (liczbę wymiarów)
+            bw.Write(tensor.Shape.Length);
+
+            // Zapisujemy poszczególne wymiary Shape
+            for (var i = 0; i < tensor.Shape.Length; i++)
+            {
+                bw.Write(tensor.Shape[i]);
+            }
+
+            // Zapisujemy surowe dane ze Spana
+            var data = tensor.AsSpan();
             for (var i = 0; i < data.Length; i++)
             {
                 bw.Write(data[i]);
             }
         }
 
-        private static void LoadMatrix(BinaryReader br, FastMatrix<float> matrix)
+        private static void LoadTensor(BinaryReader br, FastTensor<float> tensor)
         {
-            var rows = br.ReadInt32();
-            var cols = br.ReadInt32();
-
-            if (rows != matrix.Rows || cols != matrix.Cols)
+            // Odczytujemy rangę i kształt z pliku
+            var rank = br.ReadInt32();
+            var fileShape = new int[rank];
+            for (var i = 0; i < rank; i++)
             {
-                throw new Exception($"Niezgodność wymiarów! Plik: {rows}x{cols}, Model: {matrix.Rows}x{matrix.Cols}");
+                fileShape[i] = br.ReadInt32();
             }
 
-            var data = matrix.AsSpan();
+            // Weryfikacja zgodności wymiarów
+            if (rank != tensor.Shape.Length)
+            {
+                throw new Exception($"Niezgodność rangi tensora! Plik: {rank}, Model: {tensor.Shape.Length}");
+            }
 
+            for (var i = 0; i < rank; i++)
+            {
+                if (fileShape[i] != tensor.Shape[i])
+                {
+                    throw new Exception($"Niezgodność wymiaru {i}! Plik: {fileShape[i]}, Model: {tensor.Shape[i]}");
+                }
+            }
+
+            // Wczytujemy dane bezpośrednio do Spana tensora
+            var data = tensor.AsSpan();
             for (var i = 0; i < data.Length; i++)
             {
                 data[i] = br.ReadSingle();

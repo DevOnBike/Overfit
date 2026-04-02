@@ -7,6 +7,7 @@ namespace DevOnBike.Overfit.Tests
     {
         public DeepLearningModuleTests()
         {
+            // Inicjalizacja grafu dla każdego testu
             ComputationGraph.Active = new ComputationGraph();
         }
 
@@ -15,17 +16,20 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void LinearLayer_ForwardAndSerialization_Correct()
         {
-            // Test wymiarów i parametrów
+            // Test wymiarów i parametrów - LinearLayer(input, output)
             using var layer = new LinearLayer(10, 5);
             Assert.Equal(2, layer.Parameters().Count());
 
-            using var input = new AutogradNode(new FastMatrix<float>(2, 10), false);
+            // Używamy FastTensor zamiast FastMatrix
+            using var inputTensor = new FastTensor<float>(2, 10);
+            using var input = new AutogradNode(inputTensor, false);
             using var output = layer.Forward(input);
 
-            Assert.Equal(2, output.Data.Rows);
-            Assert.Equal(5, output.Data.Cols);
+            // Sprawdzamy wymiary poprzez Shape
+            Assert.Equal(2, output.Data.Shape[0]);
+            Assert.Equal(5, output.Data.Shape[1]);
 
-            // Test zapisu i odczytu
+            // Test zapisu i odczytu (Serializacja N-wymiarowa)
             using var ms = new MemoryStream();
             using (var bw = new BinaryWriter(ms, System.Text.Encoding.UTF8, true)) layer.Save(bw);
 
@@ -33,6 +37,7 @@ namespace DevOnBike.Overfit.Tests
             using var layer2 = new LinearLayer(10, 5);
             using (var br = new BinaryReader(ms)) layer2.Load(br);
 
+            // Weryfikacja wag po odczycie
             Assert.Equal(layer.Weights.Data[0, 0], layer2.Weights.Data[0, 0]);
         }
 
@@ -51,20 +56,24 @@ namespace DevOnBike.Overfit.Tests
             seq.Train();
             Assert.True(seq.IsTraining);
 
-            using var input = new AutogradNode(new FastMatrix<float>(1, 5), false);
+            // Test przepływu przez Sequential
+            using var inputTensor = new FastTensor<float>(1, 5);
+            using var input = new AutogradNode(inputTensor, false);
             using var output = seq.Forward(input);
-            Assert.Equal(5, output.Data.Cols);
+
+            Assert.Equal(5, output.Data.Shape[1]);
         }
 
         [Fact]
         public void ResidualBlock_Forward_CalculatesCorrectShape()
         {
-            // ResidualBlock musi zachować wymiary wejściowe
+            // ResidualBlock musi zachować wymiary wejściowe (Skip Connection)
             using var res = new ResidualBlock(8);
-            using var input = new AutogradNode(new FastMatrix<float>(1, 8), false);
+            using var inputTensor = new FastTensor<float>(1, 8);
+            using var input = new AutogradNode(inputTensor, false);
             using var output = res.Forward(input);
 
-            Assert.Equal(input.Data.Cols, output.Data.Cols);
+            Assert.Equal(input.Data.Shape[1], output.Data.Shape[1]);
         }
     }
 }

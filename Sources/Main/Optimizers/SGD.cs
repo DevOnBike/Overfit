@@ -23,10 +23,12 @@ namespace DevOnBike.Overfit.Optimizers
 
             foreach (var p in _parameters)
             {
+                if (p.Grad == null) continue;
+
                 TensorPrimitives.MultiplyAdd(
-                    x: p.Grad.AsReadOnlySpan(),
+                    x: p.Grad.AsSpan(),
                     y: negativeLr,
-                    addend: p.Data.AsReadOnlySpan(),
+                    addend: p.Data.AsSpan(),
                     destination: p.Data.AsSpan()
                 );
             }
@@ -36,7 +38,8 @@ namespace DevOnBike.Overfit.Optimizers
         {
             foreach (var p in _parameters)
             {
-                p.Grad.Clear();
+                // Bezpieczne zerowanie dzięki Span
+                if (p.Grad != null) p.Grad.AsSpan().Clear();
             }
         }
     }

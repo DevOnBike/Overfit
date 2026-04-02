@@ -6,47 +6,34 @@ namespace DevOnBike.Overfit.DeepLearning
     {
         public AutogradNode Gamma { get; private set; }
         public AutogradNode Beta { get; private set; }
-
-        public FastMatrix<float> RunningMean { get; private set; }
-        public FastMatrix<float> RunningVar { get; private set; }
-
+        public FastTensor<float> RunningMean { get; private set; }
+        public FastTensor<float> RunningVar { get; private set; }
         public float Momentum { get; set; }
         public float Eps { get; set; }
-
         public bool IsTraining { get; private set; } = true;
 
         public BatchNorm1D(int features, float momentum = 0.1f, float eps = 1e-5f)
         {
-            var gammaData = new FastMatrix<float>(1, features);
+            var gammaData = new FastTensor<float>(1, features);
             gammaData.AsSpan().Fill(1f);
             Gamma = new AutogradNode(gammaData, requiresGrad: true);
 
-            var betaData = new FastMatrix<float>(1, features);
+            var betaData = new FastTensor<float>(1, features);
             betaData.AsSpan().Fill(0f);
             Beta = new AutogradNode(betaData, requiresGrad: true);
 
-            RunningMean = new FastMatrix<float>(1, features);
-            RunningVar = new FastMatrix<float>(1, features);
+            RunningMean = new FastTensor<float>(1, features);
+            RunningVar = new FastTensor<float>(1, features);
             RunningVar.AsSpan().Fill(1f);
 
             Momentum = momentum;
             Eps = eps;
         }
 
-        public void Train()
-        {
-            IsTraining = true;
-        }
+        public void Train() => IsTraining = true;
+        public void Eval() => IsTraining = false;
 
-        public void Eval()
-        {
-            IsTraining = false;
-        }
-
-        public AutogradNode Forward(AutogradNode input)
-        {
-            return TensorMath.BatchNorm1D(input, Gamma, Beta, RunningMean, RunningVar, Momentum, Eps, IsTraining);
-        }
+        public AutogradNode Forward(AutogradNode input) => TensorMath.BatchNorm1D(input, Gamma, Beta, RunningMean, RunningVar, Momentum, Eps, IsTraining);
 
         public IEnumerable<AutogradNode> Parameters()
         {
