@@ -84,14 +84,20 @@ namespace DevOnBike.Overfit.Core
         private static void MatMulRawSequential(ReadOnlySpan<float> aS, ReadOnlySpan<float> bS, int aR, int aC, int bC, Span<float> cS)
         {
             cS.Clear();
+
             for (var i = 0; i < aR; i++)
             {
                 var rowC = cS.Slice(i * bC, bC);
+                var rowA = aS.Slice(i * aC, aC);
+
                 for (var k = 0; k < aC; k++)
                 {
-                    var valA = aS[i * aC + k];
-                    if (valA == 0) continue;
-                    TensorPrimitives.MultiplyAdd(bS.Slice(k * bC, bC), valA, rowC, rowC);
+                    var valA = rowA[k];
+
+                    if (valA != 0f)
+                    {
+                        TensorPrimitives.MultiplyAdd(bS.Slice(k * bC, bC), valA, rowC, rowC);
+                    }
                 }
             }
         }
@@ -632,17 +638,37 @@ namespace DevOnBike.Overfit.Core
                         for (var y = 0; y < outH; y++)
                         {
                             var i = y * stride - padding + kh;
-                            var outIdxY = rowOffset + y * outW; // Hoisting 1
+                            var outIdxY = rowOffset + y * outW;
 
                             if (i >= 0 && i < height)
                             {
-                                var inputRowOffset = c * channelSize + i * width; // Hoisting 2
+                                var inputRowOffset = c * channelSize + i * width;
 
-                                for (var x = 0; x < outW; x++)
+                                // FAST PATH: Zero instrukcji warunkowych w najgłębszej pętli
+                                if (stride == 1)
                                 {
-                                    var j = x * stride - padding + kw;
-                                    // W samym sercu pętli mamy już tylko tanie dodawanie indeksów
-                                    output[outIdxY + x] = (j >= 0 && j < width) ? input[inputRowOffset + j] : 0f;
+                                    var startX = Math.Max(0, padding - kw);
+                                    var endX = Math.Min(outW, width + padding - kw);
+
+                                    if (startX > 0) output.Slice(outIdxY, startX).Clear();
+
+                                    if (endX > startX)
+                                    {
+                                        var startJ = startX - padding + kw;
+                                        var len = endX - startX;
+                                        // Bulk Memory Copy - kompilator JIT robi z tego jedną wektorową instrukcję!
+                                        input.Slice(inputRowOffset + startJ, len).CopyTo(output.Slice(outIdxY + startX, len));
+                                    }
+
+                                    if (endX < outW) output.Slice(outIdxY + endX, outW - endX).Clear();
+                                }
+                                else
+                                {
+                                    for (var x = 0; x < outW; x++)
+                                    {
+                                        var j = x * stride - padding + kw;
+                                        output[outIdxY + x] = (j >= 0 && j < width) ? input[inputRowOffset + j] : 0f;
+                                    }
                                 }
                             }
                             else
@@ -671,19 +697,39 @@ namespace DevOnBike.Overfit.Core
                         for (var y = 0; y < outH; y++)
                         {
                             var i = y * stride - padding + kh;
-                            var outIdxY = rowOffset + y * outW; // Hoisting 1
+                            var outIdxY = rowOffset + y * outW;
 
                             if (i >= 0 && i < height)
                             {
-                                var inputRowOffset = c * channelSize + i * width; // Hoisting 2
+                                var inputRowOffset = c * channelSize + i * width;
 
-                                for (var x = 0; x < outW; x++)
+                                // FAST PATH: Akumulacja SIMD bez warunków
+                                if (stride == 1)
                                 {
-                                    var j = x * stride - padding + kw;
-                                    if (j >= 0 && j < width)
+                                    var startX = Math.Max(0, padding - kw);
+                                    var endX = Math.Min(outW, width + padding - kw);
+
+                                    if (endX > startX)
                                     {
-                                        // Ponownie - minimalizujemy operacje w środku pętli
-                                        gradInput[inputRowOffset + j] += colData[outIdxY + x];
+                                        var startJ = startX - padding + kw;
+                                        var len = endX - startX;
+
+                                        var inSlice = gradInput.Slice(inputRowOffset + startJ, len);
+                                        var outSlice = colData.Slice(outIdxY + startX, len);
+
+                                        // Wektoryzowane dodawanie potężnych bloków pamięci!
+                                        TensorPrimitives.Add(inSlice, outSlice, inSlice);
+                                    }
+                                }
+                                else
+                                {
+                                    for (var x = 0; x < outW; x++)
+                                    {
+                                        var j = x * stride - padding + kw;
+                                        if (j >= 0 && j < width)
+                                        {
+                                            gradInput[inputRowOffset + j] += colData[outIdxY + x];
+                                        }
                                     }
                                 }
                             }
