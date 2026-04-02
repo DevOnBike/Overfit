@@ -1,4 +1,5 @@
-﻿using System.Numerics.Tensors;
+﻿using System.Numerics;
+using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -399,8 +400,42 @@ namespace DevOnBike.Overfit.Core
 
         public static void ReluBackward(AutogradNode input, AutogradNode output)
         {
-            var inS = input.Data.AsSpan(); var goS = output.Grad.AsSpan(); var giS = input.Grad.AsSpan();
-            for (var i = 0; i < inS.Length; i++) if (inS[i] > 0) giS[i] += goS[i];
+            var inS = input.Data.AsSpan();
+            var goS = output.Grad.AsSpan();
+            var giS = input.Grad.AsSpan();
+
+            var i = 0;
+
+            // OSTATECZNA MAGIA SIMD DLA .NET 10 (Zero Alokacji, Zero Skoków)
+            if (Vector.IsHardwareAccelerated)
+            {
+                var vZero = Vector<float>.Zero;
+                // W .NET 10 na nowym CPU to będzie 16 (AVX-512)!
+                var vecSize = Vector<float>.Count;
+
+                // Przetwarzamy pełne wektory
+                for (; i <= inS.Length - vecSize; i += vecSize)
+                {
+                    var vIn = new Vector<float>(inS.Slice(i));
+                    var vGo = new Vector<float>(goS.Slice(i));
+                    var vGi = new Vector<float>(giS.Slice(i));
+
+                    // Maska sprzętowa w rejestrze (nigdy nie trafia do RAM)
+                    var vMask = Vector.GreaterThan(vIn, vZero);
+
+                    // Bramka logiczna: przepuszcza vGo dla true, wygasza do vZero dla false
+                    var vFilteredGo = Vector.ConditionalSelect(vMask, vGo, vZero);
+
+                    // giS += odfiltrowane goS
+                    (vGi + vFilteredGo).CopyTo(giS.Slice(i));
+                }
+            }
+
+            // Resztki (jeśli rozmiar nie jest wielokrotnością wektora)
+            for (; i < inS.Length; i++)
+            {
+                if (inS[i] > 0) giS[i] += goS[i];
+            }
         }
 
         public static AutogradNode Dropout(AutogradNode input, float probability, bool isTraining)
@@ -437,8 +472,12 @@ namespace DevOnBike.Overfit.Core
 
         public static void DropoutBackward(AutogradNode input, AutogradNode mask, AutogradNode output)
         {
-            var giS = input.Grad.AsSpan(); var goS = output.Grad.AsSpan(); var mS = mask.Data.AsSpan();
-            for (var i = 0; i < giS.Length; i++) giS[i] += goS[i] * mS[i];
+            var giS = input.Grad.AsSpan();
+            var goS = output.Grad.AsSpan();
+            var mS = mask.Data.AsSpan();
+
+            // OSTATECZNA MAGIA SIMD: Jeden wektorowy strzał przez całą pamięć!
+            TensorPrimitives.MultiplyAdd(goS, mS, giS, giS);
         }
 
         // ====================================================================
