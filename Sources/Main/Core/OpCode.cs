@@ -15,6 +15,7 @@ namespace DevOnBike.Overfit.Core
         BatchNorm1D,
         MSELoss,
         SoftmaxCrossEntropy,
-        Reshape
+        Reshape,
+        DirectionalLoss
     }
 }

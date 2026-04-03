@@ -1018,5 +1018,101 @@ namespace DevOnBike.Overfit.Core
             var product = MatMul(input, weights);
             return AddBias(product, bias);
         }
+
+        public static AutogradNode DirectionalLoss(AutogradNode prediction, AutogradNode target, float gamma = 10f)
+        {
+            var pS = prediction.Data.AsSpan();
+            var tS = target.Data.AsSpan();
+
+            var totalLoss = 0f;
+
+            // Faza Forward: Redukcja do skalara (pętla skalarna jest tu wystarczająco szybka, 
+            // ale można użyć wektorów dla gigantycznych batchy)
+            for (var i = 0; i < pS.Length; i++)
+            {
+                var p = pS[i];
+                var t = tS[i];
+                var diff = p - t;
+                var mse = diff * diff;
+
+                var prod = p * t;
+                // Jeśli znaki są różne, prod < 0, więc dodajemy karę kierunkową
+                var penalty = prod < 0f ? -prod * gamma : 0f;
+
+                totalLoss += mse + penalty;
+            }
+
+            var res = new FastTensor<float>(1, 1) { [0, 0] = totalLoss / pS.Length };
+            var output = new AutogradNode(res, prediction.RequiresGrad);
+
+            // Kontekst nagrywamy jako tablicę float z jednym parametrem (gamma)
+            if (output.RequiresGrad)
+            {
+                ComputationGraph.Active.Record(
+                    OpCode.DirectionalLoss, // Pamiętaj o dodaniu DirectionalLoss do enuma OpCode!
+                    output,
+                    prediction,
+                    target,
+                    BitConverter.SingleToInt32Bits(gamma)
+                );
+            }
+
+            return output;
+        }
+
+        public static void DirectionalLossBackward(AutogradNode p, AutogradNode t, AutogradNode o, float gamma)
+        {
+            // Pobieramy skalar z pierwszej pozycji i dzielimy przez N
+            var scale = o.Grad.AsSpan()[0] / p.Data.Size;
+            var mseScale = 2f * scale;
+            var penaltyScale = gamma * scale;
+
+            var pGrad = p.Grad.AsSpan();
+            var pData = p.Data.AsSpan();
+            var tData = t.Data.AsSpan();
+            var i = 0;
+
+            // OSTATECZNA MAGIA SIMD: Maska kierunkowa w AVX-512
+            if (Vector.IsHardwareAccelerated)
+            {
+                var vecSize = Vector<float>.Count;
+                var vZero = Vector<float>.Zero;
+                var vMseScale = new Vector<float>(mseScale);
+                var vPenaltyScale = new Vector<float>(penaltyScale);
+
+                for (; i <= pData.Length - vecSize; i += vecSize)
+                {
+                    var vP = new Vector<float>(pData.Slice(i));
+                    var vT = new Vector<float>(tData.Slice(i));
+                    var vG = new Vector<float>(pGrad.Slice(i));
+
+                    // 1. Pochodna z MSE: 2 * (P - T) * scale
+                    var vDiff = vP - vT;
+                    var vBaseGrad = vDiff * vMseScale;
+
+                    // 2. Maska kierunku: P * T < 0
+                    var vProd = vP * vT;
+                    var vWrongDirectionMask = Vector.LessThan(vProd, vZero);
+
+                    // 3. Pochodna kary: przepuszczamy (-T * penaltyScale) tylko tam, gdzie maska to true
+                    var vPenaltyGrad = Vector.ConditionalSelect(
+                        vWrongDirectionMask,
+                        -vT * vPenaltyScale,
+                        vZero
+                    );
+
+                    // 4. Akumulacja prosto do pamięci
+                    (vG + vBaseGrad + vPenaltyGrad).CopyTo(pGrad.Slice(i));
+                }
+            }
+
+            // Resztki z tablicy
+            for (; i < pData.Length; i++)
+            {
+                var baseGrad = 2f * (pData[i] - tData[i]) * scale;
+                var penaltyGrad = (pData[i] * tData[i] < 0f) ? -tData[i] * penaltyScale : 0f;
+                pGrad[i] += baseGrad + penaltyGrad;
+            }
+        }
     }
 }

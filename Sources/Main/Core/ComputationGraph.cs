@@ -56,6 +56,11 @@ namespace DevOnBike.Overfit.Core
                 case OpCode.GlobalAveragePool2D: TensorMath.GlobalAvgPool2DBackward(op.A, op.Output, op.I0, op.I1, op.I2); break;
                 case OpCode.BatchNorm1D: TensorMath.BatchNorm1DBackward(op.A, op.Output, op.NodeContext[0], op.NodeContext[1], op.NodeContext[2], op.NodeContext[3]); break;
                 case OpCode.Reshape: TensorMath.ReshapeBackward(op.A, op.Output); break;
+
+                case OpCode.DirectionalLoss:
+                    var gammaValue = BitConverter.Int32BitsToSingle(op.I0);
+                    TensorMath.DirectionalLossBackward(op.A, op.B, op.Output, gammaValue);
+                    break;
             }
         }
 

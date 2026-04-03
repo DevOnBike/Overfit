@@ -44,10 +44,11 @@ namespace DevOnBike.Overfit.Tests
             var parameters = conv1.Parameters()
                 .Concat(bn1.Parameters())
                 .Concat(res1.Parameters())
-                .Concat(fcOut.Parameters());
+                .Concat(fcOut.Parameters())
+                .ToArray();
 
             using var optimizer = new Adam(parameters, learningRate);
-            var scheduler = new LRScheduler(optimizer, _output.WriteLine, factor: 0.5f, patience: 1);
+            using var scheduler = new LRScheduler(optimizer, parameters, _output.WriteLine, factor: 0.5f, patience: 3);
 
             var numBatches = trainSize / batchSize;
             var totalSw = Stopwatch.StartNew();
