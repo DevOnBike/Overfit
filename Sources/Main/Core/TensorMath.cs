@@ -1024,32 +1024,30 @@ namespace DevOnBike.Overfit.Core
             var pS = prediction.Data.AsSpan();
             var tS = target.Data.AsSpan();
 
-            var totalLoss = 0f;
+            // 1. Część MSE: sum((p - t)^2)
+            using var temp = FastTensor<float>.SameShape(prediction.Data, clearMemory: false);
+            var tempS = temp.AsSpan();
 
-            // Faza Forward: Redukcja do skalara (pętla skalarna jest tu wystarczająco szybka, 
-            // ale można użyć wektorów dla gigantycznych batchy)
-            for (var i = 0; i < pS.Length; i++)
-            {
-                var p = pS[i];
-                var t = tS[i];
-                var diff = p - t;
-                var mse = diff * diff;
+            TensorPrimitives.Subtract(pS, tS, tempS);
+            var sumMse = TensorPrimitives.SumOfSquares(tempS);
 
-                var prod = p * t;
-                // Jeśli znaki są różne, prod < 0, więc dodajemy karę kierunkową
-                var penalty = prod < 0f ? -prod * gamma : 0f;
+            // 2. Część Kierunkowa: p * t
+            TensorPrimitives.Multiply(pS, tS, tempS);
 
-                totalLoss += mse + penalty;
-            }
+            // MAGIA: Zostawiamy tylko ujemne wartości (złe kierunki), dodatnie stają się zerem!
+            TensorPrimitives.Min(tempS, 0f, tempS);
 
+            // Sumujemy wszystkie ujemne kary i mnożymy przez -gamma (by stały się dodatnią karą)
+            var sumPenalty = TensorPrimitives.Sum(tempS) * -gamma;
+
+            var totalLoss = sumMse + sumPenalty;
             var res = new FastTensor<float>(1, 1) { [0, 0] = totalLoss / pS.Length };
             var output = new AutogradNode(res, prediction.RequiresGrad);
 
-            // Kontekst nagrywamy jako tablicę float z jednym parametrem (gamma)
             if (output.RequiresGrad)
             {
                 ComputationGraph.Active.Record(
-                    OpCode.DirectionalLoss, // Pamiętaj o dodaniu DirectionalLoss do enuma OpCode!
+                    OpCode.DirectionalLoss,
                     output,
                     prediction,
                     target,
