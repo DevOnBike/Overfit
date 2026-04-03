@@ -18,16 +18,26 @@ namespace DevOnBike.Overfit.Core
             TensorPrimitives.Add(left.Data.AsSpan(), right.Data.AsSpan(), resultData.AsSpan());
 
             var outputNode = new AutogradNode(resultData, left.RequiresGrad || right.RequiresGrad);
+
             if (outputNode.RequiresGrad)
+            {
                 ComputationGraph.Active.Record(OpCode.Add, outputNode, left, right);
+            }
 
             return outputNode;
         }
 
         public static void AddBackward(AutogradNode a, AutogradNode b, AutogradNode output)
         {
-            if (a.RequiresGrad) TensorPrimitives.Add(a.Grad.AsSpan(), output.Grad.AsSpan(), a.Grad.AsSpan());
-            if (b.RequiresGrad) TensorPrimitives.Add(b.Grad.AsSpan(), output.Grad.AsSpan(), b.Grad.AsSpan());
+            if (a.RequiresGrad)
+            {
+                TensorPrimitives.Add(a.Grad.AsSpan(), output.Grad.AsSpan(), a.Grad.AsSpan());
+            }
+
+            if (b.RequiresGrad)
+            {
+                TensorPrimitives.Add(b.Grad.AsSpan(), output.Grad.AsSpan(), b.Grad.AsSpan());
+            }
         }
 
         public static AutogradNode AddBias(AutogradNode input, AutogradNode bias)
@@ -37,23 +47,39 @@ namespace DevOnBike.Overfit.Core
             var inS = input.Data.AsSpan(); var bS = bias.Data.AsSpan(); var resS = resultData.AsSpan();
 
             for (var i = 0; i < N; i++)
+            {
                 TensorPrimitives.Add(inS.Slice(i * C, C), bS, resS.Slice(i * C, C));
+            }
 
             var outputNode = new AutogradNode(resultData, input.RequiresGrad || bias.RequiresGrad);
-            if (outputNode.RequiresGrad) ComputationGraph.Active.Record(OpCode.AddBias, outputNode, input, bias);
+
+            if (outputNode.RequiresGrad)
+            {
+                ComputationGraph.Active.Record(OpCode.AddBias, outputNode, input, bias);
+            }
+
             return outputNode;
         }
 
         public static void AddBiasBackward(AutogradNode input, AutogradNode bias, AutogradNode output)
         {
-            int N = input.Data.GetDim(0), C = input.Data.GetDim(1);
-            if (input.RequiresGrad) TensorPrimitives.Add(input.Grad.AsSpan(), output.Grad.AsSpan(), input.Grad.AsSpan());
+            var N = input.Data.GetDim(0);
+            var C = input.Data.GetDim(1);
+
+            if (input.RequiresGrad)
+            {
+                TensorPrimitives.Add(input.Grad.AsSpan(), output.Grad.AsSpan(), input.Grad.AsSpan());
+            }
+
             if (bias.RequiresGrad)
             {
                 var bGS = bias.Grad.AsSpan();
                 var oGS = output.Grad.AsSpan();
+
                 for (var i = 0; i < N; i++)
+                {
                     TensorPrimitives.Add(bGS, oGS.Slice(i * C, C), bGS);
+                }
             }
         }
 
@@ -61,8 +87,12 @@ namespace DevOnBike.Overfit.Core
         {
             var resultData = MatMulRaw(left.Data, right.Data);
             var outputNode = new AutogradNode(resultData, left.RequiresGrad || right.RequiresGrad);
+
             if (outputNode.RequiresGrad)
+            {
                 ComputationGraph.Active.Record(OpCode.MatMul, outputNode, left, right);
+            }
+
             return outputNode;
         }
 
@@ -75,13 +105,20 @@ namespace DevOnBike.Overfit.Core
             {
                 var aS = A.AsSpan(); var bS = B.AsSpan(); var cS = C.AsSpan();
                 var rowC = cS.Slice(i * bCols, bCols);
+
                 for (var k = 0; k < aCols; k++)
                 {
                     var valA = aS[i * aCols + k];
-                    if (valA == 0) continue;
+
+                    if (valA == 0)
+                    {
+                        continue;
+                    }
+
                     TensorPrimitives.MultiplyAdd(bS.Slice(k * bCols, bCols), valA, rowC, rowC);
                 }
             });
+
             return C;
         }
 
@@ -143,13 +180,16 @@ namespace DevOnBike.Overfit.Core
                     cRow[j] = TensorPrimitives.Dot(aRow, bS.Slice(j * K, K));
                 }
             });
+
             return C;
         }
 
         // Zoptymalizowane C = A^T * B (Używa SIMD MultiplyAdd)
         private static FastTensor<float> MatMul_AT_B(FastTensor<float> A, FastTensor<float> B)
         {
-            int K = A.GetDim(0), N = A.GetDim(1), M = B.GetDim(1);
+            var K = A.GetDim(0);
+            var N = A.GetDim(1);
+            var M = B.GetDim(1);
             // Ważne: true, bo sumujemy wartości do zera
             var C = new FastTensor<float>(true, N, M);
 
@@ -165,7 +205,10 @@ namespace DevOnBike.Overfit.Core
                 {
                     var aVal = aS[k * N + i];
 
-                    if (aVal == 0) continue;
+                    if (aVal == 0)
+                    {
+                        continue;
+                    }
 
                     // Używamy zbuforowanego bS
                     TensorPrimitives.MultiplyAdd(bS.Slice(k * M, M), aVal, cRow, cRow);
@@ -196,19 +239,28 @@ namespace DevOnBike.Overfit.Core
             });
 
             var outputNode = new AutogradNode(resultData, input.RequiresGrad || weights.RequiresGrad);
-            if (outputNode.RequiresGrad) ComputationGraph.Active.Record(OpCode.Conv2D, outputNode, input, weights, inC, outC, h, w, k);
+
+            if (outputNode.RequiresGrad)
+            {
+                ComputationGraph.Active.Record(OpCode.Conv2D, outputNode, input, weights, inC, outC, h, w, k);
+            }
+
             return outputNode;
         }
 
         public static void Conv2DBackward(AutogradNode input, AutogradNode weights, AutogradNode output, int inC, int outC, int h, int w, int k)
         {
-            if (!input.RequiresGrad && !weights.RequiresGrad) return;
+            if (!input.RequiresGrad && !weights.RequiresGrad)
+            {
+                return;
+            }
 
             int outH = h - k + 1, outW = w - k + 1, batchSize = input.Data.GetDim(0), kSqInC = k * k * inC;
             int colSizePerImg = kSqInC * outH * outW, inSize = inC * h * w, outSize = outC * outH * outW;
             var K = outH * outW;
 
             FastTensor<float> weights2DTContig = null;
+
             if (input.RequiresGrad)
             {
                 using var weights2D = weights.Data.Reshape(outC, kSqInC);
@@ -323,7 +375,10 @@ namespace DevOnBike.Overfit.Core
                                     // BŁYSKAWICZNY ODCZYT: Kompiluje się do instrukcji mov w asemblerze!
                                     var val = Unsafe.Add(ref inRef, absIdx);
 
-                                    if (val > maxVal) { maxVal = val; maxIdx = absIdx; }
+                                    if (val > maxVal)
+                                    {
+                                        { maxVal = val; maxIdx = absIdx; }
+                                    }
                                 }
                             }
 
@@ -338,7 +393,12 @@ namespace DevOnBike.Overfit.Core
             });
 
             var output = new AutogradNode(resultData, input.RequiresGrad);
-            if (output.RequiresGrad) ComputationGraph.Active.Record(OpCode.MaxPool2D, output, input, maxIndices);
+
+            if (output.RequiresGrad)
+            {
+                ComputationGraph.Active.Record(OpCode.MaxPool2D, output, input, maxIndices);
+            }
+
             return output;
         }
 
@@ -350,9 +410,11 @@ namespace DevOnBike.Overfit.Core
             ref var idxRef = ref MemoryMarshal.GetReference(maxIndices.Data.AsSpan());
 
             var len = maxIndices.Data.Size;
+
             for (var i = 0; i < len; i++)
             {
                 var maxIdx = (int)Unsafe.Add(ref idxRef, i);
+
                 Unsafe.Add(ref iGRef, maxIdx) += Unsafe.Add(ref oGRef, i);
             }
         }
@@ -366,11 +428,18 @@ namespace DevOnBike.Overfit.Core
             Parallel.For(0, batchSize, n =>
             {
                 for (var c = 0; c < channels; c++)
+                {
                     resData[n, c] = TensorPrimitives.Sum(input.Data.AsSpan().Slice(n * channels * h * w + c * h * w, h * w)) / spatialSize;
+                }
             });
 
             var output = new AutogradNode(resData, input.RequiresGrad);
-            if (output.RequiresGrad) ComputationGraph.Active.Record(OpCode.GlobalAveragePool2D, output, input, null, h, w, channels);
+
+            if (output.RequiresGrad)
+            {
+                ComputationGraph.Active.Record(OpCode.GlobalAveragePool2D, output, input, null, h, w, channels);
+            }
+
             return output;
         }
 
@@ -404,8 +473,11 @@ namespace DevOnBike.Overfit.Core
             TensorPrimitives.Max(input.Data.AsSpan(), 0f, res.AsSpan());
 
             var output = new AutogradNode(res, input.RequiresGrad);
+
             if (output.RequiresGrad)
+            {
                 ComputationGraph.Active.Record(OpCode.ReLU, output, input);
+            }
 
             return output;
         }
@@ -468,9 +540,14 @@ namespace DevOnBike.Overfit.Core
             if (isTraining)
             {
                 var scale = 1f / (1f - probability);
+
                 for (var i = 0; i < input.Data.Size; i++)
                 {
-                    if (Random.Shared.NextSingle() > probability) { resData.AsSpan()[i] = input.Data.AsSpan()[i] * scale; mask.Data.AsSpan()[i] = scale; }
+                    if (Random.Shared.NextSingle() > probability)
+                    {
+                        resData.AsSpan()[i] = input.Data.AsSpan()[i] * scale;
+                        mask.Data.AsSpan()[i] = scale; 
+                    }
                 }
             }
             else
@@ -517,10 +594,16 @@ namespace DevOnBike.Overfit.Core
             for (var r = 0; r < rows; r++)
             {
                 var pRow = probsTensor.AsSpan().Slice(r * cols, cols);
+
                 TensorPrimitives.SoftMax(logits.Data.AsSpan().Slice(r * cols, cols), pRow);
 
                 for (var c = 0; c < cols; c++)
-                    if (target.Data[r, c] > 0.5f) totalLoss -= MathF.Log(pRow[c] + 1e-15f);
+                {
+                    if (target.Data[r, c] > 0.5f)
+                    {
+                        totalLoss -= MathF.Log(pRow[c] + 1e-15f);
+                    }
+                }
             }
 
             var res = new FastTensor<float>(1, 1) { [0, 0] = totalLoss / rows };
@@ -530,8 +613,7 @@ namespace DevOnBike.Overfit.Core
             {
                 // Przekazujemy probsTensor przez NodeContext — backward nie będzie recomputował SoftMax
                 var probsNode = new AutogradNode(probsTensor, requiresGrad: false);
-                ComputationGraph.Active.Record(OpCode.SoftmaxCrossEntropy, output, logits, target,
-                    nodeContext: [probsNode]);
+                ComputationGraph.Active.Record(OpCode.SoftmaxCrossEntropy, output, logits, target, nodeContext: [probsNode]);
             }
             else
             {
@@ -566,10 +648,15 @@ namespace DevOnBike.Overfit.Core
             using var diff = FastTensor<float>.SameShape(prediction.Data);
 
             TensorPrimitives.Subtract(prediction.Data.AsSpan(), target.Data.AsSpan(), diff.AsSpan());
+
             var mse = TensorPrimitives.Dot(diff.AsSpan(), diff.AsSpan()) / prediction.Data.Size;
             var res = new FastTensor<float>(1, 1) { [0, 0] = mse };
             var output = new AutogradNode(res, prediction.RequiresGrad);
-            if (output.RequiresGrad) ComputationGraph.Active.Record(OpCode.MSELoss, output, prediction, target);
+
+            if (output.RequiresGrad)
+            {
+                ComputationGraph.Active.Record(OpCode.MSELoss, output, prediction, target);
+            }
 
             return output;
         }
@@ -603,8 +690,12 @@ namespace DevOnBike.Overfit.Core
             {
                 // 1. Średnia — row-major Add (cache-friendly)
                 var meanS = mean.Data.AsSpan();
+
                 for (var i = 0; i < N; i++)
+                {
                     TensorPrimitives.Add(meanS, input.Data.AsSpan().Slice(i * C, C), meanS);
+                }
+
                 TensorPrimitives.Multiply(meanS, 1f / N, meanS);
 
                 // 2. Wariancja — row-major, SIMD per wiersz (eliminuje column-major cache miss)
@@ -621,6 +712,7 @@ namespace DevOnBike.Overfit.Core
                     TensorPrimitives.Subtract(input.Data.AsSpan().Slice(i * C, C), meanR, tempS);
                     TensorPrimitives.MultiplyAdd(tempS, tempS, varS, varS);
                 }
+
                 TensorPrimitives.Multiply(varS, 1f / N, varS);
 
                 // 3. EMA running stats + invStd — SIMD
@@ -667,7 +759,12 @@ namespace DevOnBike.Overfit.Core
             }
 
             var output = new AutogradNode(outputData, input.RequiresGrad);
-            if (output.RequiresGrad && isTraining) ComputationGraph.Active.Record(OpCode.BatchNorm1D, output, input, null, 0, 0, 0, 0, 0, new[] { gamma, beta, mean, invStd });
+
+            if (output.RequiresGrad && isTraining)
+            {
+                ComputationGraph.Active.Record(OpCode.BatchNorm1D, output, input, null, 0, 0, 0, 0, 0, new[] { gamma, beta, mean, invStd });
+            }
+
             return output;
         }
 
@@ -679,7 +776,10 @@ namespace DevOnBike.Overfit.Core
             AutogradNode mean,
             AutogradNode invStd)
         {
-            if (!input.RequiresGrad && !gamma.RequiresGrad && !beta.RequiresGrad) return;
+            if (!input.RequiresGrad && !gamma.RequiresGrad && !beta.RequiresGrad)
+            {
+                return;
+            }
 
             int N = input.Data.GetDim(0), C = input.Data.GetDim(1);
 
@@ -731,10 +831,14 @@ namespace DevOnBike.Overfit.Core
                     TensorPrimitives.MultiplyAdd(gradRow, xHatRow, sumDyXHat, sumDyXHat);
 
                     if (beta.RequiresGrad)
+                    {
                         TensorPrimitives.Add(beta.Grad.AsSpan(), gradRow, beta.Grad.AsSpan());
+                    }
 
                     if (gamma.RequiresGrad)
+                    {
                         TensorPrimitives.MultiplyAdd(gradRow, xHatRow, gamma.Grad.AsSpan(), gamma.Grad.AsSpan());
+                    }
                 }
 
                 // ── Krok 1B: Gradient wejścia ────────────────────────────────────
@@ -772,7 +876,12 @@ namespace DevOnBike.Overfit.Core
         public static AutogradNode Reshape(AutogradNode input, params int[] newShape)
         {
             var output = new AutogradNode(input.Data.Reshape(newShape), input.RequiresGrad);
-            if (output.RequiresGrad) ComputationGraph.Active.Record(OpCode.Reshape, output, input);
+
+            if (output.RequiresGrad)
+            {
+                ComputationGraph.Active.Record(OpCode.Reshape, output, input);
+            }
+
             return output;
         }
 
@@ -809,7 +918,10 @@ namespace DevOnBike.Overfit.Core
                                     var startX = Math.Max(0, padding - kw);
                                     var endX = Math.Min(outW, width + padding - kw);
 
-                                    if (startX > 0) output.Slice(outIdxY, startX).Clear();
+                                    if (startX > 0)
+                                    {
+                                        output.Slice(outIdxY, startX).Clear();
+                                    }
 
                                     if (endX > startX)
                                     {
@@ -819,7 +931,10 @@ namespace DevOnBike.Overfit.Core
                                         input.Slice(inputRowOffset + startJ, len).CopyTo(output.Slice(outIdxY + startX, len));
                                     }
 
-                                    if (endX < outW) output.Slice(outIdxY + endX, outW - endX).Clear();
+                                    if (endX < outW)
+                                    {
+                                        output.Slice(outIdxY + endX, outW - endX).Clear();
+                                    }
                                 }
                                 else
                                 {
