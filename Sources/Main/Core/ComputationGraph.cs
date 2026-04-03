@@ -50,7 +50,7 @@ namespace DevOnBike.Overfit.Core
                 case OpCode.ReLU: TensorMath.ReluBackward(op.A, op.Output); break;
                 case OpCode.Dropout: TensorMath.DropoutBackward(op.A, op.B, op.Output); break;
                 case OpCode.MSELoss: TensorMath.MSELossBackward(op.A, op.B, op.Output); break;
-                case OpCode.SoftmaxCrossEntropy: TensorMath.SoftmaxCrossEntropyBackward(op.A, op.B, op.Output); break;
+                case OpCode.SoftmaxCrossEntropy: TensorMath.SoftmaxCrossEntropyBackward(op.A, op.B, op.Output, op.NodeContext[0]); break;
                 case OpCode.Conv2D: TensorMath.Conv2DBackward(op.A, op.B, op.Output, op.I0, op.I1, op.I2, op.I3, op.I4); break;
                 case OpCode.MaxPool2D: TensorMath.MaxPool2DBackward(op.A, op.B, op.Output); break;
                 case OpCode.GlobalAveragePool2D: TensorMath.GlobalAvgPool2DBackward(op.A, op.Output, op.I0, op.I1, op.I2); break;

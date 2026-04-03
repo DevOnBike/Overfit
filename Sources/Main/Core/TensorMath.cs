@@ -510,36 +510,52 @@ namespace DevOnBike.Overfit.Core
         {
             int rows = logits.Data.GetDim(0), cols = logits.Data.GetDim(1);
             var totalLoss = 0f;
-            using var pRowBuf = new FastTensor<float>(cols);
+
+            // probsTensor przechowuje probs z forward — backward odczyta je zamiast recomputować SoftMax
+            var probsTensor = new FastTensor<float>(rows, cols);
+
             for (var r = 0; r < rows; r++)
             {
-                TensorPrimitives.SoftMax(logits.Data.AsSpan().Slice(r * cols, cols), pRowBuf.AsSpan());
-                for (var c = 0; c < cols; c++) if (target.Data[r, c] > 0.5f) totalLoss -= MathF.Log(pRowBuf.AsSpan()[c] + 1e-15f);
+                var pRow = probsTensor.AsSpan().Slice(r * cols, cols);
+                TensorPrimitives.SoftMax(logits.Data.AsSpan().Slice(r * cols, cols), pRow);
+
+                for (var c = 0; c < cols; c++)
+                    if (target.Data[r, c] > 0.5f) totalLoss -= MathF.Log(pRow[c] + 1e-15f);
             }
+
             var res = new FastTensor<float>(1, 1) { [0, 0] = totalLoss / rows };
             var output = new AutogradNode(res, logits.RequiresGrad);
-            if (logits.RequiresGrad) ComputationGraph.Active.Record(OpCode.SoftmaxCrossEntropy, output, logits, target);
+
+            if (logits.RequiresGrad)
+            {
+                // Przekazujemy probsTensor przez NodeContext — backward nie będzie recomputował SoftMax
+                var probsNode = new AutogradNode(probsTensor, requiresGrad: false);
+                ComputationGraph.Active.Record(OpCode.SoftmaxCrossEntropy, output, logits, target,
+                    nodeContext: [probsNode]);
+            }
+            else
+            {
+                probsTensor.Dispose();
+            }
+
             return output;
         }
 
-        public static void SoftmaxCrossEntropyBackward(AutogradNode logits, AutogradNode target, AutogradNode output)
+        // probsNode — pierwszy element NodeContext z forward (probs już obliczone)
+        public static void SoftmaxCrossEntropyBackward(AutogradNode logits, AutogradNode target, AutogradNode output, AutogradNode probsNode)
         {
             var rows = logits.Data.GetDim(0);
             var cols = logits.Data.GetDim(1);
             var scale = output.Grad.AsSpan()[0] / rows;
-
-            using var pRowBuf = new FastTensor<float>(cols);
+            var probsS = (ReadOnlySpan<float>)probsNode.Data.AsSpan();
 
             for (var r = 0; r < rows; r++)
             {
-                var logS = logits.Data.AsSpan().Slice(r * cols, cols);
-                var pS = pRowBuf.AsSpan();
+                var pS = probsS.Slice(r * cols, cols);
                 var tS = target.Data.AsSpan().Slice(r * cols, cols);
                 var gS = logits.Grad.AsSpan().Slice(r * cols, cols);
 
-                TensorPrimitives.SoftMax(logS, pS);
-
-                // POPRAWKA: Pełna fuzja SIMD dla Cross Entropy
+                // Probs odczytane z forward — zero recompute SoftMax
                 TensorPrimitives.MultiplyAdd(pS, scale, gS, gS);
                 TensorPrimitives.MultiplyAdd(tS, -scale, gS, gS);
             }
@@ -585,24 +601,69 @@ namespace DevOnBike.Overfit.Core
 
             if (isTraining)
             {
-                for (var i = 0; i < N; i++) TensorPrimitives.Add(mean.Data.AsSpan(), input.Data.AsSpan().Slice(i * C, C), mean.Data.AsSpan());
-                foreach (ref var m in mean.Data.AsSpan()) m /= N;
-                for (var c = 0; c < C; c++)
+                // 1. Średnia — row-major Add (cache-friendly)
+                var meanS = mean.Data.AsSpan();
+                for (var i = 0; i < N; i++)
+                    TensorPrimitives.Add(meanS, input.Data.AsSpan().Slice(i * C, C), meanS);
+                TensorPrimitives.Multiply(meanS, 1f / N, meanS);
+
+                // 2. Wariancja — row-major, SIMD per wiersz (eliminuje column-major cache miss)
+                // varBuf: clearMemory:true — akumulujemy +=, musi startować od zera
+                // tempBuf: clearMemory:false — Subtract nadpisuje go w całości każdą iteracją
+                using var varBuf = new FastTensor<float>(true, C);
+                using var tempBuf = new FastTensor<float>(false, C);
+                var varS = varBuf.AsSpan();
+                var tempS = tempBuf.AsSpan();
+                var meanR = (ReadOnlySpan<float>)meanS;
+
+                for (var i = 0; i < N; i++)
                 {
-                    float varSum = 0; for (var i = 0; i < N; i++) { var d = input.Data[i, c] - mean.Data[c]; varSum += d * d; }
-                    var bVar = varSum / N; invStd.Data[c] = 1f / MathF.Sqrt(bVar + eps);
-                    runningMean[c] = (1 - momentum) * runningMean[c] + momentum * mean.Data[c];
-                    runningVar[c] = (1 - momentum) * runningVar[c] + momentum * bVar;
+                    TensorPrimitives.Subtract(input.Data.AsSpan().Slice(i * C, C), meanR, tempS);
+                    TensorPrimitives.MultiplyAdd(tempS, tempS, varS, varS);
                 }
+                TensorPrimitives.Multiply(varS, 1f / N, varS);
+
+                // 3. EMA running stats + invStd — SIMD
+                var rmS = runningMean.AsSpan();
+                var rvS = runningVar.AsSpan();
+                var ivS = invStd.Data.AsSpan();
+
+                TensorPrimitives.Multiply(rmS, 1f - momentum, rmS);
+                TensorPrimitives.MultiplyAdd(meanR, momentum, rmS, rmS);
+
+                TensorPrimitives.Multiply(rvS, 1f - momentum, rvS);
+                TensorPrimitives.MultiplyAdd(varS, momentum, rvS, rvS);
+
+                TensorPrimitives.Add(varS, eps, ivS);
+                TensorPrimitives.ReciprocalSqrt(ivS, ivS);
             }
             else
             {
-                for (var c = 0; c < C; c++) { mean.Data[c] = runningMean[c]; invStd.Data[c] = 1f / MathF.Sqrt(runningVar[c] + eps); }
+                // Inferencja — skopiuj running stats, wylicz invStd przez SIMD
+                runningMean.AsSpan().CopyTo(mean.Data.AsSpan());
+
+                var ivS = invStd.Data.AsSpan();
+                TensorPrimitives.Add(runningVar.AsSpan(), eps, ivS);
+                TensorPrimitives.ReciprocalSqrt(ivS, ivS);
             }
+
+            // 4. Normalizacja — row-major, SIMD: out = xHat * gamma + beta
+            var invStdR = (ReadOnlySpan<float>)invStd.Data.AsSpan();
+            var meanRo = (ReadOnlySpan<float>)mean.Data.AsSpan();
+            var gammaR = (ReadOnlySpan<float>)gamma.Data.AsSpan();
+            var betaR = (ReadOnlySpan<float>)beta.Data.AsSpan();
 
             for (var i = 0; i < N; i++)
             {
-                for (var c = 0; c < C; c++) outputData[i, c] = gamma.Data[c] * (input.Data[i, c] - mean.Data[c]) * invStd.Data[c] + beta.Data[c];
+                var inRow = (ReadOnlySpan<float>)input.Data.AsSpan().Slice(i * C, C);
+                var outRow = outputData.AsSpan().Slice(i * C, C);
+
+                // xHat = (in - mean) * invStd — reużywamy outRow jako tymczasowy bufor
+                TensorPrimitives.Subtract(inRow, meanRo, outRow);
+                TensorPrimitives.Multiply(outRow, invStdR, outRow);
+
+                // out = gamma * xHat + beta
+                TensorPrimitives.MultiplyAdd(outRow, gammaR, betaR, outRow);
             }
 
             var output = new AutogradNode(outputData, input.RequiresGrad);
