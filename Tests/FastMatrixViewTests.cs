@@ -107,7 +107,7 @@ namespace DevOnBike.Overfit.Tests
             // Act & Assert
             // Używamy try-catch zamiast Assert.Throws, ponieważ 'view' to 'ref struct' 
             // i nie może zostać przekazane do wnętrza wyrażenia lambda () => ...
-            ArgumentOutOfRangeException? expectedException = null;
+            ArgumentOutOfRangeException expectedException = null;
             try
             {
                 view.Slice(1, 2, rows: 2, cols: 2); // Wychodzi poza wymiar
@@ -149,7 +149,7 @@ namespace DevOnBike.Overfit.Tests
             var transposed = view.Transpose();
 
             // Act & Assert
-            InvalidOperationException? expectedException = null;
+            InvalidOperationException expectedException = null;
             try
             {
                 transposed.Row(0); // Próba pobrania ciągłego wiersza z transponowanej macierzy
@@ -160,7 +160,7 @@ namespace DevOnBike.Overfit.Tests
             }
 
             Assert.NotNull(expectedException);
-            Assert.Contains("Cannot return a contiguous Span", expectedException.Message);
+            Assert.Contains("Cannot return contiguous Span", expectedException.Message);
         }
     }
 }

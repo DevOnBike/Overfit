@@ -11,7 +11,8 @@ namespace DevOnBike.Overfit.Optimizers
 
         public SGD(IEnumerable<AutogradNode> parameters, float learningRate)
         {
-            if (parameters == null) throw new ArgumentNullException(nameof(parameters));
+            ArgumentNullException.ThrowIfNull(parameters);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(learningRate);
 
             _parameters = parameters.Where(p => p.RequiresGrad).ToArray();
             LearningRate = learningRate;
@@ -19,24 +20,27 @@ namespace DevOnBike.Overfit.Optimizers
 
         public void Step()
         {
+            // Lokalna kopia — eliminuje getter per iteracja pętli
             var negativeLr = -LearningRate;
 
             foreach (var p in _parameters)
             {
+                // Grad jest zawsze non-null — ctor filtruje przez RequiresGrad
+                // w = grad * (-lr) + w  — jeden AVX-512 VFMADD, zero alokacji
                 TensorPrimitives.MultiplyAdd(
-                    x: p.Grad.AsReadOnlySpan(),
+                    x: p.Grad.AsSpan(),
                     y: negativeLr,
-                    addend: p.Data.AsReadOnlySpan(),
-                    destination: p.Data.AsSpan()
-                );
+                    addend: p.Data.AsSpan(),
+                    destination: p.Data.AsSpan());
             }
         }
 
         public void ZeroGrad()
         {
+            // Grad zawsze non-null po filtracji w ctor — guard zbędny
             foreach (var p in _parameters)
             {
-                p.Grad.Clear();
+                p.Grad.AsSpan().Clear();
             }
         }
     }

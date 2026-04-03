@@ -35,14 +35,14 @@ namespace DevOnBike.Overfit.Tests
                 new LinearLayer(64, 9)
             );
 
-            // WAŻNE: 'using' przy Adamie! Nowy Adam wynajmuje FastBuffery (Zero-Alloc), 
-            // które muszą wrócić do ArrayPoola po zakończeniu całego procesu.
+            // WAŻNE: 'using' przy Adamie! Nowy Adam wynajmuje pamięć (FastTensor 1D), 
+            // która musi wrócić do ArrayPoola po zakończeniu całego procesu.
             using var optimizer = new Adam(model.Parameters(), 0.001f);
 
             // PARAMETRY DŁUGIEGO TRENINGU
             var totalGames = 50000;
             var epsilon = 1.0f;
-            var epsilonDecay = 0.99991f; // Bardzo powolne mądrzenie
+            var epsilonDecay = 0.99991f;
 
             var wins = 0;
             var draws = 0;
@@ -77,17 +77,14 @@ namespace DevOnBike.Overfit.Tests
                     OpponentMove(board);
                     reward = EvaluateBoard(board, true, out gameOver);
 
-                    // Jeśli przeciwnik wygrał, AI dostaje karę (uczymy się na stanie po ruchu AI)
                     if (gameOver)
                     {
                         TrainStep(model, optimizer, stateBefore, action, reward, board, true);
                     }
                 }
 
-                // Aktualizacja eksploracji
                 epsilon = MathF.Max(0.01f, epsilon * epsilonDecay);
 
-                // Raportowanie co 5000 gier
                 if (i % 5000 == 0)
                 {
                     var winRate = (float)wins / 5000;
@@ -111,34 +108,29 @@ namespace DevOnBike.Overfit.Tests
             opt.ZeroGrad();
 
             // 1. Forward 
-            using var inputMat = new FastMatrix<float>(1, 9);
-            inputMat.CopyFrom(s);
+            using var inputMat = new FastTensor<float>(1, 9);
+            s.CopyTo(inputMat.AsSpan());
             using var inputNode = new AutogradNode(inputMat, requiresGrad: false);
 
-            // Predykcja - te operacje zarejestrują się na taśmie (bo wagi mają RequiresGrad)
             using var pred = model.Forward(inputNode);
 
             // 2. Bellman Target
-            using var targetMat = new FastMatrix<float>(1, 9);
-            pred.Data.AsReadOnlySpan().CopyTo(targetMat.AsSpan());
+            using var targetMat = new FastTensor<float>(1, 9);
+            pred.Data.AsSpan().CopyTo(targetMat.AsSpan());
 
             var targetValue = r;
             if (!done)
             {
-                using var nextInputMat = new FastMatrix<float>(1, 9);
-                nextInputMat.CopyFrom(nextS);
+                using var nextInputMat = new FastTensor<float>(1, 9);
+                nextS.CopyTo(nextInputMat.AsSpan());
                 using var nextInputNode = new AutogradNode(nextInputMat, requiresGrad: false);
 
-                // --- WYŁĄCZAMY NAGRYWANIE ---
                 ComputationGraph.Active.IsRecording = false;
-
                 using var nextQNode = model.Forward(nextInputNode);
-
-                // --- WŁĄCZAMY NAGRYWANIE Z POWROTEM ---
                 ComputationGraph.Active.IsRecording = true;
 
                 var maxNextQ = -float.MaxValue;
-                var nqSpan = nextQNode.Data.AsReadOnlySpan();
+                var nqSpan = nextQNode.Data.AsSpan();
                 for (var i = 0; i < nqSpan.Length; i++)
                 {
                     if (nqSpan[i] > maxNextQ) maxNextQ = nqSpan[i];
@@ -149,19 +141,11 @@ namespace DevOnBike.Overfit.Tests
             targetMat[0, a] = targetValue;
 
             // 3. Loss & Backward
-            // UWAGA: targetNode dostaje requiresGrad: false. Dzięki temu Taśma
-            // podczas przechodzenia w tył natychmiast zatrzyma propagację błędu w stronę
-            // obliczeń 'nextQNode' i wykona optymalizację wyłącznie dla 'pred'.
             using var targetNode = new AutogradNode(targetMat, requiresGrad: false);
-
             using var loss = TensorMath.MSELoss(pred, targetNode);
 
-            // Zlecenie całej matematyki różniczkowej na zoptymalizowaną Taśmę
             ComputationGraph.Active.Backward(loss);
-
             opt.Step();
-
-            // 4. CLEANUP (Węzłów-śmieci w grafie już nie ma, wszystko zwalnia "using var")
         }
 
         private int ChooseAction(Sequential model, float[] board, float eps)
@@ -172,20 +156,17 @@ namespace DevOnBike.Overfit.Tests
                 return empty.Length > 0 ? empty[_rng.Next(empty.Length)] : 0;
             }
 
-            // RESET TAŚMY - Inference też "brudzi" taśmę, jeśli wagi mają RequiresGrad.
-            // Resetujemy graf, żeby nie wyciekała wirtualna pamięć w trakcie grania!
             ComputationGraph.Active.Reset();
 
-            using var inputMat = new FastMatrix<float>(1, 9);
-            inputMat.CopyFrom(board);
+            using var inputMat = new FastTensor<float>(1, 9);
+            board.CopyTo(inputMat.AsSpan());
 
-            // Wymuszamy wejściu brak gradientu
             using var inputNode = new AutogradNode(inputMat, requiresGrad: false);
             using var output = model.Forward(inputNode);
 
             var bestIdx = 0;
             var maxVal = -float.MaxValue;
-            var span = output.Data.AsReadOnlySpan();
+            var span = output.Data.AsSpan();
             for (var i = 0; i < span.Length; i++)
             {
                 if (span[i] > maxVal)

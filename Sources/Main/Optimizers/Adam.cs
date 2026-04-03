@@ -1,4 +1,4 @@
-using System.Numerics.Tensors;
+using System.Numerics;
 using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.Optimizers
@@ -8,27 +8,22 @@ namespace DevOnBike.Overfit.Optimizers
         private readonly struct ParamState
         {
             public readonly AutogradNode Node;
-            public readonly FastMatrix<float> M;
-            public readonly FastMatrix<float> V;
+            public readonly FastTensor<float> M;
+            public readonly FastTensor<float> V;
             public readonly int Size;
 
             public ParamState(AutogradNode node)
             {
                 Node = node;
-                Size = node.Data.Rows * node.Data.Cols;
-                M = new FastMatrix<float>(node.Data.Rows, node.Data.Cols);
-                V = new FastMatrix<float>(node.Data.Rows, node.Data.Cols);
+                Size = node.Data.Size;
+
+                // Używamy true, by FastTensor od razu wyczyścił pamięć z ArrayPool
+                M = new FastTensor<float>(true, node.Data.Shape);
+                V = new FastTensor<float>(true, node.Data.Shape);
             }
         }
 
         private readonly ParamState[] _states;
-
-        // Pojedyncze bufory wielokrotnego użytku! Zero ThreadLocal, zero locków.
-        private readonly FastBuffer<float> _bufGl2;
-        private readonly FastBuffer<float> _bufGSq;
-        private readonly FastBuffer<float> _bufMHat;
-        private readonly FastBuffer<float> _bufVHat;
-        private readonly FastBuffer<float> _bufUpd;
 
         public float LearningRate { get; set; }
         public float Beta1 { get; set; } = 0.9f;
@@ -43,22 +38,14 @@ namespace DevOnBike.Overfit.Optimizers
             LearningRate = learningRate;
 
             var paramList = parameters.Where(p => p.RequiresGrad).ToList();
-            _states = new ParamState[paramList.Count];
 
-            var maxSize = 1;
+            _states = new ParamState[paramList.Count];
 
             for (var i = 0; i < paramList.Count; i++)
             {
                 _states[i] = new ParamState(paramList[i]);
-                if (_states[i].Size > maxSize) maxSize = _states[i].Size;
             }
 
-            // Alokujemy globalne bufory tylko pod największą warstwę
-            _bufGl2 = new FastBuffer<float>(maxSize);
-            _bufGSq = new FastBuffer<float>(maxSize);
-            _bufMHat = new FastBuffer<float>(maxSize);
-            _bufVHat = new FastBuffer<float>(maxSize);
-            _bufUpd = new FastBuffer<float>(maxSize);
         }
 
         public void Step()
@@ -70,54 +57,85 @@ namespace DevOnBike.Overfit.Optimizers
             var invBc1 = 1f / bc1;
             var invBc2 = 1f / bc2;
 
-            // Płaska iteracja zamiast Parallel.ForEach
+            var wd = WeightDecay;
+            var b1 = Beta1;
+            var b2 = Beta2;
+            var b1Inv = 1f - Beta1;
+            var b2Inv = 1f - Beta2;
+            var eps = Epsilon;
+            var lr = LearningRate;
+
             foreach (var state in _states)
             {
                 var p = state.Node;
                 var n = state.Size;
-                var g = p.Grad.AsReadOnlySpan();
+
+                if (p.Grad == null) continue;
+
+                var g = p.Grad.AsSpan();
                 var m = state.M.AsSpan();
                 var v = state.V.AsSpan();
                 var w = p.Data.AsSpan();
 
-                // Wycinamy bezpiecznie potrzebny fragment pre-alokowanego bufora
-                var gl2 = _bufGl2.AsSpan()[..n];
-                var gSq = _bufGSq.AsSpan()[..n];
-                var mHat = _bufMHat.AsSpan()[..n];
-                var vHat = _bufVHat.AsSpan()[..n];
-                var upd = _bufUpd.AsSpan()[..n];
+                var i = 0;
 
-                var wd = WeightDecay;
-                var b1 = Beta1;
-                var b2 = Beta2;
-                var b1Inv = 1f - Beta1;
-                var b2Inv = 1f - Beta2;
-                var eps = Epsilon;
-                var lr = LearningRate;
+                // Fuzja SIMD: 1 przejście przez pamięć zamiast 10!
+                if (Vector.IsHardwareAccelerated)
+                {
+                    var vecSize = Vector<float>.Count;
 
-                // --- 1. gWithL2 = g + wd*w ---
-                TensorPrimitives.MultiplyAdd(w, wd, g, gl2);
+                    var vWd = new Vector<float>(wd);
+                    var vB1 = new Vector<float>(b1);
+                    var vB2 = new Vector<float>(b2);
+                    var vB1Inv = new Vector<float>(b1Inv);
+                    var vB2Inv = new Vector<float>(b2Inv);
+                    var vInvBc1 = new Vector<float>(invBc1);
+                    var vInvBc2 = new Vector<float>(invBc2);
+                    var vEps = new Vector<float>(eps);
+                    var vLr = new Vector<float>(lr);
 
-                // --- 2. m = b1*m + b1Inv*gWithL2 ---
-                TensorPrimitives.Multiply(m, b1, mHat);
-                TensorPrimitives.MultiplyAdd(gl2, b1Inv, mHat, m);
+                    for (; i <= n - vecSize; i += vecSize)
+                    {
+                        var vG = new Vector<float>(g.Slice(i));
+                        var vM = new Vector<float>(m.Slice(i));
+                        var vV = new Vector<float>(v.Slice(i));
+                        var vW = new Vector<float>(w.Slice(i));
 
-                // --- 3. v = b2*v + b2Inv*gWithL2² ---
-                TensorPrimitives.Multiply(gl2, gl2, gSq);
-                TensorPrimitives.Multiply(v, b2, vHat);
-                TensorPrimitives.MultiplyAdd(gSq, b2Inv, vHat, v);
+                        // 1. gWithL2 = g + wd * w
+                        var vGl2 = vG + vW * vWd;
 
-                // --- 4. mHat = m / bc1 ---
-                TensorPrimitives.Multiply(m, invBc1, mHat);
+                        // 2. m = b1 * m + b1Inv * gWithL2
+                        vM = vM * vB1 + vGl2 * vB1Inv;
 
-                // --- 5. vHat = sqrt(v/bc2) + eps ---
-                TensorPrimitives.Multiply(v, invBc2, vHat);
-                TensorPrimitives.Sqrt(vHat, vHat);
-                TensorPrimitives.Add(vHat, eps, vHat);
+                        // 3. v = b2 * v + b2Inv * (gWithL2 * gWithL2)
+                        vV = vV * vB2 + (vGl2 * vGl2) * vB2Inv;
 
-                // --- 6. w -= lr * mHat / vHat ---
-                TensorPrimitives.Divide(mHat, vHat, upd);
-                TensorPrimitives.MultiplyAdd(upd, -lr, w, w);
+                        // 4 & 5. mHat = m * invBc1, vHat = sqrt(v * invBc2) + eps
+                        var vMHat = vM * vInvBc1;
+                        var vVHat = Vector.SquareRoot(vV * vInvBc2) + vEps;
+
+                        // 6. w -= lr * (mHat / vHat)
+                        vW -= (vMHat / vVHat) * vLr;
+
+                        // Bezpośredni zrzut do pamięci
+                        vM.CopyTo(m.Slice(i));
+                        vV.CopyTo(v.Slice(i));
+                        vW.CopyTo(w.Slice(i));
+                    }
+                }
+
+                // Resztki (jeśli tablica nie jest wielokrotnością szerokości wektora)
+                for (; i < n; i++)
+                {
+                    var gl2 = g[i] + wd * w[i];
+                    m[i] = b1 * m[i] + b1Inv * gl2;
+                    v[i] = b2 * v[i] + b2Inv * (gl2 * gl2);
+
+                    var mHat = m[i] * invBc1;
+                    var vHat = MathF.Sqrt(v[i] * invBc2) + eps;
+
+                    w[i] -= lr * (mHat / vHat);
+                }
             }
         }
 
@@ -125,7 +143,10 @@ namespace DevOnBike.Overfit.Optimizers
         {
             foreach (var state in _states)
             {
-                state.Node.Grad.Clear();
+                if (state.Node.Grad != null)
+                {
+                    state.Node.Grad.AsSpan().Clear();
+                }
             }
         }
 
@@ -141,12 +162,6 @@ namespace DevOnBike.Overfit.Optimizers
                 state.M?.Dispose();
                 state.V?.Dispose();
             }
-
-            _bufGl2.Dispose();
-            _bufGSq.Dispose();
-            _bufMHat.Dispose();
-            _bufVHat.Dispose();
-            _bufUpd.Dispose();
         }
     }
 }

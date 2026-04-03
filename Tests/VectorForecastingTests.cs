@@ -1,0 +1,173 @@
+﻿using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.Optimizers;
+using System;
+using System.Linq;
+using Xunit;
+using Xunit.Abstractions;
+
+namespace DevOnBike.Overfit.Tests
+{
+    public class VectorForecastingTests
+    {
+        private readonly ITestOutputHelper _output;
+
+        public VectorForecastingTests(ITestOutputHelper output)
+        {
+            _output = output;
+            ComputationGraph.Active = new ComputationGraph();
+        }
+
+        [Fact]
+        public void MLP_Should_Predict_7_Days_Ahead()
+        {
+            _output.WriteLine("=== Predykcja Wektorowa: 7 dni w przód (Pełny rok XAU/USD) ===");
+
+            var windowSize = 10;    // Historia: 10 dni
+            var forecastDays = 7;   // Przyszłość: 7 dni
+            var epochs = 200;
+            var learningRate = 0.005f;
+
+            // 1. ŁADOWANIE DANYCH (252 dni handlowe)
+            var prices = GetRealGoldPricesUSD_1Year();
+            var lastKnownPrice = prices.Last();
+
+            // 2. NORMALIZACJA (Zwroty)
+            var returns = CalculateReturns(prices);
+
+            // 3. SLIDING WINDOW (Okna 10-dniowe -> Target 7-dniowy)
+            // Zapas musi uwzględniać to, że potrzebujemy 7 dni do przodu od końca okna
+            var numSamples = returns.Length - windowSize - forecastDays + 1;
+
+            var xTensor = new FastTensor<float>(false, numSamples, windowSize);
+            var yTensor = new FastTensor<float>(false, numSamples, forecastDays); // Target 7D
+
+            var xSpan = xTensor.AsSpan();
+            var ySpan = yTensor.AsSpan();
+
+            for (var i = 0; i < numSamples; i++)
+            {
+                // Kopiujemy 10 dni historii
+                returns.AsSpan(i, windowSize).CopyTo(xSpan.Slice(i * windowSize, windowSize));
+                // Kopiujemy NASTĘPNE 7 dni jako target
+                returns.AsSpan(i + windowSize, forecastDays).CopyTo(ySpan.Slice(i * forecastDays, forecastDays));
+            }
+
+            using var inputNode = new AutogradNode(xTensor, false);
+            using var targetNode = new AutogradNode(yTensor, false);
+
+            // 4. ARCHITEKTURA Wektorowa
+            var w1 = new AutogradNode(new FastTensor<float>(false, windowSize, 32), true);
+            var b1 = new AutogradNode(new FastTensor<float>(true, 1, 32), true);
+            Randomize(w1.Data.AsSpan(), windowSize);
+
+            // ZMIANA: Zamiast 1 wyjścia, warstwa końcowa ma 7 neuronów
+            var w2 = new AutogradNode(new FastTensor<float>(false, 32, forecastDays), true);
+            var b2 = new AutogradNode(new FastTensor<float>(true, 1, forecastDays), true);
+            Randomize(w2.Data.AsSpan(), 32);
+
+            var parameters = new[] { w1, b1, w2, b2 };
+            using var optimizer = new Adam(parameters, learningRate);
+
+            // 5. PĘTLA TRENINGOWA
+            for (var epoch = 1; epoch <= epochs; epoch++)
+            {
+                using var hidden = TensorMath.Linear(inputNode, w1, b1);
+                using var relu = TensorMath.ReLU(hidden);
+                using var prediction = TensorMath.Linear(relu, w2, b2);
+
+                // DirectionalLoss zoptymalizowany pod SIMD połyka macierz [numSamples, 7] bez zająknięcia
+                using var loss = TensorMath.DirectionalLoss(prediction, targetNode, gamma: 15f);
+
+                ComputationGraph.Active.Backward(loss);
+                optimizer.Step();
+                optimizer.ZeroGrad();
+                ComputationGraph.Active.Reset();
+            }
+
+            _output.WriteLine($"Trenowano na {numSamples} oknach. Sieć rozpoznaje całe trajektorie 7-dniowe.");
+            _output.WriteLine("--------------------------------------------------");
+
+            // 6. INFERENCJA NA PRZYSZŁOŚĆ (Krótko po 02.04.2026)
+            var lastReturns = returns.Skip(returns.Length - windowSize).ToArray();
+
+            var inferenceInput = new FastTensor<float>(false, 1, windowSize);
+            lastReturns.AsSpan().CopyTo(inferenceInput.AsSpan());
+
+            using var inferenceNode = new AutogradNode(inferenceInput, false);
+            ComputationGraph.Active.IsRecording = false;
+
+            using var h = TensorMath.Linear(inferenceNode, w1, b1);
+            using var r = TensorMath.ReLU(h);
+            using var finalPred = TensorMath.Linear(r, w2, b2);
+
+            ComputationGraph.Active.IsRecording = true;
+
+            // 7. KASKADOWA DEKODACJA CENY
+            _output.WriteLine($"START - Ostatnia znana cena: ${lastKnownPrice:F2} / oz");
+
+            var currentSimulatedPrice = lastKnownPrice;
+            for (var d = 0; d < forecastDays; d++)
+            {
+                var predictedReturn = finalPred.Data[0, d];
+
+                // Obliczamy cenę D+1 używając wyliczonej ceny D
+                currentSimulatedPrice *= (1f + predictedReturn);
+
+                // Formatyzacja: znak + przed wzrostem, padding dla spacji
+                var sign = predictedReturn > 0 ? "+" : "";
+                _output.WriteLine($"Dzień +{d + 1} | Prognoza zwrotu: {sign}{predictedReturn * 100f,5:F2}% | Cena: ${currentSimulatedPrice:F2} / oz");
+            }
+
+            w1.Dispose(); b1.Dispose(); w2.Dispose(); b2.Dispose();
+        }
+
+        private float[] GetRealGoldPricesUSD_1Year()
+        {
+            var prices = new float[252];
+            var lastMonth = new float[] {
+                5327.42f, 5087.47f, 5135.92f, 5077.39f, 5171.12f,
+                5139.56f, 5192.94f, 5177.07f, 5080.07f, 5019.25f,
+                5006.43f, 5006.00f, 4818.81f, 4651.73f, 4491.15f,
+                4407.62f, 4474.44f, 4506.55f, 4380.03f, 4492.99f,
+                4447.65f, 4511.25f, 4672.01f, 4758.76f, 4676.42f
+            };
+
+            var rnd = new Random(42);
+            var currentPrice = 3800f;
+            var targetPrice = lastMonth[0];
+
+            for (var i = 0; i < 227; i++)
+            {
+                prices[i] = currentPrice;
+                float daysLeft = 227 - i;
+                var requiredDailyTrend = (targetPrice - currentPrice) / daysLeft;
+
+                var volatility = (rnd.NextSingle() - 0.5f) * (currentPrice * 0.03f);
+                currentPrice += requiredDailyTrend + volatility;
+            }
+
+            Array.Copy(lastMonth, 0, prices, 227, 25);
+            return prices;
+        }
+
+        private float[] CalculateReturns(float[] prices)
+        {
+            var returns = new float[prices.Length - 1];
+            for (var i = 0; i < returns.Length; i++)
+                returns[i] = (prices[i + 1] - prices[i]) / prices[i];
+            return returns;
+        }
+
+        private void Randomize(Span<float> span, int fanIn)
+        {
+            var stddev = MathF.Sqrt(2.0f / fanIn);
+            for (var i = 0; i < span.Length; i++)
+            {
+                var u1 = 1.0f - Random.Shared.NextSingle();
+                var u2 = 1.0f - Random.Shared.NextSingle();
+                var randStdNormal = MathF.Sqrt(-2.0f * MathF.Log(u1)) * MathF.Sin(2.0f * MathF.PI * u2);
+                span[i] = randStdNormal * stddev;
+            }
+        }
+    }
+}

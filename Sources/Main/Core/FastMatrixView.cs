@@ -1,10 +1,10 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
+
 namespace DevOnBike.Overfit.Core
 {
     /// <summary>
-    /// Bezalokacyjny widok na pamięć macierzy.
-    /// Definiuje kształt (Rows, Cols) oraz fizyczny układ w pamięci (Strides, Offset).
+    /// Bezalokacyjny widok na pamięć macierzy (ref struct — zero heap alloc).
     /// </summary>
     public readonly ref struct FastMatrixView<T> where T : struct, IFloatingPointIeee754<T>
     {
@@ -12,26 +12,17 @@ namespace DevOnBike.Overfit.Core
 
         public int Rows { get; }
         public int Cols { get; }
-
-        // Strides (Kroki) - o ile elementów przeskoczyć w surowej tablicy, 
-        // aby przejść do następnego wiersza lub kolumny.
         public int RowStride { get; }
         public int ColStride { get; }
         public int Offset { get; }
 
-        /// <summary>
-        /// Zwraca true, jeśli pamięć w widoku układa się w jeden ciągły blok (Row-Major).
-        /// Pozwala to na pełną akcelerację SIMD całego bloku.
-        /// </summary>
         public bool IsContiguous => ColStride == 1 && RowStride == Cols;
 
         public FastMatrixView(Span<T> data, int rows, int cols, int rowStride, int colStride, int offset)
         {
             _data = data;
-            Rows = rows;
-            Cols = cols;
-            RowStride = rowStride;
-            ColStride = colStride;
+            Rows = rows; Cols = cols;
+            RowStride = rowStride; ColStride = colStride;
             Offset = offset;
         }
 
@@ -41,23 +32,9 @@ namespace DevOnBike.Overfit.Core
             get => ref _data[Offset + row * RowStride + col * ColStride];
         }
 
-        // ====================================================================
-        // MAGIA WIDOKÓW - Te operacje kosztują O(1) i 0 bajtów alokacji!
-        // ====================================================================
+        public FastMatrixView<T> Transpose() =>
+            new(_data, rows: Cols, cols: Rows, rowStride: ColStride, colStride: RowStride, offset: Offset);
 
-        /// <summary>
-        /// Transpozycja macierzy w czasie O(1). 
-        /// Po prostu zamienia miejscami wymiary i kroki. Zero kopiowania pamięci!
-        /// </summary>
-        public FastMatrixView<T> Transpose()
-        {
-            return new FastMatrixView<T>(_data, rows: Cols, cols: Rows, rowStride: ColStride, colStride: RowStride, offset: Offset);
-        }
-
-        /// <summary>
-        /// Wycinanie podmacierzy (Slicing) w czasie O(1).
-        /// Modyfikuje tylko Offset i wymiary. Zero kopiowania!
-        /// </summary>
         public FastMatrixView<T> Slice(int startRow, int startCol, int rows, int cols)
         {
             if (startRow + rows > Rows || startCol + cols > Cols)
@@ -65,44 +42,77 @@ namespace DevOnBike.Overfit.Core
                 throw new ArgumentOutOfRangeException("Slice exceeds view dimensions.");
             }
 
-            var newOffset = Offset + startRow * RowStride + startCol * ColStride;
-
-            return new FastMatrixView<T>(_data, rows: rows, cols: cols, rowStride: RowStride, colStride: ColStride, offset: newOffset);
-        }
-        
-        /// <summary>
-        /// Materializes the view into a new, contiguous FastMatrix.
-        /// Essential for Autograd when a transposed view needs to be the right-hand operand in SIMD GEMM.
-        /// Caller is responsible for disposing the returned FastMatrix.
-        /// </summary>
-        public FastMatrix<T> ToContiguousFastMatrix()
-        {
-            var result = new FastMatrix<T>(Rows, Cols);
-            for (var r = 0; r < Rows; r++)
-            {
-                for (var c = 0; c < Cols; c++)
-                {
-                    result[r, c] = this[r, c];
-                }
-            }
-            return result;
+            return new(_data, rows, cols, RowStride, ColStride,
+                Offset + startRow * RowStride + startCol * ColStride);
         }
 
-        /// <summary>
-        /// Pobiera wiersz jako ciągły Span (jeśli to możliwe).
-        /// Jeśli macierz jest transponowana, wiersze przestają być ciągłe w pamięci.
-        /// </summary>
+        // ── Row access ───────────────────────────────────────────────────────
+
+        /// <summary>Ciągły Span wiersza — tylko gdy ColStride==1 (ciągły widok).</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Span<T> Row(int row)
         {
             if (ColStride != 1)
             {
-                throw new InvalidOperationException("Cannot return a contiguous Span for a row when ColStride != 1 (e.g., in a transposed view).");
+                throw new InvalidOperationException("Cannot return contiguous Span for a row when ColStride != 1 (transposed view).");
+            }
+            
+            return _data.Slice(Offset + row * RowStride, Cols);
+        }
+
+        /// <summary>ReadOnly Span wiersza — tylko gdy ColStride==1.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public ReadOnlySpan<T> ReadOnlyRow(int row)
+        {
+            if (ColStride != 1)
+            {
+                throw new InvalidOperationException("Cannot return contiguous ReadOnlySpan for a row when ColStride != 1.");
+            }
+            
+            return _data.Slice(Offset + row * RowStride, Cols);
+        }
+
+        // ── Materializacja ───────────────────────────────────────────────────
+
+        /// <summary>
+        /// Materializuje widok do ciągłej FastMatrix.
+        /// Dla ciągłych widoków: jeden CopyTo (memcpy).
+        /// Dla transponowanych: per-row copy — unika N² scalar ops.
+        /// Caller odpowiada za Dispose().
+        /// </summary>
+        public FastMatrix<T> ToContiguousFastMatrix()
+        {
+            var result = new FastMatrix<T>(Rows, Cols);
+
+            if (IsContiguous)
+            {
+                // Ciągły blok — jeden AVX memcpy
+                _data.Slice(Offset, Size).CopyTo(result.AsSpan());
+            }
+            else if (ColStride == 1)
+            {
+                // Wiersze ciągłe, ale między nimi jest padding (np. Slice)
+                // Kopiujemy wiersz po wierszu przez SIMD CopyTo
+                for (var r = 0; r < Rows; r++)
+                {
+                    _data.Slice(Offset + r * RowStride, Cols).CopyTo(result.Row(r));
+                }
+            }
+            else
+            {
+                // Transponowany — kolumny stają się wierszami, scalar fallback
+                for (var r = 0; r < Rows; r++)
+                {
+                    for (var c = 0; c < Cols; c++)
+                    {
+                        result[r, c] = _data[Offset + r * RowStride + c * ColStride];
+                    }
+                }
             }
 
-            var start = Offset + row * RowStride;
-            
-            return _data.Slice(start, Cols);
+            return result;
         }
+
+        private int Size => Rows * Cols;
     }
 }

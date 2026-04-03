@@ -14,6 +14,8 @@ namespace DevOnBike.Overfit.Core
         GlobalAveragePool2D,
         BatchNorm1D,
         MSELoss,
-        SoftmaxCrossEntropy
+        SoftmaxCrossEntropy,
+        Reshape,
+        DirectionalLoss
     }
 }

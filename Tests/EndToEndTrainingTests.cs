@@ -24,11 +24,12 @@ namespace DevOnBike.Overfit.Tests
             // ==========================================
             // ARRANGE
             // ==========================================
-            using var xData = new FastMatrix<float>(4, 2);
-            xData.CopyFrom([0, 0, 0, 1, 1, 0, 1, 1]);
+            // Tworzymy tensory 2D: [Batch, Features]
+            using var xData = new FastTensor<float>(4, 2);
+            ((Span<float>)[0, 0, 0, 1, 1, 0, 1, 1]).CopyTo(xData.AsSpan());
 
-            using var yData = new FastMatrix<float>(4, 1);
-            yData.CopyFrom([0, 1, 1, 0]);
+            using var yData = new FastTensor<float>(4, 1);
+            ((Span<float>)[0, 1, 1, 0]).CopyTo(yData.AsSpan());
 
             using var X = new AutogradNode(xData, requiresGrad: false);
             using var Y = new AutogradNode(yData, requiresGrad: false);
@@ -40,7 +41,7 @@ namespace DevOnBike.Overfit.Tests
             var sgd = new SGD(model.Parameters(), learningRate: 0.1f);
 
             var epochs = 2000;
-            var finalLoss = double.MaxValue;
+            var finalLoss = 0f;
 
             // ==========================================
             // ACT (Trening)
@@ -64,7 +65,7 @@ namespace DevOnBike.Overfit.Tests
             // ==========================================
             // ASSERT (Weryfikacja w trybie No-Grad)
             // ==========================================
-            Assert.True(finalLoss < 0.05, $"Trening nie powiódł się. Loss: {finalLoss:F5}");
+            Assert.True(finalLoss < 0.05f, $"Trening nie powiódł się. Loss: {finalLoss:F5}");
 
             // Wyłączamy nagrywanie operacji dla fazy testowej
             ComputationGraph.Active.IsRecording = false;
@@ -72,14 +73,16 @@ namespace DevOnBike.Overfit.Tests
             {
                 using var finalPrediction = model.Forward(X);
 
-                Assert.True(finalPrediction.Data[0, 0] < 0.15);
-                Assert.True(finalPrediction.Data[1, 0] > 0.85);
-                Assert.True(finalPrediction.Data[2, 0] > 0.85);
-                Assert.True(finalPrediction.Data[3, 0] < 0.15);
+                // Sprawdzamy wyniki dla Batcha 4 przykładów
+                Assert.True(finalPrediction.Data[0, 0] < 0.15f);
+                Assert.True(finalPrediction.Data[1, 0] > 0.85f);
+                Assert.True(finalPrediction.Data[2, 0] > 0.85f);
+                Assert.True(finalPrediction.Data[3, 0] < 0.15f);
             }
             finally
             {
                 ComputationGraph.Active.IsRecording = true;
+                model.Dispose();
             }
         }
 
@@ -90,8 +93,8 @@ namespace DevOnBike.Overfit.Tests
             // ARRANGE: Generowanie 300 punktów danych
             // ==========================================
             var numSamples = 300;
-            using var xData = new FastMatrix<float>(numSamples, 2);
-            using var yData = new FastMatrix<float>(numSamples, 1);
+            using var xData = new FastTensor<float>(numSamples, 2);
+            using var yData = new FastTensor<float>(numSamples, 1);
             var rnd = new Random(42);
 
             for (var i = 0; i < numSamples; i++)
@@ -119,7 +122,7 @@ namespace DevOnBike.Overfit.Tests
 
             var sgd = new SGD(model.Parameters(), learningRate: 0.05f);
             var epochs = 3000;
-            var finalLoss = double.MaxValue;
+            var finalLoss = 0f;
 
             // ==========================================
             // ACT: Pętla Treningowa
@@ -140,7 +143,8 @@ namespace DevOnBike.Overfit.Tests
             // ==========================================
             // ASSERT
             // ==========================================
-            Assert.True(finalLoss < 0.1, $"Sieć nie podołała okręgom. Końcowy błąd: {finalLoss:F5}");
+            Assert.True(finalLoss < 0.1f, $"Sieć nie podołała okręgom. Końcowy błąd: {finalLoss:F5}");
+            model.Dispose();
         }
     }
 }
