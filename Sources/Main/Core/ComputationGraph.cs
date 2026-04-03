@@ -7,7 +7,16 @@ namespace DevOnBike.Overfit.Core
         private int _opCount = 0;
 
         private static readonly ThreadLocal<ComputationGraph> _active = new(() => new ComputationGraph());
-        public static ComputationGraph Active { get => _active.Value; set => _active.Value = value; }
+        public static ComputationGraph Active
+        {
+            get
+            {
+                _active.Value ??= new ComputationGraph();
+
+                return _active.Value;
+            }
+            set => _active.Value = value;
+        }
 
         public bool IsRecording { get; set; } = true;
 

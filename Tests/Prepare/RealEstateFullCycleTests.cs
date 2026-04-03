@@ -70,15 +70,20 @@ namespace DevOnBike.Overfit.Tests.Prepare
             _output.WriteLine("=== START TRENINGU ===");
             for (var epoch = 0; epoch <= 400; epoch++)
             {
-                graph.Reset(); //
-                optimizer.ZeroGrad(); //
+                graph.Reset();
+                optimizer.ZeroGrad();
 
-                using var l1 = TensorMath.ReLU(TensorMath.AddBias(TensorMath.MatMul(inputNode, w1), b1));
-                using var prediction = TensorMath.AddBias(TensorMath.MatMul(l1, w2), b2);
-                using var lossNode = TensorMath.MSELoss(prediction, targetNode); //
+                // Poprawna alokacja i zwalnianie pamięci w każdej epoce
+                using var p1 = TensorMath.MatMul(inputNode, w1);
+                using var p2 = TensorMath.AddBias(p1, b1);
+                using var l1 = TensorMath.ReLU(p2);
 
-                graph.Backward(lossNode); //
-                optimizer.Step(); //
+                using var p3 = TensorMath.MatMul(l1, w2);
+                using var prediction = TensorMath.AddBias(p3, b2);
+                using var lossNode = TensorMath.MSELoss(prediction, targetNode);
+
+                graph.Backward(lossNode);
+                optimizer.Step();
 
                 if (epoch % 100 == 0) _output.WriteLine($"Epoka {epoch:D3} | Loss: {lossNode.Forward():F6}");
             }
@@ -130,26 +135,36 @@ namespace DevOnBike.Overfit.Tests.Prepare
         private void CalculateImportance(AutogradNode w1, AutogradNode b1, AutogradNode w2, AutogradNode b2,
             FastTensor<float> x, FastTensor<float> y, List<string> names)
         {
-            ComputationGraph.Active.IsRecording = false; //
-            float baselineLoss = GetEvalLoss(w1, b1, w2, b2, x, y);
-            var impacts = new float[x.GetDim(1)];
-
-            for (int c = 0; c < x.GetDim(1); c++)
+            try
             {
-                using var shuffledX = FastTensor<float>.SameShape(x, false); //
-                x.AsSpan().CopyTo(shuffledX.AsSpan());
-                ShuffleColumn(shuffledX, c); // Permutacja kolumny
+                ComputationGraph.Active.IsRecording = false; //
+                float baselineLoss = GetEvalLoss(w1, b1, w2, b2, x, y);
+                var impacts = new float[x.GetDim(1)];
 
-                float newLoss = GetEvalLoss(w1, b1, w2, b2, shuffledX, y);
-                impacts[c] = MathF.Max(0, newLoss - baselineLoss);
+                for (int c = 0; c < x.GetDim(1); c++)
+                {
+                    using var shuffledX = FastTensor<float>.SameShape(x, false); //
+                    x.AsSpan().CopyTo(shuffledX.AsSpan());
+                    ShuffleColumn(shuffledX, c); // Permutacja kolumny
+
+                    float newLoss = GetEvalLoss(w1, b1, w2, b2, shuffledX, y);
+                    impacts[c] = MathF.Max(0, newLoss - baselineLoss);
+                }
+
+                float total = impacts.Sum();
+                foreach (var r in impacts.Select((val, idx) => (Name: names[idx], Val: val)).OrderByDescending(r => r.Val))
+                {
+                    float pct = (total > 0) ? (r.Val / total) * 100 : 0;
+                    _output.WriteLine($"{r.Name,-15} : {pct,6:F1}%");
+                }
+            }
+            finally
+            {
+                // Gwarancja, że zostawiamy czysty wątek dla kolejnych testów w xUnit
+                ComputationGraph.Active.IsRecording = true;
             }
 
-            float total = impacts.Sum();
-            foreach (var r in impacts.Select((val, idx) => (Name: names[idx], Val: val)).OrderByDescending(r => r.Val))
-            {
-                float pct = (total > 0) ? (r.Val / total) * 100 : 0;
-                _output.WriteLine($"{r.Name,-15} : {pct,6:F1}%");
-            }
+            
         }
 
         private void AnalyzeDirection(AutogradNode w1, AutogradNode b1, AutogradNode w2, AutogradNode b2,
