@@ -326,6 +326,74 @@ namespace DevOnBike.Overfit.Tests
             VerifyGradients(lossFunc, input);
         }
 
+        [Fact]
+        public void DirectionalLoss_MathematicalGradient_Check()
+        {
+            using var pred = new AutogradNode(new FastTensor<float>(1, 4));
+            using var target = new AutogradNode(new FastTensor<float>(1, 4), false);
+
+            var pData = pred.Data.AsSpan();
+            var tData = target.Data.AsSpan();
+
+            // Ustawiamy scenariusze:
+            pData[0] = 1f; tData[0] = 2f;   // Zgodny kierunek (+)
+            pData[1] = 1f; tData[1] = -2f;  // Zły kierunek (p>0, t<0)
+            pData[2] = -1f; tData[2] = -2f;  // Zgodny kierunek (-)
+            pData[3] = -1f; tData[3] = 2f;   // Zły kierunek (p<0, t>0)
+
+            // Wywołujemy z gamma = 10f
+            using var loss = TensorMath.DirectionalLoss(pred, target, gamma: 10f);
+
+            // Obliczenia analityczne dla Loss:
+            // i=0 (zgodny): mse = (1-2)^2 = 1. penalty = 0.
+            // i=1 (błędny): mse = (1 - -2)^2 = 9. penalty = -10 * (1 * -2) = 20. Suma = 29.
+            // i=2 (zgodny): mse = (-1 - -2)^2 = 1. penalty = 0.
+            // i=3 (błędny): mse = (-1 - 2)^2 = 9. penalty = -10 * (-1 * 2) = 20. Suma = 29.
+            // Srednia = (1 + 29 + 1 + 29) / 4 = 15.0
+            Assert.Equal(15f, loss.Data[0, 0]);
+
+            ComputationGraph.Active.Backward(loss);
+
+            var pGrad = pred.Grad.AsSpan();
+
+            // Obliczenia analityczne dla Gradientów (dL/dp):
+            // i=0: 2*(1-2)/4 = -0.5
+            Assert.Equal(-0.5f, pGrad[0]);
+
+            // i=1: 2*(1 - -2)/4 + (-(-2) * 10 / 4) = 1.5 + 5.0 = 6.5
+            Assert.Equal(6.5f, pGrad[1]);
+
+            // i=2: 2*(-1 - -2)/4 = 0.5
+            Assert.Equal(0.5f, pGrad[2]);
+
+            // i=3: 2*(-1 - 2)/4 + (-(2) * 10 / 4) = -1.5 - 5.0 = -6.5
+            Assert.Equal(-6.5f, pGrad[3]);
+        }
+
+        [Fact]
+        public void NumericalCheck_DirectionalLoss_ShouldBePrecise()
+        {
+            using var pred = new AutogradNode(new FastTensor<float>(2, 3));
+            using var target = new AutogradNode(new FastTensor<float>(2, 3), false);
+
+            var pData = pred.Data.AsSpan();
+            var tData = target.Data.AsSpan();
+
+            // Losujemy wartości, by pokryć mieszankę dobrych i złych kierunków 
+            // oraz zjawisko przekraczania zera.
+            pData[0] = 0.5f; tData[0] = 0.8f;   // Zgodny (+)
+            pData[1] = -0.5f; tData[1] = 0.8f;   // Zły kierunek
+            pData[2] = 1.2f; tData[2] = -0.3f;  // Zły kierunek
+            pData[3] = -1.0f; tData[3] = -1.5f;  // Zgodny (-)
+            pData[4] = 0.1f; tData[4] = 0.5f;   // Blisko zera
+            pData[5] = 2.0f; tData[5] = 2.5f;   // Zgodny (+)
+
+            var lossFunc = () => TensorMath.DirectionalLoss(pred, target, gamma: 10f);
+
+            // Wykorzystujemy istniejącą metodę z pliku TensorMathComprehensiveTests.cs
+            VerifyGradients(lossFunc, pred);
+        }
+
         // ====================================================================
         // HELPER: NUMERICAL GRADIENT CHECKER
         // ====================================================================
