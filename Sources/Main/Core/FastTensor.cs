@@ -290,6 +290,13 @@ namespace DevOnBike.Overfit.Core
             };
         }
 
+        public FastTensor<T> Zero()
+        {
+            AsSpan().Clear();
+
+            return this;
+        }
+
         // ── Dispose — Interlocked, double-dispose safe ───────────────────────────────
 
         public void Dispose()

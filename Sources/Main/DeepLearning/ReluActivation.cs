@@ -16,7 +16,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public IEnumerable<AutogradNode> Parameters()
         {
-            return Enumerable.Empty<AutogradNode>();
+            return [];
         }
 
         public void Save(BinaryWriter bw) { }

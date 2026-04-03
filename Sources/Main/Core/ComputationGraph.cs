@@ -21,12 +21,16 @@ namespace DevOnBike.Overfit.Core
 
         public void Backward(AutogradNode lossNode)
         {
-            if (lossNode?.Grad == null) return;
+            if (lossNode?.Grad == null)
+            {
+                return;
+            }
 
             // Zerowanie gradientów przed fazą Backward (poprawka dla ref struct Span)
             for (var i = 0; i < _opCount; i++)
             {
                 ref readonly var op = ref _tape[i];
+                
                 if (op.Output?.Grad != null) op.Output.Grad.AsSpan().Clear();
                 if (op.A?.Grad != null) op.A.Grad.AsSpan().Clear();
                 if (op.B?.Grad != null) op.B.Grad.AsSpan().Clear();
@@ -39,6 +43,17 @@ namespace DevOnBike.Overfit.Core
                 ExecuteBackward(in _tape[i]);
             }
         }
+
+        public AutogradNode Add(AutogradNode left, AutogradNode right) => TensorMath.Add(left, right);
+        public AutogradNode AddBias(AutogradNode input, AutogradNode bias) => TensorMath.AddBias(input, bias);
+        public AutogradNode MatMul(AutogradNode left, AutogradNode right) => TensorMath.MatMul(left, right);
+        public AutogradNode ReLU(AutogradNode input) => TensorMath.ReLU(input);
+
+        public AutogradNode MeanSquaredError(AutogradNode prediction, AutogradNode target)
+            => TensorMath.MSELoss(prediction, target);
+
+        public AutogradNode DirectionalLoss(AutogradNode prediction, AutogradNode target, float gamma = 10f)
+            => TensorMath.DirectionalLoss(prediction, target, gamma);
 
         private void ExecuteBackward(in TapeOp op)
         {
@@ -66,7 +81,11 @@ namespace DevOnBike.Overfit.Core
 
         public void Reset()
         {
-            if (_opCount > 0) Array.Clear(_tape, 0, _opCount);
+            if (_opCount > 0)
+            {
+                Array.Clear(_tape, 0, _opCount);
+            }
+            
             _opCount = 0;
         }
     }

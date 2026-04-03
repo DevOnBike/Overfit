@@ -762,7 +762,7 @@ namespace DevOnBike.Overfit.Core
 
             if (output.RequiresGrad && isTraining)
             {
-                ComputationGraph.Active.Record(OpCode.BatchNorm1D, output, input, null, 0, 0, 0, 0, 0, new[] { gamma, beta, mean, invStd });
+                ComputationGraph.Active.Record(OpCode.BatchNorm1D, output, input, null, 0, 0, 0, 0, 0, [gamma, beta, mean, invStd]);
             }
 
             return output;

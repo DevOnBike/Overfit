@@ -1,8 +1,5 @@
 ﻿using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.Optimizers;
-using System;
-using System.Linq;
-using Xunit;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests
