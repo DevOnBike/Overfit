@@ -160,7 +160,7 @@ namespace DevOnBike.Overfit.Tests
             }
 
             Assert.NotNull(expectedException);
-            Assert.Contains("Cannot return a contiguous Span", expectedException.Message);
+            Assert.Contains("Cannot return contiguous Span", expectedException.Message);
         }
     }
 }
