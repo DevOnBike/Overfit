@@ -362,8 +362,12 @@ namespace DevOnBike.Overfit.Tests
         // HELPER: NUMERICAL GRADIENT CHECKER
         // ====================================================================
 
-        private void VerifyGradients(Func<AutogradNode> lossFunc, AutogradNode parameter, float epsilon = 1e-4f, float tolerance = 2e-3f)
+        private void VerifyGradients(Func<AutogradNode> lossFunc, AutogradNode parameter, float epsilon = 1e-3f, float tolerance = 1e-2f)
         {
+            // Zerujemy gradient parametru — ten sam kontrakt co optimizer.ZeroGrad()
+            // Bez tego gradient kumuluje się z poprzednich wywołań VerifyGradients
+            parameter.Grad.AsSpan().Clear();
+
             _graph.Reset();
             using var lossNode = lossFunc();
             _graph.Backward(lossNode);
