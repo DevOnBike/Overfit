@@ -4,15 +4,23 @@ namespace DevOnBike.Overfit.Core
     {
         private const int InitialCapacity = 4096;
         private TapeOp[] _tape = new TapeOp[InitialCapacity];
-        private int _opCount = 0;
+        private int _opCount;
 
         public bool IsRecording { get; set; } = true;
 
         public void Record(OpCode code, AutogradNode output, AutogradNode a, AutogradNode b = null,
             int i0 = 0, int i1 = 0, int i2 = 0, int i3 = 0, int i4 = 0, AutogradNode[] nodeContext = null)
         {
-            if (!IsRecording) return;
-            if (_opCount >= _tape.Length) Array.Resize(ref _tape, _tape.Length * 2);
+            if (!IsRecording)
+            {
+                return;
+            }
+
+            if (_opCount >= _tape.Length)
+            {
+                Array.Resize(ref _tape, _tape.Length * 2);
+            }
+
             _tape[_opCount++] = new TapeOp(code, output, a, b, i0, i1, i2, i3, i4, nodeContext);
         }
 
@@ -23,16 +31,11 @@ namespace DevOnBike.Overfit.Core
                 return;
             }
 
-            // Zerowanie gradientów przed fazą Backward (poprawka dla ref struct Span)
-            for (var i = 0; i < _opCount; i++)
-            {
-                ref readonly var op = ref _tape[i];
-                
-                if (op.Output?.Grad != null) op.Output.Grad.AsSpan().Clear();
-                if (op.A?.Grad != null) op.A.Grad.AsSpan().Clear();
-                if (op.B?.Grad != null) op.B.Grad.AsSpan().Clear();
-            }
-
+            // Jedyne co robimy: ustawiamy gradient Loss na 1.0
+            // Zerowanie gradientów NIE jest potrzebne tutaj, bo:
+            //   - Parametry (w1, b1, ...) — zerowane przez optimizer.ZeroGrad() przed Forward
+            //   - Intermediate nodes (l1, prediction, loss) — tworzone na nowo każdą epokę
+            //     z using var, więc ich Grad jest świeży (zerowany w konstruktorze AutogradNode)
             lossNode.Grad.AsSpan().Fill(1f);
 
             for (var i = _opCount - 1; i >= 0; i--)
@@ -45,14 +48,17 @@ namespace DevOnBike.Overfit.Core
         {
             return TensorMath.Add(this, left, right);
         }
+
         public AutogradNode AddBias(AutogradNode input, AutogradNode bias)
         {
             return TensorMath.AddBias(this, input, bias);
         }
+
         public AutogradNode MatMul(AutogradNode left, AutogradNode right)
         {
             return TensorMath.MatMul(this, left, right);
         }
+
         public AutogradNode ReLU(AutogradNode input)
         {
             return TensorMath.ReLU(this, input);
@@ -98,7 +104,7 @@ namespace DevOnBike.Overfit.Core
             {
                 Array.Clear(_tape, 0, _opCount);
             }
-            
+
             _opCount = 0;
         }
     }
