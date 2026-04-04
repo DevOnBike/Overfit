@@ -1,5 +1,6 @@
 ﻿using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.DeepLearning;
+using System;
 using System.IO;
 
 namespace DevOnBike.Overfit.UI
@@ -13,7 +14,7 @@ namespace DevOnBike.Overfit.UI
 
         public MnistPredictor(string modelPath)
         {
-            // 1. Definicja architektury (Musi być identyczna jak w MnistTrainingTests)
+            // 1. Definicja architektury (Musi być identyczna jak w używanym modelu)
             // Wejście [1, 1, 28, 28] -> Conv 3x3 (8 filtrów) -> [1, 8, 26, 26]
             _conv1 = new ConvLayer(inChannels: 1, outChannels: 8, h: 28, w: 28, kSize: 3);
 
@@ -37,11 +38,7 @@ namespace DevOnBike.Overfit.UI
             // 4. Tryb inferencji (Eval) - wyłącza Dropout i blokuje aktualizację średnich w BatchNorm
             _weightsContainer.Eval();
 
-            // 5. Zapewnienie aktywnej Taśmy dla wątku UI
-            if (ComputationGraph.Active == null)
-            {
-                ComputationGraph.Active = new ComputationGraph();
-            }
+            // USUNIĘTO: Ręczne tworzenie instancji ComputationGraph.Active
         }
 
         public int Predict(float[] pixelData)
@@ -49,42 +46,33 @@ namespace DevOnBike.Overfit.UI
             if (pixelData == null || pixelData.Length != 784)
                 throw new ArgumentException("Niepoprawne dane wejściowe. Oczekiwano 784 pikseli.");
 
-            // Wyłączamy nagrywanie operacji (Inference nie wymaga grafu)
-            ComputationGraph.Active.Reset();
-            ComputationGraph.Active.IsRecording = false;
+            // USUNIĘTO: Manipulowanie ComputationGraph.Active oraz bloki try-finally
 
-            try
-            {
-                // Tworzymy wejście 4D: [Batch: 1, Channel: 1, H: 28, W: 28]
-                using var inputMat = new FastTensor<float>(1, 1, 28, 28);
-                pixelData.CopyTo(inputMat.AsSpan());
+            // Tworzymy wejście 4D: [Batch: 1, Channel: 1, H: 28, W: 28]
+            using var inputMat = new FastTensor<float>(1, 1, 28, 28);
+            pixelData.CopyTo(inputMat.AsSpan());
 
-                using var input = new AutogradNode(inputMat, requiresGrad: false);
+            using var input = new AutogradNode(inputMat, requiresGrad: false);
 
-                // --- PRZEJŚCIE W PRZÓD (FORWARD PASS) ---
+            // --- PRZEJŚCIE W PRZÓD (FORWARD PASS) ---
+            // ZMIANA: Przekazujemy 'null' jako ComputationGraph, wymuszając super szybką inferencję
 
-                // 1. Warstwa konwolucyjna
-                using var h1 = _conv1.Forward(input);
-                using var a1 = TensorMath.ReLU(h1);
+            // 1. Warstwa konwolucyjna
+            using var h1 = _conv1.Forward(null, input);
+            using var a1 = TensorMath.ReLU(null, h1);
 
-                // 2. Pooling
-                using var p1 = TensorMath.MaxPool2D(a1, 8, 26, 26, 2);
+            // 2. Pooling
+            using var p1 = TensorMath.MaxPool2D(null, a1, 8, 26, 26, 2);
 
-                // 3. KRYTYCZNY KROK: Spłaszczenie do 2D dla BatchNorm i FC
-                // Wykorzystujemy operację Reshape (Zero-Copy)
-                using var p1Flat = new AutogradNode(p1.Data.Reshape(1, 1352), false);
+            // 3. KRYTYCZNY KROK: Spłaszczenie do 2D dla BatchNorm i FC
+            using var p1Flat = TensorMath.Reshape(null, p1, 1, 1352);
 
-                // 4. Normalizacja i Klasyfikacja
-                using var bnOut = _bn1.Forward(p1Flat);
-                using var output = _fc1.Forward(bnOut);
+            // 4. Normalizacja i Klasyfikacja
+            using var bnOut = _bn1.Forward(null, p1Flat);
+            using var output = _fc1.Forward(null, bnOut);
 
-                // 5. Zwracamy wynik
-                return GetArgMax(output.Data.AsSpan());
-            }
-            finally
-            {
-                ComputationGraph.Active.IsRecording = true;
-            }
+            // 5. Zwracamy wynik
+            return GetArgMax(output.Data.AsSpan());
         }
 
         // Pomocniczy helper zastępujący ArgMax z FastMatrix
