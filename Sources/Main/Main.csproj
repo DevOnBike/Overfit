@@ -11,7 +11,7 @@
 		<SourceRevisionId>N/A</SourceRevisionId>
 		<InformationalVersion>$(Version)+$(SourceRevisionId)</InformationalVersion>
 		<PackageId>DevOnBike.Overfit</PackageId>
-		<Version>10.0.2</Version>
+		<Version>10.0.3</Version>
 		<Authors>DevOnBike</Authors>
 		<Description>Machine Learning</Description>
 		<RepositoryUrl>https://github.com/DevOnBike/Overfit</RepositoryUrl>
@@ -30,15 +30,20 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <PackageReference Include="IDisposableAnalyzers">
-	    <PrivateAssets>all</PrivateAssets>
-	    <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-	  </PackageReference>
-	  <PackageReference Include="System.Numerics.Tensors" />
+		<PackageReference Include="IDisposableAnalyzers">
+			<PrivateAssets>all</PrivateAssets>
+			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+		</PackageReference>
+		<PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers">
+			<PrivateAssets>all</PrivateAssets>
+			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+		</PackageReference>
+		<PackageReference Include="System.Numerics.Tensors" />
 	</ItemGroup>
 
 	<ItemGroup>
-	  <Folder Include="Extensions\" />
+		<AdditionalFiles Include="BannedSymbols.txt" />
+		<Using Remove="System.Linq" />
 	</ItemGroup>
 
 </Project>

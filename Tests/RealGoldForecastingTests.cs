@@ -11,7 +11,7 @@ namespace DevOnBike.Overfit.Tests
         public RealGoldForecastingTests(ITestOutputHelper output)
         {
             _output = output;
-            ComputationGraph.Active = new ComputationGraph();
+            // USUNIĘTO: ComputationGraph.Active = new ComputationGraph();
         }
 
         [Fact]
@@ -59,21 +59,26 @@ namespace DevOnBike.Overfit.Tests
             var parameters = new[] { w1, b1, w2, b2 };
             using var optimizer = new Adam(parameters, learningRate);
 
+            // ZMIANA: Tworzymy jawną instancję grafu obliczeniowego
+            var graph = new ComputationGraph();
+
             // 5. PĘTLA TRENINGOWA
             for (var epoch = 1; epoch <= epochs; epoch++)
             {
-                using var hidden = TensorMath.Linear(inputNode, w1, b1);
-                using var relu = TensorMath.ReLU(hidden);
-                using var prediction = TensorMath.Linear(relu, w2, b2);
+                // ZMIANA: Przekazujemy 'graph' do nagrywania operacji
+                using var hidden = TensorMath.Linear(graph, inputNode, w1, b1);
+                using var relu = TensorMath.ReLU(graph, hidden);
+                using var prediction = TensorMath.Linear(graph, relu, w2, b2);
 
                 // Silna kara za pomyłkę kierunku trendu
-                using var loss = TensorMath.DirectionalLoss(prediction, targetNode, gamma: 15f);
+                using var loss = TensorMath.DirectionalLoss(graph, prediction, targetNode, gamma: 15f);
 
-                ComputationGraph.Active.Backward(loss);
+                // ZMIANA: Wsteczna propagacja na jawnym obiekcie
+                graph.Backward(loss);
                 optimizer.Step();
 
                 optimizer.ZeroGrad();
-                ComputationGraph.Active.Reset();
+                graph.Reset();
             }
 
             _output.WriteLine($"Trenowano na {numSamples} próbkach. Zakończono.");
@@ -85,13 +90,15 @@ namespace DevOnBike.Overfit.Tests
             lastReturns.AsSpan().CopyTo(inferenceInput.AsSpan());
 
             using var inferenceNode = new AutogradNode(inferenceInput, false);
-            ComputationGraph.Active.IsRecording = false;
 
-            using var h = TensorMath.Linear(inferenceNode, w1, b1);
-            using var r = TensorMath.ReLU(h);
-            using var finalPred = TensorMath.Linear(r, w2, b2);
+            // USUNIĘTO: ComputationGraph.Active.IsRecording = false;
 
-            ComputationGraph.Active.IsRecording = true;
+            // ZMIANA: Przekazujemy 'null', co jest nowym sygnałem trybu Inference bez alokacji i logowania na taśmę
+            using var h = TensorMath.Linear(null, inferenceNode, w1, b1);
+            using var r = TensorMath.ReLU(null, h);
+            using var finalPred = TensorMath.Linear(null, r, w2, b2);
+
+            // USUNIĘTO: ComputationGraph.Active.IsRecording = true;
 
             var predictedReturn = finalPred.Data[0, 0];
             var predictedPriceUSD = lastKnownPrice * (1f + predictedReturn);

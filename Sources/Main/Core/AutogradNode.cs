@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace DevOnBike.Overfit.Core
 {
     public sealed class AutogradNode : IDisposable
@@ -13,14 +15,15 @@ namespace DevOnBike.Overfit.Core
 
             if (requiresGrad)
             {
-                // SameShape zamiast data.Shape — eliminuje new int[Rank] per instancja.
-                // clearMemory:true (domyślne) — konstruktor FastTensor już czyści ArrayPool.
-                // Redundantne Grad.AsSpan().Clear() usunięte.
                 Grad = FastTensor<float>.SameShape(data, clearMemory: true);
             }
         }
 
-        public void Backward() => ComputationGraph.Active?.Backward(this);
+        /// <summary>
+        /// Pobiera wartość skalarną (np. dla węzła Loss).
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public float Forward() => Data[0];
 
         public void Dispose()
         {

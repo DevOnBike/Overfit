@@ -5,7 +5,8 @@ using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests
 {
-    public class TicTacToeIntelligenceTests : IDisposable
+    // USUNIĘTO: IDisposable, brak globalnego stanu do czyszczenia
+    public class TicTacToeIntelligenceTests
     {
         private readonly ITestOutputHelper _output;
         private readonly Random _rng = new();
@@ -13,17 +14,10 @@ namespace DevOnBike.Overfit.Tests
         public TicTacToeIntelligenceTests(ITestOutputHelper output)
         {
             _output = output;
-            // 1. ZAINICJOWANIE TAŚMY (Globalnego Grafu Obliczeniowego)
-            ComputationGraph.Active = new ComputationGraph();
+            // USUNIĘTO: ComputationGraph.Active = new ComputationGraph();
         }
 
-        public void Dispose()
-        {
-            // Zwolnienie referencji do grafu po zakończeniu testów
-            ComputationGraph.Active = null;
-        }
-
-        [Fact(Skip = "aaa")]
+        [Fact]
         public void Bestia_ShouldLearn_TicTacToe_LongTraining()
         {
             // ARCHITEKTURA: Solidny mózg dla solidnej Bestii
@@ -38,6 +32,9 @@ namespace DevOnBike.Overfit.Tests
             // WAŻNE: 'using' przy Adamie! Nowy Adam wynajmuje pamięć (FastTensor 1D), 
             // która musi wrócić do ArrayPoola po zakończeniu całego procesu.
             using var optimizer = new Adam(model.Parameters(), 0.001f);
+
+            // ZMIANA: Tworzymy jawną instancję grafu do treningu
+            var graph = new ComputationGraph();
 
             // PARAMETRY DŁUGIEGO TRENINGU
             var totalGames = 50000;
@@ -58,13 +55,15 @@ namespace DevOnBike.Overfit.Tests
                 {
                     // --- RUCH AI ---
                     var stateBefore = (float[])board.Clone();
+
+                    // ChooseAction działa w trybie inference (nie potrzebuje grafu)
                     var action = ChooseAction(model, stateBefore, epsilon);
 
                     var legal = MakeMove(board, action, 1.0f);
                     var reward = EvaluateBoard(board, legal, out gameOver);
 
-                    // Nauka na własnym ruchu
-                    TrainStep(model, optimizer, stateBefore, action, reward, board, gameOver);
+                    // Nauka na własnym ruchu (Przekazujemy jawną instancję grafu)
+                    TrainStep(model, optimizer, graph, stateBefore, action, reward, board, gameOver);
 
                     if (gameOver)
                     {
@@ -79,7 +78,7 @@ namespace DevOnBike.Overfit.Tests
 
                     if (gameOver)
                     {
-                        TrainStep(model, optimizer, stateBefore, action, reward, board, true);
+                        TrainStep(model, optimizer, graph, stateBefore, action, reward, board, true);
                     }
                 }
 
@@ -101,10 +100,11 @@ namespace DevOnBike.Overfit.Tests
             _output.WriteLine("Mózg Bestii został zgrany na dysk.");
         }
 
-        private void TrainStep(Sequential model, Adam opt, float[] s, int a, float r, float[] nextS, bool done)
+        // ZMIANA: Dodano parametr ComputationGraph
+        private void TrainStep(Sequential model, Adam opt, ComputationGraph graph, float[] s, int a, float r, float[] nextS, bool done)
         {
             // RESET TAŚMY - Zwalnia operacje z poprzedniego kroku, zero alokacji!
-            ComputationGraph.Active.Reset();
+            graph.Reset();
             opt.ZeroGrad();
 
             // 1. Forward 
@@ -112,7 +112,8 @@ namespace DevOnBike.Overfit.Tests
             s.CopyTo(inputMat.AsSpan());
             using var inputNode = new AutogradNode(inputMat, requiresGrad: false);
 
-            using var pred = model.Forward(inputNode);
+            // ZMIANA: Przekazujemy jawny graf do sieci, by nagrywała operacje
+            using var pred = model.Forward(graph, inputNode);
 
             // 2. Bellman Target
             using var targetMat = new FastTensor<float>(1, 9);
@@ -125,9 +126,8 @@ namespace DevOnBike.Overfit.Tests
                 nextS.CopyTo(nextInputMat.AsSpan());
                 using var nextInputNode = new AutogradNode(nextInputMat, requiresGrad: false);
 
-                ComputationGraph.Active.IsRecording = false;
-                using var nextQNode = model.Forward(nextInputNode);
-                ComputationGraph.Active.IsRecording = true;
+                // ZMIANA: Przekazujemy 'null', by wyłączyć nagrywanie przy przewidywaniu max Q w następnym stanie (Inference)
+                using var nextQNode = model.Forward(null, nextInputNode);
 
                 var maxNextQ = -float.MaxValue;
                 var nqSpan = nextQNode.Data.AsSpan();
@@ -142,9 +142,12 @@ namespace DevOnBike.Overfit.Tests
 
             // 3. Loss & Backward
             using var targetNode = new AutogradNode(targetMat, requiresGrad: false);
-            using var loss = TensorMath.MSELoss(pred, targetNode);
 
-            ComputationGraph.Active.Backward(loss);
+            // ZMIANA: Przekazujemy graf do wyliczenia straty
+            using var loss = TensorMath.MSELoss(graph, pred, targetNode);
+
+            // ZMIANA: Backward na instancji grafu
+            graph.Backward(loss);
             opt.Step();
         }
 
@@ -156,13 +159,16 @@ namespace DevOnBike.Overfit.Tests
                 return empty.Length > 0 ? empty[_rng.Next(empty.Length)] : 0;
             }
 
-            ComputationGraph.Active.Reset();
+            // USUNIĘTO: ComputationGraph.Active.Reset(); 
+            // W trybie inference z 'null' taśma w ogóle nie jest używana, więc nie trzeba jej czyścić.
 
             using var inputMat = new FastTensor<float>(1, 9);
             board.CopyTo(inputMat.AsSpan());
 
             using var inputNode = new AutogradNode(inputMat, requiresGrad: false);
-            using var output = model.Forward(inputNode);
+
+            // ZMIANA: Omijamy nagrywanie operacji, podając 'null' (Inference)
+            using var output = model.Forward(null, inputNode);
 
             var bestIdx = 0;
             var maxVal = -float.MaxValue;

@@ -11,7 +11,7 @@ namespace DevOnBike.Overfit.Tests
         public MultiFeatureForecastingTests(ITestOutputHelper output)
         {
             _output = output;
-            ComputationGraph.Active = new ComputationGraph();
+            // USUNIĘTO: ComputationGraph.Active = new ComputationGraph();
         }
 
         [Fact]
@@ -78,19 +78,24 @@ namespace DevOnBike.Overfit.Tests
             var parameters = new[] { w1, b1, w2, b2 };
             using var optimizer = new Adam(parameters, learningRate);
 
+            // ZMIANA: Tworzymy jawną instancję grafu do treningu
+            var graph = new ComputationGraph();
+
             // 4. PĘTLA TRENINGOWA
             for (var epoch = 1; epoch <= epochs; epoch++)
             {
-                using var hidden = TensorMath.Linear(inputNode, w1, b1);
-                using var relu = TensorMath.ReLU(hidden);
-                using var prediction = TensorMath.Linear(relu, w2, b2);
+                // ZMIANA: Przekazanie 'graph' do operacji budujących taśmę
+                using var hidden = TensorMath.Linear(graph, inputNode, w1, b1);
+                using var relu = TensorMath.ReLU(graph, hidden);
+                using var prediction = TensorMath.Linear(graph, relu, w2, b2);
 
-                using var loss = TensorMath.DirectionalLoss(prediction, targetNode, gamma: 10f);
+                using var loss = TensorMath.DirectionalLoss(graph, prediction, targetNode, gamma: 10f);
 
-                ComputationGraph.Active.Backward(loss);
+                // ZMIANA: Wywołanie operacji wstecznych i resetu na obiekcie grafu
+                graph.Backward(loss);
                 optimizer.Step();
                 optimizer.ZeroGrad();
-                ComputationGraph.Active.Reset();
+                graph.Reset();
             }
 
             _output.WriteLine($"Przetrenowano na {numSamples} oknach czasowych. Sieć załapała korelację RSI i wolumenu!");
@@ -100,11 +105,13 @@ namespace DevOnBike.Overfit.Tests
             xSpan.Slice((numSamples - 1) * inputSize, inputSize).CopyTo(inferenceInput.AsSpan());
 
             using var inferenceNode = new AutogradNode(inferenceInput, false);
-            ComputationGraph.Active.IsRecording = false;
 
-            using var h = TensorMath.Linear(inferenceNode, w1, b1);
-            using var r = TensorMath.ReLU(h);
-            using var finalPred = TensorMath.Linear(r, w2, b2);
+            // USUNIĘTO: ComputationGraph.Active.IsRecording = false;
+
+            // ZMIANA: Przekazujemy NULL do metod matematycznych (Tryb Inference)
+            using var h = TensorMath.Linear(null, inferenceNode, w1, b1);
+            using var r = TensorMath.ReLU(null, h);
+            using var finalPred = TensorMath.Linear(null, r, w2, b2);
 
             _output.WriteLine($"Predykcja końcowa z 3 wskaźników: {finalPred.Data[0, 0] * 100f:F2}%");
 

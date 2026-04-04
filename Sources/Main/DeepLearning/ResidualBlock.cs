@@ -37,26 +37,26 @@ namespace DevOnBike.Overfit.DeepLearning
             _bn2.Eval();
         }
 
-        public AutogradNode Forward(AutogradNode input)
+        public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
-            var out1 = _linear1.Forward(input);
-            var bn1Out = _bn1.Forward(out1);
-            var a1 = TensorMath.ReLU(bn1Out);
+            var out1 = _linear1.Forward(graph, input);
+            var bn1Out = _bn1.Forward(graph, out1);
+            var a1 = TensorMath.ReLU(graph, bn1Out);
 
-            var out2 = _linear2.Forward(a1);
-            var bn2Out = _bn2.Forward(out2);
+            var out2 = _linear2.Forward(graph, a1);
+            var bn2Out = _bn2.Forward(graph, out2);
 
-            var added = TensorMath.Add(bn2Out, input);
+            var added = TensorMath.Add(graph, bn2Out, input);
 
-            return TensorMath.ReLU(added);
+            return TensorMath.ReLU(graph, added);
         }
 
         public IEnumerable<AutogradNode> Parameters()
         {
-            return _linear1.Parameters()
-                .Concat(_bn1.Parameters())
-                .Concat(_linear2.Parameters())
-                .Concat(_bn2.Parameters());
+            foreach (var p in _linear1.Parameters()) yield return p;
+            foreach (var p in _bn1.Parameters()) yield return p;
+            foreach (var p in _linear2.Parameters()) yield return p;
+            foreach (var p in _bn2.Parameters()) yield return p;
         }
 
         public void Save(BinaryWriter bw)
@@ -71,6 +71,7 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             using var fs = new FileStream(path, FileMode.Create);
             using var bw = new BinaryWriter(fs);
+
             Save(bw);
         }
 
@@ -79,6 +80,7 @@ namespace DevOnBike.Overfit.DeepLearning
             if (!File.Exists(path)) throw new FileNotFoundException($"Brak pliku wag: {path}");
             using var fs = new FileStream(path, FileMode.Open);
             using var br = new BinaryReader(fs);
+
             Load(br);
         }
 

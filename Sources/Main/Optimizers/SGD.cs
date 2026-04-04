@@ -14,7 +14,18 @@ namespace DevOnBike.Overfit.Optimizers
             ArgumentNullException.ThrowIfNull(parameters);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(learningRate);
 
-            _parameters = parameters.Where(p => p.RequiresGrad).ToArray();
+            var paramList = new List<AutogradNode>();
+
+            foreach (var p in parameters)
+            {
+                if (p.RequiresGrad)
+                {
+                    paramList.Add(p);
+                }
+            }
+
+            _parameters = [.. paramList];
+
             LearningRate = learningRate;
         }
 
