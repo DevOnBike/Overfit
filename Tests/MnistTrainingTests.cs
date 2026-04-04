@@ -1,8 +1,8 @@
+using System.Diagnostics;
 using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.Data;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Optimizers;
-using System.Diagnostics;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests

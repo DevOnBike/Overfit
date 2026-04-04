@@ -6,7 +6,7 @@ namespace DevOnBike.Overfit.Data.Prepare
     /// Reprezentuje stan danych wewnątrz potoku przetwarzania.
     /// Implementuje IDisposable, aby zapewnić czyszczenie ciężkich buforów FastTensor.
     /// </summary>
-    public class PipelineContext : IDisposable
+    public sealed class PipelineContext : IDisposable
     {
         /// <summary>
         /// Macierz cech wejściowych (Input).

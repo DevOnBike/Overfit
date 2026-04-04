@@ -1,5 +1,5 @@
-﻿using DevOnBike.Overfit.Core;
-using System.Numerics.Tensors;
+﻿using System.Numerics.Tensors;
+using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.Tests
 {

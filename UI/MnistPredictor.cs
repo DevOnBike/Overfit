@@ -1,7 +1,7 @@
-﻿using DevOnBike.Overfit.Core;
-using DevOnBike.Overfit.DeepLearning;
-using System;
+﻿using System;
 using System.IO;
+using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.DeepLearning;
 
 namespace DevOnBike.Overfit.UI
 {

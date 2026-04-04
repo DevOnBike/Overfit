@@ -194,6 +194,19 @@ namespace DevOnBike.Overfit.Core
             return new Span<T>(_data, Offset, Size);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public ReadOnlySpan<T> AsReadOnlySpan()
+        {
+            ObjectDisposedException.ThrowIf(_disposed == 1, this);
+
+            if (!IsContiguous)
+            {
+                throw new InvalidOperationException("Tensor nie jest ciągły. Wywołaj ToContiguous() najpierw.");
+            }
+
+            return new ReadOnlySpan<T>(_data, Offset, Size);
+        }
+
         // ── Operacje O(1) (widoki, zero kopii) ───────────────────────────────────────
 
         public FastTensor<T> Transpose(int dim0, int dim1)
