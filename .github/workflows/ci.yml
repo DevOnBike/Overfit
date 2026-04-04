@@ -90,5 +90,4 @@ jobs:
       with:
         dotnet-version: 10.x
     - name: Verify Native AOT Compilation
-      # Zmień ścieżkę na dokładną ścieżkę do głównego pliku .csproj (nie do testów!)
-      run: dotnet publish ./Core/DevOnBike.Overfit.Core.csproj -c Release -r linux-x64 --self-contained true
+      run: dotnet publish ./Sources/Main/Main.csproj -c Release -r linux-x64 --self-contained true
