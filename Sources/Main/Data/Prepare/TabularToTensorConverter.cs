@@ -7,9 +7,18 @@ namespace DevOnBike.Overfit.Data.Prepare
     {
         private readonly TableSchema _schema;
         private readonly Dictionary<string, string[]> _categoryMaps = new();
+
+        // DODANO: Delegat zastępujący Refleksję. Działa z natywną prędkością (AOT-Safe).
+        private readonly Func<T, string, object> _valueExtractor;
+
         private int _featureWidth;
 
-        public TabularToTensorConverter(TableSchema schema) => _schema = schema;
+        // ZMIANA: Konstruktor wymaga teraz dostarczenia metody wyciągającej dane
+        public TabularToTensorConverter(TableSchema schema, Func<T, string, object> valueExtractor)
+        {
+            _schema = schema;
+            _valueExtractor = valueExtractor ?? throw new ArgumentNullException(nameof(valueExtractor));
+        }
 
         public void Fit(IEnumerable<T> data)
         {
@@ -19,7 +28,6 @@ namespace DevOnBike.Overfit.Data.Prepare
             {
                 if (col.Type == ColumnType.Categorical)
                 {
-                    // 1. Zbieranie unikalnych wartości (odpowiednik Distinct + Where)
                     var uniqueSet = new HashSet<string>();
 
                     foreach (var item in data)
@@ -32,11 +40,9 @@ namespace DevOnBike.Overfit.Data.Prepare
                         }
                     }
 
-                    // 2. Materializacja do tablicy
                     var uniqueValues = new string[uniqueSet.Count];
                     uniqueSet.CopyTo(uniqueValues);
 
-                    // 3. Sortowanie w miejscu (odpowiednik OrderBy, ale bez alokacji buforów)
                     Array.Sort(uniqueValues);
 
                     _categoryMaps[col.Name] = uniqueValues;
@@ -88,7 +94,8 @@ namespace DevOnBike.Overfit.Data.Prepare
             return (features, targets);
         }
 
+        // ZMIANA: Wykorzystujemy przekazany delegat zamiast powolnej Refleksji
         private object GetValue(T item, string propName)
-            => typeof(T).GetProperty(propName)?.GetValue(item);
+            => _valueExtractor(item, propName);
     }
 }

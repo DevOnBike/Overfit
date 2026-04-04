@@ -20,7 +20,20 @@ namespace DevOnBike.Overfit.Tests.EndToEnd
             var schema = CreatePropertySchema();
 
             // KONWERSJA: Obiekt → FastTensor
-            var converter = new TabularToTensorConverter<PropertyData>(schema);
+            // ZMIANA: Wstrzykujemy AOT-Safe delegat zamiast Refleksji
+            var converter = new TabularToTensorConverter<PropertyData>(schema, (item, propName) => propName switch
+            {
+                "Powierzchnia" => item.Powierzchnia,
+                "Pietro" => item.Pietro,
+                "CzyKamienica" => item.CzyKamienica,
+                "CzyMaKomorke" => item.CzyMaKomorke,
+                "PowKomorki" => item.PowKomorki,
+                "Miasto" => item.Miasto,
+                "NazwaAgencji" => item.NazwaAgencji,
+                "Cena" => item.Cena,
+                _ => null
+            });
+
             converter.Fit(rawData);
             var (rawX, rawY) = converter.Transform(rawData);
 

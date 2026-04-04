@@ -1,1 +1,4 @@
-﻿N:System.Linq; LINQ jest zakazany w tym projekcie ze względów wydajnościowych. Użyj pętli for/foreach i Span
+﻿N:System.Linq; LINQ jest zakazany ze względów wydajnościowych. Użyj pętli for/foreach i Span<T>.
+N:System.Reflection; Refleksja jest powolna i często łamie Native AOT. Użyj delegatów, statycznego typowania lub Source Generatorów.
+T:System.Linq.Expressions.Expression; Drzewa wyrażeń używają Reflection.Emit, co wyrzuci błąd w Native AOT (brak JIT). Użyj delegatów i 'switch'.
+T:System.Activator; Activator.CreateInstance jest wolny i wymaga metadanych typu w AOT. Użyj jawnego 'new' lub fabryk (Factory Pattern).

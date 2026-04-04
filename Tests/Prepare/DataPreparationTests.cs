@@ -39,7 +39,20 @@ namespace DevOnBike.Overfit.Tests.Prepare
             };
 
             // 3. KONWERSJA (Excel -> FastTensor)
-            var converter = new TabularToTensorConverter<PropertyData>(schema);
+            // ZMIANA: Wstrzykujemy AOT-Safe delegat zamiast Refleksji
+            var converter = new TabularToTensorConverter<PropertyData>(schema, (item, propName) => propName switch
+            {
+                "Powierzchnia" => item.Powierzchnia,
+                "Pietro" => item.Pietro,
+                "CzyKamienica" => item.CzyKamienica,
+                "CzyMaKomorke" => item.CzyMaKomorke,
+                "PowKomorki" => item.PowKomorki,
+                "Miasto" => item.Miasto,
+                "NazwaAgencji" => item.NazwaAgencji,
+                "Cena" => item.Cena,
+                _ => null
+            });
+
             converter.Fit(rawRows);
             var (rawX, rawY) = converter.Transform(rawRows);
 

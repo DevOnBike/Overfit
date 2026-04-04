@@ -27,7 +27,7 @@ jobs:
       run: dotnet restore
 
     - name: Build
-      run: dotnet build -c Release --no-restore -p:SourceRevisionId=${{ steps.vars.outputs.sha_short }}
+      run: dotnet build -c Release --no-restore -p:SourceRevisionId=${{ steps.vars.outputs.sha_short }} -p:ContinuousIntegrationBuild=true
 
     - name: Test
       run: dotnet test -c Release --no-build --verbosity normal
@@ -43,7 +43,8 @@ jobs:
           echo "Packing with version from .csproj file."
         fi
         
-        dotnet pack -c Release --no-build -p:RepositoryCommit=${{ github.sha }} --output ./packages $VERSION_ARG
+        # DODANO: ContinuousIntegrationBuild i upewnienie się, że nie budujemy ponownie (--no-build)
+        dotnet pack -c Release --no-build -p:RepositoryCommit=${{ github.sha }} -p:ContinuousIntegrationBuild=true --output ./packages $VERSION_ARG
 
     - name: Push to NuGet.org
-      run: dotnet nuget push "./packages/*.nupkg" --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json"
+      run: dotnet nuget push "./packages/*.nupkg" --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json" --skip-duplicate

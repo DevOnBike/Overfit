@@ -1,8 +1,5 @@
-﻿using DevOnBike.Overfit.Core;
-
-namespace DevOnBike.Overfit.Data.Prepare
+﻿namespace DevOnBike.Overfit.Data.Prepare
 {
-
     public enum LogMode
     {
         /// <summary>log(1 + x) — bezpieczna, dla danych >= 0</summary>
