@@ -38,13 +38,13 @@ namespace DevOnBike.Overfit.DeepLearning
             _modules.Add(module);
         }
 
-        public AutogradNode Forward(AutogradNode input)
+        public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
             var current = input;
 
             foreach (var module in _modules)
             {
-                current = module.Forward(current);
+                current = module.Forward(graph, current);
             }
 
             return current;

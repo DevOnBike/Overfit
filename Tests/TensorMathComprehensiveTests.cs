@@ -1,16 +1,12 @@
-﻿using DevOnBike.Overfit.Core;
-using System.Numerics.Tensors;
+﻿using System.Numerics.Tensors;
+using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.Tests
 {
-    public class TensorMathComprehensiveTests : IDisposable
+    public class TensorMathComprehensiveTests
     {
-        public TensorMathComprehensiveTests()
-        {
-            ComputationGraph.Active = new ComputationGraph();
-        }
-
-        public void Dispose() => ComputationGraph.Active = null;
+        // Prywatna instancja grafu na potrzeby weryfikacji operacji
+        private readonly ComputationGraph _graph = new ComputationGraph();
 
         // ====================================================================
         // 1. TESTY LOGIKI MATEMATYCZNEJ (FORWARD & BACKWARD THEORY)
@@ -20,22 +16,20 @@ namespace DevOnBike.Overfit.Tests
         public void AddBias_ForwardAndBackward_NCHW_Correct()
         {
             using var input = new AutogradNode(new FastTensor<float>(2, 3, 1, 1));
-            using var bias = new AutogradNode(new FastTensor<float>(3)); // Tensor 1D
+            using var bias = new AutogradNode(new FastTensor<float>(3));
 
             input.Data.AsSpan().Fill(1f);
             var bSpan = bias.Data.AsSpan();
             bSpan[0] = 10f; bSpan[1] = 20f; bSpan[2] = 30f;
 
-            using var output = TensorMath.AddBias(input, bias);
+            using var output = TensorMath.AddBias(_graph, input, bias);
 
-            // Forward: Output jest 4D
             Assert.Equal(11f, output.Data[0, 0, 0, 0]);
             Assert.Equal(21f, output.Data[0, 1, 0, 0]);
             Assert.Equal(31f, output.Data[1, 2, 0, 0]);
 
-            // Backward: Gradient biasu jest sumą po wymiarze batcha
             output.Grad.AsSpan().Fill(1f);
-            ComputationGraph.Active.Backward(output);
+            _graph.Backward(output);
 
             Assert.Equal(2f, bias.Grad[0]);
             Assert.Equal(2f, bias.Grad[1]);
@@ -50,17 +44,15 @@ namespace DevOnBike.Overfit.Tests
             a.Data.AsSpan().Fill(1f);
             b.Data.AsSpan().Fill(2f);
 
-            using var output = TensorMath.MatMul(a, b);
+            using var output = TensorMath.MatMul(_graph, a, b);
 
-            // Forward: każdy element to 1*2 + 1*2 + 1*2 = 6
             Assert.Equal(6f, output.Data[0, 0]);
 
-            // Backward: Grad A = GradOut * B^T
             output.Grad.AsSpan().Fill(1f);
-            ComputationGraph.Active.Backward(output);
+            _graph.Backward(output);
 
-            Assert.Equal(4f, a.Grad[0, 0]); // 2 + 2
-            Assert.Equal(2f, b.Grad[0, 0]); // 1 + 1
+            Assert.Equal(4f, a.Grad[0, 0]);
+            Assert.Equal(2f, b.Grad[0, 0]);
         }
 
         [Fact]
@@ -72,17 +64,15 @@ namespace DevOnBike.Overfit.Tests
             input.Data.AsSpan()[2] = 5f;
             input.Data.AsSpan()[3] = 10f;
 
-            using var output = TensorMath.ReLU(input);
+            using var output = TensorMath.ReLU(_graph, input);
             Assert.Equal(0f, output.Data[0, 0]);
             Assert.Equal(0f, output.Data[0, 1]);
             Assert.Equal(5f, output.Data[0, 2]);
 
-            ComputationGraph.Active.Backward(output);
+            _graph.Backward(output);
 
-            // Elementy <= 0 muszą maskować gradient na 0
             Assert.Equal(0f, input.Grad[0, 0]);
             Assert.Equal(0f, input.Grad[0, 1]);
-            // Elementy > 0 przepuszczają standardowy gradient z Backward (1f)
             Assert.Equal(1f, input.Grad[0, 2]);
             Assert.Equal(1f, input.Grad[0, 3]);
         }
@@ -93,14 +83,13 @@ namespace DevOnBike.Overfit.Tests
             using var input = new AutogradNode(new FastTensor<float>(1, 1, 2, 2));
             var span = input.Data.AsSpan();
             span[0] = 1f; span[1] = 2f;
-            span[2] = 3f; span[3] = 10f; // Max element
+            span[2] = 3f; span[3] = 10f;
 
-            using var output = TensorMath.MaxPool2D(input, 1, 2, 2, 2);
+            using var output = TensorMath.MaxPool2D(_graph, input, 1, 2, 2, 2);
             Assert.Equal(10f, output.Data[0, 0, 0, 0]);
 
-            ComputationGraph.Active.Backward(output);
+            _graph.Backward(output);
 
-            // Gradient (1f) może popłynąć TYLKO do elementu, który wygrał Pooling
             Assert.Equal(0f, input.Grad[0, 0, 0, 0]);
             Assert.Equal(0f, input.Grad[0, 0, 0, 1]);
             Assert.Equal(0f, input.Grad[0, 0, 1, 0]);
@@ -112,10 +101,10 @@ namespace DevOnBike.Overfit.Tests
         {
             using var input = new AutogradNode(new FastTensor<float>(1, 2, 2, 2));
             var inS = input.Data.AsSpan();
-            inS.Slice(0, 4).Fill(10f); // Kanał 0
-            inS.Slice(4, 4).Fill(20f); // Kanał 1
+            inS.Slice(0, 4).Fill(10f);
+            inS.Slice(4, 4).Fill(20f);
 
-            using var output = TensorMath.GlobalAveragePool2D(input, 2, 2, 2);
+            using var output = TensorMath.GlobalAveragePool2D(_graph, input, 2, 2, 2);
 
             Assert.Equal(10f, output.Data[0, 0]);
             Assert.Equal(20f, output.Data[0, 1]);
@@ -137,11 +126,9 @@ namespace DevOnBike.Overfit.Tests
             using var rv = new FastTensor<float>(1);
             rv.AsSpan().Fill(1f);
 
-            using var output = TensorMath.BatchNorm1D(input, gamma, beta, rm, rv, 0.1f, 1e-5f, true);
+            using var output = TensorMath.BatchNorm1D(_graph, input, gamma, beta, rm, rv, 0.1f, 1e-5f, true);
 
-            // Średnia to 20. Wartość 20 powinna znormalizować się do 0
             Assert.InRange(output.Data[1, 0], -0.01f, 0.01f);
-            // Elementy 10 i 30 powinny być symetryczne wokół zera
             Assert.Equal(-output.Data[0, 0], output.Data[2, 0], 3);
         }
 
@@ -155,13 +142,12 @@ namespace DevOnBike.Overfit.Tests
             lS[0] = 2.0f; lS[1] = 1.0f; lS[2] = 0.1f;
             target.Data[0, 0] = 1.0f;
 
-            using var loss = TensorMath.SoftmaxCrossEntropy(logits, target);
+            using var loss = TensorMath.SoftmaxCrossEntropy(_graph, logits, target);
 
             Assert.InRange(loss.Data[0, 0], 0.41f, 0.43f);
 
-            ComputationGraph.Active.Backward(loss);
+            _graph.Backward(loss);
 
-            // Pochodna CE to (Pred - Target)
             Assert.InRange(logits.Grad[0, 0], -0.35f, -0.33f);
             Assert.InRange(logits.Grad[0, 1], 0.23f, 0.25f);
         }
@@ -172,12 +158,13 @@ namespace DevOnBike.Overfit.Tests
             using var input = new AutogradNode(new FastTensor<float>(1, 100));
             input.Data.AsSpan().Fill(1f);
 
-            using var outputTrain = TensorMath.Dropout(input, 0.5f, isTraining: true);
+            using var outputTrain = TensorMath.Dropout(_graph, input, 0.5f, isTraining: true);
             var sumTrain = TensorPrimitives.Sum(outputTrain.Data.AsSpan());
 
             Assert.InRange(sumTrain, 60f, 140f);
 
-            using var outputEval = TensorMath.Dropout(input, 0.5f, isTraining: false);
+            // ZMIANA: Tryb ewaluacji przyjmuje NULL
+            using var outputEval = TensorMath.Dropout(null, input, 0.5f, isTraining: false);
             Assert.Equal(100f, TensorPrimitives.Sum(outputEval.Data.AsSpan()));
         }
 
@@ -190,12 +177,11 @@ namespace DevOnBike.Overfit.Tests
             pred.Data[0, 0] = 10f;
             target.Data[0, 0] = 5f;
 
-            using var loss = TensorMath.MSELoss(pred, target);
+            using var loss = TensorMath.MSELoss(_graph, pred, target);
             Assert.Equal(12.5f, loss.Data[0, 0]);
 
-            ComputationGraph.Active.Backward(loss);
+            _graph.Backward(loss);
 
-            // Grad = (2/N) * (Pred - Target)
             Assert.Equal(5f, pred.Grad[0, 0]);
         }
 
@@ -205,14 +191,13 @@ namespace DevOnBike.Overfit.Tests
             using var tensor = new AutogradNode(new FastTensor<float>(1, 8, 13, 13));
             tensor.Data.AsSpan().Fill(7f);
 
-            using var reshaped = TensorMath.Reshape(tensor, 1, 1352);
+            using var reshaped = TensorMath.Reshape(_graph, tensor, 1, 1352);
 
             Assert.Equal(1352, reshaped.Data.Shape[1]);
             Assert.Equal(7f, reshaped.Data[0, 1351]);
 
-            ComputationGraph.Active.Backward(reshaped);
+            _graph.Backward(reshaped);
 
-            // Sprawdzamy czy Reshape przepuszcza domyślny gradient 1f
             Assert.Equal(1f, tensor.Grad.AsSpan()[0]);
             Assert.Equal(1f, tensor.Grad.AsSpan()[1351]);
         }
@@ -231,9 +216,9 @@ namespace DevOnBike.Overfit.Tests
             for (var i = 0; i < b.Data.Size; i++) b.Data.AsSpan()[i] = (i + 1) * 0.2f;
 
             var lossFunc = () => {
-                var mm = TensorMath.MatMul(a, b);
+                var mm = TensorMath.MatMul(_graph, a, b);
                 var target = new AutogradNode(new FastTensor<float>(2, 2), false);
-                return TensorMath.MSELoss(mm, target);
+                return TensorMath.MSELoss(_graph, mm, target);
             };
 
             VerifyGradients(lossFunc, a);
@@ -250,9 +235,9 @@ namespace DevOnBike.Overfit.Tests
             bias.Data.AsSpan().Fill(0.5f);
 
             var lossFunc = () => {
-                var res = TensorMath.AddBias(input, bias);
+                var res = TensorMath.AddBias(_graph, input, bias);
                 var target = new AutogradNode(new FastTensor<float>(3, 2), false);
-                return TensorMath.MSELoss(res, target);
+                return TensorMath.MSELoss(_graph, res, target);
             };
 
             VerifyGradients(lossFunc, input);
@@ -271,9 +256,9 @@ namespace DevOnBike.Overfit.Tests
             for (var i = 0; i < bias.Data.Size; i++) bias.Data.AsSpan()[i] = (i + 1) * 0.3f;
 
             var lossFunc = () => {
-                var lin = TensorMath.Linear(input, weights, bias);
+                var lin = TensorMath.Linear(_graph, input, weights, bias);
                 var target = new AutogradNode(new FastTensor<float>(2, 2), false);
-                return TensorMath.MSELoss(lin, target);
+                return TensorMath.MSELoss(_graph, lin, target);
             };
 
             VerifyGradients(lossFunc, input);
@@ -291,9 +276,9 @@ namespace DevOnBike.Overfit.Tests
             weights.Data.AsSpan().Fill(0.1f);
 
             var lossFunc = () => {
-                var conv = TensorMath.Conv2D(input, weights, 1, 1, 4, 4, 3);
+                var conv = TensorMath.Conv2D(_graph, input, weights, 1, 1, 4, 4, 3);
                 var target = new AutogradNode(new FastTensor<float>(1, 1, 2, 2), false);
-                return TensorMath.MSELoss(conv, target);
+                return TensorMath.MSELoss(_graph, conv, target);
             };
 
             VerifyGradients(lossFunc, weights);
@@ -316,9 +301,9 @@ namespace DevOnBike.Overfit.Tests
             rv.AsSpan().Fill(1f);
 
             var lossFunc = () => {
-                var bn = TensorMath.BatchNorm1D(input, gamma, beta, rm, rv, 0.1f, 1e-5f, true);
+                var bn = TensorMath.BatchNorm1D(_graph, input, gamma, beta, rm, rv, 0.1f, 1e-5f, true);
                 var target = new AutogradNode(new FastTensor<float>(4, 2), false);
-                return TensorMath.MSELoss(bn, target);
+                return TensorMath.MSELoss(_graph, bn, target);
             };
 
             VerifyGradients(lossFunc, gamma);
@@ -335,38 +320,20 @@ namespace DevOnBike.Overfit.Tests
             var pData = pred.Data.AsSpan();
             var tData = target.Data.AsSpan();
 
-            // Ustawiamy scenariusze:
-            pData[0] = 1f; tData[0] = 2f;   // Zgodny kierunek (+)
-            pData[1] = 1f; tData[1] = -2f;  // Zły kierunek (p>0, t<0)
-            pData[2] = -1f; tData[2] = -2f;  // Zgodny kierunek (-)
-            pData[3] = -1f; tData[3] = 2f;   // Zły kierunek (p<0, t>0)
+            pData[0] = 1f; tData[0] = 2f;
+            pData[1] = 1f; tData[1] = -2f;
+            pData[2] = -1f; tData[2] = -2f;
+            pData[3] = -1f; tData[3] = 2f;
 
-            // Wywołujemy z gamma = 10f
-            using var loss = TensorMath.DirectionalLoss(pred, target, gamma: 10f);
-
-            // Obliczenia analityczne dla Loss:
-            // i=0 (zgodny): mse = (1-2)^2 = 1. penalty = 0.
-            // i=1 (błędny): mse = (1 - -2)^2 = 9. penalty = -10 * (1 * -2) = 20. Suma = 29.
-            // i=2 (zgodny): mse = (-1 - -2)^2 = 1. penalty = 0.
-            // i=3 (błędny): mse = (-1 - 2)^2 = 9. penalty = -10 * (-1 * 2) = 20. Suma = 29.
-            // Srednia = (1 + 29 + 1 + 29) / 4 = 15.0
+            using var loss = TensorMath.DirectionalLoss(_graph, pred, target, gamma: 10f);
             Assert.Equal(15f, loss.Data[0, 0]);
 
-            ComputationGraph.Active.Backward(loss);
+            _graph.Backward(loss);
 
             var pGrad = pred.Grad.AsSpan();
-
-            // Obliczenia analityczne dla Gradientów (dL/dp):
-            // i=0: 2*(1-2)/4 = -0.5
             Assert.Equal(-0.5f, pGrad[0]);
-
-            // i=1: 2*(1 - -2)/4 + (-(-2) * 10 / 4) = 1.5 + 5.0 = 6.5
             Assert.Equal(6.5f, pGrad[1]);
-
-            // i=2: 2*(-1 - -2)/4 = 0.5
             Assert.Equal(0.5f, pGrad[2]);
-
-            // i=3: 2*(-1 - 2)/4 + (-(2) * 10 / 4) = -1.5 - 5.0 = -6.5
             Assert.Equal(-6.5f, pGrad[3]);
         }
 
@@ -379,18 +346,15 @@ namespace DevOnBike.Overfit.Tests
             var pData = pred.Data.AsSpan();
             var tData = target.Data.AsSpan();
 
-            // Losujemy wartości, by pokryć mieszankę dobrych i złych kierunków 
-            // oraz zjawisko przekraczania zera.
-            pData[0] = 0.5f; tData[0] = 0.8f;   // Zgodny (+)
-            pData[1] = -0.5f; tData[1] = 0.8f;   // Zły kierunek
-            pData[2] = 1.2f; tData[2] = -0.3f;  // Zły kierunek
-            pData[3] = -1.0f; tData[3] = -1.5f;  // Zgodny (-)
-            pData[4] = 0.1f; tData[4] = 0.5f;   // Blisko zera
-            pData[5] = 2.0f; tData[5] = 2.5f;   // Zgodny (+)
+            pData[0] = 0.5f; tData[0] = 0.8f;
+            pData[1] = -0.5f; tData[1] = 0.8f;
+            pData[2] = 1.2f; tData[2] = -0.3f;
+            pData[3] = -1.0f; tData[3] = -1.5f;
+            pData[4] = 0.1f; tData[4] = 0.5f;
+            pData[5] = 2.0f; tData[5] = 2.5f;
 
-            var lossFunc = () => TensorMath.DirectionalLoss(pred, target, gamma: 10f);
+            var lossFunc = () => TensorMath.DirectionalLoss(_graph, pred, target, gamma: 10f);
 
-            // Wykorzystujemy istniejącą metodę z pliku TensorMathComprehensiveTests.cs
             VerifyGradients(lossFunc, pred);
         }
 
@@ -400,9 +364,9 @@ namespace DevOnBike.Overfit.Tests
 
         private void VerifyGradients(Func<AutogradNode> lossFunc, AutogradNode parameter, float epsilon = 1e-4f, float tolerance = 2e-3f)
         {
-            ComputationGraph.Active.Reset();
+            _graph.Reset();
             using var lossNode = lossFunc();
-            ComputationGraph.Active.Backward(lossNode);
+            _graph.Backward(lossNode);
 
             var analyticalGrads = parameter.Grad.AsSpan().ToArray();
             var numGrads = new float[parameter.Data.Size];
@@ -413,13 +377,13 @@ namespace DevOnBike.Overfit.Tests
                 var originalValue = dataSpan[i];
 
                 dataSpan[i] = originalValue + epsilon;
-                ComputationGraph.Active.Reset();
+                _graph.Reset();
                 using (var lossPlus = lossFunc())
                 {
                     var fPlus = lossPlus.Data[0, 0];
 
                     dataSpan[i] = originalValue - epsilon;
-                    ComputationGraph.Active.Reset();
+                    _graph.Reset();
                     using (var lossMinus = lossFunc())
                     {
                         var fMinus = lossMinus.Data[0, 0];

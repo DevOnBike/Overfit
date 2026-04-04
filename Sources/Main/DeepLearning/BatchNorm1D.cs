@@ -32,9 +32,9 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Train() => IsTraining = true;
         public void Eval() => IsTraining = false;
 
-        public AutogradNode Forward(AutogradNode input)
+        public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
-            return TensorMath.BatchNorm1D(input, Gamma, Beta, RunningMean, RunningVar, Momentum, Eps, IsTraining);
+            return TensorMath.BatchNorm1D(graph, input, Gamma, Beta, RunningMean, RunningVar, Momentum, Eps, IsTraining);
         }
 
         public IEnumerable<AutogradNode> Parameters()

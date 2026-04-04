@@ -8,7 +8,7 @@ namespace DevOnBike.Overfit.Tests
         // Reprezentacja wizualna macierzy:
         // [ 1, 2, 3 ]
         // [ 4, 5, 6 ]
-        private double[] CreateTestData() => new double[] { 1, 2, 3, 4, 5, 6 };
+        private double[] CreateTestData() => [1, 2, 3, 4, 5, 6];
 
         [Fact]
         public void Indexer_ReadAndWrite_WorksOnUnderlyingSpan()

@@ -10,7 +10,7 @@ namespace DevOnBike.Overfit.DeepLearning
         void Eval();
 
         // Główne przejście w przód
-        AutogradNode Forward(AutogradNode input);
+        AutogradNode Forward(ComputationGraph graph, AutogradNode input);
 
         // Pobieranie wag do Optymalizatora
         IEnumerable<AutogradNode> Parameters();

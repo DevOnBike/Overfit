@@ -194,6 +194,19 @@ namespace DevOnBike.Overfit.Core
             return new Span<T>(_data, Offset, Size);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public ReadOnlySpan<T> AsReadOnlySpan()
+        {
+            ObjectDisposedException.ThrowIf(_disposed == 1, this);
+
+            if (!IsContiguous)
+            {
+                throw new InvalidOperationException("Tensor nie jest ciągły. Wywołaj ToContiguous() najpierw.");
+            }
+
+            return new ReadOnlySpan<T>(_data, Offset, Size);
+        }
+
         // ── Operacje O(1) (widoki, zero kopii) ───────────────────────────────────────
 
         public FastTensor<T> Transpose(int dim0, int dim1)
@@ -288,6 +301,13 @@ namespace DevOnBike.Overfit.Core
                 4 => new FastTensor<T>(clearMemory, template.GetDim(0), template.GetDim(1), template.GetDim(2), template.GetDim(3)),
                 _ => new FastTensor<T>(clearMemory, template.Shape) // rank > 4 — Shape alokuje, ale to przypadek brzegowy
             };
+        }
+
+        public FastTensor<T> Zero()
+        {
+            AsSpan().Clear();
+
+            return this;
         }
 
         // ── Dispose — Interlocked, double-dispose safe ───────────────────────────────
