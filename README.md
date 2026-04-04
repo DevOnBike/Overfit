@@ -26,3 +26,64 @@ Designed for maximum CPU inference speed, Overfit embraces aggressive memory man
 Install via NuGet Package Manager:
 ```bash
 dotnet add package DevOnBike.Overfit
+```
+
+---
+
+## ⚡ Quick Start
+
+### 1. Building a Neural Network
+Overfit makes it easy to build, train, and run inference on deep neural networks.
+
+```csharp
+using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.Optimizers;
+
+// Define a ResNet-style architecture or MLP
+var model = new Sequential(
+    new ConvLayer(inChannels: 1, outChannels: 8, h: 28, w: 28, kSize: 3),
+    new ReluActivation(),
+    new MaxPool2D(poolSize: 2),
+    // ... flattening ...
+    new LinearLayer(1352, 10)
+);
+
+// High-performance optimizers out of the box
+using var optimizer = new Adam(model.Parameters(), learningRate: 0.001f);
+
+// Null ComputationGraph disables the tape for ultra-fast Zero-Allocation Inference
+var prediction = model.Forward(null, inputTensor); 
+```
+
+### 2. Robust Data Preprocessing
+Taming messy tabular data before feeding it to a model:
+
+```csharp
+using DevOnBike.Overfit.Data.Prepare;
+
+var pipeline = new DataPipeline()
+    .AddLayer(new TechnicalSanityLayer(maxCorruptedRatio: 0.3f))
+    .AddLayer(new ConstantColumnFilterLayer())
+    .AddLayer(new OutlierClipLayer(lowerPercentile: 0.01f, upperPercentile: 0.99f))
+    .AddLayer(new RobustScalingLayer(columnIndices: numericColumns));
+
+using var cleanData = pipeline.Execute(rawFeatures, rawTargets);
+```
+
+---
+
+## 🧠 Why Pure C# and Native AOT?
+
+Most .NET ML libraries act as bridges to PyTorch, TensorFlow, or ONNX Runtime. While powerful, they drag along massive dependencies (often gigabytes of CUDA libraries and Python environments). 
+
+**Overfit is different.**
+By writing the math and the autograd engine entirely in modern C# (utilizing SIMD and memory-safe structures), Overfit allows you to deploy intelligent applications as **single-file native executables**. 
+Whether you're building a microservice, a high-frequency trading bot, or an embedded IoT application, Overfit runs with predictable latency and a tiny memory footprint.
+
+## 🤝 Contributing
+Contributions are welcome! Whether it's adding new activation functions, optimizing tensor math with `System.Numerics.Vectors`, or improving the documentation.
+1. Fork the Project
+2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the Branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
