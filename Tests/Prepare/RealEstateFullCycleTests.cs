@@ -38,7 +38,7 @@ namespace DevOnBike.Overfit.Tests.EndToEnd
             var binaryAndOneHot = new HashSet<int> { 2, 3, 5, 6, 7, 8, 9 };
             var numericColumns = new HashSet<int> { 0, 1, 4 };
 
-            var pipeline = new DataPipeline()
+            var pipeline = new DataPipeline(log: msg => _output.WriteLine(msg))
                 .AddLayer(new TechnicalSanityLayer(maxCorruptedRatio: 0.3f))
                 .AddLayer(new DuplicateRowFilterLayer())
                 .AddLayer(new ConstantColumnFilterLayer())
