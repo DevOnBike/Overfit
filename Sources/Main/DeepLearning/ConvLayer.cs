@@ -25,10 +25,17 @@ namespace DevOnBike.Overfit.DeepLearning
         private void InitializeKernels(Span<float> span, int fanIn)
         {
             var stdDev = MathF.Sqrt(2f / fanIn);
-            for (var i = 0; i < span.Length; i++) span[i] = MathUtils.NextGaussian() * stdDev;
+            
+            for (var i = 0; i < span.Length; i++)
+            {
+                span[i] = MathUtils.NextGaussian() * stdDev;
+            }
         }
 
-        public AutogradNode Forward(AutogradNode input) => TensorMath.Conv2D(input, Kernels, _inC, _outC, _h, _w, _k);
+        public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
+        {
+            return TensorMath.Conv2D(graph, input, Kernels, _inC, _outC, _h, _w, _k);
+        }
 
         public IEnumerable<AutogradNode> Parameters() { yield return Kernels; }
 
@@ -54,6 +61,7 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             using var fs = new FileStream(path, FileMode.Create);
             using var bw = new BinaryWriter(fs);
+            
             Save(bw);
         }
 
@@ -62,6 +70,7 @@ namespace DevOnBike.Overfit.DeepLearning
             if (!File.Exists(path)) throw new FileNotFoundException($"Brak pliku filtrów: {path}");
             using var fs = new FileStream(path, FileMode.Open);
             using var br = new BinaryReader(fs);
+            
             Load(br);
         }
 

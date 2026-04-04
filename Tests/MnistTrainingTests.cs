@@ -7,14 +7,13 @@ using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests
 {
-    public class MnistTrainingTests : IDisposable
+    public class MnistTrainingTests
     {
         private readonly ITestOutputHelper _output;
 
         public MnistTrainingTests(ITestOutputHelper output)
         {
             _output = output;
-            ComputationGraph.Active = new ComputationGraph();
         }
 
         [Fact(Skip = "a")]
@@ -36,7 +35,6 @@ namespace DevOnBike.Overfit.Tests
 
             // --- POPRAWIONA ARCHITEKTURA RESNET ---
             var conv1 = new ConvLayer(1, 8, 28, 28, 3);
-            // BN przeniesiony na poziom 1352 (po MaxPool2D)
             var bn1 = new BatchNorm1D(1352);
             var res1 = new ResidualBlock(1352);
             var fcOut = new LinearLayer(8, 10);
@@ -53,6 +51,9 @@ namespace DevOnBike.Overfit.Tests
             var numBatches = trainSize / batchSize;
             var totalSw = Stopwatch.StartNew();
 
+            // ZMIANA: Jawna inicjalizacja grafu
+            var graph = new ComputationGraph();
+
             _output.WriteLine($"Start treningu: {epochs} epok, {numBatches} batchy na epokę.");
             _output.WriteLine("----------------------------------------------------------");
 
@@ -66,7 +67,8 @@ namespace DevOnBike.Overfit.Tests
 
                 for (var b = 0; b < numBatches; b++)
                 {
-                    ComputationGraph.Active.Reset();
+                    // ZMIANA: Operujemy na naszej jawnej instancji
+                    graph.Reset();
                     optimizer.ZeroGrad();
 
                     using var xBatchData = new FastTensor<float>(batchSize, 1, 28, 28);
@@ -79,30 +81,24 @@ namespace DevOnBike.Overfit.Tests
                     Y.Data.AsSpan().Slice(b * batchSize * 10, batchSize * 10).CopyTo(yBatchData.AsSpan());
                     using var yBatch = new AutogradNode(yBatchData, false);
 
-                    // --- FORWARD PASS (Logiczny i bezpieczny wymiarowo) ---
-                    using var h1 = conv1.Forward(xBatch);
-                    using var a1 = TensorMath.ReLU(h1);
-                    using var p1 = TensorMath.MaxPool2D(a1, 8, 26, 26, 2);
+                    // --- FORWARD PASS (Przekazujemy 'graph' jako pierwszy argument) ---
+                    using var h1 = conv1.Forward(graph, xBatch);
+                    using var a1 = TensorMath.ReLU(graph, h1);
+                    using var p1 = TensorMath.MaxPool2D(graph, a1, 8, 26, 26, 2);
 
-                    // 1. Spłaszczamy na 2D (1352)
-                    using var p1Flat = TensorMath.Reshape(p1, batchSize, 1352);
+                    using var p1Flat = TensorMath.Reshape(graph, p1, batchSize, 1352);
+                    using var bn1Out = bn1.Forward(graph, p1Flat);
+                    using var resOut = res1.Forward(graph, bn1Out);
 
-                    // 2. BatchNorm na płaskim wektorze (TERAZ DZIAŁA W 100%)
-                    using var bn1Out = bn1.Forward(p1Flat);
+                    using var res4D = TensorMath.Reshape(graph, resOut, batchSize, 8, 13, 13);
+                    using var gapOut = TensorMath.GlobalAveragePool2D(graph, res4D, 8, 13, 13);
+                    using var predictionLogits = fcOut.Forward(graph, gapOut);
 
-                    // 3. ResNet przetwarza znormalizowane dane
-                    using var resOut = res1.Forward(bn1Out);
-
-                    // 4. Powrót do 4D dla GAP
-                    using var res4D = TensorMath.Reshape(resOut, batchSize, 8, 13, 13);
-                    using var gapOut = TensorMath.GlobalAveragePool2D(res4D, 8, 13, 13);
-
-                    using var predictionLogits = fcOut.Forward(gapOut);
-
-                    using var loss = TensorMath.SoftmaxCrossEntropy(predictionLogits, yBatch);
+                    using var loss = TensorMath.SoftmaxCrossEntropy(graph, predictionLogits, yBatch);
                     epochLoss += loss.Data[0, 0];
 
-                    ComputationGraph.Active.Backward(loss);
+                    // ZMIANA: Backward na jawnym grafie
+                    graph.Backward(loss);
                     optimizer.Step();
                 }
 
@@ -139,35 +135,28 @@ namespace DevOnBike.Overfit.Tests
 
             for (var i = 0; i < samples; i++)
             {
-                ComputationGraph.Active.Reset();
-                ComputationGraph.Active.IsRecording = false;
+                // ZMIANA: Usunięto graph.Reset() i blok try-finally
 
-                try
-                {
-                    var rowData = new FastTensor<float>(1, 1, 28, 28);
-                    testX.AsSpan().Slice(i * 784, 784).CopyTo(rowData.AsSpan());
-                    using var input = new AutogradNode(rowData, false);
+                var rowData = new FastTensor<float>(1, 1, 28, 28);
+                testX.AsSpan().Slice(i * 784, 784).CopyTo(rowData.AsSpan());
+                using var input = new AutogradNode(rowData, false);
 
-                    using var h1 = conv1.Forward(input);
-                    using var a1 = TensorMath.ReLU(h1);
-                    using var p1 = TensorMath.MaxPool2D(a1, 8, 26, 26, 2);
+                // ZMIANA: Przekazujemy 'null' zamiast grafu – wymusza to tryb Inference
+                using var h1 = conv1.Forward(null, input);
+                using var a1 = TensorMath.ReLU(null, h1);
+                using var p1 = TensorMath.MaxPool2D(null, a1, 8, 26, 26, 2);
 
-                    using var p1Flat = TensorMath.Reshape(p1, 1, 1352);
-                    using var bn1Out = bn1.Forward(p1Flat);
-                    using var resOut = res1.Forward(bn1Out);
+                using var p1Flat = TensorMath.Reshape(null, p1, 1, 1352);
+                using var bn1Out = bn1.Forward(null, p1Flat);
+                using var resOut = res1.Forward(null, bn1Out);
 
-                    using var res4D = TensorMath.Reshape(resOut, 1, 8, 13, 13);
-                    using var gapOut = TensorMath.GlobalAveragePool2D(res4D, 8, 13, 13);
-                    using var output = fcOut.Forward(gapOut);
+                using var res4D = TensorMath.Reshape(null, resOut, 1, 8, 13, 13);
+                using var gapOut = TensorMath.GlobalAveragePool2D(null, res4D, 8, 13, 13);
+                using var output = fcOut.Forward(null, gapOut);
 
-                    var predicted = GetArgMax(output.Data.AsSpan());
-                    var actual = GetArgMax(testY.AsSpan().Slice(i * 10, 10));
-                    matrix[actual, predicted]++;
-                }
-                finally
-                {
-                    ComputationGraph.Active.IsRecording = true;
-                }
+                var predicted = GetArgMax(output.Data.AsSpan());
+                var actual = GetArgMax(testY.AsSpan().Slice(i * 10, 10));
+                matrix[actual, predicted]++;
             }
 
             var sb = new System.Text.StringBuilder();
@@ -180,8 +169,6 @@ namespace DevOnBike.Overfit.Tests
             }
             _output.WriteLine(sb.ToString());
         }
-
-        public void Dispose() => ComputationGraph.Active = null;
 
         private int GetArgMax(ReadOnlySpan<float> span)
         {

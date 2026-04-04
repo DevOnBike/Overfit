@@ -4,27 +4,12 @@ using DevOnBike.Overfit.Optimizers;
 
 namespace DevOnBike.Overfit.Tests
 {
-    public class EndToEndTrainingTests : IDisposable
+    public class EndToEndTrainingTests
     {
-        public EndToEndTrainingTests()
-        {
-            // Inicjalizacja taśmy dla bieżącego wątku testowego
-            ComputationGraph.Active = new ComputationGraph();
-        }
-
-        public void Dispose()
-        {
-            // Sprzątanie po teście
-            ComputationGraph.Active = null;
-        }
-
         [Fact]
         public void NeuralNetwork_TrainsOnXORProblem_AndConvergesToCorrectPredictions()
         {
-            // ==========================================
             // ARRANGE
-            // ==========================================
-            // Tworzymy tensory 2D: [Batch, Features]
             using var xData = new FastTensor<float>(4, 2);
             ((Span<float>)[0, 0, 0, 1, 1, 0, 1, 1]).CopyTo(xData.AsSpan());
 
@@ -43,55 +28,44 @@ namespace DevOnBike.Overfit.Tests
             var epochs = 2000;
             var finalLoss = 0f;
 
-            // ==========================================
+            // ZMIANA: Tworzymy własny graf treningowy
+            var graph = new ComputationGraph();
+
             // ACT (Trening)
-            // ==========================================
             for (var epoch = 0; epoch < epochs; epoch++)
             {
-                // Reset taśmy przed każdym forwardem - zero alokacji!
-                ComputationGraph.Active.Reset();
+                graph.Reset();
                 sgd.ZeroGrad();
 
-                using var prediction = model.Forward(X);
-                using var loss = TensorMath.MSELoss(prediction, Y);
+                // Forward z nagrywaniem
+                using var prediction = model.Forward(graph, X);
+                using var loss = TensorMath.MSELoss(graph, prediction, Y);
                 finalLoss = loss.Data[0, 0];
 
                 // Backward pass przez graf
-                ComputationGraph.Active.Backward(loss);
+                graph.Backward(loss);
 
                 sgd.Step();
             }
 
-            // ==========================================
-            // ASSERT (Weryfikacja w trybie No-Grad)
-            // ==========================================
+            // ASSERT
             Assert.True(finalLoss < 0.05f, $"Trening nie powiódł się. Loss: {finalLoss:F5}");
 
-            // Wyłączamy nagrywanie operacji dla fazy testowej
-            ComputationGraph.Active.IsRecording = false;
-            try
-            {
-                using var finalPrediction = model.Forward(X);
+            // ZMIANA: Zamiast IsRecording=false, podajemy null jako graph
+            using var finalPrediction = model.Forward(null, X);
 
-                // Sprawdzamy wyniki dla Batcha 4 przykładów
-                Assert.True(finalPrediction.Data[0, 0] < 0.15f);
-                Assert.True(finalPrediction.Data[1, 0] > 0.85f);
-                Assert.True(finalPrediction.Data[2, 0] > 0.85f);
-                Assert.True(finalPrediction.Data[3, 0] < 0.15f);
-            }
-            finally
-            {
-                ComputationGraph.Active.IsRecording = true;
-                model.Dispose();
-            }
+            Assert.True(finalPrediction.Data[0, 0] < 0.15f);
+            Assert.True(finalPrediction.Data[1, 0] > 0.85f);
+            Assert.True(finalPrediction.Data[2, 0] > 0.85f);
+            Assert.True(finalPrediction.Data[3, 0] < 0.15f);
+
+            model.Dispose();
         }
 
         [Fact]
         public void NeuralNetwork_TrainsOnConcentricCircles_MakesCPUWorkHarder()
         {
-            // ==========================================
-            // ARRANGE: Generowanie 300 punktów danych
-            // ==========================================
+            // ARRANGE
             var numSamples = 300;
             using var xData = new FastTensor<float>(numSamples, 2);
             using var yData = new FastTensor<float>(numSamples, 1);
@@ -123,26 +97,23 @@ namespace DevOnBike.Overfit.Tests
             var sgd = new SGD(model.Parameters(), learningRate: 0.05f);
             var epochs = 3000;
             var finalLoss = 0f;
+            var graph = new ComputationGraph();
 
-            // ==========================================
-            // ACT: Pętla Treningowa
-            // ==========================================
+            // ACT
             for (var epoch = 0; epoch < epochs; epoch++)
             {
-                ComputationGraph.Active.Reset();
+                graph.Reset();
                 sgd.ZeroGrad();
 
-                using var prediction = model.Forward(X);
-                using var loss = TensorMath.MSELoss(prediction, Y);
+                using var prediction = model.Forward(graph, X);
+                using var loss = TensorMath.MSELoss(graph, prediction, Y);
                 finalLoss = loss.Data[0, 0];
 
-                ComputationGraph.Active.Backward(loss);
+                graph.Backward(loss);
                 sgd.Step();
             }
 
-            // ==========================================
             // ASSERT
-            // ==========================================
             Assert.True(finalLoss < 0.1f, $"Sieć nie podołała okręgom. Końcowy błąd: {finalLoss:F5}");
             model.Dispose();
         }

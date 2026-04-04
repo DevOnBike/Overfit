@@ -21,8 +21,6 @@ namespace DevOnBike.Overfit.Core
         // Ponieważ FastTensor ma indexer [int i], Data[0] jest bezpieczne i szybkie.
         public float Forward() => Data[0];
 
-        public void Backward() => ComputationGraph.Active?.Backward(this);
-
         public void Dispose()
         {
             Data?.Dispose();

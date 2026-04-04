@@ -9,9 +9,9 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Train() => IsTraining = true;
         public void Eval() => IsTraining = false;
 
-        public AutogradNode Forward(AutogradNode input)
+        public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
-            return TensorMath.ReLU(input);
+            return TensorMath.ReLU(graph, input);
         }
 
         public IEnumerable<AutogradNode> Parameters()

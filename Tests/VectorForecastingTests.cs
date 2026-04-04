@@ -11,7 +11,6 @@ namespace DevOnBike.Overfit.Tests
         public VectorForecastingTests(ITestOutputHelper output)
         {
             _output = output;
-            ComputationGraph.Active = new ComputationGraph();
         }
 
         [Fact]
@@ -19,45 +18,36 @@ namespace DevOnBike.Overfit.Tests
         {
             _output.WriteLine("=== Predykcja Wektorowa: 7 dni w przód (Pełny rok XAU/USD) ===");
 
-            var windowSize = 10;    // Historia: 10 dni
-            var forecastDays = 7;   // Przyszłość: 7 dni
+            var windowSize = 10;
+            var forecastDays = 7;
             var epochs = 200;
             var learningRate = 0.005f;
 
-            // 1. ŁADOWANIE DANYCH (252 dni handlowe)
             var prices = GetRealGoldPricesUSD_1Year();
             var lastKnownPrice = prices.Last();
-
-            // 2. NORMALIZACJA (Zwroty)
             var returns = CalculateReturns(prices);
 
-            // 3. SLIDING WINDOW (Okna 10-dniowe -> Target 7-dniowy)
-            // Zapas musi uwzględniać to, że potrzebujemy 7 dni do przodu od końca okna
             var numSamples = returns.Length - windowSize - forecastDays + 1;
 
             var xTensor = new FastTensor<float>(false, numSamples, windowSize);
-            var yTensor = new FastTensor<float>(false, numSamples, forecastDays); // Target 7D
+            var yTensor = new FastTensor<float>(false, numSamples, forecastDays);
 
             var xSpan = xTensor.AsSpan();
             var ySpan = yTensor.AsSpan();
 
             for (var i = 0; i < numSamples; i++)
             {
-                // Kopiujemy 10 dni historii
                 returns.AsSpan(i, windowSize).CopyTo(xSpan.Slice(i * windowSize, windowSize));
-                // Kopiujemy NASTĘPNE 7 dni jako target
                 returns.AsSpan(i + windowSize, forecastDays).CopyTo(ySpan.Slice(i * forecastDays, forecastDays));
             }
 
             using var inputNode = new AutogradNode(xTensor, false);
             using var targetNode = new AutogradNode(yTensor, false);
 
-            // 4. ARCHITEKTURA Wektorowa
             var w1 = new AutogradNode(new FastTensor<float>(false, windowSize, 32), true);
             var b1 = new AutogradNode(new FastTensor<float>(true, 1, 32), true);
             Randomize(w1.Data.AsSpan(), windowSize);
 
-            // ZMIANA: Zamiast 1 wyjścia, warstwa końcowa ma 7 neuronów
             var w2 = new AutogradNode(new FastTensor<float>(false, 32, forecastDays), true);
             var b2 = new AutogradNode(new FastTensor<float>(true, 1, forecastDays), true);
             Randomize(w2.Data.AsSpan(), 32);
@@ -65,52 +55,44 @@ namespace DevOnBike.Overfit.Tests
             var parameters = new[] { w1, b1, w2, b2 };
             using var optimizer = new Adam(parameters, learningRate);
 
-            // 5. PĘTLA TRENINGOWA
+            // JAWNY GRAF OBLICZENIOWY
+            var graph = new ComputationGraph();
+
             for (var epoch = 1; epoch <= epochs; epoch++)
             {
-                using var hidden = TensorMath.Linear(inputNode, w1, b1);
-                using var relu = TensorMath.ReLU(hidden);
-                using var prediction = TensorMath.Linear(relu, w2, b2);
-
-                // DirectionalLoss zoptymalizowany pod SIMD połyka macierz [numSamples, 7] bez zająknięcia
-                using var loss = TensorMath.DirectionalLoss(prediction, targetNode, gamma: 15f);
-
-                ComputationGraph.Active.Backward(loss);
-                optimizer.Step();
+                graph.Reset();
                 optimizer.ZeroGrad();
-                ComputationGraph.Active.Reset();
+
+                using var hidden = TensorMath.Linear(graph, inputNode, w1, b1);
+                using var relu = TensorMath.ReLU(graph, hidden);
+                using var prediction = TensorMath.Linear(graph, relu, w2, b2);
+
+                using var loss = TensorMath.DirectionalLoss(graph, prediction, targetNode, gamma: 15f);
+
+                graph.Backward(loss);
+                optimizer.Step();
             }
 
             _output.WriteLine($"Trenowano na {numSamples} oknach. Sieć rozpoznaje całe trajektorie 7-dniowe.");
             _output.WriteLine("--------------------------------------------------");
 
-            // 6. INFERENCJA NA PRZYSZŁOŚĆ (Krótko po 02.04.2026)
             var lastReturns = returns.Skip(returns.Length - windowSize).ToArray();
-
             var inferenceInput = new FastTensor<float>(false, 1, windowSize);
             lastReturns.AsSpan().CopyTo(inferenceInput.AsSpan());
-
             using var inferenceNode = new AutogradNode(inferenceInput, false);
-            ComputationGraph.Active.IsRecording = false;
 
-            using var h = TensorMath.Linear(inferenceNode, w1, b1);
-            using var r = TensorMath.ReLU(h);
-            using var finalPred = TensorMath.Linear(r, w2, b2);
+            // INFERENCJA -> GRAF NULL
+            using var h = TensorMath.Linear(null, inferenceNode, w1, b1);
+            using var r = TensorMath.ReLU(null, h);
+            using var finalPred = TensorMath.Linear(null, r, w2, b2);
 
-            ComputationGraph.Active.IsRecording = true;
-
-            // 7. KASKADOWA DEKODACJA CENY
             _output.WriteLine($"START - Ostatnia znana cena: ${lastKnownPrice:F2} / oz");
 
             var currentSimulatedPrice = lastKnownPrice;
             for (var d = 0; d < forecastDays; d++)
             {
                 var predictedReturn = finalPred.Data[0, d];
-
-                // Obliczamy cenę D+1 używając wyliczonej ceny D
                 currentSimulatedPrice *= (1f + predictedReturn);
-
-                // Formatyzacja: znak + przed wzrostem, padding dla spacji
                 var sign = predictedReturn > 0 ? "+" : "";
                 _output.WriteLine($"Dzień +{d + 1} | Prognoza zwrotu: {sign}{predictedReturn * 100f,5:F2}% | Cena: ${currentSimulatedPrice:F2} / oz");
             }
@@ -138,7 +120,6 @@ namespace DevOnBike.Overfit.Tests
                 prices[i] = currentPrice;
                 float daysLeft = 227 - i;
                 var requiredDailyTrend = (targetPrice - currentPrice) / daysLeft;
-
                 var volatility = (rnd.NextSingle() - 0.5f) * (currentPrice * 0.03f);
                 currentPrice += requiredDailyTrend + volatility;
             }

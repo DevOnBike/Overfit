@@ -23,8 +23,6 @@ namespace DevOnBike.Overfit.Data
             FastTensor<float> x,
             FastTensor<float> y)
         {
-            ComputationGraph.Active.IsRecording = false; // Tryb inferencji
-
             // 1. Strata bazowa
             var baselineLoss = CalculateLoss(w1, b1, w2, b2, x, y);
             var scores = new float[x.GetDim(1)];
@@ -34,7 +32,7 @@ namespace DevOnBike.Overfit.Data
             {
                 using var shuffledX = CloneAndShuffleColumn(x, c);
                 var shuffledLoss = CalculateLoss(w1, b1, w2, b2, shuffledX, y);
-                
+
                 scores[c] = MathF.Max(0, shuffledLoss - baselineLoss);
             }
 
@@ -42,10 +40,10 @@ namespace DevOnBike.Overfit.Data
             var total = scores.Sum();
             Console.WriteLine("\n=== ISTOTNOŚĆ CECH (PFI) ===");
             var sorted = scores.Select((s, i) => new
-                {
-                    Name = _featureNames[i],
-                    Val = s
-                })
+            {
+                Name = _featureNames[i],
+                Val = s
+            })
                 .OrderByDescending(x => x.Val);
 
             foreach (var item in sorted)
@@ -77,22 +75,24 @@ namespace DevOnBike.Overfit.Data
             }
         }
 
-        // Pomocnicze obliczanie straty bez nagrywania grafu
+        // Pomocnicze obliczanie straty bez nagrywania grafu (Inference Mode)
         private float CalculateLoss(
-            AutogradNode w1, 
-            AutogradNode b1, 
-            AutogradNode w2, 
+            AutogradNode w1,
+            AutogradNode b1,
+            AutogradNode w2,
             AutogradNode b2,
-            FastTensor<float> x, 
+            FastTensor<float> x,
             FastTensor<float> y)
         {
             var input = new AutogradNode(x, false);
             var target = new AutogradNode(y, false);
-            using var l1 = TensorMath.ReLU(TensorMath.AddBias(TensorMath.MatMul(input, w1), b1));
-            using var pred = TensorMath.AddBias(TensorMath.MatMul(l1, w2), b2);
-            using var loss = TensorMath.MSELoss(pred, target);
-            
-            return loss.Data[0]; //
+
+            // Przekazujemy NULL jako graf, aby całkowicie wyłączyć nagrywanie
+            using var l1 = TensorMath.ReLU(null, TensorMath.AddBias(null, TensorMath.MatMul(null, input, w1), b1));
+            using var pred = TensorMath.AddBias(null, TensorMath.MatMul(null, l1, w2), b2);
+            using var loss = TensorMath.MSELoss(null, pred, target);
+
+            return loss.Forward();
         }
 
         private float CalculatePearson(FastTensor<float> t, int colA, int colB)
@@ -102,7 +102,7 @@ namespace DevOnBike.Overfit.Data
             var s = t.AsSpan();
 
             float sumA = 0, sumB = 0, sumAB = 0, sumA2 = 0, sumB2 = 0;
-            
+
             for (var r = 0; r < rows; r++)
             {
                 var a = s[r * cols + colA];
@@ -116,7 +116,7 @@ namespace DevOnBike.Overfit.Data
 
             var num = (rows * sumAB) - (sumA * sumB);
             var den = MathF.Sqrt((rows * sumA2 - sumA * sumA) * (rows * sumB2 - sumB * sumB));
-            
+
             return den == 0 ? 0 : num / den;
         }
 
@@ -129,11 +129,9 @@ namespace DevOnBike.Overfit.Data
             var cols = res.GetDim(1);
             var span = res.AsSpan();
 
-            // Fisher-Yates Shuffle tylko dla jednej kolumny
             for (var i = rows - 1; i > 0; i--)
             {
                 var j = Random.Shared.Next(i + 1);
-                
                 (span[i * cols + colIdx], span[j * cols + colIdx]) = (span[j * cols + colIdx], span[i * cols + colIdx]);
             }
             return res;
