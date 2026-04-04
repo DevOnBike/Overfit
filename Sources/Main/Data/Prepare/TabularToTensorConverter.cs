@@ -14,17 +14,30 @@ namespace DevOnBike.Overfit.Data.Prepare
         public void Fit(IEnumerable<T> data)
         {
             _featureWidth = 0;
+
             foreach (var col in _schema.Features)
             {
                 if (col.Type == ColumnType.Categorical)
                 {
-                    // STABILNOŚĆ: Sortujemy kategorie, aby układ kolumn był zawsze taki sam
-                    var uniqueValues = data
-                        .Select(d => GetValue(d, col.Name)?.ToString())
-                        .Distinct()
-                        .Where(v => v != null)
-                        .OrderBy(v => v)
-                        .ToArray();
+                    // 1. Zbieranie unikalnych wartości (odpowiednik Distinct + Where)
+                    var uniqueSet = new HashSet<string>();
+
+                    foreach (var item in data)
+                    {
+                        var valStr = GetValue(item, col.Name)?.ToString();
+
+                        if (valStr != null)
+                        {
+                            uniqueSet.Add(valStr);
+                        }
+                    }
+
+                    // 2. Materializacja do tablicy
+                    var uniqueValues = new string[uniqueSet.Count];
+                    uniqueSet.CopyTo(uniqueValues);
+
+                    // 3. Sortowanie w miejscu (odpowiednik OrderBy, ale bez alokacji buforów)
+                    Array.Sort(uniqueValues);
 
                     _categoryMaps[col.Name] = uniqueValues;
                     _featureWidth += uniqueValues.Length;

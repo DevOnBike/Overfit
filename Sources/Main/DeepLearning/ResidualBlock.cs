@@ -53,10 +53,10 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public IEnumerable<AutogradNode> Parameters()
         {
-            return _linear1.Parameters()
-                .Concat(_bn1.Parameters())
-                .Concat(_linear2.Parameters())
-                .Concat(_bn2.Parameters());
+            foreach (var p in _linear1.Parameters()) yield return p;
+            foreach (var p in _bn1.Parameters()) yield return p;
+            foreach (var p in _linear2.Parameters()) yield return p;
+            foreach (var p in _bn2.Parameters()) yield return p;
         }
 
         public void Save(BinaryWriter bw)

@@ -36,20 +36,29 @@ namespace DevOnBike.Overfit.Data
                 scores[c] = MathF.Max(0, shuffledLoss - baselineLoss);
             }
 
-            // 3. Obliczanie procentowe
-            var total = scores.Sum();
-            Console.WriteLine("\n=== ISTOTNOŚĆ CECH (PFI) ===");
-            var sorted = scores.Select((s, i) => new
-            {
-                Name = _featureNames[i],
-                Val = s
-            })
-                .OrderByDescending(x => x.Val);
+            // 3. Przygotowanie do sortowania i obliczenie sumy (ZERO ALLOCATION)
+            float total = 0f;
+            var combined = new (float Score, string Name)[scores.Length];
 
-            foreach (var item in sorted)
+            for (var i = 0; i < scores.Length; i++)
             {
-                var pct = total > 0 ? (item.Val / total) * 100 : 0;
-                Console.WriteLine($"{item.Name,-25} : {pct,6:F1}% (score: {item.Val:F4})");
+                total += scores[i];
+                combined[i] = (scores[i], _featureNames[i]);
+            }
+
+            // Array.Sort dla ValueTuple sortuje domyślnie rosnąco po pierwszym elemencie (Score)
+            // Jest to operacja in-place (w miejscu), niezwykle szybka dla typów prostych.
+            Array.Sort(combined);
+
+            Console.WriteLine("\n=== ISTOTNOŚĆ CECH (PFI) ===");
+
+            // 4. Iterujemy od tyłu, aby uzyskać efekt "OrderByDescending"
+            for (var i = combined.Length - 1; i >= 0; i--)
+            {
+                var item = combined[i];
+                var pct = total > 0 ? (item.Score / total) * 100 : 0;
+
+                Console.WriteLine($"{item.Name,-25} : {pct,6:F1}% (score: {item.Score:F4})");
             }
         }
 

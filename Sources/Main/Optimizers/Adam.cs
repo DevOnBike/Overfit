@@ -37,15 +37,17 @@ namespace DevOnBike.Overfit.Optimizers
         {
             LearningRate = learningRate;
 
-            var paramList = parameters.Where(p => p.RequiresGrad).ToList();
+            var statesList = new List<ParamState>();
 
-            _states = new ParamState[paramList.Count];
-
-            for (var i = 0; i < paramList.Count; i++)
+            foreach (var p in parameters)
             {
-                _states[i] = new ParamState(paramList[i]);
+                if (p.RequiresGrad)
+                {
+                    statesList.Add(new ParamState(p));
+                }
             }
 
+            _states = [.. statesList];
         }
 
         public void Step()

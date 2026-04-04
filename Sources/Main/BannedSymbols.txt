@@ -1,0 +1,1 @@
+﻿N:System.Linq; LINQ jest zakazany w tym projekcie ze względów wydajnościowych. Użyj pętli for/foreach i Span
