@@ -2,7 +2,7 @@
 
 [![NuGet version](https://img.shields.io/nuget/v/DevOnBike.Overfit.svg)](https://www.nuget.org/packages/DevOnBike.Overfit)
 [![Build Status](https://img.shields.io/github/actions/workflow/status/DevOnBike/Overfit/ci.yml?branch=main)](https://github.com/DevOnBike/Overfit/actions)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![License: Dual (AGPLv3 / Commercial)](https://img.shields.io/badge/License-Dual-blue.svg)](LICENSE.md)
 
 **A High-Performance, Zero-Allocation Machine Learning Engine in Pure C#.**
 
@@ -72,13 +72,26 @@ using var cleanData = pipeline.Execute(rawFeatures, rawTargets);
 
 ---
 
-## 🧠 Why Pure C# and Native AOT?
+## 💡 Why Pure C# and Native AOT?
 
 Most .NET ML libraries act as bridges to PyTorch, TensorFlow, or ONNX Runtime. While powerful, they drag along massive dependencies (often gigabytes of CUDA libraries and Python environments). 
 
 **Overfit is different.**
 By writing the math and the autograd engine entirely in modern C# (utilizing SIMD and memory-safe structures), Overfit allows you to deploy intelligent applications as **single-file native executables**. 
 Whether you're building a microservice, a high-frequency trading bot, or an embedded IoT application, Overfit runs with predictable latency and a tiny memory footprint.
+
+---
+
+## ⚖️ Dual Licensing
+
+This software is released under a **Dual License model**:
+
+1. **Open Source (GNU AGPLv3):** Free for open-source projects, personal use, and academic research. *Note: If you use this engine in your application (even over a network/API), your entire application must also be open-sourced under the AGPLv3.*
+2. **Commercial License:** For businesses building proprietary, closed-source applications or enterprise environments. Purchasing a commercial license frees you from the requirements of the AGPLv3.
+
+**To purchase a commercial license or discuss enterprise support, please contact:** 👉 **[Wpisz Twój Email / Link do Strony]**
+
+---
 
 ## 🤝 Contributing
 Contributions are welcome! Whether it's adding new activation functions, optimizing tensor math with `System.Numerics.Vectors`, or improving the documentation.
