@@ -82,6 +82,19 @@ namespace DevOnBike.Overfit.DeepLearning
             }
         }
 
+        public void Load(string path)
+        {
+            if (!File.Exists(path))
+            {
+                throw new FileNotFoundException($"Brak pliku filtrów: {path}");
+            }
+
+            using var fs = new FileStream(path, FileMode.Open);
+            using var br = new BinaryReader(fs);
+
+            Load(br);
+        }
+
         public void Load(BinaryReader br)
         {
             foreach (var module in _modules)

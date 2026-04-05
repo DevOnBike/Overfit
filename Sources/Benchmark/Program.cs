@@ -3,13 +3,15 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using BenchmarkDotNet.Running;
+
 namespace Benchmarks
 {
     internal static class Program
     {
         private static void Main(string[] args)
         {
-            // BenchmarkRunner.Run<Conv2DBenchmark>();
+            BenchmarkRunner.Run<InferenceBenchmark>();
             // BenchmarkRunner.Run<CholeskyGaussianBenchmark>();
         }
     }
