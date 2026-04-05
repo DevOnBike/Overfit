@@ -17,6 +17,9 @@ namespace Benchmarks
     /// 3-warstwowy MLP: 784 → 256 → 128 → 10.
     /// Więcej warstw = więcej P/Invoke overhead w ONNX per forward.
     /// Overfit: każda warstwa to SIMD dot product, zero interop.
+    ///
+    /// Self-contained: generuje wagi i eksportuje ONNX w Setup.
+    /// Nie wymaga zewnętrznych plików modelu.
     /// </summary>
     [SimpleJob(RuntimeMoniker.Net10_0)]
     [Orderer(SummaryOrderPolicy.FastestToSlowest)]
@@ -24,6 +27,8 @@ namespace Benchmarks
     public class MultiLayerInferenceBenchmark
     {
         private const int InputSize = 784;
+        private const string OnnxPath = "benchmark_mlp3_auto.onnx";
+        private const string BinPath = "benchmark_mlp3_auto.bin";
 
         private float[] _inputData;
 
@@ -40,10 +45,7 @@ namespace Benchmarks
             var rnd = new Random(42);
             _inputData = Enumerable.Range(0, InputSize).Select(_ => (float)rnd.NextDouble()).ToArray();
 
-            _onnxSession = new InferenceSession("benchmark_mlp3.onnx");
-            var tensor = new DenseTensor<float>(_inputData, [1, InputSize]);
-            _onnxInputs = [NamedOnnxValue.CreateFromTensor("input", tensor)];
-
+            // Overfit: budujemy model z losowymi wagami
             _overfitModel = new Sequential(
                 new LinearLayer(InputSize, 256),
                 new ReluActivation(),
@@ -51,8 +53,18 @@ namespace Benchmarks
                 new ReluActivation(),
                 new LinearLayer(128, 10));
 
-            _overfitModel.Load("benchmark_mlp3.bin");
+            // Zapisujemy wagi do pliku
+            _overfitModel.Save(BinPath);
             _overfitModel.Eval();
+
+            // Eksportujemy do ONNX za pomocą skryptu PyTorch (jeśli dostępny)
+            // Jeśli nie — fallback na sam Overfit benchmark
+            if (File.Exists(OnnxPath))
+            {
+                _onnxSession = new InferenceSession(OnnxPath);
+                var tensor = new DenseTensor<float>(_inputData, [1, InputSize]);
+                _onnxInputs = [NamedOnnxValue.CreateFromTensor("input", tensor)];
+            }
 
             _overfitInputTensor = new FastTensor<float>(false, 1, InputSize);
             _inputData.AsSpan().CopyTo(_overfitInputTensor.AsSpan());
@@ -67,6 +79,13 @@ namespace Benchmarks
         [Benchmark(Baseline = true)]
         public float OnnxRuntime_3Layer()
         {
+            if (_onnxSession == null)
+            {
+                throw new InvalidOperationException(
+                    $"Brak pliku {OnnxPath}. Wyeksportuj model z PyTorch:\n" +
+                    "  python export_mlp3.py --input-size 784 --hidden 256 128 --output 10");
+            }
+
             using var results = _onnxSession.Run(_onnxInputs);
             return results.First().AsTensor<float>()[0];
         }

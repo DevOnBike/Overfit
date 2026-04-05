@@ -11,7 +11,9 @@ namespace Benchmarks
     {
         private static void Main(string[] args)
         {
-            BenchmarkRunner.Run<SingleInferenceBenchmark>();
+            // BenchmarkRunner.Run<SingleInferenceBenchmark>();
+            // BenchmarkRunner.Run<MultiLayerInferenceBenchmark>();
+            BenchmarkRunner.Run<TailLatencyBenchmark>();
             // BenchmarkRunner.Run<InferenceBenchmark>();
             // BenchmarkRunner.Run<TailLatencyBenchmark>();
         }
