@@ -62,15 +62,32 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             if (graph == null || !IsTraining)
             {
+                var batchSize = input.Data.GetDim(0);
+
+                // Batch > 1 w inference: fallback na standardowy MatMul (bez autograd)
+                if (batchSize != 1)
+                {
+                    return TensorMath.Linear(null, input, Weights, Biases);
+                }
+
+                if (_weightsTransposed == null)
+                {
+                    RebuildTransposedWeights();
+                }
+
                 LinearInferenceSimd(
                     input.Data.AsReadOnlySpan(),
                     _weightsTransposed.AsReadOnlySpan(),
                     Biases.Data.AsReadOnlySpan(),
                     _inferenceOutputNode.Data.AsSpan());
 
-                // Zwracamy bufor współdzielony — caller NIE powinien go disposować.
-                // Wynik jest ważny tylko do następnego wywołania Forward.
                 return _inferenceOutputNode;
+            }
+
+            if (_weightsTransposed != null)
+            {
+                _weightsTransposed.Dispose();
+                _weightsTransposed = null;
             }
 
             return TensorMath.Linear(graph, input, Weights, Biases);

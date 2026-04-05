@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -44,16 +44,36 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
-            var out1 = _linear1.Forward(graph, input);
-            var bn1Out = _bn1.Forward(graph, out1);
-            var a1 = TensorMath.ReLU(graph, bn1Out);
+            // Inference: graph == null → Backward nie będzie wywołany → bezpieczny Dispose
+            if (graph == null || !IsTraining)
+            {
+                // LinearLayer zwraca współdzielony bufor — BEZ using
+                var out1 = _linear1.Forward(null, input);
+                using var bn1Out = _bn1.Forward(null, out1);
+                using var a1 = TensorMath.ReLU(null, bn1Out);
 
-            var out2 = _linear2.Forward(graph, a1);
-            var bn2Out = _bn2.Forward(graph, out2);
+                var out2 = _linear2.Forward(null, a1);
+                using var bn2Out = _bn2.Forward(null, out2);
 
-            var added = TensorMath.Add(graph, bn2Out, input);
+                using var added = TensorMath.Add(null, bn2Out, input);
 
-            return TensorMath.ReLU(graph, added);
+                // Wynik: nowy tensor z ReLU — caller decyduje o Dispose
+                return TensorMath.ReLU(null, added);
+            }
+
+            // Trening: intermediates muszą przeżyć do Backward!
+            // Graf trzyma referencje → NIE disposujemy.
+            // Zostaną zwolnione przez graph.Reset() na początku następnego batcha.
+            var tOut1 = _linear1.Forward(graph, input);
+            var tBn1 = _bn1.Forward(graph, tOut1);
+            var tA1 = TensorMath.ReLU(graph, tBn1);
+
+            var tOut2 = _linear2.Forward(graph, tA1);
+            var tBn2 = _bn2.Forward(graph, tOut2);
+
+            var tAdded = TensorMath.Add(graph, tBn2, input);
+
+            return TensorMath.ReLU(graph, tAdded);
         }
 
         public IEnumerable<AutogradNode> Parameters()
