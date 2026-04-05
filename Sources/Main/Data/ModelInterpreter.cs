@@ -42,7 +42,7 @@ namespace DevOnBike.Overfit.Data
             }
 
             // 3. Przygotowanie do sortowania i obliczenie sumy (ZERO ALLOCATION)
-            float total = 0f;
+            var total = 0f;
             var combined = new (float Score, string Name)[scores.Length];
 
             for (var i = 0; i < scores.Length; i++)

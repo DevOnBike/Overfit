@@ -20,6 +20,9 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<None Update="benchmark_model.bin">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</None>
 		<None Update="benchmark_model.onnx">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</None>

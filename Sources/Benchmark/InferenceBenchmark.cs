@@ -7,6 +7,7 @@ using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Order;
 using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.DeepLearning;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
@@ -15,7 +16,7 @@ namespace Benchmarks
     [SimpleJob(RuntimeMoniker.Net10_0)]
     [Orderer(SummaryOrderPolicy.FastestToSlowest)]
     [MemoryDiagnoser]
-    [DisassemblyDiagnoser(maxDepth: 2)]
+    [DisassemblyDiagnoser(maxDepth: 2)] // Opcjonalnie: pokaże wygenerowany kod asemblera
     public class InferenceBenchmark
     {
         private const int InputSize = 784;
@@ -26,91 +27,64 @@ namespace Benchmarks
         // --- ONNX Runtime ---
         private InferenceSession _onnxSession;
 
-        // --- Overfit (Czysty C#) ---
+        // --- Overfit (Prawdziwy silnik) ---
+        private Sequential _overfitModel;
         private FastTensor<float> _overfitInputTensor;
-        private FastTensor<float> _weights;
-        private FastTensor<float> _bias;
-        private FastTensor<float> _overfitOutputTensor; // Pre-alokowany bufor wyjściowy
 
         [GlobalSetup]
         public void Setup()
         {
-            // 1. Generujemy fikcyjne dane wejściowe
+            // 1. Generujemy fikcyjne dane wejściowe dla równego startu
             var rnd = new Random(42);
             _inputData = Enumerable.Range(0, InputSize).Select(_ => (float)rnd.NextDouble()).ToArray();
 
-            // 2. Setup ONNX (Wymaga pliku benchmark_model.onnx w folderze wyjściowym)
+            // 2. Setup ONNX (Wymaga plików .onnx i .onnx.data w folderze wyjściowym)
             _onnxSession = new InferenceSession("benchmark_model.onnx");
 
-            // 3. Setup Overfit (Pre-alokacja całej pamięci na start - Zero GC później)
+            // 3. Setup Overfit (Twoje prawdziwe API)
+            _overfitModel = new Sequential(
+                new LinearLayer(InputSize, OutputSize)
+            );
+
+            // Ładujemy prawdziwe wagi wyciągnięte z ONNX (wymaga metody Load() z użyciem BinaryReader)
+            _overfitModel.Load("benchmark_model.bin");
+
+            // 4. Pre-alokacja tensora wejściowego dla Zero-Allocation
             _overfitInputTensor = new FastTensor<float>(false, 1, InputSize);
             _inputData.AsSpan().CopyTo(_overfitInputTensor.AsSpan());
-
-            _weights = new FastTensor<float>(false, InputSize, OutputSize);
-            _bias = new FastTensor<float>(false, 1, OutputSize);
-            _overfitOutputTensor = new FastTensor<float>(false, 1, OutputSize);
-
-            // Wypełniamy wagi testowymi wartościami
-            _weights.AsSpan().Fill(0.1f);
-            _bias.AsSpan().Fill(0.01f);
         }
 
         [Benchmark(Baseline = true)]
         public float[] OnnxRuntimeInference()
         {
-            // ALOKACJA 1: DenseTensor
+            // ALOKACJA 1: DenseTensor alokuje na stercie
             var tensor = new DenseTensor<float>(_inputData, new[] { 1, InputSize });
 
-            // ALOKACJA 2: Tablica wejść dla API
+            // ALOKACJA 2: Tablica wejść dla natywnego API
             var inputs = new NamedOnnxValue[] { NamedOnnxValue.CreateFromTensor("input", tensor) };
 
             // Bariera P/Invoke (Przejście C# -> C++)
             using var results = _onnxSession.Run(inputs);
 
-            // ALOKACJA 3: Zrzut z pamięci C++ na nową tablicę zarządzaną
+            // ALOKACJA 3: Zrzut z pamięci C++ na nową tablicę C#
             return results.First().AsTensor<float>().ToArray();
         }
 
         [Benchmark]
         public float OverfitPureCSharp()
         {
-            // ZERO-ALLOCATION
-            // Przekazujemy pre-alokowany tensor wyjściowy. Brak jakichkolwiek "new" w ciele funkcji.
-            LinearForwardFast(_overfitInputTensor, _weights, _bias, _overfitOutputTensor);
+            // PRAWDZIWY TEST: Uderzamy prosto w API Twojej biblioteki.
 
-            // Zwracamy pierwszą wartość jako dowód (wyciągnięcie ze Span to typ wartościowy, brak GC)
-            return _overfitOutputTensor.AsSpan()[0];
-        }
+            // requiresGrad: false zapobiega niepotrzebnej alokacji tensora 'Grad' 
+            // wewnątrz konstruktora AutogradNode podczas inferencji!
+            var inputNode = new AutogradNode(_overfitInputTensor, requiresGrad: false);
 
-        /// <summary>
-        /// Wysoce zoptymalizowana, płaska pętla dla warstwy Linear.
-        /// W rzeczywistości to odpowiednik Twojej metody z TensorMath.cs.
-        /// </summary>
-        private void LinearForwardFast(
-            FastTensor<float> input,
-            FastTensor<float> weights,
-            FastTensor<float> bias,
-            FastTensor<float> output)
-        {
-            var inSpan = input.AsReadOnlySpan();
-            var wSpan = weights.AsReadOnlySpan();
-            var bSpan = bias.AsReadOnlySpan();
-            var outSpan = output.AsSpan();
+            // Forward Pass: Przekazujemy null jako graf, wyłączając historię do AutoDiff
+            var outputNode = _overfitModel.Forward(null, inputNode);
 
-            // Pętla po neuronach wyjściowych (10)
-            for (int outIdx = 0; outIdx < OutputSize; outIdx++)
-            {
-                float sum = bSpan[outIdx];
-
-                // Pętla po wejściach (784) - idealne miejsce na przyszłą wektoryzację Vector<float>
-                for (int inIdx = 0; inIdx < InputSize; inIdx++)
-                {
-                    // weights w pamięci to płaska tablica: [InputSize * OutputSize]
-                    sum += inSpan[inIdx] * wSpan[inIdx * OutputSize + outIdx];
-                }
-
-                outSpan[outIdx] = sum;
-            }
+            // Zwracamy pierwszą wartość bezpośrednio z właściwości 'Data',
+            // wyciągając ją ze struktury Span (omijamy całkowicie Garbage Collectora)
+            return outputNode.Data.AsSpan()[0];
         }
 
         [GlobalCleanup]
@@ -118,9 +92,7 @@ namespace Benchmarks
         {
             _onnxSession?.Dispose();
             _overfitInputTensor?.Dispose();
-            _weights?.Dispose();
-            _bias?.Dispose();
-            _overfitOutputTensor?.Dispose();
+            _overfitModel?.Dispose();
         }
     }
 }
