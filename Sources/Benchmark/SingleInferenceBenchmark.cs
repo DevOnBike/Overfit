@@ -13,23 +13,24 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 
 namespace Benchmarks
 {
+    /// <summary>
+    /// Baseline porównanie — pojedyncza inferencja.
+    /// Mierzy czysty koszt jednego Forward pass bez pętli.
+    /// </summary>
     [SimpleJob(RuntimeMoniker.Net10_0)]
     [Orderer(SummaryOrderPolicy.FastestToSlowest)]
     [MemoryDiagnoser]
     [DisassemblyDiagnoser(maxDepth: 2)]
-    public class InferenceBenchmark
+    public class SingleInferenceBenchmark
     {
         private const int InputSize = 784;
         private const int OutputSize = 10;
 
         private float[] _inputData;
 
-        // ONNX
         private InferenceSession _onnxSession;
-        private NamedOnnxValue[] _onnxInputs;         // Pre-alokowane
-        private DenseTensor<float> _onnxInputTensor;   // Pre-alokowany
+        private NamedOnnxValue[] _onnxInputs;
 
-        // Overfit
         private Sequential _overfitModel;
         private FastTensor<float> _overfitInputTensor;
         private AutogradNode _inputNode;
@@ -40,31 +41,24 @@ namespace Benchmarks
             var rnd = new Random(42);
             _inputData = Enumerable.Range(0, InputSize).Select(_ => (float)rnd.NextDouble()).ToArray();
 
-            // --- ONNX Setup ---
             _onnxSession = new InferenceSession("benchmark_model.onnx");
-            _onnxInputTensor = new DenseTensor<float>(_inputData, [1, InputSize]);
-            _onnxInputs = [NamedOnnxValue.CreateFromTensor("input", _onnxInputTensor)];
+            var tensor = new DenseTensor<float>(_inputData, [1, InputSize]);
+            _onnxInputs = [NamedOnnxValue.CreateFromTensor("input", tensor)];
 
-            // --- Overfit Setup ---
             _overfitModel = new Sequential(new LinearLayer(InputSize, OutputSize));
             _overfitModel.Load("benchmark_model.bin");
-            _overfitModel.Eval(); // Transpozycja wag + tryb inferencji
+            _overfitModel.Eval();
 
             _overfitInputTensor = new FastTensor<float>(false, 1, InputSize);
             _inputData.AsSpan().CopyTo(_overfitInputTensor.AsSpan());
             _inputNode = new AutogradNode(_overfitInputTensor, requiresGrad: false);
 
-            // Warmup — JIT Tier-1 + PGO
             for (var i = 0; i < 100; i++)
             {
                 _overfitModel.Forward(null, _inputNode);
             }
         }
 
-        /// <summary>
-        /// ONNX Runtime — realistyczne użycie z pre-alokowanym tensorem wejściowym.
-        /// Alokacja wynikowa (Run + GetTensor) jest wewnątrz ONNX i niemożliwa do uniknięcia.
-        /// </summary>
         [Benchmark(Baseline = true)]
         public float OnnxRuntime_PreAllocated()
         {
@@ -72,10 +66,6 @@ namespace Benchmarks
             return results.First().AsTensor<float>()[0];
         }
 
-        /// <summary>
-        /// ONNX Runtime — "uczciwe" porównanie z pełnym kosztem tworzenia tensora.
-        /// Typowe w produkcji: nowe dane wejściowe per request.
-        /// </summary>
         [Benchmark]
         public float OnnxRuntime_FullAllocation()
         {
@@ -85,15 +75,10 @@ namespace Benchmarks
             return results.First().AsTensor<float>()[0];
         }
 
-        /// <summary>
-        /// Overfit — zero alokacji, SIMD na pre-transponowanych wagach.
-        /// Pełna ścieżka inferencji: dane → wynik, bez pośredników.
-        /// </summary>
         [Benchmark]
         public float Overfit_ZeroAlloc()
         {
-            var outputNode = _overfitModel.Forward(null, _inputNode);
-            return outputNode.Data.AsSpan()[0];
+            return _overfitModel.Forward(null, _inputNode).Data.AsSpan()[0];
         }
 
         [GlobalCleanup]

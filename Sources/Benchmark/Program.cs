@@ -11,8 +11,9 @@ namespace Benchmarks
     {
         private static void Main(string[] args)
         {
-            BenchmarkRunner.Run<InferenceBenchmark>();
-            // BenchmarkRunner.Run<CholeskyGaussianBenchmark>();
+            BenchmarkRunner.Run<SingleInferenceBenchmark>();
+            // BenchmarkRunner.Run<InferenceBenchmark>();
+            // BenchmarkRunner.Run<TailLatencyBenchmark>();
         }
     }
 }
