@@ -1,4 +1,9 @@
-﻿using DevOnBike.Overfit.Core;
+﻿// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
+
+using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.Data.Contracts;
 
 namespace DevOnBike.Overfit.Data
@@ -37,7 +42,7 @@ namespace DevOnBike.Overfit.Data
             }
 
             // 3. Przygotowanie do sortowania i obliczenie sumy (ZERO ALLOCATION)
-            float total = 0f;
+            var total = 0f;
             var combined = new (float Score, string Name)[scores.Length];
 
             for (var i = 0; i < scores.Length; i++)

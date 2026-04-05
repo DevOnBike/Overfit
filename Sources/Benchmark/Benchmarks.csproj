@@ -15,7 +15,14 @@
 
 	<ItemGroup>
 		<PackageReference Include="BenchmarkDotNet" />
+		<PackageReference Include="Microsoft.ML.OnnxRuntime" />
 		<ProjectReference Include="..\Main\Main.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Update="benchmark_*.onnx;benchmark_*.bin">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</None>
 	</ItemGroup>
 
 </Project>

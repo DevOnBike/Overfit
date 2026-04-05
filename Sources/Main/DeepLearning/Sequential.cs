@@ -1,3 +1,8 @@
+// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
+
 using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.DeepLearning
@@ -75,6 +80,19 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 module.Save(bw);
             }
+        }
+
+        public void Load(string path)
+        {
+            if (!File.Exists(path))
+            {
+                throw new FileNotFoundException($"Brak pliku filtrów: {path}");
+            }
+
+            using var fs = new FileStream(path, FileMode.Open);
+            using var br = new BinaryReader(fs);
+
+            Load(br);
         }
 
         public void Load(BinaryReader br)

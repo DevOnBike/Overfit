@@ -1,4 +1,9 @@
-﻿using DevOnBike.Overfit.Core;
+﻿// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
+
+using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.DeepLearning;
 
 namespace DevOnBike.Overfit.Tests
@@ -14,18 +19,24 @@ namespace DevOnBike.Overfit.Tests
             using var inputTensor = new FastTensor<float>(2, 10);
             using var input = new AutogradNode(inputTensor, false);
 
-            // Przekazujemy null, bo nie potrzebujemy nagrywać operacji dla testów wymiarów
+            // Batch=2 + graph=null → fallback na TensorMath.Linear → nowy tensor → using OK
             using var output = layer.Forward(null, input);
 
             Assert.Equal(2, output.Data.Shape[0]);
             Assert.Equal(5, output.Data.Shape[1]);
 
             using var ms = new MemoryStream();
-            using (var bw = new BinaryWriter(ms, System.Text.Encoding.UTF8, true)) layer.Save(bw);
+            using (var bw = new BinaryWriter(ms, System.Text.Encoding.UTF8, true))
+            {
+                layer.Save(bw);
+            }
 
             ms.Position = 0;
             using var layer2 = new LinearLayer(10, 5);
-            using (var br = new BinaryReader(ms)) layer2.Load(br);
+            using (var br = new BinaryReader(ms))
+            {
+                layer2.Load(br);
+            }
 
             Assert.Equal(layer.Weights.Data[0, 0], layer2.Weights.Data[0, 0]);
         }
