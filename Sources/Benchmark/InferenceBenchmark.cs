@@ -15,8 +15,8 @@ namespace Benchmarks
 {
     [SimpleJob(RuntimeMoniker.Net10_0)]
     [Orderer(SummaryOrderPolicy.FastestToSlowest)]
-    [MemoryDiagnoser]
-    [DisassemblyDiagnoser(maxDepth: 2)] // Opcjonalnie: pokaże wygenerowany kod asemblera
+    [MemoryDiagnoser] // Kluczowe dla śledzenia tych 2.63 KB
+    [DisassemblyDiagnoser(maxDepth: 2)]
     public class InferenceBenchmark
     {
         private const int InputSize = 784;
@@ -27,18 +27,19 @@ namespace Benchmarks
         // --- ONNX Runtime ---
         private InferenceSession _onnxSession;
 
-        // --- Overfit (Prawdziwy silnik) ---
+        // --- Overfit ---
         private Sequential _overfitModel;
         private FastTensor<float> _overfitInputTensor;
+        private AutogradNode _inputNode; // Pre-alokowany węzeł wejściowy
 
         [GlobalSetup]
         public void Setup()
         {
-            // 1. Generujemy fikcyjne dane wejściowe dla równego startu
+            // 1. Generujemy dane wejściowe
             var rnd = new Random(42);
             _inputData = Enumerable.Range(0, InputSize).Select(_ => (float)rnd.NextDouble()).ToArray();
 
-            // 2. Setup ONNX (Wymaga plików .onnx i .onnx.data w folderze wyjściowym)
+            // 2. Setup ONNX
             _onnxSession = new InferenceSession("benchmark_model.onnx");
 
             // 3. Setup Overfit (Twoje prawdziwe API)
@@ -46,44 +47,40 @@ namespace Benchmarks
                 new LinearLayer(InputSize, OutputSize)
             );
 
-            // Ładujemy prawdziwe wagi wyciągnięte z ONNX (wymaga metody Load() z użyciem BinaryReader)
+            // Ładujemy wagi z pliku binarnego
             _overfitModel.Load("benchmark_model.bin");
 
-            // 4. Pre-alokacja tensora wejściowego dla Zero-Allocation
+            // 4. PRZYGOTOWANIE ZERO-ALLOCATION
+            // Alokujemy tensor i węzeł RAZ. W pętli benchmarku będziemy go tylko używać.
             _overfitInputTensor = new FastTensor<float>(false, 1, InputSize);
             _inputData.AsSpan().CopyTo(_overfitInputTensor.AsSpan());
+
+            // Tworzymy węzeł wejściowy z requiresGrad: false, aby nie alokował tensora na gradienty
+            _inputNode = new AutogradNode(_overfitInputTensor, requiresGrad: false);
         }
 
         [Benchmark(Baseline = true)]
         public float[] OnnxRuntimeInference()
         {
-            // ALOKACJA 1: DenseTensor alokuje na stercie
+            // ONNX zawsze będzie tu alokował (DenseTensor + NamedOnnxValue + Results)
             var tensor = new DenseTensor<float>(_inputData, new[] { 1, InputSize });
-
-            // ALOKACJA 2: Tablica wejść dla natywnego API
             var inputs = new NamedOnnxValue[] { NamedOnnxValue.CreateFromTensor("input", tensor) };
 
-            // Bariera P/Invoke (Przejście C# -> C++)
             using var results = _onnxSession.Run(inputs);
 
-            // ALOKACJA 3: Zrzut z pamięci C++ na nową tablicę C#
             return results.First().AsTensor<float>().ToArray();
         }
 
         [Benchmark]
         public float OverfitPureCSharp()
         {
-            // PRAWDZIWY TEST: Uderzamy prosto w API Twojej biblioteki.
+            // PRAWIDŁOWY TEST:
+            // Przekazujemy pre-alokowany _inputNode. 
+            // Jeśli Twoja implementacja TensorMath.Linear (wywoływana przez Sequential) 
+            // nie tworzy wewnątrz nowych obiektów 'new', zobaczysz tutaj 0 bajtów.
+            var outputNode = _overfitModel.Forward(null, _inputNode);
 
-            // requiresGrad: false zapobiega niepotrzebnej alokacji tensora 'Grad' 
-            // wewnątrz konstruktora AutogradNode podczas inferencji!
-            var inputNode = new AutogradNode(_overfitInputTensor, requiresGrad: false);
-
-            // Forward Pass: Przekazujemy null jako graf, wyłączając historię do AutoDiff
-            var outputNode = _overfitModel.Forward(null, inputNode);
-
-            // Zwracamy pierwszą wartość bezpośrednio z właściwości 'Data',
-            // wyciągając ją ze struktury Span (omijamy całkowicie Garbage Collectora)
+            // Wyciągamy wynik prosto z Data.AsSpan()
             return outputNode.Data.AsSpan()[0];
         }
 
@@ -92,6 +89,7 @@ namespace Benchmarks
         {
             _onnxSession?.Dispose();
             _overfitInputTensor?.Dispose();
+            _inputNode?.Dispose();
             _overfitModel?.Dispose();
         }
     }
