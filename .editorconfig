@@ -2,3 +2,5 @@ root = true
 
 [*.cs]
 dotnet_diagnostic.RS0030.severity = error
+dotnet_diagnostic.IDE0073.severity = warning
+file_header_template = Copyright (c) 2026 DevOnBike.\nThis file is part of DevonBike Overfit.\nDevonBike Overfit is licensed under the GNU AGPLv3.\nFor commercial licensing options, contact: devonbike@gmail.com
