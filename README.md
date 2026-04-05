@@ -12,6 +12,61 @@ Designed for maximum CPU inference speed, Overfit embraces aggressive memory man
 
 ---
 
+## ⚡ Benchmarks: Overfit vs ONNX Runtime
+
+Single-layer MLP (784→10), measured on AMD Ryzen 9 9950X3D, .NET 10, Windows 11.
+All benchmarks use identical weights exported from the same PyTorch model.
+
+### Single Inference Latency
+
+| Method | Mean | Allocated | Ratio |
+|--------|-----:|----------:|------:|
+| **Overfit** | **382 ns** | **0 B** | **9.4×** |
+| ONNX Runtime | 3,573 ns | 912 B | 1.0× |
+
+### Throughput (10,000 calls)
+
+| Method | Mean | Gen0 | Allocated | Ratio |
+|--------|-----:|-----:|----------:|------:|
+| **Overfit** | **3.88 ms** | **0** | **0 B** | **9.2×** |
+| ONNX Runtime | 35.60 ms | 154 | 9.12 MB | 1.0× |
+
+### Concurrent (8 threads × 1,000 calls)
+
+| Method | Mean | Gen0 | Allocated | Ratio |
+|--------|-----:|-----:|----------:|------:|
+| **Overfit** | **824 μs** | **0** | **3.3 KB** | **13.4×** |
+| ONNX Runtime | 11,034 μs | 141 | 7.1 MB | 1.0× |
+
+### Cold Start (load + first prediction)
+
+| Method | Mean | Ratio |
+|--------|-----:|------:|
+| **Overfit** | **291 μs** | **4.2×** |
+| ONNX Runtime | 1,224 μs | 1.0× |
+
+### Tail Latency (100,000 calls)
+
+| Metric | Overfit | ONNX Runtime |
+|--------|--------:|-------------:|
+| P50 | 0.40 μs | 3.00 μs |
+| P99 | 0.60 μs | 3.70 μs |
+| P99.9 | 0.80 μs | 5.70 μs |
+| **Max** | **8.40 μs** | **2,184 μs** |
+| GC Gen-0 | 0 | 1 |
+
+### Scaling by Model Size
+
+| Model | Overfit | ONNX Runtime | Ratio |
+|-------|--------:|-------------:|------:|
+| 128 → 10 | 74 ns | 3,116 ns | **42.1×** |
+| 784 → 10 | 420 ns | 3,534 ns | **8.4×** |
+| 4096 → 10 | 1,972 ns | 5,461 ns | **2.8×** |
+
+> **Key takeaway:** ONNX Runtime carries ~3 μs of fixed overhead per call (P/Invoke marshalling, OrtValue allocation, managed↔native transitions). The smaller the model, the more this overhead dominates. At 128→10, the overhead is **42× larger than the actual math**. Overfit eliminates this entirely — pure managed SIMD with zero allocations.
+
+---
+
 ## 🔥 Key Features
 
 * **Zero-Allocation Hot Paths:** Built heavily on `Span<T>` and custom memory pooling. Training loops and inference passes avoid triggering the Garbage Collector (GC), ensuring flat-line CPU usage.
