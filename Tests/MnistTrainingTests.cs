@@ -134,19 +134,19 @@ namespace DevOnBike.Overfit.Tests
             var matrix = new int[10, 10];
             var samples = Math.Min(1000, testX.Shape[0]);
 
-            conv1.Eval(); bn1.Eval(); res1.Eval(); fcOut.Eval();
+            conv1.Eval();
+            bn1.Eval();
+            res1.Eval();
+            fcOut.Eval();
 
             _output.WriteLine("\nGenerowanie Macierzy Pomyłek dla 1000 próbek testowych...");
 
             for (var i = 0; i < samples; i++)
             {
-                // ZMIANA: Usunięto graph.Reset() i blok try-finally
-
                 var rowData = new FastTensor<float>(1, 1, 28, 28);
                 testX.AsSpan().Slice(i * 784, 784).CopyTo(rowData.AsSpan());
                 using var input = new AutogradNode(rowData, false);
 
-                // ZMIANA: Przekazujemy 'null' zamiast grafu – wymusza to tryb Inference
                 using var h1 = conv1.Forward(null, input);
                 using var a1 = TensorMath.ReLU(null, h1);
                 using var p1 = TensorMath.MaxPool2D(null, a1, 8, 26, 26, 2);
@@ -157,7 +157,10 @@ namespace DevOnBike.Overfit.Tests
 
                 using var res4D = TensorMath.Reshape(null, resOut, 1, 8, 13, 13);
                 using var gapOut = TensorMath.GlobalAveragePool2D(null, res4D, 8, 13, 13);
-                using var output = fcOut.Forward(null, gapOut);
+
+                // BEZ using — _inferenceOutputNode jest własnością LinearLayer,
+                // nie callera. Wynik jest ważny do następnego Forward().
+                var output = fcOut.Forward(null, gapOut);
 
                 var predicted = GetArgMax(output.Data.AsSpan());
                 var actual = GetArgMax(testY.AsSpan().Slice(i * 10, 10));
@@ -169,7 +172,10 @@ namespace DevOnBike.Overfit.Tests
             for (var r = 0; r < 10; r++)
             {
                 sb.Append($"{r,3} |");
-                for (var c = 0; c < 10; c++) sb.Append($"{matrix[r, c],4}|");
+                for (var c = 0; c < 10; c++)
+                {
+                    sb.Append($"{matrix[r, c],4}|");
+                }
                 sb.AppendLine();
             }
             _output.WriteLine(sb.ToString());
