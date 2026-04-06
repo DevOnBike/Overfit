@@ -8,23 +8,30 @@ using DevOnBike.Overfit.Data.Contracts;
 
 namespace DevOnBike.Overfit.Data.Prepare
 {
+    /// <summary>
+    /// Converts tabular data (objects/models) into high-performance <see cref="FastTensor{float}"/> objects.
+    /// Handles automated One-Hot Encoding for categorical variables and type mapping for numeric/binary data.
+    /// </summary>
+    /// <typeparam name="T">The type of the input data model.</typeparam>
     public class TabularToTensorConverter<T>
     {
         private readonly TableSchema _schema;
         private readonly Dictionary<string, string[]> _categoryMaps = new();
 
-        // DODANO: Delegat zastępujący Refleksję. Działa z natywną prędkością (AOT-Safe).
         private readonly Func<T, string, object> _valueExtractor;
-
         private int _featureWidth;
 
-        // ZMIANA: Konstruktor wymaga teraz dostarczenia metody wyciągającej dane
+        /// <param name="schema">Defines column types and their roles (Features vs Target).</param>
+        /// <param name="valueExtractor">Delegate to extract a property value by name from the input object.</param>
         public TabularToTensorConverter(TableSchema schema, Func<T, string, object> valueExtractor)
         {
             _schema = schema;
             _valueExtractor = valueExtractor ?? throw new ArgumentNullException(nameof(valueExtractor));
         }
 
+        /// <summary>
+        /// Analyzes the dataset to calculate feature width and builds category maps for One-Hot Encoding.
+        /// </summary>
         public void Fit(IEnumerable<T> data)
         {
             _featureWidth = 0;
@@ -51,7 +58,7 @@ namespace DevOnBike.Overfit.Data.Prepare
                     Array.Sort(uniqueValues);
 
                     _categoryMaps[col.Name] = uniqueValues;
-                    _featureWidth += uniqueValues.Length;
+                    _featureWidth += uniqueValues.Length; // One-Hot Encoding adds multiple columns.
                 }
                 else
                 {
@@ -60,10 +67,16 @@ namespace DevOnBike.Overfit.Data.Prepare
             }
         }
 
+        /// <summary>
+        /// Transforms the input list into a feature tensor and a target tensor.
+        /// Requires <see cref="Fit"/> to be called beforehand.
+        /// </summary>
         public (FastTensor<float> Features, FastTensor<float> Targets) Transform(List<T> data)
         {
             if (_featureWidth == 0 && _schema.Features.Count > 0)
-                throw new InvalidOperationException("Wywołaj Fit() przed Transform().");
+            {
+                throw new InvalidOperationException("Call Fit() before calling Transform().");
+            }
 
             var rowCount = data.Count;
             var features = new FastTensor<float>(rowCount, _featureWidth);
@@ -82,24 +95,31 @@ namespace DevOnBike.Overfit.Data.Prepare
                     var val = GetValue(data[i], col.Name);
 
                     if (col.Type == ColumnType.Numeric)
+                    {
                         fSpan[rowOffset + currentPos++] = Convert.ToSingle(val);
+                    }
                     else if (col.Type == ColumnType.Binary)
+                    {
                         fSpan[rowOffset + currentPos++] = Convert.ToBoolean(val) ? 1f : 0f;
+                    }
                     else if (col.Type == ColumnType.Categorical)
                     {
                         var categories = _categoryMaps[col.Name];
                         var currentVal = val?.ToString();
+
                         for (var c = 0; c < categories.Length; c++)
+                        {
                             fSpan[rowOffset + currentPos++] = (categories[c] == currentVal) ? 1f : 0f;
+                        }
                     }
                 }
+
                 tSpan[i] = Convert.ToSingle(GetValue(data[i], _schema.Target.Name));
             }
 
             return (features, targets);
         }
 
-        // ZMIANA: Wykorzystujemy przekazany delegat zamiast powolnej Refleksji
         private object GetValue(T item, string propName)
             => _valueExtractor(item, propName);
     }

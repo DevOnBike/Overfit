@@ -9,18 +9,20 @@ using DevOnBike.Overfit.Data.Contracts;
 namespace DevOnBike.Overfit.Data.Prepare
 {
     /// <summary>
-    /// Wykrywa i usuwa zduplikowane wiersze na podstawie Features.
-    /// Używa dwuetapowego porównania: szybki hash → pełne porównanie Span,
-    /// aby uniknąć fałszywych kolizji.
+    /// Detects and removes duplicate rows based on feature values.
+    /// Employs a two-stage comparison strategy: fast hashing followed by full Span verification 
+    /// to eliminate false positive collisions.
     /// </summary>
     public sealed class DuplicateRowFilterLayer : IDataLayer
     {
         private readonly bool _includeTargetInComparison;
 
         /// <param name="includeTargetInComparison">
-        /// Czy uwzględniać kolumnę Target przy porównaniu duplikatów.
-        /// true = dwa wiersze z identycznymi Features ale różnym Target NIE są duplikatami.
-        /// false = porównujemy tylko Features (domyślne — bezpieczniejsze dla regresji).
+        /// Whether to include the Target column when identifying duplicates.
+        /// <list type="bullet">
+        /// <item><description><c>true</c>: Rows with identical features but different targets are NOT considered duplicates.</description></item>
+        /// <item><description><c>false</c>: Only features are compared (default; safer for regression tasks).</description></item>
+        /// </list>
         /// </param>
         public DuplicateRowFilterLayer(bool includeTargetInComparison = false)
         {
@@ -40,7 +42,6 @@ namespace DevOnBike.Overfit.Data.Prepare
             var featureSpan = context.Features.AsReadOnlySpan();
             var targetSpan = context.Targets.AsReadOnlySpan();
 
-            // Etap 1: Obliczamy hash per wiersz
             using var rowHashes = new FastBuffer<int>(rows);
             var hashSpan = rowHashes.AsSpan();
 
@@ -49,8 +50,6 @@ namespace DevOnBike.Overfit.Data.Prepare
                 hashSpan[r] = ComputeRowHash(featureSpan, targetSpan, r, cols);
             }
 
-            // Etap 2: Grupujemy po hashu, potem weryfikujemy pełnym porównaniem
-            // Zachowujemy pierwsze wystąpienie, wyrzucamy kolejne
             var keptIndices = new List<int>(rows);
             var hashBuckets = new Dictionary<int, List<int>>(rows);
 
@@ -60,7 +59,6 @@ namespace DevOnBike.Overfit.Data.Prepare
 
                 if (!hashBuckets.TryGetValue(hash, out var bucket))
                 {
-                    // Nowy hash — na pewno unikat
                     bucket = new List<int>(1);
                     hashBuckets[hash] = bucket;
                     bucket.Add(r);
@@ -68,7 +66,6 @@ namespace DevOnBike.Overfit.Data.Prepare
                     continue;
                 }
 
-                // Kolizja hashowa — porównujemy z każdym istniejącym wierszem w kubełku
                 var isDuplicate = false;
                 foreach (var existingRow in bucket)
                 {
@@ -86,13 +83,11 @@ namespace DevOnBike.Overfit.Data.Prepare
                 }
             }
 
-            // Brak duplikatów — zwracamy bez alokacji nowych tensorów
             if (keptIndices.Count == rows)
             {
                 return context;
             }
 
-            // Budujemy nowe tensory z unikatowych wierszy
             var newRows = keptIndices.Count;
             var newFeatures = new FastTensor<float>(newRows, cols);
             var newTargets = new FastTensor<float>(newRows, 1);
@@ -123,7 +118,6 @@ namespace DevOnBike.Overfit.Data.Prepare
             var hash = new HashCode();
             var offset = row * cols;
 
-            // Hashujemy Features blokach po 4 dla lepszego pipeline'owania CPU
             var c = 0;
             var limit = cols - 3;
             for (; c < limit; c += 4)
@@ -134,7 +128,6 @@ namespace DevOnBike.Overfit.Data.Prepare
                 hash.Add(features[offset + c + 3]);
             }
 
-            // Reszta
             for (; c < cols; c++)
             {
                 hash.Add(features[offset + c]);
@@ -158,8 +151,6 @@ namespace DevOnBike.Overfit.Data.Prepare
             var offsetA = rowA * cols;
             var offsetB = rowB * cols;
 
-            // Porównanie bitowe przez SequenceEqual — szybsze niż element-po-elemencie
-            // i poprawnie traktuje NaN (NaN == NaN na poziomie bitów w SequenceEqual)
             if (!features.Slice(offsetA, cols).SequenceEqual(features.Slice(offsetB, cols)))
             {
                 return false;

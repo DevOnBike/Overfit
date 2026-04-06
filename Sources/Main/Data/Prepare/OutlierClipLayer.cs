@@ -7,6 +7,10 @@ using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.Data.Contracts;
 using DevOnBike.Overfit.Data.Prepare;
 
+/// <summary>
+/// Clips outliers in feature columns based on calculated percentile thresholds.
+/// Implements the Fit-Transform pattern, persisting thresholds from the first pass.
+/// </summary>
 public sealed class OutlierClipLayer : IDataLayer
 {
     private readonly float _lowerPercentile;
@@ -14,11 +18,14 @@ public sealed class OutlierClipLayer : IDataLayer
     private readonly Dictionary<int, (float Lower, float Upper)> _columnOverrides;
     private readonly HashSet<int> _excludedColumns;
 
-    // Zapamiętane progi z Fit
     private float[] _lowThresholds;
     private float[] _highThresholds;
     private bool _fitted;
 
+    /// <param name="lowerPercentile">The lower percentile boundary (e.g., 0.01 for 1%).</param>
+    /// <param name="upperPercentile">The upper percentile boundary (e.g., 0.99 for 99%).</param>
+    /// <param name="columnOverrides">Specific percentile boundaries for individual columns.</param>
+    /// <param name="excludedColumns">Indices of columns that should not be clipped.</param>
     public OutlierClipLayer(
         float lowerPercentile = 0.01f,
         float upperPercentile = 0.99f,
@@ -29,14 +36,14 @@ public sealed class OutlierClipLayer : IDataLayer
         {
             throw new ArgumentOutOfRangeException(
                 nameof(lowerPercentile),
-                "Dolny percentyl musi być >= 0 i mniejszy od górnego.");
+                "Lower percentile must be >= 0 and less than the upper percentile.");
         }
 
         if (upperPercentile > 1f)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(upperPercentile),
-                "Górny percentyl musi być <= 1.");
+                "Upper percentile must be <= 1.");
         }
 
         _lowerPercentile = lowerPercentile;
@@ -50,7 +57,7 @@ public sealed class OutlierClipLayer : IDataLayer
             {
                 throw new ArgumentOutOfRangeException(
                     nameof(columnOverrides),
-                    $"Nieprawidłowy zakres percentyli ({lower}, {upper}) dla kolumny {col}.");
+                    $"Invalid percentile range ({lower}, {upper}) for column {col}.");
             }
         }
     }
@@ -67,7 +74,6 @@ public sealed class OutlierClipLayer : IDataLayer
 
         var span = context.Features.AsSpan();
 
-        // Fit: wyliczamy progi — wymaga >= 2 wierszy
         if (!_fitted)
         {
             if (rows < 2)
@@ -78,12 +84,14 @@ public sealed class OutlierClipLayer : IDataLayer
             Fit(span, rows, cols);
         }
 
-        // Transform: przycinamy na zapamiętanych progach
         ClipAll(span, rows, cols);
 
         return context;
     }
 
+    /// <summary>
+    /// Calculates the clipping thresholds for each column using sorted samples.
+    /// </summary>
     private void Fit(ReadOnlySpan<float> span, int rows, int cols)
     {
         _lowThresholds = new float[cols];
@@ -128,6 +136,9 @@ public sealed class OutlierClipLayer : IDataLayer
         _fitted = true;
     }
 
+    /// <summary>
+    /// Performs in-place clipping of values outside the calculated boundaries.
+    /// </summary>
     private void ClipAll(Span<float> span, int rows, int cols)
     {
         for (var c = 0; c < cols; c++)
@@ -135,7 +146,6 @@ public sealed class OutlierClipLayer : IDataLayer
             var lowVal = _lowThresholds[c];
             var highVal = _highThresholds[c];
 
-            // MinValue/MaxValue = kolumna wykluczona lub stała → skip
             if (lowVal == float.MinValue && highVal == float.MaxValue)
             {
                 continue;
@@ -167,6 +177,9 @@ public sealed class OutlierClipLayer : IDataLayer
         return (_lowerPercentile, _upperPercentile);
     }
 
+    /// <summary>
+    /// Linear interpolation of a percentile value from a sorted dataset.
+    /// </summary>
     private static float InterpolatePercentile(ReadOnlySpan<float> sorted, int count, float percentile)
     {
         var rank = percentile * (count - 1);
