@@ -13,7 +13,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         private readonly int _numTrees;
         private readonly int _maxDepth;
         
-        private List<FastTree> _forest = [];
+        private List<FastTreeNode> _forest = [];
 
         public FastRandomForest(int numTrees = 50, int maxDepth = 10)
         {
