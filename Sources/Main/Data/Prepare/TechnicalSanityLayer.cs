@@ -11,7 +11,6 @@ namespace DevOnBike.Overfit.Data.Prepare
     /// <summary>
     /// The initial pipeline layer responsible for sanitizing technical artifacts in the data.
     /// Cleans NaN, ±Infinity, and subnormal values, with an option to discard rows exceeding a corruption threshold.
-    /// Performs in-place operations on Spans to achieve zero-allocation cleaning.
     /// </summary>
     public sealed class TechnicalSanityLayer : IDataLayer
     {

@@ -8,6 +8,10 @@ using DevOnBike.Overfit.Data.Contracts;
 
 namespace DevOnBike.Overfit.Data
 {
+    /// <summary>
+    /// Provides post-training analysis tools including Permutation Feature Importance (PFI) 
+    /// and multicollinearity detection.
+    /// </summary>
     public class ModelInterpreter
     {
         private readonly TableSchema _schema;
@@ -19,7 +23,10 @@ namespace DevOnBike.Overfit.Data
             _featureNames = expandedFeatureNames;
         }
 
-        // --- ANALIZA ISTOTNOŚCI (PFI) ---
+        /// <summary>
+        /// Calculates and prints the relative importance of features using the PFI method.
+        /// Measures the increase in prediction error after permuting each feature column.
+        /// </summary>
         public void PrintFeatureImportance(
             AutogradNode w1,
             AutogradNode b1,
@@ -28,11 +35,9 @@ namespace DevOnBike.Overfit.Data
             FastTensor<float> x,
             FastTensor<float> y)
         {
-            // 1. Strata bazowa
             var baselineLoss = CalculateLoss(w1, b1, w2, b2, x, y);
             var scores = new float[x.GetDim(1)];
 
-            // 2. Permutacja każdej kolumny
             for (var c = 0; c < x.GetDim(1); c++)
             {
                 using var shuffledX = CloneAndShuffleColumn(x, c);
@@ -41,7 +46,6 @@ namespace DevOnBike.Overfit.Data
                 scores[c] = MathF.Max(0, shuffledLoss - baselineLoss);
             }
 
-            // 3. Przygotowanie do sortowania i obliczenie sumy (ZERO ALLOCATION)
             var total = 0f;
             var combined = new (float Score, string Name)[scores.Length];
 
@@ -51,13 +55,10 @@ namespace DevOnBike.Overfit.Data
                 combined[i] = (scores[i], _featureNames[i]);
             }
 
-            // Array.Sort dla ValueTuple sortuje domyślnie rosnąco po pierwszym elemencie (Score)
-            // Jest to operacja in-place (w miejscu), niezwykle szybka dla typów prostych.
             Array.Sort(combined);
 
-            Console.WriteLine("\n=== ISTOTNOŚĆ CECH (PFI) ===");
+            Console.WriteLine("\n=== FEATURE IMPORTANCE (PFI) ===");
 
-            // 4. Iterujemy od tyłu, aby uzyskać efekt "OrderByDescending"
             for (var i = combined.Length - 1; i >= 0; i--)
             {
                 var item = combined[i];
@@ -67,14 +68,15 @@ namespace DevOnBike.Overfit.Data
             }
         }
 
-        // --- ANALIZA KORELACJI ---
+        /// <summary>
+        /// Identifies and prints strong linear correlations between features using Pearson coefficient.
+        /// Helpful for detecting redundant information in the expanded feature set.
+        /// </summary>
         public void PrintCorrelations(FastTensor<float> features)
         {
             var cols = features.GetDim(1);
-            var rows = features.GetDim(0);
-            var span = features.AsSpan();
 
-            Console.WriteLine("\n=== SILNE KORELACJE MIĘDZY CECHAMI (>30%) ===");
+            Console.WriteLine("\n=== STRONG FEATURE CORRELATIONS (>30%) ===");
 
             for (var i = 0; i < cols; i++)
             {
@@ -89,7 +91,9 @@ namespace DevOnBike.Overfit.Data
             }
         }
 
-        // Pomocnicze obliczanie straty bez nagrywania grafu (Inference Mode)
+        /// <summary>
+        /// Computes MSE loss without recording the computation graph (Inference Mode).
+        /// </summary>
         private float CalculateLoss(
             AutogradNode w1,
             AutogradNode b1,
@@ -101,7 +105,6 @@ namespace DevOnBike.Overfit.Data
             var input = new AutogradNode(x, false);
             var target = new AutogradNode(y, false);
 
-            // Przekazujemy NULL jako graf, aby całkowicie wyłączyć nagrywanie
             using var l1 = TensorMath.ReLU(null, TensorMath.AddBias(null, TensorMath.MatMul(null, input, w1), b1));
             using var pred = TensorMath.AddBias(null, TensorMath.MatMul(null, l1, w2), b2);
             using var loss = TensorMath.MSELoss(null, pred, target);
@@ -109,6 +112,9 @@ namespace DevOnBike.Overfit.Data
             return loss.Forward();
         }
 
+        /// <summary>
+        /// Calculates the Pearson correlation coefficient between two columns.
+        /// </summary>
         private float CalculatePearson(FastTensor<float> t, int colA, int colB)
         {
             var rows = t.GetDim(0);
@@ -134,6 +140,9 @@ namespace DevOnBike.Overfit.Data
             return den == 0 ? 0 : num / den;
         }
 
+        /// <summary>
+        /// Creates a deep copy of the tensor and shuffles a specific column using Fisher-Yates.
+        /// </summary>
         private FastTensor<float> CloneAndShuffleColumn(FastTensor<float> src, int colIdx)
         {
             var res = FastTensor<float>.SameShape(src, false);

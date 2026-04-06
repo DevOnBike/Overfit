@@ -11,12 +11,10 @@ namespace DevOnBike.Overfit.Data
     {
         public static FastTensor<float> AugmentBatch(FastTensor<float> originalBatch, int width = 28, int height = 28)
         {
-            // Tworzymy nowy tensor o identycznym kształcie co wejściowy
             var augmentedBatch = new FastTensor<float>(originalBatch.Shape);
 
             Parallel.For(0, originalBatch.Shape[0], i =>
             {
-                // Pobieramy wiersz (obrazek) jako Span
                 var inputRow = originalBatch.AsSpan().Slice(i * width * height, width * height);
                 var outputRow = augmentedBatch.AsSpan().Slice(i * width * height, width * height);
 
@@ -38,6 +36,7 @@ namespace DevOnBike.Overfit.Data
         private static void ShiftImage(ReadOnlySpan<float> input, Span<float> output, int w, int h, int sx, int sy)
         {
             output.Clear();
+
             for (var y = 0; y < h; y++)
             {
                 for (var x = 0; x < w; x++)

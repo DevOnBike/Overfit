@@ -7,6 +7,9 @@ using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
+    /// <summary>
+    /// Implements a Residual Block (ResNet) to mitigate the vanishing gradient problem.
+    /// </summary>
     public sealed class ResidualBlock : IModule
     {
         private readonly LinearLayer _linear1;
@@ -42,12 +45,14 @@ namespace DevOnBike.Overfit.DeepLearning
             _bn2.Eval();
         }
 
+        /// <summary>
+        /// Performs the forward pass. 
+        /// Dispatches between a memory-optimized inference path and a recording-enabled training path.
+        /// </summary>
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
-            // Inference: graph == null → Backward nie będzie wywołany → bezpieczny Dispose
             if (graph == null || !IsTraining)
             {
-                // LinearLayer zwraca współdzielony bufor — BEZ using
                 var out1 = _linear1.Forward(null, input);
                 using var bn1Out = _bn1.Forward(null, out1);
                 using var a1 = TensorMath.ReLU(null, bn1Out);
@@ -57,13 +62,9 @@ namespace DevOnBike.Overfit.DeepLearning
 
                 using var added = TensorMath.Add(null, bn2Out, input);
 
-                // Wynik: nowy tensor z ReLU — caller decyduje o Dispose
                 return TensorMath.ReLU(null, added);
             }
 
-            // Trening: intermediates muszą przeżyć do Backward!
-            // Graf trzyma referencje → NIE disposujemy.
-            // Zostaną zwolnione przez graph.Reset() na początku następnego batcha.
             var tOut1 = _linear1.Forward(graph, input);
             var tBn1 = _bn1.Forward(graph, tOut1);
             var tA1 = TensorMath.ReLU(graph, tBn1);
@@ -76,6 +77,7 @@ namespace DevOnBike.Overfit.DeepLearning
             return TensorMath.ReLU(graph, tAdded);
         }
 
+        /// <summary> Aggregates all learnable parameters from nested layers. </summary>
         public IEnumerable<AutogradNode> Parameters()
         {
             foreach (var p in _linear1.Parameters()) yield return p;
@@ -96,13 +98,16 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             using var fs = new FileStream(path, FileMode.Create);
             using var bw = new BinaryWriter(fs);
-
             Save(bw);
         }
 
         public void Load(string path)
         {
-            if (!File.Exists(path)) throw new FileNotFoundException($"Brak pliku wag: {path}");
+            if (!File.Exists(path))
+            {
+                throw new FileNotFoundException($"Model weights file not found: {path}");
+            }
+
             using var fs = new FileStream(path, FileMode.Open);
             using var br = new BinaryReader(fs);
 
