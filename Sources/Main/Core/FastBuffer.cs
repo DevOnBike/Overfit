@@ -53,7 +53,12 @@ namespace DevOnBike.Overfit.Core
             return _rented.AsSpan(0, Length);
         }
 
-        public void Clear() => AsSpan().Clear();
+        public void Clear()
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+
+            AsSpan().Clear();
+        }
 
         public void Dispose()
         {

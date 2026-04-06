@@ -17,18 +17,21 @@ namespace DevOnBike.Overfit.Core
         public bool IsRecording { get; set; } = true;
 
         public void Record(
-            OpCode code, 
-            AutogradNode output, 
-            AutogradNode a, 
+            OpCode code,
+            AutogradNode output,
+            AutogradNode a,
             AutogradNode b = null,
-            int i0 = 0, 
-            int i1 = 0, 
-            int i2 = 0, 
-            int i3 = 0, 
-            int i4 = 0, 
+            int i0 = 0,
+            int i1 = 0,
+            int i2 = 0,
+            int i3 = 0,
+            int i4 = 0,
             AutogradNode[] nodeContext = null)
         {
-            if (!IsRecording) return;
+            if (!IsRecording)
+            {
+                return;
+            }
 
             if (_opCount >= _tape.Length)
             {
@@ -43,11 +46,11 @@ namespace DevOnBike.Overfit.Core
         /// </summary>
         public void Backward(AutogradNode lossNode)
         {
-            if (lossNode?.Grad == null) return;
+            if (lossNode?.Grad == null)
+            {
+                return;
+            }
 
-            // Seed the gradient with 1.0. 
-            // Manual zeroing of intermediate node gradients is not required because transient nodes 
-            // are cleared upon allocation, and parameters are cleared by the optimizer.
             lossNode.Grad.AsSpan().Fill(1f);
 
             for (var i = _opCount - 1; i >= 0; i--)
