@@ -15,11 +15,10 @@ namespace DevOnBike.Overfit.Core
     public sealed class FastTensor<T> : IDisposable
     {
         private T[] _data;
-        private int _disposed;   // 0 = alive, 1 = disposed. Using int for Interlocked operations.
+        private int _disposed;
         private readonly bool _ownsData;
 
-        // ── Inline Shape/Strides (Rank ≤ 4) ──
-        // Prevents new int[] allocations for the most common CNN/MLP shapes.
+        // Inline Shape/Strides (Rank ≤ 4) ──
         private int _s0, _s1, _s2, _s3;
         private int _st0, _st1, _st2, _st3;
 
@@ -31,8 +30,6 @@ namespace DevOnBike.Overfit.Core
         public int Size { get; }
         public int Rank { get; }
         public bool IsContiguous { get; }
-
-        // ── O(1) Allocation-free Metadata Access ──────────────────────────────────
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public int GetDim(int index)
@@ -181,8 +178,6 @@ namespace DevOnBike.Overfit.Core
             set => _data[Offset + i * _st0 + j * _st1 + k * _st2 + l * _st3] = value;
         }
 
-        // ── Span Access ──────────────────────────────────────────────────────────────
-
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Span<T> AsSpan()
         {
@@ -209,13 +204,12 @@ namespace DevOnBike.Overfit.Core
             return new ReadOnlySpan<T>(_data, Offset, Size);
         }
 
-        // ── O(1) View Operations (No-Copy) ──────────────────────────────────────────
-
         public FastTensor<T> Transpose(int dim0, int dim1)
         {
             if (dim0 == dim1) return this;
 
             ReadShapeStrides(out var s, out var st);
+
             (s[dim0], s[dim1]) = (s[dim1], s[dim0]);
             (st[dim0], st[dim1]) = (st[dim1], st[dim0]);
 
@@ -225,6 +219,7 @@ namespace DevOnBike.Overfit.Core
         public FastTensor<T> Reshape(params int[] newShape)
         {
             var newSize = CalculateSize(newShape);
+
             if (newSize != Size)
             {
                 throw new ArgumentException($"Reshape: rozmiar {newSize} != {Size}.");
