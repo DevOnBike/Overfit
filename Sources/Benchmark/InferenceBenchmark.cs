@@ -4,7 +4,6 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Order;
 using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.DeepLearning;
@@ -13,7 +12,11 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 
 namespace Benchmarks
 {
-    [SimpleJob(RuntimeMoniker.Net10_0)]
+    /// <summary>
+    /// Performance comparison between ONNX Runtime and Overfit engine.
+    /// Evaluates execution speed and memory allocation overhead during inference.
+    /// </summary>
+    [SimpleJob(BenchmarkDotNet.Jobs.RuntimeMoniker.Net10_0)]
     [Orderer(SummaryOrderPolicy.FastestToSlowest)]
     [MemoryDiagnoser]
     [DisassemblyDiagnoser(maxDepth: 2)]
@@ -21,17 +24,11 @@ namespace Benchmarks
     {
         private const int InputSize = 784;
         private const int OutputSize = 10;
-
         private float[] _inputData;
 
-        // ONNX
         private InferenceSession _onnxSession;
-        private NamedOnnxValue[] _onnxInputs;         // Pre-alokowane
-        private DenseTensor<float> _onnxInputTensor;   // Pre-alokowany
-
-        // Overfit
+        private NamedOnnxValue[] _onnxInputs;
         private Sequential _overfitModel;
-        private FastTensor<float> _overfitInputTensor;
         private AutogradNode _inputNode;
 
         [GlobalSetup]
@@ -40,31 +37,21 @@ namespace Benchmarks
             var rnd = new Random(42);
             _inputData = Enumerable.Range(0, InputSize).Select(_ => (float)rnd.NextDouble()).ToArray();
 
-            // --- ONNX Setup ---
             _onnxSession = new InferenceSession("benchmark_model.onnx");
-            _onnxInputTensor = new DenseTensor<float>(_inputData, [1, InputSize]);
-            _onnxInputs = [NamedOnnxValue.CreateFromTensor("input", _onnxInputTensor)];
+            var tensor = new DenseTensor<float>(_inputData, [1, InputSize]);
+            _onnxInputs = [NamedOnnxValue.CreateFromTensor("input", tensor)];
 
-            // --- Overfit Setup ---
             _overfitModel = new Sequential(new LinearLayer(InputSize, OutputSize));
             _overfitModel.Load("benchmark_model.bin");
-            _overfitModel.Eval(); // Transpozycja wag + tryb inferencji
+            _overfitModel.Eval();
 
-            _overfitInputTensor = new FastTensor<float>(false, 1, InputSize);
-            _inputData.AsSpan().CopyTo(_overfitInputTensor.AsSpan());
-            _inputNode = new AutogradNode(_overfitInputTensor, requiresGrad: false);
+            var inputTensor = new FastTensor<float>(false, 1, InputSize);
+            _inputData.AsSpan().CopyTo(inputTensor.AsSpan());
+            _inputNode = new AutogradNode(inputTensor, requiresGrad: false);
 
-            // Warmup — JIT Tier-1 + PGO
-            for (var i = 0; i < 100; i++)
-            {
-                _overfitModel.Forward(null, _inputNode);
-            }
+            for (var i = 0; i < 100; i++) _overfitModel.Forward(null, _inputNode);
         }
 
-        /// <summary>
-        /// ONNX Runtime — realistyczne użycie z pre-alokowanym tensorem wejściowym.
-        /// Alokacja wynikowa (Run + GetTensor) jest wewnątrz ONNX i niemożliwa do uniknięcia.
-        /// </summary>
         [Benchmark(Baseline = true)]
         public float OnnxRuntime_PreAllocated()
         {
@@ -73,21 +60,8 @@ namespace Benchmarks
         }
 
         /// <summary>
-        /// ONNX Runtime — "uczciwe" porównanie z pełnym kosztem tworzenia tensora.
-        /// Typowe w produkcji: nowe dane wejściowe per request.
-        /// </summary>
-        [Benchmark]
-        public float OnnxRuntime_FullAllocation()
-        {
-            var tensor = new DenseTensor<float>(_inputData, [1, InputSize]);
-            var inputs = new NamedOnnxValue[] { NamedOnnxValue.CreateFromTensor("input", tensor) };
-            using var results = _onnxSession.Run(inputs);
-            return results.First().AsTensor<float>()[0];
-        }
-
-        /// <summary>
-        /// Overfit — zero alokacji, SIMD na pre-transponowanych wagach.
-        /// Pełna ścieżka inferencji: dane → wynik, bez pośredników.
+        /// Benchmarks Overfit with zero-allocation SIMD inference.
+        /// Leverages the full inference path from raw data to prediction.
         /// </summary>
         [Benchmark]
         public float Overfit_ZeroAlloc()
@@ -100,7 +74,6 @@ namespace Benchmarks
         public void Cleanup()
         {
             _onnxSession?.Dispose();
-            _overfitInputTensor?.Dispose();
             _inputNode?.Dispose();
             _overfitModel?.Dispose();
         }

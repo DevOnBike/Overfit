@@ -14,9 +14,8 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 namespace Benchmarks
 {
     /// <summary>
-    /// 8 wątków × 1000 inferencji.
-    /// ONNX: InferenceSession ma wewnętrzny mutex na alokatorze sesji.
-    /// Overfit: osobny model per wątek — zero contention, pełne 16 rdzeni.
+    /// Analyzes multi-threaded inference performance (8 threads × 1000 iterations).
+    /// Compares synchronization overhead and resource contention between ONNX Runtime and Overfit.
     /// </summary>
     [SimpleJob(RuntimeMoniker.Net10_0)]
     [Orderer(SummaryOrderPolicy.FastestToSlowest)]
@@ -65,6 +64,10 @@ namespace Benchmarks
             }
         }
 
+        /// <summary>
+        /// Measures ONNX Runtime performance under concurrent load. 
+        /// Expects potential bottlenecks due to internal thread synchronization.
+        /// </summary>
         [Benchmark(Baseline = true)]
         public float OnnxRuntime_Concurrent()
         {
@@ -88,6 +91,10 @@ namespace Benchmarks
             return results.Sum();
         }
 
+        /// <summary>
+        /// Measures Overfit performance with zero-contention concurrent execution.
+        /// Leverages independent memory buffers and pre-transposed weights for peak throughput.
+        /// </summary>
         [Benchmark]
         public float Overfit_Concurrent_ZeroContention()
         {

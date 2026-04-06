@@ -15,13 +15,8 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 namespace Benchmarks
 {
     /// <summary>
-    /// Rozkład latency: P50/P90/P95/P99/P99.9/Max + Jitter + GC Gen-0 counter.
-    /// Najważniejszy benchmark dla SLA w produkcji.
-    ///
-    /// ONNX: 912B alokacji per call → GC Gen-0 co ~87k wywołań → spike w P99.9.
-    /// Overfit: 0B alokacji → flat distribution, jitter ~1-2×.
-    ///
-    /// W kontekście SLA: "P99.9 poniżej 1μs" vs "P99.9 = 47μs z jitter 13×".
+    /// Analyzes the latency distribution (P50 to Max) and jitter performance.
+    /// This is the most critical benchmark for production Service Level Agreements (SLA).
     /// </summary>
     [SimpleJob(RuntimeMoniker.Net10_0)]
     [Orderer(SummaryOrderPolicy.FastestToSlowest)]
@@ -62,14 +57,12 @@ namespace Benchmarks
             _inputData.AsSpan().CopyTo(_overfitInputTensor.AsSpan());
             _inputNode = new AutogradNode(_overfitInputTensor, requiresGrad: false);
 
-            // Warmup — JIT Tier-1 + PGO + ONNX internal buffers
             for (var i = 0; i < 1000; i++)
             {
                 using var r = _onnxSession.Run(_onnxInputs);
                 _overfitModel.Forward(null, _inputNode);
             }
 
-            // Czysty start — eliminujemy szum z warmup'u
             GC.Collect(2, GCCollectionMode.Forced, true);
             GC.WaitForPendingFinalizers();
 
@@ -77,6 +70,9 @@ namespace Benchmarks
             _overfitLatencies = new long[TotalCalls];
         }
 
+        /// <summary>
+        /// Profiles ONNX Runtime latency. Monitored for spikes caused by heap allocations.
+        /// </summary>
         [Benchmark(Baseline = true)]
         public void OnnxRuntime_LatencyProfile()
         {
@@ -100,6 +96,9 @@ namespace Benchmarks
                 GC.CollectionCount(2) - gc2Before);
         }
 
+        /// <summary>
+        /// Profiles Overfit engine latency. Expected to show high predictability due to Zero-Allocation path.
+        /// </summary>
         [Benchmark]
         public void Overfit_LatencyProfile()
         {
@@ -125,7 +124,6 @@ namespace Benchmarks
         private static void PrintLatencyReport(string name, long[] latencies, int gc0, int gc1, int gc2)
         {
             var ticksPerUs = Stopwatch.Frequency / 1_000_000.0;
-
             Array.Sort(latencies);
 
             var p50 = latencies[(int)(TotalCalls * 0.50)] / ticksPerUs;
@@ -153,7 +151,6 @@ namespace Benchmarks
             Console.WriteLine($"  +------------------------------------------------+");
         }
 
-        [GlobalCleanup]
         public void Cleanup()
         {
             _onnxSession?.Dispose();
