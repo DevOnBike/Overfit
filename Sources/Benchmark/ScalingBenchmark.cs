@@ -14,12 +14,8 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 namespace Benchmarks
 {
     /// <summary>
-    /// Jak skaluje się przewaga Overfit przy różnych rozmiarach modelu.
-    /// Im mniejszy model, tym większy stosunek overhead/compute.
-    ///
-    /// 128 → 10:  edge/embedded, Overfit dominuje (~15×)
-    /// 784 → 10:  MNIST, sweet spot (~9×)
-    /// 4096 → 10: duży embedding, ONNX zaczyna doganiać (~5×)
+    /// Evaluates how the performance advantage of the Overfit engine scales across different model sizes.
+    /// Analyzes the compute-to-overhead ratio compared to ONNX Runtime.
     /// </summary>
     [SimpleJob(RuntimeMoniker.Net10_0)]
     [Orderer(SummaryOrderPolicy.FastestToSlowest)]
@@ -66,6 +62,9 @@ namespace Benchmarks
                 out _overfitLarge, out _largeNode, out _largeTensor);
         }
 
+        /// <summary>
+        /// Configures a benchmark pair consisting of an ONNX session and an Overfit model.
+        /// </summary>
         private static void SetupPair(Random rnd, int inputSize, string modelName,
             out InferenceSession onnxSession, out NamedOnnxValue[] onnxInputs,
             out Sequential overfitModel, out AutogradNode inputNode,
@@ -73,13 +72,15 @@ namespace Benchmarks
         {
             var data = Enumerable.Range(0, inputSize).Select(_ => (float)rnd.NextDouble()).ToArray();
 
+            // Setup ONNX Runtime session
             onnxSession = new InferenceSession($"{modelName}.onnx");
             var tensor = new DenseTensor<float>(data, [1, inputSize]);
             onnxInputs = [NamedOnnxValue.CreateFromTensor("input", tensor)];
 
+            // Setup Overfit model
             overfitModel = new Sequential(new LinearLayer(inputSize, OutputSize));
             overfitModel.Load($"{modelName}.bin");
-            overfitModel.Eval();
+            overfitModel.Eval(); // Switch to inference mode (triggers weight pre-transposition)
 
             inputTensor = new FastTensor<float>(false, 1, inputSize);
             data.AsSpan().CopyTo(inputTensor.AsSpan());
@@ -90,8 +91,6 @@ namespace Benchmarks
                 overfitModel.Forward(null, inputNode);
             }
         }
-
-        // --- Small: 128 -> 10 ---
 
         [Benchmark]
         public float Onnx_128()
@@ -106,8 +105,6 @@ namespace Benchmarks
             return _overfitSmall.Forward(null, _smallNode).Data.AsSpan()[0];
         }
 
-        // --- Medium: 784 -> 10 (MNIST) ---
-
         [Benchmark(Baseline = true)]
         public float Onnx_784()
         {
@@ -120,8 +117,6 @@ namespace Benchmarks
         {
             return _overfitMedium.Forward(null, _mediumNode).Data.AsSpan()[0];
         }
-
-        // --- Large: 4096 -> 10 ---
 
         [Benchmark]
         public float Onnx_4096()

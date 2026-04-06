@@ -9,6 +9,10 @@ using System.Runtime.CompilerServices;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
+    /// <summary>
+    /// Implements a fully-connected Linear (Dense) Layer.
+    /// Features an optimized zero-allocation SIMD inference path through weight pre-transposition.
+    /// </summary>
     public sealed class LinearLayer : IModule
     {
         public AutogradNode Weights { get; private set; }
@@ -18,11 +22,11 @@ namespace DevOnBike.Overfit.DeepLearning
         private readonly int _inputSize;
         private readonly int _outputSize;
 
-        // Bufor inferencji (Zero-Allocation)
+        // Inference buffer used to achieve Zero-Allocation during forward passes.
         private readonly AutogradNode _inferenceOutputNode;
 
-        // Transponowane wagi dla SIMD inference — kształt (outputSize, inputSize)
-        // Sekwencyjny dostęp w wewnętrznej pętli = pełne wykorzystanie SIMD
+        // Cached transposed weights for SIMD inference — shape: (outputSize, inputSize).
+        // Sequential memory access in the inner loop ensures maximum SIMD utilization.
         private FastTensor<float> _weightsTransposed;
 
         public LinearLayer(int inputSize, int outputSize)
@@ -49,7 +53,6 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             IsTraining = true;
 
-            // Zwolnij transponowane wagi — w trybie treningowym nie są potrzebne
             _weightsTransposed?.Dispose();
             _weightsTransposed = null;
         }
@@ -58,18 +61,18 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             IsTraining = false;
 
-            // Pre-transpozycja wag: (inputSize, outputSize) → (outputSize, inputSize)
-            // Robione raz przy przejściu do Eval, nie w każdym Forward
             RebuildTransposedWeights();
         }
 
+        /// <summary>
+        /// Performs the forward pass. Dispatches to a highly optimized SIMD kernel for single-row inference.
+        /// </summary>
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
             if (graph == null || !IsTraining)
             {
                 var batchSize = input.Data.GetDim(0);
 
-                // Batch > 1 w inference: fallback na standardowy MatMul (bez autograd)
                 if (batchSize != 1)
                 {
                     return TensorMath.Linear(null, input, Weights, Biases);
@@ -133,7 +136,6 @@ namespace DevOnBike.Overfit.DeepLearning
                 bSpan[i] = br.ReadSingle();
             }
 
-            // Jeśli jesteśmy w trybie Eval, przebuduj transponowane wagi po Load
             if (!IsTraining)
             {
                 RebuildTransposedWeights();
@@ -151,7 +153,7 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             if (!File.Exists(path))
             {
-                throw new FileNotFoundException($"Brak pliku wag: {path}");
+                throw new FileNotFoundException($"Weight file not found: {path}");
             }
 
             using var fs = new FileStream(path, FileMode.Open);
@@ -160,9 +162,8 @@ namespace DevOnBike.Overfit.DeepLearning
         }
 
         /// <summary>
-        /// Transpozycja wag: W[inputSize, outputSize] → W_T[outputSize, inputSize].
-        /// Po transpozycji wiersz W_T[j] = kolumna W[:,j] — dane dla outputu j
-        /// leżą sekwencyjnie w pamięci = Vector.Dot na pełnej prędkości SIMD.
+        /// Transposes weights: W[inputSize, outputSize] → W_T[outputSize, inputSize].
+        /// This ensures that data for each output neuron lies sequentially in memory, 
         /// </summary>
         private void RebuildTransposedWeights()
         {
@@ -182,12 +183,7 @@ namespace DevOnBike.Overfit.DeepLearning
         }
 
         /// <summary>
-        /// SIMD inference na pre-transponowanych wagach.
-        /// Wewnętrzna pętla jest sekwencyjna po inputSize — 
-        /// Vector.Dot przetwarza 8 floatów (AVX2) lub 16 (AVX-512) per instrukcję.
-        /// 
-        /// Dla 784→10 (MNIST): 10 × ceil(784/8) = 10 × 98 = 980 instrukcji SIMD.
-        /// Bez transpozycji: stride access co 10 elementów = zero korzyści z SIMD.
+        /// Highly optimized SIMD inference kernel for pre-transposed weights.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void LinearInferenceSimd(
@@ -206,7 +202,6 @@ namespace DevOnBike.Overfit.DeepLearning
                 var wRow = weightsT.Slice(j * inputSize, inputSize);
                 var i = 0;
 
-                // SIMD główna pętla — Vector.Dot na blokach po vCount (8/16 floatów)
                 for (; i <= inputSize - vCount; i += vCount)
                 {
                     var vIn = new Vector<float>(input.Slice(i));
@@ -214,10 +209,8 @@ namespace DevOnBike.Overfit.DeepLearning
                     sum += vIn * vW;
                 }
 
-                // Redukcja wektora SIMD do skalara
                 var scalarSum = Vector.Dot(sum, Vector<float>.One) + bias[j];
 
-                // Reszta (tail loop)
                 for (; i < inputSize; i++)
                 {
                     scalarSum += input[i] * wRow[i];

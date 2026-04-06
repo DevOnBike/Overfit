@@ -8,30 +8,24 @@ using DevOnBike.Overfit.Core;
 namespace DevOnBike.Overfit.Data.Contracts
 {
     /// <summary>
-    /// Reprezentuje stan danych wewnątrz potoku przetwarzania.
-    /// Implementuje IDisposable, aby zapewnić czyszczenie ciężkich buforów FastTensor.
-    /// 
-    /// Kontrakt własności: PipelineContext jest właścicielem swoich tensorów.
-    /// Warstwa, która podmienia tensor, jest odpowiedzialna za Dispose starego.
-    /// Warstwa, która tworzy nowy kontekst, NIE powinna Disposować starego kontekstu —
-    /// tylko jego tensory (jeśli je podmieniła).
+    /// Represents the state of data within the processing pipeline.
     /// </summary>
     public sealed class PipelineContext : IDisposable
     {
         private bool _disposed;
 
         /// <summary>
-        /// Macierz cech wejściowych (Input).
+        /// Input features tensor.
         /// </summary>
         public FastTensor<float> Features { get; set; }
 
         /// <summary>
-        /// Macierz wartości docelowych (Target).
+        /// Target values tensor (labels).
         /// </summary>
         public FastTensor<float> Targets { get; set; }
 
         /// <summary>
-        /// Metadane diagnostyczne — wypełniane przez DataPipeline po każdym kroku.
+        /// Diagnostic metadata populated by the DataPipeline after each processing step.
         /// </summary>
         public List<LayerDiagnostic> Diagnostics { get; } = [];
 
@@ -42,9 +36,7 @@ namespace DevOnBike.Overfit.Data.Contracts
         }
 
         /// <summary>
-        /// Podmienia Features na nowy tensor i zwalnia stary.
-        /// Centralizuje logikę "swap + dispose" — eliminuje rozrzucone
-        /// context.Features.Dispose() + context.Features = newTensor po warstwach.
+        /// Replaces the current Features tensor and disposes of the old one.
         /// </summary>
         public void ReplaceFeatures(FastTensor<float> newFeatures)
         {
@@ -60,8 +52,8 @@ namespace DevOnBike.Overfit.Data.Contracts
         }
 
         /// <summary>
-        /// Podmienia oba tensory na nowe i zwalnia stare.
-        /// Używane przez warstwy filtrujące wiersze (np. TechnicalSanityLayer, DuplicateRowFilter).
+        /// Replaces both Features and Targets tensors and disposes of the old ones.
+        /// Typically used by row-filtering layers (e.g., TechnicalSanityLayer, DuplicateRowFilter).
         /// </summary>
         public void ReplaceAll(FastTensor<float> newFeatures, FastTensor<float> newTargets)
         {
@@ -101,5 +93,4 @@ namespace DevOnBike.Overfit.Data.Contracts
             Targets = null;
         }
     }
-
 }

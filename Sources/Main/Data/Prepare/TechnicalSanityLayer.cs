@@ -9,9 +9,8 @@ using DevOnBike.Overfit.Data.Contracts;
 namespace DevOnBike.Overfit.Data.Prepare
 {
     /// <summary>
-    /// Pierwsza warstwa potoku — sanityzacja technicznych artefaktów w danych.
-    /// Czyści NaN, ±Infinity, subnormale i opcjonalnie wyrzuca wiersze z nadmiernym "zanieczyszczeniem".
-    /// Operuje in-place na Spanach (zero alokacji dla czyszczenia).
+    /// The initial pipeline layer responsible for sanitizing technical artifacts in the data.
+    /// Cleans NaN, ±Infinity, and subnormal values, with an option to discard rows exceeding a corruption threshold.
     /// </summary>
     public sealed class TechnicalSanityLayer : IDataLayer
     {
@@ -19,18 +18,16 @@ namespace DevOnBike.Overfit.Data.Prepare
         private readonly float _replacementValue;
 
         /// <param name="maxCorruptedRatio">
-        /// Maksymalny dopuszczalny udział uszkodzonych wartości w wierszu (0.0–1.0).
-        /// Wiersze przekraczające próg zostaną odrzucone.
-        /// Wartość 1.0 = nigdy nie wyrzucaj wierszy (tylko czyść in-place).
+        /// Maximum allowed ratio of corrupted values per row (0.0–1.0).
+        /// Rows exceeding this threshold will be discarded.
+        /// A value of 1.0 disables filtering and only performs in-place cleaning.
         /// </param>
-        /// <param name="replacementValue">Wartość wstawiana w miejsce NaN/Inf (domyślnie 0)</param>
+        /// <param name="replacementValue">The value used to replace NaN/Inf/Subnormal entries (default is 0).</param>
         public TechnicalSanityLayer(float maxCorruptedRatio = 1.0f, float replacementValue = 0f)
         {
             if (maxCorruptedRatio is < 0f or > 1f)
             {
-                throw new ArgumentOutOfRangeException(
-                    nameof(maxCorruptedRatio),
-                    "Próg uszkodzonych wartości musi być w zakresie [0, 1].");
+                throw new ArgumentOutOfRangeException(nameof(maxCorruptedRatio), "Corrupted value threshold must be in the range [0, 1].");
             }
 
             _maxCorruptedRatio = maxCorruptedRatio;
@@ -47,21 +44,17 @@ namespace DevOnBike.Overfit.Data.Prepare
                 return context;
             }
 
-            // Targets: zawsze czyścimy in-place (1 kolumna, nie ma sensu wyrzucać wiersza na tej podstawie)
             CleanSpan(context.Targets.AsSpan());
 
-            // Tryb prosty: czyść in-place bez filtrowania wierszy
             if (_maxCorruptedRatio >= 1.0f)
             {
                 CleanSpan(context.Features.AsSpan());
                 return context;
             }
 
-            // Tryb z filtrowaniem: identyfikuj czyste wiersze, wyrzuć brudne
             var featureSpan = context.Features.AsSpan();
             var maxCorruptedPerRow = (int)(cols * _maxCorruptedRatio);
 
-            // Zbieramy indeksy wierszy, które przechodzą próg
             using var corruptedCounts = new FastBuffer<int>(rows);
             var countSpan = corruptedCounts.AsSpan();
 
@@ -81,7 +74,6 @@ namespace DevOnBike.Overfit.Data.Prepare
                 countSpan[r] = corrupted;
             }
 
-            // Zbieramy indeksy wierszy do zachowania
             var keptIndices = new List<int>(rows);
             for (var r = 0; r < rows; r++)
             {
@@ -91,21 +83,18 @@ namespace DevOnBike.Overfit.Data.Prepare
                 }
             }
 
-            // Wszystkie wiersze przeszły — czyścimy in-place i zwracamy
             if (keptIndices.Count == rows)
             {
                 CleanSpan(featureSpan);
                 return context;
             }
 
-            // Zero wierszy przeszło — skrajny przypadek, zachowujemy wszystkie i czyścimy
             if (keptIndices.Count == 0)
             {
                 CleanSpan(featureSpan);
                 return context;
             }
 
-            // Budujemy nowe tensory tylko z czystych wierszy
             var newRows = keptIndices.Count;
             var newFeatures = new FastTensor<float>(newRows, cols);
             var newTargets = new FastTensor<float>(newRows, 1);
@@ -119,18 +108,14 @@ namespace DevOnBike.Overfit.Data.Prepare
             {
                 var srcRow = keptIndices[i];
 
-                // Kopiujemy wiersz Features
                 srcFeatures.Slice(srcRow * cols, cols).CopyTo(dstFeatures.Slice(i * cols, cols));
 
-                // Kopiujemy wiersz Targets
                 dstTargets[i] = srcTargets[srcRow];
             }
 
-            // Czyścimy resztki NaN/Inf w zachowanych wierszach (mogą mieć < maxCorrupted)
             CleanSpan(dstFeatures);
             CleanSpan(dstTargets);
 
-            // Zwalniamy stare tensory
             context.Features.Dispose();
             context.Targets.Dispose();
 
@@ -149,15 +134,15 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Sprawdza czy wartość jest technicznie uszkodzona:
-        /// NaN, ±Infinity lub subnormalna (denormalized).
-        /// Subnormale mogą powodować 100x spowolnienie operacji FP na niektórych CPU.
+        /// Checks if a value is technically corrupted: NaN, ±Infinity, or subnormal (denormalized).
         /// </summary>
+        /// <remarks>
+        /// Subnormals can cause significant performance degradation (up to 100x slowdown) 
+        /// in floating-point operations on certain CPUs.
+        /// </remarks>
         private static bool IsCorrupted(float value)
         {
-            return float.IsNaN(value)
-                || float.IsInfinity(value)
-                || float.IsSubnormal(value);
+            return float.IsNaN(value) || float.IsInfinity(value) || float.IsSubnormal(value);
         }
     }
 }

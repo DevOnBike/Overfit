@@ -7,13 +7,13 @@ namespace DevOnBike.Overfit.Data.Prepare
 {
     public enum LogMode
     {
-        /// <summary>log(1 + x) — bezpieczna, dla danych >= 0</summary>
+        /// <summary>log(1 + x)</summary>
         Log1p,
 
-        /// <summary>sign(x) * log(1 + |x|) — zachowuje znak, dla danych z ujemnymi wartościami</summary>
+        /// <summary>sign(x) * log(1 + |x|)</summary>
         SignedLog1p,
 
-        /// <summary>log(x + epsilon) — klasyczna, dla danych ściśle dodatnich</summary>
+        /// <summary>log(x + epsilon)</summary>
         LogEps
     }
 }

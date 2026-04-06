@@ -7,31 +7,45 @@ using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
+    /// <summary>
+    /// Implements 1D Batch Normalization as described by Ioffe and Szegedy.
+    /// Normalizes activations to improve training stability and speed up convergence.
+    /// </summary>
     public sealed class BatchNorm1D : IModule
     {
+        /// <summary> Learned scale parameter. </summary>
         public AutogradNode Gamma { get; private set; }
+
+        /// <summary> Learned bias/shift parameter. </summary>
         public AutogradNode Beta { get; private set; }
+
+        /// <summary> Cumulative moving average of the input mean. </summary>
         public FastTensor<float> RunningMean { get; private set; }
+
+        /// <summary> Cumulative moving average of the input variance. </summary>
         public FastTensor<float> RunningVar { get; private set; }
 
         public bool IsTraining { get; private set; } = true;
+
+        /// <summary> Exponential moving average factor for running statistics. </summary>
         public float Momentum { get; set; } = 0.1f;
+
+        /// <summary> Small constant added to the variance for numerical stability (avoiding division by zero). </summary>
         public float Eps { get; set; } = 1e-5f;
 
         public BatchNorm1D(int numFeatures)
         {
-            // KRYTYCZNA POPRAWKA: Używamy tensorów 1D (numFeatures), a nie 2D (1, numFeatures)
             Gamma = new AutogradNode(new FastTensor<float>(numFeatures), true);
             Beta = new AutogradNode(new FastTensor<float>(numFeatures), true);
 
-            Gamma.Data.AsSpan().Fill(1f); // Domyślnie mnożnik to 1
-            Beta.Data.AsSpan().Fill(0f);  // Domyślnie przesunięcie to 0
+            Gamma.Data.AsSpan().Fill(1f);
+            Beta.Data.AsSpan().Fill(0f);
 
             RunningMean = new FastTensor<float>(numFeatures);
             RunningVar = new FastTensor<float>(numFeatures);
 
             RunningMean.AsSpan().Fill(0f);
-            RunningVar.AsSpan().Fill(1f); // Domyślna wariancja to 1
+            RunningVar.AsSpan().Fill(1f);
         }
 
         public void Train() => IsTraining = true;
@@ -48,6 +62,9 @@ namespace DevOnBike.Overfit.DeepLearning
             yield return Beta;
         }
 
+        /// <summary>
+        /// Saves parameters and running statistics to a binary stream.
+        /// </summary>
         public void Save(BinaryWriter bw)
         {
             var len = Gamma.Data.Size;
@@ -59,11 +76,18 @@ namespace DevOnBike.Overfit.DeepLearning
             foreach (var val in RunningVar.AsSpan()) bw.Write(val);
         }
 
+        /// <summary>
+        /// Loads parameters and running statistics from a binary stream.
+        /// Performs a dimension check to ensure architectural consistency.
+        /// </summary>
         public void Load(BinaryReader br)
         {
             var len = br.ReadInt32();
+
             if (len != Gamma.Data.Size)
-                throw new Exception($"Wymiary wag w pliku ({len}) nie pasują do architektury ({Gamma.Data.Size})!");
+            {
+                throw new Exception($"Weight dimensions in file ({len}) do not match the layer architecture ({Gamma.Data.Size}).");
+            }
 
             var gSpan = Gamma.Data.AsSpan();
             for (var i = 0; i < len; i++) gSpan[i] = br.ReadSingle();

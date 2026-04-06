@@ -9,7 +9,7 @@ using System.Runtime.CompilerServices;
 namespace DevOnBike.Overfit.Core
 {
     /// <summary>
-    /// Bezalokacyjny widok na pamięć macierzy (ref struct — zero heap alloc).
+    /// Provides an allocation-free view of matrix memory.
     /// </summary>
     public readonly ref struct FastMatrixView<T> where T : struct, IFloatingPointIeee754<T>
     {
@@ -51,9 +51,6 @@ namespace DevOnBike.Overfit.Core
                 Offset + startRow * RowStride + startCol * ColStride);
         }
 
-        // ── Row access ───────────────────────────────────────────────────────
-
-        /// <summary>Ciągły Span wiersza — tylko gdy ColStride==1 (ciągły widok).</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Span<T> Row(int row)
         {
@@ -65,7 +62,6 @@ namespace DevOnBike.Overfit.Core
             return _data.Slice(Offset + row * RowStride, Cols);
         }
 
-        /// <summary>ReadOnly Span wiersza — tylko gdy ColStride==1.</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public ReadOnlySpan<T> ReadOnlyRow(int row)
         {
@@ -77,27 +73,16 @@ namespace DevOnBike.Overfit.Core
             return _data.Slice(Offset + row * RowStride, Cols);
         }
 
-        // ── Materializacja ───────────────────────────────────────────────────
-
-        /// <summary>
-        /// Materializuje widok do ciągłej FastMatrix.
-        /// Dla ciągłych widoków: jeden CopyTo (memcpy).
-        /// Dla transponowanych: per-row copy — unika N² scalar ops.
-        /// Caller odpowiada za Dispose().
-        /// </summary>
         public FastMatrix<T> ToContiguousFastMatrix()
         {
             var result = new FastMatrix<T>(Rows, Cols);
 
             if (IsContiguous)
             {
-                // Ciągły blok — jeden AVX memcpy
                 _data.Slice(Offset, Size).CopyTo(result.AsSpan());
             }
             else if (ColStride == 1)
             {
-                // Wiersze ciągłe, ale między nimi jest padding (np. Slice)
-                // Kopiujemy wiersz po wierszu przez SIMD CopyTo
                 for (var r = 0; r < Rows; r++)
                 {
                     _data.Slice(Offset + r * RowStride, Cols).CopyTo(result.Row(r));
@@ -105,7 +90,6 @@ namespace DevOnBike.Overfit.Core
             }
             else
             {
-                // Transponowany — kolumny stają się wierszami, scalar fallback
                 for (var r = 0; r < Rows; r++)
                 {
                     for (var c = 0; c < Cols; c++)

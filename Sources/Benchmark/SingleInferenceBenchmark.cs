@@ -14,8 +14,8 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 namespace Benchmarks
 {
     /// <summary>
-    /// Baseline porównanie — pojedyncza inferencja.
-    /// Mierzy czysty koszt jednego Forward pass bez pętli.
+    /// Baseline performance comparison for a single inference pass.
+    /// Measures the raw overhead of a single Forward call without loop-level optimizations.
     /// </summary>
     [SimpleJob(RuntimeMoniker.Net10_0)]
     [Orderer(SummaryOrderPolicy.FastestToSlowest)]
@@ -41,14 +41,17 @@ namespace Benchmarks
             var rnd = new Random(42);
             _inputData = Enumerable.Range(0, InputSize).Select(_ => (float)rnd.NextDouble()).ToArray();
 
+            // Setup ONNX Runtime session
             _onnxSession = new InferenceSession("benchmark_model.onnx");
             var tensor = new DenseTensor<float>(_inputData, [1, InputSize]);
             _onnxInputs = [NamedOnnxValue.CreateFromTensor("input", tensor)];
 
+            // Setup Overfit model
             _overfitModel = new Sequential(new LinearLayer(InputSize, OutputSize));
             _overfitModel.Load("benchmark_model.bin");
-            _overfitModel.Eval();
+            _overfitModel.Eval(); // Enable inference mode (triggers weight pre-transposition)
 
+            // Prepare Overfit input tensors
             _overfitInputTensor = new FastTensor<float>(false, 1, InputSize);
             _inputData.AsSpan().CopyTo(_overfitInputTensor.AsSpan());
             _inputNode = new AutogradNode(_overfitInputTensor, requiresGrad: false);
@@ -59,6 +62,10 @@ namespace Benchmarks
             }
         }
 
+        /// <summary>
+        /// Benchmarks ONNX Runtime using a pre-allocated input tensor.
+        /// Represents the "best-case" scenario for ONNX by minimizing setup overhead.
+        /// </summary>
         [Benchmark(Baseline = true)]
         public float OnnxRuntime_PreAllocated()
         {
@@ -66,6 +73,10 @@ namespace Benchmarks
             return results.First().AsTensor<float>()[0];
         }
 
+        /// <summary>
+        /// Benchmarks ONNX Runtime including the cost of tensor creation.
+        /// Reflects a typical production scenario where new data arrives per request.
+        /// </summary>
         [Benchmark]
         public float OnnxRuntime_FullAllocation()
         {
@@ -75,6 +86,10 @@ namespace Benchmarks
             return results.First().AsTensor<float>()[0];
         }
 
+        /// <summary>
+        /// Benchmarks Overfit using the zero-allocation SIMD inference path.
+        /// Leverages pre-transposed weights for optimal hardware utilization.
+        /// </summary>
         [Benchmark]
         public float Overfit_ZeroAlloc()
         {

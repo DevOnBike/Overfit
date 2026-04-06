@@ -8,20 +8,9 @@ using DevOnBike.Overfit.Data.Contracts;
 namespace DevOnBike.Overfit.Data.Prepare
 {
     /// <summary>
-    /// Transformacja logarytmiczna dla kolumn z mocno skośnym rozkładem.
-    /// Typowe zastosowania w danych nieruchomościowych:
-    /// - Cena transakcyjna (długi prawy ogon: kawalerki vs penthouse'y)
-    /// - Powierzchnia użytkowa (30m² vs 300m²)  
-    /// - Odległość od centrum (wykładniczy spadek cen)
-    /// - Czynsz administracyjny
-    ///
-    /// Stabilizuje wariancję, redukuje wpływ outlierów i przybliża rozkład do normalnego,
-    /// co poprawia konwergencję gradientową w treningu.
-    ///
-    /// Obsługuje trzy warianty transformacji:
-    /// - Log1p: log(1 + x) — bezpieczna dla wartości bliskich zeru i zerowych
-    /// - SignedLog1p: sign(x) * log(1 + |x|) — zachowuje znak dla danych z ujemnymi wartościami
-    /// - LogEps: log(x + epsilon) — klasyczna, dla danych ściśle dodatnich
+    /// Logarithmic transformation for columns with highly skewed distributions.
+    /// Used to stabilize variance, reduce outlier impact, and improve gradient convergence 
+    /// by shifting feature distributions closer to a normal distribution.
     /// </summary>
     public sealed class LogTransformLayer : IDataLayer
     {
@@ -36,14 +25,12 @@ namespace DevOnBike.Overfit.Data.Prepare
         {
             if (columnIndices == null || columnIndices.Count == 0)
             {
-                throw new ArgumentException(
-                "Lista kolumn do transformacji nie może być pusta.", nameof(columnIndices));
+                throw new ArgumentException("The list of columns for transformation cannot be empty.", nameof(columnIndices));
             }
 
             if (epsilon <= 0f)
             {
-                throw new ArgumentOutOfRangeException(
-                nameof(epsilon), "Epsilon musi być dodatni.");
+                throw new ArgumentOutOfRangeException(nameof(epsilon), "Epsilon must be positive.");
             }
 
             _columnIndices = columnIndices;
@@ -61,19 +48,16 @@ namespace DevOnBike.Overfit.Data.Prepare
                 return context;
             }
 
-            // Walidacja indeksów kolumn przed transformacją
             foreach (var c in _columnIndices)
             {
                 if (c < 0 || c >= cols)
                 {
-                    throw new InvalidOperationException(
-                    $"Indeks kolumny {c} wykracza poza zakres tensora (0–{cols - 1}).");
+                    throw new InvalidOperationException($"Column index {c} is out of tensor range (0–{cols - 1}).");
                 }
             }
 
             var span = context.Features.AsSpan();
 
-            // Dispatch per tryb — unikamy brancha wewnątrz hot-loop
             switch (_mode)
             {
                 case LogMode.Log1p:
@@ -89,17 +73,15 @@ namespace DevOnBike.Overfit.Data.Prepare
                     break;
 
                 default:
-                    throw new InvalidOperationException($"Nieobsługiwany tryb: {_mode}");
+                    throw new InvalidOperationException($"Unsupported LogMode: {_mode}");
             }
 
             return context;
         }
 
         /// <summary>
-        /// log(1 + x) — standardowy wybór dla danych nieujemnych.
-        /// Bezpieczna dla x = 0 (log(1) = 0).
-        /// Wymaga x >= 0; ujemne wartości sygnalizują błąd w danych
-        /// (cena/powierzchnia nie powinny być ujemne).
+        /// Applies log(1 + x). Ideal for non-negative data (e.g., price, area).
+        /// Safe for x = 0 (results in 0). Negative values are clamped to 0.
         /// </summary>
         private void ApplyLog1p(Span<float> span, int rows, int cols)
         {
@@ -111,26 +93,18 @@ namespace DevOnBike.Overfit.Data.Prepare
 
                     if (val < 0f)
                     {
-                        // Ujemna cena/powierzchnia = prawdopodobnie błąd w danych.
-                        // Zamiast cicho zamiatać pod dywan, zerujemy — TechnicalSanityLayer
-                        // powinien to wyłapać wcześniej, ale tu mamy dodatkową ochronę.
                         val = 0f;
                         continue;
                     }
 
-                    // MathF.Log(1 + x) zamiast MathF.Log1P (niedostępny w .NET)
-                    // Dla małych x (< 1e-4) tracimy precyzję, ale przy float32 to akceptowalne
                     val = MathF.Log(1f + val);
                 }
             }
         }
 
         /// <summary>
-        /// sign(x) * log(1 + |x|) — zachowuje znak.
-        /// Dla danych, które mogą być ujemne, np.:
-        /// - Zmiana ceny r/r (może być -15%)
-        /// - Bilans cieplny budynku (zysk/strata)
-        /// - Różnica ceny vs mediana dzielnicy
+        /// Applies sign(x) * log(1 + |x|). 
+        /// Used for symmetric distributions containing negative values (e.g., price changes or residuals).
         /// </summary>
         private void ApplySignedLog1p(Span<float> span, int rows, int cols)
         {
@@ -145,18 +119,15 @@ namespace DevOnBike.Overfit.Data.Prepare
                         continue;
                     }
 
-                    // sign(x) * log(1 + |x|)
-                    // Rozkłada symetryczny ogon na obie strony
                     val = MathF.Sign(val) * MathF.Log(1f + MathF.Abs(val));
                 }
             }
         }
 
         /// <summary>
-        /// log(x + epsilon) — klasyczna transformacja dla danych ściśle dodatnich.
-        /// Epsilon chroni przed log(0) = -∞.
-        /// Wybieraj ten tryb gdy dane nie zawierają zer i chcesz zachować
-        /// pełną rozdzielczość logarytmu (log1p "spłaszcza" małe wartości).
+        /// Applies log(x + epsilon). 
+        /// Use this for strictly positive data when log1p flattening of small values is undesirable.
+        /// Epsilon protects against log(0) resulting in negative infinity.
         /// </summary>
         private void ApplyLogEps(Span<float> span, int rows, int cols)
         {

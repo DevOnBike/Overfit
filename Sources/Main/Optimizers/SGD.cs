@@ -8,12 +8,18 @@ using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.Optimizers
 {
+    /// <summary>
+    /// Implements the Stochastic Gradient Descent (SGD) optimizer.
+    /// Utilizes hardware-accelerated parameter updates via SIMD primitives.
+    /// </summary>
     public sealed class SGD : IOptimizer
     {
         private readonly AutogradNode[] _parameters;
 
         public float LearningRate { get; set; }
 
+        /// <param name="parameters">Collection of parameters to be optimized. Only nodes with <c>RequiresGrad=true</c> are tracked.</param>
+        /// <param name="learningRate">The initial learning rate for weight updates.</param>
         public SGD(IEnumerable<AutogradNode> parameters, float learningRate)
         {
             ArgumentNullException.ThrowIfNull(parameters);
@@ -30,19 +36,19 @@ namespace DevOnBike.Overfit.Optimizers
             }
 
             _parameters = [.. paramList];
-
             LearningRate = learningRate;
         }
 
+        /// <summary>
+        /// Performs a single optimization step.
+        /// Applies the update rule: w = w - lr * grad.
+        /// </summary>
         public void Step()
         {
-            // Lokalna kopia — eliminuje getter per iteracja pętli
             var negativeLr = -LearningRate;
 
             foreach (var p in _parameters)
             {
-                // Grad jest zawsze non-null — ctor filtruje przez RequiresGrad
-                // w = grad * (-lr) + w  — jeden AVX-512 VFMADD, zero alokacji
                 TensorPrimitives.MultiplyAdd(
                     x: p.Grad.AsSpan(),
                     y: negativeLr,
@@ -51,9 +57,12 @@ namespace DevOnBike.Overfit.Optimizers
             }
         }
 
+        /// <summary>
+        /// Resets the gradients of all managed parameters to zero.
+        /// Should be called before each forward pass.
+        /// </summary>
         public void ZeroGrad()
         {
-            // Grad zawsze non-null po filtracji w ctor — guard zbędny
             foreach (var p in _parameters)
             {
                 p.Grad.AsSpan().Clear();

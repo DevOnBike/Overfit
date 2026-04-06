@@ -9,44 +9,27 @@ using DevOnBike.Overfit.Data.Contracts;
 namespace DevOnBike.Overfit.Data.Prepare
 {
     /// <summary>
-    /// Filtruje kolumny o silnej korelacji liniowej (Pearson).
-    /// Gdy dwie cechy są skorelowane powyżej progu, warstwa zachowuje tę
-    /// z wyższą korelacją z Target (jeśli dostępna) lub pierwszą napotkaną.
-    ///
-    /// Motywacja:
-    /// - Dwie cechy skorelowane na 0.98 nie wnoszą nowej informacji, ale podwajają wymiarowość
-    /// - Multikolinearność destabilizuje gradienty — model "oscyluje" między cechami
-    /// - Mniej kolumn = szybszy trening i mniej pamięci
-    ///
-    /// W danych nieruchomościowych typowe pary:
-    /// - Powierzchnia użytkowa vs liczba pokoi (r ≈ 0.92)
-    /// - Cena za m² vs cena całkowita (r ≈ 0.85 po normalizacji)
-    /// - Rok budowy vs stan techniczny (r ≈ 0.78)
-    ///
-    /// Warstwa powinna być stosowana PO skalowaniu, a PRZED Borutą.
-    /// Pearson jest wrażliwy na skalę, więc nieskalowane dane dadzą zafałszowane wyniki.
-    /// 
-    /// Implementuje Fit/Transform — statystyki z treningu są reużywane na inference.
+    /// Filters out columns with strong linear correlation (Pearson).
+    /// When two features are correlated above the threshold, the layer keeps the one with higher correlation to the Target (if available) or the first one encountered.
     /// </summary>
     public sealed class CorrelationFilterLayer : IDataLayer
     {
         private readonly float _threshold;
         private readonly DropStrategy _strategy;
 
-        // Zapamiętane z Fit — indeksy kolumn do zachowania
         private int[] _keptIndices;
         private bool _fitted;
 
         /// <param name="threshold">
-        /// Próg korelacji (wartość bezwzględna |r|). Domyślnie 0.95.
-        /// 0.98 = agresywna filtracja (tylko niemal identyczne cechy).
-        /// 0.85 = łagodna filtracja (szersze czyszczenie multikolinearności).
+        /// Correlation threshold (absolute value |r|). Default is 0.95.
+        /// 0.98 = aggressive filtration (only nearly identical features).
+        /// 0.85 = mild filtration (broader removal of multicollinearity).
         /// </param>
         /// <param name="strategy">
-        /// Strategia wyboru cechy do usunięcia z pary skorelowanych.
-        /// KeepFirst: zachowuje cechę z niższym indeksem (szybkie, deterministyczne).
-        /// KeepHigherTargetCorrelation: zachowuje cechę silniej skorelowaną z Target
-        /// (wolniejsze — wymaga N dodatkowych obliczeń Pearsona, ale daje lepszą selekcję).
+        /// Selection strategy for dropping a feature from a correlated pair.
+        /// KeepFirst: retains the feature with the lower index (fast, deterministic).
+        /// KeepHigherTargetCorrelation: retains the feature more strongly correlated with the Target 
+        /// (slower — requires N additional Pearson calculations, but provides better selection).
         /// </param>
         public CorrelationFilterLayer(
             float threshold = 0.95f,
@@ -54,8 +37,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         {
             if (threshold is <= 0f or > 1f)
             {
-                throw new ArgumentOutOfRangeException(
-                    nameof(threshold), "Próg korelacji musi być w zakresie (0, 1].");
+                throw new ArgumentOutOfRangeException(nameof(threshold), "Correlation threshold must be in the range (0, 1].");
             }
 
             _threshold = threshold;
@@ -72,20 +54,17 @@ namespace DevOnBike.Overfit.Data.Prepare
                 return context;
             }
 
-            // Fit: identyfikujemy kolumny do zachowania
             if (!_fitted)
             {
                 _keptIndices = Fit(context.Features, context.Targets, rows, cols);
                 _fitted = true;
             }
 
-            // Wszystkie kolumny przeszły — zwracamy bez zmian
             if (_keptIndices.Length == cols)
             {
                 return context;
             }
 
-            // Transform: budujemy węższy tensor
             var filtered = ExtractColumns(context.Features, _keptIndices, rows);
 
             context.Features.Dispose();
@@ -99,8 +78,6 @@ namespace DevOnBike.Overfit.Data.Prepare
             var featureSpan = features.AsReadOnlySpan();
             var targetSpan = targets.AsReadOnlySpan();
 
-            // Prekomputujemy statystyki per kolumna (sum, sumSq, mean)
-            // aby uniknąć wielokrotnego przeliczania w O(n²) parach
             using var sums = new FastBuffer<double>(cols);
             using var sumsSq = new FastBuffer<double>(cols);
             using var means = new FastBuffer<double>(cols);
@@ -126,15 +103,13 @@ namespace DevOnBike.Overfit.Data.Prepare
                 meanSpan[c] = sum / rows;
             }
 
-            // Korelacje z Target (jeśli strategia tego wymaga)
             float[] targetCorrelations = null;
+
             if (_strategy == DropStrategy.KeepHigherTargetCorrelation)
             {
-                targetCorrelations = ComputeTargetCorrelations(
-                    featureSpan, targetSpan, sumSpan, sumSqSpan, rows, cols);
+                targetCorrelations = ComputeTargetCorrelations(featureSpan, targetSpan, sumSpan, sumSqSpan, rows, cols);
             }
 
-            // Macierz korelacji — obliczamy tylko trójkąt górny
             var dropped = new HashSet<int>();
 
             for (var i = 0; i < cols; i++)
@@ -160,14 +135,13 @@ namespace DevOnBike.Overfit.Data.Prepare
                         continue;
                     }
 
-                    // Para (i, j) jest skorelowana — wybieramy którą wyrzucić
                     var dropIdx = ChooseColumnToDrop(i, j, targetCorrelations);
                     dropped.Add(dropIdx);
                 }
             }
 
-            // Budujemy posortowaną listę zachowanych indeksów
             var kept = new List<int>(cols - dropped.Count);
+
             for (var c = 0; c < cols; c++)
             {
                 if (!dropped.Contains(c))
@@ -180,9 +154,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Pearson z prekomputowanymi sumami — unika podwójnego przeliczania.
-        /// Jedyny koszt per para to obliczenie sumAB (iloczyn skalarny dwóch kolumn).
-        /// Złożoność: O(rows) per para zamiast O(3 * rows) w naiwnej implementacji.
+        /// Optimized Pearson calculation using precomputed sums.
         /// </summary>
         private float CalculatePearsonFast(
             ReadOnlySpan<float> span, int colA, int colB,
@@ -210,8 +182,8 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Oblicza korelację każdej cechy z Target.
-        /// Cecha silniej skorelowana z Target jest "cenniejsza" — zachowujemy ją.
+        /// Calculates the correlation of each feature with the Target.
+        /// Features with higher correlation are considered more valuable for prediction.
         /// </summary>
         private float[] ComputeTargetCorrelations(
             ReadOnlySpan<float> featureSpan,
@@ -222,7 +194,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         {
             var result = new float[cols];
 
-            // Statystyki Target
+            // Target statistics.
             double tSum = 0;
             double tSumSq = 0;
 
@@ -254,24 +226,24 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Wybiera kolumnę do usunięcia z pary skorelowanych.
+        /// Selects the column to drop from a correlated pair.
         /// </summary>
         private int ChooseColumnToDrop(int colA, int colB, float[] targetCorrelations)
         {
             if (_strategy == DropStrategy.KeepFirst)
             {
-                // Deterministyczne — zawsze wyrzucamy późniejszą kolumnę
                 return colB;
             }
 
-            // KeepHigherTargetCorrelation: zachowujemy cechę cenniejszą dla predykcji
             var corrA = MathF.Abs(targetCorrelations[colA]);
             var corrB = MathF.Abs(targetCorrelations[colB]);
 
-            // Przy remisie zachowujemy wcześniejszą (stabilność)
             return corrA >= corrB ? colB : colA;
         }
 
+        /// <summary>
+        /// Extracts selected columns into a new contiguous FastTensor.
+        /// </summary>
         private FastTensor<float> ExtractColumns(FastTensor<float> src, int[] indices, int rows)
         {
             var oldCols = src.GetDim(1);
@@ -296,8 +268,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Resetuje zapamiętane indeksy kolumn.
-        /// Wymusza ponowny Fit przy następnym wywołaniu Process.
+        /// Resets persisted column indices, forcing a re-Fit on the next Process call.
         /// </summary>
         public void Reset()
         {
@@ -306,15 +277,4 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
     }
 
-    public enum DropStrategy
-    {
-        /// <summary>Zachowuje kolumnę z niższym indeksem — szybkie, deterministyczne.</summary>
-        KeepFirst,
-
-        /// <summary>
-        /// Zachowuje kolumnę silniej skorelowaną z Target — wolniejsze,
-        /// ale daje lepszą selekcję pod kątem predykcji.
-        /// </summary>
-        KeepHigherTargetCorrelation
-    }
 }

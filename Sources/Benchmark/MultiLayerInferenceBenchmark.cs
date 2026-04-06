@@ -14,12 +14,8 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 namespace Benchmarks
 {
     /// <summary>
-    /// 3-warstwowy MLP: 784 → 256 → 128 → 10.
-    /// Więcej warstw = więcej P/Invoke overhead w ONNX per forward.
-    /// Overfit: każda warstwa to SIMD dot product, zero interop.
-    ///
-    /// Self-contained: generuje wagi i eksportuje ONNX w Setup.
-    /// Nie wymaga zewnętrznych plików modelu.
+    /// Performance benchmark for a 3-layer MLP architecture: 784 → 256 → 128 → 10.
+    /// Evaluates the cumulative impact of layer depth on inference latency.
     /// </summary>
     [SimpleJob(RuntimeMoniker.Net10_0)]
     [Orderer(SummaryOrderPolicy.FastestToSlowest)]
@@ -45,7 +41,6 @@ namespace Benchmarks
             var rnd = new Random(42);
             _inputData = Enumerable.Range(0, InputSize).Select(_ => (float)rnd.NextDouble()).ToArray();
 
-            // Overfit: budujemy model z losowymi wagami
             _overfitModel = new Sequential(
                 new LinearLayer(InputSize, 256),
                 new ReluActivation(),
@@ -53,12 +48,9 @@ namespace Benchmarks
                 new ReluActivation(),
                 new LinearLayer(128, 10));
 
-            // Zapisujemy wagi do pliku
             _overfitModel.Save(BinPath);
             _overfitModel.Eval();
 
-            // Eksportujemy do ONNX za pomocą skryptu PyTorch (jeśli dostępny)
-            // Jeśli nie — fallback na sam Overfit benchmark
             if (File.Exists(OnnxPath))
             {
                 _onnxSession = new InferenceSession(OnnxPath);
@@ -76,20 +68,26 @@ namespace Benchmarks
             }
         }
 
+        /// <summary>
+        /// Benchmarks ONNX Runtime on a 3-layer MLP. Requires an external .onnx file.
+        /// </summary>
         [Benchmark(Baseline = true)]
         public float OnnxRuntime_3Layer()
         {
             if (_onnxSession == null)
             {
                 throw new InvalidOperationException(
-                    $"Brak pliku {OnnxPath}. Wyeksportuj model z PyTorch:\n" +
-                    "  python export_mlp3.py --input-size 784 --hidden 256 128 --output 10");
+                    $"Missing {OnnxPath}. Please export the model from PyTorch using:\n" +
+                    "python export_mlp3.py --input-size 784 --hidden 256 128 --output 10");
             }
 
             using var results = _onnxSession.Run(_onnxInputs);
             return results.First().AsTensor<float>()[0];
         }
 
+        /// <summary>
+        /// Benchmarks Overfit on a 3-layer MLP using the optimized zero-allocation path.
+        /// </summary>
         [Benchmark]
         public float Overfit_3Layer_ZeroAlloc()
         {

@@ -8,13 +8,18 @@ using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.Optimizers
 {
+    /// <summary>
+    /// Implements the Adam (Adaptive Moment Estimation) optimizer.
+    /// Combines the advantages of AdaGrad and RMSProp to provide adaptive learning rates 
+    /// per parameter using first and second moment estimates.
+    /// </summary>
     public sealed class Adam : IOptimizer, IDisposable
     {
         private readonly struct ParamState
         {
             public readonly AutogradNode Node;
-            public readonly FastTensor<float> M;
-            public readonly FastTensor<float> V;
+            public readonly FastTensor<float> M; // First moment vector
+            public readonly FastTensor<float> V; // Second moment vector
             public readonly int Size;
 
             public ParamState(AutogradNode node)
@@ -22,7 +27,6 @@ namespace DevOnBike.Overfit.Optimizers
                 Node = node;
                 Size = node.Data.Size;
 
-                // Używamy true, by FastTensor od razu wyczyścił pamięć z ArrayPool
                 M = new FastTensor<float>(true, node.Data.Shape);
                 V = new FastTensor<float>(true, node.Data.Shape);
             }
@@ -36,7 +40,7 @@ namespace DevOnBike.Overfit.Optimizers
         public float Epsilon { get; set; } = 1e-8f;
         public float WeightDecay { get; set; } = 0.0001f;
 
-        private int _t = 0;
+        private int _t = 0; // Timestep counter for bias correction
 
         public Adam(IEnumerable<AutogradNode> parameters, float learningRate = 0.001f)
         {
@@ -55,6 +59,10 @@ namespace DevOnBike.Overfit.Optimizers
             _states = [.. statesList];
         }
 
+        /// <summary>
+        /// Performs a single optimization step (parameter update).
+        /// Utilizes hardware-accelerated SIMD paths when available.
+        /// </summary>
         public void Step()
         {
             _t++;
@@ -77,7 +85,10 @@ namespace DevOnBike.Overfit.Optimizers
                 var p = state.Node;
                 var n = state.Size;
 
-                if (p.Grad == null) continue;
+                if (p.Grad == null)
+                {
+                    continue;
+                }
 
                 var g = p.Grad.AsSpan();
                 var m = state.M.AsSpan();
@@ -86,7 +97,6 @@ namespace DevOnBike.Overfit.Optimizers
 
                 var i = 0;
 
-                // Fuzja SIMD: 1 przejście przez pamięć zamiast 10!
                 if (Vector.IsHardwareAccelerated)
                 {
                     var vecSize = Vector<float>.Count;
@@ -108,30 +118,22 @@ namespace DevOnBike.Overfit.Optimizers
                         var vV = new Vector<float>(v.Slice(i));
                         var vW = new Vector<float>(w.Slice(i));
 
-                        // 1. gWithL2 = g + wd * w
                         var vGl2 = vG + vW * vWd;
 
-                        // 2. m = b1 * m + b1Inv * gWithL2
                         vM = vM * vB1 + vGl2 * vB1Inv;
-
-                        // 3. v = b2 * v + b2Inv * (gWithL2 * gWithL2)
                         vV = vV * vB2 + (vGl2 * vGl2) * vB2Inv;
 
-                        // 4 & 5. mHat = m * invBc1, vHat = sqrt(v * invBc2) + eps
                         var vMHat = vM * vInvBc1;
                         var vVHat = Vector.SquareRoot(vV * vInvBc2) + vEps;
 
-                        // 6. w -= lr * (mHat / vHat)
                         vW -= (vMHat / vVHat) * vLr;
 
-                        // Bezpośredni zrzut do pamięci
                         vM.CopyTo(m.Slice(i));
                         vV.CopyTo(v.Slice(i));
                         vW.CopyTo(w.Slice(i));
                     }
                 }
 
-                // Resztki (jeśli tablica nie jest wielokrotnością szerokości wektora)
                 for (; i < n; i++)
                 {
                     var gl2 = g[i] + wd * w[i];
@@ -146,6 +148,10 @@ namespace DevOnBike.Overfit.Optimizers
             }
         }
 
+        /// <summary>
+        /// Resets the gradients of all optimized parameters to zero.
+        /// Should be called before every forward pass.
+        /// </summary>
         public void ZeroGrad()
         {
             foreach (var state in _states)
@@ -157,6 +163,9 @@ namespace DevOnBike.Overfit.Optimizers
             }
         }
 
+        /// <summary>
+        /// Resets the timestep counter. Used when restarting training or fine-tuning.
+        /// </summary>
         public void ResetTime()
         {
             _t = 0;

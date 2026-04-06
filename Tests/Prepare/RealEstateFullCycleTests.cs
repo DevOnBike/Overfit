@@ -24,8 +24,6 @@ namespace DevOnBike.Overfit.Tests.EndToEnd
             var rawData = GenerateDummyData(500);
             var schema = CreatePropertySchema();
 
-            // KONWERSJA: Obiekt → FastTensor
-            // ZMIANA: Wstrzykujemy AOT-Safe delegat zamiast Refleksji
             var converter = new TabularToTensorConverter<PropertyData>(schema, (item, propName) => propName switch
             {
                 "Powierzchnia" => item.Powierzchnia,

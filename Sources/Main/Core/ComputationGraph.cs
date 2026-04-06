@@ -5,6 +5,9 @@
 
 namespace DevOnBike.Overfit.Core
 {
+    /// <summary>
+    /// Manages the recording and execution of operations for automatic differentiation (Reverse Mode).
+    /// </summary>
     public sealed class ComputationGraph
     {
         private const int InitialCapacity = 4096;
@@ -13,8 +16,17 @@ namespace DevOnBike.Overfit.Core
 
         public bool IsRecording { get; set; } = true;
 
-        public void Record(OpCode code, AutogradNode output, AutogradNode a, AutogradNode b = null,
-            int i0 = 0, int i1 = 0, int i2 = 0, int i3 = 0, int i4 = 0, AutogradNode[] nodeContext = null)
+        public void Record(
+            OpCode code,
+            AutogradNode output,
+            AutogradNode a,
+            AutogradNode b = null,
+            int i0 = 0,
+            int i1 = 0,
+            int i2 = 0,
+            int i3 = 0,
+            int i4 = 0,
+            AutogradNode[] nodeContext = null)
         {
             if (!IsRecording)
             {
@@ -29,6 +41,9 @@ namespace DevOnBike.Overfit.Core
             _tape[_opCount++] = new TapeOp(code, output, a, b, i0, i1, i2, i3, i4, nodeContext);
         }
 
+        /// <summary>
+        /// Performs the backward pass, propagating gradients from the loss node through the tape.
+        /// </summary>
         public void Backward(AutogradNode lossNode)
         {
             if (lossNode?.Grad == null)
@@ -36,11 +51,6 @@ namespace DevOnBike.Overfit.Core
                 return;
             }
 
-            // Jedyne co robimy: ustawiamy gradient Loss na 1.0
-            // Zerowanie gradientów NIE jest potrzebne tutaj, bo:
-            //   - Parametry (w1, b1, ...) — zerowane przez optimizer.ZeroGrad() przed Forward
-            //   - Intermediate nodes (l1, prediction, loss) — tworzone na nowo każdą epokę
-            //     z using var, więc ich Grad jest świeży (zerowany w konstruktorze AutogradNode)
             lossNode.Grad.AsSpan().Fill(1f);
 
             for (var i = _opCount - 1; i >= 0; i--)
@@ -95,7 +105,6 @@ namespace DevOnBike.Overfit.Core
                 case OpCode.GlobalAveragePool2D: TensorMath.GlobalAvgPool2DBackward(op.A, op.Output, op.I0, op.I1, op.I2); break;
                 case OpCode.BatchNorm1D: TensorMath.BatchNorm1DBackward(op.A, op.Output, op.NodeContext[0], op.NodeContext[1], op.NodeContext[2], op.NodeContext[3]); break;
                 case OpCode.Reshape: TensorMath.ReshapeBackward(op.A, op.Output); break;
-
                 case OpCode.DirectionalLoss:
                     var gammaValue = BitConverter.Int32BitsToSingle(op.I0);
                     TensorMath.DirectionalLossBackward(op.A, op.B, op.Output, gammaValue);

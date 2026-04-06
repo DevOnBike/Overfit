@@ -9,19 +9,8 @@ using DevOnBike.Overfit.Data.Contracts;
 namespace DevOnBike.Overfit.Data.Prepare
 {
     /// <summary>
-    /// Skalowanie odporne na outliery — normalizacja przez medianę i rozstęp międzykwartylowy (IQR).
-    /// Formuła: x' = (x - median) / IQR
-    ///
-    /// Przewaga nad StandardScaler (mean/std):
-    /// - Mediana jest odporna na pojedynczy penthouse za 15M w datasecie z medianą 500k
-    /// - IQR ignoruje ekstrema — std jest wrażliwe na kwadrat odchylenia
-    ///
-    /// Dla danych nieruchomościowych to krytyczne: rozkład cen jest mocno skośny,
-    /// a StandardScaler "ściąga" wszystkie normalne mieszkania do wąskiego zakresu
-    /// i daje outlierom nieproporcjonalny wpływ na gradienty.
-    ///
-    /// Warstwa powinna być stosowana PO winsoryzacji (OutlierClipLayer)
-    /// i PO transformacji logarytmicznej (LogTransformLayer), ale PRZED selekcją cech.
+    /// Implements outlier-robust scaling using the median and Interquartile Range (IQR).
+    /// Formula: x' = (x - median) / IQR
     /// </summary>
     public sealed class RobustScalingLayer : IDataLayer
     {
@@ -30,26 +19,15 @@ namespace DevOnBike.Overfit.Data.Prepare
         private readonly float _fallbackIqr;
         private readonly bool _centerByMedian;
 
-        // Wyliczone statystyki z Fit — reużywane w Transform (inference)
+        // Persisted statistics from the Fit phase - reused during Transform (inference)
         private float[] _medians;
         private float[] _iqrs;
         private bool _fitted;
 
-        /// <param name="columnIndices">
-        /// Indeksy kolumn do skalowania. Null = skaluj wszystkie (poza wykluczonymi).
-        /// </param>
-        /// <param name="excludedColumns">
-        /// Kolumny wykluczone ze skalowania (np. binarne, one-hot encoded).
-        /// Skalowanie kolumny 0/1 przez IQR da nieokreślone wyniki (IQR = 0).
-        /// </param>
-        /// <param name="fallbackIqr">
-        /// Wartość IQR zastępcza gdy prawdziwy IQR = 0 (kolumna near-constant).
-        /// Domyślnie 1.0 — centruje przez medianę bez skalowania.
-        /// </param>
-        /// <param name="centerByMedian">
-        /// Czy odejmować medianę (centrowanie). False = tylko dzielenie przez IQR.
-        /// Przydatne gdy dane zostały już wycentrowane wcześniej w potoku.
-        /// </param>
+        /// <param name="columnIndices">Indices of columns to scale. Null = scale all (excluding specifically excluded columns).</param>
+        /// <param name="excludedColumns">Columns to skip (e.g., binary or one-hot encoded features). Scaling 0/1 by IQR is undefined.</param>
+        /// <param name="fallbackIqr">Default IQR to use if the calculated IQR is 0 (near-constant column). Defaults to 1.0.</param>
+        /// <param name="centerByMedian">Whether to subtract the median (centering). False = divide by IQR only.</param>
         public RobustScalingLayer(
             HashSet<int> columnIndices = null,
             HashSet<int> excludedColumns = null,
@@ -58,8 +36,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         {
             if (fallbackIqr <= 0f)
             {
-                throw new ArgumentOutOfRangeException(
-                    nameof(fallbackIqr), "Zastępczy IQR musi być dodatni.");
+                throw new ArgumentOutOfRangeException(nameof(fallbackIqr), "Fallback IQR must be positive.");
             }
 
             _columnIndices = columnIndices;
@@ -80,35 +57,29 @@ namespace DevOnBike.Overfit.Data.Prepare
 
             var span = context.Features.AsSpan();
 
-            // Fit: wyliczamy statystyki — wymaga >= 2 wierszy
             if (!_fitted)
             {
                 if (rows < 2)
                 {
-                    // Za mało danych do wyliczenia mediany/IQR — nie możemy skalować
                     return context;
                 }
 
                 Fit(span, rows, cols);
             }
 
-            // Transform: zawsze stosujemy zapamiętane statystyki, nawet na 1 wierszu
             Transform(span, rows, cols);
 
             return context;
         }
 
         /// <summary>
-        /// Wylicza medianę i IQR per kolumna.
-        /// Statystyki są zapamiętywane — przy ponownym wywołaniu (inference)
-        /// stosujemy te same progi co na danych treningowych.
+        /// Calculates the median and IQR per column and persists them for inference.
         /// </summary>
         private void Fit(ReadOnlySpan<float> span, int rows, int cols)
         {
             _medians = new float[cols];
             _iqrs = new float[cols];
 
-            // Domyślne wartości: median=0, iqr=1 (tożsamość)
             Array.Fill(_iqrs, _fallbackIqr);
 
             using var sortBuffer = new FastBuffer<float>(rows);
@@ -121,7 +92,6 @@ namespace DevOnBike.Overfit.Data.Prepare
                     continue;
                 }
 
-                // Kopiujemy kolumnę do bufora
                 for (var r = 0; r < rows; r++)
                 {
                     bufferSpan[r] = span[r * cols + c];
@@ -142,7 +112,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Stosuje zapamiętane statystyki do danych in-place.
+        /// Applies the persisted statistics to data in-place.
         /// </summary>
         private void Transform(Span<float> span, int rows, int cols)
         {
@@ -155,8 +125,6 @@ namespace DevOnBike.Overfit.Data.Prepare
 
                 var median = _medians[c];
                 var iqr = _iqrs[c];
-
-                // Prekomputujemy 1/IQR — mnożenie jest szybsze niż dzielenie w pętli
                 var invIqr = 1f / iqr;
 
                 if (_centerByMedian)
@@ -185,7 +153,6 @@ namespace DevOnBike.Overfit.Data.Prepare
                 return false;
             }
 
-            // Null = skaluj wszystkie (poza wykluczonymi)
             if (_columnIndices == null)
             {
                 return true;
@@ -195,8 +162,9 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Interpolacja liniowa percentyla — zgodna z numpy.percentile(interpolation='linear').
-        /// rank = p * (N - 1), wynik = lerp między dwoma sąsiednimi wartościami.
+        /// Linear interpolation of percentiles.
+        /// Compatible with numpy.percentile(interpolation='linear').
+        /// Formula: rank = p * (N - 1). Result is lerp between adjacent samples.
         /// </summary>
         private static float InterpolatePercentile(ReadOnlySpan<float> sorted, int count, float percentile)
         {
@@ -215,9 +183,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Resetuje zapamiętane statystyki.
-        /// Wymusza ponowne Fit przy następnym wywołaniu Process.
-        /// Przydatne przy retreningu na nowych danych.
+        /// Resets the persisted statistics, forcing a re-Fit on the next Process call.
         /// </summary>
         public void Reset()
         {

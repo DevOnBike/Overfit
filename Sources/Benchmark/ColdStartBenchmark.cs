@@ -14,11 +14,21 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 namespace Benchmarks
 {
     /// <summary>
-    /// Czas od zera do pierwszej predykcji.
-    /// ONNX: ładowanie onnxruntime.dll (~30MB) + parsowanie protobuf grafu + alokacja buforów.
-    /// Overfit: new Sequential + BinaryReader na float[] + Eval (transpozycja wag).
-    /// Krytyczne dla: serverless (Azure Functions), kontenerów z krótkim lifecycle, CLI tools.
+    /// Measures "Time-to-First-Prediction" (Cold Start) latency.
+    /// Compares the initialization and execution overhead of ONNX Runtime vs. the Overfit engine.
     /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item>
+    /// <description><b>ONNX:</b> Significant overhead due to loading <c>onnxruntime.dll</c> (~30MB), parsing the Protobuf graph, and initial workspace buffer allocations.</description>
+    /// </item>
+    /// <item>
+    /// <description><b>Overfit:</b> Lightweight start via direct binary reading into <see cref="FastTensor{float}"/> and efficient weight pre-transposition during <c>Eval()</c>.</description>
+    /// </item>
+    /// </list>
+    /// This benchmark is critical for Serverless environments (Azure Functions), short-lived containers, and CLI tools where 
+    /// the startup cost often dominates the total execution time.
+    /// </remarks>
     [SimpleJob(RuntimeMoniker.Net10_0, iterationCount: 10, warmupCount: 0)]
     [Orderer(SummaryOrderPolicy.FastestToSlowest)]
     [MemoryDiagnoser]
@@ -36,28 +46,38 @@ namespace Benchmarks
             _inputData = Enumerable.Range(0, InputSize).Select(_ => (float)rnd.NextDouble()).ToArray();
         }
 
+        /// <summary>
+        /// Benchmark for ONNX Runtime cold start, including session creation and the first inference pass.
+        /// </summary>
         [Benchmark(Baseline = true)]
         public float OnnxRuntime_ColdStart()
         {
             using var session = new InferenceSession("benchmark_model.onnx");
             var tensor = new DenseTensor<float>(_inputData, [1, InputSize]);
             var inputs = new NamedOnnxValue[] { NamedOnnxValue.CreateFromTensor("input", tensor) };
+
             using var results = session.Run(inputs);
             return results.First().AsTensor<float>()[0];
         }
 
+        /// <summary>
+        /// Benchmark for Overfit cold start, including model loading, weight transposition, and the first inference pass.
+        /// </summary>
         [Benchmark]
         public float Overfit_ColdStart()
         {
             var model = new Sequential(new LinearLayer(InputSize, OutputSize));
+
             model.Load("benchmark_model.bin");
             model.Eval();
 
             using var inputTensor = new FastTensor<float>(false, 1, InputSize);
             _inputData.AsSpan().CopyTo(inputTensor.AsSpan());
+
             using var inputNode = new AutogradNode(inputTensor, requiresGrad: false);
 
             var result = model.Forward(null, inputNode).Data.AsSpan()[0];
+
             model.Dispose();
             return result;
         }

@@ -7,11 +7,19 @@ using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.Optimizers
 {
+    /// <summary>
+    /// Manages the learning rate during training and provides safety mechanisms against numerical instability.
+    /// Implements "Reduce LR on Plateau" with an integrated RAM checkpointing system.
+    /// </summary>
+    /// <remarks>
+    /// This scheduler monitors the loss and automatically restores the last "safe" weight state 
+    /// if NaN or Infinity is detected, preventing total model collapse.
+    /// </remarks>
     public sealed class LRScheduler : IDisposable
     {
         private readonly IOptimizer _optimizer;
         private readonly AutogradNode[] _parameters;
-        private readonly FastTensor<float>[] _checkpoint; // Zrzut pamięci (RAM)
+        private readonly FastTensor<float>[] _checkpoint; // In-RAM weight backup
 
         private readonly float _factor;
         private readonly int _patience;
@@ -22,9 +30,16 @@ namespace DevOnBike.Overfit.Optimizers
         private float _bestLoss = float.MaxValue;
         private int _badEpochs = 0;
 
+        /// <param name="optimizer">The optimizer whose LearningRate will be managed.</param>
+        /// <param name="parameters">The model parameters to monitor and backup.</param>
+        /// <param name="log">Logging callback for scheduler events.</param>
+        /// <param name="factor">Multiplicative factor for learning rate reduction (0.0 - 1.0).</param>
+        /// <param name="patience">Number of epochs to wait before reducing LR after stagnation.</param>
+        /// <param name="minLR">Lower bound for the learning rate.</param>
+        /// <param name="minDelta">Threshold for measuring new best loss (relative change).</param>
         public LRScheduler(
             IOptimizer optimizer,
-            AutogradNode[] parameters, // Sieć przekazuje swoje wagi do monitorowania
+            AutogradNode[] parameters,
             Action<string> log,
             float factor = 0.5f,
             int patience = 2,
@@ -37,7 +52,7 @@ namespace DevOnBike.Overfit.Optimizers
 
             if (factor is <= 0f or >= 1f)
             {
-                throw new ArgumentOutOfRangeException(nameof(factor), "Mnożnik redukcji musi być w przedziale (0, 1).");
+                throw new ArgumentOutOfRangeException(nameof(factor), "Reduction factor must be in the range (0, 1).");
             }
 
             _optimizer = optimizer;
@@ -48,41 +63,42 @@ namespace DevOnBike.Overfit.Optimizers
             _minLR = minLR;
             _minDelta = minDelta;
 
-            // PRE-ALOKACJA: Tworzymy bliźniacze tensory w pamięci
             _checkpoint = new FastTensor<float>[_parameters.Length];
             for (var i = 0; i < _parameters.Length; i++)
             {
                 _checkpoint[i] = FastTensor<float>.SameShape(_parameters[i].Data);
-                // Zapisujemy stan początkowy (na wypadek wybuchu w 1. epoce)
                 _parameters[i].Data.AsSpan().CopyTo(_checkpoint[i].AsSpan());
             }
         }
 
+        /// <summary>
+        /// Evaluates the current loss and updates the learning rate or restores weights if necessary.
+        /// </summary>
+        /// <param name="currentLoss">The loss value from the current epoch.</param>
         public void Step(float currentLoss)
         {
-            // 1. KATASTROFA: Wykryto NaN/Inf
             if (float.IsNaN(currentLoss) || float.IsInfinity(currentLoss))
             {
-                _log($">>> KATASTROFA NUMERYCZNA (Loss={currentLoss}). Cofam wagi do ostatniego bezpiecznego stanu!");
+                _log($">>> NUMERICAL CATASTROPHE (Loss={currentLoss}). Restoring weights to the last safe state!");
+
                 RestoreCheckpoint();
-                ReduceLR(); // Od razu tniemy LR, by nie powtórzyć błędu
+                ReduceLR();
+
                 return;
             }
 
-            // 2. SUKCES: Prawdziwy progres
             if (currentLoss < _bestLoss * (1f - _minDelta))
             {
                 _bestLoss = currentLoss;
                 _badEpochs = 0;
-                
-                SaveCheckpoint(); // SIMD CopyTo (Błyskawiczny zrzut)
+
+                SaveCheckpoint();
             }
             else
             {
                 _badEpochs++;
             }
 
-            // 3. STAGNACJA: Cierpliwość wyczerpana
             if (_badEpochs >= _patience)
             {
                 ReduceLR();
@@ -97,12 +113,13 @@ namespace DevOnBike.Overfit.Optimizers
             if (newLR < oldLR)
             {
                 _optimizer.LearningRate = newLR;
-                _log($">>> LR SCHEDULER: Redukcja LR {oldLR:F6} → {newLR:F6}");
+                _log($">>> LR SCHEDULER: Reducing LR {oldLR:F6} → {newLR:F6}");
             }
 
             _badEpochs = 0;
         }
 
+        /// <summary> Performs a high-speed copy of current weights into the RAM checkpoint. </summary>
         private void SaveCheckpoint()
         {
             for (var i = 0; i < _parameters.Length; i++)
@@ -111,6 +128,7 @@ namespace DevOnBike.Overfit.Optimizers
             }
         }
 
+        /// <summary> Restores weights from the RAM checkpoint using SIMD-accelerated CopyTo. </summary>
         private void RestoreCheckpoint()
         {
             for (var i = 0; i < _parameters.Length; i++)
@@ -127,10 +145,12 @@ namespace DevOnBike.Overfit.Optimizers
 
         public void Dispose()
         {
-            // Zwalniamy bufory pamięci
-            for (var i = 0; i < _checkpoint.Length; i++)
+            if (_checkpoint != null)
             {
-                _checkpoint[i]?.Dispose();
+                for (var i = 0; i < _checkpoint.Length; i++)
+                {
+                    _checkpoint[i]?.Dispose();
+                }
             }
         }
     }
