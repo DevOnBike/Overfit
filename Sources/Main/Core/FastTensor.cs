@@ -206,7 +206,10 @@ namespace DevOnBike.Overfit.Core
 
         public FastTensor<T> Transpose(int dim0, int dim1)
         {
-            if (dim0 == dim1) return this;
+            if (dim0 == dim1)
+            {
+                return this;
+            }
 
             ReadShapeStrides(out var s, out var st);
 
@@ -357,6 +360,7 @@ namespace DevOnBike.Overfit.Core
         private void StoreStrides(int[] shape)
         {
             var cur = 1;
+
             if (shape.Length > 3) { _st3 = cur; cur *= shape[3]; }
             if (shape.Length > 2) { _st2 = cur; cur *= shape[2]; }
             if (shape.Length > 1) { _st1 = cur; cur *= shape[1]; }
@@ -374,6 +378,7 @@ namespace DevOnBike.Overfit.Core
 
             s = new int[Rank];
             st = new int[Rank];
+
             if (Rank > 0) { s[0] = _s0; st[0] = _st0; }
             if (Rank > 1) { s[1] = _s1; st[1] = _st1; }
             if (Rank > 2) { s[2] = _s2; st[2] = _st2; }

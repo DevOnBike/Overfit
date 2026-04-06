@@ -17,7 +17,6 @@ namespace DevOnBike.Overfit.Core
     public static class TensorMath
     {
         // Workload threshold (in FMA operations) below which Parallel.For is inefficient.
-        // ~4k FMA is the break-even point for thread-pool overhead on high-core count CPUs (e.g., Ryzen 9).
         private const long ParallelThreshold = 4096;
 
         // ====================================================================
@@ -119,7 +118,6 @@ namespace DevOnBike.Overfit.Core
 
             if (totalWork < ParallelThreshold)
             {
-                // Sequential execution to avoid thread-pool overhead for small matrices.
                 MatMulRawSequential(A.AsSpan(), B.AsSpan(), aRows, aCols, bCols, C.AsSpan());
             }
             else
@@ -326,6 +324,7 @@ namespace DevOnBike.Overfit.Core
             {
                 using var weights2D = weights.Data.Reshape(outC, kSqInC);
                 using var weights2DT = weights2D.Transpose(0, 1);
+
                 weights2DTContig = weights2DT.ToContiguous();
             }
 
@@ -534,7 +533,6 @@ namespace DevOnBike.Overfit.Core
             var giS = input.Grad.AsSpan();
             var i = 0;
 
-            // Hardware-accelerated SIMD path for ReLU derivative
             if (Vector.IsHardwareAccelerated)
             {
                 var vZero = Vector<float>.Zero;
@@ -553,7 +551,6 @@ namespace DevOnBike.Overfit.Core
                 }
             }
 
-            // Scalar fallback
             for (; i < inS.Length; i++)
             {
                 if (inS[i] > 0f) giS[i] += goS[i];
@@ -714,10 +711,12 @@ namespace DevOnBike.Overfit.Core
             if (isTraining)
             {
                 var meanS = mean.Data.AsSpan();
+
                 for (var i = 0; i < N; i++)
                 {
                     TensorPrimitives.Add(meanS, input.Data.AsSpan().Slice(i * C, C), meanS);
                 }
+
                 TensorPrimitives.Multiply(meanS, 1f / N, meanS);
 
                 using var varBuf = new FastTensor<float>(true, C);
@@ -731,6 +730,7 @@ namespace DevOnBike.Overfit.Core
                     TensorPrimitives.Subtract(input.Data.AsSpan().Slice(i * C, C), meanR, tempS);
                     TensorPrimitives.MultiplyAdd(tempS, tempS, varS, varS);
                 }
+
                 TensorPrimitives.Multiply(varS, 1f / N, varS);
 
                 var rmS = runningMean.AsSpan();
@@ -807,11 +807,9 @@ namespace DevOnBike.Overfit.Core
                 TensorPrimitives.Multiply(gammaS, invStdS, coeff);
                 TensorPrimitives.Multiply(coeff, 1f / N, coeff);
 
-                // Cache xHat for all rows to eliminate redundant recomputation
                 using var xHatAll = new FastBuffer<float>(N * C);
                 var xHatAllSpan = xHatAll.AsSpan();
 
-                // Loop 1: compute xHat, sumDy, sumDyXHat, gamma.Grad, beta.Grad
                 for (var i = 0; i < N; i++)
                 {
                     var xHatRow = xHatAllSpan.Slice(i * C, C);
