@@ -7,6 +7,9 @@ using System.Runtime.CompilerServices;
 
 namespace DevOnBike.Overfit.Core
 {
+    /// <summary>
+    /// Represents a node in the computation graph, holding data and its associated gradient.
+    /// </summary>
     public sealed class AutogradNode : IDisposable
     {
         public FastTensor<float> Data { get; }
@@ -20,12 +23,13 @@ namespace DevOnBike.Overfit.Core
 
             if (requiresGrad)
             {
+                // Gradients must match data shape. Memory is cleared to ensure zero-start.
                 Grad = FastTensor<float>.SameShape(data, clearMemory: true);
             }
         }
 
         /// <summary>
-        /// Pobiera wartość skalarną (np. dla węzła Loss).
+        /// Retrieves the first scalar value (typically used for Loss nodes).
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public float Forward() => Data[0];

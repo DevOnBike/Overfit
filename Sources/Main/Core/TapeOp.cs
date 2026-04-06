@@ -7,6 +7,10 @@ using System.Runtime.InteropServices;
 
 namespace DevOnBike.Overfit.Core
 {
+    /// <summary>
+    /// Represents a recorded operation in the computation tape.
+    /// Sequential layout ensures predictable memory access during the backward pass.
+    /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     public readonly struct TapeOp
     {
@@ -15,14 +19,14 @@ namespace DevOnBike.Overfit.Core
         public readonly AutogradNode A;
         public readonly AutogradNode B;
 
-        // Inline fields - eliminują "new int[]" w Conv2D i GAP
+        // Inline integer fields to avoid 'new int[]' for operation-specific parameters (Conv/Stride).
         public readonly int I0, I1, I2, I3, I4;
-        
-        // Kontekst dla operacji wymagających wielu węzłów (np. BatchNorm)
+
+        // Multi-node context for complex layers (e.g., BatchNorm storing mean/var).
         public readonly AutogradNode[] NodeContext;
 
-        public TapeOp(OpCode code, AutogradNode output, AutogradNode a, AutogradNode b = null, 
-            int i0 = 0, int i1 = 0, int i2 = 0, int i3 = 0, int i4 = 0, 
+        public TapeOp(OpCode code, AutogradNode output, AutogradNode a, AutogradNode b = null,
+            int i0 = 0, int i1 = 0, int i2 = 0, int i3 = 0, int i4 = 0,
             AutogradNode[] nodeContext = null)
         {
             Code = code;

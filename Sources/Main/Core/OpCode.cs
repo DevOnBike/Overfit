@@ -5,6 +5,9 @@
 
 namespace DevOnBike.Overfit.Core
 {
+    /// <summary>
+    /// Opcodes for the computation graph tape. Packed as byte for memory efficiency.
+    /// </summary>
     public enum OpCode : byte
     {
         None,

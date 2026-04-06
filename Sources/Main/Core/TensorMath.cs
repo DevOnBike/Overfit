@@ -10,14 +10,18 @@ using System.Runtime.InteropServices;
 
 namespace DevOnBike.Overfit.Core
 {
+    /// <summary>
+    /// Static utility class providing high-performance tensor operations with Autograd support.
+    /// Utilizes SIMD (TensorPrimitives) and Task Parallel Library (TPL) for hardware acceleration.
+    /// </summary>
     public static class TensorMath
     {
-        // Próg pracy (w operacjach FMA) poniżej którego Parallel.For nie opłaca się
-        // ~4k FMA = punkt, w którym overhead thread-poola zaczyna się zwracać na Ryzen 9
+        // Workload threshold (in FMA operations) below which Parallel.For is inefficient.
+        // ~4k FMA is the break-even point for thread-pool overhead on high-core count CPUs (e.g., Ryzen 9).
         private const long ParallelThreshold = 4096;
 
         // ====================================================================
-        // 1. PODSTAWOWA ALGEBRA I MATERIE (ZOPTYMALIZOWANE)
+        // 1. BASIC LINEAR ALGEBRA
         // ====================================================================
 
         public static AutogradNode Add(ComputationGraph graph, AutogradNode left, AutogradNode right)
@@ -115,7 +119,7 @@ namespace DevOnBike.Overfit.Core
 
             if (totalWork < ParallelThreshold)
             {
-                // Sekwencyjnie — unikamy overhead'u thread-poola dla małych macierzy
+                // Sequential execution to avoid thread-pool overhead for small matrices.
                 MatMulRawSequential(A.AsSpan(), B.AsSpan(), aRows, aCols, bCols, C.AsSpan());
             }
             else
@@ -155,7 +159,6 @@ namespace DevOnBike.Overfit.Core
                 for (var k = 0; k < aC; k++)
                 {
                     var valA = rowA[k];
-
                     if (valA != 0f)
                     {
                         TensorPrimitives.MultiplyAdd(bS.Slice(k * bC, bC), valA, rowC, rowC);
@@ -168,12 +171,14 @@ namespace DevOnBike.Overfit.Core
         {
             if (a.RequiresGrad)
             {
+                // dA = dO * B^T
                 using var gradA = MatMul_A_BT(output.Grad, b.Data);
                 TensorPrimitives.Add(a.Grad.AsSpan(), gradA.AsSpan(), a.Grad.AsSpan());
             }
 
             if (b.RequiresGrad)
             {
+                // dB = A^T * dO
                 using var gradB = MatMul_AT_B(a.Data, output.Grad);
                 TensorPrimitives.Add(b.Grad.AsSpan(), gradB.AsSpan(), b.Grad.AsSpan());
             }
@@ -183,7 +188,6 @@ namespace DevOnBike.Overfit.Core
         {
             int N = A.GetDim(0), K = A.GetDim(1), M = B.GetDim(0);
             var C = new FastTensor<float>(false, N, M);
-
             var totalWork = (long)N * K * M;
 
             if (totalWork < ParallelThreshold)
@@ -227,7 +231,6 @@ namespace DevOnBike.Overfit.Core
             var N = A.GetDim(1);
             var M = B.GetDim(1);
             var C = new FastTensor<float>(true, N, M);
-
             var totalWork = (long)N * K * M;
 
             if (totalWork < ParallelThreshold)
@@ -277,7 +280,7 @@ namespace DevOnBike.Overfit.Core
         }
 
         // ====================================================================
-        // 2. CNN - CONV, POOL, GAP (NCHW)
+        // 2. CNN OPERATIONS (NCHW)
         // ====================================================================
 
         public static AutogradNode Conv2D(ComputationGraph graph, AutogradNode input, AutogradNode weights, int inC, int outC, int h, int w, int k)
@@ -364,7 +367,7 @@ namespace DevOnBike.Overfit.Core
 
                     return localDw;
                 },
-                (localDw) =>
+                localDw =>
                 {
                     if (localDw != null)
                     {
@@ -502,7 +505,7 @@ namespace DevOnBike.Overfit.Core
         }
 
         // ====================================================================
-        // 3. AKTYWACJE I REGULARYZACJA
+        // 3. ACTIVATION AND REGULARIZATION
         // ====================================================================
 
         public static AutogradNode ReLU(ComputationGraph graph, AutogradNode input)
@@ -531,6 +534,7 @@ namespace DevOnBike.Overfit.Core
             var giS = input.Grad.AsSpan();
             var i = 0;
 
+            // Hardware-accelerated SIMD path for ReLU derivative
             if (Vector.IsHardwareAccelerated)
             {
                 var vZero = Vector<float>.Zero;
@@ -549,12 +553,10 @@ namespace DevOnBike.Overfit.Core
                 }
             }
 
+            // Scalar fallback
             for (; i < inS.Length; i++)
             {
-                if (inS[i] > 0f)
-                {
-                    giS[i] += goS[i];
-                }
+                if (inS[i] > 0f) giS[i] += goS[i];
             }
         }
 
@@ -571,13 +573,9 @@ namespace DevOnBike.Overfit.Core
                 var resS = resData.AsSpan();
                 var maskS = mask.Data.AsSpan();
 
-                // Generujemy blok losowych bajtów — 1 wywołanie RNG zamiast N
-                // NextBytes jest ~10x szybsze niż N × NextSingle()
                 var randomBytes = size <= 2048 ? stackalloc byte[size] : new byte[size];
-                
                 Random.Shared.NextBytes(randomBytes);
 
-                // Próg na skali byte (0..255)
                 var thresholdByte = (byte)(probability * 255f);
 
                 for (var i = 0; i < size; i++)
@@ -587,7 +585,6 @@ namespace DevOnBike.Overfit.Core
                         resS[i] = inS[i] * scale;
                         maskS[i] = scale;
                     }
-                    // else: resS[i] = 0 (domyślnie), maskS[i] = 0 (domyślnie)
                 }
             }
             else
@@ -618,7 +615,7 @@ namespace DevOnBike.Overfit.Core
         }
 
         // ====================================================================
-        // 4. FUNKCJE STRATY (LOSS)
+        // 4. LOSS FUNCTIONS
         // ====================================================================
 
         public static AutogradNode SoftmaxCrossEntropy(ComputationGraph graph, AutogradNode logits, AutogradNode target)
@@ -704,7 +701,7 @@ namespace DevOnBike.Overfit.Core
         }
 
         // ====================================================================
-        // 5. BATCH NORM I NARZĘDZIA
+        // 5. NORMALIZATION AND UTILITIES
         // ====================================================================
 
         public static AutogradNode BatchNorm1D(ComputationGraph graph, AutogradNode input, AutogradNode gamma, AutogradNode beta, FastTensor<float> runningMean, FastTensor<float> runningVar, float momentum, float eps, bool isTraining)
@@ -773,7 +770,6 @@ namespace DevOnBike.Overfit.Core
             }
 
             var output = new AutogradNode(outputData, input.RequiresGrad);
-
             if (output.RequiresGrad && isTraining)
             {
                 graph?.Record(OpCode.BatchNorm1D, output, input, null, 0, 0, 0, 0, 0, [gamma, beta, mean, invStd]);
@@ -798,7 +794,6 @@ namespace DevOnBike.Overfit.Core
             var gammaS = (ReadOnlySpan<float>)gamma.Data.AsSpan();
 
             const int StackAllocThreshold = 256;
-
             FastBuffer<float> coeffBuf = null;
             FastBuffer<float> termBuf = null;
 
@@ -812,11 +807,11 @@ namespace DevOnBike.Overfit.Core
                 TensorPrimitives.Multiply(gammaS, invStdS, coeff);
                 TensorPrimitives.Multiply(coeff, 1f / N, coeff);
 
-                // Cache xHat dla wszystkich wierszy — eliminuje podwójne obliczanie
+                // Cache xHat for all rows to eliminate redundant recomputation
                 using var xHatAll = new FastBuffer<float>(N * C);
                 var xHatAllSpan = xHatAll.AsSpan();
 
-                // Pętla 1: wylicz xHat, sumDy, sumDyXHat, gamma.Grad, beta.Grad
+                // Loop 1: compute xHat, sumDy, sumDyXHat, gamma.Grad, beta.Grad
                 for (var i = 0; i < N; i++)
                 {
                     var xHatRow = xHatAllSpan.Slice(i * C, C);
@@ -840,23 +835,18 @@ namespace DevOnBike.Overfit.Core
                     }
                 }
 
-                // Pętla 2: gradienty wejścia — korzysta z zcache'owanego xHat
                 if (input.RequiresGrad)
                 {
                     var inGradS = input.Grad.AsSpan();
-
                     for (var i = 0; i < N; i++)
                     {
                         var gradRow = (ReadOnlySpan<float>)outGradS.Slice(i * C, C);
                         var inGradRow = inGradS.Slice(i * C, C);
-
-                        // Używamy zcache'owanego xHat zamiast ponownego obliczania
                         var xHatRow = xHatAllSpan.Slice(i * C, C);
 
                         TensorPrimitives.Multiply(gradRow, (float)N, term);
                         TensorPrimitives.Subtract(term, sumDy, term);
 
-                        // xHatRow zostanie zmodyfikowany — ale już go nie potrzebujemy
                         TensorPrimitives.Multiply(xHatRow, sumDyXHat, xHatRow);
                         TensorPrimitives.Subtract(term, xHatRow, term);
 

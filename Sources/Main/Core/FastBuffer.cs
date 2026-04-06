@@ -8,6 +8,10 @@ using System.Runtime.CompilerServices;
 
 namespace DevOnBike.Overfit.Core
 {
+    /// <summary>
+    /// A high-speed memory wrapper that uses ArrayPool to avoid GC allocations.
+    /// Exposes a precise Span that excludes pool-induced padding.
+    /// </summary>
     public sealed class FastBuffer<T> : IDisposable where T : struct
     {
         private T[] _rented;
@@ -18,14 +22,13 @@ namespace DevOnBike.Overfit.Core
         public FastBuffer(int length)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(length);
-            
+
             Length = length;
 
             _rented = ArrayPool<T>.Shared.Rent(length);
-            
             _rented.AsSpan(0, length).Clear();
         }
-        
+
         public ref T this[int index]
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -36,12 +39,10 @@ namespace DevOnBike.Overfit.Core
             }
         }
 
-        /// <summary>Span dokładnie length elementów (nie nadmiarowych bajtów z puli).</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Span<T> AsSpan()
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            
             return _rented.AsSpan(0, Length);
         }
 
@@ -49,16 +50,10 @@ namespace DevOnBike.Overfit.Core
         public ReadOnlySpan<T> AsReadOnlySpan()
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            
             return _rented.AsSpan(0, Length);
         }
 
-        public void Clear()
-        {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            
-            AsSpan().Clear();
-        }
+        public void Clear() => AsSpan().Clear();
 
         public void Dispose()
         {
@@ -73,7 +68,6 @@ namespace DevOnBike.Overfit.Core
             {
                 ArrayPool<T>.Shared.Return(rented);
             }
-
         }
     }
 }

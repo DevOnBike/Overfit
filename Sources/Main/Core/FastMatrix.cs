@@ -10,6 +10,9 @@ using System.Runtime.CompilerServices;
 
 namespace DevOnBike.Overfit.Core
 {
+    /// <summary>
+    /// Represents a high-performance 2D matrix structure optimized for numerical computing and machine learning.
+    /// </summary>
     public class FastMatrix<T> : IDisposable where T : struct, IFloatingPointIeee754<T>
     {
         private T[] _data;
@@ -93,8 +96,6 @@ namespace DevOnBike.Overfit.Core
             source.CopyTo(AsSpan());
         }
 
-        // ── SIMD  (TensorPrimitives .NET 10) ─────────────────────────
-
         /// <summary>this += other (in-place, element-wise). SIMD-accelerated.</summary>
         public void Add(FastMatrix<T> other)
         {
@@ -115,14 +116,11 @@ namespace DevOnBike.Overfit.Core
             TensorPrimitives.Multiply(AsReadOnlySpan(), scalar, AsSpan());
         }
 
-        /// <summary>Suma kwadratów wszystkich elementów (‖A‖_F²). Używane do Mahalanobis distance.</summary>
         public T SumOfSquares()
         {
-            // Metoda Dot dla generics zwraca typ T
             return TensorPrimitives.Dot(AsReadOnlySpan(), AsReadOnlySpan());
         }
 
-        /// <summary>Norma Frobeniusa ‖A‖_F = sqrt(Σ aᵢⱼ²). SIMD-accelerated.</summary>
         public T FrobeniusNorm()
         {
             return TensorPrimitives.Norm(AsReadOnlySpan());
@@ -132,8 +130,6 @@ namespace DevOnBike.Overfit.Core
         {
             TensorPrimitives.SoftMax(AsReadOnlySpan(), AsSpan());
         }
-
-        // ── (Strides & Views) ─────────────────────────
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public FastMatrixView<T> AsView()
@@ -149,9 +145,6 @@ namespace DevOnBike.Overfit.Core
             return AsView().Transpose();
         }
 
-        /// <summary>
-        /// Zwraca wycinek macierzy (tzw. okno lub ROI) w czasie O(1).
-        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public FastMatrixView<T> Slice(int startRow, int startCol, int rows, int cols)
         {
@@ -172,23 +165,8 @@ namespace DevOnBike.Overfit.Core
             return result;
         }
 
-        // ── Dispose Pattern ───────────────────────────────────────────
-        // Wzorzec z virtual Dispose(bool) — wymagany gdy klasa nie jest sealed.
-        // Podklasy nadpisują Dispose(bool) aby zwolnić własne zasoby,
-        // następnie wywołują base.Dispose(disposing) do zwolnienia _data.
-
-        /// <summary>
-        /// Nadpisz tę metodę w podklasie aby zwolnić własne zasoby.
-        /// Zawsze wywołuj base.Dispose(disposing) na końcu.
-        /// </summary>
-        /// <param name="disposing">
-        /// true  — wywołane przez Dispose(); zwolnij zasoby managed i unmanaged.
-        /// false — wywołane przez finalizer; zwalniaj tylko unmanaged (managed może być już zebrany przez GC).
-        /// </param>
         protected virtual void Dispose(bool disposing)
         {
-            // Atomowa zamiana: tylko pierwszy wywołujący przechodzi dalej.
-            // Chroni przed double-return do ArrayPool z dwóch wątków jednocześnie.
             if (Interlocked.Exchange(ref _disposed, true))
             {
                 return;
@@ -196,7 +174,6 @@ namespace DevOnBike.Overfit.Core
 
             if (disposing)
             {
-                // Managed resources: zwróć bufor do ArrayPool.
                 var rented = Interlocked.Exchange(ref _data, null!);
 
                 if (rented != null)
@@ -205,14 +182,11 @@ namespace DevOnBike.Overfit.Core
                 }
             }
 
-            // Unmanaged resources: brak — ArrayPool to managed wrapper.
         }
 
-        /// <inheritdoc/>
         public void Dispose()
         {
-            Dispose(disposing: true);
-            // Informuje GC że finalizer jest zbędny — obiekt już posprzątany.
+            Dispose(true);
             GC.SuppressFinalize(this);
         }
 

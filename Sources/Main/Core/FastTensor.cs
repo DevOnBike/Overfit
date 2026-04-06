@@ -9,19 +9,21 @@ using System.Runtime.CompilerServices;
 namespace DevOnBike.Overfit.Core
 {
     /// <summary>
-    /// N-wymiarowy tensor z ArrayPool i inline Shape/Strides dla rank ≤ 4.
+    /// N-dimensional tensor using ArrayPool and inline fields for rank ≤ 4 metadata 
+    /// to eliminate heap pressure during inference.
     /// </summary>
     public sealed class FastTensor<T> : IDisposable
     {
         private T[] _data;
-        private int _disposed;   // 0 = alive, 1 = disposed — Interlocked wymaga int nie bool
+        private int _disposed;   // 0 = alive, 1 = disposed. Using int for Interlocked operations.
         private readonly bool _ownsData;
 
-        // ── Inline Shape/Strides dla rank ≤ 4 (eliminuje 2×new int[] per instancja) ──
+        // ── Inline Shape/Strides (Rank ≤ 4) ──
+        // Prevents new int[] allocations for the most common CNN/MLP shapes.
         private int _s0, _s1, _s2, _s3;
         private int _st0, _st1, _st2, _st3;
 
-        // Fallback dla rank > 4 (rzadkie — CNN najwyżej 4D)
+        // Fallback for Rank > 4.
         private readonly int[] _shapeOverflow;
         private readonly int[] _stridesOverflow;
 
@@ -30,7 +32,7 @@ namespace DevOnBike.Overfit.Core
         public int Rank { get; }
         public bool IsContiguous { get; }
 
-        // ── Dostęp O(1) bez alokacji (OSTATECZNA OPTYMALIZACJA) ────────────────────
+        // ── O(1) Allocation-free Metadata Access ──────────────────────────────────
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public int GetDim(int index)
@@ -68,7 +70,9 @@ namespace DevOnBike.Overfit.Core
             };
         }
 
-        // ── Właściwości Shape/Strides — alokują tablicę (Używać tylko do debugu!) ──
+        /// <summary>
+        /// Allocation warning: This property creates a new array. Use only for debugging.
+        /// </summary>
         public int[] Shape
         {
             get
@@ -79,12 +83,10 @@ namespace DevOnBike.Overfit.Core
                 }
 
                 var s = new int[Rank];
-
                 if (Rank > 0) s[0] = _s0;
                 if (Rank > 1) s[1] = _s1;
                 if (Rank > 2) s[2] = _s2;
                 if (Rank > 3) s[3] = _s3;
-
                 return s;
             }
         }
@@ -108,8 +110,6 @@ namespace DevOnBike.Overfit.Core
             }
         }
 
-        // ── Konstruktory publiczne ────────────────────────────────────────────────────
-
         public FastTensor(params int[] shape) : this(true, shape) { }
 
         public FastTensor(bool clearMemory, params int[] shape)
@@ -131,7 +131,6 @@ namespace DevOnBike.Overfit.Core
             }
         }
 
-        // Prywatny konstruktor dla widoków (Transpose, Reshape)
         private FastTensor(
             T[] data, int rank, int size, int offset, bool isContiguous, bool ownsData,
             int s0, int s1, int s2, int s3,
@@ -149,8 +148,6 @@ namespace DevOnBike.Overfit.Core
             _shapeOverflow = shapeOverflow;
             _stridesOverflow = stridesOverflow;
         }
-
-        // ── Indexery ─────────────────────────────────────────────────────────────────
 
         public T this[int i]
         {
@@ -184,7 +181,7 @@ namespace DevOnBike.Overfit.Core
             set => _data[Offset + i * _st0 + j * _st1 + k * _st2 + l * _st3] = value;
         }
 
-        // ── Span access ──────────────────────────────────────────────────────────────
+        // ── Span Access ──────────────────────────────────────────────────────────────
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Span<T> AsSpan()
@@ -212,18 +209,13 @@ namespace DevOnBike.Overfit.Core
             return new ReadOnlySpan<T>(_data, Offset, Size);
         }
 
-        // ── Operacje O(1) (widoki, zero kopii) ───────────────────────────────────────
+        // ── O(1) View Operations (No-Copy) ──────────────────────────────────────────
 
         public FastTensor<T> Transpose(int dim0, int dim1)
         {
-            // No-op gdy dim0 == dim1
-            if (dim0 == dim1)
-            {
-                return this;
-            }
+            if (dim0 == dim1) return this;
 
             ReadShapeStrides(out var s, out var st);
-
             (s[dim0], s[dim1]) = (s[dim1], s[dim0]);
             (st[dim0], st[dim1]) = (st[dim1], st[dim0]);
 
@@ -248,8 +240,9 @@ namespace DevOnBike.Overfit.Core
             return MakeView(newShape, newStrides, Offset, isContiguous: true);
         }
 
-        // ── Materializacja widoku ─────────────────────────────────────────────────────
-
+        /// <summary>
+        /// Materializes a non-contiguous view into a new contiguous tensor.
+        /// </summary>
         public FastTensor<T> ToContiguous()
         {
             if (IsContiguous)
@@ -257,9 +250,8 @@ namespace DevOnBike.Overfit.Core
                 return this;
             }
 
-            var result = new FastTensor<T>(false, Shape); // Shape alokuje tu raz — rzadka operacja
+            var result = new FastTensor<T>(false, Shape);
             var dst = result.AsSpan();
-
             var indices = Rank <= 8 ? stackalloc int[Rank] : new int[Rank];
 
             ReadShapeStrides(out var shapeArr, out var stridesArr);
@@ -285,16 +277,12 @@ namespace DevOnBike.Overfit.Core
                     indices[d] = 0;
                 }
             }
-
             return result;
         }
 
         /// <summary>
-        /// Zero-alloc factory — tworzy nowy tensor o tym samym kształcie co <paramref name="template"/>.
-        /// Zastępuje wzorzec: new FastTensor&lt;T&gt;(template.Shape) który alokuje new int[Rank].
-        ///
-        /// Dla rank ≤ 4 (100% przypadków CNN): zero alokacji int[].
-        /// Dla rank > 4: fallback na template.Shape (rzadkie, akceptowalne).
+        /// Optimized factory: Creates a new tensor matching the template shape.
+        /// Achieves zero-allocation for Rank ≤ 4.
         /// </summary>
         public static FastTensor<T> SameShape(FastTensor<T> template, bool clearMemory = true)
         {
@@ -304,7 +292,7 @@ namespace DevOnBike.Overfit.Core
                 2 => new FastTensor<T>(clearMemory, template.GetDim(0), template.GetDim(1)),
                 3 => new FastTensor<T>(clearMemory, template.GetDim(0), template.GetDim(1), template.GetDim(2)),
                 4 => new FastTensor<T>(clearMemory, template.GetDim(0), template.GetDim(1), template.GetDim(2), template.GetDim(3)),
-                _ => new FastTensor<T>(clearMemory, template.Shape) // rank > 4 — Shape alokuje, ale to przypadek brzegowy
+                _ => new FastTensor<T>(clearMemory, template.Shape)
             };
         }
 
@@ -314,8 +302,6 @@ namespace DevOnBike.Overfit.Core
 
             return this;
         }
-
-        // ── Dispose — Interlocked, double-dispose safe ───────────────────────────────
 
         public void Dispose()
         {
@@ -334,8 +320,6 @@ namespace DevOnBike.Overfit.Core
                 }
             }
         }
-
-        // ── Prywatne helpers ─────────────────────────────────────────────────────────
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static int CalculateSize(int[] shape)
@@ -364,7 +348,6 @@ namespace DevOnBike.Overfit.Core
             return st;
         }
 
-        // Zapisuje shape do inline fields lub overflow array
         private void StoreShape(int[] shape)
         {
             if (shape.Length <= 4)
@@ -373,12 +356,9 @@ namespace DevOnBike.Overfit.Core
                 if (shape.Length > 1) _s1 = shape[1];
                 if (shape.Length > 2) _s2 = shape[2];
                 if (shape.Length > 3) _s3 = shape[3];
-                // _shapeOverflow pozostaje null
             }
-            // else: _shapeOverflow ustawione przez MakeView lub konstruktor overflow (rank>4)
         }
 
-        // Oblicza i zapisuje strides do inline fields
         private void StoreStrides(int[] shape)
         {
             var cur = 1;
@@ -388,7 +368,6 @@ namespace DevOnBike.Overfit.Core
             if (shape.Length > 0) { _st0 = cur; }
         }
 
-        // Odczytuje shape i strides do tymczasowych tablic (tylko dla operacji widoków)
         private void ReadShapeStrides(out int[] s, out int[] st)
         {
             if (_shapeOverflow != null)
@@ -400,14 +379,12 @@ namespace DevOnBike.Overfit.Core
 
             s = new int[Rank];
             st = new int[Rank];
-
             if (Rank > 0) { s[0] = _s0; st[0] = _st0; }
             if (Rank > 1) { s[1] = _s1; st[1] = _st1; }
             if (Rank > 2) { s[2] = _s2; st[2] = _st2; }
             if (Rank > 3) { s[3] = _s3; st[3] = _st3; }
         }
 
-        // Tworzy widok (Transpose/Reshape) z podanymi shape i strides
         private FastTensor<T> MakeView(int[] shape, int[] strides, int offset, bool isContiguous)
         {
             int s0 = 0, s1 = 0, s2 = 0, s3 = 0;

@@ -21,7 +21,7 @@ namespace DevOnBike.Overfit.Tests
             _output = output;
         }
 
-        [Fact(Skip = "a")]
+        [Fact]
         public void Mnist_FullTrain60k_CnnBeastMode_Augmented()
         {
             // --- ARRANGE (SMOKE TEST) ---
