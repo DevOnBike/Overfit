@@ -89,7 +89,7 @@ This software is released under a **Dual License model**:
 1. **Open Source (GNU AGPLv3):** Free for open-source projects, personal use, and academic research. *Note: If you use this engine in your application (even over a network/API), your entire application must also be open-sourced under the AGPLv3.*
 2. **Commercial License:** For businesses building proprietary, closed-source applications or enterprise environments. Purchasing a commercial license frees you from the requirements of the AGPLv3.
 
-**To purchase a commercial license or discuss enterprise support, please contact:** 👉 **[Wpisz Twój Email / Link do Strony]**
+**To purchase a commercial license or discuss enterprise support, please contact:** 👉 **devonbike@gmail.com**
 
 ---
 
