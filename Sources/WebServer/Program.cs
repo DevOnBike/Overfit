@@ -3,9 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Text.Json.Serialization;
-
-namespace WebServer
+namespace DevOnBike.Overfit.WebServer
 {
     public class Program
     {
@@ -40,11 +38,4 @@ namespace WebServer
         }
     }
 
-    public record Todo(int Id, string? Title, DateOnly? DueBy = null, bool IsComplete = false);
-
-    [JsonSerializable(typeof(Todo[]))]
-    internal partial class AppJsonSerializerContext : JsonSerializerContext
-    {
-
-    }
 }
