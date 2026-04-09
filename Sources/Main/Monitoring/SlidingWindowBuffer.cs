@@ -10,22 +10,22 @@ namespace DevOnBike.Overfit.Monitoring
 {
     public sealed class SlidingWindowBuffer : IDisposable
     {
-        // --- pamięć (alokowana raz w konstruktorze z ArrayPool przez FastBuffer) ---
-        private readonly FastBuffer<float> _ring; // płaski: windowSize × featureCount
-        private readonly FastBuffer<DateTime> _timestamps; // jeden timestamp per slot
+        // --- memory (allocated once in the constructor from ArrayPool via FastBuffer) ---
+        private readonly FastBuffer<float> _ring; // flat: windowSize × featureCount
+        private readonly FastBuffer<DateTime> _timestamps; // one timestamp per slot
         private readonly int _windowSize;
         private readonly int _stepSize;
         private readonly int _featureCount;
         private readonly int _windowFloats; // = windowSize × featureCount
 
-        // --- stan ---
-        private readonly Lock _lock = new(); // System.Threading.Lock — bez Monitor overhead
-        private int _head; // indeks slotu następnego zapisu
-        private int _count; // liczba wypełnionych slotów (max = windowSize)
-        private int _samplesUntilStep; // ile próbek do następnego okna
+        // --- state ---
+        private readonly Lock _lock = new(); // System.Threading.Lock — no Monitor overhead
+        private int _head; // index of the next write slot
+        private int _count; // number of filled slots (max = windowSize)
+        private int _samplesUntilStep; // how many samples until the next window
         private bool _disposed;
 
-        // --- diagnostyka (Interlocked — nie wymagają _lock) ---
+        // --- diagnostics (Interlocked — do not require _lock) ---
         private long _windowsProduced;
         private long _samplesAdded;
 
@@ -36,7 +36,7 @@ namespace DevOnBike.Overfit.Monitoring
         public long WindowsProduced => Volatile.Read(ref _windowsProduced);
         public long SamplesAdded => Volatile.Read(ref _samplesAdded);
 
-        /// <summary>Ile próbek brakuje do zapełnienia pierwszego okna.</summary>
+        /// <summary>How many samples are missing to fill the first window.</summary>
         public int SamplesUntilFirstWindow
         {
             get
@@ -48,9 +48,9 @@ namespace DevOnBike.Overfit.Monitoring
             }
         }
 
-        /// <param name="windowSize">Liczba próbek w oknie.</param>
-        /// <param name="stepSize">Co ile próbek produkujemy nowe okno. Musi być ≤ windowSize.</param>
-        /// <param name="featureCount">Liczba cech — stała przez cały cykl życia bufora.</param>
+        /// <param name="windowSize">Number of samples in the window.</param>
+        /// <param name="stepSize">How often (in samples) we produce a new window. Must be <= windowSize.</param>
+        /// <param name="featureCount">Feature count — constant throughout the buffer's lifecycle.</param>
         public SlidingWindowBuffer(
             int windowSize,
             int stepSize = 1,
@@ -80,8 +80,7 @@ namespace DevOnBike.Overfit.Monitoring
         // -------------------------------------------------------------------------
 
         /// <summary>
-        /// Dodaje próbkę z <see cref="MetricSnapshot"/>.
-        /// Zero alokacji — WriteFeatureVector zapisuje bezpośrednio do slotu pierścienia.
+        /// Adds a sample from <see cref="MetricSnapshot"/>.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Add(in MetricSnapshot snapshot)
@@ -101,8 +100,8 @@ namespace DevOnBike.Overfit.Monitoring
         }
 
         /// <summary>
-        /// Dodaje ręcznie skonstruowany wektor cech.
-        /// Używaj przy testach lub przy replay historycznych danych z CSV/Parquet.
+        /// Adds a manually constructed feature vector.
+        /// Use for testing or replaying historical data from CSV/Parquet.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Add(ReadOnlySpan<float> features, DateTime timestamp)
@@ -131,13 +130,13 @@ namespace DevOnBike.Overfit.Monitoring
         // -------------------------------------------------------------------------
 
         /// <summary>
-        /// Kopiuje gotowe okno do flat <paramref name="destination"/> (row-major, chronologicznie).
+        /// Copies the ready window to a flat <paramref name="destination"/> (row-major, chronologically).
         ///
-        /// Preferowany overload gdy destination to <c>fastTensor.AsSpan()</c> —
-        /// kopiuje bezpośrednio do pamięci tensora, zero pośrednich buforów.
+        /// Preferred overload when destination is <c>fastTensor.AsSpan()</c> —
+        /// copies directly to tensor memory, zero intermediate buffers.
         /// </summary>
-        /// <param name="destination">Caller-owned, min. <see cref="WindowFloats"/> elementów.</param>
-        /// <param name="windowEnd">Timestamp najnowszej próbki w oknie.</param>
+        /// <param name="destination">Caller-owned, min. <see cref="WindowFloats"/> elements.</param>
+        /// <param name="windowEnd">Timestamp of the newest sample in the window.</param>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool TryGetWindow(Span<float> destination, out DateTime windowEnd)
         {
@@ -152,8 +151,8 @@ namespace DevOnBike.Overfit.Monitoring
         }
 
         /// <summary>
-        /// Overload dla <see cref="FastMatrix{T}"/> — prealokowana macierz [windowSize × featureCount].
-        /// Po wypełnieniu caller ma dostęp przez <c>matrix.Row(i)</c> w FeatureExtractor.
+        /// Overload for <see cref="FastMatrix{T}"/> — preallocated matrix [windowSize × featureCount].
+        /// Once filled, caller accesses via <c>matrix.Row(i)</c> in FeatureExtractor.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool TryGetWindow(FastMatrix<float> destination, out DateTime windowEnd)
@@ -170,7 +169,7 @@ namespace DevOnBike.Overfit.Monitoring
             return TryGetWindowCore(destination.AsSpan(), out windowEnd);
         }
 
-        /// <summary>Resetuje bufor — po przeładowaniu modelu lub przerwie w scrapingu.</summary>
+        /// <summary>Resets the buffer — after model reload or scraping interruption.</summary>
         public void Reset()
         {
             ThrowIfDisposed();
@@ -188,7 +187,7 @@ namespace DevOnBike.Overfit.Monitoring
         }
 
         // -------------------------------------------------------------------------
-        // Prywatne
+        // Private
         // -------------------------------------------------------------------------
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -205,7 +204,7 @@ namespace DevOnBike.Overfit.Monitoring
                 CopyWindowChronological(destination);
 
                 var lastIndex = _head == 0 ? _windowSize - 1 : _head - 1;
-                
+
                 windowEnd = _timestamps[lastIndex];
                 _samplesUntilStep = _stepSize;
             }
@@ -216,9 +215,9 @@ namespace DevOnBike.Overfit.Monitoring
         }
 
         /// <summary>
-        /// Kopiuje okno w kolejności chronologicznej (najstarsza próbka = wiersz 0).
-        /// Maksymalnie 2 Span.CopyTo przy zawinięciu pierścienia — bez pętli.
-        /// Wywoływana wewnątrz _lock.
+        /// Copies the window in chronological order (oldest sample = row 0).
+        /// Maximum 2 Span.CopyTo on ring wrap-around — no loops.
+        /// Called inside _lock.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void CopyWindowChronological(Span<float> destination)
@@ -228,12 +227,12 @@ namespace DevOnBike.Overfit.Monitoring
 
             if (slotsToEnd >= _windowSize)
             {
-                // Brak zawinięcia — jeden ciągły blok
+                // No wrap-around — one continuous block
                 ringSpan.Slice(_head * _featureCount, _windowFloats).CopyTo(destination);
             }
             else
             {
-                // Zawinięcie — dwa bloki
+                // Wrap-around — two blocks
                 var block1 = slotsToEnd * _featureCount;
                 var block2 = _windowFloats - block1;
 

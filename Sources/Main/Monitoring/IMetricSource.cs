@@ -6,16 +6,16 @@
 namespace DevOnBike.Overfit.Monitoring
 {
     /// <summary>
-    /// Kontrakt źródła metryk.
-    /// ValueTask — synchroniczne ścieżki (testy, buforowane odczyty) nie alokują Taska.
+    /// Metric source contract.
+    /// ValueTask — synchronous paths (tests, buffered reads) do not allocate a Task.
     /// </summary>
     public interface IMetricSource : IDisposable
     {
         string PodName { get; }
 
         /// <summary>
-        /// Odczytuje aktualną próbkę metryk.
-        /// Implementacja może czekać do końca okna scrapingu przed zwrotem.
+        /// Reads the current metric sample.
+        /// Implementation may await the end of the scraping window before returning.
         /// </summary>
         ValueTask<MetricSnapshot> ReadAsync(CancellationToken ct = default);
     }

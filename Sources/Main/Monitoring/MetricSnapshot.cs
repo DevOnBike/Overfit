@@ -6,38 +6,38 @@
 namespace DevOnBike.Overfit.Monitoring
 {
     /// <summary>
-    /// Pojedyncza próbka metryk jednego poda.
-    /// Readonly struct — zero alokacji przy przesyłaniu przez pipeline.
+    /// A single metric sample for one pod.
+    /// Readonly struct — zero allocations when passing through the pipeline.
     /// </summary>
     public readonly struct MetricSnapshot
     {
         public DateTime Timestamp { get; init; }
         public string PodName { get; init; }
 
-        // --- zasoby ---
-        public float CpuUsage { get; init; }   // 0–1 (znormalizowane do limitu poda)
-        public float MemoryBytes { get; init; }   // bajty RSS
+        // --- resources ---
+        public float CpuUsage { get; init; }   // 0-1 (normalized to pod limit)
+        public float MemoryBytes { get; init; }   // RSS bytes
 
-        // --- ruch HTTP/gRPC ---
+        // --- HTTP/gRPC traffic ---
         public float RequestLatencyP95 { get; init; }   // ms
         public float RequestsPerSecond { get; init; }
-        public float ErrorRate { get; init; }   // 0–1
+        public float ErrorRate { get; init; }   // 0-1
 
-        // --- runtime .NET ---
-        public float GcPauseMs { get; init; }   // sumaryczny czas GC w oknie próbki
-        public float ThreadPoolQueue { get; init; }   // długość kolejki ThreadPool
-        public float HeapBytes { get; init; }   // bajty managed heap
+        // --- .NET runtime ---
+        public float GcPauseMs { get; init; }   // total GC time in the sample window
+        public float ThreadPoolQueue { get; init; }   // ThreadPool queue length
+        public float HeapBytes { get; init; }   // managed heap bytes
 
         /// <summary>
-        /// Rozmiar wektora cech — kontrakt pipeline'u i modelu.
-        /// Zmiana wymaga przebudowy wag autoenkodera.
+        /// Feature vector size — pipeline and model contract.
+        /// Changing this requires rebuilding the autoencoder weights.
         /// </summary>
         public const int FeatureCount = 8;
 
         /// <summary>
-        /// Zapisuje wektor cech do podanego <paramref name="destination"/>.
-        /// Zero alokacji — jedyna dozwolona ścieżka w pipeline produkcyjnym.
-        /// Kolejność jest stała i musi odpowiadać oczekiwaniom encodera.
+        /// Writes the feature vector to the specified <paramref name="destination"/>.
+        /// Zero allocation — the only allowed path in the production pipeline.
+        /// The order is fixed and must match the encoder's expectations.
         /// </summary>
         public void WriteFeatureVector(Span<float> destination)
         {

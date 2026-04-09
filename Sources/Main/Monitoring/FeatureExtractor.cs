@@ -10,63 +10,63 @@ using DevOnBike.Overfit.Core;
 namespace DevOnBike.Overfit.Monitoring
 {
     /// <summary>
-    /// Wyodrębnia statystyki per-cecha z okna ślizgowego.
+    /// Extracts per-feature statistics from a sliding window.
     ///
-    /// Wejście:  window[windowSize × featureCount] — row-major, wiersz = krok czasowy
-    /// Wyjście:  stats[featureCount × StatsPerFeature] = [mean, std, p95, delta] per cecha
+    /// Input:  window[windowSize × featureCount] — row-major, row = time step
+    /// Output: stats[featureCount × StatsPerFeature] = [mean, std, p95, delta] per feature
     ///
-    /// Układ wyjścia:
+    /// Output layout:
     ///   [mean_f0, std_f0, p95_f0, delta_f0, mean_f1, std_f1, p95_f1, delta_f1, ...]
     ///
-    /// Ścieżka zero-alokacyjna gdy windowSize ≤ StackAllocThreshold (256).
-    /// Dla większych okien: jednorazowe wypożyczenie z ArrayPool.
+    /// Zero-allocation path when windowSize <= StackAllocThreshold (256).
+    /// For larger windows: a one-time lease from ArrayPool.
     ///
-    /// Wzorzec użycia w pipeline:
+    /// Usage pattern in the pipeline:
     /// <code>
-    ///   // Prealokuj raz poza pętlą:
+    ///   // Preallocate once outside the loop:
     ///   var windowScratch = new float[buffer.WindowFloats];
     ///   var statsScratch  = new float[FeatureExtractor.OutputSize(buffer.FeatureCount)];
     ///
-    ///   // W pętli scrapingu:
+    ///   // Inside the scraping loop:
     ///   if (FeatureExtractor.TryExtract(buffer, windowScratch, statsScratch))
     ///       robustScaler.Transform(statsScratch, normalizedScratch);
     /// </code>
     /// </summary>
     public static class FeatureExtractor
     {
-        /// <summary>Liczba statystyk obliczanych dla każdej cechy.</summary>
+        /// <summary>Number of statistics calculated for each feature.</summary>
         public const int StatsPerFeature = 4;
 
-        // Indeksy w bloku statystyk jednej cechy
+        // Indices within the statistics block of a single feature
         public const int MeanOffset = 0;
         public const int StdOffset = 1;
         public const int P95Offset = 2;
         public const int DeltaOffset = 3;
 
-        // Przy windowSize > 256 przechodzimy z stackalloc na ArrayPool.
-        // 256 float = 1 KB — bezpieczny limit stosu.
+        // When windowSize > 256, we switch from stackalloc to ArrayPool.
+        // 256 floats = 1 KB — safe stack limit.
         private const int StackAllocThreshold = 256;
 
-        /// <summary>Rozmiar bufora wyjściowego dla podanej liczby cech.</summary>
+        /// <summary>Output buffer size for the given number of features.</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int OutputSize(int featureCount) => featureCount * StatsPerFeature;
 
         // -------------------------------------------------------------------------
-        // Extract — główna metoda
+        // Extract — main method
         // -------------------------------------------------------------------------
 
         /// <summary>
-        /// Oblicza statystyki okna i zapisuje je do <paramref name="output"/>.
+        /// Calculates window statistics and writes them to <paramref name="output"/>.
         /// </summary>
         /// <param name="window">
-        ///   Flat bufor [windowSize × featureCount] z <see cref="SlidingWindowBuffer.TryGetWindow"/>.
+        ///   Flat buffer [windowSize × featureCount] from <see cref="SlidingWindowBuffer.TryGetWindow"/>.
         /// </param>
-        /// <param name="windowSize">Liczba próbek czasowych w oknie.</param>
-        /// <param name="featureCount">Liczba cech per próbka.</param>
+        /// <param name="windowSize">Number of time samples in the window.</param>
+        /// <param name="featureCount">Number of features per sample.</param>
         /// <param name="output">
-        ///   Caller-owned bufor min. <see cref="OutputSize"/>(<paramref name="featureCount"/>) elementów.
+        ///   Caller-owned buffer with min. <see cref="OutputSize"/>(<paramref name="featureCount"/>) elements.
         /// </param>
-        /// <exception cref="ArgumentException">Zły rozmiar window lub output.</exception>
+        /// <exception cref="ArgumentException">Invalid window or output size.</exception>
         public static void Extract(
             ReadOnlySpan<float> window,
             int windowSize,
@@ -88,14 +88,12 @@ namespace DevOnBike.Overfit.Monitoring
 
             if (windowSize <= StackAllocThreshold)
             {
-                // Zero-alokacyjna ścieżka — typowy przypadek (windowSize ≤ 256)
                 Span<float> col = stackalloc float[windowSize];
 
                 ExtractCore(window, windowSize, featureCount, output, col);
             }
             else
             {
-                // Duże okno — jedno wypożyczenie z ArrayPool
                 using var rented = new FastBuffer<float>(windowSize);
 
                 ExtractCore(window, windowSize, featureCount, output, rented.AsSpan());
@@ -103,23 +101,23 @@ namespace DevOnBike.Overfit.Monitoring
         }
 
         // -------------------------------------------------------------------------
-        // TryExtract — integracja z SlidingWindowBuffer
+        // TryExtract — integration with SlidingWindowBuffer
         // -------------------------------------------------------------------------
 
         /// <summary>
-        /// Pobiera okno z bufora i od razu oblicza statystyki.
-        /// Zwraca false gdy bufor nie jest jeszcze gotowy — output pozostaje niezmieniony.
+        /// Retrieves a window from the buffer and immediately calculates statistics.
+        /// Returns false when the buffer is not ready yet — output remains unchanged.
         /// </summary>
-        /// <param name="buffer">Bufor ślizgowy.</param>
+        /// <param name="buffer">Sliding buffer.</param>
         /// <param name="windowScratch">
-        ///   Reużywalny scratch o rozmiarze <see cref="SlidingWindowBuffer.WindowFloats"/>.
-        ///   Prealokuj raz poza pętlą.
+        ///   Reusable scratch buffer of size <see cref="SlidingWindowBuffer.WindowFloats"/>.
+        ///   Preallocate once outside the loop.
         /// </param>
         /// <param name="output">
-        ///   Reużywalny bufor wyjściowy o rozmiarze <see cref="OutputSize"/>(<c>buffer.FeatureCount</c>).
-        ///   Prealokuj raz poza pętlą.
+        ///   Reusable output buffer of size <see cref="OutputSize"/>(<c>buffer.FeatureCount</c>).
+        ///   Preallocate once outside the loop.
         /// </param>
-        /// <param name="windowEnd">Timestamp ostatniej próbki w oknie (out).</param>
+        /// <param name="windowEnd">Timestamp of the latest sample in the window (out).</param>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool TryExtract(
             SlidingWindowBuffer buffer,
@@ -138,7 +136,7 @@ namespace DevOnBike.Overfit.Monitoring
         }
 
         // -------------------------------------------------------------------------
-        // Rdzeń obliczeń
+        // Computation core
         // -------------------------------------------------------------------------
 
         private static void ExtractCore(
@@ -146,12 +144,12 @@ namespace DevOnBike.Overfit.Monitoring
             int windowSize,
             int featureCount,
             Span<float> output,
-            Span<float> col) // scratch bufor na jedną kolumnę
+            Span<float> col) // scratch buffer for a single column
         {
             for (var f = 0; f < featureCount; f++)
             {
-                // Wyodrębnij kolumnę f do ciągłego bufora
-                // (dane są non-contiguous: stride = featureCount)
+                // Extract column f to a contiguous buffer
+                // (data is non-contiguous: stride = featureCount)
                 for (var t = 0; t < windowSize; t++)
                 {
                     col[t] = window[t * featureCount + f];
@@ -163,20 +161,20 @@ namespace DevOnBike.Overfit.Monitoring
                 // --- mean (SIMD Sum) ---
                 var mean = Sum(col, windowSize) / windowSize;
 
-                // --- std (E[X²] - E[X]², numerycznie stabilne dla typowych wartości metryk) ---
+                // --- std (E[X²] - E[X]², numerically stable for typical metric values) ---
                 var sumSq = Dot(col, windowSize);
                 var variance = sumSq / windowSize - mean * mean;
                 var std = MathF.Sqrt(MathF.Max(0f, variance)); // guard float rounding
 
-                // --- p95 (wymaga sortowania kopii) ---
-                // col będzie posortowane in-place — ok, bo first/last już zapisane
+                // --- p95 (requires sorting the copy) ---
+                // col will be sorted in-place — fine, because first/last are already saved
                 SortSpan(col.Slice(0, windowSize));
                 var p95 = Percentile95(col, windowSize);
 
-                // --- delta (ostatnia - pierwsza próbka — kierunek trendu) ---
+                // --- delta (last - first sample — trend direction) ---
                 var delta = last - first;
 
-                // Zapisz blok statystyk dla cechy f
+                // Write statistics block for feature f
                 var outBase = f * StatsPerFeature;
                 output[outBase + MeanOffset] = mean;
                 output[outBase + StdOffset] = std;
@@ -186,7 +184,7 @@ namespace DevOnBike.Overfit.Monitoring
         }
 
         // -------------------------------------------------------------------------
-        // Prywatne — operacje na Span<float>
+        // Private — operations on Span<float>
         // -------------------------------------------------------------------------
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -195,25 +193,25 @@ namespace DevOnBike.Overfit.Monitoring
             return TensorPrimitives.Sum(span.Slice(0, length));
         }
 
-        /// <summary>Dot product Σ(xi²) — suma kwadratów.</summary>
+        /// <summary>Dot product Σ(xi²) — sum of squares.</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static float Dot(Span<float> span, int length)
         {
             var slice = span.Slice(0, length);
-            
+
             return TensorPrimitives.Dot(slice, slice);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void SortSpan(Span<float> span)
         {
-            // MemoryExtensions.Sort — dostępne od .NET 6, bez alokacji
+            // MemoryExtensions.Sort — available since .NET 6, zero allocation
             span.Sort();
         }
 
         /// <summary>
-        /// Percentyl 95 metodą nearest-rank z posortowanego Span.
-        /// Dla windowSize=6: ceil(0.95 × 6) - 1 = ceil(5.7) - 1 = 5 → ostatni element.
+        /// 95th percentile using nearest-rank method from a sorted Span.
+        /// For windowSize=6: ceil(0.95 × 6) - 1 = ceil(5.7) - 1 = 5 -> last element.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static float Percentile95(Span<float> sorted, int length)
@@ -222,9 +220,9 @@ namespace DevOnBike.Overfit.Monitoring
             {
                 return sorted[0];
             }
-            
+
             var index = (int)MathF.Ceiling(0.95f * length) - 1;
-            
+
             return sorted[Math.Clamp(index, 0, length - 1)];
         }
     }
