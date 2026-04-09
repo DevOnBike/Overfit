@@ -10,21 +10,21 @@ using System.Runtime.CompilerServices;
 namespace DevOnBike.Overfit.DeepLearning
 {
     /// <summary>
-    /// MLP Autoencoder do detekcji anomalii metryk K8s.
+    /// MLP Autoencoder for K8s metrics anomaly detection.
     ///
-    /// Architektura (domyślna, inputSize=32):
+    /// Architecture (default, inputSize=32):
     ///   Encoder: 32 → 16 → 8 → 4  (bottleneck)
     ///   Decoder:  4 →  8 → 16 → 32
-    ///   Każda warstwa oprócz ostatniej: LinearLayer → BatchNorm1D → ReLU
-    ///   Ostatnia warstwa dekodera: LinearLayer bez aktywacji (rekonstrukcja znorm. wartości)
+    ///   Every layer except the last one: LinearLayer → BatchNorm1D → ReLU
+    ///   Last decoder layer: LinearLayer without activation (reconstruction of normalized values)
     ///
-    /// Wejście:  output FeatureExtractor po RobustScaler — flat float[inputSize]
-    /// Wyjście:  rekonstrukcja float[inputSize]
+    /// Input:  output of FeatureExtractor after RobustScaler — flat float[inputSize]
+    /// Output: reconstruction float[inputSize]
     ///
-    /// Inference: <see cref="Reconstruct"/> — zero-alokacyjna ścieżka SIMD przez LinearLayer.
-    ///   Wywołaj <see cref="Eval"/> przed użyciem produkcyjnym.
+    /// Inference: <see cref="Reconstruct"/> — zero-allocation SIMD path through LinearLayer.
+    ///   Call <see cref="Eval"/> before production use.
     ///
-    /// Trening:
+    /// Training:
     /// <code>
     ///   autoencoder.Train();
     ///   using var graph  = new ComputationGraph();
@@ -41,8 +41,8 @@ namespace DevOnBike.Overfit.DeepLearning
         private readonly Sequential _encoder;
         private readonly Sequential _decoder;
 
-        // Prealokowany węzeł wejściowy [1, InputSize] — reużywany na każde wywołanie Reconstruct.
-        // Kształt [1, x] aktywuje zero-alokacyjną ścieżkę SIMD w LinearLayer (batchSize=1).
+        // Preallocated input node [1, InputSize] — reused on every Reconstruct call.
+        // Shape [1, x] activates the zero-allocation SIMD path in LinearLayer (batchSize=1).
         private readonly AutogradNode _inputNode;
         private bool _disposed;
 
@@ -51,16 +51,16 @@ namespace DevOnBike.Overfit.DeepLearning
         public bool IsTraining { get; private set; } = true;
 
         // -------------------------------------------------------------------------
-        // Konstruktor
+        // Constructor
         // -------------------------------------------------------------------------
 
         /// <param name="inputSize">
-        ///   Rozmiar wektora wejściowego = FeatureExtractor.OutputSize(featureCount).
-        ///   Domyślnie 32 (8 cech × 4 statystyki).
+        ///   Input vector size = FeatureExtractor.OutputSize(featureCount).
+        ///   Default is 32 (8 features × 4 statistics).
         /// </param>
-        /// <param name="hidden1">Rozmiar pierwszej ukrytej warstwy. Domyślnie inputSize/2.</param>
-        /// <param name="hidden2">Rozmiar drugiej ukrytej warstwy. Domyślnie inputSize/4.</param>
-        /// <param name="bottleneckDim">Wymiar bottleneck (przestrzeń latentna). Domyślnie inputSize/8.</param>
+        /// <param name="hidden1">First hidden layer size. Default is inputSize/2.</param>
+        /// <param name="hidden2">Second hidden layer size. Default is inputSize/4.</param>
+        /// <param name="bottleneckDim">Bottleneck dimension (latent space). Default is inputSize/8.</param>
         public AnomalyAutoencoder(
             int inputSize,
             int hidden1 = 0, // 0 = inputSize / 2
@@ -99,11 +99,11 @@ namespace DevOnBike.Overfit.DeepLearning
                 new BatchNorm1D(hidden1),
                 new ReluActivation(),
 
-                // Ostatnia warstwa bez aktywacji — rekonstruuje znorm. wartości ∈ (-∞, +∞)
+                // Last layer without activation — reconstructs normalized values ∈ (-∞, +∞)
                 new LinearLayer(hidden1, inputSize)
             );
 
-            // [1, InputSize] — kształt wymagany przez SIMD inference path w LinearLayer
+            // [1, InputSize] — shape required by the SIMD inference path in LinearLayer
             _inputNode = new AutogradNode(new FastTensor<float>(1, inputSize), requiresGrad: false);
         }
 
@@ -128,18 +128,18 @@ namespace DevOnBike.Overfit.DeepLearning
         }
 
         // -------------------------------------------------------------------------
-        // Inference — zero-alokacyjna ścieżka
+        // Inference — zero-allocation path
         // -------------------------------------------------------------------------
 
         /// <summary>
-        /// Rekonstruuje wejście przez autoencoder.
-        /// Używa prealokowanego _inputNode [1, InputSize] → SIMD path w LinearLayer.
+        /// Reconstructs the input through the autoencoder.
+        /// Uses the preallocated _inputNode [1, InputSize] -> SIMD path in LinearLayer.
         ///
-        /// WAŻNE: wywołaj <see cref="Eval"/> przed pierwszym użyciem produkcyjnym,
-        /// żeby BatchNorm używał running statistics zamiast batch statistics.
+        /// IMPORTANT: call <see cref="Eval"/> before the first production use,
+        /// so BatchNorm uses running statistics instead of batch statistics.
         /// </summary>
-        /// <param name="features">Znormalizowane cechy z RobustScaler. Rozmiar musi być == InputSize.</param>
-        /// <param name="reconstruction">Caller-owned bufor wynikowy. Rozmiar musi być >= InputSize.</param>
+        /// <param name="features">Normalized features from RobustScaler. Size must be == InputSize.</param>
+        /// <param name="reconstruction">Caller-owned result buffer. Size must be >= InputSize.</param>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Reconstruct(ReadOnlySpan<float> features, Span<float> reconstruction)
         {
@@ -153,24 +153,24 @@ namespace DevOnBike.Overfit.DeepLearning
                 throw new ArgumentException($"Bufor rekonstrukcji za krótki: potrzeba {InputSize}, dostępne {reconstruction.Length}.", nameof(reconstruction));
             }
 
-            // Kopiuj do prealokowanego tensora — jedna kopia na wywołanie, brak alokacji
+            // Copy to the preallocated tensor — one copy per call, no allocation
             features.CopyTo(_inputNode.Data.AsSpan());
 
-            // graph=null → zero-alokacyjna ścieżka SIMD we wszystkich LinearLayer
+            // graph=null -> zero-allocation SIMD path in all LinearLayers
             var latent = _encoder.Forward(null, _inputNode);
             var output = _decoder.Forward(null, latent);
 
-            // Skopiuj wynik przed następnym wywołaniem Forward (output node jest reużywany przez LinearLayer)
+            // Copy the result before the next Forward call (output node is reused by LinearLayer)
             output.Data.AsSpan().CopyTo(reconstruction);
         }
 
         // -------------------------------------------------------------------------
-        // Training forward — pełny autograd
+        // Training forward — full autograd
         // -------------------------------------------------------------------------
 
         /// <summary>
-        /// Forward pass z opcjonalnym nagrywaniem do grafu obliczeniowego.
-        /// Używaj podczas treningu:
+        /// Forward pass with optional recording to the computation graph.
+        /// Use during training:
         ///   var recon = autoencoder.Forward(graph, inputNode);
         ///   var loss  = TensorMath.MSELoss(graph, recon, inputNode);
         /// </summary>
@@ -182,12 +182,12 @@ namespace DevOnBike.Overfit.DeepLearning
         }
 
         // -------------------------------------------------------------------------
-        // Parametry, serializacja, diagnostyka
+        // Parameters, serialization, diagnostics
         // -------------------------------------------------------------------------
 
         /// <summary>
-        /// Zwraca wszystkie uczące się parametry encodera i dekodera.
-        /// Przekaż do optymalizatora: <c>new Adam(autoencoder.Parameters(), lr)</c>.
+        /// Returns all learnable parameters of the encoder and decoder.
+        /// Pass to the optimizer: <c>new Adam(autoencoder.Parameters(), lr)</c>.
         /// </summary>
         public IEnumerable<AutogradNode> Parameters()
         {
@@ -195,13 +195,14 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 yield return p;
             }
+            
             foreach (var p in _decoder.Parameters())
             {
                 yield return p;
             }
         }
 
-        /// <summary>Liczba uczących się parametrów (wagi + biasy + gamma + beta BN).</summary>
+        /// <summary>Number of learnable parameters (weights + biases + gamma + beta of BN).</summary>
         public int ParameterCount => Parameters().Sum(p => p.Data.Size);
 
         public void Save(BinaryWriter bw)
@@ -236,8 +237,6 @@ namespace DevOnBike.Overfit.DeepLearning
 
             Load(br);
         }
-
-
 
         public void Dispose()
         {
