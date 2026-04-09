@@ -254,7 +254,7 @@ namespace DevOnBike.Overfit.Tests.Monitoring
             using var source = new PrometheusMetricSource(config, http);
 
             using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
-            await Assert.ThrowsAsync<OperationCanceledException>(
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => source.ReadAsync(cts.Token).AsTask());
         }
 

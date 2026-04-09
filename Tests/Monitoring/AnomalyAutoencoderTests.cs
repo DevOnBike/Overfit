@@ -173,6 +173,18 @@ namespace DevOnBike.Overfit.Tests.Monitoring
         public void Reconstruct_WhenCalledWithDifferentInputs_ThenOutputsDiffer()
         {
             using var m = MakeEval();
+
+            var rng = new Random(42);
+            
+            foreach (var p in m.Parameters())
+            {
+                var span = p.Data.AsSpan();
+                for (var i = 0; i < span.Length; i++)
+                {
+                    span[i] = (float)(rng.NextDouble() * 0.4 - 0.2);
+                }
+            }
+
             var normal = Features(DefaultInputSize, value: 0.2f);
             var anomaly = Features(DefaultInputSize, value: 5.0f);
             var outNormal = Reconstruction(DefaultInputSize);
