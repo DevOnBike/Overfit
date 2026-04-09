@@ -3,11 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-// Copyright (c) 2026 DevOnBike.
-// This file is part of DevonBike Overfit.
-// DevonBike Overfit is licensed under the GNU AGPLv3.
-// For commercial licensing options, contact: devonbike@gmail.com
-
 using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Core;
 
@@ -188,6 +183,8 @@ namespace DevOnBike.Overfit.Monitoring
 
                 _ring.Clear();
             }
+
+            Interlocked.Exchange(ref _windowsProduced, 0L);
         }
 
         // -------------------------------------------------------------------------
@@ -207,7 +204,9 @@ namespace DevOnBike.Overfit.Monitoring
 
                 CopyWindowChronological(destination);
 
-                windowEnd = _timestamps[(_head - 1 + _windowSize) % _windowSize];
+                var lastIndex = _head == 0 ? _windowSize - 1 : _head - 1;
+                
+                windowEnd = _timestamps[lastIndex];
                 _samplesUntilStep = _stepSize;
             }
 
