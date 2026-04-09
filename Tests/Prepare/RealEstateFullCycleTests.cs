@@ -7,10 +7,9 @@ using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.Data.Contracts;
 using DevOnBike.Overfit.Data.Prepare;
 using DevOnBike.Overfit.Optimizers;
-using DevOnBike.Overfit.Tests.Prepare; // PropertyData żyje tutaj
 using Xunit.Abstractions;
 
-namespace DevOnBike.Overfit.Tests.EndToEnd
+namespace DevOnBike.Overfit.Tests.Prepare
 {
     public class RealEstateFullCycleTests
     {

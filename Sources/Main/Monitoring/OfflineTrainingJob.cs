@@ -126,21 +126,25 @@ namespace DevOnBike.Overfit.Monitoring
                     trainingData[idx].CopyTo(inputNode.Data.AsSpan());
 
                     // New graph per sample — records the forward pass for Backward.
-                    // Must be disposed AFTER Backward so intermediate tensors
-                    // (stored by graph.Record) remain valid during backpropagation.
+                    // ComputationGraph is not IDisposable — Reset() clears the tape
+                    // and releases references to intermediate activation nodes.
                     var graph = new ComputationGraph();
-
                     var reconstruction = autoencoder.Forward(graph, inputNode);
 
                     // Autoencoder loss: MSE(reconstruction, input) — target equals input
                     var loss = TensorMath.MSELoss(graph, reconstruction, inputNode);
 
-                    // Read loss value before Backward modifies gradient buffers
+                    // Read loss value before Backward fills gradient buffers
                     totalLoss += loss.Data.AsSpan()[0];
 
                     // Backward is on ComputationGraph, not on AutogradNode.
-                    // Traverses the recorded tape in reverse and accumulates gradients.
+                    // Fills loss.Grad with 1.0 then traverses the tape in reverse.
                     graph.Backward(loss);
+
+                    // Clear tape — releases references to intermediate activation nodes
+                    // so they can be collected. Must happen before loss.Dispose()
+                    // to avoid the tape holding a dangling reference.
+                    graph.Reset();
 
                     loss.Dispose();
 
