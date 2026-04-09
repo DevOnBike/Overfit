@@ -5,6 +5,7 @@
 		<RootNamespace>DevOnBike.Overfit.WebServer</RootNamespace>
 		<AssemblyName>DevOnBike.Overfit.WebServer</AssemblyName>
 		<ImplicitUsings>enable</ImplicitUsings>
+		<IsPackable>false</IsPackable>
 		<InvariantGlobalization>true</InvariantGlobalization>
 		<DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
 
