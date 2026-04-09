@@ -1,0 +1,1 @@
+docker build -t devonbike/overfit-server -f Sources/WebServer/Dockerfile .
