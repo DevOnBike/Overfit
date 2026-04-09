@@ -3,12 +3,9 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Core;
-
-#if NET9_0_OR_GREATER
-using System.Numerics.Tensors;
-#endif
 
 namespace DevOnBike.Overfit.Monitoring
 {
@@ -195,27 +192,16 @@ namespace DevOnBike.Overfit.Monitoring
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static float Sum(Span<float> span, int length)
         {
-#if NET9_0_OR_GREATER
             return TensorPrimitives.Sum(span.Slice(0, length));
-#else
-        var sum = 0f;
-        for (var i = 0; i < length; i++) { sum += span[i]; }
-        return sum;
-#endif
         }
 
         /// <summary>Dot product Σ(xi²) — suma kwadratów.</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static float Dot(Span<float> span, int length)
         {
-#if NET9_0_OR_GREATER
             var slice = span.Slice(0, length);
+            
             return TensorPrimitives.Dot(slice, slice);
-#else
-        var sum = 0f;
-        for (var i = 0; i < length; i++) { sum += span[i] * span[i]; }
-        return sum;
-#endif
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -232,10 +218,14 @@ namespace DevOnBike.Overfit.Monitoring
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static float Percentile95(Span<float> sorted, int length)
         {
-            if (length == 1) { return sorted[0]; }
+            if (length == 1)
+            {
+                return sorted[0];
+            }
+            
             var index = (int)MathF.Ceiling(0.95f * length) - 1;
+            
             return sorted[Math.Clamp(index, 0, length - 1)];
         }
     }
 }
-
