@@ -6,6 +6,7 @@
 using System.Diagnostics;
 using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.Monitoring.Contracts;
 using DevOnBike.Overfit.Optimizers;
 
 namespace DevOnBike.Overfit.Monitoring

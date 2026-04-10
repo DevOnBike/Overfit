@@ -3,7 +3,9 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-namespace DevOnBike.Overfit.Monitoring
+using DevOnBike.Overfit.Monitoring.Contracts;
+
+namespace DevOnBike.Overfit.Monitoring.Abstractions
 {
     /// <summary>
     /// Destination for alert events. Implement to integrate with PagerDuty,

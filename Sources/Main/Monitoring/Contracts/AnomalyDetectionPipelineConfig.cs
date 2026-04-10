@@ -4,8 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.DeepLearning;
-
-namespace DevOnBike.Overfit.Monitoring
+namespace DevOnBike.Overfit.Monitoring.Contracts
 {
     /// <summary>
     /// Immutable configuration used by <see cref="AnomalyDetectionPipeline.Create"/>.

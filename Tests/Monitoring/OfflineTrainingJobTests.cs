@@ -5,6 +5,7 @@
 
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Monitoring;
+using DevOnBike.Overfit.Monitoring.Contracts;
 
 namespace DevOnBike.Overfit.Tests.Monitoring
 {

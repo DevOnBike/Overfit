@@ -5,7 +5,7 @@
 
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Monitoring;
-using Xunit;
+using DevOnBike.Overfit.Monitoring.Contracts;
 
 namespace DevOnBike.Overfit.Tests.Monitoring
 {

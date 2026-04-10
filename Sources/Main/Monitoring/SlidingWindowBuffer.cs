@@ -5,6 +5,7 @@
 
 using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.Monitoring.Contracts;
 
 namespace DevOnBike.Overfit.Monitoring
 {

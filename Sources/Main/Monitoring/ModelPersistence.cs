@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.Monitoring.Contracts;
 
 namespace DevOnBike.Overfit.Monitoring
 {

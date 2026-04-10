@@ -3,7 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-namespace DevOnBike.Overfit.Monitoring
+namespace DevOnBike.Overfit.Monitoring.Contracts
 {
     /// <summary>Outcome returned by <see cref="OfflineTrainingJob.Run"/>.</summary>
     public sealed record OfflineTrainingResult

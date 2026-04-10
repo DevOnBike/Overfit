@@ -5,6 +5,7 @@
 using System.Net;
 using System.Text;
 using DevOnBike.Overfit.Monitoring;
+using DevOnBike.Overfit.Monitoring.Contracts;
 
 namespace DevOnBike.Overfit.Tests.Monitoring
 {
@@ -179,14 +180,14 @@ namespace DevOnBike.Overfit.Tests.Monitoring
         // -------------------------------------------------------------------------
 
         [Fact]
-        public async Task ReadAsync_WhenCalled_ThenIssues8HttpRequests()
+        public async Task ReadAsync_WhenCalled_ThenIssues12HttpRequests()
         {
             var handler = new FakePrometheusHandler(PrometheusResponse(0.5));
             using var source = MakeSource(handler);
 
             await source.ReadAsync();
 
-            Assert.Equal(8, handler.CallCount);
+            Assert.Equal(12, handler.CallCount);
         }
 
         [Fact]
@@ -208,7 +209,7 @@ namespace DevOnBike.Overfit.Tests.Monitoring
 
             var snap = await source.ReadAsync();
 
-            Assert.True(MathF.Abs(snap.CpuUsage - 0.42f) < 0.001f, $"got {snap.CpuUsage}");
+            Assert.True(MathF.Abs(snap.CpuUsageRatio - 0.42f) < 0.001f, $"got {snap.CpuUsageRatio}");
         }
 
         [Fact]
@@ -219,14 +220,18 @@ namespace DevOnBike.Overfit.Tests.Monitoring
 
             var snap = await source.ReadAsync();
 
-            Assert.Equal(0f, snap.CpuUsage);
-            Assert.Equal(0f, snap.MemoryBytes);
-            Assert.Equal(0f, snap.RequestLatencyP95);
+            Assert.Equal(0f, snap.CpuUsageRatio);
+            Assert.Equal(0f, snap.MemoryWorkingSetBytes);
+            Assert.Equal(0f, snap.LatencyP95Ms);
             Assert.Equal(0f, snap.RequestsPerSecond);
             Assert.Equal(0f, snap.ErrorRate);
-            Assert.Equal(0f, snap.GcPauseMs);
-            Assert.Equal(0f, snap.ThreadPoolQueue);
-            Assert.Equal(0f, snap.HeapBytes);
+            Assert.Equal(0f, snap.GcPauseRatio);
+            Assert.Equal(0f, snap.ThreadPoolQueueLength);
+            Assert.Equal(0f, snap.GcGen2HeapBytes);
+            Assert.Equal(0f, snap.CpuThrottleRatio);
+            Assert.Equal(0f, snap.OomEventsRate);
+            Assert.Equal(0f, snap.LatencyP50Ms);
+            Assert.Equal(0f, snap.LatencyP99Ms);
         }
 
         [Fact]
@@ -237,7 +242,7 @@ namespace DevOnBike.Overfit.Tests.Monitoring
 
             var snap = await source.ReadAsync();
 
-            Assert.Equal(1f, snap.CpuUsage); // CPU clamped to [0,1]
+            Assert.Equal(1f, snap.CpuUsageRatio); // CPU clamped to [0,1]
         }
 
         [Fact]

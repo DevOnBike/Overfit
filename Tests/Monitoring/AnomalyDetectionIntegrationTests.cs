@@ -5,7 +5,7 @@
 
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Monitoring;
-using Xunit;
+using DevOnBike.Overfit.Monitoring.Contracts;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Monitoring
@@ -28,7 +28,7 @@ namespace DevOnBike.Overfit.Tests.Monitoring
         // [FACT]
         // =========================================================================
 
-        [Fact(Skip = "aaa")]
+        [Fact]
         public void TrainOnNormalHistory_WhenAnomalyInjected_ThenScoreIsHigherThanNormal()
         {
             // ----------------------------------------------------------------
@@ -43,8 +43,7 @@ namespace DevOnBike.Overfit.Tests.Monitoring
             output.WriteLine($"Training windows:   {trainingVectors.Count}");
             output.WriteLine($"Feature vector dim: {InputSize} (={FeatureCount} features × {FeatureExtractor.StatsPerFeature} stats)");
 
-            Assert.True(trainingVectors.Count > 100,
-                $"Expected >100 training windows, got {trainingVectors.Count}");
+            Assert.True(trainingVectors.Count > 100, $"Expected >100 training windows, got {trainingVectors.Count}");
 
             // Normalize to [0, 1] per dimension — raw values (MemoryBytes ~280M,
             // HeapBytes ~200M) cause gradient explosion without this step.
@@ -61,8 +60,8 @@ namespace DevOnBike.Overfit.Tests.Monitoring
 
             using var autoencoder = new AnomalyAutoencoder(
                 inputSize: InputSize,
-                hidden1: 16,
-                hidden2: 8,
+                hidden1: 24,
+                hidden2: 12,
                 bottleneckDim: 4);
 
             var scorer = new ReconstructionScorer();
@@ -218,13 +217,13 @@ namespace DevOnBike.Overfit.Tests.Monitoring
         ///
         /// Profiles modelled:
         ///   CPU:          0.15–0.45 with slight daily sinusoidal wave + white noise
-        ///   Memory:       200–400 MB slow drift + small oscillation
-        ///   Latency p95:  80–150 ms with occasional 20 ms spikes (99th percentile events)
+        ///   Memory working set: 200–400 MB slow drift + small oscillation
+        ///   Latency p50/p95/p99: 60/110/180 ms with occasional spikes (99th percentile events)
         ///   RPS:          50–200 r/s, higher during "business hours" simulation
         ///   Error rate:   0–0.5 % — sporadic, never sustained
-        ///   GC pause:     2–15 ms, correlated with heap size
+        ///   GC pause ratio: 0.01–0.05, correlated with heap size
         ///   ThreadPool:   5–25 items
-        ///   Heap:         150–350 MB slow growth then GC collection
+        ///   GC Gen2 heap: 50–200 MB slow growth then GC collection
         /// </summary>
         private static List<MetricSnapshot> GenerateNormalHistory(int sampleCount, int seed = 42)
         {
@@ -246,14 +245,18 @@ namespace DevOnBike.Overfit.Tests.Monitoring
                 {
                     Timestamp = DateTime.UtcNow.AddSeconds(-sampleCount + i),
                     PodName = "integration-test-pod",
-                    CpuUsage = Clamp(0.30f + 0.08f * tod + Noise(rng, 0.04f), 0.05f, 0.60f),
-                    MemoryBytes = Clamp(280_000_000f + 60_000_000f * tod + Noise(rng, 5_000_000f), 150_000_000f, 420_000_000f),
-                    RequestLatencyP95 = Clamp(110f + 20f * tod + Noise(rng, 15f) + (rng.NextDouble() < 0.01 ? 40f : 0f), 60f, 200f),
+                    CpuUsageRatio = Clamp(0.30f + 0.08f * tod + Noise(rng, 0.04f), 0.05f, 0.60f),
+                    CpuThrottleRatio = Clamp(Noise(rng, 0.01f), 0f, 0.15f),
+                    MemoryWorkingSetBytes = Clamp(280_000_000f + 60_000_000f * tod + Noise(rng, 5_000_000f), 150_000_000f, 420_000_000f),
+                    OomEventsRate = 0f,
+                    LatencyP50Ms = Clamp(60f + 10f * tod + Noise(rng, 8f), 30f, 120f),
+                    LatencyP95Ms = Clamp(110f + 20f * tod + Noise(rng, 15f) + (rng.NextDouble() < 0.01 ? 40f : 0f), 60f, 200f),
+                    LatencyP99Ms = Clamp(180f + 30f * tod + Noise(rng, 25f) + (rng.NextDouble() < 0.01 ? 80f : 0f), 90f, 350f),
                     RequestsPerSecond = Clamp(120f + 50f * tod + Noise(rng, 20f), 30f, 250f),
                     ErrorRate = Clamp(Noise(rng, 0.002f), 0f, 0.008f),
-                    GcPauseMs = Clamp(5f + heap / 50_000_000f + Noise(rng, 2f), 1f, 30f),
-                    ThreadPoolQueue = Clamp(12f + 5f * tod + Noise(rng, 4f), 1f, 40f),
-                    HeapBytes = heap
+                    GcGen2HeapBytes = heap,
+                    GcPauseRatio = Clamp((5f + heap / 50_000_000f) / 1000f + Noise(rng, 0.001f), 0f, 0.05f),
+                    ThreadPoolQueueLength = Clamp(12f + 5f * tod + Noise(rng, 4f), 1f, 40f)
                 });
             }
 
@@ -275,14 +278,18 @@ namespace DevOnBike.Overfit.Tests.Monitoring
                 {
                     Timestamp = DateTime.UtcNow.AddSeconds(i * 10),
                     PodName = "integration-test-pod",
-                    CpuUsage = Clamp(0.55f + i * 0.04f + Noise(rng, 0.02f), 0f, 1f),
-                    MemoryBytes = 700_000_000f + i * 50_000_000f,
-                    RequestLatencyP95 = 300f + i * 40f + Noise(rng, 20f),
+                    CpuUsageRatio = Clamp(0.55f + i * 0.04f + Noise(rng, 0.02f), 0f, 1f),
+                    CpuThrottleRatio = Clamp(0.20f + i * 0.05f + Noise(rng, 0.02f), 0f, 1f),
+                    MemoryWorkingSetBytes = 700_000_000f + i * 50_000_000f,
+                    OomEventsRate = i >= 4 ? 0.1f : 0f,
+                    LatencyP50Ms = 200f + i * 30f + Noise(rng, 15f),
+                    LatencyP95Ms = 300f + i * 40f + Noise(rng, 20f),
+                    LatencyP99Ms = 500f + i * 80f + Noise(rng, 40f),
                     RequestsPerSecond = Clamp(100f - i * 10f + Noise(rng, 5f), 0f, 250f),
                     ErrorRate = Clamp(0.05f + i * 0.02f + Noise(rng, 0.01f), 0f, 1f),
-                    GcPauseMs = 80f + i * 20f + Noise(rng, 10f),
-                    ThreadPoolQueue = 60f + i * 15f + Noise(rng, 5f),
-                    HeapBytes = 700_000_000f + i * 50_000_000f
+                    GcGen2HeapBytes = 700_000_000f + i * 50_000_000f,
+                    GcPauseRatio = Clamp(0.08f + i * 0.02f + Noise(rng, 0.01f), 0f, 1f),
+                    ThreadPoolQueueLength = 60f + i * 15f + Noise(rng, 5f)
                 }).ToList(),
 
                 // Traffic spike + error cascade — CPU pegged, 500 RPS, 30–60 % errors
@@ -290,14 +297,18 @@ namespace DevOnBike.Overfit.Tests.Monitoring
                 {
                     Timestamp = DateTime.UtcNow.AddSeconds(i * 10),
                     PodName = "integration-test-pod",
-                    CpuUsage = Clamp(0.90f + Noise(rng, 0.03f), 0f, 1f),
-                    MemoryBytes = 380_000_000f + Noise(rng, 10_000_000f),
-                    RequestLatencyP95 = 800f + i * 100f + Noise(rng, 50f),
+                    CpuUsageRatio = Clamp(0.90f + Noise(rng, 0.03f), 0f, 1f),
+                    CpuThrottleRatio = Clamp(0.70f + Noise(rng, 0.05f), 0f, 1f),
+                    MemoryWorkingSetBytes = 380_000_000f + Noise(rng, 10_000_000f),
+                    OomEventsRate = 0f,
+                    LatencyP50Ms = 400f + i * 50f + Noise(rng, 30f),
+                    LatencyP95Ms = 800f + i * 100f + Noise(rng, 50f),
+                    LatencyP99Ms = 1500f + i * 200f + Noise(rng, 100f),
                     RequestsPerSecond = 500f + Noise(rng, 30f),
                     ErrorRate = Clamp(0.30f + i * 0.05f + Noise(rng, 0.02f), 0f, 1f),
-                    GcPauseMs = 12f + Noise(rng, 3f),
-                    ThreadPoolQueue = 200f + i * 30f + Noise(rng, 15f),
-                    HeapBytes = 280_000_000f + Noise(rng, 5_000_000f)
+                    GcGen2HeapBytes = 280_000_000f + Noise(rng, 5_000_000f),
+                    GcPauseRatio = Clamp(0.03f + Noise(rng, 0.005f), 0f, 1f),
+                    ThreadPoolQueueLength = 200f + i * 30f + Noise(rng, 15f)
                 }).ToList(),
 
                 // CPU throttling — throttled to limit, latency rising, RPS starved
@@ -305,14 +316,18 @@ namespace DevOnBike.Overfit.Tests.Monitoring
                 {
                     Timestamp = DateTime.UtcNow.AddSeconds(i * 10),
                     PodName = "integration-test-pod",
-                    CpuUsage = Clamp(0.98f + Noise(rng, 0.01f), 0f, 1f),
-                    MemoryBytes = 260_000_000f + Noise(rng, 5_000_000f),
-                    RequestLatencyP95 = 500f + i * 60f + Noise(rng, 30f),
+                    CpuUsageRatio = Clamp(0.98f + Noise(rng, 0.01f), 0f, 1f),
+                    CpuThrottleRatio = Clamp(0.85f + i * 0.02f + Noise(rng, 0.02f), 0f, 1f),
+                    MemoryWorkingSetBytes = 260_000_000f + Noise(rng, 5_000_000f),
+                    OomEventsRate = 0f,
+                    LatencyP50Ms = 250f + i * 30f + Noise(rng, 20f),
+                    LatencyP95Ms = 500f + i * 60f + Noise(rng, 30f),
+                    LatencyP99Ms = 900f + i * 100f + Noise(rng, 60f),
                     RequestsPerSecond = Clamp(20f - i * 2f + Noise(rng, 3f), 0f, 250f),
                     ErrorRate = Clamp(0.08f + Noise(rng, 0.01f), 0f, 1f),
-                    GcPauseMs = 8f + Noise(rng, 3f),
-                    ThreadPoolQueue = 80f + i * 10f + Noise(rng, 5f),
-                    HeapBytes = 230_000_000f + Noise(rng, 5_000_000f)
+                    GcGen2HeapBytes = 230_000_000f + Noise(rng, 5_000_000f),
+                    GcPauseRatio = Clamp(0.02f + Noise(rng, 0.005f), 0f, 1f),
+                    ThreadPoolQueueLength = 80f + i * 10f + Noise(rng, 5f)
                 }).ToList()
             };
         }

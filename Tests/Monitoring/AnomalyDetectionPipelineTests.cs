@@ -5,7 +5,8 @@
 
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Monitoring;
-using Xunit;
+using DevOnBike.Overfit.Monitoring.Abstractions;
+using DevOnBike.Overfit.Monitoring.Contracts;
 
 namespace DevOnBike.Overfit.Tests.Monitoring
 {
@@ -36,14 +37,18 @@ namespace DevOnBike.Overfit.Tests.Monitoring
                     {
                         Timestamp = DateTime.UtcNow,
                         PodName = podName,
-                        CpuUsage = cpuUsage,
-                        MemoryBytes = 400_000_000f,
-                        RequestLatencyP95 = 120f,
+                        CpuUsageRatio = cpuUsage,
+                        CpuThrottleRatio = 0.02f,
+                        MemoryWorkingSetBytes = 400_000_000f,
+                        OomEventsRate = 0f,
+                        LatencyP50Ms = 60f,
+                        LatencyP95Ms = 120f,
+                        LatencyP99Ms = 200f,
                         RequestsPerSecond = 100f,
                         ErrorRate = 0.01f,
-                        GcPauseMs = 8f,
-                        ThreadPoolQueue = 10f,
-                        HeapBytes = 200_000_000f
+                        GcGen2HeapBytes = 50_000_000f,
+                        GcPauseRatio = 0.02f,
+                        ThreadPoolQueueLength = 10f
                     });
                 }
 
@@ -54,7 +59,7 @@ namespace DevOnBike.Overfit.Tests.Monitoring
                         throw new OperationCanceledException(ct), ct));
             }
 
-            public void Dispose() {}
+            public void Dispose() { }
         }
 
         private sealed class CapturingAlertSink : IAlertSink
@@ -73,9 +78,9 @@ namespace DevOnBike.Overfit.Tests.Monitoring
         // Helpers
         // -------------------------------------------------------------------------
 
-        private static AnomalyAutoencoder MakeAutoencoder(int inputSize = 32)
+        private static AnomalyAutoencoder MakeAutoencoder(int inputSize = 48)
         {
-            var m = new AnomalyAutoencoder(inputSize, hidden1: 8, hidden2: 4, bottleneckDim: 2);
+            var m = new AnomalyAutoencoder(inputSize, hidden1: 12, hidden2: 6, bottleneckDim: 3);
             m.Eval();
             return m;
         }
@@ -90,8 +95,8 @@ namespace DevOnBike.Overfit.Tests.Monitoring
         private static SlidingWindowBuffer MakeBuffer(int windowSize = 6)
             => new(windowSize, 1, MetricSnapshot.FeatureCount);
 
-        // featureCount × StatsPerFeature = 8 × 4 = 32 → matches default autoencoder inputSize
-        private const int InputSize = MetricSnapshot.FeatureCount * FeatureExtractor.StatsPerFeature; // 32
+        // featureCount × StatsPerFeature = 12 × 4 = 48 → matches default autoencoder inputSize
+        private const int InputSize = MetricSnapshot.FeatureCount * FeatureExtractor.StatsPerFeature; // 48
 
         // -------------------------------------------------------------------------
         // Constructor — argument validation

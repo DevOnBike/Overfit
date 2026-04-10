@@ -7,6 +7,7 @@ using System.Collections.Concurrent;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
+using DevOnBike.Overfit.Monitoring.Contracts;
 
 namespace DevOnBike.Overfit.Monitoring
 {
@@ -219,11 +220,9 @@ namespace DevOnBike.Overfit.Monitoring
         // -------------------------------------------------------------------------
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private PodState GetOrAddPodState(string podName)
-            => _pods.GetOrAdd(podName, _ => new PodState());
+        private PodState GetOrAddPodState(string podName) => _pods.GetOrAdd(podName, _ => new PodState());
 
-        private static PodMetricsSnapshot BuildSnapshot(string podName, PodState state)
-            => new()
+        private static PodMetricsSnapshot BuildSnapshot(string podName, PodState state) => new()
             {
                 PodName = podName,
                 AnomalyScore = Volatile.Read(ref state.AnomalyScore),
