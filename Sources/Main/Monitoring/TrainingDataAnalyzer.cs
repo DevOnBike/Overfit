@@ -5,7 +5,7 @@
 
 using System.Linq;
 using System.Numerics.Tensors;
-using DevOnBike.Overfit.Monitoring.Contracts;
+using DevOnBike.Overfit.Data.Contracts;
 
 namespace DevOnBike.Overfit.Monitoring
 {

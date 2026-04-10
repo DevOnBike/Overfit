@@ -1,5 +1,6 @@
+using DevOnBike.Overfit.Monitoring;
 using System.Linq;
-namespace DevOnBike.Overfit.Monitoring.Contracts
+namespace DevOnBike.Overfit.Data.Contracts
 {
     /// <summary>
     /// Full analysis report returned by <see cref="TrainingDataAnalyzer.Analyze"/>.

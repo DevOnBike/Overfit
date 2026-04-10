@@ -1,4 +1,4 @@
-namespace DevOnBike.Overfit.Monitoring.Contracts
+namespace DevOnBike.Overfit.Data.Contracts
 {
     /// <summary>
     /// Pair of features whose Pearson correlation exceeds

@@ -6,7 +6,7 @@
 using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.Data.Contracts;
 
-namespace DevOnBike.Overfit.Data.Prepare
+namespace DevOnBike.Overfit.Data
 {
     /// <summary>
     /// Converts tabular data (objects/models) into high-performance <see cref="FastTensor{float}"/> objects.
@@ -109,7 +109,7 @@ namespace DevOnBike.Overfit.Data.Prepare
 
                         for (var c = 0; c < categories.Length; c++)
                         {
-                            fSpan[rowOffset + currentPos++] = (categories[c] == currentVal) ? 1f : 0f;
+                            fSpan[rowOffset + currentPos++] = categories[c] == currentVal ? 1f : 0f;
                         }
                     }
                 }

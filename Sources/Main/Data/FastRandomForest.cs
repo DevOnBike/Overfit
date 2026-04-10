@@ -6,7 +6,7 @@
 using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.Data.Contracts;
 
-namespace DevOnBike.Overfit.Data.Prepare
+namespace DevOnBike.Overfit.Data
 {
     public class FastRandomForest
     {

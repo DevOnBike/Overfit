@@ -6,8 +6,9 @@
 using DevOnBike.Overfit.DeepLearning;
 using System.Linq;
 using DevOnBike.Overfit.Monitoring.Contracts;
+using DevOnBike.Overfit.Monitoring;
 
-namespace DevOnBike.Overfit.Monitoring
+namespace DevOnBike.Overfit.Data
 {
     /// <summary>
     /// Boruta-style feature importance analysis for a trained <see cref="AnomalyAutoencoder"/>.
@@ -57,7 +58,7 @@ namespace DevOnBike.Overfit.Monitoring
 
         private static readonly string[] StatSuffixes = ["mean", "std", "p95", "delta"];
 
-        public FeatureImportanceAnalyzer(FeatureImportanceAnalyzerConfig? config = null)
+        public FeatureImportanceAnalyzer(FeatureImportanceAnalyzerConfig config = null)
         {
             _config = config ?? new FeatureImportanceAnalyzerConfig();
         }
@@ -155,7 +156,7 @@ namespace DevOnBike.Overfit.Monitoring
                 for (var f = 0; f < dim; f++)
                 {
                     var realImpThisIter = realImps[f] - (iter > 0
-                        ? realImps[f] - (realImps[f] / (iter + 1)) * iter  // running mean trick
+                        ? realImps[f] - realImps[f] / (iter + 1) * iter  // running mean trick
                         : 0f);
 
                     // Use direct per-iter calculation from the accumulators

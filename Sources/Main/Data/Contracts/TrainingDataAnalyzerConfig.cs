@@ -3,7 +3,9 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-namespace DevOnBike.Overfit.Monitoring.Contracts
+using DevOnBike.Overfit.Monitoring;
+
+namespace DevOnBike.Overfit.Data.Contracts
 {
     /// <summary>Immutable configuration for <see cref="TrainingDataAnalyzer"/>.</summary>
     public sealed record TrainingDataAnalyzerConfig
