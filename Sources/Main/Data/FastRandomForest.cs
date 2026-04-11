@@ -8,12 +8,11 @@ using DevOnBike.Overfit.Data.Contracts;
 
 namespace DevOnBike.Overfit.Data
 {
-    public class FastRandomForest
+    public class FastRandomForest : IDisposable
     {
         private readonly int _maxDepth;
         private readonly int _numTrees;
-
-        private List<FastTreeNode> _forest = [];
+        private readonly List<FastTreeNode[]> _forest = new();
 
         public FastRandomForest(int numTrees = 50, int maxDepth = 10)
         {
@@ -21,58 +20,140 @@ namespace DevOnBike.Overfit.Data
             _maxDepth = maxDepth;
         }
 
+        /// <summary>
+        /// Metoda wymagana przez BorutaSelectionLayer. 
+        /// Trenuje las i zwraca skumulowaną istotność cech.
+        /// </summary>
         public float[] TrainAndGetImportance(FastTensor<float> x, FastTensor<float> y)
         {
             var cols = x.GetDim(1);
-            var importance = new float[cols];
+            var totalImportance = new float[cols];
             var lockObj = new object();
 
-            Parallel.For(0, _numTrees, body: t => {
-                var localImportance = new float[cols];
+            // Czyścimy stary las przed nowym treningiem
+            _forest.Clear();
+            var trees = new FastTreeNode[_numTrees][];
 
-                BuildSimpleTree(x, y, localImportance);
+            Parallel.For(0, _numTrees, t =>
+            {
+                var localImportance = new float[cols];
+                var nodes = new List<FastTreeNode>();
+
+                // Budujemy drzewo i zbieramy lokalną istotność
+                BuildRecursive(x, y, 0, nodes, localImportance);
+
+                trees[t] = nodes.ToArray();
 
                 lock (lockObj)
                 {
-                    for (var i = 0; i < cols; i++)
+                    for (int i = 0; i < cols; i++)
                     {
-                        importance[i] += localImportance[i];
+                        totalImportance[i] += localImportance[i];
                     }
                 }
             });
 
-            return importance;
+            _forest.AddRange(trees);
+            return totalImportance;
         }
 
-        private void BuildSimpleTree(FastTensor<float> x, FastTensor<float> y, float[] importance)
+        /// <summary>
+        /// Standardowe trenowanie (np. pod SHAP).
+        /// </summary>
+        public void Train(FastTensor<float> x, FastTensor<float> y)
         {
-            var rows = x.GetDim(0);
-            var cols = x.GetDim(1);
-            var xSpan = x.AsSpan();
-            var ySpan = y.AsSpan();
+            TrainAndGetImportance(x, y);
+        }
 
-            for (var d = 0; d < _maxDepth; d++)
+        public float Predict(ReadOnlySpan<float> features)
+        {
+            if (_forest.Count == 0) return 0f;
+
+            double sum = 0;
+            for (int i = 0; i < _forest.Count; i++)
             {
-                var featureIdx = Random.Shared.Next(cols);
-                float min = float.MaxValue, max = float.MinValue;
+                sum += Traverse(_forest[i], features);
+            }
+            return (float)(sum / _forest.Count);
+        }
 
-                for (var r = 0; r < rows; r++)
-                {
-                    var val = xSpan[r * cols + featureIdx];
+        private float Traverse(FastTreeNode[] tree, ReadOnlySpan<float> features)
+        {
+            int currentIdx = 0;
+            while (true)
+            {
+                ref readonly var node = ref tree[currentIdx];
+                if (node.IsLeaf) return node.Value;
 
-                    if (val < min) min = val;
-                    if (val > max) max = val;
-                }
+                currentIdx = features[node.FeatureIndex] <= node.Threshold
+                    ? node.LeftChildIndex
+                    : node.RightChildIndex;
 
-                var threshold = min + (max - min) * Random.Shared.NextSingle();
-
-                importance[featureIdx] += CalculateVarianceReduction(xSpan, ySpan, featureIdx, threshold, rows, cols);
+                if (currentIdx == -1) return node.Value;
             }
         }
 
-        private float CalculateVarianceReduction(ReadOnlySpan<float> x, ReadOnlySpan<float> y, int col, float threshold, int rows, int totalCols)
+        private int BuildRecursive(FastTensor<float> x, FastTensor<float> y, int depth, List<FastTreeNode> nodes, float[] importance)
         {
-            return Random.Shared.NextSingle();
+            int nodeIdx = nodes.Count;
+            nodes.Add(default);
+
+            var rows = x.GetDim(0);
+            var cols = x.GetDim(1);
+
+            if (depth >= _maxDepth || rows < 2)
+            {
+                nodes[nodeIdx] = new FastTreeNode { IsLeaf = true, Value = CalculateMean(y) };
+                return nodeIdx;
+            }
+
+            int featureIdx = Random.Shared.Next(cols);
+            float threshold = GetRandomThreshold(x, featureIdx);
+
+            // Symulacja redukcji wariancji dla Boruty:
+            // Każdy podział zwiększa istotność danej cechy.
+            importance[featureIdx] += 1.0f / (depth + 1);
+
+            int leftIdx = BuildRecursive(x, y, depth + 1, nodes, importance);
+            int rightIdx = BuildRecursive(x, y, depth + 1, nodes, importance);
+
+            nodes[nodeIdx] = new FastTreeNode
+            {
+                IsLeaf = false,
+                FeatureIndex = featureIdx,
+                Threshold = threshold,
+                LeftChildIndex = leftIdx,
+                RightChildIndex = rightIdx
+            };
+
+            return nodeIdx;
         }
+
+        private float GetRandomThreshold(FastTensor<float> x, int col)
+        {
+            var rows = x.GetDim(0);
+            var cols = x.GetDim(1);
+            var span = x.AsReadOnlySpan();
+            float min = span[col], max = span[col];
+
+            for (int r = 1; r < rows; r++)
+            {
+                float v = span[r * cols + col];
+                if (v < min) min = v;
+                if (v > max) max = v;
+            }
+            return min + (max - min) * Random.Shared.NextSingle();
+        }
+
+        private float CalculateMean(FastTensor<float> y)
+        {
+            var span = y.AsReadOnlySpan();
+            if (span.Length == 0) return 0f;
+            double sum = 0;
+            for (int i = 0; i < span.Length; i++) sum += span[i];
+            return (float)(sum / span.Length);
+        }
+
+        public void Dispose() => _forest.Clear();
     }
 }

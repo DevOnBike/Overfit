@@ -7,9 +7,19 @@ namespace DevOnBike.Overfit.Data.Contracts
 {
     internal struct FastTreeNode
     {
-        public int[] FeatureIndices;
-        public float[] Thresholds;
-        public float[] Values;
-        public int Depth;
+        // Używamy flagi bitowej lub specjalnego indeksu, aby zaoszczędzić miejsce
+        public bool IsLeaf;
+
+        // Dane dla węzła decyzyjnego
+        public int FeatureIndex;
+        public float Threshold;
+
+        // Dane dla liścia (wynik regresji/klasyfikacji)
+        public float Value;
+
+        // Indeksy dzieci w płaskiej tablicy drzewa (zamiast referencji)
+        // Pozwala to na trzymanie całego drzewa w FastBuffer<FastTreeNode>
+        public int LeftChildIndex;
+        public int RightChildIndex;
     }
 }
