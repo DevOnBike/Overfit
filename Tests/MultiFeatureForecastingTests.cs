@@ -36,7 +36,7 @@ namespace DevOnBike.Overfit.Tests
 
             var returns = CalculateReturns(prices);
             var volumeReturns = CalculateReturns(volumes); // Wolumen też musi być % zmianą!
-            var rsi = CalculateRSI(prices, period: 14);
+            var rsi = CalculateRSI(prices, 14);
 
             // Wycinamy pierwsze 14 dni, ponieważ wskaźnik RSI potrzebuje czasu na "rozruch"
             var startIdx = 14;
@@ -72,15 +72,18 @@ namespace DevOnBike.Overfit.Tests
             using var targetNode = new AutogradNode(yTensor, false);
 
             // 3. ARCHITEKTURA (Uwaga na pierwszą warstwę: przyjmuje wektor rozmiaru 30)
-            var w1 = new AutogradNode(new FastTensor<float>(false, inputSize, 32), true);
-            var b1 = new AutogradNode(new FastTensor<float>(true, 1, 32), true);
+            var w1 = new AutogradNode(new FastTensor<float>(false, inputSize, 32));
+            var b1 = new AutogradNode(new FastTensor<float>(true, 1, 32));
             Randomize(w1.Data.AsSpan(), inputSize);
 
-            var w2 = new AutogradNode(new FastTensor<float>(false, 32, 1), true);
-            var b2 = new AutogradNode(new FastTensor<float>(true, 1, 1), true);
+            var w2 = new AutogradNode(new FastTensor<float>(false, 32, 1));
+            var b2 = new AutogradNode(new FastTensor<float>(true, 1, 1));
             Randomize(w2.Data.AsSpan(), 32);
 
-            var parameters = new[] { w1, b1, w2, b2 };
+            var parameters = new[]
+            {
+                w1, b1, w2, b2
+            };
             using var optimizer = new Adam(parameters, learningRate);
 
             // ZMIANA: Tworzymy jawną instancję grafu do treningu
@@ -94,7 +97,7 @@ namespace DevOnBike.Overfit.Tests
                 using var relu = TensorMath.ReLU(graph, hidden);
                 using var prediction = TensorMath.Linear(graph, relu, w2, b2);
 
-                using var loss = TensorMath.DirectionalLoss(graph, prediction, targetNode, gamma: 10f);
+                using var loss = TensorMath.DirectionalLoss(graph, prediction, targetNode, 10f);
 
                 // ZMIANA: Wywołanie operacji wstecznych i resetu na obiekcie grafu
                 graph.Backward(loss);
@@ -120,7 +123,10 @@ namespace DevOnBike.Overfit.Tests
 
             _output.WriteLine($"Predykcja końcowa z 3 wskaźników: {finalPred.Data[0, 0] * 100f:F2}%");
 
-            w1.Dispose(); b1.Dispose(); w2.Dispose(); b2.Dispose();
+            w1.Dispose();
+            b1.Dispose();
+            w2.Dispose();
+            b2.Dispose();
         }
 
         // ==========================================
@@ -151,7 +157,9 @@ namespace DevOnBike.Overfit.Tests
         {
             var returns = new float[data.Length - 1];
             for (var i = 0; i < returns.Length; i++)
+            {
                 returns[i] = (data[i + 1] - data[i]) / data[i];
+            }
             return returns;
         }
 
@@ -172,7 +180,7 @@ namespace DevOnBike.Overfit.Tests
 
             var avgGain = gainSum / period;
             var avgLoss = lossSum / period;
-            rsi[period] = avgLoss == 0 ? 100f : 100f - (100f / (1f + (avgGain / avgLoss)));
+            rsi[period] = avgLoss == 0 ? 100f : 100f - 100f / (1f + avgGain / avgLoss);
 
             // Wygładzona średnia RMA dla kolejnych dni
             for (var i = period + 1; i < prices.Length; i++)
@@ -184,7 +192,7 @@ namespace DevOnBike.Overfit.Tests
                 avgGain = (avgGain * (period - 1) + gain) / period;
                 avgLoss = (avgLoss * (period - 1) + loss) / period;
 
-                rsi[i] = avgLoss == 0 ? 100f : 100f - (100f / (1f + (avgGain / avgLoss)));
+                rsi[i] = avgLoss == 0 ? 100f : 100f - 100f / (1f + avgGain / avgLoss);
             }
 
             return rsi;

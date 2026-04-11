@@ -14,8 +14,8 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 namespace Benchmarks
 {
     /// <summary>
-    /// Evaluates how the performance advantage of the Overfit engine scales across different model sizes.
-    /// Analyzes the compute-to-overhead ratio compared to ONNX Runtime.
+    ///     Evaluates how the performance advantage of the Overfit engine scales across different model sizes.
+    ///     Analyzes the compute-to-overhead ratio compared to ONNX Runtime.
     /// </summary>
     [SimpleJob(RuntimeMoniker.Net10_0)]
     [Orderer(SummaryOrderPolicy.FastestToSlowest)]
@@ -23,26 +23,26 @@ namespace Benchmarks
     public class ScalingBenchmark
     {
         private const int OutputSize = 10;
+        private AutogradNode _largeNode;
+        private FastTensor<float> _largeTensor;
+        private AutogradNode _mediumNode;
+        private FastTensor<float> _mediumTensor;
+        private InferenceSession _onnxLarge;
+        private NamedOnnxValue[] _onnxLargeInputs;
+        private InferenceSession _onnxMedium;
+        private NamedOnnxValue[] _onnxMediumInputs;
 
         private InferenceSession _onnxSmall;
-        private InferenceSession _onnxMedium;
-        private InferenceSession _onnxLarge;
 
         private NamedOnnxValue[] _onnxSmallInputs;
-        private NamedOnnxValue[] _onnxMediumInputs;
-        private NamedOnnxValue[] _onnxLargeInputs;
+        private Sequential _overfitLarge;
+        private Sequential _overfitMedium;
 
         private Sequential _overfitSmall;
-        private Sequential _overfitMedium;
-        private Sequential _overfitLarge;
 
         private AutogradNode _smallNode;
-        private AutogradNode _mediumNode;
-        private AutogradNode _largeNode;
 
         private FastTensor<float> _smallTensor;
-        private FastTensor<float> _mediumTensor;
-        private FastTensor<float> _largeTensor;
 
         [GlobalSetup]
         public void Setup()
@@ -50,20 +50,20 @@ namespace Benchmarks
             var rnd = new Random(42);
 
             SetupPair(rnd, 128, "benchmark_small",
-                out _onnxSmall, out _onnxSmallInputs,
-                out _overfitSmall, out _smallNode, out _smallTensor);
+            out _onnxSmall, out _onnxSmallInputs,
+            out _overfitSmall, out _smallNode, out _smallTensor);
 
             SetupPair(rnd, 784, "benchmark_medium",
-                out _onnxMedium, out _onnxMediumInputs,
-                out _overfitMedium, out _mediumNode, out _mediumTensor);
+            out _onnxMedium, out _onnxMediumInputs,
+            out _overfitMedium, out _mediumNode, out _mediumTensor);
 
             SetupPair(rnd, 4096, "benchmark_large",
-                out _onnxLarge, out _onnxLargeInputs,
-                out _overfitLarge, out _largeNode, out _largeTensor);
+            out _onnxLarge, out _onnxLargeInputs,
+            out _overfitLarge, out _largeNode, out _largeTensor);
         }
 
         /// <summary>
-        /// Configures a benchmark pair consisting of an ONNX session and an Overfit model.
+        ///     Configures a benchmark pair consisting of an ONNX session and an Overfit model.
         /// </summary>
         private static void SetupPair(Random rnd, int inputSize, string modelName,
             out InferenceSession onnxSession, out NamedOnnxValue[] onnxInputs,
@@ -84,7 +84,7 @@ namespace Benchmarks
 
             inputTensor = new FastTensor<float>(false, 1, inputSize);
             data.AsSpan().CopyTo(inputTensor.AsSpan());
-            inputNode = new AutogradNode(inputTensor, requiresGrad: false);
+            inputNode = new AutogradNode(inputTensor, false);
 
             for (var i = 0; i < 200; i++)
             {

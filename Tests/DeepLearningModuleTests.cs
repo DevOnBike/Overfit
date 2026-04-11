@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Text;
 using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.DeepLearning;
 
@@ -26,7 +27,7 @@ namespace DevOnBike.Overfit.Tests
             Assert.Equal(5, output.Data.Shape[1]);
 
             using var ms = new MemoryStream();
-            using (var bw = new BinaryWriter(ms, System.Text.Encoding.UTF8, true))
+            using (var bw = new BinaryWriter(ms, Encoding.UTF8, true))
             {
                 layer.Save(bw);
             }

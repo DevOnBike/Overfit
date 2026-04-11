@@ -5,7 +5,7 @@
 
 namespace DevOnBike.Overfit.Data.Contracts
 {
-    /// <summary>Per-epoch snapshot reported via <see cref="IProgress{T}"/>.</summary>
+    /// <summary>Per-epoch snapshot reported via <see cref="IProgress{T}" />.</summary>
     public sealed record TrainingProgress
     {
         /// <summary>Current epoch number (1-based).</summary>

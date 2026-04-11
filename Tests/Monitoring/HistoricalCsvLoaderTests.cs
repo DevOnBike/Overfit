@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Text;
 using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 
@@ -12,7 +13,7 @@ namespace DevOnBike.Overfit.Tests.Monitoring
     {
         private static string MakeCsv(IEnumerable<string> rows)
         {
-            var sb = new System.Text.StringBuilder();
+            var sb = new StringBuilder();
             sb.AppendLine(
             "timestamp,pod_name,cpu_usage_ratio,cpu_throttle_ratio,memory_working_set_bytes," +
             "oom_events_rate,latency_p50_ms,latency_p95_ms,latency_p99_ms,requests_per_second," +
@@ -22,7 +23,9 @@ namespace DevOnBike.Overfit.Tests.Monitoring
         }
 
         private static string ValidRow(string ts = "2026-04-03T10:00:00Z")
-            => $"{ts},pod-1,0.32,0.01,285000000,0,60,110,180,100,0.005,50000000,0.02,10";
+        {
+            return $"{ts},pod-1,0.32,0.01,285000000,0,60,110,180,100,0.005,50000000,0.02,10";
+        }
 
         // -------------------------------------------------------------------------
         // Load — argument validation
@@ -30,8 +33,10 @@ namespace DevOnBike.Overfit.Tests.Monitoring
 
         [Fact]
         public void Load_WhenFileDoesNotExist_ThenThrowsFileNotFoundException()
-            => Assert.Throws<FileNotFoundException>(
+        {
+            Assert.Throws<FileNotFoundException>(
             () => HistoricalCsvLoader.Load("/tmp/no-such-file.csv", out _));
+        }
 
         [Fact]
         public void Load_WhenEmptyFile_ThenThrowsInvalidDataException()
@@ -56,7 +61,7 @@ namespace DevOnBike.Overfit.Tests.Monitoring
         [Fact]
         public void Load_WhenValidCsv_ThenReturnsCorrectCount()
         {
-            var csv = MakeCsv([ValidRow("2026-04-03T10:00:00Z"), ValidRow("2026-04-03T10:00:10Z")]);
+            var csv = MakeCsv([ValidRow(), ValidRow("2026-04-03T10:00:10Z")]);
             using var reader = new StringReader(csv);
 
             var result = HistoricalCsvLoader.Load(reader, out var skipped);
@@ -68,7 +73,7 @@ namespace DevOnBike.Overfit.Tests.Monitoring
         [Fact]
         public void Load_WhenValidRow_ThenFieldsAreParsedCorrectly()
         {
-            var csv = MakeCsv([ValidRow("2026-04-03T10:00:00Z")]);
+            var csv = MakeCsv([ValidRow()]);
             using var reader = new StringReader(csv);
 
             var result = HistoricalCsvLoader.Load(reader, out _);
@@ -117,7 +122,7 @@ namespace DevOnBike.Overfit.Tests.Monitoring
         {
             var csv = MakeCsv([
                 ValidRow("2026-04-03T10:00:20Z"),
-                ValidRow("2026-04-03T10:00:00Z"),
+                ValidRow(),
                 ValidRow("2026-04-03T10:00:10Z")
             ]);
             using var reader = new StringReader(csv);
@@ -156,25 +161,25 @@ namespace DevOnBike.Overfit.Tests.Monitoring
             {
                 new()
                 {
-                    Timestamp             = new DateTime(2026, 4, 3, 10, 0, 0, DateTimeKind.Utc),
-                    PodName               = "my-pod",
-                    CpuUsageRatio         = 0.42f,
-                    CpuThrottleRatio      = 0.03f,
+                    Timestamp = new DateTime(2026, 4, 3, 10, 0, 0, DateTimeKind.Utc),
+                    PodName = "my-pod",
+                    CpuUsageRatio = 0.42f,
+                    CpuThrottleRatio = 0.03f,
                     MemoryWorkingSetBytes = 300_000_000f,
-                    OomEventsRate         = 0f,
-                    LatencyP50Ms          = 65f,
-                    LatencyP95Ms          = 115f,
-                    LatencyP99Ms          = 195f,
-                    RequestsPerSecond     = 88f,
-                    ErrorRate             = 0.007f,
-                    GcGen2HeapBytes       = 45_000_000f,
-                    GcPauseRatio          = 0.018f,
+                    OomEventsRate = 0f,
+                    LatencyP50Ms = 65f,
+                    LatencyP95Ms = 115f,
+                    LatencyP99Ms = 195f,
+                    RequestsPerSecond = 88f,
+                    ErrorRate = 0.007f,
+                    GcGen2HeapBytes = 45_000_000f,
+                    GcPauseRatio = 0.018f,
                     ThreadPoolQueueLength = 12f
                 }
             };
 
             using var ms = new MemoryStream();
-            using var writer = new StreamWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+            using var writer = new StreamWriter(ms, Encoding.UTF8, leaveOpen: true);
             HistoricalCsvLoader.Save(writer, snapshots);
             writer.Flush();
 

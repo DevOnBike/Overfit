@@ -9,47 +9,47 @@ using DevOnBike.Overfit.Core;
 namespace DevOnBike.Overfit
 {
     /// <summary>
-    /// Stateless, static class grouping the logic of a Multivariate Gaussian Distribution 
-    /// using Cholesky decomposition.
-    /// Optimized for memory efficiency using FastMatrix and FastBuffer (ArrayPool integration).
+    ///     Stateless, static class grouping the logic of a Multivariate Gaussian Distribution
+    ///     using Cholesky decomposition.
+    ///     Optimized for memory efficiency using FastMatrix and FastBuffer (ArrayPool integration).
     /// </summary>
     public static class CholeskyMultivariateGaussianLogic
     {
         #region 1. Probability Density Calculations
 
         /// <summary>
-        /// Logarithm of the probability density. Wrapper with a readable argument order.
+        ///     Logarithm of the probability density. Wrapper with a readable argument order.
         /// </summary>
         public static double GetLogProbability(
-            ReadOnlySpan<double> observation,
-            ReadOnlySpan<double> mean,
-            FastMatrix<double> L,
+            ReadOnlySpan<float> observation,
+            ReadOnlySpan<float> mean,
+            FastMatrix<float> L,
             double logNormConst)
         {
             return LogProbabilityDensity(observation, mean, L, logNormConst);
         }
 
         /// <summary>
-        /// Probability density (linear space).
+        ///     Probability density (linear space).
         /// </summary>
         public static double ProbabilityDensity(
-            ReadOnlySpan<double> observation,
-            ReadOnlySpan<double> mean,
-            FastMatrix<double> L,
+            ReadOnlySpan<float> observation,
+            ReadOnlySpan<float> mean,
+            FastMatrix<float> L,
             double logNormConst)
         {
             return Math.Exp(LogProbabilityDensity(observation, mean, L, logNormConst));
         }
 
         /// <summary>
-        /// Logarithm of the probability density of a Multivariate Gaussian using Cholesky matrix.
-        /// Elegantly uses FastBuffer to avoid heavy array allocations, relying on ArrayPool.
-        /// Complexity: O(n^2) through forward-solve; diff and mahalSq are SIMD-accelerated via TensorPrimitives.
+        ///     Logarithm of the probability density of a Multivariate Gaussian using Cholesky matrix.
+        ///     Elegantly uses FastBuffer to avoid heavy array allocations, relying on ArrayPool.
+        ///     Complexity: O(n^2) through forward-solve; diff and mahalSq are SIMD-accelerated via TensorPrimitives.
         /// </summary>
         public static double LogProbabilityDensity(
-            ReadOnlySpan<double> observation,
-            ReadOnlySpan<double> mean,
-            FastMatrix<double> L,
+            ReadOnlySpan<float> observation,
+            ReadOnlySpan<float> mean,
+            FastMatrix<float> L,
             double logNormConst)
         {
             var n = mean.Length;
@@ -65,13 +65,13 @@ namespace DevOnBike.Overfit
             }
 
             // Clean code perfection: 'using' takes care of returning the array to the pool automatically.
-            using var diffBuffer = new FastBuffer<double>(n);
+            using var diffBuffer = new FastBuffer<float>(n);
             var diff = diffBuffer.AsSpan();
 
             TensorPrimitives.Subtract(observation, mean, diff);
 
             // Forward-solve: L * z = diff 
-            using var zBuffer = new FastBuffer<double>(n);
+            using var zBuffer = new FastBuffer<float>(n);
             var z = zBuffer.AsSpan();
 
             for (var i = 0; i < n; i++)
@@ -92,9 +92,9 @@ namespace DevOnBike.Overfit
         #region 2. Linear Algebra and Initialization
 
         /// <summary>
-        /// Validates the mean vector and covariance matrix dimensions.
+        ///     Validates the mean vector and covariance matrix dimensions.
         /// </summary>
-        public static void ValidateInputs(ReadOnlySpan<double> mean, FastMatrix<double> covariance)
+        public static void ValidateInputs(ReadOnlySpan<float> mean, FastMatrix<float> covariance)
         {
             var n = mean.Length;
 
@@ -102,7 +102,7 @@ namespace DevOnBike.Overfit
             {
                 throw new ArgumentException("Mean vector cannot be empty.", nameof(mean));
             }
-            
+
             for (var i = 0; i < n; i++)
             {
                 if (!double.IsFinite(mean[i]))
@@ -118,11 +118,11 @@ namespace DevOnBike.Overfit
         }
 
         /// <summary>
-        /// Cholesky Decomposition: returns a lower triangular matrix L such that A = L * L^T.
-        /// Uses TensorPrimitives.Dot for the inner dot product — SIMD-accelerated.
-        /// The caller takes ownership of the returned FastMatrix and is responsible for calling Dispose().
+        ///     Cholesky Decomposition: returns a lower triangular matrix L such that A = L * L^T.
+        ///     Uses TensorPrimitives.Dot for the inner dot product — SIMD-accelerated.
+        ///     The caller takes ownership of the returned FastMatrix and is responsible for calling Dispose().
         /// </summary>
-        public static FastMatrix<double> DecomposeCholesky(FastMatrix<double> matrix)
+        public static FastMatrix<float> DecomposeCholesky(FastMatrix<float> matrix)
         {
             if (matrix.Rows != matrix.Cols)
             {
@@ -130,7 +130,7 @@ namespace DevOnBike.Overfit
             }
 
             var n = matrix.Rows;
-            var L = new FastMatrix<double>(n, n);
+            var L = new FastMatrix<float>(n, n);
 
             for (var i = 0; i < n; i++)
             {
@@ -149,7 +149,7 @@ namespace DevOnBike.Overfit
                             throw new ArgumentException($"Covariance matrix is not positive-definite! Negative pivot [{i},{i}] = {pivot:G6}.", nameof(matrix));
                         }
 
-                        L[i, i] = Math.Sqrt(pivot);
+                        L[i, i] = MathF.Sqrt(pivot);
                     }
                     else
                     {
@@ -162,9 +162,9 @@ namespace DevOnBike.Overfit
         }
 
         /// <summary>
-        /// Calculates the normalizing constant for the log-density: -0.5 * n * ln(2π) - Σ ln(L_ii).
+        ///     Calculates the normalizing constant for the log-density: -0.5 * n * ln(2π) - Σ ln(L_ii).
         /// </summary>
-        public static double CalculateLogNormConstant(int dimensions, FastMatrix<double> L)
+        public static double CalculateLogNormConstant(int dimensions, FastMatrix<float> L)
         {
             if (L.Rows != dimensions || L.Cols != dimensions)
             {

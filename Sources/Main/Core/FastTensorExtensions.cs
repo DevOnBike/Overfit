@@ -8,7 +8,7 @@ namespace DevOnBike.Overfit.Core
     public static class FastTensorExtensions
     {
         /// <summary>
-        /// Randomizes tensor elements using a simple scale. 
+        ///     Randomizes tensor elements using a simple scale.
         /// </summary>
         public static FastTensor<float> Randomize(this FastTensor<float> tensor, float scale = 0.01f)
         {

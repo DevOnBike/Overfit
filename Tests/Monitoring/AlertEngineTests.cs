@@ -11,34 +11,6 @@ namespace DevOnBike.Overfit.Tests.Monitoring
 {
     public sealed class AlertEngineTests
     {
-        // -------------------------------------------------------------------------
-        // Test sink implementations
-        // -------------------------------------------------------------------------
-
-        private sealed class CapturingSink : IAlertSink
-        {
-            private readonly List<AlertEvent> _received = [];
-            public IReadOnlyList<AlertEvent> Received => _received;
-            public int SendCount => _received.Count;
-
-            public Task SendAsync(AlertEvent alert, CancellationToken ct = default)
-            {
-                lock (_received) { _received.Add(alert); }
-                return Task.CompletedTask;
-            }
-        }
-
-        private sealed class ThrowingSink : IAlertSink
-        {
-            public Task SendAsync(AlertEvent alert, CancellationToken ct = default)
-                => Task.FromException(new InvalidOperationException("Sink failure"));
-        }
-
-        private sealed class SlowSink(int delayMs = 50) : IAlertSink
-        {
-            public Task SendAsync(AlertEvent alert, CancellationToken ct = default)
-                => Task.Delay(delayMs, ct);
-        }
 
         // -------------------------------------------------------------------------
         // Helpers
@@ -48,12 +20,14 @@ namespace DevOnBike.Overfit.Tests.Monitoring
             float threshold = 0.8f,
             float criticalThreshold = 0.95f,
             TimeSpan? cooldown = null)
-            => new()
+        {
+            return new AlertEngineConfig
             {
                 AlertThreshold = threshold,
                 CriticalThreshold = criticalThreshold,
                 CooldownDuration = cooldown ?? TimeSpan.FromMilliseconds(50)
             };
+        }
 
         // -------------------------------------------------------------------------
         // Constructor validation
@@ -61,7 +35,9 @@ namespace DevOnBike.Overfit.Tests.Monitoring
 
         [Fact]
         public void Constructor_WhenNoSinks_ThenThrowsArgumentException()
-            => Assert.Throws<ArgumentException>(() => new AlertEngine(null, Array.Empty<IAlertSink>()));
+        {
+            Assert.Throws<ArgumentException>(() => new AlertEngine(null));
+        }
 
         [Fact]
         public void Constructor_WhenAlertThresholdIsZero_ThenThrowsArgumentException()
@@ -102,28 +78,28 @@ namespace DevOnBike.Overfit.Tests.Monitoring
         public async Task TryAlert_WhenScoreBelowThreshold_ThenReturnsFalse()
         {
             await using var engine = new AlertEngine(MakeConfig(threshold: 0.8f), new CapturingSink());
-            Assert.False(engine.TryAlert("pod-1", anomalyScore: 0.79f, reconstructionMse: 0.01f));
+            Assert.False(engine.TryAlert("pod-1", 0.79f, 0.01f));
         }
 
         [Fact]
         public async Task TryAlert_WhenScoreAtThreshold_ThenReturnsTrue()
         {
             await using var engine = new AlertEngine(MakeConfig(threshold: 0.8f), new CapturingSink());
-            Assert.True(engine.TryAlert("pod-1", anomalyScore: 0.8f, reconstructionMse: 0.01f));
+            Assert.True(engine.TryAlert("pod-1", 0.8f, 0.01f));
         }
 
         [Fact]
         public async Task TryAlert_WhenScoreAboveThreshold_ThenReturnsTrue()
         {
             await using var engine = new AlertEngine(MakeConfig(threshold: 0.8f), new CapturingSink());
-            Assert.True(engine.TryAlert("pod-1", anomalyScore: 0.99f, reconstructionMse: 0.05f));
+            Assert.True(engine.TryAlert("pod-1", 0.99f, 0.05f));
         }
 
         [Fact]
         public async Task TryAlert_WhenScoreAtExactly1_ThenReturnsTrue()
         {
             await using var engine = new AlertEngine(MakeConfig(threshold: 0.8f), new CapturingSink());
-            Assert.True(engine.TryAlert("pod-1", anomalyScore: 1.0f, reconstructionMse: 0.1f));
+            Assert.True(engine.TryAlert("pod-1", 1.0f, 0.1f));
         }
 
         // -------------------------------------------------------------------------
@@ -134,10 +110,10 @@ namespace DevOnBike.Overfit.Tests.Monitoring
         public async Task TryAlert_WhenScoreBetweenThresholds_ThenSeverityIsWarning()
         {
             var sink = new CapturingSink();
-            var config = MakeConfig(threshold: 0.8f, criticalThreshold: 0.95f);
+            var config = MakeConfig(0.8f, 0.95f);
             await using var engine = new AlertEngine(config, sink);
 
-            engine.TryAlert("pod-1", anomalyScore: 0.85f, reconstructionMse: 0.02f);
+            engine.TryAlert("pod-1", 0.85f, 0.02f);
             await engine.DisposeAsync();
 
             Assert.Equal(AlertSeverity.Warning, sink.Received[0].Severity);
@@ -147,10 +123,10 @@ namespace DevOnBike.Overfit.Tests.Monitoring
         public async Task TryAlert_WhenScoreAtCriticalThreshold_ThenSeverityIsCritical()
         {
             var sink = new CapturingSink();
-            var config = MakeConfig(threshold: 0.8f, criticalThreshold: 0.95f);
+            var config = MakeConfig(0.8f, 0.95f);
             await using var engine = new AlertEngine(config, sink);
 
-            engine.TryAlert("pod-1", anomalyScore: 0.95f, reconstructionMse: 0.05f);
+            engine.TryAlert("pod-1", 0.95f, 0.05f);
             await engine.DisposeAsync();
 
             Assert.Equal(AlertSeverity.Critical, sink.Received[0].Severity);
@@ -160,10 +136,10 @@ namespace DevOnBike.Overfit.Tests.Monitoring
         public async Task TryAlert_WhenScoreAboveCriticalThreshold_ThenSeverityIsCritical()
         {
             var sink = new CapturingSink();
-            var config = MakeConfig(threshold: 0.8f, criticalThreshold: 0.95f);
+            var config = MakeConfig(0.8f, 0.95f);
             await using var engine = new AlertEngine(config, sink);
 
-            engine.TryAlert("pod-1", anomalyScore: 1.0f, reconstructionMse: 0.1f);
+            engine.TryAlert("pod-1", 1.0f, 0.1f);
             await engine.DisposeAsync();
 
             Assert.Equal(AlertSeverity.Critical, sink.Received[0].Severity);
@@ -179,7 +155,7 @@ namespace DevOnBike.Overfit.Tests.Monitoring
             var sink = new CapturingSink();
             await using var engine = new AlertEngine(MakeConfig(), sink);
 
-            engine.TryAlert("pod-1", anomalyScore: 0.9f, reconstructionMse: 0.03f);
+            engine.TryAlert("pod-1", 0.9f, 0.03f);
             await engine.DisposeAsync();
 
             Assert.Equal(1, sink.SendCount);
@@ -191,7 +167,7 @@ namespace DevOnBike.Overfit.Tests.Monitoring
             var sink = new CapturingSink();
             await using var engine = new AlertEngine(MakeConfig(), sink);
 
-            engine.TryAlert("my-pod", anomalyScore: 0.9f, reconstructionMse: 0.03f);
+            engine.TryAlert("my-pod", 0.9f, 0.03f);
             await engine.DisposeAsync();
 
             Assert.Equal("my-pod", sink.Received[0].PodName);
@@ -203,7 +179,7 @@ namespace DevOnBike.Overfit.Tests.Monitoring
             var sink = new CapturingSink();
             await using var engine = new AlertEngine(MakeConfig(), sink);
 
-            engine.TryAlert("pod-1", anomalyScore: 0.87f, reconstructionMse: 0.025f);
+            engine.TryAlert("pod-1", 0.87f, 0.025f);
             await engine.DisposeAsync();
 
             Assert.Equal(0.87f, sink.Received[0].AnomalyScore);
@@ -217,7 +193,7 @@ namespace DevOnBike.Overfit.Tests.Monitoring
             var before = DateTime.UtcNow;
             await using var engine = new AlertEngine(MakeConfig(), sink);
 
-            engine.TryAlert("pod-1", anomalyScore: 0.9f, reconstructionMse: 0.01f);
+            engine.TryAlert("pod-1", 0.9f, 0.01f);
             await engine.DisposeAsync();
 
             var after = DateTime.UtcNow;
@@ -232,7 +208,7 @@ namespace DevOnBike.Overfit.Tests.Monitoring
             var sink2 = new CapturingSink();
             await using var engine = new AlertEngine(MakeConfig(), sink1, sink2);
 
-            engine.TryAlert("pod-1", anomalyScore: 0.9f, reconstructionMse: 0.03f);
+            engine.TryAlert("pod-1", 0.9f, 0.03f);
             await engine.DisposeAsync();
 
             Assert.Equal(1, sink1.SendCount);
@@ -245,7 +221,7 @@ namespace DevOnBike.Overfit.Tests.Monitoring
             var goodSink = new CapturingSink();
             await using var engine = new AlertEngine(MakeConfig(), new ThrowingSink(), goodSink);
 
-            engine.TryAlert("pod-1", anomalyScore: 0.9f, reconstructionMse: 0.03f);
+            engine.TryAlert("pod-1", 0.9f, 0.03f);
             await engine.DisposeAsync();
 
             Assert.Equal(1, goodSink.SendCount);
@@ -261,8 +237,8 @@ namespace DevOnBike.Overfit.Tests.Monitoring
             var config = MakeConfig(cooldown: TimeSpan.FromHours(1)); // very long cooldown
             await using var engine = new AlertEngine(config, new CapturingSink());
 
-            engine.TryAlert("pod-1", anomalyScore: 0.9f, reconstructionMse: 0.03f); // first — fires
-            var second = engine.TryAlert("pod-1", anomalyScore: 0.9f, reconstructionMse: 0.03f);
+            engine.TryAlert("pod-1", 0.9f, 0.03f); // first — fires
+            var second = engine.TryAlert("pod-1", 0.9f, 0.03f);
 
             Assert.False(second);
         }
@@ -273,10 +249,10 @@ namespace DevOnBike.Overfit.Tests.Monitoring
             var config = MakeConfig(cooldown: TimeSpan.FromMilliseconds(30));
             await using var engine = new AlertEngine(config, new CapturingSink());
 
-            engine.TryAlert("pod-1", anomalyScore: 0.9f, reconstructionMse: 0.03f); // first — fires
+            engine.TryAlert("pod-1", 0.9f, 0.03f); // first — fires
             await Task.Delay(60); // wait for cooldown to expire
 
-            var second = engine.TryAlert("pod-1", anomalyScore: 0.9f, reconstructionMse: 0.03f);
+            var second = engine.TryAlert("pod-1", 0.9f, 0.03f);
             Assert.True(second);
         }
 
@@ -286,8 +262,8 @@ namespace DevOnBike.Overfit.Tests.Monitoring
             var config = MakeConfig(cooldown: TimeSpan.FromHours(1));
             await using var engine = new AlertEngine(config, new CapturingSink());
 
-            engine.TryAlert("pod-A", anomalyScore: 0.9f, reconstructionMse: 0.03f); // fires for pod-A
-            var podB = engine.TryAlert("pod-B", anomalyScore: 0.9f, reconstructionMse: 0.03f);
+            engine.TryAlert("pod-A", 0.9f, 0.03f); // fires for pod-A
+            var podB = engine.TryAlert("pod-B", 0.9f, 0.03f);
 
             Assert.True(podB); // pod-B has its own cooldown
         }
@@ -336,6 +312,38 @@ namespace DevOnBike.Overfit.Tests.Monitoring
             await engine.DisposeAsync();
 
             Assert.Equal(5, sink.SendCount);
+        }
+        // -------------------------------------------------------------------------
+        // Test sink implementations
+        // -------------------------------------------------------------------------
+
+        private sealed class CapturingSink : IAlertSink
+        {
+            private readonly List<AlertEvent> _received = [];
+            public IReadOnlyList<AlertEvent> Received => _received;
+            public int SendCount => _received.Count;
+
+            public Task SendAsync(AlertEvent alert, CancellationToken ct = default)
+            {
+                lock (_received) { _received.Add(alert); }
+                return Task.CompletedTask;
+            }
+        }
+
+        private sealed class ThrowingSink : IAlertSink
+        {
+            public Task SendAsync(AlertEvent alert, CancellationToken ct = default)
+            {
+                return Task.FromException(new InvalidOperationException("Sink failure"));
+            }
+        }
+
+        private sealed class SlowSink(int delayMs = 50) : IAlertSink
+        {
+            public Task SendAsync(AlertEvent alert, CancellationToken ct = default)
+            {
+                return Task.Delay(delayMs, ct);
+            }
         }
     }
 }

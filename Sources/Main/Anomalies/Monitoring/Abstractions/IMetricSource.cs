@@ -8,16 +8,16 @@ using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 namespace DevOnBike.Overfit.Anomalies.Monitoring.Abstractions
 {
     /// <summary>
-    /// Metric source contract.
-    /// ValueTask — synchronous paths (tests, buffered reads) do not allocate a Task.
+    ///     Metric source contract.
+    ///     ValueTask — synchronous paths (tests, buffered reads) do not allocate a Task.
     /// </summary>
     public interface IMetricSource : IDisposable
     {
         string PodName { get; }
 
         /// <summary>
-        /// Reads the current metric sample.
-        /// Implementation may await the end of the scraping window before returning.
+        ///     Reads the current metric sample.
+        ///     Implementation may await the end of the scraping window before returning.
         /// </summary>
         ValueTask<MetricSnapshot> ReadAsync(CancellationToken ct = default);
     }

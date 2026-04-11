@@ -6,8 +6,8 @@
 namespace DevOnBike.Overfit.Anomalies.Monitoring.Contracts
 {
     /// <summary>
-    /// Result of a single alignment pass.
-    /// Windows[i] and PodIndex[i] always refer to the same pod.
+    ///     Result of a single alignment pass.
+    ///     Windows[i] and PodIndex[i] always refer to the same pod.
     /// </summary>
     public sealed class AlignResult
     {
@@ -15,8 +15,8 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring.Contracts
         public List<RawPodWindow> Windows { get; private set; } = [];
 
         /// <summary>
-        /// Pod identity for each window. From this point forward, pod name lives
-        /// only here — not inside the data arrays.
+        ///     Pod identity for each window. From this point forward, pod name lives
+        ///     only here — not inside the data arrays.
         /// </summary>
         public List<PodKey> PodIndex { get; private set; } = [];
     }

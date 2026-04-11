@@ -21,14 +21,14 @@ namespace DevOnBike.Overfit.Tests
             using var yData = new FastTensor<float>(4, 1);
             ((Span<float>)[0, 1, 1, 0]).CopyTo(yData.AsSpan());
 
-            using var X = new AutogradNode(xData, requiresGrad: false);
-            using var Y = new AutogradNode(yData, requiresGrad: false);
+            using var X = new AutogradNode(xData, false);
+            using var Y = new AutogradNode(yData, false);
 
-            using var layer1 = new LinearLayer(inputSize: 2, outputSize: 16);
-            using var layer2 = new LinearLayer(inputSize: 16, outputSize: 1);
+            using var layer1 = new LinearLayer(2, 16);
+            using var layer2 = new LinearLayer(16, 1);
 
             var model = new Sequential(layer1, new ReluActivation(), layer2);
-            var sgd = new SGD(model.Parameters(), learningRate: 0.1f);
+            var sgd = new SGD(model.Parameters(), 0.1f);
 
             var epochs = 2000;
             var finalLoss = 0f;
@@ -87,19 +87,19 @@ namespace DevOnBike.Overfit.Tests
                 yData[i, 0] = isOuter ? 1.0f : 0.0f;
             }
 
-            using var X = new AutogradNode(xData, requiresGrad: false);
-            using var Y = new AutogradNode(yData, requiresGrad: false);
+            using var X = new AutogradNode(xData, false);
+            using var Y = new AutogradNode(yData, false);
 
             using var layer1 = new LinearLayer(2, 32);
             using var layer2 = new LinearLayer(32, 16);
             using var layer3 = new LinearLayer(16, 1);
 
             var model = new Sequential(
-                layer1, new ReluActivation(),
-                layer2, new ReluActivation(),
-                layer3);
+            layer1, new ReluActivation(),
+            layer2, new ReluActivation(),
+            layer3);
 
-            var sgd = new SGD(model.Parameters(), learningRate: 0.05f);
+            var sgd = new SGD(model.Parameters(), 0.05f);
             var epochs = 3000;
             var finalLoss = 0f;
             var graph = new ComputationGraph();

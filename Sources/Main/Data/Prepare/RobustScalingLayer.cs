@@ -10,23 +10,26 @@ using DevOnBike.Overfit.Data.Contracts;
 namespace DevOnBike.Overfit.Data.Prepare
 {
     /// <summary>
-    /// Implements outlier-robust scaling using the median and Interquartile Range (IQR).
-    /// Formula: x' = (x - median) / IQR
+    ///     Implements outlier-robust scaling using the median and Interquartile Range (IQR).
+    ///     Formula: x' = (x - median) / IQR
     /// </summary>
     public sealed class RobustScalingLayer : IDataLayer
     {
+        private readonly bool _centerByMedian;
         private readonly HashSet<int> _columnIndices;
         private readonly HashSet<int> _excludedColumns;
         private readonly float _fallbackIqr;
-        private readonly bool _centerByMedian;
+        private bool _fitted;
+        private float[] _iqrs;
 
         // Persisted statistics from the Fit phase - reused during Transform (inference)
         private float[] _medians;
-        private float[] _iqrs;
-        private bool _fitted;
 
         /// <param name="columnIndices">Indices of columns to scale. Null = scale all (excluding specifically excluded columns).</param>
-        /// <param name="excludedColumns">Columns to skip (e.g., binary or one-hot encoded features). Scaling 0/1 by IQR is undefined.</param>
+        /// <param name="excludedColumns">
+        ///     Columns to skip (e.g., binary or one-hot encoded features). Scaling 0/1 by IQR is
+        ///     undefined.
+        /// </param>
         /// <param name="fallbackIqr">Default IQR to use if the calculated IQR is 0 (near-constant column). Defaults to 1.0.</param>
         /// <param name="centerByMedian">Whether to subtract the median (centering). False = divide by IQR only.</param>
         public RobustScalingLayer(
@@ -74,7 +77,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Calculates the median and IQR per column and persists them for inference.
+        ///     Calculates the median and IQR per column and persists them for inference.
         /// </summary>
         private void Fit(ReadOnlySpan<float> span, int rows, int cols)
         {
@@ -113,7 +116,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Applies the persisted statistics to data in-place.
+        ///     Applies the persisted statistics to data in-place.
         /// </summary>
         private void Transform(Span<float> span, int rows, int cols)
         {
@@ -163,9 +166,9 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Linear interpolation of percentiles.
-        /// Compatible with numpy.percentile(interpolation='linear').
-        /// Formula: rank = p * (N - 1). Result is lerp between adjacent samples.
+        ///     Linear interpolation of percentiles.
+        ///     Compatible with numpy.percentile(interpolation='linear').
+        ///     Formula: rank = p * (N - 1). Result is lerp between adjacent samples.
         /// </summary>
         private static float InterpolatePercentile(ReadOnlySpan<float> sorted, int count, float percentile)
         {
@@ -184,9 +187,9 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Exports fitted median and IQR parameters for persistence.
-        /// Call after processing the Golden Window data.
-        /// Throws if the scaler has not been fitted yet.
+        ///     Exports fitted median and IQR parameters for persistence.
+        ///     Call after processing the Golden Window data.
+        ///     Throws if the scaler has not been fitted yet.
         /// </summary>
         public ScalerParams ExportParams()
         {
@@ -203,8 +206,8 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Imports previously saved parameters, bypassing the Fit phase.
-        /// Use at inference time to restore a scaler fitted on the Golden Window.
+        ///     Imports previously saved parameters, bypassing the Fit phase.
+        ///     Use at inference time to restore a scaler fitted on the Golden Window.
         /// </summary>
         public void ImportParams(ScalerParams scalerParams)
         {
@@ -221,7 +224,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Resets the persisted statistics, forcing a re-Fit on the next Process call.
+        ///     Resets the persisted statistics, forcing a re-Fit on the next Process call.
         /// </summary>
         public void Reset()
         {

@@ -10,8 +10,8 @@ namespace DevOnBike.Overfit.Data.Contracts
         KeepFirst,
 
         /// <summary>
-        /// Retains the column more strongly correlated with the Target — slower, 
-        /// but provides superior predictive feature selection.
+        ///     Retains the column more strongly correlated with the Target — slower,
+        ///     but provides superior predictive feature selection.
         /// </summary>
         KeepHigherTargetCorrelation
     }

@@ -9,66 +9,75 @@ using System.Runtime.CompilerServices;
 namespace DevOnBike.Overfit.Core
 {
     /// <summary>
-    /// N-dimensional tensor using ArrayPool and inline fields for rank ≤ 4 metadata 
-    /// to eliminate heap pressure during inference.
+    ///     N-dimensional tensor using ArrayPool and inline fields for rank ≤ 4 metadata
+    ///     to eliminate heap pressure during inference.
     /// </summary>
     public sealed class FastTensor<T> : IDisposable
     {
+        private readonly bool _ownsData;
+
+        // Fallback for Rank > 4.
+        private readonly int[] _shapeOverflow;
+        private readonly int[] _stridesOverflow;
         private T[] _data;
         private int _disposed;
-        private readonly bool _ownsData;
 
         // Inline Shape/Strides (Rank ≤ 4) ──
         private int _s0, _s1, _s2, _s3;
         private int _st0, _st1, _st2, _st3;
 
-        // Fallback for Rank > 4.
-        private readonly int[] _shapeOverflow;
-        private readonly int[] _stridesOverflow;
+        public FastTensor(params int[] shape) : this(true, shape) {}
+
+        public FastTensor(bool clearMemory, params int[] shape)
+        {
+            Rank = shape.Length;
+            Size = CalculateSize(shape);
+            Offset = 0;
+            IsContiguous = true;
+            _ownsData = true;
+
+            StoreShape(shape);
+            StoreStrides(shape);
+
+            _data = ArrayPool<T>.Shared.Rent(Size);
+
+            if (clearMemory)
+            {
+                _data.AsSpan(0, Size).Clear();
+            }
+        }
+
+        private FastTensor(
+            T[] data, int rank, int size, int offset, bool isContiguous, bool ownsData,
+            int s0, int s1, int s2, int s3,
+            int st0, int st1, int st2, int st3,
+            int[] shapeOverflow, int[] stridesOverflow)
+        {
+            _data = data;
+            Rank = rank;
+            Size = size;
+            Offset = offset;
+            IsContiguous = isContiguous;
+            _ownsData = ownsData;
+            _s0 = s0;
+            _s1 = s1;
+            _s2 = s2;
+            _s3 = s3;
+            _st0 = st0;
+            _st1 = st1;
+            _st2 = st2;
+            _st3 = st3;
+            _shapeOverflow = shapeOverflow;
+            _stridesOverflow = stridesOverflow;
+        }
 
         public int Offset { get; }
         public int Size { get; }
         public int Rank { get; }
         public bool IsContiguous { get; }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public int GetDim(int index)
-        {
-            if (_shapeOverflow != null)
-            {
-                return _shapeOverflow[index];
-            }
-
-            return index switch
-            {
-                0 => _s0,
-                1 => _s1,
-                2 => _s2,
-                3 => _s3,
-                _ => throw new IndexOutOfRangeException()
-            };
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public int GetStride(int index)
-        {
-            if (_stridesOverflow != null)
-            {
-                return _stridesOverflow[index];
-            }
-
-            return index switch
-            {
-                0 => _st0,
-                1 => _st1,
-                2 => _st2,
-                3 => _st3,
-                _ => throw new IndexOutOfRangeException()
-            };
-        }
-
         /// <summary>
-        /// Allocation warning: This property creates a new array. Use only for debugging.
+        ///     Allocation warning: This property creates a new array. Use only for debugging.
         /// </summary>
         public int[] Shape
         {
@@ -107,45 +116,6 @@ namespace DevOnBike.Overfit.Core
             }
         }
 
-        public FastTensor(params int[] shape) : this(true, shape) { }
-
-        public FastTensor(bool clearMemory, params int[] shape)
-        {
-            Rank = shape.Length;
-            Size = CalculateSize(shape);
-            Offset = 0;
-            IsContiguous = true;
-            _ownsData = true;
-
-            StoreShape(shape);
-            StoreStrides(shape);
-
-            _data = ArrayPool<T>.Shared.Rent(Size);
-
-            if (clearMemory)
-            {
-                _data.AsSpan(0, Size).Clear();
-            }
-        }
-
-        private FastTensor(
-            T[] data, int rank, int size, int offset, bool isContiguous, bool ownsData,
-            int s0, int s1, int s2, int s3,
-            int st0, int st1, int st2, int st3,
-            int[] shapeOverflow, int[] stridesOverflow)
-        {
-            _data = data;
-            Rank = rank;
-            Size = size;
-            Offset = offset;
-            IsContiguous = isContiguous;
-            _ownsData = ownsData;
-            _s0 = s0; _s1 = s1; _s2 = s2; _s3 = s3;
-            _st0 = st0; _st1 = st1; _st2 = st2; _st3 = st3;
-            _shapeOverflow = shapeOverflow;
-            _stridesOverflow = stridesOverflow;
-        }
-
         public T this[int i]
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -176,6 +146,60 @@ namespace DevOnBike.Overfit.Core
             get => _data[Offset + i * _st0 + j * _st1 + k * _st2 + l * _st3];
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             set => _data[Offset + i * _st0 + j * _st1 + k * _st2 + l * _st3] = value;
+        }
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 1)
+            {
+                return;
+            }
+
+            if (_ownsData)
+            {
+                var rented = Interlocked.Exchange(ref _data, null!);
+
+                if (rented != null)
+                {
+                    ArrayPool<T>.Shared.Return(rented);
+                }
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public int GetDim(int index)
+        {
+            if (_shapeOverflow != null)
+            {
+                return _shapeOverflow[index];
+            }
+
+            return index switch
+            {
+                0 => _s0,
+                1 => _s1,
+                2 => _s2,
+                3 => _s3,
+                _ => throw new IndexOutOfRangeException()
+            };
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public int GetStride(int index)
+        {
+            if (_stridesOverflow != null)
+            {
+                return _stridesOverflow[index];
+            }
+
+            return index switch
+            {
+                0 => _st0,
+                1 => _st1,
+                2 => _st2,
+                3 => _st3,
+                _ => throw new IndexOutOfRangeException()
+            };
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -216,7 +240,7 @@ namespace DevOnBike.Overfit.Core
             (s[dim0], s[dim1]) = (s[dim1], s[dim0]);
             (st[dim0], st[dim1]) = (st[dim1], st[dim0]);
 
-            return MakeView(s, st, Offset, isContiguous: false);
+            return MakeView(s, st, Offset, false);
         }
 
         public FastTensor<T> Reshape(params int[] newShape)
@@ -235,11 +259,11 @@ namespace DevOnBike.Overfit.Core
 
             var newStrides = BuildStrides(newShape);
 
-            return MakeView(newShape, newStrides, Offset, isContiguous: true);
+            return MakeView(newShape, newStrides, Offset, true);
         }
 
         /// <summary>
-        /// Materializes a non-contiguous view into a new contiguous tensor.
+        ///     Materializes a non-contiguous view into a new contiguous tensor.
         /// </summary>
         public FastTensor<T> ToContiguous()
         {
@@ -279,8 +303,8 @@ namespace DevOnBike.Overfit.Core
         }
 
         /// <summary>
-        /// Optimized factory: Creates a new tensor matching the template shape.
-        /// Achieves zero-allocation for Rank ≤ 4.
+        ///     Optimized factory: Creates a new tensor matching the template shape.
+        ///     Achieves zero-allocation for Rank ≤ 4.
         /// </summary>
         public static FastTensor<T> SameShape(FastTensor<T> template, bool clearMemory = true)
         {
@@ -299,24 +323,6 @@ namespace DevOnBike.Overfit.Core
             AsSpan().Clear();
 
             return this;
-        }
-
-        public void Dispose()
-        {
-            if (Interlocked.Exchange(ref _disposed, 1) == 1)
-            {
-                return;
-            }
-
-            if (_ownsData)
-            {
-                var rented = Interlocked.Exchange(ref _data, null!);
-
-                if (rented != null)
-                {
-                    ArrayPool<T>.Shared.Return(rented);
-                }
-            }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -361,9 +367,21 @@ namespace DevOnBike.Overfit.Core
         {
             var cur = 1;
 
-            if (shape.Length > 3) { _st3 = cur; cur *= shape[3]; }
-            if (shape.Length > 2) { _st2 = cur; cur *= shape[2]; }
-            if (shape.Length > 1) { _st1 = cur; cur *= shape[1]; }
+            if (shape.Length > 3)
+            {
+                _st3 = cur;
+                cur *= shape[3];
+            }
+            if (shape.Length > 2)
+            {
+                _st2 = cur;
+                cur *= shape[2];
+            }
+            if (shape.Length > 1)
+            {
+                _st1 = cur;
+                cur *= shape[1];
+            }
             if (shape.Length > 0) { _st0 = cur; }
         }
 
@@ -379,10 +397,26 @@ namespace DevOnBike.Overfit.Core
             s = new int[Rank];
             st = new int[Rank];
 
-            if (Rank > 0) { s[0] = _s0; st[0] = _st0; }
-            if (Rank > 1) { s[1] = _s1; st[1] = _st1; }
-            if (Rank > 2) { s[2] = _s2; st[2] = _st2; }
-            if (Rank > 3) { s[3] = _s3; st[3] = _st3; }
+            if (Rank > 0)
+            {
+                s[0] = _s0;
+                st[0] = _st0;
+            }
+            if (Rank > 1)
+            {
+                s[1] = _s1;
+                st[1] = _st1;
+            }
+            if (Rank > 2)
+            {
+                s[2] = _s2;
+                st[2] = _st2;
+            }
+            if (Rank > 3)
+            {
+                s[3] = _s3;
+                st[3] = _st3;
+            }
         }
 
         private FastTensor<T> MakeView(int[] shape, int[] strides, int offset, bool isContiguous)
@@ -393,10 +427,26 @@ namespace DevOnBike.Overfit.Core
 
             if (shape.Length <= 4)
             {
-                if (shape.Length > 0) { s0 = shape[0]; st0 = strides[0]; }
-                if (shape.Length > 1) { s1 = shape[1]; st1 = strides[1]; }
-                if (shape.Length > 2) { s2 = shape[2]; st2 = strides[2]; }
-                if (shape.Length > 3) { s3 = shape[3]; st3 = strides[3]; }
+                if (shape.Length > 0)
+                {
+                    s0 = shape[0];
+                    st0 = strides[0];
+                }
+                if (shape.Length > 1)
+                {
+                    s1 = shape[1];
+                    st1 = strides[1];
+                }
+                if (shape.Length > 2)
+                {
+                    s2 = shape[2];
+                    st2 = strides[2];
+                }
+                if (shape.Length > 3)
+                {
+                    s3 = shape[3];
+                    st3 = strides[3];
+                }
             }
             else
             {
@@ -405,9 +455,9 @@ namespace DevOnBike.Overfit.Core
             }
 
             return new FastTensor<T>(
-                _data, shape.Length, Size, offset, isContiguous, ownsData: false,
-                s0, s1, s2, s3, st0, st1, st2, st3,
-                shapeOv, stridesOv);
+            _data, shape.Length, Size, offset, isContiguous, false,
+            s0, s1, s2, s3, st0, st1, st2, st3,
+            shapeOv, stridesOv);
         }
     }
 }

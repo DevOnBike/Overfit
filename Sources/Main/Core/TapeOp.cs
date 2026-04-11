@@ -8,8 +8,8 @@ using System.Runtime.InteropServices;
 namespace DevOnBike.Overfit.Core
 {
     /// <summary>
-    /// Represents a recorded operation in the computation tape.
-    /// Sequential layout ensures predictable memory access during the backward pass.
+    ///     Represents a recorded operation in the computation tape.
+    ///     Sequential layout ensures predictable memory access during the backward pass.
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     public readonly struct TapeOp
@@ -33,7 +33,11 @@ namespace DevOnBike.Overfit.Core
             Output = output;
             A = a;
             B = b;
-            I0 = i0; I1 = i1; I2 = i2; I3 = i3; I4 = i4;
+            I0 = i0;
+            I1 = i1;
+            I2 = i2;
+            I3 = i3;
+            I4 = i4;
             NodeContext = nodeContext;
         }
     }

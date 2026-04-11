@@ -10,8 +10,8 @@ using DevOnBike.Overfit.Data.Contracts;
 namespace DevOnBike.Overfit.Data.Prepare
 {
     /// <summary>
-    /// The initial pipeline layer responsible for sanitizing technical artifacts in the data.
-    /// Cleans NaN, ±Infinity, and subnormal values, with an option to discard rows exceeding a corruption threshold.
+    ///     The initial pipeline layer responsible for sanitizing technical artifacts in the data.
+    ///     Cleans NaN, ±Infinity, and subnormal values, with an option to discard rows exceeding a corruption threshold.
     /// </summary>
     public sealed class TechnicalSanityLayer : IDataLayer
     {
@@ -19,9 +19,9 @@ namespace DevOnBike.Overfit.Data.Prepare
         private readonly float _replacementValue;
 
         /// <param name="maxCorruptedRatio">
-        /// Maximum allowed ratio of corrupted values per row (0.0–1.0).
-        /// Rows exceeding this threshold will be discarded.
-        /// A value of 1.0 disables filtering and only performs in-place cleaning.
+        ///     Maximum allowed ratio of corrupted values per row (0.0–1.0).
+        ///     Rows exceeding this threshold will be discarded.
+        ///     A value of 1.0 disables filtering and only performs in-place cleaning.
         /// </param>
         /// <param name="replacementValue">The value used to replace NaN/Inf/Subnormal entries (default is 0).</param>
         public TechnicalSanityLayer(float maxCorruptedRatio = 1.0f, float replacementValue = 0f)
@@ -135,11 +135,11 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Checks if a value is technically corrupted: NaN, ±Infinity, or subnormal (denormalized).
+        ///     Checks if a value is technically corrupted: NaN, ±Infinity, or subnormal (denormalized).
         /// </summary>
         /// <remarks>
-        /// Subnormals can cause significant performance degradation (up to 100x slowdown) 
-        /// in floating-point operations on certain CPUs.
+        ///     Subnormals can cause significant performance degradation (up to 100x slowdown)
+        ///     in floating-point operations on certain CPUs.
         /// </remarks>
         private static bool IsCorrupted(float value)
         {

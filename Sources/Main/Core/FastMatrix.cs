@@ -11,16 +11,12 @@ using System.Runtime.CompilerServices;
 namespace DevOnBike.Overfit.Core
 {
     /// <summary>
-    /// Represents a high-performance 2D matrix structure optimized for numerical computing and machine learning.
+    ///     Represents a high-performance 2D matrix structure optimized for numerical computing and machine learning.
     /// </summary>
     public class FastMatrix<T> : IDisposable where T : struct, IFloatingPointIeee754<T>
     {
         private T[] _data;
         private bool _disposed;
-
-        public int Cols { get; }
-        public int Rows { get; }
-        public int Size { get; }
 
         public FastMatrix(int rows, int cols)
         {
@@ -36,6 +32,10 @@ namespace DevOnBike.Overfit.Core
             _data.AsSpan(0, Size).Clear();
         }
 
+        public int Cols { get; }
+        public int Rows { get; }
+        public int Size { get; }
+
         public ref T this[int row, int col]
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -44,6 +44,12 @@ namespace DevOnBike.Overfit.Core
                 ObjectDisposedException.ThrowIf(_disposed, this);
                 return ref _data![row * Cols + col];
             }
+        }
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -74,12 +80,12 @@ namespace DevOnBike.Overfit.Core
 
         public TensorSpan<T> AsTensor()
         {
-            return new(AsSpan(), [Rows, Cols], default);
+            return new TensorSpan<T>(AsSpan(), [Rows, Cols], default);
         }
 
         public ReadOnlyTensorSpan<T> AsReadOnlyTensor()
         {
-            return new(AsReadOnlySpan(), [Rows, Cols], default);
+            return new ReadOnlyTensorSpan<T>(AsReadOnlySpan(), [Rows, Cols], default);
         }
 
         public void Clear()
@@ -136,7 +142,7 @@ namespace DevOnBike.Overfit.Core
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
 
-            return new FastMatrixView<T>(AsSpan(), Rows, Cols, rowStride: Cols, colStride: 1, offset: 0);
+            return new FastMatrixView<T>(AsSpan(), Rows, Cols, Cols, 1, 0);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -152,9 +158,9 @@ namespace DevOnBike.Overfit.Core
         }
 
         /// <summary>
-        /// Materializes the view into a new, contiguous FastMatrix.
-        /// Essential for Autograd when a transposed view needs to be the right-hand operand in SIMD GEMM.
-        /// Caller is responsible for disposing the returned FastMatrix.
+        ///     Materializes the view into a new, contiguous FastMatrix.
+        ///     Essential for Autograd when a transposed view needs to be the right-hand operand in SIMD GEMM.
+        ///     Caller is responsible for disposing the returned FastMatrix.
         /// </summary>
         public FastMatrix<T> ToContiguousFastMatrix()
         {
@@ -182,12 +188,6 @@ namespace DevOnBike.Overfit.Core
                 }
             }
 
-        }
-
-        public void Dispose()
-        {
-            Dispose(true);
-            GC.SuppressFinalize(this);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

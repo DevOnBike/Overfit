@@ -3,27 +3,24 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using DevOnBike.Overfit.Core;
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
     /// <summary>
-    /// Implements a fully-connected Linear (Dense) Layer.
-    /// Features an optimized zero-allocation SIMD inference path through weight pre-transposition.
+    ///     Implements a fully-connected Linear (Dense) Layer.
+    ///     Features an optimized zero-allocation SIMD inference path through weight pre-transposition.
     /// </summary>
     public sealed class LinearLayer : IModule
     {
-        public AutogradNode Weights { get; private set; }
-        public AutogradNode Biases { get; private set; }
-        public bool IsTraining { get; private set; } = true;
-
-        private readonly int _inputSize;
-        private readonly int _outputSize;
 
         // Inference buffer used to achieve Zero-Allocation during forward passes.
         private readonly AutogradNode _inferenceOutputNode;
+
+        private readonly int _inputSize;
+        private readonly int _outputSize;
 
         // Cached transposed weights for SIMD inference — shape: (outputSize, inputSize).
         // Sequential memory access in the inner loop ensures maximum SIMD utilization.
@@ -42,12 +39,15 @@ namespace DevOnBike.Overfit.DeepLearning
                 wSpan[i] = MathUtils.NextGaussian() * stdDev;
             }
 
-            Weights = new AutogradNode(wData, true);
-            Biases = new AutogradNode(new FastTensor<float>(outputSize), true);
+            Weights = new AutogradNode(wData);
+            Biases = new AutogradNode(new FastTensor<float>(outputSize));
 
             var outData = new FastTensor<float>(1, outputSize);
-            _inferenceOutputNode = new AutogradNode(outData, requiresGrad: false);
+            _inferenceOutputNode = new AutogradNode(outData, false);
         }
+        public AutogradNode Weights { get; }
+        public AutogradNode Biases { get; }
+        public bool IsTraining { get; private set; } = true;
 
         public void Train()
         {
@@ -65,7 +65,7 @@ namespace DevOnBike.Overfit.DeepLearning
         }
 
         /// <summary>
-        /// Performs the forward pass. Dispatches to a highly optimized SIMD kernel for single-row inference.
+        ///     Performs the forward pass. Dispatches to a highly optimized SIMD kernel for single-row inference.
         /// </summary>
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
@@ -84,10 +84,10 @@ namespace DevOnBike.Overfit.DeepLearning
                 }
 
                 LinearInferenceSimd(
-                    input.Data.AsReadOnlySpan(),
-                    _weightsTransposed.AsReadOnlySpan(),
-                    Biases.Data.AsReadOnlySpan(),
-                    _inferenceOutputNode.Data.AsSpan());
+                input.Data.AsReadOnlySpan(),
+                _weightsTransposed.AsReadOnlySpan(),
+                Biases.Data.AsReadOnlySpan(),
+                _inferenceOutputNode.Data.AsSpan());
 
                 return _inferenceOutputNode;
             }
@@ -142,6 +142,14 @@ namespace DevOnBike.Overfit.DeepLearning
             }
         }
 
+        public void Dispose()
+        {
+            Weights?.Dispose();
+            Biases?.Dispose();
+            _inferenceOutputNode?.Dispose();
+            _weightsTransposed?.Dispose();
+        }
+
         public void Save(string path)
         {
             using var fs = new FileStream(path, FileMode.Create);
@@ -162,8 +170,8 @@ namespace DevOnBike.Overfit.DeepLearning
         }
 
         /// <summary>
-        /// Transposes weights: W[inputSize, outputSize] → W_T[outputSize, inputSize].
-        /// This ensures that data for each output neuron lies sequentially in memory, 
+        ///     Transposes weights: W[inputSize, outputSize] → W_T[outputSize, inputSize].
+        ///     This ensures that data for each output neuron lies sequentially in memory,
         /// </summary>
         private void RebuildTransposedWeights()
         {
@@ -183,7 +191,7 @@ namespace DevOnBike.Overfit.DeepLearning
         }
 
         /// <summary>
-        /// Highly optimized SIMD inference kernel for pre-transposed weights.
+        ///     Highly optimized SIMD inference kernel for pre-transposed weights.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void LinearInferenceSimd(
@@ -218,14 +226,6 @@ namespace DevOnBike.Overfit.DeepLearning
 
                 output[j] = scalarSum;
             }
-        }
-
-        public void Dispose()
-        {
-            Weights?.Dispose();
-            Biases?.Dispose();
-            _inferenceOutputNode?.Dispose();
-            _weightsTransposed?.Dispose();
         }
     }
 }

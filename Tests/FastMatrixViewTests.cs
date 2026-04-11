@@ -13,7 +13,10 @@ namespace DevOnBike.Overfit.Tests
         // Reprezentacja wizualna macierzy:
         // [ 1, 2, 3 ]
         // [ 4, 5, 6 ]
-        private double[] CreateTestData() => [1, 2, 3, 4, 5, 6];
+        private double[] CreateTestData()
+        {
+            return [1, 2, 3, 4, 5, 6];
+        }
 
         [Fact]
         public void Indexer_ReadAndWrite_WorksOnUnderlyingSpan()
@@ -21,7 +24,7 @@ namespace DevOnBike.Overfit.Tests
             // Arrange
             var data = CreateTestData();
             var span = data.AsSpan();
-            var view = new FastMatrixView<double>(span, rows: 2, cols: 3, rowStride: 3, colStride: 1, offset: 0);
+            var view = new FastMatrixView<double>(span, 2, 3, 3, 1, 0);
 
             // Act & Assert (Read)
             Assert.Equal(1, view[0, 0]);
@@ -41,12 +44,12 @@ namespace DevOnBike.Overfit.Tests
         {
             // Arrange
             var span = CreateTestData().AsSpan();
-            
+
             // Continuous View
-            var view = new FastMatrixView<double>(span, rows: 2, cols: 3, rowStride: 3, colStride: 1, offset: 0);
-            
+            var view = new FastMatrixView<double>(span, 2, 3, 3, 1, 0);
+
             // Non-Continuous View (e.g., reading every second element)
-            var nonContiguousView = new FastMatrixView<double>(span, rows: 2, cols: 2, rowStride: 3, colStride: 2, offset: 0);
+            var nonContiguousView = new FastMatrixView<double>(span, 2, 2, 3, 2, 0);
 
             // Assert
             Assert.True(view.IsContiguous);
@@ -58,7 +61,7 @@ namespace DevOnBike.Overfit.Tests
         {
             // Arrange
             var span = CreateTestData().AsSpan();
-            var view = new FastMatrixView<double>(span, rows: 2, cols: 3, rowStride: 3, colStride: 1, offset: 0);
+            var view = new FastMatrixView<double>(span, 2, 3, 3, 1, 0);
 
             // Act
             var transposed = view.Transpose();
@@ -84,18 +87,18 @@ namespace DevOnBike.Overfit.Tests
         {
             // Arrange
             var span = CreateTestData().AsSpan();
-            var view = new FastMatrixView<double>(span, rows: 2, cols: 3, rowStride: 3, colStride: 1, offset: 0);
+            var view = new FastMatrixView<double>(span, 2, 3, 3, 1, 0);
 
             // Act: Wycinamy podmacierz 1x2 z prawego dolnego rogu
             // [ x, x, x ]
             // [ x, 5, 6 ] <- startRow: 1, startCol: 1
-            var slice = view.Slice(1, 1, rows: 1, cols: 2);
+            var slice = view.Slice(1, 1, 1, 2);
 
             // Assert metadata
             Assert.Equal(1, slice.Rows);
             Assert.Equal(2, slice.Cols);
             // Offset powinien wskazywać na indeks 4 (wartość '5') w oryginalnej tablicy
-            Assert.Equal(4, slice.Offset); 
+            Assert.Equal(4, slice.Offset);
 
             // Assert data
             Assert.Equal(5, slice[0, 0]);
@@ -107,7 +110,7 @@ namespace DevOnBike.Overfit.Tests
         {
             // Arrange
             var span = CreateTestData().AsSpan();
-            var view = new FastMatrixView<double>(span, rows: 2, cols: 3, rowStride: 3, colStride: 1, offset: 0);
+            var view = new FastMatrixView<double>(span, 2, 3, 3, 1, 0);
 
             // Act & Assert
             // Używamy try-catch zamiast Assert.Throws, ponieważ 'view' to 'ref struct' 
@@ -115,7 +118,7 @@ namespace DevOnBike.Overfit.Tests
             ArgumentOutOfRangeException expectedException = null;
             try
             {
-                view.Slice(1, 2, rows: 2, cols: 2); // Wychodzi poza wymiar
+                view.Slice(1, 2, 2, 2); // Wychodzi poza wymiar
             }
             catch (ArgumentOutOfRangeException ex)
             {
@@ -131,7 +134,7 @@ namespace DevOnBike.Overfit.Tests
         {
             // Arrange
             var span = CreateTestData().AsSpan();
-            var view = new FastMatrixView<double>(span, rows: 2, cols: 3, rowStride: 3, colStride: 1, offset: 0);
+            var view = new FastMatrixView<double>(span, 2, 3, 3, 1, 0);
 
             // Act
             var rowSpan = view.Row(1); // Drugi wiersz: [ 4, 5, 6 ]
@@ -148,8 +151,8 @@ namespace DevOnBike.Overfit.Tests
         {
             // Arrange
             var span = CreateTestData().AsSpan();
-            var view = new FastMatrixView<double>(span, rows: 2, cols: 3, rowStride: 3, colStride: 1, offset: 0);
-            
+            var view = new FastMatrixView<double>(span, 2, 3, 3, 1, 0);
+
             // Tworzymy transpozycję. ColStride staje się > 1, więc pamięć wiersza nie jest ciągła.
             var transposed = view.Transpose();
 

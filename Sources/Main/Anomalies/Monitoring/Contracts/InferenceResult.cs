@@ -6,7 +6,7 @@
 namespace DevOnBike.Overfit.Anomalies.Monitoring.Contracts
 {
     /// <summary>
-    /// Result of a single inference step — emitted for every completed window.
+    ///     Result of a single inference step — emitted for every completed window.
     /// </summary>
     public sealed record InferenceResult
     {

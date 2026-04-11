@@ -16,7 +16,10 @@ namespace DevOnBike.Overfit.Tests.Prepare
     {
         private readonly ITestOutputHelper _output;
 
-        public RealEstateFullCycleTests(ITestOutputHelper output) => _output = output;
+        public RealEstateFullCycleTests(ITestOutputHelper output)
+        {
+            _output = output;
+        }
 
         [Fact]
         public void Training_And_Prediction_Should_Work_EndToEnd()
@@ -24,7 +27,7 @@ namespace DevOnBike.Overfit.Tests.Prepare
             var rawData = GenerateDummyData(500);
             var schema = CreatePropertySchema();
 
-            var converter = new TabularToTensorConverter<PropertyData>(schema, (item, propName) => propName switch
+            var converter = new TabularToTensorConverter<PropertyData>(schema, valueExtractor: (item, propName) => propName switch
             {
                 "Powierzchnia" => item.Powierzchnia,
                 "Pietro" => item.Pietro,
@@ -51,20 +54,34 @@ namespace DevOnBike.Overfit.Tests.Prepare
             // [7] Wroclaw       (One-Hot)
             // [8] Premium       (One-Hot)
             // [9] Standard      (One-Hot)
-            var binaryAndOneHot = new HashSet<int> { 2, 3, 5, 6, 7, 8, 9 };
-            var numericColumns = new HashSet<int> { 0, 1, 4 };
+            var binaryAndOneHot = new HashSet<int>
+            {
+                2,
+                3,
+                5,
+                6,
+                7,
+                8,
+                9
+            };
+            var numericColumns = new HashSet<int>
+            {
+                0,
+                1,
+                4
+            };
 
             var pipeline = new DataPipeline(log: msg => _output.WriteLine(msg))
                 .AddLayer(new TechnicalSanityLayer(maxCorruptedRatio: 0.3f))
                 .AddLayer(new DuplicateRowFilterLayer())
                 .AddLayer(new ConstantColumnFilterLayer())
                 .AddLayer(new OutlierClipLayer(
-                    lowerPercentile: 0.01f,
-                    upperPercentile: 0.99f,
-                    excludedColumns: binaryAndOneHot))
+                0.01f,
+                0.99f,
+                excludedColumns: binaryAndOneHot))
                 .AddLayer(new RobustScalingLayer(
-                    columnIndices: numericColumns,
-                    excludedColumns: binaryAndOneHot));
+                numericColumns,
+                binaryAndOneHot));
 
             using var cleanContext = pipeline.Execute(rawX, rawY);
 
@@ -86,17 +103,20 @@ namespace DevOnBike.Overfit.Tests.Prepare
             var heScale1 = MathF.Sqrt(2.0f / inputSize);
             var heScale2 = MathF.Sqrt(2.0f / 32);
 
-            var w1 = new AutogradNode(new FastTensor<float>(inputSize, 32).Randomize(heScale1), true);
-            var b1 = new AutogradNode(new FastTensor<float>(1, 32).Fill(0.1f), true);
-            var w2 = new AutogradNode(new FastTensor<float>(32, 1).Randomize(heScale2), true);
-            var b2 = new AutogradNode(new FastTensor<float>(1, 1).Fill(meanTarget), true);
+            var w1 = new AutogradNode(new FastTensor<float>(inputSize, 32).Randomize(heScale1));
+            var b1 = new AutogradNode(new FastTensor<float>(1, 32).Fill(0.1f));
+            var w2 = new AutogradNode(new FastTensor<float>(32, 1).Randomize(heScale2));
+            var b2 = new AutogradNode(new FastTensor<float>(1, 1).Fill(meanTarget));
 
             var inputNode = new AutogradNode(cleanContext.Features, false);
             var targetNode = new AutogradNode(cleanContext.Targets, false);
 
-            var parameters = new[] { w1, b1, w2, b2 };
-            var optimizer = new Adam(parameters, learningRate: 0.005f);
-            var scheduler = new LRScheduler(optimizer, parameters, msg => _output.WriteLine(msg), 0.5f, 50, 1e-6f, 0.001f);
+            var parameters = new[]
+            {
+                w1, b1, w2, b2
+            };
+            var optimizer = new Adam(parameters, 0.005f);
+            var scheduler = new LRScheduler(optimizer, parameters, log: msg => _output.WriteLine(msg), 0.5f, 50, 1e-6f, 0.001f);
 
             var graph = new ComputationGraph();
 
@@ -142,7 +162,10 @@ namespace DevOnBike.Overfit.Tests.Prepare
                 NazwaAgencji = "Premium"
             };
 
-            var (valX, _) = converter.Transform(new List<PropertyData> { testProperty });
+            var (valX, _) = converter.Transform(new List<PropertyData>
+            {
+                testProperty
+            });
             using var valContext = pipeline.Execute(valX, new FastTensor<float>(1, 1));
             var valInput = new AutogradNode(valContext.Features, false);
 
@@ -167,8 +190,14 @@ namespace DevOnBike.Overfit.Tests.Prepare
         {
             var data = new List<PropertyData>(count);
             var rnd = new Random(42);
-            var miasta = new[] { "Warszawa", "Krakow", "Wroclaw" };
-            var agencje = new[] { "Premium", "Standard" };
+            var miasta = new[]
+            {
+                "Warszawa", "Krakow", "Wroclaw"
+            };
+            var agencje = new[]
+            {
+                "Premium", "Standard"
+            };
 
             for (var i = 0; i < count; i++)
             {
@@ -188,9 +217,9 @@ namespace DevOnBike.Overfit.Tests.Prepare
                 var powKomorki = czyMaKomorke ? rnd.Next(2, 10) : 0f;
 
                 // Cena: baza + szum + korekta za kamienicę
-                var cena = (pow * mnoznikMiasta)
-                    + rnd.Next(-20000, 20000)
-                    + (czyKamienica ? 15000f : 0f);
+                var cena = pow * mnoznikMiasta
+                           + rnd.Next(-20000, 20000)
+                           + (czyKamienica ? 15000f : 0f);
 
                 data.Add(new PropertyData
                 {
@@ -208,19 +237,54 @@ namespace DevOnBike.Overfit.Tests.Prepare
             return data;
         }
 
-        private TableSchema CreatePropertySchema() => new TableSchema
+        private TableSchema CreatePropertySchema()
         {
-            Features =
-            [
-                new() { Name = "Powierzchnia", Type = ColumnType.Numeric },
-                new() { Name = "Pietro", Type = ColumnType.Numeric },
-                new() { Name = "CzyKamienica", Type = ColumnType.Binary },
-                new() { Name = "CzyMaKomorke", Type = ColumnType.Binary },
-                new() { Name = "PowKomorki", Type = ColumnType.Numeric },
-                new() { Name = "Miasto", Type = ColumnType.Categorical },
-                new() { Name = "NazwaAgencji", Type = ColumnType.Categorical },
-            ],
-            Target = new ColumnDefinition { Name = "Cena", Type = ColumnType.Numeric }
-        };
+            return new TableSchema
+            {
+                Features =
+                [
+                    new ColumnDefinition
+                    {
+                        Name = "Powierzchnia",
+                        Type = ColumnType.Numeric
+                    },
+                    new ColumnDefinition
+                    {
+                        Name = "Pietro",
+                        Type = ColumnType.Numeric
+                    },
+                    new ColumnDefinition
+                    {
+                        Name = "CzyKamienica",
+                        Type = ColumnType.Binary
+                    },
+                    new ColumnDefinition
+                    {
+                        Name = "CzyMaKomorke",
+                        Type = ColumnType.Binary
+                    },
+                    new ColumnDefinition
+                    {
+                        Name = "PowKomorki",
+                        Type = ColumnType.Numeric
+                    },
+                    new ColumnDefinition
+                    {
+                        Name = "Miasto",
+                        Type = ColumnType.Categorical
+                    },
+                    new ColumnDefinition
+                    {
+                        Name = "NazwaAgencji",
+                        Type = ColumnType.Categorical
+                    }
+                ],
+                Target = new ColumnDefinition
+                {
+                    Name = "Cena",
+                    Type = ColumnType.Numeric
+                }
+            };
+        }
     }
 }

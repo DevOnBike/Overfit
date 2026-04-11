@@ -14,8 +14,8 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 namespace Benchmarks
 {
     /// <summary>
-    /// Analyzes multi-threaded inference performance (8 threads × 1000 iterations).
-    /// Compares synchronization overhead and resource contention between ONNX Runtime and Overfit.
+    ///     Analyzes multi-threaded inference performance (8 threads × 1000 iterations).
+    ///     Compares synchronization overhead and resource contention between ONNX Runtime and Overfit.
     /// </summary>
     [SimpleJob(RuntimeMoniker.Net10_0)]
     [Orderer(SummaryOrderPolicy.FastestToSlowest)]
@@ -28,12 +28,12 @@ namespace Benchmarks
         private const int IterationsPerThread = 1000;
 
         private float[] _inputData;
+        private AutogradNode[] _inputNodes;
+        private FastTensor<float>[] _inputTensors;
 
         private InferenceSession _onnxSession;
 
         private Sequential[] _overfitModels;
-        private FastTensor<float>[] _inputTensors;
-        private AutogradNode[] _inputNodes;
 
         [GlobalSetup]
         public void Setup()
@@ -55,7 +55,7 @@ namespace Benchmarks
 
                 _inputTensors[t] = new FastTensor<float>(false, 1, InputSize);
                 _inputData.AsSpan().CopyTo(_inputTensors[t].AsSpan());
-                _inputNodes[t] = new AutogradNode(_inputTensors[t], requiresGrad: false);
+                _inputNodes[t] = new AutogradNode(_inputTensors[t], false);
 
                 for (var i = 0; i < 100; i++)
                 {
@@ -65,18 +65,20 @@ namespace Benchmarks
         }
 
         /// <summary>
-        /// Measures ONNX Runtime performance under concurrent load. 
-        /// Expects potential bottlenecks due to internal thread synchronization.
+        ///     Measures ONNX Runtime performance under concurrent load.
+        ///     Expects potential bottlenecks due to internal thread synchronization.
         /// </summary>
         [Benchmark(Baseline = true)]
         public float OnnxRuntime_Concurrent()
         {
             var results = new float[ThreadCount];
 
-            Parallel.For(0, ThreadCount, t =>
-            {
+            Parallel.For(0, ThreadCount, body: t => {
                 var tensor = new DenseTensor<float>(_inputData, [1, InputSize]);
-                var inputs = new NamedOnnxValue[] { NamedOnnxValue.CreateFromTensor("input", tensor) };
+                var inputs = new[]
+                {
+                    NamedOnnxValue.CreateFromTensor("input", tensor)
+                };
                 var sum = 0f;
 
                 for (var i = 0; i < IterationsPerThread; i++)
@@ -92,16 +94,15 @@ namespace Benchmarks
         }
 
         /// <summary>
-        /// Measures Overfit performance with zero-contention concurrent execution.
-        /// Leverages independent memory buffers and pre-transposed weights for peak throughput.
+        ///     Measures Overfit performance with zero-contention concurrent execution.
+        ///     Leverages independent memory buffers and pre-transposed weights for peak throughput.
         /// </summary>
         [Benchmark]
         public float Overfit_Concurrent_ZeroContention()
         {
             var results = new float[ThreadCount];
 
-            Parallel.For(0, ThreadCount, t =>
-            {
+            Parallel.For(0, ThreadCount, body: t => {
                 var model = _overfitModels[t];
                 var inputNode = _inputNodes[t];
                 var sum = 0f;

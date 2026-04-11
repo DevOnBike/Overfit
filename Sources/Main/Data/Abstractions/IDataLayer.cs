@@ -15,19 +15,19 @@ using DevOnBike.Overfit.Data.Prepare;
 namespace DevOnBike.Overfit.Data.Abstractions
 {
     /// <summary>
-    /// Defines the fundamental contract for a data processing layer within the Overfit pipeline.
+    ///     Defines the fundamental contract for a data processing layer within the Overfit pipeline.
     /// </summary>
     /// <remarks>
-    /// Each layer represents a single step in data preparation (e.g., filtering, selection, or scaling).
-    /// Layers are executed sequentially by the <see cref="DataPipeline"/>.
+    ///     Each layer represents a single step in data preparation (e.g., filtering, selection, or scaling).
+    ///     Layers are executed sequentially by the <see cref="DataPipeline" />.
     /// </remarks>
     public interface IDataLayer
     {
         /// <summary>
-        /// Processes the data state within the provided context and returns the transformed result.
+        ///     Processes the data state within the provided context and returns the transformed result.
         /// </summary>
         /// <param name="context">The current pipeline context holding feature and target tensors.</param>
-        /// <returns>The processed <see cref="PipelineContext"/>.</returns>
+        /// <returns>The processed <see cref="PipelineContext" />.</returns>
         PipelineContext Process(PipelineContext context);
     }
 }

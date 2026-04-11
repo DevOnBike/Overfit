@@ -3,16 +3,16 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Diagnostics;
 using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.Data.Abstractions;
 using DevOnBike.Overfit.Data.Contracts;
-using System.Diagnostics;
 
 namespace DevOnBike.Overfit.Data.Prepare
 {
     /// <summary>
-    /// Coordinates the sequential execution of data processing layers.
-    /// Tracks dimension changes and execution time for each step in the pipeline.
+    ///     Coordinates the sequential execution of data processing layers.
+    ///     Tracks dimension changes and execution time for each step in the pipeline.
     /// </summary>
     public class DataPipeline
     {
@@ -20,7 +20,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         private readonly Action<string> _log;
 
         /// <param name="log">
-        /// Optional logging callback (e.g., ILogger.LogInformation). 
+        ///     Optional logging callback (e.g., ILogger.LogInformation).
         /// </param>
         public DataPipeline(Action<string> log = null)
         {
@@ -28,7 +28,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Appends a processing layer to the end of the pipeline.
+        ///     Appends a processing layer to the end of the pipeline.
         /// </summary>
         public DataPipeline AddLayer(IDataLayer layer)
         {
@@ -37,7 +37,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Executes all registered layers sequentially on the provided features and targets.
+        ///     Executes all registered layers sequentially on the provided features and targets.
         /// </summary>
         public PipelineContext Execute(FastTensor<float> features, FastTensor<float> targets)
         {

@@ -8,8 +8,8 @@ using DevOnBike.Overfit.Core;
 namespace DevOnBike.Overfit.Anomalies.Monitoring.Contracts
 {
     /// <summary>
-    /// Scaled tensors ready for the LSTM autoencoder.
-    /// All values normalised to ~[-3, 3] via RobustScaler.
+    ///     Scaled tensors ready for the LSTM autoencoder.
+    ///     All values normalised to ~[-3, 3] via RobustScaler.
     /// </summary>
     public sealed class ScaledResult
     {

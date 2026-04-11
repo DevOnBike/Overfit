@@ -27,7 +27,9 @@ namespace DevOnBike.Overfit.Tests
             {
                 var pixels = imgReader.ReadBytes(784);
                 for (var j = 0; j < 784; j++)
+                {
                     images[i, j] = pixels[j] / 255.0f;
+                }
 
                 int label = lblReader.ReadByte();
                 labels[i, label] = 1.0f;

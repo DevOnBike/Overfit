@@ -10,20 +10,24 @@ using DevOnBike.Overfit.Data.Contracts;
 namespace DevOnBike.Overfit.Data.Prepare
 {
     /// <summary>
-    /// Detects and removes duplicate rows based on feature values.
-    /// Employs a two-stage comparison strategy: fast hashing followed by full Span verification 
-    /// to eliminate false positive collisions.
+    ///     Detects and removes duplicate rows based on feature values.
+    ///     Employs a two-stage comparison strategy: fast hashing followed by full Span verification
+    ///     to eliminate false positive collisions.
     /// </summary>
     public sealed class DuplicateRowFilterLayer : IDataLayer
     {
         private readonly bool _includeTargetInComparison;
 
         /// <param name="includeTargetInComparison">
-        /// Whether to include the Target column when identifying duplicates.
-        /// <list type="bullet">
-        /// <item><description><c>true</c>: Rows with identical features but different targets are NOT considered duplicates.</description></item>
-        /// <item><description><c>false</c>: Only features are compared (default; safer for regression tasks).</description></item>
-        /// </list>
+        ///     Whether to include the Target column when identifying duplicates.
+        ///     <list type="bullet">
+        ///         <item>
+        ///             <description><c>true</c>: Rows with identical features but different targets are NOT considered duplicates.</description>
+        ///         </item>
+        ///         <item>
+        ///             <description><c>false</c>: Only features are compared (default; safer for regression tasks).</description>
+        ///         </item>
+        ///     </list>
         /// </param>
         public DuplicateRowFilterLayer(bool includeTargetInComparison = false)
         {

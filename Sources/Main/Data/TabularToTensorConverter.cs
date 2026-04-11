@@ -9,14 +9,14 @@ using DevOnBike.Overfit.Data.Contracts;
 namespace DevOnBike.Overfit.Data
 {
     /// <summary>
-    /// Converts tabular data (objects/models) into high-performance <see cref="FastTensor{float}"/> objects.
-    /// Handles automated One-Hot Encoding for categorical variables and type mapping for numeric/binary data.
+    ///     Converts tabular data (objects/models) into high-performance <see cref="FastTensor{}" /> objects.
+    ///     Handles automated One-Hot Encoding for categorical variables and type mapping for numeric/binary data.
     /// </summary>
     /// <typeparam name="T">The type of the input data model.</typeparam>
     public class TabularToTensorConverter<T>
     {
-        private readonly TableSchema _schema;
         private readonly Dictionary<string, string[]> _categoryMaps = new();
+        private readonly TableSchema _schema;
 
         private readonly Func<T, string, object> _valueExtractor;
         private int _featureWidth;
@@ -30,7 +30,7 @@ namespace DevOnBike.Overfit.Data
         }
 
         /// <summary>
-        /// Analyzes the dataset to calculate feature width and builds category maps for One-Hot Encoding.
+        ///     Analyzes the dataset to calculate feature width and builds category maps for One-Hot Encoding.
         /// </summary>
         public void Fit(IEnumerable<T> data)
         {
@@ -68,8 +68,8 @@ namespace DevOnBike.Overfit.Data
         }
 
         /// <summary>
-        /// Transforms the input list into a feature tensor and a target tensor.
-        /// Requires <see cref="Fit"/> to be called beforehand.
+        ///     Transforms the input list into a feature tensor and a target tensor.
+        ///     Requires <see cref="Fit" /> to be called beforehand.
         /// </summary>
         public (FastTensor<float> Features, FastTensor<float> Targets) Transform(List<T> data)
         {
@@ -121,6 +121,8 @@ namespace DevOnBike.Overfit.Data
         }
 
         private object GetValue(T item, string propName)
-            => _valueExtractor(item, propName);
+        {
+            return _valueExtractor(item, propName);
+        }
     }
 }

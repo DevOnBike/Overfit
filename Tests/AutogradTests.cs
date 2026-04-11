@@ -80,7 +80,7 @@ namespace DevOnBike.Overfit.Tests
             using var input = new AutogradNode(new FastTensor<float>(1, 10));
             input.Data.AsSpan().Fill(1.0f);
 
-            using var res = TensorMath.Dropout(graph, input, 0.5f, isTraining: true);
+            using var res = TensorMath.Dropout(graph, input, 0.5f, true);
             graph.Backward(res);
 
             var grads = input.Grad.AsSpan();
@@ -167,7 +167,7 @@ namespace DevOnBike.Overfit.Tests
             Assert.Equal(2.5f, res.Data[0, 0]);
 
             graph.Backward(res);
-            Assert.All(input.Grad.AsSpan().ToArray(), x => Assert.Equal(0.25f, x));
+            Assert.All(input.Grad.AsSpan().ToArray(), action: x => Assert.Equal(0.25f, x));
         }
 
         [Fact]
@@ -179,7 +179,8 @@ namespace DevOnBike.Overfit.Tests
 
             using var gamma = new AutogradNode(new FastTensor<float>(1));
             using var beta = new AutogradNode(new FastTensor<float>(1));
-            gamma.Data[0] = 1.0f; beta.Data[0] = 0.0f;
+            gamma.Data[0] = 1.0f;
+            beta.Data[0] = 0.0f;
 
             using var rm = new FastTensor<float>(1);
             using var rv = new FastTensor<float>(1);
@@ -200,8 +201,8 @@ namespace DevOnBike.Overfit.Tests
             using var matA = new FastTensor<float>(1, 1);
             using var matB = new FastTensor<float>(1, 1);
 
-            using var a = new AutogradNode(matA, requiresGrad: false);
-            using var b = new AutogradNode(matB, requiresGrad: true);
+            using var a = new AutogradNode(matA, false);
+            using var b = new AutogradNode(matB, true);
 
             using var c = TensorMath.Add(graph, a, b);
             graph.Backward(c);

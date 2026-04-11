@@ -9,12 +9,11 @@ using DevOnBike.Overfit.Data.Prepare;
 namespace DevOnBike.Overfit.Anomalies.Monitoring
 {
     /// <summary>
-    /// Offline training pipeline for the anomaly detection autoencoder.
-    /// Processes raw Prometheus metric series from the Golden Window into
-    /// scaled tensors ready for LSTM autoencoder training.
-    ///
-    /// Flow per batch:
-    ///   List&lt;RawMetricSeries&gt;
+    ///     Offline training pipeline for the anomaly detection autoencoder.
+    ///     Processes raw Prometheus metric series from the Golden Window into
+    ///     scaled tensors ready for LSTM autoencoder training.
+    ///     Flow per batch:
+    ///     List&lt;RawMetricSeries&gt;
     ///     → TimeSeriesAligner   (align to shared time grid)
     ///     → WindowSanitizer     (remove invalid pods, correct values)
     ///     → FleetAggregator     (fleet medians + pod deviations)
@@ -23,11 +22,11 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
     /// </summary>
     public sealed class MonitoringPipeline
     {
-        private readonly TimeSeriesAligner _aligner;
-        private readonly WindowSanitizer _sanitizer;
         private readonly FleetAggregator _aggregator;
+        private readonly TimeSeriesAligner _aligner;
         private readonly RobustScalingLayer _baselineScaler;
         private readonly RobustScalingLayer _deviationScaler;
+        private readonly WindowSanitizer _sanitizer;
 
         public MonitoringPipeline(MonitoringPipelineOptions options)
         {
@@ -56,9 +55,9 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         }
 
         /// <summary>
-        /// Processes one batch of raw metric series.
-        /// On first call the scalers fit themselves on the incoming data.
-        /// On subsequent calls they apply the fitted parameters (Transform only).
+        ///     Processes one batch of raw metric series.
+        ///     On first call the scalers fit themselves on the incoming data.
+        ///     On subsequent calls they apply the fitted parameters (Transform only).
         /// </summary>
         public ScaledResult Process(List<RawMetricSeries> allSeries, long globalStartMs, long scrapeTimestampMs)
         {
@@ -76,8 +75,8 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         // ---------------------------------------------------------------------------
 
         /// <summary>
-        /// Resets both scalers — forces re-fit on next Process call.
-        /// Use when starting a new Golden Window collection.
+        ///     Resets both scalers — forces re-fit on next Process call.
+        ///     Use when starting a new Golden Window collection.
         /// </summary>
         public void ResetScalers()
         {

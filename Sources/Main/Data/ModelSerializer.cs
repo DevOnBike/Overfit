@@ -9,13 +9,13 @@ using DevOnBike.Overfit.DeepLearning;
 namespace DevOnBike.Overfit.Data
 {
     /// <summary>
-    /// Utility class for binary serialization of model parameters.
-    /// Handles persisting and restoring tensor data for convolutional and linear layers.
+    ///     Utility class for binary serialization of model parameters.
+    ///     Handles persisting and restoring tensor data for convolutional and linear layers.
     /// </summary>
     public static class ModelSerializer
     {
         /// <summary>
-        /// Saves the model weights and biases to a binary file.
+        ///     Saves the model weights and biases to a binary file.
         /// </summary>
         public static void SaveModel(string path, ConvLayer conv, LinearLayer fc)
         {
@@ -28,8 +28,8 @@ namespace DevOnBike.Overfit.Data
         }
 
         /// <summary>
-        /// Loads model weights and biases from a binary file.
-        /// Throws an exception if the file structure does not match the expected tensor shapes.
+        ///     Loads model weights and biases from a binary file.
+        ///     Throws an exception if the file structure does not match the expected tensor shapes.
         /// </summary>
         public static void LoadModel(string path, ConvLayer conv, LinearLayer fc)
         {
@@ -47,7 +47,7 @@ namespace DevOnBike.Overfit.Data
         }
 
         /// <summary>
-        /// Serializes a FastTensor to the stream using the format: [Rank][Dimensions][RawData].
+        ///     Serializes a FastTensor to the stream using the format: [Rank][Dimensions][RawData].
         /// </summary>
         private static void SaveTensor(BinaryWriter bw, FastTensor<float> tensor)
         {
@@ -59,7 +59,7 @@ namespace DevOnBike.Overfit.Data
             }
 
             var data = tensor.AsSpan();
-            
+
             for (var i = 0; i < data.Length; i++)
             {
                 bw.Write(data[i]);
@@ -67,8 +67,8 @@ namespace DevOnBike.Overfit.Data
         }
 
         /// <summary>
-        /// Deserializes data from the stream into an existing FastTensor.
-        /// Performs strict validation of rank and dimensions before loading data.
+        ///     Deserializes data from the stream into an existing FastTensor.
+        ///     Performs strict validation of rank and dimensions before loading data.
         /// </summary>
         private static void LoadTensor(BinaryReader br, FastTensor<float> tensor)
         {

@@ -13,8 +13,7 @@ namespace DevOnBike.Overfit.Data
         {
             var augmentedBatch = new FastTensor<float>(originalBatch.Shape);
 
-            Parallel.For(0, originalBatch.Shape[0], i =>
-            {
+            Parallel.For(0, originalBatch.Shape[0], body: i => {
                 var inputRow = originalBatch.AsSpan().Slice(i * width * height, width * height);
                 var outputRow = augmentedBatch.AsSpan().Slice(i * width * height, width * height);
 

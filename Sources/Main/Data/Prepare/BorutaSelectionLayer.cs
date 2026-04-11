@@ -10,15 +10,16 @@ using DevOnBike.Overfit.Data.Contracts;
 namespace DevOnBike.Overfit.Data.Prepare
 {
     /// <summary>
-    /// Implements the Boruta feature selection algorithm. 
-    /// Uses shadow features (shuffled copies of original features) to determine the statistical significance of each feature using a Random Forest.
+    ///     Implements the Boruta feature selection algorithm.
+    ///     Uses shadow features (shuffled copies of original features) to determine the statistical significance of each
+    ///     feature using a Random Forest.
     /// </summary>
     public sealed class BorutaSelectionLayer : IDataLayer
     {
+        private readonly float _confirmationRatio;
+        private readonly int _maxDepth;
         private readonly int _numIterations;
         private readonly int _numTrees;
-        private readonly int _maxDepth;
-        private readonly float _confirmationRatio;
 
         /// <param name="iterations">Number of Boruta rounds (higher counts result in more stable selection).</param>
         /// <param name="numTrees">Number of trees in the forest per iteration.</param>
@@ -62,7 +63,7 @@ namespace DevOnBike.Overfit.Data.Prepare
             {
                 using var extendedFeatures = CreateShadowDataset(context.Features);
 
-                var forest = new FastRandomForest(numTrees: _numTrees, maxDepth: _maxDepth);
+                var forest = new FastRandomForest(_numTrees, _maxDepth);
                 var importance = forest.TrainAndGetImportance(extendedFeatures, context.Targets);
                 var shadowMax = float.MinValue;
 
@@ -108,7 +109,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Duplicates the dataset columns and shuffles the second half to create "shadow" features.
+        ///     Duplicates the dataset columns and shuffles the second half to create "shadow" features.
         /// </summary>
         private FastTensor<float> CreateShadowDataset(FastTensor<float> original)
         {
@@ -152,7 +153,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Extracts selected columns into a new contiguous FastTensor.
+        ///     Extracts selected columns into a new contiguous FastTensor.
         /// </summary>
         private FastTensor<float> ExtractSelectedColumns(FastTensor<float> src, List<int> indices)
         {

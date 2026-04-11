@@ -9,15 +9,13 @@ using System.Runtime.CompilerServices;
 namespace DevOnBike.Overfit.Core
 {
     /// <summary>
-    /// A high-speed memory wrapper that uses ArrayPool to avoid GC allocations.
-    /// Exposes a precise Span that excludes pool-induced padding.
+    ///     A high-speed memory wrapper that uses ArrayPool to avoid GC allocations.
+    ///     Exposes a precise Span that excludes pool-induced padding.
     /// </summary>
     public sealed class FastBuffer<T> : IDisposable where T : struct
     {
-        private T[] _rented;
         private bool _disposed;
-
-        public int Length { get; }
+        private T[] _rented;
 
         public FastBuffer(int length)
         {
@@ -29,6 +27,8 @@ namespace DevOnBike.Overfit.Core
             _rented.AsSpan(0, length).Clear();
         }
 
+        public int Length { get; }
+
         public ref T this[int index]
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -36,6 +36,21 @@ namespace DevOnBike.Overfit.Core
             {
                 ObjectDisposedException.ThrowIf(_disposed, this);
                 return ref _rented![index];
+            }
+        }
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, true))
+            {
+                return;
+            }
+
+            var rented = Interlocked.Exchange(ref _rented, null);
+
+            if (rented != null)
+            {
+                ArrayPool<T>.Shared.Return(rented);
             }
         }
 
@@ -58,21 +73,6 @@ namespace DevOnBike.Overfit.Core
             ObjectDisposedException.ThrowIf(_disposed, this);
 
             AsSpan().Clear();
-        }
-
-        public void Dispose()
-        {
-            if (Interlocked.Exchange(ref _disposed, true))
-            {
-                return;
-            }
-
-            var rented = Interlocked.Exchange(ref _rented, null);
-
-            if (rented != null)
-            {
-                ArrayPool<T>.Shared.Return(rented);
-            }
         }
     }
 }

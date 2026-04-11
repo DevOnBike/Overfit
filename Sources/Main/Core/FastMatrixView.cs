@@ -9,7 +9,7 @@ using System.Runtime.CompilerServices;
 namespace DevOnBike.Overfit.Core
 {
     /// <summary>
-    /// Provides an allocation-free view of matrix memory.
+    ///     Provides an allocation-free view of matrix memory.
     /// </summary>
     public readonly ref struct FastMatrixView<T> where T : struct, IFloatingPointIeee754<T>
     {
@@ -26,8 +26,10 @@ namespace DevOnBike.Overfit.Core
         public FastMatrixView(Span<T> data, int rows, int cols, int rowStride, int colStride, int offset)
         {
             _data = data;
-            Rows = rows; Cols = cols;
-            RowStride = rowStride; ColStride = colStride;
+            Rows = rows;
+            Cols = cols;
+            RowStride = rowStride;
+            ColStride = colStride;
             Offset = offset;
         }
 
@@ -37,8 +39,10 @@ namespace DevOnBike.Overfit.Core
             get => ref _data[Offset + row * RowStride + col * ColStride];
         }
 
-        public FastMatrixView<T> Transpose() =>
-            new(_data, rows: Cols, cols: Rows, rowStride: ColStride, colStride: RowStride, offset: Offset);
+        public FastMatrixView<T> Transpose()
+        {
+            return new FastMatrixView<T>(_data, Cols, Rows, ColStride, RowStride, Offset);
+        }
 
         public FastMatrixView<T> Slice(int startRow, int startCol, int rows, int cols)
         {
@@ -47,8 +51,8 @@ namespace DevOnBike.Overfit.Core
                 throw new ArgumentOutOfRangeException("Slice exceeds view dimensions.");
             }
 
-            return new(_data, rows, cols, RowStride, ColStride,
-                Offset + startRow * RowStride + startCol * ColStride);
+            return new FastMatrixView<T>(_data, rows, cols, RowStride, ColStride,
+            Offset + startRow * RowStride + startCol * ColStride);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -58,7 +62,7 @@ namespace DevOnBike.Overfit.Core
             {
                 throw new InvalidOperationException("Cannot return contiguous Span for a row when ColStride != 1 (transposed view).");
             }
-            
+
             return _data.Slice(Offset + row * RowStride, Cols);
         }
 
@@ -69,7 +73,7 @@ namespace DevOnBike.Overfit.Core
             {
                 throw new InvalidOperationException("Cannot return contiguous ReadOnlySpan for a row when ColStride != 1.");
             }
-            
+
             return _data.Slice(Offset + row * RowStride, Cols);
         }
 

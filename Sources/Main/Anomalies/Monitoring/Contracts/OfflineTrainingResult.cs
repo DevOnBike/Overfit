@@ -5,10 +5,10 @@
 
 namespace DevOnBike.Overfit.Anomalies.Monitoring.Contracts
 {
-    /// <summary>Outcome returned by <see cref="OfflineTrainingJob.Run"/>.</summary>
+    /// <summary>Outcome returned by <see cref="OfflineTrainingJob.Run" />.</summary>
     public sealed record OfflineTrainingResult
     {
-        /// <summary>Average MSE loss per epoch, length == <see cref="OfflineTrainingConfig.Epochs"/>.</summary>
+        /// <summary>Average MSE loss per epoch, length == <see cref="OfflineTrainingConfig.Epochs" />.</summary>
         public float[] EpochLosses { get; init; } = [];
 
         /// <summary>Calibrated anomaly threshold written to the scorer after training.</summary>
@@ -24,8 +24,8 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring.Contracts
         public float FinalLoss => EpochLosses.Length > 0 ? EpochLosses[^1] : 0f;
 
         /// <summary>
-        /// Fractional loss reduction from epoch 1 to last epoch.
-        /// Positive = model improved. 0 if InitialLoss was zero.
+        ///     Fractional loss reduction from epoch 1 to last epoch.
+        ///     Positive = model improved. 0 if InitialLoss was zero.
         /// </summary>
         public float LossReduction => InitialLoss > 0f ? (InitialLoss - FinalLoss) / InitialLoss : 0f;
     }

@@ -9,13 +9,13 @@ using DevOnBike.Overfit.Data.Contracts;
 namespace DevOnBike.Overfit.Data
 {
     /// <summary>
-    /// Provides post-training analysis tools including Permutation Feature Importance (PFI) 
-    /// and multicollinearity detection.
+    ///     Provides post-training analysis tools including Permutation Feature Importance (PFI)
+    ///     and multicollinearity detection.
     /// </summary>
     public class ModelInterpreter
     {
-        private readonly TableSchema _schema;
         private readonly List<string> _featureNames;
+        private readonly TableSchema _schema;
 
         public ModelInterpreter(TableSchema schema, List<string> expandedFeatureNames)
         {
@@ -24,8 +24,8 @@ namespace DevOnBike.Overfit.Data
         }
 
         /// <summary>
-        /// Calculates and prints the relative importance of features using the PFI method.
-        /// Measures the increase in prediction error after permuting each feature column.
+        ///     Calculates and prints the relative importance of features using the PFI method.
+        ///     Measures the increase in prediction error after permuting each feature column.
         /// </summary>
         public void PrintFeatureImportance(
             AutogradNode w1,
@@ -62,15 +62,15 @@ namespace DevOnBike.Overfit.Data
             for (var i = combined.Length - 1; i >= 0; i--)
             {
                 var item = combined[i];
-                var pct = total > 0 ? (item.Score / total) * 100 : 0;
+                var pct = total > 0 ? item.Score / total * 100 : 0;
 
                 Console.WriteLine($"{item.Name,-25} : {pct,6:F1}% (score: {item.Score:F4})");
             }
         }
 
         /// <summary>
-        /// Identifies and prints strong linear correlations between features using Pearson coefficient.
-        /// Helpful for detecting redundant information in the expanded feature set.
+        ///     Identifies and prints strong linear correlations between features using Pearson coefficient.
+        ///     Helpful for detecting redundant information in the expanded feature set.
         /// </summary>
         public void PrintCorrelations(FastTensor<float> features)
         {
@@ -92,7 +92,7 @@ namespace DevOnBike.Overfit.Data
         }
 
         /// <summary>
-        /// Computes MSE loss without recording the computation graph (Inference Mode).
+        ///     Computes MSE loss without recording the computation graph (Inference Mode).
         /// </summary>
         private float CalculateLoss(
             AutogradNode w1,
@@ -113,7 +113,7 @@ namespace DevOnBike.Overfit.Data
         }
 
         /// <summary>
-        /// Calculates the Pearson correlation coefficient between two columns.
+        ///     Calculates the Pearson correlation coefficient between two columns.
         /// </summary>
         private float CalculatePearson(FastTensor<float> t, int colA, int colB)
         {
@@ -134,14 +134,14 @@ namespace DevOnBike.Overfit.Data
                 sumB2 += b * b;
             }
 
-            var num = (rows * sumAB) - (sumA * sumB);
+            var num = rows * sumAB - sumA * sumB;
             var den = MathF.Sqrt((rows * sumA2 - sumA * sumA) * (rows * sumB2 - sumB * sumB));
 
             return den == 0 ? 0 : num / den;
         }
 
         /// <summary>
-        /// Creates a deep copy of the tensor and shuffles a specific column using Fisher-Yates.
+        ///     Creates a deep copy of the tensor and shuffles a specific column using Fisher-Yates.
         /// </summary>
         private FastTensor<float> CloneAndShuffleColumn(FastTensor<float> src, int colIdx)
         {

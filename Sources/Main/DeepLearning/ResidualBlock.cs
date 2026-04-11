@@ -8,16 +8,14 @@ using DevOnBike.Overfit.Core;
 namespace DevOnBike.Overfit.DeepLearning
 {
     /// <summary>
-    /// Implements a Residual Block (ResNet) to mitigate the vanishing gradient problem.
+    ///     Implements a Residual Block (ResNet) to mitigate the vanishing gradient problem.
     /// </summary>
     public sealed class ResidualBlock : IModule
     {
-        private readonly LinearLayer _linear1;
         private readonly BatchNorm1D _bn1;
-        private readonly LinearLayer _linear2;
         private readonly BatchNorm1D _bn2;
-
-        public bool IsTraining { get; private set; } = true;
+        private readonly LinearLayer _linear1;
+        private readonly LinearLayer _linear2;
 
         public ResidualBlock(int hiddenSize)
         {
@@ -26,6 +24,8 @@ namespace DevOnBike.Overfit.DeepLearning
             _linear2 = new LinearLayer(hiddenSize, hiddenSize);
             _bn2 = new BatchNorm1D(hiddenSize);
         }
+
+        public bool IsTraining { get; private set; } = true;
 
         public void Train()
         {
@@ -46,8 +46,8 @@ namespace DevOnBike.Overfit.DeepLearning
         }
 
         /// <summary>
-        /// Performs the forward pass. 
-        /// Dispatches between a memory-optimized inference path and a recording-enabled training path.
+        ///     Performs the forward pass.
+        ///     Dispatches between a memory-optimized inference path and a recording-enabled training path.
         /// </summary>
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
@@ -80,10 +80,22 @@ namespace DevOnBike.Overfit.DeepLearning
         /// <summary> Aggregates all learnable parameters from nested layers. </summary>
         public IEnumerable<AutogradNode> Parameters()
         {
-            foreach (var p in _linear1.Parameters()) yield return p;
-            foreach (var p in _bn1.Parameters()) yield return p;
-            foreach (var p in _linear2.Parameters()) yield return p;
-            foreach (var p in _bn2.Parameters()) yield return p;
+            foreach (var p in _linear1.Parameters())
+            {
+                yield return p;
+            }
+            foreach (var p in _bn1.Parameters())
+            {
+                yield return p;
+            }
+            foreach (var p in _linear2.Parameters())
+            {
+                yield return p;
+            }
+            foreach (var p in _bn2.Parameters())
+            {
+                yield return p;
+            }
         }
 
         public void Save(BinaryWriter bw)
@@ -92,6 +104,22 @@ namespace DevOnBike.Overfit.DeepLearning
             _bn1.Save(bw);
             _linear2.Save(bw);
             _bn2.Save(bw);
+        }
+
+        public void Load(BinaryReader br)
+        {
+            _linear1.Load(br);
+            _bn1.Load(br);
+            _linear2.Load(br);
+            _bn2.Load(br);
+        }
+
+        public void Dispose()
+        {
+            _linear1?.Dispose();
+            _bn1?.Dispose();
+            _linear2?.Dispose();
+            _bn2?.Dispose();
         }
 
         public void Save(string path)
@@ -112,22 +140,6 @@ namespace DevOnBike.Overfit.DeepLearning
             using var br = new BinaryReader(fs);
 
             Load(br);
-        }
-
-        public void Load(BinaryReader br)
-        {
-            _linear1.Load(br);
-            _bn1.Load(br);
-            _linear2.Load(br);
-            _bn2.Load(br);
-        }
-
-        public void Dispose()
-        {
-            _linear1?.Dispose();
-            _bn1?.Dispose();
-            _linear2?.Dispose();
-            _bn2?.Dispose();
         }
     }
 }

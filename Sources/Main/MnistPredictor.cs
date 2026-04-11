@@ -9,18 +9,18 @@ using DevOnBike.Overfit.DeepLearning;
 namespace DevOnBike.Overfit
 {
     /// <summary>
-    /// High-level predictor for MNIST handwritten digit recognition.
-    /// Implements a Convolutional Neural Network (CNN) architecture with Residual Blocks.
+    ///     High-level predictor for MNIST handwritten digit recognition.
+    ///     Implements a Convolutional Neural Network (CNN) architecture with Residual Blocks.
     /// </summary>
     public sealed class MnistPredictor : IDisposable
     {
-        private readonly ConvLayer _conv1;
         private readonly BatchNorm1D _bn1;
-        private readonly ResidualBlock _res1;
+        private readonly ConvLayer _conv1;
         private readonly LinearLayer _fcOut;
+        private readonly ResidualBlock _res1;
 
         /// <summary>
-        /// Initializes the predictor and loads the model parameters from the specified path.
+        ///     Initializes the predictor and loads the model parameters from the specified path.
         /// </summary>
         /// <param name="modelPath">Path to the binary file containing serialized weights.</param>
         public MnistPredictor(string modelPath)
@@ -46,8 +46,16 @@ namespace DevOnBike.Overfit
             _fcOut.Eval();
         }
 
+        public void Dispose()
+        {
+            _conv1?.Dispose();
+            _bn1?.Dispose();
+            _res1?.Dispose();
+            _fcOut?.Dispose();
+        }
+
         /// <summary>
-        /// Predicts the digit (0-9) for the given pixel data.
+        ///     Predicts the digit (0-9) for the given pixel data.
         /// </summary>
         /// <param name="pixelData">Flattened array of 784 pixels (28x28 normalized 0.0-1.0).</param>
         /// <returns>The predicted digit.</returns>
@@ -61,7 +69,7 @@ namespace DevOnBike.Overfit
             using var inputMat = new FastTensor<float>(1, 1, 28, 28);
             pixelData.CopyTo(inputMat.AsSpan());
 
-            using var input = new AutogradNode(inputMat, requiresGrad: false);
+            using var input = new AutogradNode(inputMat, false);
 
             // --- FORWARD PASS (Inference Mode: null graph) ---
             using var h1 = _conv1.Forward(null, input);
@@ -81,7 +89,7 @@ namespace DevOnBike.Overfit
         }
 
         /// <summary>
-        /// Finds the index of the highest probability value in the output tensor.
+        ///     Finds the index of the highest probability value in the output tensor.
         /// </summary>
         private int GetArgMax(ReadOnlySpan<float> span)
         {
@@ -96,14 +104,6 @@ namespace DevOnBike.Overfit
             }
 
             return maxIdx;
-        }
-
-        public void Dispose()
-        {
-            _conv1?.Dispose();
-            _bn1?.Dispose();
-            _res1?.Dispose();
-            _fcOut?.Dispose();
         }
     }
 }

@@ -17,7 +17,7 @@ namespace DevOnBike.Overfit.Tests
 
             // Assert
             Assert.Equal(10, buffer.Length);
-            
+
             for (var i = 0; i < buffer.Length; i++)
             {
                 Assert.Equal(0, buffer[i]); // Pamięć z ArrayPool musi być wyzerowana
@@ -38,7 +38,7 @@ namespace DevOnBike.Overfit.Tests
         {
             // Arrange
             using var buffer = new FastBuffer<double>(5);
-            
+
             // Act
             buffer[2] = 42.5;
 
@@ -67,8 +67,7 @@ namespace DevOnBike.Overfit.Tests
             var buffer = new FastBuffer<int>(5);
 
             // Act
-            var exception = Record.Exception(() =>
-            {
+            var exception = Record.Exception(() => {
                 buffer.Dispose();
                 buffer.Dispose(); // Podwójne wywołanie zabezpieczone przez Interlocked
             });

@@ -6,8 +6,8 @@
 namespace DevOnBike.Overfit.Data.Contracts
 {
     /// <summary>
-    /// Pair of features whose Pearson correlation exceeds
-    /// <see cref="TrainingDataAnalyzerConfig.HighCorrelationThreshold"/>.
+    ///     Pair of features whose Pearson correlation exceeds
+    ///     <see cref="TrainingDataAnalyzerConfig.HighCorrelationThreshold" />.
     /// </summary>
     public sealed record CorrelationPair
     {

@@ -10,19 +10,19 @@ using DevOnBike.Overfit.Data.Contracts;
 namespace DevOnBike.Overfit.Data.Prepare
 {
     /// <summary>
-    /// Clips outliers in feature columns based on calculated percentile thresholds.
-    /// Implements the Fit-Transform pattern, persisting thresholds from the first pass.
+    ///     Clips outliers in feature columns based on calculated percentile thresholds.
+    ///     Implements the Fit-Transform pattern, persisting thresholds from the first pass.
     /// </summary>
     public sealed class OutlierClipLayer : IDataLayer
     {
-        private readonly float _lowerPercentile;
-        private readonly float _upperPercentile;
         private readonly Dictionary<int, (float Lower, float Upper)> _columnOverrides;
         private readonly HashSet<int> _excludedColumns;
+        private readonly float _lowerPercentile;
+        private readonly float _upperPercentile;
+        private bool _fitted;
+        private float[] _highThresholds;
 
         private float[] _lowThresholds;
-        private float[] _highThresholds;
-        private bool _fitted;
 
         /// <param name="lowerPercentile">The lower percentile boundary (e.g., 0.01 for 1%).</param>
         /// <param name="upperPercentile">The upper percentile boundary (e.g., 0.99 for 99%).</param>
@@ -92,7 +92,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Calculates the clipping thresholds for each column using sorted samples.
+        ///     Calculates the clipping thresholds for each column using sorted samples.
         /// </summary>
         private void Fit(ReadOnlySpan<float> span, int rows, int cols)
         {
@@ -139,7 +139,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Performs in-place clipping of values outside the calculated boundaries.
+        ///     Performs in-place clipping of values outside the calculated boundaries.
         /// </summary>
         private void ClipAll(Span<float> span, int rows, int cols)
         {
@@ -180,7 +180,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Linear interpolation of a percentile value from a sorted dataset.
+        ///     Linear interpolation of a percentile value from a sorted dataset.
         /// </summary>
         private static float InterpolatePercentile(ReadOnlySpan<float> sorted, int count, float percentile)
         {

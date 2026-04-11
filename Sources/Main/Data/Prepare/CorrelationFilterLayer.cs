@@ -10,27 +10,28 @@ using DevOnBike.Overfit.Data.Contracts;
 namespace DevOnBike.Overfit.Data.Prepare
 {
     /// <summary>
-    /// Filters out columns with strong linear correlation (Pearson).
-    /// When two features are correlated above the threshold, the layer keeps the one with higher correlation to the Target (if available) or the first one encountered.
+    ///     Filters out columns with strong linear correlation (Pearson).
+    ///     When two features are correlated above the threshold, the layer keeps the one with higher correlation to the Target
+    ///     (if available) or the first one encountered.
     /// </summary>
     public sealed class CorrelationFilterLayer : IDataLayer
     {
-        private readonly float _threshold;
         private readonly DropStrategy _strategy;
-
-        private int[] _keptIndices;
+        private readonly float _threshold;
         private bool _fitted;
 
+        private int[] _keptIndices;
+
         /// <param name="threshold">
-        /// Correlation threshold (absolute value |r|). Default is 0.95.
-        /// 0.98 = aggressive filtration (only nearly identical features).
-        /// 0.85 = mild filtration (broader removal of multicollinearity).
+        ///     Correlation threshold (absolute value |r|). Default is 0.95.
+        ///     0.98 = aggressive filtration (only nearly identical features).
+        ///     0.85 = mild filtration (broader removal of multicollinearity).
         /// </param>
         /// <param name="strategy">
-        /// Selection strategy for dropping a feature from a correlated pair.
-        /// KeepFirst: retains the feature with the lower index (fast, deterministic).
-        /// KeepHigherTargetCorrelation: retains the feature more strongly correlated with the Target 
-        /// (slower — requires N additional Pearson calculations, but provides better selection).
+        ///     Selection strategy for dropping a feature from a correlated pair.
+        ///     KeepFirst: retains the feature with the lower index (fast, deterministic).
+        ///     KeepHigherTargetCorrelation: retains the feature more strongly correlated with the Target
+        ///     (slower — requires N additional Pearson calculations, but provides better selection).
         /// </param>
         public CorrelationFilterLayer(
             float threshold = 0.95f,
@@ -128,8 +129,8 @@ namespace DevOnBike.Overfit.Data.Prepare
                     }
 
                     var r = CalculatePearsonFast(
-                        featureSpan, i, j, rows, cols,
-                        sumSpan, sumSqSpan);
+                    featureSpan, i, j, rows, cols,
+                    sumSpan, sumSqSpan);
 
                     if (MathF.Abs(r) < _threshold)
                     {
@@ -155,7 +156,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Optimized Pearson calculation using precomputed sums.
+        ///     Optimized Pearson calculation using precomputed sums.
         /// </summary>
         private float CalculatePearsonFast(
             ReadOnlySpan<float> span, int colA, int colB,
@@ -169,9 +170,9 @@ namespace DevOnBike.Overfit.Data.Prepare
                 sumAB += (double)span[r * cols + colA] * span[r * cols + colB];
             }
 
-            var num = (rows * sumAB) - (sums[colA] * sums[colB]);
-            var denA = (rows * sumsSq[colA]) - (sums[colA] * sums[colA]);
-            var denB = (rows * sumsSq[colB]) - (sums[colB] * sums[colB]);
+            var num = rows * sumAB - sums[colA] * sums[colB];
+            var denA = rows * sumsSq[colA] - sums[colA] * sums[colA];
+            var denB = rows * sumsSq[colB] - sums[colB] * sums[colB];
             var den = Math.Sqrt(denA * denB);
 
             if (den == 0)
@@ -183,8 +184,8 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Calculates the correlation of each feature with the Target.
-        /// Features with higher correlation are considered more valuable for prediction.
+        ///     Calculates the correlation of each feature with the Target.
+        ///     Features with higher correlation are considered more valuable for prediction.
         /// </summary>
         private float[] ComputeTargetCorrelations(
             ReadOnlySpan<float> featureSpan,
@@ -215,9 +216,9 @@ namespace DevOnBike.Overfit.Data.Prepare
                     sumFT += (double)featureSpan[r * cols + c] * targetSpan[r];
                 }
 
-                var num = (rows * sumFT) - (featureSums[c] * tSum);
-                var denF = (rows * featureSumsSq[c]) - (featureSums[c] * featureSums[c]);
-                var denT = (rows * tSumSq) - (tSum * tSum);
+                var num = rows * sumFT - featureSums[c] * tSum;
+                var denF = rows * featureSumsSq[c] - featureSums[c] * featureSums[c];
+                var denT = rows * tSumSq - tSum * tSum;
                 var den = Math.Sqrt(denF * denT);
 
                 result[c] = den == 0 ? 0f : (float)(num / den);
@@ -227,7 +228,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Selects the column to drop from a correlated pair.
+        ///     Selects the column to drop from a correlated pair.
         /// </summary>
         private int ChooseColumnToDrop(int colA, int colB, float[] targetCorrelations)
         {
@@ -243,7 +244,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Extracts selected columns into a new contiguous FastTensor.
+        ///     Extracts selected columns into a new contiguous FastTensor.
         /// </summary>
         private FastTensor<float> ExtractColumns(FastTensor<float> src, int[] indices, int rows)
         {
@@ -269,7 +270,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Resets persisted column indices, forcing a re-Fit on the next Process call.
+        ///     Resets persisted column indices, forcing a re-Fit on the next Process call.
         /// </summary>
         public void Reset()
         {

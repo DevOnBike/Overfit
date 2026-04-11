@@ -12,8 +12,8 @@
 namespace DevOnBike.Overfit.Anomalies.Monitoring.Contracts
 {
     /// <summary>
-    /// Current metric values for a single monitored pod.
-    /// Returned by <see cref="AnomalyMetricsCollector.GetSnapshot"/>.
+    ///     Current metric values for a single monitored pod.
+    ///     Returned by <see cref="AnomalyMetricsCollector.GetSnapshot" />.
     /// </summary>
     public sealed record PodMetricsSnapshot
     {

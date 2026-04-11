@@ -6,23 +6,22 @@
 using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.Data.Contracts;
 using DevOnBike.Overfit.Data.Prepare;
+
 namespace DevOnBike.Overfit.Anomalies.Monitoring.Contracts
 {
     /// <summary>
-    /// Packs AggregationResult into FastTensors and applies RobustScalingLayer.
-    ///
-    /// FleetBaseline:  float[2, 60, 12]  →  FastTensor [2×60, 12]  →  scaled in place
-    /// PodDeviations:  float[N, 60, 12]  →  FastTensor [N×60, 12]  →  scaled in place
-    ///
-    /// Each timestep of each pod/DC is treated as a separate sample row.
-    /// The scaler normalises each of the 12 metric columns independently.
+    ///     Packs AggregationResult into FastTensors and applies RobustScalingLayer.
+    ///     FleetBaseline:  float[2, 60, 12]  →  FastTensor [2×60, 12]  →  scaled in place
+    ///     PodDeviations:  float[N, 60, 12]  →  FastTensor [N×60, 12]  →  scaled in place
+    ///     Each timestep of each pod/DC is treated as a separate sample row.
+    ///     The scaler normalises each of the 12 metric columns independently.
     /// </summary>
     public static class AggregationScaler
     {
         /// <summary>
-        /// Scales FleetBaseline and PodDeviations in place using the provided scalers.
-        /// Scalers must already be fitted (offline on Golden Window data).
-        /// Returns FastTensors ready for the LSTM autoencoder.
+        ///     Scales FleetBaseline and PodDeviations in place using the provided scalers.
+        ///     Scalers must already be fitted (offline on Golden Window data).
+        ///     Returns FastTensors ready for the LSTM autoencoder.
         /// </summary>
         public static ScaledResult Scale(
             AggregationResult aggregation,

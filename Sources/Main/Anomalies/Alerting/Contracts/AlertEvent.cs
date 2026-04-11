@@ -9,8 +9,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using DevOnBike.Overfit.Anomalies.Monitoring;
-
 namespace DevOnBike.Overfit.Anomalies.Alerting.Contracts
 {
     /// <summary>Immutable snapshot of a single anomaly detection event.</summary>
@@ -19,7 +17,7 @@ namespace DevOnBike.Overfit.Anomalies.Alerting.Contracts
         /// <summary>Name of the K8s pod that triggered the alert.</summary>
         public required string PodName { get; init; }
 
-        /// <summary>Normalised anomaly score ∈ [0, 1] from <see cref="ReconstructionScorer"/>.</summary>
+        /// <summary>Normalised anomaly score ∈ [0, 1] from <see cref="ReconstructionScorer" />.</summary>
         public float AnomalyScore { get; init; }
 
         /// <summary>Raw MSE(input, reconstruction) before threshold normalisation.</summary>

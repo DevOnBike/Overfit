@@ -15,7 +15,10 @@ namespace DevOnBike.Overfit.Tests.Prepare
     {
         private readonly ITestOutputHelper _output;
 
-        public DataPreparationTests(ITestOutputHelper output) => _output = output;
+        public DataPreparationTests(ITestOutputHelper output)
+        {
+            _output = output;
+        }
 
         [Fact]
         public void FullPipeline_Should_Convert_Clean_And_Execute_Successfully()
@@ -23,9 +26,39 @@ namespace DevOnBike.Overfit.Tests.Prepare
             // 1. DANE TESTOWE (Makieta z Excela)
             var rawRows = new List<PropertyData>
             {
-                new() { Powierzchnia = 50, Pietro = 2, CzyKamienica = false, CzyMaKomorke = true,  PowKomorki = 4,  Miasto = "Warszawa", NazwaAgencji = "Premium",  Cena = 600000 },
-                new() { Powierzchnia = 30, Pietro = 0, CzyKamienica = true,  CzyMaKomorke = false, PowKomorki = 0,  Miasto = "Krakow",   NazwaAgencji = "Standard", Cena = 400000 },
-                new() { Powierzchnia = 80, Pietro = 5, CzyKamienica = false, CzyMaKomorke = true,  PowKomorki = 10, Miasto = "Warszawa", NazwaAgencji = "Standard", Cena = 950000 },
+                new()
+                {
+                    Powierzchnia = 50,
+                    Pietro = 2,
+                    CzyKamienica = false,
+                    CzyMaKomorke = true,
+                    PowKomorki = 4,
+                    Miasto = "Warszawa",
+                    NazwaAgencji = "Premium",
+                    Cena = 600000
+                },
+                new()
+                {
+                    Powierzchnia = 30,
+                    Pietro = 0,
+                    CzyKamienica = true,
+                    CzyMaKomorke = false,
+                    PowKomorki = 0,
+                    Miasto = "Krakow",
+                    NazwaAgencji = "Standard",
+                    Cena = 400000
+                },
+                new()
+                {
+                    Powierzchnia = 80,
+                    Pietro = 5,
+                    CzyKamienica = false,
+                    CzyMaKomorke = true,
+                    PowKomorki = 10,
+                    Miasto = "Warszawa",
+                    NazwaAgencji = "Standard",
+                    Cena = 950000
+                }
             };
 
             // 2. DEFINICJA SCHEMATU
@@ -33,20 +66,52 @@ namespace DevOnBike.Overfit.Tests.Prepare
             {
                 Features =
                 [
-                    new() { Name = "Powierzchnia", Type = ColumnType.Numeric },    // Idx 0
-                    new() { Name = "Pietro",       Type = ColumnType.Numeric },    // Idx 1
-                    new() { Name = "CzyKamienica", Type = ColumnType.Binary },     // Idx 2
-                    new() { Name = "CzyMaKomorke", Type = ColumnType.Binary },     // Idx 3
-                    new() { Name = "PowKomorki",   Type = ColumnType.Numeric },    // Idx 4
-                    new() { Name = "Miasto",       Type = ColumnType.Categorical },// Idx 5, 6 (Krakow, Warszawa)
-                    new() { Name = "NazwaAgencji", Type = ColumnType.Categorical },// Idx 7, 8 (Premium, Standard)
+                    new ColumnDefinition
+                    {
+                        Name = "Powierzchnia",
+                        Type = ColumnType.Numeric
+                    }, // Idx 0
+                    new ColumnDefinition
+                    {
+                        Name = "Pietro",
+                        Type = ColumnType.Numeric
+                    }, // Idx 1
+                    new ColumnDefinition
+                    {
+                        Name = "CzyKamienica",
+                        Type = ColumnType.Binary
+                    }, // Idx 2
+                    new ColumnDefinition
+                    {
+                        Name = "CzyMaKomorke",
+                        Type = ColumnType.Binary
+                    }, // Idx 3
+                    new ColumnDefinition
+                    {
+                        Name = "PowKomorki",
+                        Type = ColumnType.Numeric
+                    }, // Idx 4
+                    new ColumnDefinition
+                    {
+                        Name = "Miasto",
+                        Type = ColumnType.Categorical
+                    }, // Idx 5, 6 (Krakow, Warszawa)
+                    new ColumnDefinition
+                    {
+                        Name = "NazwaAgencji",
+                        Type = ColumnType.Categorical
+                    } // Idx 7, 8 (Premium, Standard)
                 ],
-                Target = new ColumnDefinition { Name = "Cena", Type = ColumnType.Numeric }
+                Target = new ColumnDefinition
+                {
+                    Name = "Cena",
+                    Type = ColumnType.Numeric
+                }
             };
 
             // 3. KONWERSJA (Excel -> FastTensor)
             // ZMIANA: Wstrzykujemy AOT-Safe delegat zamiast Refleksji
-            var converter = new TabularToTensorConverter<PropertyData>(schema, (item, propName) => propName switch
+            var converter = new TabularToTensorConverter<PropertyData>(schema, valueExtractor: (item, propName) => propName switch
             {
                 "Powierzchnia" => item.Powierzchnia,
                 "Pietro" => item.Pietro,
@@ -64,18 +129,31 @@ namespace DevOnBike.Overfit.Tests.Prepare
 
             // 4. PRZYGOTOWANIE PIPELINE
             // Indeksy kolumn binarnych/one-hot — nie podlegają skalowaniu ani winsoryzacji
-            var binaryAndOneHot = new HashSet<int> { 2, 3, 5, 6, 7, 8 };
-            var numericColumns = new HashSet<int> { 0, 1, 4 };
+            var binaryAndOneHot = new HashSet<int>
+            {
+                2,
+                3,
+                5,
+                6,
+                7,
+                8
+            };
+            var numericColumns = new HashSet<int>
+            {
+                0,
+                1,
+                4
+            };
 
             var pipeline = new DataPipeline()
-                .AddLayer(new TechnicalSanityLayer())                               // Czyści NaN/Inf/Subnormale
-                .AddLayer(new DuplicateRowFilterLayer())                             // Wyrzuca zduplikowane wiersze
-                .AddLayer(new ConstantColumnFilterLayer())                           // Wyrzuca kolumny o zerowej wariancji
-                .AddLayer(new OutlierClipLayer(                                      // Winsoryzacja — tylko kolumny numeryczne
-                    excludedColumns: binaryAndOneHot))
-                .AddLayer(new RobustScalingLayer(                                    // Skalowanie IQR — tylko kolumny numeryczne
-                    columnIndices: numericColumns,
-                    excludedColumns: binaryAndOneHot));
+                .AddLayer(new TechnicalSanityLayer()) // Czyści NaN/Inf/Subnormale
+                .AddLayer(new DuplicateRowFilterLayer()) // Wyrzuca zduplikowane wiersze
+                .AddLayer(new ConstantColumnFilterLayer()) // Wyrzuca kolumny o zerowej wariancji
+                .AddLayer(new OutlierClipLayer( // Winsoryzacja — tylko kolumny numeryczne
+                excludedColumns: binaryAndOneHot))
+                .AddLayer(new RobustScalingLayer( // Skalowanie IQR — tylko kolumny numeryczne
+                numericColumns,
+                binaryAndOneHot));
 
             // 5. EGZEKUCJA POTOKU
             using var finalContext = pipeline.Execute(rawX, rawY);
@@ -112,10 +190,18 @@ namespace DevOnBike.Overfit.Tests.Prepare
             var targets = new FastTensor<float>(4, 1);
 
             var fSpan = features.AsSpan();
-            fSpan[0] = 1f; fSpan[1] = 2f; fSpan[2] = 3f;            // Wiersz 0: czysty
-            fSpan[3] = 4f; fSpan[4] = float.NaN; fSpan[5] = 5f;     // Wiersz 1: 1/3 NaN → OK
-            fSpan[6] = float.NaN; fSpan[7] = float.NaN; fSpan[8] = float.NaN; // Wiersz 2: 3/3 NaN → wyrzucony
-            fSpan[9] = 7f; fSpan[10] = 8f; fSpan[11] = 9f;          // Wiersz 3: czysty
+            fSpan[0] = 1f;
+            fSpan[1] = 2f;
+            fSpan[2] = 3f; // Wiersz 0: czysty
+            fSpan[3] = 4f;
+            fSpan[4] = float.NaN;
+            fSpan[5] = 5f; // Wiersz 1: 1/3 NaN → OK
+            fSpan[6] = float.NaN;
+            fSpan[7] = float.NaN;
+            fSpan[8] = float.NaN; // Wiersz 2: 3/3 NaN → wyrzucony
+            fSpan[9] = 7f;
+            fSpan[10] = 8f;
+            fSpan[11] = 9f; // Wiersz 3: czysty
 
             targets.AsSpan()[0] = 10f;
             targets.AsSpan()[1] = 20f;
@@ -144,10 +230,14 @@ namespace DevOnBike.Overfit.Tests.Prepare
             var targets = new FastTensor<float>(4, 1);
 
             var fSpan = features.AsSpan();
-            fSpan[0] = 1f; fSpan[1] = 2f; // Wiersz 0
-            fSpan[2] = 3f; fSpan[3] = 4f; // Wiersz 1 — unikat
-            fSpan[4] = 1f; fSpan[5] = 2f; // Wiersz 2 — duplikat wiersza 0
-            fSpan[6] = 5f; fSpan[7] = 6f; // Wiersz 3 — unikat
+            fSpan[0] = 1f;
+            fSpan[1] = 2f; // Wiersz 0
+            fSpan[2] = 3f;
+            fSpan[3] = 4f; // Wiersz 1 — unikat
+            fSpan[4] = 1f;
+            fSpan[5] = 2f; // Wiersz 2 — duplikat wiersza 0
+            fSpan[6] = 5f;
+            fSpan[7] = 6f; // Wiersz 3 — unikat
 
             targets.AsSpan()[0] = 10f;
             targets.AsSpan()[1] = 20f;
@@ -158,7 +248,7 @@ namespace DevOnBike.Overfit.Tests.Prepare
             using var result = layer.Process(new PipelineContext(features, targets));
 
             Assert.Equal(3, result.Features.GetDim(0)); // Wiersz 2 wyrzucony
-            Assert.Equal(10f, result.Targets[0, 0]);    // Zachowany pierwszy z pary
+            Assert.Equal(10f, result.Targets[0, 0]); // Zachowany pierwszy z pary
             Assert.Equal(20f, result.Targets[1, 0]);
             Assert.Equal(40f, result.Targets[2, 0]);
         }
@@ -170,9 +260,12 @@ namespace DevOnBike.Overfit.Tests.Prepare
             var targets = new FastTensor<float>(3, 1);
 
             var fSpan = features.AsSpan();
-            fSpan[0] = 1f; fSpan[1] = 2f;
-            fSpan[2] = 1f; fSpan[3] = 2f; // Te same Features, inny Target
-            fSpan[4] = 1f; fSpan[5] = 2f; // Te same Features, jeszcze inny Target
+            fSpan[0] = 1f;
+            fSpan[1] = 2f;
+            fSpan[2] = 1f;
+            fSpan[3] = 2f; // Te same Features, inny Target
+            fSpan[4] = 1f;
+            fSpan[5] = 2f; // Te same Features, jeszcze inny Target
 
             targets.AsSpan()[0] = 100f;
             targets.AsSpan()[1] = 200f;
@@ -194,10 +287,18 @@ namespace DevOnBike.Overfit.Tests.Prepare
             var targets = new FastTensor<float>(4, 1);
 
             var fSpan = features.AsSpan();
-            fSpan[0] = 1f; fSpan[1] = 5f; fSpan[2] = 10f;
-            fSpan[3] = 2f; fSpan[4] = 5f; fSpan[5] = 20f;
-            fSpan[6] = 3f; fSpan[7] = 5f; fSpan[8] = 30f;
-            fSpan[9] = 4f; fSpan[10] = 5f; fSpan[11] = 40f;
+            fSpan[0] = 1f;
+            fSpan[1] = 5f;
+            fSpan[2] = 10f;
+            fSpan[3] = 2f;
+            fSpan[4] = 5f;
+            fSpan[5] = 20f;
+            fSpan[6] = 3f;
+            fSpan[7] = 5f;
+            fSpan[8] = 30f;
+            fSpan[9] = 4f;
+            fSpan[10] = 5f;
+            fSpan[11] = 40f;
 
             var layer = new ConstantColumnFilterLayer();
             using var result = layer.Process(new PipelineContext(features, targets));
@@ -226,8 +327,8 @@ namespace DevOnBike.Overfit.Tests.Prepare
 
             // Agresywna winsoryzacja: 10%/90%
             var layer = new OutlierClipLayer(
-                lowerPercentile: 0.1f,
-                upperPercentile: 0.9f);
+            0.1f,
+            0.9f);
 
             using var result = layer.Process(new PipelineContext(features, targets));
 
@@ -246,14 +347,20 @@ namespace DevOnBike.Overfit.Tests.Prepare
             var fSpan = features.AsSpan();
 
             // Kolumna 0: cena (skośna), Kolumna 1: piętro (symetryczna — nie transformujemy)
-            fSpan[0] = 200000f; fSpan[1] = 1f;
-            fSpan[2] = 400000f; fSpan[3] = 3f;
-            fSpan[4] = 600000f; fSpan[5] = 5f;
-            fSpan[6] = 2000000f; fSpan[7] = 2f;
+            fSpan[0] = 200000f;
+            fSpan[1] = 1f;
+            fSpan[2] = 400000f;
+            fSpan[3] = 3f;
+            fSpan[4] = 600000f;
+            fSpan[5] = 5f;
+            fSpan[6] = 2000000f;
+            fSpan[7] = 2f;
 
             var layer = new LogTransformLayer(
-                columnIndices: new List<int> { 0 },
-                mode: LogMode.Log1p);
+            new List<int>
+            {
+                0
+            });
 
             using var result = layer.Process(new PipelineContext(features, targets));
 
@@ -285,8 +392,11 @@ namespace DevOnBike.Overfit.Tests.Prepare
             fSpan[3] = 500000f;
 
             var layer = new LogTransformLayer(
-                columnIndices: new List<int> { 0 },
-                mode: LogMode.SignedLog1p);
+            new List<int>
+            {
+                0
+            },
+            LogMode.SignedLog1p);
 
             using var result = layer.Process(new PipelineContext(features, targets));
 
@@ -313,15 +423,32 @@ namespace DevOnBike.Overfit.Tests.Prepare
             // Kolumna 0: powierzchnia [30, 40, 50, 60, 80]
             // Kolumna 1: binarna [0, 1, 0, 1, 0]
             // Kolumna 2: cena [300k, 400k, 500k, 600k, 800k]
-            fSpan[0] = 30f; fSpan[1] = 0f; fSpan[2] = 300000f;
-            fSpan[3] = 40f; fSpan[4] = 1f; fSpan[5] = 400000f;
-            fSpan[6] = 50f; fSpan[7] = 0f; fSpan[8] = 500000f;
-            fSpan[9] = 60f; fSpan[10] = 1f; fSpan[11] = 600000f;
-            fSpan[12] = 80f; fSpan[13] = 0f; fSpan[14] = 800000f;
+            fSpan[0] = 30f;
+            fSpan[1] = 0f;
+            fSpan[2] = 300000f;
+            fSpan[3] = 40f;
+            fSpan[4] = 1f;
+            fSpan[5] = 400000f;
+            fSpan[6] = 50f;
+            fSpan[7] = 0f;
+            fSpan[8] = 500000f;
+            fSpan[9] = 60f;
+            fSpan[10] = 1f;
+            fSpan[11] = 600000f;
+            fSpan[12] = 80f;
+            fSpan[13] = 0f;
+            fSpan[14] = 800000f;
 
             var layer = new RobustScalingLayer(
-                columnIndices: new HashSet<int> { 0, 2 },
-                excludedColumns: new HashSet<int> { 1 });
+            new HashSet<int>
+            {
+                0,
+                2
+            },
+            new HashSet<int>
+            {
+                1
+            });
 
             using var result = layer.Process(new PipelineContext(features, targets));
 

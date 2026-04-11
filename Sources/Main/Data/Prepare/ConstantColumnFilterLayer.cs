@@ -10,16 +10,16 @@ using DevOnBike.Overfit.Data.Contracts;
 namespace DevOnBike.Overfit.Data.Prepare
 {
     /// <summary>
-    /// Filters out columns that are constant or have a low unique value ratio.
-    /// This layer follows the Fit-Transform pattern, identifying columns during the first pass.
+    ///     Filters out columns that are constant or have a low unique value ratio.
+    ///     This layer follows the Fit-Transform pattern, identifying columns during the first pass.
     /// </summary>
     public sealed class ConstantColumnFilterLayer : IDataLayer
     {
         private readonly float _epsilon;
         private readonly float _minUniqueRatio;
+        private bool _fitted;
 
         private int[] _keptIndices;
-        private bool _fitted;
 
         /// <param name="epsilon">The threshold for considering values as identical. Use 0 for exact match.</param>
         /// <param name="minUniqueRatio">Minimum ratio of unique values [0, 1]. Columns below this threshold are dropped.</param>
@@ -28,13 +28,13 @@ namespace DevOnBike.Overfit.Data.Prepare
             if (epsilon < 0f)
             {
                 throw new ArgumentOutOfRangeException(
-                    nameof(epsilon), "Epsilon cannot be negative.");
+                nameof(epsilon), "Epsilon cannot be negative.");
             }
 
             if (minUniqueRatio is < 0f or > 1f)
             {
                 throw new ArgumentOutOfRangeException(
-                    nameof(minUniqueRatio), "Unique value ratio must be in the range [0, 1].");
+                nameof(minUniqueRatio), "Unique value ratio must be in the range [0, 1].");
             }
 
             _epsilon = epsilon;
@@ -89,7 +89,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Creates a new tensor containing only the selected columns.
+        ///     Creates a new tensor containing only the selected columns.
         /// </summary>
         private FastTensor<float> ExtractColumns(FastTensor<float> src, int[] indices, int rows)
         {
@@ -115,7 +115,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Identifies non-constant columns based on a variance threshold (epsilon).
+        ///     Identifies non-constant columns based on a variance threshold (epsilon).
         /// </summary>
         private void IdentifyByVariance(ReadOnlySpan<float> span, int rows, int cols, List<int> keptIndices)
         {
@@ -155,7 +155,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Identifies columns that meet the minimum unique value ratio requirement.
+        ///     Identifies columns that meet the minimum unique value ratio requirement.
         /// </summary>
         private void IdentifyByUniqueRatio(ReadOnlySpan<float> span, int rows, int cols, List<int> keptIndices)
         {
@@ -186,7 +186,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Resets the fitted state, allowing the layer to learn from a new dataset.
+        ///     Resets the fitted state, allowing the layer to learn from a new dataset.
         /// </summary>
         public void Reset()
         {
@@ -195,4 +195,3 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
     }
 }
-

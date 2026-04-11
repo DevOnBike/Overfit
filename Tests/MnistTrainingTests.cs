@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Diagnostics;
+using System.Text;
 using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.Data;
 using DevOnBike.Overfit.DeepLearning;
@@ -27,7 +28,7 @@ namespace DevOnBike.Overfit.Tests
             // --- ARRANGE (SMOKE TEST) ---
             var trainSize = 60000; // Trenujemy na całym zbiorze danych!
             var batchSize = 64;
-            var epochs = 5;        // 5 epok x ~24 sekundy = ~120 sekund (2 minuty)
+            var epochs = 5; // 5 epok x ~24 sekundy = ~120 sekund (2 minuty)
             var learningRate = 0.001f;
 
             _output.WriteLine("=== START: Trening ResNet na Taśmie ===");
@@ -35,8 +36,8 @@ namespace DevOnBike.Overfit.Tests
 
             var (trainX, trainY) = MnistLoader.Load("d:/ml/train-images.idx3-ubyte", "d:/ml/train-labels.idx1-ubyte", trainSize);
 
-            using var X = new AutogradNode(trainX, requiresGrad: false);
-            using var Y = new AutogradNode(trainY, requiresGrad: false);
+            using var X = new AutogradNode(trainX, false);
+            using var Y = new AutogradNode(trainY, false);
 
             // --- POPRAWIONA ARCHITEKTURA RESNET ---
             var conv1 = new ConvLayer(1, 8, 28, 28, 3);
@@ -51,7 +52,7 @@ namespace DevOnBike.Overfit.Tests
                 .ToArray();
 
             using var optimizer = new Adam(parameters, learningRate);
-            using var scheduler = new LRScheduler(optimizer, parameters, _output.WriteLine, factor: 0.5f, patience: 3);
+            using var scheduler = new LRScheduler(optimizer, parameters, _output.WriteLine, 0.5f, 3);
 
             var numBatches = trainSize / batchSize;
             var totalSw = Stopwatch.StartNew();
@@ -68,7 +69,10 @@ namespace DevOnBike.Overfit.Tests
                 var epochSw = Stopwatch.StartNew();
                 var epochLoss = 0f;
 
-                conv1.Train(); bn1.Train(); res1.Train(); fcOut.Train();
+                conv1.Train();
+                bn1.Train();
+                res1.Train();
+                fcOut.Train();
 
                 for (var b = 0; b < numBatches; b++)
                 {
@@ -79,7 +83,7 @@ namespace DevOnBike.Overfit.Tests
                     using var xBatchData = new FastTensor<float>(batchSize, 1, 28, 28);
                     X.Data.AsSpan().Slice(b * batchSize * 784, batchSize * 784).CopyTo(xBatchData.AsSpan());
 
-                    using var mutatedData = DataAugmenter.AugmentBatch(xBatchData, 28, 28);
+                    using var mutatedData = DataAugmenter.AugmentBatch(xBatchData);
                     using var xBatch = new AutogradNode(mutatedData, false);
 
                     using var yBatchData = new FastTensor<float>(batchSize, 10);
@@ -124,7 +128,10 @@ namespace DevOnBike.Overfit.Tests
 
             using var fs = new FileStream("d:/ml/resnet_beast.bin", FileMode.Create);
             using var bw = new BinaryWriter(fs);
-            conv1.Save(bw); bn1.Save(bw); res1.Save(bw); fcOut.Save(bw);
+            conv1.Save(bw);
+            bn1.Save(bw);
+            res1.Save(bw);
+            fcOut.Save(bw);
 
             _output.WriteLine("Zapisano wagi do pliku: d:/ml/resnet_beast.bin");
         }
@@ -167,7 +174,7 @@ namespace DevOnBike.Overfit.Tests
                 matrix[actual, predicted]++;
             }
 
-            var sb = new System.Text.StringBuilder();
+            var sb = new StringBuilder();
             sb.AppendLine("\n=== MACIERZ POMYŁEK (CONFUSION MATRIX) ===");
             for (var r = 0; r < 10; r++)
             {
@@ -184,7 +191,10 @@ namespace DevOnBike.Overfit.Tests
         private int GetArgMax(ReadOnlySpan<float> span)
         {
             var maxIdx = 0;
-            for (var j = 1; j < span.Length; j++) if (span[j] > span[maxIdx]) maxIdx = j;
+            for (var j = 1; j < span.Length; j++)
+            {
+                if (span[j] > span[maxIdx]) maxIdx = j;
+            }
             return maxIdx;
         }
     }

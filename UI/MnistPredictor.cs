@@ -11,8 +11,8 @@ namespace DevOnBike.Overfit.UI
 {
     public sealed class MnistPredictor : IDisposable
     {
-        private readonly ConvLayer _conv1;
         private readonly BatchNorm1D _bn1;
+        private readonly ConvLayer _conv1;
         private readonly LinearLayer _fc1;
         private readonly Sequential _weightsContainer;
 
@@ -20,7 +20,7 @@ namespace DevOnBike.Overfit.UI
         {
             // 1. Definicja architektury (Musi być identyczna jak w używanym modelu)
             // Wejście [1, 1, 28, 28] -> Conv 3x3 (8 filtrów) -> [1, 8, 26, 26]
-            _conv1 = new ConvLayer(inChannels: 1, outChannels: 8, h: 28, w: 28, kSize: 3);
+            _conv1 = new ConvLayer(1, 8, 28, 28, 3);
 
             // Po MaxPool 2x2 wynik to [1, 8, 13, 13], czyli 1352 cechy
             _bn1 = new BatchNorm1D(1352);
@@ -45,6 +45,11 @@ namespace DevOnBike.Overfit.UI
             // USUNIĘTO: Ręczne tworzenie instancji ComputationGraph.Active
         }
 
+        public void Dispose()
+        {
+            _weightsContainer?.Dispose();
+        }
+
         public int Predict(float[] pixelData)
         {
             if (pixelData == null || pixelData.Length != 784)
@@ -56,7 +61,7 @@ namespace DevOnBike.Overfit.UI
             using var inputMat = new FastTensor<float>(1, 1, 28, 28);
             pixelData.CopyTo(inputMat.AsSpan());
 
-            using var input = new AutogradNode(inputMat, requiresGrad: false);
+            using var input = new AutogradNode(inputMat, false);
 
             // --- PRZEJŚCIE W PRZÓD (FORWARD PASS) ---
             // ZMIANA: Przekazujemy 'null' jako ComputationGraph, wymuszając super szybką inferencję
@@ -88,11 +93,6 @@ namespace DevOnBike.Overfit.UI
                 if (span[i] > span[maxIdx]) maxIdx = i;
             }
             return maxIdx;
-        }
-
-        public void Dispose()
-        {
-            _weightsContainer?.Dispose();
         }
     }
 }

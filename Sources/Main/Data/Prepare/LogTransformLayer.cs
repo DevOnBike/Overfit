@@ -9,15 +9,15 @@ using DevOnBike.Overfit.Data.Contracts;
 namespace DevOnBike.Overfit.Data.Prepare
 {
     /// <summary>
-    /// Logarithmic transformation for columns with highly skewed distributions.
-    /// Used to stabilize variance, reduce outlier impact, and improve gradient convergence 
-    /// by shifting feature distributions closer to a normal distribution.
+    ///     Logarithmic transformation for columns with highly skewed distributions.
+    ///     Used to stabilize variance, reduce outlier impact, and improve gradient convergence
+    ///     by shifting feature distributions closer to a normal distribution.
     /// </summary>
     public sealed class LogTransformLayer : IDataLayer
     {
         private readonly List<int> _columnIndices;
-        private readonly LogMode _mode;
         private readonly float _epsilon;
+        private readonly LogMode _mode;
 
         public LogTransformLayer(
             List<int> columnIndices,
@@ -81,8 +81,8 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Applies log(1 + x). Ideal for non-negative data (e.g., price, area).
-        /// Safe for x = 0 (results in 0). Negative values are clamped to 0.
+        ///     Applies log(1 + x). Ideal for non-negative data (e.g., price, area).
+        ///     Safe for x = 0 (results in 0). Negative values are clamped to 0.
         /// </summary>
         private void ApplyLog1p(Span<float> span, int rows, int cols)
         {
@@ -104,8 +104,8 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Applies sign(x) * log(1 + |x|). 
-        /// Used for symmetric distributions containing negative values (e.g., price changes or residuals).
+        ///     Applies sign(x) * log(1 + |x|).
+        ///     Used for symmetric distributions containing negative values (e.g., price changes or residuals).
         /// </summary>
         private void ApplySignedLog1p(Span<float> span, int rows, int cols)
         {
@@ -126,9 +126,9 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
-        /// Applies log(x + epsilon). 
-        /// Use this for strictly positive data when log1p flattening of small values is undesirable.
-        /// Epsilon protects against log(0) resulting in negative infinity.
+        ///     Applies log(x + epsilon).
+        ///     Use this for strictly positive data when log1p flattening of small values is undesirable.
+        ///     Epsilon protects against log(0) resulting in negative infinity.
         /// </summary>
         private void ApplyLogEps(Span<float> span, int rows, int cols)
         {

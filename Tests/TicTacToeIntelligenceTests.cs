@@ -24,14 +24,14 @@ namespace DevOnBike.Overfit.Tests
         public void Bestia_ShouldLearn_TicTacToe_LongTraining()
         {
             using var model = new Sequential(
-                new LinearLayer(9, 128),
-                new ReluActivation(),
-                new LinearLayer(128, 64),
-                new ReluActivation(),
-                new LinearLayer(64, 9)
+            new LinearLayer(9, 128),
+            new ReluActivation(),
+            new LinearLayer(128, 64),
+            new ReluActivation(),
+            new LinearLayer(64, 9)
             );
 
-            using var optimizer = new Adam(model.Parameters(), 0.001f);
+            using var optimizer = new Adam(model.Parameters());
 
             var graph = new ComputationGraph();
 
@@ -109,7 +109,7 @@ namespace DevOnBike.Overfit.Tests
 
             using var inputMat = new FastTensor<float>(1, 9);
             s.CopyTo(inputMat.AsSpan());
-            using var inputNode = new AutogradNode(inputMat, requiresGrad: false);
+            using var inputNode = new AutogradNode(inputMat, false);
 
             // Forward z grafem — trening, nowe tensory, using OK
             using var pred = model.Forward(graph, inputNode);
@@ -122,7 +122,7 @@ namespace DevOnBike.Overfit.Tests
             {
                 using var nextInputMat = new FastTensor<float>(1, 9);
                 nextS.CopyTo(nextInputMat.AsSpan());
-                using var nextInputNode = new AutogradNode(nextInputMat, requiresGrad: false);
+                using var nextInputNode = new AutogradNode(nextInputMat, false);
 
                 // Forward(null) — inference, zwraca współdzielony bufor → BEZ using
                 var nextQNode = model.Forward(null, nextInputNode);
@@ -142,7 +142,7 @@ namespace DevOnBike.Overfit.Tests
 
             targetMat[0, a] = targetValue;
 
-            using var targetNode = new AutogradNode(targetMat, requiresGrad: false);
+            using var targetNode = new AutogradNode(targetMat, false);
             using var loss = TensorMath.MSELoss(graph, pred, targetNode);
 
             graph.Backward(loss);
@@ -159,7 +159,7 @@ namespace DevOnBike.Overfit.Tests
 
             using var inputMat = new FastTensor<float>(1, 9);
             board.CopyTo(inputMat.AsSpan());
-            using var inputNode = new AutogradNode(inputMat, requiresGrad: false);
+            using var inputNode = new AutogradNode(inputMat, false);
 
             // Forward(null) — inference, zwraca współdzielony bufor → BEZ using
             var output = model.Forward(null, inputNode);
@@ -234,9 +234,30 @@ namespace DevOnBike.Overfit.Tests
         {
             int[,] lines =
             {
-                { 0, 1, 2 }, { 3, 4, 5 }, { 6, 7, 8 },
-                { 0, 3, 6 }, { 1, 4, 7 }, { 2, 5, 8 },
-                { 0, 4, 8 }, { 2, 4, 6 }
+                {
+                    0, 1, 2
+                },
+                {
+                    3, 4, 5
+                },
+                {
+                    6, 7, 8
+                },
+                {
+                    0, 3, 6
+                },
+                {
+                    1, 4, 7
+                },
+                {
+                    2, 5, 8
+                },
+                {
+                    0, 4, 8
+                },
+                {
+                    2, 4, 6
+                }
             };
 
             for (var i = 0; i < 8; i++)

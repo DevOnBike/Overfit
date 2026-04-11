@@ -6,13 +6,13 @@
 namespace DevOnBike.Overfit.Core
 {
     /// <summary>
-    /// Manages the recording and execution of operations for automatic differentiation (Reverse Mode).
+    ///     Manages the recording and execution of operations for automatic differentiation (Reverse Mode).
     /// </summary>
     public sealed class ComputationGraph
     {
         private const int InitialCapacity = 4096;
-        private TapeOp[] _tape = new TapeOp[InitialCapacity];
         private int _opCount;
+        private TapeOp[] _tape = new TapeOp[InitialCapacity];
 
         public bool IsRecording { get; set; } = true;
 
@@ -42,7 +42,7 @@ namespace DevOnBike.Overfit.Core
         }
 
         /// <summary>
-        /// Performs the backward pass, propagating gradients from the loss node through the tape.
+        ///     Performs the backward pass, propagating gradients from the loss node through the tape.
         /// </summary>
         public void Backward(AutogradNode lossNode)
         {
@@ -114,23 +114,41 @@ namespace DevOnBike.Overfit.Core
             switch (op.Code)
             {
                 case OpCode.Add: TensorMath.AddBackward(op.A, op.B, op.Output); break;
+
                 case OpCode.AddBias: TensorMath.AddBiasBackward(op.A, op.B, op.Output); break;
+
                 case OpCode.MatMul: TensorMath.MatMulBackward(op.A, op.B, op.Output); break;
+
                 case OpCode.ReLU: TensorMath.ReluBackward(op.A, op.Output); break;
+
                 case OpCode.Dropout: TensorMath.DropoutBackward(op.A, op.B, op.Output); break;
+
                 case OpCode.MseLoss: TensorMath.MSELossBackward(op.A, op.B, op.Output); break;
+
                 case OpCode.SoftmaxCrossEntropy: TensorMath.SoftmaxCrossEntropyBackward(op.A, op.B, op.Output, op.NodeContext[0]); break;
+
                 case OpCode.Conv2D: TensorMath.Conv2DBackward(op.A, op.B, op.Output, op.I0, op.I1, op.I2, op.I3, op.I4); break;
+
                 case OpCode.MaxPool2D: TensorMath.MaxPool2DBackward(op.A, op.B, op.Output); break;
+
                 case OpCode.GlobalAveragePool2D: TensorMath.GlobalAvgPool2DBackward(op.A, op.Output, op.I0, op.I1, op.I2); break;
+
                 case OpCode.BatchNorm1D: TensorMath.BatchNorm1DBackward(op.A, op.Output, op.NodeContext[0], op.NodeContext[1], op.NodeContext[2], op.NodeContext[3]); break;
+
                 case OpCode.Reshape: TensorMath.ReshapeBackward(op.A, op.Output); break;
+
                 case OpCode.Sigmoid: TensorMath.SigmoidBackward(op.A, op.Output); break;
+
                 case OpCode.Tanh: TensorMath.TanhBackward(op.A, op.Output); break;
+
                 case OpCode.Multiply: TensorMath.MultiplyBackward(op.A, op.B, op.Output); break;
+
                 case OpCode.GateSlice: TensorMath.GateSliceBackward(op.A, op.Output, op.I1, op.I0); break;
+
                 case OpCode.TimestepSlice: TensorMath.TimestepSliceBackward(op.A, op.Output, op.I0, op.I1, op.I2); break;
+
                 case OpCode.StackTimesteps: TensorMath.StackTimestepsBackward(op.NodeContext, op.Output, op.I0, op.I1, op.I2); break;
+
                 case OpCode.DirectionalLoss:
                     var gammaValue = BitConverter.Int32BitsToSingle(op.I0);
                     TensorMath.DirectionalLossBackward(op.A, op.B, op.Output, gammaValue);

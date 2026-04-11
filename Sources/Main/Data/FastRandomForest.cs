@@ -10,9 +10,9 @@ namespace DevOnBike.Overfit.Data
 {
     public class FastRandomForest
     {
-        private readonly int _numTrees;
         private readonly int _maxDepth;
-        
+        private readonly int _numTrees;
+
         private List<FastTreeNode> _forest = [];
 
         public FastRandomForest(int numTrees = 50, int maxDepth = 10)
@@ -27,8 +27,7 @@ namespace DevOnBike.Overfit.Data
             var importance = new float[cols];
             var lockObj = new object();
 
-            Parallel.For(0, _numTrees, t =>
-            {
+            Parallel.For(0, _numTrees, body: t => {
                 var localImportance = new float[cols];
 
                 BuildSimpleTree(x, y, localImportance);
@@ -60,7 +59,7 @@ namespace DevOnBike.Overfit.Data
                 for (var r = 0; r < rows; r++)
                 {
                     var val = xSpan[r * cols + featureIdx];
-                    
+
                     if (val < min) min = val;
                     if (val > max) max = val;
                 }

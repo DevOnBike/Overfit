@@ -12,8 +12,8 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring.Contracts
         public required string PrometheusBaseUrl { get; init; }
 
         /// <summary>
-        /// PromQL regex matching all pods to monitor, e.g. "my-service-.*".
-        /// Used as pod=~"{PodRegex}" in all instant queries.
+        ///     PromQL regex matching all pods to monitor, e.g. "my-service-.*".
+        ///     Used as pod=~"{PodRegex}" in all instant queries.
         /// </summary>
         public required string PodRegex { get; init; }
 
@@ -24,8 +24,8 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring.Contracts
         public string DcEastLabel { get; init; } = "east";
 
         /// <summary>
-        /// How often to scrape — should match Prometheus scrape_interval.
-        /// Default: 15 seconds.
+        ///     How often to scrape — should match Prometheus scrape_interval.
+        ///     Default: 15 seconds.
         /// </summary>
         public TimeSpan ScrapeInterval { get; init; } = TimeSpan.FromSeconds(15);
 

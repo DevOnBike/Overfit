@@ -6,24 +6,33 @@
 
 **A High-Performance, Zero-Allocation Machine Learning Engine in Pure C#.**
 
-Overfit is a ground-up Deep Learning and Data Preprocessing framework built specifically for modern .NET. It brings the power of neural networks, advanced feature selection, and tabular data pipelines directly to C# **without relying on Python wrappers or heavy external C++ binaries**. 
+Overfit is a ground-up Deep Learning and Data Preprocessing framework built specifically for modern .NET. It brings the
+power of neural networks, advanced feature selection, and tabular data pipelines directly to C# **without relying on
+Python wrappers or heavy external C++ binaries**.
 
-Designed for maximum CPU inference speed, Overfit embraces aggressive memory management, SIMD potential, and full Native AOT compatibility.
+Designed for maximum CPU inference speed, Overfit embraces aggressive memory management, SIMD potential, and full Native
+AOT compatibility.
 
 ---
 
 ## 🚀 Key Features
 
-* **Zero-Allocation Hot Paths:** Built heavily on `Span<T>` and custom memory pooling. Training loops and inference passes avoid triggering the Garbage Collector (GC), ensuring flat-line CPU usage.
-* **100% Native AOT Compatible:** Free from runtime reflection (`System.Reflection`), `dynamic` typing, and `Reflection.Emit`. Overfit compiles perfectly into tiny, standalone native binaries with instant cold-starts.
-* **Dynamic Autograd Engine:** Features a scratch-built `ComputationGraph` for automatic differentiation (Reverse-mode AutoDiff).
-* **Deep Learning Toolkit:** Out-of-the-box support for MLPs, Convolutional Neural Networks (Conv2D, MaxPool, GlobalAveragePool), Residual Blocks, and Batch Normalization.
-* **Advanced Data Pipelines:** Production-ready `DataPipeline` including Boruta Feature Selection, Correlation Filters, Robust Scaling, and Outlier Clipping.
+* **Zero-Allocation Hot Paths:** Built heavily on `Span<T>` and custom memory pooling. Training loops and inference
+  passes avoid triggering the Garbage Collector (GC), ensuring flat-line CPU usage.
+* **100% Native AOT Compatible:** Free from runtime reflection (`System.Reflection`), `dynamic` typing, and
+  `Reflection.Emit`. Overfit compiles perfectly into tiny, standalone native binaries with instant cold-starts.
+* **Dynamic Autograd Engine:** Features a scratch-built `ComputationGraph` for automatic differentiation (Reverse-mode
+  AutoDiff).
+* **Deep Learning Toolkit:** Out-of-the-box support for MLPs, Convolutional Neural Networks (Conv2D, MaxPool,
+  GlobalAveragePool), Residual Blocks, and Batch Normalization.
+* **Advanced Data Pipelines:** Production-ready `DataPipeline` including Boruta Feature Selection, Correlation Filters,
+  Robust Scaling, and Outlier Clipping.
 * **Reinforcement Learning:** Easily adaptable for RL scenarios (e.g., Q-Learning for game agents).
 
 ## 📦 Installation
 
 Install via NuGet Package Manager:
+
 ```bash
 dotnet add package DevOnBike.Overfit
 ```
@@ -33,6 +42,7 @@ dotnet add package DevOnBike.Overfit
 ## 🛠️ Quick Start
 
 ### 1. Building a Neural Network
+
 Overfit makes it easy to build, train, and run inference on deep neural networks.
 
 ```csharp
@@ -56,6 +66,7 @@ var prediction = model.Forward(null, inputTensor);
 ```
 
 ### 2. Robust Data Preprocessing
+
 Taming messy tabular data before feeding it to a model:
 
 ```csharp
@@ -74,11 +85,14 @@ using var cleanData = pipeline.Execute(rawFeatures, rawTargets);
 
 ## 💡 Why Pure C# and Native AOT?
 
-Most .NET ML libraries act as bridges to PyTorch, TensorFlow, or ONNX Runtime. While powerful, they drag along massive dependencies (often gigabytes of CUDA libraries and Python environments). 
+Most .NET ML libraries act as bridges to PyTorch, TensorFlow, or ONNX Runtime. While powerful, they drag along massive
+dependencies (often gigabytes of CUDA libraries and Python environments).
 
 **Overfit is different.**
-By writing the math and the autograd engine entirely in modern C# (utilizing SIMD and memory-safe structures), Overfit allows you to deploy intelligent applications as **single-file native executables**. 
-Whether you're building a microservice, a high-frequency trading bot, or an embedded IoT application, Overfit runs with predictable latency and a tiny memory footprint.
+By writing the math and the autograd engine entirely in modern C# (utilizing SIMD and memory-safe structures), Overfit
+allows you to deploy intelligent applications as **single-file native executables**.
+Whether you're building a microservice, a high-frequency trading bot, or an embedded IoT application, Overfit runs with
+predictable latency and a tiny memory footprint.
 
 ---
 
@@ -86,15 +100,21 @@ Whether you're building a microservice, a high-frequency trading bot, or an embe
 
 This software is released under a **Dual License model**:
 
-1. **Open Source (GNU AGPLv3):** Free for open-source projects, personal use, and academic research. *Note: If you use this engine in your application (even over a network/API), your entire application must also be open-sourced under the AGPLv3.*
-2. **Commercial License:** For businesses building proprietary, closed-source applications or enterprise environments. Purchasing a commercial license frees you from the requirements of the AGPLv3.
+1. **Open Source (GNU AGPLv3):** Free for open-source projects, personal use, and academic research. *Note: If you use
+   this engine in your application (even over a network/API), your entire application must also be open-sourced under
+   the AGPLv3.*
+2. **Commercial License:** For businesses building proprietary, closed-source applications or enterprise environments.
+   Purchasing a commercial license frees you from the requirements of the AGPLv3.
 
 **To purchase a commercial license or discuss enterprise support, please contact:** 👉 **devonbike@gmail.com**
 
 ---
 
 ## 🤝 Contributing
-Contributions are welcome! Whether it's adding new activation functions, optimizing tensor math with `System.Numerics.Vectors`, or improving the documentation.
+
+Contributions are welcome! Whether it's adding new activation functions, optimizing tensor math with
+`System.Numerics.Vectors`, or improving the documentation.
+
 1. Fork the Project
 2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
 3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)

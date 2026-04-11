@@ -12,8 +12,8 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring.Contracts
         public required string PrometheusBaseUrl { get; init; }
 
         /// <summary>
-        /// PromQL regex matching all pods to monitor, e.g. "my-service-.*".
-        /// Used as pod=~"{PodRegex}" in all queries.
+        ///     PromQL regex matching all pods to monitor, e.g. "my-service-.*".
+        ///     Used as pod=~"{PodRegex}" in all queries.
         /// </summary>
         public required string PodRegex { get; init; }
 
@@ -30,8 +30,8 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring.Contracts
         public required DateTime RangeEnd { get; init; }
 
         /// <summary>
-        /// Step between samples — must match Prometheus scrape_interval.
-        /// Default: 15 seconds.
+        ///     Step between samples — must match Prometheus scrape_interval.
+        ///     Default: 15 seconds.
         /// </summary>
         public TimeSpan Step { get; init; } = TimeSpan.FromSeconds(15);
 

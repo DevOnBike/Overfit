@@ -8,9 +8,9 @@ using System.Text.Json;
 namespace DevOnBike.Overfit.Data.Prepare
 {
     /// <summary>
-    /// Fitted parameters of a RobustScalingLayer � median and IQR per column.
-    /// Serialize to JSON and persist after Golden Window training.
-    /// Load at inference time via RobustScalingLayer.ImportParams().
+    ///     Fitted parameters of a RobustScalingLayer � median and IQR per column.
+    ///     Serialize to JSON and persist after Golden Window training.
+    ///     Load at inference time via RobustScalingLayer.ImportParams().
     /// </summary>
     public sealed class ScalerParams
     {

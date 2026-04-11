@@ -3,7 +3,10 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System;
+using Xunit;
 using DevOnBike.Overfit.Core;
+
 namespace DevOnBike.Overfit.Tests
 {
     public class CholeskyMultivariateGaussianLogicTests
@@ -14,8 +17,11 @@ namespace DevOnBike.Overfit.Tests
         public void ValidateInputs_ValidInputs_DoesNotThrow()
         {
             // Arrange
-            var mean = new double[] { 1.0, 2.0 };
-            using var covariance = new FastMatrix<double>(2, 2);
+            var mean = new[]
+            {
+                1.0f, 2.0f
+            };
+            using var covariance = new FastMatrix<float>(2, 2);
 
             // Act & Assert
             var ex = Record.Exception(() => CholeskyMultivariateGaussianLogic.ValidateInputs(mean, covariance));
@@ -26,8 +32,8 @@ namespace DevOnBike.Overfit.Tests
         public void ValidateInputs_EmptyMean_ThrowsArgumentException()
         {
             // Arrange
-            var mean = Array.Empty<double>();
-            using var covariance = new FastMatrix<double>(2, 2);
+            var mean = Array.Empty<float>();
+            using var covariance = new FastMatrix<float>(2, 2);
 
             // Act & Assert
             var ex = Assert.Throws<ArgumentException>(() => CholeskyMultivariateGaussianLogic.ValidateInputs(mean, covariance));
@@ -38,8 +44,11 @@ namespace DevOnBike.Overfit.Tests
         public void ValidateInputs_DimensionMismatch_ThrowsArgumentException()
         {
             // Arrange
-            var mean = new double[] { 1.0, 2.0 };
-            using var covariance = new FastMatrix<double>(3, 3); // Mismatch!
+            var mean = new[]
+            {
+                1.0f, 2.0f
+            };
+            using var covariance = new FastMatrix<float>(3, 3); // Mismatch!
 
             // Act & Assert
             var ex = Assert.Throws<ArgumentException>(() => CholeskyMultivariateGaussianLogic.ValidateInputs(mean, covariance));
@@ -50,10 +59,16 @@ namespace DevOnBike.Overfit.Tests
         public void DecomposeCholesky_ValidPositiveDefiniteMatrix_ReturnsCorrectL()
         {
             // Arrange
-            using var covariance = new FastMatrix<double>(3, 3);
-            covariance[0, 0] = 4; covariance[0, 1] = 12; covariance[0, 2] = -16;
-            covariance[1, 0] = 12; covariance[1, 1] = 37; covariance[1, 2] = -43;
-            covariance[2, 0] = -16; covariance[2, 1] = -43; covariance[2, 2] = 98;
+            using var covariance = new FastMatrix<float>(3, 3);
+            covariance[0, 0] = 4f;
+            covariance[0, 1] = 12f;
+            covariance[0, 2] = -16f;
+            covariance[1, 0] = 12f;
+            covariance[1, 1] = 37f;
+            covariance[1, 2] = -43f;
+            covariance[2, 0] = -16f;
+            covariance[2, 1] = -43f;
+            covariance[2, 2] = 98f;
 
             // Expected L:
             // [  2,   0,   0 ]
@@ -64,22 +79,29 @@ namespace DevOnBike.Overfit.Tests
             using var L = CholeskyMultivariateGaussianLogic.DecomposeCholesky(covariance);
 
             // Assert
-            Assert.Equal(2.0, L[0, 0], Precision); Assert.Equal(0.0, L[0, 1]); Assert.Equal(0.0, L[0, 2]);
-            Assert.Equal(6.0, L[1, 0], Precision); Assert.Equal(1.0, L[1, 1], Precision); Assert.Equal(0.0, L[1, 2]);
-            Assert.Equal(-8.0, L[2, 0], Precision); Assert.Equal(5.0, L[2, 1], Precision); Assert.Equal(3.0, L[2, 2], Precision);
+            Assert.Equal(2.0f, L[0, 0], Precision);
+            Assert.Equal(0.0f, L[0, 1]);
+            Assert.Equal(0.0f, L[0, 2]);
+            Assert.Equal(6.0f, L[1, 0], Precision);
+            Assert.Equal(1.0f, L[1, 1], Precision);
+            Assert.Equal(0.0f, L[1, 2]);
+            Assert.Equal(-8.0f, L[2, 0], Precision);
+            Assert.Equal(5.0f, L[2, 1], Precision);
+            Assert.Equal(3.0f, L[2, 2], Precision);
         }
 
         [Fact]
         public void DecomposeCholesky_NotPositiveDefinite_ThrowsArgumentExceptionAndCleansUp()
         {
             // Arrange
-            using var covariance = new FastMatrix<double>(2, 2);
-            covariance[0, 0] = 4; covariance[0, 1] = 12;
-            covariance[1, 0] = 12; covariance[1, 1] = 9; // Sprawia, że macierz nie jest dodatnio określona
+            using var covariance = new FastMatrix<float>(2, 2);
+            covariance[0, 0] = 4f;
+            covariance[0, 1] = 12f;
+            covariance[1, 0] = 12f;
+            covariance[1, 1] = 9f; // Sprawia, że macierz nie jest dodatnio określona
 
             // Act & Assert
-            var ex = Assert.Throws<ArgumentException>(() =>
-            {
+            var ex = Assert.Throws<ArgumentException>(() => {
                 // Chociaż metoda wewnątrz rzuca wyjątek, powinna poprawnie wywołać L.Dispose(),
                 // co zabezpiecza naszą pulę ArrayPool przed wyciekiem pamięci.
                 _ = CholeskyMultivariateGaussianLogic.DecomposeCholesky(covariance);
@@ -93,9 +115,11 @@ namespace DevOnBike.Overfit.Tests
         {
             // Arrange
             var dimensions = 2;
-            using var L = new FastMatrix<double>(dimensions, dimensions);
-            L[0, 0] = 1.0; L[0, 1] = 0.0;
-            L[1, 0] = 0.0; L[1, 1] = 1.0;
+            using var L = new FastMatrix<float>(dimensions, dimensions);
+            L[0, 0] = 1.0f;
+            L[0, 1] = 0.0f;
+            L[1, 0] = 0.0f;
+            L[1, 1] = 1.0f;
 
             // Constant dla macierzy identycznościowej: -0.5 * 2 * ln(2PI) - 0
             var expectedConstant = -1.0 * Math.Log(2.0 * Math.PI);
@@ -103,7 +127,7 @@ namespace DevOnBike.Overfit.Tests
             // Act
             var result = CholeskyMultivariateGaussianLogic.CalculateLogNormConstant(dimensions, L);
 
-            // Assert
+            // Assert - tutaj wciąż oczekujemy double, bo logika wylicza stałą w double'u.
             Assert.Equal(expectedConstant, result, Precision);
         }
 
@@ -112,11 +136,18 @@ namespace DevOnBike.Overfit.Tests
         {
             // Arrange
             var dimensions = 2;
-            var observation = new double[] { 0.5, 0.5 };
-            var mean = new double[] { 0.5, 0.5 }; // Obserwacja == Średnia -> odległość Mahalanobisa = 0
+            var observation = new[]
+            {
+                0.5f, 0.5f
+            };
+            var mean = new[]
+            {
+                0.5f, 0.5f
+            }; // Obserwacja == Średnia -> odległość Mahalanobisa = 0
 
-            using var L = new FastMatrix<double>(dimensions, dimensions);
-            L[0, 0] = 1.0; L[1, 1] = 1.0; // Macierz identycznościowa
+            using var L = new FastMatrix<float>(dimensions, dimensions);
+            L[0, 0] = 1.0f;
+            L[1, 1] = 1.0f; // Macierz identycznościowa
 
             var logNormConst = CholeskyMultivariateGaussianLogic.CalculateLogNormConstant(dimensions, L);
 
@@ -134,9 +165,15 @@ namespace DevOnBike.Overfit.Tests
         public void LogProbabilityDensity_DimensionMismatch_ThrowsArgumentException()
         {
             // Arrange
-            var observation = new double[] { 1.0, 2.0, 3.0 }; // Długość 3
-            var mean = new double[] { 1.0, 2.0 }; // Długość 2
-            using var L = new FastMatrix<double>(2, 2);
+            var observation = new[]
+            {
+                1.0f, 2.0f, 3.0f
+            }; // Długość 3
+            var mean = new[]
+            {
+                1.0f, 2.0f
+            }; // Długość 2
+            using var L = new FastMatrix<float>(2, 2);
 
             // Act & Assert
             var ex = Assert.Throws<ArgumentException>(() =>

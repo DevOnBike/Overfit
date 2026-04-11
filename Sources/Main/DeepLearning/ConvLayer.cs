@@ -8,18 +8,14 @@ using DevOnBike.Overfit.Core;
 namespace DevOnBike.Overfit.DeepLearning
 {
     /// <summary>
-    /// Implements a 2D Convolutional Layer for spatial feature extraction.
-    /// Uses an optimized weight format [outChannels, inChannels * kSize * kSize] 
-    /// to leverage high-speed matrix multiplication (Im2Col).
+    ///     Implements a 2D Convolutional Layer for spatial feature extraction.
+    ///     Uses an optimized weight format [outChannels, inChannels * kSize * kSize]
+    ///     to leverage high-speed matrix multiplication (Im2Col).
     /// </summary>
     public sealed class ConvLayer : IModule
     {
-        /// <summary> The learnable kernels (filters) of the layer. </summary>
-        public AutogradNode Kernels { get; }
 
         private readonly int _inC, _outC, _h, _w, _k;
-
-        public bool IsTraining { get; private set; } = true;
 
         /// <param name="inChannels">Number of input channels (e.g., 3 for RGB).</param>
         /// <param name="outChannels">Number of filters (kernels) to apply.</param>
@@ -38,28 +34,24 @@ namespace DevOnBike.Overfit.DeepLearning
             var kData = new FastTensor<float>(outChannels, inChannels * kSize * kSize);
             InitializeKernels(kData.AsSpan(), inChannels * kSize * kSize);
 
-            Kernels = new AutogradNode(kData, true);
+            Kernels = new AutogradNode(kData);
         }
+        /// <summary> The learnable kernels (filters) of the layer. </summary>
+        public AutogradNode Kernels { get; }
 
-        public void Train() => IsTraining = true;
-        public void Eval() => IsTraining = false;
+        public bool IsTraining { get; private set; } = true;
 
-        /// <summary>
-        /// Initializes kernels using He (Kaiming) initialization: stdDev = sqrt(2 / fanIn).
-        /// Ideal for layers followed by ReLU activation.
-        /// </summary>
-        private void InitializeKernels(Span<float> span, int fanIn)
+        public void Train()
         {
-            var stdDev = MathF.Sqrt(2f / fanIn);
-
-            for (var i = 0; i < span.Length; i++)
-            {
-                span[i] = MathUtils.NextGaussian() * stdDev;
-            }
+            IsTraining = true;
+        }
+        public void Eval()
+        {
+            IsTraining = false;
         }
 
         /// <summary>
-        /// Performs the 2D convolution forward pass via the global math engine.
+        ///     Performs the 2D convolution forward pass via the global math engine.
         /// </summary>
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
@@ -73,12 +65,15 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             bw.Write(Kernels.Data.Shape[0]);
             bw.Write(Kernels.Data.Shape[1]);
-            foreach (var val in Kernels.Data.AsSpan()) bw.Write(val);
+            foreach (var val in Kernels.Data.AsSpan())
+            {
+                bw.Write(val);
+            }
         }
 
-        /// <summary> 
-        /// Loads kernels from a binary stream. 
-        /// Performs shape validation to prevent loading incompatible weights.
+        /// <summary>
+        ///     Loads kernels from a binary stream.
+        ///     Performs shape validation to prevent loading incompatible weights.
         /// </summary>
         public void Load(BinaryReader br)
         {
@@ -94,6 +89,25 @@ namespace DevOnBike.Overfit.DeepLearning
             for (var i = 0; i < span.Length; i++)
             {
                 span[i] = br.ReadSingle();
+            }
+        }
+
+        public void Dispose()
+        {
+            Kernels?.Dispose();
+        }
+
+        /// <summary>
+        ///     Initializes kernels using He (Kaiming) initialization: stdDev = sqrt(2 / fanIn).
+        ///     Ideal for layers followed by ReLU activation.
+        /// </summary>
+        private void InitializeKernels(Span<float> span, int fanIn)
+        {
+            var stdDev = MathF.Sqrt(2f / fanIn);
+
+            for (var i = 0; i < span.Length; i++)
+            {
+                span[i] = MathUtils.NextGaussian() * stdDev;
             }
         }
 
@@ -117,7 +131,5 @@ namespace DevOnBike.Overfit.DeepLearning
 
             Load(br);
         }
-
-        public void Dispose() => Kernels?.Dispose();
     }
 }

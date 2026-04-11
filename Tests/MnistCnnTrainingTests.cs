@@ -22,10 +22,10 @@ namespace DevOnBike.Overfit.Tests
 
             var (trainX, trainY) = MnistLoader.Load("d:/ml/train-images.idx3-ubyte", "d:/ml/train-labels.idx1-ubyte", trainSize);
 
-            using var X = new AutogradNode(trainX, requiresGrad: false);
-            using var Y = new AutogradNode(trainY, requiresGrad: false);
+            using var X = new AutogradNode(trainX, false);
+            using var Y = new AutogradNode(trainY, false);
 
-            var conv1 = new ConvLayer(inChannels: 1, outChannels: 8, h: 28, w: 28, kSize: 3);
+            var conv1 = new ConvLayer(1, 8, 28, 28, 3);
             var fc1 = new LinearLayer(1352, 10);
 
             var allParameters = conv1.Parameters().Concat(fc1.Parameters());

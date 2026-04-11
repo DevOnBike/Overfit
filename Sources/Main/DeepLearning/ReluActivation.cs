@@ -8,18 +8,24 @@ using DevOnBike.Overfit.Core;
 namespace DevOnBike.Overfit.DeepLearning
 {
     /// <summary>
-    /// Implements the Rectified Linear Unit (ReLU) activation function as a standalone module.
-    /// Formula: f(x) = max(0, x).
+    ///     Implements the Rectified Linear Unit (ReLU) activation function as a standalone module.
+    ///     Formula: f(x) = max(0, x).
     /// </summary>
     public sealed class ReluActivation : IModule
     {
         public bool IsTraining { get; private set; } = true;
 
-        public void Train() => IsTraining = true;
-        public void Eval() => IsTraining = false;
+        public void Train()
+        {
+            IsTraining = true;
+        }
+        public void Eval()
+        {
+            IsTraining = false;
+        }
 
         /// <summary>
-        /// Applies the ReLU operation via the global math engine.
+        ///     Applies the ReLU operation via the global math engine.
         /// </summary>
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
@@ -27,16 +33,16 @@ namespace DevOnBike.Overfit.DeepLearning
         }
 
         /// <summary>
-        /// ReLU is a non-parametric function and contains no learnable weights.
+        ///     ReLU is a non-parametric function and contains no learnable weights.
         /// </summary>
         public IEnumerable<AutogradNode> Parameters()
         {
             return [];
         }
 
-        public void Save(BinaryWriter bw) { }
-        public void Load(BinaryReader br) { }
+        public void Save(BinaryWriter bw) {}
+        public void Load(BinaryReader br) {}
 
-        public void Dispose() { }
+        public void Dispose() {}
     }
 }

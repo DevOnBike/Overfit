@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Runtime.InteropServices;
+
 namespace DevOnBike.Overfit.Anomalies.Monitoring.Contracts
 {
     [StructLayout(LayoutKind.Sequential, Pack = 4)]

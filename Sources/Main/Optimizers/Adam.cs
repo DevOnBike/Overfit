@@ -9,38 +9,16 @@ using DevOnBike.Overfit.Core;
 namespace DevOnBike.Overfit.Optimizers
 {
     /// <summary>
-    /// Implements the Adam (Adaptive Moment Estimation) optimizer.
-    /// Combines the advantages of AdaGrad and RMSProp to provide adaptive learning rates 
-    /// per parameter using first and second moment estimates.
+    ///     Implements the Adam (Adaptive Moment Estimation) optimizer.
+    ///     Combines the advantages of AdaGrad and RMSProp to provide adaptive learning rates
+    ///     per parameter using first and second moment estimates.
     /// </summary>
     public sealed class Adam : IOptimizer, IDisposable
     {
-        private readonly struct ParamState
-        {
-            public readonly AutogradNode Node;
-            public readonly FastTensor<float> M; // First moment vector
-            public readonly FastTensor<float> V; // Second moment vector
-            public readonly int Size;
-
-            public ParamState(AutogradNode node)
-            {
-                Node = node;
-                Size = node.Data.Size;
-
-                M = new FastTensor<float>(true, node.Data.Shape);
-                V = new FastTensor<float>(true, node.Data.Shape);
-            }
-        }
 
         private readonly ParamState[] _states;
 
-        public float LearningRate { get; set; }
-        public float Beta1 { get; set; } = 0.9f;
-        public float Beta2 { get; set; } = 0.999f;
-        public float Epsilon { get; set; } = 1e-8f;
-        public float WeightDecay { get; set; } = 0.0001f;
-
-        private int _t = 0; // Timestep counter for bias correction
+        private int _t; // Timestep counter for bias correction
 
         public Adam(IEnumerable<AutogradNode> parameters, float learningRate = 0.001f)
         {
@@ -58,10 +36,25 @@ namespace DevOnBike.Overfit.Optimizers
 
             _states = [.. statesList];
         }
+        public float Beta1 { get; set; } = 0.9f;
+        public float Beta2 { get; set; } = 0.999f;
+        public float Epsilon { get; set; } = 1e-8f;
+        public float WeightDecay { get; set; } = 0.0001f;
+
+        public void Dispose()
+        {
+            foreach (var state in _states)
+            {
+                state.M?.Dispose();
+                state.V?.Dispose();
+            }
+        }
+
+        public float LearningRate { get; set; }
 
         /// <summary>
-        /// Performs a single optimization step (parameter update).
-        /// Utilizes hardware-accelerated SIMD paths when available.
+        ///     Performs a single optimization step (parameter update).
+        ///     Utilizes hardware-accelerated SIMD paths when available.
         /// </summary>
         public void Step()
         {
@@ -121,12 +114,12 @@ namespace DevOnBike.Overfit.Optimizers
                         var vGl2 = vG + vW * vWd;
 
                         vM = vM * vB1 + vGl2 * vB1Inv;
-                        vV = vV * vB2 + (vGl2 * vGl2) * vB2Inv;
+                        vV = vV * vB2 + vGl2 * vGl2 * vB2Inv;
 
                         var vMHat = vM * vInvBc1;
                         var vVHat = Vector.SquareRoot(vV * vInvBc2) + vEps;
 
-                        vW -= (vMHat / vVHat) * vLr;
+                        vW -= vMHat / vVHat * vLr;
 
                         vM.CopyTo(m.Slice(i));
                         vV.CopyTo(v.Slice(i));
@@ -149,8 +142,8 @@ namespace DevOnBike.Overfit.Optimizers
         }
 
         /// <summary>
-        /// Resets the gradients of all optimized parameters to zero.
-        /// Should be called before every forward pass.
+        ///     Resets the gradients of all optimized parameters to zero.
+        ///     Should be called before every forward pass.
         /// </summary>
         public void ZeroGrad()
         {
@@ -164,19 +157,27 @@ namespace DevOnBike.Overfit.Optimizers
         }
 
         /// <summary>
-        /// Resets the timestep counter. Used when restarting training or fine-tuning.
+        ///     Resets the timestep counter. Used when restarting training or fine-tuning.
         /// </summary>
         public void ResetTime()
         {
             _t = 0;
         }
 
-        public void Dispose()
+        private readonly struct ParamState
         {
-            foreach (var state in _states)
+            public readonly AutogradNode Node;
+            public readonly FastTensor<float> M; // First moment vector
+            public readonly FastTensor<float> V; // Second moment vector
+            public readonly int Size;
+
+            public ParamState(AutogradNode node)
             {
-                state.M?.Dispose();
-                state.V?.Dispose();
+                Node = node;
+                Size = node.Data.Size;
+
+                M = new FastTensor<float>(true, node.Data.Shape);
+                V = new FastTensor<float>(true, node.Data.Shape);
             }
         }
     }

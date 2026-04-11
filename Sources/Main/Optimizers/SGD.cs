@@ -9,16 +9,17 @@ using DevOnBike.Overfit.Core;
 namespace DevOnBike.Overfit.Optimizers
 {
     /// <summary>
-    /// Implements the Stochastic Gradient Descent (SGD) optimizer.
-    /// Utilizes hardware-accelerated parameter updates via SIMD primitives.
+    ///     Implements the Stochastic Gradient Descent (SGD) optimizer.
+    ///     Utilizes hardware-accelerated parameter updates via SIMD primitives.
     /// </summary>
     public sealed class SGD : IOptimizer
     {
         private readonly AutogradNode[] _parameters;
 
-        public float LearningRate { get; set; }
-
-        /// <param name="parameters">Collection of parameters to be optimized. Only nodes with <c>RequiresGrad=true</c> are tracked.</param>
+        /// <param name="parameters">
+        ///     Collection of parameters to be optimized. Only nodes with <c>RequiresGrad=true</c> are
+        ///     tracked.
+        /// </param>
         /// <param name="learningRate">The initial learning rate for weight updates.</param>
         public SGD(IEnumerable<AutogradNode> parameters, float learningRate)
         {
@@ -39,9 +40,11 @@ namespace DevOnBike.Overfit.Optimizers
             LearningRate = learningRate;
         }
 
+        public float LearningRate { get; set; }
+
         /// <summary>
-        /// Performs a single optimization step.
-        /// Applies the update rule: w = w - lr * grad.
+        ///     Performs a single optimization step.
+        ///     Applies the update rule: w = w - lr * grad.
         /// </summary>
         public void Step()
         {
@@ -50,16 +53,16 @@ namespace DevOnBike.Overfit.Optimizers
             foreach (var p in _parameters)
             {
                 TensorPrimitives.MultiplyAdd(
-                    x: p.Grad.AsSpan(),
-                    y: negativeLr,
-                    addend: p.Data.AsSpan(),
-                    destination: p.Data.AsSpan());
+                p.Grad.AsSpan(),
+                negativeLr,
+                p.Data.AsSpan(),
+                p.Data.AsSpan());
             }
         }
 
         /// <summary>
-        /// Resets the gradients of all managed parameters to zero.
-        /// Should be called before each forward pass.
+        ///     Resets the gradients of all managed parameters to zero.
+        ///     Should be called before each forward pass.
         /// </summary>
         public void ZeroGrad()
         {

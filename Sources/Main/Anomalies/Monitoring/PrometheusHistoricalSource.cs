@@ -3,7 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
@@ -11,14 +10,12 @@ using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 namespace DevOnBike.Overfit.Anomalies.Monitoring
 {
     /// <summary>
-    /// Fetches historical metric data from Prometheus for all pods matching a regex
-    /// and produces batches of RawMetricSeries ready for MonitoringPipeline.
-    ///
-    /// Each call to FetchAsync returns one entry per scrape timestamp:
-    ///   (ScrapeTimestampMs, List&lt;RawMetricSeries&gt;)
-    ///
-    /// These are passed directly to OfflineTrainingJob:
-    /// <code>
+    ///     Fetches historical metric data from Prometheus for all pods matching a regex
+    ///     and produces batches of RawMetricSeries ready for MonitoringPipeline.
+    ///     Each call to FetchAsync returns one entry per scrape timestamp:
+    ///     (ScrapeTimestampMs, List&lt;RawMetricSeries&gt;)
+    ///     These are passed directly to OfflineTrainingJob:
+    ///     <code>
     ///   using var source = new PrometheusHistoricalSource(config);
     ///   var scrapes = await source.FetchAsync(ct);
     ///   var result  = await job.RunAsync(scrapes, trainingConfig, log, ct);
@@ -26,14 +23,15 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
     /// </summary>
     public sealed class PrometheusHistoricalSource : IDisposable
     {
-        private readonly PrometheusHistoricalSourceConfig _config;
-        private readonly HttpClient _http;
-        private bool _disposed;
 
         private static readonly JsonSerializerOptions _jsonOptions = new()
         {
             PropertyNameCaseInsensitive = true
         };
+
+        private readonly PrometheusHistoricalSourceConfig _config;
+        private readonly HttpClient _http;
+        private bool _disposed;
 
         public PrometheusHistoricalSource(
             PrometheusHistoricalSourceConfig config,
@@ -41,7 +39,14 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         {
             ArgumentNullException.ThrowIfNull(config);
             _config = config;
-            _http   = httpClient ?? BuildHttpClient(config);
+            _http = httpClient ?? BuildHttpClient(config);
+        }
+
+        public void Dispose()
+        {
+            if (_disposed) { return; }
+            _disposed = true;
+            _http.Dispose();
         }
 
         // ---------------------------------------------------------------------------
@@ -49,11 +54,10 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         // ---------------------------------------------------------------------------
 
         /// <summary>
-        /// Fetches all 12 metrics for all pods matching PodRegex over the configured
-        /// time range and assembles them into scrape batches.
-        ///
-        /// Issues 12 parallel range queries (one per metric × both DCs).
-        /// Returns one entry per scrape step covering the full Golden Window.
+        ///     Fetches all 12 metrics for all pods matching PodRegex over the configured
+        ///     time range and assembles them into scrape batches.
+        ///     Issues 12 parallel range queries (one per metric × both DCs).
+        ///     Returns one entry per scrape step covering the full Golden Window.
         /// </summary>
         public async Task<IReadOnlyList<(long ScrapeTimestampMs, List<RawMetricSeries> Series)>> FetchAsync(
             CancellationToken ct = default)
@@ -61,25 +65,25 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             ObjectDisposedException.ThrowIf(_disposed, this);
 
             var stepSeconds = (int)_config.Step.TotalSeconds;
-            var startSec    = new DateTimeOffset(_config.RangeStart.ToUniversalTime()).ToUnixTimeSeconds();
-            var endSec      = new DateTimeOffset(_config.RangeEnd.ToUniversalTime()).ToUnixTimeSeconds();
+            var startSec = new DateTimeOffset(_config.RangeStart.ToUniversalTime()).ToUnixTimeSeconds();
+            var endSec = new DateTimeOffset(_config.RangeEnd.ToUniversalTime()).ToUnixTimeSeconds();
 
             // Fetch all metrics in parallel — 12 queries × 2 DCs = 24 parallel requests
             var tasks = new List<Task<List<RawMetricSeries>>>();
 
-            foreach (DataCenter dc in Enum.GetValues<DataCenter>())
+            foreach (var dc in Enum.GetValues<DataCenter>())
             {
                 var dcLabel = dc == DataCenter.West ? _config.DcWestLabel : _config.DcEastLabel;
 
                 for (var m = 0; m < (int)MetricIndex.Count; m++)
                 {
-                    var metric  = (MetricIndex)m;
+                    var metric = (MetricIndex)m;
                     var metricId = (byte)m;
-                    var query   = BuildQuery(metric, _config.PodRegex, dcLabel);
+                    var query = BuildQuery(metric, _config.PodRegex, dcLabel);
                     var capturedDc = dc;
 
                     tasks.Add(FetchMetricSeriesAsync(
-                        query, metricId, capturedDc, startSec, endSec, stepSeconds, ct));
+                    query, metricId, capturedDc, startSec, endSec, stepSeconds, ct));
                 }
             }
 
@@ -93,13 +97,6 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             }
 
             return GroupByScrapeTimestamp(allSeries, startSec, endSec, stepSeconds);
-        }
-
-        public void Dispose()
-        {
-            if (_disposed) { return; }
-            _disposed = true;
-            _http.Dispose();
         }
 
         // ---------------------------------------------------------------------------
@@ -116,8 +113,8 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             CancellationToken ct)
         {
             var url = $"{_config.PrometheusBaseUrl}/api/v1/query_range"
-                    + $"?query={Uri.EscapeDataString(promql)}"
-                    + $"&start={startSec}&end={endSec}&step={stepSeconds}s";
+                      + $"?query={Uri.EscapeDataString(promql)}"
+                      + $"&start={startSec}&end={endSec}&step={stepSeconds}s";
 
             using var response = await _http.GetAsync(url, ct).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
@@ -133,8 +130,8 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         {
             var result = new List<RawMetricSeries>();
 
-            using var doc  = JsonDocument.Parse(json);
-            var root       = doc.RootElement;
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
 
             if (!root.TryGetProperty("data", out var data)) return result;
             if (!data.TryGetProperty("result", out var results)) return result;
@@ -161,7 +158,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                     var tsMs  = (long)(arr[0].GetDouble() * 1000.0);
                     var valStr = arr[1].GetString();
 
-                    if (!float.TryParse(valStr, 
+                    if (!float.TryParse(valStr,
                             NumberStyles.Float,
                             CultureInfo.InvariantCulture,
                             out var value) || !float.IsFinite(value))
@@ -177,7 +174,11 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
                 var rawSeries = new RawMetricSeries
                 {
-                    Pod          = new PodKey { DC = dc, PodName = podName },
+                    Pod = new PodKey
+                    {
+                        DC = dc,
+                        PodName = podName
+                    },
                     MetricTypeId = metricTypeId
                 };
                 rawSeries.Samples.AddRange(samples);
@@ -270,9 +271,12 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
         private static HttpClient BuildHttpClient(PrometheusHistoricalSourceConfig config)
         {
-            var client = new HttpClient { Timeout = config.HttpTimeout };
+            var client = new HttpClient
+            {
+                Timeout = config.HttpTimeout
+            };
             client.DefaultRequestHeaders.Accept.Add(
-                new MediaTypeWithQualityHeaderValue("application/json"));
+            new MediaTypeWithQualityHeaderValue("application/json"));
             return client;
         }
     }

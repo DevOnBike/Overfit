@@ -12,9 +12,9 @@
 namespace DevOnBike.Overfit.Anomalies.Monitoring.Contracts
 {
     /// <summary>
-    /// Immutable configuration for <see cref="OfflineTrainingJob"/>.
-    /// Create with object initializer syntax:
-    /// <code>
+    ///     Immutable configuration for <see cref="OfflineTrainingJob" />.
+    ///     Create with object initializer syntax:
+    ///     <code>
     ///   var config = new OfflineTrainingConfig { Epochs = 100, LearningRate = 5e-4f };
     /// </code>
     /// </summary>
@@ -27,20 +27,20 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring.Contracts
         public float LearningRate { get; init; } = 1e-3f;
 
         /// <summary>
-        /// Percentile used when calibrating the <see cref="ReconstructionScorer"/> threshold.
-        /// Default: 0.99 (p99 of training MSE values).
+        ///     Percentile used when calibrating the <see cref="ReconstructionScorer" /> threshold.
+        ///     Default: 0.99 (p99 of training MSE values).
         /// </summary>
         public float CalibrationPercentile { get; init; } = 0.99f;
 
         /// <summary>
-        /// Whether to shuffle training samples before each epoch.
-        /// Disable for reproducible deterministic runs. Default: true.
+        ///     Whether to shuffle training samples before each epoch.
+        ///     Disable for reproducible deterministic runs. Default: true.
         /// </summary>
         public bool ShuffleEachEpoch { get; init; } = true;
 
         /// <summary>
-        /// Optional random seed for sample shuffling.
-        /// null = non-deterministic. Set to a fixed value for reproducible training.
+        ///     Optional random seed for sample shuffling.
+        ///     null = non-deterministic. Set to a fixed value for reproducible training.
         /// </summary>
         public int? Seed { get; init; }
     }

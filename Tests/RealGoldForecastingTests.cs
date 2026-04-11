@@ -53,15 +53,18 @@ namespace DevOnBike.Overfit.Tests
             using var targetNode = new AutogradNode(yTensor, false);
 
             // 4. ARCHITEKTURA (Powiększamy sieć z 16 na 32 neurony)
-            var w1 = new AutogradNode(new FastTensor<float>(false, windowSize, 32), true);
-            var b1 = new AutogradNode(new FastTensor<float>(true, 1, 32), true);
+            var w1 = new AutogradNode(new FastTensor<float>(false, windowSize, 32));
+            var b1 = new AutogradNode(new FastTensor<float>(true, 1, 32));
             Randomize(w1.Data.AsSpan(), windowSize);
 
-            var w2 = new AutogradNode(new FastTensor<float>(false, 32, 1), true);
-            var b2 = new AutogradNode(new FastTensor<float>(true, 1, 1), true);
+            var w2 = new AutogradNode(new FastTensor<float>(false, 32, 1));
+            var b2 = new AutogradNode(new FastTensor<float>(true, 1, 1));
             Randomize(w2.Data.AsSpan(), 32);
 
-            var parameters = new[] { w1, b1, w2, b2 };
+            var parameters = new[]
+            {
+                w1, b1, w2, b2
+            };
             using var optimizer = new Adam(parameters, learningRate);
 
             // ZMIANA: Tworzymy jawną instancję grafu obliczeniowego
@@ -76,7 +79,7 @@ namespace DevOnBike.Overfit.Tests
                 using var prediction = TensorMath.Linear(graph, relu, w2, b2);
 
                 // Silna kara za pomyłkę kierunku trendu
-                using var loss = TensorMath.DirectionalLoss(graph, prediction, targetNode, gamma: 15f);
+                using var loss = TensorMath.DirectionalLoss(graph, prediction, targetNode, 15f);
 
                 // ZMIANA: Wsteczna propagacja na jawnym obiekcie
                 graph.Backward(loss);
@@ -113,7 +116,10 @@ namespace DevOnBike.Overfit.Tests
             _output.WriteLine($"Przewidywany zwrot na kolejny dzień: {predictedReturn * 100f:F2}%");
             _output.WriteLine($"PRZEWIDYWANA CENA: ${predictedPriceUSD:F2} / oz");
 
-            w1.Dispose(); b1.Dispose(); w2.Dispose(); b2.Dispose();
+            w1.Dispose();
+            b1.Dispose();
+            w2.Dispose();
+            b2.Dispose();
         }
 
         private float[] GetRealGoldPricesUSD_1Year()
@@ -122,12 +128,9 @@ namespace DevOnBike.Overfit.Tests
             var prices = new float[252];
 
             // Ostatnie 25 dni (Realne, twarde dane z naszego poprzedniego testu)
-            var lastMonth = new float[] {
-                5327.42f, 5087.47f, 5135.92f, 5077.39f, 5171.12f,
-                5139.56f, 5192.94f, 5177.07f, 5080.07f, 5019.25f,
-                5006.43f, 5006.00f, 4818.81f, 4651.73f, 4491.15f,
-                4407.62f, 4474.44f, 4506.55f, 4380.03f, 4492.99f,
-                4447.65f, 4511.25f, 4672.01f, 4758.76f, 4676.42f
+            var lastMonth = new[]
+            {
+                5327.42f, 5087.47f, 5135.92f, 5077.39f, 5171.12f, 5139.56f, 5192.94f, 5177.07f, 5080.07f, 5019.25f, 5006.43f, 5006.00f, 4818.81f, 4651.73f, 4491.15f, 4407.62f, 4474.44f, 4506.55f, 4380.03f, 4492.99f, 4447.65f, 4511.25f, 4672.01f, 4758.76f, 4676.42f
             };
 
             // Programistyczna rekonstrukcja poprzednich 227 dni
@@ -158,7 +161,9 @@ namespace DevOnBike.Overfit.Tests
         {
             var returns = new float[prices.Length - 1];
             for (var i = 0; i < returns.Length; i++)
+            {
                 returns[i] = (prices[i + 1] - prices[i]) / prices[i];
+            }
             return returns;
         }
 

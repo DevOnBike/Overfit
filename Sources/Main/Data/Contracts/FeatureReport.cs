@@ -3,11 +3,9 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using DevOnBike.Overfit.Anomalies.Monitoring;
-
 namespace DevOnBike.Overfit.Data.Contracts
 {
-    /// <summary>Per-feature statistics computed by <see cref="TrainingDataAnalyzer"/>.</summary>
+    /// <summary>Per-feature statistics computed by <see cref="TrainingDataAnalyzer" />.</summary>
     public sealed record FeatureReport
     {
         /// <summary>Zero-based index into the feature vector.</summary>
@@ -22,12 +20,12 @@ namespace DevOnBike.Overfit.Data.Contracts
         public float Max { get; init; }
 
         /// <summary>
-        /// Std / |Mean|. Low values (&lt; 0.01) indicate the feature barely changes
-        /// across the training set — the model cannot learn from it.
+        ///     Std / |Mean|. Low values (&lt; 0.01) indicate the feature barely changes
+        ///     across the training set — the model cannot learn from it.
         /// </summary>
         public float CoefficientOfVariation { get; init; }
 
-        /// <summary>True when CV &lt; <see cref="TrainingDataAnalyzerConfig.ConstantFeatureThreshold"/>.</summary>
+        /// <summary>True when CV &lt; <see cref="TrainingDataAnalyzerConfig.ConstantFeatureThreshold" />.</summary>
         public bool IsConstant { get; init; }
 
         /// <summary>Number of NaN or Inf values in this feature dimension.</summary>

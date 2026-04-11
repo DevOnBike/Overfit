@@ -35,11 +35,15 @@ namespace DevOnBike.Overfit.Tests
             using var m1 = new FastMatrix<float>(2, 2);
             using var m2 = new FastMatrix<float>(2, 2);
 
-            m1[0, 0] = 1.0f; m1[0, 1] = 2.0f;
-            m1[1, 0] = 3.0f; m1[1, 1] = 4.0f;
+            m1[0, 0] = 1.0f;
+            m1[0, 1] = 2.0f;
+            m1[1, 0] = 3.0f;
+            m1[1, 1] = 4.0f;
 
-            m2[0, 0] = 10.0f; m2[0, 1] = 20.0f;
-            m2[1, 0] = 30.0f; m2[1, 1] = 40.0f;
+            m2[0, 0] = 10.0f;
+            m2[0, 1] = 20.0f;
+            m2[1, 0] = 30.0f;
+            m2[1, 1] = 40.0f;
 
             m1.Add(m2);
 
@@ -53,8 +57,10 @@ namespace DevOnBike.Overfit.Tests
         public void MultiplyScalar_MultipliesAllElements()
         {
             using var matrix = new FastMatrix<float>(2, 2);
-            matrix[0, 0] = 1.0f; matrix[0, 1] = 2.0f;
-            matrix[1, 0] = 3.0f; matrix[1, 1] = 4.0f;
+            matrix[0, 0] = 1.0f;
+            matrix[0, 1] = 2.0f;
+            matrix[1, 0] = 3.0f;
+            matrix[1, 1] = 4.0f;
 
             matrix.MultiplyScalar(5.0f);
 
@@ -90,8 +96,10 @@ namespace DevOnBike.Overfit.Tests
         public void SumOfSquares_ReturnsCorrectValue()
         {
             using var matrix = new FastMatrix<float>(2, 2);
-            matrix[0, 0] = 1.0f; matrix[0, 1] = 2.0f;
-            matrix[1, 0] = 3.0f; matrix[1, 1] = 4.0f;
+            matrix[0, 0] = 1.0f;
+            matrix[0, 1] = 2.0f;
+            matrix[1, 0] = 3.0f;
+            matrix[1, 1] = 4.0f;
 
             var result = matrix.SumOfSquares();
 

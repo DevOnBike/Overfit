@@ -14,8 +14,8 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 namespace Benchmarks
 {
     /// <summary>
-    /// Measures raw inference throughput in a tight loop (10,000 iterations).
-    /// Analyzes the impact of heap allocations and Garbage Collection on sustained performance.
+    ///     Measures raw inference throughput in a tight loop (10,000 iterations).
+    ///     Analyzes the impact of heap allocations and Garbage Collection on sustained performance.
     /// </summary>
     [SimpleJob(RuntimeMoniker.Net10_0)]
     [Orderer(SummaryOrderPolicy.FastestToSlowest)]
@@ -27,13 +27,13 @@ namespace Benchmarks
         private const int Iterations = 10_000;
 
         private float[] _inputData;
-
-        private InferenceSession _onnxSession;
+        private AutogradNode _inputNode;
         private NamedOnnxValue[] _onnxInputs;
 
-        private Sequential _overfitModel;
+        private InferenceSession _onnxSession;
         private FastTensor<float> _overfitInputTensor;
-        private AutogradNode _inputNode;
+
+        private Sequential _overfitModel;
 
         [GlobalSetup]
         public void Setup()
@@ -54,7 +54,7 @@ namespace Benchmarks
             // Prepare Overfit input tensors
             _overfitInputTensor = new FastTensor<float>(false, 1, InputSize);
             _inputData.AsSpan().CopyTo(_overfitInputTensor.AsSpan());
-            _inputNode = new AutogradNode(_overfitInputTensor, requiresGrad: false);
+            _inputNode = new AutogradNode(_overfitInputTensor, false);
 
             for (var i = 0; i < 100; i++)
             {
@@ -63,8 +63,8 @@ namespace Benchmarks
         }
 
         /// <summary>
-        /// Benchmarks ONNX Runtime throughput over 10,000 iterations.
-        /// Performance is expected to be affected by internal allocations and GC cycles.
+        ///     Benchmarks ONNX Runtime throughput over 10,000 iterations.
+        ///     Performance is expected to be affected by internal allocations and GC cycles.
         /// </summary>
         [Benchmark(Baseline = true)]
         public float OnnxRuntime_10k()
@@ -81,8 +81,8 @@ namespace Benchmarks
         }
 
         /// <summary>
-        /// Benchmarks Overfit throughput using the optimized Zero-Allocation path.
-        /// Performance remains constant throughout the loop due to the absence of heap pressure.
+        ///     Benchmarks Overfit throughput using the optimized Zero-Allocation path.
+        ///     Performance remains constant throughout the loop due to the absence of heap pressure.
         /// </summary>
         [Benchmark]
         public float Overfit_10k_ZeroAlloc()

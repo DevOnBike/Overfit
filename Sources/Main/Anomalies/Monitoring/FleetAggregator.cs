@@ -33,7 +33,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             // Step 2 — compute per-pod deviations from their DC median
             var podCount = result.Windows.Count;
             var podDeviations = new float[podCount * windowSize * metricCount];
-            
+
             ComputePodDeviations(result, podDeviations, fleetBaseline, windowSize, metricCount);
 
             return new AggregationResult
@@ -60,8 +60,8 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         {
             // Collect pod data per DC into lists for median computation
             var dcPods = new List<float[]>[2];
-            dcPods[0] = [];   // West
-            dcPods[1] = [];   // East
+            dcPods[0] = []; // West
+            dcPods[1] = []; // East
 
             for (var i = 0; i < result.Windows.Count; i++)
             {
@@ -130,7 +130,9 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             var values = new float[n];
 
             for (var i = 0; i < n; i++)
+            {
                 values[i] = pods[i][dataIdx];
+            }
 
             Array.Sort(values);
 

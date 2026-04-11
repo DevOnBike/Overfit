@@ -11,12 +11,12 @@ namespace DevOnBike.Overfit.DeepLearning
     {
         private readonly List<IModule> _modules = [];
 
-        public bool IsTraining { get; private set; } = true;
-
         public Sequential(params IModule[] modules)
         {
             _modules.AddRange(modules);
         }
+
+        public bool IsTraining { get; private set; } = true;
 
         public void Train()
         {
@@ -36,11 +36,6 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 module.Eval();
             }
-        }
-
-        public void Add(IModule module)
-        {
-            _modules.Add(module);
         }
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
@@ -66,33 +61,12 @@ namespace DevOnBike.Overfit.DeepLearning
             }
         }
 
-        public void Save(string path)
-        {
-            using var fs = new FileStream(path, FileMode.Create);
-            using var bw = new BinaryWriter(fs);
-
-            Save(bw);
-        }
-
         public void Save(BinaryWriter bw)
         {
             foreach (var module in _modules)
             {
                 module.Save(bw);
             }
-        }
-
-        public void Load(string path)
-        {
-            if (!File.Exists(path))
-            {
-                throw new FileNotFoundException($"Brak pliku filtrów: {path}");
-            }
-
-            using var fs = new FileStream(path, FileMode.Open);
-            using var br = new BinaryReader(fs);
-
-            Load(br);
         }
 
         public void Load(BinaryReader br)
@@ -111,6 +85,32 @@ namespace DevOnBike.Overfit.DeepLearning
             }
 
             _modules.Clear();
+        }
+
+        public void Add(IModule module)
+        {
+            _modules.Add(module);
+        }
+
+        public void Save(string path)
+        {
+            using var fs = new FileStream(path, FileMode.Create);
+            using var bw = new BinaryWriter(fs);
+
+            Save(bw);
+        }
+
+        public void Load(string path)
+        {
+            if (!File.Exists(path))
+            {
+                throw new FileNotFoundException($"Brak pliku filtrï¿½w: {path}");
+            }
+
+            using var fs = new FileStream(path, FileMode.Open);
+            using var br = new BinaryReader(fs);
+
+            Load(br);
         }
     }
 }

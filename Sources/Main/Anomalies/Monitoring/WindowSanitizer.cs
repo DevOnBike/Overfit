@@ -3,16 +3,16 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 using System.Linq;
+using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 
 namespace DevOnBike.Overfit.Anomalies.Monitoring
 {
     /// <summary>
-    /// Sanitizes an AlignResult in place.
-    /// Level 1: removes invalid pods.
-    /// Level 2: corrects individual metric values in remaining windows.
-    /// Single instance should be reused across scrapes — _podFirstSeen persists between calls.
+    ///     Sanitizes an AlignResult in place.
+    ///     Level 1: removes invalid pods.
+    ///     Level 2: corrects individual metric values in remaining windows.
+    ///     Single instance should be reused across scrapes — _podFirstSeen persists between calls.
     /// </summary>
     public sealed class WindowSanitizer
     {
@@ -71,11 +71,17 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             for (var i = result.Windows.Count - 1; i >= 0; i--)
             {
                 var data = result.Windows[i].Data;
-                if (data.Length == 0) { Remove(result, i); continue; }
+                if (data.Length == 0)
+                {
+                    Remove(result, i);
+                    continue;
+                }
 
                 var nanCount = 0;
                 foreach (var v in data)
+                {
                     if (float.IsNaN(v)) nanCount++;
+                }
 
                 if ((float)nanCount / data.Length > maxNanRatio)
                     Remove(result, i);
@@ -108,8 +114,10 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         {
             var active = new HashSet<string>(activePodNames);
             foreach (var key in _podFirstSeen.Keys.ToList())
+            {
                 if (!active.Contains(key))
                     _podFirstSeen.Remove(key);
+            }
         }
 
         private static void Remove(AlignResult result, int index)

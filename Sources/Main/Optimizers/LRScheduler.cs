@@ -8,27 +8,27 @@ using DevOnBike.Overfit.Core;
 namespace DevOnBike.Overfit.Optimizers
 {
     /// <summary>
-    /// Manages the learning rate during training and provides safety mechanisms against numerical instability.
-    /// Implements "Reduce LR on Plateau" with an integrated RAM checkpointing system.
+    ///     Manages the learning rate during training and provides safety mechanisms against numerical instability.
+    ///     Implements "Reduce LR on Plateau" with an integrated RAM checkpointing system.
     /// </summary>
     /// <remarks>
-    /// This scheduler monitors the loss and automatically restores the last "safe" weight state 
-    /// if NaN or Infinity is detected, preventing total model collapse.
+    ///     This scheduler monitors the loss and automatically restores the last "safe" weight state
+    ///     if NaN or Infinity is detected, preventing total model collapse.
     /// </remarks>
     public sealed class LRScheduler : IDisposable
     {
-        private readonly IOptimizer _optimizer;
-        private readonly AutogradNode[] _parameters;
         private readonly FastTensor<float>[] _checkpoint; // In-RAM weight backup
 
         private readonly float _factor;
-        private readonly int _patience;
-        private readonly float _minLR;
-        private readonly float _minDelta;
         private readonly Action<string> _log;
+        private readonly float _minDelta;
+        private readonly float _minLR;
+        private readonly IOptimizer _optimizer;
+        private readonly AutogradNode[] _parameters;
+        private readonly int _patience;
+        private int _badEpochs;
 
         private float _bestLoss = float.MaxValue;
-        private int _badEpochs = 0;
 
         /// <param name="optimizer">The optimizer whose LearningRate will be managed.</param>
         /// <param name="parameters">The model parameters to monitor and backup.</param>
@@ -71,8 +71,19 @@ namespace DevOnBike.Overfit.Optimizers
             }
         }
 
+        public void Dispose()
+        {
+            if (_checkpoint != null)
+            {
+                for (var i = 0; i < _checkpoint.Length; i++)
+                {
+                    _checkpoint[i]?.Dispose();
+                }
+            }
+        }
+
         /// <summary>
-        /// Evaluates the current loss and updates the learning rate or restores weights if necessary.
+        ///     Evaluates the current loss and updates the learning rate or restores weights if necessary.
         /// </summary>
         /// <param name="currentLoss">The loss value from the current epoch.</param>
         public void Step(float currentLoss)
@@ -141,17 +152,6 @@ namespace DevOnBike.Overfit.Optimizers
         {
             _bestLoss = float.MaxValue;
             _badEpochs = 0;
-        }
-
-        public void Dispose()
-        {
-            if (_checkpoint != null)
-            {
-                for (var i = 0; i < _checkpoint.Length; i++)
-                {
-                    _checkpoint[i]?.Dispose();
-                }
-            }
         }
     }
 }

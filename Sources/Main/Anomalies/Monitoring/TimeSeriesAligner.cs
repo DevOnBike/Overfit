@@ -9,10 +9,9 @@ using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 namespace DevOnBike.Overfit.Anomalies.Monitoring
 {
     /// <summary>
-    /// Aligns raw Prometheus series into fixed-size windows on a shared time grid.
-    ///
-    /// Input:  flat List of RawMetricSeries (mixed pods, mixed metrics)
-    /// Output: AlignResult — one RawPodWindow per pod + parallel PodIndex
+    ///     Aligns raw Prometheus series into fixed-size windows on a shared time grid.
+    ///     Input:  flat List of RawMetricSeries (mixed pods, mixed metrics)
+    ///     Output: AlignResult — one RawPodWindow per pod + parallel PodIndex
     /// </summary>
     public sealed class TimeSeriesAligner
     {
@@ -118,7 +117,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
             while (lo <= hi)
             {
-                var mid = (lo + hi) >>> 1;
+                var mid = lo + hi >>> 1;
                 var diff = samples[mid].Timestamp - targetMs;
 
                 if (diff < 0) lo = mid + 1;

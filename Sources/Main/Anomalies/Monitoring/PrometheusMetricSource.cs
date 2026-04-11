@@ -3,7 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
@@ -11,14 +10,12 @@ using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 namespace DevOnBike.Overfit.Anomalies.Monitoring
 {
     /// <summary>
-    /// Real-time metric scraper — issues instant PromQL queries every ScrapeInterval
-    /// and returns a flat List&lt;RawMetricSeries&gt; ready for MonitoringPipeline.Process().
-    ///
-    /// Each ReadAsync call issues 12 × 2DC = 24 parallel instant queries
-    /// and returns one RawMetricSeries per (pod, metric) combination found.
-    ///
-    /// Usage in inference loop:
-    /// <code>
+    ///     Real-time metric scraper — issues instant PromQL queries every ScrapeInterval
+    ///     and returns a flat List&lt;RawMetricSeries&gt; ready for MonitoringPipeline.Process().
+    ///     Each ReadAsync call issues 12 × 2DC = 24 parallel instant queries
+    ///     and returns one RawMetricSeries per (pod, metric) combination found.
+    ///     Usage in inference loop:
+    ///     <code>
     ///   using var source = new PrometheusMetricSource(config);
     ///   while (!ct.IsCancellationRequested)
     ///   {
@@ -32,14 +29,15 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
     /// </summary>
     public sealed class PrometheusMetricSource : IDisposable
     {
-        private readonly PrometheusMetricSourceConfig _config;
-        private readonly HttpClient _http;
-        private bool _disposed;
 
         private static readonly JsonSerializerOptions _jsonOptions = new()
         {
             PropertyNameCaseInsensitive = true
         };
+
+        private readonly PrometheusMetricSourceConfig _config;
+        private readonly HttpClient _http;
+        private bool _disposed;
 
         public PrometheusMetricSource(
             PrometheusMetricSourceConfig config,
@@ -47,7 +45,14 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         {
             ArgumentNullException.ThrowIfNull(config);
             _config = config;
-            _http   = httpClient ?? BuildHttpClient(config);
+            _http = httpClient ?? BuildHttpClient(config);
+        }
+
+        public void Dispose()
+        {
+            if (_disposed) { return; }
+            _disposed = true;
+            _http.Dispose();
         }
 
         // ---------------------------------------------------------------------------
@@ -55,8 +60,8 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         // ---------------------------------------------------------------------------
 
         /// <summary>
-        /// Waits ScrapeInterval, then issues 24 parallel instant queries.
-        /// Returns one RawMetricSeries per (pod, metric) found in Prometheus.
+        ///     Waits ScrapeInterval, then issues 24 parallel instant queries.
+        ///     Returns one RawMetricSeries per (pod, metric) found in Prometheus.
         /// </summary>
         public async Task<List<RawMetricSeries>> ReadAsync(CancellationToken ct = default)
         {
@@ -66,15 +71,15 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
             var tasks = new List<Task<List<RawMetricSeries>>>();
 
-            foreach (DataCenter dc in Enum.GetValues<DataCenter>())
+            foreach (var dc in Enum.GetValues<DataCenter>())
             {
                 var dcLabel = dc == DataCenter.West ? _config.DcWestLabel : _config.DcEastLabel;
 
                 for (var m = 0; m < (int)MetricIndex.Count; m++)
                 {
-                    var metric   = (MetricIndex)m;
+                    var metric = (MetricIndex)m;
                     var metricId = (byte)m;
-                    var query    = BuildInstantQuery(metric, _config.PodRegex, dcLabel);
+                    var query = BuildInstantQuery(metric, _config.PodRegex, dcLabel);
                     var capturedDc = dc;
 
                     tasks.Add(FetchInstantAsync(query, metricId, capturedDc, ct));
@@ -92,13 +97,6 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             return result;
         }
 
-        public void Dispose()
-        {
-            if (_disposed) { return; }
-            _disposed = true;
-            _http.Dispose();
-        }
-
         // ---------------------------------------------------------------------------
         // Instant query → List<RawMetricSeries>
         // ---------------------------------------------------------------------------
@@ -110,7 +108,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             CancellationToken ct)
         {
             var url = $"{_config.PrometheusBaseUrl}/api/v1/query"
-                    + $"?query={Uri.EscapeDataString(promql)}";
+                      + $"?query={Uri.EscapeDataString(promql)}";
 
             using var response = await _http.GetAsync(url, ct).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
@@ -127,7 +125,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             var result = new List<RawMetricSeries>();
 
             using var doc = JsonDocument.Parse(json);
-            var root      = doc.RootElement;
+            var root = doc.RootElement;
 
             if (!root.TryGetProperty("data", out var data)) return result;
             if (!data.TryGetProperty("result", out var results)) return result;
@@ -224,9 +222,12 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
         private static HttpClient BuildHttpClient(PrometheusMetricSourceConfig config)
         {
-            var client = new HttpClient { Timeout = config.HttpTimeout };
+            var client = new HttpClient
+            {
+                Timeout = config.HttpTimeout
+            };
             client.DefaultRequestHeaders.Accept.Add(
-                new MediaTypeWithQualityHeaderValue("application/json"));
+            new MediaTypeWithQualityHeaderValue("application/json"));
             return client;
         }
     }

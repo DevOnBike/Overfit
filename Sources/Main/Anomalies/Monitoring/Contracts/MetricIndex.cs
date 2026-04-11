@@ -20,6 +20,6 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring.Contracts
         GcPauseRatio = 10,
         ThreadPoolQueueLength = 11,
 
-        Count = 12   // sentinel — liczba featurów
+        Count = 12 // sentinel — liczba featurów
     }
 }
