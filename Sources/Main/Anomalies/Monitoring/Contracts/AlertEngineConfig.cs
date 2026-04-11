@@ -10,7 +10,6 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Anomalies.Alerting;
-using DevOnBike.Overfit.Anomalies.Monitoring;
 
 namespace DevOnBike.Overfit.Anomalies.Monitoring.Contracts
 {

@@ -30,6 +30,7 @@ namespace DevOnBike.Overfit.Core
         Multiply,
         GateSlice,
         TimestepSlice,
-        StackTimesteps
+        StackTimesteps,
+        RepeatVector
     }
 }

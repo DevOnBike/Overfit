@@ -1368,5 +1368,76 @@ namespace DevOnBike.Overfit.Core
                 }
             }
         }
+
+        // ====================================================================
+        // REPEAT VECTOR
+        // ====================================================================
+
+        /// <summary>
+        /// Repeats input [batch, hiddenSize] → [batch, seqLen, hiddenSize].
+        /// </summary>
+        public static AutogradNode RepeatVector(ComputationGraph graph, AutogradNode input, int seqLen)
+        {
+            var batch = input.Data.GetDim(0);
+            var hiddenSize = input.Data.GetDim(1);
+
+            var res = new FastTensor<float>(false, batch, seqLen, hiddenSize);
+            var srcS = input.Data.AsReadOnlySpan();
+            var dstS = res.AsSpan();
+
+            for (var b = 0; b < batch; b++)
+            {
+                var src = srcS.Slice(b * hiddenSize, hiddenSize);
+
+                for (var t = 0; t < seqLen; t++)
+                {
+                    src.CopyTo(dstS.Slice(b * seqLen * hiddenSize + t * hiddenSize, hiddenSize));
+                }
+            }
+
+            var output = new AutogradNode(res, input.RequiresGrad);
+
+            if (output.RequiresGrad)
+            {
+                graph?.Record(OpCode.RepeatVector, output, input, null, seqLen, hiddenSize);
+            }
+
+            return output;
+        }
+
+        // ====================================================================
+        // REPEAT VECTOR BACKWARD
+        // ====================================================================
+
+        /// <summary>
+        /// Backward for RepeatVector.
+        /// Sums gradients from all seqLen copies back into input grad [batch, hiddenSize].
+        /// i0=seqLen, i1=hiddenSize
+        /// </summary>
+        public static void RepeatVectorBackward(
+            AutogradNode input,
+            AutogradNode output,
+            int seqLen,
+            int hiddenSize)
+        {
+            if (!input.RequiresGrad)
+            {
+                return;
+            }
+
+            var batch = input.Data.GetDim(0);
+            var srcS = output.Grad.AsReadOnlySpan();
+            var dstS = input.Grad.AsSpan();
+
+            for (var b = 0; b < batch; b++)
+            {
+                var dst = dstS.Slice(b * hiddenSize, hiddenSize);
+
+                for (var t = 0; t < seqLen; t++)
+                {
+                    TensorPrimitives.Add(dst, srcS.Slice(b * seqLen * hiddenSize + t * hiddenSize, hiddenSize), dst);
+                }
+            }
+        }
     }
 }
