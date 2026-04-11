@@ -6,7 +6,7 @@
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Core;
 
-namespace DevOnBike.Overfit
+namespace DevOnBike.Overfit.Statistical
 {
     /// <summary>
     ///     Stateless, static class grouping the logic of a Multivariate Gaussian Distribution

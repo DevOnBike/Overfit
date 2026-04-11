@@ -6,6 +6,7 @@
 using System;
 using Xunit;
 using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.Statistical;
 
 namespace DevOnBike.Overfit.Tests
 {
