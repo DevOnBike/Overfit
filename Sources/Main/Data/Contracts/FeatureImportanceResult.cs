@@ -3,7 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-namespace DevOnBike.Overfit.Monitoring.Contracts
+namespace DevOnBike.Overfit.Data.Contracts
 {
 
     /// <summary>Importance result for one feature dimension.</summary>

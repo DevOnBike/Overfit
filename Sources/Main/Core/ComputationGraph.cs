@@ -89,6 +89,26 @@ namespace DevOnBike.Overfit.Core
             return TensorMath.DirectionalLoss(this, prediction, target, gamma);
         }
 
+        public AutogradNode Sigmoid(AutogradNode input)
+        {
+            return TensorMath.Sigmoid(this, input);
+        }
+
+        public AutogradNode Tanh(AutogradNode input)
+        {
+            return TensorMath.Tanh(this, input);
+        }
+
+        public AutogradNode Multiply(AutogradNode a, AutogradNode b)
+        {
+            return TensorMath.Multiply(this, a, b);
+        }
+
+        public AutogradNode GateSlice(AutogradNode gates, int hiddenSize, int gateIndex)
+        {
+            return TensorMath.GateSlice(this, gates, hiddenSize, gateIndex);
+        }
+
         private void ExecuteBackward(in TapeOp op)
         {
             switch (op.Code)
@@ -105,6 +125,10 @@ namespace DevOnBike.Overfit.Core
                 case OpCode.GlobalAveragePool2D: TensorMath.GlobalAvgPool2DBackward(op.A, op.Output, op.I0, op.I1, op.I2); break;
                 case OpCode.BatchNorm1D: TensorMath.BatchNorm1DBackward(op.A, op.Output, op.NodeContext[0], op.NodeContext[1], op.NodeContext[2], op.NodeContext[3]); break;
                 case OpCode.Reshape: TensorMath.ReshapeBackward(op.A, op.Output); break;
+                case OpCode.Sigmoid: TensorMath.SigmoidBackward(op.A, op.Output); break;
+                case OpCode.Tanh: TensorMath.TanhBackward(op.A, op.Output); break;
+                case OpCode.Multiply: TensorMath.MultiplyBackward(op.A, op.B, op.Output); break;
+                case OpCode.GateSlice: TensorMath.GateSliceBackward(op.A, op.Output, op.I1, op.I0); break;
                 case OpCode.DirectionalLoss:
                     var gammaValue = BitConverter.Int32BitsToSingle(op.I0);
                     TensorMath.DirectionalLossBackward(op.A, op.B, op.Output, gammaValue);

@@ -1,4 +1,4 @@
-namespace DevOnBike.Overfit.Monitoring.Contracts
+namespace DevOnBike.Overfit.Data.Contracts
 {
     /// <summary>Importance verdict for a single feature dimension.</summary>
     public enum FeatureImportanceVerdict

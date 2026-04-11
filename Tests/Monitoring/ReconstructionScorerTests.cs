@@ -3,8 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.DeepLearning;
-using DevOnBike.Overfit.Monitoring;
 
 namespace DevOnBike.Overfit.Tests.Monitoring
 {
@@ -81,8 +81,8 @@ namespace DevOnBike.Overfit.Tests.Monitoring
         [Fact]
         public void ComputeMse_WhenAllZeroVectors_ThenReturnsZero()
         {
-            float[] a = new float[32]; // zeros
-            float[] b = new float[32]; // zeros
+            var a = new float[32]; // zeros
+            var b = new float[32]; // zeros
             AssertClose(0f, ReconstructionScorer.ComputeMse(a, b), "MSE zeros");
         }
 

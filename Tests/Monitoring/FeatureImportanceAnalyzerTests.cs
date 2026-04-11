@@ -4,10 +4,8 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Data;
+using DevOnBike.Overfit.Data.Contracts;
 using DevOnBike.Overfit.DeepLearning;
-using DevOnBike.Overfit.Monitoring;
-using DevOnBike.Overfit.Monitoring.Contracts;
-using Xunit;
 
 namespace DevOnBike.Overfit.Tests.Monitoring
 {

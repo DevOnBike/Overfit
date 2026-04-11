@@ -1082,5 +1082,219 @@ namespace DevOnBike.Overfit.Core
                 pGrad[i] += baseGrad + penaltyGrad;
             }
         }
+
+        // ====================================================================
+        // SIGMOID
+        // ====================================================================
+
+        /// <summary>
+        /// Element-wise sigmoid: σ(x) = 1 / (1 + e^(-x)).
+        /// </summary>
+        public static AutogradNode Sigmoid(ComputationGraph graph, AutogradNode input)
+        {
+            var res = FastTensor<float>.SameShape(input.Data, clearMemory: false);
+
+            TensorPrimitives.Sigmoid(input.Data.AsReadOnlySpan(), res.AsSpan());
+
+            var output = new AutogradNode(res, input.RequiresGrad);
+
+            if (output.RequiresGrad)
+            {
+                graph?.Record(OpCode.Sigmoid, output, input);
+            }
+
+            return output;
+        }
+
+        /// <summary>
+        /// Backward: dL/dx = dL/dy * σ(x) * (1 - σ(x)).
+        /// output.Data already holds σ(x) — no recomputation needed.
+        /// Uses fused MultiplyAdd to avoid intermediate allocations.
+        /// </summary>
+        public static void SigmoidBackward(AutogradNode input, AutogradNode output)
+        {
+            if (!input.RequiresGrad)
+            {
+                return;
+            }
+
+            var outS = output.Data.AsReadOnlySpan();
+            var outGS = output.Grad.AsReadOnlySpan();
+            var inGS = input.Grad.AsSpan();
+            var n = inGS.Length;
+
+            // local buffer for σ(x) * (1 - σ(x))
+            var buf = n <= 512 ? stackalloc float[n] : new float[n];
+
+            // buf = 1 - σ(x)
+            TensorPrimitives.Subtract(1f, outS, buf);
+
+            // buf = σ(x) * (1 - σ(x))
+            TensorPrimitives.Multiply(outS, buf, buf);
+
+            // inGrad += outGrad * buf
+            TensorPrimitives.MultiplyAdd(outGS, buf, inGS, inGS);
+        }
+
+        // ====================================================================
+        // TANH
+        // ====================================================================
+
+        /// <summary>
+        /// Element-wise tanh. Uses TensorPrimitives.Tanh — SIMD in .NET 10.
+        /// </summary>
+        public static AutogradNode Tanh(ComputationGraph graph, AutogradNode input)
+        {
+            var res = FastTensor<float>.SameShape(input.Data, clearMemory: false);
+
+            TensorPrimitives.Tanh(input.Data.AsReadOnlySpan(), res.AsSpan());
+
+            var output = new AutogradNode(res, input.RequiresGrad);
+
+            if (output.RequiresGrad)
+            {
+                graph?.Record(OpCode.Tanh, output, input);
+            }
+
+            return output;
+        }
+
+        /// <summary>
+        /// Backward: dL/dx = dL/dy * (1 - tanh²(x)).
+        /// output.Data holds tanh(x).
+        /// </summary>
+        public static void TanhBackward(AutogradNode input, AutogradNode output)
+        {
+            if (!input.RequiresGrad)
+            {
+                return;
+            }
+
+            var outS = output.Data.AsReadOnlySpan();
+            var outGS = output.Grad.AsReadOnlySpan();
+            var inGS = input.Grad.AsSpan();
+            var n = inGS.Length;
+
+            var buf = n <= 512 ? stackalloc float[n] : new float[n];
+
+            // buf = tanh²(x)
+            TensorPrimitives.Multiply(outS, outS, buf);
+
+            // buf = 1 - tanh²(x)
+            TensorPrimitives.Subtract(1f, buf, buf);
+
+            // inGrad += outGrad * (1 - tanh²(x))
+            TensorPrimitives.MultiplyAdd(outGS, buf, inGS, inGS);
+        }
+
+        // ====================================================================
+        // MULTIPLY (element-wise)
+        // ====================================================================
+
+        /// <summary>
+        /// Element-wise multiplication: out = a ⊙ b.
+        /// Used for LSTM gate application: f_t ⊙ c_{t-1}, i_t ⊙ g_t, o_t ⊙ tanh(c_t).
+        /// </summary>
+        public static AutogradNode Multiply(ComputationGraph graph, AutogradNode a, AutogradNode b)
+        {
+            var res = FastTensor<float>.SameShape(a.Data, clearMemory: false);
+
+            TensorPrimitives.Multiply(a.Data.AsReadOnlySpan(), b.Data.AsReadOnlySpan(), res.AsSpan());
+
+            var output = new AutogradNode(res, a.RequiresGrad || b.RequiresGrad);
+
+            if (output.RequiresGrad)
+            {
+                graph?.Record(OpCode.Multiply, output, a, b);
+            }
+
+            return output;
+        }
+
+        /// <summary>
+        /// Backward: dL/da = dL/dout ⊙ b,  dL/db = dL/dout ⊙ a.
+        /// </summary>
+        public static void MultiplyBackward(AutogradNode a, AutogradNode b, AutogradNode output)
+        {
+            if (a.RequiresGrad)
+            {
+                // aGrad += outGrad ⊙ b
+                TensorPrimitives.MultiplyAdd(output.Grad.AsReadOnlySpan(), b.Data.AsReadOnlySpan(), a.Grad.AsSpan(), a.Grad.AsSpan());
+            }
+
+            if (b.RequiresGrad)
+            {
+                // bGrad += outGrad ⊙ a
+                TensorPrimitives.MultiplyAdd(output.Grad.AsReadOnlySpan(), a.Data.AsReadOnlySpan(), b.Grad.AsSpan(), b.Grad.AsSpan());
+            }
+        }
+
+        // ====================================================================
+        // GATE SLICE
+        // ====================================================================
+
+        /// <summary>
+        /// Extracts one gate slice from packed gates tensor [batch, 4*hiddenSize].
+        /// gateIndex: 0=forget, 1=input, 2=candidate, 3=output.
+        /// Returns a new tensor [batch, hiddenSize] — contiguous copy, safe for autograd.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static AutogradNode GateSlice(
+            ComputationGraph graph,
+            AutogradNode gates,
+            int hiddenSize,
+            int gateIndex)
+        {
+            var batch = gates.Data.GetDim(0);
+            var offset = gateIndex * hiddenSize;
+            var stride = 4 * hiddenSize;
+
+            var res = new FastTensor<float>(false, batch, hiddenSize);
+            var srcS = gates.Data.AsReadOnlySpan();
+            var dstS = res.AsSpan();
+
+            for (var b = 0; b < batch; b++)
+            {
+                srcS.Slice(b * stride + offset, hiddenSize).CopyTo(dstS.Slice(b * hiddenSize, hiddenSize));
+            }
+
+            var output = new AutogradNode(res, gates.RequiresGrad);
+
+            if (output.RequiresGrad)
+            {
+                graph?.Record(OpCode.GateSlice, output, gates, null, gateIndex, hiddenSize);
+            }
+
+            return output;
+        }
+
+        /// <summary>
+        /// Backward: scatter output grad back into the correct gate slot of gates.Grad.
+        /// </summary>
+        public static void GateSliceBackward(
+            AutogradNode gates,
+            AutogradNode output,
+            int hiddenSize,
+            int gateIndex)
+        {
+            if (!gates.RequiresGrad)
+            {
+                return;
+            }
+
+            var batch = gates.Data.GetDim(0);
+            var offset = gateIndex * hiddenSize;
+            var stride = 4 * hiddenSize;
+
+            var srcS = output.Grad.AsReadOnlySpan();
+            var dstS = gates.Grad.AsSpan();
+
+            for (var b = 0; b < batch; b++)
+            {
+                var dst = dstS.Slice(b * stride + offset, hiddenSize);
+
+                TensorPrimitives.Add(dst, srcS.Slice(b * hiddenSize, hiddenSize), dst);
+            }
+        }
     }
 }

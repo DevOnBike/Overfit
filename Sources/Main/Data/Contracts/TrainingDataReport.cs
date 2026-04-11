@@ -1,4 +1,4 @@
-using DevOnBike.Overfit.Monitoring;
+using DevOnBike.Overfit.Anomalies.Monitoring;
 using System.Linq;
 namespace DevOnBike.Overfit.Data.Contracts
 {

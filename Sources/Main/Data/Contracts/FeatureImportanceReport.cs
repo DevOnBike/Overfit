@@ -1,6 +1,4 @@
-using DevOnBike.Overfit.Data;
-
-namespace DevOnBike.Overfit.Monitoring.Contracts
+namespace DevOnBike.Overfit.Data.Contracts
 {
     /// <summary>Full report returned by <see cref="FeatureImportanceAnalyzer.Analyze"/>.</summary>
     public sealed record FeatureImportanceReport

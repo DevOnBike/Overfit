@@ -24,6 +24,10 @@ namespace DevOnBike.Overfit.Core
         MSELoss,
         SoftmaxCrossEntropy,
         Reshape,
-        DirectionalLoss
+        DirectionalLoss,
+        Sigmoid,
+        Tanh,
+        Multiply,
+        GateSlice
     }
 }

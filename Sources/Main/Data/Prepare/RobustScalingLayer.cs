@@ -184,6 +184,43 @@ namespace DevOnBike.Overfit.Data.Prepare
         }
 
         /// <summary>
+        /// Exports fitted median and IQR parameters for persistence.
+        /// Call after processing the Golden Window data.
+        /// Throws if the scaler has not been fitted yet.
+        /// </summary>
+        public ScalerParams ExportParams()
+        {
+            if (!_fitted)
+            {
+                throw new InvalidOperationException("Scaler has not been fitted yet. Call Process() on training data first.");
+            }
+
+            return new ScalerParams
+            {
+                Medians = (float[])_medians.Clone(),
+                Iqrs = (float[])_iqrs.Clone()
+            };
+        }
+
+        /// <summary>
+        /// Imports previously saved parameters, bypassing the Fit phase.
+        /// Use at inference time to restore a scaler fitted on the Golden Window.
+        /// </summary>
+        public void ImportParams(ScalerParams scalerParams)
+        {
+            ArgumentNullException.ThrowIfNull(scalerParams);
+
+            if (scalerParams.Medians.Length != scalerParams.Iqrs.Length)
+            {
+                throw new ArgumentException("Medians and Iqrs must have the same length.");
+            }
+
+            _medians = (float[])scalerParams.Medians.Clone();
+            _iqrs = (float[])scalerParams.Iqrs.Clone();
+            _fitted = true;
+        }
+
+        /// <summary>
         /// Resets the persisted statistics, forcing a re-Fit on the next Process call.
         /// </summary>
         public void Reset()
@@ -193,4 +230,5 @@ namespace DevOnBike.Overfit.Data.Prepare
             _fitted = false;
         }
     }
+
 }

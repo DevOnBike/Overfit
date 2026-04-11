@@ -1,0 +1,17 @@
+// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
+
+namespace DevOnBike.Overfit.Anomalies.Monitoring.Contracts
+{
+    /// <summary>Severity tiers for fired alerts.</summary>
+    public enum AlertSeverity
+    {
+        /// <summary>Score in [AlertThreshold, CriticalThreshold).</summary>
+        Warning,
+
+        /// <summary>Score >= CriticalThreshold.</summary>
+        Critical
+    }
+}

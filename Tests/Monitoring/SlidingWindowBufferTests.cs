@@ -4,8 +4,8 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Threading.Channels;
+using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Core;
-using DevOnBike.Overfit.Monitoring;
 
 namespace DevOnBike.Overfit.Tests.Monitoring
 {

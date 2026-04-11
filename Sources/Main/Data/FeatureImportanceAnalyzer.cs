@@ -5,8 +5,8 @@
 
 using DevOnBike.Overfit.DeepLearning;
 using System.Linq;
-using DevOnBike.Overfit.Monitoring.Contracts;
-using DevOnBike.Overfit.Monitoring;
+using DevOnBike.Overfit.Data.Contracts;
+using DevOnBike.Overfit.Anomalies.Monitoring;
 
 namespace DevOnBike.Overfit.Data
 {

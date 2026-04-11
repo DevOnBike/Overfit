@@ -1,5 +1,5 @@
-using DevOnBike.Overfit.Monitoring;
-using DevOnBike.Overfit.Monitoring.Contracts;
+using DevOnBike.Overfit.Anomalies.Monitoring;
+using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 
 namespace DevOnBike.Overfit.Tests.Monitoring
 {
