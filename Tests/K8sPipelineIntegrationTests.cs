@@ -18,7 +18,7 @@ namespace DevOnBike.Overfit.Tests
         public K8sPipelineIntegrationTests()
         {
             // 1. ARRANGE: Inicjalizacja pod MetricSnapshot.FeatureCount (12)
-            int windowSize = 10;
+            var windowSize = 10;
             _buffer = new SlidingWindowBuffer(windowSize: windowSize, stepSize: 1, featureCount: MetricSnapshot.FeatureCount);
 
             // 12 metryk * 4 statystyki = 48
@@ -40,7 +40,7 @@ namespace DevOnBike.Overfit.Tests
         public void Pipeline_ShouldClassify_NormalTraffic_AsStateNormal()
         {
             // 1. ARRANGE: Zdrowe metryki zgodnie z nowym kontraktem
-            for (int i = 0; i < _buffer.WindowSize; i++)
+            for (var i = 0; i < _buffer.WindowSize; i++)
             {
                 _buffer.Add(new MetricSnapshot
                 {
@@ -58,11 +58,11 @@ namespace DevOnBike.Overfit.Tests
             Span<float> featuresScratch = stackalloc float[_featureVectorSize];
 
             // 2. ACT
-            bool extracted = FeatureExtractor.TryExtract(_buffer, windowScratch, featuresScratch, out _);
+            var extracted = FeatureExtractor.TryExtract(_buffer, windowScratch, featuresScratch, out _);
             ScaleFeatures(featuresScratch);
 
             // Poprawione wywołanie: tylko jeden argument
-            int predictedRegime = _detector.GetCurrentRegime(featuresScratch);
+            var predictedRegime = _detector.GetCurrentRegime(featuresScratch);
 
             // 3. ASSERT
             Assert.True(extracted);
@@ -73,7 +73,7 @@ namespace DevOnBike.Overfit.Tests
         public void Pipeline_ShouldClassify_AnomalousTraffic_AsStateFailure()
         {
             // 1. ARRANGE: Symulacja awarii
-            for (int i = 0; i < _buffer.WindowSize; i++)
+            for (var i = 0; i < _buffer.WindowSize; i++)
             {
                 _buffer.Add(new MetricSnapshot
                 {
@@ -94,7 +94,7 @@ namespace DevOnBike.Overfit.Tests
             ScaleFeatures(featuresScratch);
 
             // Poprawione wywołanie
-            int predictedRegime = _detector.GetCurrentRegime(featuresScratch);
+            var predictedRegime = _detector.GetCurrentRegime(featuresScratch);
 
             // 3. ASSERT
             Assert.Equal(K8sAnomalyDetector.StateFailure, predictedRegime);
@@ -102,7 +102,7 @@ namespace DevOnBike.Overfit.Tests
 
         private void ScaleFeatures(Span<float> features)
         {
-            for (int i = 0; i < features.Length; i++)
+            for (var i = 0; i < features.Length; i++)
             {
                 features[i] = (features[i] - _scalerParams.Medians[i]) / _scalerParams.Iqrs[i];
             }
@@ -112,36 +112,37 @@ namespace DevOnBike.Overfit.Tests
         {
             // ZMIANA 1: Dajemy równe szanse na start (0.33), 
             // aby logarytm nie wynosił -Infinity i pozwalał danym "przemówić".
-            float[] initialProbs = { 0.33f, 0.33f, 0.33f };
+            float[] initialProbs = [0.33f, 0.33f, 0.33f];
 
-            float[] transitionMatrix = {
-        0.80f, 0.15f, 0.05f,
+            float[] transitionMatrix =
+            [
+                0.80f, 0.15f, 0.05f,
         0.10f, 0.80f, 0.10f,
         0.05f, 0.15f, 0.80f
-    };
+            ];
 
             var means = new float[3 * _featureVectorSize];
 
             // --- StateNormal ---
-            means[K8sAnomalyDetector.StateNormal * _featureVectorSize + (0 * 4)] = 0.1f;  // CpuUsageRatio
-            means[K8sAnomalyDetector.StateNormal * _featureVectorSize + (5 * 4)] = 20f;   // LatencyP95Ms
+            means[K8sAnomalyDetector.StateNormal * _featureVectorSize + 0 * 4] = 0.1f;  // CpuUsageRatio
+            means[K8sAnomalyDetector.StateNormal * _featureVectorSize + 5 * 4] = 20f;   // LatencyP95Ms
 
             // --- StateFailure ---
             // ZMIANA 2: Musimy ustawić średnie dla WSZYSTKICH cech, które testujemy jako anomalne.
             // Jeśli w teście dajesz ErrorRate 0.5 i ThreadPool 100, a tutaj zostawisz 0, 
             // to model uzna to za ogromną anomalię nawet wewnątrz stanu Failure!
-            means[K8sAnomalyDetector.StateFailure * _featureVectorSize + (0 * 4)] = 0.95f; // CpuUsageRatio
-            means[K8sAnomalyDetector.StateFailure * _featureVectorSize + (5 * 4)] = 5000f; // LatencyP95Ms
-            means[K8sAnomalyDetector.StateFailure * _featureVectorSize + (8 * 4)] = 0.5f;  // ErrorRate (indeks 8 * 4)
-            means[K8sAnomalyDetector.StateFailure * _featureVectorSize + (11 * 4)] = 100f; // ThreadPool (indeks 11 * 4)
+            means[K8sAnomalyDetector.StateFailure * _featureVectorSize + 0 * 4] = 0.95f; // CpuUsageRatio
+            means[K8sAnomalyDetector.StateFailure * _featureVectorSize + 5 * 4] = 5000f; // LatencyP95Ms
+            means[K8sAnomalyDetector.StateFailure * _featureVectorSize + 8 * 4] = 0.5f;  // ErrorRate (indeks 8 * 4)
+            means[K8sAnomalyDetector.StateFailure * _featureVectorSize + 11 * 4] = 100f; // ThreadPool (indeks 11 * 4)
 
             var covariances = new FastMatrix<float>[3];
-            for (int i = 0; i < 3; i++)
+            for (var i = 0; i < 3; i++)
             {
                 covariances[i] = new FastMatrix<float>(_featureVectorSize, _featureVectorSize);
                 // ZMIANA 3: Zwiększamy wariancję (np. do 100.0), aby model był mniej "sztywny" 
                 // i lepiej tolerował różnice numeryczne w testach.
-                for (int j = 0; j < _featureVectorSize; j++)
+                for (var j = 0; j < _featureVectorSize; j++)
                 {
                     covariances[i][j, j] = 100.0f;
                 }

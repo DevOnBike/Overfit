@@ -162,10 +162,7 @@ namespace DevOnBike.Overfit.Tests.Prepare
                 NazwaAgencji = "Premium"
             };
 
-            var (valX, _) = converter.Transform(new List<PropertyData>
-            {
-                testProperty
-            });
+            var (valX, _) = converter.Transform([testProperty]);
             using var valContext = pipeline.Execute(valX, new FastTensor<float>(1, 1));
             var valInput = new AutogradNode(valContext.Features, false);
 

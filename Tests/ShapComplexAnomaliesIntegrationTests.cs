@@ -44,7 +44,7 @@ namespace DevOnBike.Overfit.Tests
             // co SHAP musi wykazać jako wartość dodatnią.
             anomalousInstance[32] = 0.0f;
 
-            using var shap = new UniversalKernelShap(
+            using var shap = new ShapKernel(
                 modelFunc: (span) => _detector.ScoreWindow(span),
                 background: _normalizedBackground,
                 numSamples: 1024
@@ -56,9 +56,9 @@ namespace DevOnBike.Overfit.Tests
             shap.Explain(anomalousInstance, shapValues);
 
             // 4. ASSERT
-            float cpuShap = shapValues[0];
-            float latencyShap = shapValues[20];
-            float errorRateShap = shapValues[32];
+            var cpuShap = shapValues[0];
+            var latencyShap = shapValues[20];
+            var errorRateShap = shapValues[32];
 
             // Winowajcy muszą mieć ujemny wpływ (pogarszają wynik względem tła)
             Assert.True(cpuShap < -1.0f, $"CPU powinno pogarszać wynik. Jest: {cpuShap}");
@@ -70,26 +70,26 @@ namespace DevOnBike.Overfit.Tests
 
             // Weryfikacja Aksjomatu Efektywności
             float totalShap = 0;
-            for (int i = 0; i < _featureCount; i++) totalShap += shapValues[i];
+            for (var i = 0; i < _featureCount; i++) totalShap += shapValues[i];
 
-            float modelDiff = _detector.ScoreWindow(anomalousInstance) - _detector.ScoreWindow(_normalizedBackground);
+            var modelDiff = _detector.ScoreWindow(anomalousInstance) - _detector.ScoreWindow(_normalizedBackground);
             Assert.Equal(modelDiff, totalShap, precision: 1);
         }
 
         private void SetupNormalizedHmm()
         {
-            float[] initialProbs = { 1.0f, 0.0f, 0.0f };
-            float[] transitionMatrix = { 1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f };
+            float[] initialProbs = [1.0f, 0.0f, 0.0f];
+            float[] transitionMatrix = [1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f];
 
             // W modelu znormalizowanym średnie zawsze wynoszą 0.0
             var means = new float[3 * _featureCount];
 
             var covariances = new FastMatrix<float>[3];
-            for (int i = 0; i < 3; i++)
+            for (var i = 0; i < 3; i++)
             {
                 covariances[i] = new FastMatrix<float>(_featureCount, _featureCount);
                 // Wariancja 1.0 dla wszystkich cech (znormalizowane dane)
-                for (int j = 0; j < _featureCount; j++) covariances[i][j, j] = 1.0f;
+                for (var j = 0; j < _featureCount; j++) covariances[i][j, j] = 1.0f;
             }
 
             _detector.LoadParameters(initialProbs, transitionMatrix, means, covariances);

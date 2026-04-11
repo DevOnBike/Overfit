@@ -107,29 +107,29 @@ namespace DevOnBike.Overfit.Statistical
                     col[t] = window[t * featureCount + f];
                 }
 
-                float firstVal = col[0];
-                float lastVal = col[windowSize - 1];
+                var firstVal = col[0];
+                var lastVal = col[windowSize - 1];
 
                 // Krok 2: Średnia (Mean) za pomocą SIMD
-                float sum = TensorPrimitives.Sum(col);
-                float mean = sum / windowSize;
+                var sum = TensorPrimitives.Sum(col);
+                var mean = sum / windowSize;
 
                 // Krok 3: Odchylenie standardowe (Std) 
                 // Używamy wzoru: E[X^2] - (E[X])^2
-                float sumSq = TensorPrimitives.Dot(col, col);
-                float variance = (sumSq / windowSize) - (mean * mean);
-                float std = MathF.Sqrt(MathF.Max(0f, variance)); // Max(0) chroni przed błędami precyzji float
+                var sumSq = TensorPrimitives.Dot(col, col);
+                var variance = sumSq / windowSize - mean * mean;
+                var std = MathF.Sqrt(MathF.Max(0f, variance)); // Max(0) chroni przed błędami precyzji float
 
                 // Krok 4: Percentyl 95 (P95)
                 // Sortowanie Span w miejscu nie alokuje pamięci w .NET 6+
                 col.Sort();
-                float p95 = Percentile95(col, windowSize);
+                var p95 = Percentile95(col, windowSize);
 
                 // Krok 5: Kierunek trendu (Delta)
-                float delta = lastVal - firstVal;
+                var delta = lastVal - firstVal;
 
                 // Zapis do wynikowego wektora
-                int outBase = f * StatsPerFeature;
+                var outBase = f * StatsPerFeature;
                 output[outBase + MeanOffset] = mean;
                 output[outBase + StdOffset] = std;
                 output[outBase + P95Offset] = p95;
@@ -143,7 +143,7 @@ namespace DevOnBike.Overfit.Statistical
             if (length == 1) return sorted[0];
 
             // Metoda Nearest-Rank
-            int index = (int)MathF.Ceiling(0.95f * length) - 1;
+            var index = (int)MathF.Ceiling(0.95f * length) - 1;
             return sorted[Math.Clamp(index, 0, length - 1)];
         }
     }

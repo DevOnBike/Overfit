@@ -357,10 +357,7 @@ namespace DevOnBike.Overfit.Tests.Prepare
             fSpan[7] = 2f;
 
             var layer = new LogTransformLayer(
-            new List<int>
-            {
-                0
-            });
+            [0]);
 
             using var result = layer.Process(new PipelineContext(features, targets));
 
@@ -392,10 +389,7 @@ namespace DevOnBike.Overfit.Tests.Prepare
             fSpan[3] = 500000f;
 
             var layer = new LogTransformLayer(
-            new List<int>
-            {
-                0
-            },
+            [0],
             LogMode.SignedLog1p);
 
             using var result = layer.Process(new PipelineContext(features, targets));
@@ -440,15 +434,11 @@ namespace DevOnBike.Overfit.Tests.Prepare
             fSpan[14] = 800000f;
 
             var layer = new RobustScalingLayer(
-            new HashSet<int>
-            {
+            [
                 0,
                 2
-            },
-            new HashSet<int>
-            {
-                1
-            });
+            ],
+            [1]);
 
             using var result = layer.Process(new PipelineContext(features, targets));
 

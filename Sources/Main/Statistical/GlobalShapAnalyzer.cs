@@ -11,10 +11,10 @@ namespace DevOnBike.Overfit.Statistical
 {
     public sealed class GlobalShapAnalyzer
     {
-        private readonly UniversalKernelShap _shap;
+        private readonly ShapKernel _shap;
         private readonly int _featureCount;
 
-        public GlobalShapAnalyzer(UniversalKernelShap shap, int featureCount)
+        public GlobalShapAnalyzer(ShapKernel shap, int featureCount)
         {
             _shap = shap;
             _featureCount = featureCount;
@@ -22,24 +22,24 @@ namespace DevOnBike.Overfit.Statistical
 
         public List<FeatureImportance> AnalyzeImportance(FastTensor<float> trainingData)
         {
-            int rows = trainingData.GetDim(0);
-            float[] globalImportance = new float[_featureCount];
-            float[] shapBuffer = new float[_featureCount];
-            float[] rowBuffer = new float[_featureCount];
+            var rows = trainingData.GetDim(0);
+            var globalImportance = new float[_featureCount];
+            var shapBuffer = new float[_featureCount];
+            var rowBuffer = new float[_featureCount];
 
-            for (int r = 0; r < rows; r++)
+            for (var r = 0; r < rows; r++)
             {
                 trainingData.AsReadOnlySpan().Slice(r * _featureCount, _featureCount).CopyTo(rowBuffer);
                 _shap.Explain(rowBuffer, shapBuffer);
 
-                for (int f = 0; f < _featureCount; f++)
+                for (var f = 0; f < _featureCount; f++)
                 {
                     globalImportance[f] += MathF.Abs(shapBuffer[f]);
                 }
             }
 
             var results = new List<FeatureImportance>();
-            for (int f = 0; f < _featureCount; f++)
+            for (var f = 0; f < _featureCount; f++)
             {
                 results.Add(new FeatureImportance { FeatureIndex = f, ImportanceScore = globalImportance[f] / rows });
             }

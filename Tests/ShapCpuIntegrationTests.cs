@@ -43,7 +43,7 @@ namespace DevOnBike.Overfit.Tests
             anomalousInstance[0] = 0.95f;
 
             // Uruchamiamy generyczny eksplainer KernelSHAP
-            using var shap = new UniversalKernelShap(
+            using var shap = new ShapKernel(
                 modelFunc: (span) => _detector.ScoreWindow(span),
                 background: _background,
                 numSamples: 1024 // Zwiększona liczba próbek dla stabilności regresji
@@ -55,8 +55,8 @@ namespace DevOnBike.Overfit.Tests
             shap.Explain(anomalousInstance, shapValues);
 
             // 3. ASSERT: Weryfikacja matematyczna
-            float cpuUsageContribution = shapValues[0];
-            float unrelatedMetricContribution = shapValues[20]; // np. jakaś metryka RAM/Net
+            var cpuUsageContribution = shapValues[0];
+            var unrelatedMetricContribution = shapValues[20]; // np. jakaś metryka RAM/Net
 
             // Przy tej konfiguracji HMM, spadek Log-Likelihood powinien wynosić ok. -45.
             // SHAP musi to "rozliczyć" przede wszystkim na cechę 0.
@@ -74,26 +74,27 @@ namespace DevOnBike.Overfit.Tests
         private void SetupHarshHmmForCpuDetection()
         {
             // Prawdopodobieństwa początkowe: zawsze startujemy w Normal
-            float[] initialProbs = { 1.0f, 0.0f, 0.0f };
+            float[] initialProbs = [1.0f, 0.0f, 0.0f];
 
             // Macierz przejść: wymuszamy pozostanie w stanie Normal, 
             // aby model nie "uciekł" do stanu Failure (co zamaskowałoby anomalię w SHAP)
-            float[] transitionMatrix = {
+            float[] transitionMatrix =
+            [
                 1.0f, 0.0f, 0.0f,
                 0.0f, 1.0f, 0.0f,
                 0.0f, 0.0f, 1.0f
-            };
+            ];
 
             var means = new float[3 * _featureCount];
             // Stan Normalny oczekuje wartości 0.0 dla wszystkich metryk
             // (czyli dokładnie tyle, ile mamy w _background)
-            for (int i = 0; i < means.Length; i++) means[i] = 0.0f;
+            for (var i = 0; i < means.Length; i++) means[i] = 0.0f;
 
             var covariances = new FastMatrix<float>[3];
-            for (int i = 0; i < 3; i++)
+            for (var i = 0; i < 3; i++)
             {
                 covariances[i] = new FastMatrix<float>(_featureCount, _featureCount);
-                for (int j = 0; j < _featureCount; j++)
+                for (var j = 0; j < _featureCount; j++)
                 {
                     // Niska wariancja (0.01) sprawia, że odchylenie o 0.95 
                     // staje się "matematyczną katastrofą" dla modelu.

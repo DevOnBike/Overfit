@@ -61,20 +61,20 @@ namespace DevOnBike.Overfit.Statistical
             if (fullCovariances.Length != StateCount)
                 throw new ArgumentException("You must provide one covariance matrix per state.");
 
-            for (int i = 0; i < StateCount; i++)
+            for (var i = 0; i < StateCount; i++)
             {
                 _logPi[i] = pi[i] > 0 ? MathF.Log(pi[i]) : LogZero;
 
-                for (int j = 0; j < StateCount; j++)
+                for (var j = 0; j < StateCount; j++)
                 {
-                    float a = transitionMatrix[i * StateCount + j];
+                    var a = transitionMatrix[i * StateCount + j];
                     _logA[i, j] = a > 0 ? MathF.Log(a) : LogZero;
                 }
             }
 
             means.CopyTo(_means.AsSpan());
 
-            for (int i = 0; i < StateCount; i++)
+            for (var i = 0; i < StateCount; i++)
             {
                 // Dispose old matrix if we are overwriting an existing model
                 _choleskyL[i]?.Dispose();
@@ -111,8 +111,8 @@ namespace DevOnBike.Overfit.Statistical
             if (outputStates.Length < timeSteps)
                 throw new ArgumentException("Output buffer too small.");
 
-            int N = StateCount;
-            int vLen = timeSteps * N;
+            var N = StateCount;
+            var vLen = timeSteps * N;
 
             var vArr = ArrayPool<float>.Shared.Rent(vLen);
             var ptrArr = ArrayPool<int>.Shared.Rent(vLen);
@@ -123,27 +123,27 @@ namespace DevOnBike.Overfit.Statistical
                 var ptr = ptrArr.AsSpan(0, vLen);
 
                 var x0 = sequence.Slice(0, FeatureCount);
-                for (int i = 0; i < N; i++)
+                for (var i = 0; i < N; i++)
                 {
                     V[i] = _logPi[i] + ComputeLogEmission(i, x0);
                     ptr[i] = 0;
                 }
 
                 var logA = _logA.AsReadOnlySpan();
-                for (int t = 1; t < timeSteps; t++)
+                for (var t = 1; t < timeSteps; t++)
                 {
                     var xt = sequence.Slice(t * FeatureCount, FeatureCount);
 
-                    for (int j = 0; j < N; j++)
+                    for (var j = 0; j < N; j++)
                     {
-                        float maxLogProb = LogZero;
-                        int bestPrevState = 0;
+                        var maxLogProb = LogZero;
+                        var bestPrevState = 0;
 
-                        float emission = ComputeLogEmission(j, xt);
+                        var emission = ComputeLogEmission(j, xt);
 
-                        for (int i = 0; i < N; i++)
+                        for (var i = 0; i < N; i++)
                         {
-                            float prob = V[(t - 1) * N + i] + logA[i * N + j];
+                            var prob = V[(t - 1) * N + i] + logA[i * N + j];
                             if (prob > maxLogProb)
                             {
                                 maxLogProb = prob;
@@ -156,9 +156,9 @@ namespace DevOnBike.Overfit.Statistical
                     }
                 }
 
-                float bestFinalProb = LogZero;
-                int bestFinalState = 0;
-                for (int i = 0; i < N; i++)
+                var bestFinalProb = LogZero;
+                var bestFinalState = 0;
+                for (var i = 0; i < N; i++)
                 {
                     if (V[(timeSteps - 1) * N + i] > bestFinalProb)
                     {
@@ -168,7 +168,7 @@ namespace DevOnBike.Overfit.Statistical
                 }
 
                 outputStates[timeSteps - 1] = bestFinalState;
-                for (int t = timeSteps - 1; t > 0; t--)
+                for (var t = timeSteps - 1; t > 0; t--)
                 {
                     outputStates[t - 1] = ptr[t * N + outputStates[t]];
                 }
@@ -186,7 +186,7 @@ namespace DevOnBike.Overfit.Statistical
 
         public float ScoreSequence(int timeSteps, ReadOnlySpan<float> sequence)
         {
-            int N = StateCount;
+            var N = StateCount;
             var alphaArr = ArrayPool<float>.Shared.Rent(N);
             var nextAlphaArr = ArrayPool<float>.Shared.Rent(N);
 
@@ -196,24 +196,24 @@ namespace DevOnBike.Overfit.Statistical
                 var nextAlpha = nextAlphaArr.AsSpan(0, N);
 
                 var x0 = sequence.Slice(0, FeatureCount);
-                for (int i = 0; i < N; i++)
+                for (var i = 0; i < N; i++)
                 {
                     alpha[i] = _logPi[i] + ComputeLogEmission(i, x0);
                 }
 
                 var logA = _logA.AsReadOnlySpan();
-                for (int t = 1; t < timeSteps; t++)
+                for (var t = 1; t < timeSteps; t++)
                 {
                     var xt = sequence.Slice(t * FeatureCount, FeatureCount);
 
-                    for (int j = 0; j < N; j++)
+                    for (var j = 0; j < N; j++)
                     {
-                        float emission = ComputeLogEmission(j, xt);
-                        float sumLogExp = LogZero;
+                        var emission = ComputeLogEmission(j, xt);
+                        var sumLogExp = LogZero;
 
-                        for (int i = 0; i < N; i++)
+                        for (var i = 0; i < N; i++)
                         {
-                            float p = alpha[i] + logA[i * N + j];
+                            var p = alpha[i] + logA[i * N + j];
                             sumLogExp = LogSumExp(sumLogExp, p);
                         }
 
@@ -223,8 +223,8 @@ namespace DevOnBike.Overfit.Statistical
                     nextAlpha.CopyTo(alpha);
                 }
 
-                float totalLogLikelihood = LogZero;
-                for (int i = 0; i < N; i++)
+                var totalLogLikelihood = LogZero;
+                for (var i = 0; i < N; i++)
                 {
                     totalLogLikelihood = LogSumExp(totalLogLikelihood, alpha[i]);
                 }
@@ -244,7 +244,7 @@ namespace DevOnBike.Overfit.Statistical
             if (float.IsNegativeInfinity(a)) return b;
             if (float.IsNegativeInfinity(b)) return a;
 
-            float max = MathF.Max(a, b);
+            var max = MathF.Max(a, b);
             return max + MathF.Log(1f + MathF.Exp(-MathF.Abs(a - b)));
         }
 
@@ -259,7 +259,7 @@ namespace DevOnBike.Overfit.Statistical
 
             if (_choleskyL != null)
             {
-                for (int i = 0; i < _choleskyL.Length; i++)
+                for (var i = 0; i < _choleskyL.Length; i++)
                 {
                     _choleskyL[i]?.Dispose();
                 }

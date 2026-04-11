@@ -42,7 +42,9 @@ namespace DevOnBike.Overfit.Data
                 {
                     int nx = x + sx, ny = y + sy;
                     if (nx >= 0 && nx < w && ny >= 0 && ny < h)
+                    {
                         output[ny * w + nx] = input[y * w + x];
+                    }
                 }
             }
         }

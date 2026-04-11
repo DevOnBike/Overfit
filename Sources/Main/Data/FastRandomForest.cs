@@ -12,7 +12,7 @@ namespace DevOnBike.Overfit.Data
     {
         private readonly int _maxDepth;
         private readonly int _numTrees;
-        private readonly List<FastTreeNode[]> _forest = new();
+        private readonly List<FastTreeNode[]> _forest = [];
 
         public FastRandomForest(int numTrees = 50, int maxDepth = 10)
         {
@@ -32,10 +32,10 @@ namespace DevOnBike.Overfit.Data
 
             // Czyścimy stary las przed nowym treningiem
             _forest.Clear();
+
             var trees = new FastTreeNode[_numTrees][];
 
-            Parallel.For(0, _numTrees, t =>
-            {
+            Parallel.For(0, _numTrees, t => {
                 var localImportance = new float[cols];
                 var nodes = new List<FastTreeNode>();
 
@@ -46,7 +46,7 @@ namespace DevOnBike.Overfit.Data
 
                 lock (lockObj)
                 {
-                    for (int i = 0; i < cols; i++)
+                    for (var i = 0; i < cols; i++)
                     {
                         totalImportance[i] += localImportance[i];
                     }
@@ -54,6 +54,7 @@ namespace DevOnBike.Overfit.Data
             });
 
             _forest.AddRange(trees);
+
             return totalImportance;
         }
 
@@ -67,35 +68,46 @@ namespace DevOnBike.Overfit.Data
 
         public float Predict(ReadOnlySpan<float> features)
         {
-            if (_forest.Count == 0) return 0f;
+            if (_forest.Count == 0)
+            {
+                return 0f;
+            }
 
             double sum = 0;
-            for (int i = 0; i < _forest.Count; i++)
+
+            for (var i = 0; i < _forest.Count; i++)
             {
                 sum += Traverse(_forest[i], features);
             }
+
             return (float)(sum / _forest.Count);
         }
 
         private float Traverse(FastTreeNode[] tree, ReadOnlySpan<float> features)
         {
-            int currentIdx = 0;
+            var currentIdx = 0;
+
             while (true)
             {
                 ref readonly var node = ref tree[currentIdx];
-                if (node.IsLeaf) return node.Value;
 
-                currentIdx = features[node.FeatureIndex] <= node.Threshold
-                    ? node.LeftChildIndex
-                    : node.RightChildIndex;
+                if (node.IsLeaf)
+                {
+                    return node.Value;
+                }
 
-                if (currentIdx == -1) return node.Value;
+                currentIdx = features[node.FeatureIndex] <= node.Threshold ? node.LeftChildIndex : node.RightChildIndex;
+
+                if (currentIdx == -1)
+                {
+                    return node.Value;
+                }
             }
         }
 
         private int BuildRecursive(FastTensor<float> x, FastTensor<float> y, int depth, List<FastTreeNode> nodes, float[] importance)
         {
-            int nodeIdx = nodes.Count;
+            var nodeIdx = nodes.Count;
             nodes.Add(default);
 
             var rows = x.GetDim(0);
@@ -103,19 +115,24 @@ namespace DevOnBike.Overfit.Data
 
             if (depth >= _maxDepth || rows < 2)
             {
-                nodes[nodeIdx] = new FastTreeNode { IsLeaf = true, Value = CalculateMean(y) };
+                nodes[nodeIdx] = new FastTreeNode
+                {
+                    IsLeaf = true,
+                    Value = CalculateMean(y)
+                };
+                
                 return nodeIdx;
             }
 
-            int featureIdx = Random.Shared.Next(cols);
-            float threshold = GetRandomThreshold(x, featureIdx);
+            var featureIdx = Random.Shared.Next(cols);
+            var threshold = GetRandomThreshold(x, featureIdx);
 
             // Symulacja redukcji wariancji dla Boruty:
             // Każdy podział zwiększa istotność danej cechy.
             importance[featureIdx] += 1.0f / (depth + 1);
 
-            int leftIdx = BuildRecursive(x, y, depth + 1, nodes, importance);
-            int rightIdx = BuildRecursive(x, y, depth + 1, nodes, importance);
+            var leftIdx = BuildRecursive(x, y, depth + 1, nodes, importance);
+            var rightIdx = BuildRecursive(x, y, depth + 1, nodes, importance);
 
             nodes[nodeIdx] = new FastTreeNode
             {
@@ -136,11 +153,18 @@ namespace DevOnBike.Overfit.Data
             var span = x.AsReadOnlySpan();
             float min = span[col], max = span[col];
 
-            for (int r = 1; r < rows; r++)
+            for (var r = 1; r < rows; r++)
             {
-                float v = span[r * cols + col];
-                if (v < min) min = v;
-                if (v > max) max = v;
+                var v = span[r * cols + col];
+                
+                if (v < min)
+                {
+                    min = v;
+                }
+                if (v > max)
+                {
+                    max = v;
+                }
             }
             return min + (max - min) * Random.Shared.NextSingle();
         }
@@ -148,9 +172,19 @@ namespace DevOnBike.Overfit.Data
         private float CalculateMean(FastTensor<float> y)
         {
             var span = y.AsReadOnlySpan();
-            if (span.Length == 0) return 0f;
+            
+            if (span.Length == 0)
+            {
+                return 0f;
+            }
+            
             double sum = 0;
-            for (int i = 0; i < span.Length; i++) sum += span[i];
+            
+            for (var i = 0; i < span.Length; i++)
+            {
+                sum += span[i];
+            }
+            
             return (float)(sum / span.Length);
         }
 

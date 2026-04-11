@@ -45,7 +45,10 @@ namespace DevOnBike.Overfit.Data.Prepare
             var rows = context.Features.GetDim(0);
             var cols = context.Features.GetDim(1);
 
-            if (cols == 0 || rows < 10) return context;
+            if (cols == 0 || rows < 10)
+            {
+                return context;
+            }
 
             // Faza Fit: Wyznaczamy istotne cechy tylko raz (na danych treningowych)
             if (!_fitted)
@@ -69,73 +72,69 @@ namespace DevOnBike.Overfit.Data.Prepare
 
         private int[] Fit(FastTensor<float> features, FastTensor<float> targets)
         {
-            int rows = features.GetDim(0);
-            int cols = features.GetDim(1);
+            var rows = features.GetDim(0);
+            var cols = features.GetDim(1);
 
             // 1. Trenujemy model bazowy (Random Forest)
-            var forest = new FastRandomForest(_numTrees, _maxDepth);
+            using var forest = new FastRandomForest(_numTrees, _maxDepth);
+            
             forest.Train(features, targets);
 
             // 2. Przygotowujemy SHAP (tło = średnie ze zbioru)
-            float[] background = new float[cols];
+            var background = new float[cols];
             CalculateMeans(features, background);
 
-            using var shap = new UniversalKernelShap(
-                modelFunc: (span) => forest.Predict(span),
-                background: background,
-                numSamples: 512
-            );
+            using var shap = new ShapKernel(modelFunc: forest.Predict, background: background, numSamples: 512);
 
             // 3. Analiza Globalna
             var analyzer = new GlobalShapAnalyzer(shap, cols);
             var importanceRanking = analyzer.AnalyzeImportance(features);
 
             // 4. Selekcja indeksów
-            IEnumerable<FeatureImportance> selected;
-            if (_targetFeatureCount > 0)
-            {
-                selected = importanceRanking.Take(_targetFeatureCount);
-            }
-            else
-            {
-                selected = importanceRanking.Where(x => x.ImportanceScore >= _minImportanceThreshold);
-            }
 
+            var selected = _targetFeatureCount > 0 ? importanceRanking.Take(_targetFeatureCount) : importanceRanking.Where(x => x.ImportanceScore >= _minImportanceThreshold);
             var kept = selected.Select(x => x.FeatureIndex).OrderBy(x => x).ToArray();
+            
             return kept.Length == 0 ? null : kept;
         }
 
         private void CalculateMeans(FastTensor<float> tensor, float[] output)
         {
-            int rows = tensor.GetDim(0);
-            int cols = tensor.GetDim(1);
+            var rows = tensor.GetDim(0);
+            var cols = tensor.GetDim(1);
             var span = tensor.AsReadOnlySpan();
 
-            for (int c = 0; c < cols; c++)
+            for (var c = 0; c < cols; c++)
             {
                 float sum = 0;
-                for (int r = 0; r < rows; r++) sum += span[r * cols + c];
+                
+                for (var r = 0; r < rows; r++)
+                {
+                    sum += span[r * cols + c];
+                }
+                
                 output[c] = sum / rows;
             }
         }
 
         private FastTensor<float> ExtractColumns(FastTensor<float> src, int[] indices)
         {
-            int rows = src.GetDim(0);
-            int oldCols = src.GetDim(1);
-            int newCols = indices.Length;
+            var rows = src.GetDim(0);
+            var oldCols = src.GetDim(1);
+            var newCols = indices.Length;
 
             var result = new FastTensor<float>(rows, newCols);
             var srcSpan = src.AsReadOnlySpan();
             var dstSpan = result.AsSpan();
 
-            for (int r = 0; r < rows; r++)
+            for (var r = 0; r < rows; r++)
             {
-                for (int c = 0; c < newCols; c++)
+                for (var c = 0; c < newCols; c++)
                 {
                     dstSpan[r * newCols + c] = srcSpan[r * oldCols + indices[c]];
                 }
             }
+
             return result;
         }
 

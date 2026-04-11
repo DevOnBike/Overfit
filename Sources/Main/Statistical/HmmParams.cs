@@ -33,9 +33,10 @@ namespace DevOnBike.Overfit.Statistical
         /// </summary>
         public FastMatrix<float>[] ToFastMatrices(int featureCount)
         {
-            int stateCount = Covariances.Length;
+            var stateCount = Covariances.Length;
             var matrices = new FastMatrix<float>[stateCount];
-            for (int i = 0; i < stateCount; i++)
+            
+            for (var i = 0; i < stateCount; i++)
             {
                 matrices[i] = new FastMatrix<float>(featureCount, featureCount);
                 matrices[i].CopyFrom(Covariances[i]);

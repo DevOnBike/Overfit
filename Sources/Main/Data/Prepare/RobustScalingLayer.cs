@@ -44,7 +44,7 @@ namespace DevOnBike.Overfit.Data.Prepare
             }
 
             _columnIndices = columnIndices;
-            _excludedColumns = excludedColumns ?? new HashSet<int>();
+            _excludedColumns = excludedColumns ?? [];
             _fallbackIqr = fallbackIqr;
             _centerByMedian = centerByMedian;
         }
