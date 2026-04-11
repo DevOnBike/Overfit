@@ -50,8 +50,8 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public IEnumerable<AutogradNode> Parameters() => [];
 
-        public void Save(BinaryWriter bw) {}
-        public void Load(BinaryReader br) {}
-        public void Dispose() {}
+        public void Save(BinaryWriter bw) { }
+        public void Load(BinaryReader br) { }
+        public void Dispose() { }
     }
 }

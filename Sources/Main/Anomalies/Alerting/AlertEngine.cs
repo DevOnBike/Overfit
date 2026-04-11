@@ -5,9 +5,9 @@
 
 using System.Collections.Concurrent;
 using System.Threading.Channels;
+using DevOnBike.Overfit.Anomalies.Alerting.Contracts;
 using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
-using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 namespace DevOnBike.Overfit.Anomalies.Alerting
 {
     /// <summary>

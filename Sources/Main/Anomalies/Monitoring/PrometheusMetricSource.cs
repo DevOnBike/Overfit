@@ -5,119 +5,91 @@
 
 using System.Globalization;
 using System.Net.Http.Headers;
-using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
+using System.Text.Json;
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 
 namespace DevOnBike.Overfit.Anomalies.Monitoring
 {
     /// <summary>
-    /// Scrapes all 12 must-have metrics for one K8s .NET pod from the Prometheus
-    /// HTTP API and surfaces them as a stream of <see cref="MetricSnapshot"/> values.
+    /// Real-time metric scraper — issues instant PromQL queries every ScrapeInterval
+    /// and returns a flat List&lt;RawMetricSeries&gt; ready for MonitoringPipeline.Process().
     ///
-    /// Uses the Prometheus instant query endpoint (/api/v1/query) — one HTTP
-    /// request per metric per scrape interval. All 12 features are fetched in
-    /// parallel and assembled into a single zero-allocation struct.
+    /// Each ReadAsync call issues 12 × 2DC = 24 parallel instant queries
+    /// and returns one RawMetricSeries per (pod, metric) combination found.
     ///
-    /// PromQL queries issued (one per ReadAsync call):
-    ///   CPU usage:       rate(container_cpu_usage_seconds_total{pod,ns}[1m]) / cpu_limit
-    ///   CPU throttle:    rate(cfs_throttled_periods{pod,ns}[1m]) / rate(cfs_periods{pod,ns}[1m])
-    ///   Memory:          container_memory_working_set_bytes{pod,ns}
-    ///   OOM rate:        rate(container_oom_events_total{pod,ns}[1m])
-    ///   Latency p50:     histogram_quantile(0.50, rate(http_server_request_duration_seconds_bucket{pod}[1m])) * 1000
-    ///   Latency p95:     histogram_quantile(0.95, ...) * 1000
-    ///   Latency p99:     histogram_quantile(0.99, ...) * 1000
-    ///   RPS:             rate(http_server_request_duration_seconds_count{pod}[1m])
-    ///   Error rate:      rate(5xx_count{pod}[1m]) / (rate(total_count{pod}[1m]) or vector(1))
-    ///   GC Gen2 heap:    process_runtime_dotnet_gc_heap_size_bytes{pod,generation="2"}
-    ///   GC pause ratio:  rate(process_runtime_dotnet_gc_pause_total_seconds_total{pod}[1m])
-    ///   ThreadPool:      process_runtime_dotnet_thread_pool_queue_length{pod}
-    ///
-    /// Callers own the lifetime — call Dispose() when the pipeline stops.
-    /// The internal HttpClient is disposed together with this instance.
+    /// Usage in inference loop:
+    /// <code>
+    ///   using var source = new PrometheusMetricSource(config);
+    ///   while (!ct.IsCancellationRequested)
+    ///   {
+    ///       var series        = await source.ReadAsync(ct);
+    ///       var scrapeEndMs   = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    ///       var scaledResult  = pipeline.Process(series, scrapeEndMs - windowMs, scrapeEndMs);
+    ///       var errors        = fleetModel.ReconstructionError(scaledResult.FleetBaseline);
+    ///       alertEngine.Evaluate(errors, scaledResult.PodIndex);
+    ///   }
+    /// </code>
     /// </summary>
-    public sealed class PrometheusMetricSource : IMetricSource
+    public sealed class PrometheusMetricSource : IDisposable
     {
         private readonly PrometheusMetricSourceConfig _config;
         private readonly HttpClient _http;
         private bool _disposed;
 
-        public string PodName => _config.PodName;
+        private static readonly JsonSerializerOptions _jsonOptions = new()
+        {
+            PropertyNameCaseInsensitive = true
+        };
 
-        /// <param name="config">Scrape configuration.</param>
-        /// <param name="httpClient">
-        ///   Optional pre-configured HttpClient (e.g. for test injection or
-        ///   shared connection pools). When null, an internal client is created
-        ///   and disposed together with this source.
-        /// </param>
         public PrometheusMetricSource(
             PrometheusMetricSourceConfig config,
             HttpClient httpClient = null)
         {
             ArgumentNullException.ThrowIfNull(config);
-            ArgumentException.ThrowIfNullOrEmpty(config.PrometheusBaseUrl);
-            ArgumentException.ThrowIfNullOrEmpty(config.PodName);
-
             _config = config;
-            _http = httpClient ?? BuildHttpClient(config);
+            _http   = httpClient ?? BuildHttpClient(config);
         }
 
-        // -------------------------------------------------------------------------
-        // IMetricSource
-        // -------------------------------------------------------------------------
+        // ---------------------------------------------------------------------------
+        // ReadAsync — called once per scrape interval
+        // ---------------------------------------------------------------------------
 
         /// <summary>
-        /// Waits for the configured scrape interval, then issues 12 PromQL queries
-        /// in parallel and assembles the results into a <see cref="MetricSnapshot"/>.
-        ///
-        /// On Prometheus connectivity failure, the method throws — the pipeline
-        /// will propagate this to its RunAsync caller where it can be handled.
+        /// Waits ScrapeInterval, then issues 24 parallel instant queries.
+        /// Returns one RawMetricSeries per (pod, metric) found in Prometheus.
         /// </summary>
-        public async ValueTask<MetricSnapshot> ReadAsync(CancellationToken ct = default)
+        public async Task<List<RawMetricSeries>> ReadAsync(CancellationToken ct = default)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
 
             await Task.Delay(_config.ScrapeInterval, ct).ConfigureAwait(false);
 
-            var pod = _config.PodName;
-            var ns = _config.Namespace;
+            var tasks = new List<Task<List<RawMetricSeries>>>();
 
-            // Issue all 12 queries in parallel — total latency ≈ single query latency
-            var cpuUsageTask = QueryScalarAsync(BuildCpuUsageQuery(pod, ns), ct);
-            var cpuThrottleTask = QueryScalarAsync(BuildCpuThrottleQuery(pod, ns), ct);
-            var memTask = QueryScalarAsync(BuildMemoryQuery(pod, ns), ct);
-            var oomTask = QueryScalarAsync(BuildOomQuery(pod, ns), ct);
-            var latP50Task = QueryScalarAsync(BuildLatencyQuery(pod, 0.50f), ct);
-            var latP95Task = QueryScalarAsync(BuildLatencyQuery(pod, 0.95f), ct);
-            var latP99Task = QueryScalarAsync(BuildLatencyQuery(pod, 0.99f), ct);
-            var rpsTask = QueryScalarAsync(BuildRpsQuery(pod), ct);
-            var errorRateTask = QueryScalarAsync(BuildErrorRateQuery(pod), ct);
-            var gcGen2Task = QueryScalarAsync(BuildGcGen2Query(pod), ct);
-            var gcPauseTask = QueryScalarAsync(BuildGcPauseRatioQuery(pod), ct);
-            var threadPoolTask = QueryScalarAsync(BuildThreadPoolQuery(pod), ct);
-
-            await Task.WhenAll(
-                cpuUsageTask, cpuThrottleTask, memTask, oomTask,
-                latP50Task, latP95Task, latP99Task, rpsTask, errorRateTask,
-                gcGen2Task, gcPauseTask, threadPoolTask
-            ).ConfigureAwait(false);
-
-            return new MetricSnapshot
+            foreach (DataCenter dc in Enum.GetValues<DataCenter>())
             {
-                Timestamp = DateTime.UtcNow,
-                PodName = pod,
-                CpuUsageRatio = Math.Clamp(await cpuUsageTask, 0f, 1f),
-                CpuThrottleRatio = Math.Clamp(await cpuThrottleTask, 0f, 1f),
-                MemoryWorkingSetBytes = MathF.Max(0f, await memTask),
-                OomEventsRate = MathF.Max(0f, await oomTask),
-                LatencyP50Ms = MathF.Max(0f, await latP50Task),
-                LatencyP95Ms = MathF.Max(0f, await latP95Task),
-                LatencyP99Ms = MathF.Max(0f, await latP99Task),
-                RequestsPerSecond = MathF.Max(0f, await rpsTask),
-                ErrorRate = Math.Clamp(await errorRateTask, 0f, 1f),
-                GcGen2HeapBytes = MathF.Max(0f, await gcGen2Task),
-                GcPauseRatio = Math.Clamp(await gcPauseTask, 0f, 1f),
-                ThreadPoolQueueLength = MathF.Max(0f, await threadPoolTask)
-            };
+                var dcLabel = dc == DataCenter.West ? _config.DcWestLabel : _config.DcEastLabel;
+
+                for (var m = 0; m < (int)MetricIndex.Count; m++)
+                {
+                    var metric   = (MetricIndex)m;
+                    var metricId = (byte)m;
+                    var query    = BuildInstantQuery(metric, _config.PodRegex, dcLabel);
+                    var capturedDc = dc;
+
+                    tasks.Add(FetchInstantAsync(query, metricId, capturedDc, ct));
+                }
+            }
+
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+
+            var result = new List<RawMetricSeries>();
+            foreach (var task in tasks)
+            {
+                result.AddRange(await task);
+            }
+
+            return result;
         }
 
         public void Dispose()
@@ -127,146 +99,134 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             _http.Dispose();
         }
 
-        // -------------------------------------------------------------------------
-        // PromQL query builders
-        // -------------------------------------------------------------------------
+        // ---------------------------------------------------------------------------
+        // Instant query → List<RawMetricSeries>
+        // ---------------------------------------------------------------------------
 
-        private static string BuildCpuUsageQuery(string pod, string ns)
-            // CPU usage normalised to the container's CPU limit → [0, 1]
-            => $"rate(container_cpu_usage_seconds_total{{pod=\"{pod}\",namespace=\"{ns}\"}}[1m])" +
-               $" / on(pod) kube_pod_container_resource_limits{{pod=\"{pod}\",resource=\"cpu\"}}";
-
-        private static string BuildCpuThrottleQuery(string pod, string ns)
-            // Fraction of CFS periods in which the container was throttled → [0, 1]
-            // Divide throttled by total periods — not by time.
-            => $"rate(container_cpu_cfs_throttled_periods_total{{pod=\"{pod}\",namespace=\"{ns}\"}}[1m])" +
-               $" / rate(container_cpu_cfs_periods_total{{pod=\"{pod}\",namespace=\"{ns}\"}}[1m])";
-
-        private static string BuildMemoryQuery(string pod, string ns)
-            // Working set excludes reclaimable page cache — what K8s uses for eviction
-            => $"container_memory_working_set_bytes{{pod=\"{pod}\",namespace=\"{ns}\"}}";
-
-        private static string BuildOomQuery(string pod, string ns)
-            // OOM kill rate — normally always 0
-            => $"rate(container_oom_events_total{{pod=\"{pod}\",namespace=\"{ns}\"}}[1m])";
-
-        private static string BuildLatencyQuery(string pod, float quantile)
-            // Single builder for all latency percentiles — quantile passed as parameter.
-            // Uses ASP.NET Core built-in histogram metric name (net9+).
-            => $"histogram_quantile({quantile.ToString("F2", CultureInfo.InvariantCulture)}," +
-               $" rate(http_server_request_duration_seconds_bucket{{pod=\"{pod}\"}}[1m])) * 1000";
-
-        private static string BuildRpsQuery(string pod)
-            => $"rate(http_server_request_duration_seconds_count{{pod=\"{pod}\"}}[1m])";
-
-        private static string BuildErrorRateQuery(string pod)
-            // or vector(1) guards against division by zero when the pod has no traffic.
-            // Result: 0/1 = 0 (safe) rather than 0/0 = NaN (propagates as 0 via ParseFirstScalar,
-            // but vector(1) makes the intent explicit).
-            => $"rate(http_server_request_duration_seconds_count{{pod=\"{pod}\",http_response_status_code=~\"5..\"}}[1m])" +
-               $" / (rate(http_server_request_duration_seconds_count{{pod=\"{pod}\"}}[1m]) or vector(1))";
-
-        private static string BuildGcGen2Query(string pod)
-            // Gen2 heap is the best early signal for memory leaks
-            => $"process_runtime_dotnet_gc_heap_size_bytes{{pod=\"{pod}\",generation=\"2\"}}";
-
-        private static string BuildGcPauseRatioQuery(string pod)
-            // rate() yields seconds-of-GC-per-second — a dimensionless ratio in [0, 1]
-            // that stays comparable across different load levels
-            => $"rate(process_runtime_dotnet_gc_pause_total_seconds_total{{pod=\"{pod}\"}}[1m])";
-
-        private static string BuildThreadPoolQuery(string pod)
-            => $"process_runtime_dotnet_thread_pool_queue_length{{pod=\"{pod}\"}}";
-
-        // -------------------------------------------------------------------------
-        // HTTP + JSON parsing
-        // -------------------------------------------------------------------------
-
-        /// <summary>
-        /// Calls /api/v1/query, returns the first scalar result value.
-        /// Returns 0 when the query returns no data (metric not yet available).
-        /// Throws <see cref="HttpRequestException"/> on network failures.
-        /// </summary>
-        private async Task<float> QueryScalarAsync(string promql, CancellationToken ct)
+        private async Task<List<RawMetricSeries>> FetchInstantAsync(
+            string promql,
+            byte metricTypeId,
+            DataCenter dc,
+            CancellationToken ct)
         {
-            var url = $"{_config.PrometheusBaseUrl}/api/v1/query" +
-                      $"?query={Uri.EscapeDataString(promql)}";
+            var url = $"{_config.PrometheusBaseUrl}/api/v1/query"
+                    + $"?query={Uri.EscapeDataString(promql)}";
 
             using var response = await _http.GetAsync(url, ct).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
 
             var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            return ParseFirstScalar(body);
+            return ParseInstantResponse(body, metricTypeId, dc);
         }
 
-        /// <summary>
-        /// Minimal Prometheus API response parser — no external JSON library required.
-        ///
-        /// Response shape (success):
-        /// {
-        ///   "status": "success",
-        ///   "data": {
-        ///     "resultType": "vector",
-        ///     "result": [ { "metric": {...}, "value": [timestamp, "1.234"] } ]
-        ///   }
-        /// }
-        ///
-        /// We only need the string value at result[0].value[1].
-        /// Parsing is done with simple string search rather than System.Text.Json
-        /// to keep zero allocations for common fast-path single-metric responses.
-        /// Falls back to 0 on any parse failure — the pipeline continues with
-        /// a conservative "no data" value rather than crashing.
-        /// </summary>
-        public static float ParseFirstScalar(string json)
+        private static List<RawMetricSeries> ParseInstantResponse(
+            string json,
+            byte metricTypeId,
+            DataCenter dc)
         {
-            // Find "value": followed by optional whitespace and [timestamp,
-            const string valueKey = "\"value\":";
-            var vi = json.IndexOf(valueKey, StringComparison.Ordinal);
-            if (vi < 0) { return 0f; }
+            var result = new List<RawMetricSeries>();
 
-            // Skip to opening bracket (handles "value":[... and "value": [...])
-            var bracket = json.IndexOf('[', vi + valueKey.Length);
-            if (bracket < 0) { return 0f; }
+            using var doc = JsonDocument.Parse(json);
+            var root      = doc.RootElement;
 
-            // Skip past the timestamp and the comma
-            var comma = json.IndexOf(',', bracket);
-            if (comma < 0) { return 0f; }
+            if (!root.TryGetProperty("data", out var data)) return result;
+            if (!data.TryGetProperty("result", out var results)) return result;
 
-            // Find the quoted value string
-            var q1 = json.IndexOf('"', comma);
-            if (q1 < 0) { return 0f; }
+            var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-            var q2 = json.IndexOf('"', q1 + 1);
-            if (q2 < 0) { return 0f; }
-
-            var valueStr = json.AsSpan(q1 + 1, q2 - q1 - 1);
-
-            // Handle Prometheus special values
-            if (valueStr.Equals("NaN", StringComparison.Ordinal) ||
-                valueStr.Equals("+Inf", StringComparison.Ordinal) ||
-                valueStr.Equals("-Inf", StringComparison.Ordinal))
+            foreach (var series in results.EnumerateArray())
             {
-                return 0f;
+                /*
+                if (!series.TryGetProperty("metric", out var metric)) continue;
+                if (!metric.TryGetProperty("pod", out var podProp)) continue;
+
+                var podName = podProp.GetString() ?? string.Empty;
+
+                if (!series.TryGetProperty("value", out var value)) continue;
+
+                var arr = value.EnumerateArray().ToArray();
+                if (arr.Length < 2) continue;
+
+                var tsMs   = (long)(arr[0].GetDouble() * 1000.0);
+                var valStr = arr[1].GetString();
+
+                if (!float.TryParse(valStr,
+                        NumberStyles.Float,
+                        CultureInfo.InvariantCulture,
+                        out var floatValue) || !float.IsFinite(floatValue))
+                {
+                    floatValue = float.NaN;
+                }
+
+                var rawSeries = new RawMetricSeries
+                {
+                    Pod          = new PodKey { DC = dc, PodName = podName },
+                    MetricTypeId = metricTypeId
+                };
+                rawSeries.Samples.Add(new RawSample { Timestamp = tsMs, Value = floatValue });
+                result.Add(rawSeries);
+                */
+
             }
 
-            return float.TryParse(
-                valueStr,
-                NumberStyles.Float,
-                CultureInfo.InvariantCulture,
-                out var result) ? result : 0f;
+            return result;
+        }
+
+        // ---------------------------------------------------------------------------
+        // PromQL instant query builders
+        // ---------------------------------------------------------------------------
+
+        private static string BuildInstantQuery(MetricIndex metric, string podRegex, string dcLabel)
+        {
+            return metric switch
+            {
+                MetricIndex.CpuUsageRatio =>
+                    $"rate(container_cpu_usage_seconds_total{{pod=~\"{podRegex}\",dc=\"{dcLabel}\"}}[1m])",
+
+                MetricIndex.CpuThrottleRatio =>
+                    $"rate(container_cpu_cfs_throttled_periods_total{{pod=~\"{podRegex}\",dc=\"{dcLabel}\"}}[1m])" +
+                    $" / rate(container_cpu_cfs_periods_total{{pod=~\"{podRegex}\",dc=\"{dcLabel}\"}}[1m])",
+
+                MetricIndex.MemoryWorkingSetBytes =>
+                    $"container_memory_working_set_bytes{{pod=~\"{podRegex}\",dc=\"{dcLabel}\"}}",
+
+                MetricIndex.OomEventsRate =>
+                    $"rate(container_oom_events_total{{pod=~\"{podRegex}\",dc=\"{dcLabel}\"}}[1m])",
+
+                MetricIndex.LatencyP50Ms =>
+                    $"histogram_quantile(0.50,rate(http_server_request_duration_seconds_bucket{{pod=~\"{podRegex}\"}}[1m]))*1000",
+
+                MetricIndex.LatencyP95Ms =>
+                    $"histogram_quantile(0.95,rate(http_server_request_duration_seconds_bucket{{pod=~\"{podRegex}\"}}[1m]))*1000",
+
+                MetricIndex.LatencyP99Ms =>
+                    $"histogram_quantile(0.99,rate(http_server_request_duration_seconds_bucket{{pod=~\"{podRegex}\"}}[1m]))*1000",
+
+                MetricIndex.RequestsPerSecond =>
+                    $"rate(http_server_request_duration_seconds_count{{pod=~\"{podRegex}\"}}[1m])",
+
+                MetricIndex.ErrorRate =>
+                    $"rate(http_server_request_duration_seconds_count{{pod=~\"{podRegex}\",http_response_status_code=~\"5..\"}}[1m])" +
+                    $" / (rate(http_server_request_duration_seconds_count{{pod=~\"{podRegex}\"}}[1m]) or vector(1))",
+
+                MetricIndex.GcGen2HeapBytes =>
+                    $"process_runtime_dotnet_gc_heap_size_bytes{{pod=~\"{podRegex}\",generation=\"2\"}}",
+
+                MetricIndex.GcPauseRatio =>
+                    $"rate(process_runtime_dotnet_gc_pause_total_seconds_total{{pod=~\"{podRegex}\"}}[1m])",
+
+                MetricIndex.ThreadPoolQueueLength =>
+                    $"process_runtime_dotnet_thread_pool_queue_length{{pod=~\"{podRegex}\"}}",
+
+                _ => throw new ArgumentOutOfRangeException(nameof(metric), metric, null)
+            };
         }
 
         private static HttpClient BuildHttpClient(PrometheusMetricSourceConfig config)
         {
-            var client = new HttpClient
-            {
-                Timeout = config.HttpTimeout,
-                BaseAddress = new Uri(config.PrometheusBaseUrl)
-            };
-
+            var client = new HttpClient { Timeout = config.HttpTimeout };
             client.DefaultRequestHeaders.Accept.Add(
                 new MediaTypeWithQualityHeaderValue("application/json"));
-
             return client;
         }
     }

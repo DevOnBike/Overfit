@@ -1,38 +1,28 @@
+// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
+
 using System.Globalization;
 using System.Net.Http.Headers;
+using System.Text.Json;
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 
 namespace DevOnBike.Overfit.Anomalies.Monitoring
 {
     /// <summary>
-    /// Fetches historical metric data from Prometheus using the range query API
-    /// (/api/v1/query_range) and reconstructs a sequence of <see cref="MetricSnapshot"/>
-    /// values suitable for <see cref="OfflineTrainingJob"/>.
+    /// Fetches historical metric data from Prometheus for all pods matching a regex
+    /// and produces batches of RawMetricSeries ready for MonitoringPipeline.
     ///
-    /// Each of the 12 must-have metrics is fetched with a separate range query,
-    /// then aligned by timestamp to build complete snapshots.
+    /// Each call to FetchAsync returns one entry per scrape timestamp:
+    ///   (ScrapeTimestampMs, List&lt;RawMetricSeries&gt;)
     ///
-    /// Usage:
+    /// These are passed directly to OfflineTrainingJob:
     /// <code>
-    ///   var config = new PrometheusHistoricalSourceConfig
-    ///   {
-    ///       PrometheusBaseUrl = "http://prometheus:9090",
-    ///       PodName           = "payment-service-7f9b4c",
-    ///       RangeStart        = DateTime.UtcNow.AddDays(-7),
-    ///       RangeEnd          = DateTime.UtcNow,
-    ///       Step              = TimeSpan.FromSeconds(10)
-    ///   };
-    ///
-    ///   using var source  = new PrometheusHistoricalSource(config);
-    ///   var snapshots     = await source.FetchAsync(ct);
-    ///   var vectors       = ExtractFeatureVectors(snapshots);
-    ///   var report        = new TrainingDataAnalyzer().Analyze(vectors);
-    ///   var result        = new OfflineTrainingJob().Run(autoencoder, scorer, vectors);
+    ///   using var source = new PrometheusHistoricalSource(config);
+    ///   var scrapes = await source.FetchAsync(ct);
+    ///   var result  = await job.RunAsync(scrapes, trainingConfig, log, ct);
     /// </code>
-    ///
-    /// Gaps in data (pod restarts, Prometheus scrape failures) produce samples with
-    /// 0-values for the affected metric — the same conservative fallback used in
-    /// <see cref="PrometheusMetricSource.ParseFirstScalar"/>.
     /// </summary>
     public sealed class PrometheusHistoricalSource : IDisposable
     {
@@ -40,103 +30,69 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         private readonly HttpClient _http;
         private bool _disposed;
 
+        private static readonly JsonSerializerOptions _jsonOptions = new()
+        {
+            PropertyNameCaseInsensitive = true
+        };
+
         public PrometheusHistoricalSource(
             PrometheusHistoricalSourceConfig config,
             HttpClient httpClient = null)
         {
             ArgumentNullException.ThrowIfNull(config);
-            ArgumentException.ThrowIfNullOrEmpty(config.PrometheusBaseUrl);
-            ArgumentException.ThrowIfNullOrEmpty(config.PodName);
-
-            if (config.RangeEnd <= config.RangeStart)
-            {
-                throw new ArgumentException(
-                "RangeEnd must be after RangeStart.", nameof(config));
-            }
-
             _config = config;
-            _http = httpClient ?? BuildHttpClient(config);
+            _http   = httpClient ?? BuildHttpClient(config);
         }
 
-        // -------------------------------------------------------------------------
-        // FetchAsync
-        // -------------------------------------------------------------------------
+        // ---------------------------------------------------------------------------
+        // FetchAsync — main entry point
+        // ---------------------------------------------------------------------------
 
         /// <summary>
-        /// Fetches all 12 metrics over the configured time range and assembles
-        /// them into a chronologically ordered list of <see cref="MetricSnapshot"/>.
+        /// Fetches all 12 metrics for all pods matching PodRegex over the configured
+        /// time range and assembles them into scrape batches.
         ///
-        /// Issues 12 parallel range queries — total latency ≈ slowest single query.
-        /// For a 7-day range at 10s step, each query returns ~60,480 data points.
+        /// Issues 12 parallel range queries (one per metric × both DCs).
+        /// Returns one entry per scrape step covering the full Golden Window.
         /// </summary>
-        public async Task<IReadOnlyList<MetricSnapshot>> FetchAsync(CancellationToken ct = default)
+        public async Task<IReadOnlyList<(long ScrapeTimestampMs, List<RawMetricSeries> Series)>> FetchAsync(
+            CancellationToken ct = default)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
 
-            var pod = _config.PodName;
-            var ns = _config.Namespace;
+            var stepSeconds = (int)_config.Step.TotalSeconds;
+            var startSec    = new DateTimeOffset(_config.RangeStart.ToUniversalTime()).ToUnixTimeSeconds();
+            var endSec      = new DateTimeOffset(_config.RangeEnd.ToUniversalTime()).ToUnixTimeSeconds();
 
-            // Issue all 12 range queries in parallel
-            var cpuUsageTask = FetchSeriesAsync(BuildCpuUsageQuery(pod, ns), ct);
-            var cpuThrottleTask = FetchSeriesAsync(BuildCpuThrottleQuery(pod, ns), ct);
-            var memTask = FetchSeriesAsync(BuildMemoryQuery(pod, ns), ct);
-            var oomTask = FetchSeriesAsync(BuildOomQuery(pod, ns), ct);
-            var latP50Task = FetchSeriesAsync(BuildLatencyQuery(pod, 0.50f), ct);
-            var latP95Task = FetchSeriesAsync(BuildLatencyQuery(pod, 0.95f), ct);
-            var latP99Task = FetchSeriesAsync(BuildLatencyQuery(pod, 0.99f), ct);
-            var rpsTask = FetchSeriesAsync(BuildRpsQuery(pod), ct);
-            var errorRateTask = FetchSeriesAsync(BuildErrorRateQuery(pod), ct);
-            var gcGen2Task = FetchSeriesAsync(BuildGcGen2Query(pod), ct);
-            var gcPauseTask = FetchSeriesAsync(BuildGcPauseRatioQuery(pod), ct);
-            var threadPoolTask = FetchSeriesAsync(BuildThreadPoolQuery(pod), ct);
+            // Fetch all metrics in parallel — 12 queries × 2 DCs = 24 parallel requests
+            var tasks = new List<Task<List<RawMetricSeries>>>();
 
-            await Task.WhenAll(
-            cpuUsageTask, cpuThrottleTask, memTask, oomTask,
-            latP50Task, latP95Task, latP99Task, rpsTask, errorRateTask,
-            gcGen2Task, gcPauseTask, threadPoolTask
-            ).ConfigureAwait(false);
-
-            // Use the CPU series timestamps as the master timeline — it is the
-            // most reliably scraped metric and defines the sample grid.
-            var masterSeries = await cpuUsageTask;
-            if (masterSeries.Count == 0) { return []; }
-
-            var cpuThrottle = await cpuThrottleTask;
-            var mem = await memTask;
-            var oom = await oomTask;
-            var latP50 = await latP50Task;
-            var latP95 = await latP95Task;
-            var latP99 = await latP99Task;
-            var rps = await rpsTask;
-            var errorRate = await errorRateTask;
-            var gcGen2 = await gcGen2Task;
-            var gcPause = await gcPauseTask;
-            var threadPool = await threadPoolTask;
-
-            var snapshots = new List<MetricSnapshot>(masterSeries.Count);
-
-            foreach (var (ts, cpuVal) in masterSeries)
+            foreach (DataCenter dc in Enum.GetValues<DataCenter>())
             {
-                snapshots.Add(new MetricSnapshot
+                var dcLabel = dc == DataCenter.West ? _config.DcWestLabel : _config.DcEastLabel;
+
+                for (var m = 0; m < (int)MetricIndex.Count; m++)
                 {
-                    Timestamp = ts,
-                    PodName = pod,
-                    CpuUsageRatio = Math.Clamp(cpuVal, 0f, 1f),
-                    CpuThrottleRatio = Math.Clamp(Lookup(cpuThrottle, ts), 0f, 1f),
-                    MemoryWorkingSetBytes = MathF.Max(0f, Lookup(mem, ts)),
-                    OomEventsRate = MathF.Max(0f, Lookup(oom, ts)),
-                    LatencyP50Ms = MathF.Max(0f, Lookup(latP50, ts)),
-                    LatencyP95Ms = MathF.Max(0f, Lookup(latP95, ts)),
-                    LatencyP99Ms = MathF.Max(0f, Lookup(latP99, ts)),
-                    RequestsPerSecond = MathF.Max(0f, Lookup(rps, ts)),
-                    ErrorRate = Math.Clamp(Lookup(errorRate, ts), 0f, 1f),
-                    GcGen2HeapBytes = MathF.Max(0f, Lookup(gcGen2, ts)),
-                    GcPauseRatio = Math.Clamp(Lookup(gcPause, ts), 0f, 1f),
-                    ThreadPoolQueueLength = MathF.Max(0f, Lookup(threadPool, ts))
-                });
+                    var metric  = (MetricIndex)m;
+                    var metricId = (byte)m;
+                    var query   = BuildQuery(metric, _config.PodRegex, dcLabel);
+                    var capturedDc = dc;
+
+                    tasks.Add(FetchMetricSeriesAsync(
+                        query, metricId, capturedDc, startSec, endSec, stepSeconds, ct));
+                }
             }
 
-            return snapshots;
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+
+            // Merge all series into a flat list then group by scrape timestamp
+            var allSeries = new List<RawMetricSeries>();
+            foreach (var task in tasks)
+            {
+                allSeries.AddRange(await task);
+            }
+
+            return GroupByScrapeTimestamp(allSeries, startSec, endSec, stepSeconds);
         }
 
         public void Dispose()
@@ -146,159 +102,177 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             _http.Dispose();
         }
 
-        // -------------------------------------------------------------------------
-        // Range query + parsing
-        // -------------------------------------------------------------------------
+        // ---------------------------------------------------------------------------
+        // Range query → List<RawMetricSeries>
+        // ---------------------------------------------------------------------------
 
-        private async Task<Dictionary<DateTime, float>> FetchSeriesAsync(
-            string promql, CancellationToken ct)
+        private async Task<List<RawMetricSeries>> FetchMetricSeriesAsync(
+            string promql,
+            byte metricTypeId,
+            DataCenter dc,
+            long startSec,
+            long endSec,
+            int stepSeconds,
+            CancellationToken ct)
         {
-            var start = _config.RangeStart.ToUniversalTime().ToString("O");
-            var end = _config.RangeEnd.ToUniversalTime().ToString("O");
-            var step = ((int)_config.Step.TotalSeconds).ToString();
-
-            var url = $"{_config.PrometheusBaseUrl}/api/v1/query_range" +
-                      $"?query={Uri.EscapeDataString(promql)}" +
-                      $"&start={Uri.EscapeDataString(start)}" +
-                      $"&end={Uri.EscapeDataString(end)}" +
-                      $"&step={step}s";
+            var url = $"{_config.PrometheusBaseUrl}/api/v1/query_range"
+                    + $"?query={Uri.EscapeDataString(promql)}"
+                    + $"&start={startSec}&end={endSec}&step={stepSeconds}s";
 
             using var response = await _http.GetAsync(url, ct).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
 
             var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            return ParseRangeSeries(body);
+            return ParseRangeResponse(body, metricTypeId, dc);
         }
 
-        /// <summary>
-        /// Parses the Prometheus range query response into a timestamp → value dictionary.
-        ///
-        /// Response shape:
-        /// {
-        ///   "data": {
-        ///     "result": [ { "values": [[unix_ts, "value"], [unix_ts, "value"], ...] } ]
-        ///   }
-        /// }
-        /// </summary>
-        internal static Dictionary<DateTime, float> ParseRangeSeries(string json)
+        private static List<RawMetricSeries> ParseRangeResponse(
+            string json,
+            byte metricTypeId,
+            DataCenter dc)
         {
-            var result = new Dictionary<DateTime, float>();
+            var result = new List<RawMetricSeries>();
 
-            // Find "values":[ — the array of [timestamp, "value"] pairs
-            const string valuesKey = "\"values\":[";
-            var vi = json.IndexOf(valuesKey, StringComparison.Ordinal);
-            if (vi < 0) { return result; }
+            using var doc  = JsonDocument.Parse(json);
+            var root       = doc.RootElement;
 
-            var pos = vi + valuesKey.Length;
+            if (!root.TryGetProperty("data", out var data)) return result;
+            if (!data.TryGetProperty("result", out var results)) return result;
 
-            // Iterate over [ts,"val"] pairs until the closing ]
-            while (pos < json.Length)
+            foreach (var series in results.EnumerateArray())
             {
-                // Skip to opening [
-                pos = json.IndexOf('[', pos);
-                if (pos < 0 || json[pos - 1] == ']') { break; }
+                if (!series.TryGetProperty("metric", out var metric)) continue;
 
-                // Closing ] of outer values array — stop
-                var peek = pos - 1;
-                while (peek >= 0 && json[peek] == ' ') { peek--; }
-                if (peek >= 0 && json[peek] == ']') { break; }
+                // Pod name from label
+                if (!metric.TryGetProperty("pod", out var podProp)) continue;
+                var podName = podProp.GetString() ?? string.Empty;
 
-                pos++; // skip [
+                if (!series.TryGetProperty("values", out var values)) continue;
 
-                // Read unix timestamp (may be float like 1712345678.123)
-                var comma = json.IndexOf(',', pos);
-                if (comma < 0) { break; }
+                var samples = new List<RawSample>(values.GetArrayLength());
 
-                var tsStr = json.AsSpan(pos, comma - pos).Trim();
-                var closeBracket = json.IndexOf(']', comma);
-                if (closeBracket < 0) { break; }
-
-                // Read quoted value string
-                var q1 = json.IndexOf('"', comma);
-                if (q1 < 0 || q1 > closeBracket)
+                foreach (var point in values.EnumerateArray())
                 {
-                    pos = closeBracket + 1;
-                    continue;
+                    /*
+                    var arr = point.EnumerateArray().ToArray();
+
+                    if (arr.Length < 2) continue;
+
+                    var tsMs  = (long)(arr[0].GetDouble() * 1000.0);
+                    var valStr = arr[1].GetString();
+
+                    if (!float.TryParse(valStr, 
+                            NumberStyles.Float,
+                            CultureInfo.InvariantCulture,
+                            out var value) || !float.IsFinite(value))
+                    {
+                        value = float.NaN;
+                    }
+
+                    samples.Add(new RawSample { Timestamp = tsMs, Value = value });
+                    */
                 }
 
-                var q2 = json.IndexOf('"', q1 + 1);
-                if (q2 < 0) { break; }
+                if (samples.Count == 0) continue;
 
-                var valueStr = json.AsSpan(q1 + 1, q2 - q1 - 1);
-
-                if (double.TryParse(tsStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var unixTs) &&
-                    float.TryParse(valueStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) &&
-                    float.IsFinite(value))
+                var rawSeries = new RawMetricSeries
                 {
-                    var dt = DateTimeOffset.FromUnixTimeMilliseconds((long)(unixTs * 1000))
-                        .UtcDateTime;
-                    result.TryAdd(dt, value);
-                }
-
-                pos = closeBracket + 1;
+                    Pod          = new PodKey { DC = dc, PodName = podName },
+                    MetricTypeId = metricTypeId
+                };
+                rawSeries.Samples.AddRange(samples);
+                result.Add(rawSeries);
             }
 
             return result;
         }
 
-        // -------------------------------------------------------------------------
-        // PromQL query builders — same as PrometheusMetricSource
-        // -------------------------------------------------------------------------
+        // ---------------------------------------------------------------------------
+        // Group flat series into per-scrape batches
+        // ---------------------------------------------------------------------------
 
-        private static string BuildCpuUsageQuery(string pod, string ns)
-            => $"rate(container_cpu_usage_seconds_total{{pod=\"{pod}\",namespace=\"{ns}\"}}[1m])" +
-               $" / on(pod) kube_pod_container_resource_limits{{pod=\"{pod}\",resource=\"cpu\"}}";
+        private static IReadOnlyList<(long ScrapeTimestampMs, List<RawMetricSeries> Series)>
+            GroupByScrapeTimestamp(
+                List<RawMetricSeries> allSeries,
+                long startSec,
+                long endSec,
+                int stepSeconds)
+        {
+            // Build ordered list of scrape timestamps
+            var timestamps = new List<long>();
+            for (var t = startSec; t <= endSec; t += stepSeconds)
+            {
+                timestamps.Add(t * 1000L);
+            }
 
-        private static string BuildCpuThrottleQuery(string pod, string ns)
-            => $"rate(container_cpu_cfs_throttled_periods_total{{pod=\"{pod}\",namespace=\"{ns}\"}}[1m])" +
-               $" / rate(container_cpu_cfs_periods_total{{pod=\"{pod}\",namespace=\"{ns}\"}}[1m])";
+            // Each scrape batch contains ALL series — TimeSeriesAligner will
+            // extract the relevant window around each scrapeTimestamp
+            var batches = new List<(long, List<RawMetricSeries>)>(timestamps.Count);
 
-        private static string BuildMemoryQuery(string pod, string ns)
-            => $"container_memory_working_set_bytes{{pod=\"{pod}\",namespace=\"{ns}\"}}";
+            foreach (var tsMs in timestamps)
+            {
+                // For each scrape we pass all series — aligner handles windowing
+                batches.Add((tsMs, allSeries));
+            }
 
-        private static string BuildOomQuery(string pod, string ns)
-            => $"rate(container_oom_events_total{{pod=\"{pod}\",namespace=\"{ns}\"}}[1m])";
+            return batches;
+        }
 
-        private static string BuildLatencyQuery(string pod, float quantile)
-            => $"histogram_quantile({quantile.ToString("F2", CultureInfo.InvariantCulture)}," +
-               $" rate(http_server_request_duration_seconds_bucket{{pod=\"{pod}\"}}[1m])) * 1000";
+        // ---------------------------------------------------------------------------
+        // PromQL query builders
+        // ---------------------------------------------------------------------------
 
-        private static string BuildRpsQuery(string pod)
-            => $"rate(http_server_request_duration_seconds_count{{pod=\"{pod}\"}}[1m])";
+        private static string BuildQuery(MetricIndex metric, string podRegex, string dcLabel)
+        {
+            return metric switch
+            {
+                MetricIndex.CpuUsageRatio =>
+                    $"rate(container_cpu_usage_seconds_total{{pod=~\"{podRegex}\",dc=\"{dcLabel}\"}}[1m])",
 
-        private static string BuildErrorRateQuery(string pod)
-            => $"rate(http_server_request_duration_seconds_count{{pod=\"{pod}\",http_response_status_code=~\"5..\"}}[1m])" +
-               $" / (rate(http_server_request_duration_seconds_count{{pod=\"{pod}\"}}[1m]) or vector(1))";
+                MetricIndex.CpuThrottleRatio =>
+                    $"rate(container_cpu_cfs_throttled_periods_total{{pod=~\"{podRegex}\",dc=\"{dcLabel}\"}}[1m])" +
+                    $" / rate(container_cpu_cfs_periods_total{{pod=~\"{podRegex}\",dc=\"{dcLabel}\"}}[1m])",
 
-        private static string BuildGcGen2Query(string pod)
-            => $"process_runtime_dotnet_gc_heap_size_bytes{{pod=\"{pod}\",generation=\"2\"}}";
+                MetricIndex.MemoryWorkingSetBytes =>
+                    $"container_memory_working_set_bytes{{pod=~\"{podRegex}\",dc=\"{dcLabel}\"}}",
 
-        private static string BuildGcPauseRatioQuery(string pod)
-            => $"rate(process_runtime_dotnet_gc_pause_total_seconds_total{{pod=\"{pod}\"}}[1m])";
+                MetricIndex.OomEventsRate =>
+                    $"rate(container_oom_events_total{{pod=~\"{podRegex}\",dc=\"{dcLabel}\"}}[1m])",
 
-        private static string BuildThreadPoolQuery(string pod)
-            => $"process_runtime_dotnet_thread_pool_queue_length{{pod=\"{pod}\"}}";
+                MetricIndex.LatencyP50Ms =>
+                    $"histogram_quantile(0.50,rate(http_server_request_duration_seconds_bucket{{pod=~\"{podRegex}\"}}[1m]))*1000",
 
-        // -------------------------------------------------------------------------
-        // Helpers
-        // -------------------------------------------------------------------------
+                MetricIndex.LatencyP95Ms =>
+                    $"histogram_quantile(0.95,rate(http_server_request_duration_seconds_bucket{{pod=~\"{podRegex}\"}}[1m]))*1000",
 
-        /// <summary>
-        /// Looks up the value for a given timestamp, returning 0 when the
-        /// timestamp is absent (gap in data / scrape failure).
-        /// </summary>
-        private static float Lookup(Dictionary<DateTime, float> series, DateTime ts)
-            => series.TryGetValue(ts, out var v) ? v : 0f;
+                MetricIndex.LatencyP99Ms =>
+                    $"histogram_quantile(0.99,rate(http_server_request_duration_seconds_bucket{{pod=~\"{podRegex}\"}}[1m]))*1000",
+
+                MetricIndex.RequestsPerSecond =>
+                    $"rate(http_server_request_duration_seconds_count{{pod=~\"{podRegex}\"}}[1m])",
+
+                MetricIndex.ErrorRate =>
+                    $"rate(http_server_request_duration_seconds_count{{pod=~\"{podRegex}\",http_response_status_code=~\"5..\"}}[1m])" +
+                    $" / (rate(http_server_request_duration_seconds_count{{pod=~\"{podRegex}\"}}[1m]) or vector(1))",
+
+                MetricIndex.GcGen2HeapBytes =>
+                    $"process_runtime_dotnet_gc_heap_size_bytes{{pod=~\"{podRegex}\",generation=\"2\"}}",
+
+                MetricIndex.GcPauseRatio =>
+                    $"rate(process_runtime_dotnet_gc_pause_total_seconds_total{{pod=~\"{podRegex}\"}}[1m])",
+
+                MetricIndex.ThreadPoolQueueLength =>
+                    $"process_runtime_dotnet_thread_pool_queue_length{{pod=~\"{podRegex}\"}}",
+
+                _ => throw new ArgumentOutOfRangeException(nameof(metric), metric, null)
+            };
+        }
 
         private static HttpClient BuildHttpClient(PrometheusHistoricalSourceConfig config)
         {
-            var client = new HttpClient
-            {
-                Timeout = config.HttpTimeout,
-                BaseAddress = new Uri(config.PrometheusBaseUrl)
-            };
+            var client = new HttpClient { Timeout = config.HttpTimeout };
             client.DefaultRequestHeaders.Accept.Add(
-            new MediaTypeWithQualityHeaderValue("application/json"));
+                new MediaTypeWithQualityHeaderValue("application/json"));
             return client;
         }
     }

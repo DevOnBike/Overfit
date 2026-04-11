@@ -10,41 +10,7 @@ using DevOnBike.Overfit.Anomalies.Monitoring;
 
 namespace DevOnBike.Overfit.Data
 {
-    /// <summary>
-    /// Boruta-style feature importance analysis for a trained <see cref="AnomalyAutoencoder"/>.
-    ///
-    /// Classic Boruta uses Random Forest feature importance as its measure of variable relevance.
-    /// Here we substitute reconstruction MSE increase under permutation — a natural importance
-    /// measure for autoencoders:
-    ///
-    ///   importance(f) = mean over samples of [ MSE(permuted_f) - MSE(original) ]
-    ///
-    /// A feature is "important" if randomly shuffling its values across the batch
-    /// makes the autoencoder reconstruct significantly worse. A feature is "irrelevant"
-    /// if shuffling it changes nothing — the model does not use it.
-    ///
-    /// Shadow features:
-    ///   For each real feature f, we also compute importance for shadow_f — a copy of the
-    ///   column that is permuted independently. The max shadow importance across all
-    ///   shadow features is the Boruta baseline. A real feature beats the baseline
-    ///   when its importance > max(shadow importances).
-    ///
-    /// Verdict thresholds (configurable via <see cref="FeatureImportanceAnalyzerConfig"/>):
-    ///   ZScore > +2.0  → Confirmed   (consistently beats shadow)
-    ///   ZScore in [-2, +2] → Tentative
-    ///   ZScore &lt; -2.0  → Rejected    (indistinguishable from random noise)
-    ///
-    /// Usage:
-    /// <code>
-    ///   var result = new OfflineTrainingJob(config).Run(autoencoder, scorer, normalizedVectors);
-    ///
-    ///   var analyzer = new FeatureImportanceAnalyzer();
-    ///   var report   = analyzer.Analyze(autoencoder, normalizedVectors);
-    ///
-    ///   foreach (var r in report.Rejected)
-    ///       Console.WriteLine($"Consider removing: {r.Name}  z={r.ZScore:F2}");
-    /// </code>
-    /// </summary>
+    /*
     public sealed class FeatureImportanceAnalyzer
     {
         private readonly FeatureImportanceAnalyzerConfig _config;
@@ -384,4 +350,5 @@ namespace DevOnBike.Overfit.Data
             return $"{rawName}.{statName}";
         }
     }
+    */
 }
