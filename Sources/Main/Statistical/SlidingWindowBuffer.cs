@@ -7,7 +7,7 @@ using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 using DevOnBike.Overfit.Core;
 
-namespace DevOnBike.Overfit.Monitoring
+namespace DevOnBike.Overfit.Statistical
 {
     /// <summary>
     /// A high-performance, zero-allocation circular buffer for time-series data.

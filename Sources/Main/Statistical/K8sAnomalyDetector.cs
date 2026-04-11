@@ -5,9 +5,8 @@
 
 using System.Buffers;
 using DevOnBike.Overfit.Core;
-using DevOnBike.Overfit.Statistical;
 
-namespace DevOnBike.Overfit.Monitoring
+namespace DevOnBike.Overfit.Statistical
 {
     public class K8sAnomalyDetector : IDisposable
     {
@@ -17,8 +16,12 @@ namespace DevOnBike.Overfit.Monitoring
         public const int StateHighLoad = 1;
         public const int StateFailure = 2;
 
+        public int FeatureCount { get; }
+
         public K8sAnomalyDetector(int featureCount)
         {
+            FeatureCount = featureCount;
+            // Inicjalizacja HMM: 3 ukryte stany, liczba cech zgodna z FeatureExtractor (domyślnie 48)
             _hmm = new GaussianHMM(stateCount: 3, featureCount: featureCount);
         }
 
@@ -35,26 +38,30 @@ namespace DevOnBike.Overfit.Monitoring
         }
 
         /// <summary>
-        /// Zwraca Log-Likelihood dla całego okna. Jeśli wartość jest nienaturalnie niska,
-        /// system doświadcza anomalii (np. zachowanie wykraczające poza wszystkie 3 wyuczone stany).
+        /// Zwraca Log-Likelihood dla zagregowanego okna statystyk.
+        /// Traktuje wejście jako pojedynczą obserwację (T=1).
         /// </summary>
-        public float ScoreWindow(ReadOnlySpan<float> windowFeatures, int windowSize)
+        public float ScoreWindow(ReadOnlySpan<float> windowFeatures)
         {
-            return _hmm.ScoreSequence(windowSize, windowFeatures);
+            // Przekazujemy timeSteps: 1, ponieważ windowFeatures to jeden zagregowany wektor
+            return _hmm.ScoreSequence(timeSteps: 1, windowFeatures);
         }
 
         /// <summary>
-        /// Odpowiada na pytanie: "W jakim aktualnie reżimie znajduje się usługa?"
-        /// (Na podstawie ostatnich 'windowSize' obserwacji).
+        /// Zgadywanie w czasie rzeczywistym: "W jakim stanie aktualnie jest Pod?"
+        /// Wykorzystuje algorytm Viterbiego dla pojedynczej obserwacji (T=1).
         /// </summary>
-        public int GetCurrentRegime(ReadOnlySpan<float> windowFeatures, int windowSize)
+        public int GetCurrentRegime(ReadOnlySpan<float> windowFeatures)
         {
-            int[] statesBuffer = ArrayPool<int>.Shared.Rent(windowSize);
+            // Dla pojedynczego wektora cech wystarczy bufor o rozmiarze 1
+            var statesBuffer = ArrayPool<int>.Shared.Rent(1);
             try
             {
-                _hmm.DecodeViterbi(windowSize, windowFeatures, statesBuffer);
-                // Wynik z ostatniego kroku czasowego
-                return statesBuffer[windowSize - 1];
+                // Przekazujemy timeSteps: 1. 
+                // windowFeatures musi mieć długość dokładnie równą FeatureCount.
+                _hmm.DecodeViterbi(timeSteps: 1, windowFeatures, statesBuffer);
+
+                return statesBuffer[0];
             }
             finally
             {
@@ -62,9 +69,6 @@ namespace DevOnBike.Overfit.Monitoring
             }
         }
 
-        public void Dispose()
-        {
-            _hmm?.Dispose();
-        }
+        public void Dispose() => _hmm?.Dispose();
     }
 }
