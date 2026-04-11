@@ -1,5 +1,11 @@
-﻿using DevOnBike.Overfit.Statistical;
+﻿// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
+
 using System.Buffers;
+using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.Statistical;
 
 namespace DevOnBike.Overfit.Monitoring
 {
@@ -7,50 +13,39 @@ namespace DevOnBike.Overfit.Monitoring
     {
         private readonly GaussianHMM _hmm;
 
-        // Zdefiniowane z góry stany, dla jasności
         public const int StateNormal = 0;
         public const int StateHighLoad = 1;
         public const int StateFailure = 2;
 
-        public K8sAnomalyDetector()
+        public K8sAnomalyDetector(int featureCount)
         {
-            // 3 ukryte stany, 8 cech (np. CPU, RAM, Latency)
-            _hmm = new GaussianHMM(stateCount: 3, featureCount: 8);
-
-            // W prawdziwym projekcie pobierasz te parametry z pliku .json po treningu Baum-Welch.
-            // Tutaj inicjujemy "wiedzą ekspercką" z palca (tzw. priory):
-
-            float[] initialProbs = { 0.9f, 0.1f, 0.0f }; // Prawie zawsze startuje jako normalny
-
-            float[] transitionMatrix = {
-                // To Normal, To HighLoad, To Failure
-                0.90f, 0.09f, 0.01f, // Z Normalnego
-                0.10f, 0.85f, 0.05f, // Z HighLoad
-                0.00f, 0.20f, 0.80f  // Z Failure
-            };
-
-            // Średnie (Means) - jakie wartości przyjmuje tych 8 cech w każdym stanie
-            float[] means = new float[3 * 8];
-            // Tu ładujesz swoje znormalizowane średnie...
-
-            // Wariancje (Variances) - jak bardzo mogą wibrować metryki
-            float[] variances = new float[3 * 8];
-            Array.Fill(variances, 1.0f); // Zakładamy znormalizowane wariancje
-
-            _hmm.SetModel(initialProbs, transitionMatrix, means, variances);
+            _hmm = new GaussianHMM(stateCount: 3, featureCount: featureCount);
         }
 
         /// <summary>
-        /// Zwraca Log-Likelihood dla okna czasowego (np. 60 sekund).
-        /// Wynik bliski zeru = wszystko OK. Silnie ujemny (np. -150) = ogromna anomalia.
+        /// Inicjuje model z wytrenowanymi parametrami.
         /// </summary>
-        public float EvaluateWindow(ReadOnlySpan<float> windowFeatures, int windowSize)
+        public void LoadParameters(
+            ReadOnlySpan<float> initialProbs,
+            ReadOnlySpan<float> transitionMatrix,
+            ReadOnlySpan<float> means,
+            FastMatrix<float>[] covariances)
+        {
+            _hmm.SetModel(initialProbs, transitionMatrix, means, covariances);
+        }
+
+        /// <summary>
+        /// Zwraca Log-Likelihood dla całego okna. Jeśli wartość jest nienaturalnie niska,
+        /// system doświadcza anomalii (np. zachowanie wykraczające poza wszystkie 3 wyuczone stany).
+        /// </summary>
+        public float ScoreWindow(ReadOnlySpan<float> windowFeatures, int windowSize)
         {
             return _hmm.ScoreSequence(windowSize, windowFeatures);
         }
 
         /// <summary>
-        /// Zgadywanie w czasie rzeczywistym: "W jakim stanie aktualnie jest Pod?"
+        /// Odpowiada na pytanie: "W jakim aktualnie reżimie znajduje się usługa?"
+        /// (Na podstawie ostatnich 'windowSize' obserwacji).
         /// </summary>
         public int GetCurrentRegime(ReadOnlySpan<float> windowFeatures, int windowSize)
         {
@@ -58,7 +53,7 @@ namespace DevOnBike.Overfit.Monitoring
             try
             {
                 _hmm.DecodeViterbi(windowSize, windowFeatures, statesBuffer);
-                // Zwracamy stan z OSTATNIEGO kroku w oknie
+                // Wynik z ostatniego kroku czasowego
                 return statesBuffer[windowSize - 1];
             }
             finally
@@ -67,6 +62,9 @@ namespace DevOnBike.Overfit.Monitoring
             }
         }
 
-        public void Dispose() => _hmm.Dispose();
+        public void Dispose()
+        {
+            _hmm?.Dispose();
+        }
     }
 }

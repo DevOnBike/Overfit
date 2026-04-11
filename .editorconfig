@@ -12,4 +12,6 @@ csharp_style_namespace_declarations = block_scoped:warning
 dotnet_sort_system_directives_first = true
 dotnet_separate_import_directive_groups = false
 
-file_header_template = Copyright (c) 2026 DevOnBike.\nThis file is part of DevonBike Overfit.\nDevonBike Overfit is licensed under the GNU AGPLv3.\nFor commercial licensing options, contact:devonbike@gmail.com
+csharp_prefer_braces = true:warning
+
+file_header_template = Copyright (c) 2026 DevOnBike.\nThis file is part of DevonBike Overfit.\nDevonBike Overfit is licensed under the GNU AGPLv3.\nFor commercial licensing options, contact: devonbike@gmail.com

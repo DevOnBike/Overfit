@@ -234,7 +234,8 @@ namespace DevOnBike.Overfit.Tests
                 b.Data.AsSpan()[i] = (i + 1) * 0.2f;
             }
 
-            var lossFunc = () => {
+            var lossFunc = () =>
+            {
                 var mm = TensorMath.MatMul(_graph, a, b);
                 var target = new AutogradNode(new FastTensor<float>(2, 2), false);
                 return TensorMath.MSELoss(_graph, mm, target);
@@ -253,7 +254,8 @@ namespace DevOnBike.Overfit.Tests
             input.Data.AsSpan().Fill(1.5f);
             bias.Data.AsSpan().Fill(0.5f);
 
-            var lossFunc = () => {
+            var lossFunc = () =>
+            {
                 var res = TensorMath.AddBias(_graph, input, bias);
                 var target = new AutogradNode(new FastTensor<float>(3, 2), false);
                 return TensorMath.MSELoss(_graph, res, target);
@@ -283,7 +285,8 @@ namespace DevOnBike.Overfit.Tests
                 bias.Data.AsSpan()[i] = (i + 1) * 0.3f;
             }
 
-            var lossFunc = () => {
+            var lossFunc = () =>
+            {
                 var lin = TensorMath.Linear(_graph, input, weights, bias);
                 var target = new AutogradNode(new FastTensor<float>(2, 2), false);
                 return TensorMath.MSELoss(_graph, lin, target);
@@ -303,7 +306,8 @@ namespace DevOnBike.Overfit.Tests
             input.Data.AsSpan().Fill(0.5f);
             weights.Data.AsSpan().Fill(0.1f);
 
-            var lossFunc = () => {
+            var lossFunc = () =>
+            {
                 var conv = TensorMath.Conv2D(_graph, input, weights, 1, 1, 4, 4, 3);
                 var target = new AutogradNode(new FastTensor<float>(1, 1, 2, 2), false);
                 return TensorMath.MSELoss(_graph, conv, target);
@@ -328,7 +332,8 @@ namespace DevOnBike.Overfit.Tests
             using var rv = new FastTensor<float>(2);
             rv.AsSpan().Fill(1f);
 
-            var lossFunc = () => {
+            var lossFunc = () =>
+            {
                 var bn = TensorMath.BatchNorm1D(_graph, input, gamma, beta, rm, rv, 0.1f, 1e-5f, true);
                 var target = new AutogradNode(new FastTensor<float>(4, 2), false);
                 return TensorMath.MSELoss(_graph, bn, target);
