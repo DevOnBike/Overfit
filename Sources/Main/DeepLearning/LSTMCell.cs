@@ -10,31 +10,30 @@ namespace DevOnBike.Overfit.DeepLearning
     /// <summary>
     /// Single LSTM cell — processes one timestep.
     ///
-    /// Gates (all share the same concatenated input [h_{t-1}, x_t]):
-    ///   f_t = σ(W_f · [h, x] + b_f)          forget gate  — what to erase from cell state
-    ///   i_t = σ(W_i · [h, x] + b_i)          input gate   — what to write to cell state
-    ///   g_t = tanh(W_g · [h, x] + b_g)       candidate    — what to potentially write
-    ///   o_t = σ(W_o · [h, x] + b_o)          output gate  — what to expose as hidden state
+    /// Gates computed via separate projections of x_t and h_{t-1}:
+    ///   f_t = σ(x·W_f + h·U_f + b_f)         forget gate  — what to erase from cell state
+    ///   i_t = σ(x·W_i + h·U_i + b_i)         input gate   — what to write to cell state
+    ///   g_t = tanh(x·W_g + h·U_g + b_g)      candidate    — what to potentially write
+    ///   o_t = σ(x·W_o + h·U_o + b_o)         output gate  — what to expose as hidden state
     ///
     ///   c_t = f_t ⊙ c_{t-1} + i_t ⊙ g_t     cell state update
     ///   h_t = o_t ⊙ tanh(c_t)                hidden state update
     ///
     /// Weights are packed into two matrices for efficient matmul:
-    ///   W_gates [4 * hiddenSize, inputSize]   — input projection
-    ///   U_gates [4 * hiddenSize, hiddenSize]  — hidden state projection
-    ///   b_gates [4 * hiddenSize]              — biases
+    ///   W [inputSize,  4*hiddenSize]  — input projection:   x[batch,input]  × W = [batch,4*hidden]
+    ///   U [hiddenSize, 4*hiddenSize]  — hidden projection:  h[batch,hidden] × U = [batch,4*hidden]
+    ///   B [4*hiddenSize]              — biases
     ///
-    /// Gate order in packed matrices: f, i, g, o (index * hiddenSize offsets).
+    /// Gate order in packed dim: f, i, g, o  (gateIndex * hiddenSize column offset).
     /// </summary>
     public sealed class LSTMCell : IModule
     {
-        private readonly int _inputSize;
         private readonly int _hiddenSize;
 
-        // W [4*hiddenSize, inputSize]  — projects input x_t
+        // W [inputSize,  4*hiddenSize] — projects input x_t
         public AutogradNode W { get; }
 
-        // U [4*hiddenSize, hiddenSize] — projects previous hidden state h_{t-1}
+        // U [hiddenSize, 4*hiddenSize] — projects previous hidden state h_{t-1}
         public AutogradNode U { get; }
 
         // b [4*hiddenSize]             — biases
@@ -47,14 +46,13 @@ namespace DevOnBike.Overfit.DeepLearning
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(inputSize);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(hiddenSize);
 
-            _inputSize = inputSize;
             _hiddenSize = hiddenSize;
 
             // Xavier uniform initialization — good for sigmoid/tanh gates
             var limit = MathF.Sqrt(6f / (inputSize + hiddenSize));
 
-            W = new AutogradNode(new FastTensor<float>(4 * hiddenSize, inputSize), requiresGrad: true);
-            U = new AutogradNode(new FastTensor<float>(4 * hiddenSize, hiddenSize), requiresGrad: true);
+            W = new AutogradNode(new FastTensor<float>(inputSize, 4 * hiddenSize), requiresGrad: true);
+            U = new AutogradNode(new FastTensor<float>(hiddenSize, 4 * hiddenSize), requiresGrad: true);
             B = new AutogradNode(new FastTensor<float>(4 * hiddenSize), requiresGrad: true);
 
             InitUniform(W.Data.AsSpan(), limit);

@@ -21,13 +21,15 @@ namespace DevOnBike.Overfit.Core
         MaxPool2D,
         GlobalAveragePool2D,
         BatchNorm1D,
-        MSELoss,
+        MseLoss,
         SoftmaxCrossEntropy,
         Reshape,
         DirectionalLoss,
         Sigmoid,
         Tanh,
         Multiply,
-        GateSlice
+        GateSlice,
+        TimestepSlice,
+        StackTimesteps
     }
 }

@@ -680,7 +680,7 @@ namespace DevOnBike.Overfit.Core
 
             if (output.RequiresGrad)
             {
-                graph?.Record(OpCode.MSELoss, output, prediction, target);
+                graph?.Record(OpCode.MseLoss, output, prediction, target);
             }
 
             return output;
@@ -1121,10 +1121,9 @@ namespace DevOnBike.Overfit.Core
             var outS = output.Data.AsReadOnlySpan();
             var outGS = output.Grad.AsReadOnlySpan();
             var inGS = input.Grad.AsSpan();
-            var n = inGS.Length;
 
-            // local buffer for σ(x) * (1 - σ(x))
-            var buf = n <= 512 ? stackalloc float[n] : new float[n];
+            using var bufHandle = new FastBuffer<float>(inGS.Length);
+            var buf = bufHandle.AsSpan();
 
             // buf = 1 - σ(x)
             TensorPrimitives.Subtract(1f, outS, buf);
@@ -1133,7 +1132,7 @@ namespace DevOnBike.Overfit.Core
             TensorPrimitives.Multiply(outS, buf, buf);
 
             // inGrad += outGrad * buf
-            TensorPrimitives.MultiplyAdd(outGS, buf, inGS, inGS);
+            TensorPrimitives.MultiplyAdd(outGS, (ReadOnlySpan<float>)buf, inGS, inGS);
         }
 
         // ====================================================================
@@ -1173,9 +1172,9 @@ namespace DevOnBike.Overfit.Core
             var outS = output.Data.AsReadOnlySpan();
             var outGS = output.Grad.AsReadOnlySpan();
             var inGS = input.Grad.AsSpan();
-            var n = inGS.Length;
 
-            var buf = n <= 512 ? stackalloc float[n] : new float[n];
+            using var bufHandle = new FastBuffer<float>(inGS.Length);
+            var buf = bufHandle.AsSpan();
 
             // buf = tanh²(x)
             TensorPrimitives.Multiply(outS, outS, buf);
@@ -1184,7 +1183,7 @@ namespace DevOnBike.Overfit.Core
             TensorPrimitives.Subtract(1f, buf, buf);
 
             // inGrad += outGrad * (1 - tanh²(x))
-            TensorPrimitives.MultiplyAdd(outGS, buf, inGS, inGS);
+            TensorPrimitives.MultiplyAdd(outGS, (ReadOnlySpan<float>)buf, inGS, inGS);
         }
 
         // ====================================================================
@@ -1294,6 +1293,79 @@ namespace DevOnBike.Overfit.Core
                 var dst = dstS.Slice(b * stride + offset, hiddenSize);
 
                 TensorPrimitives.Add(dst, srcS.Slice(b * hiddenSize, hiddenSize), dst);
+            }
+        }
+
+        // ====================================================================
+        // TIMESTEP SLICE BACKWARD
+        // ====================================================================
+
+        /// <summary>
+        /// Backward for ExtractTimestep.
+        /// Scatters output grad [batch, inputSize] back into input grad [batch, seqLen, inputSize]
+        /// at timestep t.
+        /// i0=t, i1=seqLen, i2=inputSize
+        /// </summary>
+        public static void TimestepSliceBackward(
+            AutogradNode input,
+            AutogradNode output,
+            int t,
+            int seqLen,
+            int inputSize)
+        {
+            if (!input.RequiresGrad)
+            {
+                return;
+            }
+
+            var batch = input.Data.GetDim(0);
+            var srcS = output.Grad.AsReadOnlySpan();
+            var dstS = input.Grad.AsSpan();
+
+            for (var b = 0; b < batch; b++)
+            {
+                var dst = dstS.Slice(b * seqLen * inputSize + t * inputSize, inputSize);
+                TensorPrimitives.Add(dst, srcS.Slice(b * inputSize, inputSize), dst);
+            }
+        }
+
+        // ====================================================================
+        // STACK TIMESTEPS BACKWARD
+        // ====================================================================
+
+        /// <summary>
+        /// Backward for StackTimesteps.
+        /// Scatters output grad [batch, seqLen, hiddenSize] back to each h node in nodeContext.
+        /// i0=batch, i1=seqLen, i2=hiddenSize
+        /// </summary>
+        public static void StackTimestepsBackward(
+            AutogradNode[] allH,
+            AutogradNode output,
+            int batch,
+            int seqLen,
+            int hiddenSize)
+        {
+            var srcS = output.Grad.AsReadOnlySpan();
+
+            for (var t = 0; t < seqLen; t++)
+            {
+                var h = allH[t];
+
+                if (!h.RequiresGrad)
+                {
+                    continue;
+                }
+
+                var dstS = h.Grad.AsSpan();
+
+                for (var b = 0; b < batch; b++)
+                {
+                    var dst = dstS.Slice(b * hiddenSize, hiddenSize);
+                    TensorPrimitives.Add(
+                        dst,
+                        srcS.Slice(b * seqLen * hiddenSize + t * hiddenSize, hiddenSize),
+                        dst);
+                }
             }
         }
     }
