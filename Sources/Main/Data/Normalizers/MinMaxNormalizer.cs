@@ -164,5 +164,38 @@ namespace DevOnBike.Overfit.Data.Normalizers
                 throw new InvalidOperationException("Normalizer is not frozen.");
             }
         }
+
+        public void Save(BinaryWriter bw)
+        {
+            if (!_frozen)
+            {
+                throw new InvalidOperationException("Cannot save unfrozen normalizer.");
+            }
+
+            bw.Write(_frozenMin);
+            bw.Write(_frozenMax);
+            bw.Write(_frozenScale);
+            bw.Write(_hasClipMax);
+
+            if (_hasClipMax)
+            {
+                bw.Write(_clipMax);
+            }
+        }
+
+        public void Load(BinaryReader br)
+        {
+            _frozenMin = br.ReadSingle();
+            _frozenMax = br.ReadSingle();
+            _frozenScale = br.ReadSingle();
+            _hasClipMax = br.ReadBoolean();
+
+            if (_hasClipMax)
+            {
+                _clipMax = br.ReadSingle();
+            }
+
+            _frozen = true;
+        }
     }
 }

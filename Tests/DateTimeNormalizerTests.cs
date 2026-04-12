@@ -11,8 +11,8 @@ namespace DevOnBike.Overfit.Tests
         public void EncodeFromUnixMilliseconds_ShouldDetectSingleMillisecondChanges()
         {
             // ARRANGE
-            long baseMillis = 1704067200000; // 1 Stycznia 2024, 00:00:00.000 UTC
-            long plusOneMillis = 1704067200001; // 1 Stycznia 2024, 00:00:00.001 UTC
+            var baseMillis = 1704067200000; // 1 Stycznia 2024, 00:00:00.000 UTC
+            var plusOneMillis = 1704067200001; // 1 Stycznia 2024, 00:00:00.001 UTC
 
             // ACT
             var (sinBase, cosBase) = DateTimeNormalizer.EncodeFromUnixMilliseconds(baseMillis);
@@ -25,7 +25,7 @@ namespace DevOnBike.Overfit.Tests
             // Oczekiwana różnica w radianach dla 1ms:
             // 1 ms to 1 / (24 * 60 * 60 * 1000) części dnia = 1.1574074e-8
             // Różnica na Sinusie wokół zera powinna wynosić mniej więcej: 2 * PI * 1.1574e-8 ≈ 7.27e-8
-            float difference = Math.Abs(sinPlusOne - sinBase);
+            var difference = Math.Abs(sinPlusOne - sinBase);
 
             Assert.True(difference > 0f, "Brak precyzji! 1 milisekunda została zignorowana (pływające zaokrąglenie).");
             Assert.True(difference < 1e-6f, $"Różnica {difference} jest zbyt duża jak na 1 milisekundę!");
@@ -41,8 +41,8 @@ namespace DevOnBike.Overfit.Tests
             var result = DateTimeNormalizer.EncodeAllTimeFeaturesFromUnixSeconds(unixSeconds);
 
             // Obliczamy oczekiwane wartości dla czwartku (Thursday = 4)
-            float expectedDaySin = (float)Math.Sin((4.0 / 7.0) * 2.0 * Math.PI);
-            float expectedDayCos = (float)Math.Cos((4.0 / 7.0) * 2.0 * Math.PI);
+            var expectedDaySin = (float)Math.Sin((4.0 / 7.0) * 2.0 * Math.PI);
+            var expectedDayCos = (float)Math.Cos((4.0 / 7.0) * 2.0 * Math.PI);
 
             // ASSERT - Czas (Idealne 12:00 w południe -> Sin=0, Cos=-1)
             // Używamy HighPrecision (6), aby upewnić się, że Math.PI nie robi nam śmieci na 7. miejscu po przecinku

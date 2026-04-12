@@ -26,5 +26,15 @@
         /// Czeruje stan algorytmu.
         /// </summary>
         void Reset();
+
+        /// <summary>
+        /// Zapisuje zamrożone parametry do strumienia binarnego.
+        /// </summary>
+        void Save(BinaryWriter bw);
+
+        /// <summary>
+        /// Wczytuje zamrożone parametry ze strumienia binarnego.
+        /// </summary>
+        void Load(BinaryReader br);
     }
 }

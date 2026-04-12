@@ -47,8 +47,8 @@ namespace DevOnBike.Overfit.Data.Normalizers
             localMean /= n2;
 
             var localMeanFloat = (float)localMean;
-
             var buffer = ArrayPool<float>.Shared.Rent(data.Length);
+
             double localM2;
 
             try
@@ -88,9 +88,13 @@ namespace DevOnBike.Overfit.Data.Normalizers
             }
 
             _count++;
+
             var delta = value - _mean;
+
             _mean += delta / _count;
+
             var delta2 = value - _mean;
+
             _m2 += delta * delta2;
         }
 
@@ -142,6 +146,24 @@ namespace DevOnBike.Overfit.Data.Normalizers
             _isFrozen = false;
             _frozenMean = 0f;
             _frozenInvStdDev = 0f;
+        }
+
+        public void Save(BinaryWriter bw)
+        {
+            if (!_isFrozen)
+            {
+                throw new InvalidOperationException("Cannot save unfrozen normalizer.");
+            }
+
+            bw.Write(_frozenMean);
+            bw.Write(_frozenInvStdDev);
+        }
+
+        public void Load(BinaryReader br)
+        {
+            _frozenMean = br.ReadSingle();
+            _frozenInvStdDev = br.ReadSingle();
+            _isFrozen = true;
         }
     }
 }

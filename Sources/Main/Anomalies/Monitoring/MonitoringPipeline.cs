@@ -4,7 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
-using DevOnBike.Overfit.Data.Prepare;
+using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.Anomalies.Monitoring
 {
@@ -12,21 +12,18 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
     ///     Offline training pipeline for the anomaly detection autoencoder.
     ///     Processes raw Prometheus metric series from the Golden Window into
     ///     scaled tensors ready for LSTM autoencoder training.
-    ///     Flow per batch:
-    ///     List&lt;RawMetricSeries&gt;
-    ///     → TimeSeriesAligner   (align to shared time grid)
-    ///     → WindowSanitizer     (remove invalid pods, correct values)
-    ///     → FleetAggregator     (fleet medians + pod deviations)
-    ///     → AggregationScaler   (RobustScaler fit+transform)
-    ///     → ScaledResult        (FastTensor ready for training)
     /// </summary>
     public sealed class MonitoringPipeline
     {
         private readonly FleetAggregator _aggregator;
         private readonly TimeSeriesAligner _aligner;
-        private readonly RobustScalingLayer _baselineScaler;
-        private readonly RobustScalingLayer _deviationScaler;
         private readonly WindowSanitizer _sanitizer;
+
+        // ZASTĄPIONO: RobustScalingLayer na CompositeNormalizationLayer
+        private readonly CompositeNormalizationLayer _baselineScaler;
+        private readonly CompositeNormalizationLayer _deviationScaler;
+
+        private bool _isTrainingPhase = true; // Tryb pracy: True = Golden Window (uczy się)
 
         public MonitoringPipeline(MonitoringPipelineOptions options)
         {
@@ -50,15 +47,11 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 MetricCount = options.MetricCount
             });
 
-            _baselineScaler = new RobustScalingLayer();
-            _deviationScaler = new RobustScalingLayer();
+            // Inicjalizacja nowych warstw z dedykowanymi strategiami normalizacji
+            _baselineScaler = new CompositeNormalizationLayer();
+            _deviationScaler = new CompositeNormalizationLayer();
         }
 
-        /// <summary>
-        ///     Processes one batch of raw metric series.
-        ///     On first call the scalers fit themselves on the incoming data.
-        ///     On subsequent calls they apply the fitted parameters (Transform only).
-        /// </summary>
         public ScaledResult Process(List<RawMetricSeries> allSeries, long globalStartMs, long scrapeTimestampMs)
         {
             var alignResult = _aligner.Align(allSeries, globalStartMs);
@@ -67,21 +60,47 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
             var aggResult = _aggregator.Aggregate(alignResult);
 
-            return AggregationScaler.Scale(aggResult, _baselineScaler, _deviationScaler);
+            // 1. Normalizujemy Medianę Floty (Baseline)
+            _baselineScaler.ProcessInPlace(aggResult.FleetBaseline, aggResult.DcCount * aggResult.WindowSize, aggResult.MetricCount, _isTrainingPhase);
+
+            // 2. Normalizujemy Odchylenia Podów od Mediany
+            _deviationScaler.ProcessInPlace(aggResult.PodDeviations, aggResult.PodCount * aggResult.WindowSize, aggResult.MetricCount, _isTrainingPhase);
+
+            var baselineTensor = new FastTensor<float>(aggResult.DcCount, aggResult.WindowSize, aggResult.MetricCount);
+
+            aggResult.FleetBaseline.AsSpan().CopyTo(baselineTensor.AsSpan());
+
+            var deviationsTensor = new FastTensor<float>(aggResult.PodCount, aggResult.WindowSize, aggResult.MetricCount);
+
+            aggResult.PodDeviations.AsSpan().CopyTo(deviationsTensor.AsSpan());
+
+            // Zwracamy wynik bezpiecznie zapakowany w Tensory
+            return new ScaledResult
+            {
+                FleetBaseline = baselineTensor,
+                PodDeviations = deviationsTensor,
+                PodIndex = aggResult.PodIndex
+            };
         }
 
-        // ---------------------------------------------------------------------------
-        // Scaler persistence — call after Golden Window processing is complete
-        // ---------------------------------------------------------------------------
-
         /// <summary>
-        ///     Resets both scalers — forces re-fit on next Process call.
-        ///     Use when starting a new Golden Window collection.
+        /// Wywołaj tę metodę, gdy faza przetwarzania Golden Window dobiegnie końca.
+        /// Zamraża to wariancje, średnie i ekstrema do działania na produkcji (Inferencja).
         /// </summary>
+        public void FinalizeTrainingPhase()
+        {
+            _baselineScaler.FreezeAll();
+            _deviationScaler.FreezeAll();
+
+            _isTrainingPhase = false;
+        }
+
         public void ResetScalers()
         {
-            _baselineScaler.Reset();
-            _deviationScaler.Reset();
+            _baselineScaler.ResetAll();
+            _deviationScaler.ResetAll();
+
+            _isTrainingPhase = true;
         }
     }
 }

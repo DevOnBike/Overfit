@@ -15,7 +15,6 @@ namespace DevOnBike.Overfit.DeepLearning
     /// </summary>
     public sealed class LSTMCell : IModule
     {
-
         public LSTMCell(int inputSize, int hiddenSize)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(inputSize);
