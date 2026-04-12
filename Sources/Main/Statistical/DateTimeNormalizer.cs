@@ -18,7 +18,7 @@ namespace DevOnBike.Overfit.Statistical
             var decimalHour = timeOfDay.TotalHours;
             var radians = (decimalHour / 24.0) * TwoPi;
 
-            return ((float)Math.Sin(radians), (float)Math.Cos(radians));
+            return ((float)(Math.Sin(radians)), (float)(Math.Cos(radians)));
         }
 
         /// <summary>
@@ -29,7 +29,7 @@ namespace DevOnBike.Overfit.Statistical
             var dayInt = (int)dayOfWeek;
             var radians = (dayInt / 7.0) * TwoPi;
 
-            return ((float)Math.Sin(radians), (float)Math.Cos(radians));
+            return ((float)(Math.Sin(radians)), (float)(Math.Cos(radians)));
         }
 
         // ====================================================================
@@ -40,9 +40,10 @@ namespace DevOnBike.Overfit.Statistical
         /// Transformuje standardowy Unix Timestamp (w sekundach) na zmienne cykliczne pory dnia.
         /// Operuje w przestrzeni UTC dla bezpieczeństwa w systemach rozproszonych.
         /// </summary>
-        public static (float Sin, float Cos) EncodeFromUnixSeconds(long unixTime)
+        public static (float Sin, float Cos) EncodeFromUnixSeconds(long unixTimeSeconds)
         {
-            var utcTime = ToUtc(unixTime);
+            // Poprawka: Używamy metody z dopiskiem "Seconds"
+            var utcTime = DateTimeOffset.FromUnixTimeSeconds(unixTimeSeconds).UtcDateTime;
 
             return Encode(utcTime.TimeOfDay);
         }
@@ -51,9 +52,10 @@ namespace DevOnBike.Overfit.Statistical
         /// Transformuje Unix Timestamp (w milisekundach) na zmienne cykliczne pory dnia.
         /// Przydatne, gdy dane spływają prosto z Prometheusa, Grafany lub JavaScriptu.
         /// </summary>
-        public static (float Sin, float Cos) EncodeFromUnixMilliseconds(long unixTime)
+        public static (float Sin, float Cos) EncodeFromUnixMilliseconds(long unixTimeMilliseconds)
         {
-            var utcTime = ToUtc(unixTime);
+            // Poprawka: Używamy metody z dopiskiem "Milliseconds"
+            var utcTime = DateTimeOffset.FromUnixTimeMilliseconds(unixTimeMilliseconds).UtcDateTime;
 
             return Encode(utcTime.TimeOfDay);
         }
@@ -63,7 +65,7 @@ namespace DevOnBike.Overfit.Statistical
         /// </summary>
         public static (float Sin, float Cos) EncodeDayOfWeekFromUnixSeconds(long unixTimeSeconds)
         {
-            var utcTime = ToUtc(unixTimeSeconds);
+            var utcTime = DateTimeOffset.FromUnixTimeSeconds(unixTimeSeconds).UtcDateTime;
 
             return Encode(utcTime.DayOfWeek);
         }
@@ -74,17 +76,12 @@ namespace DevOnBike.Overfit.Statistical
         /// </summary>
         public static (float HourSin, float HourCos, float DaySin, float DayCos) EncodeAllTimeFeaturesFromUnixSeconds(long unixTimeSeconds)
         {
-            var utcTime = ToUtc(unixTimeSeconds);
+            var utcTime = DateTimeOffset.FromUnixTimeSeconds(unixTimeSeconds).UtcDateTime;
 
             var (sin, cos) = Encode(utcTime.TimeOfDay);
             var (daySin, dayCos) = Encode(utcTime.DayOfWeek);
 
             return (sin, cos, daySin, dayCos);
-        }
-
-        private static DateTime ToUtc(long unixMilliseconds)
-        {
-            return DateTimeOffset.FromUnixTimeMilliseconds(unixMilliseconds).UtcDateTime;
         }
 
     }
