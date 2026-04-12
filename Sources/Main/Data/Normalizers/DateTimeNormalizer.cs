@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace DevOnBike.Overfit.Statistical
+namespace DevOnBike.Overfit.Data.Normalizers
 {
     /// <summary>
     /// Klasa narzędziowa do cyklicznego kodowania czasu (Cyclical Encoding).
@@ -16,9 +16,9 @@ namespace DevOnBike.Overfit.Statistical
         public static (float Sin, float Cos) Encode(TimeSpan timeOfDay)
         {
             var decimalHour = timeOfDay.TotalHours;
-            var radians = (decimalHour / 24.0) * TwoPi;
+            var radians = decimalHour / 24.0 * TwoPi;
 
-            return ((float)(Math.Sin(radians)), (float)(Math.Cos(radians)));
+            return ((float)Math.Sin(radians), (float)Math.Cos(radians));
         }
 
         /// <summary>
@@ -27,9 +27,9 @@ namespace DevOnBike.Overfit.Statistical
         public static (float Sin, float Cos) Encode(DayOfWeek dayOfWeek)
         {
             var dayInt = (int)dayOfWeek;
-            var radians = (dayInt / 7.0) * TwoPi;
+            var radians = dayInt / 7.0 * TwoPi;
 
-            return ((float)(Math.Sin(radians)), (float)(Math.Cos(radians)));
+            return ((float)Math.Sin(radians), (float)Math.Cos(radians));
         }
 
         // ====================================================================

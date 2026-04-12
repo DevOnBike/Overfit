@@ -6,7 +6,7 @@
 using System.Buffers;
 using System.Numerics.Tensors;
 
-namespace DevOnBike.Overfit.Statistical
+namespace DevOnBike.Overfit.Data.Normalizers
 {
     /// <summary>
     /// Normalizator Log1p → Z-Score dla metryk z rozkładem log-normalnym.
@@ -46,7 +46,7 @@ namespace DevOnBike.Overfit.Statistical
         public float Mean => _frozen ? _frozenMean : _zscore.Mean;
 
         // Bezpieczne — zwraca 0 gdy nie zamrożone i nie fittowane
-        public float StdDev => _frozen ? (_frozenInvStdDev > 0f ? 1f / _frozenInvStdDev : 0f) : _zscore.StandardDeviation;
+        public float StdDev => _frozen ? _frozenInvStdDev > 0f ? 1f / _frozenInvStdDev : 0f : _zscore.StandardDeviation;
 
         public long Count => _zscore.Count;
 

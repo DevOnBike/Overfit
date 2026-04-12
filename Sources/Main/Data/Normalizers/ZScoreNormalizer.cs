@@ -1,7 +1,7 @@
 ﻿using System.Buffers;
 using System.Numerics.Tensors;
 
-namespace DevOnBike.Overfit.Statistical
+namespace DevOnBike.Overfit.Data.Normalizers
 {
     public sealed class ZScoreNormalizer
     {
@@ -69,7 +69,7 @@ namespace DevOnBike.Overfit.Statistical
                 _mean += delta * n2 / newCount;
 
                 // (double) cast chroni przed overflow _count * n2 przy bardzo dużych zbiorach
-                _m2 += localM2 + (delta * delta * (double)_count * n2) / newCount;
+                _m2 += localM2 + delta * delta * _count * n2 / newCount;
 
                 _count = newCount;
             }

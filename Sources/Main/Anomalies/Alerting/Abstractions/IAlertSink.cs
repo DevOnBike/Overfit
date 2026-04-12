@@ -5,7 +5,7 @@
 
 using DevOnBike.Overfit.Anomalies.Alerting.Contracts;
 
-namespace DevOnBike.Overfit.Anomalies.Monitoring.Abstractions
+namespace DevOnBike.Overfit.Anomalies.Alerting.Abstractions
 {
     /// <summary>
     ///     Destination for alert events. Implement to integrate with PagerDuty,

@@ -5,7 +5,7 @@
 
 using System.Numerics.Tensors;
 
-namespace DevOnBike.Overfit.Statistical
+namespace DevOnBike.Overfit.Data.Normalizers
 {
     /// <summary>
     /// Normalizator Min-Max dla sparse metryk i zdarzeń rzadkich.
