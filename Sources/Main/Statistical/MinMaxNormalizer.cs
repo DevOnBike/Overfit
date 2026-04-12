@@ -22,9 +22,6 @@ namespace DevOnBike.Overfit.Statistical
     ///   ContainerRestarts — ClipMax=5
     ///   IsThrottled       — binary 0/1, ClipMax=1
     ///
-    /// Uwaga: Dla binary feature (0/1) użyj ClipMax=1 i Min=0 —
-    ///   TransformInPlace nic nie zmienia, wartości zostają 0/1.
-    ///
     /// Użycie:
     ///   // Tryb empiryczny — min/max z danych:
     ///   var norm = new MinMaxNormalizer();
@@ -33,7 +30,7 @@ namespace DevOnBike.Overfit.Statistical
     ///
     ///   // Tryb z ustalonym ClipMax (zalecany dla sparse):
     ///   var norm = MinMaxNormalizer.WithClipMax(clipMax: 5f);
-    ///   norm.Freeze(); // od razu gotowy, nie wymaga fit
+    ///   // od razu gotowy, nie wymaga Fit/Freeze
     /// </summary>
     public sealed class MinMaxNormalizer
     {
@@ -42,14 +39,23 @@ namespace DevOnBike.Overfit.Statistical
 
         // Zamrożone parametry
         private float _frozenMin;
+        private float _frozenMax;
         private float _frozenScale;   // = 1f / (max - min)
         private bool _frozen;
         private bool _hasClipMax;
         private float _clipMax;
 
+        /// <summary>
+        /// When true, values outside [min, max] are clipped to [0, 1] during Transform.
+        /// When false (default for empirical mode), values above max produce output > 1.0 —
+        /// useful for anomaly detection where out-of-range values are the signal.
+        /// Always true when using WithClipMax().
+        /// </summary>
+        public bool ClipToRange { get; init; }
+
         public bool IsFrozen => _frozen;
         public float FrozenMin => _frozenMin;
-        public float FrozenMax => _frozen ? (_frozenMin + 1f / _frozenScale) : _observedMax;
+        public float FrozenMax => _frozenMax;
         public float ObservedMin => _observedMin;
         public float ObservedMax => _observedMax;
 
@@ -58,33 +64,33 @@ namespace DevOnBike.Overfit.Statistical
         // ---------------------------------------------------------------------------
 
         /// <summary>
-        /// Tworzy normalizator z ustalonym ClipMax — nie wymaga Fit.
+        /// Tworzy normalizator z ustalonym ClipMax — nie wymaga Fit/Freeze.
         /// Min = 0, Max = clipMax. Idealne dla OomEventsRate, ContainerRestarts.
         /// </summary>
         public static MinMaxNormalizer WithClipMax(float clipMax)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(clipMax);
 
-            return new MinMaxNormalizer
+            var norm = new MinMaxNormalizer
             {
                 _hasClipMax = true,
                 _clipMax = clipMax,
                 _frozenMin = 0f,
+                _frozenMax = clipMax,
                 _frozenScale = 1f / clipMax,
                 _frozen = true
             };
+            
+            return norm;
         }
 
         /// <summary>
         /// Tworzy normalizator dla binary feature (0/1) — TransformInPlace jest no-op.
         /// </summary>
-        public static MinMaxNormalizer Binary()
-        {
-            return WithClipMax(1f);
-        }
+        public static MinMaxNormalizer Binary() => WithClipMax(1f);
 
         // ---------------------------------------------------------------------------
-        // Fit — offline (Golden Window) — dla trybu empirycznego
+        // Fit
         // ---------------------------------------------------------------------------
 
         /// <summary>
@@ -114,11 +120,10 @@ namespace DevOnBike.Overfit.Statistical
             }
         }
 
-        /// <summary>Inkrementalne fitowanie.</summary>
         public void FitIncremental(float value)
         {
             ThrowIfFrozen();
-
+            
             if (value < _observedMin)
             {
                 _observedMin = value;
@@ -130,9 +135,6 @@ namespace DevOnBike.Overfit.Statistical
             }
         }
 
-        /// <summary>
-        /// Zamraża parametry po zakończeniu fitu.
-        /// </summary>
         public void Freeze()
         {
             if (_frozen)
@@ -148,18 +150,17 @@ namespace DevOnBike.Overfit.Statistical
             var range = _observedMax - _observedMin;
 
             _frozenMin = _observedMin;
+            _frozenMax = _observedMax;
             _frozenScale = range < 1e-8f ? 1f : 1f / range;
             _frozen = true;
         }
 
         // ---------------------------------------------------------------------------
-        // Transform — online (produkcja)
+        // Transform
         // ---------------------------------------------------------------------------
 
         /// <summary>
         /// Aplikuje Min-Max in-place: x' = (x - min) / (max - min).
-        /// Jeśli ClipMax — najpierw obcina wartości powyżej clipMax.
-        /// Wymaga Freeze() lub WithClipMax().
         /// </summary>
         public void TransformInPlace(Span<float> data)
         {
@@ -172,17 +173,23 @@ namespace DevOnBike.Overfit.Statistical
 
             if (_hasClipMax)
             {
-                // Clip do [0, clipMax] potem skaluj
+                // Clip do [0, clipMax] — zawsze dla WithClipMax()
                 TensorPrimitives.Max(data, 0f, data);
                 TensorPrimitives.Min(data, _clipMax, data);
             }
+            else if (ClipToRange)
+            {
+                // Clip do [frozenMin, frozenMax] — opt-in dla trybu empirycznego
+                TensorPrimitives.Max(data, _frozenMin, data);
+                TensorPrimitives.Min(data, _frozenMax, data);
+            }
             else
             {
-                // Clip do obserwowanego zakresu
+                // Tylko dolny clip — wartości > max mogą przekroczyć 1.0
+                // Pożądane dla anomaly detection: ekstremalny wynik = sygnał anomalii
                 TensorPrimitives.Max(data, _frozenMin, data);
             }
 
-            // (x - min) * scale
             TensorPrimitives.Subtract(data, _frozenMin, data);
             TensorPrimitives.Multiply(data, _frozenScale, data);
         }
@@ -194,11 +201,10 @@ namespace DevOnBike.Overfit.Statistical
         public void Save(BinaryWriter bw)
         {
             ThrowIfNotFrozen();
-
             bw.Write(_frozenMin);
+            bw.Write(_frozenMax);
             bw.Write(_frozenScale);
             bw.Write(_hasClipMax);
-
             if (_hasClipMax)
             {
                 bw.Write(_clipMax);
@@ -208,6 +214,7 @@ namespace DevOnBike.Overfit.Statistical
         public void Load(BinaryReader br)
         {
             _frozenMin = br.ReadSingle();
+            _frozenMax = br.ReadSingle();
             _frozenScale = br.ReadSingle();
             _hasClipMax = br.ReadBoolean();
 
@@ -224,6 +231,7 @@ namespace DevOnBike.Overfit.Statistical
             _observedMin = float.MaxValue;
             _observedMax = float.MinValue;
             _frozenMin = 0f;
+            _frozenMax = 0f;
             _frozenScale = 0f;
             _hasClipMax = false;
             _clipMax = 0f;

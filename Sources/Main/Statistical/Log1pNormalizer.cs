@@ -44,7 +44,10 @@ namespace DevOnBike.Overfit.Statistical
         public bool IsFitted => _zscore.Count > 0 || _frozen;
         public bool IsFrozen => _frozen;
         public float Mean => _frozen ? _frozenMean : _zscore.Mean;
-        public float StdDev => _frozen ? 1f / _frozenInvStdDev : _zscore.StandardDeviation;
+
+        // Bezpieczne — zwraca 0 gdy nie zamrożone i nie fittowane
+        public float StdDev => _frozen ? (_frozenInvStdDev > 0f ? 1f / _frozenInvStdDev : 0f) : _zscore.StandardDeviation;
+
         public long Count => _zscore.Count;
 
         // ---------------------------------------------------------------------------
@@ -58,7 +61,7 @@ namespace DevOnBike.Overfit.Statistical
         public void FitBatch(ReadOnlySpan<float> data)
         {
             ThrowIfFrozen();
-            
+
             if (data.Length == 0)
             {
                 return;
@@ -82,20 +85,19 @@ namespace DevOnBike.Overfit.Statistical
         public void FitIncremental(float value)
         {
             ThrowIfFrozen();
+
             _zscore.FitIncremental(MathF.Log(1f + MathF.Max(0f, value)));
         }
 
         /// <summary>
         /// Zamraża parametry Z-Score po zakończeniu fitu na Golden Window.
         /// Po Freeze() FitBatch/FitIncremental rzucają wyjątek.
-        /// TransformInPlace używa zamrożonych parametrów.
         /// </summary>
         public void Freeze()
         {
             if (_zscore.Count == 0)
             {
-                throw new InvalidOperationException(
-                    "Cannot freeze before fitting. Call FitBatch or FitIncremental first.");
+                throw new InvalidOperationException("Cannot freeze before fitting. Call FitBatch or FitIncremental first.");
             }
 
             var std = _zscore.StandardDeviation;
@@ -116,7 +118,7 @@ namespace DevOnBike.Overfit.Statistical
         public void TransformInPlace(Span<float> data)
         {
             ThrowIfNotFrozen();
-            
+
             if (data.Length == 0)
             {
                 return;
@@ -124,7 +126,6 @@ namespace DevOnBike.Overfit.Statistical
 
             ApplyReLuAndLog1P(data, data);
 
-            // Z-Score z zamrożonymi parametrami — bez alokacji
             TensorPrimitives.Subtract(data, _frozenMean, data);
             TensorPrimitives.Multiply(data, _frozenInvStdDev, data);
         }
@@ -133,16 +134,14 @@ namespace DevOnBike.Overfit.Statistical
         // Persistence
         // ---------------------------------------------------------------------------
 
-        /// <summary>Zapisuje zamrożone parametry. Wywołaj po Freeze().</summary>
         public void Save(BinaryWriter bw)
         {
             ThrowIfNotFrozen();
-            
+
             bw.Write(_frozenMean);
             bw.Write(_frozenInvStdDev);
         }
 
-        /// <summary>Wczytuje zamrożone parametry — gotowy do TransformInPlace.</summary>
         public void Load(BinaryReader br)
         {
             _frozenMean = br.ReadSingle();
@@ -153,7 +152,6 @@ namespace DevOnBike.Overfit.Statistical
         public void Reset()
         {
             _zscore.Reset();
-            
             _frozenMean = 0f;
             _frozenInvStdDev = 0f;
             _frozen = false;
@@ -167,20 +165,17 @@ namespace DevOnBike.Overfit.Statistical
         {
             // ReLU — SIMD: x = max(0, x)
             TensorPrimitives.Max(src, 0f, dst);
- 
-            // Log1p — TensorPrimitives nie ma Log1P dla float span w .NET 10.
-            // Implementujemy przez Add(1) + Log — dwa przejścia SIMD.
-            // Alternatywa: pętla z MathF.Log1P (scalar, brak SIMD) — wolniejsza.
-            TensorPrimitives.Add(dst, 1f, dst);    // dst = x + 1
-            TensorPrimitives.Log(dst, dst);         // dst = log(x + 1)
+
+            // Log1p przez dwa przejścia SIMD — TensorPrimitives nie ma Log1P dla float span w .NET 10
+            TensorPrimitives.Add(dst, 1f, dst);   // dst = x + 1
+            TensorPrimitives.Log(dst, dst);        // dst = log(x + 1)
         }
 
         private void ThrowIfFrozen()
         {
             if (_frozen)
             {
-                throw new InvalidOperationException(
-                    "Normalizer is frozen. Call Reset() before fitting again.");
+                throw new InvalidOperationException("Normalizer is frozen. Call Reset() before fitting again.");
             }
         }
 
@@ -188,8 +183,7 @@ namespace DevOnBike.Overfit.Statistical
         {
             if (!_frozen)
             {
-                throw new InvalidOperationException(
-                    "Normalizer is not frozen. Call Freeze() after fitting, or Load() to restore.");
+                throw new InvalidOperationException("Normalizer is not frozen. Call Freeze() after fitting, or Load() to restore.");
             }
         }
     }

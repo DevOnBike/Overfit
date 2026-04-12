@@ -299,6 +299,7 @@ namespace DevOnBike.Overfit.Core
                     indices[d] = 0;
                 }
             }
+
             return result;
         }
 
