@@ -70,16 +70,16 @@ namespace DevOnBike.Overfit.Tests.Integration
                 var scaledResult = pipeline.Process(batch.Series, batch.WindowStartMs, batch.ScrapeTimestampMs);
                 var devSpan = scaledResult.PodDeviations.AsSpan();
 
-                for (int pod = 0; pod < scaledResult.PodIndex.Count; pod++)
+                for (var pod = 0; pod < scaledResult.PodIndex.Count; pod++)
                 {
                     // Tensor dla jednego poda [Batch=1, SeqLen=30, Features=16]
                     var tensor = new FastTensor<float>(1, WindowSize, TotalFeatures);
                     var tensorSpan = tensor.AsSpan();
 
-                    for (int t = 0; t < WindowSize; t++)
+                    for (var t = 0; t < WindowSize; t++)
                     {
-                        long stepSecondsUnix = (batch.WindowStartMs / 1000) + (t * StepSeconds);
-                        int offset = t * TotalFeatures;
+                        var stepSecondsUnix = (batch.WindowStartMs / 1000) + (t * StepSeconds);
+                        var offset = t * TotalFeatures;
 
                         var timeFeat = DateTimeNormalizer.EncodeAllTimeFeaturesFromUnixSeconds(stepSecondsUnix);
                         tensorSpan[offset + 0] = timeFeat.HourSin;
@@ -87,9 +87,9 @@ namespace DevOnBike.Overfit.Tests.Integration
                         tensorSpan[offset + 2] = timeFeat.DaySin;
                         tensorSpan[offset + 3] = timeFeat.DayCos;
 
-                        for (int m = 0; m < MetricCount; m++)
+                        for (var m = 0; m < MetricCount; m++)
                         {
-                            int devIdx = (pod * WindowSize * MetricCount) + (t * MetricCount) + m;
+                            var devIdx = (pod * WindowSize * MetricCount) + (t * MetricCount) + m;
                             tensorSpan[offset + TimeFeaturesCount + m] = devSpan[devIdx];
                         }
                     }
@@ -108,12 +108,12 @@ namespace DevOnBike.Overfit.Tests.Integration
             using var scheduler = new LRScheduler(optimizer, autoencoder.Parameters().ToArray(), msg => _output.WriteLine(msg));
 
             const int epochs = 5;
-            float firstEpochLoss = 0f;
-            float lastEpochLoss = 0f;
+            var firstEpochLoss = 0f;
+            var lastEpochLoss = 0f;
 
-            for (int epoch = 1; epoch <= epochs; epoch++)
+            for (var epoch = 1; epoch <= epochs; epoch++)
             {
-                float epochLoss = 0f;
+                var epochLoss = 0f;
 
                 foreach (var inputTensor in trainingTensors)
                 {
@@ -162,10 +162,10 @@ namespace DevOnBike.Overfit.Tests.Integration
             int windowSize, int stepSeconds, int totalScrapes)
         {
             var batches = new List<(long, long, List<RawMetricSeries>)>();
-            long baseTsMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var baseTsMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-            int totalSamplesRequired = windowSize + totalScrapes;
-            long veryStartMs = baseTsMs - (windowSize * stepSeconds * 1000);
+            var totalSamplesRequired = windowSize + totalScrapes;
+            var veryStartMs = baseTsMs - (windowSize * stepSeconds * 1000);
 
             var allSeries = new List<RawMetricSeries>();
             for (byte m = 0; m < (byte)MetricIndex.Count; m++)
@@ -176,20 +176,20 @@ namespace DevOnBike.Overfit.Tests.Integration
                     MetricTypeId = m
                 };
 
-                for (int i = 0; i < totalSamplesRequired; i++)
+                for (var i = 0; i < totalSamplesRequired; i++)
                 {
                     var tsMs = veryStartMs + (i * stepSeconds * 1000);
                     // Podstawiamy piękną, łagodną falę, którą LSTM uwielbia modelować
-                    float val = 50f + MathF.Sin(i * 0.2f) * 20f;
+                    var val = 50f + MathF.Sin(i * 0.2f) * 20f;
                     series.Samples.Add(new RawSample { Timestamp = tsMs, Value = val });
                 }
                 allSeries.Add(series);
             }
 
-            for (int i = 0; i < totalScrapes; i++)
+            for (var i = 0; i < totalScrapes; i++)
             {
-                long scrapeTsMs = baseTsMs + (i * stepSeconds * 1000);
-                long windowStartMs = scrapeTsMs - ((windowSize - 1) * stepSeconds * 1000);
+                var scrapeTsMs = baseTsMs + (i * stepSeconds * 1000);
+                var windowStartMs = scrapeTsMs - ((windowSize - 1) * stepSeconds * 1000);
 
                 batches.Add((scrapeTsMs, windowStartMs, allSeries));
             }
