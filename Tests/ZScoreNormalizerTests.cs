@@ -15,12 +15,12 @@ namespace DevOnBike.Overfit.Tests
         public void FitBatch_CalledMultipleTimes_ShouldAccumulateCorrectlyUsingChansAlgorithm()
         {
             // ARRANGE
-            float[] part1 = { 1f, 2f, 3f, 4f, 5f };
-            float[] part2 = { 10f, 20f, 30f, 40f, 50f };
-            float[] part3 = { -5f, -10f, -15f };
+            float[] part1 = [1f, 2f, 3f, 4f, 5f];
+            float[] part2 = [10f, 20f, 30f, 40f, 50f];
+            float[] part3 = [-5f, -10f, -15f];
 
             // Scalona tablica jako nasze źródło prawdy (Ground Truth)
-            float[] fullData = part1.Concat(part2).Concat(part3).ToArray();
+            var fullData = part1.Concat(part2).Concat(part3).ToArray();
 
             var splitNormalizer = new ZScoreNormalizer();
             var fullNormalizer = new ZScoreNormalizer();
@@ -46,13 +46,13 @@ namespace DevOnBike.Overfit.Tests
         public void FitBatch_And_FitIncremental_CanBeSafelyMixed()
         {
             // ARRANGE
-            float[] batch1 = { 100f, 200f, 300f };
-            float val1 = 150f;
-            float val2 = 250f;
-            float[] batch2 = { -100f, -200f };
+            float[] batch1 = [100f, 200f, 300f];
+            var val1 = 150f;
+            var val2 = 250f;
+            float[] batch2 = [-100f, -200f];
 
             // Znów tworzymy absolutne źródło prawdy
-            float[] fullData = { 100f, 200f, 300f, 150f, 250f, -100f, -200f };
+            float[] fullData = [100f, 200f, 300f, 150f, 250f, -100f, -200f];
 
             var mixedNormalizer = new ZScoreNormalizer();
             var baselineNormalizer = new ZScoreNormalizer();
@@ -83,7 +83,7 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void FitBatch_And_FitIncremental_ShouldYieldIdenticalResults()
         {
-            float[] data = { 1.5f, 2.5f, 3.5f, 4.5f, 5.5f, 10.0f, -2.0f, 0.0f };
+            float[] data = [1.5f, 2.5f, 3.5f, 4.5f, 5.5f, 10.0f, -2.0f, 0.0f];
             var batchNormalizer = new ZScoreNormalizer();
             var incrementalNormalizer = new ZScoreNormalizer();
 
@@ -99,18 +99,18 @@ namespace DevOnBike.Overfit.Tests
         public void TransformInPlace_ShouldCorrectlyStandardizeData()
         {
             // Średnia = 5.0, StdDev = 2.0
-            float[] data = { 2f, 4f, 4f, 4f, 5f, 5f, 7f, 9f };
+            float[] data = [2f, 4f, 4f, 4f, 5f, 5f, 7f, 9f];
             var normalizer = new ZScoreNormalizer();
             normalizer.FitBatch(data);
 
-            float[] dataToTransform = (float[])data.Clone();
+            var dataToTransform = (float[])data.Clone();
             normalizer.TransformInPlace(dataToTransform);
 
             Assert.Equal(5.0f, normalizer.Mean, precision: 4);
             Assert.Equal(2.0f, normalizer.StandardDeviation, precision: 4);
 
-            float[] expected = { -1.5f, -0.5f, -0.5f, -0.5f, 0f, 0f, 1.0f, 2.0f };
-            for (int i = 0; i < expected.Length; i++)
+            float[] expected = [-1.5f, -0.5f, -0.5f, -0.5f, 0f, 0f, 1.0f, 2.0f];
+            for (var i = 0; i < expected.Length; i++)
             {
                 Assert.Equal(expected[i], dataToTransform[i], precision: 4);
             }
@@ -119,11 +119,11 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void TransformInPlace_WithConstantData_ShouldAvoidDivisionByZero()
         {
-            float[] data = { 7f, 7f, 7f, 7f, 7f };
+            float[] data = [7f, 7f, 7f, 7f, 7f];
             var normalizer = new ZScoreNormalizer();
             normalizer.FitBatch(data);
 
-            float[] dataToTransform = (float[])data.Clone();
+            var dataToTransform = (float[])data.Clone();
             normalizer.TransformInPlace(dataToTransform);
 
             Assert.Equal(7.0f, normalizer.Mean, precision: 4);
@@ -136,7 +136,7 @@ namespace DevOnBike.Overfit.Tests
         public void Reset_ShouldClearAllInternalStatistics()
         {
             var normalizer = new ZScoreNormalizer();
-            normalizer.FitBatch(new float[] { 1f, 2f, 3f });
+            normalizer.FitBatch([1f, 2f, 3f]);
 
             normalizer.Reset();
 
@@ -152,7 +152,7 @@ namespace DevOnBike.Overfit.Tests
 
             var exception = Record.Exception(() =>
             {
-                ReadOnlySpan<float> emptyData = ReadOnlySpan<float>.Empty;
+                var emptyData = ReadOnlySpan<float>.Empty;
                 normalizer.FitBatch(emptyData);
             });
 

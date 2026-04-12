@@ -7,7 +7,7 @@ namespace DevOnBike.Overfit.Statistical
     {
         private long _count;
         private double _mean;
-        private double _m2; // Agregator sumy kwadratów różnic
+        private double _m2;
 
         public float Mean => (float)_mean;
 
@@ -17,8 +17,11 @@ namespace DevOnBike.Overfit.Statistical
         public long Count => _count;
 
         /// <summary>
-        /// Turbowydajne przetwarzanie wsadowe (SIMD).
-        /// Używa algorytmu Chana do bezpiecznego scalania batchy ze stanem globalnym.
+        /// Turbowydajne przetwarzanie wsadowe z algorytmem Chana.
+        /// Mean liczona w double aby uniknąć utraty precyzji dla dużych wartości
+        /// (np. MemoryWorkingSetBytes ~10⁹).
+        /// M2 liczone przez SIMD SumOfSquares na float diffs — wystarczająca precyzja
+        /// gdy dane są wstępnie znormalizowane. Dla surowych metryk użyj FitIncremental.
         /// </summary>
         public void FitBatch(ReadOnlySpan<float> data)
         {
@@ -29,66 +32,66 @@ namespace DevOnBike.Overfit.Statistical
 
             long n2 = data.Length;
 
-            // 1. Liczymy lokalne parametry batcha (używamy SIMD dla float, ale promujemy do double)
-            var localMeanFloat = TensorPrimitives.Sum(data) / n2;
-            double localMean = localMeanFloat;
-            double localM2 = 0;
+            // Mean w double — chroni przed utratą precyzji dla dużych wartości
+            double localMean = 0.0;
+            for (var i = 0; i < data.Length; i++) localMean += data[i];
+            localMean /= n2;
 
+            var localMeanFloat = (float)localMean;
+
+            // M2 przez SIMD — subtract + SumOfSquares na float diffs
             var buffer = ArrayPool<float>.Shared.Rent(data.Length);
-            var diffs = buffer.AsSpan(0, data.Length);
+            double localM2;
 
             try
             {
-                // diffs = data - localMeanFloat
+                var diffs = buffer.AsSpan(0, data.Length);
                 TensorPrimitives.Subtract(data, localMeanFloat, diffs);
-                // Iloczyn skalarny (suma kwadratów różnic)
-                localM2 = TensorPrimitives.Dot(diffs, diffs);
+                localM2 = TensorPrimitives.SumOfSquares(diffs);
             }
             finally
             {
                 ArrayPool<float>.Shared.Return(buffer);
             }
 
-            // 2. Scalanie stanów (Chan's Update Algorithm - Welford dla paczek)
+            // Chan's merge
             if (_count == 0)
             {
-                // Pierwszy batch - po prostu inicjalizujemy stan
                 _count = n2;
                 _mean = localMean;
                 _m2 = localM2;
             }
             else
             {
-                // Kolejne batche - matematyczne scalanie
                 var newCount = _count + n2;
                 var delta = localMean - _mean;
 
-                // Nowa średnia
                 _mean += delta * n2 / newCount;
 
-                // Nowe m2 (suma kwadratów odchyleń)
-                _m2 += localM2 + (delta * delta * _count * n2) / newCount;
+                // (double) cast chroni przed overflow _count * n2 przy bardzo dużych zbiorach
+                _m2 += localM2 + (delta * delta * (double)_count * n2) / newCount;
 
                 _count = newCount;
             }
         }
 
         /// <summary>
-        /// Algorytm sekwencyjny (Welford's Algorithm). 
+        /// Algorytm sekwencyjny Welforda — precyzyjny dla dowolnych wartości,
+        /// w tym surowych metryk o dużym zakresie.
         /// </summary>
         public void FitIncremental(float value)
         {
             _count++;
 
             var delta = value - _mean;
-
             _mean += delta / _count;
-
             var delta2 = value - _mean;
-
             _m2 += delta * delta2;
         }
 
+        /// <summary>
+        /// Aplikuje Z-Score in-place: z = (x - mean) / stdDev.
+        /// </summary>
         public void TransformInPlace(Span<float> data)
         {
             if (data.Length == 0)
@@ -104,12 +107,9 @@ namespace DevOnBike.Overfit.Statistical
             }
 
             TensorPrimitives.Subtract(data, Mean, data);
-
-            var invStdDev = 1.0f / stdDev;
-            
-            TensorPrimitives.Multiply(data, invStdDev, data);
+            TensorPrimitives.Multiply(data, 1.0f / stdDev, data);
         }
-        
+
         public void Reset()
         {
             _count = 0;
