@@ -1,32 +1,96 @@
-﻿using DevOnBike.Overfit.Statistical;
+﻿using System;
+using System.Linq;
+using Xunit;
+using DevOnBike.Overfit.Statistical;
 
 namespace DevOnBike.Overfit.Tests
 {
     public class ZScoreNormalizerTests
     {
+        // ---------------------------------------------------------------------
+        // NOWE TESTY - WERYFIKACJA ALGORYTMU CHANA I MIESZANIA METOD
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        public void FitBatch_CalledMultipleTimes_ShouldAccumulateCorrectlyUsingChansAlgorithm()
+        {
+            // ARRANGE
+            float[] part1 = { 1f, 2f, 3f, 4f, 5f };
+            float[] part2 = { 10f, 20f, 30f, 40f, 50f };
+            float[] part3 = { -5f, -10f, -15f };
+
+            // Scalona tablica jako nasze źródło prawdy (Ground Truth)
+            float[] fullData = part1.Concat(part2).Concat(part3).ToArray();
+
+            var splitNormalizer = new ZScoreNormalizer();
+            var fullNormalizer = new ZScoreNormalizer();
+
+            // ACT
+            // 1. Fitujemy w 3 osobnych kawałkach (to wymusza zadziałanie Chan's Merge)
+            splitNormalizer.FitBatch(part1);
+            splitNormalizer.FitBatch(part2);
+            splitNormalizer.FitBatch(part3);
+
+            // 2. Fitujemy całość za jednym zamachem
+            fullNormalizer.FitBatch(fullData);
+
+            // ASSERT
+            Assert.Equal(fullData.Length, splitNormalizer.Count);
+
+            // Średnia i StdDev muszą być identyczne (z dokładnością do 5 miejsc, bo to double pod spodem)
+            Assert.Equal(fullNormalizer.Mean, splitNormalizer.Mean, precision: 5);
+            Assert.Equal(fullNormalizer.StandardDeviation, splitNormalizer.StandardDeviation, precision: 5);
+        }
+
+        [Fact]
+        public void FitBatch_And_FitIncremental_CanBeSafelyMixed()
+        {
+            // ARRANGE
+            float[] batch1 = { 100f, 200f, 300f };
+            float val1 = 150f;
+            float val2 = 250f;
+            float[] batch2 = { -100f, -200f };
+
+            // Znów tworzymy absolutne źródło prawdy
+            float[] fullData = { 100f, 200f, 300f, 150f, 250f, -100f, -200f };
+
+            var mixedNormalizer = new ZScoreNormalizer();
+            var baselineNormalizer = new ZScoreNormalizer();
+
+            // ACT
+            // Mieszamy na pełnej petardzie: Batch -> Incremental -> Incremental -> Batch
+            mixedNormalizer.FitBatch(batch1);
+            mixedNormalizer.FitIncremental(val1);
+            mixedNormalizer.FitIncremental(val2);
+            mixedNormalizer.FitBatch(batch2);
+
+            // Baseline fituje po jednym elemencie przez klasycznego Welforda (100% pewności)
+            foreach (var val in fullData)
+            {
+                baselineNormalizer.FitIncremental(val);
+            }
+
+            // ASSERT
+            Assert.Equal(fullData.Length, mixedNormalizer.Count);
+            Assert.Equal(baselineNormalizer.Mean, mixedNormalizer.Mean, precision: 5);
+            Assert.Equal(baselineNormalizer.StandardDeviation, mixedNormalizer.StandardDeviation, precision: 5);
+        }
+
+        // ---------------------------------------------------------------------
+        // ISTNIEJĄCE TESTY (Pozostałe weryfikacje zachowania)
+        // ---------------------------------------------------------------------
+
         [Fact]
         public void FitBatch_And_FitIncremental_ShouldYieldIdenticalResults()
         {
-            // ARRANGE
             float[] data = { 1.5f, 2.5f, 3.5f, 4.5f, 5.5f, 10.0f, -2.0f, 0.0f };
             var batchNormalizer = new ZScoreNormalizer();
             var incrementalNormalizer = new ZScoreNormalizer();
 
-            // ACT
-            // 1. Obliczamy parametry wsadowo (SIMD)
             batchNormalizer.FitBatch(data);
+            foreach (var val in data) incrementalNormalizer.FitIncremental(val);
 
-            // 2. Obliczamy parametry strumieniowo (Algorytm Welforda)
-            foreach (var val in data)
-            {
-                incrementalNormalizer.FitIncremental(val);
-            }
-
-            // ASSERT
             Assert.Equal(data.Length, batchNormalizer.Count);
-            Assert.Equal(data.Length, incrementalNormalizer.Count);
-
-            // Tolerancja 4 miejsc po przecinku (1e-4) dla różnic w operacjach zmiennoprzecinkowych
             Assert.Equal(batchNormalizer.Mean, incrementalNormalizer.Mean, precision: 4);
             Assert.Equal(batchNormalizer.StandardDeviation, incrementalNormalizer.StandardDeviation, precision: 4);
         }
@@ -34,26 +98,17 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void TransformInPlace_ShouldCorrectlyStandardizeData()
         {
-            // ARRANGE
-            // Znany zbiór danych, dla którego łatwo policzyć parametry w pamięci:
-            // Średnia = 5.0
-            // Wariancja = 4.0 -> Odchylenie Standardowe (StdDev) = 2.0
+            // Średnia = 5.0, StdDev = 2.0
             float[] data = { 2f, 4f, 4f, 4f, 5f, 5f, 7f, 9f };
-
             var normalizer = new ZScoreNormalizer();
             normalizer.FitBatch(data);
 
-            // Klonujemy tablicę, ponieważ TransformInPlace nadpisuje dane wejściowe
             float[] dataToTransform = (float[])data.Clone();
-
-            // ACT
             normalizer.TransformInPlace(dataToTransform);
 
-            // ASSERT
             Assert.Equal(5.0f, normalizer.Mean, precision: 4);
             Assert.Equal(2.0f, normalizer.StandardDeviation, precision: 4);
 
-            // Oczekiwane Z-Scores: z = (x - 5) / 2
             float[] expected = { -1.5f, -0.5f, -0.5f, -0.5f, 0f, 0f, 1.0f, 2.0f };
             for (int i = 0; i < expected.Length; i++)
             {
@@ -64,39 +119,27 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void TransformInPlace_WithConstantData_ShouldAvoidDivisionByZero()
         {
-            // ARRANGE
-            // Zbiór danych, gdzie wariancja = 0 (co w naiwnej implementacji powoduje NaN przy dzieleniu)
             float[] data = { 7f, 7f, 7f, 7f, 7f };
             var normalizer = new ZScoreNormalizer();
-
             normalizer.FitBatch(data);
-            float[] dataToTransform = (float[])data.Clone();
 
-            // ACT
+            float[] dataToTransform = (float[])data.Clone();
             normalizer.TransformInPlace(dataToTransform);
 
-            // ASSERT
             Assert.Equal(7.0f, normalizer.Mean, precision: 4);
             Assert.Equal(0.0f, normalizer.StandardDeviation, precision: 4);
 
-            // Skoro z = (7 - 7) / max(0, 1e-8), wynik musi wynosić 0.0 dla wszystkich elementów
-            foreach (var val in dataToTransform)
-            {
-                Assert.Equal(0f, val, precision: 4);
-            }
+            foreach (var val in dataToTransform) Assert.Equal(0f, val, precision: 4);
         }
 
         [Fact]
         public void Reset_ShouldClearAllInternalStatistics()
         {
-            // ARRANGE
             var normalizer = new ZScoreNormalizer();
-            normalizer.FitBatch(new float[] { 1f, 2f, 3f }); // Symulacja pracy
+            normalizer.FitBatch(new float[] { 1f, 2f, 3f });
 
-            // ACT
             normalizer.Reset();
 
-            // ASSERT
             Assert.Equal(0, normalizer.Count);
             Assert.Equal(0f, normalizer.Mean);
             Assert.Equal(0f, normalizer.StandardDeviation);
@@ -105,17 +148,14 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void FitBatch_WithEmptySpan_ShouldNotThrowException()
         {
-            // ARRANGE
             var normalizer = new ZScoreNormalizer();
 
-            // ACT
             var exception = Record.Exception(() =>
             {
                 ReadOnlySpan<float> emptyData = ReadOnlySpan<float>.Empty;
                 normalizer.FitBatch(emptyData);
             });
 
-            // ASSERT
             Assert.Null(exception);
             Assert.Equal(0, normalizer.Count);
         }

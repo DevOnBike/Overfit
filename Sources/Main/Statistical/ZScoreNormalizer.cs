@@ -1,31 +1,25 @@
-﻿using System;
-using System.Buffers;
+﻿using System.Buffers;
 using System.Numerics.Tensors;
 
 namespace DevOnBike.Overfit.Statistical
 {
-    /// <summary>
-    /// Klasa realizująca normalizację Z-Score (Standaryzację).
-    /// Posiada dwa tryby pracy: szybki wsadowy (SIMD) oraz precyzyjny strumieniowy (Welford).
-    /// </summary>
     public sealed class ZScoreNormalizer
     {
         private long _count;
         private double _mean;
-        private double _m2; // Agregator sumy kwadratów różnic (potrzebny do wariancji)
+        private double _m2; // Agregator sumy kwadratów różnic
 
         public float Mean => (float)_mean;
 
-        // Zależnie od tego, czy traktujemy dane jako populację czy próbkę:
-        // Tutaj używamy wariancji populacyjnej (dzielenie przez N). Dla próbki użyj (Count - 1).
-        public float StandardDeviation => _count > 1 ? (float)Math.Sqrt(_m2 / _count) : 0f;
+        // Wariancja populacyjna. Dla próbkowej zmień na: _count > 1 ? _m2 / (_count - 1) : 0
+        public float StandardDeviation => _count > 0 ? (float)Math.Sqrt(_m2 / _count) : 0f;
 
         public long Count => _count;
 
         /// <summary>
-        /// Opcja 1: Turbowydajne przetwarzanie kolekcji (Batch) z użyciem SIMD (TensorPrimitives).
+        /// Turbowydajne przetwarzanie wsadowe (SIMD).
+        /// Używa algorytmu Chana do bezpiecznego scalania batchy ze stanem globalnym.
         /// </summary>
-        /// <param name="data">Ciągła pamięć z wartościami zmiennoprzecinkowymi.</param>
         public void FitBatch(ReadOnlySpan<float> data)
         {
             if (data.Length == 0)
@@ -33,54 +27,68 @@ namespace DevOnBike.Overfit.Statistical
                 return;
             }
 
-            // 1. Sprzętowo akcelerowana suma
-            var sum = TensorPrimitives.Sum(data);
-            var mean = sum / data.Length;
+            long n2 = data.Length;
 
-            // 2. Sprzętowe liczenie sumy kwadratów odchyleń (Variance)
+            // 1. Liczymy lokalne parametry batcha (używamy SIMD dla float, ale promujemy do double)
+            var localMeanFloat = TensorPrimitives.Sum(data) / n2;
+            double localMean = localMeanFloat;
+            double localM2 = 0;
+
             var buffer = ArrayPool<float>.Shared.Rent(data.Length);
             var diffs = buffer.AsSpan(0, data.Length);
 
             try
             {
-                // diffs = data - mean
-                TensorPrimitives.Subtract(data, mean, diffs);
-
-                // sumOfSquares = diffs * diffs (Iloczyn skalarny z samym sobą)
-                var sumSq = TensorPrimitives.Dot(diffs, diffs);
-
-                // Zapisujemy parametry dla całej paczki
-                _count = data.Length;
-                _mean = mean;
-                _m2 = sumSq;
+                // diffs = data - localMeanFloat
+                TensorPrimitives.Subtract(data, localMeanFloat, diffs);
+                // Iloczyn skalarny (suma kwadratów różnic)
+                localM2 = TensorPrimitives.Dot(diffs, diffs);
             }
             finally
             {
                 ArrayPool<float>.Shared.Return(buffer);
             }
+
+            // 2. Scalanie stanów (Chan's Update Algorithm - Welford dla paczek)
+            if (_count == 0)
+            {
+                // Pierwszy batch - po prostu inicjalizujemy stan
+                _count = n2;
+                _mean = localMean;
+                _m2 = localM2;
+            }
+            else
+            {
+                // Kolejne batche - matematyczne scalanie
+                var newCount = _count + n2;
+                var delta = localMean - _mean;
+
+                // Nowa średnia
+                _mean += delta * n2 / newCount;
+
+                // Nowe m2 (suma kwadratów odchyleń)
+                _m2 += localM2 + (delta * delta * _count * n2) / newCount;
+
+                _count = newCount;
+            }
         }
 
         /// <summary>
-        /// Opcja 2: Algorytm sekwencyjny (Welford's Algorithm). 
-        /// Niezawodny dla ogromnych strumieni danych o nieznanej z góry wielkości.
+        /// Algorytm sekwencyjny (Welford's Algorithm). 
         /// </summary>
-        /// <param name="value">Pojedyncza próbka wpadająca z generatora/strumienia.</param>
         public void FitIncremental(float value)
         {
             _count++;
 
-            // Logika Welforda - matematycznie zapobiega utracie precyzji w liczbach floating-point
             var delta = value - _mean;
+
             _mean += delta / _count;
+
             var delta2 = value - _mean;
 
             _m2 += delta * delta2;
         }
 
-        /// <summary>
-        /// Aplikuje wyuczone parametry (Z-Score) bezpośrednio na podanych danych.
-        /// Nadpisuje przekazaną kolekcję w celu oszczędzania pamięci.
-        /// </summary>
         public void TransformInPlace(Span<float> data)
         {
             if (data.Length == 0)
@@ -90,16 +98,13 @@ namespace DevOnBike.Overfit.Statistical
 
             var stdDev = StandardDeviation;
 
-            // Zabezpieczenie przed dzieleniem przez zero dla stałych danych
             if (stdDev < 1e-8f)
             {
                 stdDev = 1e-8f;
             }
 
-            // Sprzętowo akcelerowana aplikacja Z-Score: z = (x - mean) / stdDev
             TensorPrimitives.Subtract(data, Mean, data);
 
-            // Mnożenie jest szybsze dla procesora niż dzielenie
             var invStdDev = 1.0f / stdDev;
             
             TensorPrimitives.Multiply(data, invStdDev, data);
