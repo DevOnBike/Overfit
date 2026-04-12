@@ -13,19 +13,26 @@ namespace DevOnBike.Overfit.Core
 {
     /// <summary>
     ///     Static utility class providing high-performance tensor operations with Autograd support.
-    ///     Utilizes SIMD (TensorPrimitives) and Task Parallel Library (TPL) for hardware acceleration.
+    ///     Utilizes SIMD (TensorPrimitives), Task Parallel Library (TPL), and L1/L2 Cache Tiling.
     /// </summary>
     public static class TensorMath
     {
         // Workload threshold (in FMA operations) below which Parallel.For is inefficient.
         private const long ParallelThreshold = 4096;
 
-        // Optymalny rozmiar dla stackalloc (w elementach float).
-        // 1024 floats = 4 KB, idealnie pasuje do L1 Cache, przetwarza 64 wektory AVX-512.
+        // Rozmiar bufora alokowanego na stosie (4 KB - idealnie mieści się w L1).
         private const int StackAllocThreshold = 1024;
 
         // ====================================================================
-        // 1. BASIC LINEAR ALGEBRA
+        // CACHE TILING PARAMETERS (Złoty podział dla L1/L2 Cache)
+        // ====================================================================
+        // Pętle wewnątrz MatMul dzielimy na mniejsze klocki, aby nie przepełnić cache'u 
+        // procesora przed zakończeniem operacji na wektorach SIMD.
+        private const int BlockK = 128;
+        private const int BlockJ = 512; // 512 floatów = 2KB na wiersz, idealne dla wektoryzacji.
+
+        // ====================================================================
+        // 1. BASIC LINEAR ALGEBRA (With Blocked Matrix Multiplication)
         // ====================================================================
 
         public static AutogradNode Add(ComputationGraph graph, AutogradNode left, AutogradNode right)
@@ -131,18 +138,29 @@ namespace DevOnBike.Overfit.Core
                 {
                     var aS = A.AsSpan();
                     var bS = B.AsSpan();
-                    var rowC = C.AsSpan().Slice(i * bCols, bCols);
+                    var rowA = aS.Slice(i * aCols, aCols);
+                    var rowCFull = C.AsSpan().Slice(i * bCols, bCols);
 
-                    for (var k = 0; k < aCols; k++)
+                    // Cache Tiling: Blokowanie pętli K i J dla spójności danych w L2 Cache
+                    for (var j0 = 0; j0 < bCols; j0 += BlockJ)
                     {
-                        var valA = aS[i * aCols + k];
+                        var jLen = Math.Min(bCols - j0, BlockJ);
+                        var rowC = rowCFull.Slice(j0, jLen);
 
-                        if (valA == 0)
+                        for (var k0 = 0; k0 < aCols; k0 += BlockK)
                         {
-                            continue;
+                            var kMax = Math.Min(k0 + BlockK, aCols);
+                            for (var k = k0; k < kMax; k++)
+                            {
+                                var valA = rowA[k];
+                                
+                                if (valA != 0f)
+                                {
+                                    var rowB = bS.Slice(k * bCols + j0, jLen);
+                                    TensorPrimitives.MultiplyAdd(rowB, valA, rowC, rowC);
+                                }
+                            }
                         }
-
-                        TensorPrimitives.MultiplyAdd(bS.Slice(k * bCols, bCols), valA, rowC, rowC);
                     }
                 });
             }
@@ -154,17 +172,30 @@ namespace DevOnBike.Overfit.Core
         {
             cS.Clear();
 
-            for (var i = 0; i < aR; i++)
+            // Cache Tiling for Single-Thread
+            for (var j0 = 0; j0 < bC; j0 += BlockJ)
             {
-                var rowC = cS.Slice(i * bC, bC);
-                var rowA = aS.Slice(i * aC, aC);
+                var jLen = Math.Min(bC - j0, BlockJ);
 
-                for (var k = 0; k < aC; k++)
+                for (var k0 = 0; k0 < aC; k0 += BlockK)
                 {
-                    var valA = rowA[k];
-                    if (valA != 0f)
+                    var kMax = Math.Min(k0 + BlockK, aC);
+
+                    for (var i = 0; i < aR; i++)
                     {
-                        TensorPrimitives.MultiplyAdd(bS.Slice(k * bC, bC), valA, rowC, rowC);
+                        var rowA = aS.Slice(i * aC, aC);
+                        var rowC = cS.Slice(i * bC + j0, jLen);
+
+                        for (var k = k0; k < kMax; k++)
+                        {
+                            var valA = rowA[k];
+                            
+                            if (valA != 0f)
+                            {
+                                var rowB = bS.Slice(k * bC + j0, jLen);
+                                TensorPrimitives.MultiplyAdd(rowB, valA, rowC, rowC);
+                            }
+                        }
                     }
                 }
             }
@@ -183,6 +214,7 @@ namespace DevOnBike.Overfit.Core
             }
         }
 
+        // C += A * B^T
         private static void MatMulAdd_A_BT(FastTensor<float> A, FastTensor<float> B, FastTensor<float> CGrad)
         {
             int N = A.GetDim(0), K = A.GetDim(1), M = B.GetDim(0);
@@ -196,12 +228,23 @@ namespace DevOnBike.Overfit.Core
 
                 for (var i = 0; i < N; i++)
                 {
-                    var aRow = aS.Slice(i * K, K);
+                    var aRowFull = aS.Slice(i * K, K);
                     var cRow = cS.Slice(i * M, M);
 
-                    for (var j = 0; j < M; j++)
+                    // Cache Tiling: Partial Dot Products
+                    for (var j0 = 0; j0 < M; j0 += BlockJ)
                     {
-                        cRow[j] += TensorPrimitives.Dot(aRow, bS.Slice(j * K, K));
+                        var jMax = Math.Min(j0 + BlockJ, M);
+                        for (var k0 = 0; k0 < K; k0 += BlockK)
+                        {
+                            var kLen = Math.Min(K - k0, BlockK);
+                            var aRowBlock = aRowFull.Slice(k0, kLen);
+
+                            for (var j = j0; j < jMax; j++)
+                            {
+                                cRow[j] += TensorPrimitives.Dot(aRowBlock, bS.Slice(j * K + k0, kLen));
+                            }
+                        }
                     }
                 }
             }
@@ -209,18 +252,30 @@ namespace DevOnBike.Overfit.Core
             {
                 Parallel.For(0, N, i =>
                 {
-                    var aRow = A.AsSpan().Slice(i * K, K);
+                    var aRowFull = A.AsSpan().Slice(i * K, K);
                     var cRow = CGrad.AsSpan().Slice(i * M, M);
                     var bS = B.AsSpan();
 
-                    for (var j = 0; j < M; j++)
+                    // Cache Tiling for Backward Pass (Dot Product Accumulation)
+                    for (var j0 = 0; j0 < M; j0 += BlockJ)
                     {
-                        cRow[j] += TensorPrimitives.Dot(aRow, bS.Slice(j * K, K));
+                        var jMax = Math.Min(j0 + BlockJ, M);
+                        for (var k0 = 0; k0 < K; k0 += BlockK)
+                        {
+                            var kLen = Math.Min(K - k0, BlockK);
+                            var aRowBlock = aRowFull.Slice(k0, kLen);
+
+                            for (var j = j0; j < jMax; j++)
+                            {
+                                cRow[j] += TensorPrimitives.Dot(aRowBlock, bS.Slice(j * K + k0, kLen));
+                            }
+                        }
                     }
                 });
             }
         }
 
+        // C += A^T * B
         private static void MatMulAdd_AT_B(FastTensor<float> A, FastTensor<float> B, FastTensor<float> CGrad)
         {
             var K = A.GetDim(0);
@@ -230,20 +285,32 @@ namespace DevOnBike.Overfit.Core
 
             if (totalWork < ParallelThreshold)
             {
+                var cS = CGrad.AsSpan();
                 var aS = A.AsSpan();
                 var bS = B.AsSpan();
-                var cS = CGrad.AsSpan();
 
                 for (var i = 0; i < N; i++)
                 {
-                    var cRow = cS.Slice(i * M, M);
+                    var cRowFull = cS.Slice(i * M, M);
 
-                    for (var k = 0; k < K; k++)
+                    for (var j0 = 0; j0 < M; j0 += BlockJ)
                     {
-                        var aVal = aS[k * N + i];
-                        if (aVal != 0f)
+                        var jLen = Math.Min(M - j0, BlockJ);
+                        var cRowBlock = cRowFull.Slice(j0, jLen);
+
+                        for (var k0 = 0; k0 < K; k0 += BlockK)
                         {
-                            TensorPrimitives.MultiplyAdd(bS.Slice(k * M, M), aVal, cRow, cRow);
+                            var kMax = Math.Min(k0 + BlockK, K);
+                            for (var k = k0; k < kMax; k++)
+                            {
+                                var aVal = aS[k * N + i];
+                                
+                                if (aVal != 0f)
+                                {
+                                    var bRowBlock = bS.Slice(k * M + j0, jLen);
+                                    TensorPrimitives.MultiplyAdd(bRowBlock, aVal, cRowBlock, cRowBlock);
+                                }
+                            }
                         }
                     }
                 }
@@ -252,19 +319,30 @@ namespace DevOnBike.Overfit.Core
             {
                 Parallel.For(0, N, i =>
                 {
-                    var cRow = CGrad.AsSpan().Slice(i * M, M);
+                    var cRowFull = CGrad.AsSpan().Slice(i * M, M);
                     var aS = A.AsSpan();
                     var bS = B.AsSpan();
 
-                    for (var k = 0; k < K; k++)
+                    // Cache Tiling
+                    for (var j0 = 0; j0 < M; j0 += BlockJ)
                     {
-                        var aVal = aS[k * N + i];
-                        if (aVal == 0)
-                        {
-                            continue;
-                        }
+                        var jLen = Math.Min(M - j0, BlockJ);
+                        var cRowBlock = cRowFull.Slice(j0, jLen);
 
-                        TensorPrimitives.MultiplyAdd(bS.Slice(k * M, M), aVal, cRow, cRow);
+                        for (var k0 = 0; k0 < K; k0 += BlockK)
+                        {
+                            var kMax = Math.Min(k0 + BlockK, K);
+                            for (var k = k0; k < kMax; k++)
+                            {
+                                var aVal = aS[k * N + i];
+                                
+                                if (aVal != 0f)
+                                {
+                                    var bRowBlock = bS.Slice(k * M + j0, jLen);
+                                    TensorPrimitives.MultiplyAdd(bRowBlock, aVal, cRowBlock, cRowBlock);
+                                }
+                            }
+                        }
                     }
                 });
             }
@@ -347,7 +425,6 @@ namespace DevOnBike.Overfit.Core
                 var gradMatArr = ArrayPool<float>.Shared.Rent(outC * K);
                 var dColArr = input.RequiresGrad ? ArrayPool<float>.Shared.Rent(kSqInC * K) : null;
                 var localDw = weights.RequiresGrad ? new FastTensor<float>(true, outC, kSqInC) : null;
-                
                 return (colArr, gradMatArr, dColArr, localDw);
             },
             body: (n, loopState, ws) =>
@@ -715,9 +792,7 @@ namespace DevOnBike.Overfit.Core
             try
             {
                 var diffSpan = diffArr.AsSpan(0, size);
-                
                 TensorPrimitives.Subtract(prediction.Data.AsSpan(), target.Data.AsSpan(), diffSpan);
-                
                 mse = TensorPrimitives.Dot(diffSpan, diffSpan) / size;
             }
             finally
@@ -857,19 +932,16 @@ namespace DevOnBike.Overfit.Core
             {
                 var coeff = C <= StackAllocThreshold ? stackalloc float[C] : (coeffArr = ArrayPool<float>.Shared.Rent(C)).AsSpan(0, C);
                 var term = C <= StackAllocThreshold ? stackalloc float[C] : (termArr = ArrayPool<float>.Shared.Rent(C)).AsSpan(0, C);
-
                 var sumDy = C <= StackAllocThreshold ? stackalloc float[C] : (sumDyArr = ArrayPool<float>.Shared.Rent(C)).AsSpan(0, C);
                 var sumDyXHat = C <= StackAllocThreshold ? stackalloc float[C] : (sumDyXHatArr = ArrayPool<float>.Shared.Rent(C)).AsSpan(0, C);
                 var xHatRow = C <= StackAllocThreshold ? stackalloc float[C] : (xHatRowArr = ArrayPool<float>.Shared.Rent(C)).AsSpan(0, C);
 
-                // Inicjalizacja akumulatorów (stackalloc zwraca brudną pamięć)
                 sumDy.Clear();
                 sumDyXHat.Clear();
 
                 TensorPrimitives.Multiply(gammaS, invStdS, coeff);
                 TensorPrimitives.Multiply(coeff, 1f / N, coeff);
 
-                // PASS 1: Liczymy sumy z xHat w locie (oszczędzamy przepustowość pamięci N*C)
                 for (var i = 0; i < N; i++)
                 {
                     var gradRow = (ReadOnlySpan<float>)outGradS.Slice(i * C, C);
@@ -901,14 +973,12 @@ namespace DevOnBike.Overfit.Core
                         var inGradRow = inGradS.Slice(i * C, C);
                         var inRow = (ReadOnlySpan<float>)inS.Slice(i * C, C);
 
-                        // Rekomputacja xHat
                         TensorPrimitives.Subtract(inRow, meanS, xHatRow);
                         TensorPrimitives.Multiply(xHatRow, invStdS, xHatRow);
 
                         TensorPrimitives.Multiply(gradRow, N, term);
                         TensorPrimitives.Subtract(term, sumDy, term);
 
-                        // Reusing xHatRow buffer to store (xHat * sumDyXHat) temporarily
                         TensorPrimitives.Multiply(xHatRow, sumDyXHat, xHatRow);
                         TensorPrimitives.Subtract(term, xHatRow, term);
 
@@ -1095,7 +1165,6 @@ namespace DevOnBike.Overfit.Core
             float totalLoss;
 
             var tempArr = ArrayPool<float>.Shared.Rent(size);
-            
             try
             {
                 var tempS = tempArr.AsSpan(0, size);
@@ -1208,7 +1277,6 @@ namespace DevOnBike.Overfit.Core
             var inGS = input.Grad.AsSpan();
             var len = inGS.Length;
 
-            // Stack Chunking o rozmiarze 1024 omija GC i nasyca L1/SIMD
             Span<float> buf = stackalloc float[StackAllocThreshold];
 
             for (var i = 0; i < len; i += StackAllocThreshold)
@@ -1219,11 +1287,8 @@ namespace DevOnBike.Overfit.Core
                 var igChunk = inGS.Slice(i, chunk);
                 var b = buf.Slice(0, chunk);
 
-                // b = 1 - σ(x)
                 TensorPrimitives.Subtract(1f, oChunk, b);
-                // b = σ(x) * (1 - σ(x))
                 TensorPrimitives.Multiply(oChunk, b, b);
-                // inGrad += outGrad * b
                 TensorPrimitives.MultiplyAdd(ogChunk, b, igChunk, igChunk);
             }
         }
@@ -1255,7 +1320,6 @@ namespace DevOnBike.Overfit.Core
             var inGS = input.Grad.AsSpan();
             var len = inGS.Length;
 
-            // Stack Chunking o rozmiarze 1024
             Span<float> buf = stackalloc float[StackAllocThreshold];
 
             for (var i = 0; i < len; i += StackAllocThreshold)
@@ -1266,11 +1330,8 @@ namespace DevOnBike.Overfit.Core
                 var igChunk = inGS.Slice(i, chunk);
                 var b = buf.Slice(0, chunk);
 
-                // b = tanh²(x)
                 TensorPrimitives.Multiply(oChunk, oChunk, b);
-                // b = 1 - tanh²(x)
                 TensorPrimitives.Subtract(1f, b, b);
-                // inGrad += outGrad * b
                 TensorPrimitives.MultiplyAdd(ogChunk, b, igChunk, igChunk);
             }
         }
@@ -1312,11 +1373,6 @@ namespace DevOnBike.Overfit.Core
         // GATE SLICE
         // ====================================================================
 
-        /// <summary>
-        ///     Extracts one gate slice from packed gates tensor [batch, 4*hiddenSize].
-        ///     gateIndex: 0=forget, 1=input, 2=candidate, 3=output.
-        ///     Returns a new tensor [batch, hiddenSize] — contiguous copy, safe for autograd.
-        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static AutogradNode GateSlice(
             ComputationGraph graph,
@@ -1347,9 +1403,6 @@ namespace DevOnBike.Overfit.Core
             return output;
         }
 
-        /// <summary>
-        ///     Backward: scatter output grad back into the correct gate slot of gates.Grad.
-        /// </summary>
         public static void GateSliceBackward(
             AutogradNode gates,
             AutogradNode output,
@@ -1380,12 +1433,6 @@ namespace DevOnBike.Overfit.Core
         // TIMESTEP SLICE BACKWARD
         // ====================================================================
 
-        /// <summary>
-        ///     Backward for ExtractTimestep.
-        ///     Scatters output grad [batch, inputSize] back into input grad [batch, seqLen, inputSize]
-        ///     at timestep t.
-        ///     i0=t, i1=seqLen, i2=inputSize
-        /// </summary>
         public static void TimestepSliceBackward(
             AutogradNode input,
             AutogradNode output,
@@ -1413,11 +1460,6 @@ namespace DevOnBike.Overfit.Core
         // STACK TIMESTEPS BACKWARD
         // ====================================================================
 
-        /// <summary>
-        ///     Backward for StackTimesteps.
-        ///     Scatters output grad [batch, seqLen, hiddenSize] back to each h node in nodeContext.
-        ///     i0=batch, i1=seqLen, i2=hiddenSize
-        /// </summary>
         public static void StackTimestepsBackward(
             AutogradNode[] allH,
             AutogradNode output,
@@ -1453,9 +1495,6 @@ namespace DevOnBike.Overfit.Core
         // REPEAT VECTOR
         // ====================================================================
 
-        /// <summary>
-        ///     Repeats input [batch, hiddenSize] → [batch, seqLen, hiddenSize].
-        /// </summary>
         public static AutogradNode RepeatVector(ComputationGraph graph, AutogradNode input, int seqLen)
         {
             var batch = input.Data.GetDim(0);
@@ -1489,11 +1528,6 @@ namespace DevOnBike.Overfit.Core
         // REPEAT VECTOR BACKWARD
         // ====================================================================
 
-        /// <summary>
-        ///     Backward for RepeatVector.
-        ///     Sums gradients from all seqLen copies back into input grad [batch, hiddenSize].
-        ///     i0=seqLen, i1=hiddenSize
-        /// </summary>
         public static void RepeatVectorBackward(
             AutogradNode input,
             AutogradNode output,
