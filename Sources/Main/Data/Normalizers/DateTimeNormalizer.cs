@@ -1,79 +1,43 @@
-﻿using System;
-
-namespace DevOnBike.Overfit.Data.Normalizers
+﻿namespace DevOnBike.Overfit.Data.Normalizers
 {
-    /// <summary>
-    /// Klasa narzędziowa do cyklicznego kodowania czasu (Cyclical Encoding).
-    /// Zamienia liniowy czas na współrzędne na okręgu (Sin/Cos).
-    /// </summary>
     public static class DateTimeNormalizer
     {
         private const double TwoPi = 2.0 * Math.PI;
 
-        /// <summary>
-        /// Transformuje czas z doby (00:00 - 23:59) na dwie zmienne cykliczne.
-        /// </summary>
         public static (float Sin, float Cos) Encode(TimeSpan timeOfDay)
         {
             var decimalHour = timeOfDay.TotalHours;
             var radians = decimalHour / 24.0 * TwoPi;
 
-            return ((float)Math.Sin(radians), (float)Math.Cos(radians));
+            return (CleanZero(Math.Sin(radians)), CleanZero(Math.Cos(radians)));
         }
 
-        /// <summary>
-        /// Transformuje dzień tygodnia na dwie zmienne cykliczne.
-        /// </summary>
         public static (float Sin, float Cos) Encode(DayOfWeek dayOfWeek)
         {
             var dayInt = (int)dayOfWeek;
             var radians = dayInt / 7.0 * TwoPi;
 
-            return ((float)Math.Sin(radians), (float)Math.Cos(radians));
+            return (CleanZero(Math.Sin(radians)), CleanZero(Math.Cos(radians)));
         }
 
-        // ====================================================================
-        // NOWE METODY: OBSŁUGA UNIX TIMESTAMP
-        // ====================================================================
-
-        /// <summary>
-        /// Transformuje standardowy Unix Timestamp (w sekundach) na zmienne cykliczne pory dnia.
-        /// Operuje w przestrzeni UTC dla bezpieczeństwa w systemach rozproszonych.
-        /// </summary>
         public static (float Sin, float Cos) EncodeFromUnixSeconds(long unixTimeSeconds)
         {
-            // Poprawka: Używamy metody z dopiskiem "Seconds"
             var utcTime = DateTimeOffset.FromUnixTimeSeconds(unixTimeSeconds).UtcDateTime;
-
             return Encode(utcTime.TimeOfDay);
         }
 
-        /// <summary>
-        /// Transformuje Unix Timestamp (w milisekundach) na zmienne cykliczne pory dnia.
-        /// Przydatne, gdy dane spływają prosto z Prometheusa, Grafany lub JavaScriptu.
-        /// </summary>
         public static (float Sin, float Cos) EncodeFromUnixMilliseconds(long unixTimeMilliseconds)
         {
-            // Poprawka: Używamy metody z dopiskiem "Milliseconds"
             var utcTime = DateTimeOffset.FromUnixTimeMilliseconds(unixTimeMilliseconds).UtcDateTime;
-
             return Encode(utcTime.TimeOfDay);
         }
 
-        /// <summary>
-        /// Transformuje standardowy Unix Timestamp (w sekundach) na zmienne cykliczne dnia tygodnia (UTC).
-        /// </summary>
         public static (float Sin, float Cos) EncodeDayOfWeekFromUnixSeconds(long unixTimeSeconds)
         {
             var utcTime = DateTimeOffset.FromUnixTimeSeconds(unixTimeSeconds).UtcDateTime;
-
             return Encode(utcTime.DayOfWeek);
         }
 
-        /// <summary>
-        /// Metoda typu "All-in-One". Pobiera Unix Timestamp (sekundy) i zwraca 
-        /// komplet 4 cech cyklicznych naraz. Idealne prosto do pipeline'u danych.
-        /// </summary>
         public static (float HourSin, float HourCos, float DaySin, float DayCos) EncodeAllTimeFeaturesFromUnixSeconds(long unixTimeSeconds)
         {
             var utcTime = DateTimeOffset.FromUnixTimeSeconds(unixTimeSeconds).UtcDateTime;
@@ -84,5 +48,9 @@ namespace DevOnBike.Overfit.Data.Normalizers
             return (sin, cos, daySin, dayCos);
         }
 
+        private static float CleanZero(double value)
+        {
+            return Math.Abs(value) < 1e-10 ? 0f : (float)value;
+        }
     }
 }

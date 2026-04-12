@@ -1,7 +1,4 @@
-﻿using System;
-using System.Linq;
-using Xunit;
-using DevOnBike.Overfit.Statistical;
+﻿using DevOnBike.Overfit.Data.Normalizers;
 
 namespace DevOnBike.Overfit.Tests
 {

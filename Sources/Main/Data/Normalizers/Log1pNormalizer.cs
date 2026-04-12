@@ -5,6 +5,7 @@
 
 using System.Buffers;
 using System.Numerics.Tensors;
+using DevOnBike.Overfit.Data.Abstractions;
 
 namespace DevOnBike.Overfit.Data.Normalizers
 {
@@ -32,7 +33,7 @@ namespace DevOnBike.Overfit.Data.Normalizers
     ///   norm.Load(br);               // wczytuje zamrożone parametry
     ///   norm.TransformInPlace(data); // tylko transform, bez fit
     /// </summary>
-    public sealed class Log1pNormalizer
+    public sealed class Log1pNormalizer : IFeatureNormalizer
     {
         private readonly ZScoreNormalizer _zscore = new();
 
