@@ -1,16 +1,12 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using Xunit;
-using Xunit.Abstractions;
-using DevOnBike.Overfit.Anomalies.Monitoring;
+﻿using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
-using DevOnBike.Overfit.DeepLearning;
-using DevOnBike.Overfit.Data.Normalizers;
-using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.Data.Normalizers;
+using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.Optimizers;
+using Xunit.Abstractions;
 
-namespace DevOnBike.Overfit.Tests.Integration
+namespace DevOnBike.Overfit.Tests
 {
     public class TrainingIntegrationTests
     {

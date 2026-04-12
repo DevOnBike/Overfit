@@ -10,7 +10,7 @@ namespace DevOnBike.Overfit.DeepLearning
 {
     /// <summary>
     ///     LSTM layer — wraps LSTMCell and iterates over sequence timesteps.
-    ///     Includes zero-allocation path via ForwardInference.
+    ///     Includes zero-allocation path via ForwardInference with Buffer Hoisting.
     /// </summary>
     public sealed class LSTMLayer : IModule
     {
@@ -62,6 +62,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
                 return StackTimesteps(graph, allH, batch, seqLen);
             }
+
             for (var t = 0; t < seqLen; t++)
             {
                 var xt = ExtractTimestep(graph, input, t, batch, seqLen, inputSize);
@@ -75,25 +76,13 @@ namespace DevOnBike.Overfit.DeepLearning
         // IModule
         // ---------------------------------------------------------------------------
 
-        public IEnumerable<AutogradNode> Parameters()
-        {
-            return _cell.Parameters();
-        }
-        public void Save(BinaryWriter bw)
-        {
-            _cell.Save(bw);
-        }
-        public void Load(BinaryReader br)
-        {
-            _cell.Load(br);
-        }
-        public void Dispose()
-        {
-            _cell.Dispose();
-        }
+        public IEnumerable<AutogradNode> Parameters() => _cell.Parameters();
+        public void Save(BinaryWriter bw) => _cell.Save(bw);
+        public void Load(BinaryReader br) => _cell.Load(br);
+        public void Dispose() => _cell.Dispose();
 
         // ---------------------------------------------------------------------------
-        // Forward — Zero-Allocation Inference Path
+        // Forward — Zero-Allocation Inference Path (With Buffer Hoisting)
         // ---------------------------------------------------------------------------
 
         /// <summary>
@@ -105,16 +94,22 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             var inputSize = _cell.InputSize;
             var hiddenSize = _cell.HiddenSize;
+            var gatesLen = batchSize * 4 * hiddenSize;
 
+            // HOISTING: Alokujemy bufory raz na całą sekwencję, a nie per timestep
             var hArr = ArrayPool<float>.Shared.Rent(batchSize * hiddenSize);
             var cArr = ArrayPool<float>.Shared.Rent(batchSize * hiddenSize);
             var xtArr = ArrayPool<float>.Shared.Rent(batchSize * inputSize);
+            var gatesArr = ArrayPool<float>.Shared.Rent(gatesLen);
+            var uhArr = ArrayPool<float>.Shared.Rent(gatesLen);
 
             try
             {
                 var h = hArr.AsSpan(0, batchSize * hiddenSize);
                 var c = cArr.AsSpan(0, batchSize * hiddenSize);
                 var xt = xtArr.AsSpan(0, batchSize * inputSize);
+                var gates = gatesArr.AsSpan(0, gatesLen);
+                var uh = uhArr.AsSpan(0, gatesLen);
 
                 h.Clear();
                 c.Clear();
@@ -128,7 +123,8 @@ namespace DevOnBike.Overfit.DeepLearning
                             .CopyTo(xt.Slice(b * inputSize, inputSize));
                     }
 
-                    _cell.ForwardInference(batchSize, xt, h, c);
+                    // Pure math kernel
+                    _cell.ForwardInference(batchSize, xt, h, c, gates, uh);
 
                     if (_returnSequences)
                     {
@@ -152,6 +148,8 @@ namespace DevOnBike.Overfit.DeepLearning
                 ArrayPool<float>.Shared.Return(hArr);
                 ArrayPool<float>.Shared.Return(cArr);
                 ArrayPool<float>.Shared.Return(xtArr);
+                ArrayPool<float>.Shared.Return(gatesArr);
+                ArrayPool<float>.Shared.Return(uhArr);
             }
         }
 
@@ -192,7 +190,6 @@ namespace DevOnBike.Overfit.DeepLearning
             }
 
             var requiresGrad = false;
-
             foreach (var h in allH)
             {
                 if (h.RequiresGrad)

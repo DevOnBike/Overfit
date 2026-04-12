@@ -3,7 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Buffers;
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Core;
 
@@ -89,21 +88,18 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Load(BinaryReader br)
         {
             var wSpan = W.Data.AsSpan();
-
             for (var i = 0; i < wSpan.Length; i++)
             {
                 wSpan[i] = br.ReadSingle();
             }
 
             var uSpan = U.Data.AsSpan();
-
             for (var i = 0; i < uSpan.Length; i++)
             {
                 uSpan[i] = br.ReadSingle();
             }
 
             var bSpan = B.Data.AsSpan();
-
             for (var i = 0; i < bSpan.Length; i++)
             {
                 bSpan[i] = br.ReadSingle();
@@ -121,88 +117,72 @@ namespace DevOnBike.Overfit.DeepLearning
         // Forward — Zero-Allocation Inference Path (Production Fast-Path)
         // ---------------------------------------------------------------------------
 
-        public void ForwardInference(int batchSize, ReadOnlySpan<float> x, Span<float> h, Span<float> c)
+        public void ForwardInference(int batchSize, ReadOnlySpan<float> x, Span<float> h, Span<float> c, Span<float> gates, Span<float> uh)
         {
             var hSize = HiddenSize;
-            var gatesLen = batchSize * 4 * hSize;
+            var wSpan = W.Data.AsReadOnlySpan();
+            var uSpan = U.Data.AsReadOnlySpan();
+            var bSpan = B.Data.AsReadOnlySpan();
 
-            var gatesArr = ArrayPool<float>.Shared.Rent(gatesLen);
-            var uhArr = ArrayPool<float>.Shared.Rent(gatesLen);
+            gates.Clear();
+            uh.Clear();
 
-            try
+            for (var b = 0; b < batchSize; b++)
             {
-                var gates = gatesArr.AsSpan(0, gatesLen);
-                var uh = uhArr.AsSpan(0, gatesLen);
+                var bGates = gates.Slice(b * 4 * hSize, 4 * hSize);
+                var bX = x.Slice(b * InputSize, InputSize);
 
-                var wSpan = W.Data.AsReadOnlySpan();
-                var uSpan = U.Data.AsReadOnlySpan();
-                var bSpan = B.Data.AsReadOnlySpan();
-
-                gates.Clear();
-                uh.Clear();
-
-                for (var b = 0; b < batchSize; b++)
+                // 1. wx = x * W
+                for (var i = 0; i < InputSize; i++)
                 {
-                    var bGates = gates.Slice(b * 4 * hSize, 4 * hSize);
-                    var bX = x.Slice(b * InputSize, InputSize);
+                    var xVal = bX[i];
 
-                    // 1. wx = x * W
-                    for (var i = 0; i < InputSize; i++)
+                    if (xVal != 0f)
                     {
-                        var xVal = bX[i];
-
-                        if (xVal != 0f)
-                        {
-                            TensorPrimitives.MultiplyAdd(wSpan.Slice(i * 4 * hSize, 4 * hSize), xVal, bGates, bGates);
-                        }
+                        TensorPrimitives.MultiplyAdd(wSpan.Slice(i * 4 * hSize, 4 * hSize), xVal, bGates, bGates);
                     }
-
-                    // 2. wx = wx + B
-                    TensorPrimitives.Add(bGates, bSpan, bGates);
-
-                    var bUh = uh.Slice(b * 4 * hSize, 4 * hSize);
-                    var bH = h.Slice(b * hSize, hSize);
-
-                    // 3. uh = h * U
-                    for (var i = 0; i < hSize; i++)
-                    {
-                        var hVal = bH[i];
-
-                        if (hVal != 0f)
-                        {
-                            TensorPrimitives.MultiplyAdd(uSpan.Slice(i * 4 * hSize, 4 * hSize), hVal, bUh, bUh);
-                        }
-                    }
-
-                    // 4. gates = wx + uh
-                    TensorPrimitives.Add(bGates, bUh, bGates);
-
-                    // 5. Fused Activation and State Update (100% SIMD)
-                    var bC = c.Slice(b * hSize, hSize);
-
-                    var gF = bGates.Slice(0, hSize);
-                    var gI = bGates.Slice(hSize, hSize);
-                    var gG = bGates.Slice(2 * hSize, hSize);
-                    var gO = bGates.Slice(3 * hSize, hSize);
-
-                    TensorPrimitives.Sigmoid(gF, gF);
-                    TensorPrimitives.Sigmoid(gI, gI);
-                    TensorPrimitives.Tanh(gG, gG);
-                    TensorPrimitives.Sigmoid(gO, gO);
-
-                    // C = f * C + i * g
-                    TensorPrimitives.Multiply(gF, bC, bC);
-                    TensorPrimitives.MultiplyAdd(gI, gG, bC, bC);
-
-                    // H = o * tanh(C)
-                    TensorPrimitives.Tanh(bC, gG); // Reuse gG as a free temp buffer
-                    TensorPrimitives.Multiply(gO, gG, bH);
                 }
-            }
-            finally
-            {
-                ArrayPool<float>.Shared.Return(gatesArr);
-                ArrayPool<float>.Shared.Return(uhArr);
+
+                // 2. wx = wx + B
+                TensorPrimitives.Add(bGates, bSpan, bGates);
+
+                var bUh = uh.Slice(b * 4 * hSize, 4 * hSize);
+                var bH = h.Slice(b * hSize, hSize);
+
+                // 3. uh = h * U
+                for (var i = 0; i < hSize; i++)
+                {
+                    var hVal = bH[i];
+
+                    if (hVal != 0f)
+                    {
+                        TensorPrimitives.MultiplyAdd(uSpan.Slice(i * 4 * hSize, 4 * hSize), hVal, bUh, bUh);
+                    }
+                }
+
+                // 4. gates = wx + uh
+                TensorPrimitives.Add(bGates, bUh, bGates);
+
+                // 5. Fused Activation and State Update (100% SIMD)
+                var bC = c.Slice(b * hSize, hSize);
+
+                var gF = bGates.Slice(0, hSize);
+                var gI = bGates.Slice(hSize, hSize);
+                var gG = bGates.Slice(2 * hSize, hSize);
+                var gO = bGates.Slice(3 * hSize, hSize);
+
+                TensorPrimitives.Sigmoid(gF, gF);
+                TensorPrimitives.Sigmoid(gI, gI);
+                TensorPrimitives.Tanh(gG, gG);
+                TensorPrimitives.Sigmoid(gO, gO);
+
+                // C = f * C + i * g
+                TensorPrimitives.Multiply(gF, bC, bC);
+                TensorPrimitives.MultiplyAdd(gI, gG, bC, bC);
+
+                // H = o * tanh(C)
+                TensorPrimitives.Tanh(bC, gG); // Reuse gG as a free temp buffer
+                TensorPrimitives.Multiply(gO, gG, bH);
             }
         }
 
