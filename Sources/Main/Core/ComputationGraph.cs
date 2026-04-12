@@ -41,9 +41,6 @@ namespace DevOnBike.Overfit.Core
             _tape[_opCount++] = new TapeOp(code, output, a, b, i0, i1, i2, i3, i4, nodeContext);
         }
 
-        /// <summary>
-        ///     Performs the backward pass, propagating gradients from the loss node through the tape.
-        /// </summary>
         public void Backward(AutogradNode lossNode)
         {
             if (lossNode?.Grad == null)
@@ -63,47 +60,38 @@ namespace DevOnBike.Overfit.Core
         {
             return TensorMath.Add(this, left, right);
         }
-
         public AutogradNode AddBias(AutogradNode input, AutogradNode bias)
         {
             return TensorMath.AddBias(this, input, bias);
         }
-
         public AutogradNode MatMul(AutogradNode left, AutogradNode right)
         {
             return TensorMath.MatMul(this, left, right);
         }
-
         public AutogradNode ReLU(AutogradNode input)
         {
             return TensorMath.ReLU(this, input);
         }
-
         public AutogradNode MeanSquaredError(AutogradNode prediction, AutogradNode target)
         {
             return TensorMath.MSELoss(this, prediction, target);
         }
-
         public AutogradNode DirectionalLoss(AutogradNode prediction, AutogradNode target, float gamma = 10f)
         {
             return TensorMath.DirectionalLoss(this, prediction, target, gamma);
         }
-
         public AutogradNode Sigmoid(AutogradNode input)
         {
             return TensorMath.Sigmoid(this, input);
         }
-
         public AutogradNode Tanh(AutogradNode input)
         {
             return TensorMath.Tanh(this, input);
         }
-
         public AutogradNode Multiply(AutogradNode a, AutogradNode b)
         {
             return TensorMath.Multiply(this, a, b);
         }
-
         public AutogradNode GateSlice(AutogradNode gates, int hiddenSize, int gateIndex)
         {
             return TensorMath.GateSlice(this, gates, hiddenSize, gateIndex);
@@ -114,40 +102,27 @@ namespace DevOnBike.Overfit.Core
             switch (op.Code)
             {
                 case OpCode.Add: TensorMath.AddBackward(op.A, op.B, op.Output); break;
-
                 case OpCode.AddBias: TensorMath.AddBiasBackward(op.A, op.B, op.Output); break;
-
                 case OpCode.MatMul: TensorMath.MatMulBackward(op.A, op.B, op.Output); break;
-
                 case OpCode.ReLU: TensorMath.ReluBackward(op.A, op.Output); break;
-
                 case OpCode.Dropout: TensorMath.DropoutBackward(op.A, op.B, op.Output); break;
-
                 case OpCode.MseLoss: TensorMath.MSELossBackward(op.A, op.B, op.Output); break;
-
                 case OpCode.SoftmaxCrossEntropy: TensorMath.SoftmaxCrossEntropyBackward(op.A, op.B, op.Output, op.NodeContext[0]); break;
-
                 case OpCode.Conv2D: TensorMath.Conv2DBackward(op.A, op.B, op.Output, op.I0, op.I1, op.I2, op.I3, op.I4); break;
-
                 case OpCode.MaxPool2D: TensorMath.MaxPool2DBackward(op.A, op.B, op.Output); break;
-
                 case OpCode.GlobalAveragePool2D: TensorMath.GlobalAvgPool2DBackward(op.A, op.Output, op.I0, op.I1, op.I2); break;
-
                 case OpCode.BatchNorm1D: TensorMath.BatchNorm1DBackward(op.A, op.Output, op.NodeContext[0], op.NodeContext[1], op.NodeContext[2], op.NodeContext[3]); break;
-
                 case OpCode.Reshape: TensorMath.ReshapeBackward(op.A, op.Output); break;
-
                 case OpCode.Sigmoid: TensorMath.SigmoidBackward(op.A, op.Output); break;
-
                 case OpCode.Tanh: TensorMath.TanhBackward(op.A, op.Output); break;
-
                 case OpCode.Multiply: TensorMath.MultiplyBackward(op.A, op.B, op.Output); break;
-
                 case OpCode.GateSlice: TensorMath.GateSliceBackward(op.A, op.Output, op.I1, op.I0); break;
-
                 case OpCode.TimestepSlice: TensorMath.TimestepSliceBackward(op.A, op.Output, op.I0, op.I1, op.I2); break;
-
                 case OpCode.StackTimesteps: TensorMath.StackTimestepsBackward(op.NodeContext, op.Output, op.I0, op.I1, op.I2); break;
+                case OpCode.RepeatVector: TensorMath.RepeatVectorBackward(op.A, op.Output, op.I0, op.I1); break;
+
+                // NOWY KERNEL
+                case OpCode.FusedLSTMStep: TensorMath.FusedLSTMStepBackward(op.A, op.B, op.Output, op.NodeContext); break;
 
                 case OpCode.DirectionalLoss:
                     var gammaValue = BitConverter.Int32BitsToSingle(op.I0);
@@ -162,7 +137,6 @@ namespace DevOnBike.Overfit.Core
             {
                 Array.Clear(_tape, 0, _opCount);
             }
-
             _opCount = 0;
         }
     }

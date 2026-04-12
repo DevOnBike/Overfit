@@ -31,6 +31,7 @@ namespace DevOnBike.Overfit.Core
         GateSlice,
         TimestepSlice,
         StackTimesteps,
-        RepeatVector
+        RepeatVector,
+        FusedLSTMStep
     }
 }

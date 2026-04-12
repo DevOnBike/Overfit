@@ -10,7 +10,7 @@ namespace DevOnBike.Overfit.DeepLearning
 {
     /// <summary>
     ///     Single LSTM cell — processes one timestep.
-    ///     Includes a zero-allocation inference path with a Fused Kernel.
+    ///     Features ultra-fast zero-allocation inference and a monolithic Fused Kernel for BPTT.
     /// </summary>
     public sealed class LSTMCell : IModule
     {
@@ -73,12 +73,12 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 bw.Write(v);
             }
-
+            
             foreach (var v in U.Data.AsSpan())
             {
                 bw.Write(v);
             }
-
+            
             foreach (var v in B.Data.AsSpan())
             {
                 bw.Write(v);
@@ -116,7 +116,6 @@ namespace DevOnBike.Overfit.DeepLearning
         // ---------------------------------------------------------------------------
         // Forward — Zero-Allocation Inference Path (Production Fast-Path)
         // ---------------------------------------------------------------------------
-
         public void ForwardInference(int batchSize, ReadOnlySpan<float> x, Span<float> h, Span<float> c, Span<float> gates, Span<float> uh)
         {
             var hSize = HiddenSize;
@@ -132,40 +131,30 @@ namespace DevOnBike.Overfit.DeepLearning
                 var bGates = gates.Slice(b * 4 * hSize, 4 * hSize);
                 var bX = x.Slice(b * InputSize, InputSize);
 
-                // 1. wx = x * W
                 for (var i = 0; i < InputSize; i++)
                 {
-                    var xVal = bX[i];
-
-                    if (xVal != 0f)
+                    if (bX[i] != 0f)
                     {
-                        TensorPrimitives.MultiplyAdd(wSpan.Slice(i * 4 * hSize, 4 * hSize), xVal, bGates, bGates);
+                        TensorPrimitives.MultiplyAdd(wSpan.Slice(i * 4 * hSize, 4 * hSize), bX[i], bGates, bGates);
                     }
                 }
 
-                // 2. wx = wx + B
                 TensorPrimitives.Add(bGates, bSpan, bGates);
 
                 var bUh = uh.Slice(b * 4 * hSize, 4 * hSize);
                 var bH = h.Slice(b * hSize, hSize);
 
-                // 3. uh = h * U
                 for (var i = 0; i < hSize; i++)
                 {
-                    var hVal = bH[i];
-
-                    if (hVal != 0f)
+                    if (bH[i] != 0f)
                     {
-                        TensorPrimitives.MultiplyAdd(uSpan.Slice(i * 4 * hSize, 4 * hSize), hVal, bUh, bUh);
+                        TensorPrimitives.MultiplyAdd(uSpan.Slice(i * 4 * hSize, 4 * hSize), bH[i], bUh, bUh);
                     }
                 }
 
-                // 4. gates = wx + uh
                 TensorPrimitives.Add(bGates, bUh, bGates);
 
-                // 5. Fused Activation and State Update (100% SIMD)
                 var bC = c.Slice(b * hSize, hSize);
-
                 var gF = bGates.Slice(0, hSize);
                 var gI = bGates.Slice(hSize, hSize);
                 var gG = bGates.Slice(2 * hSize, hSize);
@@ -176,39 +165,21 @@ namespace DevOnBike.Overfit.DeepLearning
                 TensorPrimitives.Tanh(gG, gG);
                 TensorPrimitives.Sigmoid(gO, gO);
 
-                // C = f * C + i * g
                 TensorPrimitives.Multiply(gF, bC, bC);
                 TensorPrimitives.MultiplyAdd(gI, gG, bC, bC);
 
-                // H = o * tanh(C)
-                TensorPrimitives.Tanh(bC, gG); // Reuse gG as a free temp buffer
+                TensorPrimitives.Tanh(bC, gG);
                 TensorPrimitives.Multiply(gO, gG, bH);
             }
         }
 
+        // ---------------------------------------------------------------------------
+        // REWOLUCJA: Fused Training Path
+        // ---------------------------------------------------------------------------
         public (AutogradNode h, AutogradNode c) Forward(ComputationGraph graph, AutogradNode x, AutogradNode h, AutogradNode c)
         {
-            var wx = TensorMath.Linear(graph, x, W, B);
-            var uh = TensorMath.MatMul(graph, h, U);
-            var gates = TensorMath.Add(graph, wx, uh);
-
-            var gF = TensorMath.GateSlice(graph, gates, HiddenSize, 0);
-            var gI = TensorMath.GateSlice(graph, gates, HiddenSize, 1);
-            var gG = TensorMath.GateSlice(graph, gates, HiddenSize, 2);
-            var gO = TensorMath.GateSlice(graph, gates, HiddenSize, 3);
-
-            var fT = TensorMath.Sigmoid(graph, gF);
-            var iT = TensorMath.Sigmoid(graph, gI);
-            var gT = TensorMath.Tanh(graph, gG);
-            var oT = TensorMath.Sigmoid(graph, gO);
-
-            var fc = TensorMath.Multiply(graph, fT, c);
-            var ig = TensorMath.Multiply(graph, iT, gT);
-            var cNew = TensorMath.Add(graph, fc, ig);
-
-            var hNew = TensorMath.Multiply(graph, oT, TensorMath.Tanh(graph, cNew));
-
-            return (hNew, cNew);
+            // Koniec generowania śmieci. Jedno wielkie przejście matematyczne.
+            return TensorMath.FusedLSTMStep(graph, x, h, c, W, U, B);
         }
 
         public (AutogradNode h0, AutogradNode c0) ZeroState(int batchSize)
@@ -222,7 +193,6 @@ namespace DevOnBike.Overfit.DeepLearning
         private static void InitUniform(Span<float> span, float limit)
         {
             var rng = Random.Shared;
-
             for (var i = 0; i < span.Length; i++)
             {
                 span[i] = (float)(rng.NextDouble() * 2.0 * limit - limit);

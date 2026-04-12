@@ -162,7 +162,7 @@ namespace DevOnBike.Overfit.Core
                 for (var k = 0; k < aC; k++)
                 {
                     var valA = rowA[k];
-                    
+
                     if (valA != 0f)
                     {
                         TensorPrimitives.MultiplyAdd(bS.Slice(k * bC, bC), valA, rowC, rowC);
@@ -242,7 +242,7 @@ namespace DevOnBike.Overfit.Core
                     for (var k = 0; k < K; k++)
                     {
                         var aVal = aS[k * N + i];
-                        
+
                         if (aVal != 0f)
                         {
                             TensorPrimitives.MultiplyAdd(bS.Slice(k * M, M), aVal, cRow, cRow);
@@ -261,7 +261,7 @@ namespace DevOnBike.Overfit.Core
                     for (var k = 0; k < K; k++)
                     {
                         var aVal = aS[k * N + i];
-                        
+
                         if (aVal == 0)
                         {
                             continue;
@@ -1464,6 +1464,198 @@ namespace DevOnBike.Overfit.Core
                 for (var t = 0; t < seqLen; t++)
                 {
                     TensorPrimitives.Add(dst, srcS.Slice(b * seqLen * hiddenSize + t * hiddenSize, hiddenSize), dst);
+                }
+            }
+        }
+
+        // ====================================================================
+        // FUSED LSTM STEP (ULTIMATE BPTT PERFORMANCE)
+        // ====================================================================
+
+        public static (AutogradNode hNew, AutogradNode cNew) FusedLSTMStep(
+            ComputationGraph graph, AutogradNode x, AutogradNode hPrev, AutogradNode cPrev,
+            AutogradNode W, AutogradNode U, AutogradNode B)
+        {
+            var batchSize = x.Data.GetDim(0);
+            var hiddenSize = hPrev.Data.GetDim(1);
+
+            // 1. wx = X * W  (Mnożenie rzędami - rewelacyjne dla L1 Cache)
+            var gatesData = MatMulRaw(x.Data, W.Data);
+
+            // 2. uh = H * U
+            using var uh = MatMulRaw(hPrev.Data, U.Data);
+
+            var cNewData = new FastTensor<float>(batchSize, hiddenSize);
+            var hNewData = new FastTensor<float>(batchSize, hiddenSize);
+
+            // Równoległe bramkowanie i aktywacja w wektorach
+            Parallel.For(0, batchSize, b =>
+            {
+                // TWORZENIE SPANÓW WEWNĄTRZ LAMBDY ABY OMINĄĆ BŁĄD CS8175
+                var gSpan = gatesData.AsSpan();
+                var uhSpan = uh.AsSpan();
+                var bSpan = B.Data.AsReadOnlySpan();
+                var cPrevS = cPrev.Data.AsReadOnlySpan();
+                var cNewS = cNewData.AsSpan();
+                var hNewS = hNewData.AsSpan();
+
+                var bg = gSpan.Slice(b * 4 * hiddenSize, 4 * hiddenSize);
+                var buh = uhSpan.Slice(b * 4 * hiddenSize, 4 * hiddenSize);
+
+                TensorPrimitives.Add(bg, buh, bg);
+                TensorPrimitives.Add(bg, bSpan, bg);
+
+                var f = bg.Slice(0, hiddenSize);
+                var i = bg.Slice(hiddenSize, hiddenSize);
+                var g = bg.Slice(2 * hiddenSize, hiddenSize);
+                var o = bg.Slice(3 * hiddenSize, hiddenSize);
+
+                TensorPrimitives.Sigmoid(f, f);
+                TensorPrimitives.Sigmoid(i, i);
+                TensorPrimitives.Tanh(g, g);
+                TensorPrimitives.Sigmoid(o, o);
+
+                var bcPrev = cPrevS.Slice(b * hiddenSize, hiddenSize);
+                var bcNew = cNewS.Slice(b * hiddenSize, hiddenSize);
+                var bhNew = hNewS.Slice(b * hiddenSize, hiddenSize);
+
+                // C = f * C_prev + i * g
+                TensorPrimitives.Multiply(f, bcPrev, bcNew);
+                TensorPrimitives.MultiplyAdd(i, g, bcNew, bcNew);
+
+                // H = o * tanh(C)
+                TensorPrimitives.Tanh(bcNew, bhNew);
+                TensorPrimitives.Multiply(o, bhNew, bhNew);
+            });
+
+            bool requiresGrad = x.RequiresGrad || hPrev.RequiresGrad || cPrev.RequiresGrad ||
+                                W.RequiresGrad || U.RequiresGrad || B.RequiresGrad;
+
+            var hNewNode = new AutogradNode(hNewData, requiresGrad);
+            var cNewNode = new AutogradNode(cNewData, requiresGrad);
+
+            if (graph != null && graph.IsRecording && requiresGrad)
+            {
+                // Zapisujemy f, i, g, o w grafie, by nie liczyć ich znowu podczas backward!
+                var gatesNode = new AutogradNode(gatesData, false);
+                graph.Record(OpCode.FusedLSTMStep, hNewNode, x, hPrev,
+                             nodeContext: new[] { cPrev, W, U, B, cNewNode, gatesNode });
+            }
+            else
+            {
+                gatesData.Dispose();
+            }
+
+            return (hNewNode, cNewNode);
+        }
+
+        public static void FusedLSTMStepBackward(
+            AutogradNode x, AutogradNode hPrev, AutogradNode hNew, AutogradNode[] ctx)
+        {
+            var cPrev = ctx[0];
+            var W = ctx[1];
+            var U = ctx[2];
+            var B = ctx[3];
+            var cNew = ctx[4];
+            var gates = ctx[5]; // To zawiera wyliczone z przodu aktywacje: f, i, g, o
+
+            var batchSize = x.Data.GetDim(0);
+            var hiddenSize = hPrev.Data.GetDim(1);
+
+            using var dGates = new FastTensor<float>(batchSize, 4 * hiddenSize);
+
+            // Równoległe, bezalokacyjne liczenie pochodnych wstecz
+            Parallel.For(0, batchSize,
+                localInit: () => ArrayPool<float>.Shared.Rent(hiddenSize * 4),
+                body: (b, state, arr) =>
+                {
+                    // TWORZENIE SPANÓW WEWNĄTRZ LAMBDY ABY OMINĄĆ BŁĄD CS8175
+                    var dGatesS = dGates.AsSpan();
+                    var dhS = hNew.Grad.AsSpan();
+                    var dcS = cNew.Grad.AsSpan();
+                    var cNewDataS = cNew.Data.AsReadOnlySpan();
+                    var cPrevDataS = cPrev.Data.AsReadOnlySpan();
+                    var gatesS = gates.Data.AsReadOnlySpan();
+
+                    var tempS = arr.AsSpan();
+                    var tanhC = tempS.Slice(0, hiddenSize);
+                    var temp1 = tempS.Slice(hiddenSize, hiddenSize);
+                    var temp2 = tempS.Slice(2 * hiddenSize, hiddenSize);
+
+                    var f = gatesS.Slice(b * 4 * hiddenSize, hiddenSize);
+                    var i = gatesS.Slice(b * 4 * hiddenSize + hiddenSize, hiddenSize);
+                    var g = gatesS.Slice(b * 4 * hiddenSize + 2 * hiddenSize, hiddenSize);
+                    var o = gatesS.Slice(b * 4 * hiddenSize + 3 * hiddenSize, hiddenSize);
+
+                    var dh = dhS.Slice(b * hiddenSize, hiddenSize);
+                    var dc = dcS.Slice(b * hiddenSize, hiddenSize);
+                    var cNewVal = cNewDataS.Slice(b * hiddenSize, hiddenSize);
+                    var cPrevVal = cPrevDataS.Slice(b * hiddenSize, hiddenSize);
+
+                    var dgf = dGatesS.Slice(b * 4 * hiddenSize, hiddenSize);
+                    var dgi = dGatesS.Slice(b * 4 * hiddenSize + hiddenSize, hiddenSize);
+                    var dgg = dGatesS.Slice(b * 4 * hiddenSize + 2 * hiddenSize, hiddenSize);
+                    var dgo = dGatesS.Slice(b * 4 * hiddenSize + 3 * hiddenSize, hiddenSize);
+
+                    TensorPrimitives.Tanh(cNewVal, tanhC);
+
+                    // dgo = dh * tanhC * o * (1 - o)
+                    TensorPrimitives.Subtract(1f, o, temp1);
+                    TensorPrimitives.Multiply(o, temp1, temp1);
+                    TensorPrimitives.Multiply(dh, tanhC, temp2);
+                    TensorPrimitives.Multiply(temp2, temp1, dgo);
+
+                    // dc += dh * o * (1 - tanhC^2)
+                    TensorPrimitives.Multiply(tanhC, tanhC, temp1);
+                    TensorPrimitives.Subtract(1f, temp1, temp1);
+                    TensorPrimitives.Multiply(dh, o, temp2);
+                    TensorPrimitives.Multiply(temp2, temp1, temp1);
+                    TensorPrimitives.Add(dc, temp1, dc);
+
+                    // dgg = dc * i * (1 - g^2)
+                    TensorPrimitives.Multiply(g, g, temp1);
+                    TensorPrimitives.Subtract(1f, temp1, temp1);
+                    TensorPrimitives.Multiply(dc, i, temp2);
+                    TensorPrimitives.Multiply(temp2, temp1, dgg);
+
+                    // dgi = dc * g * i * (1 - i)
+                    TensorPrimitives.Subtract(1f, i, temp1);
+                    TensorPrimitives.Multiply(i, temp1, temp1);
+                    TensorPrimitives.Multiply(dc, g, temp2);
+                    TensorPrimitives.Multiply(temp2, temp1, dgi);
+
+                    // dgf = dc * cPrev * f * (1 - f)
+                    TensorPrimitives.Subtract(1f, f, temp1);
+                    TensorPrimitives.Multiply(f, temp1, temp1);
+                    TensorPrimitives.Multiply(dc, cPrevVal, temp2);
+                    TensorPrimitives.Multiply(temp2, temp1, dgf);
+
+                    // dcPrev += dc * f (ZABEZPIECZONE PRZED NRE)
+                    if (cPrev.RequiresGrad)
+                    {
+                        var dcPrevS = cPrev.Grad.AsSpan();
+                        var dcp = dcPrevS.Slice(b * hiddenSize, hiddenSize);
+                        TensorPrimitives.MultiplyAdd(dc, f, dcp, dcp);
+                    }
+
+                    return arr;
+                },
+                localFinally: arr => { ArrayPool<float>.Shared.Return(arr); }
+            );
+
+            // Aktualizacja gradientów wag i stanu (dziedziczy po MatMul Raw!)
+            if (x.RequiresGrad) MatMulAdd_A_BT(dGates, W.Data, x.Grad);
+            if (W.RequiresGrad) MatMulAdd_AT_B(x.Data, dGates, W.Grad);
+            if (hPrev.RequiresGrad) MatMulAdd_A_BT(dGates, U.Data, hPrev.Grad);
+            if (U.RequiresGrad) MatMulAdd_AT_B(hPrev.Data, dGates, U.Grad);
+
+            if (B.RequiresGrad)
+            {
+                var dbS = B.Grad.AsSpan();
+                var dGatesS = dGates.AsSpan();
+                for (var b = 0; b < batchSize; b++)
+                {
+                    TensorPrimitives.Add(dbS, dGatesS.Slice(b * 4 * hiddenSize, 4 * hiddenSize), dbS);
                 }
             }
         }
