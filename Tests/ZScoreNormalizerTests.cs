@@ -100,6 +100,8 @@ namespace DevOnBike.Overfit.Tests
             var normalizer = new ZScoreNormalizer();
             normalizer.FitBatch(data);
 
+            normalizer.Freeze();
+
             var dataToTransform = (float[])data.Clone();
             normalizer.TransformInPlace(dataToTransform);
 
@@ -119,6 +121,8 @@ namespace DevOnBike.Overfit.Tests
             float[] data = [7f, 7f, 7f, 7f, 7f];
             var normalizer = new ZScoreNormalizer();
             normalizer.FitBatch(data);
+
+            normalizer.Freeze();
 
             var dataToTransform = (float[])data.Clone();
             normalizer.TransformInPlace(dataToTransform);
