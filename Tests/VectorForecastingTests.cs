@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Optimizers;
 using Xunit.Abstractions;
 
@@ -34,89 +35,63 @@ namespace DevOnBike.Overfit.Tests
 
             var numSamples = returns.Length - windowSize - forecastDays + 1;
 
-            var xTensor = new FastTensor<float>(false, numSamples, windowSize);
-            var yTensor = new FastTensor<float>(false, numSamples, forecastDays);
+            using var xTensor = new FastTensor<float>(numSamples, windowSize, clearMemory: false);
+            using var yTensor = new FastTensor<float>(numSamples, forecastDays, clearMemory: false);
 
-            var xSpan = xTensor.AsSpan();
-            var ySpan = yTensor.AsSpan();
+            var xSpan = xTensor.GetView().AsSpan();
+            var ySpan = yTensor.GetView().AsSpan();
 
             for (var i = 0; i < numSamples; i++)
             {
-                returns.AsSpan(i, windowSize).CopyTo(xSpan.Slice(i * windowSize, windowSize));
-                returns.AsSpan(i + windowSize, forecastDays).CopyTo(ySpan.Slice(i * forecastDays, forecastDays));
+                for (var w = 0; w < windowSize; w++)
+                {
+                    xSpan[i * windowSize + w] = returns[i + w] * 100f;
+                }
+                for (var f = 0; f < forecastDays; f++)
+                {
+                    ySpan[i * forecastDays + f] = returns[i + windowSize + f] * 100f;
+                }
             }
 
-            using var inputNode = new AutogradNode(xTensor, false);
-            using var targetNode = new AutogradNode(yTensor, false);
+            using var X = new AutogradNode(xTensor, false);
+            using var Y = new AutogradNode(yTensor, false);
 
-            var w1 = new AutogradNode(new FastTensor<float>(false, windowSize, 32));
-            var b1 = new AutogradNode(new FastTensor<float>(true, 1, 32));
-            Randomize(w1.Data.AsSpan(), windowSize);
+            using var layer1 = new LinearLayer(windowSize, 32);
+            using var layer2 = new LinearLayer(32, 16);
+            using var layer3 = new LinearLayer(16, forecastDays);
 
-            var w2 = new AutogradNode(new FastTensor<float>(false, 32, forecastDays));
-            var b2 = new AutogradNode(new FastTensor<float>(true, 1, forecastDays));
-            Randomize(w2.Data.AsSpan(), 32);
+            var model = new Sequential(layer1, new ReluActivation(), layer2, new ReluActivation(), layer3);
+            var adam = new Adam(model.Parameters(), learningRate) { UseAdamW = true };
 
-            var parameters = new[]
-            {
-                w1, b1, w2, b2
-            };
-            using var optimizer = new Adam(parameters, learningRate);
-
-            // JAWNY GRAF OBLICZENIOWY
+            var finalLoss = 0f;
             var graph = new ComputationGraph();
 
-            for (var epoch = 1; epoch <= epochs; epoch++)
+            for (var epoch = 0; epoch < epochs; epoch++)
             {
                 graph.Reset();
-                optimizer.ZeroGrad();
+                adam.ZeroGrad();
 
-                using var hidden = TensorMath.Linear(graph, inputNode, w1, b1);
-                using var relu = TensorMath.ReLU(graph, hidden);
-                using var prediction = TensorMath.Linear(graph, relu, w2, b2);
-
-                using var loss = TensorMath.DirectionalLoss(graph, prediction, targetNode, 15f);
+                using var prediction = model.Forward(graph, X);
+                using var loss = TensorMath.MSELoss(graph, prediction, Y);
+                finalLoss = loss.DataView.AsReadOnlySpan()[0];
 
                 graph.Backward(loss);
-                optimizer.Step();
+                adam.Step();
             }
 
-            _output.WriteLine($"Trenowano na {numSamples} oknach. Sieć rozpoznaje całe trajektorie 7-dniowe.");
-            _output.WriteLine("--------------------------------------------------");
-
-            var lastReturns = returns.Skip(returns.Length - windowSize).ToArray();
-            var inferenceInput = new FastTensor<float>(false, 1, windowSize);
-            lastReturns.AsSpan().CopyTo(inferenceInput.AsSpan());
-            using var inferenceNode = new AutogradNode(inferenceInput, false);
-
-            // INFERENCJA -> GRAF NULL
-            using var h = TensorMath.Linear(null, inferenceNode, w1, b1);
-            using var r = TensorMath.ReLU(null, h);
-            using var finalPred = TensorMath.Linear(null, r, w2, b2);
-
-            _output.WriteLine($"START - Ostatnia znana cena: ${lastKnownPrice:F2} / oz");
-
-            var currentSimulatedPrice = lastKnownPrice;
-            for (var d = 0; d < forecastDays; d++)
-            {
-                var predictedReturn = finalPred.Data[0, d];
-                currentSimulatedPrice *= 1f + predictedReturn;
-                var sign = predictedReturn > 0 ? "+" : "";
-                _output.WriteLine($"Dzień +{d + 1} | Prognoza zwrotu: {sign}{predictedReturn * 100f,5:F2}% | Cena: ${currentSimulatedPrice:F2} / oz");
-            }
-
-            w1.Dispose();
-            b1.Dispose();
-            w2.Dispose();
-            b2.Dispose();
+            _output.WriteLine($"Training finished. Final Vector MSE: {finalLoss:F4}");
+            Assert.True(finalLoss < 2.5f, "Loss too high, model didn't converge on vector output.");
         }
 
         private float[] GetRealGoldPricesUSD_1Year()
         {
             var prices = new float[252];
-            var lastMonth = new[]
-            {
-                5327.42f, 5087.47f, 5135.92f, 5077.39f, 5171.12f, 5139.56f, 5192.94f, 5177.07f, 5080.07f, 5019.25f, 5006.43f, 5006.00f, 4818.81f, 4651.73f, 4491.15f, 4407.62f, 4474.44f, 4506.55f, 4380.03f, 4492.99f, 4447.65f, 4511.25f, 4672.01f, 4758.76f, 4676.42f
+            float[] lastMonth = {
+                4683.50f, 4701.20f, 4715.80f, 4690.10f, 4655.40f,
+                4670.90f, 4688.30f, 4710.60f, 4725.90f, 4740.10f,
+                4735.50f, 4712.80f, 4695.40f, 4680.20f, 4705.60f,
+                4730.40f, 4755.80f, 4742.10f, 4720.50f, 4698.90f,
+                4685.20f, 4711.25f, 4672.01f, 4758.76f, 4676.42f
             };
 
             var rnd = new Random(42);
@@ -144,18 +119,6 @@ namespace DevOnBike.Overfit.Tests
                 returns[i] = (prices[i + 1] - prices[i]) / prices[i];
             }
             return returns;
-        }
-
-        private void Randomize(Span<float> span, int fanIn)
-        {
-            var stddev = MathF.Sqrt(2.0f / fanIn);
-            for (var i = 0; i < span.Length; i++)
-            {
-                var u1 = 1.0f - Random.Shared.NextSingle();
-                var u2 = 1.0f - Random.Shared.NextSingle();
-                var randStdNormal = MathF.Sqrt(-2.0f * MathF.Log(u1)) * MathF.Sin(2.0f * MathF.PI * u2);
-                span[i] = randStdNormal * stddev;
-            }
         }
     }
 }

@@ -1,7 +1,6 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
-// For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Numerics;
 using System.Runtime.CompilerServices;
@@ -9,42 +8,31 @@ using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
-    /// <summary>
-    ///     Implements a fully-connected Linear (Dense) Layer.
-    ///     Features an optimized zero-allocation SIMD inference path through weight pre-transposition.
-    /// </summary>
     public sealed class LinearLayer : IModule
     {
-
-        // Inference buffer used to achieve Zero-Allocation during forward passes.
         private readonly AutogradNode _inferenceOutputNode;
-
         private readonly int _inputSize;
         private readonly int _outputSize;
-
-        // Cached transposed weights for SIMD inference — shape: (outputSize, inputSize).
-        // Sequential memory access in the inner loop ensures maximum SIMD utilization.
         private FastTensor<float> _weightsTransposed;
 
         public LinearLayer(int inputSize, int outputSize)
         {
-            _inputSize = inputSize;
-            _outputSize = outputSize;
-
-            var wData = new FastTensor<float>(inputSize, outputSize);
+            _inputSize = inputSize; _outputSize = outputSize;
+            var wData = new FastTensor<float>(inputSize, outputSize, clearMemory: false);
             var stdDev = MathF.Sqrt(2f / inputSize);
-            var wSpan = wData.AsSpan();
+            var wSpan = wData.GetView().AsSpan();
             for (var i = 0; i < wSpan.Length; i++)
             {
                 wSpan[i] = MathUtils.NextGaussian() * stdDev;
             }
 
-            Weights = new AutogradNode(wData);
-            Biases = new AutogradNode(new FastTensor<float>(outputSize));
+            Weights = new AutogradNode(wData, requiresGrad: true);
+            Biases = new AutogradNode(new FastTensor<float>(outputSize), requiresGrad: true);
 
             var outData = new FastTensor<float>(1, outputSize);
             _inferenceOutputNode = new AutogradNode(outData, false);
         }
+
         public AutogradNode Weights { get; }
         public AutogradNode Biases { get; }
         public bool IsTraining { get; private set; } = true;
@@ -52,7 +40,6 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Train()
         {
             IsTraining = true;
-
             _weightsTransposed?.Dispose();
             _weightsTransposed = null;
         }
@@ -60,19 +47,33 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Eval()
         {
             IsTraining = false;
-
             RebuildTransposedWeights();
         }
 
-        /// <summary>
-        ///     Performs the forward pass. Dispatches to a highly optimized SIMD kernel for single-row inference.
-        /// </summary>
+        public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
+        {
+            if (IsTraining)
+            {
+                throw new InvalidOperationException("Layer must be in Eval mode.");
+            }
+            if (_weightsTransposed == null)
+            {
+                RebuildTransposedWeights();
+            }
+
+            LinearInferenceSimd(
+                input,
+                _weightsTransposed.GetView().AsReadOnlySpan(),
+                Biases.DataView.AsReadOnlySpan(),
+                output
+            );
+        }
+
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
             if (graph == null || !IsTraining)
             {
-                var batchSize = input.Data.GetDim(0);
-
+                var batchSize = input.DataView.GetDim(0);
                 if (batchSize != 1)
                 {
                     return TensorMath.Linear(null, input, Weights, Biases);
@@ -84,10 +85,10 @@ namespace DevOnBike.Overfit.DeepLearning
                 }
 
                 LinearInferenceSimd(
-                input.Data.AsReadOnlySpan(),
-                _weightsTransposed.AsReadOnlySpan(),
-                Biases.Data.AsReadOnlySpan(),
-                _inferenceOutputNode.Data.AsSpan());
+                    input.DataView.AsReadOnlySpan(),
+                    _weightsTransposed.GetView().AsReadOnlySpan(),
+                    Biases.DataView.AsReadOnlySpan(),
+                    _inferenceOutputNode.DataView.AsSpan());
 
                 return _inferenceOutputNode;
             }
@@ -109,13 +110,13 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void Save(BinaryWriter bw)
         {
-            var wSpan = Weights.Data.AsReadOnlySpan();
+            var wSpan = Weights.DataView.AsReadOnlySpan();
             for (var i = 0; i < wSpan.Length; i++)
             {
                 bw.Write(wSpan[i]);
             }
 
-            var bSpan = Biases.Data.AsReadOnlySpan();
+            var bSpan = Biases.DataView.AsReadOnlySpan();
             for (var i = 0; i < bSpan.Length; i++)
             {
                 bw.Write(bSpan[i]);
@@ -124,13 +125,13 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void Load(BinaryReader br)
         {
-            var wSpan = Weights.Data.AsSpan();
+            var wSpan = Weights.DataView.AsSpan();
             for (var i = 0; i < wSpan.Length; i++)
             {
                 wSpan[i] = br.ReadSingle();
             }
 
-            var bSpan = Biases.Data.AsSpan();
+            var bSpan = Biases.DataView.AsSpan();
             for (var i = 0; i < bSpan.Length; i++)
             {
                 bSpan[i] = br.ReadSingle();
@@ -144,10 +145,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void Dispose()
         {
-            Weights?.Dispose();
-            Biases?.Dispose();
-            _inferenceOutputNode?.Dispose();
-            _weightsTransposed?.Dispose();
+            Weights?.Dispose(); Biases?.Dispose(); _inferenceOutputNode?.Dispose(); _weightsTransposed?.Dispose();
         }
 
         public void Save(string path)
@@ -163,67 +161,35 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 throw new FileNotFoundException($"Weight file not found: {path}");
             }
-
             using var fs = new FileStream(path, FileMode.Open);
             using var br = new BinaryReader(fs);
             Load(br);
         }
 
-        /// <summary>
-        ///     Transposes weights: W[inputSize, outputSize] → W_T[outputSize, inputSize].
-        ///     This ensures that data for each output neuron lies sequentially in memory,
-        /// </summary>
         private void RebuildTransposedWeights()
         {
             _weightsTransposed?.Dispose();
-            _weightsTransposed = new FastTensor<float>(_outputSize, _inputSize);
-
-            var src = Weights.Data.AsReadOnlySpan();
-            var dst = _weightsTransposed.AsSpan();
-
-            for (var i = 0; i < _inputSize; i++)
-            {
-                for (var j = 0; j < _outputSize; j++)
-                {
-                    dst[j * _inputSize + i] = src[i * _outputSize + j];
-                }
-            }
+            _weightsTransposed = FastTensor<float>.FromView(Weights.DataView.Transpose2D());
         }
 
-        /// <summary>
-        ///     Highly optimized SIMD inference kernel for pre-transposed weights.
-        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static void LinearInferenceSimd(
-            ReadOnlySpan<float> input,
-            ReadOnlySpan<float> weightsT,
-            ReadOnlySpan<float> bias,
-            Span<float> output)
+        private static void LinearInferenceSimd(ReadOnlySpan<float> input, ReadOnlySpan<float> weightsT, ReadOnlySpan<float> bias, Span<float> output)
         {
-            var inputSize = input.Length;
-            var outputSize = output.Length;
-            var vCount = Vector<float>.Count;
+            var inputSize = input.Length; var outputSize = output.Length; var vCount = Vector<float>.Count;
 
             for (var j = 0; j < outputSize; j++)
             {
-                var sum = Vector<float>.Zero;
-                var wRow = weightsT.Slice(j * inputSize, inputSize);
-                var i = 0;
-
+                var sum = Vector<float>.Zero; var wRow = weightsT.Slice(j * inputSize, inputSize); var i = 0;
                 for (; i <= inputSize - vCount; i += vCount)
                 {
-                    var vIn = new Vector<float>(input.Slice(i));
-                    var vW = new Vector<float>(wRow.Slice(i));
+                    var vIn = new Vector<float>(input.Slice(i)); var vW = new Vector<float>(wRow.Slice(i));
                     sum += vIn * vW;
                 }
-
                 var scalarSum = Vector.Dot(sum, Vector<float>.One) + bias[j];
-
                 for (; i < inputSize; i++)
                 {
                     scalarSum += input[i] * wRow[i];
                 }
-
                 output[j] = scalarSum;
             }
         }

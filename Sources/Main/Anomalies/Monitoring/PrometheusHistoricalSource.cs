@@ -133,18 +133,33 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
-            if (!root.TryGetProperty("data", out var data)) return result;
-            if (!data.TryGetProperty("result", out var results)) return result;
+            if (!root.TryGetProperty("data", out var data))
+            {
+                return result;
+            }
+            if (!data.TryGetProperty("result", out var results))
+            {
+                return result;
+            }
 
             foreach (var series in results.EnumerateArray())
             {
-                if (!series.TryGetProperty("metric", out var metric)) continue;
+                if (!series.TryGetProperty("metric", out var metric))
+                {
+                    continue;
+                }
 
                 // Pod name from label
-                if (!metric.TryGetProperty("pod", out var podProp)) continue;
+                if (!metric.TryGetProperty("pod", out var podProp))
+                {
+                    continue;
+                }
                 var podName = podProp.GetString() ?? string.Empty;
 
-                if (!series.TryGetProperty("values", out var values)) continue;
+                if (!series.TryGetProperty("values", out var values))
+                {
+                    continue;
+                }
 
                 var samples = new List<RawSample>(values.GetArrayLength());
 
@@ -170,7 +185,10 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                     */
                 }
 
-                if (samples.Count == 0) continue;
+                if (samples.Count == 0)
+                {
+                    continue;
+                }
 
                 var rawSeries = new RawMetricSeries
                 {

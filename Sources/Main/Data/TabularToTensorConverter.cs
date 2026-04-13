@@ -3,13 +3,14 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Linq;
 using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.Data.Contracts;
 
 namespace DevOnBike.Overfit.Data
 {
     /// <summary>
-    ///     Converts tabular data (objects/models) into high-performance <see cref="FastTensor{}" /> objects.
+    ///     Converts tabular data (objects/models) into high-performance <see cref="FastTensor{T}" /> objects.
     ///     Handles automated One-Hot Encoding for categorical variables and type mapping for numeric/binary data.
     /// </summary>
     /// <typeparam name="T">The type of the input data model.</typeparam>
@@ -21,44 +22,34 @@ namespace DevOnBike.Overfit.Data
         private readonly Func<T, string, object> _valueExtractor;
         private int _featureWidth;
 
-        /// <param name="schema">Defines column types and their roles (Features vs Target).</param>
-        /// <param name="valueExtractor">Delegate to extract a property value by name from the input object.</param>
         public TabularToTensorConverter(TableSchema schema, Func<T, string, object> valueExtractor)
         {
             _schema = schema;
             _valueExtractor = valueExtractor ?? throw new ArgumentNullException(nameof(valueExtractor));
         }
 
-        /// <summary>
-        ///     Analyzes the dataset to calculate feature width and builds category maps for One-Hot Encoding.
-        /// </summary>
-        public void Fit(IEnumerable<T> data)
+        public void Fit(IReadOnlyList<T> data)
         {
             _featureWidth = 0;
+            _categoryMaps.Clear();
 
             foreach (var col in _schema.Features)
             {
                 if (col.Type == ColumnType.Categorical)
                 {
-                    var uniqueSet = new HashSet<string>();
-
+                    var uniqueValues = new HashSet<string>();
                     foreach (var item in data)
                     {
-                        var valStr = GetValue(item, col.Name)?.ToString();
-
-                        if (valStr != null)
+                        var val = GetValue(item, col.Name)?.ToString();
+                        if (val != null)
                         {
-                            uniqueSet.Add(valStr);
+                            uniqueValues.Add(val);
                         }
                     }
 
-                    var uniqueValues = new string[uniqueSet.Count];
-                    uniqueSet.CopyTo(uniqueValues);
-
-                    Array.Sort(uniqueValues);
-
-                    _categoryMaps[col.Name] = uniqueValues;
-                    _featureWidth += uniqueValues.Length; // One-Hot Encoding adds multiple columns.
+                    var categories = uniqueValues.OrderBy(x => x).ToArray();
+                    _categoryMaps[col.Name] = categories;
+                    _featureWidth += categories.Length;
                 }
                 else
                 {
@@ -67,23 +58,16 @@ namespace DevOnBike.Overfit.Data
             }
         }
 
-        /// <summary>
-        ///     Transforms the input list into a feature tensor and a target tensor.
-        ///     Requires <see cref="Fit" /> to be called beforehand.
-        /// </summary>
-        public (FastTensor<float> Features, FastTensor<float> Targets) Transform(List<T> data)
+        public (FastTensor<float> Features, FastTensor<float> Targets) Convert(IReadOnlyList<T> data)
         {
-            if (_featureWidth == 0 && _schema.Features.Count > 0)
-            {
-                throw new InvalidOperationException("Call Fit() before calling Transform().");
-            }
-
             var rowCount = data.Count;
-            var features = new FastTensor<float>(rowCount, _featureWidth);
-            var targets = new FastTensor<float>(rowCount, 1);
 
-            var fSpan = features.AsSpan();
-            var tSpan = targets.AsSpan();
+            // Alokujemy nowe tensory. clearMemory: false, bo zaraz precyzyjnie nadpiszemy każdy bajt.
+            var features = new FastTensor<float>(rowCount, _featureWidth, clearMemory: false);
+            var targets = new FastTensor<float>(rowCount, 1, clearMemory: false);
+
+            var fSpan = features.GetView().AsSpan();
+            var tSpan = targets.GetView().AsSpan();
 
             for (var i = 0; i < rowCount; i++)
             {
@@ -96,11 +80,11 @@ namespace DevOnBike.Overfit.Data
 
                     if (col.Type == ColumnType.Numeric)
                     {
-                        fSpan[rowOffset + currentPos++] = Convert.ToSingle(val);
+                        fSpan[rowOffset + currentPos++] = System.Convert.ToSingle(val);
                     }
                     else if (col.Type == ColumnType.Binary)
                     {
-                        fSpan[rowOffset + currentPos++] = Convert.ToBoolean(val) ? 1f : 0f;
+                        fSpan[rowOffset + currentPos++] = System.Convert.ToBoolean(val) ? 1f : 0f;
                     }
                     else if (col.Type == ColumnType.Categorical)
                     {
@@ -114,7 +98,7 @@ namespace DevOnBike.Overfit.Data
                     }
                 }
 
-                tSpan[i] = Convert.ToSingle(GetValue(data[i], _schema.Target.Name));
+                tSpan[i] = System.Convert.ToSingle(GetValue(data[i], _schema.Target.Name));
             }
 
             return (features, targets);

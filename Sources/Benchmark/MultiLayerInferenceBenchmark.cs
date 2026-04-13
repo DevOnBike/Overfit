@@ -58,8 +58,8 @@ namespace Benchmarks
                 _onnxInputs = [NamedOnnxValue.CreateFromTensor("input", tensor)];
             }
 
-            _overfitInputTensor = new FastTensor<float>(false, 1, InputSize);
-            _inputData.AsSpan().CopyTo(_overfitInputTensor.AsSpan());
+            _overfitInputTensor = new FastTensor<float>(1, InputSize, clearMemory: false);
+            _inputData.AsSpan().CopyTo(_overfitInputTensor.GetView().AsSpan());
             _inputNode = new AutogradNode(_overfitInputTensor, false);
 
             for (var i = 0; i < 200; i++)
@@ -91,7 +91,7 @@ namespace Benchmarks
         [Benchmark]
         public float Overfit_3Layer_ZeroAlloc()
         {
-            return _overfitModel.Forward(null, _inputNode).Data.AsSpan()[0];
+            return _overfitModel.Forward(null, _inputNode).DataView.AsReadOnlySpan()[0];
         }
 
         [GlobalCleanup]

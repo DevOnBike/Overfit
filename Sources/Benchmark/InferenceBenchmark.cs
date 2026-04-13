@@ -46,8 +46,8 @@ namespace Benchmarks
             _overfitModel.Load("benchmark_model.bin");
             _overfitModel.Eval();
 
-            var inputTensor = new FastTensor<float>(false, 1, InputSize);
-            _inputData.AsSpan().CopyTo(inputTensor.AsSpan());
+            var inputTensor = new FastTensor<float>(1, InputSize, clearMemory: false);
+            _inputData.AsSpan().CopyTo(inputTensor.GetView().AsSpan());
             _inputNode = new AutogradNode(inputTensor, false);
 
             for (var i = 0; i < 100; i++)
@@ -71,7 +71,8 @@ namespace Benchmarks
         public float Overfit_ZeroAlloc()
         {
             var outputNode = _overfitModel.Forward(null, _inputNode);
-            return outputNode.Data.AsSpan()[0];
+
+            return outputNode.DataView.AsReadOnlySpan()[0];
         }
 
         [GlobalCleanup]

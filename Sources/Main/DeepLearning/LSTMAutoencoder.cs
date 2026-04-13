@@ -3,7 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Buffers;
 using System.Linq;
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Core;
@@ -54,7 +53,7 @@ namespace DevOnBike.Overfit.DeepLearning
         public int LatentSize { get; }
         public int DecoderHidden { get; }
 
-        public int ParameterCount => Parameters().Sum(p => p.Data.Size);
+        public int ParameterCount => Parameters().Sum(p => p.DataView.Size);
 
         public bool IsTraining { get; private set; } = true;
 
@@ -79,6 +78,13 @@ namespace DevOnBike.Overfit.DeepLearning
         // ---------------------------------------------------------------------------
         // Forward — Training Path (Autograd)
         // ---------------------------------------------------------------------------
+
+        public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
+        {
+            // Adapter dla standardowego interfejsu IModule. 
+            // Wymusza predykcję dla pojedynczej sekwencji (Batch = 1).
+            Reconstruct(1, input, output);
+        }
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
@@ -154,7 +160,6 @@ namespace DevOnBike.Overfit.DeepLearning
 
         /// <summary>
         ///     100% Allocation-free reconstruction path.
-        ///     Operates fully on ArrayPool and Spans.
         /// </summary>
         public void Reconstruct(int batchSize, ReadOnlySpan<float> features, Span<float> reconstruction)
         {
@@ -170,48 +175,39 @@ namespace DevOnBike.Overfit.DeepLearning
             var repLen = batchSize * SeqLen * LatentSize;
             var dec1Len = batchSize * SeqLen * DecoderHidden;
 
-            var enc1Arr = ArrayPool<float>.Shared.Rent(enc1Len);
-            var latentArr = ArrayPool<float>.Shared.Rent(latentLen);
-            var repArr = ArrayPool<float>.Shared.Rent(repLen);
-            var dec1Arr = ArrayPool<float>.Shared.Rent(dec1Len);
+            // Brak wielkich bloków try-finally, wszystko załatwiają PooledBuffery
+            using var enc1Buf = new PooledBuffer<float>(enc1Len);
+            using var latentBuf = new PooledBuffer<float>(latentLen);
+            using var repBuf = new PooledBuffer<float>(repLen);
+            using var dec1Buf = new PooledBuffer<float>(dec1Len);
 
-            try
+            var enc1S = enc1Buf.Span;
+            var latentS = latentBuf.Span;
+            var repS = repBuf.Span;
+            var dec1S = dec1Buf.Span;
+
+            // 1. Encoder 1
+            _enc1.ForwardInference(batchSize, SeqLen, features, enc1S);
+
+            // 2. Encoder 2
+            _enc2.ForwardInference(batchSize, SeqLen, enc1S, latentS);
+
+            // 3. Repeat Vector (Manual copy to avoid allocations)
+            for (var b = 0; b < batchSize; b++)
             {
-                var enc1S = enc1Arr.AsSpan(0, enc1Len);
-                var latentS = latentArr.AsSpan(0, latentLen);
-                var repS = repArr.AsSpan(0, repLen);
-                var dec1S = dec1Arr.AsSpan(0, dec1Len);
+                var src = latentS.Slice(b * LatentSize, LatentSize);
 
-                // 1. Encoder 1
-                _enc1.ForwardInference(batchSize, SeqLen, features, enc1S);
-
-                // 2. Encoder 2
-                _enc2.ForwardInference(batchSize, SeqLen, enc1S, latentS);
-
-                // 3. Repeat Vector (Manual copy to avoid allocations)
-                for (var b = 0; b < batchSize; b++)
+                for (var t = 0; t < SeqLen; t++)
                 {
-                    var src = latentS.Slice(b * LatentSize, LatentSize);
-
-                    for (var t = 0; t < SeqLen; t++)
-                    {
-                        src.CopyTo(repS.Slice(b * SeqLen * LatentSize + t * LatentSize, LatentSize));
-                    }
+                    src.CopyTo(repS.Slice(b * SeqLen * LatentSize + t * LatentSize, LatentSize));
                 }
-
-                // 4. Decoder 1
-                _dec1.ForwardInference(batchSize, SeqLen, repS, dec1S);
-
-                // 5. Decoder 2
-                _dec2.ForwardInference(batchSize, SeqLen, dec1S, reconstruction);
             }
-            finally
-            {
-                ArrayPool<float>.Shared.Return(enc1Arr);
-                ArrayPool<float>.Shared.Return(latentArr);
-                ArrayPool<float>.Shared.Return(repArr);
-                ArrayPool<float>.Shared.Return(dec1Arr);
-            }
+
+            // 4. Decoder 1
+            _dec1.ForwardInference(batchSize, SeqLen, repS, dec1S);
+
+            // 5. Decoder 2
+            _dec2.ForwardInference(batchSize, SeqLen, dec1S, reconstruction);
         }
 
         /// <summary>
@@ -223,30 +219,22 @@ namespace DevOnBike.Overfit.DeepLearning
             var n = SeqLen * InputSize;
             var errors = new float[batchSize];
 
-            var reconArr = ArrayPool<float>.Shared.Rent(batchSize * n);
-            var diffArr = ArrayPool<float>.Shared.Rent(n);
+            using var reconBuf = new PooledBuffer<float>(batchSize * n);
+            using var diffBuf = new PooledBuffer<float>(n);
 
-            try
+            var reconS = reconBuf.Span;
+            var diffS = diffBuf.Span;
+
+            Reconstruct(batchSize, input, reconS);
+
+            for (var b = 0; b < batchSize; b++)
             {
-                var reconS = reconArr.AsSpan(0, batchSize * n);
-                var diffS = diffArr.AsSpan(0, n);
+                var src = input.Slice(b * n, n);
+                var rec = reconS.Slice(b * n, n);
 
-                Reconstruct(batchSize, input, reconS);
+                TensorPrimitives.Subtract(src, rec, diffS);
 
-                for (var b = 0; b < batchSize; b++)
-                {
-                    var src = input.Slice(b * n, n);
-                    var rec = reconS.Slice(b * n, n);
-
-                    TensorPrimitives.Subtract(src, rec, diffS);
-
-                    errors[b] = TensorPrimitives.Dot(diffS, diffS) / n;
-                }
-            }
-            finally
-            {
-                ArrayPool<float>.Shared.Return(reconArr);
-                ArrayPool<float>.Shared.Return(diffArr);
+                errors[b] = TensorPrimitives.Dot(diffS, diffS) / n;
             }
 
             return errors;
@@ -262,7 +250,10 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void Load(string path)
         {
-            if (!File.Exists(path)) throw new FileNotFoundException($"Model file not found: {path}");
+            if (!File.Exists(path))
+            {
+                throw new FileNotFoundException($"Model file not found: {path}");
+            }
 
             using var fs = new FileStream(path, FileMode.Open);
             using var br = new BinaryReader(fs);

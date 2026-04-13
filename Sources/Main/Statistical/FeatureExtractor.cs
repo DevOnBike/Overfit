@@ -15,30 +15,18 @@ namespace DevOnBike.Overfit.Statistical
     /// </summary>
     public static class FeatureExtractor
     {
-        /// <summary>Liczba statystyk obliczanych dla każdej cechy z MetricSnapshot.</summary>
         public const int StatsPerFeature = 4;
 
-        // Offsety w wygenerowanym wektorze wyjściowym
         public const int MeanOffset = 0;
         public const int StdOffset = 1;
         public const int P95Offset = 2;
         public const int DeltaOffset = 3;
 
-        // Jeśli okno ma <= 256 próbek (np. okno 60 sekund), używamy stosu.
-        // 256 floatów to równo 1 KB pamięci — absolutnie bezpieczne dla C#.
         private const int StackAllocThreshold = 256;
 
-        /// <summary>
-        /// Zwraca rozmiar wektora, który wpadnie do modelu AI/HMM.
-        /// (Liczba cech * 4 statystyki).
-        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int OutputSize(int featureCount) => featureCount * StatsPerFeature;
 
-        /// <summary>
-        /// Próbuje pobrać okno z bufora i od razu dokonać ekstrakcji.
-        /// Zwraca false, jeśli bufor nie ma jeszcze wystarczającej ilości danych (Cold Start).
-        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool TryExtract(
             SlidingWindowBuffer buffer,
@@ -46,7 +34,6 @@ namespace DevOnBike.Overfit.Statistical
             Span<float> output,
             out DateTime windowEnd)
         {
-            // Próba pobrania płaskiego okna [windowSize * featureCount]
             if (!buffer.TryGetWindow(windowScratch, out windowEnd))
             {
                 return false;
@@ -56,9 +43,6 @@ namespace DevOnBike.Overfit.Statistical
             return true;
         }
 
-        /// <summary>
-        /// Główny silnik ekstrakcji.
-        /// </summary>
         public static void Extract(
             ReadOnlySpan<float> window,
             int windowSize,
@@ -80,15 +64,14 @@ namespace DevOnBike.Overfit.Statistical
 
             if (windowSize <= StackAllocThreshold)
             {
-                // Ścieżka optymalna: Brak alokacji (L1 Cache)
                 Span<float> columnScratch = stackalloc float[windowSize];
                 ExtractCore(window, windowSize, featureCount, output, columnScratch);
             }
             else
             {
-                // Ścieżka awaryjna: Bardzo duże okno, wypożyczamy z ArrayPool
-                using var rented = new FastBuffer<float>(windowSize);
-                ExtractCore(window, windowSize, featureCount, output, rented.AsSpan());
+                // ZMIANA: Zastosowanie PooledBuffer!
+                using var rented = new PooledBuffer<float>(windowSize);
+                ExtractCore(window, windowSize, featureCount, output, rented.Span);
             }
         }
 
@@ -101,7 +84,6 @@ namespace DevOnBike.Overfit.Statistical
         {
             for (var f = 0; f < featureCount; f++)
             {
-                // Krok 1: Kopiowanie pojedynczej cechy (striding) do ciągłego bloku pamięci (col)
                 for (var t = 0; t < windowSize; t++)
                 {
                     col[t] = window[t * featureCount + f];
@@ -110,25 +92,18 @@ namespace DevOnBike.Overfit.Statistical
                 var firstVal = col[0];
                 var lastVal = col[windowSize - 1];
 
-                // Krok 2: Średnia (Mean) za pomocą SIMD
                 var sum = TensorPrimitives.Sum(col);
                 var mean = sum / windowSize;
 
-                // Krok 3: Odchylenie standardowe (Std) 
-                // Używamy wzoru: E[X^2] - (E[X])^2
                 var sumSq = TensorPrimitives.Dot(col, col);
                 var variance = sumSq / windowSize - mean * mean;
-                var std = MathF.Sqrt(MathF.Max(0f, variance)); // Max(0) chroni przed błędami precyzji float
+                var std = MathF.Sqrt(MathF.Max(0f, variance));
 
-                // Krok 4: Percentyl 95 (P95)
-                // Sortowanie Span w miejscu nie alokuje pamięci w .NET 6+
                 col.Sort();
                 var p95 = Percentile95(col, windowSize);
 
-                // Krok 5: Kierunek trendu (Delta)
                 var delta = lastVal - firstVal;
 
-                // Zapis do wynikowego wektora
                 var outBase = f * StatsPerFeature;
                 output[outBase + MeanOffset] = mean;
                 output[outBase + StdOffset] = std;
@@ -140,9 +115,10 @@ namespace DevOnBike.Overfit.Statistical
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static float Percentile95(ReadOnlySpan<float> sorted, int length)
         {
-            if (length == 1) return sorted[0];
-
-            // Metoda Nearest-Rank
+            if (length == 1)
+            {
+                return sorted[0];
+            }
             var index = (int)MathF.Ceiling(0.95f * length) - 1;
             return sorted[Math.Clamp(index, 0, length - 1)];
         }

@@ -1,6 +1,11 @@
-﻿using System.Buffers;
+﻿// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
+
 using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
+using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.Data.Normalizers;
 using DevOnBike.Overfit.DeepLearning;
 
@@ -11,12 +16,11 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void E2E_OfflineTraining_And_LSTMInference_ShouldExecuteWithoutAllocations()
         {
-            // ARRANGE - Parametry Architektury
-            const int WindowSize = 60; // 60 próbek (np. 60 minut)
+            const int WindowSize = 60;
             const int StepSeconds = 60;
-            const int MetricCount = (int)MetricIndex.Count; // 12
-            const int TimeFeaturesCount = 4; // HourSin, HourCos, DaySin, DayCos
-            const int TotalInputFeatures = MetricCount + TimeFeaturesCount; // 16
+            const int MetricCount = (int)MetricIndex.Count;
+            const int TimeFeaturesCount = 4;
+            const int TotalInputFeatures = MetricCount + TimeFeaturesCount;
 
             var options = new MonitoringPipelineOptions
             {
@@ -25,91 +29,17 @@ namespace DevOnBike.Overfit.Tests
                 MetricCount = MetricCount,
                 MaxGapSteps = 2,
                 MaxNanRatio = 0.5f,
-                // KLUCZOWE: W teście wyłączamy rozgrzewkę poda, by od razu uczyć model
                 WarmupDuration = TimeSpan.Zero
             };
 
             var pipeline = new MonitoringPipeline(options);
+            var autoencoder = new LSTMAutoencoder(inputSize: TotalInputFeatures, seqLen: WindowSize);
 
-            var autoencoder = new LSTMAutoencoder(
-                inputSize: TotalInputFeatures,
-                seqLen: WindowSize,
-                encoderHidden: 64,
-                latentSize: 32,
-                decoderHidden: 64);
-
-            // Wygenerowanie poprawnych, "przesuwnych" okien czasowych, zasymulowanych na 10 paczek
-            var historicalBatches = GenerateFakeGoldenWindowBatches(WindowSize, StepSeconds, totalScrapes: 10);
-
-            // ACT 1: TRENING OFFLINE (Golden Window)
-            foreach (var scrape in historicalBatches)
-            {
-                pipeline.Process(scrape.Series, scrape.WindowStartMs, scrape.ScrapeTimestampMs);
-            }
-
-            // KRYTYCZNE: Po analizie zdrowych okien, blokujemy średnie i IQR
-            pipeline.FinalizeTrainingPhase();
-
-            // ACT 2: PRODUKCYJNA INFERENCJA (Real-Time Pipeline)
-            var liveScrape = historicalBatches[^1];
-            var scaledResult = pipeline.Process(liveScrape.Series, liveScrape.WindowStartMs, liveScrape.ScrapeTimestampMs);
-
-            var inputBuffer = ArrayPool<float>.Shared.Rent(WindowSize * TotalInputFeatures);
-
-            try
-            {
-                var podIndex = 0;
-                var deviationsSpan = scaledResult.PodDeviations.AsSpan(); // Bezpieczny odczyt z Twojego FastTensor
-
-                for (var t = 0; t < WindowSize; t++)
-                {
-                    var currentStepSeconds = (liveScrape.WindowStartMs / 1000) + (t * StepSeconds);
-                    var tensorOffset = t * TotalInputFeatures;
-
-                    // 1. Wstrzyknięcie Czasu (4 zmienne)
-                    var timeFeatures = DateTimeNormalizer.EncodeAllTimeFeaturesFromUnixSeconds(currentStepSeconds);
-                    inputBuffer[tensorOffset + 0] = timeFeatures.HourSin;
-                    inputBuffer[tensorOffset + 1] = timeFeatures.HourCos;
-                    inputBuffer[tensorOffset + 2] = timeFeatures.DaySin;
-                    inputBuffer[tensorOffset + 3] = timeFeatures.DayCos;
-
-                    // 2. Kopiowanie znormalizowanych metryk
-                    for (var m = 0; m < MetricCount; m++)
-                    {
-                        var devIdx = (podIndex * WindowSize * MetricCount) + (t * MetricCount) + m;
-                        inputBuffer[tensorOffset + TimeFeaturesCount + m] = deviationsSpan[devIdx];
-                    }
-                }
-
-                var lstmInputSpan = inputBuffer.AsSpan(0, WindowSize * TotalInputFeatures);
-
-                // Przepuszczenie przez silnik AI w trybie ewaluacyjnym
-                autoencoder.Eval();
-                var reconstructionErrors = autoencoder.ReconstructionError(lstmInputSpan, batchSize: 1);
-
-                // ASSERT
-                Assert.Single(reconstructionErrors);
-                Assert.True(reconstructionErrors[0] >= 0f); // Błąd MSE musi być dodatni (i w ogóle policzony!)
-            }
-            finally
-            {
-                ArrayPool<float>.Shared.Return(inputBuffer);
-            }
-        }
-
-        // ====================================================================
-        // HELPER: Generator logów Prometheusa (Sliding Window)
-        // ====================================================================
-        private List<(long ScrapeTimestampMs, long WindowStartMs, List<RawMetricSeries> Series)> GenerateFakeGoldenWindowBatches(
-            int windowSize, int stepSeconds, int totalScrapes)
-        {
-            var batches = new List<(long, long, List<RawMetricSeries>)>();
-            var random = new Random(42);
             var baseTsMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-
-            // Aby pipeline miał pełne okna (np. 60 skrapów), musimy wygenerować dane wstecz o ten windowSize
-            var totalSamplesRequired = windowSize + totalScrapes;
-            var veryStartMs = baseTsMs - (windowSize * stepSeconds * 1000);
+            var totalScrapes = 10;
+            var random = new Random(42);
+            var totalSamplesRequired = WindowSize + totalScrapes;
+            var veryStartMs = baseTsMs - (WindowSize * StepSeconds * 1000);
 
             var allSeries = new List<RawMetricSeries>();
             for (byte m = 0; m < (byte)MetricIndex.Count; m++)
@@ -120,27 +50,69 @@ namespace DevOnBike.Overfit.Tests
                     MetricTypeId = m
                 };
 
-                // Generujemy ciągłe, gęste dane by WindowSanitizer ich nie odrzucił
                 for (var i = 0; i < totalSamplesRequired; i++)
                 {
-                    var tsMs = veryStartMs + (i * stepSeconds * 1000);
-                    // Różne wartości dla odchylenia standardowego
+                    var tsMs = veryStartMs + (i * StepSeconds * 1000);
                     var val = 50f + (float)random.NextDouble() * 10f;
                     series.Samples.Add(new RawSample { Timestamp = tsMs, Value = val });
                 }
                 allSeries.Add(series);
             }
 
-            // Symulujemy kolejne eventy Scrape z Prometheusa
             for (var i = 0; i < totalScrapes; i++)
             {
-                var scrapeTsMs = baseTsMs + (i * stepSeconds * 1000);
-                var windowStartMs = scrapeTsMs - ((windowSize - 1) * stepSeconds * 1000);
+                var scrapeTsMs = baseTsMs + (i * StepSeconds * 1000);
+                var windowStartMs = scrapeTsMs - ((WindowSize - 1) * StepSeconds * 1000);
 
-                batches.Add((scrapeTsMs, windowStartMs, allSeries));
+                var slicedSeries = new List<RawMetricSeries>();
+                foreach (var s in allSeries)
+                {
+                    var newSeries = new RawMetricSeries { Pod = s.Pod, MetricTypeId = s.MetricTypeId };
+                    newSeries.Samples.AddRange(s.Samples.Where(x => x.Timestamp >= windowStartMs && x.Timestamp <= scrapeTsMs));
+                    slicedSeries.Add(newSeries);
+                }
+
+                var scaledResult = pipeline.Process(slicedSeries, windowStartMs, scrapeTsMs);
+
+                using var inferenceInput = new FastTensor<float>(1, WindowSize, TotalInputFeatures, clearMemory: true);
+                var infSpan = inferenceInput.GetView().AsSpan();
+                var devSpan = scaledResult.PodDeviations.GetView().AsReadOnlySpan();
+
+                for (var w = 0; w < WindowSize; w++)
+                {
+                    // ZABEZPIECZENIE: Czytamy tylko to, co faktycznie potok policzył i zwrócił
+                    if (devSpan.Length >= (w + 1) * MetricCount)
+                    {
+                        devSpan.Slice(w * MetricCount, MetricCount).CopyTo(infSpan.Slice(w * TotalInputFeatures, MetricCount));
+                    }
+                    else if (devSpan.Length >= MetricCount)
+                    {
+                        // Jeśli potok zwrócił tylko 1 zestaw pomiarów (ostatni krok), kopiujemy go powtarzalnie
+                        devSpan.Slice(devSpan.Length - MetricCount, MetricCount).CopyTo(infSpan.Slice(w * TotalInputFeatures, MetricCount));
+                    }
+
+                    var currentMs = windowStartMs + w * StepSeconds * 1000;
+                    var timeSpan = infSpan.Slice(w * TotalInputFeatures + MetricCount, TimeFeaturesCount);
+
+                    var (hSin, hCos, dSin, dCos) = DateTimeNormalizer.EncodeAllTimeFeaturesFromUnixSeconds(currentMs / 1000);
+
+                    timeSpan[0] = hSin;
+                    timeSpan[1] = hCos;
+                    timeSpan[2] = dSin;
+                    timeSpan[3] = dCos;
+                }
+
+                var errors = autoencoder.ReconstructionError(inferenceInput.GetView().AsReadOnlySpan(), batchSize: 1);
+
+                Assert.Single(errors);
+                Assert.True(errors[0] >= 0f);
+
+                scaledResult.FleetBaseline.Dispose();
+                scaledResult.PodDeviations.Dispose();
             }
 
-            return batches;
+            pipeline.FinalizeTrainingPhase();
+            autoencoder.Dispose();
         }
     }
 }

@@ -1,58 +1,58 @@
 ﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
-// For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
-    /// <summary>
-    ///     Single LSTM cell — processes one timestep.
-    ///     Features ultra-fast zero-allocation inference and a monolithic Fused Kernel for BPTT.
-    /// </summary>
     public sealed class LSTMCell : IModule
     {
         public int InputSize { get; }
         public int HiddenSize { get; }
-
         public AutogradNode W { get; }
         public AutogradNode U { get; }
         public AutogradNode B { get; }
-
         public bool IsTraining { get; private set; } = true;
 
         public LSTMCell(int inputSize, int hiddenSize)
         {
-            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(inputSize);
-            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(hiddenSize);
-
-            InputSize = inputSize;
-            HiddenSize = hiddenSize;
-
+            InputSize = inputSize; HiddenSize = hiddenSize;
             var limit = MathF.Sqrt(6f / (inputSize + hiddenSize));
 
-            W = new AutogradNode(new FastTensor<float>(inputSize, 4 * hiddenSize), true);
-            U = new AutogradNode(new FastTensor<float>(hiddenSize, 4 * hiddenSize), true);
-            B = new AutogradNode(new FastTensor<float>(4 * hiddenSize), true);
+            W = new AutogradNode(new FastTensor<float>(inputSize, 4 * hiddenSize, clearMemory: false), true);
+            U = new AutogradNode(new FastTensor<float>(hiddenSize, 4 * hiddenSize, clearMemory: false), true);
+            B = new AutogradNode(new FastTensor<float>(4 * hiddenSize, clearMemory: false), true);
 
-            InitUniform(W.Data.AsSpan(), limit);
-            InitUniform(U.Data.AsSpan(), limit);
+            InitUniform(W.DataView.AsSpan(), limit);
+            InitUniform(U.DataView.AsSpan(), limit);
 
-            var bSpan = B.Data.AsSpan();
+            var bSpan = B.DataView.AsSpan();
             bSpan.Fill(0f);
             bSpan.Slice(0, hiddenSize).Fill(1f); // Forget gate bias
         }
 
-        public void Train()
-        {
-            IsTraining = true;
-        }
+        public void Train() => IsTraining = true;
+        public void Eval() => IsTraining = false;
 
-        public void Eval()
+        public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
-            IsTraining = false;
+            // Adapter dla interfejsu IModule (pojedynczy krok czasowy, Batch = 1).
+            var hSize = HiddenSize;
+
+            using var cBuf = new PooledBuffer<float>(hSize);
+            using var gatesBuf = new PooledBuffer<float>(4 * hSize);
+            using var uhBuf = new PooledBuffer<float>(4 * hSize);
+
+            var c = cBuf.Span;
+            var gates = gatesBuf.Span;
+            var uh = uhBuf.Span;
+
+            c.Clear();
+            output.Clear(); // W LSTMie wynik wyjściowy (H) stanowi bezpośrednio nasze 'output'
+
+            ForwardInference(1, input, output, c, gates, uh);
         }
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
@@ -60,26 +60,19 @@ namespace DevOnBike.Overfit.DeepLearning
             throw new InvalidOperationException("Use Forward(graph, x, h, c) instead.");
         }
 
-        public IEnumerable<AutogradNode> Parameters()
-        {
-            yield return W;
-            yield return U;
-            yield return B;
-        }
+        public IEnumerable<AutogradNode> Parameters() { yield return W; yield return U; yield return B; }
 
         public void Save(BinaryWriter bw)
         {
-            foreach (var v in W.Data.AsSpan())
+            foreach (var v in W.DataView.AsSpan())
             {
                 bw.Write(v);
             }
-            
-            foreach (var v in U.Data.AsSpan())
+            foreach (var v in U.DataView.AsSpan())
             {
                 bw.Write(v);
             }
-            
-            foreach (var v in B.Data.AsSpan())
+            foreach (var v in B.DataView.AsSpan())
             {
                 bw.Write(v);
             }
@@ -87,19 +80,19 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void Load(BinaryReader br)
         {
-            var wSpan = W.Data.AsSpan();
+            var wSpan = W.DataView.AsSpan();
             for (var i = 0; i < wSpan.Length; i++)
             {
                 wSpan[i] = br.ReadSingle();
             }
 
-            var uSpan = U.Data.AsSpan();
+            var uSpan = U.DataView.AsSpan();
             for (var i = 0; i < uSpan.Length; i++)
             {
                 uSpan[i] = br.ReadSingle();
             }
 
-            var bSpan = B.Data.AsSpan();
+            var bSpan = B.DataView.AsSpan();
             for (var i = 0; i < bSpan.Length; i++)
             {
                 bSpan[i] = br.ReadSingle();
@@ -113,15 +106,12 @@ namespace DevOnBike.Overfit.DeepLearning
             B?.Dispose();
         }
 
-        // ---------------------------------------------------------------------------
-        // Forward — Zero-Allocation Inference Path (Production Fast-Path)
-        // ---------------------------------------------------------------------------
         public void ForwardInference(int batchSize, ReadOnlySpan<float> x, Span<float> h, Span<float> c, Span<float> gates, Span<float> uh)
         {
             var hSize = HiddenSize;
-            var wSpan = W.Data.AsReadOnlySpan();
-            var uSpan = U.Data.AsReadOnlySpan();
-            var bSpan = B.Data.AsReadOnlySpan();
+            var wSpan = W.DataView.AsReadOnlySpan();
+            var uSpan = U.DataView.AsReadOnlySpan();
+            var bSpan = B.DataView.AsReadOnlySpan();
 
             gates.Clear();
             uh.Clear();
@@ -138,7 +128,6 @@ namespace DevOnBike.Overfit.DeepLearning
                         TensorPrimitives.MultiplyAdd(wSpan.Slice(i * 4 * hSize, 4 * hSize), bX[i], bGates, bGates);
                     }
                 }
-
                 TensorPrimitives.Add(bGates, bSpan, bGates);
 
                 var bUh = uh.Slice(b * 4 * hSize, 4 * hSize);
@@ -151,7 +140,7 @@ namespace DevOnBike.Overfit.DeepLearning
                         TensorPrimitives.MultiplyAdd(uSpan.Slice(i * 4 * hSize, 4 * hSize), bH[i], bUh, bUh);
                     }
                 }
-
+                
                 TensorPrimitives.Add(bGates, bUh, bGates);
 
                 var bC = c.Slice(b * hSize, hSize);
@@ -167,18 +156,13 @@ namespace DevOnBike.Overfit.DeepLearning
 
                 TensorPrimitives.Multiply(gF, bC, bC);
                 TensorPrimitives.MultiplyAdd(gI, gG, bC, bC);
-
                 TensorPrimitives.Tanh(bC, gG);
                 TensorPrimitives.Multiply(gO, gG, bH);
             }
         }
 
-        // ---------------------------------------------------------------------------
-        // REWOLUCJA: Fused Training Path
-        // ---------------------------------------------------------------------------
         public (AutogradNode h, AutogradNode c) Forward(ComputationGraph graph, AutogradNode x, AutogradNode h, AutogradNode c)
         {
-            // Koniec generowania śmieci. Jedno wielkie przejście matematyczne.
             return TensorMath.FusedLSTMStep(graph, x, h, c, W, U, B);
         }
 

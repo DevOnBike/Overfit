@@ -24,24 +24,26 @@ namespace DevOnBike.Overfit.Statistical
         public static HmmParams LoadFromFile(string path)
         {
             var json = File.ReadAllText(path);
+
             return JsonSerializer.Deserialize<HmmParams>(json) ?? throw new InvalidOperationException("Nie udało się zdeserializować HmmParams.");
         }
 
         /// <summary>
-        /// Konwertuje płaskie tablice z JSON-a na zoptymalizowane FastMatrix dla Twojego silnika.
-        /// Zwraca macierze, które po przekazaniu do GaussianHMM należy zwolnić (Dispose).
+        /// Konwertuje płaskie tablice z JSON-a na zoptymalizowane FastTensor dla silnika Overfit.
+        /// Zwraca tensory, które po przekazaniu do GaussianHMM zostaną tam zutylizowane (Dispose).
         /// </summary>
-        public FastMatrix<float>[] ToFastMatrices(int featureCount)
+        public FastTensor<float>[] ToFastTensors(int featureCount)
         {
             var stateCount = Covariances.Length;
-            var matrices = new FastMatrix<float>[stateCount];
-            
+            var tensors = new FastTensor<float>[stateCount];
+
             for (var i = 0; i < stateCount; i++)
             {
-                matrices[i] = new FastMatrix<float>(featureCount, featureCount);
-                matrices[i].CopyFrom(Covariances[i]);
+                tensors[i] = new FastTensor<float>(featureCount, featureCount, clearMemory: false);
+                Covariances[i].CopyTo(tensors[i].GetView().AsSpan());
             }
-            return matrices;
+
+            return tensors;
         }
     }
 }

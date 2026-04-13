@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -43,12 +43,15 @@ namespace DevOnBike.Overfit.Core
 
         public void Backward(AutogradNode lossNode)
         {
-            if (lossNode?.Grad == null)
+            // ZMIANA: AutogradNode ukrywa teraz fizyczną pamięć.
+            // Sprawdzamy bezpieczną flagę RequiresGrad zamiast badać referencje.
+            if (lossNode == null || !lossNode.RequiresGrad)
             {
                 return;
             }
 
-            lossNode.Grad.AsSpan().Fill(1f);
+            // ZMIANA: Używamy naszego bezalokacyjnego widoku (GradView) do zainicjowania gradientu
+            lossNode.GradView.AsSpan().Fill(1f);
 
             for (var i = _opCount - 1; i >= 0; i--)
             {
@@ -135,6 +138,8 @@ namespace DevOnBike.Overfit.Core
         {
             if (_opCount > 0)
             {
+                // UWAGA: To jest krytyczne dla zarządzania pamięcią! 
+                // Czyszczenie tablicy zwalnia referencje do AutogradNodes, pozwalając GC lub Dispose na posprzątanie sterty.
                 Array.Clear(_tape, 0, _opCount);
             }
             _opCount = 0;

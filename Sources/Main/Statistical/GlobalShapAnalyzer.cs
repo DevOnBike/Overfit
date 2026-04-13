@@ -22,14 +22,19 @@ namespace DevOnBike.Overfit.Statistical
 
         public List<FeatureImportance> AnalyzeImportance(FastTensor<float> trainingData)
         {
-            var rows = trainingData.GetDim(0);
+            // ZMIANA: Pobieramy bezalokacyjny widok na dane
+            var view = trainingData.GetView();
+            var rows = view.GetDim(0);
+            var span = view.AsReadOnlySpan();
+
             var globalImportance = new float[_featureCount];
             var shapBuffer = new float[_featureCount];
             var rowBuffer = new float[_featureCount];
 
             for (var r = 0; r < rows; r++)
             {
-                trainingData.AsReadOnlySpan().Slice(r * _featureCount, _featureCount).CopyTo(rowBuffer);
+                // ZMIANA: Używamy span z widoku
+                span.Slice(r * _featureCount, _featureCount).CopyTo(rowBuffer);
                 _shap.Explain(rowBuffer, shapBuffer);
 
                 for (var f = 0; f < _featureCount; f++)
@@ -41,7 +46,11 @@ namespace DevOnBike.Overfit.Statistical
             var results = new List<FeatureImportance>();
             for (var f = 0; f < _featureCount; f++)
             {
-                results.Add(new FeatureImportance { FeatureIndex = f, ImportanceScore = globalImportance[f] / rows });
+                results.Add(new FeatureImportance
+                {
+                    FeatureIndex = f,
+                    ImportanceScore = globalImportance[f] / rows
+                });
             }
 
             return results.OrderByDescending(x => x.ImportanceScore).ToList();

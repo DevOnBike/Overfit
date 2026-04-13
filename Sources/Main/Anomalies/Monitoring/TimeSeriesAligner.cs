@@ -58,7 +58,10 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             foreach (var series in seriesList)
             {
                 int mId = series.MetricTypeId;
-                if ((uint)mId >= (uint)_options.MetricCount) continue;
+                if ((uint)mId >= (uint)_options.MetricCount)
+                {
+                    continue;
+                }
 
                 series.Samples.Sort(static (a, b) => a.Timestamp.CompareTo(b.Timestamp));
 
@@ -111,7 +114,10 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static float FindNearest(List<RawSample> samples, long targetMs, int toleranceMs)
         {
-            if (samples.Count == 0) return float.NaN;
+            if (samples.Count == 0)
+            {
+                return float.NaN;
+            }
 
             int lo = 0, hi = samples.Count - 1;
 
@@ -120,9 +126,18 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 var mid = lo + hi >>> 1;
                 var diff = samples[mid].Timestamp - targetMs;
 
-                if (diff < 0) lo = mid + 1;
-                else if (diff > 0) hi = mid - 1;
-                else return samples[mid].Value;
+                if (diff < 0)
+                {
+                    lo = mid + 1;
+                }
+                else if (diff > 0)
+                {
+                    hi = mid - 1;
+                }
+                else
+                {
+                    return samples[mid].Value;
+                }
             }
 
             var best = float.NaN;

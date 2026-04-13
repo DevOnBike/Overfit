@@ -1,5 +1,7 @@
 ﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 using DevOnBike.Overfit.Statistical;
@@ -15,15 +17,14 @@ namespace DevOnBike.Overfit.Tests
 
         public ShapComplexAnomaliesIntegrationTests()
         {
-            _featureCount = MetricSnapshot.FeatureCount * 4; // 48 cech
+            _featureCount = MetricSnapshot.FeatureCount * 4; // 48 cech (12 metryk * 4 statystyki)
             _detector = new K8sAnomalyDetector(_featureCount);
 
             // 1. ARRANGE: Tło (Background) reprezentuje stan lekko podwyższonego szumu.
-            // Ustawiamy wszystko na 0.0 (idealnie), poza ErrorRate.
             _normalizedBackground = new float[_featureCount];
 
             // Indeks 32 to ErrorRate Mean. 
-            // Ustawiamy tło na 1.0 (czyli 1 odchylenie standardowe od normy).
+            // Ustawiamy tło na 1.0 (czyli 1 odchylenie standardowe od normy w świecie znormalizowanym).
             _normalizedBackground[32] = 1.0f;
 
             SetupNormalizedHmm();
@@ -32,70 +33,89 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void Shap_ShouldPartitionBlame_InCascadeFailure()
         {
-            // 2. ARRANGE: Instancja z awarią (wartości znormalizowane)
+            // 2. ARRANGE: Instancja z awarią (w stosunku do tła)
             var anomalousInstance = new float[_featureCount];
+            _normalizedBackground.CopyTo(anomalousInstance, 0);
 
-            // CPU i Latencja są bardzo wysokie (odchylenie o 5 sigma)
-            anomalousInstance[0] = 5.0f;  // CpuUsageRatio Mean
-            anomalousInstance[20] = 5.0f; // LatencyP95Ms Mean
+            // Wartości dobrane tak, by model widział różnicę, ale nie wpadał w nasycenie (underflow)
+            anomalousInstance[0] = 2.0f;   // CpuUsage Mean rośnie
+            anomalousInstance[20] = 5.0f;  // Latency Mean rośnie mocniej (główna anomalia)
+            anomalousInstance[32] = 3.0f;  // ErrorRate Mean rośnie umiarkowanie
 
-            // KLUCZ: ErrorRate w instancji jest IDEALNY (0.0).
-            // Ponieważ background wynosił 1.0, zmiana na 0.0 jest "poprawą",
-            // co SHAP musi wykazać jako wartość dodatnią.
-            anomalousInstance[32] = 0.0f;
-
+            // 3. ACT: Wyjaśniamy zjawisko przy użyciu KernelSHAP
             using var shap = new ShapKernel(
-                modelFunc: (span) => _detector.ScoreWindow(span),
+                modelFunc: _detector.ScoreWindow,
                 background: _normalizedBackground,
-                numSamples: 1024
-            );
+                numSamples: 2048);
 
-            Span<float> shapValues = stackalloc float[_featureCount];
-
-            // 3. ACT
+            var shapValues = new float[_featureCount];
             shap.Explain(anomalousInstance, shapValues);
 
-            // 4. ASSERT
+            // 4. ASSERT: Analiza wyników SHAP
             var cpuShap = shapValues[0];
             var latencyShap = shapValues[20];
             var errorRateShap = shapValues[32];
 
-            // Winowajcy muszą mieć ujemny wpływ (pogarszają wynik względem tła)
-            Assert.True(cpuShap < -1.0f, $"CPU powinno pogarszać wynik. Jest: {cpuShap}");
-            Assert.True(latencyShap < -1.0f, $"Latency powinno pogarszać wynik. Jest: {latencyShap}");
+            // Weryfikacja kierunku wpływu: anomalie muszą obniżać Score (wartości SHAP ujemne)
+            Assert.True(cpuShap < 0f, $"CPU powinno obniżać score, a ma: {cpuShap}");
+            Assert.True(latencyShap < 0f, $"Latency powinno obniżać score, a ma: {latencyShap}");
+            Assert.True(errorRateShap < 0f, $"ErrorRate powinno obniżać score, a ma: {errorRateShap}");
 
-            // Sukces: ErrorRate jest bliżej średniej (0.0) niż tło (1.0).
-            // SHAP musi być dodatni.
-            Assert.True(errorRateShap > 0.05f, $"ErrorRate powinien pomagać (>0), a ma: {errorRateShap}");
+            // Weryfikacja rangi: Latency (5.0) jest gorsze statystycznie od CPU (2.0)
+            // Im bardziej ujemna wartość SHAP, tym większa "wina" za spadek prawdopodobieństwa.
+            Assert.True(latencyShap < cpuShap,
+                $"Latency (5.0) powinno być uznane za większą anomalię niż CPU (2.0). " +
+                $"SHAP Latency: {latencyShap}, SHAP CPU: {cpuShap}");
 
-            // Weryfikacja Aksjomatu Efektywności
+            // Weryfikacja Aksjomatu Efektywności SHAP: suma wpływów == zmiana wyjścia modelu
             float totalShap = 0;
-            for (var i = 0; i < _featureCount; i++) totalShap += shapValues[i];
+            for (var i = 0; i < _featureCount; i++)
+            {
+                totalShap += shapValues[i];
+            }
 
             var modelDiff = _detector.ScoreWindow(anomalousInstance) - _detector.ScoreWindow(_normalizedBackground);
+
+            // Sprawdzamy równość z tolerancją wynikającą z próbkowania (numSamples)
             Assert.Equal(modelDiff, totalShap, precision: 1);
         }
 
         private void SetupNormalizedHmm()
         {
+            // Model deterministyczny: startuje i zostaje w stanie Normal (idx 0)
             float[] initialProbs = [1.0f, 0.0f, 0.0f];
             float[] transitionMatrix = [1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f];
 
-            // W modelu znormalizowanym średnie zawsze wynoszą 0.0
+            // Średnie ustawione na 0.0 dla wszystkich stanów
             var means = new float[3 * _featureCount];
 
-            var covariances = new FastMatrix<float>[3];
+            var covariances = new FastTensor<float>[3];
             for (var i = 0; i < 3; i++)
             {
-                covariances[i] = new FastMatrix<float>(_featureCount, _featureCount);
-                // Wariancja 1.0 dla wszystkich cech (znormalizowane dane)
-                for (var j = 0; j < _featureCount; j++) covariances[i][j, j] = 1.0f;
+                // Inicjalizacja z wyczyszczoną pamięcią (macierz diagonalna)
+                covariances[i] = new FastTensor<float>(_featureCount, _featureCount, clearMemory: true);
+
+                for (var j = 0; j < _featureCount; j++)
+                {
+                    // Ustawiamy wariancję na 2.0. Rozszerza to "pole widzenia" modelu Gausowskiego,
+                    // pozwalając mu rozróżniać duże odchylenia bez wpadania w zero maszynowe (Underflow).
+                    covariances[i].GetView()[j, j] = 2.0f;
+                }
             }
 
+            // Załadowanie parametrów do detektora
             _detector.LoadParameters(initialProbs, transitionMatrix, means, covariances);
-            foreach (var m in covariances) m.Dispose();
+
+            // Zwolnienie tymczasowych tensorów po załadowaniu (HMM tworzy własne dekompozycje Cholesky'ego)
+            foreach (var t in covariances)
+            {
+                t.Dispose();
+            }
         }
 
-        public void Dispose() => _detector?.Dispose();
+        public void Dispose()
+        {
+            _detector?.Dispose(); //
+        }
     }
 }

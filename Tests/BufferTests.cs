@@ -8,7 +8,6 @@ namespace DevOnBike.Overfit.Tests
         public void PooledBuffer_ShouldHaveExactSpanSize_EvenIfPoolReturnsLargerArray()
         {
             // Arrange & Act
-            // 1000 to rozmiar, którego ArrayPool zazwyczaj nie ma idealnie dopasowanego (zwróci np. 1024)
             using var buffer = new PooledBuffer<float>(1000);
 
             // Assert
@@ -70,7 +69,7 @@ namespace DevOnBike.Overfit.Tests
             using var nativeBuffer = new NativeBuffer<int>(100, clearMemory: true);
 
             // Assert
-            for (int i = 0; i < 100; i++)
+            for (var i = 0; i < 100; i++)
             {
                 Assert.Equal(0, nativeBuffer.Span[i]);
             }

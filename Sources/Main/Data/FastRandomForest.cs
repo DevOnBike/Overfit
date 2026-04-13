@@ -8,7 +8,7 @@ using DevOnBike.Overfit.Data.Contracts;
 
 namespace DevOnBike.Overfit.Data
 {
-    public class FastRandomForest : IDisposable
+    public sealed class FastRandomForest : IDisposable
     {
         private readonly int _maxDepth;
         private readonly int _numTrees;
@@ -20,17 +20,12 @@ namespace DevOnBike.Overfit.Data
             _maxDepth = maxDepth;
         }
 
-        /// <summary>
-        /// Metoda wymagana przez BorutaSelectionLayer. 
-        /// Trenuje las i zwraca skumulowaną istotność cech.
-        /// </summary>
         public float[] TrainAndGetImportance(FastTensor<float> x, FastTensor<float> y)
         {
-            var cols = x.GetDim(1);
+            var cols = x.GetView().GetDim(1);
             var totalImportance = new float[cols];
             var lockObj = new object();
 
-            // Czyścimy stary las przed nowym treningiem
             _forest.Clear();
 
             var trees = new FastTreeNode[_numTrees][];
@@ -39,7 +34,6 @@ namespace DevOnBike.Overfit.Data
                 var localImportance = new float[cols];
                 var nodes = new List<FastTreeNode>();
 
-                // Budujemy drzewo i zbieramy lokalną istotność
                 BuildRecursive(x, y, 0, nodes, localImportance);
 
                 trees[t] = nodes.ToArray();
@@ -58,9 +52,6 @@ namespace DevOnBike.Overfit.Data
             return totalImportance;
         }
 
-        /// <summary>
-        /// Standardowe trenowanie (np. pod SHAP).
-        /// </summary>
         public void Train(FastTensor<float> x, FastTensor<float> y)
         {
             TrainAndGetImportance(x, y);
@@ -74,7 +65,6 @@ namespace DevOnBike.Overfit.Data
             }
 
             double sum = 0;
-
             for (var i = 0; i < _forest.Count; i++)
             {
                 sum += Traverse(_forest[i], features);
@@ -110,25 +100,18 @@ namespace DevOnBike.Overfit.Data
             var nodeIdx = nodes.Count;
             nodes.Add(default);
 
-            var rows = x.GetDim(0);
-            var cols = x.GetDim(1);
+            var rows = x.GetView().GetDim(0);
+            var cols = x.GetView().GetDim(1);
 
             if (depth >= _maxDepth || rows < 2)
             {
-                nodes[nodeIdx] = new FastTreeNode
-                {
-                    IsLeaf = true,
-                    Value = CalculateMean(y)
-                };
-                
+                nodes[nodeIdx] = new FastTreeNode { IsLeaf = true, Value = CalculateMean(y) };
                 return nodeIdx;
             }
 
             var featureIdx = Random.Shared.Next(cols);
             var threshold = GetRandomThreshold(x, featureIdx);
 
-            // Symulacja redukcji wariancji dla Boruty:
-            // Każdy podział zwiększa istotność danej cechy.
             importance[featureIdx] += 1.0f / (depth + 1);
 
             var leftIdx = BuildRecursive(x, y, depth + 1, nodes, importance);
@@ -148,15 +131,14 @@ namespace DevOnBike.Overfit.Data
 
         private float GetRandomThreshold(FastTensor<float> x, int col)
         {
-            var rows = x.GetDim(0);
-            var cols = x.GetDim(1);
-            var span = x.AsReadOnlySpan();
+            var rows = x.GetView().GetDim(0);
+            var cols = x.GetView().GetDim(1);
+            var span = x.GetView().AsReadOnlySpan();
             float min = span[col], max = span[col];
 
             for (var r = 1; r < rows; r++)
             {
                 var v = span[r * cols + col];
-                
                 if (v < min)
                 {
                     min = v;
@@ -171,20 +153,18 @@ namespace DevOnBike.Overfit.Data
 
         private float CalculateMean(FastTensor<float> y)
         {
-            var span = y.AsReadOnlySpan();
-            
+            var span = y.GetView().AsReadOnlySpan();
             if (span.Length == 0)
             {
                 return 0f;
             }
-            
+
             double sum = 0;
-            
             for (var i = 0; i < span.Length; i++)
             {
                 sum += span[i];
             }
-            
+
             return (float)(sum / span.Length);
         }
 

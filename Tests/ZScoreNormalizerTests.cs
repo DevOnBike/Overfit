@@ -85,7 +85,11 @@ namespace DevOnBike.Overfit.Tests
             var incrementalNormalizer = new ZScoreNormalizer();
 
             batchNormalizer.FitBatch(data);
-            foreach (var val in data) incrementalNormalizer.FitIncremental(val);
+
+            foreach (var val in data)
+            {
+                incrementalNormalizer.FitIncremental(val);
+            }
 
             Assert.Equal(data.Length, batchNormalizer.Count);
             Assert.Equal(batchNormalizer.Mean, incrementalNormalizer.Mean, precision: 4);
@@ -130,7 +134,10 @@ namespace DevOnBike.Overfit.Tests
             Assert.Equal(7.0f, normalizer.Mean, precision: 4);
             Assert.Equal(0.0f, normalizer.StandardDeviation, precision: 4);
 
-            foreach (var val in dataToTransform) Assert.Equal(0f, val, precision: 4);
+            foreach (var val in dataToTransform)
+            {
+                Assert.Equal(0f, val, precision: 4);
+            }
         }
 
         [Fact]

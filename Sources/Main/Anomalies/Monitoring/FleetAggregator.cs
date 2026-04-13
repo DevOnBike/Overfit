@@ -74,7 +74,10 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             for (var dc = 0; dc < 2; dc++)
             {
                 var pods = dcPods[dc];
-                if (pods.Count == 0) continue;
+                if (pods.Count == 0)
+                {
+                    continue;
+                }
 
                 for (var t = 0; t < windowSize; t++)
                 {

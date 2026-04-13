@@ -1,91 +1,91 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
-// For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
-    /// <summary>
-    ///     Implements a 2D Convolutional Layer for spatial feature extraction.
-    ///     Uses an optimized weight format [outChannels, inChannels * kSize * kSize]
-    ///     to leverage high-speed matrix multiplication (Im2Col).
-    /// </summary>
     public sealed class ConvLayer : IModule
     {
-
-        private readonly int _inC, _outC, _h, _w, _k;
-
-        /// <param name="inChannels">Number of input channels (e.g., 3 for RGB).</param>
-        /// <param name="outChannels">Number of filters (kernels) to apply.</param>
-        /// <param name="h">Input height.</param>
-        /// <param name="w">Input width.</param>
-        /// <param name="kSize">Kernel (filter) size (e.g., 3 for a 3x3 filter).</param>
-        public ConvLayer(int inChannels, int outChannels, int h, int w, int kSize)
-        {
-            _inC = inChannels;
-            _outC = outChannels;
-            _h = h;
-            _w = w;
-            _k = kSize;
-
-            // Weights are stored in a flattened 2D format to facilitate Im2Col optimization
-            var kData = new FastTensor<float>(outChannels, inChannels * kSize * kSize);
-            InitializeKernels(kData.AsSpan(), inChannels * kSize * kSize);
-
-            Kernels = new AutogradNode(kData);
-        }
-        /// <summary> The learnable kernels (filters) of the layer. </summary>
         public AutogradNode Kernels { get; }
 
         public bool IsTraining { get; private set; } = true;
+
+        private readonly int _inC, _outC, _h, _w, _k;
+
+        public ConvLayer(int inChannels, int outChannels, int h, int w, int kSize)
+        {
+            _inC = inChannels; _outC = outChannels; _h = h; _w = w; _k = kSize;
+
+            var kData = new FastTensor<float>(outChannels, inChannels * kSize * kSize, clearMemory: false);
+
+            InitializeKernels(kData.GetView().AsSpan(), inChannels * kSize * kSize);
+
+            Kernels = new AutogradNode(kData);
+        }
 
         public void Train()
         {
             IsTraining = true;
         }
+
         public void Eval()
         {
             IsTraining = false;
         }
 
-        /// <summary>
-        ///     Performs the 2D convolution forward pass via the global math engine.
-        /// </summary>
+        public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
+        {
+            var outH = _h - _k + 1;
+            var outW = _w - _k + 1;
+            var kSqInC = _k * _k * _inC;
+            var outElements = outH * outW;
+
+            using var colArr = new PooledBuffer<float>(kSqInC * outElements);
+
+            var colSpan = colArr.Span;
+
+            TensorMath.Im2Col(input, _inC, _h, _w, _k, 1, 0, colSpan);
+
+            var w2D = Kernels.DataView.AsReadOnlySpan();
+
+            TensorMath.MatMulRawSeq(w2D, colSpan, _outC, kSqInC, outElements, output);
+        }
+
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
             return TensorMath.Conv2D(graph, input, Kernels, _inC, _outC, _h, _w, _k);
         }
 
-        public IEnumerable<AutogradNode> Parameters() { yield return Kernels; }
+        public IEnumerable<AutogradNode> Parameters()
+        {
+            yield return Kernels;
+        }
 
-        /// <summary> Saves kernels dimensions and raw data to a binary stream. </summary>
         public void Save(BinaryWriter bw)
         {
-            bw.Write(Kernels.Data.Shape[0]);
-            bw.Write(Kernels.Data.Shape[1]);
-            foreach (var val in Kernels.Data.AsSpan())
+            bw.Write(Kernels.DataView.GetDim(0));
+            bw.Write(Kernels.DataView.GetDim(1));
+
+            foreach (var val in Kernels.DataView.AsSpan())
             {
                 bw.Write(val);
             }
         }
 
-        /// <summary>
-        ///     Loads kernels from a binary stream.
-        ///     Performs shape validation to prevent loading incompatible weights.
-        /// </summary>
         public void Load(BinaryReader br)
         {
             var rows = br.ReadInt32();
             var cols = br.ReadInt32();
 
-            if (rows != Kernels.Data.Shape[0] || cols != Kernels.Data.Shape[1])
+            if (rows != Kernels.DataView.GetDim(0) || cols != Kernels.DataView.GetDim(1))
             {
                 throw new Exception("Kernel dimensions in file do not match the ConvLayer architecture.");
             }
 
-            var span = Kernels.Data.AsSpan();
+            var span = Kernels.DataView.AsSpan();
+
             for (var i = 0; i < span.Length; i++)
             {
                 span[i] = br.ReadSingle();
@@ -97,14 +97,9 @@ namespace DevOnBike.Overfit.DeepLearning
             Kernels?.Dispose();
         }
 
-        /// <summary>
-        ///     Initializes kernels using He (Kaiming) initialization: stdDev = sqrt(2 / fanIn).
-        ///     Ideal for layers followed by ReLU activation.
-        /// </summary>
         private void InitializeKernels(Span<float> span, int fanIn)
         {
             var stdDev = MathF.Sqrt(2f / fanIn);
-
             for (var i = 0; i < span.Length; i++)
             {
                 span[i] = MathUtils.NextGaussian() * stdDev;

@@ -127,8 +127,14 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
-            if (!root.TryGetProperty("data", out var data)) return result;
-            if (!data.TryGetProperty("result", out var results)) return result;
+            if (!root.TryGetProperty("data", out var data))
+            {
+                return result;
+            }
+            if (!data.TryGetProperty("result", out var results))
+            {
+                return result;
+            }
 
             var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 

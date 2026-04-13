@@ -44,7 +44,10 @@ namespace DevOnBike.Overfit.UI
         // Zdarzenie wyzwalane za każdym razem, gdy użytkownik odrywa myszkę/rysik od płótna
         private void DrawingCanvas_MouseUp(object sender, MouseButtonEventArgs e)
         {
-            if (_predictor == null || DrawingCanvas.Strokes.Count == 0) return;
+            if (_predictor == null || DrawingCanvas.Strokes.Count == 0)
+            {
+                return;
+            }
 
             PredictDigit();
         }

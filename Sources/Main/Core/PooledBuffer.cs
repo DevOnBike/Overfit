@@ -13,7 +13,7 @@ namespace DevOnBike.Overfit.Core
 
         private readonly T[] _rented;
 
-        public PooledBuffer(int requiredSize, bool clearMemory = false)
+        public PooledBuffer(int requiredSize, bool clearMemory = true)
         {
             _rented = ArrayPool<T>.Shared.Rent(requiredSize);
 
@@ -29,8 +29,7 @@ namespace DevOnBike.Overfit.Core
         {
             if (_rented != null)
             {
-                // Oddajemy oryginalną, surową tablicę z powrotem
-                ArrayPool<T>.Shared.Return(_rented, clearArray: false);
+                ArrayPool<T>.Shared.Return(_rented, false);
             }
         }
     }

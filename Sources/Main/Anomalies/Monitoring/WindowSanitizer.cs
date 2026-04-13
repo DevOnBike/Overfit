@@ -80,11 +80,16 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 var nanCount = 0;
                 foreach (var v in data)
                 {
-                    if (float.IsNaN(v)) nanCount++;
+                    if (float.IsNaN(v))
+                    {
+                        nanCount++;
+                    }
                 }
 
                 if ((float)nanCount / data.Length > maxNanRatio)
+                {
                     Remove(result, i);
+                }
             }
         }
 
@@ -116,7 +121,9 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             foreach (var key in _podFirstSeen.Keys.ToList())
             {
                 if (!active.Contains(key))
+                {
                     _podFirstSeen.Remove(key);
+                }
             }
         }
 
