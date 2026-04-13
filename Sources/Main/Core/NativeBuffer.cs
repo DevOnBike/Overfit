@@ -7,22 +7,19 @@ using System.Runtime.InteropServices;
 
 namespace DevOnBike.Overfit.Core
 {
-    public unsafe readonly ref struct NativeBuffer<T>  where T : unmanaged
+    public unsafe readonly ref struct NativeBuffer<T> where T : unmanaged
     {
         public readonly Span<T> Span;
 
         private readonly void* _ptr;
 
-        public NativeBuffer(int size, bool clearMemory = false)
+        public NativeBuffer(int size, bool clearMemory = true)
         {
-            var byteCount = (nuint)size * (nuint)sizeof(T);
-
-            _ptr = clearMemory ? NativeMemory.AllocZeroed(byteCount) : NativeMemory.Alloc(byteCount);
+            _ptr = clearMemory ? NativeMemory.AllocZeroed((nuint)size, (nuint)sizeof(T)) : NativeMemory.Alloc((nuint)size, (nuint)sizeof(T));
 
             Span = new Span<T>(_ptr, size);
         }
 
-        // Struktury ref struct w nowych wersjach C# obsługują wzorzec Dispose!
         public void Dispose()
         {
             if (_ptr != null)

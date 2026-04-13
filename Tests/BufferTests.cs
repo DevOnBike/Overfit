@@ -70,7 +70,7 @@ namespace DevOnBike.Overfit.Tests
             using var nativeBuffer = new NativeBuffer<int>(100, clearMemory: true);
 
             // Assert
-            for (int i = 0; i < 100; i++)
+            for (var i = 0; i < 100; i++)
             {
                 Assert.Equal(0, nativeBuffer.Span[i]);
             }
