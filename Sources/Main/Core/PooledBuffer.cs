@@ -7,9 +7,9 @@ using System.Buffers;
 
 namespace DevOnBike.Overfit.Core
 {
-    public readonly ref struct PooledBuffer<T> : IDisposable where T : struct
+    public readonly ref struct PooledBuffer<T> where T : struct
     {
-        public readonly Span<T> Span { get; }
+        public readonly Span<T> Span;
 
         private readonly T[] _rented;
 

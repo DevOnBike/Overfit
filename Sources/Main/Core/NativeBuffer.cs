@@ -7,7 +7,7 @@ using System.Runtime.InteropServices;
 
 namespace DevOnBike.Overfit.Core
 {
-    public unsafe readonly ref struct NativeBuffer<T> : IDisposable where T : unmanaged
+    public unsafe readonly ref struct NativeBuffer<T>  where T : unmanaged
     {
         public readonly Span<T> Span;
 
