@@ -1,29 +1,23 @@
 ﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
-// For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Buffers;
 using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
-    /// <summary>
-    ///     LSTM layer — wraps LSTMCell and iterates over sequence timesteps.
-    ///     Includes zero-allocation path via ForwardInference with Buffer Hoisting.
-    /// </summary>
     public sealed class LSTMLayer : IModule
     {
+        public bool IsTraining { get; private set; } = true;
+        
         private readonly LSTMCell _cell;
         private readonly bool _returnSequences;
 
         public LSTMLayer(int inputSize, int hiddenSize, bool returnSequences = false)
         {
-            _cell = new LSTMCell(inputSize, hiddenSize);
-            _returnSequences = returnSequences;
+            _cell = new LSTMCell(inputSize, hiddenSize); _returnSequences = returnSequences;
         }
-
-        public bool IsTraining { get; private set; } = true;
 
         public void Train()
         {
@@ -37,29 +31,23 @@ namespace DevOnBike.Overfit.DeepLearning
             _cell.Eval();
         }
 
-        // ---------------------------------------------------------------------------
-        // Forward — Training Path
-        // ---------------------------------------------------------------------------
-
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
-            var batch = input.Data.GetDim(0);
-            var seqLen = input.Data.GetDim(1);
-            var inputSize = input.Data.GetDim(2);
+            var batch = input.DataView.GetDim(0);
+            var seqLen = input.DataView.GetDim(1);
+            var inputSize = input.DataView.GetDim(2);
 
             var (h, c) = _cell.ZeroState(batch);
 
             if (_returnSequences)
             {
                 var allH = new AutogradNode[seqLen];
-
                 for (var t = 0; t < seqLen; t++)
                 {
                     var xt = ExtractTimestep(graph, input, t, batch, seqLen, inputSize);
                     (h, c) = _cell.Forward(graph, xt, h, c);
                     allH[t] = h;
                 }
-
                 return StackTimesteps(graph, allH, batch, seqLen);
             }
 
@@ -72,31 +60,27 @@ namespace DevOnBike.Overfit.DeepLearning
             return h;
         }
 
-        // ---------------------------------------------------------------------------
-        // IModule
-        // ---------------------------------------------------------------------------
+        public IEnumerable<AutogradNode> Parameters()
+        {
+            return _cell.Parameters();
+        }
+        public void Save(BinaryWriter bw)
+        {
+            _cell.Save(bw);
+        }
+        public void Load(BinaryReader br)
+        {
+            _cell.Load(br);
+        }
+        public void Dispose()
+        {
+            _cell.Dispose();
+        }
 
-        public IEnumerable<AutogradNode> Parameters() => _cell.Parameters();
-        public void Save(BinaryWriter bw) => _cell.Save(bw);
-        public void Load(BinaryReader br) => _cell.Load(br);
-        public void Dispose() => _cell.Dispose();
-
-        // ---------------------------------------------------------------------------
-        // Forward — Zero-Allocation Inference Path (With Buffer Hoisting)
-        // ---------------------------------------------------------------------------
-
-        /// <summary>
-        ///     Zero-allocation forward pass for production inference.
-        ///     input:  [batchSize, seqLen, inputSize]
-        ///     output: [batchSize, seqLen, hiddenSize] OR [batchSize, hiddenSize]
-        /// </summary>
         public void ForwardInference(int batchSize, int seqLen, ReadOnlySpan<float> input, Span<float> output)
         {
-            var inputSize = _cell.InputSize;
-            var hiddenSize = _cell.HiddenSize;
-            var gatesLen = batchSize * 4 * hiddenSize;
+            var inputSize = _cell.InputSize; var hiddenSize = _cell.HiddenSize; var gatesLen = batchSize * 4 * hiddenSize;
 
-            // HOISTING: Alokujemy bufory raz na całą sekwencję, a nie per timestep
             var hArr = ArrayPool<float>.Shared.Rent(batchSize * hiddenSize);
             var cArr = ArrayPool<float>.Shared.Rent(batchSize * hiddenSize);
             var xtArr = ArrayPool<float>.Shared.Rent(batchSize * inputSize);
@@ -105,59 +89,43 @@ namespace DevOnBike.Overfit.DeepLearning
 
             try
             {
-                var h = hArr.AsSpan(0, batchSize * hiddenSize);
-                var c = cArr.AsSpan(0, batchSize * hiddenSize);
-                var xt = xtArr.AsSpan(0, batchSize * inputSize);
-                var gates = gatesArr.AsSpan(0, gatesLen);
-                var uh = uhArr.AsSpan(0, gatesLen);
+                var h = hArr.AsSpan(0, batchSize * hiddenSize); var c = cArr.AsSpan(0, batchSize * hiddenSize);
+                var xt = xtArr.AsSpan(0, batchSize * inputSize); var gates = gatesArr.AsSpan(0, gatesLen); var uh = uhArr.AsSpan(0, gatesLen);
 
-                h.Clear();
-                c.Clear();
+                h.Clear(); c.Clear();
 
                 for (var t = 0; t < seqLen; t++)
                 {
-                    // Gather timestep
                     for (var b = 0; b < batchSize; b++)
                     {
-                        input.Slice(b * seqLen * inputSize + t * inputSize, inputSize)
-                            .CopyTo(xt.Slice(b * inputSize, inputSize));
+                        input.Slice(b * seqLen * inputSize + t * inputSize, inputSize).CopyTo(xt.Slice(b * inputSize, inputSize));
                     }
-
-                    // Pure math kernel
                     _cell.ForwardInference(batchSize, xt, h, c, gates, uh);
 
                     if (_returnSequences)
                     {
-                        // Scatter hidden state
                         for (var b = 0; b < batchSize; b++)
                         {
-                            h.Slice(b * hiddenSize, hiddenSize)
-                                .CopyTo(output.Slice(b * seqLen * hiddenSize + t * hiddenSize, hiddenSize));
+                            h.Slice(b * hiddenSize, hiddenSize).CopyTo(output.Slice(b * seqLen * hiddenSize + t * hiddenSize, hiddenSize));
                         }
                     }
                 }
-
                 if (!_returnSequences)
                 {
-                    // Copy final hidden state to output
                     h.CopyTo(output);
                 }
             }
             finally
             {
-                ArrayPool<float>.Shared.Return(hArr);
-                ArrayPool<float>.Shared.Return(cArr);
-                ArrayPool<float>.Shared.Return(xtArr);
-                ArrayPool<float>.Shared.Return(gatesArr);
-                ArrayPool<float>.Shared.Return(uhArr);
+                ArrayPool<float>.Shared.Return(hArr); ArrayPool<float>.Shared.Return(cArr); ArrayPool<float>.Shared.Return(xtArr); ArrayPool<float>.Shared.Return(gatesArr); ArrayPool<float>.Shared.Return(uhArr);
             }
         }
 
         private static AutogradNode ExtractTimestep(ComputationGraph graph, AutogradNode input, int t, int batch, int seqLen, int inputSize)
         {
-            var res = new FastTensor<float>(false, batch, inputSize);
-            var srcS = input.Data.AsReadOnlySpan();
-            var dstS = res.AsSpan();
+            var res = new FastTensor<float>(batch, inputSize, clearMemory: false);
+            var srcS = input.DataView.AsReadOnlySpan();
+            var dstS = res.GetView().AsSpan();
 
             for (var b = 0; b < batch; b++)
             {
@@ -165,7 +133,6 @@ namespace DevOnBike.Overfit.DeepLearning
             }
 
             var output = new AutogradNode(res, input.RequiresGrad);
-
             if (output.RequiresGrad)
             {
                 graph?.Record(OpCode.TimestepSlice, output, input, null, t, seqLen, inputSize);
@@ -175,14 +142,13 @@ namespace DevOnBike.Overfit.DeepLearning
 
         private static AutogradNode StackTimesteps(ComputationGraph graph, AutogradNode[] allH, int batch, int seqLen)
         {
-            var hiddenSize = allH[0].Data.GetDim(1);
-            var res = new FastTensor<float>(false, batch, seqLen, hiddenSize);
-            var dstS = res.AsSpan();
+            var hiddenSize = allH[0].DataView.GetDim(1);
+            var res = new FastTensor<float>(batch, seqLen, hiddenSize, clearMemory: false);
+            var dstS = res.GetView().AsSpan();
 
             for (var t = 0; t < seqLen; t++)
             {
-                var srcS = allH[t].Data.AsReadOnlySpan();
-
+                var srcS = allH[t].DataView.AsReadOnlySpan();
                 for (var b = 0; b < batch; b++)
                 {
                     srcS.Slice(b * hiddenSize, hiddenSize).CopyTo(dstS.Slice(b * seqLen * hiddenSize + t * hiddenSize, hiddenSize));
@@ -192,15 +158,10 @@ namespace DevOnBike.Overfit.DeepLearning
             var requiresGrad = false;
             foreach (var h in allH)
             {
-                if (h.RequiresGrad)
-                {
-                    requiresGrad = true;
-                    break;
-                }
+                if (h.RequiresGrad) { requiresGrad = true; break; }
             }
 
             var output = new AutogradNode(res, requiresGrad);
-
             if (output.RequiresGrad)
             {
                 graph?.Record(OpCode.StackTimesteps, output, null, null, batch, seqLen, hiddenSize, nodeContext: allH);

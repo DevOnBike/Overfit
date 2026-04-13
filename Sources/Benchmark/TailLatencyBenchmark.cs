@@ -53,8 +53,10 @@ namespace Benchmarks
             _overfitModel.Load("benchmark_model.bin");
             _overfitModel.Eval();
 
-            _overfitInputTensor = new FastTensor<float>(false, 1, InputSize);
-            _inputData.AsSpan().CopyTo(_overfitInputTensor.AsSpan());
+            // POPRAWKA: Poprawny konstruktor
+            _overfitInputTensor = new FastTensor<float>(1, InputSize, clearMemory: false);
+            // POPRAWKA: GetView().AsSpan()
+            _inputData.AsSpan().CopyTo(_overfitInputTensor.GetView().AsSpan());
             _inputNode = new AutogradNode(_overfitInputTensor, false);
 
             for (var i = 0; i < 1000; i++)
@@ -70,9 +72,6 @@ namespace Benchmarks
             _overfitLatencies = new long[TotalCalls];
         }
 
-        /// <summary>
-        ///     Profiles ONNX Runtime latency. Monitored for spikes caused by heap allocations.
-        /// </summary>
         [Benchmark(Baseline = true)]
         public void OnnxRuntime_LatencyProfile()
         {
@@ -96,9 +95,6 @@ namespace Benchmarks
             GC.CollectionCount(2) - gc2Before);
         }
 
-        /// <summary>
-        ///     Profiles Overfit engine latency. Expected to show high predictability due to Zero-Allocation path.
-        /// </summary>
         [Benchmark]
         public void Overfit_LatencyProfile()
         {
@@ -109,7 +105,8 @@ namespace Benchmarks
             for (var i = 0; i < TotalCalls; i++)
             {
                 var start = Stopwatch.GetTimestamp();
-                _ = _overfitModel.Forward(null, _inputNode).Data.AsSpan()[0];
+                // POPRAWKA: DataView.AsReadOnlySpan() zamiast Data.AsSpan()
+                _ = _overfitModel.Forward(null, _inputNode).DataView.AsReadOnlySpan()[0];
                 _overfitLatencies[i] = Stopwatch.GetTimestamp() - start;
             }
 

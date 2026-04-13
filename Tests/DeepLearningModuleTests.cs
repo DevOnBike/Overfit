@@ -17,14 +17,13 @@ namespace DevOnBike.Overfit.Tests
             using var layer = new LinearLayer(10, 5);
             Assert.Equal(2, layer.Parameters().Count());
 
-            using var inputTensor = new FastTensor<float>(2, 10);
+            using var inputTensor = new FastTensor<float>(2, 10, clearMemory: true);
             using var input = new AutogradNode(inputTensor, false);
 
-            // Batch=2 + graph=null → fallback na TensorMath.Linear → nowy tensor → using OK
             using var output = layer.Forward(null, input);
 
-            Assert.Equal(2, output.Data.Shape[0]);
-            Assert.Equal(5, output.Data.Shape[1]);
+            Assert.Equal(2, output.DataView.GetDim(0));
+            Assert.Equal(5, output.DataView.GetDim(1));
 
             using var ms = new MemoryStream();
             using (var bw = new BinaryWriter(ms, Encoding.UTF8, true))
@@ -39,7 +38,7 @@ namespace DevOnBike.Overfit.Tests
                 layer2.Load(br);
             }
 
-            Assert.Equal(layer.Weights.Data[0, 0], layer2.Weights.Data[0, 0]);
+            Assert.Equal(layer.Weights.DataView[0, 0], layer2.Weights.DataView[0, 0]);
         }
 
         [Fact]
@@ -56,25 +55,24 @@ namespace DevOnBike.Overfit.Tests
             seq.Train();
             Assert.True(seq.IsTraining);
 
-            using var inputTensor = new FastTensor<float>(1, 5);
+            using var inputTensor = new FastTensor<float>(1, 5, clearMemory: true);
             using var input = new AutogradNode(inputTensor, false);
 
-            // Null jako ComputationGraph w trybie testowym
             using var output = seq.Forward(null, input);
 
-            Assert.Equal(5, output.Data.Shape[1]);
+            Assert.Equal(5, output.DataView.GetDim(1));
         }
 
         [Fact]
         public void ResidualBlock_Forward_CalculatesCorrectShape()
         {
             using var res = new ResidualBlock(8);
-            using var inputTensor = new FastTensor<float>(1, 8);
+            using var inputTensor = new FastTensor<float>(1, 8, clearMemory: true);
             using var input = new AutogradNode(inputTensor, false);
 
             using var output = res.Forward(null, input);
 
-            Assert.Equal(input.Data.Shape[1], output.Data.Shape[1]);
+            Assert.Equal(8, output.DataView.GetDim(1));
         }
     }
 }

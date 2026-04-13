@@ -1,7 +1,6 @@
 ﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
-// For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.Data.Abstractions;
@@ -9,10 +8,6 @@ using DevOnBike.Overfit.Data.Contracts;
 
 namespace DevOnBike.Overfit.Data.Prepare
 {
-    /// <summary>
-    ///     Clips outliers in feature columns based on calculated percentile thresholds.
-    ///     Implements the Fit-Transform pattern, persisting thresholds from the first pass.
-    /// </summary>
     public sealed class OutlierClipLayer : IDataLayer
     {
         private readonly Dictionary<int, (float Lower, float Upper)> _columnOverrides;
@@ -21,13 +16,8 @@ namespace DevOnBike.Overfit.Data.Prepare
         private readonly float _upperPercentile;
         private bool _fitted;
         private float[] _highThresholds;
-
         private float[] _lowThresholds;
 
-        /// <param name="lowerPercentile">The lower percentile boundary (e.g., 0.01 for 1%).</param>
-        /// <param name="upperPercentile">The upper percentile boundary (e.g., 0.99 for 99%).</param>
-        /// <param name="columnOverrides">Specific percentile boundaries for individual columns.</param>
-        /// <param name="excludedColumns">Indices of columns that should not be clipped.</param>
         public OutlierClipLayer(
             float lowerPercentile = 0.01f,
             float upperPercentile = 0.99f,
@@ -36,16 +26,11 @@ namespace DevOnBike.Overfit.Data.Prepare
         {
             if (lowerPercentile < 0f || lowerPercentile >= upperPercentile)
             {
-                throw new ArgumentOutOfRangeException(
-                nameof(lowerPercentile),
-                "Lower percentile must be >= 0 and less than the upper percentile.");
+                throw new ArgumentOutOfRangeException(nameof(lowerPercentile), "Lower percentile must be >= 0 and less than the upper percentile.");
             }
-
             if (upperPercentile > 1f)
             {
-                throw new ArgumentOutOfRangeException(
-                nameof(upperPercentile),
-                "Upper percentile must be <= 1.");
+                throw new ArgumentOutOfRangeException(nameof(upperPercentile), "Upper percentile must be <= 1.");
             }
 
             _lowerPercentile = lowerPercentile;
@@ -57,24 +42,22 @@ namespace DevOnBike.Overfit.Data.Prepare
             {
                 if (lower < 0f || lower >= upper || upper > 1f)
                 {
-                    throw new ArgumentOutOfRangeException(
-                    nameof(columnOverrides),
-                    $"Invalid percentile range ({lower}, {upper}) for column {col}.");
+                    throw new ArgumentOutOfRangeException(nameof(columnOverrides), $"Invalid percentile range ({lower}, {upper}) for column {col}.");
                 }
             }
         }
 
         public PipelineContext Process(PipelineContext context)
         {
-            var rows = context.Features.GetDim(0);
-            var cols = context.Features.GetDim(1);
+            var rows = context.Features.GetView().GetDim(0);
+            var cols = context.Features.GetView().GetDim(1);
 
             if (rows == 0 || cols == 0)
             {
                 return context;
             }
 
-            var span = context.Features.AsSpan();
+            var span = context.Features.GetView().AsSpan();
 
             if (!_fitted)
             {
@@ -82,7 +65,6 @@ namespace DevOnBike.Overfit.Data.Prepare
                 {
                     return context;
                 }
-
                 Fit(span, rows, cols);
             }
 
@@ -91,23 +73,19 @@ namespace DevOnBike.Overfit.Data.Prepare
             return context;
         }
 
-        /// <summary>
-        ///     Calculates the clipping thresholds for each column using sorted samples.
-        /// </summary>
         private void Fit(ReadOnlySpan<float> span, int rows, int cols)
         {
             _lowThresholds = new float[cols];
             _highThresholds = new float[cols];
 
-            using var sortBuffer = new FastBuffer<float>(rows);
-            var bufferSpan = sortBuffer.AsSpan();
+            using var sortBuffer = new PooledBuffer<float>(rows);
+            var bufferSpan = sortBuffer.Span;
 
             for (var c = 0; c < cols; c++)
             {
                 if (_excludedColumns.Contains(c))
                 {
-                    _lowThresholds[c] = float.MinValue;
-                    _highThresholds[c] = float.MaxValue;
+                    _lowThresholds[c] = float.MinValue; _highThresholds[c] = float.MaxValue;
                     continue;
                 }
 
@@ -125,22 +103,17 @@ namespace DevOnBike.Overfit.Data.Prepare
 
                 if (lowVal >= highVal)
                 {
-                    _lowThresholds[c] = float.MinValue;
-                    _highThresholds[c] = float.MaxValue;
+                    _lowThresholds[c] = float.MinValue; _highThresholds[c] = float.MaxValue;
                 }
                 else
                 {
-                    _lowThresholds[c] = lowVal;
-                    _highThresholds[c] = highVal;
+                    _lowThresholds[c] = lowVal; _highThresholds[c] = highVal;
                 }
             }
 
             _fitted = true;
         }
 
-        /// <summary>
-        ///     Performs in-place clipping of values outside the calculated boundaries.
-        /// </summary>
         private void ClipAll(Span<float> span, int rows, int cols)
         {
             for (var c = 0; c < cols; c++)
@@ -156,7 +129,6 @@ namespace DevOnBike.Overfit.Data.Prepare
                 for (var r = 0; r < rows; r++)
                 {
                     ref var val = ref span[r * cols + c];
-
                     if (val < lowVal)
                     {
                         val = lowVal;
@@ -175,13 +147,9 @@ namespace DevOnBike.Overfit.Data.Prepare
             {
                 return overrides;
             }
-
             return (_lowerPercentile, _upperPercentile);
         }
 
-        /// <summary>
-        ///     Linear interpolation of a percentile value from a sorted dataset.
-        /// </summary>
         private static float InterpolatePercentile(ReadOnlySpan<float> sorted, int count, float percentile)
         {
             var rank = percentile * (count - 1);
@@ -194,7 +162,6 @@ namespace DevOnBike.Overfit.Data.Prepare
             }
 
             var fraction = rank - lowerIdx;
-
             return sorted[lowerIdx] * (1f - fraction) + sorted[upperIdx] * fraction;
         }
 

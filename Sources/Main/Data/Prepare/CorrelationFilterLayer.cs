@@ -1,7 +1,6 @@
 ﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
-// For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.Data.Abstractions;
@@ -9,30 +8,13 @@ using DevOnBike.Overfit.Data.Contracts;
 
 namespace DevOnBike.Overfit.Data.Prepare
 {
-    /// <summary>
-    ///     Filters out columns with strong linear correlation (Pearson).
-    ///     When two features are correlated above the threshold, the layer keeps the one with higher correlation to the Target
-    ///     (if available) or the first one encountered.
-    /// </summary>
     public sealed class CorrelationFilterLayer : IDataLayer
     {
         private readonly DropStrategy _strategy;
         private readonly float _threshold;
         private bool _fitted;
-
         private int[] _keptIndices;
 
-        /// <param name="threshold">
-        ///     Correlation threshold (absolute value |r|). Default is 0.95.
-        ///     0.98 = aggressive filtration (only nearly identical features).
-        ///     0.85 = mild filtration (broader removal of multicollinearity).
-        /// </param>
-        /// <param name="strategy">
-        ///     Selection strategy for dropping a feature from a correlated pair.
-        ///     KeepFirst: retains the feature with the lower index (fast, deterministic).
-        ///     KeepHigherTargetCorrelation: retains the feature more strongly correlated with the Target
-        ///     (slower — requires N additional Pearson calculations, but provides better selection).
-        /// </param>
         public CorrelationFilterLayer(
             float threshold = 0.95f,
             DropStrategy strategy = DropStrategy.KeepHigherTargetCorrelation)
@@ -48,8 +30,8 @@ namespace DevOnBike.Overfit.Data.Prepare
 
         public PipelineContext Process(PipelineContext context)
         {
-            var rows = context.Features.GetDim(0);
-            var cols = context.Features.GetDim(1);
+            var rows = context.Features.GetView().GetDim(0);
+            var cols = context.Features.GetView().GetDim(1);
 
             if (rows < 3 || cols <= 1)
             {
@@ -77,32 +59,26 @@ namespace DevOnBike.Overfit.Data.Prepare
 
         private int[] Fit(FastTensor<float> features, FastTensor<float> targets, int rows, int cols)
         {
-            var featureSpan = features.AsReadOnlySpan();
-            var targetSpan = targets.AsReadOnlySpan();
+            var featureSpan = features.GetView().AsReadOnlySpan();
+            var targetSpan = targets.GetView().AsReadOnlySpan();
 
-            using var sums = new FastBuffer<double>(cols);
-            using var sumsSq = new FastBuffer<double>(cols);
-            using var means = new FastBuffer<double>(cols);
+            using var sums = new PooledBuffer<double>(cols, clearMemory: true);
+            using var sumsSq = new PooledBuffer<double>(cols, clearMemory: true);
+            using var means = new PooledBuffer<double>(cols, clearMemory: true);
 
-            var sumSpan = sums.AsSpan();
-            var sumSqSpan = sumsSq.AsSpan();
-            var meanSpan = means.AsSpan();
+            var sumSpan = sums.Span;
+            var sumSqSpan = sumsSq.Span;
+            var meanSpan = means.Span;
 
             for (var c = 0; c < cols; c++)
             {
-                double sum = 0;
-                double sumSq = 0;
-
+                double sum = 0; double sumSq = 0;
                 for (var r = 0; r < rows; r++)
                 {
                     double val = featureSpan[r * cols + c];
-                    sum += val;
-                    sumSq += val * val;
+                    sum += val; sumSq += val * val;
                 }
-
-                sumSpan[c] = sum;
-                sumSqSpan[c] = sumSq;
-                meanSpan[c] = sum / rows;
+                sumSpan[c] = sum; sumSqSpan[c] = sumSq; meanSpan[c] = sum / rows;
             }
 
             float[] targetCorrelations = null;
@@ -128,9 +104,7 @@ namespace DevOnBike.Overfit.Data.Prepare
                         continue;
                     }
 
-                    var r = CalculatePearsonFast(
-                    featureSpan, i, j, rows, cols,
-                    sumSpan, sumSqSpan);
+                    var r = CalculatePearsonFast(featureSpan, i, j, rows, cols, sumSpan, sumSqSpan);
 
                     if (MathF.Abs(r) < _threshold)
                     {
@@ -143,7 +117,6 @@ namespace DevOnBike.Overfit.Data.Prepare
             }
 
             var kept = new List<int>(cols - dropped.Count);
-
             for (var c = 0; c < cols; c++)
             {
                 if (!dropped.Contains(c))
@@ -155,16 +128,9 @@ namespace DevOnBike.Overfit.Data.Prepare
             return kept.ToArray();
         }
 
-        /// <summary>
-        ///     Optimized Pearson calculation using precomputed sums.
-        /// </summary>
-        private float CalculatePearsonFast(
-            ReadOnlySpan<float> span, int colA, int colB,
-            int rows, int cols,
-            Span<double> sums, Span<double> sumsSq)
+        private float CalculatePearsonFast(ReadOnlySpan<float> span, int colA, int colB, int rows, int cols, Span<double> sums, Span<double> sumsSq)
         {
             double sumAB = 0;
-
             for (var r = 0; r < rows; r++)
             {
                 sumAB += (double)span[r * cols + colA] * span[r * cols + colB];
@@ -183,34 +149,20 @@ namespace DevOnBike.Overfit.Data.Prepare
             return (float)(num / den);
         }
 
-        /// <summary>
-        ///     Calculates the correlation of each feature with the Target.
-        ///     Features with higher correlation are considered more valuable for prediction.
-        /// </summary>
-        private float[] ComputeTargetCorrelations(
-            ReadOnlySpan<float> featureSpan,
-            ReadOnlySpan<float> targetSpan,
-            Span<double> featureSums,
-            Span<double> featureSumsSq,
-            int rows, int cols)
+        private float[] ComputeTargetCorrelations(ReadOnlySpan<float> featureSpan, ReadOnlySpan<float> targetSpan, Span<double> featureSums, Span<double> featureSumsSq, int rows, int cols)
         {
             var result = new float[cols];
 
-            // Target statistics.
-            double tSum = 0;
-            double tSumSq = 0;
-
+            double tSum = 0; double tSumSq = 0;
             for (var r = 0; r < rows; r++)
             {
                 double val = targetSpan[r];
-                tSum += val;
-                tSumSq += val * val;
+                tSum += val; tSumSq += val * val;
             }
 
             for (var c = 0; c < cols; c++)
             {
                 double sumFT = 0;
-
                 for (var r = 0; r < rows; r++)
                 {
                     sumFT += (double)featureSpan[r * cols + c] * targetSpan[r];
@@ -227,9 +179,6 @@ namespace DevOnBike.Overfit.Data.Prepare
             return result;
         }
 
-        /// <summary>
-        ///     Selects the column to drop from a correlated pair.
-        /// </summary>
         private int ChooseColumnToDrop(int colA, int colB, float[] targetCorrelations)
         {
             if (_strategy == DropStrategy.KeepFirst)
@@ -243,17 +192,14 @@ namespace DevOnBike.Overfit.Data.Prepare
             return corrA >= corrB ? colB : colA;
         }
 
-        /// <summary>
-        ///     Extracts selected columns into a new contiguous FastTensor.
-        /// </summary>
         private FastTensor<float> ExtractColumns(FastTensor<float> src, int[] indices, int rows)
         {
-            var oldCols = src.GetDim(1);
+            var oldCols = src.GetView().GetDim(1);
             var newCols = indices.Length;
 
-            var result = new FastTensor<float>(rows, newCols);
-            var srcSpan = src.AsReadOnlySpan();
-            var dstSpan = result.AsSpan();
+            var result = new FastTensor<float>(rows, newCols, clearMemory: false);
+            var srcSpan = src.GetView().AsReadOnlySpan();
+            var dstSpan = result.GetView().AsSpan();
 
             for (var r = 0; r < rows; r++)
             {
@@ -269,14 +215,10 @@ namespace DevOnBike.Overfit.Data.Prepare
             return result;
         }
 
-        /// <summary>
-        ///     Resets persisted column indices, forcing a re-Fit on the next Process call.
-        /// </summary>
         public void Reset()
         {
             _keptIndices = null;
             _fitted = false;
         }
     }
-
 }

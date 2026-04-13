@@ -52,11 +52,13 @@ namespace DevOnBike.Overfit.Optimizers
 
             foreach (var p in _parameters)
             {
+                // Wykorzystujemy bezpieczne widoki DataView i GradView
                 TensorPrimitives.MultiplyAdd(
-                p.Grad.AsSpan(),
-                negativeLr,
-                p.Data.AsSpan(),
-                p.Data.AsSpan());
+                    p.GradView.AsReadOnlySpan(),
+                    negativeLr,
+                    p.DataView.AsReadOnlySpan(),
+                    p.DataView.AsSpan()
+                );
             }
         }
 
@@ -68,7 +70,8 @@ namespace DevOnBike.Overfit.Optimizers
         {
             foreach (var p in _parameters)
             {
-                p.Grad.AsSpan().Clear();
+                // Węzeł sam dba o wyczyszczenie swojego ukrytego magazynu
+                p.ZeroGrad();
             }
         }
     }

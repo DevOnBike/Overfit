@@ -9,11 +9,15 @@ namespace DevOnBike.Overfit.Core
 {
     public static class MatrixExtensions
     {
-        public static int ArgMax(this FastMatrix<float> matrix, int row = 0)
+        public static int ArgMax(this TensorView<float> tensor, int row = 0)
         {
+            // Omijamy wywołania metod i alokacje - bierzemy płaski fragment pamięci danego wiersza.
             // Magia .NET: Sprzętowe SIMD (AVX2/AVX-512) robiące dokładnie to samo,
             // ale sprawdzające po 4-8 liczb w jednym takcie zegara!
-            return TensorPrimitives.IndexOfMax(matrix.ReadOnlyRow(row));
+            var cols = tensor.GetDim(1);
+            var rowSpan = tensor.AsReadOnlySpan().Slice(row * cols, cols);
+
+            return TensorPrimitives.IndexOfMax(rowSpan);
         }
     }
 }

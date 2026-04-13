@@ -54,7 +54,7 @@ namespace DevOnBike.Overfit.DeepLearning
         public int LatentSize { get; }
         public int DecoderHidden { get; }
 
-        public int ParameterCount => Parameters().Sum(p => p.Data.Size);
+        public int ParameterCount => Parameters().Sum(p => p.DataView.Size);
 
         public bool IsTraining { get; private set; } = true;
 
@@ -262,7 +262,10 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void Load(string path)
         {
-            if (!File.Exists(path)) throw new FileNotFoundException($"Model file not found: {path}");
+            if (!File.Exists(path))
+            {
+                throw new FileNotFoundException($"Model file not found: {path}");
+            }
 
             using var fs = new FileStream(path, FileMode.Open);
             using var br = new BinaryReader(fs);

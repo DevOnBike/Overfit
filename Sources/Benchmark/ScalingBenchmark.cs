@@ -62,9 +62,6 @@ namespace Benchmarks
             out _overfitLarge, out _largeNode, out _largeTensor);
         }
 
-        /// <summary>
-        ///     Configures a benchmark pair consisting of an ONNX session and an Overfit model.
-        /// </summary>
         private static void SetupPair(Random rnd, int inputSize, string modelName,
             out InferenceSession onnxSession, out NamedOnnxValue[] onnxInputs,
             out Sequential overfitModel, out AutogradNode inputNode,
@@ -80,10 +77,12 @@ namespace Benchmarks
             // Setup Overfit model
             overfitModel = new Sequential(new LinearLayer(inputSize, OutputSize));
             overfitModel.Load($"{modelName}.bin");
-            overfitModel.Eval(); // Switch to inference mode (triggers weight pre-transposition)
+            overfitModel.Eval();
 
-            inputTensor = new FastTensor<float>(false, 1, inputSize);
-            data.AsSpan().CopyTo(inputTensor.AsSpan());
+            // POPRAWKA: Poprawny konstruktor (dim0, dim1, clearMemory)
+            inputTensor = new FastTensor<float>(1, inputSize, clearMemory: false);
+            // POPRAWKA: GetView().AsSpan() zamiast AsSpan()
+            data.AsSpan().CopyTo(inputTensor.GetView().AsSpan());
             inputNode = new AutogradNode(inputTensor, false);
 
             for (var i = 0; i < 200; i++)
@@ -102,7 +101,8 @@ namespace Benchmarks
         [Benchmark]
         public float Overfit_128()
         {
-            return _overfitSmall.Forward(null, _smallNode).Data.AsSpan()[0];
+            // POPRAWKA: DataView.AsReadOnlySpan() zamiast Data.AsSpan()
+            return _overfitSmall.Forward(null, _smallNode).DataView.AsReadOnlySpan()[0];
         }
 
         [Benchmark(Baseline = true)]
@@ -115,7 +115,8 @@ namespace Benchmarks
         [Benchmark]
         public float Overfit_784()
         {
-            return _overfitMedium.Forward(null, _mediumNode).Data.AsSpan()[0];
+            // POPRAWKA: DataView.AsReadOnlySpan()
+            return _overfitMedium.Forward(null, _mediumNode).DataView.AsReadOnlySpan()[0];
         }
 
         [Benchmark]
@@ -128,7 +129,8 @@ namespace Benchmarks
         [Benchmark]
         public float Overfit_4096()
         {
-            return _overfitLarge.Forward(null, _largeNode).Data.AsSpan()[0];
+            // POPRAWKA: DataView.AsReadOnlySpan()
+            return _overfitLarge.Forward(null, _largeNode).DataView.AsReadOnlySpan()[0];
         }
 
         [GlobalCleanup]

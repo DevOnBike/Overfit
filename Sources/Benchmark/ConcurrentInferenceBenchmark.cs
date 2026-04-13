@@ -53,14 +53,9 @@ namespace Benchmarks
                 _overfitModels[t].Load("benchmark_model.bin");
                 _overfitModels[t].Eval();
 
-                _inputTensors[t] = new FastTensor<float>(false, 1, InputSize);
-                _inputData.AsSpan().CopyTo(_inputTensors[t].AsSpan());
+                _inputTensors[t] = new FastTensor<float>(1, InputSize, clearMemory: false);
+                _inputData.AsSpan().CopyTo(_inputTensors[t].GetView().AsSpan());
                 _inputNodes[t] = new AutogradNode(_inputTensors[t], false);
-
-                for (var i = 0; i < 100; i++)
-                {
-                    _overfitModels[t].Forward(null, _inputNodes[t]);
-                }
             }
         }
 
@@ -73,7 +68,8 @@ namespace Benchmarks
         {
             var results = new float[ThreadCount];
 
-            Parallel.For(0, ThreadCount, body: t => {
+            Parallel.For(0, ThreadCount, body: t =>
+            {
                 var tensor = new DenseTensor<float>(_inputData, [1, InputSize]);
                 var inputs = new[]
                 {
@@ -102,19 +98,19 @@ namespace Benchmarks
         {
             var results = new float[ThreadCount];
 
-            Parallel.For(0, ThreadCount, body: t => {
+            Parallel.For(0, ThreadCount, body: t =>
+            {
                 var model = _overfitModels[t];
                 var inputNode = _inputNodes[t];
                 var sum = 0f;
 
                 for (var i = 0; i < IterationsPerThread; i++)
                 {
-                    sum += model.Forward(null, inputNode).Data.AsSpan()[0];
+                    sum += model.Forward(null, inputNode).DataView.AsReadOnlySpan()[0];
                 }
 
                 results[t] = sum;
             });
-
             return results.Sum();
         }
 

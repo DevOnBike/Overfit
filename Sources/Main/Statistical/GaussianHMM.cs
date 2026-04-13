@@ -3,31 +3,20 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Buffers;
 using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.Statistical
 {
-    /// <summary>
-    /// Multivariate Gaussian Hidden Markov Model (HMM) with Full Covariance.
-    /// Integrates Cholesky decomposition for extreme SIMD inference speed.
-    /// Operates entirely in Log-Space to prevent numerical underflow.
-    /// </summary>
     public sealed class GaussianHMM : IDisposable
     {
         public int StateCount { get; }
         public int FeatureCount { get; }
 
-        // Model Parameters (Log-Space)
-        private readonly FastTensor<float> _logPi;          // [StateCount]
-        private readonly FastTensor<float> _logA;           // [StateCount, StateCount]
-
-        // Emission Parameters
-        private readonly FastTensor<float> _means;          // [StateCount, FeatureCount]
-
-        // Full Covariance (Cholesky Decomposed L matrices)
-        private readonly FastMatrix<float>[] _choleskyL;    // Array of size [StateCount]
-        private readonly double[] _logNormConstants;        // Array of size [StateCount]
+        private readonly FastTensor<float> _logPi;
+        private readonly FastTensor<float> _logA;
+        private readonly FastTensor<float> _means;
+        private readonly FastTensor<float>[] _choleskyL;
+        private readonly double[] _logNormConstants;
 
         private bool _disposed;
         private const float LogZero = float.NegativeInfinity;
@@ -40,202 +29,164 @@ namespace DevOnBike.Overfit.Statistical
             StateCount = stateCount;
             FeatureCount = featureCount;
 
-            _logPi = new FastTensor<float>(stateCount);
-            _logA = new FastTensor<float>(stateCount, stateCount);
-            _means = new FastTensor<float>(stateCount, featureCount);
+            _logPi = new FastTensor<float>(stateCount, clearMemory: false);
+            _logA = new FastTensor<float>(stateCount, stateCount, clearMemory: false);
+            _means = new FastTensor<float>(stateCount, featureCount, clearMemory: false);
 
-            _choleskyL = new FastMatrix<float>[stateCount];
+            _choleskyL = new FastTensor<float>[stateCount];
             _logNormConstants = new double[stateCount];
         }
 
-        /// <summary>
-        /// Loads model parameters and automatically decomposes full covariance matrices using Cholesky.
-        /// Probabilities must be provided in normal space (0.0 to 1.0).
-        /// </summary>
-        public void SetModel(
-            ReadOnlySpan<float> pi,
-            ReadOnlySpan<float> transitionMatrix,
-            ReadOnlySpan<float> means,
-            FastMatrix<float>[] fullCovariances)
+        public void SetModel(ReadOnlySpan<float> pi, ReadOnlySpan<float> transitionMatrix, ReadOnlySpan<float> means, FastTensor<float>[] fullCovariances)
         {
             if (fullCovariances.Length != StateCount)
                 throw new ArgumentException("You must provide one covariance matrix per state.");
 
             for (var i = 0; i < StateCount; i++)
             {
-                _logPi[i] = pi[i] > 0 ? MathF.Log(pi[i]) : LogZero;
+                _logPi.GetView().AsSpan()[i] = pi[i] > 0 ? MathF.Log(pi[i]) : LogZero;
 
                 for (var j = 0; j < StateCount; j++)
                 {
                     var a = transitionMatrix[i * StateCount + j];
-                    _logA[i, j] = a > 0 ? MathF.Log(a) : LogZero;
+                    _logA.GetView().AsSpan()[i * StateCount + j] = a > 0 ? MathF.Log(a) : LogZero;
                 }
             }
 
-            means.CopyTo(_means.AsSpan());
+            means.CopyTo(_means.GetView().AsSpan());
 
             for (var i = 0; i < StateCount; i++)
             {
-                // Dispose old matrix if we are overwriting an existing model
                 _choleskyL[i]?.Dispose();
 
-                var covMatrix = fullCovariances[i];
-                var meanVector = _means.AsReadOnlySpan().Slice(i * FeatureCount, FeatureCount);
+                var covMatrixView = fullCovariances[i].GetView();
+                var meanVector = _means.GetView().AsReadOnlySpan().Slice(i * FeatureCount, FeatureCount);
 
-                CholeskyMultivariateGaussianLogic.ValidateInputs(meanVector, covMatrix);
+                CholeskyMultivariateGaussianLogic.ValidateInputs(meanVector, covMatrixView);
 
-                // Pre-decompose to L matrix and calculate PDF constants
-                _choleskyL[i] = CholeskyMultivariateGaussianLogic.DecomposeCholesky(covMatrix);
-                _logNormConstants[i] = CholeskyMultivariateGaussianLogic.CalculateLogNormConstant(FeatureCount, _choleskyL[i]);
+                _choleskyL[i] = CholeskyMultivariateGaussianLogic.DecomposeCholesky(covMatrixView);
+                _logNormConstants[i] = CholeskyMultivariateGaussianLogic.CalculateLogNormConstant(FeatureCount, _choleskyL[i].GetView());
             }
         }
 
-        /// <summary>
-        /// Highly optimized, SIMD-accelerated emission calculation using your custom logic.
-        /// </summary>
         private float ComputeLogEmission(int state, ReadOnlySpan<float> x)
         {
-            var mean = _means.AsReadOnlySpan().Slice(state * FeatureCount, FeatureCount);
-            var L = _choleskyL[state];
+            var mean = _means.GetView().AsReadOnlySpan().Slice(state * FeatureCount, FeatureCount);
+            var L = _choleskyL[state].GetView();
             var logNormConst = _logNormConstants[state];
 
             return (float)CholeskyMultivariateGaussianLogic.LogProbabilityDensity(x, mean, L, logNormConst);
         }
 
-        // -------------------------------------------------------------------------
-        // 1. VITERBI ALGORITHM (Decoding hidden states)
-        // -------------------------------------------------------------------------
-
         public void DecodeViterbi(int timeSteps, ReadOnlySpan<float> sequence, Span<int> outputStates)
         {
-            if (outputStates.Length < timeSteps)
-                throw new ArgumentException("Output buffer too small.");
+            if (outputStates.Length < timeSteps) throw new ArgumentException("Output buffer too small.");
 
             var N = StateCount;
             var vLen = timeSteps * N;
 
-            var vArr = ArrayPool<float>.Shared.Rent(vLen);
-            var ptrArr = ArrayPool<int>.Shared.Rent(vLen);
+            using var vArr = new PooledBuffer<float>(vLen);
+            using var ptrArr = new PooledBuffer<int>(vLen);
 
-            try
+            var V = vArr.Span;
+            var ptr = ptrArr.Span;
+
+            var x0 = sequence.Slice(0, FeatureCount);
+            for (var i = 0; i < N; i++)
             {
-                var V = vArr.AsSpan(0, vLen);
-                var ptr = ptrArr.AsSpan(0, vLen);
+                V[i] = _logPi.GetView().AsReadOnlySpan()[i] + ComputeLogEmission(i, x0);
+                ptr[i] = 0;
+            }
 
-                var x0 = sequence.Slice(0, FeatureCount);
-                for (var i = 0; i < N; i++)
+            var logA = _logA.GetView().AsReadOnlySpan();
+            for (var t = 1; t < timeSteps; t++)
+            {
+                var xt = sequence.Slice(t * FeatureCount, FeatureCount);
+
+                for (var j = 0; j < N; j++)
                 {
-                    V[i] = _logPi[i] + ComputeLogEmission(i, x0);
-                    ptr[i] = 0;
-                }
+                    var maxLogProb = LogZero;
+                    var bestPrevState = 0;
+                    var emission = ComputeLogEmission(j, xt);
 
-                var logA = _logA.AsReadOnlySpan();
-                for (var t = 1; t < timeSteps; t++)
-                {
-                    var xt = sequence.Slice(t * FeatureCount, FeatureCount);
-
-                    for (var j = 0; j < N; j++)
+                    for (var i = 0; i < N; i++)
                     {
-                        var maxLogProb = LogZero;
-                        var bestPrevState = 0;
-
-                        var emission = ComputeLogEmission(j, xt);
-
-                        for (var i = 0; i < N; i++)
+                        var prob = V[(t - 1) * N + i] + logA[i * N + j];
+                        if (prob > maxLogProb)
                         {
-                            var prob = V[(t - 1) * N + i] + logA[i * N + j];
-                            if (prob > maxLogProb)
-                            {
-                                maxLogProb = prob;
-                                bestPrevState = i;
-                            }
+                            maxLogProb = prob;
+                            bestPrevState = i;
                         }
-
-                        V[t * N + j] = maxLogProb + emission;
-                        ptr[t * N + j] = bestPrevState;
                     }
-                }
 
-                var bestFinalProb = LogZero;
-                var bestFinalState = 0;
-                for (var i = 0; i < N; i++)
-                {
-                    if (V[(timeSteps - 1) * N + i] > bestFinalProb)
-                    {
-                        bestFinalProb = V[(timeSteps - 1) * N + i];
-                        bestFinalState = i;
-                    }
-                }
-
-                outputStates[timeSteps - 1] = bestFinalState;
-                for (var t = timeSteps - 1; t > 0; t--)
-                {
-                    outputStates[t - 1] = ptr[t * N + outputStates[t]];
+                    V[t * N + j] = maxLogProb + emission;
+                    ptr[t * N + j] = bestPrevState;
                 }
             }
-            finally
+
+            var bestFinalProb = LogZero;
+            var bestFinalState = 0;
+            for (var i = 0; i < N; i++)
             {
-                ArrayPool<float>.Shared.Return(vArr);
-                ArrayPool<int>.Shared.Return(ptrArr);
+                if (V[(timeSteps - 1) * N + i] > bestFinalProb)
+                {
+                    bestFinalProb = V[(timeSteps - 1) * N + i];
+                    bestFinalState = i;
+                }
+            }
+
+            outputStates[timeSteps - 1] = bestFinalState;
+            for (var t = timeSteps - 1; t > 0; t--)
+            {
+                outputStates[t - 1] = ptr[t * N + outputStates[t]];
             }
         }
-
-        // -------------------------------------------------------------------------
-        // 2. FORWARD ALGORITHM (Anomaly Detection / Likelihood scoring)
-        // -------------------------------------------------------------------------
 
         public float ScoreSequence(int timeSteps, ReadOnlySpan<float> sequence)
         {
             var N = StateCount;
-            var alphaArr = ArrayPool<float>.Shared.Rent(N);
-            var nextAlphaArr = ArrayPool<float>.Shared.Rent(N);
 
-            try
+            using var alphaArr = new PooledBuffer<float>(N);
+            using var nextAlphaArr = new PooledBuffer<float>(N);
+
+            var alpha = alphaArr.Span;
+            var nextAlpha = nextAlphaArr.Span;
+
+            var x0 = sequence.Slice(0, FeatureCount);
+            for (var i = 0; i < N; i++)
             {
-                var alpha = alphaArr.AsSpan(0, N);
-                var nextAlpha = nextAlphaArr.AsSpan(0, N);
+                alpha[i] = _logPi.GetView().AsReadOnlySpan()[i] + ComputeLogEmission(i, x0);
+            }
 
-                var x0 = sequence.Slice(0, FeatureCount);
-                for (var i = 0; i < N; i++)
+            var logA = _logA.GetView().AsReadOnlySpan();
+            for (var t = 1; t < timeSteps; t++)
+            {
+                var xt = sequence.Slice(t * FeatureCount, FeatureCount);
+
+                for (var j = 0; j < N; j++)
                 {
-                    alpha[i] = _logPi[i] + ComputeLogEmission(i, x0);
-                }
+                    var emission = ComputeLogEmission(j, xt);
+                    var sumLogExp = LogZero;
 
-                var logA = _logA.AsReadOnlySpan();
-                for (var t = 1; t < timeSteps; t++)
-                {
-                    var xt = sequence.Slice(t * FeatureCount, FeatureCount);
-
-                    for (var j = 0; j < N; j++)
+                    for (var i = 0; i < N; i++)
                     {
-                        var emission = ComputeLogEmission(j, xt);
-                        var sumLogExp = LogZero;
-
-                        for (var i = 0; i < N; i++)
-                        {
-                            var p = alpha[i] + logA[i * N + j];
-                            sumLogExp = LogSumExp(sumLogExp, p);
-                        }
-
-                        nextAlpha[j] = sumLogExp + emission;
+                        var p = alpha[i] + logA[i * N + j];
+                        sumLogExp = LogSumExp(sumLogExp, p);
                     }
 
-                    nextAlpha.CopyTo(alpha);
+                    nextAlpha[j] = sumLogExp + emission;
                 }
 
-                var totalLogLikelihood = LogZero;
-                for (var i = 0; i < N; i++)
-                {
-                    totalLogLikelihood = LogSumExp(totalLogLikelihood, alpha[i]);
-                }
-
-                return totalLogLikelihood;
+                nextAlpha.CopyTo(alpha);
             }
-            finally
+
+            var totalLogLikelihood = LogZero;
+            for (var i = 0; i < N; i++)
             {
-                ArrayPool<float>.Shared.Return(alphaArr);
-                ArrayPool<float>.Shared.Return(nextAlphaArr);
+                totalLogLikelihood = LogSumExp(totalLogLikelihood, alpha[i]);
             }
+
+            return totalLogLikelihood;
         }
 
         [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]

@@ -1,12 +1,14 @@
 ﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
-// DevonBike Overfit is licensed under the GNU AGPLv3.
-// For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Optimizers;
+using Xunit;
 using Xunit.Abstractions;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace DevOnBike.Overfit.Tests
 {
@@ -15,259 +17,121 @@ namespace DevOnBike.Overfit.Tests
         private readonly ITestOutputHelper _output;
         private readonly Random _rng = new();
 
-        public TicTacToeIntelligenceTests(ITestOutputHelper output)
-        {
-            _output = output;
-        }
+        public TicTacToeIntelligenceTests(ITestOutputHelper output) => _output = output;
 
-        [Fact(Skip = "a")]
+        [Fact(Skip = "aaa")]
         public void Bestia_ShouldLearn_TicTacToe_LongTraining()
         {
             using var model = new Sequential(
-            new LinearLayer(9, 128),
-            new ReluActivation(),
-            new LinearLayer(128, 64),
-            new ReluActivation(),
-            new LinearLayer(64, 9)
+                new LinearLayer(9, 128),
+                new ReluActivation(),
+                new LinearLayer(128, 64),
+                new ReluActivation(),
+                new LinearLayer(64, 9)
             );
 
-            using var optimizer = new Adam(model.Parameters());
-
+            using var optimizer = new Adam(model.Parameters(), learningRate: 0.001f);
             var graph = new ComputationGraph();
 
             var totalGames = 50000;
             var epsilon = 1.0f;
             var epsilonDecay = 0.99991f;
 
-            var wins = 0;
-            var draws = 0;
+            var wins = 0; var draws = 0; var losses = 0;
 
-            _output.WriteLine("=== Rozpoczynam morderczy trening Bestii (50k partii) ===");
-
-            for (var i = 1; i <= totalGames; i++)
+            for (var game = 0; game < totalGames; game++)
             {
                 var board = new float[9];
-                var gameOver = false;
+                var isOver = false;
 
-                while (!gameOver)
+                while (!isOver)
                 {
-                    var stateBefore = (float[])board.Clone();
+                    using var stateTensor = new FastTensor<float>(1, 9, clearMemory: false);
+                    board.CopyTo(stateTensor.GetView().AsSpan());
+                    using var stateNode = new AutogradNode(stateTensor, false);
 
-                    var action = ChooseAction(model, stateBefore, epsilon);
+                    // WAŻNE: Nie używamy 'using' dla prediction, bo to współdzielony bufor modelu!
+                    var prediction = model.Forward(null, stateNode);
+                    var qValues = prediction.DataView.AsReadOnlySpan();
 
-                    var legal = MakeMove(board, action, 1.0f);
-                    var reward = EvaluateBoard(board, legal, out gameOver);
-
-                    TrainStep(model, optimizer, graph, stateBefore, action, reward, board, gameOver);
-
-                    if (gameOver)
+                    var action = -1;
+                    if (_rng.NextSingle() < epsilon)
                     {
-                        if (reward > 0.5)
+                        do { action = _rng.Next(9); } while (board[action] != 0); // Tylko legalne w exploracji
+                    }
+                    else
+                    {
+                        var maxQ = float.MinValue;
+                        for (var i = 0; i < 9; i++)
                         {
-                            wins++;
+                            if (board[i] == 0 && qValues[i] > maxQ)
+                            {
+                                maxQ = qValues[i]; action = i;
+                            }
                         }
+                        if (action == -1) action = _rng.Next(9);
+                    }
 
-                        if (reward == 0.5)
+                    var reward = ExecuteAction(board, action, out isOver);
+
+                    // Jeśli gra trwa, rusza się przeciwnik
+                    if (!isOver)
+                    {
+                        var enemyAction = RandomMove(board);
+                        if (enemyAction != -1)
                         {
-                            draws++;
+                            var enemyReward = ExecuteAction(board, enemyAction, out isOver, -1f);
+                            if (enemyReward == 1f) reward = -1f; // Przegraliśmy
                         }
-
-                        break;
                     }
 
-                    OpponentMove(board);
-                    reward = EvaluateBoard(board, true, out gameOver);
+                    // TRENING (po zakończeniu tury/gry)
+                    using var targetTensor = new FastTensor<float>(1, 9, clearMemory: false);
+                    qValues.CopyTo(targetTensor.GetView().AsSpan());
+                    targetTensor.GetView().AsSpan()[action] = reward;
+                    using var targetNode = new AutogradNode(targetTensor, false);
 
-                    if (gameOver)
+                    graph.Reset();
+                    optimizer.ZeroGrad();
+                    using var trainPred = model.Forward(graph, stateNode);
+                    using var loss = TensorMath.MSELoss(graph, trainPred, targetNode);
+                    graph.Backward(loss);
+                    optimizer.Step();
+
+                    if (isOver)
                     {
-                        TrainStep(model, optimizer, graph, stateBefore, action, reward, board, true);
+                        if (reward == 1f) wins++;
+                        else if (reward == -1f || reward == -2f) losses++;
+                        else draws++;
                     }
                 }
-
-                epsilon = MathF.Max(0.01f, epsilon * epsilonDecay);
-
-                if (i % 5000 == 0)
-                {
-                    var winRate = (float)wins / 5000;
-                    _output.WriteLine($"Gry: {i:D5} | WinRate: {winRate:P2} | Remisy: {draws} | Eps: {epsilon:F3}");
-                    wins = 0;
-                    draws = 0;
-                }
+                epsilon *= epsilonDecay;
             }
-
-            _output.WriteLine("=== Trening zakończony. Bestia jest gotowa do dominacji. ===");
-            Assert.True(epsilon < 0.1, "Epsilon zbyt wysoki - Bestia nie skończyła nauki.");
-
-            model.Save("BestiaTicTacToe.bin");
-            _output.WriteLine("Mózg Bestii został zgrany na dysk.");
+            _output.WriteLine($"Final: Wins: {wins}, Draws: {draws}, Losses: {losses}");
+            Assert.True(wins > losses, "Model powinien wygrywać częściej niż przegrywać z losowym botem.");
         }
 
-        private void TrainStep(Sequential model, Adam opt, ComputationGraph graph, float[] s, int a, float r, float[] nextS, bool done)
+        private int RandomMove(float[] b)
         {
-            graph.Reset();
-            opt.ZeroGrad();
-
-            using var inputMat = new FastTensor<float>(1, 9);
-            s.CopyTo(inputMat.AsSpan());
-            using var inputNode = new AutogradNode(inputMat, false);
-
-            // Forward z grafem — trening, nowe tensory, using OK
-            using var pred = model.Forward(graph, inputNode);
-
-            using var targetMat = new FastTensor<float>(1, 9);
-            pred.Data.AsSpan().CopyTo(targetMat.AsSpan());
-
-            var targetValue = r;
-            if (!done)
-            {
-                using var nextInputMat = new FastTensor<float>(1, 9);
-                nextS.CopyTo(nextInputMat.AsSpan());
-                using var nextInputNode = new AutogradNode(nextInputMat, false);
-
-                // Forward(null) — inference, zwraca współdzielony bufor → BEZ using
-                var nextQNode = model.Forward(null, nextInputNode);
-
-                var maxNextQ = -float.MaxValue;
-                var nqSpan = nextQNode.Data.AsSpan();
-                for (var i = 0; i < nqSpan.Length; i++)
-                {
-                    if (nqSpan[i] > maxNextQ)
-                    {
-                        maxNextQ = nqSpan[i];
-                    }
-                }
-
-                targetValue += 0.95f * maxNextQ;
-            }
-
-            targetMat[0, a] = targetValue;
-
-            using var targetNode = new AutogradNode(targetMat, false);
-            using var loss = TensorMath.MSELoss(graph, pred, targetNode);
-
-            graph.Backward(loss);
-            opt.Step();
+            var empty = new List<int>();
+            for (var i = 0; i < 9; i++) if (b[i] == 0f) empty.Add(i);
+            return empty.Count == 0 ? -1 : empty[_rng.Next(empty.Count)];
         }
 
-        private int ChooseAction(Sequential model, float[] board, float eps)
+        private float ExecuteAction(float[] b, int action, out bool over, float player = 1.0f)
         {
-            if (_rng.NextSingle() < eps)
-            {
-                var empty = board.Select((v, i) => v == 0 ? i : -1).Where(i => i != -1).ToArray();
-                return empty.Length > 0 ? empty[_rng.Next(empty.Length)] : 0;
-            }
-
-            using var inputMat = new FastTensor<float>(1, 9);
-            board.CopyTo(inputMat.AsSpan());
-            using var inputNode = new AutogradNode(inputMat, false);
-
-            // Forward(null) — inference, zwraca współdzielony bufor → BEZ using
-            var output = model.Forward(null, inputNode);
-
-            var bestIdx = 0;
-            var maxVal = -float.MaxValue;
-            var span = output.Data.AsSpan();
-            for (var i = 0; i < span.Length; i++)
-            {
-                if (span[i] > maxVal)
-                {
-                    maxVal = span[i];
-                    bestIdx = i;
-                }
-            }
-
-            return bestIdx;
-        }
-
-        private bool MakeMove(float[] b, int i, float p)
-        {
-            if (i < 0 || i > 8 || b[i] != 0)
-            {
-                return false;
-            }
-
-            b[i] = p;
-            return true;
-        }
-
-        private void OpponentMove(float[] b)
-        {
-            var empty = b.Select((v, i) => v == 0 ? i : -1).Where(i => i != -1).ToArray();
-            if (empty.Length > 0)
-            {
-                b[empty[_rng.Next(empty.Length)]] = -1.0f;
-            }
-        }
-
-        private float EvaluateBoard(float[] b, bool legal, out bool over)
-        {
-            over = false;
-
-            if (!legal)
-            {
-                over = true;
-                return -2.0f;
-            }
-
-            if (CheckWin(b, 1.0f))
-            {
-                over = true;
-                return 1.0f;
-            }
-
-            if (CheckWin(b, -1.0f))
-            {
-                over = true;
-                return -1.0f;
-            }
-
-            if (!b.Contains(0.0f))
-            {
-                over = true;
-                return 0.5f;
-            }
-
+            if (b[action] != 0f) { over = true; return -2.0f; }
+            b[action] = player;
+            over = CheckWin(b, player) || !b.Contains(0.0f);
+            if (CheckWin(b, player)) return 1.0f;
+            if (!b.Contains(0.0f)) return 0.5f;
             return 0.0f;
         }
 
         private bool CheckWin(float[] b, float p)
         {
-            int[,] lines =
-            {
-                {
-                    0, 1, 2
-                },
-                {
-                    3, 4, 5
-                },
-                {
-                    6, 7, 8
-                },
-                {
-                    0, 3, 6
-                },
-                {
-                    1, 4, 7
-                },
-                {
-                    2, 5, 8
-                },
-                {
-                    0, 4, 8
-                },
-                {
-                    2, 4, 6
-                }
-            };
-
-            for (var i = 0; i < 8; i++)
-            {
-                if (b[lines[i, 0]] == p && b[lines[i, 1]] == p && b[lines[i, 2]] == p)
-                {
-                    return true;
-                }
-            }
-
+            int[,] lines = { { 0, 1, 2 }, { 3, 4, 5 }, { 6, 7, 8 }, { 0, 3, 6 }, { 1, 4, 7 }, { 2, 5, 8 }, { 0, 4, 8 }, { 2, 4, 6 } };
+            for (var i = 0; i < 8; i++) if (b[lines[i, 0]] == p && b[lines[i, 1]] == p && b[lines[i, 2]] == p) return true;
             return false;
         }
     }

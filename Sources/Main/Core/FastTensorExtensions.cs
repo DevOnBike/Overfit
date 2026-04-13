@@ -7,12 +7,9 @@ namespace DevOnBike.Overfit.Core
 {
     public static class FastTensorExtensions
     {
-        /// <summary>
-        ///     Randomizes tensor elements using a simple scale.
-        /// </summary>
         public static FastTensor<float> Randomize(this FastTensor<float> tensor, float scale = 0.01f)
         {
-            var span = tensor.AsSpan();
+            var span = tensor.GetView().AsSpan();
             for (var i = 0; i < span.Length; i++)
             {
                 span[i] = (Random.Shared.NextSingle() * 2f - 1f) * scale;
@@ -22,7 +19,7 @@ namespace DevOnBike.Overfit.Core
 
         public static FastTensor<float> Fill(this FastTensor<float> tensor, float value)
         {
-            tensor.AsSpan().Fill(value);
+            tensor.GetView().AsSpan().Fill(value);
             return tensor;
         }
     }

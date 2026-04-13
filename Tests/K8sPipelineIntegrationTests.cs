@@ -5,6 +5,7 @@ using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 using DevOnBike.Overfit.Statistical;
 using DevOnBike.Overfit.Data.Prepare;
 using DevOnBike.Overfit.Core;
+using Xunit;
 
 namespace DevOnBike.Overfit.Tests
 {
@@ -12,151 +13,106 @@ namespace DevOnBike.Overfit.Tests
     {
         private readonly K8sAnomalyDetector _detector;
         private readonly SlidingWindowBuffer _buffer;
-        private readonly ScalerParams _scalerParams;
         private readonly int _featureVectorSize;
+        private readonly int _windowSize = 10;
 
         public K8sPipelineIntegrationTests()
         {
-            // 1. ARRANGE: Inicjalizacja pod MetricSnapshot.FeatureCount (12)
-            var windowSize = 10;
-            _buffer = new SlidingWindowBuffer(windowSize: windowSize, stepSize: 1, featureCount: MetricSnapshot.FeatureCount);
+            _buffer = new SlidingWindowBuffer(windowSize: _windowSize, featureCount: MetricSnapshot.FeatureCount, stepSize: 1);
 
-            // 12 metryk * 4 statystyki = 48
             _featureVectorSize = FeatureExtractor.OutputSize(MetricSnapshot.FeatureCount);
             _detector = new K8sAnomalyDetector(_featureVectorSize);
 
-            // Parametry skalera (Neutralne dla testu)
-            _scalerParams = new ScalerParams
+            var initialProbs = new float[3] { 0.8f, 0.15f, 0.05f };
+            var transitionMatrix = new float[9]
             {
-                Medians = new float[_featureVectorSize],
-                Iqrs = new float[_featureVectorSize]
+                0.9f, 0.08f, 0.02f,
+                0.1f, 0.8f,  0.1f,
+                0.05f, 0.1f, 0.85f
             };
-            Array.Fill(_scalerParams.Iqrs, 1.0f);
-
-            SetupDeterministicHmm();
-        }
-
-        [Fact]
-        public void Pipeline_ShouldClassify_NormalTraffic_AsStateNormal()
-        {
-            // 1. ARRANGE: Zdrowe metryki zgodnie z nowym kontraktem
-            for (var i = 0; i < _buffer.WindowSize; i++)
-            {
-                _buffer.Add(new MetricSnapshot
-                {
-                    Timestamp = DateTime.UtcNow.AddSeconds(i),
-                    PodName = "test-pod",
-                    CpuUsageRatio = 0.1f,           //
-                    MemoryWorkingSetBytes = 100 * 1024 * 1024,
-                    LatencyP95Ms = 20f,             //
-                    RequestsPerSecond = 100f,       //
-                    ErrorRate = 0.0f                //
-                });
-            }
-
-            Span<float> windowScratch = stackalloc float[_buffer.WindowFloats];
-            Span<float> featuresScratch = stackalloc float[_featureVectorSize];
-
-            // 2. ACT
-            var extracted = FeatureExtractor.TryExtract(_buffer, windowScratch, featuresScratch, out _);
-            ScaleFeatures(featuresScratch);
-
-            // Poprawione wywołanie: tylko jeden argument
-            var predictedRegime = _detector.GetCurrentRegime(featuresScratch);
-
-            // 3. ASSERT
-            Assert.True(extracted);
-            Assert.Equal(K8sAnomalyDetector.StateNormal, predictedRegime);
-        }
-
-        [Fact]
-        public void Pipeline_ShouldClassify_AnomalousTraffic_AsStateFailure()
-        {
-            // 1. ARRANGE: Symulacja awarii
-            for (var i = 0; i < _buffer.WindowSize; i++)
-            {
-                _buffer.Add(new MetricSnapshot
-                {
-                    Timestamp = DateTime.UtcNow.AddSeconds(i),
-                    PodName = "test-pod",
-                    CpuUsageRatio = 0.95f,
-                    LatencyP95Ms = 5000f,
-                    ErrorRate = 0.5f,
-                    ThreadPoolQueueLength = 100f
-                });
-            }
-
-            Span<float> windowScratch = stackalloc float[_buffer.WindowFloats];
-            Span<float> featuresScratch = stackalloc float[_featureVectorSize];
-
-            // 2. ACT
-            FeatureExtractor.TryExtract(_buffer, windowScratch, featuresScratch, out _);
-            ScaleFeatures(featuresScratch);
-
-            // Poprawione wywołanie
-            var predictedRegime = _detector.GetCurrentRegime(featuresScratch);
-
-            // 3. ASSERT
-            Assert.Equal(K8sAnomalyDetector.StateFailure, predictedRegime);
-        }
-
-        private void ScaleFeatures(Span<float> features)
-        {
-            for (var i = 0; i < features.Length; i++)
-            {
-                features[i] = (features[i] - _scalerParams.Medians[i]) / _scalerParams.Iqrs[i];
-            }
-        }
-
-        private void SetupDeterministicHmm()
-        {
-            // ZMIANA 1: Dajemy równe szanse na start (0.33), 
-            // aby logarytm nie wynosił -Infinity i pozwalał danym "przemówić".
-            float[] initialProbs = [0.33f, 0.33f, 0.33f];
-
-            float[] transitionMatrix =
-            [
-                0.80f, 0.15f, 0.05f,
-        0.10f, 0.80f, 0.10f,
-        0.05f, 0.15f, 0.80f
-            ];
 
             var means = new float[3 * _featureVectorSize];
+            // Ustawiamy progi dla stanu awarii (StateFailure)
+            // Zakładamy, że FeatureExtractor produkuje 4 statystyki na metrykę (Mean, Min, Max, P95)
+            means[K8sAnomalyDetector.StateFailure * _featureVectorSize + 0 * 4] = 0.95f; // CPU Mean
+            means[K8sAnomalyDetector.StateFailure * _featureVectorSize + 5 * 4] = 5000f; // Latency Mean
+            means[K8sAnomalyDetector.StateFailure * _featureVectorSize + 8 * 4] = 0.5f;  // ErrorRate Mean
+            means[K8sAnomalyDetector.StateFailure * _featureVectorSize + 11 * 4] = 100f; // ThreadPool Mean
 
-            // --- StateNormal ---
-            means[K8sAnomalyDetector.StateNormal * _featureVectorSize + 0 * 4] = 0.1f;  // CpuUsageRatio
-            means[K8sAnomalyDetector.StateNormal * _featureVectorSize + 5 * 4] = 20f;   // LatencyP95Ms
-
-            // --- StateFailure ---
-            // ZMIANA 2: Musimy ustawić średnie dla WSZYSTKICH cech, które testujemy jako anomalne.
-            // Jeśli w teście dajesz ErrorRate 0.5 i ThreadPool 100, a tutaj zostawisz 0, 
-            // to model uzna to za ogromną anomalię nawet wewnątrz stanu Failure!
-            means[K8sAnomalyDetector.StateFailure * _featureVectorSize + 0 * 4] = 0.95f; // CpuUsageRatio
-            means[K8sAnomalyDetector.StateFailure * _featureVectorSize + 5 * 4] = 5000f; // LatencyP95Ms
-            means[K8sAnomalyDetector.StateFailure * _featureVectorSize + 8 * 4] = 0.5f;  // ErrorRate (indeks 8 * 4)
-            means[K8sAnomalyDetector.StateFailure * _featureVectorSize + 11 * 4] = 100f; // ThreadPool (indeks 11 * 4)
-
-            var covariances = new FastMatrix<float>[3];
+            var covariances = new FastTensor<float>[3];
             for (var i = 0; i < 3; i++)
             {
-                covariances[i] = new FastMatrix<float>(_featureVectorSize, _featureVectorSize);
-                // ZMIANA 3: Zwiększamy wariancję (np. do 100.0), aby model był mniej "sztywny" 
-                // i lepiej tolerował różnice numeryczne w testach.
+                covariances[i] = new FastTensor<float>(_featureVectorSize, _featureVectorSize, clearMemory: true);
                 for (var j = 0; j < _featureVectorSize; j++)
                 {
-                    covariances[i][j, j] = 100.0f;
+                    covariances[i].GetView()[j, j] = 100.0f;
                 }
             }
 
             _detector.LoadParameters(initialProbs, transitionMatrix, means, covariances);
 
-            foreach (var matrix in covariances) matrix.Dispose();
+            foreach (var cov in covariances) cov.Dispose();
+        }
+
+        [Fact]
+        public void NormalTraffic_ShouldRemainInNormalState()
+        {
+            var dt = DateTime.UtcNow;
+            for (var i = 0; i < _windowSize; i++)
+            {
+                var metric = CreateMockMetric(cpu: 0.1f, memory: 50, latency: 20f, errRate: 0.01f, threadPool: 5);
+                _buffer.Add(metric, dt.AddSeconds(i * 15));
+            }
+
+            // 1. Pobieramy surowe okno
+            Span<float> rawWindow = stackalloc float[_windowSize * MetricSnapshot.FeatureCount];
+            Assert.True(_buffer.TryGetWindow(rawWindow, out _));
+
+            // 2. Ekstrahujemy cechy - POPRAWIONA KOLEJNOŚĆ ARGUMENTÓW
+            Span<float> windowFeatures = stackalloc float[_featureVectorSize];
+            FeatureExtractor.Extract(rawWindow, _windowSize, MetricSnapshot.FeatureCount, windowFeatures);
+
+            var state = _detector.GetCurrentRegime(windowFeatures);
+            Assert.Equal(K8sAnomalyDetector.StateNormal, state);
+        }
+
+        [Fact]
+        public void HighCpuAndLatency_ShouldTriggerFailureState()
+        {
+            var dt = DateTime.UtcNow;
+            for (var i = 0; i < _windowSize; i++)
+            {
+                var metric = CreateMockMetric(cpu: 0.99f, memory: 90, latency: 6000f, errRate: 0.6f, threadPool: 120);
+                _buffer.Add(metric, dt.AddSeconds(i * 15));
+            }
+
+            // 1. Pobieramy surowe okno
+            Span<float> rawWindow = stackalloc float[_windowSize * MetricSnapshot.FeatureCount];
+            Assert.True(_buffer.TryGetWindow(rawWindow, out _));
+
+            // 2. Ekstrahujemy cechy - POPRAWIONA KOLEJNOŚĆ ARGUMENTÓW
+            Span<float> windowFeatures = stackalloc float[_featureVectorSize];
+            FeatureExtractor.Extract(rawWindow, _windowSize, MetricSnapshot.FeatureCount, windowFeatures);
+
+            var state = _detector.GetCurrentRegime(windowFeatures);
+            Assert.Equal(K8sAnomalyDetector.StateFailure, state);
+        }
+
+        private float[] CreateMockMetric(float cpu, float memory, float latency, float errRate, float threadPool)
+        {
+            var m = new float[MetricSnapshot.FeatureCount];
+            m[0] = cpu;
+            m[1] = memory;
+            m[5] = latency;
+            m[8] = errRate;
+            m[11] = threadPool;
+            return m;
         }
 
         public void Dispose()
         {
-            _detector?.Dispose();
             _buffer?.Dispose();
+            _detector?.Dispose();
         }
     }
 }

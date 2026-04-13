@@ -1,8 +1,3 @@
-// Copyright (c) 2026 DevOnBike.
-// This file is part of DevonBike Overfit.
-// DevonBike Overfit is licensed under the GNU AGPLv3.
-// For commercial licensing options, contact: devonbike@gmail.com
-
 using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.DeepLearning
@@ -21,7 +16,6 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Train()
         {
             IsTraining = true;
-
             foreach (var module in _modules)
             {
                 module.Train();
@@ -31,7 +25,6 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Eval()
         {
             IsTraining = false;
-
             foreach (var module in _modules)
             {
                 module.Eval();
@@ -41,12 +34,10 @@ namespace DevOnBike.Overfit.DeepLearning
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
             var current = input;
-
             foreach (var module in _modules)
             {
                 current = module.Forward(graph, current);
             }
-
             return current;
         }
 
@@ -83,7 +74,6 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 module.Dispose();
             }
-
             _modules.Clear();
         }
 
@@ -96,7 +86,6 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             using var fs = new FileStream(path, FileMode.Create);
             using var bw = new BinaryWriter(fs);
-
             Save(bw);
         }
 
@@ -104,12 +93,11 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             if (!File.Exists(path))
             {
-                throw new FileNotFoundException($"Brak pliku filtr�w: {path}");
+                throw new FileNotFoundException($"Brak pliku modelu: {path}");
             }
 
             using var fs = new FileStream(path, FileMode.Open);
             using var br = new BinaryReader(fs);
-
             Load(br);
         }
     }

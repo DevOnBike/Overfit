@@ -37,27 +37,27 @@ namespace DevOnBike.Overfit.Data.Prepare
 
         public PipelineContext Process(PipelineContext context)
         {
-            var rows = context.Features.GetDim(0);
-            var cols = context.Features.GetDim(1);
+            var rows = context.Features.GetView().GetDim(0);
+            var cols = context.Features.GetView().GetDim(1);
 
             if (rows == 0 || cols == 0)
             {
                 return context;
             }
 
-            CleanSpan(context.Targets.AsSpan());
+            CleanSpan(context.Targets.GetView().AsSpan());
 
             if (_maxCorruptedRatio >= 1.0f)
             {
-                CleanSpan(context.Features.AsSpan());
+                CleanSpan(context.Features.GetView().AsSpan());
                 return context;
             }
 
-            var featureSpan = context.Features.AsSpan();
+            var featureSpan = context.Features.GetView().AsSpan();
             var maxCorruptedPerRow = (int)(cols * _maxCorruptedRatio);
 
-            using var corruptedCounts = new FastBuffer<int>(rows);
-            var countSpan = corruptedCounts.AsSpan();
+            using var corruptedCounts = new PooledBuffer<int>(rows);
+            var countSpan = corruptedCounts.Span;
 
             for (var r = 0; r < rows; r++)
             {
@@ -97,13 +97,13 @@ namespace DevOnBike.Overfit.Data.Prepare
             }
 
             var newRows = keptIndices.Count;
-            var newFeatures = new FastTensor<float>(newRows, cols);
-            var newTargets = new FastTensor<float>(newRows, 1);
+            var newFeatures = new FastTensor<float>(newRows, cols, clearMemory: false);
+            var newTargets = new FastTensor<float>(newRows, 1, clearMemory: false);
 
-            var srcFeatures = context.Features.AsSpan();
-            var srcTargets = context.Targets.AsSpan();
-            var dstFeatures = newFeatures.AsSpan();
-            var dstTargets = newTargets.AsSpan();
+            var srcFeatures = context.Features.GetView().AsReadOnlySpan();
+            var srcTargets = context.Targets.GetView().AsReadOnlySpan();
+            var dstFeatures = newFeatures.GetView().AsSpan();
+            var dstTargets = newTargets.GetView().AsSpan();
 
             for (var i = 0; i < newRows; i++)
             {

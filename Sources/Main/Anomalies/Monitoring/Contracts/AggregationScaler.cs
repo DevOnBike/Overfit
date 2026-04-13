@@ -9,20 +9,8 @@ using DevOnBike.Overfit.Data.Prepare;
 
 namespace DevOnBike.Overfit.Anomalies.Monitoring.Contracts
 {
-    /// <summary>
-    ///     Packs AggregationResult into FastTensors and applies RobustScalingLayer.
-    ///     FleetBaseline:  float[2, 60, 12]  →  FastTensor [2×60, 12]  →  scaled in place
-    ///     PodDeviations:  float[N, 60, 12]  →  FastTensor [N×60, 12]  →  scaled in place
-    ///     Each timestep of each pod/DC is treated as a separate sample row.
-    ///     The scaler normalises each of the 12 metric columns independently.
-    /// </summary>
     public static class AggregationScaler
     {
-        /// <summary>
-        ///     Scales FleetBaseline and PodDeviations in place using the provided scalers.
-        ///     Scalers must already be fitted (offline on Golden Window data).
-        ///     Returns FastTensors ready for the LSTM autoencoder.
-        /// </summary>
         public static ScaledResult Scale(
             AggregationResult aggregation,
             RobustScalingLayer baselineScaler,
@@ -34,18 +22,27 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring.Contracts
             baselineScaler.Process(WrapInContext(baselineTensor));
             deviationScaler.Process(WrapInContext(deviationTensor));
 
+            // Zmiana kształtu: Tworzymy nowy magazyn 3D i kopiujemy zawartość z widoku 2D
+            var reshapedBaseline = new FastTensor<float>(aggregation.DcCount, aggregation.WindowSize, aggregation.MetricCount, clearMemory: false);
+            baselineTensor.GetView().AsReadOnlySpan().CopyTo(reshapedBaseline.GetView().AsSpan());
+            baselineTensor.Dispose();
+
+            var reshapedDeviations = new FastTensor<float>(aggregation.PodCount, aggregation.WindowSize, aggregation.MetricCount, clearMemory: false);
+            deviationTensor.GetView().AsReadOnlySpan().CopyTo(reshapedDeviations.GetView().AsSpan());
+            deviationTensor.Dispose();
+
             return new ScaledResult
             {
-                FleetBaseline = baselineTensor.Reshape(aggregation.DcCount, aggregation.WindowSize, aggregation.MetricCount),
-                PodDeviations = deviationTensor.Reshape(aggregation.PodCount, aggregation.WindowSize, aggregation.MetricCount),
+                FleetBaseline = reshapedBaseline,
+                PodDeviations = reshapedDeviations,
                 PodIndex = aggregation.PodIndex
             };
         }
 
         private static FastTensor<float> PackToTensor(float[] data, int rows, int cols)
         {
-            var tensor = new FastTensor<float>(false, rows, cols);
-            var span = tensor.AsSpan();
+            var tensor = new FastTensor<float>(rows, cols, clearMemory: false);
+            var span = tensor.GetView().AsSpan();
 
             data.AsSpan().CopyTo(span);
 
@@ -54,8 +51,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring.Contracts
 
         private static PipelineContext WrapInContext(FastTensor<float> tensor)
         {
-            // Targets not used by RobustScalingLayer — pass empty tensor as placeholder
-            var emptyTargets = new FastTensor<float>(false, 0);
+            var emptyTargets = new FastTensor<float>(0, clearMemory: false);
 
             return new PipelineContext(tensor, emptyTargets);
         }

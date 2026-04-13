@@ -8,29 +8,18 @@ using DevOnBike.Overfit.DeepLearning;
 
 namespace DevOnBike.Overfit.Data
 {
-    /// <summary>
-    ///     Utility class for binary serialization of model parameters.
-    ///     Handles persisting and restoring tensor data for convolutional and linear layers.
-    /// </summary>
     public static class ModelSerializer
     {
-        /// <summary>
-        ///     Saves the model weights and biases to a binary file.
-        /// </summary>
         public static void SaveModel(string path, ConvLayer conv, LinearLayer fc)
         {
             using var fs = new FileStream(path, FileMode.Create);
             using var bw = new BinaryWriter(fs);
 
-            SaveTensor(bw, conv.Kernels.Data);
-            SaveTensor(bw, fc.Weights.Data);
-            SaveTensor(bw, fc.Biases.Data);
+            SaveTensor(bw, conv.Kernels.DataView);
+            SaveTensor(bw, fc.Weights.DataView);
+            SaveTensor(bw, fc.Biases.DataView);
         }
 
-        /// <summary>
-        ///     Loads model weights and biases from a binary file.
-        ///     Throws an exception if the file structure does not match the expected tensor shapes.
-        /// </summary>
         public static void LoadModel(string path, ConvLayer conv, LinearLayer fc)
         {
             if (!File.Exists(path))
@@ -41,24 +30,21 @@ namespace DevOnBike.Overfit.Data
             using var fs = new FileStream(path, FileMode.Open);
             using var br = new BinaryReader(fs);
 
-            LoadTensor(br, conv.Kernels.Data);
-            LoadTensor(br, fc.Weights.Data);
-            LoadTensor(br, fc.Biases.Data);
+            LoadTensor(br, conv.Kernels.DataView);
+            LoadTensor(br, fc.Weights.DataView);
+            LoadTensor(br, fc.Biases.DataView);
         }
 
-        /// <summary>
-        ///     Serializes a FastTensor to the stream using the format: [Rank][Dimensions][RawData].
-        /// </summary>
-        private static void SaveTensor(BinaryWriter bw, FastTensor<float> tensor)
+        private static void SaveTensor(BinaryWriter bw, TensorView<float> view)
         {
-            bw.Write(tensor.Shape.Length);
+            bw.Write(view.Rank);
 
-            for (var i = 0; i < tensor.Shape.Length; i++)
+            for (var i = 0; i < view.Rank; i++)
             {
-                bw.Write(tensor.Shape[i]);
+                bw.Write(view.GetDim(i));
             }
 
-            var data = tensor.AsSpan();
+            var data = view.AsReadOnlySpan();
 
             for (var i = 0; i < data.Length; i++)
             {
@@ -66,11 +52,7 @@ namespace DevOnBike.Overfit.Data
             }
         }
 
-        /// <summary>
-        ///     Deserializes data from the stream into an existing FastTensor.
-        ///     Performs strict validation of rank and dimensions before loading data.
-        /// </summary>
-        private static void LoadTensor(BinaryReader br, FastTensor<float> tensor)
+        private static void LoadTensor(BinaryReader br, TensorView<float> view)
         {
             var rank = br.ReadInt32();
             var fileShape = new int[rank];
@@ -79,21 +61,20 @@ namespace DevOnBike.Overfit.Data
                 fileShape[i] = br.ReadInt32();
             }
 
-            if (rank != tensor.Shape.Length)
+            if (rank != view.Rank)
             {
-                throw new Exception($"Tensor rank mismatch! File: {rank}, Model: {tensor.Shape.Length}");
+                throw new Exception($"Tensor rank mismatch! File: {rank}, Model: {view.Rank}");
             }
 
             for (var i = 0; i < rank; i++)
             {
-                if (fileShape[i] != tensor.Shape[i])
+                if (fileShape[i] != view.GetDim(i))
                 {
-                    throw new Exception($"Dimension mismatch at index {i}! File: {fileShape[i]}, Model: {tensor.Shape[i]}");
+                    throw new Exception($"Dimension mismatch at index {i}! File: {fileShape[i]}, Model: {view.GetDim(i)}");
                 }
             }
 
-            // Load data directly into the tensor's Span
-            var data = tensor.AsSpan();
+            var data = view.AsSpan();
             for (var i = 0; i < data.Length; i++)
             {
                 data[i] = br.ReadSingle();

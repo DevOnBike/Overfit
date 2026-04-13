@@ -77,16 +77,16 @@ namespace Benchmarks
         public float Overfit_ColdStart()
         {
             var model = new Sequential(new LinearLayer(InputSize, OutputSize));
-
             model.Load("benchmark_model.bin");
             model.Eval();
 
-            using var inputTensor = new FastTensor<float>(false, 1, InputSize);
-            _inputData.AsSpan().CopyTo(inputTensor.AsSpan());
+            // POPRAWKA: Konstruktor i GetView()
+            using var inputTensor = new FastTensor<float>(1, InputSize, clearMemory: false);
+            _inputData.AsSpan().CopyTo(inputTensor.GetView().AsSpan());
 
             using var inputNode = new AutogradNode(inputTensor, false);
-
-            var result = model.Forward(null, inputNode).Data.AsSpan()[0];
+            // POPRAWKA: DataView.AsReadOnlySpan()
+            var result = model.Forward(null, inputNode).DataView.AsReadOnlySpan()[0];
 
             model.Dispose();
             return result;

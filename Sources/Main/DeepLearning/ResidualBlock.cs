@@ -1,7 +1,6 @@
 ﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
-// For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Core;
 
@@ -30,25 +29,15 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Train()
         {
             IsTraining = true;
-            _linear1.Train();
-            _bn1.Train();
-            _linear2.Train();
-            _bn2.Train();
+            _linear1.Train(); _bn1.Train(); _linear2.Train(); _bn2.Train();
         }
 
         public void Eval()
         {
             IsTraining = false;
-            _linear1.Eval();
-            _bn1.Eval();
-            _linear2.Eval();
-            _bn2.Eval();
+            _linear1.Eval(); _bn1.Eval(); _linear2.Eval(); _bn2.Eval();
         }
 
-        /// <summary>
-        ///     Performs the forward pass.
-        ///     Dispatches between a memory-optimized inference path and a recording-enabled training path.
-        /// </summary>
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
             if (graph == null || !IsTraining)
@@ -77,7 +66,6 @@ namespace DevOnBike.Overfit.DeepLearning
             return TensorMath.ReLU(graph, tAdded);
         }
 
-        /// <summary> Aggregates all learnable parameters from nested layers. </summary>
         public IEnumerable<AutogradNode> Parameters()
         {
             foreach (var p in _linear1.Parameters())
@@ -100,26 +88,17 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void Save(BinaryWriter bw)
         {
-            _linear1.Save(bw);
-            _bn1.Save(bw);
-            _linear2.Save(bw);
-            _bn2.Save(bw);
+            _linear1.Save(bw); _bn1.Save(bw); _linear2.Save(bw); _bn2.Save(bw);
         }
 
         public void Load(BinaryReader br)
         {
-            _linear1.Load(br);
-            _bn1.Load(br);
-            _linear2.Load(br);
-            _bn2.Load(br);
+            _linear1.Load(br); _bn1.Load(br); _linear2.Load(br); _bn2.Load(br);
         }
 
         public void Dispose()
         {
-            _linear1?.Dispose();
-            _bn1?.Dispose();
-            _linear2?.Dispose();
-            _bn2?.Dispose();
+            _linear1?.Dispose(); _bn1?.Dispose(); _linear2?.Dispose(); _bn2?.Dispose();
         }
 
         public void Save(string path)
@@ -135,10 +114,8 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 throw new FileNotFoundException($"Model weights file not found: {path}");
             }
-
             using var fs = new FileStream(path, FileMode.Open);
             using var br = new BinaryReader(fs);
-
             Load(br);
         }
     }

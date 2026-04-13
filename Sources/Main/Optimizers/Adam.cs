@@ -10,7 +10,7 @@ using DevOnBike.Overfit.Core;
 namespace DevOnBike.Overfit.Optimizers
 {
     /// <summary>
-    ///     Implements the Adam & AdamW (Adaptive Moment Estimation with Decoupled Weight Decay).
+    ///     Implements the Adam + AdamW (Adaptive Moment Estimation with Decoupled Weight Decay).
     ///     Features extreme-performance MemoryMarshal SIMD paths.
     /// </summary>
     public sealed class Adam : IOptimizer, IDisposable
@@ -39,7 +39,6 @@ namespace DevOnBike.Overfit.Optimizers
         public float Epsilon { get; set; } = 1e-8f;
         public float WeightDecay { get; set; } = 0.0001f;
 
-        // ZŁOTY STANDARD DEEP LEARNINGU: AdamW
         public bool UseAdamW { get; set; } = true;
 
         public float LearningRate { get; set; }
@@ -79,15 +78,16 @@ namespace DevOnBike.Overfit.Optimizers
                 var p = state.Node;
                 var n = state.Size;
 
-                if (p.Grad == null)
+                if (!p.RequiresGrad)
                 {
                     continue;
                 }
 
-                var gSpan = p.Grad.AsSpan();
-                var mSpan = state.M.AsSpan();
-                var vSpan = state.V.AsSpan();
-                var wSpan = p.Data.AsSpan();
+                // Generujemy błyskawiczne widoki na pamięć
+                var gSpan = p.GradView.AsSpan();
+                var mSpan = state.M.GetView().AsSpan();
+                var vSpan = state.V.GetView().AsSpan();
+                var wSpan = p.DataView.AsSpan();
 
                 var elementsProcessed = 0;
 
@@ -197,10 +197,8 @@ namespace DevOnBike.Overfit.Optimizers
         {
             foreach (var state in _states)
             {
-                if (state.Node.Grad != null)
-                {
-                    state.Node.Grad.AsSpan().Clear();
-                }
+                // Całe ręczne czyszczenie znika! AutogradNode robi to najlepiej i najbezpieczniej.
+                state.Node.ZeroGrad();
             }
         }
 
@@ -219,10 +217,12 @@ namespace DevOnBike.Overfit.Optimizers
             public ParamState(AutogradNode node)
             {
                 Node = node;
-                Size = node.Data.Size;
+                Size = node.DataView.Size;
 
-                M = new FastTensor<float>(true, node.Data.Shape);
-                V = new FastTensor<float>(true, node.Data.Shape);
+                // Optymalizator operuje wyłącznie na płaskich blokach pamięci. 
+                // Skoro interesuje go tylko `Size`, alokujemy te bufory jako 1-wymiarowe wektory!
+                M = new FastTensor<float>(Size, clearMemory: true);
+                V = new FastTensor<float>(Size, clearMemory: true);
             }
         }
     }

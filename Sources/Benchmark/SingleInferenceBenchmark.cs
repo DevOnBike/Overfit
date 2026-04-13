@@ -51,9 +51,11 @@ namespace Benchmarks
             _overfitModel.Load("benchmark_model.bin");
             _overfitModel.Eval(); // Enable inference mode (triggers weight pre-transposition)
 
-            // Prepare Overfit input tensors
-            _overfitInputTensor = new FastTensor<float>(false, 1, InputSize);
-            _inputData.AsSpan().CopyTo(_overfitInputTensor.AsSpan());
+            // POPRAWKA: Poprawna kolejność argumentów w konstruktorze (dim0, dim1, clearMemory)
+            _overfitInputTensor = new FastTensor<float>(1, InputSize, clearMemory: false);
+
+            // POPRAWKA: Użycie GetView().AsSpan() zamiast bezpośredniego AsSpan()
+            _inputData.AsSpan().CopyTo(_overfitInputTensor.GetView().AsSpan());
             _inputNode = new AutogradNode(_overfitInputTensor, false);
 
             for (var i = 0; i < 100; i++)
@@ -96,7 +98,8 @@ namespace Benchmarks
         [Benchmark]
         public float Overfit_ZeroAlloc()
         {
-            return _overfitModel.Forward(null, _inputNode).Data.AsSpan()[0];
+            // POPRAWKA: Użycie DataView.AsReadOnlySpan() zamiast Data.AsSpan()
+            return _overfitModel.Forward(null, _inputNode).DataView.AsReadOnlySpan()[0];
         }
 
         [GlobalCleanup]
