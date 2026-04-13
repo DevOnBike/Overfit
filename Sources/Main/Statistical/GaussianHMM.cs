@@ -40,7 +40,9 @@ namespace DevOnBike.Overfit.Statistical
         public void SetModel(ReadOnlySpan<float> pi, ReadOnlySpan<float> transitionMatrix, ReadOnlySpan<float> means, FastTensor<float>[] fullCovariances)
         {
             if (fullCovariances.Length != StateCount)
+            {
                 throw new ArgumentException("You must provide one covariance matrix per state.");
+            }
 
             for (var i = 0; i < StateCount; i++)
             {
@@ -80,7 +82,10 @@ namespace DevOnBike.Overfit.Statistical
 
         public void DecodeViterbi(int timeSteps, ReadOnlySpan<float> sequence, Span<int> outputStates)
         {
-            if (outputStates.Length < timeSteps) throw new ArgumentException("Output buffer too small.");
+            if (outputStates.Length < timeSteps)
+            {
+                throw new ArgumentException("Output buffer too small.");
+            }
 
             var N = StateCount;
             var vLen = timeSteps * N;
@@ -192,8 +197,14 @@ namespace DevOnBike.Overfit.Statistical
         [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
         private static float LogSumExp(float a, float b)
         {
-            if (float.IsNegativeInfinity(a)) return b;
-            if (float.IsNegativeInfinity(b)) return a;
+            if (float.IsNegativeInfinity(a))
+            {
+                return b;
+            }
+            if (float.IsNegativeInfinity(b))
+            {
+                return a;
+            }
 
             var max = MathF.Max(a, b);
             return max + MathF.Log(1f + MathF.Exp(-MathF.Abs(a - b)));
@@ -201,7 +212,10 @@ namespace DevOnBike.Overfit.Statistical
 
         public void Dispose()
         {
-            if (_disposed) return;
+            if (_disposed)
+            {
+                return;
+            }
             _disposed = true;
 
             _logPi?.Dispose();

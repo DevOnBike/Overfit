@@ -116,7 +116,10 @@ namespace DevOnBike.Overfit.Tests
             var maxIdx = 0;
             for (var j = 1; j < span.Length; j++)
             {
-                if (span[j] > span[maxIdx]) maxIdx = j;
+                if (span[j] > span[maxIdx])
+                {
+                    maxIdx = j;
+                }
             }
             return maxIdx;
         }

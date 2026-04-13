@@ -21,7 +21,10 @@ namespace DevOnBike.Overfit.DeepLearning
             var wData = new FastTensor<float>(inputSize, outputSize, clearMemory: false);
             var stdDev = MathF.Sqrt(2f / inputSize);
             var wSpan = wData.GetView().AsSpan();
-            for (var i = 0; i < wSpan.Length; i++) wSpan[i] = MathUtils.NextGaussian() * stdDev;
+            for (var i = 0; i < wSpan.Length; i++)
+            {
+                wSpan[i] = MathUtils.NextGaussian() * stdDev;
+            }
 
             Weights = new AutogradNode(wData, requiresGrad: true);
             Biases = new AutogradNode(new FastTensor<float>(outputSize), requiresGrad: true);
@@ -45,6 +48,25 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             IsTraining = false;
             RebuildTransposedWeights();
+        }
+
+        public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
+        {
+            if (IsTraining)
+            {
+                throw new InvalidOperationException("Layer must be in Eval mode.");
+            }
+            if (_weightsTransposed == null)
+            {
+                RebuildTransposedWeights();
+            }
+
+            LinearInferenceSimd(
+                input,
+                _weightsTransposed.GetView().AsReadOnlySpan(),
+                Biases.DataView.AsReadOnlySpan(),
+                output
+            );
         }
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)

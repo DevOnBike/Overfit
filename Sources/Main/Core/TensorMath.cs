@@ -153,9 +153,10 @@ namespace DevOnBike.Overfit.Core
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static void MatMulRawSeq(ReadOnlySpan<float> aS, ReadOnlySpan<float> bS, int aR, int aC, int bC, Span<float> cS)
+        public static void MatMulRawSeq(ReadOnlySpan<float> aS, ReadOnlySpan<float> bS, int aR, int aC, int bC, Span<float> cS)
         {
             cS.Clear();
+
             for (var i = 0; i < aR; i++)
             {
                 var rC = cS.Slice(i * bC, bC);
@@ -1062,15 +1063,21 @@ namespace DevOnBike.Overfit.Core
         public static AutogradNode Reshape(ComputationGraph graph, AutogradNode input, params int[] newShape)
         {
             // Obliczamy całkowitą liczbę elementów w nowym kształcie
-            int totalNewElements = 1;
-            foreach (var dim in newShape) totalNewElements *= dim;
+            var totalNewElements = 1;
+            foreach (var dim in newShape)
+            {
+                totalNewElements *= dim;
+            }
 
             // Tworzymy widok 2D (Batch, Reszta), bo Twój TensorView póki co pewnie tylko to wspiera stabilnie
             var newView = input.DataView.Reshape(newShape[0], totalNewElements / newShape[0]);
             var resD = FastTensor<float>.FromView(newView);
             var output = new AutogradNode(resD, input.RequiresGrad);
 
-            if (output.RequiresGrad) graph?.Record(OpCode.Reshape, output, input);
+            if (output.RequiresGrad)
+            {
+                graph?.Record(OpCode.Reshape, output, input);
+            }
             return output;
         }
 

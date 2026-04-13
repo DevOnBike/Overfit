@@ -38,6 +38,11 @@ namespace DevOnBike.Overfit.DeepLearning
         AutogradNode Forward(ComputationGraph graph, AutogradNode input);
 
         /// <summary>
+        ///     Extremely fast, 0-allocation forward pass for inference (Batch = 1).
+        /// </summary>
+        void ForwardInference(ReadOnlySpan<float> input, Span<float> output);
+
+        /// <summary>
         ///     Retrieves all learnable parameters (weights and biases) within this module and its children.
         ///     Typically used by the <c>Optimizer</c> to update weights during backpropagation.
         /// </summary>

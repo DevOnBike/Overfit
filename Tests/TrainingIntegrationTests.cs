@@ -125,8 +125,14 @@ namespace DevOnBike.Overfit.Tests
                 using var loss = TensorMath.MSELoss(graph, reconstruction, inputNode);
 
                 var currentLoss = loss.DataView.AsReadOnlySpan()[0];
-                if (i == 0) initialLoss = currentLoss;
-                if (i == totalScrapes - 1) finalLoss = currentLoss;
+                if (i == 0)
+                {
+                    initialLoss = currentLoss;
+                }
+                if (i == totalScrapes - 1)
+                {
+                    finalLoss = currentLoss;
+                }
 
                 graph.Backward(loss);
                 optimizer.Step();

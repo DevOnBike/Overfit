@@ -51,7 +51,10 @@ namespace DevOnBike.Overfit.Tests
 
             _detector.LoadParameters(initialProbs, transitionMatrix, means, covariances);
 
-            foreach (var cov in covariances) cov.Dispose();
+            foreach (var cov in covariances)
+            {
+                cov.Dispose();
+            }
         }
 
         [Fact]

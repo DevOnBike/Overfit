@@ -1,7 +1,8 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 
+using System.Buffers;
 using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.DeepLearning
@@ -25,6 +26,34 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void Train() => IsTraining = true;
         public void Eval() => IsTraining = false;
+
+        public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
+        {
+            var outH = _h - _k + 1;
+            var outW = _w - _k + 1;
+            var kSqInC = _k * _k * _inC;
+            var outElements = outH * outW;
+
+            // Wypożyczamy pamięć na macierz Im2Col (zero narzutu na GC)
+            var colArr = ArrayPool<float>.Shared.Rent(kSqInC * outElements);
+
+            try
+            {
+                var colSpan = colArr.AsSpan(0, kSqInC * outElements);
+
+                // 1. Rozwinięcie obrazu
+                TensorMath.Im2Col(input, _inC, _h, _w, _k, 1, 0, colSpan);
+
+                // 2. Mnożenie macierzy (Kernels x Im2Col)
+                var w2D = Kernels.DataView.AsReadOnlySpan();
+
+                TensorMath.MatMulRawSeq(w2D, colSpan, _outC, kSqInC, outElements, output);
+            }
+            finally
+            {
+                ArrayPool<float>.Shared.Return(colArr);
+            }
+        }
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {

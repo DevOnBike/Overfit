@@ -1,3 +1,4 @@
+﻿using System.Buffers;
 using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.DeepLearning
@@ -28,6 +29,48 @@ namespace DevOnBike.Overfit.DeepLearning
             foreach (var module in _modules)
             {
                 module.Eval();
+            }
+        }
+
+        public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
+        {
+            var maxHiddenSize = 65536;
+
+            var bufA_Arr = ArrayPool<float>.Shared.Rent(maxHiddenSize);
+            var bufB_Arr = ArrayPool<float>.Shared.Rent(maxHiddenSize);
+            
+            try
+            {
+                var bufA = bufA_Arr.AsSpan();
+                var bufB = bufB_Arr.AsSpan();
+
+                var currentInput = input;
+                var currentOutput = bufA;
+
+                // UWAGA: Zmień "_modules" na nazwę swojej tablicy/listy warstw w klasie Sequential.
+                // Czasami nazywa się to Modules, _layers, albo children.
+                var modulesList = _modules;
+
+                // Jeśli modulesList to Lista (List<IModule>), użyj modulesList.Count zamiast modulesList.Length
+                for (var i = 0; i < modulesList.Count; i++)
+                {
+                    // Ostatnia warstwa zapisuje bezpośrednio do docelowego 'output'
+                    if (i == modulesList.Count - 1)
+                    {
+                        currentOutput = output;
+                    }
+
+                    modulesList[i].ForwardInference(currentInput, currentOutput);
+
+                    // Ping-Pong: obecny output staje się inputem dla kolejnej warstwy
+                    currentInput = currentOutput;
+                    currentOutput = (currentOutput == bufA) ? bufB : bufA;
+                }
+            }
+            finally
+            {
+                ArrayPool<float>.Shared.Return(bufA_Arr);
+                ArrayPool<float>.Shared.Return(bufB_Arr);
             }
         }
 

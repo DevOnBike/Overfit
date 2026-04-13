@@ -77,6 +77,17 @@ namespace DevOnBike.Overfit.DeepLearning
             _cell.Dispose();
         }
 
+        public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
+        {
+            // Adapter dla interfejsu IModule (Batch = 1).
+            // Automatycznie wylicza długość sekwencji z przesłanego spana.
+            var inputSize = _cell.InputSize;
+            var seqLen = input.Length / inputSize;
+
+            // Wywołujemy istniejącą pętlę BPTT w trybie inferencji
+            ForwardInference(1, seqLen, input, output);
+        }
+
         public void ForwardInference(int batchSize, int seqLen, ReadOnlySpan<float> input, Span<float> output)
         {
             var inputSize = _cell.InputSize; var hiddenSize = _cell.HiddenSize; var gatesLen = batchSize * 4 * hiddenSize;

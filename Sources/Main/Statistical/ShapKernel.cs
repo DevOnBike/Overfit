@@ -34,12 +34,12 @@ namespace DevOnBike.Overfit.Statistical
             var fX = _modelFunc(x);
             var fNull = _modelFunc(_background);
 
-            int samplesPerFeature = Math.Max(1, _numSamples / _m);
+            var samplesPerFeature = Math.Max(1, _numSamples / _m);
 
-            for (int i = 0; i < _m; i++)
+            for (var i = 0; i < _m; i++)
             {
                 float marginalSum = 0;
-                for (int s = 0; s < samplesPerFeature; s++)
+                for (var s = 0; s < samplesPerFeature; s++)
                 {
                     PrepareCoalition(zWithout, i, x);
                     zWithout.CopyTo(zWith);
@@ -53,16 +53,22 @@ namespace DevOnBike.Overfit.Statistical
 
             // Korekta efektywności (Aksjomat SHAP)
             float sum = 0;
-            for (int i = 0; i < _m; i++) sum += phi[i];
-            float diff = (fX - fNull - sum) / _m;
-            for (int i = 0; i < _m; i++) phi[i] += diff;
+            for (var i = 0; i < _m; i++)
+            {
+                sum += phi[i];
+            }
+            var diff = (fX - fNull - sum) / _m;
+            for (var i = 0; i < _m; i++)
+            {
+                phi[i] += diff;
+            }
         }
 
         private void PrepareCoalition(Span<float> dest, int excludedIdx, ReadOnlySpan<float> x)
         {
             _background.AsSpan().CopyTo(dest); // Naprawa CS1503
             var rnd = Random.Shared;
-            for (int i = 0; i < _m; i++)
+            for (var i = 0; i < _m; i++)
             {
                 if (i != excludedIdx && rnd.NextDouble() > 0.5)
                 {

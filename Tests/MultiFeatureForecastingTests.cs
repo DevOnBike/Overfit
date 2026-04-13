@@ -109,7 +109,10 @@ namespace DevOnBike.Overfit.Tests
         private float[] CalculateReturns(float[] prices)
         {
             var returns = new float[prices.Length - 1];
-            for (var i = 0; i < returns.Length; i++) returns[i] = (prices[i + 1] - prices[i]) / prices[i];
+            for (var i = 0; i < returns.Length; i++)
+            {
+                returns[i] = (prices[i + 1] - prices[i]) / prices[i];
+            }
             return returns;
         }
 

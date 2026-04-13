@@ -2,6 +2,7 @@
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 
+using System.Numerics.Tensors;
 using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.DeepLearning
@@ -36,6 +37,36 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             IsTraining = false;
             _linear1.Eval(); _bn1.Eval(); _linear2.Eval(); _bn2.Eval();
+        }
+
+        public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
+        {
+            var hiddenSize = _linear1.Weights.DataView.GetDim(0);
+
+            var buf1Arr = System.Buffers.ArrayPool<float>.Shared.Rent(hiddenSize);
+            var buf2Arr = System.Buffers.ArrayPool<float>.Shared.Rent(hiddenSize);
+            try
+            {
+                var b1 = buf1Arr.AsSpan(0, hiddenSize);
+                var b2 = buf2Arr.AsSpan(0, hiddenSize);
+
+                // Ścieżka główna (Main Path)
+                _linear1.ForwardInference(input, b1);          // Linear1: wejście -> b1
+                _bn1.ForwardInference(b1, b2);                 // BN1: b1 -> b2
+                TensorPrimitives.Max(b2, 0f, b1); // ReLU: b2 -> b1 (nadpisujemy b1)
+
+                _linear2.ForwardInference(b1, b2);             // Linear2: b1 -> b2
+                _bn2.ForwardInference(b2, b1);                 // BN2: b2 -> b1
+
+                // Połączenie rezydualne (Skip Connection): output = ReLU(b1 + input)
+                TensorPrimitives.Add(b1, input, output);
+                TensorPrimitives.Max(output, 0f, output);
+            }
+            finally
+            {
+                System.Buffers.ArrayPool<float>.Shared.Return(buf1Arr);
+                System.Buffers.ArrayPool<float>.Shared.Return(buf2Arr);
+            }
         }
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)

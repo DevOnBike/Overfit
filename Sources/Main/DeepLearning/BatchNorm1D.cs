@@ -2,12 +2,24 @@
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 
+using System.Numerics.Tensors;
 using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
     public sealed class BatchNorm1D : IModule
     {
+        public AutogradNode Gamma { get; }
+        public AutogradNode Beta { get; }
+        public FastTensor<float> RunningMean { get; }
+        public FastTensor<float> RunningVar { get; }
+        public float Momentum { get; set; } = 0.1f;
+        public float Eps { get; set; } = 1e-5f;
+        public bool IsTraining { get; private set; } = true;
+
+        private FastTensor<float> _fusedScale;
+        private FastTensor<float> _fusedShift;
+
         public BatchNorm1D(int numFeatures)
         {
             Gamma = new AutogradNode(new FastTensor<float>(numFeatures, clearMemory: false));
@@ -23,16 +35,53 @@ namespace DevOnBike.Overfit.DeepLearning
             RunningVar.GetView().AsSpan().Fill(1f);
         }
 
-        public AutogradNode Gamma { get; }
-        public AutogradNode Beta { get; }
-        public FastTensor<float> RunningMean { get; }
-        public FastTensor<float> RunningVar { get; }
-        public float Momentum { get; set; } = 0.1f;
-        public float Eps { get; set; } = 1e-5f;
-        public bool IsTraining { get; private set; } = true;
+        public void Train()
+        {
+            IsTraining = true;
+        }
 
-        public void Train() => IsTraining = true;
-        public void Eval() => IsTraining = false;
+        public void Eval()
+        {
+            IsTraining = false;
+
+            // Fuzja parametrów - liczymy Scale i Shift TYLKO RAZ podczas przełączania w tryb Eval
+            var C = Gamma.DataView.Size;
+            
+            if (_fusedScale == null)
+            {
+                _fusedScale = new FastTensor<float>(C, clearMemory: false);
+                _fusedShift = new FastTensor<float>(C, clearMemory: false);
+            }
+
+            var scaleS = _fusedScale.GetView().AsSpan();
+            var shiftS = _fusedShift.GetView().AsSpan();
+            var gammaS = Gamma.DataView.AsReadOnlySpan();
+            var betaS = Beta.DataView.AsReadOnlySpan();
+            var meanS = RunningMean.GetView().AsReadOnlySpan();
+            var varS = RunningVar.GetView().AsReadOnlySpan();
+
+            for (var i = 0; i < C; i++)
+            {
+                scaleS[i] = gammaS[i] / MathF.Sqrt(varS[i] + Eps);
+                shiftS[i] = betaS[i] - meanS[i] * scaleS[i];
+            }
+        }
+
+        public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
+        {
+            if (IsTraining)
+            {
+                throw new InvalidOperationException("Layer must be in Eval mode.");
+            }
+
+            // MISTRZOSTWO AVX-512: Cały BatchNorm wykonany jako jedna operacja y = (x * Scale) + Shift!
+            TensorPrimitives.MultiplyAdd(
+                input,
+                _fusedScale.GetView().AsReadOnlySpan(),
+                _fusedShift.GetView().AsReadOnlySpan(),
+                output
+            );
+        }
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {

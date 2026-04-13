@@ -69,7 +69,10 @@ namespace DevOnBike.Overfit.Tests
                                 maxQ = qValues[i]; action = i;
                             }
                         }
-                        if (action == -1) action = _rng.Next(9);
+                        if (action == -1)
+                        {
+                            action = _rng.Next(9);
+                        }
                     }
 
                     var reward = ExecuteAction(board, action, out isOver);
@@ -81,7 +84,10 @@ namespace DevOnBike.Overfit.Tests
                         if (enemyAction != -1)
                         {
                             var enemyReward = ExecuteAction(board, enemyAction, out isOver, -1f);
-                            if (enemyReward == 1f) reward = -1f; // Przegraliśmy
+                            if (enemyReward == 1f)
+                            {
+                                reward = -1f; // Przegraliśmy
+                            }
                         }
                     }
 
@@ -100,9 +106,18 @@ namespace DevOnBike.Overfit.Tests
 
                     if (isOver)
                     {
-                        if (reward == 1f) wins++;
-                        else if (reward == -1f || reward == -2f) losses++;
-                        else draws++;
+                        if (reward == 1f)
+                        {
+                            wins++;
+                        }
+                        else if (reward == -1f || reward == -2f)
+                        {
+                            losses++;
+                        }
+                        else
+                        {
+                            draws++;
+                        }
                     }
                 }
                 epsilon *= epsilonDecay;
@@ -114,7 +129,13 @@ namespace DevOnBike.Overfit.Tests
         private int RandomMove(float[] b)
         {
             var empty = new List<int>();
-            for (var i = 0; i < 9; i++) if (b[i] == 0f) empty.Add(i);
+            for (var i = 0; i < 9; i++)
+            {
+                if (b[i] == 0f)
+                {
+                    empty.Add(i);
+                }
+            }
             return empty.Count == 0 ? -1 : empty[_rng.Next(empty.Count)];
         }
 
@@ -123,15 +144,27 @@ namespace DevOnBike.Overfit.Tests
             if (b[action] != 0f) { over = true; return -2.0f; }
             b[action] = player;
             over = CheckWin(b, player) || !b.Contains(0.0f);
-            if (CheckWin(b, player)) return 1.0f;
-            if (!b.Contains(0.0f)) return 0.5f;
+            if (CheckWin(b, player))
+            {
+                return 1.0f;
+            }
+            if (!b.Contains(0.0f))
+            {
+                return 0.5f;
+            }
             return 0.0f;
         }
 
         private bool CheckWin(float[] b, float p)
         {
             int[,] lines = { { 0, 1, 2 }, { 3, 4, 5 }, { 6, 7, 8 }, { 0, 3, 6 }, { 1, 4, 7 }, { 2, 5, 8 }, { 0, 4, 8 }, { 2, 4, 6 } };
-            for (var i = 0; i < 8; i++) if (b[lines[i, 0]] == p && b[lines[i, 1]] == p && b[lines[i, 2]] == p) return true;
+            for (var i = 0; i < 8; i++)
+            {
+                if (b[lines[i, 0]] == p && b[lines[i, 1]] == p && b[lines[i, 2]] == p)
+                {
+                    return true;
+                }
+            }
             return false;
         }
     }

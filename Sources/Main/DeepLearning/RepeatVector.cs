@@ -26,6 +26,14 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Train() => IsTraining = true;
         public void Eval() => IsTraining = false;
 
+        public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
+        {
+            for (var t = 0; t < _seqLen; t++)
+            {
+                input.CopyTo(output.Slice(t * input.Length, input.Length));
+            }
+        }
+
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
             return TensorMath.RepeatVector(graph, input, _seqLen);

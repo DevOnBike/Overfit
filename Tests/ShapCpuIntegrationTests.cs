@@ -51,7 +51,10 @@ namespace DevOnBike.Overfit.Tests
 
             // Sprawdzenie sumy (Aksjomat Efektywności)
             float totalShap = 0;
-            for (var i = 0; i < _featureCount; i++) totalShap += shapValues[i];
+            for (var i = 0; i < _featureCount; i++)
+            {
+                totalShap += shapValues[i];
+            }
 
             var expectedDiff = _detector.ScoreWindow(anomalousInstance) - _detector.ScoreWindow(_background);
             Assert.Equal(expectedDiff, totalShap, precision: 1);
@@ -75,7 +78,10 @@ namespace DevOnBike.Overfit.Tests
 
             _detector.LoadParameters(initialProbs, transitionMatrix, means, covariances);
 
-            foreach (var t in covariances) t.Dispose();
+            foreach (var t in covariances)
+            {
+                t.Dispose();
+            }
         }
 
         public void Dispose() => _detector?.Dispose();

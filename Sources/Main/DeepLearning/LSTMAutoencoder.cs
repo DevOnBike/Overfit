@@ -80,6 +80,13 @@ namespace DevOnBike.Overfit.DeepLearning
         // Forward — Training Path (Autograd)
         // ---------------------------------------------------------------------------
 
+        public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
+        {
+            // Adapter dla standardowego interfejsu IModule. 
+            // Wymusza predykcję dla pojedynczej sekwencji (Batch = 1).
+            Reconstruct(1, input, output);
+        }
+
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
             var latent = Encode(graph, input);

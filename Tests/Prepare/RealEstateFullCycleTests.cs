@@ -51,7 +51,7 @@ namespace DevOnBike.Overfit.Tests.Prepare
             var fSpan = features.GetView().AsSpan();
             var nSamples = features.GetView().GetDim(0);
             var nFeatures = features.GetView().GetDim(1);
-            for (int i = 0; i < nSamples; i++)
+            for (var i = 0; i < nSamples; i++)
             {
                 // Powierzchnia (30-150) -> ok. 0.3-1.5
                 fSpan[i * nFeatures + 0] /= 100f;
@@ -119,7 +119,10 @@ namespace DevOnBike.Overfit.Tests.Prepare
 
                 // Cena zależy od powierzchni, miasta i piętra
                 var cena = pow * 10000f + (miasto == "Warszawa" ? 200000f : 0f) - pietro * 1000f;
-                if (isKam) cena *= 1.2f;
+                if (isKam)
+                {
+                    cena *= 1.2f;
+                }
 
                 list.Add(new PropertyData
                 {

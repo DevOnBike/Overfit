@@ -2,6 +2,7 @@
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 
+using System.Buffers;
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Core;
 
@@ -35,6 +36,37 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void Train() => IsTraining = true;
         public void Eval() => IsTraining = false;
+
+        public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
+        {
+            // Adapter dla interfejsu IModule (pojedynczy krok czasowy, Batch = 1).
+            // Alokuje tymczasowo wektory stanu (Cell state i bramki) z ArrayPool (Zero-GC).
+            var hSize = HiddenSize;
+
+            var cArr = ArrayPool<float>.Shared.Rent(hSize);
+            var gatesArr = ArrayPool<float>.Shared.Rent(4 * hSize);
+            var uhArr = ArrayPool<float>.Shared.Rent(4 * hSize);
+
+            try
+            {
+                var c = cArr.AsSpan(0, hSize);
+                var gates = gatesArr.AsSpan(0, 4 * hSize);
+                var uh = uhArr.AsSpan(0, 4 * hSize);
+
+                // Inicjalizacja stanu zerowego (ZeroState) dla nowego przebiegu
+                c.Clear();
+                output.Clear(); // W LSTMie wynik wyjściowy (H) stanowi bezpośrednio nasze 'output'
+
+                // Odpalamy zoptymalizowaną sprzętowo matematykę z krokami wskaźnika
+                ForwardInference(1, input, output, c, gates, uh);
+            }
+            finally
+            {
+                ArrayPool<float>.Shared.Return(cArr);
+                ArrayPool<float>.Shared.Return(gatesArr);
+                ArrayPool<float>.Shared.Return(uhArr);
+            }
+        }
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {

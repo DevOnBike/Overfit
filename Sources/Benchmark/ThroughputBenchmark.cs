@@ -44,7 +44,10 @@ namespace Benchmarks
             _inputData.AsSpan().CopyTo(_overfitInputTensor.GetView().AsSpan());
             _inputNode = new AutogradNode(_overfitInputTensor, false);
 
-            for (var i = 0; i < 100; i++) _overfitModel.Forward(null, _inputNode);
+            for (var i = 0; i < 100; i++)
+            {
+                _overfitModel.Forward(null, _inputNode);
+            }
         }
 
         [Benchmark(Baseline = true)]
