@@ -1,9 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
-// This file is part of DevonBike Overfit.
-// DevonBike Overfit is licensed under the GNU AGPLv3.
-// For commercial licensing options, contact: devonbike@gmail.com
-
-using DevOnBike.Overfit.Core;
+ï»¿using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
@@ -11,17 +6,17 @@ namespace DevOnBike.Overfit.DeepLearning
     {
         private readonly List<IModule> _modules = [];
 
-        public bool IsTraining { get; private set; } = true;
-
         public Sequential(params IModule[] modules)
         {
             _modules.AddRange(modules);
         }
 
+        public bool IsTraining { get; private set; } = true;
+
         public void Train()
         {
             IsTraining = true;
-
+            
             foreach (var module in _modules)
             {
                 module.Train();
@@ -31,16 +26,40 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Eval()
         {
             IsTraining = false;
-
+            
             foreach (var module in _modules)
             {
                 module.Eval();
             }
         }
 
-        public void Add(IModule module)
+        public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
-            _modules.Add(module);
+            var maxHiddenSize = 65536;
+
+            using var bufA_Buf = new PooledBuffer<float>(maxHiddenSize);
+            using var bufB_Buf = new PooledBuffer<float>(maxHiddenSize);
+
+            var bufA = bufA_Buf.Span;
+            var bufB = bufB_Buf.Span;
+
+            var currentInput = input;
+            var currentOutput = bufA;
+
+            var modulesList = _modules;
+
+            for (var i = 0; i < modulesList.Count; i++)
+            {
+                if (i == modulesList.Count - 1)
+                {
+                    currentOutput = output;
+                }
+
+                modulesList[i].ForwardInference(currentInput, currentOutput);
+
+                currentInput = currentOutput;
+                currentOutput = (currentOutput == bufA) ? bufB : bufA;
+            }
         }
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
@@ -66,33 +85,12 @@ namespace DevOnBike.Overfit.DeepLearning
             }
         }
 
-        public void Save(string path)
-        {
-            using var fs = new FileStream(path, FileMode.Create);
-            using var bw = new BinaryWriter(fs);
-
-            Save(bw);
-        }
-
         public void Save(BinaryWriter bw)
         {
             foreach (var module in _modules)
             {
                 module.Save(bw);
             }
-        }
-
-        public void Load(string path)
-        {
-            if (!File.Exists(path))
-            {
-                throw new FileNotFoundException($"Brak pliku filtrów: {path}");
-            }
-
-            using var fs = new FileStream(path, FileMode.Open);
-            using var br = new BinaryReader(fs);
-
-            Load(br);
         }
 
         public void Load(BinaryReader br)
@@ -111,6 +109,32 @@ namespace DevOnBike.Overfit.DeepLearning
             }
 
             _modules.Clear();
+        }
+
+        public void Add(IModule module)
+        {
+            _modules.Add(module);
+        }
+
+        public void Save(string path)
+        {
+            using var fs = new FileStream(path, FileMode.Create);
+            using var bw = new BinaryWriter(fs);
+
+            Save(bw);
+        }
+
+        public void Load(string path)
+        {
+            if (!File.Exists(path))
+            {
+                throw new FileNotFoundException($"Brak pliku modelu: {path}");
+            }
+
+            using var fs = new FileStream(path, FileMode.Open);
+            using var br = new BinaryReader(fs);
+            
+            Load(br);
         }
     }
 }

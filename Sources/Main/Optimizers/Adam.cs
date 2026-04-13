@@ -1,51 +1,26 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Numerics;
+using System.Runtime.InteropServices;
 using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.Optimizers
 {
     /// <summary>
-    /// Implements the Adam (Adaptive Moment Estimation) optimizer.
-    /// Combines the advantages of AdaGrad and RMSProp to provide adaptive learning rates 
-    /// per parameter using first and second moment estimates.
+    ///     Implements the Adam + AdamW (Adaptive Moment Estimation with Decoupled Weight Decay).
+    ///     Features extreme-performance MemoryMarshal SIMD paths.
     /// </summary>
     public sealed class Adam : IOptimizer, IDisposable
     {
-        private readonly struct ParamState
-        {
-            public readonly AutogradNode Node;
-            public readonly FastTensor<float> M; // First moment vector
-            public readonly FastTensor<float> V; // Second moment vector
-            public readonly int Size;
-
-            public ParamState(AutogradNode node)
-            {
-                Node = node;
-                Size = node.Data.Size;
-
-                M = new FastTensor<float>(true, node.Data.Shape);
-                V = new FastTensor<float>(true, node.Data.Shape);
-            }
-        }
-
         private readonly ParamState[] _states;
-
-        public float LearningRate { get; set; }
-        public float Beta1 { get; set; } = 0.9f;
-        public float Beta2 { get; set; } = 0.999f;
-        public float Epsilon { get; set; } = 1e-8f;
-        public float WeightDecay { get; set; } = 0.0001f;
-
-        private int _t = 0; // Timestep counter for bias correction
+        private int _t; // Timestep counter for bias correction
 
         public Adam(IEnumerable<AutogradNode> parameters, float learningRate = 0.001f)
         {
             LearningRate = learningRate;
-
             var statesList = new List<ParamState>();
 
             foreach (var p in parameters)
@@ -59,9 +34,26 @@ namespace DevOnBike.Overfit.Optimizers
             _states = [.. statesList];
         }
 
+        public float Beta1 { get; set; } = 0.9f;
+        public float Beta2 { get; set; } = 0.999f;
+        public float Epsilon { get; set; } = 1e-8f;
+        public float WeightDecay { get; set; } = 0.0001f;
+
+        public bool UseAdamW { get; set; } = true;
+
+        public float LearningRate { get; set; }
+
+        public void Dispose()
+        {
+            foreach (var state in _states)
+            {
+                state.M?.Dispose();
+                state.V?.Dispose();
+            }
+        }
+
         /// <summary>
-        /// Performs a single optimization step (parameter update).
-        /// Utilizes hardware-accelerated SIMD paths when available.
+        ///     Performs a single optimization step using highly optimized SIMD operations.
         /// </summary>
         public void Step()
         {
@@ -79,27 +71,33 @@ namespace DevOnBike.Overfit.Optimizers
             var b2Inv = 1f - Beta2;
             var eps = Epsilon;
             var lr = LearningRate;
+            var useAdamW = UseAdamW;
 
             foreach (var state in _states)
             {
                 var p = state.Node;
                 var n = state.Size;
 
-                if (p.Grad == null)
+                if (!p.RequiresGrad)
                 {
                     continue;
                 }
 
-                var g = p.Grad.AsSpan();
-                var m = state.M.AsSpan();
-                var v = state.V.AsSpan();
-                var w = p.Data.AsSpan();
+                // Generujemy błyskawiczne widoki na pamięć
+                var gSpan = p.GradView.AsSpan();
+                var mSpan = state.M.GetView().AsSpan();
+                var vSpan = state.V.GetView().AsSpan();
+                var wSpan = p.DataView.AsSpan();
 
-                var i = 0;
+                var elementsProcessed = 0;
 
                 if (Vector.IsHardwareAccelerated)
                 {
-                    var vecSize = Vector<float>.Count;
+                    // MemoryMarshal magią pozbywa się bounds-checkingu i tworzenia tymczasowych obiektów.
+                    var gVec = MemoryMarshal.Cast<float, Vector<float>>(gSpan);
+                    var mVec = MemoryMarshal.Cast<float, Vector<float>>(mSpan);
+                    var vVec = MemoryMarshal.Cast<float, Vector<float>>(vSpan);
+                    var wVec = MemoryMarshal.Cast<float, Vector<float>>(wSpan);
 
                     var vWd = new Vector<float>(wd);
                     var vB1 = new Vector<float>(b1);
@@ -111,72 +109,120 @@ namespace DevOnBike.Overfit.Optimizers
                     var vEps = new Vector<float>(eps);
                     var vLr = new Vector<float>(lr);
 
-                    for (; i <= n - vecSize; i += vecSize)
+                    for (var i = 0; i < gVec.Length; i++)
                     {
-                        var vG = new Vector<float>(g.Slice(i));
-                        var vM = new Vector<float>(m.Slice(i));
-                        var vV = new Vector<float>(v.Slice(i));
-                        var vW = new Vector<float>(w.Slice(i));
+                        var vG = gVec[i];
+                        var vW = wVec[i];
+                        var vM = mVec[i];
+                        var vV = vVec[i];
 
-                        var vGl2 = vG + vW * vWd;
+                        if (useAdamW)
+                        {
+                            // AdamW: Weight decay zaaplikowane osobno na wagach, NIE na gradientach.
+                            vM = vM * vB1 + vG * vB1Inv;
+                            vV = vV * vB2 + vG * vG * vB2Inv;
 
-                        vM = vM * vB1 + vGl2 * vB1Inv;
-                        vV = vV * vB2 + (vGl2 * vGl2) * vB2Inv;
+                            var vMHat = vM * vInvBc1;
+                            var vVHat = Vector.SquareRoot(vV * vInvBc2) + vEps;
 
-                        var vMHat = vM * vInvBc1;
-                        var vVHat = Vector.SquareRoot(vV * vInvBc2) + vEps;
+                            vW -= vMHat / vVHat * vLr;
+                            if (wd > 0f)
+                            {
+                                vW -= vW * vWd * vLr; // AdamW penalty
+                            }
+                        }
+                        else
+                        {
+                            // Klasyczny Adam z L2 Regularization (Przestarzałe)
+                            var vGl2 = vG + vW * vWd;
+                            vM = vM * vB1 + vGl2 * vB1Inv;
+                            vV = vV * vB2 + vGl2 * vGl2 * vB2Inv;
 
-                        vW -= (vMHat / vVHat) * vLr;
+                            var vMHat = vM * vInvBc1;
+                            var vVHat = Vector.SquareRoot(vV * vInvBc2) + vEps;
 
-                        vM.CopyTo(m.Slice(i));
-                        vV.CopyTo(v.Slice(i));
-                        vW.CopyTo(w.Slice(i));
+                            vW -= vMHat / vVHat * vLr;
+                        }
+
+                        // Zapis wyników bez CopyTo()
+                        mVec[i] = vM;
+                        vVec[i] = vV;
+                        wVec[i] = vW;
                     }
+                    elementsProcessed = gVec.Length * Vector<float>.Count;
                 }
 
-                for (; i < n; i++)
+                // Skalarny fallback dla resztki parametrów (np. 3 ostatnie z warstwy)
+                for (var i = elementsProcessed; i < n; i++)
                 {
-                    var gl2 = g[i] + wd * w[i];
-                    m[i] = b1 * m[i] + b1Inv * gl2;
-                    v[i] = b2 * v[i] + b2Inv * (gl2 * gl2);
+                    var gw = gSpan[i];
+                    var ww = wSpan[i];
+                    var mw = mSpan[i];
+                    var vw = vSpan[i];
 
-                    var mHat = m[i] * invBc1;
-                    var vHat = MathF.Sqrt(v[i] * invBc2) + eps;
+                    if (useAdamW)
+                    {
+                        mw = b1 * mw + b1Inv * gw;
+                        vw = b2 * vw + b2Inv * (gw * gw);
 
-                    w[i] -= lr * (mHat / vHat);
+                        var mHat = mw * invBc1;
+                        var vHat = MathF.Sqrt(vw * invBc2) + eps;
+
+                        ww -= lr * (mHat / vHat);
+                        if (wd > 0f)
+                        {
+                            ww -= ww * wd * lr;
+                        }
+                    }
+                    else
+                    {
+                        var gl2 = gw + wd * ww;
+                        mw = b1 * mw + b1Inv * gl2;
+                        vw = b2 * vw + b2Inv * (gl2 * gl2);
+
+                        var mHat = mw * invBc1;
+                        var vHat = MathF.Sqrt(vw * invBc2) + eps;
+
+                        ww -= lr * (mHat / vHat);
+                    }
+
+                    mSpan[i] = mw;
+                    vSpan[i] = vw;
+                    wSpan[i] = ww;
                 }
             }
         }
 
-        /// <summary>
-        /// Resets the gradients of all optimized parameters to zero.
-        /// Should be called before every forward pass.
-        /// </summary>
         public void ZeroGrad()
         {
             foreach (var state in _states)
             {
-                if (state.Node.Grad != null)
-                {
-                    state.Node.Grad.AsSpan().Clear();
-                }
+                // Całe ręczne czyszczenie znika! AutogradNode robi to najlepiej i najbezpieczniej.
+                state.Node.ZeroGrad();
             }
         }
 
-        /// <summary>
-        /// Resets the timestep counter. Used when restarting training or fine-tuning.
-        /// </summary>
         public void ResetTime()
         {
             _t = 0;
         }
 
-        public void Dispose()
+        private readonly struct ParamState
         {
-            foreach (var state in _states)
+            public readonly AutogradNode Node;
+            public readonly FastTensor<float> M; // First moment vector
+            public readonly FastTensor<float> V; // Second moment vector
+            public readonly int Size;
+
+            public ParamState(AutogradNode node)
             {
-                state.M?.Dispose();
-                state.V?.Dispose();
+                Node = node;
+                Size = node.DataView.Size;
+
+                // Optymalizator operuje wyłącznie na płaskich blokach pamięci. 
+                // Skoro interesuje go tylko `Size`, alokujemy te bufory jako 1-wymiarowe wektory!
+                M = new FastTensor<float>(Size, clearMemory: true);
+                V = new FastTensor<float>(Size, clearMemory: true);
             }
         }
     }

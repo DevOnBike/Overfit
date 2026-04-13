@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Order;
 using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.DeepLearning;
@@ -13,10 +14,10 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 namespace Benchmarks
 {
     /// <summary>
-    /// Performance comparison between ONNX Runtime and Overfit engine.
-    /// Evaluates execution speed and memory allocation overhead during inference.
+    ///     Performance comparison between ONNX Runtime and Overfit engine.
+    ///     Evaluates execution speed and memory allocation overhead during inference.
     /// </summary>
-    [SimpleJob(BenchmarkDotNet.Jobs.RuntimeMoniker.Net10_0)]
+    [SimpleJob(RuntimeMoniker.Net10_0)]
     [Orderer(SummaryOrderPolicy.FastestToSlowest)]
     [MemoryDiagnoser]
     [DisassemblyDiagnoser(maxDepth: 2)]
@@ -25,11 +26,11 @@ namespace Benchmarks
         private const int InputSize = 784;
         private const int OutputSize = 10;
         private float[] _inputData;
+        private AutogradNode _inputNode;
+        private NamedOnnxValue[] _onnxInputs;
 
         private InferenceSession _onnxSession;
-        private NamedOnnxValue[] _onnxInputs;
         private Sequential _overfitModel;
-        private AutogradNode _inputNode;
 
         [GlobalSetup]
         public void Setup()
@@ -45,11 +46,14 @@ namespace Benchmarks
             _overfitModel.Load("benchmark_model.bin");
             _overfitModel.Eval();
 
-            var inputTensor = new FastTensor<float>(false, 1, InputSize);
-            _inputData.AsSpan().CopyTo(inputTensor.AsSpan());
-            _inputNode = new AutogradNode(inputTensor, requiresGrad: false);
+            var inputTensor = new FastTensor<float>(1, InputSize, clearMemory: false);
+            _inputData.AsSpan().CopyTo(inputTensor.GetView().AsSpan());
+            _inputNode = new AutogradNode(inputTensor, false);
 
-            for (var i = 0; i < 100; i++) _overfitModel.Forward(null, _inputNode);
+            for (var i = 0; i < 100; i++)
+            {
+                _overfitModel.Forward(null, _inputNode);
+            }
         }
 
         [Benchmark(Baseline = true)]
@@ -60,14 +64,15 @@ namespace Benchmarks
         }
 
         /// <summary>
-        /// Benchmarks Overfit with zero-allocation SIMD inference.
-        /// Leverages the full inference path from raw data to prediction.
+        ///     Benchmarks Overfit with zero-allocation SIMD inference.
+        ///     Leverages the full inference path from raw data to prediction.
         /// </summary>
         [Benchmark]
         public float Overfit_ZeroAlloc()
         {
             var outputNode = _overfitModel.Forward(null, _inputNode);
-            return outputNode.Data.AsSpan()[0];
+
+            return outputNode.DataView.AsReadOnlySpan()[0];
         }
 
         [GlobalCleanup]

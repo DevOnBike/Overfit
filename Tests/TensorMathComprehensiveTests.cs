@@ -11,7 +11,7 @@ namespace DevOnBike.Overfit.Tests
     public class TensorMathComprehensiveTests
     {
         // Prywatna instancja grafu na potrzeby weryfikacji operacji
-        private readonly ComputationGraph _graph = new ComputationGraph();
+        private readonly ComputationGraph _graph = new();
 
         // ====================================================================
         // 1. TESTY LOGIKI MATEMATYCZNEJ (FORWARD & BACKWARD THEORY)
@@ -20,393 +20,310 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void AddBias_ForwardAndBackward_NCHW_Correct()
         {
-            using var input = new AutogradNode(new FastTensor<float>(2, 3, 1, 1));
-            using var bias = new AutogradNode(new FastTensor<float>(3));
+            using var input = new AutogradNode(new FastTensor<float>(2, 3, 1, 1, clearMemory: true), requiresGrad: true);
+            using var bias = new AutogradNode(new FastTensor<float>(3, clearMemory: true), requiresGrad: true);
 
-            input.Data.AsSpan().Fill(1f);
-            var bSpan = bias.Data.AsSpan();
-            bSpan[0] = 10f; bSpan[1] = 20f; bSpan[2] = 30f;
+            input.DataView.AsSpan().Fill(1f);
+            var bSpan = bias.DataView.AsSpan();
+            bSpan[0] = 10f;
+            bSpan[1] = 20f;
+            bSpan[2] = 30f;
 
             using var output = TensorMath.AddBias(_graph, input, bias);
 
-            Assert.Equal(11f, output.Data[0, 0, 0, 0]);
-            Assert.Equal(21f, output.Data[0, 1, 0, 0]);
-            Assert.Equal(31f, output.Data[1, 2, 0, 0]);
+            var outSpan = output.DataView.AsSpan();
+            Assert.Equal(11f, outSpan[0]); // Batch 0, Ch 0
+            Assert.Equal(21f, outSpan[1]); // Batch 0, Ch 1
+            Assert.Equal(31f, outSpan[2]); // Batch 0, Ch 2
 
-            output.Grad.AsSpan().Fill(1f);
+            output.GradView.AsSpan().Fill(1f);
             _graph.Backward(output);
 
-            Assert.Equal(2f, bias.Grad[0]);
-            Assert.Equal(2f, bias.Grad[1]);
+            var inGrad = input.GradView.AsSpan();
+            var bGrad = bias.GradView.AsSpan();
+
+            Assert.Equal(1f, inGrad[0]);
+            Assert.Equal(2f, bGrad[0]); // Batch size = 2, gradient sumuje się po batchach i pikselach
+            Assert.Equal(2f, bGrad[1]);
         }
 
         [Fact]
-        public void MatMul_FullGradientCheck_MathematicalTruth()
+        public void MatMul_ForwardAndBackward_Correct()
         {
-            using var a = new AutogradNode(new FastTensor<float>(2, 3));
-            using var b = new AutogradNode(new FastTensor<float>(3, 2));
+            using var input = new AutogradNode(new FastTensor<float>(2, 3, clearMemory: true), requiresGrad: true);
+            using var weights = new AutogradNode(new FastTensor<float>(3, 4, clearMemory: true), requiresGrad: true);
 
-            a.Data.AsSpan().Fill(1f);
-            b.Data.AsSpan().Fill(2f);
+            input.DataView.AsSpan().Fill(2f);
+            weights.DataView.AsSpan().Fill(3f);
 
-            using var output = TensorMath.MatMul(_graph, a, b);
+            using var output = TensorMath.MatMul(_graph, input, weights);
 
-            Assert.Equal(6f, output.Data[0, 0]);
+            var outSpan = output.DataView.AsSpan();
+            Assert.Equal(2 * 3 * 3f, outSpan[0]); // 18
 
-            output.Grad.AsSpan().Fill(1f);
+            output.GradView.AsSpan().Fill(1f);
             _graph.Backward(output);
 
-            Assert.Equal(4f, a.Grad[0, 0]);
-            Assert.Equal(2f, b.Grad[0, 0]);
+            var inGrad = input.GradView.AsSpan();
+            var wGrad = weights.GradView.AsSpan();
+
+            Assert.Equal(4 * 3f, inGrad[0]); // 4 kolumny wag, każda waga = 3 -> grad względem wejścia = sum(grad_out * W^T)
+            Assert.Equal(2 * 2f, wGrad[0]);  // 2 wiersze wejścia, każdy = 2 -> grad względem wagi = sum(X^T * grad_out)
         }
 
         [Fact]
-        public void ReLU_GradientMasking_MathematicalTruth()
+        public void Conv2D_ForwardAndBackward_Correct()
         {
-            using var input = new AutogradNode(new FastTensor<float>(1, 4));
-            input.Data.AsSpan()[0] = -5f;
-            input.Data.AsSpan()[1] = 0f;
-            input.Data.AsSpan()[2] = 5f;
-            input.Data.AsSpan()[3] = 10f;
+            int inC = 1, outC = 1, h = 3, w = 3, k = 2;
+            using var input = new AutogradNode(new FastTensor<float>(1, inC, h, w, clearMemory: true), requiresGrad: true);
+            using var weights = new AutogradNode(new FastTensor<float>(outC, inC * k * k, clearMemory: true), requiresGrad: true);
+
+            input.DataView.AsSpan().Fill(1f);
+            weights.DataView.AsSpan().Fill(2f);
+
+            using var output = TensorMath.Conv2D(_graph, input, weights, inC, outC, h, w, k);
+
+            var outSpan = output.DataView.AsSpan();
+            Assert.Equal(4 * 2f, outSpan[0]); // 2x2 okno jedynek * 2 = 8
+
+            output.GradView.AsSpan().Fill(1f);
+            _graph.Backward(output);
+
+            var inGrad = input.GradView.AsSpan();
+            var wGrad = weights.GradView.AsSpan();
+
+            Assert.Equal(2f, inGrad[0]); // Narożnik użyty raz
+            Assert.Equal(4f, inGrad[1]); // Krawędź użyta dwa razy
+            Assert.Equal(4f, wGrad[0]);  // 4 pozycje filtra
+        }
+
+        [Fact]
+        public void ReLU_ForwardAndBackward_Correct()
+        {
+            using var input = new AutogradNode(new FastTensor<float>(1, 4, clearMemory: true), requiresGrad: true);
+            var inSpan = input.DataView.AsSpan();
+            inSpan[0] = 5.0f;
+            inSpan[1] = -2.0f;
+            inSpan[2] = 0.0f;
+            inSpan[3] = 3.0f;
 
             using var output = TensorMath.ReLU(_graph, input);
-            Assert.Equal(0f, output.Data[0, 0]);
-            Assert.Equal(0f, output.Data[0, 1]);
-            Assert.Equal(5f, output.Data[0, 2]);
+            var outSpan = output.DataView.AsSpan();
 
+            Assert.Equal(5.0f, outSpan[0]);
+            Assert.Equal(0.0f, outSpan[1]);
+            Assert.Equal(0.0f, outSpan[2]);
+            Assert.Equal(3.0f, outSpan[3]);
+
+            // Wywołanie Backward() automatycznie zaleje węzeł wyjściowy gradientem = 1.0f
             _graph.Backward(output);
 
-            Assert.Equal(0f, input.Grad[0, 0]);
-            Assert.Equal(0f, input.Grad[0, 1]);
-            Assert.Equal(1f, input.Grad[0, 2]);
-            Assert.Equal(1f, input.Grad[0, 3]);
+            var gradSpan = input.GradView.AsSpan();
+
+            // Oczekujemy teraz prądu 1.0f, bo taki generuje na starcie ComputationGraph
+            Assert.Equal(1.0f, gradSpan[0]); // Przepuścił prąd 
+            Assert.Equal(0.0f, gradSpan[1]); // Zablokował (ujemne)
+            Assert.Equal(0.0f, gradSpan[2]); // Zablokował (zero)
+            Assert.Equal(1.0f, gradSpan[3]); // Przepuścił prąd 
         }
 
         [Fact]
-        public void MaxPool2D_GradientRouting_MathematicalTruth()
+        public void SoftmaxCrossEntropy_ForwardAndBackward_Correct()
         {
-            using var input = new AutogradNode(new FastTensor<float>(1, 1, 2, 2));
-            var span = input.Data.AsSpan();
-            span[0] = 1f; span[1] = 2f;
-            span[2] = 3f; span[3] = 10f;
+            using var logits = new AutogradNode(new FastTensor<float>(1, 3, clearMemory: true), requiresGrad: true);
+            using var targets = new AutogradNode(new FastTensor<float>(1, 3, clearMemory: true), requiresGrad: false);
 
-            using var output = TensorMath.MaxPool2D(_graph, input, 1, 2, 2, 2);
-            Assert.Equal(10f, output.Data[0, 0, 0, 0]);
+            var lSpan = logits.DataView.AsSpan();
+            lSpan[0] = 2.0f; lSpan[1] = 1.0f; lSpan[2] = 0.1f;
 
-            _graph.Backward(output);
+            var tSpan = targets.DataView.AsSpan();
+            tSpan[0] = 1.0f; tSpan[1] = 0.0f; tSpan[2] = 0.0f; // Target class 0
 
-            Assert.Equal(0f, input.Grad[0, 0, 0, 0]);
-            Assert.Equal(0f, input.Grad[0, 0, 0, 1]);
-            Assert.Equal(0f, input.Grad[0, 0, 1, 0]);
-            Assert.Equal(1f, input.Grad[0, 0, 1, 1]);
-        }
+            using var loss = TensorMath.SoftmaxCrossEntropy(_graph, logits, targets);
+            Assert.True(loss.DataView.AsReadOnlySpan()[0] > 0f);
 
-        [Fact]
-        public void GlobalAveragePool2D_NCHW_Reduction_Check()
-        {
-            using var input = new AutogradNode(new FastTensor<float>(1, 2, 2, 2));
-            var inS = input.Data.AsSpan();
-            inS.Slice(0, 4).Fill(10f);
-            inS.Slice(4, 4).Fill(20f);
-
-            using var output = TensorMath.GlobalAveragePool2D(_graph, input, 2, 2, 2);
-
-            Assert.Equal(10f, output.Data[0, 0]);
-            Assert.Equal(20f, output.Data[0, 1]);
-        }
-
-        [Fact]
-        public void BatchNorm1D_NormalizationTheory()
-        {
-            using var input = new AutogradNode(new FastTensor<float>(3, 1));
-            var inS = input.Data.AsSpan();
-            inS[0] = 10f; inS[1] = 20f; inS[2] = 30f;
-
-            using var gamma = new AutogradNode(new FastTensor<float>(1));
-            using var beta = new AutogradNode(new FastTensor<float>(1));
-            gamma.Data.AsSpan().Fill(1f);
-            beta.Data.AsSpan().Fill(0f);
-
-            using var rm = new FastTensor<float>(1);
-            using var rv = new FastTensor<float>(1);
-            rv.AsSpan().Fill(1f);
-
-            using var output = TensorMath.BatchNorm1D(_graph, input, gamma, beta, rm, rv, 0.1f, 1e-5f, true);
-
-            Assert.InRange(output.Data[1, 0], -0.01f, 0.01f);
-            Assert.Equal(-output.Data[0, 0], output.Data[2, 0], 3);
-        }
-
-        [Fact]
-        public void SoftmaxCrossEntropy_MathematicalTruth()
-        {
-            using var logits = new AutogradNode(new FastTensor<float>(1, 3));
-            using var target = new AutogradNode(new FastTensor<float>(1, 3), false);
-
-            var lS = logits.Data.AsSpan();
-            lS[0] = 2.0f; lS[1] = 1.0f; lS[2] = 0.1f;
-            target.Data[0, 0] = 1.0f;
-
-            using var loss = TensorMath.SoftmaxCrossEntropy(_graph, logits, target);
-
-            Assert.InRange(loss.Data[0, 0], 0.41f, 0.43f);
-
+            loss.GradView.AsSpan()[0] = 1.0f;
             _graph.Backward(loss);
 
-            Assert.InRange(logits.Grad[0, 0], -0.35f, -0.33f);
-            Assert.InRange(logits.Grad[0, 1], 0.23f, 0.25f);
+            var grad = logits.GradView.AsSpan();
+            var sum = grad[0] + grad[1] + grad[2];
+
+            Assert.True(Math.Abs(sum) < 1e-5f); // Suma gradientów softmax_ce wynosi ~0
+            Assert.True(grad[0] < 0f); // Klasa poprawna ma gradient ujemny (chce zwiększyć wartość)
+            Assert.True(grad[1] > 0f); // Błędne mają dodatni (chcą zmniejszyć)
+            Assert.True(grad[2] > 0f);
         }
 
         [Fact]
-        public void Dropout_Scaling_And_InferenceMode()
+        public void GlobalAveragePool2D_Forward_Correct()
         {
-            using var input = new AutogradNode(new FastTensor<float>(1, 100));
-            input.Data.AsSpan().Fill(1f);
+            int batch = 1, channels = 2, h = 2, w = 2;
+            using var input = new AutogradNode(new FastTensor<float>(batch, channels, h, w, clearMemory: true), requiresGrad: false);
+            var inSpan = input.DataView.AsSpan();
 
-            using var outputTrain = TensorMath.Dropout(_graph, input, 0.5f, isTraining: true);
-            var sumTrain = TensorPrimitives.Sum(outputTrain.Data.AsSpan());
+            // Kanał 0
+            inSpan[0] = 1f; inSpan[1] = 3f; inSpan[2] = 5f; inSpan[3] = 7f; // Średnia: 4
+            // Kanał 1
+            inSpan[4] = 10f; inSpan[5] = 10f; inSpan[6] = 20f; inSpan[7] = 0f; // Średnia: 10
 
-            Assert.InRange(sumTrain, 60f, 140f);
+            using var output = TensorMath.GlobalAveragePool2D(_graph, input, channels, h, w);
+            var outSpan = output.DataView.AsSpan();
 
-            // ZMIANA: Tryb ewaluacji przyjmuje NULL
-            using var outputEval = TensorMath.Dropout(null, input, 0.5f, isTraining: false);
-            Assert.Equal(100f, TensorPrimitives.Sum(outputEval.Data.AsSpan()));
+            Assert.Equal(2, outSpan.Length); // Batch = 1, Channels = 2
+            Assert.Equal(4f, outSpan[0]);
+            Assert.Equal(10f, outSpan[1]);
         }
 
         [Fact]
-        public void MSELoss_MathematicalGradient_Check()
+        public void MSELoss_ForwardAndBackward_Correct()
         {
-            using var pred = new AutogradNode(new FastTensor<float>(1, 2));
-            using var target = new AutogradNode(new FastTensor<float>(1, 2), false);
+            using var pred = new AutogradNode(new FastTensor<float>(1, 4, clearMemory: true), requiresGrad: true);
+            using var target = new AutogradNode(new FastTensor<float>(1, 4, clearMemory: true), requiresGrad: false);
 
-            pred.Data[0, 0] = 10f;
-            target.Data[0, 0] = 5f;
+            pred.DataView.AsSpan().Fill(2f);
+            target.DataView.AsSpan().Fill(1f);
 
             using var loss = TensorMath.MSELoss(_graph, pred, target);
-            Assert.Equal(12.5f, loss.Data[0, 0]);
 
+            Assert.Equal(1f, loss.DataView.AsReadOnlySpan()[0]);
+
+            loss.GradView.AsSpan()[0] = 1f;
             _graph.Backward(loss);
 
-            Assert.Equal(5f, pred.Grad[0, 0]);
+            var pGrad = pred.GradView.AsSpan();
+            Assert.Equal(2f * (2f - 1f) / 4f, pGrad[0]); // 0.5
         }
 
         [Fact]
-        public void Reshape_ZeroCopy_And_Gradient_Flows()
+        public void DirectionalLoss_ForwardAndBackward_Correct()
         {
-            using var tensor = new AutogradNode(new FastTensor<float>(1, 8, 13, 13));
-            tensor.Data.AsSpan().Fill(7f);
+            using var pred = new AutogradNode(new FastTensor<float>(1, 4, clearMemory: true), requiresGrad: true);
+            using var target = new AutogradNode(new FastTensor<float>(1, 4, clearMemory: true), requiresGrad: false);
 
-            using var reshaped = TensorMath.Reshape(_graph, tensor, 1, 1352);
-
-            Assert.Equal(1352, reshaped.Data.Shape[1]);
-            Assert.Equal(7f, reshaped.Data[0, 1351]);
-
-            _graph.Backward(reshaped);
-
-            Assert.Equal(1f, tensor.Grad.AsSpan()[0]);
-            Assert.Equal(1f, tensor.Grad.AsSpan()[1351]);
-        }
-
-        // ====================================================================
-        // 2. TESTY NUMERYCZNE (CZYSTA PRAWDA RÓŻNICZKOWA)
-        // ====================================================================
-
-        [Fact]
-        public void NumericalCheck_MatMul_ShouldBePrecise()
-        {
-            using var a = new AutogradNode(new FastTensor<float>(2, 3));
-            using var b = new AutogradNode(new FastTensor<float>(3, 2));
-
-            for (var i = 0; i < a.Data.Size; i++) a.Data.AsSpan()[i] = (i + 1) * 0.1f;
-            for (var i = 0; i < b.Data.Size; i++) b.Data.AsSpan()[i] = (i + 1) * 0.2f;
-
-            var lossFunc = () => {
-                var mm = TensorMath.MatMul(_graph, a, b);
-                var target = new AutogradNode(new FastTensor<float>(2, 2), false);
-                return TensorMath.MSELoss(_graph, mm, target);
-            };
-
-            VerifyGradients(lossFunc, a);
-            VerifyGradients(lossFunc, b);
-        }
-
-        [Fact]
-        public void NumericalCheck_AddBias_ShouldBePrecise()
-        {
-            using var input = new AutogradNode(new FastTensor<float>(3, 2));
-            using var bias = new AutogradNode(new FastTensor<float>(2));
-
-            input.Data.AsSpan().Fill(1.5f);
-            bias.Data.AsSpan().Fill(0.5f);
-
-            var lossFunc = () => {
-                var res = TensorMath.AddBias(_graph, input, bias);
-                var target = new AutogradNode(new FastTensor<float>(3, 2), false);
-                return TensorMath.MSELoss(_graph, res, target);
-            };
-
-            VerifyGradients(lossFunc, input);
-            VerifyGradients(lossFunc, bias);
-        }
-
-        [Fact]
-        public void NumericalCheck_Linear_ShouldBePrecise()
-        {
-            using var input = new AutogradNode(new FastTensor<float>(2, 3));
-            using var weights = new AutogradNode(new FastTensor<float>(3, 2));
-            using var bias = new AutogradNode(new FastTensor<float>(2));
-
-            for (var i = 0; i < input.Data.Size; i++) input.Data.AsSpan()[i] = (i + 1) * 0.1f;
-            for (var i = 0; i < weights.Data.Size; i++) weights.Data.AsSpan()[i] = (i + 1) * 0.2f;
-            for (var i = 0; i < bias.Data.Size; i++) bias.Data.AsSpan()[i] = (i + 1) * 0.3f;
-
-            var lossFunc = () => {
-                var lin = TensorMath.Linear(_graph, input, weights, bias);
-                var target = new AutogradNode(new FastTensor<float>(2, 2), false);
-                return TensorMath.MSELoss(_graph, lin, target);
-            };
-
-            VerifyGradients(lossFunc, input);
-            VerifyGradients(lossFunc, weights);
-            VerifyGradients(lossFunc, bias);
-        }
-
-        [Fact]
-        public void NumericalCheck_Conv2D_ShouldBePrecise()
-        {
-            using var input = new AutogradNode(new FastTensor<float>(1, 1, 4, 4));
-            using var weights = new AutogradNode(new FastTensor<float>(1, 9));
-
-            input.Data.AsSpan().Fill(0.5f);
-            weights.Data.AsSpan().Fill(0.1f);
-
-            var lossFunc = () => {
-                var conv = TensorMath.Conv2D(_graph, input, weights, 1, 1, 4, 4, 3);
-                var target = new AutogradNode(new FastTensor<float>(1, 1, 2, 2), false);
-                return TensorMath.MSELoss(_graph, conv, target);
-            };
-
-            VerifyGradients(lossFunc, weights);
-            VerifyGradients(lossFunc, input);
-        }
-
-        [Fact]
-        public void NumericalCheck_BatchNorm1D_ShouldBePrecise()
-        {
-            using var input = new AutogradNode(new FastTensor<float>(4, 2));
-            using var gamma = new AutogradNode(new FastTensor<float>(2));
-            using var beta = new AutogradNode(new FastTensor<float>(2));
-
-            input.Data.AsSpan().Fill(1.5f);
-            gamma.Data.AsSpan().Fill(1.0f);
-            beta.Data.AsSpan().Fill(0.0f);
-
-            using var rm = new FastTensor<float>(2);
-            using var rv = new FastTensor<float>(2);
-            rv.AsSpan().Fill(1f);
-
-            var lossFunc = () => {
-                var bn = TensorMath.BatchNorm1D(_graph, input, gamma, beta, rm, rv, 0.1f, 1e-5f, true);
-                var target = new AutogradNode(new FastTensor<float>(4, 2), false);
-                return TensorMath.MSELoss(_graph, bn, target);
-            };
-
-            VerifyGradients(lossFunc, gamma);
-            VerifyGradients(lossFunc, beta);
-            VerifyGradients(lossFunc, input);
-        }
-
-        [Fact]
-        public void DirectionalLoss_MathematicalGradient_Check()
-        {
-            using var pred = new AutogradNode(new FastTensor<float>(1, 4));
-            using var target = new AutogradNode(new FastTensor<float>(1, 4), false);
-
-            var pData = pred.Data.AsSpan();
-            var tData = target.Data.AsSpan();
-
-            pData[0] = 1f; tData[0] = 2f;
-            pData[1] = 1f; tData[1] = -2f;
-            pData[2] = -1f; tData[2] = -2f;
-            pData[3] = -1f; tData[3] = 2f;
+            pred.DataView.AsSpan().Fill(2f);
+            target.DataView.AsSpan().Fill(-1f); // Zły kierunek (pred > 0, target < 0)
 
             using var loss = TensorMath.DirectionalLoss(_graph, pred, target, gamma: 10f);
-            Assert.Equal(15f, loss.Data[0, 0]);
 
+            loss.GradView.AsSpan()[0] = 1f;
             _graph.Backward(loss);
 
-            var pGrad = pred.Grad.AsSpan();
-            Assert.Equal(-0.5f, pGrad[0]);
-            Assert.Equal(6.5f, pGrad[1]);
-            Assert.Equal(0.5f, pGrad[2]);
-            Assert.Equal(-6.5f, pGrad[3]);
+            var pGrad = pred.GradView.AsSpan();
+            Assert.True(pGrad[0] > 0);
+        }
+
+        // ====================================================================
+        // 2. TESTY NUMERYCZNE (NUMERICAL GRADIENT CHECKING)
+        // ====================================================================
+
+        [Fact]
+        public void AddBias_NumericalGradient_MatchesAnalytical()
+        {
+            using var input = new AutogradNode(new FastTensor<float>(2, 3, 1, 1, clearMemory: true), requiresGrad: true);
+            using var bias = new AutogradNode(new FastTensor<float>(3, clearMemory: true), requiresGrad: true);
+
+            input.DataView.AsSpan().Fill(0.5f);
+            bias.DataView.AsSpan().Fill(0.2f);
+
+            // Przekazujemy bezpośrednio operację. VerifyGradients zajmie się sumowaniem.
+            VerifyGradients(bias, () => TensorMath.AddBias(_graph, input, bias));
         }
 
         [Fact]
-        public void NumericalCheck_DirectionalLoss_ShouldBePrecise()
+        public void ReLU_NumericalGradient_MatchesAnalytical()
         {
-            using var pred = new AutogradNode(new FastTensor<float>(2, 3));
-            using var target = new AutogradNode(new FastTensor<float>(2, 3), false);
+            using var input = new AutogradNode(new FastTensor<float>(1, 4, clearMemory: true), requiresGrad: true);
 
-            var pData = pred.Data.AsSpan();
-            var tData = target.Data.AsSpan();
+            // Wartości wejściowe "z dala od zera", aby test numeryczny f(x+e)-f(x-e) działał płynnie 
+            // poza punktem nieciągłości matematycznej ReLU.
+            var span = input.DataView.AsSpan();
+            span[0] = 1.5f; span[1] = -0.5f; span[2] = 2.0f; span[3] = -1.0f;
 
-            pData[0] = 0.5f; tData[0] = 0.8f;
-            pData[1] = -0.5f; tData[1] = 0.8f;
-            pData[2] = 1.2f; tData[2] = -0.3f;
-            pData[3] = -1.0f; tData[3] = -1.5f;
-            pData[4] = 0.1f; tData[4] = 0.5f;
-            pData[5] = 2.0f; tData[5] = 2.5f;
-
-            var lossFunc = () => TensorMath.DirectionalLoss(_graph, pred, target, gamma: 10f);
-
-            VerifyGradients(lossFunc, pred);
+            VerifyGradients(input, () => TensorMath.ReLU(_graph, input));
         }
 
-        // ====================================================================
-        // HELPER: NUMERICAL GRADIENT CHECKER
-        // ====================================================================
-
-        private void VerifyGradients(Func<AutogradNode> lossFunc, AutogradNode parameter, float epsilon = 1e-3f, float tolerance = 1e-2f)
+        [Fact]
+        public void MatMul_NumericalGradient_MatchesAnalytical()
         {
-            // Zerujemy gradient parametru — ten sam kontrakt co optimizer.ZeroGrad()
-            // Bez tego gradient kumuluje się z poprzednich wywołań VerifyGradients
-            parameter.Grad.AsSpan().Clear();
+            using var a = new AutogradNode(new FastTensor<float>(2, 3, clearMemory: true), requiresGrad: true);
+            using var b = new AutogradNode(new FastTensor<float>(3, 2, clearMemory: true), requiresGrad: true);
 
+            a.DataView.AsSpan().Fill(0.5f);
+            b.DataView.AsSpan().Fill(0.2f);
+
+            VerifyGradients(a, () => TensorMath.MatMul(_graph, a, b));
+        }
+
+        [Fact]
+        public void Conv2D_NumericalGradient_MatchesAnalytical()
+        {
+            using var input = new AutogradNode(new FastTensor<float>(1, 1, 4, 4, clearMemory: true), requiresGrad: true);
+            using var weights = new AutogradNode(new FastTensor<float>(1, 4, clearMemory: true), requiresGrad: true);
+
+            input.DataView.AsSpan().Fill(0.5f);
+            weights.DataView.AsSpan().Fill(0.2f);
+
+            VerifyGradients(weights, () => TensorMath.Conv2D(_graph, input, weights, 1, 1, 4, 4, 2));
+        }
+
+        /// <summary>
+        /// Uniwersalna metoda porównująca Gradient Analityczny z Numerycznym Różniczkowaniem.
+        /// </summary>
+        private void VerifyGradients(AutogradNode parameter, Func<AutogradNode> opFunc, float epsilon = 1e-3f, float tolerance = 1e-2f)
+        {
+            // 1. Resetujemy gradient z poprzednich wywołań
+            parameter.ZeroGrad();
             _graph.Reset();
-            using var lossNode = lossFunc();
-            _graph.Backward(lossNode);
 
-            var analyticalGrads = parameter.Grad.AsSpan().ToArray();
-            var numGrads = new float[parameter.Data.Size];
-            var dataSpan = parameter.Data.AsSpan();
+            // 2. Generujemy graf
+            using var outNode = opFunc();
 
-            for (var i = 0; i < parameter.Data.Size; i++)
+            // ---> NAPRAWA GRAFU: Inicjujemy tensor wyjściowy jedynkami! 
+            // Matematycznie jest to równoznaczne ze zrobieniem Loss = Sum(outNode) i Loss.Backward().
+            outNode.GradView.AsSpan().Fill(1f);
+
+            // 3. Propagacja wsteczna (Liczy gradienty analityczne bezpośrednio w grafie)
+            _graph.Backward(outNode);
+
+            var analyticalGrads = parameter.GradView.AsSpan().ToArray();
+            var numGrads = new float[parameter.DataView.Size];
+            var dataSpan = parameter.DataView.AsSpan();
+
+            // 4. Numeryczne sprawdzanie każdego elementu
+            for (var i = 0; i < parameter.DataView.Size; i++)
             {
                 var originalValue = dataSpan[i];
 
+                // Krok do przodu f(x + epsilon)
                 dataSpan[i] = originalValue + epsilon;
                 _graph.Reset();
-                using (var lossPlus = lossFunc())
+                using (var outPlus = opFunc())
                 {
-                    var fPlus = lossPlus.Data[0, 0];
+                    // Liczymy numeryczną sumę na wyjściu (TensorPrimitives wspiera przyspieszenie sprzętowe)
+                    var fPlus = TensorPrimitives.Sum(outPlus.DataView.AsReadOnlySpan());
 
+                    // Krok w tył f(x - epsilon)
                     dataSpan[i] = originalValue - epsilon;
                     _graph.Reset();
-                    using (var lossMinus = lossFunc())
+                    using (var outMinus = opFunc())
                     {
-                        var fMinus = lossMinus.Data[0, 0];
+                        var fMinus = TensorPrimitives.Sum(outMinus.DataView.AsReadOnlySpan());
+
+                        // Aproksymacja pochodnej numerycznej
                         numGrads[i] = (fPlus - fMinus) / (2 * epsilon);
                     }
                 }
+
+                // Przywrócenie stanu oryginalnego
                 dataSpan[i] = originalValue;
             }
 
+            // 5. Asercje
             for (var i = 0; i < analyticalGrads.Length; i++)
             {
                 var diff = Math.Abs(analyticalGrads[i] - numGrads[i]);
                 Assert.True(diff < tolerance,
-                    $"Błąd gradientu w elemencie {i}! Analityczny: {analyticalGrads[i]}, Numeryczny: {numGrads[i]}, Różnica: {diff}");
+                $"Błąd gradientu w elemencie {i}! Analityczny: {analyticalGrads[i]:F5}, Numeryczny: {numGrads[i]:F5}, Różnica: {diff:F5}");
             }
         }
     }

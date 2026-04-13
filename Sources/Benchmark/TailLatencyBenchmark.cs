@@ -15,8 +15,8 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 namespace Benchmarks
 {
     /// <summary>
-    /// Analyzes the latency distribution (P50 to Max) and jitter performance.
-    /// This is the most critical benchmark for production Service Level Agreements (SLA).
+    ///     Analyzes the latency distribution (P50 to Max) and jitter performance.
+    ///     This is the most critical benchmark for production Service Level Agreements (SLA).
     /// </summary>
     [SimpleJob(RuntimeMoniker.Net10_0)]
     [Orderer(SummaryOrderPolicy.FastestToSlowest)]
@@ -27,17 +27,17 @@ namespace Benchmarks
         private const int TotalCalls = 100_000;
 
         private float[] _inputData;
-
-        private InferenceSession _onnxSession;
-        private DenseTensor<float> _onnxInputTensor;
-        private NamedOnnxValue[] _onnxInputs;
-
-        private Sequential _overfitModel;
-        private FastTensor<float> _overfitInputTensor;
         private AutogradNode _inputNode;
+        private NamedOnnxValue[] _onnxInputs;
+        private DenseTensor<float> _onnxInputTensor;
 
         private long[] _onnxLatencies;
+
+        private InferenceSession _onnxSession;
+        private FastTensor<float> _overfitInputTensor;
         private long[] _overfitLatencies;
+
+        private Sequential _overfitModel;
 
         [GlobalSetup]
         public void Setup()
@@ -53,9 +53,11 @@ namespace Benchmarks
             _overfitModel.Load("benchmark_model.bin");
             _overfitModel.Eval();
 
-            _overfitInputTensor = new FastTensor<float>(false, 1, InputSize);
-            _inputData.AsSpan().CopyTo(_overfitInputTensor.AsSpan());
-            _inputNode = new AutogradNode(_overfitInputTensor, requiresGrad: false);
+            // POPRAWKA: Poprawny konstruktor
+            _overfitInputTensor = new FastTensor<float>(1, InputSize, clearMemory: false);
+            // POPRAWKA: GetView().AsSpan()
+            _inputData.AsSpan().CopyTo(_overfitInputTensor.GetView().AsSpan());
+            _inputNode = new AutogradNode(_overfitInputTensor, false);
 
             for (var i = 0; i < 1000; i++)
             {
@@ -70,9 +72,6 @@ namespace Benchmarks
             _overfitLatencies = new long[TotalCalls];
         }
 
-        /// <summary>
-        /// Profiles ONNX Runtime latency. Monitored for spikes caused by heap allocations.
-        /// </summary>
         [Benchmark(Baseline = true)]
         public void OnnxRuntime_LatencyProfile()
         {
@@ -89,16 +88,13 @@ namespace Benchmarks
             }
 
             PrintLatencyReport(
-                "ONNX Runtime",
-                _onnxLatencies,
-                GC.CollectionCount(0) - gc0Before,
-                GC.CollectionCount(1) - gc1Before,
-                GC.CollectionCount(2) - gc2Before);
+            "ONNX Runtime",
+            _onnxLatencies,
+            GC.CollectionCount(0) - gc0Before,
+            GC.CollectionCount(1) - gc1Before,
+            GC.CollectionCount(2) - gc2Before);
         }
 
-        /// <summary>
-        /// Profiles Overfit engine latency. Expected to show high predictability due to Zero-Allocation path.
-        /// </summary>
         [Benchmark]
         public void Overfit_LatencyProfile()
         {
@@ -109,16 +105,17 @@ namespace Benchmarks
             for (var i = 0; i < TotalCalls; i++)
             {
                 var start = Stopwatch.GetTimestamp();
-                _ = _overfitModel.Forward(null, _inputNode).Data.AsSpan()[0];
+                // POPRAWKA: DataView.AsReadOnlySpan() zamiast Data.AsSpan()
+                _ = _overfitModel.Forward(null, _inputNode).DataView.AsReadOnlySpan()[0];
                 _overfitLatencies[i] = Stopwatch.GetTimestamp() - start;
             }
 
             PrintLatencyReport(
-                "Overfit",
-                _overfitLatencies,
-                GC.CollectionCount(0) - gc0Before,
-                GC.CollectionCount(1) - gc1Before,
-                GC.CollectionCount(2) - gc2Before);
+            "Overfit",
+            _overfitLatencies,
+            GC.CollectionCount(0) - gc0Before,
+            GC.CollectionCount(1) - gc1Before,
+            GC.CollectionCount(2) - gc2Before);
         }
 
         private static void PrintLatencyReport(string name, long[] latencies, int gc0, int gc1, int gc2)
@@ -135,9 +132,9 @@ namespace Benchmarks
             var jitter = p999 / Math.Max(p50, 0.01);
 
             Console.WriteLine();
-            Console.WriteLine($"  +------------------------------------------------+");
+            Console.WriteLine("  +------------------------------------------------+");
             Console.WriteLine($"  |  {name,-44}  |");
-            Console.WriteLine($"  +------------------------------------------------+");
+            Console.WriteLine("  +------------------------------------------------+");
             Console.WriteLine($"  |  P50:       {p50,10:F2} us                       |");
             Console.WriteLine($"  |  P90:       {p90,10:F2} us                       |");
             Console.WriteLine($"  |  P95:       {p95,10:F2} us                       |");
@@ -148,7 +145,7 @@ namespace Benchmarks
             Console.WriteLine($"  |  GC Gen-0:  {gc0,10}                         |");
             Console.WriteLine($"  |  GC Gen-1:  {gc1,10}                         |");
             Console.WriteLine($"  |  GC Gen-2:  {gc2,10}                         |");
-            Console.WriteLine($"  +------------------------------------------------+");
+            Console.WriteLine("  +------------------------------------------------+");
         }
 
         public void Cleanup()

@@ -19,18 +19,23 @@ namespace DevOnBike.Overfit.Tests
             imgReader.ReadBytes(16);
             lblReader.ReadBytes(8);
 
-            // Zwracamy natywne Tensory zamiast Macierzy
-            var images = new FastTensor<float>(maxSamples, 784);
-            var labels = new FastTensor<float>(maxSamples, 10);
+            // Zwracamy natywne Tensory. Obrazy nie muszą być czyszczone, etykiety tak (one-hot).
+            var images = new FastTensor<float>(maxSamples, 784, clearMemory: false);
+            var labels = new FastTensor<float>(maxSamples, 10, clearMemory: true);
+
+            var imgSpan = images.GetView().AsSpan();
+            var lblSpan = labels.GetView().AsSpan();
 
             for (var i = 0; i < maxSamples; i++)
             {
                 var pixels = imgReader.ReadBytes(784);
                 for (var j = 0; j < 784; j++)
-                    images[i, j] = pixels[j] / 255.0f;
+                {
+                    imgSpan[i * 784 + j] = pixels[j] / 255.0f;
+                }
 
-                int label = lblReader.ReadByte();
-                labels[i, label] = 1.0f;
+                var label = lblReader.ReadByte();
+                lblSpan[i * 10 + label] = 1.0f;
             }
 
             return (images, labels);

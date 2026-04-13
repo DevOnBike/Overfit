@@ -3,7 +3,9 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Diagnostics;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
@@ -11,7 +13,7 @@ namespace DevOnBike.Overfit.UI
 {
     public partial class MainWindow : Window
     {
-        private DevOnBike.Overfit.UI.MnistPredictor _predictor;
+        private MnistPredictor _predictor;
 
         public MainWindow()
         {
@@ -29,7 +31,7 @@ namespace DevOnBike.Overfit.UI
                 // Pamiętaj, że prefiks musi zgadzać się z tym, co podałeś w MnistPredictor!
                 var modelPrefix = @"d:\ml\bestia.bin";
 
-                _predictor = new DevOnBike.Overfit.UI.MnistPredictor(modelPrefix);
+                _predictor = new MnistPredictor(modelPrefix);
                 TxtStatus.Text = "Bestia gotowa! Rysuj!";
             }
             catch (Exception ex)
@@ -40,9 +42,12 @@ namespace DevOnBike.Overfit.UI
         }
 
         // Zdarzenie wyzwalane za każdym razem, gdy użytkownik odrywa myszkę/rysik od płótna
-        private void DrawingCanvas_MouseUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        private void DrawingCanvas_MouseUp(object sender, MouseButtonEventArgs e)
         {
-            if (_predictor == null || DrawingCanvas.Strokes.Count == 0) return;
+            if (_predictor == null || DrawingCanvas.Strokes.Count == 0)
+            {
+                return;
+            }
 
             PredictDigit();
         }
@@ -61,7 +66,7 @@ namespace DevOnBike.Overfit.UI
                 var pixelData = GetMnistPixelsFromCanvas();
 
                 // --- INFERENCJA (Nasza 48-sekundowa bestia w akcji) ---
-                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+                var stopwatch = Stopwatch.StartNew();
                 var prediction = _predictor.Predict(pixelData);
                 stopwatch.Stop();
 
@@ -79,14 +84,14 @@ namespace DevOnBike.Overfit.UI
         {
             // 1. Renderujemy Canvas do bitmapy
             var rtb = new RenderTargetBitmap(
-                (int)DrawingCanvas.Width, (int)DrawingCanvas.Height,
-                96d, 96d, PixelFormats.Default);
+            (int)DrawingCanvas.Width, (int)DrawingCanvas.Height,
+            96d, 96d, PixelFormats.Default);
             rtb.Render(DrawingCanvas);
 
             // 2. Skalujemy w dół do 28x28 używając wbudowanego wysokiej jakości algorytmu
             var scaled = new TransformedBitmap(rtb, new ScaleTransform(
-                28.0 / DrawingCanvas.Width,
-                28.0 / DrawingCanvas.Height));
+            28.0 / DrawingCanvas.Width,
+            28.0 / DrawingCanvas.Height));
 
             // 3. Pobieramy surowe piksele
             var stride = 28 * 4; // 4 bajty na piksel (BGRA)
@@ -99,7 +104,7 @@ namespace DevOnBike.Overfit.UI
             {
                 for (var x = 0; x < 28; x++)
                 {
-                    var idx = (y * stride) + (x * 4);
+                    var idx = y * stride + x * 4;
 
                     // W MNIST interesuje nas tylko jasność (bierzemy kanał Red, bo tło to czarny, a rysik biały)
                     var brightness = pixels[idx + 2];

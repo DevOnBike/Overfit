@@ -14,8 +14,8 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 namespace Benchmarks
 {
     /// <summary>
-    /// Performance benchmark for a 3-layer MLP architecture: 784 → 256 → 128 → 10.
-    /// Evaluates the cumulative impact of layer depth on inference latency.
+    ///     Performance benchmark for a 3-layer MLP architecture: 784 → 256 → 128 → 10.
+    ///     Evaluates the cumulative impact of layer depth on inference latency.
     /// </summary>
     [SimpleJob(RuntimeMoniker.Net10_0)]
     [Orderer(SummaryOrderPolicy.FastestToSlowest)]
@@ -27,13 +27,13 @@ namespace Benchmarks
         private const string BinPath = "benchmark_mlp3_auto.bin";
 
         private float[] _inputData;
-
-        private InferenceSession _onnxSession;
+        private AutogradNode _inputNode;
         private NamedOnnxValue[] _onnxInputs;
 
-        private Sequential _overfitModel;
+        private InferenceSession _onnxSession;
         private FastTensor<float> _overfitInputTensor;
-        private AutogradNode _inputNode;
+
+        private Sequential _overfitModel;
 
         [GlobalSetup]
         public void Setup()
@@ -42,11 +42,11 @@ namespace Benchmarks
             _inputData = Enumerable.Range(0, InputSize).Select(_ => (float)rnd.NextDouble()).ToArray();
 
             _overfitModel = new Sequential(
-                new LinearLayer(InputSize, 256),
-                new ReluActivation(),
-                new LinearLayer(256, 128),
-                new ReluActivation(),
-                new LinearLayer(128, 10));
+            new LinearLayer(InputSize, 256),
+            new ReluActivation(),
+            new LinearLayer(256, 128),
+            new ReluActivation(),
+            new LinearLayer(128, 10));
 
             _overfitModel.Save(BinPath);
             _overfitModel.Eval();
@@ -58,9 +58,9 @@ namespace Benchmarks
                 _onnxInputs = [NamedOnnxValue.CreateFromTensor("input", tensor)];
             }
 
-            _overfitInputTensor = new FastTensor<float>(false, 1, InputSize);
-            _inputData.AsSpan().CopyTo(_overfitInputTensor.AsSpan());
-            _inputNode = new AutogradNode(_overfitInputTensor, requiresGrad: false);
+            _overfitInputTensor = new FastTensor<float>(1, InputSize, clearMemory: false);
+            _inputData.AsSpan().CopyTo(_overfitInputTensor.GetView().AsSpan());
+            _inputNode = new AutogradNode(_overfitInputTensor, false);
 
             for (var i = 0; i < 200; i++)
             {
@@ -69,7 +69,7 @@ namespace Benchmarks
         }
 
         /// <summary>
-        /// Benchmarks ONNX Runtime on a 3-layer MLP. Requires an external .onnx file.
+        ///     Benchmarks ONNX Runtime on a 3-layer MLP. Requires an external .onnx file.
         /// </summary>
         [Benchmark(Baseline = true)]
         public float OnnxRuntime_3Layer()
@@ -77,8 +77,8 @@ namespace Benchmarks
             if (_onnxSession == null)
             {
                 throw new InvalidOperationException(
-                    $"Missing {OnnxPath}. Please export the model from PyTorch using:\n" +
-                    "python export_mlp3.py --input-size 784 --hidden 256 128 --output 10");
+                $"Missing {OnnxPath}. Please export the model from PyTorch using:\n" +
+                "python export_mlp3.py --input-size 784 --hidden 256 128 --output 10");
             }
 
             using var results = _onnxSession.Run(_onnxInputs);
@@ -86,12 +86,12 @@ namespace Benchmarks
         }
 
         /// <summary>
-        /// Benchmarks Overfit on a 3-layer MLP using the optimized zero-allocation path.
+        ///     Benchmarks Overfit on a 3-layer MLP using the optimized zero-allocation path.
         /// </summary>
         [Benchmark]
         public float Overfit_3Layer_ZeroAlloc()
         {
-            return _overfitModel.Forward(null, _inputNode).Data.AsSpan()[0];
+            return _overfitModel.Forward(null, _inputNode).DataView.AsReadOnlySpan()[0];
         }
 
         [GlobalCleanup]

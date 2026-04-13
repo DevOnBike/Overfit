@@ -6,7 +6,7 @@
 namespace DevOnBike.Overfit
 {
     /// <summary>
-    /// Static utility class providing mathematical helper functions used across the engine.
+    ///     Static utility class providing mathematical helper functions used across the engine.
     /// </summary>
     public static class MathUtils
     {
@@ -14,13 +14,13 @@ namespace DevOnBike.Overfit
         private static Random _rng;
 
         /// <summary>
-        /// Gets a thread-safe <see cref="Random"/> instance, lazily initialized with a unique seed.
-        /// Uses <see cref="ThreadStaticAttribute"/> to avoid lock contention in multi-threaded training.
+        ///     Gets a thread-safe <see cref="Random" /> instance, lazily initialized with a unique seed.
+        ///     Uses <see cref="ThreadStaticAttribute" /> to avoid lock contention in multi-threaded training.
         /// </summary>
         private static Random Rng => _rng ??= new Random(Guid.NewGuid().GetHashCode());
 
         /// <summary>
-        /// Returns a random number from a standard normal distribution N(0, 1) using the Box-Muller transform.
+        ///     Returns a random number from a standard normal distribution N(0, 1) using the Box-Muller transform.
         /// </summary>
         /// <returns>A random float following the Gaussian distribution.</returns>
         public static float NextGaussian()

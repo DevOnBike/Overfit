@@ -1,23 +1,21 @@
 ﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
-// For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Numerics.Tensors;
 using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
     /// <summary>
-    /// Implements a Residual Block (ResNet) to mitigate the vanishing gradient problem.
+    ///     Implements a Residual Block (ResNet) to mitigate the vanishing gradient problem.
     /// </summary>
     public sealed class ResidualBlock : IModule
     {
-        private readonly LinearLayer _linear1;
         private readonly BatchNorm1D _bn1;
-        private readonly LinearLayer _linear2;
         private readonly BatchNorm1D _bn2;
-
-        public bool IsTraining { get; private set; } = true;
+        private readonly LinearLayer _linear1;
+        private readonly LinearLayer _linear2;
 
         public ResidualBlock(int hiddenSize)
         {
@@ -27,9 +25,12 @@ namespace DevOnBike.Overfit.DeepLearning
             _bn2 = new BatchNorm1D(hiddenSize);
         }
 
+        public bool IsTraining { get; private set; } = true;
+
         public void Train()
         {
             IsTraining = true;
+
             _linear1.Train();
             _bn1.Train();
             _linear2.Train();
@@ -39,16 +40,37 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Eval()
         {
             IsTraining = false;
+
             _linear1.Eval();
             _bn1.Eval();
             _linear2.Eval();
             _bn2.Eval();
         }
 
-        /// <summary>
-        /// Performs the forward pass. 
-        /// Dispatches between a memory-optimized inference path and a recording-enabled training path.
-        /// </summary>
+        public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
+        {
+            var hiddenSize = _linear1.Weights.DataView.GetDim(0);
+
+            // PooledBuffer z using var - zero ręcznego zarządzania w finally!
+            using var buf1 = new PooledBuffer<float>(hiddenSize);
+            using var buf2 = new PooledBuffer<float>(hiddenSize);
+
+            var b1 = buf1.Span;
+            var b2 = buf2.Span;
+
+            // Ścieżka główna (Main Path)
+            _linear1.ForwardInference(input, b1);          // Linear1: wejście -> b1
+            _bn1.ForwardInference(b1, b2);                 // BN1: b1 -> b2
+            TensorPrimitives.Max(b2, 0f, b1);              // ReLU: b2 -> b1 (nadpisujemy b1)
+
+            _linear2.ForwardInference(b1, b2);             // Linear2: b1 -> b2
+            _bn2.ForwardInference(b2, b1);                 // BN2: b2 -> b1
+
+            // Połączenie rezydualne (Skip Connection): output = ReLU(b1 + input)
+            TensorPrimitives.Add(b1, input, output);
+            TensorPrimitives.Max(output, 0f, output);
+        }
+
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
             if (graph == null || !IsTraining)
@@ -77,27 +99,49 @@ namespace DevOnBike.Overfit.DeepLearning
             return TensorMath.ReLU(graph, tAdded);
         }
 
-        /// <summary> Aggregates all learnable parameters from nested layers. </summary>
         public IEnumerable<AutogradNode> Parameters()
         {
-            foreach (var p in _linear1.Parameters()) yield return p;
-            foreach (var p in _bn1.Parameters()) yield return p;
-            foreach (var p in _linear2.Parameters()) yield return p;
-            foreach (var p in _bn2.Parameters()) yield return p;
+            foreach (var p in _linear1.Parameters())
+            {
+                yield return p;
+            }
+
+            foreach (var p in _bn1.Parameters())
+            {
+                yield return p;
+            }
+
+            foreach (var p in _linear2.Parameters())
+            {
+                yield return p;
+            }
+
+            foreach (var p in _bn2.Parameters())
+            {
+                yield return p;
+            }
         }
 
         public void Save(BinaryWriter bw)
         {
-            _linear1.Save(bw);
-            _bn1.Save(bw);
-            _linear2.Save(bw);
-            _bn2.Save(bw);
+            _linear1.Save(bw); _bn1.Save(bw); _linear2.Save(bw); _bn2.Save(bw);
+        }
+
+        public void Load(BinaryReader br)
+        {
+            _linear1.Load(br); _bn1.Load(br); _linear2.Load(br); _bn2.Load(br);
+        }
+
+        public void Dispose()
+        {
+            _linear1?.Dispose(); _bn1?.Dispose(); _linear2?.Dispose(); _bn2?.Dispose();
         }
 
         public void Save(string path)
         {
             using var fs = new FileStream(path, FileMode.Create);
             using var bw = new BinaryWriter(fs);
+
             Save(bw);
         }
 
@@ -112,22 +156,6 @@ namespace DevOnBike.Overfit.DeepLearning
             using var br = new BinaryReader(fs);
 
             Load(br);
-        }
-
-        public void Load(BinaryReader br)
-        {
-            _linear1.Load(br);
-            _bn1.Load(br);
-            _linear2.Load(br);
-            _bn2.Load(br);
-        }
-
-        public void Dispose()
-        {
-            _linear1?.Dispose();
-            _bn1?.Dispose();
-            _linear2?.Dispose();
-            _bn2?.Dispose();
         }
     }
 }

@@ -14,8 +14,8 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 namespace Benchmarks
 {
     /// <summary>
-    /// Baseline performance comparison for a single inference pass.
-    /// Measures the raw overhead of a single Forward call without loop-level optimizations.
+    ///     Baseline performance comparison for a single inference pass.
+    ///     Measures the raw overhead of a single Forward call without loop-level optimizations.
     /// </summary>
     [SimpleJob(RuntimeMoniker.Net10_0)]
     [Orderer(SummaryOrderPolicy.FastestToSlowest)]
@@ -27,13 +27,13 @@ namespace Benchmarks
         private const int OutputSize = 10;
 
         private float[] _inputData;
-
-        private InferenceSession _onnxSession;
+        private AutogradNode _inputNode;
         private NamedOnnxValue[] _onnxInputs;
 
-        private Sequential _overfitModel;
+        private InferenceSession _onnxSession;
         private FastTensor<float> _overfitInputTensor;
-        private AutogradNode _inputNode;
+
+        private Sequential _overfitModel;
 
         [GlobalSetup]
         public void Setup()
@@ -51,10 +51,12 @@ namespace Benchmarks
             _overfitModel.Load("benchmark_model.bin");
             _overfitModel.Eval(); // Enable inference mode (triggers weight pre-transposition)
 
-            // Prepare Overfit input tensors
-            _overfitInputTensor = new FastTensor<float>(false, 1, InputSize);
-            _inputData.AsSpan().CopyTo(_overfitInputTensor.AsSpan());
-            _inputNode = new AutogradNode(_overfitInputTensor, requiresGrad: false);
+            // POPRAWKA: Poprawna kolejność argumentów w konstruktorze (dim0, dim1, clearMemory)
+            _overfitInputTensor = new FastTensor<float>(1, InputSize, clearMemory: false);
+
+            // POPRAWKA: Użycie GetView().AsSpan() zamiast bezpośredniego AsSpan()
+            _inputData.AsSpan().CopyTo(_overfitInputTensor.GetView().AsSpan());
+            _inputNode = new AutogradNode(_overfitInputTensor, false);
 
             for (var i = 0; i < 100; i++)
             {
@@ -63,8 +65,8 @@ namespace Benchmarks
         }
 
         /// <summary>
-        /// Benchmarks ONNX Runtime using a pre-allocated input tensor.
-        /// Represents the "best-case" scenario for ONNX by minimizing setup overhead.
+        ///     Benchmarks ONNX Runtime using a pre-allocated input tensor.
+        ///     Represents the "best-case" scenario for ONNX by minimizing setup overhead.
         /// </summary>
         [Benchmark(Baseline = true)]
         public float OnnxRuntime_PreAllocated()
@@ -74,26 +76,30 @@ namespace Benchmarks
         }
 
         /// <summary>
-        /// Benchmarks ONNX Runtime including the cost of tensor creation.
-        /// Reflects a typical production scenario where new data arrives per request.
+        ///     Benchmarks ONNX Runtime including the cost of tensor creation.
+        ///     Reflects a typical production scenario where new data arrives per request.
         /// </summary>
         [Benchmark]
         public float OnnxRuntime_FullAllocation()
         {
             var tensor = new DenseTensor<float>(_inputData, [1, InputSize]);
-            var inputs = new NamedOnnxValue[] { NamedOnnxValue.CreateFromTensor("input", tensor) };
+            var inputs = new[]
+            {
+                NamedOnnxValue.CreateFromTensor("input", tensor)
+            };
             using var results = _onnxSession.Run(inputs);
             return results.First().AsTensor<float>()[0];
         }
 
         /// <summary>
-        /// Benchmarks Overfit using the zero-allocation SIMD inference path.
-        /// Leverages pre-transposed weights for optimal hardware utilization.
+        ///     Benchmarks Overfit using the zero-allocation SIMD inference path.
+        ///     Leverages pre-transposed weights for optimal hardware utilization.
         /// </summary>
         [Benchmark]
         public float Overfit_ZeroAlloc()
         {
-            return _overfitModel.Forward(null, _inputNode).Data.AsSpan()[0];
+            // POPRAWKA: Użycie DataView.AsReadOnlySpan() zamiast Data.AsSpan()
+            return _overfitModel.Forward(null, _inputNode).DataView.AsReadOnlySpan()[0];
         }
 
         [GlobalCleanup]

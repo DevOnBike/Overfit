@@ -1,33 +1,23 @@
 // Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
-// For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.Data.Abstractions;
 using DevOnBike.Overfit.Data.Contracts;
 
 namespace DevOnBike.Overfit.Data.Prepare
 {
-    /// <summary>
-    /// Implements outlier-robust scaling using the median and Interquartile Range (IQR).
-    /// Formula: x' = (x - median) / IQR
-    /// </summary>
     public sealed class RobustScalingLayer : IDataLayer
     {
+        private readonly bool _centerByMedian;
         private readonly HashSet<int> _columnIndices;
         private readonly HashSet<int> _excludedColumns;
         private readonly float _fallbackIqr;
-        private readonly bool _centerByMedian;
-
-        // Persisted statistics from the Fit phase - reused during Transform (inference)
-        private float[] _medians;
-        private float[] _iqrs;
         private bool _fitted;
+        private float[] _iqrs;
+        private float[] _medians;
 
-        /// <param name="columnIndices">Indices of columns to scale. Null = scale all (excluding specifically excluded columns).</param>
-        /// <param name="excludedColumns">Columns to skip (e.g., binary or one-hot encoded features). Scaling 0/1 by IQR is undefined.</param>
-        /// <param name="fallbackIqr">Default IQR to use if the calculated IQR is 0 (near-constant column). Defaults to 1.0.</param>
-        /// <param name="centerByMedian">Whether to subtract the median (centering). False = divide by IQR only.</param>
         public RobustScalingLayer(
             HashSet<int> columnIndices = null,
             HashSet<int> excludedColumns = null,
@@ -40,22 +30,22 @@ namespace DevOnBike.Overfit.Data.Prepare
             }
 
             _columnIndices = columnIndices;
-            _excludedColumns = excludedColumns ?? new HashSet<int>();
+            _excludedColumns = excludedColumns ?? [];
             _fallbackIqr = fallbackIqr;
             _centerByMedian = centerByMedian;
         }
 
         public PipelineContext Process(PipelineContext context)
         {
-            var rows = context.Features.GetDim(0);
-            var cols = context.Features.GetDim(1);
+            var rows = context.Features.GetView().GetDim(0);
+            var cols = context.Features.GetView().GetDim(1);
 
             if (rows == 0 || cols == 0)
             {
                 return context;
             }
 
-            var span = context.Features.AsSpan();
+            var span = context.Features.GetView().AsSpan();
 
             if (!_fitted)
             {
@@ -63,7 +53,6 @@ namespace DevOnBike.Overfit.Data.Prepare
                 {
                     return context;
                 }
-
                 Fit(span, rows, cols);
             }
 
@@ -72,9 +61,6 @@ namespace DevOnBike.Overfit.Data.Prepare
             return context;
         }
 
-        /// <summary>
-        /// Calculates the median and IQR per column and persists them for inference.
-        /// </summary>
         private void Fit(ReadOnlySpan<float> span, int rows, int cols)
         {
             _medians = new float[cols];
@@ -82,8 +68,8 @@ namespace DevOnBike.Overfit.Data.Prepare
 
             Array.Fill(_iqrs, _fallbackIqr);
 
-            using var sortBuffer = new FastBuffer<float>(rows);
-            var bufferSpan = sortBuffer.AsSpan();
+            using var sortBuffer = new PooledBuffer<float>(rows);
+            var bufferSpan = sortBuffer.Span;
 
             for (var c = 0; c < cols; c++)
             {
@@ -111,9 +97,6 @@ namespace DevOnBike.Overfit.Data.Prepare
             _fitted = true;
         }
 
-        /// <summary>
-        /// Applies the persisted statistics to data in-place.
-        /// </summary>
         private void Transform(Span<float> span, int rows, int cols)
         {
             for (var c = 0; c < cols; c++)
@@ -152,20 +135,13 @@ namespace DevOnBike.Overfit.Data.Prepare
             {
                 return false;
             }
-
             if (_columnIndices == null)
             {
                 return true;
             }
-
             return _columnIndices.Contains(colIndex);
         }
 
-        /// <summary>
-        /// Linear interpolation of percentiles.
-        /// Compatible with numpy.percentile(interpolation='linear').
-        /// Formula: rank = p * (N - 1). Result is lerp between adjacent samples.
-        /// </summary>
         private static float InterpolatePercentile(ReadOnlySpan<float> sorted, int count, float percentile)
         {
             var rank = percentile * (count - 1);
@@ -178,13 +154,37 @@ namespace DevOnBike.Overfit.Data.Prepare
             }
 
             var fraction = rank - lowerIdx;
-
             return sorted[lowerIdx] * (1f - fraction) + sorted[upperIdx] * fraction;
         }
 
-        /// <summary>
-        /// Resets the persisted statistics, forcing a re-Fit on the next Process call.
-        /// </summary>
+        public ScalerParams ExportParams()
+        {
+            if (!_fitted)
+            {
+                throw new InvalidOperationException("Scaler has not been fitted yet. Call Process() on training data first.");
+            }
+
+            return new ScalerParams
+            {
+                Medians = (float[])_medians.Clone(),
+                Iqrs = (float[])_iqrs.Clone()
+            };
+        }
+
+        public void ImportParams(ScalerParams scalerParams)
+        {
+            ArgumentNullException.ThrowIfNull(scalerParams);
+
+            if (scalerParams.Medians.Length != scalerParams.Iqrs.Length)
+            {
+                throw new ArgumentException("Medians and Iqrs must have the same length.");
+            }
+
+            _medians = (float[])scalerParams.Medians.Clone();
+            _iqrs = (float[])scalerParams.Iqrs.Clone();
+            _fitted = true;
+        }
+
         public void Reset()
         {
             _medians = null;

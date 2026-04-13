@@ -8,14 +8,10 @@ using DevOnBike.Overfit.Data.Contracts;
 
 namespace DevOnBike.Overfit.Data
 {
-    /// <summary>
-    /// Provides post-training analysis tools including Permutation Feature Importance (PFI) 
-    /// and multicollinearity detection.
-    /// </summary>
     public class ModelInterpreter
     {
-        private readonly TableSchema _schema;
         private readonly List<string> _featureNames;
+        private readonly TableSchema _schema;
 
         public ModelInterpreter(TableSchema schema, List<string> expandedFeatureNames)
         {
@@ -23,10 +19,6 @@ namespace DevOnBike.Overfit.Data
             _featureNames = expandedFeatureNames;
         }
 
-        /// <summary>
-        /// Calculates and prints the relative importance of features using the PFI method.
-        /// Measures the increase in prediction error after permuting each feature column.
-        /// </summary>
         public void PrintFeatureImportance(
             AutogradNode w1,
             AutogradNode b1,
@@ -36,9 +28,9 @@ namespace DevOnBike.Overfit.Data
             FastTensor<float> y)
         {
             var baselineLoss = CalculateLoss(w1, b1, w2, b2, x, y);
-            var scores = new float[x.GetDim(1)];
+            var scores = new float[x.GetView().GetDim(1)];
 
-            for (var c = 0; c < x.GetDim(1); c++)
+            for (var c = 0; c < x.GetView().GetDim(1); c++)
             {
                 using var shuffledX = CloneAndShuffleColumn(x, c);
                 var shuffledLoss = CalculateLoss(w1, b1, w2, b2, shuffledX, y);
@@ -62,19 +54,15 @@ namespace DevOnBike.Overfit.Data
             for (var i = combined.Length - 1; i >= 0; i--)
             {
                 var item = combined[i];
-                var pct = total > 0 ? (item.Score / total) * 100 : 0;
+                var pct = total > 0 ? item.Score / total * 100 : 0;
 
                 Console.WriteLine($"{item.Name,-25} : {pct,6:F1}% (score: {item.Score:F4})");
             }
         }
 
-        /// <summary>
-        /// Identifies and prints strong linear correlations between features using Pearson coefficient.
-        /// Helpful for detecting redundant information in the expanded feature set.
-        /// </summary>
         public void PrintCorrelations(FastTensor<float> features)
         {
-            var cols = features.GetDim(1);
+            var cols = features.GetView().GetDim(1);
 
             Console.WriteLine("\n=== STRONG FEATURE CORRELATIONS (>30%) ===");
 
@@ -91,9 +79,6 @@ namespace DevOnBike.Overfit.Data
             }
         }
 
-        /// <summary>
-        /// Computes MSE loss without recording the computation graph (Inference Mode).
-        /// </summary>
         private float CalculateLoss(
             AutogradNode w1,
             AutogradNode b1,
@@ -109,17 +94,15 @@ namespace DevOnBike.Overfit.Data
             using var pred = TensorMath.AddBias(null, TensorMath.MatMul(null, l1, w2), b2);
             using var loss = TensorMath.MSELoss(null, pred, target);
 
-            return loss.Forward();
+            return loss.DataView.AsReadOnlySpan()[0];
         }
 
-        /// <summary>
-        /// Calculates the Pearson correlation coefficient between two columns.
-        /// </summary>
         private float CalculatePearson(FastTensor<float> t, int colA, int colB)
         {
-            var rows = t.GetDim(0);
-            var cols = t.GetDim(1);
-            var s = t.AsSpan();
+            var view = t.GetView();
+            var rows = view.GetDim(0);
+            var cols = view.GetDim(1);
+            var s = view.AsReadOnlySpan();
 
             float sumA = 0, sumB = 0, sumAB = 0, sumA2 = 0, sumB2 = 0;
 
@@ -134,23 +117,23 @@ namespace DevOnBike.Overfit.Data
                 sumB2 += b * b;
             }
 
-            var num = (rows * sumAB) - (sumA * sumB);
+            var num = rows * sumAB - sumA * sumB;
             var den = MathF.Sqrt((rows * sumA2 - sumA * sumA) * (rows * sumB2 - sumB * sumB));
 
             return den == 0 ? 0 : num / den;
         }
 
-        /// <summary>
-        /// Creates a deep copy of the tensor and shuffles a specific column using Fisher-Yates.
-        /// </summary>
         private FastTensor<float> CloneAndShuffleColumn(FastTensor<float> src, int colIdx)
         {
-            var res = FastTensor<float>.SameShape(src, false);
-            src.AsSpan().CopyTo(res.AsSpan());
+            var res = FastTensor<float>.SameShape(src, clearMemory: false);
+            var srcView = src.GetView();
+            var resView = res.GetView();
 
-            var rows = res.GetDim(0);
-            var cols = res.GetDim(1);
-            var span = res.AsSpan();
+            srcView.AsReadOnlySpan().CopyTo(resView.AsSpan());
+
+            var rows = resView.GetDim(0);
+            var cols = resView.GetDim(1);
+            var span = resView.AsSpan();
 
             for (var i = rows - 1; i > 0; i--)
             {

@@ -1,58 +1,58 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
-	<PropertyGroup>
-		<TargetFramework>net10.0</TargetFramework>
-		<ImplicitUsings>enable</ImplicitUsings>
-		<DebugType>embedded</DebugType>
-		<NoWarn>$(NoWarn);1591</NoWarn>
-		<RootNamespace>DevOnBike.Overfit</RootNamespace>
-		<AssemblyName>DevOnBike.Overfit</AssemblyName>
-		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-		<SourceRevisionId>N/A</SourceRevisionId>
-		<InformationalVersion>$(Version)+$(SourceRevisionId)</InformationalVersion>
-		<PackageId>DevOnBike.Overfit</PackageId>
-		<Version>10.0.6</Version>
-		<Authors>DevOnBike</Authors>
-		<Description>High-performance, zero-allocation machine learning and deep learning framework for .NET. Fully optimized for Native AOT, SIMD vectorization, and CPU inference. Includes MLP, ResNet architectures, and advanced data preprocessing pipelines.</Description>
-		<PackageTags>machine-learning;deep-learning;neural-network;aot;native-aot;zero-allocation;simd;tensor;ai;csharp</PackageTags>
-		<RepositoryUrl>https://github.com/DevOnBike/Overfit</RepositoryUrl>
-		<RepositoryType>git</RepositoryType>
-		<PackageLicenseExpression>MIT</PackageLicenseExpression>
-		<PackageReadmeFile>README.md</PackageReadmeFile>
-		<PackageIcon>logo.png</PackageIcon>
-		<GenerateDocumentationFile>true</GenerateDocumentationFile>
-		
-		<PublishRepositoryUrl>true</PublishRepositoryUrl>
-		<EmbedUntrackedSources>true</EmbedUntrackedSources>
-		<IncludeSymbols>true</IncludeSymbols>
-		
-		<PublishAot>true</PublishAot>
-		<IsAotCompatible>true</IsAotCompatible>
-		<OptimizationPreference>Speed</OptimizationPreference>
-		<IsTrimmable>true</IsTrimmable>
-	</PropertyGroup>
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <DebugType>embedded</DebugType>
+        <NoWarn>$(NoWarn);1591</NoWarn>
+        <RootNamespace>DevOnBike.Overfit</RootNamespace>
+        <AssemblyName>DevOnBike.Overfit</AssemblyName>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <SourceRevisionId>N/A</SourceRevisionId>
+        <InformationalVersion>$(Version)+$(SourceRevisionId)</InformationalVersion>
+        <PackageId>DevOnBike.Overfit</PackageId>
+        <Version>10.0.7</Version>
+        <Authors>DevOnBike</Authors>
+        <Description>High-performance, zero-allocation machine learning and deep learning framework for .NET. Fully optimized for Native AOT, SIMD vectorization, and CPU inference. Includes MLP, ResNet architectures, and advanced data preprocessing pipelines.</Description>
+        <PackageTags>machine-learning;deep-learning;neural-network;aot;native-aot;zero-allocation;simd;tensor;ai;csharp</PackageTags>
+        <RepositoryUrl>https://github.com/DevOnBike/Overfit</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+        <PackageLicenseExpression>MIT</PackageLicenseExpression>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <PackageIcon>logo.png</PackageIcon>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
 
-	<ItemGroup>
-		<None Include="logo.png" Pack="true" PackagePath="\" />
-		<None Include="README.md" Pack="true" PackagePath="\" />
-		<InternalsVisibleTo Include="Tests" />
-	</ItemGroup>
+        <PublishRepositoryUrl>true</PublishRepositoryUrl>
+        <EmbedUntrackedSources>true</EmbedUntrackedSources>
+        <IncludeSymbols>true</IncludeSymbols>
 
-	<ItemGroup>
-		<PackageReference Include="IDisposableAnalyzers">
-			<PrivateAssets>all</PrivateAssets>
-			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-		</PackageReference>
-		<PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers">
-			<PrivateAssets>all</PrivateAssets>
-			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-		</PackageReference>
-		<PackageReference Include="System.Numerics.Tensors" />
-	</ItemGroup>
+        <PublishAot>true</PublishAot>
+        <IsAotCompatible>true</IsAotCompatible>
+        <OptimizationPreference>Speed</OptimizationPreference>
+        <IsTrimmable>true</IsTrimmable>
+    </PropertyGroup>
 
-	<ItemGroup>
-		<AdditionalFiles Include="BannedSymbols.txt" />
-		<Using Remove="System.Linq" />
-	</ItemGroup>
+    <ItemGroup>
+        <None Include="logo.png" Pack="true" PackagePath="\" />
+        <None Include="README.md" Pack="true" PackagePath="\" />
+        <InternalsVisibleTo Include="DevOnBike.Overfit.Tests" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="IDisposableAnalyzers">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+        <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+        <PackageReference Include="System.Numerics.Tensors" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <AdditionalFiles Include="BannedSymbols.txt" />
+        <Using Remove="System.Linq" />
+    </ItemGroup>
 
 </Project>

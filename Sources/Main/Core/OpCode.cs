@@ -6,7 +6,7 @@
 namespace DevOnBike.Overfit.Core
 {
     /// <summary>
-    /// Opcodes for the computation graph tape. Packed as byte for memory efficiency.
+    ///     Opcodes for the computation graph tape. Packed as byte for memory efficiency.
     /// </summary>
     public enum OpCode : byte
     {
@@ -21,9 +21,17 @@ namespace DevOnBike.Overfit.Core
         MaxPool2D,
         GlobalAveragePool2D,
         BatchNorm1D,
-        MSELoss,
+        MseLoss,
         SoftmaxCrossEntropy,
         Reshape,
-        DirectionalLoss
+        DirectionalLoss,
+        Sigmoid,
+        Tanh,
+        Multiply,
+        GateSlice,
+        TimestepSlice,
+        StackTimesteps,
+        RepeatVector,
+        FusedLSTMStep
     }
 }

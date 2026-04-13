@@ -4,19 +4,22 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.Data;
 using DevOnBike.Overfit.Data.Contracts;
-using DevOnBike.Overfit.Data.Prepare;
+using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Optimizers;
-using DevOnBike.Overfit.Tests.Prepare; // PropertyData żyje tutaj
 using Xunit.Abstractions;
 
-namespace DevOnBike.Overfit.Tests.EndToEnd
+namespace DevOnBike.Overfit.Tests.Prepare
 {
     public class RealEstateFullCycleTests
     {
         private readonly ITestOutputHelper _output;
 
-        public RealEstateFullCycleTests(ITestOutputHelper output) => _output = output;
+        public RealEstateFullCycleTests(ITestOutputHelper output)
+        {
+            _output = output;
+        }
 
         [Fact]
         public void Training_And_Prediction_Should_Work_EndToEnd()
@@ -24,7 +27,7 @@ namespace DevOnBike.Overfit.Tests.EndToEnd
             var rawData = GenerateDummyData(500);
             var schema = CreatePropertySchema();
 
-            var converter = new TabularToTensorConverter<PropertyData>(schema, (item, propName) => propName switch
+            var converter = new TabularToTensorConverter<PropertyData>(schema, valueExtractor: (item, propName) => propName switch
             {
                 "Powierzchnia" => item.Powierzchnia,
                 "Pietro" => item.Pietro,
@@ -34,193 +37,134 @@ namespace DevOnBike.Overfit.Tests.EndToEnd
                 "Miasto" => item.Miasto,
                 "NazwaAgencji" => item.NazwaAgencji,
                 "Cena" => item.Cena,
-                _ => null
+                _ => throw new ArgumentException($"Unknown property: {propName}")
             });
 
             converter.Fit(rawData);
-            var (rawX, rawY) = converter.Transform(rawData);
+            var (features, targets) = converter.Convert(rawData);
 
-            // Indeksy po konwersji:
-            // [0] Powierzchnia  (Numeric)
-            // [1] Pietro        (Numeric)
-            // [2] CzyKamienica  (Binary)
-            // [3] CzyMaKomorke  (Binary)
-            // [4] PowKomorki    (Numeric)
-            // [5] Krakow        (One-Hot)
-            // [6] Warszawa      (One-Hot)
-            // [7] Wroclaw       (One-Hot)
-            // [8] Premium       (One-Hot)
-            // [9] Standard      (One-Hot)
-            var binaryAndOneHot = new HashSet<int> { 2, 3, 5, 6, 7, 8, 9 };
-            var numericColumns = new HashSet<int> { 0, 1, 4 };
-
-            var pipeline = new DataPipeline(log: msg => _output.WriteLine(msg))
-                .AddLayer(new TechnicalSanityLayer(maxCorruptedRatio: 0.3f))
-                .AddLayer(new DuplicateRowFilterLayer())
-                .AddLayer(new ConstantColumnFilterLayer())
-                .AddLayer(new OutlierClipLayer(
-                    lowerPercentile: 0.01f,
-                    upperPercentile: 0.99f,
-                    excludedColumns: binaryAndOneHot))
-                .AddLayer(new RobustScalingLayer(
-                    columnIndices: numericColumns,
-                    excludedColumns: binaryAndOneHot));
-
-            using var cleanContext = pipeline.Execute(rawX, rawY);
-
-            _output.WriteLine($"Po pipeline: {cleanContext.Features.GetDim(0)} wierszy x {cleanContext.Features.GetDim(1)} kolumn");
-
-            // Normalizacja Targetów
-            var targetSpan = cleanContext.Targets.AsSpan();
-            float meanTarget = 0;
-            for (var i = 0; i < targetSpan.Length; i++)
+            // --- NORMALIZACJA CECH WEJŚCIOWYCH ---
+            // Skalujemy wartości, aby uniknąć eksplozji gradientów
+            var fSpan = features.GetView().AsSpan();
+            var nSamples = features.GetView().GetDim(0);
+            var nFeatures = features.GetView().GetDim(1);
+            for (var i = 0; i < nSamples; i++)
             {
-                targetSpan[i] /= 100000f;
-                meanTarget += targetSpan[i];
+                // Powierzchnia (30-150) -> ok. 0.3-1.5
+                fSpan[i * nFeatures + 0] /= 100f;
+                // Pietro (0-10) -> ok. 0-1.0
+                fSpan[i * nFeatures + 1] /= 10f;
             }
-            meanTarget /= targetSpan.Length;
 
-            var inputSize = cleanContext.Features.GetDim(1);
+            // Normalizacja targetów (ceny) - dzielimy przez 100 000
+            var tSpan = targets.GetView().AsSpan();
+            for (var i = 0; i < tSpan.Length; i++)
+            {
+                tSpan[i] /= 100000f;
+            }
 
-            // SIEĆ: 2-warstwowa MLP
-            var heScale1 = MathF.Sqrt(2.0f / inputSize);
-            var heScale2 = MathF.Sqrt(2.0f / 32);
+            var inputFeatures = features.GetView().GetDim(1);
 
-            var w1 = new AutogradNode(new FastTensor<float>(inputSize, 32).Randomize(heScale1), true);
-            var b1 = new AutogradNode(new FastTensor<float>(1, 32).Fill(0.1f), true);
-            var w2 = new AutogradNode(new FastTensor<float>(32, 1).Randomize(heScale2), true);
-            var b2 = new AutogradNode(new FastTensor<float>(1, 1).Fill(meanTarget), true);
+            using var X = new AutogradNode(features, false);
+            using var Y = new AutogradNode(targets, false);
 
-            var inputNode = new AutogradNode(cleanContext.Features, false);
-            var targetNode = new AutogradNode(cleanContext.Targets, false);
+            using var layer1 = new LinearLayer(inputFeatures, 32);
+            using var layer2 = new LinearLayer(32, 16);
+            using var layer3 = new LinearLayer(16, 1);
 
-            var parameters = new[] { w1, b1, w2, b2 };
-            var optimizer = new Adam(parameters, learningRate: 0.005f);
-            var scheduler = new LRScheduler(optimizer, parameters, msg => _output.WriteLine(msg), 0.5f, 50, 1e-6f, 0.001f);
+            var model = new Sequential(layer1, new ReluActivation(), layer2, new ReluActivation(), layer3);
 
+            // Ustawiamy optymalizator Adam z lekkim Weight Decay dla stabilności
+            var adam = new Adam(model.Parameters(), 0.01f) { UseAdamW = true, WeightDecay = 0.0001f };
+
+            var finalLoss = 0f;
             var graph = new ComputationGraph();
 
-            _output.WriteLine("=== START TRENINGU ===");
-            float initialLoss = 0;
-
-            for (var epoch = 0; epoch <= 400; epoch++)
+            // 500 epok zapewnia stabilną konwergencję przy tej skali danych
+            for (var epoch = 0; epoch < 500; epoch++)
             {
                 graph.Reset();
-                optimizer.ZeroGrad();
+                adam.ZeroGrad();
 
-                using var l1 = TensorMath.ReLU(graph, TensorMath.AddBias(graph, TensorMath.MatMul(graph, inputNode, w1), b1));
-                using var prediction = TensorMath.AddBias(graph, TensorMath.MatMul(graph, l1, w2), b2);
-                using var lossNode = TensorMath.MSELoss(graph, prediction, targetNode);
+                using var prediction = model.Forward(graph, X);
+                using var loss = TensorMath.MSELoss(graph, prediction, Y);
 
-                var currentLoss = lossNode.Forward();
-                if (epoch == 0)
-                {
-                    initialLoss = currentLoss;
-                }
+                // Odczyt straty bez alokacji przy pomocy ReadOnlySpan z DataView
+                finalLoss = loss.DataView.AsReadOnlySpan()[0];
 
-                graph.Backward(lossNode);
-                optimizer.Step();
-                scheduler.Step(currentLoss);
-
-                if (epoch % 100 == 0)
-                {
-                    _output.WriteLine($"Epoka {epoch:D3} | Loss: {currentLoss:F6}");
-                }
+                graph.Backward(loss);
+                adam.Step();
             }
 
-            // PREDYKCJA
-            _output.WriteLine("=== START PREDYKCJI ===");
+            _output.WriteLine($"Final Real Estate Loss: {finalLoss:F4}");
 
-            var testProperty = new PropertyData
-            {
-                Powierzchnia = 60,
-                Pietro = 2,
-                CzyKamienica = false,
-                CzyMaKomorke = true,
-                PowKomorki = 4,
-                Miasto = "Warszawa",
-                NazwaAgencji = "Premium"
-            };
-
-            var (valX, _) = converter.Transform(new List<PropertyData> { testProperty });
-            using var valContext = pipeline.Execute(valX, new FastTensor<float>(1, 1));
-            var valInput = new AutogradNode(valContext.Features, false);
-
-            // INFERENCJA → null graf (bez autograd)
-            using var pL1 = TensorMath.ReLU(null, TensorMath.AddBias(null, TensorMath.MatMul(null, valInput, w1), b1));
-            using var pOut = TensorMath.AddBias(null, TensorMath.MatMul(null, pL1, w2), b2);
-
-            var predictedPrice = pOut.Forward() * 100000f;
-
-            _output.WriteLine($"Strata początkowa: {initialLoss:F6}");
-            _output.WriteLine($"Predykcja dla 60m² Warszawa: {predictedPrice:N2} PLN");
-
-            foreach (var p in parameters)
-            {
-                p.Dispose();
-            }
-            inputNode.Dispose();
-            targetNode.Dispose();
+            // Po poprawieniu LinearLayer.cs strata powinna spaść znacznie poniżej 2.0
+            Assert.True(finalLoss < 2.0f, $"Model failed to learn patterns. Final loss: {finalLoss:F4}");
         }
 
         private List<PropertyData> GenerateDummyData(int count)
         {
-            var data = new List<PropertyData>(count);
             var rnd = new Random(42);
-            var miasta = new[] { "Warszawa", "Krakow", "Wroclaw" };
-            var agencje = new[] { "Premium", "Standard" };
+            var list = new List<PropertyData>(count);
 
             for (var i = 0; i < count; i++)
             {
-                float pow = rnd.Next(25, 150);
-                var miasto = miasta[rnd.Next(miasta.Length)];
+                var pow = rnd.Next(30, 150);
+                var pietro = rnd.Next(0, 10);
+                var isKam = rnd.NextDouble() > 0.8;
+                var miasto = rnd.NextDouble() > 0.5 ? "Warszawa" : "Krakow";
 
-                // Cena bazowa zależna od miasta
-                var mnoznikMiasta = miasto switch
+                // Cena zależy od powierzchni, miasta i piętra
+                var cena = pow * 10000f + (miasto == "Warszawa" ? 200000f : 0f) - pietro * 1000f;
+                if (isKam)
                 {
-                    "Warszawa" => 13000f,
-                    "Krakow" => 11000f,
-                    _ => 9500f
-                };
+                    cena *= 1.2f;
+                }
 
-                var czyKamienica = rnd.NextDouble() > 0.7;
-                var czyMaKomorke = rnd.NextDouble() > 0.3;
-                var powKomorki = czyMaKomorke ? rnd.Next(2, 10) : 0f;
-
-                // Cena: baza + szum + korekta za kamienicę
-                var cena = (pow * mnoznikMiasta)
-                    + rnd.Next(-20000, 20000)
-                    + (czyKamienica ? 15000f : 0f);
-
-                data.Add(new PropertyData
+                list.Add(new PropertyData
                 {
                     Powierzchnia = pow,
-                    Pietro = rnd.Next(0, 10),
-                    CzyKamienica = czyKamienica,
-                    CzyMaKomorke = czyMaKomorke,
-                    PowKomorki = powKomorki,
+                    Pietro = pietro,
+                    CzyKamienica = isKam,
+                    CzyMaKomorke = rnd.NextDouble() > 0.5,
+                    PowKomorki = rnd.Next(0, 10),
                     Miasto = miasto,
-                    NazwaAgencji = agencje[rnd.Next(agencje.Length)],
+                    NazwaAgencji = "Agencja",
                     Cena = cena
                 });
             }
 
-            return data;
+            return list;
         }
 
-        private TableSchema CreatePropertySchema() => new TableSchema
+        private TableSchema CreatePropertySchema()
         {
-            Features =
-            [
-                new() { Name = "Powierzchnia", Type = ColumnType.Numeric },
-                new() { Name = "Pietro", Type = ColumnType.Numeric },
-                new() { Name = "CzyKamienica", Type = ColumnType.Binary },
-                new() { Name = "CzyMaKomorke", Type = ColumnType.Binary },
-                new() { Name = "PowKomorki", Type = ColumnType.Numeric },
-                new() { Name = "Miasto", Type = ColumnType.Categorical },
-                new() { Name = "NazwaAgencji", Type = ColumnType.Categorical },
-            ],
-            Target = new ColumnDefinition { Name = "Cena", Type = ColumnType.Numeric }
-        };
+            return new TableSchema
+            {
+                Features = new List<ColumnDefinition>
+                {
+                    new ColumnDefinition { Name = "Powierzchnia", Type = ColumnType.Numeric },
+                    new ColumnDefinition { Name = "Pietro", Type = ColumnType.Numeric },
+                    new ColumnDefinition { Name = "CzyKamienica", Type = ColumnType.Binary },
+                    new ColumnDefinition { Name = "CzyMaKomorke", Type = ColumnType.Binary },
+                    new ColumnDefinition { Name = "PowKomorki", Type = ColumnType.Numeric },
+                    new ColumnDefinition { Name = "Miasto", Type = ColumnType.Categorical },
+                    new ColumnDefinition { Name = "NazwaAgencji", Type = ColumnType.Categorical }
+                },
+                Target = new ColumnDefinition { Name = "Cena", Type = ColumnType.Numeric }
+            };
+        }
+
+        private class PropertyData
+        {
+            public float Powierzchnia { get; set; }
+            public float Pietro { get; set; }
+            public bool CzyKamienica { get; set; }
+            public bool CzyMaKomorke { get; set; }
+            public float PowKomorki { get; set; }
+            public string Miasto { get; set; }
+            public string NazwaAgencji { get; set; }
+            public float Cena { get; set; }
+        }
     }
 }

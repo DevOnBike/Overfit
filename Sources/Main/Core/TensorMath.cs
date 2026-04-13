@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
@@ -10,156 +11,161 @@ using System.Runtime.InteropServices;
 
 namespace DevOnBike.Overfit.Core
 {
-    /// <summary>
-    /// Static utility class providing high-performance tensor operations with Autograd support.
-    /// Utilizes SIMD (TensorPrimitives) and Task Parallel Library (TPL) for hardware acceleration.
-    /// </summary>
     public static class TensorMath
     {
-        // Workload threshold (in FMA operations) below which Parallel.For is inefficient.
         private const long ParallelThreshold = 4096;
+        private const int StackAllocThreshold = 1024;
 
         // ====================================================================
-        // 1. BASIC LINEAR ALGEBRA
+        // HELPER ALLOCATOR
+        // ====================================================================
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static FastTensor<float> AllocateLike(AutogradNode node, bool clearMemory = true)
+        {
+            var v = node.DataView;
+            return v.Rank switch
+            {
+                1 => new FastTensor<float>(v.GetDim(0), clearMemory),
+                2 => new FastTensor<float>(v.GetDim(0), v.GetDim(1), clearMemory),
+                3 => new FastTensor<float>(v.GetDim(0), v.GetDim(1), v.GetDim(2), clearMemory),
+                4 => new FastTensor<float>(v.GetDim(0), v.GetDim(1), v.GetDim(2), v.GetDim(3), clearMemory),
+                _ => throw new InvalidOperationException("Nieobsługiwany wymiar")
+            };
+        }
+
+        // ====================================================================
+        // 1. CORE ALGEBRA (Parallel Safe - No Span Capturing)
         // ====================================================================
 
         public static AutogradNode Add(ComputationGraph graph, AutogradNode left, AutogradNode right)
         {
-            var resultData = FastTensor<float>.SameShape(left.Data);
-            TensorPrimitives.Add(left.Data.AsSpan(), right.Data.AsSpan(), resultData.AsSpan());
-            var outputNode = new AutogradNode(resultData, left.RequiresGrad || right.RequiresGrad);
+            var resD = AllocateLike(left, false);
+            TensorPrimitives.Add(left.DataView.AsReadOnlySpan(), right.DataView.AsReadOnlySpan(), resD.GetView().AsSpan());
 
-            if (outputNode.RequiresGrad)
+            var output = new AutogradNode(resD, left.RequiresGrad || right.RequiresGrad);
+            if (output.RequiresGrad)
             {
-                graph?.Record(OpCode.Add, outputNode, left, right);
+                graph?.Record(OpCode.Add, output, left, right);
             }
-
-            return outputNode;
+            return output;
         }
 
         public static void AddBackward(AutogradNode a, AutogradNode b, AutogradNode output)
         {
             if (a.RequiresGrad)
             {
-                TensorPrimitives.Add(a.Grad.AsSpan(), output.Grad.AsSpan(), a.Grad.AsSpan());
+                TensorPrimitives.Add(a.GradView.AsSpan(), output.GradView.AsReadOnlySpan(), a.GradView.AsSpan());
             }
-
             if (b.RequiresGrad)
             {
-                TensorPrimitives.Add(b.Grad.AsSpan(), output.Grad.AsSpan(), b.Grad.AsSpan());
+                TensorPrimitives.Add(b.GradView.AsSpan(), output.GradView.AsReadOnlySpan(), b.GradView.AsSpan());
             }
+        }
+
+        public static AutogradNode Subtract(ComputationGraph graph, AutogradNode left, AutogradNode right)
+        {
+            var resD = AllocateLike(left, false);
+            TensorPrimitives.Subtract(left.DataView.AsReadOnlySpan(), right.DataView.AsReadOnlySpan(), resD.GetView().AsSpan());
+
+            var output = new AutogradNode(resD, left.RequiresGrad || right.RequiresGrad);
+            if (output.RequiresGrad)
+            {
+                graph?.Record(OpCode.Subtract, output, left, right);
+            }
+            return output;
         }
 
         public static AutogradNode AddBias(ComputationGraph graph, AutogradNode input, AutogradNode bias)
         {
-            var N = input.Data.GetDim(0);
-            var C = input.Data.GetDim(1);
-            var resultData = new FastTensor<float>(N, C);
-            var inS = input.Data.AsSpan();
-            var bS = bias.Data.AsSpan();
-            var resS = resultData.AsSpan();
+            int N = input.DataView.GetDim(0), C = input.DataView.GetDim(1);
+            var resD = new FastTensor<float>(N, C, false);
 
-            for (var i = 0; i < N; i++)
+            Parallel.For(0, N, i =>
             {
-                TensorPrimitives.Add(inS.Slice(i * C, C), bS, resS.Slice(i * C, C));
-            }
+                // Widoki są generowane bezpiecznie WNĘTRZU lambdy
+                TensorPrimitives.Add(input.DataView.AsReadOnlySpan().Slice(i * C, C), bias.DataView.AsReadOnlySpan(), resD.GetView().AsSpan().Slice(i * C, C));
+            });
 
-            var outputNode = new AutogradNode(resultData, input.RequiresGrad || bias.RequiresGrad);
-
-            if (outputNode.RequiresGrad)
+            var output = new AutogradNode(resD, input.RequiresGrad || bias.RequiresGrad);
+            if (output.RequiresGrad)
             {
-                graph?.Record(OpCode.AddBias, outputNode, input, bias);
+                graph?.Record(OpCode.AddBias, output, input, bias);
             }
-
-            return outputNode;
+            return output;
         }
 
         public static void AddBiasBackward(AutogradNode input, AutogradNode bias, AutogradNode output)
         {
-            var N = input.Data.GetDim(0);
-            var C = input.Data.GetDim(1);
-
+            int N = input.DataView.GetDim(0), C = input.DataView.GetDim(1);
             if (input.RequiresGrad)
             {
-                TensorPrimitives.Add(input.Grad.AsSpan(), output.Grad.AsSpan(), input.Grad.AsSpan());
+                TensorPrimitives.Add(input.GradView.AsSpan(), output.GradView.AsReadOnlySpan(), input.GradView.AsSpan());
             }
-
             if (bias.RequiresGrad)
             {
-                var bGS = bias.Grad.AsSpan();
-                var oGS = output.Grad.AsSpan();
-
+                var bG = bias.GradView.AsSpan();
                 for (var i = 0; i < N; i++)
                 {
-                    TensorPrimitives.Add(bGS, oGS.Slice(i * C, C), bGS);
+                    TensorPrimitives.Add(bG, output.GradView.AsReadOnlySpan().Slice(i * C, C), bG);
                 }
             }
         }
 
         public static AutogradNode MatMul(ComputationGraph graph, AutogradNode left, AutogradNode right)
         {
-            var resultData = MatMulRaw(left.Data, right.Data);
-            var outputNode = new AutogradNode(resultData, left.RequiresGrad || right.RequiresGrad);
-
-            if (outputNode.RequiresGrad)
+            var resD = MatMulRaw(left, right);
+            var output = new AutogradNode(resD, left.RequiresGrad || right.RequiresGrad);
+            if (output.RequiresGrad)
             {
-                graph?.Record(OpCode.MatMul, outputNode, left, right);
+                graph?.Record(OpCode.MatMul, output, left, right);
             }
-
-            return outputNode;
+            return output;
         }
 
-        public static FastTensor<float> MatMulRaw(FastTensor<float> A, FastTensor<float> B)
+        public static FastTensor<float> MatMulRaw(AutogradNode A, AutogradNode B)
         {
-            int aRows = A.GetDim(0), aCols = A.GetDim(1), bCols = B.GetDim(1);
-            var C = new FastTensor<float>(aRows, bCols);
+            int aR = A.DataView.GetDim(0), aC = A.DataView.GetDim(1), bC = B.DataView.GetDim(1);
+            var C = new FastTensor<float>(aR, bC, true);
 
-            var totalWork = (long)aRows * aCols * bCols;
-
-            if (totalWork < ParallelThreshold)
+            if ((long)aR * aC * bC < ParallelThreshold)
             {
-                MatMulRawSequential(A.AsSpan(), B.AsSpan(), aRows, aCols, bCols, C.AsSpan());
+                MatMulRawSeq(A.DataView.AsReadOnlySpan(), B.DataView.AsReadOnlySpan(), aR, aC, bC, C.GetView().AsSpan());
             }
             else
             {
-                Parallel.For(0, aRows, i =>
+                Parallel.For(0, aR, i =>
                 {
-                    var aS = A.AsSpan();
-                    var bS = B.AsSpan();
-                    var rowC = C.AsSpan().Slice(i * bCols, bCols);
+                    var rC = C.GetView().AsSpan().Slice(i * bC, bC);
+                    var rA = A.DataView.AsReadOnlySpan().Slice(i * aC, aC);
+                    var bS = B.DataView.AsReadOnlySpan();
 
-                    for (var k = 0; k < aCols; k++)
+                    for (var k = 0; k < aC; k++)
                     {
-                        var valA = aS[i * aCols + k];
-
-                        if (valA == 0)
+                        if (rA[k] != 0f)
                         {
-                            continue;
+                            TensorPrimitives.MultiplyAdd(bS.Slice(k * bC, bC), rA[k], rC, rC);
                         }
-
-                        TensorPrimitives.MultiplyAdd(bS.Slice(k * bCols, bCols), valA, rowC, rowC);
                     }
                 });
             }
-
             return C;
         }
 
-        private static void MatMulRawSequential(ReadOnlySpan<float> aS, ReadOnlySpan<float> bS, int aR, int aC, int bC, Span<float> cS)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void MatMulRawSeq(ReadOnlySpan<float> aS, ReadOnlySpan<float> bS, int aR, int aC, int bC, Span<float> cS)
         {
             cS.Clear();
 
             for (var i = 0; i < aR; i++)
             {
-                var rowC = cS.Slice(i * bC, bC);
-                var rowA = aS.Slice(i * aC, aC);
-
+                var rC = cS.Slice(i * bC, bC);
+                var rA = aS.Slice(i * aC, aC);
                 for (var k = 0; k < aC; k++)
                 {
-                    var valA = rowA[k];
-                    if (valA != 0f)
+                    if (rA[k] != 0f)
                     {
-                        TensorPrimitives.MultiplyAdd(bS.Slice(k * bC, bC), valA, rowC, rowC);
+                        TensorPrimitives.MultiplyAdd(bS.Slice(k * bC, bC), rA[k], rC, rC);
                     }
                 }
             }
@@ -169,112 +175,107 @@ namespace DevOnBike.Overfit.Core
         {
             if (a.RequiresGrad)
             {
-                // dA = dO * B^T
-                using var gradA = MatMul_A_BT(output.Grad, b.Data);
-                TensorPrimitives.Add(a.Grad.AsSpan(), gradA.AsSpan(), a.Grad.AsSpan());
+                MatMulAdd_A_BT_Raw(output, true, b, false, a, true);
             }
-
             if (b.RequiresGrad)
             {
-                // dB = A^T * dO
-                using var gradB = MatMul_AT_B(a.Data, output.Grad);
-                TensorPrimitives.Add(b.Grad.AsSpan(), gradB.AsSpan(), b.Grad.AsSpan());
+                MatMulAdd_AT_B_Raw(a, false, output, true, b, true);
             }
         }
 
-        private static FastTensor<float> MatMul_A_BT(FastTensor<float> A, FastTensor<float> B)
+        public static void MatMulAdd_A_BT_Raw(AutogradNode A, bool aGrad, AutogradNode B, bool bGrad, AutogradNode C, bool cGrad)
         {
-            int N = A.GetDim(0), K = A.GetDim(1), M = B.GetDim(0);
-            var C = new FastTensor<float>(false, N, M);
-            var totalWork = (long)N * K * M;
+            var N = (aGrad ? A.GradView : A.DataView).GetDim(0);
+            var K = (aGrad ? A.GradView : A.DataView).GetDim(1);
+            var M = (bGrad ? B.GradView : B.DataView).GetDim(0);
 
-            if (totalWork < ParallelThreshold)
+            if ((long)N * K * M < ParallelThreshold)
             {
-                var aS = A.AsSpan();
-                var bS = B.AsSpan();
-                var cS = C.AsSpan();
-
-                for (var i = 0; i < N; i++)
-                {
-                    var aRow = aS.Slice(i * K, K);
-                    var cRow = cS.Slice(i * M, M);
-
-                    for (var j = 0; j < M; j++)
-                    {
-                        cRow[j] = TensorPrimitives.Dot(aRow, bS.Slice(j * K, K));
-                    }
-                }
+                var aS = (aGrad ? A.GradView : A.DataView).AsReadOnlySpan();
+                var bS = (bGrad ? B.GradView : B.DataView).AsReadOnlySpan();
+                var cS = (cGrad ? C.GradView : C.DataView).AsSpan();
+                MatMulAdd_A_BT_Seq(aS, bS, cS, N, K, M);
             }
             else
             {
                 Parallel.For(0, N, i =>
                 {
-                    var aRow = A.AsSpan().Slice(i * K, K);
-                    var cRow = C.AsSpan().Slice(i * M, M);
-                    var bS = B.AsSpan();
+                    var aS = (aGrad ? A.GradView : A.DataView).AsReadOnlySpan();
+                    var bS = (bGrad ? B.GradView : B.DataView).AsReadOnlySpan();
+                    var cS = (cGrad ? C.GradView : C.DataView).AsSpan();
 
+                    var rA = aS.Slice(i * K, K);
+                    var rC = cS.Slice(i * M, M);
                     for (var j = 0; j < M; j++)
                     {
-                        cRow[j] = TensorPrimitives.Dot(aRow, bS.Slice(j * K, K));
+                        rC[j] += TensorPrimitives.Dot(rA, bS.Slice(j * K, K));
                     }
                 });
             }
-
-            return C;
         }
 
-        private static FastTensor<float> MatMul_AT_B(FastTensor<float> A, FastTensor<float> B)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void MatMulAdd_A_BT_Seq(ReadOnlySpan<float> aS, ReadOnlySpan<float> bS, Span<float> cS, int N, int K, int M)
         {
-            var K = A.GetDim(0);
-            var N = A.GetDim(1);
-            var M = B.GetDim(1);
-            var C = new FastTensor<float>(true, N, M);
-            var totalWork = (long)N * K * M;
-
-            if (totalWork < ParallelThreshold)
+            for (var i = 0; i < N; i++)
             {
-                var aS = A.AsSpan();
-                var bS = B.AsSpan();
-                var cS = C.AsSpan();
-
-                for (var i = 0; i < N; i++)
+                var rA = aS.Slice(i * K, K); var rC = cS.Slice(i * M, M);
+                for (var j = 0; j < M; j++)
                 {
-                    var cRow = cS.Slice(i * M, M);
-
-                    for (var k = 0; k < K; k++)
-                    {
-                        var aVal = aS[k * N + i];
-
-                        if (aVal != 0f)
-                        {
-                            TensorPrimitives.MultiplyAdd(bS.Slice(k * M, M), aVal, cRow, cRow);
-                        }
-                    }
+                    rC[j] += TensorPrimitives.Dot(rA, bS.Slice(j * K, K));
                 }
+            }
+        }
+
+        public static void MatMulAdd_AT_B_Raw(AutogradNode A, bool aGrad, AutogradNode B, bool bGrad, AutogradNode C, bool cGrad)
+        {
+            var K = (aGrad ? A.GradView : A.DataView).GetDim(0);
+            var N = (aGrad ? A.GradView : A.DataView).GetDim(1);
+            var M = (bGrad ? B.GradView : B.DataView).GetDim(1);
+
+            if ((long)N * K * M < ParallelThreshold)
+            {
+                var aS = (aGrad ? A.GradView : A.DataView).AsReadOnlySpan();
+                var bS = (bGrad ? B.GradView : B.DataView).AsReadOnlySpan();
+                var cS = (cGrad ? C.GradView : C.DataView).AsSpan();
+                MatMulAdd_AT_B_Seq(aS, bS, cS, K, N, M);
             }
             else
             {
                 Parallel.For(0, N, i =>
                 {
-                    var cRow = C.AsSpan().Slice(i * M, M);
-                    var aS = A.AsSpan();
-                    var bS = B.AsSpan();
+                    var aS = (aGrad ? A.GradView : A.DataView).AsReadOnlySpan();
+                    var bS = (bGrad ? B.GradView : B.DataView).AsReadOnlySpan();
+                    var cS = (cGrad ? C.GradView : C.DataView).AsSpan();
 
+                    var rC = cS.Slice(i * M, M);
                     for (var k = 0; k < K; k++)
                     {
-                        var aVal = aS[k * N + i];
-
-                        if (aVal == 0)
+                        var vA = aS[k * N + i];
+                        if (vA != 0f)
                         {
-                            continue;
+                            TensorPrimitives.MultiplyAdd(bS.Slice(k * M, M), vA, rC, rC);
                         }
-
-                        TensorPrimitives.MultiplyAdd(bS.Slice(k * M, M), aVal, cRow, cRow);
                     }
                 });
             }
+        }
 
-            return C;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void MatMulAdd_AT_B_Seq(ReadOnlySpan<float> aS, ReadOnlySpan<float> bS, Span<float> cS, int K, int N, int M)
+        {
+            for (var i = 0; i < N; i++)
+            {
+                var rC = cS.Slice(i * M, M);
+                for (var k = 0; k < K; k++)
+                {
+                    var vA = aS[k * N + i];
+                    if (vA != 0f)
+                    {
+                        TensorPrimitives.MultiplyAdd(bS.Slice(k * M, M), vA, rC, rC);
+                    }
+                }
+            }
         }
 
         // ====================================================================
@@ -283,27 +284,26 @@ namespace DevOnBike.Overfit.Core
 
         public static AutogradNode Conv2D(ComputationGraph graph, AutogradNode input, AutogradNode weights, int inC, int outC, int h, int w, int k)
         {
-            int outH = h - k + 1, outW = w - k + 1, batchSize = input.Data.GetDim(0), kSqInC = k * k * inC;
-            int colSizePerImg = kSqInC * outH * outW, inSize = inC * h * w, outSize = outC * outH * outW;
-
-            using var workspace = new FastTensor<float>(false, batchSize, colSizePerImg);
-            var resultData = new FastTensor<float>(batchSize, outC, outH, outW);
-            using var weights2D = weights.Data.Reshape(outC, kSqInC);
-
-            Parallel.For(0, batchSize, n =>
+            int outH = h - k + 1, outW = w - k + 1, batchSize = input.DataView.GetDim(0), kSqInC = k * k * inC, colS = kSqInC * outH * outW;
+            var workspaceArr = ArrayPool<float>.Shared.Rent(batchSize * colS);
+            var resultData = new FastTensor<float>(batchSize, outC, outH, outW, false);
+            try
             {
-                var colSpan = workspace.AsSpan().Slice(n * colSizePerImg, colSizePerImg);
-                Im2Col(input.Data.AsSpan().Slice(n * inSize, inSize), inC, h, w, k, 1, 0, colSpan);
-                MatMulRawSequential(weights2D.AsSpan(), colSpan, outC, kSqInC, outH * outW, resultData.AsSpan().Slice(n * outSize, outSize));
-            });
+                Parallel.For(0, batchSize, n =>
+                {
+                    var w2D = weights.DataView.Reshape(outC, kSqInC);
+                    var colS_n = workspaceArr.AsSpan(n * colS, colS);
+                    Im2Col(input.DataView.AsReadOnlySpan().Slice(n * inC * h * w, inC * h * w), inC, h, w, k, 1, 0, colS_n);
+                    MatMulRawSeq(w2D.AsReadOnlySpan(), colS_n, outC, kSqInC, outH * outW, resultData.GetView().AsSpan().Slice(n * outC * outH * outW, outC * outH * outW));
+                });
+            }
+            finally { ArrayPool<float>.Shared.Return(workspaceArr); }
 
             var outputNode = new AutogradNode(resultData, input.RequiresGrad || weights.RequiresGrad);
-
             if (outputNode.RequiresGrad)
             {
                 graph?.Record(OpCode.Conv2D, outputNode, input, weights, inC, outC, h, w, k);
             }
-
             return outputNode;
         }
 
@@ -314,203 +314,76 @@ namespace DevOnBike.Overfit.Core
                 return;
             }
 
-            int outH = h - k + 1, outW = w - k + 1, batchSize = input.Data.GetDim(0), kSqInC = k * k * inC;
-            int colSizePerImg = kSqInC * outH * outW, inSize = inC * h * w, outSize = outC * outH * outW;
-            var K = outH * outW;
-
-            FastTensor<float> weights2DTContig = null;
+            int outH = h - k + 1, outW = w - k + 1, batchSize = input.DataView.GetDim(0), kSqInC = k * k * inC, K = outH * outW;
+            FastTensor<float> w2DTContig = null;
 
             if (input.RequiresGrad)
             {
-                using var weights2D = weights.Data.Reshape(outC, kSqInC);
-                using var weights2DT = weights2D.Transpose(0, 1);
-
-                weights2DTContig = weights2DT.ToContiguous();
+                var w2D = weights.DataView.Reshape(outC, kSqInC);
+                w2DTContig = FastTensor<float>.FromView(w2D.Transpose2D());
             }
 
             var weightLock = new object();
-
             Parallel.For(0, batchSize,
-                () => weights.RequiresGrad ? new FastTensor<float>(true, outC, kSqInC) : null,
-                (n, loopState, localDw) =>
+                () => (ArrayPool<float>.Shared.Rent(kSqInC * K), ArrayPool<float>.Shared.Rent(outC * K), input.RequiresGrad ? ArrayPool<float>.Shared.Rent(kSqInC * K) : null, weights.RequiresGrad ? new FastTensor<float>(outC, kSqInC, true) : null),
+                (n, loopState, ws) =>
                 {
-                    using var colData = new FastTensor<float>(false, kSqInC, K);
-                    Im2Col(input.Data.AsSpan().Slice(n * inSize, inSize), inC, h, w, k, 1, 0, colData.AsSpan());
-
-                    var outGradSlice = output.Grad.AsSpan().Slice(n * outSize, outSize);
-                    using var outGradMat = new FastTensor<float>(false, outC, K);
-                    outGradSlice.CopyTo(outGradMat.AsSpan());
+                    var colS = ws.Item1.AsSpan(0, kSqInC * K); var outGS = ws.Item2.AsSpan(0, outC * K);
+                    Im2Col(input.DataView.AsReadOnlySpan().Slice(n * inC * h * w, inC * h * w), inC, h, w, k, 1, 0, colS);
+                    output.GradView.AsReadOnlySpan().Slice(n * outC * K, outC * K).CopyTo(outGS);
 
                     if (weights.RequiresGrad)
                     {
-                        var dwSpan = localDw.AsSpan();
-                        var outGradSpan = outGradMat.AsSpan();
-                        var colSpan = colData.AsSpan();
-
-                        for (var r = 0; r < outC; r++)
+                        var dwS = ws.Item4.GetView().AsSpan();
+                        for (var i = 0; i < outC; i++)
                         {
-                            var outGradRow = outGradSpan.Slice(r * K, K);
-                            for (var c = 0; c < kSqInC; c++)
+                            var rGS = outGS.Slice(i * K, K);
+                            for (var j = 0; j < kSqInC; j++)
                             {
-                                dwSpan[r * kSqInC + c] += TensorPrimitives.Dot(outGradRow, colSpan.Slice(c * K, K));
+                                dwS[i * kSqInC + j] += TensorPrimitives.Dot(rGS, colS.Slice(j * K, K));
                             }
                         }
                     }
-
                     if (input.RequiresGrad)
                     {
-                        using var dCol = new FastTensor<float>(false, kSqInC, K);
-                        MatMulRawSequential(weights2DTContig.AsSpan(), outGradMat.AsSpan(), kSqInC, outC, K, dCol.AsSpan());
-                        Col2Im(dCol.AsSpan(), inC, h, w, k, 1, 0, input.Grad.AsSpan().Slice(n * inSize, inSize));
+                        var dColS = ws.Item3.AsSpan(0, kSqInC * K);
+                        MatMulRawSeq(w2DTContig.GetView().AsReadOnlySpan(), outGS, kSqInC, outC, K, dColS);
+                        Col2Im(dColS, inC, h, w, k, 1, 0, input.GradView.AsSpan().Slice(n * inC * h * w, inC * h * w));
                     }
-
-                    return localDw;
+                    return ws;
                 },
-                localDw =>
+                ws =>
                 {
-                    if (localDw != null)
+                    ArrayPool<float>.Shared.Return(ws.Item1); ArrayPool<float>.Shared.Return(ws.Item2);
+                    if (ws.Item3 != null)
+                    {
+                        ArrayPool<float>.Shared.Return(ws.Item3);
+                    }
+                    if (ws.Item4 != null)
                     {
                         lock (weightLock)
                         {
-                            TensorPrimitives.Add(weights.Grad.AsSpan(), localDw.AsSpan(), weights.Grad.AsSpan());
+                            TensorPrimitives.Add(weights.GradView.AsSpan(), ws.Item4.GetView().AsReadOnlySpan(), weights.GradView.AsSpan());
                         }
-                        localDw.Dispose();
+                        ws.Item4.Dispose();
                     }
-                }
-            );
-
-            weights2DTContig?.Dispose();
-        }
-
-        public static AutogradNode MaxPool2D(ComputationGraph graph, AutogradNode input, int channels, int inputH, int inputW, int poolSize)
-        {
-            int outputH = inputH / poolSize, outputW = inputW / poolSize, batchSize = input.Data.GetDim(0);
-            var resultData = new FastTensor<float>(batchSize, channels, outputH, outputW);
-            var maxIndices = new AutogradNode(new FastTensor<float>(batchSize, channels, outputH, outputW), false);
-
-            Parallel.For(0, batchSize, n =>
-            {
-                ref var inRef = ref MemoryMarshal.GetReference(input.Data.AsSpan());
-                ref var outRef = ref MemoryMarshal.GetReference(resultData.AsSpan());
-                ref var idxRef = ref MemoryMarshal.GetReference(maxIndices.Data.AsSpan());
-
-                var bInOffset = n * channels * inputH * inputW;
-                var bOutOffset = n * channels * outputH * outputW;
-
-                for (var c = 0; c < channels; c++)
-                {
-                    var cInOffset = bInOffset + c * inputH * inputW;
-                    var cOutOffset = bOutOffset + c * outputH * outputW;
-
-                    for (var oh = 0; oh < outputH; oh++)
-                    {
-                        var ohInOffset = cInOffset + oh * poolSize * inputW;
-                        var ohOutOffset = cOutOffset + oh * outputW;
-
-                        for (var ow = 0; ow < outputW; ow++)
-                        {
-                            var maxVal = float.MinValue;
-                            var maxIdx = -1;
-                            var owInOffset = ohInOffset + ow * poolSize;
-
-                            for (var ph = 0; ph < poolSize; ph++)
-                            {
-                                var phInOffset = owInOffset + ph * inputW;
-
-                                for (var pw = 0; pw < poolSize; pw++)
-                                {
-                                    var absIdx = phInOffset + pw;
-                                    var val = Unsafe.Add(ref inRef, absIdx);
-
-                                    if (val > maxVal)
-                                    {
-                                        maxVal = val;
-                                        maxIdx = absIdx;
-                                    }
-                                }
-                            }
-
-                            var outAbsIdx = ohOutOffset + ow;
-                            Unsafe.Add(ref outRef, outAbsIdx) = maxVal;
-                            Unsafe.Add(ref idxRef, outAbsIdx) = maxIdx;
-                        }
-                    }
-                }
-            });
-
-            var output = new AutogradNode(resultData, input.RequiresGrad);
-
-            if (output.RequiresGrad)
-            {
-                graph?.Record(OpCode.MaxPool2D, output, input, maxIndices);
-            }
-
-            return output;
-        }
-
-        public static void MaxPool2DBackward(AutogradNode input, AutogradNode maxIndices, AutogradNode output)
-        {
-            ref var iGRef = ref MemoryMarshal.GetReference(input.Grad.AsSpan());
-            ref var oGRef = ref MemoryMarshal.GetReference(output.Grad.AsSpan());
-            ref var idxRef = ref MemoryMarshal.GetReference(maxIndices.Data.AsSpan());
-
-            var len = maxIndices.Data.Size;
-
-            for (var i = 0; i < len; i++)
-            {
-                var maxIdx = (int)Unsafe.Add(ref idxRef, i);
-                Unsafe.Add(ref iGRef, maxIdx) += Unsafe.Add(ref oGRef, i);
-            }
-        }
-
-        public static AutogradNode GlobalAveragePool2D(ComputationGraph graph, AutogradNode input, int channels, int h, int w)
-        {
-            var batchSize = input.Data.GetDim(0);
-            var resData = new FastTensor<float>(batchSize, channels);
-            float spatialSize = h * w;
-
-            Parallel.For(0, batchSize, n =>
-            {
-                for (var c = 0; c < channels; c++)
-                {
-                    resData[n, c] = TensorPrimitives.Sum(input.Data.AsSpan().Slice(n * channels * h * w + c * h * w, h * w)) / spatialSize;
-                }
-            });
-
-            var output = new AutogradNode(resData, input.RequiresGrad);
-
-            if (output.RequiresGrad)
-            {
-                graph?.Record(OpCode.GlobalAveragePool2D, output, input, null, h, w, channels);
-            }
-
-            return output;
-        }
-
-        public static void GlobalAvgPool2DBackward(AutogradNode input, AutogradNode output, int h, int w, int channels)
-        {
-            var batchSize = input.Data.GetDim(0);
-            float spatialSize = h * w;
-
-            Parallel.For(0, batchSize, n =>
-            {
-                for (var c = 0; c < channels; c++)
-                {
-                    var gradSlice = input.Grad.AsSpan().Slice(n * channels * h * w + c * h * w, h * w);
-                    var val = output.Grad[n, c] / spatialSize;
-                    TensorPrimitives.Add(gradSlice, val, gradSlice);
-                }
-            });
+                });
+            w2DTContig?.Dispose();
         }
 
         // ====================================================================
-        // 3. ACTIVATION AND REGULARIZATION
+        // 3. ACTIVATIONS, POOLING & DROPOUT
         // ====================================================================
 
         public static AutogradNode ReLU(ComputationGraph graph, AutogradNode input)
         {
-            var res = FastTensor<float>.SameShape(input.Data, clearMemory: false);
-            TensorPrimitives.Max(input.Data.AsSpan(), 0f, res.AsSpan());
+            var res = AllocateLike(input, false);
+
+            var inSpan = input.DataView.AsReadOnlySpan();
+            var outSpan = res.GetView().AsSpan();
+
+            TensorPrimitives.Max(inSpan, 0f, outSpan);
+
             var output = new AutogradNode(res, input.RequiresGrad);
 
             if (output.RequiresGrad)
@@ -528,76 +401,236 @@ namespace DevOnBike.Overfit.Core
                 return;
             }
 
-            var inS = (ReadOnlySpan<float>)input.Data.AsSpan();
-            var goS = (ReadOnlySpan<float>)output.Grad.AsSpan();
-            var giS = input.Grad.AsSpan();
+            var inS = input.DataView.AsReadOnlySpan();
+            var goS = output.GradView.AsReadOnlySpan();
+            var giS = input.GradView.AsSpan();
+
             var i = 0;
 
             if (Vector.IsHardwareAccelerated)
             {
+                var vCount = Vector<float>.Count;
                 var vZero = Vector<float>.Zero;
-                var vecSize = Vector<float>.Count;
 
-                for (; i <= inS.Length - vecSize; i += vecSize)
+                for (; i <= inS.Length - vCount; i += vCount)
                 {
                     var vIn = new Vector<float>(inS.Slice(i));
                     var vGo = new Vector<float>(goS.Slice(i));
                     var vGi = new Vector<float>(giS.Slice(i));
 
                     var vMask = Vector.GreaterThan(vIn, vZero);
-                    var vFiltered = Vector.ConditionalSelect(vMask, vGo, vZero);
+                    var vGradToPass = Vector.ConditionalSelect(vMask, vGo, vZero);
 
-                    (vGi + vFiltered).CopyTo(giS.Slice(i));
+                    (vGi + vGradToPass).CopyTo(giS.Slice(i));
                 }
             }
 
             for (; i < inS.Length; i++)
             {
-                if (inS[i] > 0f) giS[i] += goS[i];
+                if (inS[i] > 0f)
+                {
+                    giS[i] += goS[i];
+                }
             }
+        }
+
+        public static AutogradNode Sigmoid(ComputationGraph graph, AutogradNode input)
+        {
+            var res = AllocateLike(input, false);
+
+            TensorPrimitives.Sigmoid(input.DataView.AsReadOnlySpan(), res.GetView().AsSpan());
+
+            var output = new AutogradNode(res, input.RequiresGrad);
+
+            if (output.RequiresGrad)
+            {
+                graph?.Record(OpCode.Sigmoid, output, input);
+            }
+
+            return output;
+        }
+
+        public static void SigmoidBackward(AutogradNode input, AutogradNode output)
+        {
+            if (!input.RequiresGrad)
+            {
+                return;
+            }
+            var outS = output.DataView.AsReadOnlySpan();
+            var ogS = output.GradView.AsReadOnlySpan();
+            var igS = input.GradView.AsSpan();
+
+            // Stackalloc jest tutaj bezwzględnie najszybszy (1 cykl zegara) i bezpieczny (max 4KB)
+            Span<float> buffer = stackalloc float[StackAllocThreshold];
+
+            for (var i = 0; i < igS.Length; i += StackAllocThreshold)
+            {
+                var c = Math.Min(StackAllocThreshold, igS.Length - i);
+                var b = buffer.Slice(0, c);
+                var o = outS.Slice(i, c);
+
+                TensorPrimitives.Subtract(1f, o, b);
+                TensorPrimitives.Multiply(o, b, b);
+                TensorPrimitives.MultiplyAdd(ogS.Slice(i, c), b, igS.Slice(i, c), igS.Slice(i, c));
+            }
+        }
+
+        public static AutogradNode Tanh(ComputationGraph graph, AutogradNode input)
+        {
+            var res = AllocateLike(input, false);
+            TensorPrimitives.Tanh(input.DataView.AsReadOnlySpan(), res.GetView().AsSpan());
+            var output = new AutogradNode(res, input.RequiresGrad);
+            if (output.RequiresGrad)
+            {
+                graph?.Record(OpCode.Tanh, output, input);
+            }
+            return output;
+        }
+
+        public static void TanhBackward(AutogradNode input, AutogradNode output)
+        {
+            if (!input.RequiresGrad)
+            {
+                return;
+            }
+
+            var outS = output.DataView.AsReadOnlySpan();
+            var ogS = output.GradView.AsReadOnlySpan();
+            var igS = input.GradView.AsSpan();
+
+            Span<float> buffer = stackalloc float[StackAllocThreshold];
+
+            for (var i = 0; i < igS.Length; i += StackAllocThreshold)
+            {
+                var c = Math.Min(StackAllocThreshold, igS.Length - i);
+                var b = buffer.Slice(0, c);
+                var o = outS.Slice(i, c);
+
+                TensorPrimitives.Multiply(o, o, b);
+                TensorPrimitives.Subtract(1f, b, b);
+                TensorPrimitives.MultiplyAdd(ogS.Slice(i, c), b, igS.Slice(i, c), igS.Slice(i, c));
+            }
+        }
+
+        public static AutogradNode MaxPool2D(ComputationGraph graph, AutogradNode input, int channels, int h, int w, int pool)
+        {
+            int oH = h / pool, oW = w / pool, batch = input.DataView.GetDim(0);
+            var res = new FastTensor<float>(batch, channels, oH, oW, false);
+            var idx = new AutogradNode(new FastTensor<float>(batch, channels, oH, oW, false), false);
+
+            Parallel.For(0, batch, n =>
+            {
+                ref var iR = ref MemoryMarshal.GetReference(input.DataView.AsReadOnlySpan());
+                ref var oR = ref MemoryMarshal.GetReference(res.GetView().AsSpan());
+                ref var xR = ref MemoryMarshal.GetReference(idx.DataView.AsSpan());
+
+                for (var c = 0; c < channels; c++)
+                {
+                    for (var oh = 0; oh < oH; oh++)
+                    {
+                        for (var ow = 0; ow < oW; ow++)
+                        {
+                            var max = float.MinValue; var mI = -1;
+                            for (var ph = 0; ph < pool; ph++)
+                            {
+                                for (var pw = 0; pw < pool; pw++)
+                                {
+                                    var aI = n * channels * h * w + c * h * w + (oh * pool + ph) * w + (ow * pool + pw);
+                                    var v = Unsafe.Add(ref iR, aI); if (v > max) { max = v; mI = aI; }
+                                }
+                            }
+                            var oI = n * channels * oH * oW + c * oH * oW + oh * oW + ow;
+                            Unsafe.Add(ref oR, oI) = max; Unsafe.Add(ref xR, oI) = mI;
+                        }
+                    }
+                }
+            });
+            var output = new AutogradNode(res, input.RequiresGrad);
+            if (output.RequiresGrad)
+            {
+                graph?.Record(OpCode.MaxPool2D, output, input, idx);
+            }
+            return output;
+        }
+
+        public static void MaxPool2DBackward(AutogradNode input, AutogradNode maxIndices, AutogradNode output)
+        {
+            ref var iG = ref MemoryMarshal.GetReference(input.GradView.AsSpan());
+            ref var xG = ref MemoryMarshal.GetReference(maxIndices.DataView.AsReadOnlySpan());
+            ref var oG = ref MemoryMarshal.GetReference(output.GradView.AsReadOnlySpan());
+
+            for (var i = 0; i < maxIndices.DataView.Size; i++)
+            {
+                Unsafe.Add(ref iG, (int)Unsafe.Add(ref xG, i)) += Unsafe.Add(ref oG, i);
+            }
+        }
+
+        public static AutogradNode GlobalAveragePool2D(ComputationGraph graph, AutogradNode input, int channels, int h, int w)
+        {
+            var res = new FastTensor<float>(input.DataView.GetDim(0), channels, false);
+            float sz = h * w;
+
+            Parallel.For(0, input.DataView.GetDim(0), n =>
+            {
+                for (var c = 0; c < channels; c++)
+                {
+                    res.GetView()[n, c] = TensorPrimitives.Sum(input.DataView.AsReadOnlySpan().Slice(n * channels * h * w + c * h * w, h * w)) / sz;
+                }
+            });
+
+            var output = new AutogradNode(res, input.RequiresGrad);
+            if (output.RequiresGrad)
+            {
+                graph?.Record(OpCode.GlobalAveragePool2D, output, input, null, h, w, channels);
+            }
+            return output;
+        }
+
+        public static void GlobalAvgPool2DBackward(AutogradNode input, AutogradNode output, int h, int w, int channels)
+        {
+            float sz = h * w;
+            Parallel.For(0, input.DataView.GetDim(0), n =>
+            {
+                for (var c = 0; c < channels; c++)
+                {
+                    var s = input.GradView.AsSpan().Slice(n * channels * h * w + c * h * w, h * w);
+                    TensorPrimitives.Add(s, output.GradView.AsReadOnlySpan()[n * channels + c] / sz, s);
+                }
+            });
         }
 
         public static AutogradNode Dropout(ComputationGraph graph, AutogradNode input, float probability, bool isTraining)
         {
-            var resData = FastTensor<float>.SameShape(input.Data);
-            var mask = new AutogradNode(FastTensor<float>.SameShape(input.Data), false);
+            var resD = AllocateLike(input, false);
+            var maskNode = new AutogradNode(AllocateLike(input, false), false);
 
             if (isTraining)
             {
-                var scale = 1f / (1f - probability);
-                var size = input.Data.Size;
-                var inS = input.Data.AsSpan();
-                var resS = resData.AsSpan();
-                var maskS = mask.Data.AsSpan();
+                var sc = 1f / (1f - probability); var sz = input.DataView.Size; var thr = (byte)(probability * 255f);
 
-                var randomBytes = size <= 2048 ? stackalloc byte[size] : new byte[size];
-                Random.Shared.NextBytes(randomBytes);
+                using var rndBuf = new PooledBuffer<byte>(sz, false);
+                Random.Shared.NextBytes(rndBuf.Span);
 
-                var thresholdByte = (byte)(probability * 255f);
-
-                for (var i = 0; i < size; i++)
+                var mS = maskNode.DataView.AsSpan();
+                for (var i = 0; i < sz; i++)
                 {
-                    if (randomBytes[i] > thresholdByte)
-                    {
-                        resS[i] = inS[i] * scale;
-                        maskS[i] = scale;
-                    }
+                    mS[i] = rndBuf.Span[i] > thr ? sc : 0f;
                 }
+
+                TensorPrimitives.Multiply(input.DataView.AsReadOnlySpan(), mS, resD.GetView().AsSpan());
             }
             else
             {
-                input.Data.AsSpan().CopyTo(resData.AsSpan());
+                input.DataView.AsReadOnlySpan().CopyTo(resD.GetView().AsSpan());
             }
-
-            var output = new AutogradNode(resData, input.RequiresGrad);
-
+            var output = new AutogradNode(resD, input.RequiresGrad);
             if (output.RequiresGrad && isTraining)
             {
-                graph?.Record(OpCode.Dropout, output, input, mask);
+                graph?.Record(OpCode.Dropout, output, input, maskNode);
             }
             else
             {
-                mask.Dispose();
+                maskNode.Dispose();
             }
 
             return output;
@@ -605,47 +638,42 @@ namespace DevOnBike.Overfit.Core
 
         public static void DropoutBackward(AutogradNode input, AutogradNode mask, AutogradNode output)
         {
-            var giS = input.Grad.AsSpan();
-            var goS = output.Grad.AsSpan();
-            var mS = mask.Data.AsSpan();
-            TensorPrimitives.MultiplyAdd(goS, mS, giS, giS);
+            TensorPrimitives.MultiplyAdd(output.GradView.AsReadOnlySpan(), mask.DataView.AsReadOnlySpan(), input.GradView.AsSpan(), input.GradView.AsSpan());
         }
 
         // ====================================================================
-        // 4. LOSS FUNCTIONS
+        // 4. LOSS FUNCTIONS & BATCHNORM
         // ====================================================================
 
         public static AutogradNode SoftmaxCrossEntropy(ComputationGraph graph, AutogradNode logits, AutogradNode target)
         {
-            int rows = logits.Data.GetDim(0), cols = logits.Data.GetDim(1);
-            var totalLoss = 0f;
-            var probsTensor = new FastTensor<float>(rows, cols);
+            int rows = logits.DataView.GetDim(0), cols = logits.DataView.GetDim(1); var total = 0f;
+            var probs = new FastTensor<float>(rows, cols, false);
 
             for (var r = 0; r < rows; r++)
             {
-                var pRow = probsTensor.AsSpan().Slice(r * cols, cols);
-                TensorPrimitives.SoftMax(logits.Data.AsSpan().Slice(r * cols, cols), pRow);
-
+                var pR = probs.GetView().AsSpan().Slice(r * cols, cols);
+                TensorPrimitives.SoftMax(logits.DataView.AsReadOnlySpan().Slice(r * cols, cols), pR);
                 for (var c = 0; c < cols; c++)
                 {
-                    if (target.Data[r, c] > 0.5f)
+                    if (target.DataView[r, c] > 0.5f)
                     {
-                        totalLoss -= MathF.Log(pRow[c] + 1e-15f);
+                        total -= MathF.Log(pR[c] + 1e-15f);
                     }
                 }
             }
 
-            var res = new FastTensor<float>(1, 1) { [0, 0] = totalLoss / rows };
-            var output = new AutogradNode(res, logits.RequiresGrad);
+            var resTensor = new FastTensor<float>(1, false);
+            resTensor.GetView().AsSpan()[0] = total / rows;
+            var output = new AutogradNode(resTensor, logits.RequiresGrad);
 
             if (logits.RequiresGrad)
             {
-                var probsNode = new AutogradNode(probsTensor, requiresGrad: false);
-                graph?.Record(OpCode.SoftmaxCrossEntropy, output, logits, target, nodeContext: [probsNode]);
+                graph?.Record(OpCode.SoftmaxCrossEntropy, output, logits, target, nodeContext: [new AutogradNode(probs, false)]);
             }
             else
             {
-                probsTensor.Dispose();
+                probs.Dispose();
             }
 
             return output;
@@ -653,34 +681,34 @@ namespace DevOnBike.Overfit.Core
 
         public static void SoftmaxCrossEntropyBackward(AutogradNode logits, AutogradNode target, AutogradNode output, AutogradNode probsNode)
         {
-            var rows = logits.Data.GetDim(0);
-            var cols = logits.Data.GetDim(1);
-            var scale = output.Grad.AsSpan()[0] / rows;
-            var probsS = (ReadOnlySpan<float>)probsNode.Data.AsSpan();
-
-            for (var r = 0; r < rows; r++)
+            int R = logits.DataView.GetDim(0), C = logits.DataView.GetDim(1); var s = output.GradView.AsReadOnlySpan()[0] / R;
+            for (var r = 0; r < R; r++)
             {
-                var pS = probsS.Slice(r * cols, cols);
-                var tS = target.Data.AsSpan().Slice(r * cols, cols);
-                var gS = logits.Grad.AsSpan().Slice(r * cols, cols);
-
-                TensorPrimitives.MultiplyAdd(pS, scale, gS, gS);
-                TensorPrimitives.MultiplyAdd(tS, -scale, gS, gS);
+                var pS = probsNode.DataView.AsReadOnlySpan().Slice(r * C, C); var tS = target.DataView.AsReadOnlySpan().Slice(r * C, C); var gS = logits.GradView.AsSpan().Slice(r * C, C);
+                TensorPrimitives.MultiplyAdd(pS, s, gS, gS); TensorPrimitives.MultiplyAdd(tS, -s, gS, gS);
             }
         }
 
         public static AutogradNode MSELoss(ComputationGraph graph, AutogradNode prediction, AutogradNode target)
         {
-            using var diff = FastTensor<float>.SameShape(prediction.Data);
-            TensorPrimitives.Subtract(prediction.Data.AsSpan(), target.Data.AsSpan(), diff.AsSpan());
+            var sz = prediction.DataView.Size; float mse;
 
-            var mse = TensorPrimitives.Dot(diff.AsSpan(), diff.AsSpan()) / prediction.Data.Size;
-            var res = new FastTensor<float>(1, 1) { [0, 0] = mse };
-            var output = new AutogradNode(res, prediction.RequiresGrad);
+            using (var diffBuf = new PooledBuffer<float>(sz, false))
+            {
+                var dS = diffBuf.Span;
+                TensorPrimitives.Subtract(prediction.DataView.AsReadOnlySpan(), target.DataView.AsReadOnlySpan(), dS);
+                mse = TensorPrimitives.Dot(dS, dS) / sz;
+            }
+
+            var resTensor = new FastTensor<float>(1, false);
+
+            resTensor.GetView().AsSpan()[0] = mse;
+
+            var output = new AutogradNode(resTensor, prediction.RequiresGrad);
 
             if (output.RequiresGrad)
             {
-                graph?.Record(OpCode.MSELoss, output, prediction, target);
+                graph?.Record(OpCode.MseLoss, output, prediction, target);
             }
 
             return output;
@@ -688,88 +716,101 @@ namespace DevOnBike.Overfit.Core
 
         public static void MSELossBackward(AutogradNode p, AutogradNode t, AutogradNode o)
         {
-            var factor = o.Grad.AsSpan()[0] * (2f / p.Data.Size);
-            var pGrad = p.Grad.AsSpan();
-            var pData = p.Data.AsSpan();
-            var tData = t.Data.AsSpan();
-
-            TensorPrimitives.MultiplyAdd(pData, factor, pGrad, pGrad);
-            TensorPrimitives.MultiplyAdd(tData, -factor, pGrad, pGrad);
+            var f = o.GradView.AsReadOnlySpan()[0] * (2f / p.DataView.Size);
+            TensorPrimitives.MultiplyAdd(p.DataView.AsReadOnlySpan(), f, p.GradView.AsSpan(), p.GradView.AsSpan());
+            TensorPrimitives.MultiplyAdd(t.DataView.AsReadOnlySpan(), -f, p.GradView.AsSpan(), p.GradView.AsSpan());
         }
 
-        // ====================================================================
-        // 5. NORMALIZATION AND UTILITIES
-        // ====================================================================
+        public static AutogradNode DirectionalLoss(ComputationGraph graph, AutogradNode prediction, AutogradNode target, float gamma = 10f)
+        {
+            var sz = prediction.DataView.Size; float loss;
+
+            using (var tempBuf = new PooledBuffer<float>(sz, false))
+            {
+                var s = tempBuf.Span;
+                TensorPrimitives.Subtract(prediction.DataView.AsReadOnlySpan(), target.DataView.AsReadOnlySpan(), s);
+                var mse = TensorPrimitives.SumOfSquares(s);
+                TensorPrimitives.Multiply(prediction.DataView.AsReadOnlySpan(), target.DataView.AsReadOnlySpan(), s); TensorPrimitives.Min(s, 0f, s);
+                loss = (mse + TensorPrimitives.Sum(s) * -gamma) / sz;
+            }
+
+            var resTensor = new FastTensor<float>(1, false);
+
+            resTensor.GetView().AsSpan()[0] = loss;
+
+            var output = new AutogradNode(resTensor, prediction.RequiresGrad);
+
+            if (output.RequiresGrad)
+            {
+                graph?.Record(OpCode.DirectionalLoss, output, prediction, target, BitConverter.SingleToInt32Bits(gamma));
+            }
+
+            return output;
+        }
+
+        public static void DirectionalLossBackward(AutogradNode p, AutogradNode t, AutogradNode o, float gamma)
+        {
+            var s = o.GradView.AsReadOnlySpan()[0] / p.DataView.Size; var pG = p.GradView.AsSpan(); var pD = p.DataView.AsReadOnlySpan(); var tD = t.DataView.AsReadOnlySpan(); var i = 0;
+            if (Vector.IsHardwareAccelerated)
+            {
+                var vS = Vector<float>.Count;
+                for (; i <= pD.Length - vS; i += vS)
+                {
+                    var vP = new Vector<float>(pD.Slice(i)); var vT = new Vector<float>(tD.Slice(i));
+                    (new Vector<float>(pG.Slice(i)) + (vP - vT) * (2f * s) + Vector.ConditionalSelect(Vector.LessThan(vP * vT, Vector<float>.Zero), -vT * (gamma * s), Vector<float>.Zero)).CopyTo(pG.Slice(i));
+                }
+            }
+            for (; i < pD.Length; i++)
+            {
+                pG[i] += 2f * (pD[i] - tD[i]) * s + (pD[i] * tD[i] < 0f ? -tD[i] * (gamma * s) : 0f);
+            }
+        }
 
         public static AutogradNode BatchNorm1D(ComputationGraph graph, AutogradNode input, AutogradNode gamma, AutogradNode beta, FastTensor<float> runningMean, FastTensor<float> runningVar, float momentum, float eps, bool isTraining)
         {
-            int N = input.Data.GetDim(0), C = input.Data.GetDim(1);
-            var outputData = new FastTensor<float>(N, C);
-            var mean = new AutogradNode(new FastTensor<float>(C), false);
-            var invStd = new AutogradNode(new FastTensor<float>(C), false);
+            int N = input.DataView.GetDim(0), C = input.DataView.GetDim(1); var outD = new FastTensor<float>(N, C, false);
+            var mean = new AutogradNode(new FastTensor<float>(C, true), false);
+            var invStd = new AutogradNode(new FastTensor<float>(C, true), false);
 
             if (isTraining)
             {
-                var meanS = mean.Data.AsSpan();
+                var mS = mean.DataView.AsSpan();
+                for (var i = 0; i < N; i++)
+                {
+                    TensorPrimitives.Add(mS, input.DataView.AsReadOnlySpan().Slice(i * C, C), mS);
+                }
+                TensorPrimitives.Multiply(mS, 1f / N, mS);
+
+                using var vB = new PooledBuffer<float>(C, true);
+                using var tB = new PooledBuffer<float>(C, false);
 
                 for (var i = 0; i < N; i++)
                 {
-                    TensorPrimitives.Add(meanS, input.Data.AsSpan().Slice(i * C, C), meanS);
+                    TensorPrimitives.Subtract(input.DataView.AsReadOnlySpan().Slice(i * C, C), mS, tB.Span);
+                    TensorPrimitives.MultiplyAdd(tB.Span, tB.Span, vB.Span, vB.Span);
                 }
 
-                TensorPrimitives.Multiply(meanS, 1f / N, meanS);
+                TensorPrimitives.Multiply(vB.Span, 1f / N, vB.Span);
 
-                using var varBuf = new FastTensor<float>(true, C);
-                using var tempBuf = new FastTensor<float>(false, C);
-                var varS = varBuf.AsSpan();
-                var tempS = tempBuf.AsSpan();
-                var meanR = (ReadOnlySpan<float>)meanS;
+                var rmS = runningMean.GetView().AsSpan(); var rvS = runningVar.GetView().AsSpan(); var ivS = invStd.DataView.AsSpan();
 
-                for (var i = 0; i < N; i++)
-                {
-                    TensorPrimitives.Subtract(input.Data.AsSpan().Slice(i * C, C), meanR, tempS);
-                    TensorPrimitives.MultiplyAdd(tempS, tempS, varS, varS);
-                }
-
-                TensorPrimitives.Multiply(varS, 1f / N, varS);
-
-                var rmS = runningMean.AsSpan();
-                var rvS = runningVar.AsSpan();
-                var ivS = invStd.Data.AsSpan();
-
-                TensorPrimitives.Multiply(rmS, 1f - momentum, rmS);
-                TensorPrimitives.MultiplyAdd(meanR, momentum, rmS, rmS);
-
-                TensorPrimitives.Multiply(rvS, 1f - momentum, rvS);
-                TensorPrimitives.MultiplyAdd(varS, momentum, rvS, rvS);
-
-                TensorPrimitives.Add(varS, eps, ivS);
-                TensorPrimitives.ReciprocalSqrt(ivS, ivS);
+                TensorPrimitives.Multiply(rmS, 1f - momentum, rmS); TensorPrimitives.MultiplyAdd(mS, momentum, rmS, rmS);
+                TensorPrimitives.Multiply(rvS, 1f - momentum, rvS); TensorPrimitives.MultiplyAdd(vB.Span, momentum, rvS, rvS);
+                TensorPrimitives.Add(vB.Span, eps, ivS); TensorPrimitives.ReciprocalSqrt(ivS, ivS);
             }
             else
             {
-                runningMean.AsSpan().CopyTo(mean.Data.AsSpan());
-                var ivS = invStd.Data.AsSpan();
-                TensorPrimitives.Add(runningVar.AsSpan(), eps, ivS);
-                TensorPrimitives.ReciprocalSqrt(ivS, ivS);
+                runningMean.GetView().AsReadOnlySpan().CopyTo(mean.DataView.AsSpan()); var ivS = invStd.DataView.AsSpan();
+                TensorPrimitives.Add(runningVar.GetView().AsReadOnlySpan(), eps, ivS); TensorPrimitives.ReciprocalSqrt(ivS, ivS);
             }
-
-            var invStdR = (ReadOnlySpan<float>)invStd.Data.AsSpan();
-            var meanRo = (ReadOnlySpan<float>)mean.Data.AsSpan();
-            var gammaR = (ReadOnlySpan<float>)gamma.Data.AsSpan();
-            var betaR = (ReadOnlySpan<float>)beta.Data.AsSpan();
-
             for (var i = 0; i < N; i++)
             {
-                var inRow = (ReadOnlySpan<float>)input.Data.AsSpan().Slice(i * C, C);
-                var outRow = outputData.AsSpan().Slice(i * C, C);
-
-                TensorPrimitives.Subtract(inRow, meanRo, outRow);
-                TensorPrimitives.Multiply(outRow, invStdR, outRow);
-                TensorPrimitives.MultiplyAdd(outRow, gammaR, betaR, outRow);
+                var oR = outD.GetView().AsSpan().Slice(i * C, C); TensorPrimitives.Subtract(input.DataView.AsReadOnlySpan().Slice(i * C, C), mean.DataView.AsReadOnlySpan(), oR);
+                TensorPrimitives.Multiply(oR, invStd.DataView.AsReadOnlySpan(), oR); TensorPrimitives.MultiplyAdd(oR, gamma.DataView.AsReadOnlySpan(), beta.DataView.AsReadOnlySpan(), oR);
             }
 
-            var output = new AutogradNode(outputData, input.RequiresGrad);
+            var output = new AutogradNode(outD, input.RequiresGrad);
+
             if (output.RequiresGrad && isTraining)
             {
                 graph?.Record(OpCode.BatchNorm1D, output, input, null, 0, 0, 0, 0, 0, [gamma, beta, mean, invStd]);
@@ -785,83 +826,314 @@ namespace DevOnBike.Overfit.Core
                 return;
             }
 
-            int N = input.Data.GetDim(0), C = input.Data.GetDim(1);
+            int N = input.DataView.GetDim(0), C = input.DataView.GetDim(1);
 
-            var inS = input.Data.AsSpan();
-            var outGradS = output.Grad.AsSpan();
-            var meanS = (ReadOnlySpan<float>)mean.Data.AsSpan();
-            var invStdS = (ReadOnlySpan<float>)invStd.Data.AsSpan();
-            var gammaS = (ReadOnlySpan<float>)gamma.Data.AsSpan();
+            using var coeffBuf = new PooledBuffer<float>(C, false); var coeff = coeffBuf.Span;
+            using var termBuf = new PooledBuffer<float>(C, false); var term = termBuf.Span;
 
-            const int StackAllocThreshold = 256;
-            FastBuffer<float> coeffBuf = null;
-            FastBuffer<float> termBuf = null;
+            // sDy i sDyX służą do akumulacji w pętli -> WYMAGA clearMemory = true
+            using var sDyBuf = new PooledBuffer<float>(C, true); var sDy = sDyBuf.Span;
+            using var sDyXBuf = new PooledBuffer<float>(C, true); var sDyX = sDyXBuf.Span;
 
-            try
+            using var xHRBuf = new PooledBuffer<float>(C, false); var xHR = xHRBuf.Span;
+
+            TensorPrimitives.Multiply(gamma.DataView.AsReadOnlySpan(), invStd.DataView.AsReadOnlySpan(), coeff); TensorPrimitives.Multiply(coeff, 1f / N, coeff);
+
+            for (var i = 0; i < N; i++)
             {
-                var coeff = C <= StackAllocThreshold ? stackalloc float[C] : (coeffBuf = new FastBuffer<float>(C)).AsSpan();
-                var term = C <= StackAllocThreshold ? stackalloc float[C] : (termBuf = new FastBuffer<float>(C)).AsSpan();
-                var sumDy = C <= StackAllocThreshold ? stackalloc float[C] : new float[C];
-                var sumDyXHat = C <= StackAllocThreshold ? stackalloc float[C] : new float[C];
+                var gR = output.GradView.AsReadOnlySpan().Slice(i * C, C); var iR = input.DataView.AsReadOnlySpan().Slice(i * C, C);
+                TensorPrimitives.Subtract(iR, mean.DataView.AsReadOnlySpan(), xHR); TensorPrimitives.Multiply(xHR, invStd.DataView.AsReadOnlySpan(), xHR);
+                TensorPrimitives.Add(sDy, gR, sDy); TensorPrimitives.MultiplyAdd(gR, xHR, sDyX, sDyX);
+                if (beta.RequiresGrad)
+                {
+                    TensorPrimitives.Add(beta.GradView.AsSpan(), gR, beta.GradView.AsSpan());
+                }
+                if (gamma.RequiresGrad)
+                {
+                    TensorPrimitives.MultiplyAdd(gR, xHR, gamma.GradView.AsSpan(), gamma.GradView.AsSpan());
+                }
+            }
 
-                TensorPrimitives.Multiply(gammaS, invStdS, coeff);
-                TensorPrimitives.Multiply(coeff, 1f / N, coeff);
-
-                using var xHatAll = new FastBuffer<float>(N * C);
-                var xHatAllSpan = xHatAll.AsSpan();
+            if (input.RequiresGrad)
+            {
+                var iGS = input.GradView.AsSpan();
 
                 for (var i = 0; i < N; i++)
                 {
-                    var xHatRow = xHatAllSpan.Slice(i * C, C);
-                    var gradRow = (ReadOnlySpan<float>)outGradS.Slice(i * C, C);
-                    var inRow = (ReadOnlySpan<float>)inS.Slice(i * C, C);
+                    var gR = output.GradView.AsReadOnlySpan().Slice(i * C, C); var iGR = iGS.Slice(i * C, C); var iR = input.DataView.AsReadOnlySpan().Slice(i * C, C);
+                    TensorPrimitives.Subtract(iR, mean.DataView.AsReadOnlySpan(), xHR); TensorPrimitives.Multiply(xHR, invStd.DataView.AsReadOnlySpan(), xHR);
+                    TensorPrimitives.Multiply(gR, N, term); TensorPrimitives.Subtract(term, sDy, term);
 
-                    TensorPrimitives.Subtract(inRow, meanS, xHatRow);
-                    TensorPrimitives.Multiply(xHatRow, invStdS, xHatRow);
+                    using var tempXHatBuf = new PooledBuffer<float>(C, false); var tempXHat = tempXHatBuf.Span;
+                    xHR.CopyTo(tempXHat);
 
-                    TensorPrimitives.Add(sumDy, gradRow, sumDy);
-                    TensorPrimitives.MultiplyAdd(gradRow, xHatRow, sumDyXHat, sumDyXHat);
-
-                    if (beta.RequiresGrad)
-                    {
-                        TensorPrimitives.Add(beta.Grad.AsSpan(), gradRow, beta.Grad.AsSpan());
-                    }
-
-                    if (gamma.RequiresGrad)
-                    {
-                        TensorPrimitives.MultiplyAdd(gradRow, xHatRow, gamma.Grad.AsSpan(), gamma.Grad.AsSpan());
-                    }
+                    TensorPrimitives.Multiply(tempXHat, sDyX, tempXHat); TensorPrimitives.Subtract(term, tempXHat, term);
+                    TensorPrimitives.MultiplyAdd(coeff, term, iGR, iGR);
                 }
-
-                if (input.RequiresGrad)
-                {
-                    var inGradS = input.Grad.AsSpan();
-                    for (var i = 0; i < N; i++)
-                    {
-                        var gradRow = (ReadOnlySpan<float>)outGradS.Slice(i * C, C);
-                        var inGradRow = inGradS.Slice(i * C, C);
-                        var xHatRow = xHatAllSpan.Slice(i * C, C);
-
-                        TensorPrimitives.Multiply(gradRow, (float)N, term);
-                        TensorPrimitives.Subtract(term, sumDy, term);
-
-                        TensorPrimitives.Multiply(xHatRow, sumDyXHat, xHatRow);
-                        TensorPrimitives.Subtract(term, xHatRow, term);
-
-                        TensorPrimitives.MultiplyAdd(coeff, term, inGradRow, inGradRow);
-                    }
-                }
-            }
-            finally
-            {
-                coeffBuf?.Dispose();
-                termBuf?.Dispose();
             }
         }
 
+        // ====================================================================
+        // 5. BPTT & SEQUENCE (Fused LSTM, Repeat, Multiply, Slices)
+        // ====================================================================
+
+        public static (AutogradNode hNew, AutogradNode cNew) FusedLSTMStep(ComputationGraph graph, AutogradNode x, AutogradNode hPrev, AutogradNode cPrev, AutogradNode W, AutogradNode U, AutogradNode B)
+        {
+            int batchSize = x.DataView.GetDim(0), hS = hPrev.DataView.GetDim(1);
+            var gD = MatMulRaw(x, W);
+            using var uh = MatMulRaw(hPrev, U);
+
+            var cnD = new FastTensor<float>(batchSize, hS, false);
+            var hnD = new FastTensor<float>(batchSize, hS, false);
+
+            Parallel.For(0, batchSize, b =>
+            {
+                var bg = gD.GetView().AsSpan().Slice(b * 4 * hS, 4 * hS);
+                TensorPrimitives.Add(bg, uh.GetView().AsReadOnlySpan().Slice(b * 4 * hS, 4 * hS), bg); TensorPrimitives.Add(bg, B.DataView.AsReadOnlySpan(), bg);
+
+                var f = bg.Slice(0, hS); var i = bg.Slice(hS, hS); var g = bg.Slice(2 * hS, hS); var o = bg.Slice(3 * hS, hS);
+                TensorPrimitives.Sigmoid(f, f); TensorPrimitives.Sigmoid(i, i); TensorPrimitives.Tanh(g, g); TensorPrimitives.Sigmoid(o, o);
+
+                var bcn = cnD.GetView().AsSpan().Slice(b * hS, hS);
+                TensorPrimitives.Multiply(f, cPrev.DataView.AsReadOnlySpan().Slice(b * hS, hS), bcn); TensorPrimitives.MultiplyAdd(i, g, bcn, bcn);
+
+                var bhn = hnD.GetView().AsSpan().Slice(b * hS, hS);
+                TensorPrimitives.Tanh(bcn, bhn); TensorPrimitives.Multiply(o, bhn, bhn);
+            });
+            var req = x.RequiresGrad || hPrev.RequiresGrad || cPrev.RequiresGrad || W.RequiresGrad || U.RequiresGrad || B.RequiresGrad;
+            var hNode = new AutogradNode(hnD, req); var cNode = new AutogradNode(cnD, req);
+
+            if (graph != null && graph.IsRecording && req)
+            {
+                graph.Record(OpCode.FusedLSTMStep, hNode, x, hPrev, nodeContext: [cPrev, W, U, B, cNode, new AutogradNode(gD, false)]);
+            }
+            else
+            {
+                gD.Dispose();
+            }
+
+            return (hNode, cNode);
+        }
+
+        public static void FusedLSTMStepBackward(AutogradNode x, AutogradNode hPrev, AutogradNode hNew, AutogradNode[] ctx)
+        {
+            var cPrev = ctx[0];
+            var W = ctx[1];
+            var U = ctx[2];
+            var B = ctx[3];
+            var cNew = ctx[4];
+            var gates = ctx[5];
+            int batchSize = x.DataView.GetDim(0), hS = hPrev.DataView.GetDim(1);
+
+            using var dGNode = new AutogradNode(new FastTensor<float>(batchSize, 4 * hS, false));
+
+            Parallel.For(0, batchSize, () => ArrayPool<float>.Shared.Rent(hS * 4),
+                (b, state, arr) =>
+                {
+                    var dGS = dGNode.DataView.AsSpan().Slice(b * 4 * hS, 4 * hS);
+                    var gs = gates.DataView.AsReadOnlySpan().Slice(b * 4 * hS, 4 * hS); var f = gs.Slice(0, hS); var i = gs.Slice(hS, hS); var g = gs.Slice(2 * hS, hS); var o = gs.Slice(3 * hS, hS);
+                    var dh = hNew.GradView.AsReadOnlySpan().Slice(b * hS, hS); var dc = cNew.GradView.AsSpan().Slice(b * hS, hS);
+                    var tS = arr.AsSpan(); var tanhC = tS.Slice(0, hS); var t1 = tS.Slice(hS, hS); var t2 = tS.Slice(2 * hS, hS);
+
+                    TensorPrimitives.Tanh(cNew.DataView.AsReadOnlySpan().Slice(b * hS, hS), tanhC);
+                    TensorPrimitives.Subtract(1f, o, t1); TensorPrimitives.Multiply(o, t1, t1); TensorPrimitives.Multiply(dh, tanhC, t2); TensorPrimitives.Multiply(t2, t1, dGS.Slice(3 * hS, hS));
+                    TensorPrimitives.Multiply(tanhC, tanhC, t1); TensorPrimitives.Subtract(1f, t1, t1); TensorPrimitives.Multiply(dh, o, t2); TensorPrimitives.MultiplyAdd(t2, t1, dc, dc);
+                    TensorPrimitives.Multiply(g, g, t1); TensorPrimitives.Subtract(1f, t1, t1); TensorPrimitives.Multiply(dc, i, t2); TensorPrimitives.Multiply(t2, t1, dGS.Slice(2 * hS, hS));
+                    TensorPrimitives.Subtract(1f, i, t1); TensorPrimitives.Multiply(i, t1, t1); TensorPrimitives.Multiply(dc, g, t2); TensorPrimitives.Multiply(t2, t1, dGS.Slice(hS, hS));
+                    TensorPrimitives.Subtract(1f, f, t1); TensorPrimitives.Multiply(f, t1, t1); TensorPrimitives.Multiply(dc, cPrev.DataView.AsReadOnlySpan().Slice(b * hS, hS), t2); TensorPrimitives.Multiply(t2, t1, dGS.Slice(0, hS));
+
+                    if (cPrev.RequiresGrad) { var dcp = cPrev.GradView.AsSpan().Slice(b * hS, hS); TensorPrimitives.MultiplyAdd(dc, f, dcp, dcp); }
+                    return arr;
+                }, arr => ArrayPool<float>.Shared.Return(arr));
+
+            if (x.RequiresGrad)
+            {
+                MatMulAdd_A_BT_Raw(dGNode, false, W, false, x, true);
+            }
+            if (W.RequiresGrad)
+            {
+                MatMulAdd_AT_B_Raw(x, false, dGNode, false, W, true);
+            }
+            if (hPrev.RequiresGrad)
+            {
+                MatMulAdd_A_BT_Raw(dGNode, false, U, false, hPrev, true);
+            }
+            if (U.RequiresGrad)
+            {
+                MatMulAdd_AT_B_Raw(hPrev, false, dGNode, false, U, true);
+            }
+
+            if (B.RequiresGrad)
+            {
+                var dbS = B.GradView.AsSpan(); var dGS_full = dGNode.DataView.AsReadOnlySpan();
+                for (var b = 0; b < batchSize; b++)
+                {
+                    TensorPrimitives.Add(dbS, dGS_full.Slice(b * 4 * hS, 4 * hS), dbS);
+                }
+            }
+        }
+
+        public static AutogradNode RepeatVector(ComputationGraph graph, AutogradNode input, int seqLen)
+        {
+            int batch = input.DataView.GetDim(0), hS = input.DataView.GetDim(1);
+            var res = new FastTensor<float>(batch, seqLen, hS, false);
+
+            for (var b = 0; b < batch; b++)
+            {
+                var src = input.DataView.AsReadOnlySpan().Slice(b * hS, hS);
+
+                for (var t = 0; t < seqLen; t++)
+                {
+                    src.CopyTo(res.GetView().AsSpan().Slice(b * seqLen * hS + t * hS, hS));
+                }
+            }
+
+            var output = new AutogradNode(res, input.RequiresGrad);
+
+            if (output.RequiresGrad)
+            {
+                graph?.Record(OpCode.RepeatVector, output, input, null, seqLen, hS);
+            }
+
+            return output;
+        }
+
+        public static void RepeatVectorBackward(AutogradNode input, AutogradNode output, int seqLen, int hS)
+        {
+            if (!input.RequiresGrad)
+            {
+                return;
+            }
+
+            var iGS = input.GradView.AsSpan(); var ogS = output.GradView.AsReadOnlySpan();
+
+            for (var b = 0; b < input.DataView.GetDim(0); b++)
+            {
+                var dst = iGS.Slice(b * hS, hS);
+
+                for (var t = 0; t < seqLen; t++)
+                {
+                    TensorPrimitives.Add(dst, ogS.Slice(b * seqLen * hS + t * hS, hS), dst);
+                }
+            }
+        }
+
+        public static AutogradNode Multiply(ComputationGraph graph, AutogradNode a, AutogradNode b)
+        {
+            var res = AllocateLike(a, false);
+
+            TensorPrimitives.Multiply(a.DataView.AsReadOnlySpan(), b.DataView.AsReadOnlySpan(), res.GetView().AsSpan());
+
+            var output = new AutogradNode(res, a.RequiresGrad || b.RequiresGrad);
+
+            if (output.RequiresGrad)
+            {
+                graph?.Record(OpCode.Multiply, output, a, b);
+            }
+
+            return output;
+        }
+
+        public static void MultiplyBackward(AutogradNode a, AutogradNode b, AutogradNode output)
+        {
+            if (a.RequiresGrad)
+            {
+                TensorPrimitives.MultiplyAdd(output.GradView.AsReadOnlySpan(), b.DataView.AsReadOnlySpan(), a.GradView.AsSpan(), a.GradView.AsSpan());
+            }
+
+            if (b.RequiresGrad)
+            {
+                TensorPrimitives.MultiplyAdd(output.GradView.AsReadOnlySpan(), a.DataView.AsReadOnlySpan(), b.GradView.AsSpan(), b.GradView.AsSpan());
+            }
+        }
+
+        public static AutogradNode GateSlice(ComputationGraph graph, AutogradNode gates, int hiddenSize, int gateIndex)
+        {
+            var res = new FastTensor<float>(gates.DataView.GetDim(0), hiddenSize, false);
+            int batch = gates.DataView.GetDim(0), stride = 4 * hiddenSize, offset = gateIndex * hiddenSize;
+
+            for (var b = 0; b < batch; b++)
+            {
+                gates.DataView.AsReadOnlySpan().Slice(b * stride + offset, hiddenSize).CopyTo(res.GetView().AsSpan().Slice(b * hiddenSize, hiddenSize));
+            }
+
+            var output = new AutogradNode(res, gates.RequiresGrad);
+
+            if (output.RequiresGrad)
+            {
+                graph?.Record(OpCode.GateSlice, output, gates, null, gateIndex, hiddenSize);
+            }
+
+            return output;
+        }
+
+        public static void GateSliceBackward(AutogradNode gates, AutogradNode output, int hiddenSize, int gateIndex)
+        {
+            if (!gates.RequiresGrad)
+            {
+                return;
+            }
+
+            int batch = gates.DataView.GetDim(0), offset = gateIndex * hiddenSize, stride = 4 * hiddenSize;
+
+            for (var b = 0; b < batch; b++)
+            {
+                var dst = gates.GradView.AsSpan().Slice(b * stride + offset, hiddenSize);
+
+                TensorPrimitives.Add(dst, output.GradView.AsReadOnlySpan().Slice(b * hiddenSize, hiddenSize), dst);
+            }
+        }
+
+        public static void TimestepSliceBackward(AutogradNode input, AutogradNode output, int t, int seqLen, int inputSize)
+        {
+            if (!input.RequiresGrad)
+            {
+                return;
+            }
+
+            for (var b = 0; b < input.DataView.GetDim(0); b++)
+            {
+                var dst = input.GradView.AsSpan().Slice(b * seqLen * inputSize + t * inputSize, inputSize);
+
+                TensorPrimitives.Add(dst, output.GradView.AsReadOnlySpan().Slice(b * inputSize, inputSize), dst);
+            }
+        }
+
+        public static void StackTimestepsBackward(AutogradNode[] allH, AutogradNode output, int batch, int seqLen, int hiddenSize)
+        {
+            for (var t = 0; t < seqLen; t++)
+            {
+                if (!allH[t].RequiresGrad)
+                {
+                    continue;
+                }
+
+                for (var b = 0; b < batch; b++)
+                {
+                    var dst = allH[t].GradView.AsSpan().Slice(b * hiddenSize, hiddenSize);
+
+                    TensorPrimitives.Add(dst, output.GradView.AsReadOnlySpan().Slice(b * seqLen * hiddenSize + t * hiddenSize, hiddenSize), dst);
+                }
+            }
+        }
+
+        // ====================================================================
+        // 6. GRAPH HELPERS
+        // ====================================================================
+
         public static AutogradNode Reshape(ComputationGraph graph, AutogradNode input, params int[] newShape)
         {
-            var output = new AutogradNode(input.Data.Reshape(newShape), input.RequiresGrad);
+            var totalNewElements = 1;
+
+            foreach (var dim in newShape)
+            {
+                totalNewElements *= dim;
+            }
+
+            // Tworzymy widok 2D (Batch, Reszta), bo Twój TensorView póki co pewnie tylko to wspiera stabilnie
+            var newView = input.DataView.Reshape(newShape[0], totalNewElements / newShape[0]);
+            var resD = FastTensor<float>.FromView(newView);
+            var output = new AutogradNode(resD, input.RequiresGrad);
 
             if (output.RequiresGrad)
             {
@@ -873,213 +1145,81 @@ namespace DevOnBike.Overfit.Core
 
         public static void ReshapeBackward(AutogradNode input, AutogradNode output)
         {
-            TensorPrimitives.Add(input.Grad.AsSpan(), output.Grad.AsSpan(), input.Grad.AsSpan());
-        }
-
-        public static void Im2Col(ReadOnlySpan<float> input, int channels, int height, int width, int kSize, int stride, int padding, Span<float> output)
-        {
-            var outH = (height + 2 * padding - kSize) / stride + 1;
-            var outW = (width + 2 * padding - kSize) / stride + 1;
-            var channelSize = height * width;
-
-            for (var c = 0; c < channels; c++)
-            {
-                for (var kh = 0; kh < kSize; kh++)
-                {
-                    for (var kw = 0; kw < kSize; kw++)
-                    {
-                        var rowOffset = (c * kSize * kSize + kh * kSize + kw) * outH * outW;
-                        for (var y = 0; y < outH; y++)
-                        {
-                            var i = y * stride - padding + kh;
-                            var outIdxY = rowOffset + y * outW;
-
-                            if (i >= 0 && i < height)
-                            {
-                                var inputRowOffset = c * channelSize + i * width;
-
-                                if (stride == 1)
-                                {
-                                    var startX = Math.Max(0, padding - kw);
-                                    var endX = Math.Min(outW, width + padding - kw);
-
-                                    if (startX > 0)
-                                    {
-                                        output.Slice(outIdxY, startX).Clear();
-                                    }
-
-                                    if (endX > startX)
-                                    {
-                                        var startJ = startX - padding + kw;
-                                        var len = endX - startX;
-                                        input.Slice(inputRowOffset + startJ, len).CopyTo(output.Slice(outIdxY + startX, len));
-                                    }
-
-                                    if (endX < outW)
-                                    {
-                                        output.Slice(outIdxY + endX, outW - endX).Clear();
-                                    }
-                                }
-                                else
-                                {
-                                    for (var x = 0; x < outW; x++)
-                                    {
-                                        var j = x * stride - padding + kw;
-                                        output[outIdxY + x] = (j >= 0 && j < width) ? input[inputRowOffset + j] : 0f;
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                output.Slice(outIdxY, outW).Clear();
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        public static void Col2Im(ReadOnlySpan<float> colData, int channels, int height, int width, int kSize, int stride, int padding, Span<float> gradInput)
-        {
-            var outH = (height + 2 * padding - kSize) / stride + 1;
-            var outW = (width + 2 * padding - kSize) / stride + 1;
-            var channelSize = height * width;
-
-            for (var c = 0; c < channels; c++)
-            {
-                for (var kh = 0; kh < kSize; kh++)
-                {
-                    for (var kw = 0; kw < kSize; kw++)
-                    {
-                        var rowOffset = (c * kSize * kSize + kh * kSize + kw) * outH * outW;
-                        for (var y = 0; y < outH; y++)
-                        {
-                            var i = y * stride - padding + kh;
-                            var outIdxY = rowOffset + y * outW;
-
-                            if (i >= 0 && i < height)
-                            {
-                                var inputRowOffset = c * channelSize + i * width;
-
-                                if (stride == 1)
-                                {
-                                    var startX = Math.Max(0, padding - kw);
-                                    var endX = Math.Min(outW, width + padding - kw);
-
-                                    if (endX > startX)
-                                    {
-                                        var startJ = startX - padding + kw;
-                                        var len = endX - startX;
-
-                                        var inSlice = gradInput.Slice(inputRowOffset + startJ, len);
-                                        var outSlice = colData.Slice(outIdxY + startX, len);
-
-                                        TensorPrimitives.Add(inSlice, outSlice, inSlice);
-                                    }
-                                }
-                                else
-                                {
-                                    for (var x = 0; x < outW; x++)
-                                    {
-                                        var j = x * stride - padding + kw;
-                                        if (j >= 0 && j < width)
-                                        {
-                                            gradInput[inputRowOffset + j] += colData[outIdxY + x];
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            TensorPrimitives.Add(input.GradView.AsSpan(), output.GradView.AsReadOnlySpan(), input.GradView.AsSpan());
         }
 
         public static AutogradNode Linear(ComputationGraph graph, AutogradNode input, AutogradNode weights, AutogradNode bias)
         {
-            var product = MatMul(graph, input, weights);
-            return AddBias(graph, product, bias);
+            return AddBias(graph, MatMul(graph, input, weights), bias);
         }
 
-        public static AutogradNode DirectionalLoss(ComputationGraph graph, AutogradNode prediction, AutogradNode target, float gamma = 10f)
+        public static void Im2Col(ReadOnlySpan<float> input, int channels, int h, int w, int k, int s, int p, Span<float> output)
         {
-            var pS = prediction.Data.AsSpan();
-            var tS = target.Data.AsSpan();
+            int oH = (h + 2 * p - k) / s + 1, oW = (w + 2 * p - k) / s + 1;
 
-            using var temp = FastTensor<float>.SameShape(prediction.Data, clearMemory: false);
-            var tempS = temp.AsSpan();
-
-            TensorPrimitives.Subtract(pS, tS, tempS);
-            var sumMse = TensorPrimitives.SumOfSquares(tempS);
-
-            TensorPrimitives.Multiply(pS, tS, tempS);
-            TensorPrimitives.Min(tempS, 0f, tempS);
-
-            var sumPenalty = TensorPrimitives.Sum(tempS) * -gamma;
-
-            var totalLoss = sumMse + sumPenalty;
-            var res = new FastTensor<float>(1, 1) { [0, 0] = totalLoss / pS.Length };
-            var output = new AutogradNode(res, prediction.RequiresGrad);
-
-            if (output.RequiresGrad)
+            for (var c = 0; c < channels; c++)
             {
-                graph?.Record(
-                    OpCode.DirectionalLoss,
-                    output,
-                    prediction,
-                    target,
-                    BitConverter.SingleToInt32Bits(gamma)
-                );
-            }
-
-            return output;
-        }
-
-        public static void DirectionalLossBackward(AutogradNode p, AutogradNode t, AutogradNode o, float gamma)
-        {
-            var scale = o.Grad.AsSpan()[0] / p.Data.Size;
-            var mseScale = 2f * scale;
-            var penaltyScale = gamma * scale;
-
-            var pGrad = p.Grad.AsSpan();
-            var pData = p.Data.AsSpan();
-            var tData = t.Data.AsSpan();
-            var i = 0;
-
-            if (Vector.IsHardwareAccelerated)
-            {
-                var vecSize = Vector<float>.Count;
-                var vZero = Vector<float>.Zero;
-                var vMseScale = new Vector<float>(mseScale);
-                var vPenaltyScale = new Vector<float>(penaltyScale);
-
-                for (; i <= pData.Length - vecSize; i += vecSize)
+                for (var kh = 0; kh < k; kh++)
                 {
-                    var vP = new Vector<float>(pData.Slice(i));
-                    var vT = new Vector<float>(tData.Slice(i));
-                    var vG = new Vector<float>(pGrad.Slice(i));
+                    for (var kw = 0; kw < k; kw++)
+                    {
+                        var rO = (c * k * k + kh * k + kw) * oH * oW;
 
-                    var vDiff = vP - vT;
-                    var vBaseGrad = vDiff * vMseScale;
-
-                    var vProd = vP * vT;
-                    var vWrongDirectionMask = Vector.LessThan(vProd, vZero);
-
-                    var vPenaltyGrad = Vector.ConditionalSelect(
-                        vWrongDirectionMask,
-                        -vT * vPenaltyScale,
-                        vZero
-                    );
-
-                    (vG + vBaseGrad + vPenaltyGrad).CopyTo(pGrad.Slice(i));
+                        for (var y = 0; y < oH; y++)
+                        {
+                            var i = y * s - p + kh;
+                            if (i >= 0 && i < h)
+                            {
+                                var iO = c * h * w + i * w;
+                                for (var x = 0; x < oW; x++)
+                                {
+                                    var j = x * s - p + kw;
+                                    output[rO + y * oW + x] = (j >= 0 && j < w) ? input[iO + j] : 0f;
+                                }
+                            }
+                            else
+                            {
+                                output.Slice(rO + y * oW, oW).Clear();
+                            }
+                        }
+                    }
                 }
             }
+        }
 
-            for (; i < pData.Length; i++)
+        public static void Col2Im(ReadOnlySpan<float> col, int channels, int h, int w, int k, int s, int p, Span<float> gI)
+        {
+            int oH = (h + 2 * p - k) / s + 1, oW = (w + 2 * p - k) / s + 1;
+
+            for (var c = 0; c < channels; c++)
             {
-                var baseGrad = 2f * (pData[i] - tData[i]) * scale;
-                var penaltyGrad = (pData[i] * tData[i] < 0f) ? -tData[i] * penaltyScale : 0f;
-                pGrad[i] += baseGrad + penaltyGrad;
+                for (var kh = 0; kh < k; kh++)
+                {
+                    for (var kw = 0; kw < k; kw++)
+                    {
+                        var rO = (c * k * k + kh * k + kw) * oH * oW;
+
+                        for (var y = 0; y < oH; y++)
+                        {
+                            var i = y * s - p + kh;
+
+                            if (i >= 0 && i < h)
+                            {
+                                var iO = c * h * w + i * w;
+
+                                for (var x = 0; x < oW; x++)
+                                {
+                                    var j = x * s - p + kw;
+
+                                    if (j >= 0 && j < w)
+                                    {
+                                        gI[iO + j] += col[rO + y * oW + x];
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

@@ -8,26 +8,11 @@ using DevOnBike.Overfit.Core;
 namespace DevOnBike.Overfit.Data.Contracts
 {
     /// <summary>
-    /// Represents the state of data within the processing pipeline.
+    ///     Represents the state of data within the processing pipeline.
     /// </summary>
     public sealed class PipelineContext : IDisposable
     {
         private bool _disposed;
-
-        /// <summary>
-        /// Input features tensor.
-        /// </summary>
-        public FastTensor<float> Features { get; set; }
-
-        /// <summary>
-        /// Target values tensor (labels).
-        /// </summary>
-        public FastTensor<float> Targets { get; set; }
-
-        /// <summary>
-        /// Diagnostic metadata populated by the DataPipeline after each processing step.
-        /// </summary>
-        public List<LayerDiagnostic> Diagnostics { get; } = [];
 
         public PipelineContext(FastTensor<float> features, FastTensor<float> targets)
         {
@@ -36,7 +21,38 @@ namespace DevOnBike.Overfit.Data.Contracts
         }
 
         /// <summary>
-        /// Replaces the current Features tensor and disposes of the old one.
+        ///     Input features tensor.
+        /// </summary>
+        public FastTensor<float> Features { get; set; }
+
+        /// <summary>
+        ///     Target values tensor (labels).
+        /// </summary>
+        public FastTensor<float> Targets { get; set; }
+
+        /// <summary>
+        ///     Diagnostic metadata populated by the DataPipeline after each processing step.
+        /// </summary>
+        public List<LayerDiagnostic> Diagnostics { get; } = [];
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+
+            Features?.Dispose();
+            Targets?.Dispose();
+
+            Features = null;
+            Targets = null;
+        }
+
+        /// <summary>
+        ///     Replaces the current Features tensor and disposes of the old one.
         /// </summary>
         public void ReplaceFeatures(FastTensor<float> newFeatures)
         {
@@ -52,8 +68,8 @@ namespace DevOnBike.Overfit.Data.Contracts
         }
 
         /// <summary>
-        /// Replaces both Features and Targets tensors and disposes of the old ones.
-        /// Typically used by row-filtering layers (e.g., TechnicalSanityLayer, DuplicateRowFilter).
+        ///     Replaces both Features and Targets tensors and disposes of the old ones.
+        ///     Typically used by row-filtering layers (e.g., TechnicalSanityLayer, DuplicateRowFilter).
         /// </summary>
         public void ReplaceAll(FastTensor<float> newFeatures, FastTensor<float> newTargets)
         {
@@ -75,22 +91,6 @@ namespace DevOnBike.Overfit.Data.Contracts
             {
                 oldT?.Dispose();
             }
-        }
-
-        public void Dispose()
-        {
-            if (_disposed)
-            {
-                return;
-            }
-
-            _disposed = true;
-
-            Features?.Dispose();
-            Targets?.Dispose();
-
-            Features = null;
-            Targets = null;
         }
     }
 }

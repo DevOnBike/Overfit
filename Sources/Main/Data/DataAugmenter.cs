@@ -11,12 +11,12 @@ namespace DevOnBike.Overfit.Data
     {
         public static FastTensor<float> AugmentBatch(FastTensor<float> originalBatch, int width = 28, int height = 28)
         {
-            var augmentedBatch = new FastTensor<float>(originalBatch.Shape);
+            var augmentedBatch = FastTensor<float>.SameShape(originalBatch, clearMemory: false);
+            var rows = originalBatch.GetView().GetDim(0);
 
-            Parallel.For(0, originalBatch.Shape[0], i =>
-            {
-                var inputRow = originalBatch.AsSpan().Slice(i * width * height, width * height);
-                var outputRow = augmentedBatch.AsSpan().Slice(i * width * height, width * height);
+            Parallel.For(0, rows, body: i => {
+                var inputRow = originalBatch.GetView().AsReadOnlySpan().Slice(i * width * height, width * height);
+                var outputRow = augmentedBatch.GetView().AsSpan().Slice(i * width * height, width * height);
 
                 if (Random.Shared.NextSingle() > 0.5f)
                 {
@@ -43,7 +43,9 @@ namespace DevOnBike.Overfit.Data
                 {
                     int nx = x + sx, ny = y + sy;
                     if (nx >= 0 && nx < w && ny >= 0 && ny < h)
+                    {
                         output[ny * w + nx] = input[y * w + x];
+                    }
                 }
             }
         }

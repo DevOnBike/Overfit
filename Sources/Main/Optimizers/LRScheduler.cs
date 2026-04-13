@@ -8,35 +8,28 @@ using DevOnBike.Overfit.Core;
 namespace DevOnBike.Overfit.Optimizers
 {
     /// <summary>
-    /// Manages the learning rate during training and provides safety mechanisms against numerical instability.
-    /// Implements "Reduce LR on Plateau" with an integrated RAM checkpointing system.
+    ///     Manages the learning rate during training and provides safety mechanisms against numerical instability.
+    ///     Implements "Reduce LR on Plateau" with an integrated RAM checkpointing system.
     /// </summary>
     /// <remarks>
-    /// This scheduler monitors the loss and automatically restores the last "safe" weight state 
-    /// if NaN or Infinity is detected, preventing total model collapse.
+    ///     This scheduler monitors the loss and automatically restores the last "safe" weight state
+    ///     if NaN or Infinity is detected, preventing total model collapse.
     /// </remarks>
     public sealed class LRScheduler : IDisposable
     {
-        private readonly IOptimizer _optimizer;
-        private readonly AutogradNode[] _parameters;
         private readonly FastTensor<float>[] _checkpoint; // In-RAM weight backup
 
         private readonly float _factor;
-        private readonly int _patience;
-        private readonly float _minLR;
-        private readonly float _minDelta;
         private readonly Action<string> _log;
+        private readonly float _minDelta;
+        private readonly float _minLR;
+        private readonly IOptimizer _optimizer;
+        private readonly AutogradNode[] _parameters;
+        private readonly int _patience;
+        private int _badEpochs;
 
         private float _bestLoss = float.MaxValue;
-        private int _badEpochs = 0;
 
-        /// <param name="optimizer">The optimizer whose LearningRate will be managed.</param>
-        /// <param name="parameters">The model parameters to monitor and backup.</param>
-        /// <param name="log">Logging callback for scheduler events.</param>
-        /// <param name="factor">Multiplicative factor for learning rate reduction (0.0 - 1.0).</param>
-        /// <param name="patience">Number of epochs to wait before reducing LR after stagnation.</param>
-        /// <param name="minLR">Lower bound for the learning rate.</param>
-        /// <param name="minDelta">Threshold for measuring new best loss (relative change).</param>
         public LRScheduler(
             IOptimizer optimizer,
             AutogradNode[] parameters,
@@ -66,15 +59,33 @@ namespace DevOnBike.Overfit.Optimizers
             _checkpoint = new FastTensor<float>[_parameters.Length];
             for (var i = 0; i < _parameters.Length; i++)
             {
-                _checkpoint[i] = FastTensor<float>.SameShape(_parameters[i].Data);
-                _parameters[i].Data.AsSpan().CopyTo(_checkpoint[i].AsSpan());
+                var view = _parameters[i].DataView;
+
+                // Alokujemy kopię zapasową na stercie na podstawie wymiarów widoku
+                _checkpoint[i] = view.Rank switch
+                {
+                    1 => new FastTensor<float>(view.GetDim(0), clearMemory: false),
+                    2 => new FastTensor<float>(view.GetDim(0), view.GetDim(1), clearMemory: false),
+                    3 => new FastTensor<float>(view.GetDim(0), view.GetDim(1), view.GetDim(2), clearMemory: false),
+                    4 => new FastTensor<float>(view.GetDim(0), view.GetDim(1), view.GetDim(2), view.GetDim(3), clearMemory: false),
+                    _ => throw new InvalidOperationException("Wymiar nieobsługiwany przez LRScheduler")
+                };
+
+                view.AsReadOnlySpan().CopyTo(_checkpoint[i].GetView().AsSpan());
             }
         }
 
-        /// <summary>
-        /// Evaluates the current loss and updates the learning rate or restores weights if necessary.
-        /// </summary>
-        /// <param name="currentLoss">The loss value from the current epoch.</param>
+        public void Dispose()
+        {
+            if (_checkpoint != null)
+            {
+                for (var i = 0; i < _checkpoint.Length; i++)
+                {
+                    _checkpoint[i]?.Dispose();
+                }
+            }
+        }
+
         public void Step(float currentLoss)
         {
             if (float.IsNaN(currentLoss) || float.IsInfinity(currentLoss))
@@ -124,7 +135,7 @@ namespace DevOnBike.Overfit.Optimizers
         {
             for (var i = 0; i < _parameters.Length; i++)
             {
-                _parameters[i].Data.AsSpan().CopyTo(_checkpoint[i].AsSpan());
+                _parameters[i].DataView.AsReadOnlySpan().CopyTo(_checkpoint[i].GetView().AsSpan());
             }
         }
 
@@ -133,7 +144,7 @@ namespace DevOnBike.Overfit.Optimizers
         {
             for (var i = 0; i < _parameters.Length; i++)
             {
-                _checkpoint[i].AsSpan().CopyTo(_parameters[i].Data.AsSpan());
+                _checkpoint[i].GetView().AsReadOnlySpan().CopyTo(_parameters[i].DataView.AsSpan());
             }
         }
 
@@ -141,17 +152,6 @@ namespace DevOnBike.Overfit.Optimizers
         {
             _bestLoss = float.MaxValue;
             _badEpochs = 0;
-        }
-
-        public void Dispose()
-        {
-            if (_checkpoint != null)
-            {
-                for (var i = 0; i < _checkpoint.Length; i++)
-                {
-                    _checkpoint[i]?.Dispose();
-                }
-            }
         }
     }
 }

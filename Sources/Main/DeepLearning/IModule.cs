@@ -8,29 +8,29 @@ using DevOnBike.Overfit.Core;
 namespace DevOnBike.Overfit.DeepLearning
 {
     /// <summary>
-    /// Defines the fundamental contract for all neural network modules, including layers and composite models.
-    /// Supports the training/evaluation lifecycle, parameter management, and serialization.
+    ///     Defines the fundamental contract for all neural network modules, including layers and composite models.
+    ///     Supports the training/evaluation lifecycle, parameter management, and serialization.
     /// </summary>
     public interface IModule : IDisposable
     {
         /// <summary>
-        /// Gets a value indicating whether the module is currently in training mode.
-        /// This state affects layers like <c>Dropout</c> or <c>BatchNorm</c>.
+        ///     Gets a value indicating whether the module is currently in training mode.
+        ///     This state affects layers like <c>Dropout</c> or <c>BatchNorm</c>.
         /// </summary>
         bool IsTraining { get; }
 
         /// <summary>
-        /// Sets the module (and its sub-modules) to training mode.
+        ///     Sets the module (and its sub-modules) to training mode.
         /// </summary>
         void Train();
 
         /// <summary>
-        /// Sets the module (and its sub-modules) to evaluation (inference) mode.
+        ///     Sets the module (and its sub-modules) to evaluation (inference) mode.
         /// </summary>
         void Eval();
 
         /// <summary>
-        /// Performs the forward pass through the module.
+        ///     Performs the forward pass through the module.
         /// </summary>
         /// <param name="graph">The computation graph to record operations for Autograd. Can be <c>null</c> for inference.</param>
         /// <param name="input">The input tensor node.</param>
@@ -38,18 +38,23 @@ namespace DevOnBike.Overfit.DeepLearning
         AutogradNode Forward(ComputationGraph graph, AutogradNode input);
 
         /// <summary>
-        /// Retrieves all learnable parameters (weights and biases) within this module and its children.
-        /// Typically used by the <c>Optimizer</c> to update weights during backpropagation.
+        ///     Extremely fast, 0-allocation forward pass for inference (Batch = 1).
+        /// </summary>
+        void ForwardInference(ReadOnlySpan<float> input, Span<float> output);
+
+        /// <summary>
+        ///     Retrieves all learnable parameters (weights and biases) within this module and its children.
+        ///     Typically used by the <c>Optimizer</c> to update weights during backpropagation.
         /// </summary>
         IEnumerable<AutogradNode> Parameters();
 
         /// <summary>
-        /// Serializes the module's parameters to a binary stream.
+        ///     Serializes the module's parameters to a binary stream.
         /// </summary>
         void Save(BinaryWriter bw);
 
         /// <summary>
-        /// Deserializes the module's parameters from a binary stream.
+        ///     Deserializes the module's parameters from a binary stream.
         /// </summary>
         void Load(BinaryReader br);
     }
