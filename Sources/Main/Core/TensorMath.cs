@@ -463,7 +463,7 @@ namespace DevOnBike.Overfit.Core
             for (var i = 0; i < igS.Length; i += StackAllocThreshold)
             {
                 var c = Math.Min(StackAllocThreshold, igS.Length - i);
-                using var buf = new PooledBuffer<float>(c);
+                using var buf = new NativeBuffer<float>(c);
                 var b = buf.Span; var o = outS.Slice(i, c);
 
                 TensorPrimitives.Subtract(1f, o, b); TensorPrimitives.Multiply(o, b, b);
@@ -494,7 +494,7 @@ namespace DevOnBike.Overfit.Core
             for (var i = 0; i < igS.Length; i += StackAllocThreshold)
             {
                 var c = Math.Min(StackAllocThreshold, igS.Length - i);
-                using var buf = new PooledBuffer<float>(c);
+                using var buf = new NativeBuffer<float>(c);
                 var b = buf.Span; var o = outS.Slice(i, c);
 
                 TensorPrimitives.Multiply(o, o, b); TensorPrimitives.Subtract(1f, b, b);
@@ -598,7 +598,7 @@ namespace DevOnBike.Overfit.Core
             {
                 var sc = 1f / (1f - probability); var sz = input.DataView.Size; var thr = (byte)(probability * 255f);
 
-                using var rndBuf = new PooledBuffer<byte>(sz);
+                using var rndBuf = new NativeBuffer<byte>(sz);
                 Random.Shared.NextBytes(rndBuf.Span);
 
                 var mS = maskNode.DataView.AsSpan();
@@ -680,7 +680,7 @@ namespace DevOnBike.Overfit.Core
         public static AutogradNode MSELoss(ComputationGraph graph, AutogradNode prediction, AutogradNode target)
         {
             var sz = prediction.DataView.Size; float mse;
-            using (var diffBuf = new PooledBuffer<float>(sz))
+            using (var diffBuf = new NativeBuffer<float>(sz))
             {
                 var dS = diffBuf.Span;
                 TensorPrimitives.Subtract(prediction.DataView.AsReadOnlySpan(), target.DataView.AsReadOnlySpan(), dS);
@@ -707,7 +707,7 @@ namespace DevOnBike.Overfit.Core
         public static AutogradNode DirectionalLoss(ComputationGraph graph, AutogradNode prediction, AutogradNode target, float gamma = 10f)
         {
             var sz = prediction.DataView.Size; float loss;
-            using (var tempBuf = new PooledBuffer<float>(sz))
+            using (var tempBuf = new NativeBuffer<float>(sz))
             {
                 var s = tempBuf.Span;
                 TensorPrimitives.Subtract(prediction.DataView.AsReadOnlySpan(), target.DataView.AsReadOnlySpan(), s);
@@ -759,8 +759,8 @@ namespace DevOnBike.Overfit.Core
                 }
                 TensorPrimitives.Multiply(mS, 1f / N, mS);
 
-                using var vB = new PooledBuffer<float>(C, clearMemory: true);
-                using var tB = new PooledBuffer<float>(C);
+                using var vB = new NativeBuffer<float>(C, clearMemory: true);
+                using var tB = new NativeBuffer<float>(C);
 
                 for (var i = 0; i < N; i++)
                 {
@@ -801,11 +801,11 @@ namespace DevOnBike.Overfit.Core
 
             int N = input.DataView.GetDim(0), C = input.DataView.GetDim(1);
 
-            using var coeffBuf = new PooledBuffer<float>(C); var coeff = coeffBuf.Span;
-            using var termBuf = new PooledBuffer<float>(C); var term = termBuf.Span;
-            using var sDyBuf = new PooledBuffer<float>(C, true); var sDy = sDyBuf.Span;
-            using var sDyXBuf = new PooledBuffer<float>(C, true); var sDyX = sDyXBuf.Span;
-            using var xHRBuf = new PooledBuffer<float>(C); var xHR = xHRBuf.Span;
+            using var coeffBuf = new NativeBuffer<float>(C); var coeff = coeffBuf.Span;
+            using var termBuf = new NativeBuffer<float>(C); var term = termBuf.Span;
+            using var sDyBuf = new NativeBuffer<float>(C, true); var sDy = sDyBuf.Span;
+            using var sDyXBuf = new NativeBuffer<float>(C, true); var sDyX = sDyXBuf.Span;
+            using var xHRBuf = new NativeBuffer<float>(C); var xHR = xHRBuf.Span;
 
             TensorPrimitives.Multiply(gamma.DataView.AsReadOnlySpan(), invStd.DataView.AsReadOnlySpan(), coeff); TensorPrimitives.Multiply(coeff, 1f / N, coeff);
             for (var i = 0; i < N; i++)
@@ -832,7 +832,7 @@ namespace DevOnBike.Overfit.Core
                     TensorPrimitives.Subtract(iR, mean.DataView.AsReadOnlySpan(), xHR); TensorPrimitives.Multiply(xHR, invStd.DataView.AsReadOnlySpan(), xHR);
                     TensorPrimitives.Multiply(gR, N, term); TensorPrimitives.Subtract(term, sDy, term);
 
-                    using var tempXHatBuf = new PooledBuffer<float>(C); var tempXHat = tempXHatBuf.Span;
+                    using var tempXHatBuf = new NativeBuffer<float>(C); var tempXHat = tempXHatBuf.Span;
                     xHR.CopyTo(tempXHat);
 
                     TensorPrimitives.Multiply(tempXHat, sDyX, tempXHat); TensorPrimitives.Subtract(term, tempXHat, term);

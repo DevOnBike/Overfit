@@ -10,21 +10,38 @@ namespace DevOnBike.Overfit.Core
     public unsafe readonly ref struct NativeBuffer<T> where T : unmanaged
     {
         public readonly Span<T> Span;
-
         private readonly void* _ptr;
 
         public NativeBuffer(int size, bool clearMemory = true)
         {
-            _ptr = clearMemory ? NativeMemory.AllocZeroed((nuint)size, (nuint)sizeof(T)) : NativeMemory.Alloc((nuint)size, (nuint)sizeof(T));
+            if (size <= 0)
+            {
+                _ptr = null;
+                Span = Span<T>.Empty;
+                return;
+            }
 
+            var byteSize = (nuint)size * (nuint)sizeof(T);
+
+            var paddedByteSize = (byteSize + 63) & ~(nuint)63;
+
+            _ptr = NativeMemory.AlignedAlloc(paddedByteSize, 64);
+
+            // WAŻNE: Span nakładamy tylko na FAKTYCZNY rozmiar, żeby logika 
+            // matematyczna nie operowała na śmieciowych danych z obszaru paddingu.
             Span = new Span<T>(_ptr, size);
+
+            if (clearMemory)
+            {
+                Span.Clear();
+            }
         }
 
         public void Dispose()
         {
             if (_ptr != null)
             {
-                NativeMemory.Free(_ptr);
+                NativeMemory.AlignedFree(_ptr);
             }
         }
     }
