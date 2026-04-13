@@ -1,5 +1,5 @@
-﻿using System.Buffers;
-using System.Numerics.Tensors;
+﻿using System.Numerics.Tensors;
+using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.Data.Abstractions;
 
 namespace DevOnBike.Overfit.Data.Normalizers
@@ -47,21 +47,14 @@ namespace DevOnBike.Overfit.Data.Normalizers
             localMean /= n2;
 
             var localMeanFloat = (float)localMean;
-            var buffer = ArrayPool<float>.Shared.Rent(data.Length);
+            using var buffer = new PooledBuffer<float>(data.Length);
 
             double localM2;
 
-            try
-            {
-                var diffs = buffer.AsSpan(0, data.Length);
-                TensorPrimitives.Subtract(data, localMeanFloat, diffs);
+            var diffs = buffer.Span;
+            TensorPrimitives.Subtract(data, localMeanFloat, diffs);
 
-                localM2 = TensorPrimitives.SumOfSquares(diffs);
-            }
-            finally
-            {
-                ArrayPool<float>.Shared.Return(buffer);
-            }
+            localM2 = TensorPrimitives.SumOfSquares(diffs);
 
             if (_count == 0)
             {

@@ -3,8 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Buffers;
 using System.Numerics.Tensors;
+using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.Data.Abstractions;
 
 namespace DevOnBike.Overfit.Data.Normalizers
@@ -68,18 +68,13 @@ namespace DevOnBike.Overfit.Data.Normalizers
                 return;
             }
 
-            var buffer = ArrayPool<float>.Shared.Rent(data.Length);
+            using var buffer = new PooledBuffer<float>(data.Length);
 
-            try
-            {
-                var tmp = buffer.AsSpan(0, data.Length);
-                ApplyReLuAndLog1P(data, tmp);
-                _zscore.FitBatch(tmp);
-            }
-            finally
-            {
-                ArrayPool<float>.Shared.Return(buffer);
-            }
+            var tmp = buffer.Span;
+
+            ApplyReLuAndLog1P(data, tmp);
+
+            _zscore.FitBatch(tmp);
         }
 
         /// <summary>Inkrementalne fitowanie — Welford po transformacji log1p.</summary>

@@ -5,8 +5,6 @@
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 using DevOnBike.Overfit.Statistical;
 using DevOnBike.Overfit.Core;
-using Xunit;
-using System;
 
 namespace DevOnBike.Overfit.Tests
 {

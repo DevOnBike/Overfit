@@ -7,7 +7,6 @@ using System.Diagnostics;
 using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Optimizers;
-using Xunit; // Dodano brakujący atrybut
 
 namespace DevOnBike.Overfit.Tests
 {

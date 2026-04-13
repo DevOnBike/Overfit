@@ -3,10 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System;
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Core;
-using Xunit;
 
 namespace DevOnBike.Overfit.Tests
 {

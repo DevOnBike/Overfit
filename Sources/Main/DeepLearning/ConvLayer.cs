@@ -2,13 +2,16 @@
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 
-using System.Buffers;
 using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
     public sealed class ConvLayer : IModule
     {
+        public AutogradNode Kernels { get; }
+
+        public bool IsTraining { get; private set; } = true;
+
         private readonly int _inC, _outC, _h, _w, _k;
 
         public ConvLayer(int inChannels, int outChannels, int h, int w, int kSize)
@@ -16,16 +19,21 @@ namespace DevOnBike.Overfit.DeepLearning
             _inC = inChannels; _outC = outChannels; _h = h; _w = w; _k = kSize;
 
             var kData = new FastTensor<float>(outChannels, inChannels * kSize * kSize, clearMemory: false);
+
             InitializeKernels(kData.GetView().AsSpan(), inChannels * kSize * kSize);
 
             Kernels = new AutogradNode(kData);
         }
 
-        public AutogradNode Kernels { get; }
-        public bool IsTraining { get; private set; } = true;
+        public void Train()
+        {
+            IsTraining = true;
+        }
 
-        public void Train() => IsTraining = true;
-        public void Eval() => IsTraining = false;
+        public void Eval()
+        {
+            IsTraining = false;
+        }
 
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
@@ -34,25 +42,15 @@ namespace DevOnBike.Overfit.DeepLearning
             var kSqInC = _k * _k * _inC;
             var outElements = outH * outW;
 
-            // Wypożyczamy pamięć na macierz Im2Col (zero narzutu na GC)
-            var colArr = ArrayPool<float>.Shared.Rent(kSqInC * outElements);
+            using var colArr = new PooledBuffer<float>(kSqInC * outElements);
 
-            try
-            {
-                var colSpan = colArr.AsSpan(0, kSqInC * outElements);
+            var colSpan = colArr.Span;
 
-                // 1. Rozwinięcie obrazu
-                TensorMath.Im2Col(input, _inC, _h, _w, _k, 1, 0, colSpan);
+            TensorMath.Im2Col(input, _inC, _h, _w, _k, 1, 0, colSpan);
 
-                // 2. Mnożenie macierzy (Kernels x Im2Col)
-                var w2D = Kernels.DataView.AsReadOnlySpan();
+            var w2D = Kernels.DataView.AsReadOnlySpan();
 
-                TensorMath.MatMulRawSeq(w2D, colSpan, _outC, kSqInC, outElements, output);
-            }
-            finally
-            {
-                ArrayPool<float>.Shared.Return(colArr);
-            }
+            TensorMath.MatMulRawSeq(w2D, colSpan, _outC, kSqInC, outElements, output);
         }
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
@@ -60,12 +58,16 @@ namespace DevOnBike.Overfit.DeepLearning
             return TensorMath.Conv2D(graph, input, Kernels, _inC, _outC, _h, _w, _k);
         }
 
-        public IEnumerable<AutogradNode> Parameters() { yield return Kernels; }
+        public IEnumerable<AutogradNode> Parameters()
+        {
+            yield return Kernels;
+        }
 
         public void Save(BinaryWriter bw)
         {
             bw.Write(Kernels.DataView.GetDim(0));
             bw.Write(Kernels.DataView.GetDim(1));
+
             foreach (var val in Kernels.DataView.AsSpan())
             {
                 bw.Write(val);
@@ -83,13 +85,17 @@ namespace DevOnBike.Overfit.DeepLearning
             }
 
             var span = Kernels.DataView.AsSpan();
+
             for (var i = 0; i < span.Length; i++)
             {
                 span[i] = br.ReadSingle();
             }
         }
 
-        public void Dispose() => Kernels?.Dispose();
+        public void Dispose()
+        {
+            Kernels?.Dispose();
+        }
 
         private void InitializeKernels(Span<float> span, int fanIn)
         {
@@ -104,6 +110,7 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             using var fs = new FileStream(path, FileMode.Create);
             using var bw = new BinaryWriter(fs);
+
             Save(bw);
         }
 
@@ -113,8 +120,10 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 throw new FileNotFoundException($"Model weights file not found: {path}");
             }
+
             using var fs = new FileStream(path, FileMode.Open);
             using var br = new BinaryReader(fs);
+
             Load(br);
         }
     }

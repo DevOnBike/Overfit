@@ -39,6 +39,7 @@ namespace DevOnBike.Overfit.Core
             get
             {
                 ObjectDisposedException.ThrowIf(_disposed == 1, this);
+
                 if (!RequiresGrad || _gradTensor == null)
                 {
                     throw new InvalidOperationException("Ten węzeł nie śledzi gradientów (RequiresGrad = false).");
@@ -55,13 +56,12 @@ namespace DevOnBike.Overfit.Core
         public AutogradNode(FastTensor<float> data, bool requiresGrad = false)
         {
             _dataTensor = data ?? throw new ArgumentNullException(nameof(data));
+
             RequiresGrad = requiresGrad;
 
             if (requiresGrad)
             {
-                // Alokujemy magazyn na gradienty od razu przyłączając go do węzła.
-                // Używamy clearMemory: true, bo gradienty muszą startować od 0.
-                _gradTensor = FastTensor<float>.SameShape(data, clearMemory: true);
+                _gradTensor = FastTensor<float>.SameShape(data, true);
             }
         }
 
@@ -89,7 +89,6 @@ namespace DevOnBike.Overfit.Core
         {
             if (Interlocked.Exchange(ref _disposed, 1) == 0)
             {
-                // Oddajemy oba magazyny do ArrayPool
                 _dataTensor?.Dispose();
                 _dataTensor = null;
 

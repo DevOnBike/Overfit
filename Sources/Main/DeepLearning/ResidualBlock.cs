@@ -30,43 +30,45 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Train()
         {
             IsTraining = true;
-            _linear1.Train(); _bn1.Train(); _linear2.Train(); _bn2.Train();
+
+            _linear1.Train();
+            _bn1.Train();
+            _linear2.Train();
+            _bn2.Train();
         }
 
         public void Eval()
         {
             IsTraining = false;
-            _linear1.Eval(); _bn1.Eval(); _linear2.Eval(); _bn2.Eval();
+
+            _linear1.Eval();
+            _bn1.Eval();
+            _linear2.Eval();
+            _bn2.Eval();
         }
 
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
             var hiddenSize = _linear1.Weights.DataView.GetDim(0);
 
-            var buf1Arr = System.Buffers.ArrayPool<float>.Shared.Rent(hiddenSize);
-            var buf2Arr = System.Buffers.ArrayPool<float>.Shared.Rent(hiddenSize);
-            try
-            {
-                var b1 = buf1Arr.AsSpan(0, hiddenSize);
-                var b2 = buf2Arr.AsSpan(0, hiddenSize);
+            // PooledBuffer z using var - zero ręcznego zarządzania w finally!
+            using var buf1 = new PooledBuffer<float>(hiddenSize);
+            using var buf2 = new PooledBuffer<float>(hiddenSize);
 
-                // Ścieżka główna (Main Path)
-                _linear1.ForwardInference(input, b1);          // Linear1: wejście -> b1
-                _bn1.ForwardInference(b1, b2);                 // BN1: b1 -> b2
-                TensorPrimitives.Max(b2, 0f, b1); // ReLU: b2 -> b1 (nadpisujemy b1)
+            var b1 = buf1.Span;
+            var b2 = buf2.Span;
 
-                _linear2.ForwardInference(b1, b2);             // Linear2: b1 -> b2
-                _bn2.ForwardInference(b2, b1);                 // BN2: b2 -> b1
+            // Ścieżka główna (Main Path)
+            _linear1.ForwardInference(input, b1);          // Linear1: wejście -> b1
+            _bn1.ForwardInference(b1, b2);                 // BN1: b1 -> b2
+            TensorPrimitives.Max(b2, 0f, b1);              // ReLU: b2 -> b1 (nadpisujemy b1)
 
-                // Połączenie rezydualne (Skip Connection): output = ReLU(b1 + input)
-                TensorPrimitives.Add(b1, input, output);
-                TensorPrimitives.Max(output, 0f, output);
-            }
-            finally
-            {
-                System.Buffers.ArrayPool<float>.Shared.Return(buf1Arr);
-                System.Buffers.ArrayPool<float>.Shared.Return(buf2Arr);
-            }
+            _linear2.ForwardInference(b1, b2);             // Linear2: b1 -> b2
+            _bn2.ForwardInference(b2, b1);                 // BN2: b2 -> b1
+
+            // Połączenie rezydualne (Skip Connection): output = ReLU(b1 + input)
+            TensorPrimitives.Add(b1, input, output);
+            TensorPrimitives.Max(output, 0f, output);
         }
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
@@ -103,14 +105,17 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 yield return p;
             }
+
             foreach (var p in _bn1.Parameters())
             {
                 yield return p;
             }
+
             foreach (var p in _linear2.Parameters())
             {
                 yield return p;
             }
+
             foreach (var p in _bn2.Parameters())
             {
                 yield return p;
@@ -136,6 +141,7 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             using var fs = new FileStream(path, FileMode.Create);
             using var bw = new BinaryWriter(fs);
+
             Save(bw);
         }
 
@@ -145,8 +151,10 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 throw new FileNotFoundException($"Model weights file not found: {path}");
             }
+
             using var fs = new FileStream(path, FileMode.Open);
             using var br = new BinaryReader(fs);
+
             Load(br);
         }
     }

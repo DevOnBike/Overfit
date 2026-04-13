@@ -2,7 +2,6 @@
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 
-using System.Numerics.Tensors;
 using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.Statistical
@@ -25,6 +24,7 @@ namespace DevOnBike.Overfit.Statistical
         public void Explain(ReadOnlySpan<float> x, Span<float> phi)
         {
             phi.Clear();
+            
             using var zWithBuf = new PooledBuffer<float>(_m, clearMemory: false);
             using var zWithoutBuf = new PooledBuffer<float>(_m, clearMemory: false);
 
@@ -33,31 +33,34 @@ namespace DevOnBike.Overfit.Statistical
 
             var fX = _modelFunc(x);
             var fNull = _modelFunc(_background);
-
             var samplesPerFeature = Math.Max(1, _numSamples / _m);
 
             for (var i = 0; i < _m; i++)
             {
                 float marginalSum = 0;
+                
                 for (var s = 0; s < samplesPerFeature; s++)
                 {
                     PrepareCoalition(zWithout, i, x);
                     zWithout.CopyTo(zWith);
                     zWith[i] = x[i];
 
-                    // Prawdziwy wkład marginalny cechy i
                     marginalSum += (_modelFunc(zWith) - _modelFunc(zWithout));
                 }
+                
                 phi[i] = marginalSum / samplesPerFeature;
             }
 
             // Korekta efektywności (Aksjomat SHAP)
             float sum = 0;
+            
             for (var i = 0; i < _m; i++)
             {
                 sum += phi[i];
             }
+            
             var diff = (fX - fNull - sum) / _m;
+            
             for (var i = 0; i < _m; i++)
             {
                 phi[i] += diff;
@@ -66,8 +69,10 @@ namespace DevOnBike.Overfit.Statistical
 
         private void PrepareCoalition(Span<float> dest, int excludedIdx, ReadOnlySpan<float> x)
         {
-            _background.AsSpan().CopyTo(dest); // Naprawa CS1503
+            _background.AsSpan().CopyTo(dest);
+            
             var rnd = Random.Shared;
+            
             for (var i = 0; i < _m; i++)
             {
                 if (i != excludedIdx && rnd.NextDouble() > 0.5)
@@ -77,6 +82,9 @@ namespace DevOnBike.Overfit.Statistical
             }
         }
 
-        public void Dispose() { }
+        public void Dispose()
+        {
+            
+        }
     }
 }

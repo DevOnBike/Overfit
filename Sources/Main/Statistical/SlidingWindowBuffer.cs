@@ -4,7 +4,6 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Runtime.CompilerServices;
-using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.Statistical
@@ -15,7 +14,6 @@ namespace DevOnBike.Overfit.Statistical
     /// </summary>
     public sealed class SlidingWindowBuffer : IDisposable
     {
-        // --- memory (allocated once in the constructor from ArrayPool via FastTensor) ---
         private readonly FastTensor<float> _ring; // flat: windowSize × featureCount
         private readonly FastTensor<DateTime> _timestamps; // one timestamp per slot
         private readonly int _windowSize;
@@ -125,6 +123,7 @@ namespace DevOnBike.Overfit.Statistical
         private void AdvanceHead()
         {
             _head++;
+            
             if (_head >= _windowSize)
             {
                 _head = 0;
@@ -152,6 +151,7 @@ namespace DevOnBike.Overfit.Statistical
                 {
                     return;
                 }
+                
                 _disposed = true;
             }
 

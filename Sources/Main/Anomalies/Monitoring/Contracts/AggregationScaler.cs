@@ -16,20 +16,17 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring.Contracts
             RobustScalingLayer baselineScaler,
             RobustScalingLayer deviationScaler)
         {
-            var baselineTensor = PackToTensor(aggregation.FleetBaseline, aggregation.DcCount * aggregation.WindowSize, aggregation.MetricCount);
-            var deviationTensor = PackToTensor(aggregation.PodDeviations, aggregation.PodCount * aggregation.WindowSize, aggregation.MetricCount);
+            using var baselineTensor = PackToTensor(aggregation.FleetBaseline, aggregation.DcCount * aggregation.WindowSize, aggregation.MetricCount);
+            using var deviationTensor = PackToTensor(aggregation.PodDeviations, aggregation.PodCount * aggregation.WindowSize, aggregation.MetricCount);
 
             baselineScaler.Process(WrapInContext(baselineTensor));
             deviationScaler.Process(WrapInContext(deviationTensor));
 
-            // Zmiana kształtu: Tworzymy nowy magazyn 3D i kopiujemy zawartość z widoku 2D
             var reshapedBaseline = new FastTensor<float>(aggregation.DcCount, aggregation.WindowSize, aggregation.MetricCount, clearMemory: false);
             baselineTensor.GetView().AsReadOnlySpan().CopyTo(reshapedBaseline.GetView().AsSpan());
-            baselineTensor.Dispose();
 
             var reshapedDeviations = new FastTensor<float>(aggregation.PodCount, aggregation.WindowSize, aggregation.MetricCount, clearMemory: false);
             deviationTensor.GetView().AsReadOnlySpan().CopyTo(reshapedDeviations.GetView().AsSpan());
-            deviationTensor.Dispose();
 
             return new ScaledResult
             {
@@ -51,6 +48,10 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring.Contracts
 
         private static PipelineContext WrapInContext(FastTensor<float> tensor)
         {
+            // UWAGA ARCHITEKTONICZNA: Jeśli ten tensor o rozmiarze 0 nie jest nigdzie 
+            // zwalniany wewnątrz PipelineContext, to zostawia po sobie mikroskopijny 
+            // ślad dla Garbage Collectora. Jeśli to obciąża GC, warto rozważyć współdzielony 
+            // statyczny pusty tensor, np. public static readonly FastTensor<float> Empty = ...
             var emptyTargets = new FastTensor<float>(0, clearMemory: false);
 
             return new PipelineContext(tensor, emptyTargets);

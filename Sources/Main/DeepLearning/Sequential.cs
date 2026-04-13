@@ -1,5 +1,4 @@
-﻿using System.Buffers;
-using DevOnBike.Overfit.Core;
+﻿using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
@@ -17,6 +16,7 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Train()
         {
             IsTraining = true;
+            
             foreach (var module in _modules)
             {
                 module.Train();
@@ -26,6 +26,7 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Eval()
         {
             IsTraining = false;
+            
             foreach (var module in _modules)
             {
                 module.Eval();
@@ -36,51 +37,40 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             var maxHiddenSize = 65536;
 
-            var bufA_Arr = ArrayPool<float>.Shared.Rent(maxHiddenSize);
-            var bufB_Arr = ArrayPool<float>.Shared.Rent(maxHiddenSize);
-            
-            try
+            using var bufA_Buf = new PooledBuffer<float>(maxHiddenSize);
+            using var bufB_Buf = new PooledBuffer<float>(maxHiddenSize);
+
+            var bufA = bufA_Buf.Span;
+            var bufB = bufB_Buf.Span;
+
+            var currentInput = input;
+            var currentOutput = bufA;
+
+            var modulesList = _modules;
+
+            for (var i = 0; i < modulesList.Count; i++)
             {
-                var bufA = bufA_Arr.AsSpan();
-                var bufB = bufB_Arr.AsSpan();
-
-                var currentInput = input;
-                var currentOutput = bufA;
-
-                // UWAGA: Zmień "_modules" na nazwę swojej tablicy/listy warstw w klasie Sequential.
-                // Czasami nazywa się to Modules, _layers, albo children.
-                var modulesList = _modules;
-
-                // Jeśli modulesList to Lista (List<IModule>), użyj modulesList.Count zamiast modulesList.Length
-                for (var i = 0; i < modulesList.Count; i++)
+                if (i == modulesList.Count - 1)
                 {
-                    // Ostatnia warstwa zapisuje bezpośrednio do docelowego 'output'
-                    if (i == modulesList.Count - 1)
-                    {
-                        currentOutput = output;
-                    }
-
-                    modulesList[i].ForwardInference(currentInput, currentOutput);
-
-                    // Ping-Pong: obecny output staje się inputem dla kolejnej warstwy
-                    currentInput = currentOutput;
-                    currentOutput = (currentOutput == bufA) ? bufB : bufA;
+                    currentOutput = output;
                 }
-            }
-            finally
-            {
-                ArrayPool<float>.Shared.Return(bufA_Arr);
-                ArrayPool<float>.Shared.Return(bufB_Arr);
+
+                modulesList[i].ForwardInference(currentInput, currentOutput);
+
+                currentInput = currentOutput;
+                currentOutput = (currentOutput == bufA) ? bufB : bufA;
             }
         }
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
             var current = input;
+
             foreach (var module in _modules)
             {
                 current = module.Forward(graph, current);
             }
+
             return current;
         }
 
@@ -117,6 +107,7 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 module.Dispose();
             }
+
             _modules.Clear();
         }
 
@@ -129,6 +120,7 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             using var fs = new FileStream(path, FileMode.Create);
             using var bw = new BinaryWriter(fs);
+
             Save(bw);
         }
 
@@ -141,6 +133,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
             using var fs = new FileStream(path, FileMode.Open);
             using var br = new BinaryReader(fs);
+            
             Load(br);
         }
     }

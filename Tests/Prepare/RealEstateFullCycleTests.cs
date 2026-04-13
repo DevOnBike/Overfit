@@ -8,10 +8,7 @@ using DevOnBike.Overfit.Data;
 using DevOnBike.Overfit.Data.Contracts;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Optimizers;
-using Xunit;
 using Xunit.Abstractions;
-using System;
-using System.Collections.Generic;
 
 namespace DevOnBike.Overfit.Tests.Prepare
 {

@@ -2,7 +2,6 @@
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 
-using System.Buffers;
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Core;
 
@@ -40,32 +39,20 @@ namespace DevOnBike.Overfit.DeepLearning
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
             // Adapter dla interfejsu IModule (pojedynczy krok czasowy, Batch = 1).
-            // Alokuje tymczasowo wektory stanu (Cell state i bramki) z ArrayPool (Zero-GC).
             var hSize = HiddenSize;
 
-            var cArr = ArrayPool<float>.Shared.Rent(hSize);
-            var gatesArr = ArrayPool<float>.Shared.Rent(4 * hSize);
-            var uhArr = ArrayPool<float>.Shared.Rent(4 * hSize);
+            using var cBuf = new PooledBuffer<float>(hSize);
+            using var gatesBuf = new PooledBuffer<float>(4 * hSize);
+            using var uhBuf = new PooledBuffer<float>(4 * hSize);
 
-            try
-            {
-                var c = cArr.AsSpan(0, hSize);
-                var gates = gatesArr.AsSpan(0, 4 * hSize);
-                var uh = uhArr.AsSpan(0, 4 * hSize);
+            var c = cBuf.Span;
+            var gates = gatesBuf.Span;
+            var uh = uhBuf.Span;
 
-                // Inicjalizacja stanu zerowego (ZeroState) dla nowego przebiegu
-                c.Clear();
-                output.Clear(); // W LSTMie wynik wyjściowy (H) stanowi bezpośrednio nasze 'output'
+            c.Clear();
+            output.Clear(); // W LSTMie wynik wyjściowy (H) stanowi bezpośrednio nasze 'output'
 
-                // Odpalamy zoptymalizowaną sprzętowo matematykę z krokami wskaźnika
-                ForwardInference(1, input, output, c, gates, uh);
-            }
-            finally
-            {
-                ArrayPool<float>.Shared.Return(cArr);
-                ArrayPool<float>.Shared.Return(gatesArr);
-                ArrayPool<float>.Shared.Return(uhArr);
-            }
+            ForwardInference(1, input, output, c, gates, uh);
         }
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
@@ -112,7 +99,12 @@ namespace DevOnBike.Overfit.DeepLearning
             }
         }
 
-        public void Dispose() { W?.Dispose(); U?.Dispose(); B?.Dispose(); }
+        public void Dispose()
+        {
+            W?.Dispose();
+            U?.Dispose();
+            B?.Dispose();
+        }
 
         public void ForwardInference(int batchSize, ReadOnlySpan<float> x, Span<float> h, Span<float> c, Span<float> gates, Span<float> uh)
         {
@@ -148,6 +140,7 @@ namespace DevOnBike.Overfit.DeepLearning
                         TensorPrimitives.MultiplyAdd(uSpan.Slice(i * 4 * hSize, 4 * hSize), bH[i], bUh, bUh);
                     }
                 }
+                
                 TensorPrimitives.Add(bGates, bUh, bGates);
 
                 var bC = c.Slice(b * hSize, hSize);

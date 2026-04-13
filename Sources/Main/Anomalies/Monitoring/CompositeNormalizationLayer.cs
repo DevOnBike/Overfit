@@ -1,5 +1,5 @@
-﻿using System.Buffers;
-using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
+﻿using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
+using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.Data.Abstractions;
 using DevOnBike.Overfit.Data.Normalizers;
 
@@ -7,8 +7,6 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 {
     /// <summary>
     /// Aplikuje dedykowane algorytmy normalizacji (Log1p, ZScore, MinMax) 
-    /// per-metryka, korzystając z instrukcji SIMD.
-    /// Zero-Allocation na gorącej ścieżce (używa ArrayPool).
     /// </summary>
     public sealed class CompositeNormalizationLayer
     {
@@ -40,49 +38,35 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
         public void ProcessInPlace(Span<float> data, int windowSize, int metricCount, bool isTraining)
         {
-            // Wynajmujemy ciągły bufor dla jednej metryki, aby SIMD mogło działać na pełnej prędkości
-            var buffer = ArrayPool<float>.Shared.Rent(windowSize);
+            using var buffer = new PooledBuffer<float>(windowSize);
 
-            try
+            var metricSpan = buffer.Span;
+
+            for (var m = 0; m < metricCount; m++)
             {
-                var metricSpan = buffer.AsSpan(0, windowSize);
+                var normalizer = _normalizers[m];
 
-                for (var m = 0; m < metricCount; m++)
+                for (var t = 0; t < windowSize; t++)
                 {
-                    var normalizer = _normalizers[m];
+                    metricSpan[t] = data[t * metricCount + m];
+                }
 
-                    // Kopiowanie danych konkretnej metryki (kroku czasu) do ciągłego bufora
-                    for (var t = 0; t < windowSize; t++)
+                if (isTraining)
+                {
+                    if (!normalizer.IsFrozen)
                     {
-                        metricSpan[t] = data[t * metricCount + m];
-                    }
-
-                    if (isTraining)
-                    {
-                        // Faza Golden Window — tylko Fit, bez Transform.
-                        // Parametry są jeszcze częściowe — Transform po FreezeAll().
-                        // MinMaxNormalizer.WithClipMax jest już zamrożony — FitBatch ignorowany.
-                        if (!normalizer.IsFrozen)
-                        {
-                            normalizer.FitBatch(metricSpan);
-                        }
-                    }
-                    else
-                    {
-                        // Faza produkcyjna — tylko Transform z zamrożonymi parametrami.
-                        normalizer.TransformInPlace(metricSpan);
-
-                        // Zapisz znormalizowane wartości z powrotem do macierzy
-                        for (var t = 0; t < windowSize; t++)
-                        {
-                            data[t * metricCount + m] = metricSpan[t];
-                        }
+                        normalizer.FitBatch(metricSpan);
                     }
                 }
-            }
-            finally
-            {
-                ArrayPool<float>.Shared.Return(buffer);
+                else
+                {
+                    normalizer.TransformInPlace(metricSpan);
+
+                    for (var t = 0; t < windowSize; t++)
+                    {
+                        data[t * metricCount + m] = metricSpan[t];
+                    }
+                }
             }
         }
 
@@ -118,13 +102,13 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         {
             if (!_isFrozen)
             {
-                throw new InvalidOperationException(
-                    "Cannot save before freezing. Call FreezeAll() first.");
+                throw new InvalidOperationException("Cannot save before freezing. Call FreezeAll() first.");
             }
 
             foreach (var norm in _normalizers)
             {
                 bw.Write((byte)GetNormalizerType(norm));
+
                 norm.Save(bw);
             }
         }
@@ -134,16 +118,13 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             for (var m = 0; m < _normalizers.Length; m++)
             {
                 var type = (NormalizerType)br.ReadByte();
+
                 _normalizers[m] = CreateNormalizer(type);
                 _normalizers[m].Load(br);
             }
 
             _isFrozen = true;
         }
-
-        // ---------------------------------------------------------------------------
-        // Private
-        // ---------------------------------------------------------------------------
 
         private enum NormalizerType : byte
         {
@@ -152,22 +133,28 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             MinMax = 2
         }
 
-        private static NormalizerType GetNormalizerType(IFeatureNormalizer norm) => norm switch
+        private static NormalizerType GetNormalizerType(IFeatureNormalizer norm)
         {
-            ZScoreNormalizer => NormalizerType.ZScore,
-            Log1pNormalizer => NormalizerType.Log1p,
-            MinMaxNormalizer => NormalizerType.MinMax,
-            
-            _ => throw new InvalidOperationException($"Unknown normalizer type: {norm.GetType().Name}")
-        };
+            return norm switch
+            {
+                ZScoreNormalizer => NormalizerType.ZScore,
+                Log1pNormalizer => NormalizerType.Log1p,
+                MinMaxNormalizer => NormalizerType.MinMax,
 
-        private static IFeatureNormalizer CreateNormalizer(NormalizerType type) => type switch
+                _ => throw new InvalidOperationException($"Unknown normalizer type: {norm.GetType().Name}")
+            };
+        }
+
+        private static IFeatureNormalizer CreateNormalizer(NormalizerType type)
         {
-            NormalizerType.ZScore => new ZScoreNormalizer(),
-            NormalizerType.Log1p => new Log1pNormalizer(),
-            NormalizerType.MinMax => new MinMaxNormalizer(),
+            return type switch
+            {
+                NormalizerType.ZScore => new ZScoreNormalizer(),
+                NormalizerType.Log1p => new Log1pNormalizer(),
+                NormalizerType.MinMax => new MinMaxNormalizer(),
 
-            _ => throw new InvalidDataException($"Unknown normalizer type: {(byte)type}")
-        };
+                _ => throw new InvalidDataException($"Unknown normalizer type: {(byte)type}")
+            };
+        }
     }
 }

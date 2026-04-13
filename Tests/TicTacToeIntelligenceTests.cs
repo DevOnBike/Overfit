@@ -4,11 +4,7 @@
 using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Optimizers;
-using Xunit;
 using Xunit.Abstractions;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace DevOnBike.Overfit.Tests
 {

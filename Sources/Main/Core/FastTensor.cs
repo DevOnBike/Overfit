@@ -90,7 +90,6 @@ namespace DevOnBike.Overfit.Core
         {
             ObjectDisposedException.ThrowIf(_disposed == 1, this);
 
-            // Wydajemy odpowiedni widok na podstawie oryginalnego Rank
             return Rank switch
             {
                 1 => new TensorView<T>(_data.AsSpan(0, Size), _s0),
@@ -128,14 +127,13 @@ namespace DevOnBike.Overfit.Core
                 _ => throw new InvalidOperationException()
             };
         }
-        
+
         // ========================================================================
         // MATERIALIZACJA WIDOKÓW
         // ========================================================================
 
         /// <summary>
         /// Tworzy nowy, ciągły fizyczny tensor z dowolnego (nawet transponowanego) widoku.
-        /// UWAGA: Ta operacja alokuje nową pamięć z ArrayPool!
         /// </summary>
         public static FastTensor<T> FromView(TensorView<T> view)
         {
@@ -146,35 +144,34 @@ namespace DevOnBike.Overfit.Core
                 2 => new FastTensor<T>(view.GetDim(0), view.GetDim(1), clearMemory: false),
                 3 => new FastTensor<T>(view.GetDim(0), view.GetDim(1), view.GetDim(2), clearMemory: false),
                 4 => new FastTensor<T>(view.GetDim(0), view.GetDim(1), view.GetDim(2), view.GetDim(3), clearMemory: false),
+
                 _ => throw new InvalidOperationException("Nieobsługiwany wymiar")
             };
 
-            // 2. Jeśli widok jest ciągły, po prostu robimy błyskawiczny zrzut pamięci (memcopy)
             if (view.IsContiguous)
             {
                 view.AsReadOnlySpan().CopyTo(materializedTensor.GetView().AsSpan());
-                
+
                 return materializedTensor;
             }
 
             // 3. Jeśli widok został "poszatkowany" (np. przez Transpose2D), 
-            // musimy skopiować go element po elemencie używając indeksów.
             var targetSpan = materializedTensor.GetView().AsSpan();
             var index = 0;
-            
+
             if (view.Rank == 2)
             {
                 for (var i = 0; i < view.GetDim(0); i++)
                 {
                     for (var j = 0; j < view.GetDim(1); j++)
                     {
-                        targetSpan[index++] = view[i, j]; 
+                        targetSpan[index++] = view[i, j];
                     }
                 }
             }
             else
             {
-                throw new NotImplementedException("Kopiowanie nieciągłych widoków > 2D nie jest zaimplementowane.");
+                throw new NotImplementedException("todo: Kopiowanie nieciągłych widoków > 2D nie jest zaimplementowane.");
             }
 
             return materializedTensor;
