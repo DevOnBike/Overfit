@@ -16,22 +16,22 @@ namespace DevOnBike.Overfit.Core
         private const long ParallelThreshold = 4096;
         private const int StackAllocThreshold = 1024;
 
-        // ====================================================================
-        // HELPER ALLOCATOR
-        // ====================================================================
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static FastTensor<float> AllocateLike(AutogradNode node, bool clearMemory = true)
+        public static void StableSoftmax(ReadOnlySpan<float> input, Span<float> output)
         {
-            var v = node.DataView;
-            return v.Rank switch
-            {
-                1 => new FastTensor<float>(v.GetDim(0), clearMemory),
-                2 => new FastTensor<float>(v.GetDim(0), v.GetDim(1), clearMemory),
-                3 => new FastTensor<float>(v.GetDim(0), v.GetDim(1), v.GetDim(2), clearMemory),
-                4 => new FastTensor<float>(v.GetDim(0), v.GetDim(1), v.GetDim(2), v.GetDim(3), clearMemory),
-                _ => throw new InvalidOperationException("Nieobsługiwany wymiar")
-            };
+            // 1. Znalezienie maksimum przy użyciu akceleracji SIMD (Zero alokacji, instrukcje wektorowe)
+            var maxVal = TensorPrimitives.Max(input);
+
+            // 2. Przesunięcie wektora i jednoczesna aplikacja funkcji wykładniczej
+            var shifted = output; // Używamy bufora wyjściowego, aby uniknąć dodatkowych alokacji
+
+            TensorPrimitives.Subtract(input, maxVal, shifted);
+            TensorPrimitives.Exp(shifted, shifted);
+
+            // 3. Sumowanie wektora wyjściowego
+            var sumExp = TensorPrimitives.Sum(shifted);
+
+            // 4. Normalizacja do rozkładu prawdopodobieństwa
+            TensorPrimitives.Divide(shifted, sumExp, output);
         }
 
         // ====================================================================
@@ -1221,6 +1221,24 @@ namespace DevOnBike.Overfit.Core
                     }
                 }
             }
+        }
+        
+        // ====================================================================
+        // HELPER ALLOCATOR
+        // ====================================================================
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static FastTensor<float> AllocateLike(AutogradNode node, bool clearMemory = true)
+        {
+            var v = node.DataView;
+            return v.Rank switch
+            {
+                1 => new FastTensor<float>(v.GetDim(0), clearMemory),
+                2 => new FastTensor<float>(v.GetDim(0), v.GetDim(1), clearMemory),
+                3 => new FastTensor<float>(v.GetDim(0), v.GetDim(1), v.GetDim(2), clearMemory),
+                4 => new FastTensor<float>(v.GetDim(0), v.GetDim(1), v.GetDim(2), v.GetDim(3), clearMemory),
+                _ => throw new InvalidOperationException("Nieobsługiwany wymiar")
+            };
         }
     }
 }
