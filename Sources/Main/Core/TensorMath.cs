@@ -5,6 +5,7 @@
 
 using System.Numerics;
 using System.Numerics.Tensors;
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -83,14 +84,17 @@ namespace DevOnBike.Overfit.Core
 
                 for (var i = 0; i < N; i++)
                 {
-                    TensorPrimitives.Add(inS.Slice(i * C, C), bS, outS.Slice(i * C, C));
+                    Simd.Add(inS.Slice(i * C, C), bS, outS.Slice(i * C, C));
                 }
             }
             else
             {
                 Parallel.For(0, N, i =>
                 {
-                    TensorPrimitives.Add(input.DataView.AsReadOnlySpan().Slice(i * C, C), bias.DataView.AsReadOnlySpan(), resD.GetView().AsSpan().Slice(i * C, C));
+                    Simd.Add(
+                        input.DataView.AsReadOnlySpan().Slice(i * C, C),
+                        bias.DataView.AsReadOnlySpan(),
+                        resD.GetView().AsSpan().Slice(i * C, C));
                 });
             }
 
@@ -111,34 +115,49 @@ namespace DevOnBike.Overfit.Core
                 TensorPrimitives.Add(input.GradView.AsSpan(), output.GradView.AsReadOnlySpan(), input.GradView.AsSpan());
             }
 
-            if (bias.RequiresGrad)
+            if (!bias.RequiresGrad)
             {
-                if (N < BatchSequentialThreshold)
+                return;
+            }
+
+            if (N < BatchSequentialThreshold)
+            {
+                var bG = bias.GradView.AsSpan();
+                var oG = output.GradView.AsReadOnlySpan();
+                for (var i = 0; i < N; i++)
                 {
-                    var bG = bias.GradView.AsSpan();
-                    var oG = output.GradView.AsReadOnlySpan();
-                    for (var i = 0; i < N; i++)
-                    {
-                        TensorPrimitives.Add(bG, oG.Slice(i * C, C), bG);
-                    }
+                    Simd.Add(bG, oG.Slice(i * C, C), bG);
                 }
-                else
+                return;
+            }
+
+            var partials = new ConcurrentBag<FastTensor<float>>();
+
+            Parallel.For(0, N,
+                () => new FastTensor<float>(C),
+                (i, state, localGrad) =>
                 {
-                    Parallel.For(0, N,
-                        () => new FastTensor<float>(C),
-                        (i, state, localGrad) =>
-                        {
-                            TensorPrimitives.Add(localGrad.GetView().AsSpan(), output.GradView.AsReadOnlySpan().Slice(i * C, C), localGrad.GetView().AsSpan());
-                            return localGrad;
-                        },
-                        localGrad =>
-                        {
-                            lock (bias)
-                            {
-                                TensorPrimitives.Add(bias.GradView.AsSpan(), localGrad.GetView().AsReadOnlySpan(), bias.GradView.AsSpan());
-                            }
-                            localGrad.Dispose();
-                        });
+                    Simd.Add(
+                        localGrad.GetView().AsReadOnlySpan(),
+                        output.GradView.AsReadOnlySpan().Slice(i * C, C),
+                        localGrad.GetView().AsSpan());
+                    return localGrad;
+                },
+                localGrad =>
+                {
+                    partials.Add(localGrad);
+                });
+
+            var biasGrad = bias.GradView.AsSpan();
+            foreach (var partial in partials)
+            {
+                try
+                {
+                    Simd.Add(biasGrad, partial.GetView().AsReadOnlySpan(), biasGrad);
+                }
+                finally
+                {
+                    partial.Dispose();
                 }
             }
         }
@@ -173,9 +192,10 @@ namespace DevOnBike.Overfit.Core
 
                     for (var k = 0; k < aC; k++)
                     {
-                        if (rA[k] != 0f)
+                        var aVal = rA[k];
+                        if (aVal != 0f)
                         {
-                            TensorPrimitives.MultiplyAdd(bS.Slice(k * bC, bC), rA[k], rC, rC);
+                            Simd.MulAdd(bS.Slice(k * bC, bC), aVal, rC);
                         }
                     }
                 });
@@ -193,9 +213,10 @@ namespace DevOnBike.Overfit.Core
 
                 for (var k = 0; k < aC; k++)
                 {
-                    if (rA[k] != 0f)
+                    var aVal = rA[k];
+                    if (aVal != 0f)
                     {
-                        TensorPrimitives.MultiplyAdd(bS.Slice(k * bC, bC), rA[k], rC, rC);
+                        Simd.MulAdd(bS.Slice(k * bC, bC), aVal, rC);
                     }
                 }
             }
@@ -238,7 +259,7 @@ namespace DevOnBike.Overfit.Core
                     var rC = cS.Slice(i * M, M);
                     for (var j = 0; j < M; j++)
                     {
-                        rC[j] += TensorPrimitives.Dot(rA, bS.Slice(j * K, K));
+                        rC[j] += Simd.Dot(rA, bS.Slice(j * K, K));
                     }
                 });
             }
@@ -252,7 +273,7 @@ namespace DevOnBike.Overfit.Core
                 var rA = aS.Slice(i * K, K); var rC = cS.Slice(i * M, M);
                 for (var j = 0; j < M; j++)
                 {
-                    rC[j] += TensorPrimitives.Dot(rA, bS.Slice(j * K, K));
+                    rC[j] += Simd.Dot(rA, bS.Slice(j * K, K));
                 }
             }
         }
@@ -284,7 +305,7 @@ namespace DevOnBike.Overfit.Core
                         var vA = aS[k * N + i];
                         if (vA != 0f)
                         {
-                            TensorPrimitives.MultiplyAdd(bS.Slice(k * M, M), vA, rC, rC);
+                            Simd.MulAdd(bS.Slice(k * M, M), vA, rC);
                         }
                     }
                 });
@@ -302,7 +323,7 @@ namespace DevOnBike.Overfit.Core
                     var vA = aS[k * N + i];
                     if (vA != 0f)
                     {
-                        TensorPrimitives.MultiplyAdd(bS.Slice(k * M, M), vA, rC, rC);
+                        Simd.MulAdd(bS.Slice(k * M, M), vA, rC);
                     }
                 }
             }
@@ -357,12 +378,14 @@ namespace DevOnBike.Overfit.Core
                 w2DTContig = FastTensor<float>.FromView(w2D.Transpose2D());
             }
 
+            var partialWeightGrads = weights.RequiresGrad ? new ConcurrentBag<FastTensor<float>>() : null;
+
             Parallel.For(0, batchSize,
                 () => weights.RequiresGrad ? new FastTensor<float>(outC, kSqInC, clearMemory: true) : null,
                 (n, loopState, localDw) =>
                 {
                     using var colS = new PooledBuffer<float>(kSqInC * K);
-                    
+
                     Im2Col(input.DataView.AsReadOnlySpan().Slice(n * inC * h * w, inC * h * w), inC, h, w, k, 1, 0, colS.Span);
 
                     var outGS = output.GradView.AsReadOnlySpan().Slice(n * outC * K, outC * K);
@@ -375,7 +398,7 @@ namespace DevOnBike.Overfit.Core
                     if (input.RequiresGrad && w2DTContig != null)
                     {
                         using var dColS = new PooledBuffer<float>(kSqInC * K);
-                        
+
                         MatMulRawSeq(w2DTContig.GetView().AsReadOnlySpan(), outGS, kSqInC, outC, K, dColS.Span);
                         Col2Im(dColS.Span, inC, h, w, k, 1, 0, input.GradView.AsSpan().Slice(n * inC * h * w, inC * h * w));
                     }
@@ -386,14 +409,25 @@ namespace DevOnBike.Overfit.Core
                 {
                     if (localDw != null)
                     {
-                        lock (weights)
-                        {
-                            TensorPrimitives.Add(weights.GradView.AsSpan(), localDw.GetView().AsReadOnlySpan(), weights.GradView.AsSpan());
-                        }
-                        
-                        localDw.Dispose();
+                        partialWeightGrads!.Add(localDw);
                     }
                 });
+
+            if (weights.RequiresGrad && partialWeightGrads != null)
+            {
+                var weightsGrad = weights.GradView.AsSpan();
+                foreach (var partial in partialWeightGrads)
+                {
+                    try
+                    {
+                        Simd.Add(weightsGrad, partial.GetView().AsReadOnlySpan(), weightsGrad);
+                    }
+                    finally
+                    {
+                        partial.Dispose();
+                    }
+                }
+            }
 
             w2DTContig?.Dispose();
         }
@@ -708,7 +742,7 @@ namespace DevOnBike.Overfit.Core
             }
 
             var output = new AutogradNode(resD, input.RequiresGrad);
-            
+
             if (output.RequiresGrad && isTraining)
             {
                 graph?.Record(OpCode.Dropout, output, input, maskNode);
@@ -1073,10 +1107,10 @@ namespace DevOnBike.Overfit.Core
 
                     if (cPrev.RequiresGrad)
                     {
-                        var dcp = cPrev.GradView.AsSpan().Slice(b * hS, hS); 
+                        var dcp = cPrev.GradView.AsSpan().Slice(b * hS, hS);
                         TensorPrimitives.MultiplyAdd(dc, f, dcp, dcp);
                     }
-                    
+
                     return arrNode;
                 },
                 arrNode => arrNode.Dispose());
