@@ -1240,5 +1240,31 @@ namespace DevOnBike.Overfit.Core
                 _ => throw new InvalidOperationException("Nieobsługiwany wymiar")
             };
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void AtomicAddSpan(Span<float> dest, ReadOnlySpan<float> src)
+        {
+            ref var dRef = ref MemoryMarshal.GetReference(dest);
+            ref var sRef = ref MemoryMarshal.GetReference(src);
+
+            for (var i = 0; i < src.Length; i++)
+            {
+                // 1. Pobieramy referencję do miejsca w pamięci docelowej
+                ref float target = ref Unsafe.Add(ref dRef, i);
+
+                // 2. Wartość, którą chcemy dodać
+                float valueToAdd = Unsafe.Add(ref sRef, i);
+
+                float initialValue, computedValue;
+
+                // 3. Pętla CAS (Compare-And-Swap)
+                do
+                {
+                    initialValue = target;
+                    computedValue = initialValue + valueToAdd;
+                }
+                while (Interlocked.CompareExchange(ref target, computedValue, initialValue) != initialValue);
+            }
+        }
     }
 }
