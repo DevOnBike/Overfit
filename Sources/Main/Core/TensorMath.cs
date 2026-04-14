@@ -1250,10 +1250,10 @@ namespace DevOnBike.Overfit.Core
             for (var i = 0; i < src.Length; i++)
             {
                 // 1. Pobieramy referencję do miejsca w pamięci docelowej
-                ref float target = ref Unsafe.Add(ref dRef, i);
+                ref var target = ref Unsafe.Add(ref dRef, i);
 
                 // 2. Wartość, którą chcemy dodać
-                float valueToAdd = Unsafe.Add(ref sRef, i);
+                var valueToAdd = Unsafe.Add(ref sRef, i);
 
                 float initialValue, computedValue;
 
