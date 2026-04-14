@@ -1,7 +1,4 @@
-﻿// Copyright (c) 2026 DevOnBike.
-// This file is part of DevonBike Overfit.
-
-using DevOnBike.Overfit.Core;
+﻿using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.DeepLearning;
 
 namespace DevOnBike.Overfit.Tests
