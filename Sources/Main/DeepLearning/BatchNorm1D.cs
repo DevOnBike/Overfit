@@ -22,16 +22,15 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public BatchNorm1D(int numFeatures)
         {
-            Gamma = new AutogradNode(new FastTensor<float>(numFeatures, clearMemory: false));
-            Beta = new AutogradNode(new FastTensor<float>(numFeatures, clearMemory: false));
+            Gamma = new AutogradNode(new FastTensor<float>(numFeatures, clearMemory: false), requiresGrad: true);
+            Beta = new AutogradNode(new FastTensor<float>(numFeatures, clearMemory: false), requiresGrad: true);
 
             Gamma.DataView.AsSpan().Fill(1f);
             Beta.DataView.AsSpan().Fill(0f);
 
             RunningMean = new FastTensor<float>(numFeatures, clearMemory: false);
             RunningVar = new FastTensor<float>(numFeatures, clearMemory: false);
-
-            RunningMean.GetView().AsSpan().Fill(0f);
+            
             RunningVar.GetView().AsSpan().Fill(1f);
         }
 
