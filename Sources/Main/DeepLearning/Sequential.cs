@@ -5,6 +5,7 @@
 
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
+using DevOnBike.Overfit.Licensing;
 using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.DeepLearning
@@ -45,6 +46,8 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
+            OverfitLicense.EnsureNotified();
+
             var maxHiddenSize = 65536;
 
             using var bufA_Buf = new PooledBuffer<float>(maxHiddenSize);
@@ -74,6 +77,8 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
+            OverfitLicense.EnsureNotified();
+
             var current = input;
 
             foreach (var module in _modules)

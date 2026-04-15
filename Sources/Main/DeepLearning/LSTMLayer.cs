@@ -9,16 +9,16 @@ using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
-    public sealed class LSTMLayer : IModule
+    public sealed class LstmLayer : IModule
     {
         public bool IsTraining { get; private set; } = true;
 
-        private readonly LSTMCell _cell;
+        private readonly LstmCell _cell;
         private readonly bool _returnSequences;
 
-        public LSTMLayer(int inputSize, int hiddenSize, bool returnSequences = false)
+        public LstmLayer(int inputSize, int hiddenSize, bool returnSequences = false)
         {
-            _cell = new LSTMCell(inputSize, hiddenSize); 
+            _cell = new LstmCell(inputSize, hiddenSize); 
             _returnSequences = returnSequences;
         }
 

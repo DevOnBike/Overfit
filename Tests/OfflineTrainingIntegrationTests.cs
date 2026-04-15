@@ -33,7 +33,7 @@ namespace DevOnBike.Overfit.Tests
             };
 
             var pipeline = new MonitoringPipeline(options);
-            var autoencoder = new LSTMAutoencoder(inputSize: TotalInputFeatures, seqLen: WindowSize);
+            var autoencoder = new LstmAutoencoder(inputSize: TotalInputFeatures, seqLen: WindowSize);
 
             var baseTsMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             var totalScrapes = 10;

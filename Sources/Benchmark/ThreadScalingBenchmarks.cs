@@ -40,7 +40,7 @@ namespace Benchmarks
         private AutogradNode _targetNode = null!;
 
         private ResidualBlock _residual = null!;
-        private LSTMLayer _lstm = null!;
+        private LstmLayer _lstm = null!;
 
         private FastTensor<float> _lstmInputTensor = null!;
         private FastTensor<float> _lstmTargetTensor = null!;
@@ -76,7 +76,7 @@ namespace Benchmarks
             _targetNode = new AutogradNode(_targetTensor, requiresGrad: false);
 
             _residual = new ResidualBlock(Hidden);
-            _lstm = new LSTMLayer(inputSize: 32, hiddenSize: 32, returnSequences: false);
+            _lstm = new LstmLayer(inputSize: 32, hiddenSize: 32, returnSequences: false);
 
             _lstmInputTensor = new FastTensor<float>(Batch, 8, 32, clearMemory: true);
             _lstmTargetTensor = new FastTensor<float>(Batch, 32, clearMemory: true);
