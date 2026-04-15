@@ -1,3 +1,4 @@
+﻿using Xunit;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests
@@ -38,6 +39,7 @@ namespace DevOnBike.Overfit.Tests
 
             _output.WriteLine(DiagnosticsTraceComparer.Format(diff));
 
+            // Porównujemy tylko stabilną epokę końcową, nie epoch_01.
             Assert.True(current.TapeOps == baseline.TapeOps,
             $"Tape op count changed. baseline={baseline.TapeOps}, current={current.TapeOps}");
 

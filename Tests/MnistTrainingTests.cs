@@ -3,6 +3,7 @@ using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.Optimizers;
+using Xunit;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests
@@ -58,11 +59,28 @@ namespace DevOnBike.Overfit.Tests
             var traceDir = Path.Combine(AppContext.BaseDirectory, "diagnostics", "mnist");
             Directory.CreateDirectory(traceDir);
 
-            using var textSink = TextWriterDiagnosticsSink.CreateFile(Path.Combine(traceDir, "mnist_trace.log"), append: false);
-            using var jsonlSink = JsonLinesDiagnosticsSink.CreateFile(Path.Combine(traceDir, "mnist_trace.jsonl"), append: false);
+            var textTracePath = Path.Combine(traceDir, "mnist_trace.log");
+            var jsonlTracePath = Path.Combine(traceDir, "mnist_trace.jsonl");
+
+            if (File.Exists(textTracePath))
+            {
+                File.Delete(textTracePath);
+            }
+
+            if (File.Exists(jsonlTracePath))
+            {
+                File.Delete(jsonlTracePath);
+            }
+
+            using var textSink = TextWriterDiagnosticsSink.CreateFile(textTracePath, append: false);
+            using var jsonlSink = JsonLinesDiagnosticsSink.CreateFile(jsonlTracePath, append: false);
             var compositeSink = new CompositeOverfitDiagnosticsSink(traceCollector, textSink, jsonlSink);
 
             using var session = new DiagnosticsSession(enabled: true, sink: compositeSink);
+
+            // Bardzo ważne: reset przed całym benchmarkiem,
+            // żeby nie wciągnąć stanu z wcześniejszych testów/runów.
+            traceCollector.Reset();
 
             _output.WriteLine("=== START: Trening ResNet na Taśmie (NativeBuffer) ===");
 
