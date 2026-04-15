@@ -15,7 +15,10 @@ namespace DevOnBike.Overfit.Tests
             using var input = new AutogradNode(inputTensor, requiresGrad: true);
 
             var x = input.DataView.AsSpan();
-            for (int i = 0; i < x.Length; i++) x[i] = (i - 5) * 0.1f;
+            for (var i = 0; i < x.Length; i++)
+            {
+                x[i] = (i - 5) * 0.1f;
+            }
 
             var runningMeanSnapshot = new float[bn.RunningMean.Size];
             var runningVarSnapshot = new float[bn.RunningVar.Size];
@@ -34,7 +37,10 @@ namespace DevOnBike.Overfit.Tests
                     var target = new AutogradNode(targetTensor, requiresGrad: false);
 
                     var t = target.DataView.AsSpan();
-                    for (int i = 0; i < t.Length; i++) t[i] = 0.05f * i;
+                    for (var i = 0; i < t.Length; i++)
+                    {
+                        t[i] = 0.05f * i;
+                    }
 
                     return TensorMath.MSELoss(graph, y, target);
                 },
@@ -51,7 +57,10 @@ namespace DevOnBike.Overfit.Tests
             using var input = new AutogradNode(inputTensor, requiresGrad: true);
 
             var x = input.DataView.AsSpan();
-            for (int i = 0; i < x.Length; i++) x[i] = (i - 4) * 0.07f;
+            for (var i = 0; i < x.Length; i++)
+            {
+                x[i] = (i - 4) * 0.07f;
+            }
 
             var bn1 = (BatchNorm1D)typeof(ResidualBlock)
                 .GetField("_bn1", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
@@ -80,7 +89,10 @@ namespace DevOnBike.Overfit.Tests
                     var target = new AutogradNode(targetTensor, requiresGrad: false);
 
                     var t = target.DataView.AsSpan();
-                    for (int i = 0; i < t.Length; i++) t[i] = ((i % 3) - 1) * 0.2f;
+                    for (var i = 0; i < t.Length; i++)
+                    {
+                        t[i] = ((i % 3) - 1) * 0.2f;
+                    }
 
                     return TensorMath.MSELoss(graph, y, target);
                 },
@@ -108,18 +120,18 @@ namespace DevOnBike.Overfit.Tests
             var analytical = input.GradView.AsReadOnlySpan().ToArray();
             const float eps = 1e-3f;
 
-            for (int i = 0; i < x.Length; i++)
+            for (var i = 0; i < x.Length; i++)
             {
-                float original = x[i];
+                var original = x[i];
                 x[i] = original + eps;
-                float lossPlus = EvalSigmoidSquaredMean(input);
+                var lossPlus = EvalSigmoidSquaredMean(input);
                 x[i] = original - eps;
-                float lossMinus = EvalSigmoidSquaredMean(input);
+                var lossMinus = EvalSigmoidSquaredMean(input);
                 x[i] = original;
 
-                float numerical = (lossPlus - lossMinus) / (2f * eps);
-                float absError = MathF.Abs(analytical[i] - numerical);
-                float relError = absError / MathF.Max(1e-6f, MathF.Abs(analytical[i]) + MathF.Abs(numerical));
+                var numerical = (lossPlus - lossMinus) / (2f * eps);
+                var absError = MathF.Abs(analytical[i] - numerical);
+                var relError = absError / MathF.Max(1e-6f, MathF.Abs(analytical[i]) + MathF.Abs(numerical));
 
                 Assert.True(relError < 1e-2f || absError < 1e-3f,
                     $"Sigmoid grad mismatch at {i}: analytical={analytical[i]}, numerical={numerical}, rel={relError}");
@@ -129,9 +141,12 @@ namespace DevOnBike.Overfit.Tests
             {
                 var g = new ComputationGraph();
                 using var y2 = TensorMath.Sigmoid(g, inputNode);
-                float sum = 0f;
+                var sum = 0f;
                 var s = y2.DataView.AsReadOnlySpan();
-                for (int j = 0; j < s.Length; j++) sum += s[j] * s[j];
+                for (var j = 0; j < s.Length; j++)
+                {
+                    sum += s[j] * s[j];
+                }
                 return sum / s.Length;
             }
         }
@@ -155,18 +170,18 @@ namespace DevOnBike.Overfit.Tests
             var analytical = input.GradView.AsReadOnlySpan().ToArray();
             const float eps = 1e-3f;
 
-            for (int i = 0; i < x.Length; i++)
+            for (var i = 0; i < x.Length; i++)
             {
-                float original = x[i];
+                var original = x[i];
                 x[i] = original + eps;
-                float lossPlus = EvalTanhSquaredMean(input);
+                var lossPlus = EvalTanhSquaredMean(input);
                 x[i] = original - eps;
-                float lossMinus = EvalTanhSquaredMean(input);
+                var lossMinus = EvalTanhSquaredMean(input);
                 x[i] = original;
 
-                float numerical = (lossPlus - lossMinus) / (2f * eps);
-                float absError = MathF.Abs(analytical[i] - numerical);
-                float relError = absError / MathF.Max(1e-6f, MathF.Abs(analytical[i]) + MathF.Abs(numerical));
+                var numerical = (lossPlus - lossMinus) / (2f * eps);
+                var absError = MathF.Abs(analytical[i] - numerical);
+                var relError = absError / MathF.Max(1e-6f, MathF.Abs(analytical[i]) + MathF.Abs(numerical));
 
                 Assert.True(relError < 1e-2f || absError < 1e-3f,
                     $"Tanh grad mismatch at {i}: analytical={analytical[i]}, numerical={numerical}, rel={relError}");
@@ -176,9 +191,12 @@ namespace DevOnBike.Overfit.Tests
             {
                 var g = new ComputationGraph();
                 using var y2 = TensorMath.Tanh(g, inputNode);
-                float sum = 0f;
+                var sum = 0f;
                 var s = y2.DataView.AsReadOnlySpan();
-                for (int j = 0; j < s.Length; j++) sum += s[j] * s[j];
+                for (var j = 0; j < s.Length; j++)
+                {
+                    sum += s[j] * s[j];
+                }
                 return sum / s.Length;
             }
         }
@@ -191,7 +209,10 @@ namespace DevOnBike.Overfit.Tests
             using var input = new AutogradNode(inputTensor, requiresGrad: true);
 
             var x = input.DataView.AsSpan();
-            for (int i = 0; i < x.Length; i++) x[i] = (i - 2) * 0.15f;
+            for (var i = 0; i < x.Length; i++)
+            {
+                x[i] = (i - 2) * 0.15f;
+            }
 
             var graph = new ComputationGraph();
             using var y = repeat.Forward(graph, input);
@@ -203,18 +224,18 @@ namespace DevOnBike.Overfit.Tests
             var analytical = input.GradView.AsReadOnlySpan().ToArray();
             const float eps = 1e-3f;
 
-            for (int i = 0; i < x.Length; i++)
+            for (var i = 0; i < x.Length; i++)
             {
-                float original = x[i];
+                var original = x[i];
                 x[i] = original + eps;
-                float lossPlus = EvalRepeatSquaredMean(input, repeat);
+                var lossPlus = EvalRepeatSquaredMean(input, repeat);
                 x[i] = original - eps;
-                float lossMinus = EvalRepeatSquaredMean(input, repeat);
+                var lossMinus = EvalRepeatSquaredMean(input, repeat);
                 x[i] = original;
 
-                float numerical = (lossPlus - lossMinus) / (2f * eps);
-                float absError = MathF.Abs(analytical[i] - numerical);
-                float relError = absError / MathF.Max(1e-6f, MathF.Abs(analytical[i]) + MathF.Abs(numerical));
+                var numerical = (lossPlus - lossMinus) / (2f * eps);
+                var absError = MathF.Abs(analytical[i] - numerical);
+                var relError = absError / MathF.Max(1e-6f, MathF.Abs(analytical[i]) + MathF.Abs(numerical));
 
                 Assert.True(relError < 1e-2f || absError < 1e-3f,
                     $"RepeatVector grad mismatch at {i}: analytical={analytical[i]}, numerical={numerical}, rel={relError}");
@@ -224,9 +245,12 @@ namespace DevOnBike.Overfit.Tests
             {
                 var g = new ComputationGraph();
                 using var y2 = repeatModule.Forward(g, inputNode);
-                float sum = 0f;
+                var sum = 0f;
                 var s = y2.DataView.AsReadOnlySpan();
-                for (int j = 0; j < s.Length; j++) sum += s[j] * s[j];
+                for (var j = 0; j < s.Length; j++)
+                {
+                    sum += s[j] * s[j];
+                }
                 return sum / s.Length;
             }
         }
@@ -239,7 +263,10 @@ namespace DevOnBike.Overfit.Tests
             using var input = new AutogradNode(inputTensor, requiresGrad: true);
 
             var x = input.DataView.AsSpan();
-            for (int i = 0; i < x.Length; i++) x[i] = (i - 4) * 0.08f;
+            for (var i = 0; i < x.Length; i++)
+            {
+                x[i] = (i - 4) * 0.08f;
+            }
 
             GradientChecker.Verify(
                 layer,
@@ -250,7 +277,10 @@ namespace DevOnBike.Overfit.Tests
                     var target = new AutogradNode(targetTensor, requiresGrad: false);
 
                     var t = target.DataView.AsSpan();
-                    for (int i = 0; i < t.Length; i++) t[i] = ((i % 3) - 1) * 0.1f;
+                    for (var i = 0; i < t.Length; i++)
+                    {
+                        t[i] = ((i % 3) - 1) * 0.1f;
+                    }
 
                     return TensorMath.MSELoss(graph, y, target);
                 },
@@ -266,7 +296,10 @@ namespace DevOnBike.Overfit.Tests
             using var input = new AutogradNode(inputTensor, requiresGrad: false);
 
             var x = input.DataView.AsSpan();
-            for (int i = 0; i < x.Length; i++) x[i] = i + 1;
+            for (var i = 0; i < x.Length; i++)
+            {
+                x[i] = i + 1;
+            }
 
             using var pooled = TensorMath.MaxPool2D(null, input, 1, 4, 4, 2);
             var actual = pooled.DataView.AsReadOnlySpan().ToArray();
@@ -394,7 +427,10 @@ namespace DevOnBike.Overfit.Tests
             using var input = new AutogradNode(inputTensor, requiresGrad: true);
 
             var x = input.DataView.AsSpan();
-            for (int i = 0; i < x.Length; i++) x[i] = (i - 4) * 0.05f;
+            for (var i = 0; i < x.Length; i++)
+            {
+                x[i] = (i - 4) * 0.05f;
+            }
 
             GradientChecker.Verify(
                 conv,
@@ -405,7 +441,10 @@ namespace DevOnBike.Overfit.Tests
                     var target = new AutogradNode(targetTensor, requiresGrad: false);
 
                     var t = target.DataView.AsSpan();
-                    for (int i = 0; i < t.Length; i++) t[i] = 0.02f * (i + 1);
+                    for (var i = 0; i < t.Length; i++)
+                    {
+                        t[i] = 0.02f * (i + 1);
+                    }
 
                     return TensorMath.MSELoss(graph, y, target);
                 },
@@ -423,7 +462,7 @@ namespace DevOnBike.Overfit.Tests
             using var input = new AutogradNode(inputTensor, requiresGrad: true);
 
             var inData = input.DataView.AsSpan();
-            for (int i = 0; i < inData.Length; i++)
+            for (var i = 0; i < inData.Length; i++)
             {
                 inData[i] = i + 1;
             }
@@ -436,7 +475,7 @@ namespace DevOnBike.Overfit.Tests
 
             Assert.Equal(6, actual.Length);
 
-            for (int i = 0; i < actual.Length; i++)
+            for (var i = 0; i < actual.Length; i++)
             {
                 Assert.Equal(1f, actual[i], 3);
             }
@@ -449,7 +488,7 @@ namespace DevOnBike.Overfit.Tests
             using var input = new AutogradNode(inputTensor, requiresGrad: false);
 
             var src = input.DataView.AsSpan();
-            for (int i = 0; i < src.Length; i++)
+            for (var i = 0; i < src.Length; i++)
             {
                 src[i] = i + 1;
             }
@@ -459,7 +498,7 @@ namespace DevOnBike.Overfit.Tests
             var actual = reshaped.DataView.AsReadOnlySpan().ToArray();
 
             Assert.Equal(6, actual.Length);
-            for (int i = 0; i < actual.Length; i++)
+            for (var i = 0; i < actual.Length; i++)
             {
                 Assert.Equal(i + 1, actual[i], 3);
             }
@@ -485,7 +524,7 @@ namespace DevOnBike.Overfit.Tests
 
             Assert.Equal(expected.Length, actual.Length);
 
-            for (int i = 0; i < expected.Length; i++)
+            for (var i = 0; i < expected.Length; i++)
             {
                 Assert.True(MathF.Abs(expected[i] - actual[i]) < 1e-5f,
                     $"LinearLayer train/eval mismatch at {i}: train={expected[i]}, eval={actual[i]}");
@@ -542,7 +581,10 @@ namespace DevOnBike.Overfit.Tests
             using var input = new AutogradNode(inputTensor, requiresGrad: true);
 
             var x = input.DataView.AsSpan();
-            for (int i = 0; i < x.Length; i++) x[i] = (i - 3) * 0.09f;
+            for (var i = 0; i < x.Length; i++)
+            {
+                x[i] = (i - 3) * 0.09f;
+            }
 
             GradientChecker.Verify(
                 seq,
@@ -553,7 +595,10 @@ namespace DevOnBike.Overfit.Tests
                     var target = new AutogradNode(targetTensor, requiresGrad: false);
 
                     var t = target.DataView.AsSpan();
-                    for (int i = 0; i < t.Length; i++) t[i] = ((i % 4) - 1.5f) * 0.12f;
+                    for (var i = 0; i < t.Length; i++)
+                    {
+                        t[i] = ((i % 4) - 1.5f) * 0.12f;
+                    }
 
                     return TensorMath.MSELoss(graph, y, target);
                 },
@@ -592,10 +637,13 @@ namespace DevOnBike.Overfit.Tests
             using (var warmupInput = new AutogradNode(warmupTensor, requiresGrad: false))
             {
                 var w = warmupInput.DataView.AsSpan();
-                for (int i = 0; i < w.Length; i++) w[i] = ((i % 7) - 3) * 0.25f;
+                for (var i = 0; i < w.Length; i++)
+                {
+                    w[i] = ((i % 7) - 3) * 0.25f;
+                }
 
                 bn.Train();
-                for (int step = 0; step < 20; step++)
+                for (var step = 0; step < 20; step++)
                 {
                     using var y = bn.Forward(new ComputationGraph(), warmupInput);
                 }
@@ -615,7 +663,7 @@ namespace DevOnBike.Overfit.Tests
             var inSpan = input.DataView.AsReadOnlySpan();
             var outSpan = evalTensor.GetView().AsSpan();
 
-            for (int r = 0; r < 3; r++)
+            for (var r = 0; r < 3; r++)
             {
                 bn.ForwardInference(inSpan.Slice(r * 4, 4), outSpan.Slice(r * 4, 4));
             }
@@ -627,18 +675,18 @@ namespace DevOnBike.Overfit.Tests
             var varSpan = bn.RunningVar.GetView().AsReadOnlySpan();
 
             var expected = new float[12];
-            for (int r = 0; r < 3; r++)
+            for (var r = 0; r < 3; r++)
             {
-                for (int c = 0; c < 4; c++)
+                for (var c = 0; c < 4; c++)
                 {
-                    int idx = r * 4 + c;
-                    float scale = gamma[c] / MathF.Sqrt(varSpan[c] + bn.Eps);
-                    float shift = beta[c] - mean[c] * scale;
+                    var idx = r * 4 + c;
+                    var scale = gamma[c] / MathF.Sqrt(varSpan[c] + bn.Eps);
+                    var shift = beta[c] - mean[c] * scale;
                     expected[idx] = x[idx] * scale + shift;
                 }
             }
 
-            for (int i = 0; i < expected.Length; i++)
+            for (var i = 0; i < expected.Length; i++)
             {
                 Assert.True(MathF.Abs(expected[i] - evalOutput[i]) < 1e-5f,
                     $"BatchNorm1D eval mismatch at {i}: expected={expected[i]}, actual={evalOutput[i]}");
@@ -654,10 +702,13 @@ namespace DevOnBike.Overfit.Tests
             using (var warmupInput = new AutogradNode(warmupTensor, requiresGrad: false))
             {
                 var w = warmupInput.DataView.AsSpan();
-                for (int i = 0; i < w.Length; i++) w[i] = ((i % 11) - 5) * 0.1f;
+                for (var i = 0; i < w.Length; i++)
+                {
+                    w[i] = ((i % 11) - 5) * 0.1f;
+                }
 
                 block.Train();
-                for (int step = 0; step < 25; step++)
+                for (var step = 0; step < 25; step++)
                 {
                     using var y = block.Forward(new ComputationGraph(), warmupInput);
                 }
@@ -682,7 +733,7 @@ namespace DevOnBike.Overfit.Tests
 
             Assert.Equal(y1.Length, y2.Length);
 
-            for (int i = 0; i < y1.Length; i++)
+            for (var i = 0; i < y1.Length; i++)
             {
                 Assert.True(MathF.Abs(y1[i] - y2[i]) < 1e-6f,
                     $"ResidualBlock eval path is not deterministic at {i}: first={y1[i]}, second={y2[i]}");
@@ -701,10 +752,16 @@ namespace DevOnBike.Overfit.Tests
             using var target = new AutogradNode(targetTensor, requiresGrad: false);
 
             var xs = input.DataView.AsSpan();
-            for (int i = 0; i < xs.Length; i++) xs[i] = (i - 2) * 0.1f;
+            for (var i = 0; i < xs.Length; i++)
+            {
+                xs[i] = (i - 2) * 0.1f;
+            }
 
             var ts = target.DataView.AsSpan();
-            for (int i = 0; i < ts.Length; i++) ts[i] = (i % 3) * 0.2f;
+            for (var i = 0; i < ts.Length; i++)
+            {
+                ts[i] = (i % 3) * 0.2f;
+            }
 
             var graph = new ComputationGraph();
             using var pred = layer.Forward(graph, input);
@@ -715,7 +772,7 @@ namespace DevOnBike.Overfit.Tests
             foreach (var p in layer.Parameters())
             {
                 var span = p.DataView.AsReadOnlySpan();
-                for (int i = 0; i < span.Length; i++)
+                for (var i = 0; i < span.Length; i++)
                 {
                     Assert.True(float.IsFinite(span[i]), $"Parameter contains non-finite value at {i}: {span[i]}");
                 }
@@ -756,17 +813,17 @@ namespace DevOnBike.Overfit.Tests
             var graph = new ComputationGraph();
             var epochLosses = new float[epochs];
 
-            for (int epoch = 0; epoch < epochs; epoch++)
+            for (var epoch = 0; epoch < epochs; epoch++)
             {
-                float epochLoss = 0f;
-                int batches = trainSize / batchSize;
+                var epochLoss = 0f;
+                var batches = trainSize / batchSize;
 
                 conv1.Train();
                 bn1.Train();
                 res1.Train();
                 fcOut.Train();
 
-                for (int b = 0; b < batches; b++)
+                for (var b = 0; b < batches; b++)
                 {
                     graph.Reset();
                     optimizer.ZeroGrad();
@@ -802,10 +859,10 @@ namespace DevOnBike.Overfit.Tests
             res1.Train();
             fcOut.Train();
 
-            int correct = 0;
-            int testBatches = testSize / batchSize;
+            var correct = 0;
+            var testBatches = testSize / batchSize;
 
-            for (int b = 0; b < testBatches; b++)
+            for (var b = 0; b < testBatches; b++)
             {
                 using var xBData = new FastTensor<float>(batchSize, 1, 28, 28, clearMemory: false);
                 using var yBData = new FastTensor<float>(batchSize, 10, clearMemory: false);
@@ -829,15 +886,18 @@ namespace DevOnBike.Overfit.Tests
                 var logitsSpan = logits.DataView.AsReadOnlySpan();
                 var labelsSpan = yBNode.DataView.AsReadOnlySpan();
 
-                for (int i = 0; i < batchSize; i++)
+                for (var i = 0; i < batchSize; i++)
                 {
                     var pred = ArgMax(logitsSpan.Slice(i * 10, 10));
                     var truth = ArgMax(labelsSpan.Slice(i * 10, 10));
-                    if (pred == truth) correct++;
+                    if (pred == truth)
+                    {
+                        correct++;
+                    }
                 }
             }
 
-            float accuracy = correct / (float)(testBatches * batchSize);
+            var accuracy = correct / (float)(testBatches * batchSize);
 
             Assert.True(epochLosses[1] < epochLosses[0],
                 $"Training loss did not decrease: epoch1={epochLosses[0]:F4}, epoch2={epochLosses[1]:F4}");
@@ -846,11 +906,263 @@ namespace DevOnBike.Overfit.Tests
                 $"Accuracy too low after small training run: {accuracy:P2}");
         }
 
+        [Fact]
+        public void MaxPool2D_Backward_OnlyArgmaxReceivesGradient()
+        {
+            var graph = new ComputationGraph();
+
+            using var inputTensor = new FastTensor<float>(1, 1, 4, 4, clearMemory: true);
+            using var input = new AutogradNode(inputTensor, requiresGrad: true);
+
+            var x = input.DataView.AsSpan();
+            // 2x2 okno 1 -> max = 6 na pozycji [1,1]
+            x[0] = 1; x[1] = 2; x[2] = 3; x[3] = 4;
+            x[4] = 5; x[5] = 6; x[6] = 7; x[7] = 8;
+            x[8] = 9; x[9] = 10; x[10] = 11; x[11] = 12;
+            x[12] = 13; x[13] = 14; x[14] = 15; x[15] = 16;
+
+            using var pooled = TensorMath.MaxPool2D(graph, input, 1, 4, 4, 2);
+
+            // terminal gradient = 1 dla każdego elementu wyjścia
+            graph.Backward(pooled);
+
+            var g = input.GradView.AsReadOnlySpan().ToArray();
+
+            Assert.Equal(16, g.Length);
+
+            // okno [0:2,0:2] -> max=6 index 5
+            Assert.Equal(0f, g[0], 3);
+            Assert.Equal(0f, g[1], 3);
+            Assert.Equal(0f, g[4], 3);
+            Assert.Equal(1f, g[5], 3);
+
+            // okno [0:2,2:4] -> max=8 index 7
+            Assert.Equal(0f, g[2], 3);
+            Assert.Equal(0f, g[3], 3);
+            Assert.Equal(0f, g[6], 3);
+            Assert.Equal(1f, g[7], 3);
+
+            // okno [2:4,0:2] -> max=14 index 13
+            Assert.Equal(0f, g[8], 3);
+            Assert.Equal(0f, g[9], 3);
+            Assert.Equal(0f, g[12], 3);
+            Assert.Equal(1f, g[13], 3);
+
+            // okno [2:4,2:4] -> max=16 index 15
+            Assert.Equal(0f, g[10], 3);
+            Assert.Equal(0f, g[11], 3);
+            Assert.Equal(0f, g[14], 3);
+            Assert.Equal(1f, g[15], 3);
+        }
+
+        [Fact]
+        public void GlobalAveragePool2D_Backward_DistributesGradientEvenly()
+        {
+            var graph = new ComputationGraph();
+
+            using var inputTensor = new FastTensor<float>(1, 2, 2, 2, clearMemory: true);
+            using var input = new AutogradNode(inputTensor, requiresGrad: true);
+
+            var x = input.DataView.AsSpan();
+            for (var i = 0; i < x.Length; i++)
+            {
+                x[i] = i + 1;
+            }
+
+            using var pooled = TensorMath.GlobalAveragePool2D(graph, input, 2, 2, 2);
+
+            // gradient 1 dla każdego wyjścia kanału
+            graph.Backward(pooled);
+
+            var g = input.GradView.AsReadOnlySpan().ToArray();
+            Assert.Equal(8, g.Length);
+
+            // Dla każdego kanału 2x2 każdy element powinien dostać 1/4
+            for (var i = 0; i < g.Length; i++)
+            {
+                Assert.Equal(0.25f, g[i], 3);
+            }
+        }
+
+        [Fact]
+        public void SoftmaxCrossEntropy_Backward_PerSampleGradientsSumToZero()
+        {
+            var graph = new ComputationGraph();
+
+            using var logitsTensor = new FastTensor<float>(2, 3, clearMemory: true);
+            using var targetTensor = new FastTensor<float>(2, 3, clearMemory: true);
+            using var logits = new AutogradNode(logitsTensor, requiresGrad: true);
+            using var target = new AutogradNode(targetTensor, requiresGrad: false);
+
+            var l = logits.DataView.AsSpan();
+            l[0] = 3f; l[1] = 1f; l[2] = -2f;
+            l[3] = -1f; l[4] = 2f; l[5] = 0.5f;
+
+            var t = target.DataView.AsSpan();
+            // class 0
+            t[0] = 1f; t[1] = 0f; t[2] = 0f;
+            // class 1
+            t[3] = 0f; t[4] = 1f; t[5] = 0f;
+
+            using var loss = TensorMath.SoftmaxCrossEntropy(graph, logits, target);
+            graph.Backward(loss);
+
+            var g = logits.GradView.AsReadOnlySpan().ToArray();
+
+            // gradient softmax+CE dla każdego sample powinien sumować się do 0
+            var row0 = g[0] + g[1] + g[2];
+            var row1 = g[3] + g[4] + g[5];
+
+            Assert.Equal(0f, row0, 3);
+            Assert.Equal(0f, row1, 3);
+
+            // target class gradient powinien być ujemny
+            Assert.True(g[0] < 0f, $"Expected target grad < 0 for row0 class0, got {g[0]}");
+            Assert.True(g[4] < 0f, $"Expected target grad < 0 for row1 class1, got {g[4]}");
+        }
+
+        [Fact]
+        public void SoftmaxCrossEntropy_PenalizesWrongHighConfidencePrediction()
+        {
+            using var targetTensor = new FastTensor<float>(1, 3, clearMemory: true);
+            using var target = new AutogradNode(targetTensor, requiresGrad: false);
+
+            var t = target.DataView.AsSpan();
+            t[0] = 1f; t[1] = 0f; t[2] = 0f;
+
+            using var goodTensor = new FastTensor<float>(1, 3, clearMemory: true);
+            using var badTensor = new FastTensor<float>(1, 3, clearMemory: true);
+            using var good = new AutogradNode(goodTensor, requiresGrad: true);
+            using var bad = new AutogradNode(badTensor, requiresGrad: true);
+
+            var gs = good.DataView.AsSpan();
+            gs[0] = 6f; gs[1] = 1f; gs[2] = 0f;
+
+            var bs = bad.DataView.AsSpan();
+            bs[0] = -2f; bs[1] = 5f; bs[2] = 1f;
+
+            using var goodLoss = TensorMath.SoftmaxCrossEntropy(new ComputationGraph(), good, target);
+            using var badLoss = TensorMath.SoftmaxCrossEntropy(new ComputationGraph(), bad, target);
+
+            Assert.True(
+                goodLoss.DataView.AsReadOnlySpan()[0] < badLoss.DataView.AsReadOnlySpan()[0],
+                $"Expected correct/high-confidence prediction to have lower loss. good={goodLoss.DataView.AsReadOnlySpan()[0]}, bad={badLoss.DataView.AsReadOnlySpan()[0]}");
+        }
+
+        [Fact]
+        public void TrainingLoop_SmallLinearModel_NoNaNsAfterMultipleSteps()
+        {
+            using var layer = new LinearLayer(3, 2);
+            using var optimizer = new Adam(layer.Parameters(), 0.001f) { UseAdamW = true };
+
+            using var xTensor = new FastTensor<float>(4, 3, clearMemory: true);
+            using var yTensor = new FastTensor<float>(4, 2, clearMemory: true);
+            using var xNode = new AutogradNode(xTensor, requiresGrad: false);
+            using var yNode = new AutogradNode(yTensor, requiresGrad: false);
+
+            var x = xNode.DataView.AsSpan();
+            var y = yNode.DataView.AsSpan();
+
+            for (var i = 0; i < x.Length; i++)
+            {
+                x[i] = (i - 3) * 0.2f;
+            }
+
+            for (var i = 0; i < y.Length; i++)
+            {
+                y[i] = ((i % 2) == 0 ? 1f : -1f) * 0.5f;
+            }
+
+            for (var step = 0; step < 20; step++)
+            {
+                var graph = new ComputationGraph();
+                optimizer.ZeroGrad();
+
+                using var pred = layer.Forward(graph, xNode);
+                using var loss = TensorMath.MSELoss(graph, pred, yNode);
+
+                var lossValue = loss.DataView.AsReadOnlySpan()[0];
+                Assert.True(float.IsFinite(lossValue), $"Loss became non-finite at step {step}: {lossValue}");
+
+                graph.Backward(loss);
+                optimizer.Step();
+
+                foreach (var p in layer.Parameters())
+                {
+                    var pSpan = p.DataView.AsReadOnlySpan();
+                    for (var i = 0; i < pSpan.Length; i++)
+                    {
+                        Assert.True(float.IsFinite(pSpan[i]), $"Parameter became non-finite at step {step}, index {i}: {pSpan[i]}");
+                    }
+
+                    var gSpan = p.GradView.AsReadOnlySpan();
+                    for (var i = 0; i < gSpan.Length; i++)
+                    {
+                        Assert.True(float.IsFinite(gSpan[i]), $"Gradient became non-finite at step {step}, index {i}: {gSpan[i]}");
+                    }
+                }
+            }
+        }
+
+        [Fact]
+        public void ResidualBlock_ZeroedLinearWeights_BehavesLikeReluSkip_WhenBatchNormIsNeutral()
+        {
+            using var block = new ResidualBlock(8);
+
+            var l1 = (LinearLayer)typeof(ResidualBlock)
+                .GetField("_linear1", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .GetValue(block)!;
+
+            var l2 = (LinearLayer)typeof(ResidualBlock)
+                .GetField("_linear2", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .GetValue(block)!;
+
+            var bn1 = (BatchNorm1D)typeof(ResidualBlock)
+                .GetField("_bn1", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .GetValue(block)!;
+
+            var bn2 = (BatchNorm1D)typeof(ResidualBlock)
+                .GetField("_bn2", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .GetValue(block)!;
+
+            l1.Weights.DataView.AsSpan().Clear();
+            l1.Biases.DataView.AsSpan().Clear();
+            l2.Weights.DataView.AsSpan().Clear();
+            l2.Biases.DataView.AsSpan().Clear();
+
+            bn1.Gamma.DataView.AsSpan().Fill(1f);
+            bn1.Beta.DataView.AsSpan().Clear();
+            bn1.RunningMean.GetView().AsSpan().Clear();
+            bn1.RunningVar.GetView().AsSpan().Fill(1f);
+
+            bn2.Gamma.DataView.AsSpan().Fill(1f);
+            bn2.Beta.DataView.AsSpan().Clear();
+            bn2.RunningMean.GetView().AsSpan().Clear();
+            bn2.RunningVar.GetView().AsSpan().Fill(1f);
+
+            using var inputTensor = new FastTensor<float>(1, 8, clearMemory: true);
+            using var input = new AutogradNode(inputTensor, requiresGrad: false);
+
+            var x = input.DataView.AsSpan();
+            x[0] = -2f; x[1] = -1f; x[2] = -0.1f; x[3] = 0f;
+            x[4] = 0.1f; x[5] = 1f; x[6] = 2f; x[7] = 3f;
+
+            block.Eval();
+            using var y = block.Forward(null, input);
+
+            var actual = y.DataView.AsReadOnlySpan().ToArray();
+
+            for (var i = 0; i < actual.Length; i++)
+            {
+                Assert.Equal(MathF.Max(0f, x[i]), actual[i], 3);
+            }
+        }
+
         private static int ArgMax(ReadOnlySpan<float> span)
         {
-            int bestIdx = 0;
-            float bestVal = span[0];
-            for (int i = 1; i < span.Length; i++)
+            var bestIdx = 0;
+            var bestVal = span[0];
+            for (var i = 1; i < span.Length; i++)
             {
                 if (span[i] > bestVal)
                 {
