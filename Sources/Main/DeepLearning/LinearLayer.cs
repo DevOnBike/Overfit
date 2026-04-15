@@ -1,10 +1,7 @@
-﻿// Copyright (c) 2026 DevOnBike.
-// This file is part of DevonBike Overfit.
-// DevonBike Overfit is licensed under the GNU AGPLv3.
-
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.Diagnostics.Contracts;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
@@ -17,7 +14,9 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public LinearLayer(int inputSize, int outputSize)
         {
-            _inputSize = inputSize; _outputSize = outputSize;
+            _inputSize = inputSize;
+            _outputSize = outputSize;
+
             var wData = new FastTensor<float>(inputSize, outputSize, clearMemory: false);
             var stdDev = MathF.Sqrt(2f / inputSize);
             var wSpan = wData.GetView().AsSpan();
@@ -56,50 +55,79 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 throw new InvalidOperationException("Layer must be in Eval mode.");
             }
+
             if (_weightsTransposed == null)
             {
                 RebuildTransposedWeights();
             }
 
-            LinearInferenceSimd(
+            using (new DiagnosticScope(
+                   category: "DeepLearning",
+                   name: "LinearLayer.ForwardInference",
+                   phase: "forward_inference",
+                   isTraining: false,
+                   batchSize: 1,
+                   featureCount: _outputSize,
+                   inputElements: input.Length,
+                   outputElements: output.Length))
+            {
+                LinearInferenceSimd(
                 input,
                 _weightsTransposed.GetView().AsReadOnlySpan(),
                 Biases.DataView.AsReadOnlySpan(),
-                output
-            );
+                output);
+            }
         }
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
-            if (graph == null || !IsTraining)
+            var batchSize = input.DataView.GetDim(0);
+
+            var ctx = ModuleDiagnostics.Begin(
+            moduleType: nameof(LinearLayer),
+            phase: graph == null || !IsTraining ? "forward_eval" : "forward_train",
+            isTraining: IsTraining,
+            batchSize: batchSize,
+            inputRows: batchSize,
+            inputCols: _inputSize,
+            outputRows: batchSize,
+            outputCols: _outputSize);
+
+            try
             {
-                var batchSize = input.DataView.GetDim(0);
-                if (batchSize != 1)
+                if (graph == null || !IsTraining)
                 {
-                    return TensorMath.Linear(null, input, Weights, Biases);
-                }
+                    if (batchSize != 1)
+                    {
+                        return TensorMath.Linear(null, input, Weights, Biases);
+                    }
 
-                if (_weightsTransposed == null)
-                {
-                    RebuildTransposedWeights();
-                }
+                    if (_weightsTransposed == null)
+                    {
+                        RebuildTransposedWeights();
+                    }
 
-                LinearInferenceSimd(
+                    LinearInferenceSimd(
                     input.DataView.AsReadOnlySpan(),
                     _weightsTransposed.GetView().AsReadOnlySpan(),
                     Biases.DataView.AsReadOnlySpan(),
                     _inferenceOutputNode.DataView.AsSpan());
 
-                return _inferenceOutputNode;
-            }
+                    return _inferenceOutputNode;
+                }
 
-            if (_weightsTransposed != null)
+                if (_weightsTransposed != null)
+                {
+                    _weightsTransposed.Dispose();
+                    _weightsTransposed = null;
+                }
+
+                return TensorMath.Linear(graph, input, Weights, Biases);
+            }
+            finally
             {
-                _weightsTransposed.Dispose();
-                _weightsTransposed = null;
+                ModuleDiagnostics.End(ctx);
             }
-
-            return TensorMath.Linear(graph, input, Weights, Biases);
         }
 
         public IEnumerable<AutogradNode> Parameters()
@@ -145,7 +173,10 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void Dispose()
         {
-            Weights?.Dispose(); Biases?.Dispose(); _inferenceOutputNode?.Dispose(); _weightsTransposed?.Dispose();
+            Weights?.Dispose();
+            Biases?.Dispose();
+            _inferenceOutputNode?.Dispose();
+            _weightsTransposed?.Dispose();
         }
 
         public void Save(string path)
@@ -161,6 +192,7 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 throw new FileNotFoundException($"Weight file not found: {path}");
             }
+
             using var fs = new FileStream(path, FileMode.Open);
             using var br = new BinaryReader(fs);
             Load(br);
@@ -173,23 +205,36 @@ namespace DevOnBike.Overfit.DeepLearning
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static void LinearInferenceSimd(ReadOnlySpan<float> input, ReadOnlySpan<float> weightsT, ReadOnlySpan<float> bias, Span<float> output)
+        private static void LinearInferenceSimd(
+            ReadOnlySpan<float> input,
+            ReadOnlySpan<float> weightsT,
+            ReadOnlySpan<float> bias,
+            Span<float> output)
         {
-            var inputSize = input.Length; var outputSize = output.Length; var vCount = Vector<float>.Count;
+            var inputSize = input.Length;
+            var outputSize = output.Length;
+            var vCount = Vector<float>.Count;
 
             for (var j = 0; j < outputSize; j++)
             {
-                var sum = Vector<float>.Zero; var wRow = weightsT.Slice(j * inputSize, inputSize); var i = 0;
+                var sum = Vector<float>.Zero;
+                var wRow = weightsT.Slice(j * inputSize, inputSize);
+                var i = 0;
+
                 for (; i <= inputSize - vCount; i += vCount)
                 {
-                    var vIn = new Vector<float>(input.Slice(i)); var vW = new Vector<float>(wRow.Slice(i));
+                    var vIn = new Vector<float>(input.Slice(i));
+                    var vW = new Vector<float>(wRow.Slice(i));
                     sum += vIn * vW;
                 }
+
                 var scalarSum = Vector.Dot(sum, Vector<float>.One) + bias[j];
+
                 for (; i < inputSize; i++)
                 {
                     scalarSum += input[i] * wRow[i];
                 }
+
                 output[j] = scalarSum;
             }
         }

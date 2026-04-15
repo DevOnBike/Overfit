@@ -101,6 +101,23 @@ namespace DevOnBike.Overfit.Core
             };
         }
 
+        /// <summary>
+        /// Zwraca widok 2D z nadpisanym kształtem na te same dane.
+        /// Używane przez AutogradNode w trybie aliasowania (Reshape zero-copy).
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public TensorView<T> GetViewAs(int s0, int s1)
+        {
+            ObjectDisposedException.ThrowIf(_disposed == 1, this);
+
+            if (s0 * s1 != Size)
+            {
+                throw new ArgumentException($"Nowy kształt ({s0}×{s1}={s0 * s1}) nie pasuje do rozmiaru tensora ({Size}).");
+            }
+
+            return new TensorView<T>(_data.AsSpan(0, Size), s0, s1);
+        }
+
         // ========================================================================
         // ZARZĄDZANIE PAMIĘCIĄ
         // ========================================================================
