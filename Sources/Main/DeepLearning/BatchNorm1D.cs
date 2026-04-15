@@ -1,9 +1,6 @@
-﻿// Copyright (c) 2026 DevOnBike.
-// This file is part of DevonBike Overfit.
-// DevonBike Overfit is licensed under the GNU AGPLv3.
-
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.Diagnostics.Contracts;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
@@ -13,6 +10,7 @@ namespace DevOnBike.Overfit.DeepLearning
         public AutogradNode Beta { get; }
         public FastTensor<float> RunningMean { get; }
         public FastTensor<float> RunningVar { get; }
+
         public float Momentum { get; set; } = 0.1f;
         public float Eps { get; set; } = 1e-5f;
         public bool IsTraining { get; private set; } = true;
@@ -30,7 +28,6 @@ namespace DevOnBike.Overfit.DeepLearning
 
             RunningMean = new FastTensor<float>(numFeatures, clearMemory: false);
             RunningVar = new FastTensor<float>(numFeatures, clearMemory: false);
-            
             RunningVar.GetView().AsSpan().Fill(1f);
         }
 
@@ -43,13 +40,12 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             IsTraining = false;
 
-            // Fuzja parametrów - liczymy Scale i Shift TYLKO RAZ podczas przełączania w tryb Eval
-            var C = Gamma.DataView.Size;
-            
+            var c = Gamma.DataView.Size;
+
             if (_fusedScale == null)
             {
-                _fusedScale = new FastTensor<float>(C, clearMemory: false);
-                _fusedShift = new FastTensor<float>(C, clearMemory: false);
+                _fusedScale = new FastTensor<float>(c, clearMemory: false);
+                _fusedShift = new FastTensor<float>(c, clearMemory: false);
             }
 
             var scaleS = _fusedScale.GetView().AsSpan();
@@ -59,7 +55,7 @@ namespace DevOnBike.Overfit.DeepLearning
             var meanS = RunningMean.GetView().AsReadOnlySpan();
             var varS = RunningVar.GetView().AsReadOnlySpan();
 
-            for (var i = 0; i < C; i++)
+            for (var i = 0; i < c; i++)
             {
                 scaleS[i] = gammaS[i] / MathF.Sqrt(varS[i] + Eps);
                 shiftS[i] = betaS[i] - meanS[i] * scaleS[i];
@@ -73,18 +69,47 @@ namespace DevOnBike.Overfit.DeepLearning
                 throw new InvalidOperationException("Layer must be in Eval mode.");
             }
 
-            // MISTRZOSTWO AVX-512: Cały BatchNorm wykonany jako jedna operacja y = (x * Scale) + Shift!
-            TensorPrimitives.MultiplyAdd(
+            using (new DiagnosticScope(
+                   category: "DeepLearning",
+                   name: "BatchNorm1D.ForwardInference",
+                   phase: "forward_inference",
+                   isTraining: false,
+                   batchSize: 1,
+                   featureCount: input.Length,
+                   inputElements: input.Length,
+                   outputElements: output.Length))
+            {
+                TensorPrimitives.MultiplyAdd(
                 input,
                 _fusedScale.GetView().AsReadOnlySpan(),
                 _fusedShift.GetView().AsReadOnlySpan(),
-                output
-            );
+                output);
+            }
         }
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
-            return TensorMath.BatchNorm1D(graph, input, Gamma, Beta, RunningMean, RunningVar, Momentum, Eps, IsTraining);
+            var batch = input.DataView.GetDim(0);
+            var cols = input.DataView.Rank > 1 ? input.DataView.GetDim(1) : input.DataView.Size;
+
+            var ctx = ModuleDiagnostics.Begin(
+            moduleType: nameof(BatchNorm1D),
+            phase: graph == null || !IsTraining ? "forward_eval" : "forward_train",
+            isTraining: IsTraining,
+            batchSize: batch,
+            inputRows: batch,
+            inputCols: cols,
+            outputRows: batch,
+            outputCols: cols);
+
+            try
+            {
+                return TensorMath.BatchNorm1D(graph, input, Gamma, Beta, RunningMean, RunningVar, Momentum, Eps, IsTraining);
+            }
+            finally
+            {
+                ModuleDiagnostics.End(ctx);
+            }
         }
 
         public IEnumerable<AutogradNode> Parameters()
@@ -102,14 +127,17 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 bw.Write(val);
             }
+
             foreach (var val in Beta.DataView.AsSpan())
             {
                 bw.Write(val);
             }
+
             foreach (var val in RunningMean.GetView().AsSpan())
             {
                 bw.Write(val);
             }
+
             foreach (var val in RunningVar.GetView().AsSpan())
             {
                 bw.Write(val);
@@ -155,6 +183,9 @@ namespace DevOnBike.Overfit.DeepLearning
             Beta?.Dispose();
             RunningMean?.Dispose();
             RunningVar?.Dispose();
+            
+            _fusedScale?.Dispose();
+            _fusedShift?.Dispose();
         }
     }
 }

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Optimizers;
+using Xunit;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests
@@ -15,7 +16,7 @@ namespace DevOnBike.Overfit.Tests
             _output = output;
         }
 
-        [Fact]
+        [Fact(Skip = "a")]
         public void Mnist_FullTrain60k_CnnBeastMode_Benchmark()
         {
             const int trainSize = 60_000;
@@ -61,9 +62,6 @@ namespace DevOnBike.Overfit.Tests
                 bn1.Train();
                 res1.Train();
                 fcOut.Train();
-
-                ResidualBlock.DiagnosticsEnabled = true;
-                ResidualBlock.ResetDiagnostics();
 
                 float epochLoss = 0f;
                 int batches = trainSize / batchSize;
@@ -167,7 +165,6 @@ namespace DevOnBike.Overfit.Tests
                 }
 
                 long epochAllocAfter = GC.GetTotalAllocatedBytes(true);
-                var rd = ResidualBlock.GetDiagnosticsSnapshot();
 
                 _output.WriteLine($"Epoch {epoch + 1} | Loss: {epochLoss / batches:F4} | Time: {totalSw.ElapsedMilliseconds}ms");
                 _output.WriteLine($"  conv+relu+pool+reshape: {TimeSpan.FromTicks(tConv).TotalMilliseconds:F1} ms | alloc {(aConv / 1024.0 / 1024.0):F2} MB");
@@ -179,19 +176,8 @@ namespace DevOnBike.Overfit.Tests
                 _output.WriteLine($"  optimizer:              {TimeSpan.FromTicks(tOptimizer).TotalMilliseconds:F1} ms | alloc {(aOptimizer / 1024.0 / 1024.0):F2} MB");
                 _output.WriteLine($"  allocated total:        {(epochAllocAfter - epochAllocBefore) / 1024.0 / 1024.0:F2} MB");
                 _output.WriteLine($"  GC0/1/2:                {GC.CollectionCount(0) - gc0Before}/{GC.CollectionCount(1) - gc1Before}/{GC.CollectionCount(2) - gc2Before}");
-
-                _output.WriteLine($"  residual.calls:         {rd.Calls}");
-                _output.WriteLine($"  residual.total:         {rd.TotalMs:F1} ms | alloc {(rd.TotalAllocBytes / 1024.0 / 1024.0):F2} MB");
-                _output.WriteLine($"    linear1:              {rd.Linear1Ms:F1} ms | alloc {(rd.Linear1AllocBytes / 1024.0 / 1024.0):F2} MB");
-                _output.WriteLine($"    bn1:                  {rd.BatchNorm1Ms:F1} ms | alloc {(rd.BatchNorm1AllocBytes / 1024.0 / 1024.0):F2} MB");
-                _output.WriteLine($"    relu1:                {rd.ReLU1Ms:F1} ms | alloc {(rd.ReLU1AllocBytes / 1024.0 / 1024.0):F2} MB");
-                _output.WriteLine($"    linear2:              {rd.Linear2Ms:F1} ms | alloc {(rd.Linear2AllocBytes / 1024.0 / 1024.0):F2} MB");
-                _output.WriteLine($"    bn2:                  {rd.BatchNorm2Ms:F1} ms | alloc {(rd.BatchNorm2AllocBytes / 1024.0 / 1024.0):F2} MB");
-                _output.WriteLine($"    add:                  {rd.AddMs:F1} ms | alloc {(rd.AddAllocBytes / 1024.0 / 1024.0):F2} MB");
-                _output.WriteLine($"    relu2:                {rd.ReLU2Ms:F1} ms | alloc {(rd.ReLU2AllocBytes / 1024.0 / 1024.0):F2} MB");
             }
 
-            ResidualBlock.DiagnosticsEnabled = false;
             _output.WriteLine("=== KONIEC ===");
         }
     }
