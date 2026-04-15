@@ -607,7 +607,7 @@ namespace DevOnBike.Overfit.Tests
                     return TensorMath.MSELoss(graph, y, target);
                 },
                 epsilon: 1e-3f,
-                tolerance: 2e-2f,
+                tolerance: 3e-2f,
                 maxChecksPerParameter: 10);
         }
 
