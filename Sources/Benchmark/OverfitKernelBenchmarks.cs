@@ -82,7 +82,7 @@ namespace Benchmarks
 
         private void WarmUp()
         {
-            for (int i = 0; i < 4; i++)
+            for (var i = 0; i < 4; i++)
             {
                 _inferGraph.Reset();
                 _inferGraph.IsRecording = false;
@@ -155,7 +155,7 @@ namespace Benchmarks
             using var y = _trainGraph.MatMul(_aNode, _bNode);
             using var loss = TensorMath.MSELoss(_trainGraph, y, _targetNode);
 
-            float v = loss.DataView.AsReadOnlySpan()[0];
+            var v = loss.DataView.AsReadOnlySpan()[0];
             _trainGraph.Backward(loss);
             return v;
         }
@@ -179,7 +179,7 @@ namespace Benchmarks
             using var y = _linear.Forward(_trainGraph, _aNode);
             using var loss = TensorMath.MSELoss(_trainGraph, y, _targetNode);
 
-            float v = loss.DataView.AsReadOnlySpan()[0];
+            var v = loss.DataView.AsReadOnlySpan()[0];
             _trainGraph.Backward(loss);
             return v;
         }
@@ -213,7 +213,7 @@ namespace Benchmarks
             using var y = _residual.Forward(_trainGraph, _aNode);
             using var loss = TensorMath.MSELoss(_trainGraph, y, _targetNode);
 
-            float v = loss.DataView.AsReadOnlySpan()[0];
+            var v = loss.DataView.AsReadOnlySpan()[0];
             _trainGraph.Backward(loss);
             return v;
         }
@@ -237,7 +237,7 @@ namespace Benchmarks
             using var y = _lstm.Forward(_trainGraph, _lstmInputNode);
             using var loss = TensorMath.MSELoss(_trainGraph, y, _lstmTargetNode);
 
-            float v = loss.DataView.AsReadOnlySpan()[0];
+            var v = loss.DataView.AsReadOnlySpan()[0];
             _trainGraph.Backward(loss);
             return v;
         }
@@ -261,7 +261,7 @@ namespace Benchmarks
 
         private static void Fill(Span<float> span, Random rnd)
         {
-            for (int i = 0; i < span.Length; i++)
+            for (var i = 0; i < span.Length; i++)
             {
                 span[i] = (float)(rnd.NextDouble() * 2.0 - 1.0);
             }

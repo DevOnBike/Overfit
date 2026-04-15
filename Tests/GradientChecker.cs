@@ -79,7 +79,7 @@ namespace DevOnBike.Overfit.Tests
             var rng = new Random(seed);
 
             // 4. Gradient numeryczny i porównanie.
-            for (int pIdx = 0; pIdx < parameters.Count; pIdx++)
+            for (var pIdx = 0; pIdx < parameters.Count; pIdx++)
             {
                 var param = parameters[pIdx];
                 if (!param.RequiresGrad)
@@ -92,27 +92,27 @@ namespace DevOnBike.Overfit.Tests
 
                 foreach (var i in GetIndicesToCheck(dataSpan.Length, maxChecksPerParameter, rng))
                 {
-                    float originalValue = dataSpan[i];
+                    var originalValue = dataSpan[i];
 
                     // f(x + eps)
                     dataSpan[i] = originalValue + epsilon;
-                    float lossPlus = EvaluateScalarLoss(graph, forwardAndLoss);
+                    var lossPlus = EvaluateScalarLoss(graph, forwardAndLoss);
 
                     // f(x - eps)
                     dataSpan[i] = originalValue - epsilon;
-                    float lossMinus = EvaluateScalarLoss(graph, forwardAndLoss);
+                    var lossMinus = EvaluateScalarLoss(graph, forwardAndLoss);
 
                     // Przywrócenie oryginalnej wartości
                     dataSpan[i] = originalValue;
 
-                    float numericalGrad = (lossPlus - lossMinus) / (2f * epsilon);
-                    float analyticalGrad = analyticalGradSpan[i];
+                    var numericalGrad = (lossPlus - lossMinus) / (2f * epsilon);
+                    var analyticalGrad = analyticalGradSpan[i];
 
-                    float absError = MathF.Abs(analyticalGrad - numericalGrad);
+                    var absError = MathF.Abs(analyticalGrad - numericalGrad);
 
                     // Bardziej czuły i standardowy mianownik niż max(1,...)
-                    float relDenom = MathF.Max(1e-6f, MathF.Abs(analyticalGrad) + MathF.Abs(numericalGrad));
-                    float relativeError = absError / relDenom;
+                    var relDenom = MathF.Max(1e-6f, MathF.Abs(analyticalGrad) + MathF.Abs(numericalGrad));
+                    var relativeError = absError / relDenom;
 
                     if (relativeError > tolerance && absError > tolerance)
                     {
@@ -139,7 +139,7 @@ namespace DevOnBike.Overfit.Tests
             var lossNode = forwardAndLoss(graph);
             EnsureScalarLoss(lossNode);
 
-            float loss = lossNode.DataView.AsReadOnlySpan()[0];
+            var loss = lossNode.DataView.AsReadOnlySpan()[0];
 
             graph.Reset();
             return loss;
@@ -166,7 +166,7 @@ namespace DevOnBike.Overfit.Tests
 
             if (!maxChecksPerParameter.HasValue || maxChecksPerParameter.Value <= 0 || maxChecksPerParameter.Value >= size)
             {
-                for (int i = 0; i < size; i++)
+                for (var i = 0; i < size; i++)
                 {
                     yield return i;
                 }
