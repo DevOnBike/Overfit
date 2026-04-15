@@ -1,8 +1,8 @@
 using System.Diagnostics;
 using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.Optimizers;
-using Xunit;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests
@@ -54,10 +54,22 @@ namespace DevOnBike.Overfit.Tests
             var graph = new ComputationGraph();
             var totalSw = Stopwatch.StartNew();
 
+            var traceCollector = new EpochTraceCollector();
+            var traceDir = Path.Combine(AppContext.BaseDirectory, "diagnostics", "mnist");
+            Directory.CreateDirectory(traceDir);
+
+            using var textSink = TextWriterDiagnosticsSink.CreateFile(Path.Combine(traceDir, "mnist_trace.log"), append: false);
+            using var jsonlSink = JsonLinesDiagnosticsSink.CreateFile(Path.Combine(traceDir, "mnist_trace.jsonl"), append: false);
+            var compositeSink = new CompositeOverfitDiagnosticsSink(traceCollector, textSink, jsonlSink);
+
+            using var session = new DiagnosticsSession(enabled: true, sink: compositeSink);
+
             _output.WriteLine("=== START: Trening ResNet na Taśmie (NativeBuffer) ===");
 
             for (int epoch = 0; epoch < epochs; epoch++)
             {
+                traceCollector.Reset();
+
                 conv1.Train();
                 bn1.Train();
                 res1.Train();
@@ -165,6 +177,12 @@ namespace DevOnBike.Overfit.Tests
                 }
 
                 long epochAllocAfter = GC.GetTotalAllocatedBytes(true);
+                var snapshot = traceCollector.Snapshot();
+
+                var epochJson = Path.Combine(traceDir, $"epoch_{epoch + 1:D2}.json");
+                var epochCsv = Path.Combine(traceDir, $"epoch_{epoch + 1:D2}.csv");
+                EpochTraceExporter.WriteJson(epochJson, epoch + 1, snapshot);
+                EpochTraceExporter.WriteCsv(epochCsv, snapshot);
 
                 _output.WriteLine($"Epoch {epoch + 1} | Loss: {epochLoss / batches:F4} | Time: {totalSw.ElapsedMilliseconds}ms");
                 _output.WriteLine($"  conv+relu+pool+reshape: {TimeSpan.FromTicks(tConv).TotalMilliseconds:F1} ms | alloc {(aConv / 1024.0 / 1024.0):F2} MB");
@@ -176,6 +194,9 @@ namespace DevOnBike.Overfit.Tests
                 _output.WriteLine($"  optimizer:              {TimeSpan.FromTicks(tOptimizer).TotalMilliseconds:F1} ms | alloc {(aOptimizer / 1024.0 / 1024.0):F2} MB");
                 _output.WriteLine($"  allocated total:        {(epochAllocAfter - epochAllocBefore) / 1024.0 / 1024.0:F2} MB");
                 _output.WriteLine($"  GC0/1/2:                {GC.CollectionCount(0) - gc0Before}/{GC.CollectionCount(1) - gc1Before}/{GC.CollectionCount(2) - gc2Before}");
+                _output.WriteLine(BenchmarkTraceFormatter.Format(snapshot));
+                _output.WriteLine($"  trace.json:             {epochJson}");
+                _output.WriteLine($"  trace.csv:              {epochCsv}");
             }
 
             _output.WriteLine("=== KONIEC ===");
