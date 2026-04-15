@@ -6,9 +6,12 @@ namespace DevOnBike.Overfit.DeepLearning
     {
         private readonly List<IModule> _modules = [];
 
-        public Sequential(params IModule[] modules)
+        public Sequential(params ReadOnlySpan<IModule> modules)
         {
-            _modules.AddRange(modules);
+            foreach (var module in modules)
+            {
+                _modules.Add(module);
+            }
         }
 
         public bool IsTraining { get; private set; } = true;
@@ -16,7 +19,7 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Train()
         {
             IsTraining = true;
-            
+
             foreach (var module in _modules)
             {
                 module.Train();
@@ -26,7 +29,7 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Eval()
         {
             IsTraining = false;
-            
+
             foreach (var module in _modules)
             {
                 module.Eval();
@@ -133,7 +136,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
             using var fs = new FileStream(path, FileMode.Open);
             using var br = new BinaryReader(fs);
-            
+
             Load(br);
         }
     }
