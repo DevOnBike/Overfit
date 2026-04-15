@@ -1,8 +1,9 @@
 using System.Diagnostics;
 using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.Diagnostics.Contracts;
+using DevOnBike.Overfit.Ops;
 
-namespace DevOnBike.Overfit.Core
+namespace DevOnBike.Overfit.Autograd
 {
     /// <summary>
     /// Manages the recording and execution of operations for automatic differentiation (Reverse Mode).

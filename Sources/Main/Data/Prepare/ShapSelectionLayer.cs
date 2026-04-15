@@ -3,10 +3,10 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 
 using System.Linq;
-using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.Data.Abstractions;
 using DevOnBike.Overfit.Data.Contracts;
 using DevOnBike.Overfit.Statistical;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Data.Prepare
 {

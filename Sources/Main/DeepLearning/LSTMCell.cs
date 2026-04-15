@@ -3,7 +3,10 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 
 using System.Numerics.Tensors;
-using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.Autograd;
+using DevOnBike.Overfit.DeepLearning.Abstractions;
+using DevOnBike.Overfit.Ops;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.DeepLearning
 {

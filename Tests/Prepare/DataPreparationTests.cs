@@ -3,10 +3,11 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.Data;
 using DevOnBike.Overfit.Data.Contracts;
 using DevOnBike.Overfit.Data.Prepare;
+using DevOnBike.Overfit.Data.Tabular;
+using DevOnBike.Overfit.Tensors;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Prepare

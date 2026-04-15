@@ -1,5 +1,5 @@
-﻿using DevOnBike.Overfit.Core;
-using DevOnBike.Overfit.DeepLearning;
+﻿using DevOnBike.Overfit.Autograd;
+using DevOnBike.Overfit.DeepLearning.Abstractions;
 
 namespace DevOnBike.Overfit.Tests
 {

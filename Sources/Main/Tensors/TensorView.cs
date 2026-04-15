@@ -5,7 +5,7 @@
 
 using System.Runtime.CompilerServices;
 
-namespace DevOnBike.Overfit.Core
+namespace DevOnBike.Overfit.Tensors
 {
     /// <summary>
     /// Ekstremalnie lekki, wszechstronny widok na pamięć tensora. 

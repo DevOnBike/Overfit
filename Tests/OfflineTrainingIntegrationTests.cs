@@ -5,9 +5,9 @@
 
 using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
-using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.Data.Normalizers;
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Tests
 {

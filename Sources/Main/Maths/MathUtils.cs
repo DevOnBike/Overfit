@@ -3,7 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-namespace DevOnBike.Overfit
+namespace DevOnBike.Overfit.Maths
 {
     /// <summary>
     ///     Static utility class providing mathematical helper functions used across the engine.

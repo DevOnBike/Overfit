@@ -3,9 +3,9 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.Autograd;
 
-namespace DevOnBike.Overfit.DeepLearning
+namespace DevOnBike.Overfit.DeepLearning.Abstractions
 {
     /// <summary>
     ///     Defines the fundamental contract for all neural network modules, including layers and composite models.

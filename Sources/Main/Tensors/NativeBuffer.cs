@@ -5,7 +5,7 @@
 
 using System.Runtime.InteropServices;
 
-namespace DevOnBike.Overfit.Core
+namespace DevOnBike.Overfit.Tensors
 {
     public unsafe readonly ref struct NativeBuffer<T> where T : unmanaged
     {

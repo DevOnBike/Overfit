@@ -1,7 +1,12 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
-using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.Autograd;
+using DevOnBike.Overfit.DeepLearning.Abstractions;
+using DevOnBike.Overfit.DeepLearning.Diagnostics;
 using DevOnBike.Overfit.Diagnostics.Contracts;
+using DevOnBike.Overfit.Maths;
+using DevOnBike.Overfit.Ops;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.DeepLearning
 {

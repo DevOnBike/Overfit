@@ -1,9 +1,11 @@
 ﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 
-using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Optimizers;
+using DevOnBike.Overfit.Tensors;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests

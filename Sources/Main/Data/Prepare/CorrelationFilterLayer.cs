@@ -2,9 +2,9 @@
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 
-using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.Data.Abstractions;
 using DevOnBike.Overfit.Data.Contracts;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Data.Prepare
 {

@@ -12,13 +12,16 @@ namespace Benchmarks
         private static void Main(string[] args)
         {
             // BenchmarkRunner.Run<SingleInferenceBenchmark>();
-            BenchmarkRunner.Run<InferenceBenchmark>();
+            // BenchmarkRunner.Run<InferenceBenchmark>();
             // BenchmarkRunner.Run<MultiLayerInferenceBenchmark>();
             // BenchmarkRunner.Run<TailLatencyBenchmark>();
             // BenchmarkRunner.Run<ColdStartBenchmark>();
             // BenchmarkRunner.Run<ConcurrentInferenceBenchmark>();
             // BenchmarkRunner.Run<ThroughputBenchmark>();
             // BenchmarkRunner.Run<ScalingBenchmark>();
+
+            // BenchmarkRunner.Run<OverfitKernelBenchmarks>();
+            BenchmarkRunner.Run<ThreadScalingBenchmarks>();
         }
     }
 }

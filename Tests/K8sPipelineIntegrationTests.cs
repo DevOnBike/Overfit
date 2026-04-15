@@ -3,7 +3,7 @@
 
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 using DevOnBike.Overfit.Statistical;
-using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Tests
 {

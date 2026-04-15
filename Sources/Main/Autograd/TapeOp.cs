@@ -5,7 +5,7 @@
 
 using System.Runtime.InteropServices;
 
-namespace DevOnBike.Overfit.Core
+namespace DevOnBike.Overfit.Autograd
 {
     /// <summary>
     ///     Represents a recorded operation in the computation tape.

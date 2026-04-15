@@ -4,9 +4,9 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Diagnostics;
-using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.Data.Abstractions;
 using DevOnBike.Overfit.Data.Contracts;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Data.Prepare
 {

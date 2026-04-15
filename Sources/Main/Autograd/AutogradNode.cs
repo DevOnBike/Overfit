@@ -2,7 +2,9 @@
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 
-namespace DevOnBike.Overfit.Core
+using DevOnBike.Overfit.Tensors;
+
+namespace DevOnBike.Overfit.Autograd
 {
     /// <summary>
     /// Węzeł grafu obliczeniowego. 

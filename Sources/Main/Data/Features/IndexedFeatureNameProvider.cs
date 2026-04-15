@@ -3,9 +3,15 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+
+// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
+
 using DevOnBike.Overfit.Data.Abstractions;
 
-namespace DevOnBike.Overfit.Data
+namespace DevOnBike.Overfit.Data.Features
 {
     /// <summary>
     ///     Generic fallback provider that names features "feature_0", "feature_1" etc.

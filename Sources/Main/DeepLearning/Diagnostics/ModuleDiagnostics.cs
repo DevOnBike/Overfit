@@ -2,7 +2,7 @@ using System.Diagnostics;
 using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.Diagnostics.Contracts;
 
-namespace DevOnBike.Overfit.DeepLearning
+namespace DevOnBike.Overfit.DeepLearning.Diagnostics
 {
     internal static class ModuleDiagnostics
     {

@@ -5,7 +5,9 @@
 
 using System.Linq;
 using System.Numerics.Tensors;
-using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.Autograd;
+using DevOnBike.Overfit.DeepLearning.Abstractions;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.DeepLearning
 {

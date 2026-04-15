@@ -8,7 +8,7 @@ using System.Runtime.Intrinsics.X86;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
-namespace DevOnBike.Overfit.Core
+namespace DevOnBike.Overfit.Intrinsics
 {
     internal static class Simd
     {

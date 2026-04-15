@@ -1,8 +1,9 @@
-using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.InteropServices;
-using DevOnBike.Overfit.Core;
-using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.Autograd;
+using DevOnBike.Overfit.DeepLearning.Diagnostics;
+using DevOnBike.Overfit.Optimizers.Abstractions;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Optimizers
 {

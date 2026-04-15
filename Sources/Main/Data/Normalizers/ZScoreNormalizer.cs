@@ -1,6 +1,6 @@
 ﻿using System.Numerics.Tensors;
-using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.Data.Abstractions;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Data.Normalizers
 {

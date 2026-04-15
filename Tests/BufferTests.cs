@@ -1,4 +1,4 @@
-﻿using DevOnBike.Overfit.Core;
+﻿using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Tests
 {

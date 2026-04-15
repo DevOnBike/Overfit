@@ -8,8 +8,11 @@ using System.Numerics.Tensors;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Autograd;
+using DevOnBike.Overfit.Intrinsics;
 
-namespace DevOnBike.Overfit.Core
+namespace DevOnBike.Overfit.Ops
 {
     public static class TensorMath
     {
@@ -389,7 +392,7 @@ namespace DevOnBike.Overfit.Core
 
             int batchSize = input.DataView.GetDim(0), outH = h - k + 1, outW = w - k + 1, K = outH * outW, kSqInC = k * k * inC;
 
-            FastTensor<float>? w2DTContig = null;
+            FastTensor<float> w2DTContig = null;
             if (input.RequiresGrad)
             {
                 var w2D = weights.DataView.Reshape(outC, kSqInC);
@@ -633,7 +636,7 @@ namespace DevOnBike.Overfit.Core
                         {
                             for (var pw = 0; pw < pool; pw++)
                             {
-                                var aI = n * channels * h * w + c * h * w + (oh * pool + ph) * w + (ow * pool + pw);
+                                var aI = n * channels * h * w + c * h * w + (oh * pool + ph) * w + ow * pool + pw;
                                 var v = Unsafe.Add(ref iR, aI);
                                 if (v > max) { max = v; mI = aI; }
                             }
@@ -1368,7 +1371,7 @@ namespace DevOnBike.Overfit.Core
                                 for (var x = 0; x < oW; x++)
                                 {
                                     var j = x * s - p + kw;
-                                    output[rO + y * oW + x] = (j >= 0 && j < w) ? input[iO + j] : 0f;
+                                    output[rO + y * oW + x] = j >= 0 && j < w ? input[iO + j] : 0f;
                                 }
                             }
                             else

@@ -1,7 +1,7 @@
 ﻿using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
-using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.Data.Abstractions;
 using DevOnBike.Overfit.Data.Normalizers;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Anomalies.Monitoring
 {
