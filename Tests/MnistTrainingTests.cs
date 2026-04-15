@@ -197,6 +197,16 @@ namespace DevOnBike.Overfit.Tests
                 _output.WriteLine(BenchmarkTraceFormatter.Format(snapshot));
                 _output.WriteLine($"  trace.json:             {epochJson}");
                 _output.WriteLine($"  trace.csv:              {epochCsv}");
+
+                if (epoch == epochs - 1)
+                {
+                    var baselinePath = Path.Combine(traceDir, "baseline_epoch_05.json");
+                    if (!File.Exists(baselinePath))
+                    {
+                        File.Copy(epochJson, baselinePath, overwrite: false);
+                        _output.WriteLine($"  baseline.json:          {baselinePath} (created)");
+                    }
+                }
             }
 
             _output.WriteLine("=== KONIEC ===");
