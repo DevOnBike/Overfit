@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Text.Json;
+using DevOnBike.Overfit.Data.Serialization;
 using DevOnBike.Overfit.Diagnostics.Contracts;
 
 namespace DevOnBike.Overfit.Diagnostics
@@ -11,22 +12,20 @@ namespace DevOnBike.Overfit.Diagnostics
     public sealed class JsonLinesDiagnosticsSink : IOverfitDiagnosticsSink, IDisposable
     {
         private readonly TextWriter _writer;
-        private readonly JsonSerializerOptions _options;
-        private readonly object _gate = new();
+        private readonly Lock _gate = new();
         private readonly bool _ownsWriter;
 
-        public JsonLinesDiagnosticsSink(TextWriter writer, bool ownsWriter = false, JsonSerializerOptions? options = null)
+        public JsonLinesDiagnosticsSink(TextWriter writer, bool ownsWriter = false)
         {
             _writer = writer ?? throw new ArgumentNullException(nameof(writer));
             _ownsWriter = ownsWriter;
-            _options = options ?? new JsonSerializerOptions(JsonSerializerDefaults.Web);
         }
 
         public static JsonLinesDiagnosticsSink CreateFile(string path, bool append = false)
         {
             var stream = new FileStream(path, append ? FileMode.Append : FileMode.Create, FileAccess.Write, FileShare.Read);
             var writer = new StreamWriter(stream) { AutoFlush = true };
-            
+
             return new JsonLinesDiagnosticsSink(writer, ownsWriter: true);
         }
 
@@ -34,22 +33,22 @@ namespace DevOnBike.Overfit.Diagnostics
         {
             WriteEnvelope("kernel", evt);
         }
-        
+
         public void OnModuleCompleted(in ModuleDiagnosticEvent evt)
         {
             WriteEnvelope("module", evt);
         }
-        
+
         public void OnGraphCompleted(in GraphDiagnosticEvent evt)
         {
             WriteEnvelope("graph", evt);
         }
-        
+
         public void OnAllocation(in AllocationDiagnosticEvent evt)
         {
             WriteEnvelope("allocation", evt);
         }
-        
+
         public void OnCounter(string name, long value)
         {
             WriteEnvelope("counter", new
@@ -72,7 +71,7 @@ namespace DevOnBike.Overfit.Diagnostics
             lock (_gate)
             {
                 var envelope = new { tsUtc = DateTime.UtcNow, type, payload };
-                _writer.WriteLine(JsonSerializer.Serialize(envelope, _options));
+                _writer.WriteLine(JsonSerializer.Serialize(envelope, OverfitJsonContext.Default.KernelDiagnosticEvent));
             }
         }
     }
