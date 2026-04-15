@@ -4,5 +4,7 @@ namespace DevOnBike.Overfit.Diagnostics.Contracts
         string Owner,
         string ResourceType,
         int Elements,
-        long Bytes);
+        long Bytes,
+        bool IsPooled = false,
+        bool IsManaged = true);
 }

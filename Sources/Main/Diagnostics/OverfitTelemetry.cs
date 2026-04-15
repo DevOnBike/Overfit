@@ -1,38 +1,80 @@
-// Copyright (c) 2026 DevOnBike.
-// This file is part of DevonBike Overfit.
-// DevonBike Overfit is licensed under the GNU AGPLv3.
-// For commercial licensing options, contact: devonbike@gmail.com
-
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 
 namespace DevOnBike.Overfit.Diagnostics
 {
-    namespace DevOnBike.Overfit.Diagnostics
+    public static class OverfitTelemetry
     {
-        public static class OverfitTelemetry
-        {
-            public const string MeterName = "DevOnBike.Overfit";
-            public const string Version = "1.0.0";
+        public const string MeterName = "DevOnBike.Overfit";
+        public const string Version = "1.0.0";
 
-            // 1. Zegary i Liczniki
-            public static readonly Meter Meter = new(MeterName, Version);
+        public static readonly Meter Meter = new(MeterName, Version);
+        public static readonly ActivitySource Tracer = new(MeterName, Version);
 
-            // Histogram pozwala Grafanie rysować percentyle (p95, p99) opóźnień predykcji
-            public static readonly Histogram<double> InferenceDuration =
-                Meter.CreateHistogram<double>("overfit.inference.duration_ms", "ms", "Czas wykonania predykcji");
+        public static readonly Histogram<double> KernelDurationMs =
+            Meter.CreateHistogram<double>(
+            "overfit.kernel.duration.ms",
+            unit: "ms",
+            description: "Execution time of low-level kernels.");
 
-            // Licznik predykcji
-            public static readonly Counter<long> InferenceCount =
-                Meter.CreateCounter<long>("overfit.inference.total", "{inferences}", "Całkowita liczba predykcji");
+        public static readonly Histogram<double> ModuleDurationMs =
+            Meter.CreateHistogram<double>(
+            "overfit.module.duration.ms",
+            unit: "ms",
+            description: "Execution time of high-level DL modules.");
 
-            // Śledzenie natywnego RAMu (którego GC nie widzi)
-            public static readonly UpDownCounter<long> NativeMemoryBytes =
-                Meter.CreateUpDownCounter<long>("overfit.memory.native_bytes", "By", "Ilość zaalokowanej natywnej pamięci");
+        public static readonly Histogram<double> GraphBackwardDurationMs =
+            Meter.CreateHistogram<double>(
+            "overfit.graph.backward.duration.ms",
+            unit: "ms",
+            description: "Backward pass duration.");
 
-            // 2. Rozproszone śledzenie (Traces dla np. Jaegera)
-            public static readonly ActivitySource Tracer = new(MeterName, Version);
-        }
+        public static readonly Histogram<long> ModuleAllocatedBytes =
+            Meter.CreateHistogram<long>(
+            "overfit.module.alloc.bytes",
+            unit: "By",
+            description: "Allocated managed bytes captured for module execution.");
 
+        public static readonly Histogram<long> GraphAllocatedBytes =
+            Meter.CreateHistogram<long>(
+            "overfit.graph.alloc.bytes",
+            unit: "By",
+            description: "Allocated managed bytes captured during backward.");
+
+        public static readonly Histogram<long> AllocationBytes =
+            Meter.CreateHistogram<long>(
+            "overfit.allocation.bytes",
+            unit: "By",
+            description: "Reported tensor/buffer allocations.");
+
+        public static readonly Counter<long> KernelCount =
+            Meter.CreateCounter<long>(
+            "overfit.kernel.count",
+            unit: "{kernel}",
+            description: "Number of kernel executions.");
+
+        public static readonly Counter<long> ModuleCount =
+            Meter.CreateCounter<long>(
+            "overfit.module.count",
+            unit: "{module}",
+            description: "Number of module executions.");
+
+        public static readonly Counter<long> GraphCount =
+            Meter.CreateCounter<long>(
+            "overfit.graph.count",
+            unit: "{graph}",
+            description: "Number of graph completion events.");
+
+        public static readonly Counter<long> TapeOpCount =
+            Meter.CreateCounter<long>(
+            "overfit.graph.tape_ops",
+            unit: "{op}",
+            description: "Total number of tape ops recorded in completed graphs.");
+
+        public static readonly UpDownCounter<long> NativeMemoryBytes =
+            Meter.CreateUpDownCounter<long>(
+            "overfit.memory.native.bytes",
+            unit: "By",
+            description: "Native / unmanaged memory tracked by Overfit diagnostics.");
     }
 }

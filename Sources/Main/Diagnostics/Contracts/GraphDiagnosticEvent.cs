@@ -6,5 +6,8 @@ namespace DevOnBike.Overfit.Diagnostics.Contracts
         long AllocatedBytes,
         int Gen0Collections,
         int Gen1Collections,
-        int Gen2Collections);
+        int Gen2Collections,
+        string Phase = "backward",
+        bool IsTraining = true,
+        int BatchSize = 0);
 }

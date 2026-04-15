@@ -1,6 +1,5 @@
 ﻿using System.Diagnostics;
 using System.Numerics.Tensors;
-using System.Threading;
 using DevOnBike.Overfit.Core;
 
 namespace DevOnBike.Overfit.DeepLearning

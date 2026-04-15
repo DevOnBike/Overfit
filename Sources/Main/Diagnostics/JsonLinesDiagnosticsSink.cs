@@ -1,0 +1,74 @@
+using System.Text.Json;
+using DevOnBike.Overfit.Diagnostics.Contracts;
+
+namespace DevOnBike.Overfit.Diagnostics
+{
+    public sealed class JsonLinesDiagnosticsSink : IOverfitDiagnosticsSink, IDisposable
+    {
+        private readonly TextWriter _writer;
+        private readonly JsonSerializerOptions _options;
+        private readonly object _gate = new();
+        private readonly bool _ownsWriter;
+
+        public JsonLinesDiagnosticsSink(TextWriter writer, bool ownsWriter = false, JsonSerializerOptions? options = null)
+        {
+            _writer = writer ?? throw new ArgumentNullException(nameof(writer));
+            _ownsWriter = ownsWriter;
+            _options = options ?? new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        }
+
+        public static JsonLinesDiagnosticsSink CreateFile(string path, bool append = false)
+        {
+            var stream = new FileStream(path, append ? FileMode.Append : FileMode.Create, FileAccess.Write, FileShare.Read);
+            var writer = new StreamWriter(stream) { AutoFlush = true };
+            
+            return new JsonLinesDiagnosticsSink(writer, ownsWriter: true);
+        }
+
+        public void OnKernelCompleted(in KernelDiagnosticEvent evt)
+        {
+            WriteEnvelope("kernel", evt);
+        }
+        
+        public void OnModuleCompleted(in ModuleDiagnosticEvent evt)
+        {
+            WriteEnvelope("module", evt);
+        }
+        
+        public void OnGraphCompleted(in GraphDiagnosticEvent evt)
+        {
+            WriteEnvelope("graph", evt);
+        }
+        
+        public void OnAllocation(in AllocationDiagnosticEvent evt)
+        {
+            WriteEnvelope("allocation", evt);
+        }
+        
+        public void OnCounter(string name, long value)
+        {
+            WriteEnvelope("counter", new
+            {
+                name,
+                value
+            });
+        }
+
+        public void Dispose()
+        {
+            if (_ownsWriter)
+            {
+                _writer.Dispose();
+            }
+        }
+
+        private void WriteEnvelope<T>(string type, T payload)
+        {
+            lock (_gate)
+            {
+                var envelope = new { tsUtc = DateTime.UtcNow, type, payload };
+                _writer.WriteLine(JsonSerializer.Serialize(envelope, _options));
+            }
+        }
+    }
+}
