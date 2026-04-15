@@ -64,11 +64,26 @@ namespace DevOnBike.Overfit.Core
             TensorPrimitives.Subtract(left.DataView.AsReadOnlySpan(), right.DataView.AsReadOnlySpan(), resD.GetView().AsSpan());
 
             var output = new AutogradNode(resD, left.RequiresGrad || right.RequiresGrad);
+
             if (output.RequiresGrad)
             {
                 graph?.Record(OpCode.Subtract, output, left, right);
             }
+
             return output;
+        }
+
+        public static void SubtractBackward(AutogradNode a, AutogradNode b, AutogradNode output)
+        {
+            if (a.RequiresGrad)
+            {
+                TensorPrimitives.Add(a.GradView.AsSpan(), output.GradView.AsReadOnlySpan(), a.GradView.AsSpan());
+            }
+
+            if (b.RequiresGrad)
+            {
+                TensorPrimitives.Subtract(b.GradView.AsSpan(), output.GradView.AsReadOnlySpan(), b.GradView.AsSpan());
+            }
         }
 
         public static AutogradNode AddBias(ComputationGraph graph, AutogradNode input, AutogradNode bias)
@@ -259,7 +274,8 @@ namespace DevOnBike.Overfit.Core
                     var rC = cS.Slice(i * M, M);
                     for (var j = 0; j < M; j++)
                     {
-                        rC[j] += Simd.Dot(rA, bS.Slice(j * K, K));
+                        // rC[j] += Simd.Dot(rA, bS.Slice(j * K, K));
+                        rC[j] += TensorPrimitives.Dot(rA, bS.Slice(j * K, K));
                     }
                 });
             }
@@ -271,9 +287,11 @@ namespace DevOnBike.Overfit.Core
             for (var i = 0; i < N; i++)
             {
                 var rA = aS.Slice(i * K, K); var rC = cS.Slice(i * M, M);
+
                 for (var j = 0; j < M; j++)
                 {
-                    rC[j] += Simd.Dot(rA, bS.Slice(j * K, K));
+                    // rC[j] += Simd.Dot(rA, bS.Slice(j * K, K));
+                    rC[j] += TensorPrimitives.Dot(rA, bS.Slice(j * K, K));
                 }
             }
         }
@@ -782,7 +800,7 @@ namespace DevOnBike.Overfit.Core
                 {
                     if (tR[c] > 0.5f)
                     {
-                        total -= MathF.Log(pR[c] + 1e-15f);
+                        total -= MathF.Log(MathF.Max(pR[c], 1e-7f));
                     }
                 }
             }

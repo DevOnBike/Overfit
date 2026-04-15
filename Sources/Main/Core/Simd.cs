@@ -94,15 +94,50 @@ namespace DevOnBike.Overfit.Core
             }
 
             var len = a.Length;
-            var simdCount = Vector256<float>.Count;
             var i = 0;
 
             ref var aRef = ref MemoryMarshal.GetReference(a);
             ref var bRef = ref MemoryMarshal.GetReference(b);
 
-            if (Avx.IsSupported)
+            // =======================================================
+            // Ścieżka 1: AVX-512 (Zen 4/5, nowoczesne Intel Xeon)
+            // 16 floatów w jednej instrukcji
+            // =======================================================
+            if (Vector512.IsHardwareAccelerated)
+            {
+                var acc = Vector512<float>.Zero;
+                var simdCount = Vector512<float>.Count; // 16
+
+                for (; i <= len - simdCount; i += simdCount)
+                {
+                    var va = Vector512.LoadUnsafe(ref aRef, (nuint)i);
+                    var vb = Vector512.LoadUnsafe(ref bRef, (nuint)i);
+
+                    // FMA (Fused Multiply-Add) jest wbudowane w procesory z AVX-512
+                    acc = Vector512.MultiplyAddEstimate(va, vb, acc);
+                    // Alternatywnie dla pewności ścisłej FMA: Avx512F.FusedMultiplyAdd(va, vb, acc)
+                }
+
+                // Błyskawiczna suma horyzontalna w .NET 10
+                var sum = Vector512.Sum(acc);
+
+                // Resztówka (Tail)
+                for (; i < len; i++)
+                {
+                    sum += Unsafe.Add(ref aRef, i) * Unsafe.Add(ref bRef, i);
+                }
+
+                return sum;
+            }
+
+            // =======================================================
+            // Ścieżka 2: AVX2 / FMA
+            // 8 floatów w jednej instrukcji
+            // =======================================================
+            if (Vector256.IsHardwareAccelerated)
             {
                 var acc = Vector256<float>.Zero;
+                var simdCount = Vector256<float>.Count; // 8
 
                 for (; i <= len - simdCount; i += simdCount)
                 {
@@ -114,12 +149,10 @@ namespace DevOnBike.Overfit.Core
                         : Avx.Add(acc, Avx.Multiply(va, vb));
                 }
 
-                var sum =
-                    acc.GetElement(0) + acc.GetElement(1) +
-                    acc.GetElement(2) + acc.GetElement(3) +
-                    acc.GetElement(4) + acc.GetElement(5) +
-                    acc.GetElement(6) + acc.GetElement(7);
+                // Zastąpienie ręcznego GetElement wbudowaną sumą!
+                var sum = Vector256.Sum(acc);
 
+                // Resztówka (Tail)
                 for (; i < len; i++)
                 {
                     sum += Unsafe.Add(ref aRef, i) * Unsafe.Add(ref bRef, i);
@@ -128,6 +161,30 @@ namespace DevOnBike.Overfit.Core
                 return sum;
             }
 
+            // =======================================================
+            // Ścieżka 3: Opcjonalnie SSE (Vector128) - 4 floaty
+            // Wrzucam dla kompletności, jeśli np. odpalasz na starszym ARM/x86
+            // =======================================================
+            if (Vector128.IsHardwareAccelerated)
+            {
+                var acc = Vector128<float>.Zero;
+                var simdCount = Vector128<float>.Count; // 4
+
+                for (; i <= len - simdCount; i += simdCount)
+                {
+                    var va = Vector128.LoadUnsafe(ref aRef, (nuint)i);
+                    var vb = Vector128.LoadUnsafe(ref bRef, (nuint)i);
+                    acc = Vector128.MultiplyAddEstimate(va, vb, acc);
+                }
+
+                var sum = Vector128.Sum(acc);
+                for (; i < len; i++) sum += Unsafe.Add(ref aRef, i) * Unsafe.Add(ref bRef, i);
+                return sum;
+            }
+
+            // =======================================================
+            // Ścieżka 4: Fallback Skalarny (np. brak wektoryzacji)
+            // =======================================================
             var scalarSum = 0f;
             for (; i < len; i++)
             {

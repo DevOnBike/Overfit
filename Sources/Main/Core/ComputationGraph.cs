@@ -113,6 +113,9 @@ namespace DevOnBike.Overfit.Core
                 case OpCode.Add:
                     TensorMath.AddBackward(op.A, op.B, op.Output);
                     break;
+                case OpCode.Subtract:
+                    TensorMath.SubtractBackward(op.A, op.B, op.Output);
+                    break;
                 case OpCode.AddBias:
                     TensorMath.AddBiasBackward(op.A, op.B, op.Output);
                     break;
