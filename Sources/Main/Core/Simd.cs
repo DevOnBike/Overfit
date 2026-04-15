@@ -99,29 +99,40 @@ namespace DevOnBike.Overfit.Core
             ref var aRef = ref MemoryMarshal.GetReference(a);
             ref var bRef = ref MemoryMarshal.GetReference(b);
 
-            // =======================================================
-            // Ścieżka 1: AVX-512 (Zen 4/5, nowoczesne Intel Xeon)
-            // 16 floatów w jednej instrukcji
-            // =======================================================
-            if (Vector512.IsHardwareAccelerated)
+            if (Avx512F.IsSupported)
             {
-                var acc = Vector512<float>.Zero;
-                var simdCount = Vector512<float>.Count; // 16
+                var acc512 = Vector512<float>.Zero;
+                var simd512Count = Vector512<float>.Count;
 
-                for (; i <= len - simdCount; i += simdCount)
+                for (; i <= len - simd512Count; i += simd512Count)
                 {
                     var va = Vector512.LoadUnsafe(ref aRef, (nuint)i);
                     var vb = Vector512.LoadUnsafe(ref bRef, (nuint)i);
 
-                    // FMA (Fused Multiply-Add) jest wbudowane w procesory z AVX-512
-                    acc = Vector512.MultiplyAddEstimate(va, vb, acc);
-                    // Alternatywnie dla pewności ścisłej FMA: Avx512F.FusedMultiplyAdd(va, vb, acc)
+                    acc512 = Avx512F.FusedMultiplyAdd(va, vb, acc512);
                 }
 
-                // Błyskawiczna suma horyzontalna w .NET 10
-                var sum = Vector512.Sum(acc);
+                var lower256 = acc512.GetLower();
+                var upper256 = acc512.GetUpper();
+                var sum256 = Avx.Add(lower256, upper256);
 
-                // Resztówka (Tail)
+                var lower128 = sum256.GetLower();
+                var upper128 = sum256.GetUpper();
+                var sum128 = Sse.Add(lower128, upper128);
+
+                if (Sse3.IsSupported)
+                {
+                    sum128 = Sse3.HorizontalAdd(sum128, sum128);
+                    sum128 = Sse3.HorizontalAdd(sum128, sum128);
+                }
+                else
+                {
+                    sum128 = Sse.Add(sum128, Sse.Shuffle(sum128, sum128, 0b10_11_00_01));
+                    sum128 = Sse.Add(sum128, Sse.Shuffle(sum128, sum128, 0b00_01_10_11));
+                }
+
+                var sum = sum128.GetElement(0);
+
                 for (; i < len; i++)
                 {
                     sum += Unsafe.Add(ref aRef, i) * Unsafe.Add(ref bRef, i);
@@ -130,14 +141,10 @@ namespace DevOnBike.Overfit.Core
                 return sum;
             }
 
-            // =======================================================
-            // Ścieżka 2: AVX2 / FMA
-            // 8 floatów w jednej instrukcji
-            // =======================================================
-            if (Vector256.IsHardwareAccelerated)
+            if (Avx.IsSupported)
             {
                 var acc = Vector256<float>.Zero;
-                var simdCount = Vector256<float>.Count; // 8
+                var simdCount = Vector256<float>.Count;
 
                 for (; i <= len - simdCount; i += simdCount)
                 {
@@ -149,10 +156,12 @@ namespace DevOnBike.Overfit.Core
                         : Avx.Add(acc, Avx.Multiply(va, vb));
                 }
 
-                // Zastąpienie ręcznego GetElement wbudowaną sumą!
-                var sum = Vector256.Sum(acc);
+                var sum =
+                    acc.GetElement(0) + acc.GetElement(1) +
+                    acc.GetElement(2) + acc.GetElement(3) +
+                    acc.GetElement(4) + acc.GetElement(5) +
+                    acc.GetElement(6) + acc.GetElement(7);
 
-                // Resztówka (Tail)
                 for (; i < len; i++)
                 {
                     sum += Unsafe.Add(ref aRef, i) * Unsafe.Add(ref bRef, i);
@@ -161,30 +170,6 @@ namespace DevOnBike.Overfit.Core
                 return sum;
             }
 
-            // =======================================================
-            // Ścieżka 3: Opcjonalnie SSE (Vector128) - 4 floaty
-            // Wrzucam dla kompletności, jeśli np. odpalasz na starszym ARM/x86
-            // =======================================================
-            if (Vector128.IsHardwareAccelerated)
-            {
-                var acc = Vector128<float>.Zero;
-                var simdCount = Vector128<float>.Count; // 4
-
-                for (; i <= len - simdCount; i += simdCount)
-                {
-                    var va = Vector128.LoadUnsafe(ref aRef, (nuint)i);
-                    var vb = Vector128.LoadUnsafe(ref bRef, (nuint)i);
-                    acc = Vector128.MultiplyAddEstimate(va, vb, acc);
-                }
-
-                var sum = Vector128.Sum(acc);
-                for (; i < len; i++) sum += Unsafe.Add(ref aRef, i) * Unsafe.Add(ref bRef, i);
-                return sum;
-            }
-
-            // =======================================================
-            // Ścieżka 4: Fallback Skalarny (np. brak wektoryzacji)
-            // =======================================================
             var scalarSum = 0f;
             for (; i < len; i++)
             {
