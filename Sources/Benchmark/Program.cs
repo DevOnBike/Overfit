@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using BenchmarkDotNet.Running;
+using DevOnBike.Overfit.Licensing;
 
 namespace Benchmarks
 {
@@ -11,6 +12,9 @@ namespace Benchmarks
     {
         private static void Main(string[] args)
         {
+            OverfitLicense.SuppressNotice = true;
+            OverfitLicense.MessageSink = _ => { };
+
             // BenchmarkRunner.Run<SingleInferenceBenchmark>();
             // BenchmarkRunner.Run<InferenceBenchmark>();
             // BenchmarkRunner.Run<MultiLayerInferenceBenchmark>();
