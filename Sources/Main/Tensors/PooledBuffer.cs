@@ -5,7 +5,7 @@
 
 using System.Buffers;
 
-namespace DevOnBike.Overfit.Core
+namespace DevOnBike.Overfit.Tensors
 {
     public readonly ref struct PooledBuffer<T> where T : struct
     {

@@ -5,7 +5,9 @@
 
 using System.Linq;
 using System.Numerics.Tensors;
-using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.Autograd;
+using DevOnBike.Overfit.DeepLearning.Abstractions;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
@@ -13,15 +15,15 @@ namespace DevOnBike.Overfit.DeepLearning
     ///     LSTM Autoencoder for time-series anomaly detection.
     ///     Includes a strictly 0-allocation inference path for real-time K8s monitoring.
     /// </summary>
-    public sealed class LSTMAutoencoder : IModule
+    public sealed class LstmAutoencoder : IModule
     {
-        private readonly LSTMLayer _dec1;
-        private readonly LSTMLayer _dec2;
-        private readonly LSTMLayer _enc1;
-        private readonly LSTMLayer _enc2;
+        private readonly LstmLayer _dec1;
+        private readonly LstmLayer _dec2;
+        private readonly LstmLayer _enc1;
+        private readonly LstmLayer _enc2;
         private readonly RepeatVector _repeat;
 
-        public LSTMAutoencoder(
+        public LstmAutoencoder(
             int inputSize,
             int seqLen,
             int encoderHidden = 64,
@@ -40,11 +42,11 @@ namespace DevOnBike.Overfit.DeepLearning
             LatentSize = latentSize;
             DecoderHidden = decoderHidden;
 
-            _enc1 = new LSTMLayer(inputSize, encoderHidden, true);
-            _enc2 = new LSTMLayer(encoderHidden, latentSize, false);
+            _enc1 = new LstmLayer(inputSize, encoderHidden, true);
+            _enc2 = new LstmLayer(encoderHidden, latentSize, false);
             _repeat = new RepeatVector(seqLen);
-            _dec1 = new LSTMLayer(latentSize, decoderHidden, true);
-            _dec2 = new LSTMLayer(decoderHidden, inputSize, true);
+            _dec1 = new LstmLayer(latentSize, decoderHidden, true);
+            _dec2 = new LstmLayer(decoderHidden, inputSize, true);
         }
 
         public int InputSize { get; }

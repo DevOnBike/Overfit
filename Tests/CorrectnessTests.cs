@@ -1,6 +1,13 @@
-﻿using DevOnBike.Overfit.Core;
+﻿// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
+
+using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Optimizers;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Tests
 {
@@ -261,7 +268,7 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void LSTMLayer_NumericalGradient_MatchesAnalytical()
         {
-            using var layer = new LSTMLayer(inputSize: 3, hiddenSize: 2, returnSequences: false);
+            using var layer = new LstmLayer(inputSize: 3, hiddenSize: 2, returnSequences: false);
             using var inputTensor = new FastTensor<float>(2, 3, 3, clearMemory: true);
             using var input = new AutogradNode(inputTensor, requiresGrad: true);
 

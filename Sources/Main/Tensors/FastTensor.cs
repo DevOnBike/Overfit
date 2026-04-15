@@ -1,11 +1,12 @@
 ﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Buffers;
 using System.Runtime.CompilerServices;
 
-namespace DevOnBike.Overfit.Core
+namespace DevOnBike.Overfit.Tensors
 {
     /// <summary>
     /// Klasa zarządzająca wyłącznie cyklem życia pamięci na stercie (Heap).
@@ -13,7 +14,7 @@ namespace DevOnBike.Overfit.Core
     /// </summary>
     public sealed class FastTensor<T> : IDisposable where T : struct
     {
-        private T[]? _data;
+        private T[] _data;
         private int _disposed;
 
         public readonly int Rank;

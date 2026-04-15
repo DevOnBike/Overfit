@@ -1,5 +1,10 @@
-﻿using DevOnBike.Overfit.Core;
-using DevOnBike.Overfit.DeepLearning;
+﻿// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
+
+using DevOnBike.Overfit.Autograd;
+using DevOnBike.Overfit.DeepLearning.Abstractions;
 
 namespace DevOnBike.Overfit.Tests
 {

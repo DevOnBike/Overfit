@@ -1,8 +1,13 @@
+// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
+
 using System.Diagnostics;
 using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.Diagnostics.Contracts;
 
-namespace DevOnBike.Overfit.DeepLearning
+namespace DevOnBike.Overfit.DeepLearning.Diagnostics
 {
     internal static class ModuleDiagnostics
     {

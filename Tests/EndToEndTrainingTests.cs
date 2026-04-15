@@ -3,9 +3,11 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Optimizers;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Tests
 {

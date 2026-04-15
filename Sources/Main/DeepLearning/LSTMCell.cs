@@ -1,13 +1,17 @@
 ﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Numerics.Tensors;
-using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.Autograd;
+using DevOnBike.Overfit.DeepLearning.Abstractions;
+using DevOnBike.Overfit.Ops;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
-    public sealed class LSTMCell : IModule
+    public sealed class LstmCell : IModule
     {
         public int InputSize { get; }
         public int HiddenSize { get; }
@@ -16,7 +20,7 @@ namespace DevOnBike.Overfit.DeepLearning
         public AutogradNode B { get; }
         public bool IsTraining { get; private set; } = true;
 
-        public LSTMCell(int inputSize, int hiddenSize)
+        public LstmCell(int inputSize, int hiddenSize)
         {
             InputSize = inputSize; HiddenSize = hiddenSize;
             var limit = MathF.Sqrt(6f / (inputSize + hiddenSize));

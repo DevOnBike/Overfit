@@ -4,10 +4,10 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Linq;
-using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.Data.Contracts;
+using DevOnBike.Overfit.Tensors;
 
-namespace DevOnBike.Overfit.Data
+namespace DevOnBike.Overfit.Data.Tabular
 {
     /// <summary>
     ///     Converts tabular data (objects/models) into high-performance <see cref="FastTensor{T}" /> objects.

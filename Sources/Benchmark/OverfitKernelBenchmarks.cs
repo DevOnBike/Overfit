@@ -1,8 +1,16 @@
+// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
+
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Order;
-using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.DeepLearning.Abstractions;
+using DevOnBike.Overfit.Ops;
+using DevOnBike.Overfit.Tensors;
 
 namespace Benchmarks
 {
@@ -33,7 +41,7 @@ namespace Benchmarks
         private LinearLayer _linear = null!;
         private ResidualBlock _residual = null!;
         private BatchNorm1D _batchNorm = null!;
-        private LSTMLayer _lstm = null!;
+        private LstmLayer _lstm = null!;
 
         private FastTensor<float> _lstmInputTensor = null!;
         private FastTensor<float> _lstmTargetTensor = null!;
@@ -66,7 +74,7 @@ namespace Benchmarks
             _linear = new LinearLayer(Hidden, Hidden);
             _residual = new ResidualBlock(Hidden);
             _batchNorm = new BatchNorm1D(Hidden);
-            _lstm = new LSTMLayer(inputSize: 32, hiddenSize: 32, returnSequences: false);
+            _lstm = new LstmLayer(inputSize: 32, hiddenSize: 32, returnSequences: false);
 
             _lstmInputTensor = new FastTensor<float>(Batch, 8, 32, clearMemory: true);
             _lstmTargetTensor = new FastTensor<float>(Batch, 32, clearMemory: true);

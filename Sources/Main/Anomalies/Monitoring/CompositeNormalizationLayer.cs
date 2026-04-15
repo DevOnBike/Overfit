@@ -1,7 +1,12 @@
-﻿using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
-using DevOnBike.Overfit.Core;
+﻿// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
+
+using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 using DevOnBike.Overfit.Data.Abstractions;
 using DevOnBike.Overfit.Data.Normalizers;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Anomalies.Monitoring
 {

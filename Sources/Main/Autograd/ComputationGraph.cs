@@ -1,8 +1,14 @@
+// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
+
 using System.Diagnostics;
 using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.Diagnostics.Contracts;
+using DevOnBike.Overfit.Ops;
 
-namespace DevOnBike.Overfit.Core
+namespace DevOnBike.Overfit.Autograd
 {
     /// <summary>
     /// Manages the recording and execution of operations for automatic differentiation (Reverse Mode).

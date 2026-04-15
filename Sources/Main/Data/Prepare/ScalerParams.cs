@@ -4,6 +4,8 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Text.Json;
+using DevOnBike.Overfit.Data.Serialization;
+using DevOnBike.Overfit.Diagnostics;
 
 namespace DevOnBike.Overfit.Data.Prepare
 {
@@ -23,10 +25,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         /// <summary>Saves params to a JSON file.</summary>
         public void SaveToFile(string path)
         {
-            var json = JsonSerializer.Serialize(this, new JsonSerializerOptions
-            {
-                WriteIndented = true
-            });
+            var json = JsonSerializer.Serialize(this, OverfitJsonContext.Default.ScalerParams);
 
             File.WriteAllText(path, json);
         }
@@ -36,7 +35,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         {
             var json = File.ReadAllText(path);
 
-            return JsonSerializer.Deserialize<ScalerParams>(json) ?? throw new InvalidOperationException($"Failed to deserialize ScalerParams from {path}.");
+            return JsonSerializer.Deserialize(json, OverfitJsonContext.Default.ScalerParams) ?? throw new InvalidOperationException($"Failed to deserialize ScalerParams from {path}.");
         }
     }
 }

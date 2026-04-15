@@ -4,7 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Runtime.CompilerServices;
-using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Statistical
 {

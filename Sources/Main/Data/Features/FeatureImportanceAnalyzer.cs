@@ -3,7 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-namespace DevOnBike.Overfit.Data
+namespace DevOnBike.Overfit.Data.Features
 {
     /*
     public sealed class FeatureImportanceAnalyzer

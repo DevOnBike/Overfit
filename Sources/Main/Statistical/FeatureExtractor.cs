@@ -5,7 +5,7 @@
 
 using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
-using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Statistical
 {

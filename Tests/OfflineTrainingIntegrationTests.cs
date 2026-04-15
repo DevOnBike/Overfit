@@ -5,9 +5,9 @@
 
 using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
-using DevOnBike.Overfit.Core;
 using DevOnBike.Overfit.Data.Normalizers;
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Tests
 {
@@ -33,7 +33,7 @@ namespace DevOnBike.Overfit.Tests
             };
 
             var pipeline = new MonitoringPipeline(options);
-            var autoencoder = new LSTMAutoencoder(inputSize: TotalInputFeatures, seqLen: WindowSize);
+            var autoencoder = new LstmAutoencoder(inputSize: TotalInputFeatures, seqLen: WindowSize);
 
             var baseTsMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             var totalScrapes = 10;

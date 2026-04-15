@@ -1,9 +1,15 @@
+// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
+
 using System.Diagnostics;
-using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Diagnostics;
+using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Optimizers;
-using Xunit;
+using DevOnBike.Overfit.Tensors;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests
@@ -17,7 +23,7 @@ namespace DevOnBike.Overfit.Tests
             _output = output;
         }
 
-        [Fact(Skip = "a")]
+        [Fact]
         public void Mnist_FullTrain60k_CnnBeastMode_Benchmark()
         {
             const int trainSize = 60_000;

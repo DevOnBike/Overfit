@@ -1,13 +1,16 @@
 ﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
-using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Data.Normalizers;
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Optimizers;
+using DevOnBike.Overfit.Tensors;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests
@@ -41,7 +44,7 @@ namespace DevOnBike.Overfit.Tests
             };
 
             var pipeline = new MonitoringPipeline(options);
-            using var autoencoder = new LSTMAutoencoder(inputSize: TotalFeatures, seqLen: WindowSize);
+            using var autoencoder = new LstmAutoencoder(inputSize: TotalFeatures, seqLen: WindowSize);
             using var optimizer = new Adam(autoencoder.Parameters(), learningRate: 0.01f);
 
             var baseTsMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();

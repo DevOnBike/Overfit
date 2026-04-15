@@ -4,7 +4,8 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Text.Json;
-using DevOnBike.Overfit.Core;
+using DevOnBike.Overfit.Data.Serialization;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Statistical
 {
@@ -17,7 +18,7 @@ namespace DevOnBike.Overfit.Statistical
 
         public void SaveToFile(string path)
         {
-            var json = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
+            var json = JsonSerializer.Serialize(this, OverfitJsonContext.Default.HmmParams);
             File.WriteAllText(path, json);
         }
 
@@ -25,7 +26,7 @@ namespace DevOnBike.Overfit.Statistical
         {
             var json = File.ReadAllText(path);
 
-            return JsonSerializer.Deserialize<HmmParams>(json) ?? throw new InvalidOperationException("Nie udało się zdeserializować HmmParams.");
+            return JsonSerializer.Deserialize(json, OverfitJsonContext.Default.HmmParams) ?? throw new InvalidOperationException("Nie udało się zdeserializować HmmParams.");
         }
 
         /// <summary>
