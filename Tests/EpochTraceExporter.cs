@@ -25,17 +25,17 @@ namespace DevOnBike.Overfit.Tests
                 static kv => kv.Key,
                 static kv => new
                 {
-                    kv.Value.Count,
-                    kv.Value.DurationMs,
-                    kv.Value.AllocatedBytes
+                    count = kv.Value.Count,
+                    durationMs = kv.Value.DurationMs,
+                    allocatedBytes = kv.Value.AllocatedBytes
                 }),
                 kernels = snapshot.Kernels.ToDictionary(
                 static kv => kv.Key,
                 static kv => new
                 {
-                    kv.Value.Count,
-                    kv.Value.DurationMs,
-                    kv.Value.AllocatedBytes
+                    count = kv.Value.Count,
+                    durationMs = kv.Value.DurationMs,
+                    allocatedBytes = kv.Value.AllocatedBytes
                 }),
                 counters = snapshot.Counters
             };
@@ -53,7 +53,6 @@ namespace DevOnBike.Overfit.Tests
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
 
             var sb = new StringBuilder();
-            
             sb.AppendLine("kind,name,count,duration_ms,allocated_bytes,value");
 
             foreach (var kv in snapshot.Modules.OrderBy(static x => x.Key, StringComparer.Ordinal))
@@ -79,12 +78,8 @@ namespace DevOnBike.Overfit.Tests
             sb.AppendLine($"allocation,allocation.total,0,0,{snapshot.AllocationBytes},0");
 
             File.WriteAllText(path, sb.ToString(), Encoding.UTF8);
-            return;
 
-            static string Escape(string s)
-            {
-                return "\"" + s.Replace("\"", "\"\"") + "\"";
-            }
+            static string Escape(string s) => "\"" + s.Replace("\"", "\"\"") + "\"";
         }
     }
 }
