@@ -8,7 +8,7 @@ using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors;
 
-namespace DevOnBike.Overfit.Ineference
+namespace DevOnBike.Overfit.Inference
 {
     public sealed class MnistPredictor : IDisposable
     {
