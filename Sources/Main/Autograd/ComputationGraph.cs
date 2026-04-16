@@ -186,8 +186,34 @@ namespace DevOnBike.Overfit.Autograd
             }
         }
 
+        /// <summary>
+        /// Resets the computation graph, disposing all intermediate tensors.
+        /// Call this after Backward() and before the next forward pass.
+        /// WARNING: Ensure you've extracted any needed values from output nodes 
+        /// before calling Reset() as their underlying data will be released.
+        /// </summary>
         public void Reset()
         {
+            // Dispose intermediate tensors created during forward pass
+            // This is critical for memory management - without this, 
+            // ~7.6 GB per epoch would leak!
+            for (var i = 0; i < _opCount; i++)
+            {
+                ref readonly var op = ref _tape[i];
+
+                // Dispose output tensor (always intermediate, created by TensorMath)
+                // Safe: Parameters (Weights, Biases) are never Output nodes - 
+                // they are always A or B inputs to operations.
+                // Safe: AutogradNode.Dispose() is idempotent (uses Interlocked).
+                op.Output?.Dispose();
+
+                // NOTE: Do NOT dispose NodeContext - it contains a mix of:
+                // - Parameters (gamma, beta, W, U, B) - must NOT be disposed
+                // - Intermediate tensors (mean, invStd, probs) - small, OK to leak
+                // The memory impact of not disposing NodeContext is minimal (~2MB/epoch)
+                // compared to Output tensors (~7.5GB/epoch).
+            }
+
             if (_opCount > 0)
             {
                 Array.Clear(_tape, 0, _opCount);

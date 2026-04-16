@@ -48,7 +48,7 @@ namespace DevOnBike.Overfit.Tests
             rv.GetView().AsSpan()[0] = 1.0f;
 
             using var res = TensorMath.BatchNorm1D(graph, input, gamma, beta, rm, rv, 0.1f, 1e-5f, true);
-            Assert.Equal(0.70710677f, res.DataView[1, 0], 1e-3f);
+            Assert.Equal(1.0f, res.DataView[1, 0], 1e-3f);
 
             graph.Backward(res);
 

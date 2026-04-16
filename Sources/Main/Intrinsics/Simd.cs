@@ -14,6 +14,10 @@ namespace DevOnBike.Overfit.Intrinsics
     {
         public static bool IsSupported => Avx.IsSupported;
 
+        // Threshold for AVX-512: only use for arrays >= 512 floats (2KB)
+        // Below this, AVX2 overhead is lower
+        private const int Avx512Threshold = 512;
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void Add(ReadOnlySpan<float> a, ReadOnlySpan<float> b, Span<float> dst)
         {
@@ -23,15 +27,28 @@ namespace DevOnBike.Overfit.Intrinsics
             }
 
             var len = a.Length;
-            var simdCount = Vector256<float>.Count;
             var i = 0;
 
             ref var aRef = ref MemoryMarshal.GetReference(a);
             ref var bRef = ref MemoryMarshal.GetReference(b);
             ref var dRef = ref MemoryMarshal.GetReference(dst);
 
-            if (Avx.IsSupported)
+            // AVX-512 path for large arrays
+            if (Avx512F.IsSupported && len >= Avx512Threshold)
             {
+                var simd512 = Vector512<float>.Count;
+                for (; i <= len - simd512; i += simd512)
+                {
+                    var va = Vector512.LoadUnsafe(ref aRef, (nuint)i);
+                    var vb = Vector512.LoadUnsafe(ref bRef, (nuint)i);
+                    Avx512F.Add(va, vb).StoreUnsafe(ref dRef, (nuint)i);
+                }
+                // Fall through to scalar for remainder
+            }
+            // AVX2 path (original code, unchanged)
+            else if (Avx.IsSupported)
+            {
+                var simdCount = Vector256<float>.Count;
                 for (; i <= len - simdCount; i += simdCount)
                 {
                     var va = Vector256.LoadUnsafe(ref aRef, (nuint)i);
@@ -41,6 +58,7 @@ namespace DevOnBike.Overfit.Intrinsics
                 }
             }
 
+            // Scalar remainder
             for (; i < len; i++)
             {
                 Unsafe.Add(ref dRef, i) = Unsafe.Add(ref aRef, i) + Unsafe.Add(ref bRef, i);
@@ -56,14 +74,28 @@ namespace DevOnBike.Overfit.Intrinsics
             }
 
             var len = a.Length;
-            var simdCount = Vector256<float>.Count;
             var i = 0;
 
             ref var aRef = ref MemoryMarshal.GetReference(a);
             ref var dRef = ref MemoryMarshal.GetReference(dst);
 
-            if (Avx.IsSupported)
+            // AVX-512 path for large arrays
+            if (Avx512F.IsSupported && len >= Avx512Threshold)
             {
+                var simd512 = Vector512<float>.Count;
+                var vs = Vector512.Create(scalar);
+                for (; i <= len - simd512; i += simd512)
+                {
+                    var va = Vector512.LoadUnsafe(ref aRef, (nuint)i);
+                    var vd = Vector512.LoadUnsafe(ref dRef, (nuint)i);
+                    Avx512F.FusedMultiplyAdd(va, vs, vd).StoreUnsafe(ref dRef, (nuint)i);
+                }
+                // Fall through to scalar for remainder
+            }
+            // AVX2 path (original code, unchanged)
+            else if (Avx.IsSupported)
+            {
+                var simdCount = Vector256<float>.Count;
                 var vs = Vector256.Create(scalar);
 
                 for (; i <= len - simdCount; i += simdCount)
@@ -79,6 +111,7 @@ namespace DevOnBike.Overfit.Intrinsics
                 }
             }
 
+            // Scalar remainder
             for (; i < len; i++)
             {
                 Unsafe.Add(ref dRef, i) += Unsafe.Add(ref aRef, i) * scalar;
@@ -99,6 +132,7 @@ namespace DevOnBike.Overfit.Intrinsics
             ref var aRef = ref MemoryMarshal.GetReference(a);
             ref var bRef = ref MemoryMarshal.GetReference(b);
 
+            // AVX-512 path (ORIGINAL - no threshold, kept as-is)
             if (Avx512F.IsSupported)
             {
                 var acc512 = Vector512<float>.Zero;
@@ -141,6 +175,7 @@ namespace DevOnBike.Overfit.Intrinsics
                 return sum;
             }
 
+            // AVX2 path (original)
             if (Avx.IsSupported)
             {
                 var acc = Vector256<float>.Zero;
@@ -170,6 +205,7 @@ namespace DevOnBike.Overfit.Intrinsics
                 return sum;
             }
 
+            // Scalar fallback
             var scalarSum = 0f;
             for (; i < len; i++)
             {
@@ -188,14 +224,27 @@ namespace DevOnBike.Overfit.Intrinsics
             }
 
             var len = input.Length;
-            var simdCount = Vector256<float>.Count;
             var i = 0;
 
             ref var inRef = ref MemoryMarshal.GetReference(input);
             ref var outRef = ref MemoryMarshal.GetReference(output);
 
-            if (Avx.IsSupported)
+            // AVX-512 path for large arrays
+            if (Avx512F.IsSupported && len >= Avx512Threshold)
             {
+                var simd512 = Vector512<float>.Count;
+                var zero512 = Vector512<float>.Zero;
+                for (; i <= len - simd512; i += simd512)
+                {
+                    var v = Vector512.LoadUnsafe(ref inRef, (nuint)i);
+                    Avx512F.Max(v, zero512).StoreUnsafe(ref outRef, (nuint)i);
+                }
+                // Fall through to scalar for remainder
+            }
+            // AVX2 path (original code, unchanged)
+            else if (Avx.IsSupported)
+            {
+                var simdCount = Vector256<float>.Count;
                 var zero = Vector256<float>.Zero;
 
                 for (; i <= len - simdCount; i += simdCount)
@@ -206,6 +255,7 @@ namespace DevOnBike.Overfit.Intrinsics
                 }
             }
 
+            // Scalar remainder
             for (; i < len; i++)
             {
                 var x = Unsafe.Add(ref inRef, i);

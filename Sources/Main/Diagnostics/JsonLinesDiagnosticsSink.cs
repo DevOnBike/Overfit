@@ -71,7 +71,7 @@ namespace DevOnBike.Overfit.Diagnostics
             lock (_gate)
             {
                 var envelope = new { tsUtc = DateTime.UtcNow, type, payload };
-                _writer.WriteLine(JsonSerializer.Serialize(envelope, OverfitJsonContext.Default.KernelDiagnosticEvent));
+                _writer.WriteLine(JsonSerializer.Serialize(envelope));
             }
         }
     }

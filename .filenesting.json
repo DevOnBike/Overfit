@@ -1,0 +1,13 @@
+{
+  "dependentFileProviders": {
+    "add": {
+      "pathSegment": {
+        "add": {
+          ".cs": [
+            ".cs"
+          ]
+        }
+      }
+    }
+  }
+}
