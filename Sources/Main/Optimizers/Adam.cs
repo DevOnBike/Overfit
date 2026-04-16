@@ -86,29 +86,52 @@ namespace DevOnBike.Overfit.Optimizers
                 var eps = Epsilon;
                 var lr = LearningRate;
 
-                // Branch outside loop for better branch prediction
-                if (UseAdamW)
+                // Parallel processing for multiple large parameters
+                if (_states.Length >= 4)
                 {
-                    foreach (var state in _states)
+                    if (UseAdamW)
                     {
-                        if (!state.Node.RequiresGrad)
+                        Parallel.ForEach(_states, state =>
                         {
-                            continue;
-                        }
-
-                        StepAdamW(state, b1, b2, b1Inv, b2Inv, invBc1, invBc2, eps, lr, wd);
+                            if (state.Node.RequiresGrad)
+                            {
+                                StepAdamW(state, b1, b2, b1Inv, b2Inv, invBc1, invBc2, eps, lr, wd);
+                            }
+                        });
+                    }
+                    else
+                    {
+                        Parallel.ForEach(_states, state =>
+                        {
+                            if (state.Node.RequiresGrad)
+                            {
+                                StepAdam(state, b1, b2, b1Inv, b2Inv, invBc1, invBc2, eps, lr, wd);
+                            }
+                        });
                     }
                 }
                 else
                 {
-                    foreach (var state in _states)
+                    // Sequential for few parameters (less overhead)
+                    if (UseAdamW)
                     {
-                        if (!state.Node.RequiresGrad)
+                        foreach (var state in _states)
                         {
-                            continue;
+                            if (state.Node.RequiresGrad)
+                            {
+                                StepAdamW(state, b1, b2, b1Inv, b2Inv, invBc1, invBc2, eps, lr, wd);
+                            }
                         }
-
-                        StepAdam(state, b1, b2, b1Inv, b2Inv, invBc1, invBc2, eps, lr, wd);
+                    }
+                    else
+                    {
+                        foreach (var state in _states)
+                        {
+                            if (state.Node.RequiresGrad)
+                            {
+                                StepAdam(state, b1, b2, b1Inv, b2Inv, invBc1, invBc2, eps, lr, wd);
+                            }
+                        }
                     }
                 }
             }
