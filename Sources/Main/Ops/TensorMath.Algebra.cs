@@ -240,8 +240,15 @@ namespace DevOnBike.Overfit.Ops
 
         public static void MatMulBackward(AutogradNode a, AutogradNode b, AutogradNode output)
         {
-            MatMulAdd_A_BT_Raw(output, false, b, false, a, true);
-            MatMulAdd_AT_B_Raw(a, false, output, false, b, true);
+            if (a.RequiresGrad)
+            {
+                MatMulAdd_A_BT_Raw(output, true, b, false, a, true);
+            }
+            
+            if (b.RequiresGrad)
+            {
+                MatMulAdd_AT_B_Raw(a, false, output, true, b, true);
+            }
         }
 
         // ====================================================================
