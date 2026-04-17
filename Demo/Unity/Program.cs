@@ -1,206 +1,101 @@
-﻿using System;
-using System.IO;
-using System.Net;
+﻿using System.Net;
 using System.Net.Sockets;
 
-namespace Overfit.SwarmServer
+namespace DevOnBike.Overfit.Demo.Unity.Server
 {
-    class Program
+    internal static class Program
     {
         static void Main(string[] args)
         {
-            Console.WriteLine("=== Overfit AI: Silnik Roju (AVX-512) ===");
-            string mode = args.Length > 0 ? args[0].ToLower() : "demo";
+            Console.WriteLine("=== Overfit AI: Swarm Engine (Production Build) ===");
 
-            if (mode == "training") RunTraining();
-            else if (mode == "demo") RunInference();
-            else Console.WriteLine("BŁĄD: Nieznany tryb. Użyj: 'training' lub 'demo'.");
+            // Production server defaults to Inference mode
+            RunInference();
         }
 
-        // ==========================================
-        // TRYB PRODUKCYJNY (DEMO Z WYUCZONYM MODELEM)
-        // ==========================================
+        /// <summary>
+        /// Production mode: Executes swarm logic using optimized weights.
+        /// </summary>
         static void RunInference()
         {
-            Console.WriteLine("\n[TRYB: DEMO] Aktywacja stabilnego instynktu roju...");
+            Console.WriteLine("\n[MODE: DEMO] Activating stable swarm instinct...");
 
-            int swarmSize = 100_000;
-            float[] brain = new float[10];
+            const int swarmSize = 100_000;
 
-            // PERFEKCYJNIE ZBALANSOWANE WAGI (Wynik tysięcy prób symulacji)
-            brain[0] = 0.8f;   // Dążenie do celu X
-            brain[1] = -1.2f;  // Swirl X (to robi tornado!)
-            brain[2] = 1.5f;   // Ucieczka przed Predator X
+            // Proprietary optimized weights (Result of evolutionary simulation)
+            var brain = new float[10];
+            brain[0] = 0.8f;   // Attraction to Target X
+            brain[1] = -1.2f;  // Tangential Swirl X (Tornado effect)
+            brain[2] = 1.5f;   // Predator Avoidance X
             brain[3] = 0.0f;
-            brain[4] = 1.2f;   // Swirl Z (to robi tornado!)
-            brain[5] = 0.8f;   // Dążenie do celu Z
+            brain[4] = 1.2f;   // Tangential Swirl Z (Tornado effect)
+            brain[5] = 0.8f;   // Attraction to Target Z
             brain[6] = 0.0f;
-            brain[7] = 1.5f;   // Ucieczka przed Predator Z
+            brain[7] = 1.5f;   // Predator Avoidance Z
             brain[8] = 0.0f;   // Bias X
             brain[9] = 0.0f;   // Bias Z
 
-            TcpListener listener = new TcpListener(IPAddress.Loopback, 5000);
+            var listener = new TcpListener(IPAddress.Loopback, 5000);
             listener.Start();
+            Console.WriteLine("Server listening on port 5000. Awaiting Unity connection...");
 
             while (true)
             {
-                using TcpClient client = listener.AcceptTcpClient();
-                client.NoDelay = true;
-                using NetworkStream stream = client.GetStream();
-
-                int inputSize = 4, outputSize = 2;
-                byte[] recvBuf = new byte[swarmSize * inputSize * 4];
-                byte[] sendBuf = new byte[swarmSize * outputSize * 4];
-                float[] inputs = new float[swarmSize * inputSize];
-                float[] outputs = new float[swarmSize * outputSize];
-
                 try
                 {
+                    using var client = listener.AcceptTcpClient();
+                    client.NoDelay = true; // Minimize latency
+                    using var stream = client.GetStream();
+                    Console.WriteLine("Unity connected. Streaming inference data...");
+
+                    int inputSize = 4, outputSize = 2;
+                    var recvBuf = new byte[swarmSize * inputSize * 4];
+                    var sendBuf = new byte[swarmSize * outputSize * 4];
+                    var inputs = new float[swarmSize * inputSize];
+                    var outputs = new float[swarmSize * outputSize];
+
                     while (true)
                     {
+                        // 1. Receive relative vectors from the game engine
                         ReadExactly(stream, recvBuf, recvBuf.Length);
                         Buffer.BlockCopy(recvBuf, 0, inputs, 0, recvBuf.Length);
 
-                        for (int i = 0; i < swarmSize; i++)
+                        // 2. High-performance inference loop
+                        for (var i = 0; i < swarmSize; i++)
                         {
-                            int inIdx = i * 4;
-                            int outIdx = i * 2;
-                            // Matematyczny silnik tornada
+                            var inIdx = i * 4;
+                            var outIdx = i * 2;
+
+                            // Tornado mathematical engine
                             outputs[outIdx + 0] = inputs[inIdx + 0] * brain[0] + inputs[inIdx + 1] * brain[1] + inputs[inIdx + 2] * brain[2];
                             outputs[outIdx + 1] = inputs[inIdx + 0] * brain[4] + inputs[inIdx + 1] * brain[5] + inputs[inIdx + 3] * brain[7];
                         }
+
+                        // 3. Send calculated steering forces back to Unity
                         Buffer.BlockCopy(outputs, 0, sendBuf, 0, sendBuf.Length);
                         stream.Write(sendBuf, 0, sendBuf.Length);
                     }
                 }
-                catch { }
-            }
-        }
-
-        // ==========================================
-        // TRYB TRENINGOWY (EWOLUCJA I MUTACJE)
-        // ==========================================
-        // ==========================================
-        // TRYB TRENINGOWY (Ewolucja z bonusem za Tornado)
-        // ==========================================
-        static void RunTraining()
-        {
-            Console.WriteLine("\n[DEBUG] Uruchamiam Trening 3.0: Eliminacja efektu siatki...");
-            int swarmSize = 100_000;
-            int genomeSize = 10;
-            float[] population = new float[swarmSize * genomeSize];
-            float[] fitness = new float[swarmSize];
-            int[] botIndices = new int[swarmSize];
-            Random rnd = new Random();
-
-            for (int i = 0; i < swarmSize; i++)
-            {
-                botIndices[i] = i;
-                for (int g = 0; g < genomeSize; g++)
-                    population[i * genomeSize + g] = (float)(rnd.NextDouble() * 0.4 - 0.2); // Startujemy z małych wag!
-            }
-
-            TcpListener listener = new TcpListener(IPAddress.Loopback, 5000);
-            listener.Start();
-            using TcpClient client = listener.AcceptTcpClient();
-            using NetworkStream stream = client.GetStream();
-
-            int inputSize = 4;
-            byte[] recvBuffer = new byte[swarmSize * inputSize * 4];
-            byte[] sendBuffer = new byte[swarmSize * 2 * 4];
-            float[] inputs = new float[swarmSize * inputSize];
-            float[] outputs = new float[swarmSize * 2];
-
-            int framesPassed = 0;
-
-            while (true)
-            {
-                try
+                catch (Exception e)
                 {
-                    ReadExactly(stream, recvBuffer, recvBuffer.Length);
-                    Buffer.BlockCopy(recvBuffer, 0, inputs, 0, recvBuffer.Length);
-
-                    for (int i = 0; i < swarmSize; i++)
-                    {
-                        int inIdx = i * 4;
-                        int genIdx = i * genomeSize;
-
-                        // 1. NORMALIZACJA (Kierunek zamiast pozycji)
-                        float tx = inputs[inIdx + 0];
-                        float tz = inputs[inIdx + 1];
-                        float dist = (float)Math.Sqrt(tx * tx + tz * tz);
-                        float nx = dist > 0.01f ? tx / dist : 0;
-                        float nz = dist > 0.01f ? tz / dist : 0;
-
-                        // 2. INFERENCJA
-                        float ax = nx * population[genIdx + 0] + nz * population[genIdx + 1] + population[genIdx + 8];
-                        float az = nx * population[genIdx + 4] + nz * population[genIdx + 5] + population[genIdx + 9];
-
-                        outputs[i * 2 + 0] = Math.Clamp(ax, -1f, 1f);
-                        outputs[i * 2 + 1] = Math.Clamp(az, -1f, 1f);
-
-                        // 3. FITNESS (Nowa logika)
-                        // Nagroda za bliskość
-                        fitness[i] += 1.0f / (1.0f + dist);
-
-                        // KARA ZA WYSOKIE WAGI (To zabija 'krzyż')
-                        float weightPenalty = 0;
-                        for (int g = 0; g < genomeSize; g++) weightPenalty += population[genIdx + g] * population[genIdx + g];
-                        fitness[i] -= weightPenalty * 0.01f;
-
-                        // Nagroda za orbitowanie (tylko blisko celu)
-                        if (dist < 1.5f && dist > 0.1f)
-                        {
-                            float dot = (nx * (ax / 1.0f)) + (nz * (az / 1.0f));
-                            fitness[i] += (1.0f - Math.Abs(dot)) * 0.5f;
-                        }
-                    }
-
-                    Buffer.BlockCopy(outputs, 0, sendBuffer, 0, sendBuffer.Length);
-                    stream.Write(sendBuffer, 0, sendBuffer.Length);
-
-                    if (++framesPassed >= 300)
-                    {
-                        Array.Sort(botIndices, (a, b) => fitness[b].CompareTo(fitness[a]));
-                        SaveBrain(population, botIndices[0], genomeSize, Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "swarm_brain.bin"));
-
-                        Console.WriteLine($"[Gen] Najlepszy: {fitness[botIndices[0]]:F2} | Waga: {population[botIndices[0] * genomeSize]:F2}");
-
-                        int elite = swarmSize / 10;
-                        for (int i = elite; i < swarmSize; i++)
-                        {
-                            int weak = botIndices[i];
-                            int parent = botIndices[rnd.Next(0, elite)];
-                            for (int g = 0; g < genomeSize; g++)
-                            {
-                                float mut = rnd.NextDouble() < 0.05 ? (float)(rnd.NextDouble() * 0.2 - 0.1) : (float)(rnd.NextDouble() * 0.01 - 0.005);
-                                population[weak * genomeSize + g] = Math.Clamp(population[parent * genomeSize + g] + mut, -2f, 2f);
-                            }
-                        }
-                        Array.Clear(fitness, 0, fitness.Length);
-                        framesPassed = 0;
-                    }
+                    Console.WriteLine($"Connection lost: {e.Message}. Re-initializing listener...");
                 }
-                catch { break; }
             }
         }
 
-        static void SaveBrain(float[] population, int index, int size, string path)
-        {
-            float[] best = new float[size];
-            Array.Copy(population, index * size, best, 0, size);
-            byte[] data = new byte[size * 4];
-            Buffer.BlockCopy(best, 0, data, 0, data.Length);
-            File.WriteAllBytes(path, data);
-        }
-
+        /// <summary>
+        /// Utility to ensure the full byte buffer is read from the stream.
+        /// </summary>
         static void ReadExactly(NetworkStream stream, byte[] buffer, int amount)
         {
-            int total = 0;
+            var total = 0;
             while (total < amount)
             {
-                int read = stream.Read(buffer, total, amount - total);
-                if (read == 0) throw new Exception("Link lost");
+                var read = stream.Read(buffer, total, amount - total);
+                if (read == 0)
+                {
+                    throw new Exception("Network link terminated by client.");
+                }
                 total += read;
             }
         }
