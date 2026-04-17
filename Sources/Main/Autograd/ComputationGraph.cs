@@ -128,6 +128,9 @@ namespace DevOnBike.Overfit.Autograd
                 case OpCode.MatMul:
                     TensorMath.MatMulBackward(op.A, op.B, op.Output);
                     break;
+                case OpCode.Linear:
+                    TensorMath.LinearBackward(op.A, op.B, op.NodeContext[0], op.Output);
+                    break;
                 case OpCode.ReLU:
                     TensorMath.ReluBackward(op.A, op.Output);
                     break;

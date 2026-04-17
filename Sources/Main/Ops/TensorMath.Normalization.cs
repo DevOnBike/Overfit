@@ -44,9 +44,8 @@ namespace DevOnBike.Overfit.Ops
                     TensorPrimitives.MultiplyAdd(tB.Span, tB.Span, vB.Span, vB.Span);
                 }
 
-                // Bessel's correction for unbiased sample variance estimate
-                var varianceDivisor = N > 1 ? 1f / (N - 1) : 1f;
-                TensorPrimitives.Multiply(vB.Span, varianceDivisor, vB.Span);
+                // Use 1/N (biased, consistent with backward pass)
+                TensorPrimitives.Multiply(vB.Span, 1f / N, vB.Span);
 
                 var rmS = runningMean.GetView().AsSpan();
                 var rvS = runningVar.GetView().AsSpan();
