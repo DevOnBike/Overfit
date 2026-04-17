@@ -54,13 +54,6 @@ namespace DevOnBike.Overfit.Ops
 
             int batchSize = input.DataView.GetDim(0), outH = h - k + 1, outW = w - k + 1, K = outH * outW, kSqInC = k * k * inC;
 
-            FastTensor<float> w2DTContig = null;
-            if (input.RequiresGrad)
-            {
-                var w2D = weights.DataView.Reshape(outC, kSqInC);
-                w2DTContig = FastTensor<float>.FromView(w2D.Transpose2D());
-            }
-
             var partialWeightGrads = weights.RequiresGrad ? new ConcurrentBag<FastTensor<float>>() : null;
 
             Parallel.For(0, batchSize,
@@ -78,11 +71,15 @@ namespace DevOnBike.Overfit.Ops
                         MatMulAdd_A_BT_Seq(outGS, colS.Span, localDw.GetView().AsSpan(), outC, K, kSqInC);
                     }
 
-                    if (input.RequiresGrad && w2DTContig != null)
+                    if (input.RequiresGrad)
                     {
                         using var dColS = new PooledBuffer<float>(kSqInC * K);
 
-                        MatMulRawSeq(w2DTContig.GetView().AsReadOnlySpan(), outGS, kSqInC, outC, K, dColS.Span);
+                        // OPTIMIZATION: eliminate w2DTContig allocation (was FastTensor.FromView + transpose copy per backward).
+                        // Use MatMulAdd_AT_B_Seq which computes dColS = w2D^T * outGS directly
+                        // from contiguous weights via strided access - no transpose buffer needed.
+                        var w2D = weights.DataView.Reshape(outC, kSqInC);
+                        MatMulAdd_AT_B_Seq(w2D.AsReadOnlySpan(), outGS, dColS.Span, outC, kSqInC, K);
                         Col2Im(dColS.Span, inC, h, w, k, 1, 0, input.GradView.AsSpan().Slice(n * inC * h * w, inC * h * w));
                     }
 
@@ -111,8 +108,6 @@ namespace DevOnBike.Overfit.Ops
                     }
                 }
             }
-
-            w2DTContig?.Dispose();
         }
 
         // ====================================================================
