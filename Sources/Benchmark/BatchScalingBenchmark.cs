@@ -15,73 +15,64 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 
 namespace Benchmarks
 {
-    /// <summary>
-    ///     Performance comparison between ONNX Runtime and Overfit engine.
-    ///     Evaluates execution speed and memory allocation overhead during inference.
-    /// </summary>
     [SimpleJob(RuntimeMoniker.Net10_0)]
     [Orderer(SummaryOrderPolicy.FastestToSlowest)]
     [MemoryDiagnoser]
-    [DisassemblyDiagnoser(maxDepth: 2)]
     [HardwareCounters(HardwareCounter.InstructionRetired, HardwareCounter.CacheMisses)]
-    public class InferenceBenchmark
+    public class BatchScalingBenchmark
     {
         private const int InputSize = 784;
         private const int OutputSize = 10;
-        private float[] _inputData;
-        private AutogradNode _inputNode;
-        private NamedOnnxValue[] _onnxInputs;
+
+        // Testujemy małe paczki (Edge/IoT) i duże paczki (Server/Cloud)
+        [Params(1, 16, 64, 256)]
+        public int BatchSize { get; set; }
 
         private InferenceSession _onnxSession;
+        private NamedOnnxValue[] _onnxInputs;
         private Sequential _overfitModel;
+        private FastTensor<float> _overfitInputTensor;
+        private AutogradNode _inputNode;
 
         [GlobalSetup]
         public void Setup()
         {
             var rnd = new Random(42);
-            _inputData = Enumerable.Range(0, InputSize).Select(_ => (float)rnd.NextDouble()).ToArray();
+            var inputData = Enumerable.Range(0, BatchSize * InputSize).Select(_ => (float)rnd.NextDouble()).ToArray();
 
+            // ONNX Setup
             _onnxSession = new InferenceSession("benchmark_model.onnx");
-            var tensor = new DenseTensor<float>(_inputData, [1, InputSize]);
+            var tensor = new DenseTensor<float>(inputData, [BatchSize, InputSize]);
             _onnxInputs = [NamedOnnxValue.CreateFromTensor("input", tensor)];
 
+            // Overfit Setup
             _overfitModel = new Sequential(new LinearLayer(InputSize, OutputSize));
             _overfitModel.Load("benchmark_model.bin");
             _overfitModel.Eval();
 
-            var inputTensor = new FastTensor<float>(1, InputSize, clearMemory: false);
-            _inputData.AsSpan().CopyTo(inputTensor.GetView().AsSpan());
-            _inputNode = new AutogradNode(inputTensor, false);
-
-            for (var i = 0; i < 100; i++)
-            {
-                _overfitModel.Forward(null, _inputNode);
-            }
+            _overfitInputTensor = new FastTensor<float>(BatchSize, InputSize, clearMemory: false);
+            inputData.AsSpan().CopyTo(_overfitInputTensor.GetView().AsSpan());
+            _inputNode = new AutogradNode(_overfitInputTensor, false);
         }
 
         [Benchmark(Baseline = true)]
-        public float OnnxRuntime_PreAllocated()
+        public float OnnxRuntime_Batch()
         {
             using var results = _onnxSession.Run(_onnxInputs);
             return results.First().AsTensor<float>()[0];
         }
 
-        /// <summary>
-        ///     Benchmarks Overfit with zero-allocation SIMD inference.
-        ///     Leverages the full inference path from raw data to prediction.
-        /// </summary>
         [Benchmark]
-        public float Overfit_ZeroAlloc()
+        public float Overfit_Batch()
         {
-            var outputNode = _overfitModel.Forward(null, _inputNode);
-
-            return outputNode.DataView.AsReadOnlySpan()[0];
+            return _overfitModel.Forward(null, _inputNode).DataView.AsReadOnlySpan()[0];
         }
 
         [GlobalCleanup]
         public void Cleanup()
         {
             _onnxSession?.Dispose();
+            _overfitInputTensor?.Dispose();
             _inputNode?.Dispose();
             _overfitModel?.Dispose();
         }
