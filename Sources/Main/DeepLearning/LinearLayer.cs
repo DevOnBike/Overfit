@@ -132,7 +132,10 @@ namespace DevOnBike.Overfit.DeepLearning
                     // Batched SIMD inference: each row treated independently
                     // Parallelize only for large batches - Parallel.For overhead (~50-100μs)
                     // exceeds benefit for small batches with lightweight models.
-                    // Empirical threshold: batch*inputSize > 200k
+                    // Empirical threshold (Ryzen 9 9950X3D, 784->10 Linear):
+                    //   batch*inputSize > 200k ~ batch >= 256 for InputSize=784.
+                    //   Trade-off: small closure allocation (~6-7KB) for 3-4× speedup.
+                    //   Below threshold: sequential SIMD wins due to zero dispatch overhead.
                     if ((long)batchSize * _inputSize > 200_000)
                     {
                         // Capture references outside lambda (ref struct Span cannot be captured)
