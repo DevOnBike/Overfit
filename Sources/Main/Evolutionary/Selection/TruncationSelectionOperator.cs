@@ -8,14 +8,10 @@ namespace DevOnBike.Overfit.Evolutionary.Selection
         {
             if (eliteIndices.Length == 0)
             {
-                throw new ArgumentException("Elite set nie może być pusty.", nameof(eliteIndices));
+                throw new ArgumentException("Elite set cannot be empty.", nameof(eliteIndices));
             }
 
             return eliteIndices[rng.Next(eliteIndices.Length)];
-        }
-        public void Select(ReadOnlySpan<float> fitness, Span<int> selectedIndicesOut)
-        {
-            throw new NotImplementedException();
         }
     }
 }

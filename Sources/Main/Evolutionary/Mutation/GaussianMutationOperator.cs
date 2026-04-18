@@ -27,7 +27,7 @@ namespace DevOnBike.Overfit.Evolutionary.Mutation
 
             if (minWeight > maxWeight)
             {
-                throw new ArgumentException("minWeight nie może być większy niż maxWeight.");
+                throw new ArgumentException("minWeight cannot be greater than maxWeight.");
             }
 
             _mutationProbability = mutationProbability;
@@ -35,17 +35,15 @@ namespace DevOnBike.Overfit.Evolutionary.Mutation
             _minWeight = minWeight;
             _maxWeight = maxWeight;
         }
-        
-        public void Mutate(Span<float> populationData, int populationSize, int genomeSize)
-        {
-            throw new NotImplementedException();
-        }
 
-        public void Mutate(ReadOnlySpan<float> parentGenome, Span<float> childGenome, Random rng)
+        public void Mutate(
+            ReadOnlySpan<float> parentGenome,
+            Span<float> childGenome,
+            Random rng)
         {
             if (parentGenome.Length != childGenome.Length)
             {
-                throw new ArgumentException("parentGenome i childGenome muszą mieć ten sam rozmiar.");
+                throw new ArgumentException("parentGenome and childGenome must have the same length.");
             }
 
             parentGenome.CopyTo(childGenome);
@@ -68,7 +66,5 @@ namespace DevOnBike.Overfit.Evolutionary.Mutation
             var stdNormal = Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Cos(2.0 * Math.PI * u2);
             return (float)stdNormal;
         }
-        
-        
     }
 }

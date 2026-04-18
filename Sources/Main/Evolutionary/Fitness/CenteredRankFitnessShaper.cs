@@ -1,14 +1,14 @@
-using DevOnBike.Overfit.Evolutionary.Abstractions;
-
 namespace DevOnBike.Overfit.Evolutionary.Fitness
 {
+    using DevOnBike.Overfit.Evolutionary.Abstractions;
+
     public sealed class CenteredRankFitnessShaper : IFitnessShaper
     {
         public void Shape(ReadOnlySpan<float> rawFitness, Span<float> shapedFitness)
         {
             if (rawFitness.Length != shapedFitness.Length)
             {
-                throw new ArgumentException("rawFitness i shapedFitness muszą mieć ten sam rozmiar.");
+                throw new ArgumentException("rawFitness and shapedFitness must have the same length.");
             }
 
             var count = rawFitness.Length;
@@ -17,24 +17,42 @@ namespace DevOnBike.Overfit.Evolutionary.Fitness
                 return;
             }
 
-            var pairs = new (float fitness, int index)[count];
-            for (var i = 0; i < count; i++)
-            {
-                pairs[i] = (rawFitness[i], i);
-            }
-
-            Array.Sort(pairs, static (a, b) => a.fitness.CompareTo(b.fitness));
-
             if (count == 1)
             {
-                shapedFitness[pairs[0].index] = 0f;
+                shapedFitness[0] = 0f;
                 return;
             }
+
+            var ranking = new int[count];
+            for (var i = 0; i < count; i++)
+            {
+                ranking[i] = i;
+            }
+
+            SortIndicesAscending(ranking, rawFitness);
 
             for (var rank = 0; rank < count; rank++)
             {
                 var normalized = (float)rank / (count - 1);
-                shapedFitness[pairs[rank].index] = normalized - 0.5f;
+                shapedFitness[ranking[rank]] = normalized - 0.5f;
+            }
+        }
+
+        private static void SortIndicesAscending(int[] indices, ReadOnlySpan<float> values)
+        {
+            for (var i = 1; i < indices.Length; i++)
+            {
+                var key = indices[i];
+                var keyValue = values[key];
+                var j = i - 1;
+
+                while (j >= 0 && values[indices[j]] > keyValue)
+                {
+                    indices[j + 1] = indices[j];
+                    j--;
+                }
+
+                indices[j + 1] = key;
             }
         }
     }

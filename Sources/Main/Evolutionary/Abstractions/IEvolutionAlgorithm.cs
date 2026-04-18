@@ -10,7 +10,7 @@ namespace DevOnBike.Overfit.Evolutionary.Abstractions
         void Tell(ReadOnlySpan<float> fitness);
 
         ReadOnlySpan<float> GetBestParameters();
-        
+
         float BestFitness { get; }
     }
 }

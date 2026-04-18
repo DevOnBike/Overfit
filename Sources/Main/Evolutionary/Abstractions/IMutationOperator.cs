@@ -1,10 +1,10 @@
 namespace DevOnBike.Overfit.Evolutionary.Abstractions
 {
     /// <summary>
-    /// Operatory mutacji operujące bezpośrednio na pamięci (SIMD/No-Alloc).
+    /// Mutates a parent genome into a child genome without allocating.
     /// </summary>
     public interface IMutationOperator
     {
-        void Mutate(Span<float> populationData, int populationSize, int genomeSize);
+        void Mutate(ReadOnlySpan<float> parentGenome, Span<float> childGenome, Random rng);
     }
 }
