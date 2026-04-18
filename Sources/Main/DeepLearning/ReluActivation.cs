@@ -57,5 +57,9 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Dispose()
         {
         }
+
+        public void InvalidateParameterCaches()
+        {
+        }
     }
 }

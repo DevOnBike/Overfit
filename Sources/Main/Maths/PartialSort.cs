@@ -1,27 +1,45 @@
-﻿using System.Runtime.CompilerServices;
+﻿// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
+
+using System.Runtime.CompilerServices;
 
 namespace DevOnBike.Overfit.Maths
 {
     /// <summary>
-    /// Indirect partial sort by float keys. Rearranges <paramref name="indices"/>
-    /// so that the first <paramref name="k"/> positions hold the indices of the
-    /// k largest (or smallest) values, in sorted order. Remaining indices are
-    /// left in an unspecified order. NaN values rank last regardless of direction.
+    ///     Indirect (index-based) sort utilities for float keys.
+    ///     All routines operate in-place on an <c>int[]</c> of indices, ordered by the
+    ///     corresponding values in a <see cref="ReadOnlySpan{T}"/>. No managed allocations.
     /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         All comparisons are NaN-safe and rely on <see cref="float.CompareTo(float)"/>,
+    ///         which treats <see cref="float.NaN"/> as the smallest possible value
+    ///         (including below <see cref="float.NegativeInfinity"/>). In practice that means a NaN
+    ///         fitness can never win a "top-K-largest" slot and can never corrupt the ordering.
+    ///     </para>
+    ///     <para>
+    ///         Designed for the evolutionary pipeline where population sizes are in the hundreds
+    ///         to thousands and elite counts are typically 5–20 % of the population. All public
+    ///         methods are AOT-safe.
+    ///     </para>
+    /// </remarks>
     public static class PartialSort
     {
         /// <summary>
-        /// In-place partial sort, descending. After the call, <paramref name="indices"/>[0..k]
-        /// contain the indices of the k largest values in <paramref name="values"/>, sorted
-        /// from largest to smallest. Uses a k-element min-heap → O(n log k) time, O(1) extra memory.
-        /// NaN values are treated as -infinity (they cannot win a "largest" slot).
+        ///     Partial sort by descending value. After the call,
+        ///     <paramref name="indices"/>[0..<paramref name="k"/>] contains the indices of the
+        ///     k largest values in <paramref name="values"/>, sorted from largest to smallest.
+        ///     Remaining positions are left in an unspecified order.
         /// </summary>
+        /// <remarks>
+        ///     O(n log k) time, O(1) extra memory. Internally maintains a min-heap of size k
+        ///     during the selection phase, then a small insertion sort to order the elite set.
+        /// </remarks>
         public static void TopKDescending(int[] indices, ReadOnlySpan<float> values, int k)
         {
-            if (indices is null)
-            {
-                throw new ArgumentNullException(nameof(indices));
-            }
+            ArgumentNullException.ThrowIfNull(indices);
 
             var n = indices.Length;
 
@@ -40,50 +58,66 @@ namespace DevOnBike.Overfit.Maths
                 return;
             }
 
-            // Build a min-heap over the first k entries. Root = smallest among the current top-k.
-            for (var i = k / 2 - 1; i >= 0; i--)
+            if (k == n)
+            {
+                SortIndices(indices, values, ascending: false);
+                return;
+            }
+
+            // Phase 1 — selection. Min-heap over indices[0..k]; the root holds the index
+            // of the smallest value in the current elite set, so any better candidate evicts it.
+            for (var i = (k >> 1) - 1; i >= 0; i--)
             {
                 SiftDownMin(indices, values, i, k);
             }
 
-            // Scan the rest. Anything beating the heap root (= current k-th best) replaces it.
             for (var i = k; i < n; i++)
             {
-                if (Better(values, indices[i], indices[0]))
+                // candidate > root  =>  candidate belongs in the elite set.
+                if (values[indices[i]].CompareTo(values[indices[0]]) > 0)
                 {
                     (indices[0], indices[i]) = (indices[i], indices[0]);
                     SiftDownMin(indices, values, 0, k);
                 }
             }
 
-            // Heap-sort the top-k in place to get descending order at indices[0..k].
-            for (var end = k - 1; end > 0; end--)
-            {
-                (indices[0], indices[end]) = (indices[end], indices[0]);
-                SiftDownMin(indices, values, 0, end);
-            }
+            // Phase 2 — order. The heap guarantees membership is correct, but only the root
+            // is sorted. Finish with an insertion sort over indices[0..k] for descending order.
+            // Rationale: elite counts are small (tens to low hundreds in practice); insertion
+            // sort is cache- and branch-predictor-friendly at this size, and faster than
+            // a second O(k log k) heap-sort pass for realistic k.
+            IndirectInsertionSort(indices, values, 0, k - 1, ascending: false);
         }
 
         /// <summary>
-        /// Full indirect sort by float key. Ascending if <paramref name="ascending"/> is true,
-        /// otherwise descending. NaN values always land at the end. O(n log n), zero alloc.
+        ///     Full indirect sort of <paramref name="indices"/> by <paramref name="values"/>,
+        ///     ascending or descending. NaN always sorts last in ascending and first in
+        ///     descending order (as <see cref="float.CompareTo(float)"/> ranks it).
         /// </summary>
+        /// <remarks>
+        ///     O(n log n) average, O(n^2) worst case (standard quicksort).
+        ///     Zero managed allocations. For inputs ≤ 16 elements, falls back to insertion sort.
+        /// </remarks>
         public static void SortIndices(int[] indices, ReadOnlySpan<float> values, bool ascending)
         {
-            if (indices is null)
-            {
-                throw new ArgumentNullException(nameof(indices));
-            }
+            ArgumentNullException.ThrowIfNull(indices);
 
             if (values.Length != indices.Length)
             {
                 throw new ArgumentException("indices and values must have the same length.");
             }
 
-            // .NET's Array.Sort over a key/value pair is not directly applicable to indirect sort
-            // without allocating a keys array, so use an introsort-style quicksort on indices.
+            if (indices.Length <= 1)
+            {
+                return;
+            }
+
             IndirectQuickSort(indices, values, 0, indices.Length - 1, ascending);
         }
+
+        // -------------------------------------------------------------------------------------
+        // Internals
+        // -------------------------------------------------------------------------------------
 
         private static void IndirectQuickSort(int[] indices, ReadOnlySpan<float> values, int lo, int hi, bool ascending)
         {
@@ -95,19 +129,19 @@ namespace DevOnBike.Overfit.Maths
                     return;
                 }
 
-                var pivotIdx = indices[lo + ((hi - lo) >> 1)];
-                var pivot = values[pivotIdx];
+                var pivotIndex = indices[lo + ((hi - lo) >> 1)];
+                var pivot = values[pivotIndex];
                 var i = lo;
                 var j = hi;
 
                 while (i <= j)
                 {
-                    while (ascending ? LessThan(values[indices[i]], pivot) : GreaterThan(values[indices[i]], pivot))
+                    while (IsLeftOfPivot(values[indices[i]], pivot, ascending))
                     {
                         i++;
                     }
 
-                    while (ascending ? GreaterThan(values[indices[j]], pivot) : LessThan(values[indices[j]], pivot))
+                    while (IsRightOfPivot(values[indices[j]], pivot, ascending))
                     {
                         j--;
                     }
@@ -120,7 +154,7 @@ namespace DevOnBike.Overfit.Maths
                     }
                 }
 
-                // Recurse into the smaller partition; iterate the larger (bounds recursion depth).
+                // Recurse into the smaller partition; loop on the larger one to bound recursion depth.
                 if (j - lo < hi - i)
                 {
                     IndirectQuickSort(indices, values, lo, j, ascending);
@@ -134,46 +168,96 @@ namespace DevOnBike.Overfit.Maths
             }
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static bool IsLeftOfPivot(float value, float pivot, bool ascending)
+        {
+            var cmp = value.CompareTo(pivot);
+            return ascending ? cmp < 0 : cmp > 0;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static bool IsRightOfPivot(float value, float pivot, bool ascending)
+        {
+            var cmp = value.CompareTo(pivot);
+            return ascending ? cmp > 0 : cmp < 0;
+        }
+
         private static void IndirectInsertionSort(int[] indices, ReadOnlySpan<float> values, int lo, int hi, bool ascending)
         {
-            for (var i = lo + 1; i <= hi; i++)
+            if (ascending)
             {
-                var key = indices[i];
-                var keyVal = values[key];
-                var j = i - 1;
-
-                while (j >= lo && (ascending ? GreaterThan(values[indices[j]], keyVal) : LessThan(values[indices[j]], keyVal)))
+                for (var i = lo + 1; i <= hi; i++)
                 {
-                    indices[j + 1] = indices[j];
-                    j--;
-                }
+                    var key = indices[i];
+                    var keyValue = values[key];
+                    var j = i - 1;
 
-                indices[j + 1] = key;
+                    while (j >= lo && values[indices[j]].CompareTo(keyValue) > 0)
+                    {
+                        indices[j + 1] = indices[j];
+                        j--;
+                    }
+
+                    indices[j + 1] = key;
+                }
+            }
+            else
+            {
+                for (var i = lo + 1; i <= hi; i++)
+                {
+                    var key = indices[i];
+                    var keyValue = values[key];
+                    var j = i - 1;
+
+                    while (j >= lo && values[indices[j]].CompareTo(keyValue) < 0)
+                    {
+                        indices[j + 1] = indices[j];
+                        j--;
+                    }
+
+                    indices[j + 1] = key;
+                }
             }
         }
 
+        /// <summary>
+        ///     Restores the min-heap property rooted at <paramref name="start"/>,
+        ///     assuming both child subtrees are already valid min-heaps.
+        ///     The root ends up holding the index of the smallest value in the heap range.
+        /// </summary>
         private static void SiftDownMin(int[] indices, ReadOnlySpan<float> values, int start, int heapSize)
         {
             var root = start;
 
             while (true)
             {
-                var left = 2 * root + 1;
+                var left = (root << 1) + 1;
+
                 if (left >= heapSize)
                 {
                     return;
                 }
 
                 var smallest = root;
-                if (Better(values, indices[smallest], indices[left]))
+                var smallestValue = values[indices[smallest]];
+                var leftValue = values[indices[left]];
+
+                if (leftValue.CompareTo(smallestValue) < 0)
                 {
                     smallest = left;
+                    smallestValue = leftValue;
                 }
 
                 var right = left + 1;
-                if (right < heapSize && Better(values, indices[smallest], indices[right]))
+
+                if (right < heapSize)
                 {
-                    smallest = right;
+                    var rightValue = values[indices[right]];
+
+                    if (rightValue.CompareTo(smallestValue) < 0)
+                    {
+                        smallest = right;
+                    }
                 }
 
                 if (smallest == root)
@@ -184,64 +268,6 @@ namespace DevOnBike.Overfit.Maths
                 (indices[root], indices[smallest]) = (indices[smallest], indices[root]);
                 root = smallest;
             }
-        }
-
-        /// <summary>
-        /// Returns true when the element at <paramref name="candidate"/> would push the element at
-        /// <paramref name="incumbent"/> out of a top-K-descending set. NaN-aware: a NaN candidate
-        /// never wins, and a NaN incumbent is always displaced.
-        /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static bool Better(ReadOnlySpan<float> values, int incumbent, int candidate)
-        {
-            var a = values[incumbent];
-            var b = values[candidate];
-
-            // NaN handling: NaN is always the worst.
-            if (float.IsNaN(b))
-            {
-                return false;
-            }
-
-            if (float.IsNaN(a))
-            {
-                return true;
-            }
-
-            return b > a;
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static bool LessThan(float a, float b)
-        {
-            // NaN sorts last in both directions.
-            if (float.IsNaN(a))
-            {
-                return false;
-            }
-
-            if (float.IsNaN(b))
-            {
-                return true;
-            }
-
-            return a < b;
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static bool GreaterThan(float a, float b)
-        {
-            if (float.IsNaN(a))
-            {
-                return false;
-            }
-
-            if (float.IsNaN(b))
-            {
-                return true;
-            }
-
-            return a > b;
         }
     }
 }

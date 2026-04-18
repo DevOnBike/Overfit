@@ -61,6 +61,18 @@ namespace DevOnBike.Overfit.DeepLearning
             RebuildTransposedWeights();
         }
 
+        /// <summary>
+        ///     Drops the cached transposed-weight buffer used by <see cref="ForwardInference"/>.
+        ///     Called after external parameter mutation (e.g. from
+        ///     <c>IParameterVectorAdapter.ReadFromVector</c>). Lazy: the next call to
+        ///     <see cref="ForwardInference"/> will rebuild the cache on demand. Zero allocation.
+        /// </summary>
+        public void InvalidateParameterCaches()
+        {
+            _weightsTransposed?.Dispose();
+            _weightsTransposed = null;
+        }
+
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
             if (IsTraining)

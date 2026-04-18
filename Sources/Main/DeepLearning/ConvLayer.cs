@@ -167,5 +167,9 @@ namespace DevOnBike.Overfit.DeepLearning
             using var br = new BinaryReader(fs);
             Load(br);
         }
+
+        public void InvalidateParameterCaches()
+        {
+        }
     }
 }

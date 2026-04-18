@@ -38,9 +38,10 @@ namespace Benchmarks
             _population = new float[PopulationSize * ParameterCount];
             _fitness = new float[PopulationSize];
 
+            var rng = new Random(42);
             for (var i = 0; i < _fitness.Length; i++)
             {
-                _fitness[i] = _fitness.Length - i;
+                _fitness[i] = rng.NextSingle() * 1000f;
             }
 
             _algorithm.Ask(_population);

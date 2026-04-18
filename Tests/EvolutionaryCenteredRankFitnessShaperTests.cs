@@ -50,5 +50,54 @@ namespace DevOnBike.Overfit.Tests
 
             Assert.Throws<ArgumentException>(() => shaper.Shape(raw, shaped));
         }
+
+        [Fact]
+        public void Shape_HandlesNaN_RanksAsWorst()
+        {
+            // float.CompareTo treats NaN as smallest: a NaN fitness should receive rank 0
+            // (lowest shaped value = -0.5) and never propagate upward in the ordering.
+            var shaper = new CenteredRankFitnessShaper();
+            float[] raw = [10f, float.NaN, 30f, 20f];
+            var shaped = new float[4];
+
+            shaper.Shape(raw, shaped);
+
+            // Expected ordering, ascending: NaN (-0.5), 10 (-1/6), 20 (+1/6), 30 (+0.5).
+            Assert.Equal(-0.5f, shaped[1], 5);  // NaN entry gets the lowest rank
+            Assert.Equal(-1f / 6f, shaped[0], 5);
+            Assert.Equal(1f / 6f, shaped[3], 5);
+            Assert.Equal(0.5f, shaped[2], 5);
+        }
+
+        [Fact]
+        public void Shape_IsAllocationStable_AfterWarmup()
+        {
+            var shaper = new CenteredRankFitnessShaper();
+            var raw = new float[256];
+            var shaped = new float[256];
+            var rng = new Random(42);
+
+            for (var i = 0; i < raw.Length; i++)
+            {
+                raw[i] = rng.NextSingle();
+            }
+
+            shaper.Shape(raw, shaped); // warmup: one-time ranking-buffer allocation
+
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            var before = GC.GetAllocatedBytesForCurrentThread();
+
+            for (var i = 0; i < 5_000; i++)
+            {
+                shaper.Shape(raw, shaped);
+            }
+
+            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.True(allocated <= 512, $"Shape allocated {allocated} bytes.");
+        }
     }
 }

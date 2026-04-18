@@ -186,5 +186,9 @@ namespace DevOnBike.Overfit.DeepLearning
                 span[i] = (float)(rng.NextDouble() * 2.0 * limit - limit);
             }
         }
+
+        public void InvalidateParameterCaches()
+        {
+        }
     }
 }

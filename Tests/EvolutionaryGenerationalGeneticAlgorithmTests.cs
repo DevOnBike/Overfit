@@ -155,6 +155,50 @@ namespace DevOnBike.Overfit.Tests
             Assert.True(allocated <= 512, $"Tell allocated {allocated} bytes.");
         }
 
+        [Fact]
+        public void Tell_HandlesNaNFitness_WithoutCorruptingEliteSelection()
+        {
+            // Regression guard: prior implementation used an insertion sort over the raw
+            // fitness array. Comparing NaN with <, > or < returns false, which made the
+            // ranking non-deterministic and could place a NaN individual in the elite set.
+            // The new PartialSort uses float.CompareTo which treats NaN as smallest,
+            // so any valid fitness beats NaN and NaN can never win an elite slot.
+            using var algorithm = CreateAlgorithm(
+            selection: new FirstEliteSelectionOperator(),
+            mutation: new CopyMutationOperator(),
+            populationSize: 4,
+            parameterCount: 3,
+            eliteFraction: 0.5f);
+
+            algorithm.Initialize();
+
+            // Two NaN values and two valid values. The best must be 10f at index 1.
+            algorithm.Tell([float.NaN, 10f, float.NaN, 5f]);
+
+            Assert.Equal(10f, algorithm.BestFitness, 5);
+        }
+
+        [Fact]
+        public void Tell_HandlesAllNaNFitness_WithoutCrashing()
+        {
+            // Edge case: every individual produces NaN. The algorithm should still make
+            // progress (e.g. select an arbitrary individual as "best") rather than crash
+            // or loop forever.
+            using var algorithm = CreateAlgorithm(
+            selection: new FirstEliteSelectionOperator(),
+            mutation: new CopyMutationOperator(),
+            populationSize: 4,
+            parameterCount: 3,
+            eliteFraction: 0.5f);
+
+            algorithm.Initialize();
+
+            algorithm.Tell([float.NaN, float.NaN, float.NaN, float.NaN]);
+
+            Assert.Equal(1, algorithm.Generation);
+            Assert.True(float.IsNaN(algorithm.BestFitness));
+        }
+
         private static GenerationalGeneticAlgorithm CreateAlgorithm(
             ISelectionOperator selection,
             IMutationOperator mutation,

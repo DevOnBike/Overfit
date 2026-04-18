@@ -77,6 +77,14 @@ namespace DevOnBike.Overfit.DeepLearning
             _dec2.Eval();
         }
 
+        public void InvalidateParameterCaches()
+        {
+            _enc1.InvalidateParameterCaches();
+            _enc2.InvalidateParameterCaches();
+            _dec1.InvalidateParameterCaches();
+            _dec2.InvalidateParameterCaches();
+        }
+
         // ---------------------------------------------------------------------------
         // Forward — Training Path (Autograd)
         // ---------------------------------------------------------------------------

@@ -196,5 +196,9 @@ namespace DevOnBike.Overfit.DeepLearning
             _fusedScale?.Dispose();
             _fusedShift?.Dispose();
         }
+
+        public void InvalidateParameterCaches()
+        {
+        }
     }
 }

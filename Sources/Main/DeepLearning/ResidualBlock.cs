@@ -48,6 +48,14 @@ namespace DevOnBike.Overfit.DeepLearning
             _bn2.Eval();
         }
 
+        public void InvalidateParameterCaches()
+        {
+            _linear1.InvalidateParameterCaches();
+            _bn1.InvalidateParameterCaches();
+            _linear2.InvalidateParameterCaches();
+            _bn2.InvalidateParameterCaches();
+        }
+
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
             var hiddenSize = _linear1.Weights.DataView.GetDim(0);

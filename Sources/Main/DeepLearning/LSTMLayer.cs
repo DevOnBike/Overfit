@@ -197,5 +197,9 @@ namespace DevOnBike.Overfit.DeepLearning
 
             return output;
         }
+
+        public void InvalidateParameterCaches()
+        {
+        }
     }
 }

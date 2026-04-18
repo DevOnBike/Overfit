@@ -57,5 +57,30 @@ namespace DevOnBike.Overfit.DeepLearning.Abstractions
         ///     Deserializes the module's parameters from a binary stream.
         /// </summary>
         void Load(BinaryReader br);
+
+        /// <summary>
+        ///     Signals that this module's parameters have been mutated externally (for example, by
+        ///     <c>IParameterVectorAdapter.ReadFromVector</c> in the evolutionary pipeline) and any
+        ///     cached state derived from those parameters must be invalidated.
+        /// </summary>
+        /// <remarks>
+        ///     <para>
+        ///         Default implementation is a no-op. Modules that maintain caches derived from
+        ///         <see cref="Parameters"/> (for example, <c>LinearLayer</c>'s transposed-weight
+        ///         buffer used by <see cref="ForwardInference"/>) must override this method and
+        ///         invalidate those caches lazily — without allocating — so the next inference
+        ///         call rebuilds them on demand.
+        ///     </para>
+        ///     <para>
+        ///         Composite modules (<c>Sequential</c>, <c>ResidualBlock</c>, <c>LstmAutoencoder</c>)
+        ///         must propagate the call to all child modules.
+        ///     </para>
+        ///     <para>
+        ///         <see cref="Load(BinaryReader)"/> and <see cref="Train"/> are NOT required to
+        ///         call this method — they already invalidate their own caches through their
+        ///         existing protocols.
+        ///     </para>
+        /// </remarks>
+        void InvalidateParameterCaches();
     }
 }

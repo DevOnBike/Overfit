@@ -116,6 +116,14 @@ namespace DevOnBike.Overfit.DeepLearning
             }
         }
 
+        public void InvalidateParameterCaches()
+        {
+            foreach (var module in _modules)
+            {
+                module.InvalidateParameterCaches();
+            }
+        }
+
         public void Dispose()
         {
             foreach (var module in _modules)
