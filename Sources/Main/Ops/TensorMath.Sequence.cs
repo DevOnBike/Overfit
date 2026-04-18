@@ -220,7 +220,7 @@ namespace DevOnBike.Overfit.Ops
                 return;
             }
 
-            int batch = input.DataView.GetDim(0);
+            var batch = input.DataView.GetDim(0);
             var iGS = input.GradView.AsSpan();
             var oGS = output.GradView.AsReadOnlySpan();
 

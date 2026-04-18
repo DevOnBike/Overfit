@@ -84,7 +84,7 @@ namespace DevOnBike.Overfit.Tests
             using var input = new AutogradNode(inputTensor, requiresGrad: true);
 
             var x = input.DataView.AsSpan();
-            for (int i = 0; i < x.Length; i++)
+            for (var i = 0; i < x.Length; i++)
             {
                 x[i] = (i - 4) * 0.07f;
             }
@@ -99,7 +99,7 @@ namespace DevOnBike.Overfit.Tests
                     var target = new AutogradNode(targetTensor, requiresGrad: false);
 
                     var t = target.DataView.AsSpan();
-                    for (int i = 0; i < t.Length; i++)
+                    for (var i = 0; i < t.Length; i++)
                     {
                         t[i] = ((i % 3) - 1) * 0.2f;
                     }
@@ -1284,7 +1284,7 @@ namespace DevOnBike.Overfit.Tests
             };
 
             float initialLoss;
-            float finalLoss = float.MaxValue;
+            var finalLoss = float.MaxValue;
 
             {
                 using var pred0 = model.Forward(graph, xNode);
@@ -1366,7 +1366,7 @@ namespace DevOnBike.Overfit.Tests
             };
 
             float initialLoss;
-            float finalLoss = float.MaxValue;
+            var finalLoss = float.MaxValue;
 
             {
                 using var logits0 = model.Forward(graph, xNode);

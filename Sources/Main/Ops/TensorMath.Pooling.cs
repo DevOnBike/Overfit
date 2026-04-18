@@ -19,7 +19,7 @@ namespace DevOnBike.Overfit.Ops
 
         public static AutogradNode MaxPool2D(ComputationGraph graph, AutogradNode input, int channels, int h, int w, int pool)
         {
-            int batchSize = input.DataView.GetDim(0);
+            var batchSize = input.DataView.GetDim(0);
             int oH = h / pool, oW = w / pool;
 
             var outD = new FastTensor<float>(batchSize, channels, oH, oW, false);
@@ -127,8 +127,8 @@ namespace DevOnBike.Overfit.Ops
 
         public static AutogradNode GlobalAveragePool2D(ComputationGraph graph, AutogradNode input, int channels, int h, int w)
         {
-            int batchSize = input.DataView.GetDim(0);
-            int spatialSize = h * w;
+            var batchSize = input.DataView.GetDim(0);
+            var spatialSize = h * w;
             var scale = 1f / spatialSize;
 
             var outD = new FastTensor<float>(batchSize, channels, false);
@@ -174,8 +174,8 @@ namespace DevOnBike.Overfit.Ops
                 return;
             }
 
-            int batchSize = input.DataView.GetDim(0);
-            int spatialSize = h * w;
+            var batchSize = input.DataView.GetDim(0);
+            var spatialSize = h * w;
             var scale = 1f / spatialSize;
 
             var oGS = output.GradView.AsReadOnlySpan();

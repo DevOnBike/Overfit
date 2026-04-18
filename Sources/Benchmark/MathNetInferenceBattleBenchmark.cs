@@ -45,8 +45,14 @@ namespace Benchmarks
             _overfitOutputs = new float[SwarmSize * OutputSize];
             _overfitBrain = new float[GenomeSize];
 
-            for (int i = 0; i < _overfitInputs.Length; i++) _overfitInputs[i] = (float)rng.NextDouble();
-            for (int i = 0; i < GenomeSize; i++) _overfitBrain[i] = (float)rng.NextDouble();
+            for (var i = 0; i < _overfitInputs.Length; i++)
+            {
+                _overfitInputs[i] = (float)rng.NextDouble();
+            }
+            for (var i = 0; i < GenomeSize; i++)
+            {
+                _overfitBrain[i] = (float)rng.NextDouble();
+            }
 
             // 2. Setup dla MathNet
             // Tworzymy macierz 100_000 x 4 dla wejść

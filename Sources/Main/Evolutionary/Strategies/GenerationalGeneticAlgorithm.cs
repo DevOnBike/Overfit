@@ -144,7 +144,7 @@ public sealed class GenerationalGeneticAlgorithm : IEvolutionAlgorithm
 
     private void RankPopulation()
     {
-        ReadOnlySpan<float> rankingFitness = _workspace.Fitness.GetView().AsReadOnlySpan();
+        var rankingFitness = _workspace.Fitness.GetView().AsReadOnlySpan();
 
         if (_fitnessShaper is not null)
         {

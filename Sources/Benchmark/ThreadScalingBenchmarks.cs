@@ -256,7 +256,9 @@ namespace Benchmarks
             foreach (var p in module.Parameters())
             {
                 if (p.RequiresGrad)
+                {
                     p.ZeroGrad();
+                }
             }
         }
     }
