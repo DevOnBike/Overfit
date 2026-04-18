@@ -14,9 +14,11 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="BenchmarkDotNet"/>
-        <PackageReference Include="Microsoft.ML.OnnxRuntime"/>
-        <ProjectReference Include="..\Main\Main.csproj"/>
+        <PackageReference Include="BenchmarkDotNet" />
+        <PackageReference Include="BenchmarkDotNet.Diagnostics.Windows" />
+        <PackageReference Include="MathNet.Numerics" />
+        <PackageReference Include="Microsoft.ML.OnnxRuntime" />
+        <ProjectReference Include="..\Main\Main.csproj" />
     </ItemGroup>
 
     <ItemGroup>
