@@ -25,7 +25,8 @@ namespace Benchmarks
             // BenchmarkRunner.Run<ScalingBenchmark>();
 
             // BenchmarkRunner.Run<OverfitKernelBenchmarks>();
-            BenchmarkRunner.Run<ThreadScalingBenchmarks>();
+            // BenchmarkRunner.Run<ThreadScalingBenchmarks>();
+            BenchmarkRunner.Run<MathNetInferenceBattleBenchmark>();
         }
     }
 }
