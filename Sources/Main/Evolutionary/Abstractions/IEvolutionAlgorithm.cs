@@ -9,7 +9,8 @@ namespace DevOnBike.Overfit.Evolutionary.Abstractions
         void Ask(Span<float> populationMatrix);   // [populationSize * parameterCount]
         void Tell(ReadOnlySpan<float> fitness);
 
-        ReadOnlySpan<float> BestParameters { get; }
+        ReadOnlySpan<float> GetBestParameters();
+        
         float BestFitness { get; }
     }
 }
