@@ -1241,5 +1241,298 @@ namespace DevOnBike.Overfit.Tests
             }
         }
 
+        [Fact]
+        public void Sequential_SmallNetwork_Training_DecreasesLoss_WithoutBatchNorm()
+        {
+            var graph = new ComputationGraph();
+
+            var model = new Sequential(
+                new LinearLayer(2, 8),
+                new ReluActivation(),
+                new LinearLayer(8, 1));
+
+            model.Train();
+
+            using var xTensor = CreateTensor(
+                rows: 4,
+                cols: 2,
+                values:
+                [
+                    0f, 0f,
+                0f, 1f,
+                1f, 0f,
+                1f, 1f
+                ]);
+
+            using var yTensor = CreateTensor(
+                rows: 4,
+                cols: 1,
+                values:
+                [
+                    0f,
+                1f,
+                1f,
+                0f
+                ]);
+
+            using var xNode = new AutogradNode(xTensor, requiresGrad: false);
+            using var yNode = new AutogradNode(yTensor, requiresGrad: false);
+
+            using var optimizer = new Adam(model.Parameters(), learningRate: 0.03f)
+            {
+                UseAdamW = true
+            };
+
+            float initialLoss;
+            float finalLoss = float.MaxValue;
+
+            {
+                using var pred0 = model.Forward(graph, xNode);
+                using var loss0 = TensorMath.MSELoss(graph, pred0, yNode);
+                initialLoss = loss0.DataView.AsReadOnlySpan()[0];
+                graph.Reset();
+            }
+
+            for (var step = 0; step < 300; step++)
+            {
+                graph.Reset();
+                optimizer.ZeroGrad();
+
+                using var pred = model.Forward(graph, xNode);
+                using var loss = TensorMath.MSELoss(graph, pred, yNode);
+
+                finalLoss = loss.DataView.AsReadOnlySpan()[0];
+
+                graph.Backward(loss);
+                optimizer.Step();
+            }
+
+            Assert.True(finalLoss < initialLoss * 0.5f,
+                $"Loss should decrease clearly. initial={initialLoss}, final={finalLoss}");
+
+            Assert.True(finalLoss < 0.10f,
+                $"Final loss too high for tiny XOR-style regression. final={finalLoss}");
+        }
+
+        [Fact]
+        public void BatchNorm1D_SmallClassifier_Overfits_LinearlySeparableBatch()
+        {
+            var graph = new ComputationGraph();
+
+            var model = new Sequential(
+                new LinearLayer(2, 8),
+                new BatchNorm1D(8),
+                new ReluActivation(),
+                new LinearLayer(8, 2));
+
+            model.Train();
+
+            using var xTensor = CreateTensor(
+                rows: 8,
+                cols: 2,
+                values:
+                [
+                    -2.0f, -1.8f,
+                -1.7f, -1.3f,
+                -1.4f, -1.1f,
+                -1.2f, -0.8f,
+                 1.2f,  0.9f,
+                 1.4f,  1.1f,
+                 1.7f,  1.4f,
+                 2.0f,  1.7f
+                ]);
+
+            using var yTensor = CreateTensor(
+                rows: 8,
+                cols: 2,
+                values:
+                [
+                    1f, 0f,
+                1f, 0f,
+                1f, 0f,
+                1f, 0f,
+                0f, 1f,
+                0f, 1f,
+                0f, 1f,
+                0f, 1f
+                ]);
+
+            using var xNode = new AutogradNode(xTensor, requiresGrad: false);
+            using var yNode = new AutogradNode(yTensor, requiresGrad: false);
+
+            using var optimizer = new Adam(model.Parameters(), learningRate: 0.01f)
+            {
+                UseAdamW = true
+            };
+
+            float initialLoss;
+            float finalLoss = float.MaxValue;
+
+            {
+                using var logits0 = model.Forward(graph, xNode);
+                using var loss0 = TensorMath.SoftmaxCrossEntropy(graph, logits0, yNode);
+                initialLoss = loss0.DataView.AsReadOnlySpan()[0];
+                graph.Reset();
+            }
+
+            for (var step = 0; step < 200; step++)
+            {
+                graph.Reset();
+                optimizer.ZeroGrad();
+
+                using var logits = model.Forward(graph, xNode);
+                using var loss = TensorMath.SoftmaxCrossEntropy(graph, logits, yNode);
+
+                finalLoss = loss.DataView.AsReadOnlySpan()[0];
+
+                graph.Backward(loss);
+                optimizer.Step();
+            }
+
+            model.Eval();
+
+            graph.Reset();
+            using var evalLogits = model.Forward(graph, xNode);
+            var accuracy = ComputeAccuracy(evalLogits.DataView.AsReadOnlySpan(), yTensor.GetView().AsReadOnlySpan(), rows: 8, classes: 2);
+
+            Assert.True(finalLoss < initialLoss * 0.4f,
+                $"BatchNorm classifier loss should drop clearly. initial={initialLoss}, final={finalLoss}");
+
+            Assert.True(accuracy >= 0.875f,
+                $"Accuracy too low after tiny BN overfit. acc={accuracy:P2}");
+        }
+
+        [Fact]
+        public void BatchNorm1D_EvalPath_IsDeterministic_AfterWarmup()
+        {
+            var graph = new ComputationGraph();
+
+            var model = new Sequential(
+                new LinearLayer(2, 8),
+                new BatchNorm1D(8),
+                new ReluActivation(),
+                new LinearLayer(8, 2));
+
+            model.Train();
+
+            using var xTensor = CreateTensor(
+                rows: 8,
+                cols: 2,
+                values:
+                [
+                    -2.0f, -1.8f,
+                -1.7f, -1.3f,
+                -1.4f, -1.1f,
+                -1.2f, -0.8f,
+                 1.2f,  0.9f,
+                 1.4f,  1.1f,
+                 1.7f,  1.4f,
+                 2.0f,  1.7f
+                ]);
+
+            using var yTensor = CreateTensor(
+                rows: 8,
+                cols: 2,
+                values:
+                [
+                    1f, 0f,
+                1f, 0f,
+                1f, 0f,
+                1f, 0f,
+                0f, 1f,
+                0f, 1f,
+                0f, 1f,
+                0f, 1f
+                ]);
+
+            using var xNode = new AutogradNode(xTensor, requiresGrad: false);
+            using var yNode = new AutogradNode(yTensor, requiresGrad: false);
+
+            using var optimizer = new Adam(model.Parameters(), learningRate: 0.01f)
+            {
+                UseAdamW = true
+            };
+
+            for (var step = 0; step < 40; step++)
+            {
+                graph.Reset();
+                optimizer.ZeroGrad();
+
+                using var logits = model.Forward(graph, xNode);
+                using var loss = TensorMath.SoftmaxCrossEntropy(graph, logits, yNode);
+
+                graph.Backward(loss);
+                optimizer.Step();
+            }
+
+            model.Eval();
+
+            graph.Reset();
+            using var eval1 = model.Forward(graph, xNode);
+
+            graph.Reset();
+            using var eval2 = model.Forward(graph, xNode);
+
+            var s1 = eval1.DataView.AsReadOnlySpan();
+            var s2 = eval2.DataView.AsReadOnlySpan();
+
+            Assert.Equal(s1.Length, s2.Length);
+
+            for (var i = 0; i < s1.Length; i++)
+            {
+                Assert.Equal(s1[i], s2[i], 5);
+            }
+        }
+
+        private static FastTensor<float> CreateTensor(int rows, int cols, float[] values)
+        {
+            var tensor = new FastTensor<float>(rows, cols, clearMemory: true);
+            values.AsSpan().CopyTo(tensor.GetView().AsSpan());
+            return tensor;
+        }
+
+        private static float ComputeAccuracy(ReadOnlySpan<float> logits, ReadOnlySpan<float> oneHotTargets, int rows, int classes)
+        {
+            var correct = 0;
+
+            for (var r = 0; r < rows; r++)
+            {
+                var rowOffset = r * classes;
+
+                var predClass = 0;
+                var predValue = logits[rowOffset];
+
+                for (var c = 1; c < classes; c++)
+                {
+                    var v = logits[rowOffset + c];
+                    if (v > predValue)
+                    {
+                        predValue = v;
+                        predClass = c;
+                    }
+                }
+
+                var trueClass = 0;
+                var trueValue = oneHotTargets[rowOffset];
+
+                for (var c = 1; c < classes; c++)
+                {
+                    var v = oneHotTargets[rowOffset + c];
+                    if (v > trueValue)
+                    {
+                        trueValue = v;
+                        trueClass = c;
+                    }
+                }
+
+                if (predClass == trueClass)
+                {
+                    correct++;
+                }
+            }
+
+            return correct / (float)rows;
+        }
+
     }
 }

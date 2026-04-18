@@ -14,6 +14,7 @@ namespace DevOnBike.Overfit.Diagnostics
         private readonly TextWriter _writer;
         private readonly Lock _gate = new();
         private readonly bool _ownsWriter;
+        private volatile bool _disposed;
 
         public JsonLinesDiagnosticsSink(TextWriter writer, bool ownsWriter = false)
         {
@@ -60,16 +61,36 @@ namespace DevOnBike.Overfit.Diagnostics
 
         public void Dispose()
         {
-            if (_ownsWriter)
+            lock (_gate)
             {
-                _writer.Dispose();
+                if (_disposed)
+                {
+                    return;
+                }
+
+                _disposed = true;
+
+                if (_ownsWriter)
+                {
+                    _writer.Dispose();
+                }
             }
         }
 
         private void WriteEnvelope<T>(string type, T payload)
         {
+            if (_disposed)
+            {
+                return;
+            }
+
             lock (_gate)
             {
+                if (_disposed)
+                {
+                    return;
+                }
+
                 var envelope = new { tsUtc = DateTime.UtcNow, type, payload };
                 _writer.WriteLine(JsonSerializer.Serialize(envelope));
             }

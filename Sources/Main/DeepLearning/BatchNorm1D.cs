@@ -192,7 +192,7 @@ namespace DevOnBike.Overfit.DeepLearning
             Beta?.Dispose();
             RunningMean?.Dispose();
             RunningVar?.Dispose();
-            
+
             _fusedScale?.Dispose();
             _fusedShift?.Dispose();
         }

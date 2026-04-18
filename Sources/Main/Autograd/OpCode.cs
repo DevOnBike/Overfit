@@ -32,6 +32,7 @@ namespace DevOnBike.Overfit.Autograd
         TimestepSlice,
         StackTimesteps,
         RepeatVector,
-        FusedLSTMStep
+        FusedLSTMStep,
+        Linear
     }
 }

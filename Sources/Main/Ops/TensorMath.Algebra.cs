@@ -244,7 +244,7 @@ namespace DevOnBike.Overfit.Ops
             {
                 MatMulAdd_A_BT_Raw(output, true, b, false, a, true);
             }
-            
+
             if (b.RequiresGrad)
             {
                 MatMulAdd_AT_B_Raw(a, false, output, true, b, true);
@@ -390,7 +390,122 @@ namespace DevOnBike.Overfit.Ops
 
         public static AutogradNode Linear(ComputationGraph graph, AutogradNode input, AutogradNode weights, AutogradNode bias)
         {
-            return AddBias(graph, MatMul(graph, input, weights), bias);
+            int N = input.DataView.GetDim(0), K = input.DataView.GetDim(1), M = weights.DataView.GetDim(1);
+
+            // OPTIMIZATION: fused MatMul + AddBias = 1 allocation instead of 2
+            // Trick: init output with broadcast bias, then accumulate MatMul (output += A * B)
+            // Since Simd.MulAdd is accumulating, result = bias + A*B (which is exactly Linear)
+            var resD = new FastTensor<float>(N, M, clearMemory: false);
+            var outS = resD.GetView().AsSpan();
+            var biasS = bias.DataView.AsReadOnlySpan();
+
+            // Broadcast bias to every row of output
+            for (var i = 0; i < N; i++)
+            {
+                biasS.CopyTo(outS.Slice(i * M, M));
+            }
+
+            // Accumulate: output += input @ weights
+            // Sparsity guard: skip MulAdd when aVal == 0 (common after ReLU).
+            // Benchmarked: removing guard costs +30% on forward due to wasted FMA cycles
+            // for zero inputs (~40-60% sparsity in trained networks after ReLU).
+            if ((long)N * K * M < ParallelThreshold)
+            {
+                var inS = input.DataView.AsReadOnlySpan();
+                var wS = weights.DataView.AsReadOnlySpan();
+
+                for (var i = 0; i < N; i++)
+                {
+                    var rC = outS.Slice(i * M, M);
+                    var rA = inS.Slice(i * K, K);
+                    for (var k = 0; k < K; k++)
+                    {
+                        var aVal = rA[k];
+                        if (aVal != 0f)
+                        {
+                            Simd.MulAdd(wS.Slice(k * M, M), aVal, rC);
+                        }
+                    }
+                }
+            }
+            else
+            {
+                Parallel.For(0, N, i =>
+                {
+                    var rC = resD.GetView().AsSpan().Slice(i * M, M);
+                    var rA = input.DataView.AsReadOnlySpan().Slice(i * K, K);
+                    var wS = weights.DataView.AsReadOnlySpan();
+
+                    for (var k = 0; k < K; k++)
+                    {
+                        var aVal = rA[k];
+                        if (aVal != 0f)
+                        {
+                            Simd.MulAdd(wS.Slice(k * M, M), aVal, rC);
+                        }
+                    }
+                });
+            }
+
+            var output = new AutogradNode(resD, input.RequiresGrad || weights.RequiresGrad || bias.RequiresGrad);
+            if (output.RequiresGrad)
+            {
+                graph?.Record(OpCode.Linear, output, input, weights, 0, 0, 0, 0, 0, [bias]);
+            }
+
+            return output;
+        }
+
+        public static void LinearBackward(AutogradNode input, AutogradNode weights, AutogradNode bias, AutogradNode output)
+        {
+            // MatMul backward: computes gradients for input and weights
+            MatMulBackward(input, weights, output);
+
+            // Bias backward: sum output.Grad over batch dimension
+            if (!bias.RequiresGrad)
+            {
+                return;
+            }
+
+            int N = output.DataView.GetDim(0), C = output.DataView.GetDim(1);
+
+            if (N < BatchSequentialThreshold)
+            {
+                var bG = bias.GradView.AsSpan();
+                var oG = output.GradView.AsReadOnlySpan();
+                for (var i = 0; i < N; i++)
+                {
+                    Simd.Add(bG, oG.Slice(i * C, C), bG);
+                }
+                return;
+            }
+
+            var partials = new ConcurrentBag<FastTensor<float>>();
+
+            Parallel.For(0, N,
+                () => new FastTensor<float>(C),
+                (i, state, localGrad) =>
+                {
+                    Simd.Add(
+                        localGrad.GetView().AsReadOnlySpan(),
+                        output.GradView.AsReadOnlySpan().Slice(i * C, C),
+                        localGrad.GetView().AsSpan());
+                    return localGrad;
+                },
+                localGrad => partials.Add(localGrad));
+
+            var biasG = bias.GradView.AsSpan();
+            foreach (var partial in partials)
+            {
+                try
+                {
+                    Simd.Add(biasG, partial.GetView().AsReadOnlySpan(), biasG);
+                }
+                finally
+                {
+                    partial.Dispose();
+                }
+            }
         }
     }
 }
