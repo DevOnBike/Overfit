@@ -10,6 +10,20 @@ Overfit is a ground-up Deep Learning and Data Preprocessing framework built spec
 
 Designed for maximum CPU inference speed, Overfit embraces aggressive memory management, SIMD potential, and full Native AOT compatibility.
 
+---
+
+## 👥 Which Guide Is Right For You?
+
+Overfit serves different needs depending on your role. Jump to the scenario that matches your situation:
+
+| If you are... | Read this |
+|--------------|-----------|
+| 🏗️ **.NET Architect** building microservices with ML | [ASP.NET Core integration guide](docs/scenarios/aspnet-microservice.md) |
+| 🎮 **Game developer** running NNs at frame-rate | [Game AI guide](docs/scenarios/game-ai.md) |
+| 📡 **Embedded / IoT engineer** deploying to edge devices | [Edge & IoT guide](docs/scenarios/edge-iot.md) |
+| 💰 **Finance / HFT engineer** with tail-latency requirements | [Finance & Low-Latency guide](docs/scenarios/finance-latency.md) |
+| 🐍 **ML engineer** coming from PyTorch | [For PyTorch users](docs/scenarios/for-pytorch-users.md) |
+
 See [ROADMAP.md](ROADMAP.md) for planned features and current priorities.
 
 ---
@@ -90,7 +104,7 @@ All benchmarks use identical weights exported from the same PyTorch model.
 - 100k inferences per frame (~1.7 ms at 60 FPS)
 - Offline training: 400 generations in **36 seconds** on Ryzen 9 9950X3D
 
-See [`Demo/Unity/`](Demo/Unity) for the full code.
+See [`Demo/Unity/`](Demo/Unity) for the full code, or jump to the [Game AI scenario](docs/scenarios/game-ai.md) for integration details.
 
 ---
 
@@ -189,7 +203,7 @@ app.MapPost("/predict", (float[] input, Sequential model) =>
 app.Run();
 ```
 
-No Python sidecar. No inter-process serialization. Model lives in the same process as your business logic, with sub-microsecond latency per request.
+No Python sidecar. No inter-process serialization. Model lives in the same process as your business logic, with sub-microsecond latency per request. See the [full ASP.NET guide](docs/scenarios/aspnet-microservice.md) for deployment patterns.
 
 ---
 
@@ -229,12 +243,11 @@ See [ROADMAP.md](ROADMAP.md) for what's planned next.
 
 Overfit shines in scenarios where ONNX Runtime's per-call overhead dominates or where a Python sidecar is operationally painful:
 
-- **ASP.NET Core microservices** — inference as a first-class citizen of your API, not a separate service.
-- **Real-time anomaly detection** — fraud detection, intrusion detection, log anomaly scoring with minimal latency variance.
-- **Edge and IoT** — single-file AOT executables for field-deployed inference (Raspberry Pi, industrial controllers).
-- **Game engines** — per-frame AI inference for large populations (see the Unity Swarm demo).
-- **High-frequency trading** — predictable sub-microsecond latency with zero GC pauses.
-- **Embedded analytics** — ML inside desktop applications, mobile apps (MAUI), or on-device processing.
+- **ASP.NET Core microservices** — inference as a first-class citizen of your API, not a separate service. [→ Full guide](docs/scenarios/aspnet-microservice.md)
+- **Game engines** — per-frame AI inference for large populations. [→ Full guide](docs/scenarios/game-ai.md)
+- **Edge and IoT** — single-file AOT executables for field-deployed inference. [→ Full guide](docs/scenarios/edge-iot.md)
+- **High-frequency trading / fraud detection** — predictable sub-microsecond latency with zero GC pauses. [→ Full guide](docs/scenarios/finance-latency.md)
+- **Coming from PyTorch** — bridging models between Python research and .NET production. [→ Full guide](docs/scenarios/for-pytorch-users.md)
 
 ---
 
