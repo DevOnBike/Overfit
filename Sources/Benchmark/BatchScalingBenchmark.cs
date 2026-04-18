@@ -18,7 +18,7 @@ namespace Benchmarks
     [SimpleJob(RuntimeMoniker.Net10_0)]
     [Orderer(SummaryOrderPolicy.FastestToSlowest)]
     [MemoryDiagnoser]
-    [HardwareCounters(HardwareCounter.InstructionRetired, HardwareCounter.CacheMisses)]
+    // [HardwareCounters(HardwareCounter.InstructionRetired, HardwareCounter.CacheMisses)]
     public class BatchScalingBenchmark
     {
         private const int InputSize = 784;
