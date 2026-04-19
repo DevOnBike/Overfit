@@ -1,6 +1,6 @@
 namespace DevOnBike.Overfit.Evolutionary.Abstractions
 {
-    public interface IEvolutionAlgorithm : IDisposable
+    public interface IEvolutionAlgorithm : IDisposable, IEvolutionCheckpoint
     {
         int PopulationSize { get; }
         int ParameterCount { get; }

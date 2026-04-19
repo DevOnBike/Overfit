@@ -279,6 +279,134 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             _disposed = true;
         }
 
+        // -----------------------------------------------------------------------------
+        // Checkpoint: IEvolutionCheckpoint.Save / Load
+        // Format (little-endian, BinaryWriter defaults):
+        //   int32   magic           = 0x47474101 ('G','G','A',0x01)
+        //   int32   schemaVersion   = 1
+        //   int32   populationSize
+        //   int32   parameterCount
+        //   int32   eliteCount
+        //   int32   generation
+        //   byte    hasFitness
+        //   float   bestFitness
+        //   float[] bestParameters  [parameterCount]
+        //   float[] population      [populationSize * parameterCount]
+        //   float[] fitness         [populationSize]          (only when hasFitness == 1)
+        //   float[] shapedFitness   [populationSize]          (only when hasFitness == 1)
+        //   int32[] ranking         [populationSize]          (only when hasFitness == 1)
+        //   int32[] eliteIndices    [eliteCount]              (only when hasFitness == 1)
+        // -----------------------------------------------------------------------------
+
+        private const int CheckpointMagic = 0x47474101;
+        private const int CheckpointSchemaVersion = 1;
+
+        public void Save(BinaryWriter writer)
+        {
+            ThrowIfDisposed();
+            ArgumentNullException.ThrowIfNull(writer);
+
+            writer.Write(CheckpointMagic);
+            writer.Write(CheckpointSchemaVersion);
+            writer.Write(PopulationSize);
+            writer.Write(ParameterCount);
+            writer.Write(_eliteCount);
+            writer.Write(Generation);
+            writer.Write(_hasFitness);
+            writer.Write(_bestFitness);
+
+            WriteFloats(writer, _bestParameters);
+            WriteFloats(writer, _workspace.Population.GetView().AsReadOnlySpan());
+
+            if (_hasFitness)
+            {
+                WriteFloats(writer, _workspace.Fitness.GetView().AsReadOnlySpan());
+                WriteFloats(writer, _workspace.ShapedFitness.GetView().AsReadOnlySpan());
+                WriteInts(writer, _workspace.Ranking);
+                WriteInts(writer, _workspace.EliteIndices.AsSpan(0, _eliteCount));
+            }
+        }
+
+        public void Load(BinaryReader reader)
+        {
+            ThrowIfDisposed();
+            ArgumentNullException.ThrowIfNull(reader);
+
+            var magic = reader.ReadInt32();
+
+            if (magic != CheckpointMagic)
+            {
+                throw new InvalidDataException(
+                    $"Expected magic 0x{CheckpointMagic:X8}, found 0x{magic:X8}. Stream was not produced by GenerationalGeneticAlgorithm.");
+            }
+
+            var schemaVersion = reader.ReadInt32();
+
+            if (schemaVersion != CheckpointSchemaVersion)
+            {
+                throw new InvalidDataException(
+                    $"Unsupported schema version {schemaVersion}; this build supports {CheckpointSchemaVersion}.");
+            }
+
+            var populationSize = reader.ReadInt32();
+            var parameterCount = reader.ReadInt32();
+            var eliteCount = reader.ReadInt32();
+
+            if (populationSize != PopulationSize || parameterCount != ParameterCount || eliteCount != _eliteCount)
+            {
+                throw new InvalidDataException(
+                    $"Checkpoint was produced for ({populationSize}, {parameterCount}, elite={eliteCount}); " +
+                    $"current instance is ({PopulationSize}, {ParameterCount}, elite={_eliteCount}).");
+            }
+
+            Generation = reader.ReadInt32();
+            _hasFitness = reader.ReadBoolean();
+            _bestFitness = reader.ReadSingle();
+
+            ReadFloats(reader, _bestParameters);
+            ReadFloats(reader, _workspace.Population.GetView().AsSpan());
+
+            if (_hasFitness)
+            {
+                ReadFloats(reader, _workspace.Fitness.GetView().AsSpan());
+                ReadFloats(reader, _workspace.ShapedFitness.GetView().AsSpan());
+                ReadInts(reader, _workspace.Ranking);
+                ReadInts(reader, _workspace.EliteIndices.AsSpan(0, _eliteCount));
+            }
+        }
+
+        private static void WriteFloats(BinaryWriter writer, ReadOnlySpan<float> values)
+        {
+            for (var i = 0; i < values.Length; i++)
+            {
+                writer.Write(values[i]);
+            }
+        }
+
+        private static void WriteInts(BinaryWriter writer, ReadOnlySpan<int> values)
+        {
+            for (var i = 0; i < values.Length; i++)
+            {
+                writer.Write(values[i]);
+            }
+        }
+
+        private static void ReadFloats(BinaryReader reader, Span<float> destination)
+        {
+            for (var i = 0; i < destination.Length; i++)
+            {
+                destination[i] = reader.ReadSingle();
+            }
+        }
+
+        private static void ReadInts(BinaryReader reader, Span<int> destination)
+        {
+            for (var i = 0; i < destination.Length; i++)
+            {
+                destination[i] = reader.ReadInt32();
+            }
+        }
+
         private void ThrowIfDisposed()
         {
             ObjectDisposedException.ThrowIf(_disposed, this);

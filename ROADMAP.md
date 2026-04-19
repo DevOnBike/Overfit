@@ -16,6 +16,8 @@ Zero-allocation, pure C# deep learning framework targeting high-performance infe
 | LSTM layers | ✅ Implemented |
 | Adam / AdamW optimizer (AVX-512 path) | ✅ Stable |
 | MNIST training (full 60k, ResNet-style) | ✅ ~26 s/epoch, 99% accuracy |
+| Evolutionary: GA + OpenAI-ES | ✅ Stable — zero-alloc Ask/Tell, NaN-safe, checkpointable |
+| Evolutionary: parallel fitness eval | ✅ `ParallelPopulationEvaluator<TContext>` |
 | ONNX import/export | ❌ Not started |
 | GPU backend | ❌ Not started |
 

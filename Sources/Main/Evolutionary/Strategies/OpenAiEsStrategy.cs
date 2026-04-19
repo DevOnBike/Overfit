@@ -339,6 +339,95 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             _disposed = true;
         }
 
+        // -----------------------------------------------------------------------------
+        // Checkpoint: IEvolutionCheckpoint.Save / Load
+        // Format (little-endian, BinaryWriter defaults):
+        //   int32   magic          = 0x4F414553 ('O','A','E','S')
+        //   int32   schemaVersion  = 1
+        //   int32   populationSize
+        //   int32   parameterCount
+        //   int32   generation
+        //   byte    hasFitness
+        //   float   bestFitness
+        //   float[] mu              [parameterCount]
+        //   float[] bestParameters  [parameterCount]
+        // -----------------------------------------------------------------------------
+
+        private const int CheckpointMagic = 0x4F414553;
+        private const int CheckpointSchemaVersion = 1;
+
+        public void Save(BinaryWriter writer)
+        {
+            ThrowIfDisposed();
+            ArgumentNullException.ThrowIfNull(writer);
+
+            writer.Write(CheckpointMagic);
+            writer.Write(CheckpointSchemaVersion);
+            writer.Write(PopulationSize);
+            writer.Write(ParameterCount);
+            writer.Write(Generation);
+            writer.Write(_hasFitness);
+            writer.Write(_bestFitness);
+
+            WriteFloats(writer, _mu);
+            WriteFloats(writer, _bestParameters);
+        }
+
+        public void Load(BinaryReader reader)
+        {
+            ThrowIfDisposed();
+            ArgumentNullException.ThrowIfNull(reader);
+
+            var magic = reader.ReadInt32();
+
+            if (magic != CheckpointMagic)
+            {
+                throw new InvalidDataException(
+                    $"Expected magic 0x{CheckpointMagic:X8}, found 0x{magic:X8}. Stream was not produced by OpenAiEsStrategy.");
+            }
+
+            var schemaVersion = reader.ReadInt32();
+
+            if (schemaVersion != CheckpointSchemaVersion)
+            {
+                throw new InvalidDataException(
+                    $"Unsupported schema version {schemaVersion}; this build supports {CheckpointSchemaVersion}.");
+            }
+
+            var populationSize = reader.ReadInt32();
+            var parameterCount = reader.ReadInt32();
+
+            if (populationSize != PopulationSize || parameterCount != ParameterCount)
+            {
+                throw new InvalidDataException(
+                    $"Checkpoint was produced for ({populationSize}, {parameterCount}); " +
+                    $"current instance is ({PopulationSize}, {ParameterCount}).");
+            }
+
+            Generation = reader.ReadInt32();
+            _hasFitness = reader.ReadBoolean();
+            _bestFitness = reader.ReadSingle();
+
+            ReadFloats(reader, _mu);
+            ReadFloats(reader, _bestParameters);
+        }
+
+        private static void WriteFloats(BinaryWriter writer, ReadOnlySpan<float> values)
+        {
+            for (var i = 0; i < values.Length; i++)
+            {
+                writer.Write(values[i]);
+            }
+        }
+
+        private static void ReadFloats(BinaryReader reader, Span<float> destination)
+        {
+            for (var i = 0; i < destination.Length; i++)
+            {
+                destination[i] = reader.ReadSingle();
+            }
+        }
+
         private void ThrowIfDisposed()
         {
             ObjectDisposedException.ThrowIf(_disposed, this);

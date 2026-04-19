@@ -108,6 +108,75 @@ See [`Demo/Unity/`](Demo/Unity) for the full code, or jump to the [Game AI scena
 
 ---
 
+## 🧬 Evolutionary Training Engine
+
+Overfit includes a production-grade evolutionary optimization module for gradient-free training — useful when your fitness function is non-differentiable, when the environment is a black box (game engine, simulator, trading backtester), or when you just need a second optimizer to contrast against Adam.
+
+Two algorithms ship out of the box, both behind a unified **Ask/Tell API** and with **zero per-generation allocations**:
+
+- **`GenerationalGeneticAlgorithm`** — classic elitist GA with truncation selection, Gaussian mutation, and centered-rank fitness shaping. NaN-safe ranking via an O(n log k) partial sort.
+- **`OpenAiEsStrategy`** — Natural Evolution Strategies in the style of Salimans et al. 2017. Maintains a single mean parameter vector, uses a shared `PrecomputedNoiseTable` plus antithetic sampling to estimate the search gradient from population fitness.
+
+### Per-generation cost (Ryzen 9 9950X3D, .NET 10)
+
+Synthetic random fitness, same centered-rank shaper for both algorithms. Real training spends its wallclock in fitness evaluation — these numbers answer one narrow question: *which algorithm has a cheaper per-generation step?*
+
+| Population × Params | GA Ask+Tell | ES Ask+Tell | ES speedup |
+|---|---:|---:|---:|
+| 256 × 64    | 250 μs | 42 μs | **6.0×** |
+| 256 × 256   | 842 μs | 68 μs | **12.5×** |
+| 1024 × 64   | 984 μs | 135 μs | **7.3×** |
+| 1024 × 256  | 3,345 μs | 236 μs | **14.2×** |
+
+### When to pick which
+
+| Genome size | Problem type | Recommendation |
+|---|---|---|
+| < 50 params | Anything | GA works fine; speedup from ES is negligible at this scale |
+| 50–500 params | Smooth control (RL, robotics) | **ES** — 3–10× faster per generation, lower gradient variance thanks to antithetic sampling |
+| > 1000 params | Neural-network weights, large policies | **ES** — 10–50× faster per generation; the noise table pays for itself on the first generation |
+| Any | Discrete / combinatorial / multi-modal | **GA** — population diversity escapes local optima that ES's single μ gets stuck in |
+
+### Parallel fitness evaluation
+
+Evolutionary training is bottlenecked by fitness evaluation, not by the algorithm itself. `ParallelPopulationEvaluator<TContext>` fans candidate evaluation across the thread pool with a lazy per-thread context pool, so each worker reuses its own neural network across generations instead of paying construction cost per candidate.
+
+```csharp
+// One network per worker thread, reused across every generation.
+using var evaluator = new ParallelPopulationEvaluator<(IModule Net, NeuralNetworkParameterAdapter Adapter)>(
+    evaluator:       new MyFitnessFunction(env),
+    contextFactory:  () => BuildNetworkAndAdapter(),
+    contextDispose:  ctx => ctx.Net.Dispose());
+
+using var strategy = new OpenAiEsStrategy(
+    populationSize: 256, parameterCount: adapter.ParameterCount,
+    sigma: 0.1f, learningRate: 0.01f,
+    noiseTable: new PrecomputedNoiseTable(length: 1 << 24, seed: 42));
+
+strategy.Initialize();
+
+var genomes = new float[256 * strategy.ParameterCount];
+var fitness = new float[256];
+
+for (var gen = 0; gen < generations; gen++)
+{
+    strategy.Ask(genomes);
+    evaluator.Evaluate(genomes, fitness, 256, strategy.ParameterCount);
+    strategy.Tell(fitness);
+
+    if (gen % 100 == 0)
+    {
+        using var fs = File.Create($"checkpoint-{gen}.bin");
+        using var bw = new BinaryWriter(fs);
+        strategy.Save(bw);
+    }
+}
+```
+
+Both strategies implement `IEvolutionCheckpoint`, so long-running jobs can checkpoint to disk and resume across process restarts.
+
+---
+
 ## 🔥 Key Features
 
 * **Zero-Allocation Hot Paths:** Built heavily on `Span<T>` and custom memory pooling. Training loops and inference passes avoid triggering the Garbage Collector (GC), ensuring flat-line CPU usage.
@@ -233,6 +302,7 @@ Overfit is organized into clear layers:
 - **DeepLearning** (`DevOnBike.Overfit.DeepLearning`) — High-level modules: `Sequential`, `LinearLayer`, `ConvLayer`, `ResidualBlock`, `LSTMLayer`.
 - **Optimizers** (`DevOnBike.Overfit.Optimizers`) — `Adam`, `AdamW`, `SGD` with AVX-512 optimized update paths.
 - **Data** (`DevOnBike.Overfit.Data`) — Tabular preprocessing pipelines (`DataPipeline`, feature selection, scaling, outlier handling).
+- **Evolutionary** (`DevOnBike.Overfit.Evolutionary`) — Gradient-free optimization via `GenerationalGeneticAlgorithm` and `OpenAiEsStrategy` behind a shared Ask/Tell API; parallel fitness fan-out through `ParallelPopulationEvaluator<TContext>`.
 - **Diagnostics** (`DevOnBike.Overfit.Diagnostics`) — Optional per-module timing and allocation tracing for training inspection.
 
 See [ROADMAP.md](ROADMAP.md) for what's planned next.
