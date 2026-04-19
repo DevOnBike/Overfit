@@ -1,4 +1,4 @@
-using DevOnBike.Overfit.Evolutionary.Abstractions;
+﻿using DevOnBike.Overfit.Evolutionary.Abstractions;
 using DevOnBike.Overfit.Evolutionary.Strategies;
 
 namespace DevOnBike.Overfit.Tests
@@ -197,6 +197,64 @@ namespace DevOnBike.Overfit.Tests
 
             Assert.Equal(1, algorithm.Generation);
             Assert.True(float.IsNaN(algorithm.BestFitness));
+        }
+
+        [Fact]
+        public void Tell_LargePopulation_TriggersParallelPath_ProducesValidOffspring()
+        {
+            // With eliteFraction = 1/256 we get exactly ONE elite (the individual with
+            // the highest fitness). Child work = (256 - 1) * 64 = 16320, above the 4096
+            // threshold, so the parallel child-creation path is exercised.
+            //
+            // With a single elite:
+            //   - CopyElites writes new[0] = old[bestIndex]
+            //   - CreateChildren (parallel) writes new[1..255], each a copy of old[bestIndex]
+            //     (FirstEliteSelectionOperator always returns eliteIndices[0] = bestIndex;
+            //      CopyMutationOperator reproduces the parent verbatim)
+            // So EVERY slot in the new population must equal old[bestIndex]. Any lost
+            // update, stale read, or partitioning bug in Parallel.For would leave at least
+            // one slot pointing at a different genome (or at zeros).
+            using var algorithm = new GenerationalGeneticAlgorithm(
+                populationSize: 256,
+                parameterCount: 64,
+                eliteFraction: 1f / 256f,
+                selectionOperator: new FirstEliteSelectionOperator(),
+                mutationOperator: new CopyMutationOperator(),
+                fitnessShaper: null,
+                seed: 42);
+
+            algorithm.Initialize(min: -0.1f, max: 0.1f);
+
+            var populationBefore = new float[algorithm.PopulationSize * algorithm.ParameterCount];
+            algorithm.Ask(populationBefore);
+
+            var fitness = new float[algorithm.PopulationSize];
+            for (var i = 0; i < fitness.Length; i++)
+            {
+                fitness[i] = (float)i;
+            }
+
+            algorithm.Tell(fitness);
+
+            Assert.Equal(1, algorithm.Generation);
+            Assert.Equal(255f, algorithm.BestFitness, 5);
+
+            var populationAfter = new float[algorithm.PopulationSize * algorithm.ParameterCount];
+            algorithm.Ask(populationAfter);
+
+            for (var i = 0; i < populationAfter.Length; i++)
+            {
+                Assert.False(float.IsNaN(populationAfter[i]) || float.IsInfinity(populationAfter[i]),
+                    $"Position {i} contains NaN or Inf.");
+            }
+
+            var expectedGenome = SliceGenome(populationBefore, 255, algorithm.ParameterCount);
+
+            for (var genomeIndex = 0; genomeIndex < algorithm.PopulationSize; genomeIndex++)
+            {
+                var genome = SliceGenome(populationAfter, genomeIndex, algorithm.ParameterCount);
+                Assert.Equal(expectedGenome, genome);
+            }
         }
 
         private static GenerationalGeneticAlgorithm CreateAlgorithm(

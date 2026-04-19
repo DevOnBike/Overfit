@@ -8,19 +8,26 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
     ///     (mu + lambda)-style generational genetic algorithm with truncation elitism
     ///     and pluggable selection, mutation and fitness-shaping operators.
     ///     Publishes the standard Ask/Tell black-box API so the same loop can be driven
-    ///     from a single-threaded evaluator, a <see cref="System.Threading.Tasks.Parallel"/>
-    ///     sweep, or a distributed evaluator.
+    ///     from any fitness evaluator.
     /// </summary>
     /// <remarks>
     ///     <para>
     ///         All per-generation state lives in a pooled <see cref="EvolutionWorkspace"/>;
-    ///         steady-state Ask/Tell calls perform no managed allocations.
+    ///         steady-state Ask/Tell calls perform zero managed allocations.
     ///     </para>
     ///     <para>
     ///         Ranking uses an O(n log k) partial sort so the cost of extracting the elite
     ///         set scales with the elite count rather than the population size. NaN fitness
     ///         values are tolerated: they always rank as worst and can never displace a
     ///         valid individual from the elite set.
+    ///     </para>
+    ///     <para>
+    ///         Child creation is sequential by design. The per-child work (selection + mutation)
+    ///         is measured in hundreds of nanoseconds for typical genomes, which is far below
+    ///         the threshold at which parallel dispatch overhead pays off. Parallelism is instead
+    ///         placed at the fitness-evaluation boundary, where each genome evaluation routinely
+    ///         takes microseconds to milliseconds and the dispatch cost is amortized over real
+    ///         work. See <c>ParallelPopulationEvaluator</c> for that integration point.
     ///     </para>
     /// </remarks>
     public sealed class GenerationalGeneticAlgorithm : IEvolutionAlgorithm
