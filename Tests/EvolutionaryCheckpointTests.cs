@@ -214,6 +214,38 @@ namespace DevOnBike.Overfit.Tests
         }
 
         [Fact]
+        public void Es_Load_RejectsMismatchedAdamMode()
+        {
+            // A checkpoint written by Adam mode must not load into an SGD-mode instance
+            // (and vice versa): the downstream update rule would diverge silently.
+            var noise = new PrecomputedNoiseTable(length: 1024, seed: 1);
+
+            using var adamEs = new OpenAiEsStrategy(
+                populationSize: 8, parameterCount: 4,
+                sigma: 0.1f, learningRate: 0.01f,
+                noiseTable: noise, useAdam: true);
+            adamEs.Initialize();
+
+            byte[] adamBytes;
+            using (var ms = new MemoryStream())
+            {
+                using var bw = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+                adamEs.Save(bw);
+                adamBytes = ms.ToArray();
+            }
+
+            using var sgdEs = new OpenAiEsStrategy(
+                populationSize: 8, parameterCount: 4,
+                sigma: 0.1f, learningRate: 0.01f,
+                noiseTable: noise, useAdam: false);
+
+            using var msLoad = new MemoryStream(adamBytes);
+            using var br = new BinaryReader(msLoad);
+
+            Assert.Throws<InvalidDataException>(() => sgdEs.Load(br));
+        }
+
+        [Fact]
         public void Es_Load_RejectsGaCheckpoint()
         {
             // A checkpoint produced by the GA must not load into an ES instance, because the

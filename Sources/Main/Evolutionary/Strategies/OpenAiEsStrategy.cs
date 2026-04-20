@@ -19,11 +19,20 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
     ///             <item>Consume fitness, shape it through the supplied <see cref="IFitnessShaper"/>
     ///                   (centered-rank by default), estimate the gradient
     ///                   <c>∇ ≈ (1 / (N·σ)) · Σ_pairs (f⁺ − f⁻)·ε</c>, and update
-    ///                   <c>μ ← μ + α·∇</c>.</item>
+    ///                   μ. With <paramref name="useAdam"/>=false (plain SGD),
+    ///                   <c>μ ← μ + α·∇</c>; with useAdam=true (default), μ is updated using
+    ///                   the Adam moment estimator — Salimans' original recipe, which typically
+    ///                   converges 2–3× faster per generation at the cost of two extra
+    ///                   parameter-sized buffers (m, v).</item>
     ///         </list>
     ///         Antithetic sampling halves the variance of the gradient estimate for the same
     ///         number of evaluations, which is the main correctness advantage over the
     ///         textbook ES sampler.
+    ///     </para>
+    ///     <para>
+    ///         Sign convention: ES maximizes fitness, so the update direction is <c>+∇</c>,
+    ///         not <c>−∇</c> as in standard deep-learning optimizers that minimize a loss.
+    ///         The internal Adam step returns the signed step to add to μ.
     ///     </para>
     ///     <para>
     ///         Steady-state <see cref="Ask"/> and <see cref="Tell"/> perform zero managed
@@ -53,10 +62,30 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
         private readonly float _learningRate;
         private readonly float _gradientScale;
 
+        // Adam state. Non-null iff useAdam == true.
+        private readonly bool _useAdam;
+        private readonly float _beta1;
+        private readonly float _beta2;
+        private readonly float _epsilon;
+        private readonly float[]? _m;
+        private readonly float[]? _v;
+        private int _adamStep;
+
         private float _bestFitness;
         private bool _disposed;
         private bool _hasFitness;
 
+        /// <summary>
+        ///     Creates an ES optimizer with either plain SGD or Adam as the mean-update rule.
+        /// </summary>
+        /// <param name="useAdam">
+        ///     When true (default), applies the Adam moment estimator to the ES gradient
+        ///     estimate. Matches Salimans et al.'s published recipe and typically converges
+        ///     faster. When false, uses plain SGD: <c>μ ← μ + α·∇</c>.
+        /// </param>
+        /// <param name="beta1">Adam first-moment decay. Ignored when useAdam=false.</param>
+        /// <param name="beta2">Adam second-moment decay. Ignored when useAdam=false.</param>
+        /// <param name="epsilon">Adam numerical stabilizer. Ignored when useAdam=false.</param>
         public OpenAiEsStrategy(
             int populationSize,
             int parameterCount,
@@ -64,7 +93,11 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             float learningRate,
             INoiseTable noiseTable,
             IFitnessShaper? shaper = null,
-            int? seed = null)
+            int? seed = null,
+            bool useAdam = true,
+            float beta1 = 0.9f,
+            float beta2 = 0.999f,
+            float epsilon = 1e-8f)
         {
             if (populationSize <= 1)
             {
@@ -91,6 +124,24 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             if (learningRate <= 0f)
             {
                 throw new ArgumentOutOfRangeException(nameof(learningRate), "Learning rate must be positive.");
+            }
+
+            if (useAdam)
+            {
+                if (beta1 is < 0f or >= 1f)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(beta1), "beta1 must be in [0, 1).");
+                }
+
+                if (beta2 is < 0f or >= 1f)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(beta2), "beta2 must be in [0, 1).");
+                }
+
+                if (epsilon <= 0f)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(epsilon), "epsilon must be positive.");
+                }
             }
 
             ArgumentNullException.ThrowIfNull(noiseTable);
@@ -123,6 +174,18 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             _noiseOffsets = new int[_pairCount];
             _bestFitness = float.NaN;
             _hasFitness = false;
+
+            _useAdam = useAdam;
+            _beta1 = beta1;
+            _beta2 = beta2;
+            _epsilon = epsilon;
+
+            if (useAdam)
+            {
+                _m = new float[parameterCount];
+                _v = new float[parameterCount];
+                _adamStep = 0;
+            }
         }
 
         public int PopulationSize { get; }
@@ -154,6 +217,12 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             }
         }
 
+        /// <summary>
+        ///     True when Adam is active, false when plain SGD is active. Informational only —
+        ///     not part of the strategy's behavioral contract.
+        /// </summary>
+        public bool UseAdam => _useAdam;
+
         public void Initialize(float min = -0.3f, float max = 0.3f)
         {
             ThrowIfDisposed();
@@ -171,6 +240,15 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             _hasFitness = false;
             _bestFitness = float.NaN;
             Generation = 0;
+
+            // Reset Adam moments: resuming training from scratch must not inherit the m/v
+            // accumulators from a previous run. Initialize is the natural "factory reset" hook.
+            if (_useAdam)
+            {
+                Array.Clear(_m!, 0, _m!.Length);
+                Array.Clear(_v!, 0, _v!.Length);
+                _adamStep = 0;
+            }
         }
 
         public void Ask(Span<float> populationMatrix)
@@ -231,7 +309,8 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
             // Accumulate the gradient: for each antithetic pair with noise ε,
             //   Σ (f⁺ − f⁻)·ε
-            // then scale once by 1 / (N·σ) at the end.
+            // then scale once by 1 / (N·σ) at the end so the final gradient magnitude is
+            // independent of population size and sigma choice.
             Array.Clear(_gradient, 0, _gradient.Length);
 
             var paramCount = ParameterCount;
@@ -255,16 +334,83 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
                 }
             }
 
-            // Apply: μ ← μ + α · ∇, with ∇ = _gradient · _gradientScale.
-            var step = _learningRate * _gradientScale;
+            // Normalize: _gradient now holds the ES estimate of the search gradient.
+            var scale = _gradientScale;
 
             for (var j = 0; j < paramCount; j++)
             {
-                _mu[j] += step * _gradient[j];
+                _gradient[j] *= scale;
+            }
+
+            if (_useAdam)
+            {
+                ApplyAdamStep();
+            }
+            else
+            {
+                ApplySgdStep();
             }
 
             _hasFitness = true;
             Generation++;
+        }
+
+        /// <summary>
+        ///     Plain SGD mean update: μ ← μ + α · ∇. Sign is positive because ES maximizes.
+        /// </summary>
+        private void ApplySgdStep()
+        {
+            var lr = _learningRate;
+            var paramCount = ParameterCount;
+
+            for (var j = 0; j < paramCount; j++)
+            {
+                _mu[j] += lr * _gradient[j];
+            }
+        }
+
+        /// <summary>
+        ///     Adam mean update with bias-corrected moments. Same as the TF/PyTorch Adam,
+        ///     except the sign of the step is positive (maximization) rather than negative
+        ///     (minimization). All moments live in dedicated pre-allocated buffers, so the
+        ///     update is zero-allocation.
+        /// </summary>
+        private void ApplyAdamStep()
+        {
+            _adamStep++;
+
+            var m = _m!;
+            var v = _v!;
+            var beta1 = _beta1;
+            var beta2 = _beta2;
+            var epsilon = _epsilon;
+            var lr = _learningRate;
+            var paramCount = ParameterCount;
+
+            // Bias correction factors. At t=1 with beta1=0.9 these amplify the step by 10×,
+            // which is intentional and matches the reference Adam.
+            var biasCorrection1 = 1f - MathF.Pow(beta1, _adamStep);
+            var biasCorrection2 = 1f - MathF.Pow(beta2, _adamStep);
+
+            // Hoist the per-step constant to avoid the divide-in-loop.
+            var stepSize = lr / biasCorrection1;
+            var invSqrtBc2 = 1f / MathF.Sqrt(biasCorrection2);
+
+            for (var j = 0; j < paramCount; j++)
+            {
+                var g = _gradient[j];
+
+                // m_t = β₁·m_{t−1} + (1−β₁)·g
+                m[j] = (beta1 * m[j]) + ((1f - beta1) * g);
+
+                // v_t = β₂·v_{t−1} + (1−β₂)·g²
+                v[j] = (beta2 * v[j]) + ((1f - beta2) * g * g);
+
+                // μ ← μ + α · m̂ / (√v̂ + ε), with both bias corrections factored into the
+                // step size and denominator. Plus sign because ES maximizes.
+                var denom = (MathF.Sqrt(v[j]) * invSqrtBc2) + epsilon;
+                _mu[j] += stepSize * m[j] / denom;
+            }
         }
 
         public ReadOnlySpan<float> GetBestParameters()
@@ -341,9 +487,10 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
         // -----------------------------------------------------------------------------
         // Checkpoint: IEvolutionCheckpoint.Save / Load
+        // Schema version 2 (breaking change from v1: added Adam state).
         // Format (little-endian, BinaryWriter defaults):
         //   int32   magic          = 0x4F414553 ('O','A','E','S')
-        //   int32   schemaVersion  = 1
+        //   int32   schemaVersion  = 2
         //   int32   populationSize
         //   int32   parameterCount
         //   int32   generation
@@ -351,10 +498,15 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
         //   float   bestFitness
         //   float[] mu              [parameterCount]
         //   float[] bestParameters  [parameterCount]
+        //   byte    useAdam
+        //   (if useAdam:)
+        //     int32   adamStep
+        //     float[] m              [parameterCount]
+        //     float[] v              [parameterCount]
         // -----------------------------------------------------------------------------
 
         private const int CheckpointMagic = 0x4F414553;
-        private const int CheckpointSchemaVersion = 1;
+        private const int CheckpointSchemaVersion = 2;
 
         public void Save(BinaryWriter writer)
         {
@@ -371,6 +523,15 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
             WriteFloats(writer, _mu);
             WriteFloats(writer, _bestParameters);
+
+            writer.Write(_useAdam);
+
+            if (_useAdam)
+            {
+                writer.Write(_adamStep);
+                WriteFloats(writer, _m!);
+                WriteFloats(writer, _v!);
+            }
         }
 
         public void Load(BinaryReader reader)
@@ -391,7 +552,8 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             if (schemaVersion != CheckpointSchemaVersion)
             {
                 throw new InvalidDataException(
-                    $"Unsupported schema version {schemaVersion}; this build supports {CheckpointSchemaVersion}.");
+                    $"Unsupported schema version {schemaVersion}; this build supports {CheckpointSchemaVersion}. " +
+                    "Checkpoints produced by earlier builds cannot be loaded.");
             }
 
             var populationSize = reader.ReadInt32();
@@ -410,6 +572,22 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
             ReadFloats(reader, _mu);
             ReadFloats(reader, _bestParameters);
+
+            var streamUsedAdam = reader.ReadBoolean();
+
+            if (streamUsedAdam != _useAdam)
+            {
+                throw new InvalidDataException(
+                    $"Checkpoint optimizer mode (useAdam={streamUsedAdam}) does not match " +
+                    $"this instance (useAdam={_useAdam}).");
+            }
+
+            if (_useAdam)
+            {
+                _adamStep = reader.ReadInt32();
+                ReadFloats(reader, _m!);
+                ReadFloats(reader, _v!);
+            }
         }
 
         private static void WriteFloats(BinaryWriter writer, ReadOnlySpan<float> values)
