@@ -21,6 +21,7 @@ namespace DevOnBike.Overfit.Ops
             TensorPrimitives.Max(input.DataView.AsReadOnlySpan(), 0f, res.GetView().AsSpan());
 
             var output = new AutogradNode(res, input.RequiresGrad);
+            
             if (output.RequiresGrad)
             {
                 graph?.Record(OpCode.ReLU, output, input);
@@ -75,6 +76,7 @@ namespace DevOnBike.Overfit.Ops
             TensorPrimitives.Sigmoid(input.DataView.AsReadOnlySpan(), res.GetView().AsSpan());
 
             var output = new AutogradNode(res, input.RequiresGrad);
+            
             if (output.RequiresGrad)
             {
                 graph?.Record(OpCode.Sigmoid, output, input);
@@ -115,9 +117,11 @@ namespace DevOnBike.Overfit.Ops
         public static AutogradNode Tanh(ComputationGraph graph, AutogradNode input)
         {
             var res = AllocateLike(input, false);
+            
             TensorPrimitives.Tanh(input.DataView.AsReadOnlySpan(), res.GetView().AsSpan());
 
             var output = new AutogradNode(res, input.RequiresGrad);
+            
             if (output.RequiresGrad)
             {
                 graph?.Record(OpCode.Tanh, output, input);
