@@ -1,4 +1,4 @@
-using DevOnBike.Overfit.Evolutionary.Abstractions;
+﻿using DevOnBike.Overfit.Evolutionary.Abstractions;
 using DevOnBike.Overfit.Evolutionary.Storage;
 using DevOnBike.Overfit.Maths;
 
@@ -35,15 +35,27 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
         private readonly EvolutionWorkspace _workspace;
         private readonly ISelectionOperator _selectionOperator;
         private readonly IMutationOperator _mutationOperator;
+        private readonly ICrossoverOperator? _crossoverOperator;
         private readonly IFitnessShaper? _fitnessShaper;
         private readonly Random _rng;
         private readonly int _eliteCount;
         private readonly float[] _bestParameters;
+        private readonly float[]? _crossoverScratch1;
+        private readonly float[]? _crossoverScratch2;
 
         private float _bestFitness;
         private bool _disposed;
         private bool _hasFitness;
 
+        /// <summary>
+        ///     Creates a generational GA.
+        /// </summary>
+        /// <param name="crossoverOperator">
+        ///     Optional recombination operator. When non-null, each pair of children is
+        ///     produced from two elite parents via crossover followed by per-child mutation.
+        ///     When null (default), the algorithm runs as a (μ+λ)-ES: one elite parent
+        ///     produces one mutated child.
+        /// </param>
         public GenerationalGeneticAlgorithm(
             int populationSize,
             int parameterCount,
@@ -51,7 +63,8 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             ISelectionOperator selectionOperator,
             IMutationOperator mutationOperator,
             IFitnessShaper? fitnessShaper = null,
-            int? seed = null)
+            int? seed = null,
+            ICrossoverOperator? crossoverOperator = null)
         {
             if (populationSize <= 1)
             {
@@ -70,6 +83,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
             _selectionOperator = selectionOperator ?? throw new ArgumentNullException(nameof(selectionOperator));
             _mutationOperator = mutationOperator ?? throw new ArgumentNullException(nameof(mutationOperator));
+            _crossoverOperator = crossoverOperator;
             _fitnessShaper = fitnessShaper;
             _rng = seed.HasValue ? new Random(seed.Value) : new Random();
 
@@ -83,6 +97,17 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             _bestParameters = new float[parameterCount];
             _bestFitness = float.NaN;
             _hasFitness = false;
+
+            // Crossover produces child pairs into scratch buffers, then mutate copies from
+            // scratch into the nextPopulation slice. Without scratch the crossover output
+            // would have to be written directly to the population buffer, and the subsequent
+            // Mutate call would read its own newly-written output as "parent" — which is the
+            // wrong semantics (Mutate expects an unrelated parent, not the crossover child).
+            if (crossoverOperator is not null)
+            {
+                _crossoverScratch1 = new float[parameterCount];
+                _crossoverScratch2 = new float[parameterCount];
+            }
         }
 
         public int PopulationSize { get; }
@@ -248,7 +273,72 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
                 throw new InvalidOperationException("Elite set cannot be empty.");
             }
 
+            if (_crossoverOperator is null)
+            {
+                CreateChildrenMutationOnly(currentPopulation, nextPopulation, eliteIndices);
+            }
+            else
+            {
+                CreateChildrenWithCrossover(currentPopulation, nextPopulation, eliteIndices);
+            }
+        }
+
+        private void CreateChildrenMutationOnly(
+            ReadOnlySpan<float> currentPopulation,
+            Span<float> nextPopulation,
+            ReadOnlySpan<int> eliteIndices)
+        {
             for (var i = _eliteCount; i < PopulationSize; i++)
+            {
+                var parentIndex = _selectionOperator.SelectParent(eliteIndices, _rng);
+                ValidateGenomeIndex(parentIndex);
+
+                var parentGenome = currentPopulation.Slice(parentIndex * ParameterCount, ParameterCount);
+                var childGenome = nextPopulation.Slice(i * ParameterCount, ParameterCount);
+
+                _mutationOperator.Mutate(parentGenome, childGenome, _rng);
+            }
+        }
+
+        private void CreateChildrenWithCrossover(
+            ReadOnlySpan<float> currentPopulation,
+            Span<float> nextPopulation,
+            ReadOnlySpan<int> eliteIndices)
+        {
+            // Crossover produces two children per parent pair. Iterate in steps of 2.
+            // If the number of non-elite slots is odd, the final slot is filled by the
+            // mutation-only path, which keeps invariants simple.
+            var scratch1 = _crossoverScratch1!.AsSpan();
+            var scratch2 = _crossoverScratch2!.AsSpan();
+            var i = _eliteCount;
+
+            while (i + 1 < PopulationSize)
+            {
+                var parent1Index = _selectionOperator.SelectParent(eliteIndices, _rng);
+                var parent2Index = _selectionOperator.SelectParent(eliteIndices, _rng);
+
+                ValidateGenomeIndex(parent1Index);
+                ValidateGenomeIndex(parent2Index);
+
+                var parent1 = currentPopulation.Slice(parent1Index * ParameterCount, ParameterCount);
+                var parent2 = currentPopulation.Slice(parent2Index * ParameterCount, ParameterCount);
+
+                _crossoverOperator!.Crossover(parent1, parent2, scratch1, scratch2, _rng);
+
+                // Mutate reads its parent through the ReadOnlySpan overload, so writing the
+                // child through the scratch buffer and then mutating scratch -> final slot
+                // keeps the Mutate contract intact.
+                var child1Target = nextPopulation.Slice(i * ParameterCount, ParameterCount);
+                var child2Target = nextPopulation.Slice((i + 1) * ParameterCount, ParameterCount);
+
+                _mutationOperator.Mutate(scratch1, child1Target, _rng);
+                _mutationOperator.Mutate(scratch2, child2Target, _rng);
+
+                i += 2;
+            }
+
+            // Odd leftover slot: fall back to mutation-only for one child.
+            if (i < PopulationSize)
             {
                 var parentIndex = _selectionOperator.SelectParent(eliteIndices, _rng);
                 ValidateGenomeIndex(parentIndex);
