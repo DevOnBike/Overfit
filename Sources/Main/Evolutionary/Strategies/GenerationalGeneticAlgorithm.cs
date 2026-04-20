@@ -1,4 +1,4 @@
-﻿using DevOnBike.Overfit.Evolutionary.Abstractions;
+using DevOnBike.Overfit.Evolutionary.Abstractions;
 using DevOnBike.Overfit.Evolutionary.Storage;
 using DevOnBike.Overfit.Maths;
 
@@ -224,14 +224,34 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
         private void StoreBestGenome()
         {
+            // Best-ever semantics: only update the tracked best if the current generation's
+            // best candidate strictly outperforms the previous recorded best. On the very first
+            // Tell, _bestFitness is NaN; float.CompareTo ranks NaN below any finite value, so
+            // the first finite candidate wins automatically.
+            //
+            // Rationale for "best-ever" vs "best-of-current-generation":
+            //   • Intuitive: users call GetBestParameters() expecting the best solution found
+            //     so far, not a potentially weaker best from the last generation.
+            //   • Robust: evolutionary trajectories regularly regress — a single bad generation
+            //     (noisy fitness, unlucky mutations) should not throw away the trained weights.
+            //   • Cheap: one compare per Tell, one conditional copy of the genome.
             var bestIndex = _workspace.EliteIndices[0];
             ValidateGenomeIndex(bestIndex);
 
-            _bestFitness = _workspace.Fitness.GetView().AsReadOnlySpan()[bestIndex];
+            var currentBestFitness = _workspace.Fitness.GetView().AsReadOnlySpan()[bestIndex];
 
-            var population = _workspace.Population.GetView().AsReadOnlySpan();
-            var bestGenome = population.Slice(bestIndex * ParameterCount, ParameterCount);
-            bestGenome.CopyTo(_bestParameters);
+            // CompareTo > 0 iff currentBestFitness is strictly better than _bestFitness,
+            // and NaN is treated as worse than any finite value on both sides — so a NaN
+            // candidate never overwrites a finite recorded best, and a finite candidate
+            // always overwrites a NaN recorded best (i.e. the initial state).
+            if (currentBestFitness.CompareTo(_bestFitness) > 0)
+            {
+                _bestFitness = currentBestFitness;
+
+                var population = _workspace.Population.GetView().AsReadOnlySpan();
+                var bestGenome = population.Slice(bestIndex * ParameterCount, ParameterCount);
+                bestGenome.CopyTo(_bestParameters);
+            }
         }
 
         private void RebuildPopulation()

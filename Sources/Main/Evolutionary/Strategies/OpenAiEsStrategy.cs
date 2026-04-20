@@ -1,4 +1,4 @@
-﻿using DevOnBike.Overfit.Evolutionary.Abstractions;
+using DevOnBike.Overfit.Evolutionary.Abstractions;
 using DevOnBike.Overfit.Evolutionary.Fitness;
 
 namespace DevOnBike.Overfit.Evolutionary.Strategies
@@ -427,8 +427,10 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
         private void UpdateBestCandidate(ReadOnlySpan<float> fitness)
         {
-            // Find the (raw) best fitness this generation. NaN values compare false against
-            // anything, so a strict > filter keeps NaN out of the best slot automatically.
+            // Best-ever semantics: scan this generation for its best candidate, then upgrade
+            // the tracked best only if the generation's best strictly outperforms it. See the
+            // equivalent comment in GenerationalGeneticAlgorithm.StoreBestGenome for the
+            // rationale (intuitive API + robust to regression generations).
             var bestLocalIndex = -1;
             var bestLocalFitness = float.NegativeInfinity;
 
@@ -436,6 +438,8 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             {
                 var f = fitness[i];
 
+                // Strict >: NaN compares false, so NaN never wins. −∞ against an initial −∞
+                // also loses (not strictly greater), which is desirable — no meaningful best.
                 if (f > bestLocalFitness)
                 {
                     bestLocalFitness = f;
@@ -445,9 +449,17 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
             if (bestLocalIndex < 0)
             {
-                // Every fitness was NaN or −∞. Leave previous best untouched, but publish NaN
-                // so callers can detect the degenerate generation.
-                _bestFitness = float.NaN;
+                // Every fitness was NaN. Leave previous best untouched — best-ever semantics
+                // means a degenerate generation must not overwrite a valid earlier record.
+                // Note: unlike the old behavior, we do NOT publish NaN here.
+                return;
+            }
+
+            // Only overwrite if the generation's best is strictly better than the all-time best.
+            // NaN in _bestFitness (initial state) compares as "worse" under CompareTo, so any
+            // finite candidate wins on the first Tell.
+            if (bestLocalFitness.CompareTo(_bestFitness) <= 0)
+            {
                 return;
             }
 

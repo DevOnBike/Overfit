@@ -257,6 +257,110 @@ namespace DevOnBike.Overfit.Tests
             }
         }
 
+        [Fact]
+        public void Tell_WithCrossover_PreservesPopulationStructure()
+        {
+            // With crossover enabled, the GA must still produce a full population of the
+            // correct size on every generation, eliteFraction × popSize of those must be
+            // unchanged elites, and Generation must still increment exactly once per Tell.
+            // Uses CopyMutation + a deterministic crossover that returns parent1 as child1
+            // and parent2 as child2 — so we can reason about the final population directly.
+            using var algorithm = new GenerationalGeneticAlgorithm(
+                populationSize: 8,
+                parameterCount: 2,
+                eliteFraction: 0.25f, // 2 elites
+                selectionOperator: new FirstEliteSelectionOperator(),
+                mutationOperator: new CopyMutationOperator(),
+                fitnessShaper: null,
+                seed: 123,
+                crossoverOperator: new IdentityCrossoverOperator());
+
+            algorithm.Initialize();
+
+            var before = new float[8 * 2];
+            algorithm.Ask(before);
+
+            // With strictly increasing fitness, the top elite is at index 7, second at 6.
+            float[] fitness = [0f, 1f, 2f, 3f, 4f, 5f, 6f, 7f];
+
+            algorithm.Tell(fitness);
+
+            var after = new float[8 * 2];
+            algorithm.Ask(after);
+
+            Assert.Equal(1, algorithm.Generation);
+            Assert.Equal(7f, algorithm.BestFitness, 5);
+
+            // First elite slot (index 0 in the new population) should be the best from before.
+            var bestGenome = SliceGenome(before, 7, 2);
+            Assert.Equal(bestGenome, SliceGenome(after, 0, 2));
+        }
+
+        [Fact]
+        public void Tell_WithCrossover_IsAllocationStable()
+        {
+            using var algorithm = new GenerationalGeneticAlgorithm(
+                populationSize: 16,
+                parameterCount: 4,
+                eliteFraction: 0.25f,
+                selectionOperator: new FirstEliteSelectionOperator(),
+                mutationOperator: new CopyMutationOperator(),
+                fitnessShaper: null,
+                seed: 123,
+                crossoverOperator: new IdentityCrossoverOperator());
+
+            algorithm.Initialize();
+            var fitness = new float[16];
+            for (var i = 0; i < fitness.Length; i++)
+            {
+                fitness[i] = i;
+            }
+            algorithm.Tell(fitness); // warmup
+
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            var before = GC.GetAllocatedBytesForCurrentThread();
+
+            for (var i = 0; i < 5_000; i++)
+            {
+                algorithm.Tell(fitness);
+            }
+
+            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.True(allocated <= 512, $"Tell with crossover allocated {allocated} bytes.");
+        }
+
+        [Fact]
+        public void Tell_WithCrossover_HandlesOddNonEliteCount()
+        {
+            // Non-elite count is odd: crossover produces pairs, so the final slot is filled
+            // by mutation-only. The assertion just confirms the GA finishes Tell without
+            // throwing or leaving holes.
+            using var algorithm = new GenerationalGeneticAlgorithm(
+                populationSize: 7, // 1 elite (round(7 * 0.1) = 1), 6 children — even, but
+                parameterCount: 2, // we force odd by using eliteFraction = 0.3 -> 2 elites, 5 children
+                eliteFraction: 0.3f,
+                selectionOperator: new FirstEliteSelectionOperator(),
+                mutationOperator: new CopyMutationOperator(),
+                fitnessShaper: null,
+                seed: 123,
+                crossoverOperator: new IdentityCrossoverOperator());
+
+            algorithm.Initialize();
+            var fitness = new float[7];
+            for (var i = 0; i < fitness.Length; i++)
+            {
+                fitness[i] = i;
+            }
+
+            algorithm.Tell(fitness);
+
+            Assert.Equal(1, algorithm.Generation);
+            Assert.Equal(6f, algorithm.BestFitness, 5);
+        }
+
         private static GenerationalGeneticAlgorithm CreateAlgorithm(
             ISelectionOperator selection,
             IMutationOperator mutation,
@@ -304,6 +408,26 @@ namespace DevOnBike.Overfit.Tests
                 {
                     childGenome[i] += 1f;
                 }
+            }
+        }
+
+        /// <summary>
+        ///     Crossover that copies parent1 to child1 and parent2 to child2 verbatim.
+        ///     Removes crossover randomness from integration tests so the remaining GA
+        ///     machinery (elite copying, step=2 iteration, odd-leftover fallback) can be
+        ///     verified deterministically.
+        /// </summary>
+        private sealed class IdentityCrossoverOperator : ICrossoverOperator
+        {
+            public void Crossover(
+                ReadOnlySpan<float> parent1,
+                ReadOnlySpan<float> parent2,
+                Span<float> child1,
+                Span<float> child2,
+                Random rng)
+            {
+                parent1.CopyTo(child1);
+                parent2.CopyTo(child2);
             }
         }
     }
