@@ -29,7 +29,9 @@ namespace Benchmarks
             // BenchmarkRunner.Run<MathNetInferenceBattleBenchmark>();
             // BenchmarkRunner.Run<BatchScalingBenchmark>();
             //BenchmarkRunner.Run<GenerationalGeneticAlgorithmBenchmarks>();
-            BenchmarkRunner.Run<EvolutionaryAlgorithmBenchmarks>();
+            // BenchmarkRunner.Run<EvolutionaryAlgorithmBenchmarks>();
+
+            BenchmarkRunner.Run<RandomizationBenchmarks>();
         }
     }
 }
