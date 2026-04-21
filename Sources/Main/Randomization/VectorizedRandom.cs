@@ -1,8 +1,9 @@
 ﻿// Copyright (c) 2026 DevOnBike.
-// This file is part of DevonBike Overfit.
-// DevonBike Overfit is licensed under the GNU AGPLv3.
-// For commercial licensing options, contact: devonbike@gmail.com
+// This file is part of DevOnBike Overfit.
+// DevOnBike Overfit is licensed under the GNU AGPLv3.
 
+using System;
+using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
 using System.Security.Cryptography;
@@ -10,43 +11,48 @@ using System.Security.Cryptography;
 namespace DevOnBike.Overfit.Randomization
 {
     /// <summary>
-    /// Fast SIMD-oriented pseudo-random number generator producing uniform values.
+    /// High-throughput SIMD-oriented pseudo-random number generator based on 256-bit SIMD.
+    /// Optimized for zero-allocation hot paths and high sampling throughput.
     ///
-    /// Designed for throughput-oriented workloads such as:
-    /// - simulations,
+    /// Intended for workloads such as:
     /// - evolutionary algorithms,
+    /// - simulations,
     /// - stochastic masking,
-    /// - general high-volume numeric sampling.
+    /// - general numeric sampling.
     ///
     /// This generator is:
     /// - not cryptographically secure,
-    /// - not intended for security-sensitive scenarios,
+    /// - not thread-safe per instance,
     /// - optimized for speed rather than top-tier statistical quality.
     ///
-    /// Thread safety:
-    /// - instances of <see cref="VectorizedRandom"/> are NOT thread-safe,
-    /// - <see cref="Shared"/> is safe to use from multiple threads because it provides
-    ///   one independent instance per thread via thread-local storage.
-    ///
-    /// Sequence semantics:
-    /// - vector methods and scalar methods share the same underlying state,
-    /// - but mixing scalar and vector APIs does not preserve a perfect element-by-element
-    ///   sequence because vector calls may discard partially consumed scalar lanes.
+    /// Use <see cref="Shared"/> for a thread-local shared instance.
     /// </summary>
     public sealed class VectorizedRandom
     {
+        private static readonly int UIntLaneCount = Vector256<uint>.Count;
+        private static readonly int FloatLaneCount = Vector256<float>.Count;
+        private static readonly int ByteVectorWidth = Vector256<byte>.Count;
+
         [ThreadStatic]
-        private static VectorizedRandom _shared;
+        private static VectorizedRandom? _shared;
 
         private Vector256<uint> _state;
 
-        // Scalar lane cache built from one vector step.
+        // Scalar cache built from one SIMD step.
         private Vector256<uint> _laneBuffer;
         private int _laneIndex;
 
+        static VectorizedRandom()
+        {
+            if (!Vector256.IsHardwareAccelerated)
+            {
+                throw new PlatformNotSupportedException("VectorizedRandom requires 256-bit SIMD hardware acceleration.");
+            }
+        }
+
         /// <summary>
         /// Gets a thread-local shared instance, similar in spirit to <see cref="Random.Shared"/>.
-        /// Each thread gets its own independent generator instance.
+        /// Each thread receives its own independent generator instance.
         /// </summary>
         public static VectorizedRandom Shared => _shared ??= new VectorizedRandom();
 
@@ -55,40 +61,34 @@ namespace DevOnBike.Overfit.Randomization
         /// </summary>
         public VectorizedRandom(uint? seed = null)
         {
-            if (!Vector256.IsHardwareAccelerated)
-            {
-                throw new PlatformNotSupportedException("VectorizedRandom requires 256-bit SIMD hardware acceleration.");
-            }
-
             var actualSeed = seed ?? CreateSeed();
-
             _state = CreateInitialState(NonZero(actualSeed));
 
             _laneBuffer = default;
-            _laneIndex = Vector256<uint>.Count; // empty
+            _laneIndex = UIntLaneCount; // cache empty
         }
 
         /// <summary>
-        /// Resets the generator state using a new seed without allocating a new object.
-        /// Critical for deterministic noise regeneration in Evolution Strategies.
+        /// Reinitializes the generator state without allocating a new instance.
+        /// Useful for deterministic regeneration of noise in evolutionary algorithms.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Reinitialize(uint seed)
         {
             _state = CreateInitialState(NonZero(seed));
-            _laneIndex = Vector256<uint>.Count; // Invalidate the scalar lane buffer
+            _laneBuffer = default;
+            _laneIndex = UIntLaneCount;
         }
 
         /// <summary>
-        /// Returns 8 uniformly distributed floats in [0, 1).
-        /// Hot path: no branches in the PRNG step itself, just state update + bit manipulation.
+        /// Returns 8 random floats in the range [0, 1) in a single SIMD step.
+        /// This invalidates any partially consumed scalar cache.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Vector256<float> NextSingleVector()
         {
-            // Discard any partially consumed scalar lane buffer so vector output
-            // always represents a fresh full SIMD step.
-            _laneIndex = Vector256<uint>.Count;
+            // A vector call consumes a fresh SIMD step and discards any partially used scalar cache.
+            _laneIndex = UIntLaneCount;
 
             var s = NextUInt32VectorInternal();
 
@@ -99,42 +99,39 @@ namespace DevOnBike.Overfit.Randomization
         }
 
         /// <summary>
-        /// Returns a uniformly distributed float in [0, 1).
+        /// Returns a random float in the range [0, 1).
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public float NextSingle()
         {
             var bits = (int)((NextUInt32() & 0x007FFFFFu) | 0x3F800000u);
+
             return BitConverter.Int32BitsToSingle(bits) - 1.0f;
         }
 
         /// <summary>
-        /// Returns a uniformly distributed double in [0, 1).
+        /// Returns a random double in the range [0, 1).
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public double NextDouble()
         {
-            // Standard 53-bit construction.
+            // Standard 53-bit construction from two uint draws.
             ulong a = NextUInt32() >> 5;
             ulong b = NextUInt32() >> 6;
-            var value = (a << 26) | b;
 
-            return value * (1.0 / (1UL << 53));
+            return ((a << 26) | b) * (1.0 / (1UL << 53));
         }
 
         /// <summary>
         /// Returns a non-negative random integer that is less than <see cref="int.MaxValue"/>.
-        /// Mirrors the behavior of <see cref="Random.Next()"/>.
+        /// Mirrors the semantics of <see cref="Random.Next()"/>.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public int Next()
-        {
-            return (int)NextUInt32Below(int.MaxValue);
-        }
+        public int Next() => Next(int.MaxValue);
 
         /// <summary>
         /// Returns a non-negative random integer that is less than the specified maximum.
-        /// Mirrors the behavior of <see cref="Random.Next(int)"/>.
+        /// Mirrors the semantics of <see cref="Random.Next(int)"/>.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public int Next(int maxValue)
@@ -150,8 +147,8 @@ namespace DevOnBike.Overfit.Randomization
         }
 
         /// <summary>
-        /// Returns a random integer that is within a specified range.
-        /// Mirrors the behavior of <see cref="Random.Next(int, int)"/>.
+        /// Returns a random integer within the specified range.
+        /// Mirrors the semantics of <see cref="Random.Next(int, int)"/>.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public int Next(int minValue, int maxValue)
@@ -166,32 +163,68 @@ namespace DevOnBike.Overfit.Randomization
                 return minValue;
             }
 
-            var range = (uint)((long)maxValue - minValue);
-            var sample = NextUInt32Below(range);
+            uint range = (uint)((long)maxValue - minValue);
+            uint sample = NextUInt32Below(range);
 
             return (int)(minValue + (long)sample);
         }
 
         /// <summary>
+        /// Fills the destination span with random floats in [0, 1) using SIMD.
+        /// Steady-state path is allocation-free.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Fill(Span<float> destination)
+        {
+            var i = 0;
+
+            for (; i <= destination.Length - FloatLaneCount; i += FloatLaneCount)
+            {
+                var v = NextSingleVector();
+                v.CopyTo(destination.Slice(i, FloatLaneCount));
+            }
+
+            if (i < destination.Length)
+            {
+                Span<float> tail = stackalloc float[8];
+                var v = NextSingleVector();
+                v.CopyTo(tail);
+                tail[..(destination.Length - i)].CopyTo(destination[i..]);
+            }
+        }
+
+        /// <summary>
         /// Fills the destination span with random bytes.
+        /// Uses a bulk SIMD path for 32-byte chunks and preserves scalar cache continuity.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void NextBytes(Span<byte> buffer)
         {
             var i = 0;
 
-            while (i <= buffer.Length - sizeof(uint))
+            // 1. Drain remaining scalar cache first to preserve sequence continuity.
+            while (_laneIndex < UIntLaneCount && buffer.Length - i >= sizeof(uint))
             {
-                var value = NextUInt32();
-
-                buffer[i] = (byte)value;
-                buffer[i + 1] = (byte)(value >> 8);
-                buffer[i + 2] = (byte)(value >> 16);
-                buffer[i + 3] = (byte)(value >> 24);
-
-                i += sizeof(uint);
+                var value = _laneBuffer.GetElement(_laneIndex++);
+                WriteUInt32LittleEndian(buffer, ref i, value);
             }
 
+            // 2. Bulk SIMD path: one PRNG step produces 32 bytes.
+            while (i <= buffer.Length - ByteVectorWidth)
+            {
+                var v = NextUInt32VectorInternal();
+                v.AsByte().CopyTo(buffer.Slice(i, ByteVectorWidth));
+                i += ByteVectorWidth;
+            }
+
+            // 3. Consume remaining full uints through the scalar cache.
+            while (buffer.Length - i >= sizeof(uint))
+            {
+                var value = NextUInt32();
+                WriteUInt32LittleEndian(buffer, ref i, value);
+            }
+
+            // 4. Tail bytes.
             if (i < buffer.Length)
             {
                 var value = NextUInt32();
@@ -215,35 +248,10 @@ namespace DevOnBike.Overfit.Randomization
             NextBytes(buffer.AsSpan());
         }
 
-        /// <summary>
-        /// Fills the destination span with uniformly distributed floats in [0, 1).
-        /// Steady-state path is allocation-free.
-        /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void Fill(Span<float> destination)
-        {
-            var width = Vector256<float>.Count;
-            var i = 0;
-
-            for (; i <= destination.Length - width; i += width)
-            {
-                var v = NextSingleVector();
-                v.CopyTo(destination.Slice(i, width));
-            }
-
-            if (i < destination.Length)
-            {
-                Span<float> tail = stackalloc float[8];
-                var v = NextSingleVector();
-                v.CopyTo(tail);
-                tail[..(destination.Length - i)].CopyTo(destination[i..]);
-            }
-        }
-
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private uint NextUInt32()
         {
-            if (_laneIndex >= Vector256<uint>.Count)
+            if (_laneIndex >= UIntLaneCount)
             {
                 _laneBuffer = NextUInt32VectorInternal();
                 _laneIndex = 0;
@@ -263,6 +271,7 @@ namespace DevOnBike.Overfit.Randomization
             s ^= Vector256.ShiftLeft(s, 5);
 
             _state = s;
+
             return s;
         }
 
@@ -274,13 +283,13 @@ namespace DevOnBike.Overfit.Randomization
                 return 0;
             }
 
-            // Lemire-style unbiased bounded generation.
-            var product = (ulong)NextUInt32() * maxExclusive;
-            var low = (uint)product;
+            // Lemire's unbiased bounded random generation.
+            ulong product = (ulong)NextUInt32() * maxExclusive;
+            uint low = (uint)product;
 
             if (low < maxExclusive)
             {
-                var threshold = unchecked((uint)(0 - maxExclusive)) % maxExclusive;
+                uint threshold = unchecked((uint)(0 - maxExclusive)) % maxExclusive;
 
                 while (low < threshold)
                 {
@@ -290,6 +299,17 @@ namespace DevOnBike.Overfit.Randomization
             }
 
             return (uint)(product >> 32);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void WriteUInt32LittleEndian(Span<byte> buffer, ref int offset, uint value)
+        {
+            buffer[offset] = (byte)value;
+            buffer[offset + 1] = (byte)(value >> 8);
+            buffer[offset + 2] = (byte)(value >> 16);
+            buffer[offset + 3] = (byte)(value >> 24);
+
+            offset += sizeof(uint);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -314,13 +334,7 @@ namespace DevOnBike.Overfit.Randomization
 
             RandomNumberGenerator.Fill(bytes);
 
-            var seed =
-                (uint)bytes[0] |
-                ((uint)bytes[1] << 8) |
-                ((uint)bytes[2] << 16) |
-                ((uint)bytes[3] << 24);
-
-            return NonZero(seed);
+            return NonZero(BinaryPrimitives.ReadUInt32LittleEndian(bytes));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
