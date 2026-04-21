@@ -1,53 +1,21 @@
+using System.Numerics;
+using System.Numerics.Tensors;
 using DevOnBike.Overfit.Evolutionary.Abstractions;
 using DevOnBike.Overfit.Evolutionary.Fitness;
 
 namespace DevOnBike.Overfit.Evolutionary.Strategies
 {
-    /// <summary>
-    ///     Natural Evolution Strategies optimizer in the style of
-    ///     "Evolution Strategies as a Scalable Alternative to Reinforcement Learning"
-    ///     (Salimans et al., 2017). Maintains a single mean parameter vector and estimates
-    ///     the search gradient each generation from population evaluations of antithetically
-    ///     mirrored perturbations sampled from a shared <see cref="INoiseTable"/>.
-    /// </summary>
-    /// <remarks>
-    ///     <para>
-    ///         Per generation:
-    ///         <list type="number">
-    ///             <item>Draw <c>populationSize / 2</c> independent noise offsets into the table.</item>
-    ///             <item>Emit the antithetic pair <c>(μ + σε, μ − σε)</c> for each offset.</item>
-    ///             <item>Consume fitness, shape it through the supplied <see cref="IFitnessShaper"/>
-    ///                   (centered-rank by default), estimate the gradient
-    ///                   <c>∇ ≈ (1 / (N·σ)) · Σ_pairs (f⁺ − f⁻)·ε</c>, and update
-    ///                   μ. With <paramref name="useAdam"/>=false (plain SGD),
-    ///                   <c>μ ← μ + α·∇</c>; with useAdam=true (default), μ is updated using
-    ///                   the Adam moment estimator — Salimans' original recipe, which typically
-    ///                   converges 2–3× faster per generation at the cost of two extra
-    ///                   parameter-sized buffers (m, v).</item>
-    ///         </list>
-    ///         Antithetic sampling halves the variance of the gradient estimate for the same
-    ///         number of evaluations, which is the main correctness advantage over the
-    ///         textbook ES sampler.
-    ///     </para>
-    ///     <para>
-    ///         Sign convention: ES maximizes fitness, so the update direction is <c>+∇</c>,
-    ///         not <c>−∇</c> as in standard deep-learning optimizers that minimize a loss.
-    ///         The internal Adam step returns the signed step to add to μ.
-    ///     </para>
-    ///     <para>
-    ///         Steady-state <see cref="Ask"/> and <see cref="Tell"/> perform zero managed
-    ///         allocations. All per-generation state lives in arrays owned by the strategy
-    ///         and sized once in the constructor.
-    ///     </para>
-    ///     <para>
-    ///         <see cref="IEvolutionAlgorithm.GetBestParameters"/> returns the best-fitness
-    ///         candidate from the most recent generation, matching the semantics of the
-    ///         generational GA. <see cref="Mean"/> exposes the current mean vector μ, which
-    ///         is typically the parameter vector you want to deploy after training finishes.
-    ///     </para>
-    /// </remarks>
     public sealed class OpenAiEsStrategy : IEvolutionAlgorithm
     {
+        // -----------------------------------------------------------------------------
+        // Constants
+        // -----------------------------------------------------------------------------
+        private const int CheckpointMagic = 0x4F414553;
+        private const int CheckpointSchemaVersion = 2;
+
+        // -----------------------------------------------------------------------------
+        // Private Fields
+        // -----------------------------------------------------------------------------
         private readonly INoiseTable _noiseTable;
         private readonly IFitnessShaper _fitnessShaper;
         private readonly Random _rng;
@@ -62,7 +30,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
         private readonly float _learningRate;
         private readonly float _gradientScale;
 
-        // Adam state. Non-null iff useAdam == true.
+        // Adam state
         private readonly bool _useAdam;
         private readonly float _beta1;
         private readonly float _beta2;
@@ -75,17 +43,9 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
         private bool _disposed;
         private bool _hasFitness;
 
-        /// <summary>
-        ///     Creates an ES optimizer with either plain SGD or Adam as the mean-update rule.
-        /// </summary>
-        /// <param name="useAdam">
-        ///     When true (default), applies the Adam moment estimator to the ES gradient
-        ///     estimate. Matches Salimans et al.'s published recipe and typically converges
-        ///     faster. When false, uses plain SGD: <c>μ ← μ + α·∇</c>.
-        /// </param>
-        /// <param name="beta1">Adam first-moment decay. Ignored when useAdam=false.</param>
-        /// <param name="beta2">Adam second-moment decay. Ignored when useAdam=false.</param>
-        /// <param name="epsilon">Adam numerical stabilizer. Ignored when useAdam=false.</param>
+        // -----------------------------------------------------------------------------
+        // Constructor
+        // -----------------------------------------------------------------------------
         public OpenAiEsStrategy(
             int populationSize,
             int parameterCount,
@@ -106,9 +66,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
             if ((populationSize & 1) != 0)
             {
-                throw new ArgumentException(
-                    "Population size must be even; antithetic sampling produces pairs (θ+, θ−).",
-                    nameof(populationSize));
+                throw new ArgumentException("Population size must be even for antithetic sampling.", nameof(populationSize));
             }
 
             if (parameterCount <= 0)
@@ -132,12 +90,10 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
                 {
                     throw new ArgumentOutOfRangeException(nameof(beta1), "beta1 must be in [0, 1).");
                 }
-
                 if (beta2 is < 0f or >= 1f)
                 {
                     throw new ArgumentOutOfRangeException(nameof(beta2), "beta2 must be in [0, 1).");
                 }
-
                 if (epsilon <= 0f)
                 {
                     throw new ArgumentOutOfRangeException(nameof(epsilon), "epsilon must be positive.");
@@ -145,12 +101,9 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             }
 
             ArgumentNullException.ThrowIfNull(noiseTable);
-
             if (noiseTable.Length < parameterCount)
             {
-                throw new ArgumentException(
-                    $"Noise table length {noiseTable.Length} is smaller than parameterCount {parameterCount}.",
-                    nameof(noiseTable));
+                throw new ArgumentException($"Noise table length is smaller than parameterCount.", nameof(noiseTable));
             }
 
             _noiseTable = noiseTable;
@@ -163,8 +116,6 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             _pairCount = populationSize / 2;
             _sigma = sigma;
             _learningRate = learningRate;
-
-            // Gradient normalizer per Salimans 2017: 1 / (N * σ). Precomputed once.
             _gradientScale = 1f / (populationSize * sigma);
 
             _mu = new float[parameterCount];
@@ -188,10 +139,11 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             }
         }
 
+        // -----------------------------------------------------------------------------
+        // Properties
+        // -----------------------------------------------------------------------------
         public int PopulationSize { get; }
-
         public int ParameterCount { get; }
-
         public int Generation { get; private set; }
 
         public float BestFitness
@@ -203,11 +155,6 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             }
         }
 
-        /// <summary>
-        ///     Current mean parameter vector (μ). This is the typical "deploy after training"
-        ///     vector — not the best candidate seen, but the center of the sampling distribution
-        ///     that ES has converged to.
-        /// </summary>
         public ReadOnlySpan<float> Mean
         {
             get
@@ -217,16 +164,14 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             }
         }
 
-        /// <summary>
-        ///     True when Adam is active, false when plain SGD is active. Informational only —
-        ///     not part of the strategy's behavioral contract.
-        /// </summary>
         public bool UseAdam => _useAdam;
 
+        // -----------------------------------------------------------------------------
+        // Methods
+        // -----------------------------------------------------------------------------
         public void Initialize(float min = -0.3f, float max = 0.3f)
         {
             ThrowIfDisposed();
-
             if (min > max)
             {
                 throw new ArgumentException("min cannot be greater than max.");
@@ -241,8 +186,6 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             _bestFitness = float.NaN;
             Generation = 0;
 
-            // Reset Adam moments: resuming training from scratch must not inherit the m/v
-            // accumulators from a previous run. Initialize is the natural "factory reset" hook.
             if (_useAdam)
             {
                 Array.Clear(_m!, 0, _m!.Length);
@@ -254,64 +197,47 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
         public void Ask(Span<float> populationMatrix)
         {
             ThrowIfDisposed();
-
             var expectedLength = PopulationSize * ParameterCount;
 
             if (populationMatrix.Length != expectedLength)
             {
-                throw new ArgumentException(
-                    $"populationMatrix length must be {expectedLength}.",
-                    nameof(populationMatrix));
+                throw new ArgumentException($"populationMatrix length must be {expectedLength}.", nameof(populationMatrix));
             }
 
             var sigma = _sigma;
             var paramCount = ParameterCount;
+            var muSpan = _mu.AsSpan();
 
             for (var p = 0; p < _pairCount; p++)
             {
-                // Sample a single offset per antithetic pair; the two children of the pair
-                // share the same noise vector (one with +σ, one with −σ).
                 var offset = _noiseTable.SampleOffset(_rng, paramCount);
                 _noiseOffsets[p] = offset;
 
                 var noise = _noiseTable.GetSlice(offset, paramCount);
-
                 var positiveChild = populationMatrix.Slice((2 * p) * paramCount, paramCount);
                 var negativeChild = populationMatrix.Slice(((2 * p) + 1) * paramCount, paramCount);
 
-                for (var j = 0; j < paramCount; j++)
-                {
-                    var delta = sigma * noise[j];
-                    positiveChild[j] = _mu[j] + delta;
-                    negativeChild[j] = _mu[j] - delta;
-                }
+                // SIMD: positiveChild[j] = (noise[j] * sigma) + _mu[j]
+                TensorPrimitives.MultiplyAdd(noise, sigma, muSpan, positiveChild);
+
+                // SIMD: negativeChild[j] = (noise[j] * -sigma) + _mu[j]
+                TensorPrimitives.MultiplyAdd(noise, -sigma, muSpan, negativeChild);
             }
         }
 
         public void Tell(ReadOnlySpan<float> fitness)
         {
             ThrowIfDisposed();
-
             if (fitness.Length != PopulationSize)
             {
-                throw new ArgumentException(
-                    $"fitness length must be {PopulationSize}.",
-                    nameof(fitness));
+                throw new ArgumentException($"fitness length must be {PopulationSize}.", nameof(fitness));
             }
 
-            // Shape raw fitness into ranks. CenteredRank is NaN-safe: degenerate fitness
-            // values sink to the bottom rank and cannot poison the gradient estimate.
             _fitnessShaper.Shape(fitness, _shapedFitness);
-
-            // Track the unshaped best for reporting, using the raw fitness (shaped values
-            // are meaningful only within a generation, not across generations).
             UpdateBestCandidate(fitness);
 
-            // Accumulate the gradient: for each antithetic pair with noise ε,
-            //   Σ (f⁺ − f⁻)·ε
-            // then scale once by 1 / (N·σ) at the end so the final gradient magnitude is
-            // independent of population size and sigma choice.
-            Array.Clear(_gradient, 0, _gradient.Length);
+            var gradientSpan = _gradient.AsSpan();
+            gradientSpan.Clear();
 
             var paramCount = ParameterCount;
 
@@ -328,19 +254,12 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
                 var noise = _noiseTable.GetSlice(_noiseOffsets[p], paramCount);
 
-                for (var j = 0; j < paramCount; j++)
-                {
-                    _gradient[j] += weight * noise[j];
-                }
+                // SIMD Accumulation: _gradient[j] += noise[j] * weight
+                TensorPrimitives.MultiplyAdd(noise, weight, gradientSpan, gradientSpan);
             }
 
-            // Normalize: _gradient now holds the ES estimate of the search gradient.
-            var scale = _gradientScale;
-
-            for (var j = 0; j < paramCount; j++)
-            {
-                _gradient[j] *= scale;
-            }
+            // SIMD Normalization: _gradient[j] *= scale
+            TensorPrimitives.Multiply(gradientSpan, _gradientScale, gradientSpan);
 
             if (_useAdam)
             {
@@ -355,26 +274,12 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             Generation++;
         }
 
-        /// <summary>
-        ///     Plain SGD mean update: μ ← μ + α · ∇. Sign is positive because ES maximizes.
-        /// </summary>
         private void ApplySgdStep()
         {
-            var lr = _learningRate;
-            var paramCount = ParameterCount;
-
-            for (var j = 0; j < paramCount; j++)
-            {
-                _mu[j] += lr * _gradient[j];
-            }
+            // SIMD: _mu[j] = (_gradient[j] * _learningRate) + _mu[j]
+            TensorPrimitives.MultiplyAdd(_gradient, _learningRate, _mu, _mu);
         }
 
-        /// <summary>
-        ///     Adam mean update with bias-corrected moments. Same as the TF/PyTorch Adam,
-        ///     except the sign of the step is positive (maximization) rather than negative
-        ///     (minimization). All moments live in dedicated pre-allocated buffers, so the
-        ///     update is zero-allocation.
-        /// </summary>
         private void ApplyAdamStep()
         {
             _adamStep++;
@@ -384,30 +289,55 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             var beta1 = _beta1;
             var beta2 = _beta2;
             var epsilon = _epsilon;
-            var lr = _learningRate;
             var paramCount = ParameterCount;
 
-            // Bias correction factors. At t=1 with beta1=0.9 these amplify the step by 10×,
-            // which is intentional and matches the reference Adam.
             var biasCorrection1 = 1f - MathF.Pow(beta1, _adamStep);
             var biasCorrection2 = 1f - MathF.Pow(beta2, _adamStep);
 
-            // Hoist the per-step constant to avoid the divide-in-loop.
-            var stepSize = lr / biasCorrection1;
+            var stepSize = _learningRate / biasCorrection1;
             var invSqrtBc2 = 1f / MathF.Sqrt(biasCorrection2);
 
-            for (var j = 0; j < paramCount; j++)
+            int j = 0;
+
+            // Single-Pass SIMD Kernel
+            if (Vector.IsHardwareAccelerated)
+            {
+                var vBeta1 = new Vector<float>(beta1);
+                var vOneMinusBeta1 = new Vector<float>(1f - beta1);
+                var vBeta2 = new Vector<float>(beta2);
+                var vOneMinusBeta2 = new Vector<float>(1f - beta2);
+                var vStepSize = new Vector<float>(stepSize);
+                var vInvSqrtBc2 = new Vector<float>(invSqrtBc2);
+                var vEpsilon = new Vector<float>(epsilon);
+
+                int limit = paramCount - Vector<float>.Count;
+
+                for (; j <= limit; j += Vector<float>.Count)
+                {
+                    var g = new Vector<float>(_gradient, j);
+                    var mVec = new Vector<float>(m, j);
+                    var vVec = new Vector<float>(v, j);
+                    var muVec = new Vector<float>(_mu, j);
+
+                    mVec = (vBeta1 * mVec) + (vOneMinusBeta1 * g);
+                    vVec = (vBeta2 * vVec) + (vOneMinusBeta2 * g * g);
+
+                    var denom = (Vector.SquareRoot(vVec) * vInvSqrtBc2) + vEpsilon;
+                    muVec += (vStepSize * mVec) / denom;
+
+                    mVec.CopyTo(m, j);
+                    vVec.CopyTo(v, j);
+                    muVec.CopyTo(_mu, j);
+                }
+            }
+
+            // Scalar fallback 
+            for (; j < paramCount; j++)
             {
                 var g = _gradient[j];
-
-                // m_t = β₁·m_{t−1} + (1−β₁)·g
                 m[j] = (beta1 * m[j]) + ((1f - beta1) * g);
-
-                // v_t = β₂·v_{t−1} + (1−β₂)·g²
                 v[j] = (beta2 * v[j]) + ((1f - beta2) * g * g);
 
-                // μ ← μ + α · m̂ / (√v̂ + ε), with both bias corrections factored into the
-                // step size and denominator. Plus sign because ES maximizes.
                 var denom = (MathF.Sqrt(v[j]) * invSqrtBc2) + epsilon;
                 _mu[j] += stepSize * m[j] / denom;
             }
@@ -416,21 +346,15 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
         public ReadOnlySpan<float> GetBestParameters()
         {
             ThrowIfDisposed();
-
             if (!_hasFitness)
             {
                 return ReadOnlySpan<float>.Empty;
             }
-
             return _bestParameters;
         }
 
         private void UpdateBestCandidate(ReadOnlySpan<float> fitness)
         {
-            // Best-ever semantics: scan this generation for its best candidate, then upgrade
-            // the tracked best only if the generation's best strictly outperforms it. See the
-            // equivalent comment in GenerationalGeneticAlgorithm.StoreBestGenome for the
-            // rationale (intuitive API + robust to regression generations).
             var bestLocalIndex = -1;
             var bestLocalFitness = float.NegativeInfinity;
 
@@ -438,8 +362,6 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             {
                 var f = fitness[i];
 
-                // Strict >: NaN compares false, so NaN never wins. −∞ against an initial −∞
-                // also loses (not strictly greater), which is desirable — no meaningful best.
                 if (f > bestLocalFitness)
                 {
                     bestLocalFitness = f;
@@ -449,76 +371,30 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
             if (bestLocalIndex < 0)
             {
-                // Every fitness was NaN. Leave previous best untouched — best-ever semantics
-                // means a degenerate generation must not overwrite a valid earlier record.
-                // Note: unlike the old behavior, we do NOT publish NaN here.
                 return;
             }
-
-            // Only overwrite if the generation's best is strictly better than the all-time best.
-            // NaN in _bestFitness (initial state) compares as "worse" under CompareTo, so any
-            // finite candidate wins on the first Tell.
+            
             if (bestLocalFitness.CompareTo(_bestFitness) <= 0)
             {
                 return;
             }
 
-            // Reconstruct the winning candidate from μ ± σε. We know the candidate's genome
-            // was never stored explicitly, but μ, σ, and the noise slice fully determine it.
             var paramCount = ParameterCount;
             var pairIndex = bestLocalIndex / 2;
             var isNegative = (bestLocalIndex & 1) == 1;
             var noise = _noiseTable.GetSlice(_noiseOffsets[pairIndex], paramCount);
-            var sigma = _sigma;
 
             if (isNegative)
             {
-                for (var j = 0; j < paramCount; j++)
-                {
-                    _bestParameters[j] = _mu[j] - (sigma * noise[j]);
-                }
+                TensorPrimitives.MultiplyAdd(noise, -_sigma, _mu, _bestParameters);
             }
             else
             {
-                for (var j = 0; j < paramCount; j++)
-                {
-                    _bestParameters[j] = _mu[j] + (sigma * noise[j]);
-                }
+                TensorPrimitives.MultiplyAdd(noise, _sigma, _mu, _bestParameters);
             }
 
             _bestFitness = bestLocalFitness;
         }
-
-        public void Dispose()
-        {
-            // Strategy holds only managed float[] / int[] buffers; GC reclaims them.
-            // The noise table is user-owned and is NOT disposed here — lifetime is caller's
-            // responsibility so the same table can be shared across multiple strategies.
-            _disposed = true;
-        }
-
-        // -----------------------------------------------------------------------------
-        // Checkpoint: IEvolutionCheckpoint.Save / Load
-        // Schema version 2 (breaking change from v1: added Adam state).
-        // Format (little-endian, BinaryWriter defaults):
-        //   int32   magic          = 0x4F414553 ('O','A','E','S')
-        //   int32   schemaVersion  = 2
-        //   int32   populationSize
-        //   int32   parameterCount
-        //   int32   generation
-        //   byte    hasFitness
-        //   float   bestFitness
-        //   float[] mu              [parameterCount]
-        //   float[] bestParameters  [parameterCount]
-        //   byte    useAdam
-        //   (if useAdam:)
-        //     int32   adamStep
-        //     float[] m              [parameterCount]
-        //     float[] v              [parameterCount]
-        // -----------------------------------------------------------------------------
-
-        private const int CheckpointMagic = 0x4F414553;
-        private const int CheckpointSchemaVersion = 2;
 
         public void Save(BinaryWriter writer)
         {
@@ -552,20 +428,15 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             ArgumentNullException.ThrowIfNull(reader);
 
             var magic = reader.ReadInt32();
-
             if (magic != CheckpointMagic)
             {
-                throw new InvalidDataException(
-                    $"Expected magic 0x{CheckpointMagic:X8}, found 0x{magic:X8}. Stream was not produced by OpenAiEsStrategy.");
+                throw new InvalidDataException($"Expected magic 0x{CheckpointMagic:X8}, found 0x{magic:X8}. Stream was not produced by OpenAiEsStrategy.");
             }
 
             var schemaVersion = reader.ReadInt32();
-
             if (schemaVersion != CheckpointSchemaVersion)
             {
-                throw new InvalidDataException(
-                    $"Unsupported schema version {schemaVersion}; this build supports {CheckpointSchemaVersion}. " +
-                    "Checkpoints produced by earlier builds cannot be loaded.");
+                throw new InvalidDataException($"Unsupported schema version {schemaVersion}; this build supports {CheckpointSchemaVersion}.");
             }
 
             var populationSize = reader.ReadInt32();
@@ -573,9 +444,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
             if (populationSize != PopulationSize || parameterCount != ParameterCount)
             {
-                throw new InvalidDataException(
-                    $"Checkpoint was produced for ({populationSize}, {parameterCount}); " +
-                    $"current instance is ({PopulationSize}, {ParameterCount}).");
+                throw new InvalidDataException($"Checkpoint was produced for ({populationSize}, {parameterCount}); current instance is ({PopulationSize}, {ParameterCount}).");
             }
 
             Generation = reader.ReadInt32();
@@ -586,12 +455,9 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             ReadFloats(reader, _bestParameters);
 
             var streamUsedAdam = reader.ReadBoolean();
-
             if (streamUsedAdam != _useAdam)
             {
-                throw new InvalidDataException(
-                    $"Checkpoint optimizer mode (useAdam={streamUsedAdam}) does not match " +
-                    $"this instance (useAdam={_useAdam}).");
+                throw new InvalidDataException($"Checkpoint optimizer mode (useAdam={streamUsedAdam}) does not match this instance.");
             }
 
             if (_useAdam)
@@ -616,6 +482,11 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             {
                 destination[i] = reader.ReadSingle();
             }
+        }
+
+        public void Dispose()
+        {
+            _disposed = true;
         }
 
         private void ThrowIfDisposed()
