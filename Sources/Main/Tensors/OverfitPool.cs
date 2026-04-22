@@ -3,17 +3,37 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Buffers;
+using System.Collections.Concurrent;
 
 namespace DevOnBike.Overfit.Tensors
 {
     /// <summary>
-    /// Globalna, powiększona pula pamięci dla silnika Overfit.
-    /// Zatrzymuje zjawisko "Bucket Exhaustion" dla dużych sieci konwolucyjnych.
+    /// Niezależna, odporna na Garbage Collectora pula pamięci (GC-Immune Pool).
+    /// Zatrzymuje wyrzucanie zbuforowanych tensorów podczas zbiórek pamięci Gen2.
     /// </summary>
     internal static class OverfitPool<T> where T : struct
     {
-        // 1024 tablice na rozmiar (zamiast 50) i wielkie rozmiary do 64M elementów
-        public static readonly ArrayPool<T> Shared = ArrayPool<T>.Create(1024 * 1024 * 64, 1024);
+        private static readonly ConcurrentDictionary<int, ConcurrentBag<T[]>> _buckets = new();
+
+        public static T[] Rent(int size)
+        {
+            if (_buckets.TryGetValue(size, out var bag) && bag.TryTake(out var array))
+            {
+                return array;
+            }
+            
+            return new T[size];
+        }
+
+        public static void Return(T[] array)
+        {
+            if (array == null)
+            {
+                return;
+            }
+            
+            var bag = _buckets.GetOrAdd(array.Length, _ => new ConcurrentBag<T[]>());
+            bag.Add(array);
+        }
     }
 }
