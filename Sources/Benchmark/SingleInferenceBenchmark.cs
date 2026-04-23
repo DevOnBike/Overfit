@@ -10,6 +10,7 @@ using BenchmarkDotNet.Order;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core; // Zmieniono na Tensors.Core
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
@@ -30,96 +31,76 @@ namespace Benchmarks
     {
         private const int InputSize = 784;
         private const int OutputSize = 10;
-
-        // Wspólne dane wejściowe
         private float[] _inputData;
-        private float[] _onnxRawOutputData;
-
-        // ================== ONNX ==================
-        private InferenceSession _onnxSession;
-
-        // Pola dla standardowego ONNX (alokującego)
+        private AutogradNode _inputNode;
         private NamedOnnxValue[] _onnxInputs;
 
-        // Pola dla ONNX "True Zero Alloc"
-        private RunOptions _onnxRunOptions;
+        private InferenceSession _onnxSession;
+        private Sequential _overfitModel;
+
+        // Zmiana na TensorStorage
+        private TensorStorage<float> _overfitInputTensor;
+
+        // TRUE ZERO-ALLOC ONNX FIELDS
+        private float[] _onnxRawOutputData;
         private OrtValue _onnxPreAllocatedInput;
         private OrtValue _onnxPreAllocatedOutput;
+        private RunOptions _onnxRunOptions;
         private string[] _inputNames;
         private string[] _outputNames;
         private OrtValue[] _ortInputValues;
         private OrtValue[] _ortOutputValues;
-
-        // ================== OVERFIT ==================
-        private Sequential _overfitModel;
-        private FastTensor<float> _overfitInputTensor;
-        private AutogradNode _inputNode;
 
         [GlobalSetup]
         public void Setup()
         {
             var rnd = new Random(42);
             _inputData = Enumerable.Range(0, InputSize).Select(_ => (float)rnd.NextDouble()).ToArray();
-            _onnxRawOutputData = new float[OutputSize];
 
-            // --------------------------------------------------------
-            // 1. Setup ONNX Runtime session
-            // --------------------------------------------------------
+            // 1. STANDARD ONNX SETUP
             _onnxSession = new InferenceSession("benchmark_model.onnx");
-
-            // Standard ONNX setup
             var tensor = new DenseTensor<float>(_inputData, [1, InputSize]);
             _onnxInputs = [NamedOnnxValue.CreateFromTensor("input", tensor)];
 
-            // True Zero-Alloc ONNX setup (Najbardziej zoptymalizowana ścieżka C++ interop)
-            _onnxRunOptions = new RunOptions();
-            var memoryInfo = OrtMemoryInfo.DefaultInstance;
-
-            // Mapowanie pamięci C# bezpośrednio do C++ bez kopiowania
-            _onnxPreAllocatedInput = OrtValue.CreateTensorValueFromMemory<float>(memoryInfo, _inputData.AsMemory(), new long[] { 1, InputSize });
-            _onnxPreAllocatedOutput = OrtValue.CreateTensorValueFromMemory<float>(memoryInfo, _onnxRawOutputData.AsMemory(), new long[] { 1, OutputSize });
-
-            _inputNames = new[] { "input" };
-            // UWAGA: Upewnij się, że "output" to prawidłowa nazwa węzła wyjściowego w Twoim modelu ONNX
-            _outputNames = new[] { "output" };
-
-            _ortInputValues = new[] { _onnxPreAllocatedInput };
-            _ortOutputValues = new[] { _onnxPreAllocatedOutput };
-
-            // --------------------------------------------------------
-            // 2. Setup Overfit model
-            // --------------------------------------------------------
+            // 2. OVERFIT SETUP (DOD)
             _overfitModel = new Sequential(new LinearLayer(InputSize, OutputSize));
             _overfitModel.Load("benchmark_model.bin");
             _overfitModel.Eval();
 
-            _overfitInputTensor = new FastTensor<float>(1, InputSize, clearMemory: false);
-            _inputData.AsSpan().CopyTo(_overfitInputTensor.GetView().AsSpan());
-            _inputNode = new AutogradNode(_overfitInputTensor, false);
+            _overfitInputTensor = new TensorStorage<float>(InputSize, clearMemory: false);
+            _inputData.AsSpan().CopyTo(_overfitInputTensor.AsSpan());
+            _inputNode = new AutogradNode(_overfitInputTensor, new TensorShape(1, InputSize), false);
+
+            // 3. TRUE ZERO-ALLOC ONNX SETUP
+            _onnxRawOutputData = new float[OutputSize];
+            var allocator = OrtAllocator.DefaultInstance;
+
+            var inputShape = new long[] { 1, InputSize };
+            _onnxPreAllocatedInput = OrtValue.CreateTensorValueFromMemory(OrtMemoryInfo.DefaultInstance,
+                _inputData.AsMemory(), inputShape);
+
+            var outputShape = new long[] { 1, OutputSize };
+            _onnxPreAllocatedOutput = OrtValue.CreateTensorValueFromMemory(OrtMemoryInfo.DefaultInstance,
+                _onnxRawOutputData.AsMemory(), outputShape);
+
+            _onnxRunOptions = new RunOptions();
+            _inputNames = ["input"];
+            _outputNames = ["output"];
+            _ortInputValues = [_onnxPreAllocatedInput];
+            _ortOutputValues = [_onnxPreAllocatedOutput];
 
             // WARMUP
             for (var i = 0; i < 100; i++)
             {
                 _overfitModel.Forward(null, _inputNode);
-                using var r = _onnxSession.Run(_onnxInputs);
+                _onnxSession.Run(_onnxInputs).Dispose();
                 _onnxSession.Run(_onnxRunOptions, _inputNames, _ortInputValues, _outputNames, _ortOutputValues);
             }
         }
 
         /// <summary>
-        ///     Klasyczne wywołanie ONNX z alokacją tensora wejściowego w locie (najczęstszy antywzorzec).
-        /// </summary>
-        [Benchmark]
-        public float OnnxRuntime_FullAllocation()
-        {
-            var tensor = new DenseTensor<float>(_inputData, [1, InputSize]);
-            var inputs = new[] { NamedOnnxValue.CreateFromTensor("input", tensor) };
-            using var results = _onnxSession.Run(inputs);
-            return results.First().AsTensor<float>()[0];
-        }
-
-        /// <summary>
-        ///     Standardowe wywołanie ONNX (Prealokowane wejście, ale wyjście nadal tworzy IDisposable).
+        ///     Standardowe wywołanie ONNX używane w 99% tutoriali .NET 
+        ///     (Alokuje tablicę wyników pod spodem i nadal tworzy IDisposable).
         /// </summary>
         [Benchmark(Baseline = true)]
         public float OnnxRuntime_PreAllocated()
@@ -157,9 +138,9 @@ namespace Benchmarks
             _onnxPreAllocatedOutput?.Dispose();
             _onnxRunOptions?.Dispose();
             _onnxSession?.Dispose();
+            _overfitModel?.Dispose();
             _overfitInputTensor?.Dispose();
             _inputNode?.Dispose();
-            _overfitModel?.Dispose();
         }
     }
 }

@@ -9,6 +9,7 @@ using BenchmarkDotNet.Order;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core; // Zmieniono namespace na Core
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
@@ -30,7 +31,9 @@ namespace Benchmarks
         private InferenceSession _onnxSession;
         private NamedOnnxValue[] _onnxInputs;
         private Sequential _overfitModel;
-        private FastTensor<float> _overfitInputTensor;
+
+        // Zmiana na TensorStorage
+        private TensorStorage<float> _overfitInputTensor;
         private AutogradNode _inputNode;
 
         [GlobalSetup]
@@ -49,9 +52,12 @@ namespace Benchmarks
             _overfitModel.Load("benchmark_model.bin");
             _overfitModel.Eval();
 
-            _overfitInputTensor = new FastTensor<float>(BatchSize, InputSize, clearMemory: false);
-            inputData.AsSpan().CopyTo(_overfitInputTensor.GetView().AsSpan());
-            _inputNode = new AutogradNode(_overfitInputTensor, false);
+            // Używamy TensorStorage i bezpośredniego kopiowania do AsSpan()
+            _overfitInputTensor = new TensorStorage<float>(BatchSize * InputSize, clearMemory: false);
+            inputData.AsSpan().CopyTo(_overfitInputTensor.AsSpan());
+
+            // Węzeł autogradu wymaga teraz struktury TensorShape
+            _inputNode = new AutogradNode(_overfitInputTensor, new TensorShape(BatchSize, InputSize), false);
         }
 
         [Benchmark(Baseline = true)]
@@ -71,9 +77,9 @@ namespace Benchmarks
         public void Cleanup()
         {
             _onnxSession?.Dispose();
+            _overfitModel?.Dispose();
             _overfitInputTensor?.Dispose();
             _inputNode?.Dispose();
-            _overfitModel?.Dispose();
         }
     }
 }

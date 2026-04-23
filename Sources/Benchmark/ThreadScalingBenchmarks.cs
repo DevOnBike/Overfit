@@ -11,6 +11,7 @@ using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core; // Dodano namespace DOD
 
 namespace Benchmarks
 {
@@ -31,9 +32,10 @@ namespace Benchmarks
         private ComputationGraph _inferGraph = null!;
         private ComputationGraph _trainGraph = null!;
 
-        private FastTensor<float> _aTensor = null!;
-        private FastTensor<float> _bTensor = null!;
-        private FastTensor<float> _targetTensor = null!;
+        // Zmiana na TensorStorage
+        private TensorStorage<float> _aTensor = null!;
+        private TensorStorage<float> _bTensor = null!;
+        private TensorStorage<float> _targetTensor = null!;
 
         private AutogradNode _aNode = null!;
         private AutogradNode _bNode = null!;
@@ -42,8 +44,8 @@ namespace Benchmarks
         private ResidualBlock _residual = null!;
         private LstmLayer _lstm = null!;
 
-        private FastTensor<float> _lstmInputTensor = null!;
-        private FastTensor<float> _lstmTargetTensor = null!;
+        private TensorStorage<float> _lstmInputTensor = null!;
+        private TensorStorage<float> _lstmTargetTensor = null!;
         private AutogradNode _lstmInputNode = null!;
         private AutogradNode _lstmTargetNode = null!;
 
@@ -52,7 +54,6 @@ namespace Benchmarks
         private int _oldMaxWorker;
         private int _oldMaxIo;
 
-        // 🔥 do stabilizacji benchmarku
         private float _sink;
 
         [GlobalSetup]
@@ -63,39 +64,40 @@ namespace Benchmarks
             _inferGraph = new ComputationGraph { IsRecording = false };
             _trainGraph = new ComputationGraph { IsRecording = true };
 
-            _aTensor = new FastTensor<float>(Batch, Hidden, clearMemory: true);
-            _bTensor = new FastTensor<float>(Hidden, Hidden, clearMemory: true);
-            _targetTensor = new FastTensor<float>(Batch, Hidden, clearMemory: true);
+            // POPRAWKA: Przejście na płaskie alokacje dla DOD
+            _aTensor = new TensorStorage<float>(Batch * Hidden, clearMemory: true);
+            _bTensor = new TensorStorage<float>(Hidden * Hidden, clearMemory: true);
+            _targetTensor = new TensorStorage<float>(Batch * Hidden, clearMemory: true);
 
-            Fill(_aTensor.GetView().AsSpan(), rnd);
-            Fill(_bTensor.GetView().AsSpan(), rnd);
-            Fill(_targetTensor.GetView().AsSpan(), rnd);
+            Fill(_aTensor.AsSpan(), rnd);
+            Fill(_bTensor.AsSpan(), rnd);
+            Fill(_targetTensor.AsSpan(), rnd);
 
-            _aNode = new AutogradNode(_aTensor, requiresGrad: true);
-            _bNode = new AutogradNode(_bTensor, requiresGrad: true);
-            _targetNode = new AutogradNode(_targetTensor, requiresGrad: false);
+            // Wstrzyknięcie TensorShape
+            _aNode = new AutogradNode(_aTensor, new TensorShape(Batch, Hidden), requiresGrad: true);
+            _bNode = new AutogradNode(_bTensor, new TensorShape(Hidden, Hidden), requiresGrad: true);
+            _targetNode = new AutogradNode(_targetTensor, new TensorShape(Batch, Hidden), requiresGrad: false);
 
             _residual = new ResidualBlock(Hidden);
             _lstm = new LstmLayer(inputSize: 32, hiddenSize: 32, returnSequences: false);
 
-            _lstmInputTensor = new FastTensor<float>(Batch, 8, 32, clearMemory: true);
-            _lstmTargetTensor = new FastTensor<float>(Batch, 32, clearMemory: true);
+            _lstmInputTensor = new TensorStorage<float>(Batch * 8 * 32, clearMemory: true);
+            _lstmTargetTensor = new TensorStorage<float>(Batch * 32, clearMemory: true);
 
-            Fill(_lstmInputTensor.GetView().AsSpan(), rnd);
-            Fill(_lstmTargetTensor.GetView().AsSpan(), rnd);
+            Fill(_lstmInputTensor.AsSpan(), rnd);
+            Fill(_lstmTargetTensor.AsSpan(), rnd);
 
-            _lstmInputNode = new AutogradNode(_lstmInputTensor, requiresGrad: true);
-            _lstmTargetNode = new AutogradNode(_lstmTargetTensor, requiresGrad: false);
+            _lstmInputNode = new AutogradNode(_lstmInputTensor, new TensorShape(Batch, 8, 32), requiresGrad: true);
+            _lstmTargetNode = new AutogradNode(_lstmTargetTensor, new TensorShape(Batch, 32), requiresGrad: false);
 
             ThreadPool.GetMinThreads(out _oldMinWorker, out _oldMinIo);
             ThreadPool.GetMaxThreads(out _oldMaxWorker, out _oldMaxIo);
 
-            WarmUp(); // 🔥 KLUCZOWE
+            WarmUp();
         }
 
         private void WarmUp()
         {
-            // 🔥 JIT + cache + branch warmup
             for (var i = 0; i < 10; i++)
             {
                 _inferGraph.Reset();
@@ -146,7 +148,6 @@ namespace Benchmarks
             _residual.Train();
             _lstm.Train();
 
-            // 🔥 kontrola wątków
             ThreadPool.SetMinThreads(Threads, _oldMinIo);
             ThreadPool.SetMaxThreads(Math.Max(Threads, 1), _oldMaxIo);
         }
@@ -157,10 +158,6 @@ namespace Benchmarks
             ThreadPool.SetMinThreads(_oldMinWorker, _oldMinIo);
             ThreadPool.SetMaxThreads(_oldMaxWorker, _oldMaxIo);
         }
-
-        // ======================
-        // BENCHMARKI
-        // ======================
 
         [Benchmark(Baseline = true)]
         public float MatMul_MSE_Backward()
@@ -241,6 +238,12 @@ namespace Benchmarks
 
             _residual.Dispose();
             _lstm.Dispose();
+
+            _aTensor.Dispose();
+            _bTensor.Dispose();
+            _targetTensor.Dispose();
+            _lstmInputTensor.Dispose();
+            _lstmTargetTensor.Dispose();
         }
 
         private static void Fill(Span<float> span, Random rnd)

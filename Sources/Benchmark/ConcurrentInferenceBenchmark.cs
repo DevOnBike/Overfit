@@ -9,6 +9,7 @@ using BenchmarkDotNet.Order;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core; // Zmieniono namespace na Core
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
@@ -30,10 +31,11 @@ namespace Benchmarks
 
         private float[] _inputData;
         private AutogradNode[] _inputNodes;
-        private FastTensor<float>[] _inputTensors;
+
+        // Zmiana na tablicę TensorStorage
+        private TensorStorage<float>[] _inputTensors;
 
         private InferenceSession _onnxSession;
-
         private Sequential[] _overfitModels;
 
         [GlobalSetup]
@@ -45,8 +47,8 @@ namespace Benchmarks
             _onnxSession = new InferenceSession("benchmark_model.onnx");
 
             _overfitModels = new Sequential[ThreadCount];
-            _inputTensors = new FastTensor<float>[ThreadCount];
             _inputNodes = new AutogradNode[ThreadCount];
+            _inputTensors = new TensorStorage<float>[ThreadCount];
 
             for (var t = 0; t < ThreadCount; t++)
             {
@@ -54,28 +56,28 @@ namespace Benchmarks
                 _overfitModels[t].Load("benchmark_model.bin");
                 _overfitModels[t].Eval();
 
-                _inputTensors[t] = new FastTensor<float>(1, InputSize, clearMemory: false);
-                _inputData.AsSpan().CopyTo(_inputTensors[t].GetView().AsSpan());
-                _inputNodes[t] = new AutogradNode(_inputTensors[t], false);
+                // POPRAWKA: Zmiana na TensorStorage z podaniem TensorShape w węźle
+                _inputTensors[t] = new TensorStorage<float>(InputSize, clearMemory: false);
+                _inputData.AsSpan().CopyTo(_inputTensors[t].AsSpan());
+                _inputNodes[t] = new AutogradNode(_inputTensors[t], new TensorShape(1, InputSize), false);
+
+                _overfitModels[t].Forward(null, _inputNodes[t]);
             }
         }
 
         /// <summary>
-        ///     Measures ONNX Runtime performance under concurrent load.
-        ///     Expects potential bottlenecks due to internal thread synchronization.
+        ///     Measures ONNX Runtime performance with multi-threaded queries.
+        ///     Internally, ONNX uses its own thread pool and locks, leading to potential contention.
         /// </summary>
         [Benchmark(Baseline = true)]
         public float OnnxRuntime_Concurrent()
         {
+            var tensor = new DenseTensor<float>(_inputData, [1, InputSize]);
+            var inputs = new[] { NamedOnnxValue.CreateFromTensor("input", tensor) };
             var results = new float[ThreadCount];
 
             Parallel.For(0, ThreadCount, body: t =>
             {
-                var tensor = new DenseTensor<float>(_inputData, [1, InputSize]);
-                var inputs = new[]
-                {
-                    NamedOnnxValue.CreateFromTensor("input", tensor)
-                };
                 var sum = 0f;
 
                 for (var i = 0; i < IterationsPerThread; i++)
@@ -122,7 +124,6 @@ namespace Benchmarks
 
             for (var t = 0; t < ThreadCount; t++)
             {
-                _inputTensors[t]?.Dispose();
                 _inputNodes[t]?.Dispose();
                 _overfitModels[t]?.Dispose();
             }

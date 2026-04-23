@@ -9,6 +9,7 @@ using BenchmarkDotNet.Order;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core; // Zmieniono na Tensors.Core
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
@@ -24,85 +25,80 @@ namespace Benchmarks
     public class ScalingBenchmark
     {
         private const int OutputSize = 10;
+
         private AutogradNode _largeNode;
-        private FastTensor<float> _largeTensor;
+        private TensorStorage<float> _largeTensor;
         private AutogradNode _mediumNode;
-        private FastTensor<float> _mediumTensor;
+        private TensorStorage<float> _mediumTensor;
+        private AutogradNode _smallNode;
+        private TensorStorage<float> _smallTensor;
+
         private InferenceSession _onnxLarge;
         private NamedOnnxValue[] _onnxLargeInputs;
         private InferenceSession _onnxMedium;
         private NamedOnnxValue[] _onnxMediumInputs;
-
         private InferenceSession _onnxSmall;
-
         private NamedOnnxValue[] _onnxSmallInputs;
+
         private Sequential _overfitLarge;
         private Sequential _overfitMedium;
-
         private Sequential _overfitSmall;
-
-        private AutogradNode _smallNode;
-
-        private FastTensor<float> _smallTensor;
 
         [GlobalSetup]
         public void Setup()
         {
             var rnd = new Random(42);
 
-            SetupPair(rnd, 128, "benchmark_small",
-            out _onnxSmall, out _onnxSmallInputs,
-            out _overfitSmall, out _smallNode, out _smallTensor);
+            var smallData = Enumerable.Range(0, 64).Select(_ => (float)rnd.NextDouble()).ToArray();
+            var mediumData = Enumerable.Range(0, 784).Select(_ => (float)rnd.NextDouble()).ToArray();
+            var largeData = Enumerable.Range(0, 4096).Select(_ => (float)rnd.NextDouble()).ToArray();
 
-            SetupPair(rnd, 784, "benchmark_medium",
-            out _onnxMedium, out _onnxMediumInputs,
-            out _overfitMedium, out _mediumNode, out _mediumTensor);
+            // ONNX Setup
+            _onnxSmall = new InferenceSession("benchmark_small.onnx");
+            _onnxMedium = new InferenceSession("benchmark_medium.onnx");
+            _onnxLarge = new InferenceSession("benchmark_large.onnx");
 
-            SetupPair(rnd, 4096, "benchmark_large",
-            out _onnxLarge, out _onnxLargeInputs,
-            out _overfitLarge, out _largeNode, out _largeTensor);
-        }
+            _onnxSmallInputs = [NamedOnnxValue.CreateFromTensor("input", new DenseTensor<float>(smallData, [1, 64]))];
+            _onnxMediumInputs = [NamedOnnxValue.CreateFromTensor("input", new DenseTensor<float>(mediumData, [1, 784]))];
+            _onnxLargeInputs = [NamedOnnxValue.CreateFromTensor("input", new DenseTensor<float>(largeData, [1, 4096]))];
 
-        private static void SetupPair(Random rnd, int inputSize, string modelName,
-            out InferenceSession onnxSession, out NamedOnnxValue[] onnxInputs,
-            out Sequential overfitModel, out AutogradNode inputNode,
-            out FastTensor<float> inputTensor)
-        {
-            var data = Enumerable.Range(0, inputSize).Select(_ => (float)rnd.NextDouble()).ToArray();
+            // Overfit Setup
+            _overfitSmall = new Sequential(new LinearLayer(64, OutputSize));
+            _overfitSmall.Load("benchmark_small.bin");
+            _overfitSmall.Eval();
 
-            // Setup ONNX Runtime session
-            onnxSession = new InferenceSession($"{modelName}.onnx");
-            var tensor = new DenseTensor<float>(data, [1, inputSize]);
-            onnxInputs = [NamedOnnxValue.CreateFromTensor("input", tensor)];
+            _overfitMedium = new Sequential(new LinearLayer(784, OutputSize));
+            _overfitMedium.Load("benchmark_medium.bin");
+            _overfitMedium.Eval();
 
-            // Setup Overfit model
-            overfitModel = new Sequential(new LinearLayer(inputSize, OutputSize));
-            overfitModel.Load($"{modelName}.bin");
-            overfitModel.Eval();
+            _overfitLarge = new Sequential(new LinearLayer(4096, OutputSize));
+            _overfitLarge.Load("benchmark_large.bin");
+            _overfitLarge.Eval();
 
-            // POPRAWKA: Poprawny konstruktor (dim0, dim1, clearMemory)
-            inputTensor = new FastTensor<float>(1, inputSize, clearMemory: false);
-            // POPRAWKA: GetView().AsSpan() zamiast AsSpan()
-            data.AsSpan().CopyTo(inputTensor.GetView().AsSpan());
-            inputNode = new AutogradNode(inputTensor, false);
+            // Zmiana na TensorStorage + TensorShape w AutogradNode
+            _smallTensor = new TensorStorage<float>(64, clearMemory: false);
+            smallData.AsSpan().CopyTo(_smallTensor.AsSpan());
+            _smallNode = new AutogradNode(_smallTensor, new TensorShape(1, 64), false);
 
-            for (var i = 0; i < 200; i++)
-            {
-                overfitModel.Forward(null, inputNode);
-            }
+            _mediumTensor = new TensorStorage<float>(784, clearMemory: false);
+            mediumData.AsSpan().CopyTo(_mediumTensor.AsSpan());
+            _mediumNode = new AutogradNode(_mediumTensor, new TensorShape(1, 784), false);
+
+            _largeTensor = new TensorStorage<float>(4096, clearMemory: false);
+            largeData.AsSpan().CopyTo(_largeTensor.AsSpan());
+            _largeNode = new AutogradNode(_largeTensor, new TensorShape(1, 4096), false);
         }
 
         [Benchmark]
-        public float Onnx_128()
+        public float Onnx_64()
         {
             using var r = _onnxSmall.Run(_onnxSmallInputs);
             return r.First().AsTensor<float>()[0];
         }
 
         [Benchmark]
-        public float Overfit_128()
+        public float Overfit_64()
         {
-            // POPRAWKA: DataView.AsReadOnlySpan() zamiast Data.AsSpan()
             return _overfitSmall.Forward(null, _smallNode).DataView.AsReadOnlySpan()[0];
         }
 
@@ -116,7 +112,6 @@ namespace Benchmarks
         [Benchmark]
         public float Overfit_784()
         {
-            // POPRAWKA: DataView.AsReadOnlySpan()
             return _overfitMedium.Forward(null, _mediumNode).DataView.AsReadOnlySpan()[0];
         }
 
@@ -130,7 +125,6 @@ namespace Benchmarks
         [Benchmark]
         public float Overfit_4096()
         {
-            // POPRAWKA: DataView.AsReadOnlySpan()
             return _overfitLarge.Forward(null, _largeNode).DataView.AsReadOnlySpan()[0];
         }
 
@@ -143,12 +137,12 @@ namespace Benchmarks
             _overfitSmall?.Dispose();
             _overfitMedium?.Dispose();
             _overfitLarge?.Dispose();
-            _smallNode?.Dispose();
-            _mediumNode?.Dispose();
-            _largeNode?.Dispose();
             _smallTensor?.Dispose();
+            _smallNode?.Dispose();
             _mediumTensor?.Dispose();
+            _mediumNode?.Dispose();
             _largeTensor?.Dispose();
+            _largeNode?.Dispose();
         }
     }
 }

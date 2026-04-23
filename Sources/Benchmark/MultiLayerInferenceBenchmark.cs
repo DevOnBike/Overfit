@@ -9,6 +9,7 @@ using BenchmarkDotNet.Order;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core; // Zmieniono na Tensors.Core
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
@@ -32,9 +33,10 @@ namespace Benchmarks
         private NamedOnnxValue[] _onnxInputs;
 
         private InferenceSession _onnxSession;
-        private FastTensor<float> _overfitInputTensor;
-
         private Sequential _overfitModel;
+
+        // Zmiana na TensorStorage
+        private TensorStorage<float> _overfitInputTensor;
 
         [GlobalSetup]
         public void Setup()
@@ -42,16 +44,7 @@ namespace Benchmarks
             var rnd = new Random(42);
             _inputData = Enumerable.Range(0, InputSize).Select(_ => (float)rnd.NextDouble()).ToArray();
 
-            _overfitModel = new Sequential(
-            new LinearLayer(InputSize, 256),
-            new ReluActivation(),
-            new LinearLayer(256, 128),
-            new ReluActivation(),
-            new LinearLayer(128, 10));
-
-            _overfitModel.Save(BinPath);
-            _overfitModel.Eval();
-
+            // ONNX Setup
             if (File.Exists(OnnxPath))
             {
                 _onnxSession = new InferenceSession(OnnxPath);
@@ -59,9 +52,25 @@ namespace Benchmarks
                 _onnxInputs = [NamedOnnxValue.CreateFromTensor("input", tensor)];
             }
 
-            _overfitInputTensor = new FastTensor<float>(1, InputSize, clearMemory: false);
-            _inputData.AsSpan().CopyTo(_overfitInputTensor.GetView().AsSpan());
-            _inputNode = new AutogradNode(_overfitInputTensor, false);
+            // Overfit Setup (DOD)
+            _overfitModel = new Sequential(
+                new LinearLayer(InputSize, 256),
+                new ReluActivation(),
+                new LinearLayer(256, 128),
+                new ReluActivation(),
+                new LinearLayer(128, 10));
+
+            if (!File.Exists(BinPath))
+            {
+                _overfitModel.Save(BinPath);
+            }
+
+            _overfitModel.Load(BinPath);
+            _overfitModel.Eval();
+
+            _overfitInputTensor = new TensorStorage<float>(InputSize, clearMemory: false);
+            _inputData.AsSpan().CopyTo(_overfitInputTensor.AsSpan());
+            _inputNode = new AutogradNode(_overfitInputTensor, new TensorShape(1, InputSize), false);
 
             for (var i = 0; i < 200; i++)
             {
@@ -99,9 +108,9 @@ namespace Benchmarks
         public void Cleanup()
         {
             _onnxSession?.Dispose();
+            _overfitModel?.Dispose();
             _overfitInputTensor?.Dispose();
             _inputNode?.Dispose();
-            _overfitModel?.Dispose();
         }
     }
 }

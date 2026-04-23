@@ -10,6 +10,7 @@ using BenchmarkDotNet.Order;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core; // Dodano namespace DOD
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
@@ -35,7 +36,9 @@ namespace Benchmarks
         private long[] _onnxLatencies;
 
         private InferenceSession _onnxSession;
-        private FastTensor<float> _overfitInputTensor;
+
+        // Zmiana na TensorStorage
+        private TensorStorage<float> _overfitInputTensor;
         private long[] _overfitLatencies;
 
         private Sequential _overfitModel;
@@ -54,11 +57,10 @@ namespace Benchmarks
             _overfitModel.Load("benchmark_model.bin");
             _overfitModel.Eval();
 
-            // POPRAWKA: Poprawny konstruktor
-            _overfitInputTensor = new FastTensor<float>(1, InputSize, clearMemory: false);
-            // POPRAWKA: GetView().AsSpan()
-            _inputData.AsSpan().CopyTo(_overfitInputTensor.GetView().AsSpan());
-            _inputNode = new AutogradNode(_overfitInputTensor, false);
+            // POPRAWKA: Przejście na TensorStorage
+            _overfitInputTensor = new TensorStorage<float>(InputSize, clearMemory: false);
+            _inputData.AsSpan().CopyTo(_overfitInputTensor.AsSpan());
+            _inputNode = new AutogradNode(_overfitInputTensor, new TensorShape(1, InputSize), false);
 
             for (var i = 0; i < 1000; i++)
             {
@@ -106,7 +108,6 @@ namespace Benchmarks
             for (var i = 0; i < TotalCalls; i++)
             {
                 var start = Stopwatch.GetTimestamp();
-                // POPRAWKA: DataView.AsReadOnlySpan() zamiast Data.AsSpan()
                 _ = _overfitModel.Forward(null, _inputNode).DataView.AsReadOnlySpan()[0];
                 _overfitLatencies[i] = Stopwatch.GetTimestamp() - start;
             }

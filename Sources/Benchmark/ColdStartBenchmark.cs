@@ -9,6 +9,7 @@ using BenchmarkDotNet.Order;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core; // Zmieniono namespace na Core
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
@@ -18,33 +19,13 @@ namespace Benchmarks
     ///     Measures "Time-to-First-Prediction" (Cold Start) latency.
     ///     Compares the initialization and execution overhead of ONNX Runtime vs. the Overfit engine.
     /// </summary>
-    /// <remarks>
-    ///     <list type="bullet">
-    ///         <item>
-    ///             <description>
-    ///                 <b>ONNX:</b> Significant overhead due to loading <c>onnxruntime.dll</c> (~30MB), parsing the
-    ///                 Protobuf graph, and initial workspace buffer allocations.
-    ///             </description>
-    ///         </item>
-    ///         <item>
-    ///             <description>
-    ///                 <b>Overfit:</b> Lightweight start via direct binary reading into <see cref="FastTensor{}" />
-    ///                 and efficient weight pre-transposition during <c>Eval()</c>.
-    ///             </description>
-    ///         </item>
-    ///     </list>
-    ///     This benchmark is critical for Serverless environments (Azure Functions), short-lived containers, and CLI tools
-    ///     where
-    ///     the startup cost often dominates the total execution time.
-    /// </remarks>
-    [SimpleJob(RuntimeMoniker.Net10_0, iterationCount: 10, warmupCount: 0)]
+    [SimpleJob(RuntimeMoniker.Net10_0)]
     [Orderer(SummaryOrderPolicy.FastestToSlowest)]
     [MemoryDiagnoser]
     public class ColdStartBenchmark
     {
         private const int InputSize = 784;
         private const int OutputSize = 10;
-
         private float[] _inputData;
 
         [GlobalSetup]
@@ -81,12 +62,12 @@ namespace Benchmarks
             model.Load("benchmark_model.bin");
             model.Eval();
 
-            // POPRAWKA: Konstruktor i GetView()
-            using var inputTensor = new FastTensor<float>(1, InputSize, clearMemory: false);
-            _inputData.AsSpan().CopyTo(inputTensor.GetView().AsSpan());
+            // POPRAWKA: Zmiana na TensorStorage + ucięto GetView()
+            using var inputTensor = new TensorStorage<float>(InputSize, clearMemory: false);
+            _inputData.AsSpan().CopyTo(inputTensor.AsSpan());
 
-            using var inputNode = new AutogradNode(inputTensor, false);
-            // POPRAWKA: DataView.AsReadOnlySpan()
+            using var inputNode = new AutogradNode(inputTensor, new TensorShape(1, InputSize), false);
+
             var result = model.Forward(null, inputNode).DataView.AsReadOnlySpan()[0];
 
             model.Dispose();

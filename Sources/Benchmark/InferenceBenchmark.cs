@@ -10,6 +10,7 @@ using BenchmarkDotNet.Order;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core; // Zmieniono namespace na Core
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
@@ -49,9 +50,10 @@ namespace Benchmarks
             _overfitModel.Load("benchmark_model.bin");
             _overfitModel.Eval();
 
-            var inputTensor = new FastTensor<float>(1, InputSize, clearMemory: false);
-            _inputData.AsSpan().CopyTo(inputTensor.GetView().AsSpan());
-            _inputNode = new AutogradNode(inputTensor, false);
+            // POPRAWKA: Używamy TensorStorage i TensorShape
+            var inputTensor = new TensorStorage<float>(InputSize, clearMemory: false);
+            _inputData.AsSpan().CopyTo(inputTensor.AsSpan());
+            _inputNode = new AutogradNode(inputTensor, new TensorShape(1, InputSize), false);
 
             for (var i = 0; i < 100; i++)
             {
@@ -82,8 +84,9 @@ namespace Benchmarks
         public void Cleanup()
         {
             _onnxSession?.Dispose();
-            _inputNode?.Dispose();
             _overfitModel?.Dispose();
+            // Dispose logic was moved to _inputNode.Dispose() which holds the storage
+            _inputNode?.Dispose();
         }
     }
 }
