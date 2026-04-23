@@ -1,27 +1,41 @@
-﻿// Copyright (c) 2026 DevOnBike.
-// This file is part of DevonBike Overfit.
+﻿using System;
+using System.Runtime.CompilerServices;
 
 namespace DevOnBike.Overfit.Tensors.Core
 {
     /// <summary>
-    /// PURE DOD: Oddzielona logika tworzenia, klonowania i materializacji pamięci.
+    /// Pure DOD: creation, cloning and materialization logic separated from storage and views.
     /// </summary>
     public static class TensorFactory
     {
-        public static TensorStorage<T> CloneStorage<T>(TensorStorage<T> template, bool clearMemory = true) where T : unmanaged
+        /// <summary>
+        /// Creates a new storage with the same length and memory mode as the template.
+        /// For borrowed memory, the clone borrows from the same arena.
+        /// For pooled memory, the clone rents a new managed buffer.
+        /// </summary>
+        public static TensorStorage<T> CloneStorage<T>(TensorStorage<T> template, bool clearMemory = true)
+            where T : unmanaged
         {
+            ArgumentNullException.ThrowIfNull(template);
+
             TensorStorage<T> result;
 
-            if (template._isBorrowedMemory && template._arena != null)
+            if (template._isBorrowedMemory)
             {
+                if (template._arena is null)
+                {
+                    throw new InvalidOperationException(
+                        "Template storage is marked as borrowed memory but has no arena.");
+                }
+
                 result = new TensorStorage<T>(template._arena, template.Length);
             }
             else
             {
-                result = new TensorStorage<T>(template.Length, false);
+                result = new TensorStorage<T>(template.Length, clearMemory);
             }
 
-            if (clearMemory)
+            if (template._isBorrowedMemory && clearMemory)
             {
                 result.AsSpan().Clear();
             }
@@ -30,36 +44,111 @@ namespace DevOnBike.Overfit.Tensors.Core
         }
 
         /// <summary>
-        /// Tworzy ciągły bufor pamięci na podstawie (nawet poszatkowanego) widoku.
+        /// Materializes any tensor view into a new contiguous storage buffer.
+        /// Supports rank 1..4.
         /// </summary>
-        public static TensorStorage<T> Materialize<T>(TensorView<T> view) where T : unmanaged
+        public static TensorStorage<T> Materialize<T>(TensorView<T> view)
+            where T : unmanaged
         {
-            var storage = new TensorStorage<T>(view.Size, false);
-            var targetSpan = storage.AsSpan();
+            var storage = new TensorStorage<T>(view.Size, clearMemory: false);
+            var target = storage.AsSpan();
 
             if (view.IsContiguous)
             {
-                view.AsReadOnlySpan().CopyTo(targetSpan);
+                view.AsReadOnlySpan().CopyTo(target);
                 return storage;
             }
 
-            // Implementacja dla nieciągłych widoków 2D (np. po Transpose)
-            if (view.Rank == 2)
+            switch (view.Rank)
             {
-                var index = 0;
-                
-                for (var i = 0; i < view.GetDim(0); i++)
+                case 1:
+                    MaterializeRank1(view, target);
+                    break;
+
+                case 2:
+                    MaterializeRank2(view, target);
+                    break;
+
+                case 3:
+                    MaterializeRank3(view, target);
+                    break;
+
+                case 4:
+                    MaterializeRank4(view, target);
+                    break;
+
+                default:
+                    storage.Dispose();
+                    throw new NotSupportedException($"Unsupported tensor rank: {view.Rank}");
+            }
+
+            return storage;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void MaterializeRank1<T>(TensorView<T> view, Span<T> target)
+            where T : unmanaged
+        {
+            var idx = 0;
+
+            for (var i = 0; i < view.Shape.D0; i++)
+            {
+                target[idx++] = view[i];
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void MaterializeRank2<T>(TensorView<T> view, Span<T> target)
+            where T : unmanaged
+        {
+            var idx = 0;
+
+            for (var i = 0; i < view.Shape.D0; i++)
+            {
+                for (var j = 0; j < view.Shape.D1; j++)
                 {
-                    for (var j = 0; j < view.GetDim(1); j++)
+                    target[idx++] = view[i, j];
+                }
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void MaterializeRank3<T>(TensorView<T> view, Span<T> target)
+            where T : unmanaged
+        {
+            var idx = 0;
+
+            for (var i = 0; i < view.Shape.D0; i++)
+            {
+                for (var j = 0; j < view.Shape.D1; j++)
+                {
+                    for (var k = 0; k < view.Shape.D2; k++)
                     {
-                        targetSpan[index++] = view[i, j];
+                        target[idx++] = view[i, j, k];
                     }
                 }
-                
-                return storage;
             }
+        }
 
-            throw new NotImplementedException("Kopiowanie nieciągłych widoków > 2D nie jest zaimplementowane.");
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void MaterializeRank4<T>(TensorView<T> view, Span<T> target)
+            where T : unmanaged
+        {
+            var idx = 0;
+
+            for (var i = 0; i < view.Shape.D0; i++)
+            {
+                for (var j = 0; j < view.Shape.D1; j++)
+                {
+                    for (var k = 0; k < view.Shape.D2; k++)
+                    {
+                        for (var l = 0; l < view.Shape.D3; l++)
+                        {
+                            target[idx++] = view[i, j, k, l];
+                        }
+                    }
+                }
+            }
         }
     }
 }
