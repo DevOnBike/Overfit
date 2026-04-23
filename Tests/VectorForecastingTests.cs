@@ -8,6 +8,8 @@ using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core; // Zmieniono na Tensors.Core
+using Xunit;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests
@@ -37,11 +39,11 @@ namespace DevOnBike.Overfit.Tests
 
             var numSamples = returns.Length - windowSize - forecastDays + 1;
 
-            using var xTensor = new FastTensor<float>(numSamples, windowSize, clearMemory: false);
-            using var yTensor = new FastTensor<float>(numSamples, forecastDays, clearMemory: false);
+            using var xTensor = new TensorStorage<float>(numSamples * windowSize, clearMemory: false);
+            using var yTensor = new TensorStorage<float>(numSamples * forecastDays, clearMemory: false);
 
-            var xSpan = xTensor.GetView().AsSpan();
-            var ySpan = yTensor.GetView().AsSpan();
+            var xSpan = xTensor.AsSpan();
+            var ySpan = yTensor.AsSpan();
 
             for (var i = 0; i < numSamples; i++)
             {
@@ -55,8 +57,8 @@ namespace DevOnBike.Overfit.Tests
                 }
             }
 
-            using var X = new AutogradNode(xTensor, false);
-            using var Y = new AutogradNode(yTensor, false);
+            using var X = new AutogradNode(xTensor, new TensorShape(numSamples, windowSize), false);
+            using var Y = new AutogradNode(yTensor, new TensorShape(numSamples, forecastDays), false);
 
             using var layer1 = new LinearLayer(windowSize, 32);
             using var layer2 = new LinearLayer(32, 16);

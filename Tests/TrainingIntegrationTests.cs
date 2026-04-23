@@ -11,6 +11,7 @@ using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core; // Zmieniono na Tensors.Core
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests
@@ -89,13 +90,15 @@ namespace DevOnBike.Overfit.Tests
 
                 var scaledResult = pipeline.Process(slicedSeries, windowStartMs, scrapeTsMs);
 
-                using var trainingInput = new FastTensor<float>(1, WindowSize, TotalFeatures, clearMemory: true);
-                var infSpan = trainingInput.GetView().AsSpan();
+                // Przejście na TensorStorage z płaskim rozmiarem (DOD)
+                using var trainingInput = new TensorStorage<float>(1 * WindowSize * TotalFeatures, clearMemory: true);
+                var infSpan = trainingInput.AsSpan();
+
+                // POPRAWKA: Pipeline zwraca stary FastTensor, więc musimy użyć .GetView() przed wejściem na Span
                 var devSpan = scaledResult.PodDeviations.GetView().AsReadOnlySpan();
 
                 for (var w = 0; w < WindowSize; w++)
                 {
-                    // ZABEZPIECZENIE: Sprawdzamy czy mamy dane dla całego okna czy tylko ostatni krok
                     if (devSpan.Length >= (w + 1) * MetricCount)
                     {
                         devSpan.Slice(w * MetricCount, MetricCount).CopyTo(infSpan.Slice(w * TotalFeatures, MetricCount));
@@ -119,7 +122,8 @@ namespace DevOnBike.Overfit.Tests
                 graph.Reset();
                 optimizer.ZeroGrad();
 
-                using var inputNode = new AutogradNode(trainingInput, false);
+                // Dodane parametry kształtu
+                using var inputNode = new AutogradNode(trainingInput, new TensorShape(1, WindowSize, TotalFeatures), false);
                 using var reconstruction = autoencoder.Forward(graph, inputNode);
                 using var loss = TensorMath.MSELoss(graph, reconstruction, inputNode);
 

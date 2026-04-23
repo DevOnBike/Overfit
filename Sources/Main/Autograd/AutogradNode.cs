@@ -4,51 +4,56 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core; // Wpinamy nowy Core!
 
 namespace DevOnBike.Overfit.Autograd
 {
     /// <summary>
     /// Węzeł grafu obliczeniowego. 
-    /// Przechowuje fizyczną pamięć (FastTensor) dla danych i gradientów.
-    /// Udostępnia bezalokacyjne widoki (TensorView) dla logiki matematycznej.
+    /// Przechowuje fizyczną pamięć (TensorStorage) dla danych i gradientów.
+    /// Udostępnia bezalokacyjne widoki (TensorSpan) dla logiki matematycznej.
     /// </summary>
     public sealed class AutogradNode : IDisposable
     {
-        // 1. PAMIĘĆ FIZYCZNA NA STERCIE (Magazyny)
-        private FastTensor<float>? _dataTensor;
-        private FastTensor<float>? _gradTensor;
+        // 1. PAMIĘĆ FIZYCZNA NA STERCIE / ARENIE (Magazyny)
+        private TensorStorage<float>? _dataStorage;
+        private TensorStorage<float>? _gradStorage;
         private int _disposed;
 
         public bool RequiresGrad { get; }
+
+        // NOWOŚĆ: Węzeł sam pamięta swój kształt!
+        public TensorShape Shape { get; }
 
         // ========================================================================
         // 2. BEZALOKACYJNE WIDOKI (Bramy do matematyki)
         // ========================================================================
 
         /// <summary> Zwraca widok na dane z Forward Pass. Używane przez TensorMath. </summary>
-        public TensorView<float> DataView
+        public TensorSpan<float> DataView
         {
             get
             {
                 ObjectDisposedException.ThrowIf(_disposed == 1, this);
 
-                return _dataTensor!.GetView();
+                // ZERO-ALLOC: Składamy widok na stosie za każdym razem w ułamek nanosekundy!
+                return new TensorSpan<float>(_dataStorage!.AsSpan(), Shape);
             }
         }
 
         /// <summary> Zwraca widok na gradienty z Backward Pass. Używane przez TensorMath. </summary>
-        public TensorView<float> GradView
+        public TensorSpan<float> GradView
         {
             get
             {
                 ObjectDisposedException.ThrowIf(_disposed == 1, this);
 
-                if (!RequiresGrad || _gradTensor == null)
+                if (!RequiresGrad || _gradStorage == null)
                 {
                     throw new InvalidOperationException("Ten węzeł nie śledzi gradientów (RequiresGrad = false).");
                 }
 
-                return _gradTensor.GetView();
+                return new TensorSpan<float>(_gradStorage.AsSpan(), Shape);
             }
         }
 
@@ -56,15 +61,16 @@ namespace DevOnBike.Overfit.Autograd
         // KONSTRUKTOR
         // ========================================================================
 
-        public AutogradNode(FastTensor<float> data, bool requiresGrad = false)
+        public AutogradNode(TensorStorage<float> data, TensorShape shape, bool requiresGrad = false)
         {
-            _dataTensor = data ?? throw new ArgumentNullException(nameof(data));
-
+            _dataStorage = data ?? throw new ArgumentNullException(nameof(data));
+            Shape = shape;
             RequiresGrad = requiresGrad;
 
             if (requiresGrad)
             {
-                _gradTensor = FastTensor<float>.SameShape(data, true);
+                // Używamy nowej Fabryki DOD: sama zadba o to, czy sklonować to na Arenie, czy w Puli!
+                _gradStorage = TensorFactory.CloneStorage(data, clearMemory: true);
             }
         }
 
@@ -78,9 +84,9 @@ namespace DevOnBike.Overfit.Autograd
         /// </summary>
         public void ZeroGrad()
         {
-            if (RequiresGrad && _gradTensor != null)
+            if (RequiresGrad && _gradStorage != null)
             {
-                _gradTensor.GetView().AsSpan().Clear();
+                _gradStorage.AsSpan().Clear();
             }
         }
 
@@ -92,11 +98,11 @@ namespace DevOnBike.Overfit.Autograd
         {
             if (Interlocked.Exchange(ref _disposed, 1) == 0)
             {
-                _dataTensor?.Dispose();
-                _dataTensor = null;
+                _dataStorage?.Dispose();
+                _dataStorage = null;
 
-                _gradTensor?.Dispose();
-                _gradTensor = null;
+                _gradStorage?.Dispose();
+                _gradStorage = null;
             }
         }
     }

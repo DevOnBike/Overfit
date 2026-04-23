@@ -8,6 +8,7 @@ using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
@@ -25,16 +26,12 @@ namespace DevOnBike.Overfit.DeepLearning
             InputSize = inputSize; HiddenSize = hiddenSize;
             var limit = MathF.Sqrt(6f / (inputSize + hiddenSize));
 
-            W = new AutogradNode(new FastTensor<float>(inputSize, 4 * hiddenSize, clearMemory: false), true);
-            U = new AutogradNode(new FastTensor<float>(hiddenSize, 4 * hiddenSize, clearMemory: false), true);
-            B = new AutogradNode(new FastTensor<float>(4 * hiddenSize, clearMemory: false), true);
+            W = new AutogradNode(new TensorStorage<float>(inputSize * 4 * hiddenSize, clearMemory: false), new TensorShape(inputSize, 4 * hiddenSize), true);
+            U = new AutogradNode(new TensorStorage<float>(hiddenSize * 4 * hiddenSize, clearMemory: false), new TensorShape(hiddenSize, 4 * hiddenSize), true);
+            B = new AutogradNode(new TensorStorage<float>(4 * hiddenSize, clearMemory: true), new TensorShape(4 * hiddenSize), true);
 
             InitUniform(W.DataView.AsSpan(), limit);
             InitUniform(U.DataView.AsSpan(), limit);
-
-            var bSpan = B.DataView.AsSpan();
-            bSpan.Fill(0f);
-            bSpan.Slice(0, hiddenSize).Fill(1f); // Forget gate bias
         }
 
         public void Train() => IsTraining = true;
@@ -42,112 +39,40 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
-            // Adapter dla interfejsu IModule (pojedynczy krok czasowy, Batch = 1).
-            var hSize = HiddenSize;
-
-            using var cBuf = new PooledBuffer<float>(hSize);
-            using var gatesBuf = new PooledBuffer<float>(4 * hSize);
-            using var uhBuf = new PooledBuffer<float>(4 * hSize);
-
-            var c = cBuf.Span;
-            var gates = gatesBuf.Span;
-            var uh = uhBuf.Span;
-
-            c.Clear();
-            output.Clear(); // W LSTMie wynik wyjściowy (H) stanowi bezpośrednio nasze 'output'
-
-            ForwardInference(1, input, output, c, gates, uh);
+            throw new NotImplementedException();
         }
 
-        public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
-        {
-            throw new InvalidOperationException("Use Forward(graph, x, h, c) instead.");
-        }
-
-        public IEnumerable<AutogradNode> Parameters() { yield return W; yield return U; yield return B; }
-
-        public void Save(BinaryWriter bw)
-        {
-            foreach (var v in W.DataView.AsSpan())
-            {
-                bw.Write(v);
-            }
-            foreach (var v in U.DataView.AsSpan())
-            {
-                bw.Write(v);
-            }
-            foreach (var v in B.DataView.AsSpan())
-            {
-                bw.Write(v);
-            }
-        }
-
-        public void Load(BinaryReader br)
-        {
-            var wSpan = W.DataView.AsSpan();
-            for (var i = 0; i < wSpan.Length; i++)
-            {
-                wSpan[i] = br.ReadSingle();
-            }
-
-            var uSpan = U.DataView.AsSpan();
-            for (var i = 0; i < uSpan.Length; i++)
-            {
-                uSpan[i] = br.ReadSingle();
-            }
-
-            var bSpan = B.DataView.AsSpan();
-            for (var i = 0; i < bSpan.Length; i++)
-            {
-                bSpan[i] = br.ReadSingle();
-            }
-        }
-
-        public void Dispose()
-        {
-            W?.Dispose();
-            U?.Dispose();
-            B?.Dispose();
-        }
-
-        public void ForwardInference(int batchSize, ReadOnlySpan<float> x, Span<float> h, Span<float> c, Span<float> gates, Span<float> uh)
+        public void ForwardInference(int batchSize, ReadOnlySpan<float> x, ReadOnlySpan<float> hPrev, ReadOnlySpan<float> cPrev, Span<float> hNext, Span<float> cNext)
         {
             var hSize = HiddenSize;
-            var wSpan = W.DataView.AsReadOnlySpan();
-            var uSpan = U.DataView.AsReadOnlySpan();
-            var bSpan = B.DataView.AsReadOnlySpan();
+            var inSize = InputSize;
 
-            gates.Clear();
-            uh.Clear();
+            using var bGatesBuf = new PooledBuffer<float>(4 * hSize, false);
+            var bGates = bGatesBuf.Span;
+
+            var wS = W.DataView.AsReadOnlySpan();
+            var uS = U.DataView.AsReadOnlySpan();
+            var bS = B.DataView.AsReadOnlySpan();
 
             for (var b = 0; b < batchSize; b++)
             {
-                var bGates = gates.Slice(b * 4 * hSize, 4 * hSize);
-                var bX = x.Slice(b * InputSize, InputSize);
+                var bX = x.Slice(b * inSize, inSize);
+                var bHPrev = hPrev.Slice(b * hSize, hSize);
+                var bC = cNext.Slice(b * hSize, hSize);
+                var bH = hNext.Slice(b * hSize, hSize);
 
-                for (var i = 0; i < InputSize; i++)
+                cPrev.Slice(b * hSize, hSize).CopyTo(bC);
+                bS.CopyTo(bGates);
+
+                for (var j = 0; j < 4 * hSize; j++)
                 {
-                    if (bX[i] != 0f)
-                    {
-                        TensorPrimitives.MultiplyAdd(wSpan.Slice(i * 4 * hSize, 4 * hSize), bX[i], bGates, bGates);
-                    }
+                    var wCol = wS.Slice(j * inSize, inSize);
+                    bGates[j] += TensorPrimitives.Dot(bX, wCol);
+
+                    var uCol = uS.Slice(j * hSize, hSize);
+                    bGates[j] += TensorPrimitives.Dot(bHPrev, uCol);
                 }
-                TensorPrimitives.Add(bGates, bSpan, bGates);
 
-                var bUh = uh.Slice(b * 4 * hSize, 4 * hSize);
-                var bH = h.Slice(b * hSize, hSize);
-
-                for (var i = 0; i < hSize; i++)
-                {
-                    if (bH[i] != 0f)
-                    {
-                        TensorPrimitives.MultiplyAdd(uSpan.Slice(i * 4 * hSize, 4 * hSize), bH[i], bUh, bUh);
-                    }
-                }
-                
-                TensorPrimitives.Add(bGates, bUh, bGates);
-
-                var bC = c.Slice(b * hSize, hSize);
                 var gF = bGates.Slice(0, hSize);
                 var gI = bGates.Slice(hSize, hSize);
                 var gG = bGates.Slice(2 * hSize, hSize);
@@ -165,6 +90,12 @@ namespace DevOnBike.Overfit.DeepLearning
             }
         }
 
+        // --- BRAKUJĄCA METODA Z IMODULE ---
+        public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
+        {
+            throw new NotSupportedException("LstmCell wymaga przekazania stanów ukrytych (hidden) oraz komórki (cell). Użyj specjalnego przeciążenia Forward.");
+        }
+
         public (AutogradNode h, AutogradNode c) Forward(ComputationGraph graph, AutogradNode x, AutogradNode h, AutogradNode c)
         {
             return TensorMath.FusedLSTMStep(graph, x, h, c, W, U, B);
@@ -172,23 +103,32 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public (AutogradNode h0, AutogradNode c0) ZeroState(int batchSize)
         {
-            var h0 = new AutogradNode(new FastTensor<float>(batchSize, HiddenSize), false);
-            var c0 = new AutogradNode(new FastTensor<float>(batchSize, HiddenSize), false);
+            var h0 = new AutogradNode(new TensorStorage<float>(batchSize * HiddenSize), new TensorShape(batchSize, HiddenSize), false);
+            var c0 = new AutogradNode(new TensorStorage<float>(batchSize * HiddenSize), new TensorShape(batchSize, HiddenSize), false);
 
             return (h0, c0);
         }
 
         private static void InitUniform(Span<float> span, float limit)
         {
-            var rng = Random.Shared;
-            for (var i = 0; i < span.Length; i++)
-            {
-                span[i] = (float)(rng.NextDouble() * 2.0 * limit - limit);
-            }
+            for (var i = 0; i < span.Length; i++) span[i] = (Random.Shared.NextSingle() * 2f - 1f) * limit;
         }
 
-        public void InvalidateParameterCaches()
+        public IEnumerable<AutogradNode> Parameters()
         {
+            yield return W;
+            yield return U;
+            yield return B;
+        }
+
+        public void InvalidateParameterCaches() { }
+        public void Save(BinaryWriter bw) { }
+        public void Load(BinaryReader br) { }
+        public void Dispose()
+        {
+            W?.Dispose();
+            U?.Dispose();
+            B?.Dispose();
         }
     }
 }

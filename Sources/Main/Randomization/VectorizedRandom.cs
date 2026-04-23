@@ -2,7 +2,6 @@
 // This file is part of DevOnBike Overfit.
 // DevOnBike Overfit is licensed under the GNU AGPLv3.
 
-using System;
 using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;

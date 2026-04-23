@@ -10,6 +10,7 @@ using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core; // Zmieniono namespace
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests
@@ -23,11 +24,11 @@ namespace DevOnBike.Overfit.Tests
             _output = output;
         }
 
-        [Fact(Skip ="aaa")]
+        //[Fact]
         public void Mnist_FullTrain60k_CnnBeastMode_Benchmark()
         {
-            const int trainSize = 60_000;
-            const int batchSize = 64;
+            const int trainSize = 10_000;
+            const int batchSize = 16;
             const int epochs = 5;
             const float lr = 0.001f;
 
@@ -84,8 +85,6 @@ namespace DevOnBike.Overfit.Tests
 
             using var session = new DiagnosticsSession(enabled: true, sink: compositeSink);
 
-            // Bardzo ważne: reset przed całym benchmarkiem,
-            // żeby nie wciągnąć stanu z wcześniejszych testów/runów.
             traceCollector.Reset();
 
             _output.WriteLine("=== START: Trening ResNet na Taśmie (NativeBuffer) ===");
@@ -102,21 +101,8 @@ namespace DevOnBike.Overfit.Tests
                 float epochLoss = 0f;
                 int batches = trainSize / batchSize;
 
-                long tConv = 0;
-                long tBn = 0;
-                long tRes = 0;
-                long tHead = 0;
-                long tLoss = 0;
-                long tBackward = 0;
-                long tOptimizer = 0;
-
-                long aConv = 0;
-                long aBn = 0;
-                long aRes = 0;
-                long aHead = 0;
-                long aLoss = 0;
-                long aBackward = 0;
-                long aOptimizer = 0;
+                long tConv = 0, tBn = 0, tRes = 0, tHead = 0, tLoss = 0, tBackward = 0, tOptimizer = 0;
+                long aConv = 0, aBn = 0, aRes = 0, aHead = 0, aLoss = 0, aBackward = 0, aOptimizer = 0;
 
                 var sectionSw = new Stopwatch();
 
@@ -130,18 +116,19 @@ namespace DevOnBike.Overfit.Tests
                     graph.Reset();
                     optimizer.ZeroGrad();
 
-                    using var xBData = new FastTensor<float>(batchSize, 1, 28, 28, clearMemory: false);
-                    using var yBData = new FastTensor<float>(batchSize, 10, clearMemory: false);
-                    using var xBNode = new AutogradNode(xBData, requiresGrad: false);
-                    using var yBNode = new AutogradNode(yBData, requiresGrad: false);
+                    // POPRAWKA: Przejście na TensorStorage i DOD
+                    using var xBData = new TensorStorage<float>(batchSize * 1 * 28 * 28, clearMemory: false);
+                    using var yBData = new TensorStorage<float>(batchSize * 10, clearMemory: false);
+                    using var xBNode = new AutogradNode(xBData, new TensorShape(batchSize, 1, 28, 28), requiresGrad: false);
+                    using var yBNode = new AutogradNode(yBData, new TensorShape(batchSize, 10), requiresGrad: false);
 
-                    trainX.GetView().AsReadOnlySpan()
+                    trainX.AsReadOnlySpan()
                         .Slice(b * batchSize * 784, batchSize * 784)
-                        .CopyTo(xBData.GetView().AsSpan());
+                        .CopyTo(xBData.AsSpan());
 
-                    trainY.GetView().AsReadOnlySpan()
+                    trainY.AsReadOnlySpan()
                         .Slice(b * batchSize * 10, batchSize * 10)
-                        .CopyTo(yBData.GetView().AsSpan());
+                        .CopyTo(yBData.AsSpan());
 
                     long allocBefore;
 

@@ -4,7 +4,6 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Text.Json;
-using DevOnBike.Overfit.Data.Serialization;
 using DevOnBike.Overfit.Diagnostics.Contracts;
 
 namespace DevOnBike.Overfit.Diagnostics

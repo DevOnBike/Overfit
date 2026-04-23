@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -6,6 +6,7 @@
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.Ops
 {
@@ -15,24 +16,24 @@ namespace DevOnBike.Overfit.Ops
         // BATCH NORM 1D
         // ====================================================================
 
-        public static AutogradNode BatchNorm1D(ComputationGraph graph, AutogradNode input, AutogradNode gamma, AutogradNode beta, FastTensor<float> runningMean, FastTensor<float> runningVar, float momentum, float eps, bool isTraining)
+        public static AutogradNode BatchNorm1D(ComputationGraph graph, AutogradNode input, AutogradNode gamma, AutogradNode beta, TensorStorage<float> runningMean, TensorStorage<float> runningVar, float momentum, float eps, bool isTraining)
         {
-            int N = input.DataView.GetDim(0), C = input.DataView.GetDim(1);
-            var outD = new FastTensor<float>(N, C, false);
-            var mean = new AutogradNode(new FastTensor<float>(C));
-            var invStd = new AutogradNode(new FastTensor<float>(C));
+            int N = input.Shape.D0, C = input.Shape.D1;
+
+            var output = AllocateNode(graph, input.Shape, input.RequiresGrad, clearMemory: false);
+
+            // KRYTYCZNA POPRAWKA: 'mean' MUSI być czyszczone, ponieważ za chwilę akumulujemy (Add) do niego wartości!
+            var mean = AllocateNode(graph, new TensorShape(C), false, clearMemory: true);
+            var invStd = AllocateNode(graph, new TensorShape(C), false, clearMemory: false);
 
             var inS = input.DataView.AsReadOnlySpan();
-            var outS = outD.GetView().AsSpan();
+            var outS = output.DataView.AsSpan();
             var meanS = mean.DataView.AsSpan();
             var invStdS = invStd.DataView.AsSpan();
 
             if (isTraining)
             {
-                for (var i = 0; i < N; i++)
-                {
-                    TensorPrimitives.Add(meanS, inS.Slice(i * C, C), meanS);
-                }
+                for (var i = 0; i < N; i++) TensorPrimitives.Add(meanS, inS.Slice(i * C, C), meanS);
                 TensorPrimitives.Multiply(meanS, 1f / N, meanS);
 
                 using var vB = new PooledBuffer<float>(C);
@@ -44,11 +45,10 @@ namespace DevOnBike.Overfit.Ops
                     TensorPrimitives.MultiplyAdd(tB.Span, tB.Span, vB.Span, vB.Span);
                 }
 
-                // Use 1/N (biased, consistent with backward pass)
                 TensorPrimitives.Multiply(vB.Span, 1f / N, vB.Span);
 
-                var rmS = runningMean.GetView().AsSpan();
-                var rvS = runningVar.GetView().AsSpan();
+                var rmS = runningMean.AsSpan();
+                var rvS = runningVar.AsSpan();
 
                 TensorPrimitives.Multiply(rmS, 1f - momentum, rmS);
                 TensorPrimitives.MultiplyAdd(meanS, momentum, rmS, rmS);
@@ -59,8 +59,8 @@ namespace DevOnBike.Overfit.Ops
             }
             else
             {
-                runningMean.GetView().AsReadOnlySpan().CopyTo(meanS);
-                TensorPrimitives.Add(runningVar.GetView().AsReadOnlySpan(), eps, invStdS);
+                runningMean.AsReadOnlySpan().CopyTo(meanS);
+                TensorPrimitives.Add(runningVar.AsReadOnlySpan(), eps, invStdS);
                 TensorPrimitives.ReciprocalSqrt(invStdS, invStdS);
             }
 
@@ -77,10 +77,14 @@ namespace DevOnBike.Overfit.Ops
                 TensorPrimitives.MultiplyAdd(oR, gS, bS, oR);
             }
 
-            var output = new AutogradNode(outD, input.RequiresGrad);
             if (output.RequiresGrad && isTraining)
             {
                 graph?.Record(OpCode.BatchNorm1D, output, input, null, 0, 0, 0, 0, 0, [gamma, beta, mean, invStd]);
+            }
+            else if (!isTraining)
+            {
+                mean.Dispose();
+                invStd.Dispose();
             }
 
             return output;
@@ -88,12 +92,9 @@ namespace DevOnBike.Overfit.Ops
 
         public static void BatchNorm1DBackward(AutogradNode input, AutogradNode output, AutogradNode gamma, AutogradNode beta, AutogradNode mean, AutogradNode invStd)
         {
-            if (!input.RequiresGrad && !gamma.RequiresGrad && !beta.RequiresGrad)
-            {
-                return;
-            }
+            if (!input.RequiresGrad && !gamma.RequiresGrad && !beta.RequiresGrad) return;
 
-            int N = input.DataView.GetDim(0), C = input.DataView.GetDim(1);
+            int N = input.Shape.D0, C = input.Shape.D1;
 
             using var coeffBuf = new PooledBuffer<float>(C, false);
             var coeff = coeffBuf.Span;
@@ -124,15 +125,8 @@ namespace DevOnBike.Overfit.Ops
                 TensorPrimitives.Add(sDy, gR, sDy);
                 TensorPrimitives.MultiplyAdd(gR, xHR, sDyX, sDyX);
 
-                if (beta.RequiresGrad)
-                {
-                    TensorPrimitives.Add(beta.GradView.AsSpan(), gR, beta.GradView.AsSpan());
-                }
-
-                if (gamma.RequiresGrad)
-                {
-                    TensorPrimitives.MultiplyAdd(gR, xHR, gamma.GradView.AsSpan(), gamma.GradView.AsSpan());
-                }
+                if (beta.RequiresGrad) TensorPrimitives.Add(beta.GradView.AsSpan(), gR, beta.GradView.AsSpan());
+                if (gamma.RequiresGrad) TensorPrimitives.MultiplyAdd(gR, xHR, gamma.GradView.AsSpan(), gamma.GradView.AsSpan());
             }
 
             if (input.RequiresGrad)

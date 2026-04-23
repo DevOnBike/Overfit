@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -120,8 +120,15 @@ namespace DevOnBike.Overfit.DeepLearning
                 using var a1 = TensorMath.ReLU(null, bn1Out);
                 var out2 = _linear2.Forward(null, a1);
                 using var bn2Out = _bn2.Forward(null, out2);
-                using var added = TensorMath.Add(null, bn2Out, input);
-                return TensorMath.ReLU(null, added);
+
+                // IN-PLACE (INFERENCJA): Oszczędność pamięci na produkcji!
+                // Zamiast: using var added = TensorMath.Add(null, bn2Out, input);
+                TensorPrimitives.Add(
+                    bn2Out.DataView.AsSpan(),
+                    input.DataView.AsReadOnlySpan(),
+                    bn2Out.DataView.AsSpan());
+
+                return TensorMath.ReLU(null, bn2Out);
             }
 
             var tOut1 = _linear1.Forward(graph, input);
@@ -129,7 +136,11 @@ namespace DevOnBike.Overfit.DeepLearning
             var tA1 = TensorMath.ReLU(graph, tBn1);
             var tOut2 = _linear2.Forward(graph, tA1);
             var tBn2 = _bn2.Forward(graph, tOut2);
-            var tAdded = TensorMath.Add(graph, tBn2, input);
+
+            // IN-PLACE (TRENING): Zabijamy te 42 MB alokacji na epokę!
+            // Zamiast: var tAdded = TensorMath.Add(graph, tBn2, input);
+            var tAdded = graph.AddInPlace(tBn2, input);
+
             return TensorMath.ReLU(graph, tAdded);
         }
 

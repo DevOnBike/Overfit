@@ -29,7 +29,7 @@ namespace DevOnBike.Overfit.Tensors
         {
             if (_rented != null)
             {
-                ArrayPool<T>.Shared.Return(_rented, false);
+                ArrayPool<T>.Shared.Return(_rented);
             }
         }
     }

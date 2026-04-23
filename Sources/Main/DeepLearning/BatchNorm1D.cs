@@ -7,9 +7,9 @@ using System.Numerics.Tensors;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
 using DevOnBike.Overfit.DeepLearning.Diagnostics;
-using DevOnBike.Overfit.Diagnostics.Contracts;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
@@ -17,100 +17,33 @@ namespace DevOnBike.Overfit.DeepLearning
     {
         public AutogradNode Gamma { get; }
         public AutogradNode Beta { get; }
-        public FastTensor<float> RunningMean { get; }
-        public FastTensor<float> RunningVar { get; }
+
+        // Zmieniono na TensorStorage
+        public TensorStorage<float> RunningMean { get; }
+        public TensorStorage<float> RunningVar { get; }
 
         public float Momentum { get; set; } = 0.1f;
         public float Eps { get; set; } = 1e-5f;
         public bool IsTraining { get; private set; } = true;
 
-        private FastTensor<float> _fusedScale;
-        private FastTensor<float> _fusedShift;
-
         public BatchNorm1D(int numFeatures)
         {
-            Gamma = new AutogradNode(new FastTensor<float>(numFeatures, clearMemory: false), requiresGrad: true);
-            Beta = new AutogradNode(new FastTensor<float>(numFeatures, clearMemory: false), requiresGrad: true);
-
+            Gamma = new AutogradNode(new TensorStorage<float>(numFeatures, clearMemory: false), new TensorShape(numFeatures), requiresGrad: true);
             Gamma.DataView.AsSpan().Fill(1f);
-            Beta.DataView.AsSpan().Fill(0f);
 
-            RunningMean = new FastTensor<float>(numFeatures, clearMemory: false);
-            RunningVar = new FastTensor<float>(numFeatures, clearMemory: false);
-            RunningVar.GetView().AsSpan().Fill(1f);
+            Beta = new AutogradNode(new TensorStorage<float>(numFeatures, clearMemory: true), new TensorShape(numFeatures), requiresGrad: true);
+
+            RunningMean = new TensorStorage<float>(numFeatures, clearMemory: true);
+            RunningVar = new TensorStorage<float>(numFeatures, clearMemory: false);
+            RunningVar.AsSpan().Fill(1f);
         }
 
-        public void Train()
-        {
-            IsTraining = true;
-        }
-
-        public void Eval()
-        {
-            IsTraining = false;
-
-            var c = Gamma.DataView.Size;
-
-            if (_fusedScale == null)
-            {
-                _fusedScale = new FastTensor<float>(c, clearMemory: false);
-                _fusedShift = new FastTensor<float>(c, clearMemory: false);
-            }
-
-            var scaleS = _fusedScale.GetView().AsSpan();
-            var shiftS = _fusedShift.GetView().AsSpan();
-            var gammaS = Gamma.DataView.AsReadOnlySpan();
-            var betaS = Beta.DataView.AsReadOnlySpan();
-            var meanS = RunningMean.GetView().AsReadOnlySpan();
-            var varS = RunningVar.GetView().AsReadOnlySpan();
-
-            for (var i = 0; i < c; i++)
-            {
-                scaleS[i] = gammaS[i] / MathF.Sqrt(varS[i] + Eps);
-                shiftS[i] = betaS[i] - meanS[i] * scaleS[i];
-            }
-        }
-
-        public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
-        {
-            if (IsTraining)
-            {
-                throw new InvalidOperationException("Layer must be in Eval mode.");
-            }
-
-            using (new DiagnosticScope(
-                   category: "DeepLearning",
-                   name: "BatchNorm1D.ForwardInference",
-                   phase: "forward_inference",
-                   isTraining: false,
-                   batchSize: 1,
-                   featureCount: input.Length,
-                   inputElements: input.Length,
-                   outputElements: output.Length))
-            {
-                TensorPrimitives.MultiplyAdd(
-                input,
-                _fusedScale.GetView().AsReadOnlySpan(),
-                _fusedShift.GetView().AsReadOnlySpan(),
-                output);
-            }
-        }
+        public void Train() => IsTraining = true;
+        public void Eval() => IsTraining = false;
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
-            var batch = input.DataView.GetDim(0);
-            var cols = input.DataView.Rank > 1 ? input.DataView.GetDim(1) : input.DataView.Size;
-
-            var ctx = ModuleDiagnostics.Begin(
-            moduleType: nameof(BatchNorm1D),
-            phase: graph == null || !IsTraining ? "forward_eval" : "forward_train",
-            isTraining: IsTraining,
-            batchSize: batch,
-            inputRows: batch,
-            inputCols: cols,
-            outputRows: batch,
-            outputCols: cols);
-
+            var ctx = ModuleDiagnostics.Begin(nameof(BatchNorm1D), "forward_train", true, input.Shape.D0, input.Shape.D1, input.Shape.D0, input.Shape.D1);
             try
             {
                 return TensorMath.BatchNorm1D(graph, input, Gamma, Beta, RunningMean, RunningVar, Momentum, Eps, IsTraining);
@@ -129,61 +62,30 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void Save(BinaryWriter bw)
         {
-            var len = Gamma.DataView.Size;
-            bw.Write(len);
+            bw.Write(Gamma.DataView.Size);
 
-            foreach (var val in Gamma.DataView.AsSpan())
-            {
-                bw.Write(val);
-            }
-
-            foreach (var val in Beta.DataView.AsSpan())
-            {
-                bw.Write(val);
-            }
-
-            foreach (var val in RunningMean.GetView().AsSpan())
-            {
-                bw.Write(val);
-            }
-
-            foreach (var val in RunningVar.GetView().AsSpan())
-            {
-                bw.Write(val);
-            }
+            foreach (var val in Gamma.DataView.AsReadOnlySpan()) bw.Write(val);
+            foreach (var val in Beta.DataView.AsReadOnlySpan()) bw.Write(val);
+            foreach (var val in RunningMean.AsReadOnlySpan()) bw.Write(val);
+            foreach (var val in RunningVar.AsReadOnlySpan()) bw.Write(val);
         }
 
         public void Load(BinaryReader br)
         {
             var len = br.ReadInt32();
-            if (len != Gamma.DataView.Size)
-            {
-                throw new Exception($"Weight dimensions mismatch: {len} vs {Gamma.DataView.Size}");
-            }
+            if (len != Gamma.DataView.Size) throw new Exception($"Weight dimensions mismatch: {len} vs {Gamma.DataView.Size}");
 
             var gSpan = Gamma.DataView.AsSpan();
-            for (var i = 0; i < len; i++)
-            {
-                gSpan[i] = br.ReadSingle();
-            }
+            for (var i = 0; i < len; i++) gSpan[i] = br.ReadSingle();
 
             var bSpan = Beta.DataView.AsSpan();
-            for (var i = 0; i < len; i++)
-            {
-                bSpan[i] = br.ReadSingle();
-            }
+            for (var i = 0; i < len; i++) bSpan[i] = br.ReadSingle();
 
-            var rmSpan = RunningMean.GetView().AsSpan();
-            for (var i = 0; i < len; i++)
-            {
-                rmSpan[i] = br.ReadSingle();
-            }
+            var rmSpan = RunningMean.AsSpan();
+            for (var i = 0; i < len; i++) rmSpan[i] = br.ReadSingle();
 
-            var rvSpan = RunningVar.GetView().AsSpan();
-            for (var i = 0; i < len; i++)
-            {
-                rvSpan[i] = br.ReadSingle();
-            }
+            var rvSpan = RunningVar.AsSpan();
+            for (var i = 0; i < len; i++) rvSpan[i] = br.ReadSingle();
         }
 
         public void Dispose()
@@ -192,13 +94,36 @@ namespace DevOnBike.Overfit.DeepLearning
             Beta?.Dispose();
             RunningMean?.Dispose();
             RunningVar?.Dispose();
-
-            _fusedScale?.Dispose();
-            _fusedShift?.Dispose();
         }
 
-        public void InvalidateParameterCaches()
+        public void InvalidateParameterCaches() { }
+
+        public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
+            // Oparte teraz na czystych Spanach (DOD)
+            var c = Gamma.DataView.Size;
+            var batchSize = input.Length / c;
+
+            using var scaleBuf = new PooledBuffer<float>(c, false);
+            using var shiftBuf = new PooledBuffer<float>(c, false);
+
+            var scaleS = scaleBuf.Span;
+            var shiftS = shiftBuf.Span;
+
+            TensorPrimitives.Add(RunningVar.AsReadOnlySpan(), Eps, scaleS);
+            TensorPrimitives.ReciprocalSqrt(scaleS, scaleS);
+            TensorPrimitives.Multiply(scaleS, Gamma.DataView.AsReadOnlySpan(), scaleS);
+
+            TensorPrimitives.Multiply(RunningMean.AsReadOnlySpan(), scaleS, shiftS);
+            TensorPrimitives.Subtract(Beta.DataView.AsReadOnlySpan(), shiftS, shiftS);
+
+            for (var b = 0; b < batchSize; b++)
+            {
+                var inSlice = input.Slice(b * c, c);
+                var outSlice = output.Slice(b * c, c);
+
+                TensorPrimitives.MultiplyAdd(inSlice, scaleS, shiftS, outSlice);
+            }
         }
     }
 }

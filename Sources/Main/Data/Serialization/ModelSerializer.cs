@@ -4,7 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.DeepLearning;
-using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core; // Wpinamy Core!
 
 namespace DevOnBike.Overfit.Data.Serialization
 {
@@ -17,7 +17,7 @@ namespace DevOnBike.Overfit.Data.Serialization
 
             SaveTensor(bw, conv.Kernels.DataView);
             SaveTensor(bw, fc.Weights.DataView);
-            SaveTensor(bw, fc.Biases.DataView);
+            SaveTensor(bw, fc.Bias.DataView); // Zmieniono Biases na Bias (zgodnie z LinearLayer)
         }
 
         public static void LoadModel(string path, ConvLayer conv, LinearLayer fc)
@@ -32,10 +32,10 @@ namespace DevOnBike.Overfit.Data.Serialization
 
             LoadTensor(br, conv.Kernels.DataView);
             LoadTensor(br, fc.Weights.DataView);
-            LoadTensor(br, fc.Biases.DataView);
+            LoadTensor(br, fc.Bias.DataView); // Zmieniono Biases na Bias
         }
 
-        private static void SaveTensor(BinaryWriter bw, TensorView<float> view)
+        private static void SaveTensor(BinaryWriter bw, TensorSpan<float> view) // TensorSpan zamiast TensorView
         {
             bw.Write(view.Rank);
 
@@ -52,7 +52,7 @@ namespace DevOnBike.Overfit.Data.Serialization
             }
         }
 
-        private static void LoadTensor(BinaryReader br, TensorView<float> view)
+        private static void LoadTensor(BinaryReader br, TensorSpan<float> view) // TensorSpan zamiast TensorView
         {
             var rank = br.ReadInt32();
             var fileShape = new int[rank];

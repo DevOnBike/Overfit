@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -6,6 +6,7 @@
 using System.Numerics;
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Autograd;
+using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.Ops
 {
@@ -17,11 +18,11 @@ namespace DevOnBike.Overfit.Ops
 
         public static AutogradNode ReLU(ComputationGraph graph, AutogradNode input)
         {
-            var res = AllocateLike(input, false);
-            TensorPrimitives.Max(input.DataView.AsReadOnlySpan(), 0f, res.GetView().AsSpan());
+            var output = AllocateNode(graph, input.Shape, input.RequiresGrad, clearMemory: false);
 
-            var output = new AutogradNode(res, input.RequiresGrad);
-            
+            // Używamy naszego zoptymalizowanego Kernela!
+            TensorKernels.Relu(input.DataView.AsReadOnlySpan(), output.DataView.AsSpan());
+
             if (output.RequiresGrad)
             {
                 graph?.Record(OpCode.ReLU, output, input);
@@ -32,10 +33,7 @@ namespace DevOnBike.Overfit.Ops
 
         public static void ReluBackward(AutogradNode input, AutogradNode output)
         {
-            if (!input.RequiresGrad)
-            {
-                return;
-            }
+            if (!input.RequiresGrad) return;
 
             var inS = input.DataView.AsReadOnlySpan();
             var goS = output.GradView.AsReadOnlySpan();
@@ -59,10 +57,7 @@ namespace DevOnBike.Overfit.Ops
 
             for (; i < inS.Length; i++)
             {
-                if (inS[i] > 0f)
-                {
-                    giS[i] += goS[i];
-                }
+                if (inS[i] > 0f) giS[i] += goS[i];
             }
         }
 
@@ -72,25 +67,16 @@ namespace DevOnBike.Overfit.Ops
 
         public static AutogradNode Sigmoid(ComputationGraph graph, AutogradNode input)
         {
-            var res = AllocateLike(input, false);
-            TensorPrimitives.Sigmoid(input.DataView.AsReadOnlySpan(), res.GetView().AsSpan());
+            var output = AllocateNode(graph, input.Shape, input.RequiresGrad, clearMemory: false);
+            TensorPrimitives.Sigmoid(input.DataView.AsReadOnlySpan(), output.DataView.AsSpan());
 
-            var output = new AutogradNode(res, input.RequiresGrad);
-            
-            if (output.RequiresGrad)
-            {
-                graph?.Record(OpCode.Sigmoid, output, input);
-            }
-
+            if (output.RequiresGrad) graph?.Record(OpCode.Sigmoid, output, input);
             return output;
         }
 
         public static void SigmoidBackward(AutogradNode input, AutogradNode output)
         {
-            if (!input.RequiresGrad)
-            {
-                return;
-            }
+            if (!input.RequiresGrad) return;
 
             var outS = output.DataView.AsReadOnlySpan();
             var ogS = output.GradView.AsReadOnlySpan();
@@ -116,26 +102,16 @@ namespace DevOnBike.Overfit.Ops
 
         public static AutogradNode Tanh(ComputationGraph graph, AutogradNode input)
         {
-            var res = AllocateLike(input, false);
-            
-            TensorPrimitives.Tanh(input.DataView.AsReadOnlySpan(), res.GetView().AsSpan());
+            var output = AllocateNode(graph, input.Shape, input.RequiresGrad, clearMemory: false);
+            TensorPrimitives.Tanh(input.DataView.AsReadOnlySpan(), output.DataView.AsSpan());
 
-            var output = new AutogradNode(res, input.RequiresGrad);
-            
-            if (output.RequiresGrad)
-            {
-                graph?.Record(OpCode.Tanh, output, input);
-            }
-
+            if (output.RequiresGrad) graph?.Record(OpCode.Tanh, output, input);
             return output;
         }
 
         public static void TanhBackward(AutogradNode input, AutogradNode output)
         {
-            if (!input.RequiresGrad)
-            {
-                return;
-            }
+            if (!input.RequiresGrad) return;
 
             var outS = output.DataView.AsReadOnlySpan();
             var ogS = output.GradView.AsReadOnlySpan();
@@ -161,20 +137,21 @@ namespace DevOnBike.Overfit.Ops
 
         public static AutogradNode Dropout(ComputationGraph graph, AutogradNode input, float probability, bool isTraining)
         {
-            var res = AllocateLike(input, false);
+            var output = AllocateNode(graph, input.Shape, input.RequiresGrad, clearMemory: false);
 
             if (!isTraining || probability <= 0f)
             {
-                input.DataView.AsReadOnlySpan().CopyTo(res.GetView().AsSpan());
-                return new AutogradNode(res, input.RequiresGrad);
+                input.DataView.AsReadOnlySpan().CopyTo(output.DataView.AsSpan());
+                return output;
             }
 
-            var mask = AllocateLike(input, false);
+            // Mask staje się pełnoprawnym węzłem z własną pamięcią na taśmie
+            var mask = AllocateNode(graph, input.Shape, false, clearMemory: false);
             var scale = 1f / (1f - probability);
 
             var inS = input.DataView.AsReadOnlySpan();
-            var outS = res.GetView().AsSpan();
-            var maskS = mask.GetView().AsSpan();
+            var outS = output.DataView.AsSpan();
+            var maskS = mask.DataView.AsSpan();
 
             for (var i = 0; i < inS.Length; i++)
             {
@@ -183,10 +160,9 @@ namespace DevOnBike.Overfit.Ops
                 outS[i] = inS[i] * maskS[i];
             }
 
-            var output = new AutogradNode(res, input.RequiresGrad);
             if (output.RequiresGrad)
             {
-                graph?.Record(OpCode.Dropout, output, input, new AutogradNode(mask));
+                graph?.Record(OpCode.Dropout, output, input, mask); // Mask jako node context B
             }
             else
             {

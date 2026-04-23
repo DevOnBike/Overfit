@@ -8,6 +8,7 @@ using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.Tests
 {
@@ -16,50 +17,55 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void NeuralNetwork_TrainsOnXORProblem_AndConvergesToCorrectPredictions()
         {
-            using var xData = new FastTensor<float>(4, 2, clearMemory: true);
-            ((Span<float>)[0, 0, 0, 1, 1, 0, 1, 1]).CopyTo(xData.GetView().AsSpan());
+            using var xData = new TensorStorage<float>(8, clearMemory: true);
+            ((Span<float>)[0, 0, 0, 1, 1, 0, 1, 1]).CopyTo(xData.AsSpan());
 
-            using var yData = new FastTensor<float>(4, 1, clearMemory: true);
-            ((Span<float>)[0, 1, 1, 0]).CopyTo(yData.GetView().AsSpan());
+            using var yData = new TensorStorage<float>(4, clearMemory: true);
+            ((Span<float>)[0, 1, 1, 0]).CopyTo(yData.AsSpan());
 
-            using var X = new AutogradNode(xData, false);
-            using var Y = new AutogradNode(yData, false);
+            using var X = new AutogradNode(xData, new TensorShape(4, 2), false);
+            using var Y = new AutogradNode(yData, new TensorShape(4, 1), false);
 
             using var layer1 = new LinearLayer(2, 16);
             using var layer2 = new LinearLayer(16, 1);
 
-            var model = new Sequential(layer1, new ReluActivation(), layer2);
-            var sgd = new SGD(model.Parameters(), 0.1f);
-            var epochs = 500;
+            var model = new Sequential(
+                layer1, new ReluActivation(),
+                layer2, new ReluActivation());
+
+            var adam = new Adam(model.Parameters(), 0.05f) { UseAdamW = true };
+
+            var epochs = 200;
             var finalLoss = 0f;
             var graph = new ComputationGraph();
 
             for (var epoch = 0; epoch < epochs; epoch++)
             {
                 graph.Reset();
-                sgd.ZeroGrad();
+                adam.ZeroGrad();
 
                 using var prediction = model.Forward(graph, X);
                 using var loss = TensorMath.MSELoss(graph, prediction, Y);
-                finalLoss = loss.DataView.AsReadOnlySpan()[0];
 
                 graph.Backward(loss);
-                sgd.Step();
+                adam.Step();
+
+                finalLoss = loss.DataView.AsReadOnlySpan()[0];
             }
 
-            Assert.True(finalLoss < 0.1f, $"Loss did not converge well enough. Final Loss: {finalLoss}");
+            Assert.True(finalLoss < 0.1f, $"Loss should be close to 0, but was {finalLoss}");
         }
 
         [Fact]
-        public void NeuralNetwork_TrainsOnCircleProblem_WithAdamW_AndConverges()
+        public void NeuralNetwork_TrainsOnCircleDataset_AndConverges()
         {
             var samples = 200;
-            using var xData = new FastTensor<float>(samples, 2, clearMemory: true);
-            using var yData = new FastTensor<float>(samples, 1, clearMemory: true);
-
             var rnd = new Random(42);
-            var xSpan = xData.GetView().AsSpan();
-            var ySpan = yData.GetView().AsSpan();
+
+            var xData = new TensorStorage<float>(samples * 2, clearMemory: true);
+            var yData = new TensorStorage<float>(samples, clearMemory: true);
+            var xSpan = xData.AsSpan();
+            var ySpan = yData.AsSpan();
 
             for (var i = 0; i < samples; i++)
             {
@@ -72,8 +78,8 @@ namespace DevOnBike.Overfit.Tests
                 ySpan[i] = isOuter ? 1.0f : 0.0f;
             }
 
-            using var X = new AutogradNode(xData, false);
-            using var Y = new AutogradNode(yData, false);
+            using var X = new AutogradNode(xData, new TensorShape(samples, 2), false);
+            using var Y = new AutogradNode(yData, new TensorShape(samples, 1), false);
 
             using var layer1 = new LinearLayer(2, 32);
             using var layer2 = new LinearLayer(32, 16);
@@ -96,13 +102,14 @@ namespace DevOnBike.Overfit.Tests
 
                 using var prediction = model.Forward(graph, X);
                 using var loss = TensorMath.MSELoss(graph, prediction, Y);
-                finalLoss = loss.DataView.AsReadOnlySpan()[0];
 
                 graph.Backward(loss);
                 adam.Step();
+
+                finalLoss = loss.DataView.AsReadOnlySpan()[0];
             }
 
-            Assert.True(finalLoss < 0.15f, $"Loss did not converge well enough. Final Loss: {finalLoss}");
+            Assert.True(finalLoss < 0.15f, $"Loss should converge below 0.15, but was {finalLoss}");
         }
     }
 }

@@ -4,7 +4,6 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Evolutionary.Abstractions;
-using DevOnBike.Overfit.Evolutionary.Mutation;
 using DevOnBike.Overfit.Evolutionary.Selection;
 using DevOnBike.Overfit.Evolutionary.Storage;
 using DevOnBike.Overfit.Evolutionary.Strategies;

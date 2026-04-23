@@ -7,6 +7,7 @@ using System.Text;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.Tests
 {
@@ -18,8 +19,8 @@ namespace DevOnBike.Overfit.Tests
             using var layer = new LinearLayer(10, 5);
             Assert.Equal(2, layer.Parameters().Count());
 
-            using var inputTensor = new FastTensor<float>(2, 10, clearMemory: true);
-            using var input = new AutogradNode(inputTensor, false);
+            using var inputTensor = new TensorStorage<float>(20, clearMemory: true);
+            using var input = new AutogradNode(inputTensor, new TensorShape(2, 10), false);
 
             using var output = layer.Forward(null, input);
 
@@ -56,8 +57,8 @@ namespace DevOnBike.Overfit.Tests
             seq.Train();
             Assert.True(seq.IsTraining);
 
-            using var inputTensor = new FastTensor<float>(1, 5, clearMemory: true);
-            using var input = new AutogradNode(inputTensor, false);
+            using var inputTensor = new TensorStorage<float>(5, clearMemory: true);
+            using var input = new AutogradNode(inputTensor, new TensorShape(1, 5), false);
 
             using var output = seq.Forward(null, input);
 
@@ -68,12 +69,15 @@ namespace DevOnBike.Overfit.Tests
         public void ResidualBlock_Forward_CalculatesCorrectShape()
         {
             using var res = new ResidualBlock(8);
-            using var inputTensor = new FastTensor<float>(1, 8, clearMemory: true);
-            using var input = new AutogradNode(inputTensor, false);
+            using var inputTensor = new TensorStorage<float>(1352, clearMemory: true);
+            using var input = new AutogradNode(inputTensor, new TensorShape(1, 8, 13, 13), false);
 
             using var output = res.Forward(null, input);
 
+            Assert.Equal(1, output.DataView.GetDim(0));
             Assert.Equal(8, output.DataView.GetDim(1));
+            Assert.Equal(13, output.DataView.GetDim(2));
+            Assert.Equal(13, output.DataView.GetDim(3));
         }
     }
 }

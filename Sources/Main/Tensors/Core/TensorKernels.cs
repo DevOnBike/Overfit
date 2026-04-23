@@ -1,5 +1,4 @@
-﻿using System;
-using System.Numerics.Tensors;
+﻿using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
 
 namespace DevOnBike.Overfit.Tensors.Core
