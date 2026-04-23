@@ -60,5 +60,23 @@ namespace DevOnBike.Overfit.Tensors.Core
             ValidateInputOutputSpanNonOverlapping(left, output);
             ValidateInputOutputSpanNonOverlapping(right, output);
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void ValidateContiguous<T>(TensorSpan<T> span, [CallerArgumentExpression("span")] string paramName = "") where T : unmanaged
+        {
+            if (!span.IsContiguous)
+            {
+                throw new InvalidOperationException($"KRYTYCZNY BŁĄD WYDAJNOŚCI: Tensor '{paramName}' nie jest ciągły w pamięci (np. po operacji Transpose). Szybkie kernele SIMD wymagają ciągłej pamięci. Zmaterializuj tensor używając TensorFactory.Materialize().");
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void ValidateSameShape<T>(TensorSpan<T> left, TensorSpan<float> right) where T : unmanaged
+        {
+            if (left.Size != right.Size) // W przyszłości można sprawdzać pełny Rank i D0..D3
+            {
+                throw new ArgumentException($"Niezgodność kształtów: {left.Shape} vs {right.Shape}.");
+            }
+        }
     }
 }

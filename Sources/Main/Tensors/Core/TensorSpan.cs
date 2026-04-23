@@ -94,8 +94,7 @@ namespace DevOnBike.Overfit.Tensors.Core
         {
             if (!IsContiguous)
             {
-                throw new InvalidOperationException(
-                    "Tensor span is not contiguous. Materialize it first or use indexed access.");
+                throw new InvalidOperationException("Tensor span is not contiguous. Materialize it first or use indexed access.");
             }
 
             return _data.Slice(Offset, Size);
@@ -106,7 +105,10 @@ namespace DevOnBike.Overfit.Tensors.Core
         /// Valid only for contiguous tensor spans.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public ReadOnlySpan<T> AsReadOnlySpan() => AsSpan();
+        public ReadOnlySpan<T> AsReadOnlySpan()
+        {
+            return AsSpan();
+        }
 
         /// <summary>
         /// Tries to get a contiguous span view over the tensor contents.
@@ -205,6 +207,7 @@ namespace DevOnBike.Overfit.Tensors.Core
 
             var newShape = new TensorShape(Shape.D1, Shape.D0);
             var newStrides = Strides.Transpose2D();
+
             return new TensorSpan<T>(_data, newShape, newStrides, Offset);
         }
 
@@ -236,6 +239,7 @@ namespace DevOnBike.Overfit.Tensors.Core
             }
 
             var slicedSpan = _data.Slice(Offset + offsetIndex, sliceLength);
+
             return new TensorSpan<T>(slicedSpan, new TensorShape(sliceLength));
         }
 

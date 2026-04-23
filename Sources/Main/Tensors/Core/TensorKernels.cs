@@ -10,6 +10,22 @@ namespace DevOnBike.Overfit.Tensors.Core
     public static class TensorKernels
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void Add(TensorSpan<float> left, TensorSpan<float> right, TensorSpan<float> destination)
+        {
+            // 1. Fail-Fast (Odrzucamy nieciągłą pamięć)
+            TensorKernelGuards.ValidateContiguous(left);
+            TensorKernelGuards.ValidateContiguous(right);
+            TensorKernelGuards.ValidateContiguous(destination);
+
+            // 2. Walidacja Kształtów (Zanim wejdziemy w surowe bajty)
+            TensorKernelGuards.ValidateSameShape(left, right);
+            TensorKernelGuards.ValidateSameShape(left, destination);
+
+            // 3. Zejście do najszybszej ścieżki
+            Add(left.AsReadOnlySpan(), right.AsReadOnlySpan(), destination.AsSpan());
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void AddInPlace(Span<float> target, ReadOnlySpan<float> source)
         {
             TensorKernelGuards.ValidateSameLength(source, target);
@@ -22,8 +38,6 @@ namespace DevOnBike.Overfit.Tensors.Core
         public static void Add(ReadOnlySpan<float> left, ReadOnlySpan<float> right, Span<float> destination)
         {
             TensorKernelGuards.ValidateSameLengthAndDestination(left, right, destination);
-            TensorKernelGuards.ValidateInputOutputSpanNonOverlapping(left, right, destination);
-
             TensorPrimitives.Add(left, right, destination);
         }
 
@@ -52,6 +66,16 @@ namespace DevOnBike.Overfit.Tensors.Core
             TensorKernelGuards.ValidateInputOutputSpanNonOverlapping(source, destination);
 
             TensorPrimitives.Max(source, 0f, destination);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void Relu(TensorSpan<float> source, TensorSpan<float> destination)
+        {
+            TensorKernelGuards.ValidateContiguous(source);
+            TensorKernelGuards.ValidateContiguous(destination);
+            TensorKernelGuards.ValidateSameShape(source, destination);
+
+            Relu(source.AsReadOnlySpan(), destination.AsSpan());
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
