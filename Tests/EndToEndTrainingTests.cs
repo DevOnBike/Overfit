@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -29,13 +29,15 @@ namespace DevOnBike.Overfit.Tests
             using var layer1 = new LinearLayer(2, 16);
             using var layer2 = new LinearLayer(16, 1);
 
+            // POPRAWKA: Usunięto końcowe ReLU. Wyjście regresyjne powinno być liniowe,
+            // w przeciwnym razie początkowe ujemne wagi całkowicie ubijają gradient (Dead ReLU).
             var model = new Sequential(
                 layer1, new ReluActivation(),
-                layer2, new ReluActivation());
+                layer2);
 
             var adam = new Adam(model.Parameters(), 0.05f) { UseAdamW = true };
 
-            var epochs = 200;
+            var epochs = 300;
             var finalLoss = 0f;
             var graph = new ComputationGraph();
 

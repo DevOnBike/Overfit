@@ -27,8 +27,8 @@ namespace DevOnBike.Overfit.Tests
         //[Fact]
         public void Mnist_FullTrain60k_CnnBeastMode_Benchmark()
         {
-            const int trainSize = 10_000;
-            const int batchSize = 16;
+            const int trainSize = 60_000;
+            const int batchSize = 64;
             const int epochs = 5;
             const float lr = 0.001f;
 

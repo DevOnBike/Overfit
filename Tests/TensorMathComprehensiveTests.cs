@@ -8,7 +8,6 @@ using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core; // Zmieniono na Tensors.Core
-using Xunit;
 
 namespace DevOnBike.Overfit.Tests
 {

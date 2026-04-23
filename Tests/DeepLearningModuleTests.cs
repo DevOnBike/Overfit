@@ -40,7 +40,7 @@ namespace DevOnBike.Overfit.Tests
                 layer2.Load(br);
             }
 
-            Assert.Equal(layer.Weights.DataView[0, 0], layer2.Weights.DataView[0, 0]);
+            Assert.Equal(layer.Weights.DataView.AsReadOnlySpan()[0], layer2.Weights.DataView.AsReadOnlySpan()[0]);
         }
 
         [Fact]
@@ -69,15 +69,15 @@ namespace DevOnBike.Overfit.Tests
         public void ResidualBlock_Forward_CalculatesCorrectShape()
         {
             using var res = new ResidualBlock(8);
-            using var inputTensor = new TensorStorage<float>(1352, clearMemory: true);
-            using var input = new AutogradNode(inputTensor, new TensorShape(1, 8, 13, 13), false);
+
+            // POPRAWKA: Blok rezydualny na bazie LinearLayer oczekuje tensora 2D [Batch, HiddenSize]
+            using var inputTensor = new TensorStorage<float>(16, clearMemory: true);
+            using var input = new AutogradNode(inputTensor, new TensorShape(2, 8), false);
 
             using var output = res.Forward(null, input);
 
-            Assert.Equal(1, output.DataView.GetDim(0));
+            Assert.Equal(2, output.DataView.GetDim(0));
             Assert.Equal(8, output.DataView.GetDim(1));
-            Assert.Equal(13, output.DataView.GetDim(2));
-            Assert.Equal(13, output.DataView.GetDim(3));
         }
     }
 }

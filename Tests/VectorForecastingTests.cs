@@ -9,7 +9,6 @@ using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core; // Zmieniono na Tensors.Core
-using Xunit;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests

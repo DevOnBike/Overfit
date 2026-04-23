@@ -9,7 +9,6 @@ using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core; // Zmieniono na Tensors.Core
-using Xunit;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests
@@ -21,7 +20,7 @@ namespace DevOnBike.Overfit.Tests
 
         public TicTacToeIntelligenceTests(ITestOutputHelper output) => _output = output;
 
-        [Fact(Skip = "aaa")]
+        [Fact]
         public void Bestia_ShouldLearn_TicTacToe_LongTraining()
         {
             using var model = new Sequential(
