@@ -54,7 +54,7 @@ namespace DevOnBike.Overfit.Randomization
         /// Gets a thread-local shared instance, similar in spirit to <see cref="Random.Shared"/>.
         /// Each thread receives its own independent generator instance.
         /// </summary>
-        public static VectorizedRandom Shared => _shared ??= new VectorizedRandom();
+        public static VectorizedRandom Shared => _shared ??= new();
 
         /// <summary>
         /// Creates a new generator with either an explicit seed or a securely generated seed.
