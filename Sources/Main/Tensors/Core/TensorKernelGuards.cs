@@ -1,13 +1,12 @@
-﻿using System;
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 
-namespace DevOnBike.Overfit.Tensors
+namespace DevOnBike.Overfit.Tensors.Core
 {
     internal static class TensorKernelGuards
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void ValidateSameLength<T>(
-            ReadOnlySpan<T> left, 
+            ReadOnlySpan<T> left,
             ReadOnlySpan<T> right)
         {
             if (left.Length != right.Length)
@@ -18,7 +17,7 @@ namespace DevOnBike.Overfit.Tensors
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void ValidateDestinationLength<T>(
-            ReadOnlySpan<T> source, 
+            ReadOnlySpan<T> source,
             Span<T> destination)
         {
             if (destination.Length < source.Length)

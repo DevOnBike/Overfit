@@ -3,11 +3,10 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
-namespace DevOnBike.Overfit.Tensors
+namespace DevOnBike.Overfit.Tensors.Core
 {
     /// <summary>
     /// 64-byte aligned unmanaged buffer.
@@ -88,7 +87,7 @@ namespace DevOnBike.Overfit.Tensors
         /// - a power of two
         /// - a multiple of sizeof(T)
         /// </summary>
-        public void* AllocatePointer(int length, int alignmentBytes = (int)BaseAlignmentBytes)
+        public void* Allocate(int length, int alignmentBytes = (int)BaseAlignmentBytes)
         {
             ThrowIfDisposed();
 
@@ -125,7 +124,7 @@ namespace DevOnBike.Overfit.Tensors
         /// </summary>
         public Span<T> AllocateSpan(int length, int alignmentBytes = (int)BaseAlignmentBytes)
         {
-            var ptr = AllocatePointer(length, alignmentBytes);
+            var ptr = Allocate(length, alignmentBytes);
 
             return length == 0 ? [] : new Span<T>(ptr, length);
         }

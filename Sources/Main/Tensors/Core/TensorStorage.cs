@@ -11,7 +11,7 @@ namespace DevOnBike.Overfit.Tensors.Core
         private T[] _data;
         private int _disposed;
 
-        internal NativeBufferManaged<T> _arena;
+        internal NativeBufferManaged<T> _buffer;
         private void* _nativePtr;
         internal readonly bool _isBorrowedMemory;
 
@@ -31,11 +31,11 @@ namespace DevOnBike.Overfit.Tensors.Core
         }
 
         // 2. Konstruktor Zero-Alloc (NativeBufferManaged / Arena)
-        public TensorStorage(NativeBufferManaged<T> arena, int length)
+        public TensorStorage(NativeBufferManaged<T> buffer, int length)
         {
             Length = length;
-            _arena = arena;
-            _nativePtr = arena.AllocatePointer(length);
+            _buffer = buffer;
+            _nativePtr = buffer.Allocate(length);
             _isBorrowedMemory = true;
         }
 
@@ -49,7 +49,10 @@ namespace DevOnBike.Overfit.Tensors.Core
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public ReadOnlySpan<T> AsReadOnlySpan() => AsSpan();
+        public ReadOnlySpan<T> AsReadOnlySpan()
+        {
+            return AsSpan();
+        }
 
         public void Dispose()
         {
@@ -62,7 +65,7 @@ namespace DevOnBike.Overfit.Tensors.Core
 
                 _data = null;
                 _nativePtr = null;
-                _arena = null;
+                _buffer = null;
             }
         }
     }

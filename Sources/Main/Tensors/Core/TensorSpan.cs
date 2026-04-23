@@ -1,14 +1,13 @@
-﻿using System;
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 
 namespace DevOnBike.Overfit.Tensors.Core
 {
     /// <summary>
-    /// Stack-only lens over raw tensor memory.
-    /// Combines base span, shape, strides and offset without owning memory.
+    /// Stack-only mutable lens over tensor memory.
+    /// Does not own memory; only describes how to interpret it via shape, strides and offset.
     /// Supports up to 4 dimensions.
     /// </summary>
-    public readonly ref struct TensorView<T> where T : unmanaged
+    public readonly ref struct TensorSpan<T> where T : unmanaged
     {
         private readonly Span<T> _data;
 
@@ -28,6 +27,12 @@ namespace DevOnBike.Overfit.Tensors.Core
             get => Shape.Size;
         }
 
+        public bool IsEmpty
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => Size == 0;
+        }
+
         public bool IsContiguous
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -35,10 +40,10 @@ namespace DevOnBike.Overfit.Tensors.Core
         }
 
         /// <summary>
-        /// Creates a contiguous tensor view over the supplied span.
+        /// Creates a contiguous tensor span over the supplied span.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public TensorView(Span<T> data, TensorShape shape)
+        public TensorSpan(Span<T> data, TensorShape shape)
         {
             if (!shape.IsValid)
             {
@@ -59,10 +64,10 @@ namespace DevOnBike.Overfit.Tensors.Core
         }
 
         /// <summary>
-        /// Creates a view with explicitly supplied shape, strides and base offset.
+        /// Creates a tensor span with explicitly supplied shape, strides and base offset.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal TensorView(Span<T> data, TensorShape shape, TensorStrides strides, int offset)
+        internal TensorSpan(Span<T> data, TensorShape shape, TensorStrides strides, int offset)
         {
             if (!shape.IsValid)
             {
@@ -80,21 +85,45 @@ namespace DevOnBike.Overfit.Tensors.Core
             Offset = offset;
         }
 
+        /// <summary>
+        /// Returns a contiguous span over the tensor contents.
+        /// Valid only for contiguous tensor spans.
+        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Span<T> AsSpan()
         {
             if (!IsContiguous)
             {
                 throw new InvalidOperationException(
-                    "Tensor view is not contiguous. Materialize it first or use indexed access.");
+                    "Tensor span is not contiguous. Materialize it first or use indexed access.");
             }
 
             return _data.Slice(Offset, Size);
         }
 
+        /// <summary>
+        /// Returns a contiguous readonly span over the tensor contents.
+        /// Valid only for contiguous tensor spans.
+        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public ReadOnlySpan<T> AsReadOnlySpan() => AsSpan();
 
+        /// <summary>
+        /// Tries to get a contiguous span view over the tensor contents.
+        /// Returns false for non-contiguous tensor spans.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool TryGetSpan(out Span<T> span)
+        {
+            if (IsContiguous)
+            {
+                span = _data.Slice(Offset, Size);
+                return true;
+            }
+
+            span = default;
+            return false;
+        }
 
         public ref T this[int i]
         {
@@ -106,7 +135,6 @@ namespace DevOnBike.Overfit.Tensors.Core
             }
         }
 
-
         public ref T this[int i, int j]
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -116,7 +144,6 @@ namespace DevOnBike.Overfit.Tensors.Core
                 return ref _data[Offset + Strides.GetOffset(i, j)];
             }
         }
-
 
         public ref T this[int i, int j, int k]
         {
@@ -138,12 +165,16 @@ namespace DevOnBike.Overfit.Tensors.Core
             }
         }
 
+        /// <summary>
+        /// Reinterprets the current tensor span with a new shape.
+        /// Valid only for contiguous tensor spans.
+        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public TensorView<T> Reshape(TensorShape newShape)
+        public TensorSpan<T> Reshape(TensorShape newShape)
         {
             if (!IsContiguous)
             {
-                throw new InvalidOperationException("Cannot reshape a non-contiguous tensor view.");
+                throw new InvalidOperationException("Cannot reshape a non-contiguous tensor span.");
             }
 
             if (!newShape.IsValid)
@@ -158,11 +189,14 @@ namespace DevOnBike.Overfit.Tensors.Core
                     nameof(newShape));
             }
 
-            return new TensorView<T>(_data.Slice(Offset, Size), newShape);
+            return new TensorSpan<T>(_data.Slice(Offset, Size), newShape);
         }
 
+        /// <summary>
+        /// Returns a transposed 2D view without copying data.
+        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public TensorView<T> Transpose2D()
+        public TensorSpan<T> Transpose2D()
         {
             if (Rank != 2)
             {
@@ -171,19 +205,19 @@ namespace DevOnBike.Overfit.Tensors.Core
 
             var newShape = new TensorShape(Shape.D1, Shape.D0);
             var newStrides = Strides.Transpose2D();
-            return new TensorView<T>(_data, newShape, newStrides, Offset);
+            return new TensorSpan<T>(_data, newShape, newStrides, Offset);
         }
 
         /// <summary>
-        /// Returns a contiguous 1D slice over the current contiguous view.
+        /// Returns a contiguous 1D slice over the current contiguous tensor span.
         /// This is a linear slice, not a general N-dimensional slice.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public TensorView<T> SliceContiguous1D(int offsetIndex, int sliceLength)
+        public TensorSpan<T> SliceContiguous1D(int offsetIndex, int sliceLength)
         {
             if (!IsContiguous)
             {
-                throw new InvalidOperationException("SliceContiguous1D requires a contiguous tensor view.");
+                throw new InvalidOperationException("SliceContiguous1D requires a contiguous tensor span.");
             }
 
             if (offsetIndex < 0)
@@ -202,19 +236,22 @@ namespace DevOnBike.Overfit.Tensors.Core
             }
 
             var slicedSpan = _data.Slice(Offset + offsetIndex, sliceLength);
-
-            return new TensorView<T>(slicedSpan, new TensorShape(sliceLength));
+            return new TensorSpan<T>(slicedSpan, new TensorShape(sliceLength));
         }
 
+        /// <summary>
+        /// Flattens the tensor span into a contiguous 1D view.
+        /// Valid only for contiguous tensor spans.
+        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public TensorView<T> Flatten()
+        public TensorSpan<T> Flatten()
         {
             if (!IsContiguous)
             {
-                throw new InvalidOperationException("Flatten requires a contiguous tensor view.");
+                throw new InvalidOperationException("Flatten requires a contiguous tensor span.");
             }
 
-            return new TensorView<T>(_data.Slice(Offset, Size), new TensorShape(Size));
+            return new TensorSpan<T>(_data.Slice(Offset, Size), new TensorShape(Size));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

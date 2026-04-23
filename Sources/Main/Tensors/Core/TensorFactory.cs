@@ -22,13 +22,12 @@ namespace DevOnBike.Overfit.Tensors.Core
 
             if (template._isBorrowedMemory)
             {
-                if (template._arena is null)
+                if (template._buffer is null)
                 {
-                    throw new InvalidOperationException(
-                        "Template storage is marked as borrowed memory but has no arena.");
+                    throw new InvalidOperationException("Template storage is marked as borrowed memory but has no arena.");
                 }
 
-                result = new TensorStorage<T>(template._arena, template.Length);
+                result = new TensorStorage<T>(template._buffer, template.Length);
             }
             else
             {
@@ -47,7 +46,7 @@ namespace DevOnBike.Overfit.Tensors.Core
         /// Materializes any tensor view into a new contiguous storage buffer.
         /// Supports rank 1..4.
         /// </summary>
-        public static TensorStorage<T> Materialize<T>(TensorView<T> view)
+        public static TensorStorage<T> Materialize<T>(TensorSpan<T> view)
             where T : unmanaged
         {
             var storage = new TensorStorage<T>(view.Size, clearMemory: false);
@@ -56,6 +55,7 @@ namespace DevOnBike.Overfit.Tensors.Core
             if (view.IsContiguous)
             {
                 view.AsReadOnlySpan().CopyTo(target);
+
                 return storage;
             }
 
@@ -86,7 +86,7 @@ namespace DevOnBike.Overfit.Tensors.Core
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static void MaterializeRank1<T>(TensorView<T> view, Span<T> target)
+        private static void MaterializeRank1<T>(TensorSpan<T> view, Span<T> target)
             where T : unmanaged
         {
             var idx = 0;
@@ -98,7 +98,7 @@ namespace DevOnBike.Overfit.Tensors.Core
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static void MaterializeRank2<T>(TensorView<T> view, Span<T> target)
+        private static void MaterializeRank2<T>(TensorSpan<T> view, Span<T> target)
             where T : unmanaged
         {
             var idx = 0;
@@ -113,7 +113,7 @@ namespace DevOnBike.Overfit.Tensors.Core
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static void MaterializeRank3<T>(TensorView<T> view, Span<T> target)
+        private static void MaterializeRank3<T>(TensorSpan<T> view, Span<T> target)
             where T : unmanaged
         {
             var idx = 0;
@@ -131,7 +131,7 @@ namespace DevOnBike.Overfit.Tensors.Core
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static void MaterializeRank4<T>(TensorView<T> view, Span<T> target)
+        private static void MaterializeRank4<T>(TensorSpan<T> view, Span<T> target)
             where T : unmanaged
         {
             var idx = 0;
