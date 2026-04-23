@@ -15,6 +15,9 @@ namespace DevOnBike.Overfit.Tensors.Core
         public readonly TensorStrides Strides;
         public readonly int Offset;
 
+        // HPC OPTIMIZATION: Cached at creation to avoid recalculating on every Span access
+        public readonly bool IsContiguous;
+
         public int Rank
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -31,12 +34,6 @@ namespace DevOnBike.Overfit.Tensors.Core
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => Size == 0;
-        }
-
-        public bool IsContiguous
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => Strides.IsContiguous(Shape);
         }
 
         /// <summary>
@@ -61,6 +58,9 @@ namespace DevOnBike.Overfit.Tensors.Core
             Shape = shape;
             Strides = TensorStrides.Contiguous(shape);
             Offset = 0;
+
+            // Ponieważ używamy metody Contiguous, wiemy na 100%, że pamięć jest ciągła
+            IsContiguous = true;
         }
 
         /// <summary>
@@ -83,6 +83,9 @@ namespace DevOnBike.Overfit.Tensors.Core
             Shape = shape;
             Strides = strides;
             Offset = offset;
+
+            // Obliczane tylko raz przy tworzeniu niestandardowego widoku (np. przy Transpose)
+            IsContiguous = strides.IsContiguous(shape);
         }
 
         /// <summary>

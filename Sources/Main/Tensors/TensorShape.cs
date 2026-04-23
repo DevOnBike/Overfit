@@ -28,9 +28,7 @@ namespace DevOnBike.Overfit.Tensors
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get
             {
-                return D3 > 1 ? 4 :
-                    D2 > 1 ? 3 :
-                    D1 > 1 ? 2 : 1;
+                return D3 > 1 ? 4 : D2 > 1 ? 3 : D1 > 1 ? 2 : 1;
             }
         }
 
