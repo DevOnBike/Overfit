@@ -70,16 +70,12 @@ namespace DevOnBike.Overfit.Autograd
                 return;
             }
 
-            using var activity = _activitySource.StartActivity(nameof(Record));
-
             if (_opCount >= _tape.Length)
             {
                 Array.Resize(ref _tape, _tape.Length * 2);
             }
 
             _tape[_opCount++] = new TapeOp(code, output, a, b, i0, i1, i2, i3, i4, nodeContext);
-
-            activity?.SetStatus(ActivityStatusCode.Ok);
 
             if (OverfitDiagnostics.IsEnabled())
             {

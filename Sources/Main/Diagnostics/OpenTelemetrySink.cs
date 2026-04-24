@@ -33,8 +33,8 @@ namespace DevOnBike.Overfit.Diagnostics
                 { "output_elements", evt.OutputElements }
             };
 
-            OverfitTelemetry.KernelDurationMs.Record(evt.DurationMs, tags);
-            OverfitTelemetry.KernelCount.Add(1, tags);
+            // OverfitTelemetry.KernelDurationMs.Record(evt.DurationMs, tags);
+            // OverfitTelemetry.KernelCount.Add(1, tags);
         }
 
         public void OnModuleCompleted(in ModuleDiagnosticEvent evt)
