@@ -6,6 +6,7 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
+using DevOnBike.Overfit.Autograd;
 
 namespace DevOnBike.Overfit.Diagnostics
 {
@@ -105,6 +106,11 @@ namespace DevOnBike.Overfit.Diagnostics
             "overfit.graph.tape_ops",
             unit: "{op}",
             description: "Tape ops completed in backward passes.");
+
+        public static readonly Counter<long> GraphRecordTotalCount = Meter.CreateCounter<long>(
+            "overfit.graph.record_op.count",
+            unit: "{op}",
+            description: "Graph record record total count");
 
         public static readonly Counter<long> BackwardOpCount = Meter.CreateCounter<long>(
             "overfit.backward.op.count",
@@ -219,6 +225,21 @@ namespace DevOnBike.Overfit.Diagnostics
             BackwardOpDurationMs.Record(elapsed.TotalMilliseconds, tags);
             BackwardOpAllocatedBytes.Record(allocatedBytes, tags);
             BackwardOpCount.Add(1, tags);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void RecordGraphRecordOp(
+            OpCode code)
+        {
+            if (!Enabled)
+            {
+                return;
+            }
+
+            TagList tags = default;
+            tags.Add("op", code);
+
+            GraphRecordTotalCount.Add(1, tags);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

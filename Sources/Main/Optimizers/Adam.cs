@@ -9,7 +9,6 @@ using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 using DevOnBike.Overfit.Autograd;
-using DevOnBike.Overfit.DeepLearning.Diagnostics;
 using DevOnBike.Overfit.Optimizers.Abstractions;
 using DevOnBike.Overfit.Tensors;
 
@@ -60,84 +59,67 @@ namespace DevOnBike.Overfit.Optimizers
 
         public void Step()
         {
-            var ctx = ModuleDiagnostics.Begin(
-                moduleType: nameof(Adam),
-                phase: "step",
-                isTraining: true,
-                batchSize: 0,
-                inputRows: _states.Length,
-                inputCols: 0,
-                outputRows: _states.Length,
-                outputCols: 0);
+            _t++;
 
-            try
+            var bc1 = 1f - MathF.Pow(Beta1, _t);
+            var bc2 = 1f - MathF.Pow(Beta2, _t);
+            var invBc1 = 1f / bc1;
+            var invBc2 = 1f / bc2;
+            var wd = WeightDecay;
+            var b1 = Beta1;
+            var b2 = Beta2;
+            var b1Inv = 1f - Beta1;
+            var b2Inv = 1f - Beta2;
+            var eps = Epsilon;
+            var lr = LearningRate;
+
+            // Parallel processing for multiple large parameters
+            if (_states.Length >= 4)
             {
-                _t++;
-
-                var bc1 = 1f - MathF.Pow(Beta1, _t);
-                var bc2 = 1f - MathF.Pow(Beta2, _t);
-                var invBc1 = 1f / bc1;
-                var invBc2 = 1f / bc2;
-                var wd = WeightDecay;
-                var b1 = Beta1;
-                var b2 = Beta2;
-                var b1Inv = 1f - Beta1;
-                var b2Inv = 1f - Beta2;
-                var eps = Epsilon;
-                var lr = LearningRate;
-
-                // Parallel processing for multiple large parameters
-                if (_states.Length >= 4)
+                if (UseAdamW)
                 {
-                    if (UseAdamW)
+                    Parallel.ForEach(_states, state =>
                     {
-                        Parallel.ForEach(_states, state =>
+                        if (state.Node.RequiresGrad)
                         {
-                            if (state.Node.RequiresGrad)
-                            {
-                                StepAdamW(state, b1, b2, b1Inv, b2Inv, invBc1, invBc2, eps, lr, wd);
-                            }
-                        });
-                    }
-                    else
+                            StepAdamW(state, b1, b2, b1Inv, b2Inv, invBc1, invBc2, eps, lr, wd);
+                        }
+                    });
+                }
+                else
+                {
+                    Parallel.ForEach(_states, state =>
                     {
-                        Parallel.ForEach(_states, state =>
+                        if (state.Node.RequiresGrad)
                         {
-                            if (state.Node.RequiresGrad)
-                            {
-                                StepAdam(state, b1, b2, b1Inv, b2Inv, invBc1, invBc2, eps, lr, wd);
-                            }
-                        });
+                            StepAdam(state, b1, b2, b1Inv, b2Inv, invBc1, invBc2, eps, lr, wd);
+                        }
+                    });
+                }
+            }
+            else
+            {
+                // Sequential for few parameters (less overhead)
+                if (UseAdamW)
+                {
+                    foreach (var state in _states)
+                    {
+                        if (state.Node.RequiresGrad)
+                        {
+                            StepAdamW(state, b1, b2, b1Inv, b2Inv, invBc1, invBc2, eps, lr, wd);
+                        }
                     }
                 }
                 else
                 {
-                    // Sequential for few parameters (less overhead)
-                    if (UseAdamW)
+                    foreach (var state in _states)
                     {
-                        foreach (var state in _states)
+                        if (state.Node.RequiresGrad)
                         {
-                            if (state.Node.RequiresGrad)
-                            {
-                                StepAdamW(state, b1, b2, b1Inv, b2Inv, invBc1, invBc2, eps, lr, wd);
-                            }
-                        }
-                    }
-                    else
-                    {
-                        foreach (var state in _states)
-                        {
-                            if (state.Node.RequiresGrad)
-                            {
-                                StepAdam(state, b1, b2, b1Inv, b2Inv, invBc1, invBc2, eps, lr, wd);
-                            }
+                            StepAdam(state, b1, b2, b1Inv, b2Inv, invBc1, invBc2, eps, lr, wd);
                         }
                     }
                 }
-            }
-            finally
-            {
-                ModuleDiagnostics.End(ctx);
             }
         }
 
@@ -390,26 +372,9 @@ namespace DevOnBike.Overfit.Optimizers
 
         public void ZeroGrad()
         {
-            var ctx = ModuleDiagnostics.Begin(
-                moduleType: nameof(Adam),
-                phase: "zero_grad",
-                isTraining: true,
-                batchSize: 0,
-                inputRows: _states.Length,
-                inputCols: 0,
-                outputRows: _states.Length,
-                outputCols: 0);
-
-            try
+            foreach (var state in _states)
             {
-                foreach (var state in _states)
-                {
-                    state.Node.ZeroGrad();
-                }
-            }
-            finally
-            {
-                ModuleDiagnostics.End(ctx);
+                state.Node.ZeroGrad();
             }
         }
 

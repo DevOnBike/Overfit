@@ -31,7 +31,7 @@ namespace Benchmarks
             //BenchmarkRunner.Run<GenerationalGeneticAlgorithmBenchmarks>();
             // BenchmarkRunner.Run<EvolutionaryAlgorithmBenchmarks>();
 
-            BenchmarkRunner.Run<ArrayAllocationBenchmark>();
+            BenchmarkRunner.Run<SingleInferenceBenchmark>();
         }
     }
 }

@@ -6,8 +6,6 @@
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
-using DevOnBike.Overfit.DeepLearning.Diagnostics;
-using DevOnBike.Overfit.Diagnostics.Contracts;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors;
 
@@ -66,24 +64,13 @@ namespace DevOnBike.Overfit.DeepLearning
             var b1 = buf1.Span;
             var b2 = buf2.Span;
 
-            using (new DiagnosticScope(
-                   category: "DeepLearning",
-                   name: "ResidualBlock.ForwardInference",
-                   phase: "forward_inference",
-                   isTraining: false,
-                   batchSize: 1,
-                   featureCount: hiddenSize,
-                   inputElements: input.Length,
-                   outputElements: output.Length))
-            {
-                _linear1.ForwardInference(input, b1);
-                _bn1.ForwardInference(b1, b2);
-                TensorPrimitives.Max(b2, 0f, b1);
-                _linear2.ForwardInference(b1, b2);
-                _bn2.ForwardInference(b2, b1);
-                TensorPrimitives.Add(b1, input, output);
-                TensorPrimitives.Max(output, 0f, output);
-            }
+            _linear1.ForwardInference(input, b1);
+            _bn1.ForwardInference(b1, b2);
+            TensorPrimitives.Max(b2, 0f, b1);
+            _linear2.ForwardInference(b1, b2);
+            _bn2.ForwardInference(b2, b1);
+            TensorPrimitives.Add(b1, input, output);
+            TensorPrimitives.Max(output, 0f, output);
         }
 
         public AutogradNode Forward(ComputationGraph? graph, AutogradNode input)
@@ -91,24 +78,7 @@ namespace DevOnBike.Overfit.DeepLearning
             var batch = input.DataView.GetDim(0);
             var cols = input.DataView.Rank > 1 ? input.DataView.GetDim(1) : input.DataView.Size;
 
-            var ctx = ModuleDiagnostics.Begin(
-            moduleType: nameof(ResidualBlock),
-            phase: graph is null || !IsTraining ? "forward_eval" : "forward_train",
-            isTraining: IsTraining,
-            batchSize: batch,
-            inputRows: batch,
-            inputCols: cols,
-            outputRows: batch,
-            outputCols: cols);
-
-            try
-            {
-                return ForwardCore(graph, input);
-            }
-            finally
-            {
-                ModuleDiagnostics.End(ctx);
-            }
+            return ForwardCore(graph, input);
         }
 
         private AutogradNode ForwardCore(ComputationGraph? graph, AutogradNode input)

@@ -7,7 +7,6 @@ using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
-using DevOnBike.Overfit.DeepLearning.Diagnostics;
 using DevOnBike.Overfit.Maths;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors;
@@ -55,15 +54,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
-            var ctx = ModuleDiagnostics.Begin(nameof(LinearLayer), "forward_train", true, input.Shape.D0, _inputSize, input.Shape.D0, _outputSize);
-            try
-            {
-                return TensorMath.Linear(graph, input, Weights, Bias);
-            }
-            finally
-            {
-                ModuleDiagnostics.End(ctx);
-            }
+            return TensorMath.Linear(graph, input, Weights, Bias);
         }
 
         public IEnumerable<AutogradNode> Parameters()

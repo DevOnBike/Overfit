@@ -6,7 +6,7 @@ namespace DevOnBike.Overfit.Diagnostics
     /// <summary>
     /// Allocation-free stopwatch stored as a readonly struct.
     /// </summary>
-    internal readonly struct ValueStopwatch
+    public readonly struct ValueStopwatch
     {
         private static readonly double TimestampToTicks = TimeSpan.TicksPerSecond / (double)Stopwatch.Frequency;
         private readonly long _startTimestamp;

@@ -6,7 +6,6 @@
 using System.Diagnostics;
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Diagnostics;
-using DevOnBike.Overfit.Diagnostics.Contracts;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors.Core;
 
@@ -27,12 +26,6 @@ namespace DevOnBike.Overfit.Autograd
 
         // Huge arena buffer: bypasses GC and ArrayPool for intermediate tensor storage.
         public readonly NativeBufferManaged<float> TapeBuffer = new NativeBufferManaged<float>(50_000_000, clearMemory: false);
-
-        private readonly int[] _backwardOpCounts = new int[OpCodeCount];
-        private readonly long[] _backwardOpTicks = new long[OpCodeCount];
-        private readonly long[] _backwardOpAllocatedBytes = new long[OpCodeCount];
-        private long _lastBackwardTotalTicks;
-        private long _lastBackwardTotalAllocatedBytes;
 
         public bool IsRecording { get; set; } = true;
 
@@ -77,10 +70,7 @@ namespace DevOnBike.Overfit.Autograd
 
             _tape[_opCount++] = new TapeOp(code, output, a, b, i0, i1, i2, i3, i4, nodeContext);
 
-            if (OverfitDiagnostics.IsEnabled())
-            {
-                OverfitDiagnostics.Counter($"graph.op.{code}", 1);
-            }
+            OverfitTelemetry.RecordGraphRecordOp(code);
         }
 
         public void Backward(AutogradNode lossNode)
@@ -90,128 +80,16 @@ namespace DevOnBike.Overfit.Autograd
                 return;
             }
 
-            long allocBefore = 0;
-            long start = 0;
-            var gc0Before = 0;
-            var gc1Before = 0;
-            var gc2Before = 0;
-
-            if (OverfitDiagnostics.IsEnabled())
-            {
-                allocBefore = GC.GetTotalAllocatedBytes(false);
-                start = Stopwatch.GetTimestamp();
-                gc0Before = GC.CollectionCount(0);
-                gc1Before = GC.CollectionCount(1);
-                gc2Before = GC.CollectionCount(2);
-            }
-
-            if (EnableBackwardProfiling)
-            {
-                ClearBackwardProfile();
-            }
+            var memoryStatsBefore = new DotNetMemorySnapshot();
 
             lossNode.GradView.AsSpan().Fill(1f);
 
-            if (EnableBackwardProfiling)
+            for (var i = _opCount - 1; i >= 0; i--)
             {
-                var totalAllocBefore = GC.GetTotalAllocatedBytes(false);
-                var totalStart = Stopwatch.GetTimestamp();
-
-                for (var i = _opCount - 1; i >= 0; i--)
-                {
-                    ref readonly var op = ref _tape[i];
-                    var codeIndex = (int)op.Code;
-
-                    var opAllocBefore = GC.GetTotalAllocatedBytes(false);
-                    var opStart = Stopwatch.GetTimestamp();
-
-                    ExecuteBackward(in op);
-
-                    var opEnd = Stopwatch.GetTimestamp();
-                    var opAllocAfter = GC.GetTotalAllocatedBytes(false);
-
-                    _backwardOpCounts[codeIndex]++;
-                    _backwardOpTicks[codeIndex] += opEnd - opStart;
-                    _backwardOpAllocatedBytes[codeIndex] += opAllocAfter - opAllocBefore;
-                }
-
-                var totalEnd = Stopwatch.GetTimestamp();
-                var totalAllocAfter = GC.GetTotalAllocatedBytes(false);
-
-                _lastBackwardTotalTicks = totalEnd - totalStart;
-                _lastBackwardTotalAllocatedBytes = totalAllocAfter - totalAllocBefore;
-            }
-            else
-            {
-                for (var i = _opCount - 1; i >= 0; i--)
-                {
-                    ExecuteBackward(in _tape[i]);
-                }
-
-                _lastBackwardTotalTicks = 0;
-                _lastBackwardTotalAllocatedBytes = 0;
+                ExecuteBackward(in _tape[i]);
             }
 
-            if (OverfitDiagnostics.IsEnabled())
-            {
-                var allocAfter = GC.GetTotalAllocatedBytes(false);
-                var end = Stopwatch.GetTimestamp();
-
-                OverfitDiagnostics.GraphCompleted(new GraphDiagnosticEvent(
-                    TapeOpCount: _opCount,
-                    BackwardMs: (end - start) * 1000.0 / Stopwatch.Frequency,
-                    AllocatedBytes: allocAfter - allocBefore,
-                    Gen0Collections: GC.CollectionCount(0) - gc0Before,
-                    Gen1Collections: GC.CollectionCount(1) - gc1Before,
-                    Gen2Collections: GC.CollectionCount(2) - gc2Before,
-                    Phase: "backward",
-                    IsTraining: true,
-                    BatchSize: lossNode.DataView.Rank > 0 ? lossNode.DataView.GetDim(0) : 0));
-            }
-        }
-
-        public BackwardProfileSnapshot GetBackwardProfileSnapshot()
-        {
-            var nonEmpty = 0;
-            for (var i = 0; i < OpCodeCount; i++)
-            {
-                if (_backwardOpCounts[i] != 0)
-                {
-                    nonEmpty++;
-                }
-            }
-
-            var profiles = new BackwardOpProfile[nonEmpty];
-            var cursor = 0;
-
-            for (var i = 0; i < OpCodeCount; i++)
-            {
-                var count = _backwardOpCounts[i];
-                if (count == 0)
-                {
-                    continue;
-                }
-
-                profiles[cursor++] = new BackwardOpProfile(
-                    Code: (OpCode)i,
-                    Count: count,
-                    ElapsedMs: _backwardOpTicks[i] * 1000.0 / Stopwatch.Frequency,
-                    AllocatedBytes: _backwardOpAllocatedBytes[i]);
-            }
-
-            return new BackwardProfileSnapshot(
-                profiles,
-                _lastBackwardTotalTicks,
-                _lastBackwardTotalAllocatedBytes);
-        }
-
-        public void ClearBackwardProfile()
-        {
-            Array.Clear(_backwardOpCounts, 0, _backwardOpCounts.Length);
-            Array.Clear(_backwardOpTicks, 0, _backwardOpTicks.Length);
-            Array.Clear(_backwardOpAllocatedBytes, 0, _backwardOpAllocatedBytes.Length);
-            _lastBackwardTotalTicks = 0;
-            _lastBackwardTotalAllocatedBytes = 0;
+            var memoryStatsAfter = new DotNetMemorySnapshot();
         }
 
         public AutogradNode Add(AutogradNode left, AutogradNode right) => TensorMath.Add(this, left, right);
@@ -362,7 +240,6 @@ namespace DevOnBike.Overfit.Autograd
             }
 
             _opCount = 0;
-            ClearBackwardProfile();
 
             // Reset arena without involving GC.
             TapeBuffer.ResetOffset();

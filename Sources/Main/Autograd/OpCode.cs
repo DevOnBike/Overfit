@@ -34,6 +34,6 @@ namespace DevOnBike.Overfit.Autograd
         RepeatVector,
         FusedLSTMStep,
         Linear,
-        AddInPlace // <--- NOWY KOD
+        AddInPlace
     }
 }

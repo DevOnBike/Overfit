@@ -25,7 +25,7 @@ namespace DevOnBike.Overfit.Tests
             _output = output;
         }
 
-        //[Fact]
+        [Fact]
         public void Mnist_FullTrain60k_CnnBeastMode_Benchmark()
         {
             const int trainSize = 60_000;
@@ -70,7 +70,6 @@ namespace DevOnBike.Overfit.Tests
 
             var totalSw = Stopwatch.StartNew();
 
-            var traceCollector = new EpochTraceCollector();
             var traceDir = Path.Combine(AppContext.BaseDirectory, "diagnostics", "mnist");
             Directory.CreateDirectory(traceDir);
 
@@ -87,13 +86,6 @@ namespace DevOnBike.Overfit.Tests
                 File.Delete(jsonlTracePath);
             }
 
-            using var textSink = TextWriterDiagnosticsSink.CreateFile(textTracePath, append: false);
-            using var jsonlSink = JsonLinesDiagnosticsSink.CreateFile(jsonlTracePath, append: false);
-            var compositeSink = new CompositeOverfitDiagnosticsSink(traceCollector, textSink, jsonlSink);
-            using var session = new DiagnosticsSession(enabled: enableDiagnostics, sink: compositeSink);
-
-            traceCollector.Reset();
-
             _output.WriteLine("=== START: Trening ResNet na Taśmie (NativeBuffer) ===");
             _output.WriteLine($"Diagnostics enabled: {enableDiagnostics}");
             _output.WriteLine($"Backward profiling enabled: {enableBackwardProfiling}");
@@ -103,8 +95,6 @@ namespace DevOnBike.Overfit.Tests
 
             for (var epoch = 0; epoch < epochs; epoch++)
             {
-                traceCollector.Reset();
-
                 conv1.Train();
                 bn1.Train();
                 res1.Train();
@@ -124,7 +114,6 @@ namespace DevOnBike.Overfit.Tests
                 var gc2Before = GC.CollectionCount(2);
 
                 var epochStartSnapshot = MemoryLeakProbe.Capture(forceFullGc: true);
-                BackwardProfileSnapshot lastBackwardProfile = null;
 
                 for (var b = 0; b < batches; b++)
                 {
@@ -196,7 +185,7 @@ namespace DevOnBike.Overfit.Tests
 
                     if (enableBackwardProfiling)
                     {
-                        lastBackwardProfile = graph.GetBackwardProfileSnapshot();
+                        // lastBackwardProfile = graph.GetBackwardProfileSnapshot();
                     }
 
                     allocBefore = GC.GetTotalAllocatedBytes(false);
@@ -209,15 +198,8 @@ namespace DevOnBike.Overfit.Tests
 
                 var epochAllocAfter = GC.GetTotalAllocatedBytes(true);
 
-                var snapshot = traceCollector.Snapshot();
                 var epochJson = Path.Combine(traceDir, $"epoch_{epoch + 1:D2}.json");
                 var epochCsv = Path.Combine(traceDir, $"epoch_{epoch + 1:D2}.csv");
-
-                if (enableDiagnostics)
-                {
-                    EpochTraceExporter.WriteJson(epochJson, epoch + 1, snapshot);
-                    EpochTraceExporter.WriteCsv(epochCsv, snapshot);
-                }
 
                 var epochEndSnapshot = MemoryLeakProbe.Capture(forceFullGc: true);
 
@@ -238,14 +220,8 @@ namespace DevOnBike.Overfit.Tests
                 _output.WriteLine($"private bytes delta: {(epochEndSnapshot.PrivateMemoryBytes - epochStartSnapshot.PrivateMemoryBytes) / 1024.0 / 1024.0:F2} MB");
                 _output.WriteLine($"working set delta: {(epochEndSnapshot.WorkingSet64 - epochStartSnapshot.WorkingSet64) / 1024.0 / 1024.0:F2} MB");
 
-                if (enableBackwardProfiling && lastBackwardProfile is not null)
-                {
-                    _output.WriteLine(BackwardProfileFormatter.Format(lastBackwardProfile, top: 16));
-                }
-
                 if (enableDiagnostics)
                 {
-                    _output.WriteLine(BenchmarkTraceFormatter.Format(snapshot));
                     _output.WriteLine($"  trace.json:             {epochJson}");
                     _output.WriteLine($"  trace.csv:              {epochCsv}");
 
