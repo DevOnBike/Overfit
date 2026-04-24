@@ -1,13 +1,9 @@
-// Copyright (c) 2026 DevOnBike.
-// This file is part of DevonBike Overfit.
-// DevonBike Overfit is licensed under the GNU AGPLv3.
-// For commercial licensing options, contact: devonbike@gmail.com
-
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Diagnostics.Contracts;
+using DevOnBike.Overfit.Evolutionary.Runtime;
 
 namespace DevOnBike.Overfit.Diagnostics
 {
@@ -22,7 +18,7 @@ namespace DevOnBike.Overfit.Diagnostics
         public static readonly Meter Meter = new(MeterName, Version);
         public static readonly ActivitySource Tracer = new(MeterName, Version);
 
-        // Existing DL/runtime metrics
+        // Existing runtime metrics
         public static readonly Histogram<double> KernelDurationMs = Meter.CreateHistogram<double>(
             "overfit.kernel.duration.ms",
             unit: "ms",
@@ -37,6 +33,11 @@ namespace DevOnBike.Overfit.Diagnostics
             "overfit.graph.backward.duration.ms",
             unit: "ms",
             description: "Backward pass duration.");
+
+        public static readonly Counter<long> GraphRecordTotalCount = Meter.CreateCounter<long>(
+            "overfit.graph.record_op.count",
+            unit: "{op}",
+            description: "Graph record record total count");
 
         public static readonly Histogram<long> ModuleAllocatedBytes = Meter.CreateHistogram<long>(
             "overfit.module.alloc.bytes",
@@ -78,49 +79,74 @@ namespace DevOnBike.Overfit.Diagnostics
             unit: "By",
             description: "Native / unmanaged memory tracked by Overfit diagnostics.");
 
-        public static readonly Counter<long> GraphRecordTotalCount = Meter.CreateCounter<long>(
-            "overfit.graph.record_op.count",
-            unit: "{op}",
-            description: "Graph record record total count");
-
-        // Evolutionary runner metrics
-        public static readonly Histogram<double> EvolutionGenerationDurationMs = Meter.CreateHistogram<double>(
-            "overfit.evolution.generation.duration.ms",
+        // Evolutionary / MAP-Elites metrics
+        public static readonly Histogram<double> MapElitesIterationDurationMs = Meter.CreateHistogram<double>(
+            "overfit.evolution.map_elites.iteration.duration.ms",
             unit: "ms",
-            description: "Total duration of one evolutionary generation.");
+            description: "Duration of one MAP-Elites iteration.");
 
-        public static readonly Histogram<double> EvolutionAskDurationMs = Meter.CreateHistogram<double>(
-            "overfit.evolution.ask.duration.ms",
+        public static readonly Histogram<double> MapElitesAskDurationMs = Meter.CreateHistogram<double>(
+            "overfit.evolution.map_elites.ask.duration.ms",
             unit: "ms",
-            description: "Duration of the Ask phase.");
+            description: "Duration of MAP-Elites Ask phase.");
 
-        public static readonly Histogram<double> EvolutionEvaluateDurationMs = Meter.CreateHistogram<double>(
-            "overfit.evolution.evaluate.duration.ms",
+        public static readonly Histogram<double> MapElitesEvaluateDurationMs = Meter.CreateHistogram<double>(
+            "overfit.evolution.map_elites.evaluate.duration.ms",
             unit: "ms",
-            description: "Duration of the Evaluate phase.");
+            description: "Duration of MAP-Elites Evaluate phase.");
 
-        public static readonly Histogram<double> EvolutionTellDurationMs = Meter.CreateHistogram<double>(
-            "overfit.evolution.tell.duration.ms",
+        public static readonly Histogram<double> MapElitesTellDurationMs = Meter.CreateHistogram<double>(
+            "overfit.evolution.map_elites.tell.duration.ms",
             unit: "ms",
-            description: "Duration of the Tell phase.");
+            description: "Duration of MAP-Elites Tell phase.");
 
-        public static readonly Histogram<double> EvolutionBestFitness = Meter.CreateHistogram<double>(
-            "overfit.evolution.best_fitness",
+        public static readonly Histogram<double> MapElitesCoverage = Meter.CreateHistogram<double>(
+            "overfit.evolution.map_elites.coverage",
+            unit: "{coverage}",
+            description: "Archive coverage after MAP-Elites iteration.");
+
+        public static readonly Histogram<double> MapElitesQdScore = Meter.CreateHistogram<double>(
+            "overfit.evolution.map_elites.qd_score",
+            unit: "{score}",
+            description: "QD score after MAP-Elites iteration.");
+
+        public static readonly Histogram<double> MapElitesBestFitness = Meter.CreateHistogram<double>(
+            "overfit.evolution.map_elites.best_fitness",
             unit: "{fitness}",
-            description: "Best fitness observed after a generation.");
+            description: "Best fitness after MAP-Elites iteration.");
 
-        public static readonly Counter<long> EvolutionGenerationCount = Meter.CreateCounter<long>(
-            "overfit.evolution.generation.count",
-            unit: "{generation}",
-            description: "Number of completed evolutionary generations.");
+        public static readonly Counter<long> MapElitesIterationCount = Meter.CreateCounter<long>(
+            "overfit.evolution.map_elites.iteration.count",
+            unit: "{iteration}",
+            description: "Number of completed MAP-Elites iterations.");
 
-        public static readonly Counter<long> EvolutionPopulationEvaluated = Meter.CreateCounter<long>(
-            "overfit.evolution.population.evaluated",
+        public static readonly Counter<long> MapElitesInsertedNewCells = Meter.CreateCounter<long>(
+            "overfit.evolution.map_elites.inserted_new_cells",
+            unit: "{cell}",
+            description: "Number of newly occupied archive cells.");
+
+        public static readonly Counter<long> MapElitesReplacedCells = Meter.CreateCounter<long>(
+            "overfit.evolution.map_elites.replaced_cells",
+            unit: "{cell}",
+            description: "Number of elite replacements.");
+
+        public static readonly Counter<long> MapElitesRejectedCandidates = Meter.CreateCounter<long>(
+            "overfit.evolution.map_elites.rejected_candidates",
             unit: "{candidate}",
-            description: "Number of candidates evaluated by the runner.");
+            description: "Number of rejected MAP-Elites candidates.");
+
+        public static readonly Counter<long> MapElitesOutOfBoundsCandidates = Meter.CreateCounter<long>(
+            "overfit.evolution.map_elites.out_of_bounds_candidates",
+            unit: "{candidate}",
+            description: "Number of MAP-Elites candidates whose descriptors were outside archive bounds.");
+
+        public static readonly Histogram<long> MapElitesOccupiedCells = Meter.CreateHistogram<long>(
+            "overfit.evolution.map_elites.occupied_cells",
+            unit: "{cell}",
+            description: "Number of occupied archive cells.");
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Activity StartActivity(string name, ActivityKind kind = ActivityKind.Internal)
+        public static Activity? StartActivity(string name, ActivityKind kind = ActivityKind.Internal)
         {
             if (!Enabled || !TraceEnabled)
             {
@@ -128,6 +154,20 @@ namespace DevOnBike.Overfit.Diagnostics
             }
 
             return Tracer.StartActivity(name, kind);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void RecordGraphRecordOp(OpCode code)
+        {
+            if (!Enabled)
+            {
+                return;
+            }
+
+            TagList tags = default;
+            tags.Add("op", code);
+
+            GraphRecordTotalCount.Add(1, tags);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -145,6 +185,7 @@ namespace DevOnBike.Overfit.Diagnostics
             tags.Add("population_size", populationSize);
             tags.Add("parameter_count", parameterCount);
 
+            /*
             EvolutionGenerationDurationMs.Record(metrics.TotalElapsed.TotalMilliseconds, tags);
             EvolutionAskDurationMs.Record(metrics.AskElapsed.TotalMilliseconds, tags);
             EvolutionEvaluateDurationMs.Record(metrics.EvaluateElapsed.TotalMilliseconds, tags);
@@ -152,11 +193,15 @@ namespace DevOnBike.Overfit.Diagnostics
             EvolutionBestFitness.Record(metrics.BestFitness, tags);
             EvolutionGenerationCount.Add(1, tags);
             EvolutionPopulationEvaluated.Add(populationSize, tags);
+            */
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static void RecordGraphRecordOp(
-            OpCode code)
+        public static void RecordMapElitesIteration(
+            in MapElitesIterationMetrics metrics,
+            int batchSize,
+            int parameterCount,
+            int descriptorDimensions)
         {
             if (!Enabled)
             {
@@ -164,9 +209,25 @@ namespace DevOnBike.Overfit.Diagnostics
             }
 
             TagList tags = default;
-            tags.Add("op", code);
+            tags.Add("batch_size", batchSize);
+            tags.Add("parameter_count", parameterCount);
+            tags.Add("descriptor_dimensions", descriptorDimensions);
 
-            GraphRecordTotalCount.Add(1, tags);
+            MapElitesIterationDurationMs.Record(metrics.TotalElapsed.TotalMilliseconds, tags);
+            MapElitesAskDurationMs.Record(metrics.AskElapsed.TotalMilliseconds, tags);
+            MapElitesEvaluateDurationMs.Record(metrics.EvaluateElapsed.TotalMilliseconds, tags);
+            MapElitesTellDurationMs.Record(metrics.TellElapsed.TotalMilliseconds, tags);
+
+            MapElitesCoverage.Record(metrics.Coverage, tags);
+            MapElitesQdScore.Record(metrics.QdScore, tags);
+            MapElitesBestFitness.Record(metrics.BestFitness, tags);
+
+            MapElitesIterationCount.Add(1, tags);
+            MapElitesInsertedNewCells.Add(metrics.InsertedNewCells, tags);
+            MapElitesReplacedCells.Add(metrics.ReplacedExistingCells, tags);
+            MapElitesRejectedCandidates.Add(metrics.RejectedCount, tags);
+            MapElitesOutOfBoundsCandidates.Add(metrics.OutOfBoundsCount, tags);
+            MapElitesOccupiedCells.Record(metrics.OccupiedCells, tags);
         }
     }
 }
