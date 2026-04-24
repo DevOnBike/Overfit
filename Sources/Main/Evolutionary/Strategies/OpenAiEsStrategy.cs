@@ -7,45 +7,41 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 {
     public sealed class OpenAiEsStrategy : IEvolutionAlgorithm
     {
-        // -----------------------------------------------------------------------------
-        // Constants
-        // -----------------------------------------------------------------------------
         private const int CheckpointMagic = 0x4F414553;
-        private const int CheckpointSchemaVersion = 2;
+        private const int CheckpointSchemaVersion = 3;
+        private const uint DefaultNonZeroSeed = 0x6D2B79F5u;
 
-        // -----------------------------------------------------------------------------
-        // Private Fields
-        // -----------------------------------------------------------------------------
         private readonly INoiseTable _noiseTable;
         private readonly IFitnessShaper _fitnessShaper;
-        private readonly Random _rng;
 
         private readonly float[] _mu;
         private readonly float[] _gradient;
         private readonly float[] _shapedFitness;
         private readonly float[] _bestParameters;
         private readonly int[] _noiseOffsets;
+
         private readonly int _pairCount;
         private readonly float _sigma;
         private readonly float _learningRate;
         private readonly float _gradientScale;
 
-        // Adam state
         private readonly bool _useAdam;
         private readonly float _beta1;
         private readonly float _beta2;
         private readonly float _epsilon;
+
         private readonly float[]? _m;
         private readonly float[]? _v;
-        private int _adamStep;
 
+        private uint _rngState;
+        private readonly int _initialSeed;
+
+        private int _adamStep;
         private float _bestFitness;
         private bool _disposed;
         private bool _hasFitness;
+        private bool _hasPendingPopulation;
 
-        // -----------------------------------------------------------------------------
-        // Constructor
-        // -----------------------------------------------------------------------------
         public OpenAiEsStrategy(
             int populationSize,
             int parameterCount,
@@ -90,10 +86,12 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
                 {
                     throw new ArgumentOutOfRangeException(nameof(beta1), "beta1 must be in [0, 1).");
                 }
+
                 if (beta2 is < 0f or >= 1f)
                 {
                     throw new ArgumentOutOfRangeException(nameof(beta2), "beta2 must be in [0, 1).");
                 }
+
                 if (epsilon <= 0f)
                 {
                     throw new ArgumentOutOfRangeException(nameof(epsilon), "epsilon must be positive.");
@@ -101,18 +99,19 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             }
 
             ArgumentNullException.ThrowIfNull(noiseTable);
+
             if (noiseTable.Length < parameterCount)
             {
-                throw new ArgumentException($"Noise table length is smaller than parameterCount.", nameof(noiseTable));
+                throw new ArgumentException("Noise table length is smaller than parameterCount.", nameof(noiseTable));
             }
 
             _noiseTable = noiseTable;
             _fitnessShaper = shaper ?? new CenteredRankFitnessShaper();
-            _rng = seed.HasValue ? new Random(seed.Value) : new Random();
 
             PopulationSize = populationSize;
             ParameterCount = parameterCount;
             Generation = 0;
+
             _pairCount = populationSize / 2;
             _sigma = sigma;
             _learningRate = learningRate;
@@ -123,8 +122,10 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             _shapedFitness = new float[populationSize];
             _bestParameters = new float[parameterCount];
             _noiseOffsets = new int[_pairCount];
+
             _bestFitness = float.NaN;
             _hasFitness = false;
+            _hasPendingPopulation = false;
 
             _useAdam = useAdam;
             _beta1 = beta1;
@@ -137,11 +138,11 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
                 _v = new float[parameterCount];
                 _adamStep = 0;
             }
+
+            _initialSeed = seed ?? Random.Shared.Next(int.MinValue, int.MaxValue);
+            _rngState = NormalizeSeed(unchecked((uint)_initialSeed));
         }
 
-        // -----------------------------------------------------------------------------
-        // Properties
-        // -----------------------------------------------------------------------------
         public int PopulationSize { get; }
         public int ParameterCount { get; }
         public int Generation { get; private set; }
@@ -152,6 +153,15 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             {
                 ThrowIfDisposed();
                 return _bestFitness;
+            }
+        }
+
+        public bool HasBest
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return _hasFitness;
             }
         }
 
@@ -166,23 +176,30 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
         public bool UseAdam => _useAdam;
 
-        // -----------------------------------------------------------------------------
-        // Methods
-        // -----------------------------------------------------------------------------
         public void Initialize(float min = -0.3f, float max = 0.3f)
         {
             ThrowIfDisposed();
+
             if (min > max)
             {
                 throw new ArgumentException("min cannot be greater than max.");
             }
 
+            ResetRngToInitialSeed();
+
+            var range = max - min;
             for (var i = 0; i < _mu.Length; i++)
             {
-                _mu[i] = (float)(_rng.NextDouble() * (max - min) + min);
+                _mu[i] = min + (range * NextUnitFloat());
             }
 
+            Array.Clear(_gradient, 0, _gradient.Length);
+            Array.Clear(_shapedFitness, 0, _shapedFitness.Length);
+            Array.Clear(_bestParameters, 0, _bestParameters.Length);
+            Array.Clear(_noiseOffsets, 0, _noiseOffsets.Length);
+
             _hasFitness = false;
+            _hasPendingPopulation = false;
             _bestFitness = float.NaN;
             Generation = 0;
 
@@ -197,8 +214,8 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
         public void Ask(Span<float> populationMatrix)
         {
             ThrowIfDisposed();
-            var expectedLength = PopulationSize * ParameterCount;
 
+            var expectedLength = PopulationSize * ParameterCount;
             if (populationMatrix.Length != expectedLength)
             {
                 throw new ArgumentException($"populationMatrix length must be {expectedLength}.", nameof(populationMatrix));
@@ -210,27 +227,32 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
             for (var p = 0; p < _pairCount; p++)
             {
-                var offset = _noiseTable.SampleOffset(_rng, paramCount);
+                var offset = NextNoiseOffset(paramCount);
                 _noiseOffsets[p] = offset;
 
                 var noise = _noiseTable.GetSlice(offset, paramCount);
                 var positiveChild = populationMatrix.Slice((2 * p) * paramCount, paramCount);
                 var negativeChild = populationMatrix.Slice(((2 * p) + 1) * paramCount, paramCount);
 
-                // SIMD: positiveChild[j] = (noise[j] * sigma) + _mu[j]
                 TensorPrimitives.MultiplyAdd(noise, sigma, muSpan, positiveChild);
-
-                // SIMD: negativeChild[j] = (noise[j] * -sigma) + _mu[j]
                 TensorPrimitives.MultiplyAdd(noise, -sigma, muSpan, negativeChild);
             }
+
+            _hasPendingPopulation = true;
         }
 
         public void Tell(ReadOnlySpan<float> fitness)
         {
             ThrowIfDisposed();
+
             if (fitness.Length != PopulationSize)
             {
                 throw new ArgumentException($"fitness length must be {PopulationSize}.", nameof(fitness));
+            }
+
+            if (!_hasPendingPopulation)
+            {
+                throw new InvalidOperationException("Tell() was called without a matching Ask().");
             }
 
             _fitnessShaper.Shape(fitness, _shapedFitness);
@@ -253,12 +275,9 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
                 }
 
                 var noise = _noiseTable.GetSlice(_noiseOffsets[p], paramCount);
-
-                // SIMD Accumulation: _gradient[j] += noise[j] * weight
                 TensorPrimitives.MultiplyAdd(noise, weight, gradientSpan, gradientSpan);
             }
 
-            // SIMD Normalization: _gradient[j] *= scale
             TensorPrimitives.Multiply(gradientSpan, _gradientScale, gradientSpan);
 
             if (_useAdam)
@@ -271,12 +290,24 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             }
 
             _hasFitness = true;
+            _hasPendingPopulation = false;
             Generation++;
+        }
+
+        public ReadOnlySpan<float> GetBestParameters()
+        {
+            ThrowIfDisposed();
+
+            if (!_hasFitness)
+            {
+                return ReadOnlySpan<float>.Empty;
+            }
+
+            return _bestParameters;
         }
 
         private void ApplySgdStep()
         {
-            // SIMD: _mu[j] = (_gradient[j] * _learningRate) + _mu[j]
             TensorPrimitives.MultiplyAdd(_gradient, _learningRate, _mu, _mu);
         }
 
@@ -293,13 +324,11 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
             var biasCorrection1 = 1f - MathF.Pow(beta1, _adamStep);
             var biasCorrection2 = 1f - MathF.Pow(beta2, _adamStep);
-
             var stepSize = _learningRate / biasCorrection1;
             var invSqrtBc2 = 1f / MathF.Sqrt(biasCorrection2);
 
             var j = 0;
 
-            // Single-Pass SIMD Kernel
             if (Vector.IsHardwareAccelerated)
             {
                 var vBeta1 = new Vector<float>(beta1);
@@ -311,7 +340,6 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
                 var vEpsilon = new Vector<float>(epsilon);
 
                 var limit = paramCount - Vector<float>.Count;
-
                 for (; j <= limit; j += Vector<float>.Count)
                 {
                     var g = new Vector<float>(_gradient, j);
@@ -331,7 +359,6 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
                 }
             }
 
-            // Scalar fallback 
             for (; j < paramCount; j++)
             {
                 var g = _gradient[j];
@@ -343,16 +370,6 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             }
         }
 
-        public ReadOnlySpan<float> GetBestParameters()
-        {
-            ThrowIfDisposed();
-            if (!_hasFitness)
-            {
-                return ReadOnlySpan<float>.Empty;
-            }
-            return _bestParameters;
-        }
-
         private void UpdateBestCandidate(ReadOnlySpan<float> fitness)
         {
             var bestLocalIndex = -1;
@@ -361,7 +378,6 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             for (var i = 0; i < fitness.Length; i++)
             {
                 var f = fitness[i];
-
                 if (f > bestLocalFitness)
                 {
                     bestLocalFitness = f;
@@ -373,8 +389,8 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             {
                 return;
             }
-            
-            if (bestLocalFitness.CompareTo(_bestFitness) <= 0)
+
+            if (_hasFitness && bestLocalFitness.CompareTo(_bestFitness) <= 0)
             {
                 return;
             }
@@ -409,11 +425,22 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             writer.Write(_hasFitness);
             writer.Write(_bestFitness);
 
+            writer.Write(_initialSeed);
+            writer.Write(_rngState);
+            writer.Write(_hasPendingPopulation);
+
             WriteFloats(writer, _mu);
             WriteFloats(writer, _bestParameters);
 
-            writer.Write(_useAdam);
+            writer.Write(_noiseOffsets.Length);
+            
+            for (var i = 0; i < _noiseOffsets.Length; i++)
+            {
+                writer.Write(_noiseOffsets[i]);
+            }
 
+            writer.Write(_useAdam);
+            
             if (_useAdam)
             {
                 writer.Write(_adamStep);
@@ -430,13 +457,14 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             var magic = reader.ReadInt32();
             if (magic != CheckpointMagic)
             {
-                throw new InvalidDataException($"Expected magic 0x{CheckpointMagic:X8}, found 0x{magic:X8}. Stream was not produced by OpenAiEsStrategy.");
+                throw new InvalidDataException(
+                    $"Expected magic 0x{CheckpointMagic:X8}, found 0x{magic:X8}. Stream was not produced by OpenAiEsStrategy.");
             }
 
             var schemaVersion = reader.ReadInt32();
-            if (schemaVersion != CheckpointSchemaVersion)
+            if (schemaVersion is not 2 and not 3)
             {
-                throw new InvalidDataException($"Unsupported schema version {schemaVersion}; this build supports {CheckpointSchemaVersion}.");
+                throw new InvalidDataException($"Unsupported schema version {schemaVersion}; this build supports 2 and {CheckpointSchemaVersion}.");
             }
 
             var populationSize = reader.ReadInt32();
@@ -448,16 +476,52 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             }
 
             Generation = reader.ReadInt32();
+
             _hasFitness = reader.ReadBoolean();
             _bestFitness = reader.ReadSingle();
+
+            if (schemaVersion >= 3)
+            {
+                _ = reader.ReadInt32(); // initial seed from checkpoint; current instance keeps constructor seed
+                _rngState = NormalizeSeed(reader.ReadUInt32());
+                _hasPendingPopulation = reader.ReadBoolean();
+            }
+            else
+            {
+                // Legacy schema v2 had no RNG state and no pending Ask/Tell state.
+                // We restore a deterministic fallback state so the strategy remains usable,
+                // but exact replay is only guaranteed for schema v3.
+                _rngState = NormalizeSeed(unchecked((uint)(Generation ^ PopulationSize ^ ParameterCount ^ 0x9E3779B9)));
+                _hasPendingPopulation = false;
+            }
 
             ReadFloats(reader, _mu);
             ReadFloats(reader, _bestParameters);
 
+            if (schemaVersion >= 3)
+            {
+                var offsetCount = reader.ReadInt32();
+                if (offsetCount != _noiseOffsets.Length)
+                {
+                    throw new InvalidDataException(
+                        $"Checkpoint noise-offset count {offsetCount} does not match this instance {_noiseOffsets.Length}.");
+                }
+
+                for (var i = 0; i < _noiseOffsets.Length; i++)
+                {
+                    _noiseOffsets[i] = reader.ReadInt32();
+                }
+            }
+            else
+            {
+                Array.Clear(_noiseOffsets, 0, _noiseOffsets.Length);
+            }
+
             var streamUsedAdam = reader.ReadBoolean();
             if (streamUsedAdam != _useAdam)
             {
-                throw new InvalidDataException($"Checkpoint optimizer mode (useAdam={streamUsedAdam}) does not match this instance.");
+                throw new InvalidDataException(
+                    $"Checkpoint optimizer mode (useAdam={streamUsedAdam}) does not match this instance.");
             }
 
             if (_useAdam)
@@ -482,6 +546,71 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             {
                 destination[i] = reader.ReadSingle();
             }
+        }
+
+        private void ResetRngToInitialSeed()
+        {
+            _rngState = NormalizeSeed(unchecked((uint)_initialSeed));
+        }
+
+        private int NextNoiseOffset(int sliceLength)
+        {
+            if (sliceLength <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(sliceLength));
+            }
+
+            var exclusiveUpper = _noiseTable.Length - sliceLength + 1;
+            if (exclusiveUpper <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(sliceLength));
+            }
+
+            return (int)NextUInt32Below((uint)exclusiveUpper);
+        }
+
+        private float NextUnitFloat()
+        {
+            // 24-bit mantissa path, deterministic and allocation-free.
+            return (NextUInt32() >> 8) * (1.0f / (1u << 24));
+        }
+
+        private uint NextUInt32()
+        {
+            var x = _rngState;
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            _rngState = NormalizeSeed(x);
+            return _rngState;
+        }
+
+        private uint NextUInt32Below(uint maxExclusive)
+        {
+            if (maxExclusive == 0u)
+            {
+                throw new ArgumentOutOfRangeException(nameof(maxExclusive));
+            }
+
+            var product = (ulong)NextUInt32() * maxExclusive;
+            var low = (uint)product;
+
+            if (low < maxExclusive)
+            {
+                var threshold = unchecked((uint)(0 - maxExclusive)) % maxExclusive;
+                while (low < threshold)
+                {
+                    product = (ulong)NextUInt32() * maxExclusive;
+                    low = (uint)product;
+                }
+            }
+
+            return (uint)(product >> 32);
+        }
+
+        private static uint NormalizeSeed(uint seed)
+        {
+            return seed == 0u ? DefaultNonZeroSeed : seed;
         }
 
         public void Dispose()
