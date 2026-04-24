@@ -30,11 +30,6 @@ namespace DevOnBike.Overfit.Data.Contracts
         /// </summary>
         public FastTensor<float> Targets { get; set; }
 
-        /// <summary>
-        ///     Diagnostic metadata populated by the DataPipeline after each processing step.
-        /// </summary>
-        public List<LayerDiagnostic> Diagnostics { get; } = [];
-
         public void Dispose()
         {
             if (_disposed)

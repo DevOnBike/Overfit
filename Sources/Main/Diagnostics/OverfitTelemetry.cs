@@ -7,6 +7,7 @@ using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Autograd;
+using DevOnBike.Overfit.Diagnostics.Contracts;
 
 namespace DevOnBike.Overfit.Diagnostics
 {
@@ -15,126 +16,111 @@ namespace DevOnBike.Overfit.Diagnostics
         public const string MeterName = "DevOnBike.Overfit";
         public const string Version = "1.0.0";
 
-        /// <summary>
-        /// Master switch for metrics and tracing emitted through OverfitTelemetry.
-        /// Keep this cheap and explicit.
-        /// </summary>
         public static bool Enabled { get; set; } = true;
-
-        /// <summary>
-        /// Enables ActivitySource spans. Metrics can remain enabled while tracing is off.
-        /// </summary>
         public static bool TraceEnabled { get; set; } = false;
 
         public static readonly Meter Meter = new(MeterName, Version);
         public static readonly ActivitySource Tracer = new(MeterName, Version);
 
-        // Core durations
+        // Existing DL/runtime metrics
+        public static readonly Histogram<double> KernelDurationMs = Meter.CreateHistogram<double>(
+            "overfit.kernel.duration.ms",
+            unit: "ms",
+            description: "Execution time of low-level kernels.");
+
         public static readonly Histogram<double> ModuleDurationMs = Meter.CreateHistogram<double>(
             "overfit.module.duration.ms",
             unit: "ms",
-            description: "Execution time of high-level modules.");
+            description: "Execution time of high-level DL modules.");
 
         public static readonly Histogram<double> GraphBackwardDurationMs = Meter.CreateHistogram<double>(
             "overfit.graph.backward.duration.ms",
             unit: "ms",
             description: "Backward pass duration.");
 
-        public static readonly Histogram<double> BackwardOpDurationMs = Meter.CreateHistogram<double>(
-            "overfit.backward.op.duration.ms",
-            unit: "ms",
-            description: "Backward opcode execution time.");
-
-        public static readonly Histogram<double> EpochDurationMs = Meter.CreateHistogram<double>(
-            "overfit.epoch.duration.ms",
-            unit: "ms",
-            description: "Epoch duration.");
-
-        public static readonly Histogram<double> BatchDurationMs = Meter.CreateHistogram<double>(
-            "overfit.batch.duration.ms",
-            unit: "ms",
-            description: "Batch duration.");
-
-        public static readonly Histogram<double> OptimizerStepDurationMs = Meter.CreateHistogram<double>(
-            "overfit.optimizer.step.duration.ms",
-            unit: "ms",
-            description: "Optimizer step duration.");
-
-        public static readonly Histogram<double> LossValue = Meter.CreateHistogram<double>(
-            "overfit.loss",
-            unit: "{loss}",
-            description: "Observed loss values.");
-
-        // Allocation / memory
         public static readonly Histogram<long> ModuleAllocatedBytes = Meter.CreateHistogram<long>(
             "overfit.module.alloc.bytes",
             unit: "By",
-            description: "Managed bytes allocated during module execution.");
+            description: "Allocated managed bytes captured for module execution.");
 
         public static readonly Histogram<long> GraphAllocatedBytes = Meter.CreateHistogram<long>(
             "overfit.graph.alloc.bytes",
             unit: "By",
-            description: "Managed bytes allocated during backward.");
-
-        public static readonly Histogram<long> BackwardOpAllocatedBytes = Meter.CreateHistogram<long>(
-            "overfit.backward.op.alloc.bytes",
-            unit: "By",
-            description: "Managed bytes allocated by a backward opcode.");
+            description: "Allocated managed bytes captured during backward.");
 
         public static readonly Histogram<long> AllocationBytes = Meter.CreateHistogram<long>(
             "overfit.allocation.bytes",
             unit: "By",
             description: "Reported tensor/buffer allocations.");
 
-        public static readonly UpDownCounter<long> NativeMemoryBytes = Meter.CreateUpDownCounter<long>(
-            "overfit.memory.native.bytes",
-            unit: "By",
-            description: "Native / unmanaged memory tracked by Overfit.");
+        public static readonly Counter<long> KernelCount = Meter.CreateCounter<long>(
+            "overfit.kernel.count",
+            unit: "{kernel}",
+            description: "Number of kernel executions.");
 
-        // Counters
         public static readonly Counter<long> ModuleCount = Meter.CreateCounter<long>(
             "overfit.module.count",
             unit: "{module}",
-            description: "Number of completed module executions.");
+            description: "Number of module executions.");
 
         public static readonly Counter<long> GraphCount = Meter.CreateCounter<long>(
             "overfit.graph.count",
             unit: "{graph}",
-            description: "Number of completed backward passes.");
+            description: "Number of graph completion events.");
 
         public static readonly Counter<long> TapeOpCount = Meter.CreateCounter<long>(
             "overfit.graph.tape_ops",
             unit: "{op}",
-            description: "Tape ops completed in backward passes.");
+            description: "Total number of tape ops recorded in completed graphs.");
+
+        public static readonly UpDownCounter<long> NativeMemoryBytes = Meter.CreateUpDownCounter<long>(
+            "overfit.memory.native.bytes",
+            unit: "By",
+            description: "Native / unmanaged memory tracked by Overfit diagnostics.");
 
         public static readonly Counter<long> GraphRecordTotalCount = Meter.CreateCounter<long>(
             "overfit.graph.record_op.count",
             unit: "{op}",
             description: "Graph record record total count");
 
-        public static readonly Counter<long> BackwardOpCount = Meter.CreateCounter<long>(
-            "overfit.backward.op.count",
-            unit: "{op}",
-            description: "Number of backward opcode executions.");
+        // Evolutionary runner metrics
+        public static readonly Histogram<double> EvolutionGenerationDurationMs = Meter.CreateHistogram<double>(
+            "overfit.evolution.generation.duration.ms",
+            unit: "ms",
+            description: "Total duration of one evolutionary generation.");
 
-        public static readonly Counter<long> Gen0Collections = Meter.CreateCounter<long>(
-            "overfit.gc.gen0.count",
-            unit: "{gc}",
-            description: "Gen0 collections observed by Overfit.");
+        public static readonly Histogram<double> EvolutionAskDurationMs = Meter.CreateHistogram<double>(
+            "overfit.evolution.ask.duration.ms",
+            unit: "ms",
+            description: "Duration of the Ask phase.");
 
-        public static readonly Counter<long> Gen1Collections = Meter.CreateCounter<long>(
-            "overfit.gc.gen1.count",
-            unit: "{gc}",
-            description: "Gen1 collections observed by Overfit.");
+        public static readonly Histogram<double> EvolutionEvaluateDurationMs = Meter.CreateHistogram<double>(
+            "overfit.evolution.evaluate.duration.ms",
+            unit: "ms",
+            description: "Duration of the Evaluate phase.");
 
-        public static readonly Counter<long> Gen2Collections = Meter.CreateCounter<long>(
-            "overfit.gc.gen2.count",
-            unit: "{gc}",
-            description: "Gen2 collections observed by Overfit.");
+        public static readonly Histogram<double> EvolutionTellDurationMs = Meter.CreateHistogram<double>(
+            "overfit.evolution.tell.duration.ms",
+            unit: "ms",
+            description: "Duration of the Tell phase.");
 
+        public static readonly Histogram<double> EvolutionBestFitness = Meter.CreateHistogram<double>(
+            "overfit.evolution.best_fitness",
+            unit: "{fitness}",
+            description: "Best fitness observed after a generation.");
+
+        public static readonly Counter<long> EvolutionGenerationCount = Meter.CreateCounter<long>(
+            "overfit.evolution.generation.count",
+            unit: "{generation}",
+            description: "Number of completed evolutionary generations.");
+
+        public static readonly Counter<long> EvolutionPopulationEvaluated = Meter.CreateCounter<long>(
+            "overfit.evolution.population.evaluated",
+            unit: "{candidate}",
+            description: "Number of candidates evaluated by the runner.");
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Activity? StartActivity(string name, ActivityKind kind = ActivityKind.Internal)
+        public static Activity StartActivity(string name, ActivityKind kind = ActivityKind.Internal)
         {
             if (!Enabled || !TraceEnabled)
             {
@@ -145,12 +131,10 @@ namespace DevOnBike.Overfit.Diagnostics
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static void RecordModule(
-            string module,
-            string phase,
-            bool trainMode,
-            TimeSpan elapsed,
-            long allocatedBytes)
+        public static void RecordEvolutionGeneration(
+            in EvolutionGenerationMetrics metrics,
+            int populationSize,
+            int parameterCount)
         {
             if (!Enabled)
             {
@@ -158,73 +142,16 @@ namespace DevOnBike.Overfit.Diagnostics
             }
 
             TagList tags = default;
-            tags.Add("module", module);
-            tags.Add("phase", phase);
-            tags.Add("train_mode", trainMode);
+            tags.Add("population_size", populationSize);
+            tags.Add("parameter_count", parameterCount);
 
-            ModuleDurationMs.Record(elapsed.TotalMilliseconds, tags);
-            ModuleAllocatedBytes.Record(allocatedBytes, tags);
-            ModuleCount.Add(1, tags);
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static void RecordGraphBackward(
-            string phase,
-            bool trainMode,
-            TimeSpan elapsed,
-            long allocatedBytes,
-            int tapeOps,
-            int gen0Collections,
-            int gen1Collections,
-            int gen2Collections)
-        {
-            if (!Enabled)
-            {
-                return;
-            }
-
-            TagList tags = default;
-            tags.Add("phase", phase);
-            tags.Add("train_mode", trainMode);
-
-            GraphBackwardDurationMs.Record(elapsed.TotalMilliseconds, tags);
-            GraphAllocatedBytes.Record(allocatedBytes, tags);
-            GraphCount.Add(1, tags);
-            TapeOpCount.Add(tapeOps, tags);
-
-            if (gen0Collections != 0)
-            {
-                Gen0Collections.Add(gen0Collections, tags);
-            }
-
-            if (gen1Collections != 0)
-            {
-                Gen1Collections.Add(gen1Collections, tags);
-            }
-
-            if (gen2Collections != 0)
-            {
-                Gen2Collections.Add(gen2Collections, tags);
-            }
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static void RecordBackwardOp(
-            string opcode,
-            TimeSpan elapsed,
-            long allocatedBytes)
-        {
-            if (!Enabled)
-            {
-                return;
-            }
-
-            TagList tags = default;
-            tags.Add("opcode", opcode);
-
-            BackwardOpDurationMs.Record(elapsed.TotalMilliseconds, tags);
-            BackwardOpAllocatedBytes.Record(allocatedBytes, tags);
-            BackwardOpCount.Add(1, tags);
+            EvolutionGenerationDurationMs.Record(metrics.TotalElapsed.TotalMilliseconds, tags);
+            EvolutionAskDurationMs.Record(metrics.AskElapsed.TotalMilliseconds, tags);
+            EvolutionEvaluateDurationMs.Record(metrics.EvaluateElapsed.TotalMilliseconds, tags);
+            EvolutionTellDurationMs.Record(metrics.TellElapsed.TotalMilliseconds, tags);
+            EvolutionBestFitness.Record(metrics.BestFitness, tags);
+            EvolutionGenerationCount.Add(1, tags);
+            EvolutionPopulationEvaluated.Add(populationSize, tags);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -240,96 +167,6 @@ namespace DevOnBike.Overfit.Diagnostics
             tags.Add("op", code);
 
             GraphRecordTotalCount.Add(1, tags);
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static void RecordAllocation(
-            string owner,
-            string resourceType,
-            long bytes,
-            bool pooled,
-            bool managed)
-        {
-            if (!Enabled)
-            {
-                return;
-            }
-
-            TagList tags = default;
-            tags.Add("owner", owner);
-            tags.Add("resource_type", resourceType);
-            tags.Add("pooled", pooled);
-            tags.Add("managed", managed);
-
-            AllocationBytes.Record(bytes, tags);
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static void AddNativeMemory(long bytesDelta)
-        {
-            if (!Enabled || bytesDelta == 0)
-            {
-                return;
-            }
-
-            NativeMemoryBytes.Add(bytesDelta);
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static void RecordEpoch(int epoch, TimeSpan elapsed, double loss)
-        {
-            if (!Enabled)
-            {
-                return;
-            }
-
-            TagList tags = default;
-            tags.Add("epoch", epoch);
-
-            EpochDurationMs.Record(elapsed.TotalMilliseconds, tags);
-            LossValue.Record(loss, tags);
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static void RecordBatch(bool trainMode, TimeSpan elapsed)
-        {
-            if (!Enabled)
-            {
-                return;
-            }
-
-            TagList tags = default;
-            tags.Add("train_mode", trainMode);
-
-            BatchDurationMs.Record(elapsed.TotalMilliseconds, tags);
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static void RecordOptimizerStep(bool trainMode, TimeSpan elapsed)
-        {
-            if (!Enabled)
-            {
-                return;
-            }
-
-            TagList tags = default;
-            tags.Add("train_mode", trainMode);
-
-            OptimizerStepDurationMs.Record(elapsed.TotalMilliseconds, tags);
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static void RecordLoss(double loss, bool trainMode)
-        {
-            if (!Enabled)
-            {
-                return;
-            }
-
-            TagList tags = default;
-            tags.Add("train_mode", trainMode);
-
-            LossValue.Record(loss, tags);
         }
     }
 }

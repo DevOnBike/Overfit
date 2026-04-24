@@ -6,6 +6,7 @@
 using System.Diagnostics;
 using DevOnBike.Overfit.Data.Abstractions;
 using DevOnBike.Overfit.Data.Contracts;
+using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Data.Prepare
@@ -40,9 +41,9 @@ namespace DevOnBike.Overfit.Data.Prepare
                 var rowsBefore = current.Features.GetView().GetDim(0);
                 var colsBefore = current.Features.GetView().GetDim(1);
 
-                var sw = Stopwatch.StartNew();
+                var sw = ValueStopwatch.StartNew();
                 current = layer.Process(current);
-                sw.Stop();
+                var elapsed = sw.GetElapsedTime();
 
                 var rowsAfter = current.Features.GetView().GetDim(0);
                 var colsAfter = current.Features.GetView().GetDim(1);
@@ -52,19 +53,6 @@ namespace DevOnBike.Overfit.Data.Prepare
                     throw new InvalidOperationException($"[{layer.GetType().Name}] Desynchronized dimensions: Features={current.Features.GetView().GetDim(0)} rows, Targets={current.Targets.GetView().GetDim(0)} rows.");
                 }
 
-                var diag = new LayerDiagnostic
-                {
-                    LayerName = layer.GetType().Name,
-                    RowsBefore = rowsBefore,
-                    ColsBefore = colsBefore,
-                    RowsAfter = rowsAfter,
-                    ColsAfter = colsAfter,
-                    ElapsedMs = sw.ElapsedMilliseconds
-                };
-
-                current.Diagnostics.Add(diag);
-
-                _log?.Invoke($"[{diag.LayerName}] {rowsBefore}x{colsBefore} → {rowsAfter}x{colsAfter} ({sw.ElapsedMilliseconds}ms)");
             }
 
             return current;
