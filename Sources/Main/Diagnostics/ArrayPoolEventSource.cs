@@ -1,10 +1,9 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Tracing;
 
-namespace System.Buffers
+namespace DevOnBike.Overfit.Diagnostics
 {
     [EventSource(Guid = "0866B2B8-5CEF-5DB9-2612-0C0FFD814A44", Name = "System.Buffers.ArrayPoolEventSource")]
     internal sealed partial class ArrayPoolEventSource : EventSource
@@ -47,13 +46,13 @@ namespace System.Buffers
         {
             var payload = stackalloc EventData[4];
             payload[0].Size = sizeof(int);
-            payload[0].DataPointer = ((IntPtr)(&bufferId));
+            payload[0].DataPointer = (IntPtr)(&bufferId);
             payload[1].Size = sizeof(int);
-            payload[1].DataPointer = ((IntPtr)(&bufferSize));
+            payload[1].DataPointer = (IntPtr)(&bufferSize);
             payload[2].Size = sizeof(int);
-            payload[2].DataPointer = ((IntPtr)(&poolId));
+            payload[2].DataPointer = (IntPtr)(&poolId);
             payload[3].Size = sizeof(int);
-            payload[3].DataPointer = ((IntPtr)(&bucketId));
+            payload[3].DataPointer = (IntPtr)(&bucketId);
 
             WriteEventCore(1, 4, payload);
         }
@@ -69,15 +68,15 @@ namespace System.Buffers
             var payload = stackalloc EventData[5];
 
             payload[0].Size = sizeof(int);
-            payload[0].DataPointer = ((IntPtr)(&bufferId));
+            payload[0].DataPointer = (IntPtr)(&bufferId);
             payload[1].Size = sizeof(int);
-            payload[1].DataPointer = ((IntPtr)(&bufferSize));
+            payload[1].DataPointer = (IntPtr)(&bufferSize);
             payload[2].Size = sizeof(int);
-            payload[2].DataPointer = ((IntPtr)(&poolId));
+            payload[2].DataPointer = (IntPtr)(&poolId);
             payload[3].Size = sizeof(int);
-            payload[3].DataPointer = ((IntPtr)(&bucketId));
+            payload[3].DataPointer = (IntPtr)(&bucketId);
             payload[4].Size = sizeof(BufferAllocatedReason);
-            payload[4].DataPointer = ((IntPtr)(&reason));
+            payload[4].DataPointer = (IntPtr)(&reason);
 
             WriteEventCore(2, 5, payload);
         }
@@ -88,7 +87,10 @@ namespace System.Buffers
         /// events exactly matches the number of BufferRented events.
         /// </summary>
         [Event(3, Level = EventLevel.Verbose)]
-        internal void BufferReturned(int bufferId, int bufferSize, int poolId) => WriteEvent(3, bufferId, bufferSize, poolId);
+        internal void BufferReturned(int bufferId, int bufferSize, int poolId)
+        {
+            WriteEvent(3, bufferId, bufferSize, poolId);
+        }
 
         /// <summary>
         /// Event raised when we attempt to free a buffer due to inactivity or memory pressure (by no longer
@@ -96,13 +98,19 @@ namespace System.Buffers
         /// to free it. A rent event before or after this event for the same ID, is a rare, but expected case.
         /// </summary>
         [Event(4, Level = EventLevel.Informational)]
-        internal void BufferTrimmed(int bufferId, int bufferSize, int poolId) => WriteEvent(4, bufferId, bufferSize, poolId);
+        internal void BufferTrimmed(int bufferId, int bufferSize, int poolId)
+        {
+            WriteEvent(4, bufferId, bufferSize, poolId);
+        }
 
         /// <summary>
         /// Event raised when we check to trim buffers.
         /// </summary>
         [Event(5, Level = EventLevel.Informational)]
-        internal void BufferTrimPoll(int milliseconds, int pressure) => WriteEvent(5, milliseconds, pressure);
+        internal void BufferTrimPoll(int milliseconds, int pressure)
+        {
+            WriteEvent(5, milliseconds, pressure);
+        }
 
         /// <summary>
         /// Event raised when a buffer returned to the pool is dropped.
@@ -112,15 +120,15 @@ namespace System.Buffers
         {
             var payload = stackalloc EventData[5];
             payload[0].Size = sizeof(int);
-            payload[0].DataPointer = ((IntPtr)(&bufferId));
+            payload[0].DataPointer = (IntPtr)(&bufferId);
             payload[1].Size = sizeof(int);
-            payload[1].DataPointer = ((IntPtr)(&bufferSize));
+            payload[1].DataPointer = (IntPtr)(&bufferSize);
             payload[2].Size = sizeof(int);
-            payload[2].DataPointer = ((IntPtr)(&poolId));
+            payload[2].DataPointer = (IntPtr)(&poolId);
             payload[3].Size = sizeof(int);
-            payload[3].DataPointer = ((IntPtr)(&bucketId));
+            payload[3].DataPointer = (IntPtr)(&bucketId);
             payload[4].Size = sizeof(BufferDroppedReason);
-            payload[4].DataPointer = ((IntPtr)(&reason));
+            payload[4].DataPointer = (IntPtr)(&reason);
 
             WriteEventCore(6, 5, payload);
         }

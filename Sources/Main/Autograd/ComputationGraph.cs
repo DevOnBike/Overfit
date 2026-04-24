@@ -6,6 +6,7 @@
 using System.Diagnostics;
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Diagnostics;
+using DevOnBike.Overfit.Diagnostics.Contracts;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors.Core;
 
