@@ -162,8 +162,8 @@ namespace DevOnBike.Overfit.Randomization
                 return minValue;
             }
 
-            uint range = (uint)((long)maxValue - minValue);
-            uint sample = NextUInt32Below(range);
+            var range = (uint)((long)maxValue - minValue);
+            var sample = NextUInt32Below(range);
 
             return (int)(minValue + (long)sample);
         }
@@ -283,12 +283,12 @@ namespace DevOnBike.Overfit.Randomization
             }
 
             // Lemire's unbiased bounded random generation.
-            ulong product = (ulong)NextUInt32() * maxExclusive;
-            uint low = (uint)product;
+            var product = (ulong)NextUInt32() * maxExclusive;
+            var low = (uint)product;
 
             if (low < maxExclusive)
             {
-                uint threshold = unchecked((uint)(0 - maxExclusive)) % maxExclusive;
+                var threshold = unchecked((uint)(0 - maxExclusive)) % maxExclusive;
 
                 while (low < threshold)
                 {

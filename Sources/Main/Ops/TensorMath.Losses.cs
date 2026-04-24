@@ -34,7 +34,10 @@ namespace DevOnBike.Overfit.Ops
                 var tR = targetS.Slice(r * cols, cols);
                 for (var c = 0; c < cols; c++)
                 {
-                    if (tR[c] > 0.5f) total -= MathF.Log(MathF.Max(pR[c], 1e-7f));
+                    if (tR[c] > 0.5f)
+                    {
+                        total -= MathF.Log(MathF.Max(pR[c], 1e-7f));
+                    }
                 }
             }
 
@@ -91,7 +94,10 @@ namespace DevOnBike.Overfit.Ops
             var output = AllocateNode(graph, new TensorShape(1), prediction.RequiresGrad, clearMemory: false);
             output.DataView.AsSpan()[0] = mse;
 
-            if (output.RequiresGrad) graph?.Record(OpCode.MseLoss, output, prediction, target);
+            if (output.RequiresGrad)
+            {
+                graph?.Record(OpCode.MseLoss, output, prediction, target);
+            }
 
             return output;
         }
@@ -125,7 +131,10 @@ namespace DevOnBike.Overfit.Ops
             var output = AllocateNode(graph, new TensorShape(1), prediction.RequiresGrad, clearMemory: false);
             output.DataView.AsSpan()[0] = loss;
 
-            if (output.RequiresGrad) graph?.Record(OpCode.DirectionalLoss, output, prediction, target, BitConverter.SingleToInt32Bits(gamma));
+            if (output.RequiresGrad)
+            {
+                graph?.Record(OpCode.DirectionalLoss, output, prediction, target, BitConverter.SingleToInt32Bits(gamma));
+            }
 
             return output;
         }

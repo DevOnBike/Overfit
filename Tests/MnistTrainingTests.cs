@@ -10,7 +10,8 @@ using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tensors;
-using DevOnBike.Overfit.Tensors.Core; // Zmieniono namespace
+using DevOnBike.Overfit.Tensors.Core;
+using DevOnBike.Overfit.Tests.Monitoring;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests
@@ -31,6 +32,9 @@ namespace DevOnBike.Overfit.Tests
             const int batchSize = 64;
             const int epochs = 5;
             const float lr = 0.001f;
+
+            const bool enableDiagnostics = false;
+            const bool enableBackwardProfiling = true;
 
             var trainImagesPath = "d:/ml/train-images.idx3-ubyte";
             var trainLabelsPath = "d:/ml/train-labels.idx1-ubyte";
@@ -59,7 +63,11 @@ namespace DevOnBike.Overfit.Tests
                 UseAdamW = true
             };
 
-            var graph = new ComputationGraph();
+            using var graph = new ComputationGraph
+            {
+                EnableBackwardProfiling = enableBackwardProfiling
+            };
+
             var totalSw = Stopwatch.StartNew();
 
             var traceCollector = new EpochTraceCollector();
@@ -82,14 +90,18 @@ namespace DevOnBike.Overfit.Tests
             using var textSink = TextWriterDiagnosticsSink.CreateFile(textTracePath, append: false);
             using var jsonlSink = JsonLinesDiagnosticsSink.CreateFile(jsonlTracePath, append: false);
             var compositeSink = new CompositeOverfitDiagnosticsSink(traceCollector, textSink, jsonlSink);
-
-            using var session = new DiagnosticsSession(enabled: true, sink: compositeSink);
+            using var session = new DiagnosticsSession(enabled: enableDiagnostics, sink: compositeSink);
 
             traceCollector.Reset();
 
             _output.WriteLine("=== START: Trening ResNet na Taśmie (NativeBuffer) ===");
+            _output.WriteLine($"Diagnostics enabled: {enableDiagnostics}");
+            _output.WriteLine($"Backward profiling enabled: {enableBackwardProfiling}");
 
-            for (int epoch = 0; epoch < epochs; epoch++)
+            var runStartSnapshot = MemoryLeakProbe.Capture(forceFullGc: true);
+            _output.WriteLine(MemoryLeakProbe.Format("RUN START", runStartSnapshot));
+
+            for (var epoch = 0; epoch < epochs; epoch++)
             {
                 traceCollector.Reset();
 
@@ -98,27 +110,30 @@ namespace DevOnBike.Overfit.Tests
                 res1.Train();
                 fcOut.Train();
 
-                float epochLoss = 0f;
-                int batches = trainSize / batchSize;
+                var epochLoss = 0f;
+                var batches = trainSize / batchSize;
 
                 long tConv = 0, tBn = 0, tRes = 0, tHead = 0, tLoss = 0, tBackward = 0, tOptimizer = 0;
                 long aConv = 0, aBn = 0, aRes = 0, aHead = 0, aLoss = 0, aBackward = 0, aOptimizer = 0;
 
                 var sectionSw = new Stopwatch();
 
-                long epochAllocBefore = GC.GetTotalAllocatedBytes(true);
-                int gc0Before = GC.CollectionCount(0);
-                int gc1Before = GC.CollectionCount(1);
-                int gc2Before = GC.CollectionCount(2);
+                var epochAllocBefore = GC.GetTotalAllocatedBytes(true);
+                var gc0Before = GC.CollectionCount(0);
+                var gc1Before = GC.CollectionCount(1);
+                var gc2Before = GC.CollectionCount(2);
 
-                for (int b = 0; b < batches; b++)
+                var epochStartSnapshot = MemoryLeakProbe.Capture(forceFullGc: true);
+                BackwardProfileSnapshot lastBackwardProfile = null;
+
+                for (var b = 0; b < batches; b++)
                 {
                     graph.Reset();
                     optimizer.ZeroGrad();
 
-                    // POPRAWKA: Przejście na TensorStorage i DOD
                     using var xBData = new TensorStorage<float>(batchSize * 1 * 28 * 28, clearMemory: false);
                     using var yBData = new TensorStorage<float>(batchSize * 10, clearMemory: false);
+
                     using var xBNode = new AutogradNode(xBData, new TensorShape(batchSize, 1, 28, 28), requiresGrad: false);
                     using var yBNode = new AutogradNode(yBData, new TensorShape(batchSize, 10), requiresGrad: false);
 
@@ -179,6 +194,11 @@ namespace DevOnBike.Overfit.Tests
                     tBackward += sectionSw.ElapsedTicks;
                     aBackward += GC.GetTotalAllocatedBytes(false) - allocBefore;
 
+                    if (enableBackwardProfiling)
+                    {
+                        lastBackwardProfile = graph.GetBackwardProfileSnapshot();
+                    }
+
                     allocBefore = GC.GetTotalAllocatedBytes(false);
                     sectionSw.Restart();
                     optimizer.Step();
@@ -187,13 +207,19 @@ namespace DevOnBike.Overfit.Tests
                     aOptimizer += GC.GetTotalAllocatedBytes(false) - allocBefore;
                 }
 
-                long epochAllocAfter = GC.GetTotalAllocatedBytes(true);
-                var snapshot = traceCollector.Snapshot();
+                var epochAllocAfter = GC.GetTotalAllocatedBytes(true);
 
+                var snapshot = traceCollector.Snapshot();
                 var epochJson = Path.Combine(traceDir, $"epoch_{epoch + 1:D2}.json");
                 var epochCsv = Path.Combine(traceDir, $"epoch_{epoch + 1:D2}.csv");
-                EpochTraceExporter.WriteJson(epochJson, epoch + 1, snapshot);
-                EpochTraceExporter.WriteCsv(epochCsv, snapshot);
+
+                if (enableDiagnostics)
+                {
+                    EpochTraceExporter.WriteJson(epochJson, epoch + 1, snapshot);
+                    EpochTraceExporter.WriteCsv(epochCsv, snapshot);
+                }
+
+                var epochEndSnapshot = MemoryLeakProbe.Capture(forceFullGc: true);
 
                 _output.WriteLine($"Epoch {epoch + 1} | Loss: {epochLoss / batches:F4} | Time: {totalSw.ElapsedMilliseconds}ms");
                 _output.WriteLine($"  conv+relu+pool+reshape: {TimeSpan.FromTicks(tConv).TotalMilliseconds:F1} ms | alloc {(aConv / 1024.0 / 1024.0):F2} MB");
@@ -205,20 +231,46 @@ namespace DevOnBike.Overfit.Tests
                 _output.WriteLine($"  optimizer:              {TimeSpan.FromTicks(tOptimizer).TotalMilliseconds:F1} ms | alloc {(aOptimizer / 1024.0 / 1024.0):F2} MB");
                 _output.WriteLine($"  allocated total:        {(epochAllocAfter - epochAllocBefore) / 1024.0 / 1024.0:F2} MB");
                 _output.WriteLine($"  GC0/1/2:                {GC.CollectionCount(0) - gc0Before}/{GC.CollectionCount(1) - gc1Before}/{GC.CollectionCount(2) - gc2Before}");
-                _output.WriteLine(BenchmarkTraceFormatter.Format(snapshot));
-                _output.WriteLine($"  trace.json:             {epochJson}");
-                _output.WriteLine($"  trace.csv:              {epochCsv}");
 
-                if (epoch == epochs - 1)
+                _output.WriteLine(MemoryLeakProbe.Format($"EPOCH {epoch + 1} START", epochStartSnapshot));
+                _output.WriteLine(MemoryLeakProbe.Format($"EPOCH {epoch + 1} END", epochEndSnapshot));
+                _output.WriteLine($"live managed delta: {(epochEndSnapshot.LiveManagedBytes - epochStartSnapshot.LiveManagedBytes) / 1024.0 / 1024.0:F2} MB");
+                _output.WriteLine($"private bytes delta: {(epochEndSnapshot.PrivateMemoryBytes - epochStartSnapshot.PrivateMemoryBytes) / 1024.0 / 1024.0:F2} MB");
+                _output.WriteLine($"working set delta: {(epochEndSnapshot.WorkingSet64 - epochStartSnapshot.WorkingSet64) / 1024.0 / 1024.0:F2} MB");
+
+                if (enableBackwardProfiling && lastBackwardProfile is not null)
                 {
-                    var baselinePath = Path.Combine(traceDir, "baseline_epoch_05.json");
-                    if (!File.Exists(baselinePath))
+                    _output.WriteLine(BackwardProfileFormatter.Format(lastBackwardProfile, top: 16));
+                }
+
+                if (enableDiagnostics)
+                {
+                    _output.WriteLine(BenchmarkTraceFormatter.Format(snapshot));
+                    _output.WriteLine($"  trace.json:             {epochJson}");
+                    _output.WriteLine($"  trace.csv:              {epochCsv}");
+
+                    if (epoch == epochs - 1)
                     {
-                        File.Copy(epochJson, baselinePath, overwrite: false);
-                        _output.WriteLine($"  baseline.json:          {baselinePath} (created)");
+                        var baselinePath = Path.Combine(traceDir, "baseline_epoch_05.json");
+                        if (!File.Exists(baselinePath))
+                        {
+                            File.Copy(epochJson, baselinePath, overwrite: false);
+                            _output.WriteLine($"  baseline.json:          {baselinePath} (created)");
+                        }
                     }
                 }
+                else
+                {
+                    _output.WriteLine("=== RUNTIME DIAGNOSTICS ===");
+                    _output.WriteLine("diagnostics disabled");
+                }
             }
+
+            var runEndSnapshot = MemoryLeakProbe.Capture(forceFullGc: true);
+            _output.WriteLine(MemoryLeakProbe.Format("RUN END", runEndSnapshot));
+            _output.WriteLine($"run live managed delta: {(runEndSnapshot.LiveManagedBytes - runStartSnapshot.LiveManagedBytes) / 1024.0 / 1024.0:F2} MB");
+            _output.WriteLine($"run private bytes delta: {(runEndSnapshot.PrivateMemoryBytes - runStartSnapshot.PrivateMemoryBytes) / 1024.0 / 1024.0:F2} MB");
+            _output.WriteLine($"run working set delta: {(runEndSnapshot.WorkingSet64 - runStartSnapshot.WorkingSet64) / 1024.0 / 1024.0:F2} MB");
 
             _output.WriteLine("=== KONIEC ===");
         }

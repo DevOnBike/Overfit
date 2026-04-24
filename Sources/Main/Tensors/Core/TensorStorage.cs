@@ -21,7 +21,7 @@ namespace DevOnBike.Overfit.Tensors.Core
         public TensorStorage(int length, bool clearMemory = true)
         {
             Length = length;
-            
+
             _data = OverfitPool<T>.Shared.Rent(length);
 
             if (clearMemory)
@@ -44,7 +44,7 @@ namespace DevOnBike.Overfit.Tensors.Core
         public Span<T> AsSpan()
         {
             ObjectDisposedException.ThrowIf(_disposed == 1, this);
-            
+
             return _isBorrowedMemory ? new Span<T>(_nativePtr, Length) : _data.AsSpan(0, Length);
         }
 

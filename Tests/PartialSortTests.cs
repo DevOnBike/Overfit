@@ -17,7 +17,7 @@ namespace DevOnBike.Overfit.Tests
         public void TopKDescending_ReturnsLargestKInOrder()
         {
             float[] values = [3f, 1f, 4f, 1f, 5f, 9f, 2f, 6f];
-            int[] indices = InitIndices(values.Length);
+            var indices = InitIndices(values.Length);
 
             PartialSort.TopKDescending(indices, values, k: 3);
 
@@ -31,7 +31,7 @@ namespace DevOnBike.Overfit.Tests
         public void TopKDescending_KEqualsN_FullySortsAllIndices()
         {
             float[] values = [3f, 1f, 4f, 1f, 5f];
-            int[] indices = InitIndices(values.Length);
+            var indices = InitIndices(values.Length);
 
             PartialSort.TopKDescending(indices, values, k: values.Length);
 
@@ -47,7 +47,7 @@ namespace DevOnBike.Overfit.Tests
         public void TopKDescending_KZero_IsNoOp()
         {
             float[] values = [1f, 2f, 3f];
-            int[] indices = InitIndices(values.Length);
+            var indices = InitIndices(values.Length);
 
             PartialSort.TopKDescending(indices, values, k: 0);
 
@@ -66,7 +66,7 @@ namespace DevOnBike.Overfit.Tests
         {
             // Every value equal → top-K should be {idx 0, idx 1, ..., idx k-1} in order.
             float[] values = [5f, 5f, 5f, 5f, 5f];
-            int[] indices = InitIndices(values.Length);
+            var indices = InitIndices(values.Length);
 
             PartialSort.TopKDescending(indices, values, k: 2);
 
@@ -91,7 +91,7 @@ namespace DevOnBike.Overfit.Tests
         {
             // Values: [9, 9, 3, 9, 2]. Top-3 should be {0, 1, 3} — all the 9s, in index order.
             float[] values = [9f, 9f, 3f, 9f, 2f];
-            int[] indices = InitIndices(values.Length);
+            var indices = InitIndices(values.Length);
 
             PartialSort.TopKDescending(indices, values, k: 3);
 
@@ -128,7 +128,7 @@ namespace DevOnBike.Overfit.Tests
         public void SortIndices_Ascending_TiesBreakByIndex()
         {
             float[] values = [2f, 1f, 2f, 1f];
-            int[] indices = InitIndices(values.Length);
+            var indices = InitIndices(values.Length);
 
             PartialSort.SortIndices(indices, values, ascending: true);
 
@@ -140,7 +140,7 @@ namespace DevOnBike.Overfit.Tests
         public void SortIndices_Descending_TiesBreakByIndex()
         {
             float[] values = [2f, 1f, 2f, 1f];
-            int[] indices = InitIndices(values.Length);
+            var indices = InitIndices(values.Length);
 
             PartialSort.SortIndices(indices, values, ascending: false);
 
@@ -198,7 +198,7 @@ namespace DevOnBike.Overfit.Tests
         public void TopKDescending_WithNaN_NaNNeverEntersTopK()
         {
             float[] values = [float.NaN, 5f, 3f, float.NaN, 1f];
-            int[] indices = InitIndices(values.Length);
+            var indices = InitIndices(values.Length);
 
             PartialSort.TopKDescending(indices, values, k: 2);
 
@@ -213,7 +213,7 @@ namespace DevOnBike.Overfit.Tests
             // All NaN is a degenerate input; the sort must still terminate without throwing.
             // Output order of NaNs is unspecified but must be a valid permutation of [0..n).
             float[] values = [float.NaN, float.NaN, float.NaN];
-            int[] indices = InitIndices(values.Length);
+            var indices = InitIndices(values.Length);
 
             PartialSort.TopKDescending(indices, values, k: values.Length);
 
@@ -228,7 +228,7 @@ namespace DevOnBike.Overfit.Tests
             // float.CompareTo ranks NaN below -Infinity. In descending sort that means NaN
             // goes last.
             float[] values = [5f, float.NaN, 3f, 1f, float.NaN];
-            int[] indices = InitIndices(values.Length);
+            var indices = InitIndices(values.Length);
 
             PartialSort.SortIndices(indices, values, ascending: false);
 
@@ -246,7 +246,7 @@ namespace DevOnBike.Overfit.Tests
         {
             // Ascending + NaN-is-smallest ⇒ NaN slots lead the output.
             float[] values = [5f, float.NaN, 3f, 1f, float.NaN];
-            int[] indices = InitIndices(values.Length);
+            var indices = InitIndices(values.Length);
 
             PartialSort.SortIndices(indices, values, ascending: true);
 

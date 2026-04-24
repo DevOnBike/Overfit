@@ -33,7 +33,10 @@ namespace DevOnBike.Overfit.Ops
 
         public static void ReluBackward(AutogradNode input, AutogradNode output)
         {
-            if (!input.RequiresGrad) return;
+            if (!input.RequiresGrad)
+            {
+                return;
+            }
 
             var inS = input.DataView.AsReadOnlySpan();
             var goS = output.GradView.AsReadOnlySpan();
@@ -57,7 +60,10 @@ namespace DevOnBike.Overfit.Ops
 
             for (; i < inS.Length; i++)
             {
-                if (inS[i] > 0f) giS[i] += goS[i];
+                if (inS[i] > 0f)
+                {
+                    giS[i] += goS[i];
+                }
             }
         }
 
@@ -70,13 +76,19 @@ namespace DevOnBike.Overfit.Ops
             var output = AllocateNode(graph, input.Shape, input.RequiresGrad, clearMemory: false);
             TensorPrimitives.Sigmoid(input.DataView.AsReadOnlySpan(), output.DataView.AsSpan());
 
-            if (output.RequiresGrad) graph?.Record(OpCode.Sigmoid, output, input);
+            if (output.RequiresGrad)
+            {
+                graph?.Record(OpCode.Sigmoid, output, input);
+            }
             return output;
         }
 
         public static void SigmoidBackward(AutogradNode input, AutogradNode output)
         {
-            if (!input.RequiresGrad) return;
+            if (!input.RequiresGrad)
+            {
+                return;
+            }
 
             var outS = output.DataView.AsReadOnlySpan();
             var ogS = output.GradView.AsReadOnlySpan();
@@ -105,13 +117,19 @@ namespace DevOnBike.Overfit.Ops
             var output = AllocateNode(graph, input.Shape, input.RequiresGrad, clearMemory: false);
             TensorPrimitives.Tanh(input.DataView.AsReadOnlySpan(), output.DataView.AsSpan());
 
-            if (output.RequiresGrad) graph?.Record(OpCode.Tanh, output, input);
+            if (output.RequiresGrad)
+            {
+                graph?.Record(OpCode.Tanh, output, input);
+            }
             return output;
         }
 
         public static void TanhBackward(AutogradNode input, AutogradNode output)
         {
-            if (!input.RequiresGrad) return;
+            if (!input.RequiresGrad)
+            {
+                return;
+            }
 
             var outS = output.DataView.AsReadOnlySpan();
             var ogS = output.GradView.AsReadOnlySpan();

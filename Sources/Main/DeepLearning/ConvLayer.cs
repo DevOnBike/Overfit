@@ -66,7 +66,10 @@ namespace DevOnBike.Overfit.DeepLearning
             bw.Write(Kernels.Shape.D0);
             bw.Write(Kernels.Shape.D1);
 
-            foreach (var val in Kernels.DataView.AsReadOnlySpan()) bw.Write(val);
+            foreach (var val in Kernels.DataView.AsReadOnlySpan())
+            {
+                bw.Write(val);
+            }
         }
 
         public void Load(BinaryReader br)
@@ -75,10 +78,15 @@ namespace DevOnBike.Overfit.DeepLearning
             var cols = br.ReadInt32();
 
             if (rows != Kernels.Shape.D0 || cols != Kernels.Shape.D1)
+            {
                 throw new Exception("Kernel dimensions in file do not match the ConvLayer architecture.");
+            }
 
             var span = Kernels.DataView.AsSpan();
-            for (var i = 0; i < span.Length; i++) span[i] = br.ReadSingle();
+            for (var i = 0; i < span.Length; i++)
+            {
+                span[i] = br.ReadSingle();
+            }
         }
 
         public void Dispose() => Kernels?.Dispose();
@@ -86,7 +94,10 @@ namespace DevOnBike.Overfit.DeepLearning
         private void InitializeKernels(Span<float> span, int fanIn)
         {
             var stdDev = MathF.Sqrt(2f / fanIn);
-            for (var i = 0; i < span.Length; i++) span[i] = MathUtils.NextGaussian() * stdDev;
+            for (var i = 0; i < span.Length; i++)
+            {
+                span[i] = MathUtils.NextGaussian() * stdDev;
+            }
         }
 
         public void Save(string path)
@@ -98,7 +109,10 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void Load(string path)
         {
-            if (!File.Exists(path)) throw new FileNotFoundException($"Model weights file not found: {path}");
+            if (!File.Exists(path))
+            {
+                throw new FileNotFoundException($"Model weights file not found: {path}");
+            }
 
             using var fs = new FileStream(path, FileMode.Open);
             using var br = new BinaryReader(fs);

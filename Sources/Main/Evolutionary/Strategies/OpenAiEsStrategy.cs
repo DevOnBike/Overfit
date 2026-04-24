@@ -297,7 +297,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             var stepSize = _learningRate / biasCorrection1;
             var invSqrtBc2 = 1f / MathF.Sqrt(biasCorrection2);
 
-            int j = 0;
+            var j = 0;
 
             // Single-Pass SIMD Kernel
             if (Vector.IsHardwareAccelerated)
@@ -310,7 +310,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
                 var vInvSqrtBc2 = new Vector<float>(invSqrtBc2);
                 var vEpsilon = new Vector<float>(epsilon);
 
-                int limit = paramCount - Vector<float>.Count;
+                var limit = paramCount - Vector<float>.Count;
 
                 for (; j <= limit; j += Vector<float>.Count)
                 {

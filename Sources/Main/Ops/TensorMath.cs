@@ -19,7 +19,7 @@ namespace DevOnBike.Overfit.Ops
 
         private const long ParallelThreshold = 4096;
         private const int StackAllocThreshold = 1024;
-        private const int BatchSequentialThreshold = 32;
+        private const int BatchSequentialThreshold = 128;
 
         // ====================================================================
         // SOFTMAX

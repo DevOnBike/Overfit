@@ -26,7 +26,6 @@ namespace Benchmarks
     [MemoryDiagnoser]
     [DisassemblyDiagnoser(maxDepth: 2)]
     // Dodajemy analizę cache'u procesora – to pokaże, dlaczego Overfit dominuje
-    [HardwareCounters(HardwareCounter.InstructionRetired, HardwareCounter.CacheMisses)]
     public class SingleInferenceBenchmark
     {
         private const int InputSize = 784;

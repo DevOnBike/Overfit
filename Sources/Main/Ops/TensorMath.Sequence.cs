@@ -154,10 +154,22 @@ namespace DevOnBike.Overfit.Ops
                 },
                 arrNode => arrNode.Dispose());
 
-            if (x.RequiresGrad) MatMulAdd_A_BT_Raw(dGNode, false, W, false, x, true);
-            if (W.RequiresGrad) MatMulAdd_AT_B_Raw(x, false, dGNode, false, W, true);
-            if (hPrev.RequiresGrad) MatMulAdd_A_BT_Raw(dGNode, false, U, false, hPrev, true);
-            if (U.RequiresGrad) MatMulAdd_AT_B_Raw(hPrev, false, dGNode, false, U, true);
+            if (x.RequiresGrad)
+            {
+                MatMulAdd_A_BT_Raw(dGNode, false, W, false, x, true);
+            }
+            if (W.RequiresGrad)
+            {
+                MatMulAdd_AT_B_Raw(x, false, dGNode, false, W, true);
+            }
+            if (hPrev.RequiresGrad)
+            {
+                MatMulAdd_A_BT_Raw(dGNode, false, U, false, hPrev, true);
+            }
+            if (U.RequiresGrad)
+            {
+                MatMulAdd_AT_B_Raw(hPrev, false, dGNode, false, U, true);
+            }
 
             if (B.RequiresGrad)
             {
@@ -185,17 +197,26 @@ namespace DevOnBike.Overfit.Ops
             for (var b = 0; b < batch; b++)
             {
                 var src = inS.Slice(b * hS, hS);
-                for (var t = 0; t < seqLen; t++) src.CopyTo(outS.Slice(b * seqLen * hS + t * hS, hS));
+                for (var t = 0; t < seqLen; t++)
+                {
+                    src.CopyTo(outS.Slice(b * seqLen * hS + t * hS, hS));
+                }
             }
 
-            if (output.RequiresGrad) graph?.Record(OpCode.RepeatVector, output, input, null, seqLen, hS);
+            if (output.RequiresGrad)
+            {
+                graph?.Record(OpCode.RepeatVector, output, input, null, seqLen, hS);
+            }
 
             return output;
         }
 
         public static void RepeatVectorBackward(AutogradNode input, AutogradNode output, int seqLen, int hS)
         {
-            if (!input.RequiresGrad) return;
+            if (!input.RequiresGrad)
+            {
+                return;
+            }
 
             var batch = input.Shape.D0;
             var iGS = input.GradView.AsSpan();
@@ -204,7 +225,10 @@ namespace DevOnBike.Overfit.Ops
             for (var b = 0; b < batch; b++)
             {
                 var dst = iGS.Slice(b * hS, hS);
-                for (var t = 0; t < seqLen; t++) TensorPrimitives.Add(dst, oGS.Slice(b * seqLen * hS + t * hS, hS), dst);
+                for (var t = 0; t < seqLen; t++)
+                {
+                    TensorPrimitives.Add(dst, oGS.Slice(b * seqLen * hS + t * hS, hS), dst);
+                }
             }
         }
 
@@ -225,14 +249,20 @@ namespace DevOnBike.Overfit.Ops
                 inS.Slice(b * stride + offset, hiddenSize).CopyTo(outS.Slice(b * hiddenSize, hiddenSize));
             }
 
-            if (output.RequiresGrad) graph?.Record(OpCode.GateSlice, output, gates, null, gateIndex, hiddenSize);
+            if (output.RequiresGrad)
+            {
+                graph?.Record(OpCode.GateSlice, output, gates, null, gateIndex, hiddenSize);
+            }
 
             return output;
         }
 
         public static void GateSliceBackward(AutogradNode gates, AutogradNode output, int hiddenSize, int gateIndex)
         {
-            if (!gates.RequiresGrad) return;
+            if (!gates.RequiresGrad)
+            {
+                return;
+            }
 
             int batch = gates.Shape.D0, offset = gateIndex * hiddenSize, stride = 4 * hiddenSize;
             var gGS = gates.GradView.AsSpan();
@@ -251,7 +281,10 @@ namespace DevOnBike.Overfit.Ops
 
         public static void TimestepSliceBackward(AutogradNode input, AutogradNode output, int t, int seqLen, int inputSize)
         {
-            if (!input.RequiresGrad) return;
+            if (!input.RequiresGrad)
+            {
+                return;
+            }
 
             var igS = input.GradView.AsSpan();
             var ogS = output.GradView.AsReadOnlySpan();
@@ -269,7 +302,10 @@ namespace DevOnBike.Overfit.Ops
 
             for (var t = 0; t < seqLen; t++)
             {
-                if (!allH[t].RequiresGrad) continue;
+                if (!allH[t].RequiresGrad)
+                {
+                    continue;
+                }
 
                 var hGS = allH[t].GradView.AsSpan();
 

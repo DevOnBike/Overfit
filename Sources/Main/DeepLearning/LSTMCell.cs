@@ -111,7 +111,10 @@ namespace DevOnBike.Overfit.DeepLearning
 
         private static void InitUniform(Span<float> span, float limit)
         {
-            for (var i = 0; i < span.Length; i++) span[i] = (Random.Shared.NextSingle() * 2f - 1f) * limit;
+            for (var i = 0; i < span.Length; i++)
+            {
+                span[i] = (Random.Shared.NextSingle() * 2f - 1f) * limit;
+            }
         }
 
         public IEnumerable<AutogradNode> Parameters()

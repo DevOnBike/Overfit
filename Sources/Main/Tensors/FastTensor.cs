@@ -221,7 +221,7 @@ namespace DevOnBike.Overfit.Tensors
             else
             {
                 // Fallback dla innych typów
-                for (int i = 0; i < target.Length; i++)
+                for (var i = 0; i < target.Length; i++)
                 {
                     // Wymagałoby to generycznej matematyki w .NET 7+, 
                     // dla uproszczenia załóżmy float lub zaimplementuj per typ

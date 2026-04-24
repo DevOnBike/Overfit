@@ -180,8 +180,8 @@ namespace DevOnBike.Overfit.Tests
         {
             var op = new SbxCrossoverOperator();
 
-            float[] p1 = new float[64];
-            float[] p2 = new float[64];
+            var p1 = new float[64];
+            var p2 = new float[64];
             var c1 = new float[64];
             var c2 = new float[64];
             var rng = new Random(1);

@@ -8,7 +8,7 @@ using System.Numerics.Tensors;
 using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.Diagnostics.Contracts;
 using DevOnBike.Overfit.Ops;
-using DevOnBike.Overfit.Tensors.Core; // Wpinamy Core!
+using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.Autograd
 {
@@ -17,21 +17,36 @@ namespace DevOnBike.Overfit.Autograd
     /// </summary>
     public sealed class ComputationGraph : IDisposable
     {
+        private static readonly ActivitySource _activitySource = new("DevOnBike.Overfit.Autograd.ComputationGraph");
+
         private const int InitialCapacity = 4096;
+        private static readonly int OpCodeCount = Enum.GetValues<OpCode>().Length;
 
         private int _opCount;
         private TapeOp[] _tape = new TapeOp[InitialCapacity];
 
-        // GIGANTYCZNY BUFOR (Arena): Omija GC i ArrayPool.
+        // Huge arena buffer: bypasses GC and ArrayPool for intermediate tensor storage.
         public readonly NativeBufferManaged<float> TapeBuffer = new NativeBufferManaged<float>(50_000_000, clearMemory: false);
 
+        private readonly int[] _backwardOpCounts = new int[OpCodeCount];
+        private readonly long[] _backwardOpTicks = new long[OpCodeCount];
+        private readonly long[] _backwardOpAllocatedBytes = new long[OpCodeCount];
+        private long _lastBackwardTotalTicks;
+        private long _lastBackwardTotalAllocatedBytes;
+
         public bool IsRecording { get; set; } = true;
+
+        /// <summary>
+        /// Enables per-opcode backward profiling independent of runtime diagnostics.
+        /// This adds overhead and should be used only when hunting allocation churn.
+        /// </summary>
+        public bool EnableBackwardProfiling { get; set; }
 
         public int RecordedOpCount => _opCount;
 
         /// <summary>
-        /// Szybka alokacja surowej pamięci z Areny.
-        /// Zwraca sam magazyn (TensorStorage), bez informacji o kształcie.
+        /// Fast allocation of raw storage from the arena.
+        /// Returns only storage, without shape metadata.
         /// </summary>
         public TensorStorage<float> AllocateIntermediate(int length)
         {
@@ -55,12 +70,16 @@ namespace DevOnBike.Overfit.Autograd
                 return;
             }
 
+            using var activity = _activitySource.StartActivity(nameof(Record));
+
             if (_opCount >= _tape.Length)
             {
                 Array.Resize(ref _tape, _tape.Length * 2);
             }
 
             _tape[_opCount++] = new TapeOp(code, output, a, b, i0, i1, i2, i3, i4, nodeContext);
+
+            activity?.SetStatus(ActivityStatusCode.Ok);
 
             if (OverfitDiagnostics.IsEnabled())
             {
@@ -90,11 +109,51 @@ namespace DevOnBike.Overfit.Autograd
                 gc2Before = GC.CollectionCount(2);
             }
 
+            if (EnableBackwardProfiling)
+            {
+                ClearBackwardProfile();
+            }
+
             lossNode.GradView.AsSpan().Fill(1f);
 
-            for (var i = _opCount - 1; i >= 0; i--)
+            if (EnableBackwardProfiling)
             {
-                ExecuteBackward(in _tape[i]);
+                var totalAllocBefore = GC.GetTotalAllocatedBytes(false);
+                var totalStart = Stopwatch.GetTimestamp();
+
+                for (var i = _opCount - 1; i >= 0; i--)
+                {
+                    ref readonly var op = ref _tape[i];
+                    var codeIndex = (int)op.Code;
+
+                    var opAllocBefore = GC.GetTotalAllocatedBytes(false);
+                    var opStart = Stopwatch.GetTimestamp();
+
+                    ExecuteBackward(in op);
+
+                    var opEnd = Stopwatch.GetTimestamp();
+                    var opAllocAfter = GC.GetTotalAllocatedBytes(false);
+
+                    _backwardOpCounts[codeIndex]++;
+                    _backwardOpTicks[codeIndex] += opEnd - opStart;
+                    _backwardOpAllocatedBytes[codeIndex] += opAllocAfter - opAllocBefore;
+                }
+
+                var totalEnd = Stopwatch.GetTimestamp();
+                var totalAllocAfter = GC.GetTotalAllocatedBytes(false);
+
+                _lastBackwardTotalTicks = totalEnd - totalStart;
+                _lastBackwardTotalAllocatedBytes = totalAllocAfter - totalAllocBefore;
+            }
+            else
+            {
+                for (var i = _opCount - 1; i >= 0; i--)
+                {
+                    ExecuteBackward(in _tape[i]);
+                }
+
+                _lastBackwardTotalTicks = 0;
+                _lastBackwardTotalAllocatedBytes = 0;
             }
 
             if (OverfitDiagnostics.IsEnabled())
@@ -115,6 +174,50 @@ namespace DevOnBike.Overfit.Autograd
             }
         }
 
+        public BackwardProfileSnapshot GetBackwardProfileSnapshot()
+        {
+            var nonEmpty = 0;
+            for (var i = 0; i < OpCodeCount; i++)
+            {
+                if (_backwardOpCounts[i] != 0)
+                {
+                    nonEmpty++;
+                }
+            }
+
+            var profiles = new BackwardOpProfile[nonEmpty];
+            var cursor = 0;
+
+            for (var i = 0; i < OpCodeCount; i++)
+            {
+                var count = _backwardOpCounts[i];
+                if (count == 0)
+                {
+                    continue;
+                }
+
+                profiles[cursor++] = new BackwardOpProfile(
+                    Code: (OpCode)i,
+                    Count: count,
+                    ElapsedMs: _backwardOpTicks[i] * 1000.0 / Stopwatch.Frequency,
+                    AllocatedBytes: _backwardOpAllocatedBytes[i]);
+            }
+
+            return new BackwardProfileSnapshot(
+                profiles,
+                _lastBackwardTotalTicks,
+                _lastBackwardTotalAllocatedBytes);
+        }
+
+        public void ClearBackwardProfile()
+        {
+            Array.Clear(_backwardOpCounts, 0, _backwardOpCounts.Length);
+            Array.Clear(_backwardOpTicks, 0, _backwardOpTicks.Length);
+            Array.Clear(_backwardOpAllocatedBytes, 0, _backwardOpAllocatedBytes.Length);
+            _lastBackwardTotalTicks = 0;
+            _lastBackwardTotalAllocatedBytes = 0;
+        }
+
         public AutogradNode Add(AutogradNode left, AutogradNode right) => TensorMath.Add(this, left, right);
         public AutogradNode AddBias(AutogradNode input, AutogradNode bias) => TensorMath.AddBias(this, input, bias);
         public AutogradNode MatMul(AutogradNode left, AutogradNode right) => TensorMath.MatMul(this, left, right);
@@ -128,7 +231,6 @@ namespace DevOnBike.Overfit.Autograd
 
         public AutogradNode AddInPlace(AutogradNode target, AutogradNode source)
         {
-            // Oparte teraz na TensorSpan!
             TensorPrimitives.Add(
                 target.DataView.AsSpan(),
                 source.DataView.AsReadOnlySpan(),
@@ -146,29 +248,98 @@ namespace DevOnBike.Overfit.Autograd
         {
             switch (op.Code)
             {
-                case OpCode.Add: TensorMath.AddBackward(op.A, op.B, op.Output); break;
-                case OpCode.Subtract: TensorMath.SubtractBackward(op.A, op.B, op.Output); break;
-                case OpCode.AddBias: TensorMath.AddBiasBackward(op.A, op.B, op.Output); break;
-                case OpCode.MatMul: TensorMath.MatMulBackward(op.A, op.B, op.Output); break;
-                case OpCode.Linear: TensorMath.LinearBackward(op.A, op.B, op.NodeContext[0], op.Output); break;
-                case OpCode.ReLU: TensorMath.ReluBackward(op.A, op.Output); break;
-                case OpCode.Dropout: TensorMath.DropoutBackward(op.A, op.B, op.Output); break;
-                case OpCode.MseLoss: TensorMath.MSELossBackward(op.A, op.B, op.Output); break;
-                case OpCode.SoftmaxCrossEntropy: TensorMath.SoftmaxCrossEntropyBackward(op.A, op.B, op.Output, op.NodeContext[0]); break;
-                case OpCode.Conv2D: TensorMath.Conv2DBackward(op.A, op.B, op.Output, op.I0, op.I1, op.I2, op.I3, op.I4); break;
-                case OpCode.MaxPool2D: TensorMath.MaxPool2DBackward(op.A, op.B, op.Output); break;
-                case OpCode.GlobalAveragePool2D: TensorMath.GlobalAvgPool2DBackward(op.A, op.Output, op.I0, op.I1, op.I2); break;
-                case OpCode.BatchNorm1D: TensorMath.BatchNorm1DBackward(op.A, op.Output, op.NodeContext[0], op.NodeContext[1], op.NodeContext[2], op.NodeContext[3]); break;
-                case OpCode.Reshape: TensorMath.ReshapeBackward(op.A, op.Output); break;
-                case OpCode.Sigmoid: TensorMath.SigmoidBackward(op.A, op.Output); break;
-                case OpCode.Tanh: TensorMath.TanhBackward(op.A, op.Output); break;
-                case OpCode.Multiply: TensorMath.MultiplyBackward(op.A, op.B, op.Output); break;
-                case OpCode.GateSlice: TensorMath.GateSliceBackward(op.A, op.Output, op.I1, op.I0); break;
-                case OpCode.TimestepSlice: TensorMath.TimestepSliceBackward(op.A, op.Output, op.I0, op.I1, op.I2); break;
-                case OpCode.StackTimesteps: TensorMath.StackTimestepsBackward(op.NodeContext, op.Output, op.I0, op.I1, op.I2); break;
-                case OpCode.RepeatVector: TensorMath.RepeatVectorBackward(op.A, op.Output, op.I0, op.I1); break;
-                case OpCode.FusedLSTMStep: TensorMath.FusedLSTMStepBackward(op.A, op.B, op.Output, op.NodeContext); break;
-                case OpCode.DirectionalLoss: TensorMath.DirectionalLossBackward(op.A, op.B, op.Output, BitConverter.Int32BitsToSingle(op.I0)); break;
+                case OpCode.Add:
+                    TensorMath.AddBackward(op.A, op.B, op.Output);
+                    break;
+
+                case OpCode.Subtract:
+                    TensorMath.SubtractBackward(op.A, op.B, op.Output);
+                    break;
+
+                case OpCode.AddBias:
+                    TensorMath.AddBiasBackward(op.A, op.B, op.Output);
+                    break;
+
+                case OpCode.MatMul:
+                    TensorMath.MatMulBackward(op.A, op.B, op.Output);
+                    break;
+
+                case OpCode.Linear:
+                    TensorMath.LinearBackward(op.A, op.B, op.NodeContext[0], op.Output);
+                    break;
+
+                case OpCode.ReLU:
+                    TensorMath.ReluBackward(op.A, op.Output);
+                    break;
+
+                case OpCode.Dropout:
+                    TensorMath.DropoutBackward(op.A, op.B, op.Output);
+                    break;
+
+                case OpCode.MseLoss:
+                    TensorMath.MSELossBackward(op.A, op.B, op.Output);
+                    break;
+
+                case OpCode.SoftmaxCrossEntropy:
+                    TensorMath.SoftmaxCrossEntropyBackward(op.A, op.B, op.Output, op.NodeContext[0]);
+                    break;
+
+                case OpCode.Conv2D:
+                    TensorMath.Conv2DBackward(op.A, op.B, op.Output, op.I0, op.I1, op.I2, op.I3, op.I4);
+                    break;
+
+                case OpCode.MaxPool2D:
+                    TensorMath.MaxPool2DBackward(op.A, op.B, op.Output);
+                    break;
+
+                case OpCode.GlobalAveragePool2D:
+                    TensorMath.GlobalAvgPool2DBackward(op.A, op.Output, op.I0, op.I1, op.I2);
+                    break;
+
+                case OpCode.BatchNorm1D:
+                    TensorMath.BatchNorm1DBackward(op.A, op.Output, op.NodeContext[0], op.NodeContext[1], op.NodeContext[2], op.NodeContext[3]);
+                    break;
+
+                case OpCode.Reshape:
+                    TensorMath.ReshapeBackward(op.A, op.Output);
+                    break;
+
+                case OpCode.Sigmoid:
+                    TensorMath.SigmoidBackward(op.A, op.Output);
+                    break;
+
+                case OpCode.Tanh:
+                    TensorMath.TanhBackward(op.A, op.Output);
+                    break;
+
+                case OpCode.Multiply:
+                    TensorMath.MultiplyBackward(op.A, op.B, op.Output);
+                    break;
+
+                case OpCode.GateSlice:
+                    TensorMath.GateSliceBackward(op.A, op.Output, op.I1, op.I0);
+                    break;
+
+                case OpCode.TimestepSlice:
+                    TensorMath.TimestepSliceBackward(op.A, op.Output, op.I0, op.I1, op.I2);
+                    break;
+
+                case OpCode.StackTimesteps:
+                    TensorMath.StackTimestepsBackward(op.NodeContext, op.Output, op.I0, op.I1, op.I2);
+                    break;
+
+                case OpCode.RepeatVector:
+                    TensorMath.RepeatVectorBackward(op.A, op.Output, op.I0, op.I1);
+                    break;
+
+                case OpCode.FusedLSTMStep:
+                    TensorMath.FusedLSTMStepBackward(op.A, op.B, op.Output, op.NodeContext);
+                    break;
+
+                case OpCode.DirectionalLoss:
+                    TensorMath.DirectionalLossBackward(op.A, op.B, op.Output, BitConverter.Int32BitsToSingle(op.I0));
+                    break;
+
                 case OpCode.AddInPlace:
                     if (op.A.RequiresGrad)
                     {
@@ -195,8 +366,9 @@ namespace DevOnBike.Overfit.Autograd
             }
 
             _opCount = 0;
+            ClearBackwardProfile();
 
-            // Sprzątanie po epokach bez angażowania GC!
+            // Reset arena without involving GC.
             TapeBuffer.ResetOffset();
         }
 

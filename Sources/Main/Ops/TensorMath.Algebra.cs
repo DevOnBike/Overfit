@@ -3,7 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Collections.Concurrent;
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Intrinsics;
@@ -35,8 +34,14 @@ namespace DevOnBike.Overfit.Ops
 
         public static void AddBackward(AutogradNode a, AutogradNode b, AutogradNode output)
         {
-            if (a.RequiresGrad) TensorPrimitives.Add(a.GradView.AsSpan(), output.GradView.AsReadOnlySpan(), a.GradView.AsSpan());
-            if (b.RequiresGrad) TensorPrimitives.Add(b.GradView.AsSpan(), output.GradView.AsReadOnlySpan(), b.GradView.AsSpan());
+            if (a.RequiresGrad)
+            {
+                TensorPrimitives.Add(a.GradView.AsSpan(), output.GradView.AsReadOnlySpan(), a.GradView.AsSpan());
+            }
+            if (b.RequiresGrad)
+            {
+                TensorPrimitives.Add(b.GradView.AsSpan(), output.GradView.AsReadOnlySpan(), b.GradView.AsSpan());
+            }
         }
 
         // ====================================================================
@@ -50,14 +55,23 @@ namespace DevOnBike.Overfit.Ops
 
             TensorPrimitives.Subtract(left.DataView.AsReadOnlySpan(), right.DataView.AsReadOnlySpan(), output.DataView.AsSpan());
 
-            if (output.RequiresGrad) graph?.Record(OpCode.Subtract, output, left, right);
+            if (output.RequiresGrad)
+            {
+                graph?.Record(OpCode.Subtract, output, left, right);
+            }
             return output;
         }
 
         public static void SubtractBackward(AutogradNode a, AutogradNode b, AutogradNode output)
         {
-            if (a.RequiresGrad) TensorPrimitives.Add(a.GradView.AsSpan(), output.GradView.AsReadOnlySpan(), a.GradView.AsSpan());
-            if (b.RequiresGrad) TensorPrimitives.Subtract(b.GradView.AsSpan(), output.GradView.AsReadOnlySpan(), b.GradView.AsSpan());
+            if (a.RequiresGrad)
+            {
+                TensorPrimitives.Add(a.GradView.AsSpan(), output.GradView.AsReadOnlySpan(), a.GradView.AsSpan());
+            }
+            if (b.RequiresGrad)
+            {
+                TensorPrimitives.Subtract(b.GradView.AsSpan(), output.GradView.AsReadOnlySpan(), b.GradView.AsSpan());
+            }
         }
 
         // ====================================================================
@@ -76,7 +90,10 @@ namespace DevOnBike.Overfit.Ops
                 var bS = bias.DataView.AsReadOnlySpan();
                 var outS = output.DataView.AsSpan();
 
-                for (var i = 0; i < N; i++) Simd.Add(inS.Slice(i * C, C), bS, outS.Slice(i * C, C));
+                for (var i = 0; i < N; i++)
+                {
+                    Simd.Add(inS.Slice(i * C, C), bS, outS.Slice(i * C, C));
+                }
             }
             else
             {
@@ -89,7 +106,10 @@ namespace DevOnBike.Overfit.Ops
                 });
             }
 
-            if (output.RequiresGrad) graph?.Record(OpCode.AddBias, output, input, bias);
+            if (output.RequiresGrad)
+            {
+                graph?.Record(OpCode.AddBias, output, input, bias);
+            }
             return output;
         }
 
@@ -97,44 +117,31 @@ namespace DevOnBike.Overfit.Ops
         {
             int N = input.Shape.D0, C = input.Shape.D1;
 
-            if (input.RequiresGrad) TensorPrimitives.Add(input.GradView.AsSpan(), output.GradView.AsReadOnlySpan(), input.GradView.AsSpan());
-
-            if (!bias.RequiresGrad) return;
-
-            if (N < BatchSequentialThreshold)
+            if (input.RequiresGrad)
             {
-                var bG = bias.GradView.AsSpan();
-                var oG = output.GradView.AsReadOnlySpan();
-                for (var i = 0; i < N; i++) Simd.Add(bG, oG.Slice(i * C, C), bG);
+                TensorPrimitives.Add(input.GradView.AsSpan(), output.GradView.AsReadOnlySpan(), input.GradView.AsSpan());
+            }
+
+            if (!bias.RequiresGrad)
+            {
                 return;
             }
 
-            // PODMIENIONE: Wątkowy worek to teraz TensorStorage z puli ArrayPool
-            var partials = new ConcurrentBag<TensorStorage<float>>();
-
-            Parallel.For(0, N,
-                () => new TensorStorage<float>(C, clearMemory: true),
-                (i, state, localGrad) =>
-                {
-                    Simd.Add(
-                        localGrad.AsReadOnlySpan(),
-                        output.GradView.AsReadOnlySpan().Slice(i * C, C),
-                        localGrad.AsSpan());
-                    return localGrad;
-                },
-                localGrad => partials.Add(localGrad));
-
+            // Bias gradient = column-wise sum of output gradient across the batch dimension:
+            //   bias.Grad[c] += sum_i( output.Grad[i, c] )
+            //
+            // Kept as a single sequential pass. Previous iteration used Parallel.For with
+            // per-worker TensorStorage partials + ConcurrentBag merge; for realistic shapes
+            // (N ≤ 512, C ≤ 2048) the parallel spawn + merge overhead dominated the actual
+            // SIMD work, and the per-call allocations (worker wrappers + collection) were
+            // the single largest contributor to backward-pass managed garbage. Sequential
+            // SIMD keeps everything in the caller thread's L1/L2 and allocates nothing.
             var biasGrad = bias.GradView.AsSpan();
-            foreach (var partial in partials)
+            var outGrad = output.GradView.AsReadOnlySpan();
+
+            for (var i = 0; i < N; i++)
             {
-                try
-                {
-                    Simd.Add(biasGrad, partial.AsReadOnlySpan(), biasGrad);
-                }
-                finally
-                {
-                    partial.Dispose(); // Zwraca do ArrayPool!
-                }
+                Simd.Add(biasGrad, outGrad.Slice(i * C, C), biasGrad);
             }
         }
 
@@ -147,7 +154,10 @@ namespace DevOnBike.Overfit.Ops
             var requiresGrad = left.RequiresGrad || right.RequiresGrad;
             var output = MatMulRaw(graph, left, right, requiresGrad);
 
-            if (output.RequiresGrad) graph?.Record(OpCode.MatMul, output, left, right);
+            if (output.RequiresGrad)
+            {
+                graph?.Record(OpCode.MatMul, output, left, right);
+            }
             return output;
         }
 
@@ -173,7 +183,10 @@ namespace DevOnBike.Overfit.Ops
                     for (var k = 0; k < aC; k++)
                     {
                         var aVal = rA[k];
-                        if (aVal != 0f) Simd.MulAdd(bS.Slice(k * bC, bC), aVal, rC);
+                        if (aVal != 0f)
+                        {
+                            Simd.MulAdd(bS.Slice(k * bC, bC), aVal, rC);
+                        }
                     }
                 });
             }
@@ -191,15 +204,24 @@ namespace DevOnBike.Overfit.Ops
                 for (var k = 0; k < aC; k++)
                 {
                     var aVal = rA[k];
-                    if (aVal != 0f) Simd.MulAdd(bS.Slice(k * bC, bC), aVal, rC);
+                    if (aVal != 0f)
+                    {
+                        Simd.MulAdd(bS.Slice(k * bC, bC), aVal, rC);
+                    }
                 }
             }
         }
 
         public static void MatMulBackward(AutogradNode a, AutogradNode b, AutogradNode output)
         {
-            if (a.RequiresGrad) MatMulAdd_A_BT_Raw(output, true, b, false, a, true);
-            if (b.RequiresGrad) MatMulAdd_AT_B_Raw(a, false, output, true, b, true);
+            if (a.RequiresGrad)
+            {
+                MatMulAdd_A_BT_Raw(output, true, b, false, a, true);
+            }
+            if (b.RequiresGrad)
+            {
+                MatMulAdd_AT_B_Raw(a, false, output, true, b, true);
+            }
         }
 
         // ====================================================================
@@ -208,7 +230,10 @@ namespace DevOnBike.Overfit.Ops
 
         public static void MatMulAdd_A_BT_Raw(AutogradNode A, bool aGrad, AutogradNode B, bool bGrad, AutogradNode C, bool cGrad)
         {
-            if (!cGrad || !C.RequiresGrad) return;
+            if (!cGrad || !C.RequiresGrad)
+            {
+                return;
+            }
 
             int N = A.Shape.D0, K = A.Shape.D1, M = B.Shape.D0;
 
@@ -227,7 +252,10 @@ namespace DevOnBike.Overfit.Ops
                     var cRow = C.GradView.AsSpan().Slice(i * M, M);
                     var bData = bGrad ? B.GradView.AsReadOnlySpan() : B.DataView.AsReadOnlySpan();
 
-                    for (var j = 0; j < M; j++) cRow[j] += Simd.Dot(aRow, bData.Slice(j * K, K));
+                    for (var j = 0; j < M; j++)
+                    {
+                        cRow[j] += Simd.Dot(aRow, bData.Slice(j * K, K));
+                    }
                 });
             }
         }
@@ -239,13 +267,19 @@ namespace DevOnBike.Overfit.Ops
                 var aRow = aS.Slice(i * K, K);
                 var cRow = cS.Slice(i * M, M);
 
-                for (var j = 0; j < M; j++) cRow[j] += Simd.Dot(aRow, bS.Slice(j * K, K));
+                for (var j = 0; j < M; j++)
+                {
+                    cRow[j] += Simd.Dot(aRow, bS.Slice(j * K, K));
+                }
             }
         }
 
         public static void MatMulAdd_AT_B_Raw(AutogradNode A, bool aGrad, AutogradNode B, bool bGrad, AutogradNode C, bool cGrad)
         {
-            if (!cGrad || !C.RequiresGrad) return;
+            if (!cGrad || !C.RequiresGrad)
+            {
+                return;
+            }
 
             int K = A.Shape.D0, N = A.Shape.D1, M = B.Shape.D1;
 
@@ -267,7 +301,10 @@ namespace DevOnBike.Overfit.Ops
                     for (var k = 0; k < K; k++)
                     {
                         var aVal = aData[k * N + i];
-                        if (aVal != 0f) Simd.MulAdd(bData.Slice(k * M, M), aVal, cRow);
+                        if (aVal != 0f)
+                        {
+                            Simd.MulAdd(bData.Slice(k * M, M), aVal, cRow);
+                        }
                     }
                 });
             }
@@ -281,7 +318,10 @@ namespace DevOnBike.Overfit.Ops
                 for (var k = 0; k < K; k++)
                 {
                     var aVal = aS[k * N + i];
-                    if (aVal != 0f) Simd.MulAdd(bS.Slice(k * M, M), aVal, cRow);
+                    if (aVal != 0f)
+                    {
+                        Simd.MulAdd(bS.Slice(k * M, M), aVal, cRow);
+                    }
                 }
             }
         }
@@ -297,14 +337,23 @@ namespace DevOnBike.Overfit.Ops
 
             TensorKernels.Multiply(a.DataView.AsReadOnlySpan(), b.DataView.AsReadOnlySpan(), output.DataView.AsSpan());
 
-            if (output.RequiresGrad) graph?.Record(OpCode.Multiply, output, a, b);
+            if (output.RequiresGrad)
+            {
+                graph?.Record(OpCode.Multiply, output, a, b);
+            }
             return output;
         }
 
         public static void MultiplyBackward(AutogradNode a, AutogradNode b, AutogradNode output)
         {
-            if (a.RequiresGrad) TensorPrimitives.MultiplyAdd(output.GradView.AsReadOnlySpan(), b.DataView.AsReadOnlySpan(), a.GradView.AsSpan(), a.GradView.AsSpan());
-            if (b.RequiresGrad) TensorPrimitives.MultiplyAdd(output.GradView.AsReadOnlySpan(), a.DataView.AsReadOnlySpan(), b.GradView.AsSpan(), b.GradView.AsSpan());
+            if (a.RequiresGrad)
+            {
+                TensorPrimitives.MultiplyAdd(output.GradView.AsReadOnlySpan(), b.DataView.AsReadOnlySpan(), a.GradView.AsSpan(), a.GradView.AsSpan());
+            }
+            if (b.RequiresGrad)
+            {
+                TensorPrimitives.MultiplyAdd(output.GradView.AsReadOnlySpan(), a.DataView.AsReadOnlySpan(), b.GradView.AsSpan(), b.GradView.AsSpan());
+            }
         }
 
         // ====================================================================
@@ -338,7 +387,10 @@ namespace DevOnBike.Overfit.Ops
                     for (var k = 0; k < K; k++)
                     {
                         var aVal = rA[k];
-                        if (aVal != 0f) Simd.MulAdd(wS.Slice(k * M, M), aVal, rC);
+                        if (aVal != 0f)
+                        {
+                            Simd.MulAdd(wS.Slice(k * M, M), aVal, rC);
+                        }
                     }
                 }
             }
@@ -353,12 +405,18 @@ namespace DevOnBike.Overfit.Ops
                     for (var k = 0; k < K; k++)
                     {
                         var aVal = rA[k];
-                        if (aVal != 0f) Simd.MulAdd(wS.Slice(k * M, M), aVal, rC);
+                        if (aVal != 0f)
+                        {
+                            Simd.MulAdd(wS.Slice(k * M, M), aVal, rC);
+                        }
                     }
                 });
             }
 
-            if (output.RequiresGrad) graph?.Record(OpCode.Linear, output, input, weights, 0, 0, 0, 0, 0, [bias]);
+            if (output.RequiresGrad)
+            {
+                graph?.Record(OpCode.Linear, output, input, weights, 0, 0, 0, 0, 0, [bias]);
+            }
             return output;
         }
 
@@ -366,43 +424,23 @@ namespace DevOnBike.Overfit.Ops
         {
             MatMulBackward(input, weights, output);
 
-            if (!bias.RequiresGrad) return;
-
-            int N = output.Shape.D0, C = output.Shape.D1;
-
-            if (N < BatchSequentialThreshold)
+            if (!bias.RequiresGrad)
             {
-                var bG = bias.GradView.AsSpan();
-                var oG = output.GradView.AsReadOnlySpan();
-                for (var i = 0; i < N; i++) Simd.Add(bG, oG.Slice(i * C, C), bG);
                 return;
             }
 
-            var partials = new ConcurrentBag<TensorStorage<float>>();
+            int N = output.Shape.D0, C = output.Shape.D1;
 
-            Parallel.For(0, N,
-                () => new TensorStorage<float>(C, clearMemory: true),
-                (i, state, localGrad) =>
-                {
-                    Simd.Add(
-                        localGrad.AsReadOnlySpan(),
-                        output.GradView.AsReadOnlySpan().Slice(i * C, C),
-                        localGrad.AsSpan());
-                    return localGrad;
-                },
-                localGrad => partials.Add(localGrad));
+            // Bias gradient accumulation — same shape of work as in AddBiasBackward.
+            // Sequential SIMD beats Parallel.For for the sizes encountered in practice,
+            // and removes the allocation-heavy per-worker buffer + ConcurrentBag merge.
+            // See AddBiasBackward for the full rationale.
+            var biasGrad = bias.GradView.AsSpan();
+            var outGrad = output.GradView.AsReadOnlySpan();
 
-            var biasG = bias.GradView.AsSpan();
-            foreach (var partial in partials)
+            for (var i = 0; i < N; i++)
             {
-                try
-                {
-                    Simd.Add(biasG, partial.AsReadOnlySpan(), biasG);
-                }
-                finally
-                {
-                    partial.Dispose();
-                }
+                Simd.Add(biasGrad, outGrad.Slice(i * C, C), biasGrad);
             }
         }
     }

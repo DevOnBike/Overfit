@@ -64,28 +64,55 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             bw.Write(Gamma.DataView.Size);
 
-            foreach (var val in Gamma.DataView.AsReadOnlySpan()) bw.Write(val);
-            foreach (var val in Beta.DataView.AsReadOnlySpan()) bw.Write(val);
-            foreach (var val in RunningMean.AsReadOnlySpan()) bw.Write(val);
-            foreach (var val in RunningVar.AsReadOnlySpan()) bw.Write(val);
+            foreach (var val in Gamma.DataView.AsReadOnlySpan())
+            {
+                bw.Write(val);
+            }
+            foreach (var val in Beta.DataView.AsReadOnlySpan())
+            {
+                bw.Write(val);
+            }
+            foreach (var val in RunningMean.AsReadOnlySpan())
+            {
+                bw.Write(val);
+            }
+            foreach (var val in RunningVar.AsReadOnlySpan())
+            {
+                bw.Write(val);
+            }
         }
 
         public void Load(BinaryReader br)
         {
             var len = br.ReadInt32();
-            if (len != Gamma.DataView.Size) throw new Exception($"Weight dimensions mismatch: {len} vs {Gamma.DataView.Size}");
+            if (len != Gamma.DataView.Size)
+            {
+                throw new Exception($"Weight dimensions mismatch: {len} vs {Gamma.DataView.Size}");
+            }
 
             var gSpan = Gamma.DataView.AsSpan();
-            for (var i = 0; i < len; i++) gSpan[i] = br.ReadSingle();
+            for (var i = 0; i < len; i++)
+            {
+                gSpan[i] = br.ReadSingle();
+            }
 
             var bSpan = Beta.DataView.AsSpan();
-            for (var i = 0; i < len; i++) bSpan[i] = br.ReadSingle();
+            for (var i = 0; i < len; i++)
+            {
+                bSpan[i] = br.ReadSingle();
+            }
 
             var rmSpan = RunningMean.AsSpan();
-            for (var i = 0; i < len; i++) rmSpan[i] = br.ReadSingle();
+            for (var i = 0; i < len; i++)
+            {
+                rmSpan[i] = br.ReadSingle();
+            }
 
             var rvSpan = RunningVar.AsSpan();
-            for (var i = 0; i < len; i++) rvSpan[i] = br.ReadSingle();
+            for (var i = 0; i < len; i++)
+            {
+                rvSpan[i] = br.ReadSingle();
+            }
         }
 
         public void Dispose()

@@ -103,7 +103,7 @@ namespace DevOnBike.Overfit.Tests
             // context instances to be created — ThreadLocal reuses values from prior calls.
             var factoryInvocations = 0;
 
-            Func<Scratch> factory = () =>
+            var factory = () =>
             {
                 Interlocked.Increment(ref factoryInvocations);
                 return new Scratch();
@@ -129,7 +129,7 @@ namespace DevOnBike.Overfit.Tests
             // should allocate zero new contexts regardless of how many times they run.
             var factoryInvocations = 0;
 
-            Func<Scratch> factory = () =>
+            var factory = () =>
             {
                 Interlocked.Increment(ref factoryInvocations);
                 return new Scratch();

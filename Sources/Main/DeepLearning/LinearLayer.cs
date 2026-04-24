@@ -74,31 +74,52 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void InvalidateParameterCaches()
         {
-            if (!IsTraining) RebuildTransposedWeights();
+            if (!IsTraining)
+            {
+                RebuildTransposedWeights();
+            }
         }
 
         public void Save(BinaryWriter bw)
         {
             bw.Write(Weights.DataView.Size);
-            foreach (var val in Weights.DataView.AsReadOnlySpan()) bw.Write(val);
+            foreach (var val in Weights.DataView.AsReadOnlySpan())
+            {
+                bw.Write(val);
+            }
 
             bw.Write(Bias.DataView.Size);
-            foreach (var val in Bias.DataView.AsReadOnlySpan()) bw.Write(val);
+            foreach (var val in Bias.DataView.AsReadOnlySpan())
+            {
+                bw.Write(val);
+            }
         }
 
         public void Load(BinaryReader br)
         {
             var lenW = br.ReadInt32();
-            if (lenW != Weights.DataView.Size) throw new Exception("Weights mismatch");
+            if (lenW != Weights.DataView.Size)
+            {
+                throw new Exception("Weights mismatch");
+            }
 
             var wSpan = Weights.DataView.AsSpan();
-            for (var i = 0; i < lenW; i++) wSpan[i] = br.ReadSingle();
+            for (var i = 0; i < lenW; i++)
+            {
+                wSpan[i] = br.ReadSingle();
+            }
 
             var lenB = br.ReadInt32();
-            if (lenB != Bias.DataView.Size) throw new Exception("Bias mismatch");
+            if (lenB != Bias.DataView.Size)
+            {
+                throw new Exception("Bias mismatch");
+            }
 
             var bSpan = Bias.DataView.AsSpan();
-            for (var i = 0; i < lenB; i++) bSpan[i] = br.ReadSingle();
+            for (var i = 0; i < lenB; i++)
+            {
+                bSpan[i] = br.ReadSingle();
+            }
         }
 
         public void Save(string path)
@@ -110,7 +131,10 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void Load(string path)
         {
-            if (!File.Exists(path)) throw new FileNotFoundException($"Weight file not found: {path}");
+            if (!File.Exists(path))
+            {
+                throw new FileNotFoundException($"Weight file not found: {path}");
+            }
 
             using var fs = new FileStream(path, FileMode.Open);
             using var br = new BinaryReader(fs);
@@ -143,7 +167,10 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
-            if (_weightsTransposed == null) RebuildTransposedWeights();
+            if (_weightsTransposed == null)
+            {
+                RebuildTransposedWeights();
+            }
 
             var batchSize = input.Length / _inputSize;
 

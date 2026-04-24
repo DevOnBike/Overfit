@@ -104,7 +104,10 @@ namespace DevOnBike.Overfit.Ops
 
         public static void MaxPool2DBackward(AutogradNode input, AutogradNode maxIndices, AutogradNode output)
         {
-            if (!input.RequiresGrad) return;
+            if (!input.RequiresGrad)
+            {
+                return;
+            }
 
             var oGS = output.GradView.AsReadOnlySpan();
             var iGS = input.GradView.AsSpan();
@@ -154,14 +157,20 @@ namespace DevOnBike.Overfit.Ops
                 });
             }
 
-            if (output.RequiresGrad) graph?.Record(OpCode.GlobalAveragePool2D, output, input, null, h, w, channels);
+            if (output.RequiresGrad)
+            {
+                graph?.Record(OpCode.GlobalAveragePool2D, output, input, null, h, w, channels);
+            }
 
             return output;
         }
 
         public static void GlobalAvgPool2DBackward(AutogradNode input, AutogradNode output, int h, int w, int channels)
         {
-            if (!input.RequiresGrad) return;
+            if (!input.RequiresGrad)
+            {
+                return;
+            }
 
             var batchSize = input.Shape.D0;
             var spatialSize = h * w;
@@ -177,7 +186,10 @@ namespace DevOnBike.Overfit.Ops
                     var grad = oGS[n * channels + c] * scale;
                     var channelSlice = iGS.Slice(n * channels * spatialSize + c * spatialSize, spatialSize);
 
-                    for (var i = 0; i < spatialSize; i++) channelSlice[i] += grad;
+                    for (var i = 0; i < spatialSize; i++)
+                    {
+                        channelSlice[i] += grad;
+                    }
                 }
             }
         }

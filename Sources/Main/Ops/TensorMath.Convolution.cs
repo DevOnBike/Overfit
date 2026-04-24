@@ -48,7 +48,10 @@ namespace DevOnBike.Overfit.Ops
 
         public static void Conv2DBackward(AutogradNode input, AutogradNode weights, AutogradNode output, int inC, int outC, int h, int w, int k)
         {
-            if (!input.RequiresGrad && !weights.RequiresGrad) return;
+            if (!input.RequiresGrad && !weights.RequiresGrad)
+            {
+                return;
+            }
 
             int batchSize = input.Shape.D0, outH = h - k + 1, outW = w - k + 1, K = outH * outW, kSqInC = k * k * inC;
 
@@ -81,7 +84,10 @@ namespace DevOnBike.Overfit.Ops
                 },
                 localDw =>
                 {
-                    if (localDw != null) partialWeightGrads!.Add(localDw);
+                    if (localDw != null)
+                    {
+                        partialWeightGrads!.Add(localDw);
+                    }
                 });
 
             if (weights.RequiresGrad && partialWeightGrads != null)
@@ -156,7 +162,10 @@ namespace DevOnBike.Overfit.Ops
                                 for (var x = 0; x < oW; x++)
                                 {
                                     var j = x * s - p + kw;
-                                    if (j >= 0 && j < w) gI[iO + j] += col[rO + y * oW + x];
+                                    if (j >= 0 && j < w)
+                                    {
+                                        gI[iO + j] += col[rO + y * oW + x];
+                                    }
                                 }
                             }
                         }
