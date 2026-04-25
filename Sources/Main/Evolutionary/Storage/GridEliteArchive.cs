@@ -135,6 +135,237 @@ namespace DevOnBike.Overfit.Evolutionary.Storage
             }
         }
 
+        // ====================================================================
+        // Persistence
+        // ====================================================================
+
+        /// <summary>
+        ///     Magic header for serialised archive blobs. Spells "MEAD" (MAP-Elites
+        ///     Archive Data) in little-endian ASCII. Used to detect mis-routed files
+        ///     before reading further fields.
+        /// </summary>
+        private const uint SaveMagic = 0x4D454144u;
+
+        /// <summary>
+        ///     Schema version of the on-disk format. Bump when adding/removing/reordering
+        ///     fields. Old files are rejected on Load with InvalidDataException — there
+        ///     is no migration path; users are expected to retrain on schema change.
+        /// </summary>
+        private const int SaveSchemaVersion = 1;
+
+        /// <summary>
+        ///     Writes the archive's full state to <paramref name="writer"/> in a
+        ///     versioned binary format. Includes shape (parameter count, descriptor
+        ///     dimensions, bins per dimension, descriptor bounds) so that Load can
+        ///     verify the receiving archive is compatible. The on-disk size is
+        ///     dominated by the dense per-cell arrays (parameters and descriptors)
+        ///     even when most cells are unoccupied — this keeps the format simple
+        ///     and Load fast at the cost of file size for sparse archives.
+        /// </summary>
+        public void Save(BinaryWriter writer)
+        {
+            ThrowIfDisposed();
+            ArgumentNullException.ThrowIfNull(writer);
+
+            writer.Write(SaveMagic);
+            writer.Write(SaveSchemaVersion);
+
+            writer.Write(_parameterCount);
+            writer.Write(DescriptorDimensions);
+
+            for (var d = 0; d < DescriptorDimensions; d++)
+            {
+                writer.Write(_binsPerDimension[d]);
+            }
+
+            for (var d = 0; d < DescriptorDimensions; d++)
+            {
+                writer.Write(_descriptorMin[d]);
+            }
+
+            for (var d = 0; d < DescriptorDimensions; d++)
+            {
+                writer.Write(_descriptorMax[d]);
+            }
+
+            writer.Write(CellCount);
+            writer.Write(_qdScore);
+            writer.Write(_occupiedCount);
+
+            for (var i = 0; i < _occupiedCount; i++)
+            {
+                writer.Write(_occupiedCells[i]);
+            }
+
+            // Dense per-cell arrays. Unoccupied cells contribute their initial values
+            // (NegativeInfinity for fitness, zeros for parameters/descriptors), which
+            // are wasted bytes but make Save/Load trivially correct: no need to walk
+            // the occupancy mask while serialising.
+            for (var i = 0; i < CellCount; i++)
+            {
+                writer.Write(_fitness[i]);
+            }
+
+            var paramsLen = CellCount * _parameterCount;
+            for (var i = 0; i < paramsLen; i++)
+            {
+                writer.Write(_parameters[i]);
+            }
+
+            var descLen = CellCount * DescriptorDimensions;
+            for (var i = 0; i < descLen; i++)
+            {
+                writer.Write(_descriptors[i]);
+            }
+
+            for (var i = 0; i < CellCount; i++)
+            {
+                writer.Write(_occupied[i]);
+            }
+        }
+
+        /// <summary>
+        ///     Loads an archive snapshot previously written by <see cref="Save"/>.
+        ///     The receiving archive's shape (parameter count, descriptor dimensions,
+        ///     bins per dimension, descriptor bounds) must exactly match the saved
+        ///     blob — otherwise an <see cref="InvalidDataException"/> is thrown.
+        ///     Any prior contents of the archive are discarded.
+        /// </summary>
+        public void Load(BinaryReader reader)
+        {
+            ThrowIfDisposed();
+            ArgumentNullException.ThrowIfNull(reader);
+
+            var magic = reader.ReadUInt32();
+            if (magic != SaveMagic)
+            {
+                throw new InvalidDataException(
+                    $"Not a GridEliteArchive snapshot — magic header 0x{magic:X8} does not match expected 0x{SaveMagic:X8}.");
+            }
+
+            var schemaVersion = reader.ReadInt32();
+            if (schemaVersion != SaveSchemaVersion)
+            {
+                throw new InvalidDataException(
+                    $"GridEliteArchive snapshot schema version {schemaVersion} is not supported by this build (expected {SaveSchemaVersion}). There is no automatic migration; retrain to produce a fresh snapshot.");
+            }
+
+            var parameterCount = reader.ReadInt32();
+            if (parameterCount != _parameterCount)
+            {
+                throw new InvalidDataException(
+                    $"Snapshot parameterCount={parameterCount} does not match this archive's parameterCount={_parameterCount}.");
+            }
+
+            var descriptorDimensions = reader.ReadInt32();
+            if (descriptorDimensions != DescriptorDimensions)
+            {
+                throw new InvalidDataException(
+                    $"Snapshot descriptorDimensions={descriptorDimensions} does not match this archive's DescriptorDimensions={DescriptorDimensions}.");
+            }
+
+            for (var d = 0; d < descriptorDimensions; d++)
+            {
+                var bins = reader.ReadInt32();
+                if (bins != _binsPerDimension[d])
+                {
+                    throw new InvalidDataException(
+                        $"Snapshot bins[{d}]={bins} does not match archive bins[{d}]={_binsPerDimension[d]}.");
+                }
+            }
+
+            for (var d = 0; d < descriptorDimensions; d++)
+            {
+                var min = reader.ReadSingle();
+                if (min != _descriptorMin[d])
+                {
+                    throw new InvalidDataException(
+                        $"Snapshot descriptorMin[{d}]={min} does not match archive descriptorMin[{d}]={_descriptorMin[d]}.");
+                }
+            }
+
+            for (var d = 0; d < descriptorDimensions; d++)
+            {
+                var max = reader.ReadSingle();
+                if (max != _descriptorMax[d])
+                {
+                    throw new InvalidDataException(
+                        $"Snapshot descriptorMax[{d}]={max} does not match archive descriptorMax[{d}]={_descriptorMax[d]}.");
+                }
+            }
+
+            var cellCount = reader.ReadInt32();
+            if (cellCount != CellCount)
+            {
+                throw new InvalidDataException(
+                    $"Snapshot cellCount={cellCount} does not match archive CellCount={CellCount}.");
+            }
+
+            // Reset existing state before populating from the stream. Anything that
+            // was in the archive prior to Load is discarded.
+            Clear();
+
+            _qdScore = reader.ReadSingle();
+            _occupiedCount = reader.ReadInt32();
+
+            if ((uint)_occupiedCount > (uint)CellCount)
+            {
+                throw new InvalidDataException(
+                    $"Snapshot occupiedCount={_occupiedCount} exceeds cellCount={CellCount}.");
+            }
+
+            for (var i = 0; i < _occupiedCount; i++)
+            {
+                var cellIdx = reader.ReadInt32();
+                if ((uint)cellIdx >= (uint)CellCount)
+                {
+                    throw new InvalidDataException(
+                        $"Snapshot occupiedCells[{i}]={cellIdx} is out of range for cellCount={CellCount}.");
+                }
+                _occupiedCells[i] = cellIdx;
+            }
+
+            for (var i = 0; i < CellCount; i++)
+            {
+                _fitness[i] = reader.ReadSingle();
+            }
+
+            var paramsLen = CellCount * _parameterCount;
+            for (var i = 0; i < paramsLen; i++)
+            {
+                _parameters[i] = reader.ReadSingle();
+            }
+
+            var descLen = CellCount * DescriptorDimensions;
+            for (var i = 0; i < descLen; i++)
+            {
+                _descriptors[i] = reader.ReadSingle();
+            }
+
+            for (var i = 0; i < CellCount; i++)
+            {
+                _occupied[i] = reader.ReadBoolean();
+            }
+        }
+
+        /// <summary>
+        ///     Empties the archive: resets occupancy, qd-score, and fitness back to
+        ///     <see cref="float.NegativeInfinity"/>. Parameter and descriptor buffers
+        ///     are not cleared (they're considered garbage when the corresponding cell
+        ///     is unoccupied). The archive's grid shape (bins, bounds, parameter count)
+        ///     stays intact — re-use the same instance for a fresh QD run.
+        /// </summary>
+        public void Clear()
+        {
+            ThrowIfDisposed();
+
+            Array.Clear(_occupied, 0, _occupied.Length);
+            Array.Fill(_fitness, float.NegativeInfinity);
+            Array.Clear(_occupiedCells, 0, _occupiedCells.Length);
+            _occupiedCount = 0;
+            _qdScore = 0f;
+        }
+
         public bool TryInsert(ReadOnlySpan<float> parameters, float fitness, ReadOnlySpan<float> descriptor)
         {
             return Insert(parameters, fitness, descriptor) is EliteInsertStatus.InsertedNewCell

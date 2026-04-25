@@ -3,8 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System;
-
 namespace DevOnBike.Overfit.Evolutionary.Runtime
 {
     /// <summary>
@@ -43,7 +41,11 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
             float coverage,
             float qdScore,
             float bestEvaluatedFitness,
-            float bestEliteFitness)
+            float bestEliteFitness,
+            TimeSpan totalElapsed,
+            TimeSpan askElapsed,
+            TimeSpan evaluateElapsed,
+            TimeSpan tellElapsed)
         {
             Iteration = iteration;
             InsertedNewCells = insertedNewCells;
@@ -57,6 +59,10 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
             QdScore = qdScore;
             BestEvaluatedFitness = bestEvaluatedFitness;
             BestEliteFitness = bestEliteFitness;
+            TotalElapsed = totalElapsed;
+            AskElapsed = askElapsed;
+            EvaluateElapsed = evaluateElapsed;
+            TellElapsed = tellElapsed;
         }
 
         public int Iteration { get; }
@@ -84,7 +90,14 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
         /// </summary>
         public float BestEliteFitness { get; }
 
+        /// <summary>
+        ///     Wall-clock duration of one full iteration (Ask + Evaluate + Tell).
+        ///     Populated by <c>MapElites.RunIteration</c>; for callers that drive
+        ///     Ask/Evaluate/Tell manually via <see cref="MapElites{TContext}.Tell"/>,
+        ///     this is <see cref="TimeSpan.Zero"/>.
+        /// </summary>
         public TimeSpan TotalElapsed { get; }
+
         public TimeSpan AskElapsed { get; }
         public TimeSpan EvaluateElapsed { get; }
         public TimeSpan TellElapsed { get; }

@@ -181,6 +181,232 @@ namespace DevOnBike.Overfit.Tests
             Assert.Equal(new[] { 2f, 2f, 2f, 2f }, archive.GetParameters(cellIndex).ToArray());
         }
 
+        // ====================================================================
+        // Checkpoint roundtrip tests (Plan 2.1)
+        // ====================================================================
+
+        [Fact]
+        public void Checkpoint_Archive_RoundtripPreservesAllOccupiedCells()
+        {
+            using var original = CreateArchive(parameterCount: 4);
+            original.Insert([0.1f, 0.2f, 0.3f, 0.4f], 1.5f, [0.25f, 0.25f]);
+            original.Insert([0.5f, 0.6f, 0.7f, 0.8f], 2.5f, [0.75f, 0.25f]);
+            original.Insert([0.9f, 1.0f, 1.1f, 1.2f], 3.5f, [0.5f, 0.5f]);
+
+            var savedQdScore = original.QdScore;
+            var savedOccupied = original.OccupiedCount;
+
+            // Save to in-memory stream then immediately load into a fresh archive.
+            using var stream = new MemoryStream();
+            using (var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, leaveOpen: true))
+            {
+                original.Save(writer);
+            }
+            stream.Position = 0;
+
+            using var restored = CreateArchive(parameterCount: 4);
+            using (var reader = new BinaryReader(stream, System.Text.Encoding.UTF8, leaveOpen: true))
+            {
+                restored.Load(reader);
+            }
+
+            Assert.Equal(savedQdScore, restored.QdScore, 6);
+            Assert.Equal(savedOccupied, restored.OccupiedCount);
+
+            // Verify each cell is occupied with identical fitness and parameters.
+            Assert.True(restored.TryGetCellIndex([0.25f, 0.25f], out var c1));
+            Assert.True(restored.IsOccupied(c1));
+            Assert.Equal(1.5f, restored.GetFitness(c1), 6);
+            Assert.Equal(new[] { 0.1f, 0.2f, 0.3f, 0.4f }, restored.GetParameters(c1).ToArray());
+
+            Assert.True(restored.TryGetCellIndex([0.75f, 0.25f], out var c2));
+            Assert.True(restored.IsOccupied(c2));
+            Assert.Equal(2.5f, restored.GetFitness(c2), 6);
+
+            Assert.True(restored.TryGetCellIndex([0.5f, 0.5f], out var c3));
+            Assert.True(restored.IsOccupied(c3));
+            Assert.Equal(3.5f, restored.GetFitness(c3), 6);
+        }
+
+        [Fact]
+        public void Checkpoint_Archive_LoadRejectsMismatchedParameterCount()
+        {
+            using var source = CreateArchive(parameterCount: 4);
+            source.Insert([0.1f, 0.2f, 0.3f, 0.4f], 1.5f, [0.25f, 0.25f]);
+
+            using var stream = new MemoryStream();
+            using (var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, leaveOpen: true))
+            {
+                source.Save(writer);
+            }
+            stream.Position = 0;
+
+            // Receiving archive has different parameter count — Load must refuse.
+            using var target = CreateArchive(parameterCount: 8);
+            using var reader = new BinaryReader(stream, System.Text.Encoding.UTF8, leaveOpen: true);
+
+            Assert.Throws<InvalidDataException>(() => target.Load(reader));
+        }
+
+        [Fact]
+        public void Checkpoint_Archive_LoadRejectsBadMagic()
+        {
+            using var stream = new MemoryStream();
+            using (var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, leaveOpen: true))
+            {
+                writer.Write(0xDEADBEEFu); // wrong magic
+                writer.Write(1);           // schema version
+            }
+            stream.Position = 0;
+
+            using var target = CreateArchive(parameterCount: 4);
+            using var reader = new BinaryReader(stream, System.Text.Encoding.UTF8, leaveOpen: true);
+
+            Assert.Throws<InvalidDataException>(() => target.Load(reader));
+        }
+
+        [Fact]
+        public void Checkpoint_Archive_ClearEmptiesArchive()
+        {
+            using var archive = CreateArchive(parameterCount: 4);
+            archive.Insert([0.1f, 0.2f, 0.3f, 0.4f], 1.5f, [0.25f, 0.25f]);
+            archive.Insert([0.5f, 0.6f, 0.7f, 0.8f], 2.5f, [0.75f, 0.25f]);
+
+            Assert.Equal(2, archive.OccupiedCount);
+            Assert.Equal(4f, archive.QdScore, 6);
+
+            archive.Clear();
+
+            Assert.Equal(0, archive.OccupiedCount);
+            Assert.Equal(0f, archive.QdScore, 6);
+            Assert.Equal(0f, archive.Coverage, 6);
+        }
+
+        [Fact]
+        public void Checkpoint_MapElites_RoundtripPreservesIterationAndBestTrackers()
+        {
+            using var origArchive = CreateArchive(parameterCount: 8);
+            using var origMap = new MapElites<DummyContext>(
+                parameterCount: 8,
+                batchSize: 64,
+                archive: origArchive,
+                evaluator: new SimpleDescriptorEvaluator(),
+                seed: 999,
+                mutationSigma: 0.05f,
+                initialMin: -1f,
+                initialMax: 1f,
+                randomInjectionProbability: 0.1f);
+
+            // Run a few iterations to build up state worth saving.
+            var ctx = new DummyContext();
+            for (var i = 0; i < 5; i++)
+            {
+                origMap.RunIteration(ref ctx);
+            }
+
+            var savedIteration = origMap.Iteration;
+            var savedBestEvaluated = origMap.BestEvaluatedFitness;
+            var savedBestElite = origMap.BestEliteFitness;
+            var savedOccupied = origArchive.OccupiedCount;
+            var savedQdScore = origArchive.QdScore;
+
+            // Save → Load.
+            using var stream = new MemoryStream();
+            using (var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, leaveOpen: true))
+            {
+                origMap.Save(writer);
+            }
+            stream.Position = 0;
+
+            using var restoredArchive = CreateArchive(parameterCount: 8);
+            using var restoredMap = new MapElites<DummyContext>(
+                parameterCount: 8,
+                batchSize: 64,
+                archive: restoredArchive,
+                evaluator: new SimpleDescriptorEvaluator(),
+                seed: 1, // intentionally different — Load should overwrite RNG state
+                mutationSigma: 0.05f,
+                initialMin: -1f,
+                initialMax: 1f,
+                randomInjectionProbability: 0.1f);
+
+            using (var reader = new BinaryReader(stream, System.Text.Encoding.UTF8, leaveOpen: true))
+            {
+                restoredMap.Load(reader);
+            }
+
+            Assert.Equal(savedIteration, restoredMap.Iteration);
+            Assert.Equal(savedBestEvaluated, restoredMap.BestEvaluatedFitness, 5);
+            Assert.Equal(savedBestElite, restoredMap.BestEliteFitness, 5);
+            Assert.Equal(savedOccupied, restoredArchive.OccupiedCount);
+            Assert.Equal(savedQdScore, restoredArchive.QdScore, 5);
+
+            // Best-elite parameters must come from the loaded archive cell, not garbage.
+            if (origMap.HasBestElite)
+            {
+                Assert.True(restoredMap.HasBestElite);
+                Assert.Equal(
+                    origMap.GetBestEliteParameters().ToArray(),
+                    restoredMap.GetBestEliteParameters().ToArray());
+            }
+        }
+
+        [Fact]
+        public void Checkpoint_MapElites_NextIterationProducesIdenticalCandidates()
+        {
+            // The strongest possible reproducibility test: save, run one more iteration
+            // on both original and restored, expect bit-identical candidates.
+            using var origArchive = CreateArchive(parameterCount: 8);
+            using var origMap = new MapElites<DummyContext>(
+                parameterCount: 8,
+                batchSize: 32,
+                archive: origArchive,
+                evaluator: new SimpleDescriptorEvaluator(),
+                seed: 12345,
+                mutationSigma: 0.05f,
+                initialMin: -1f,
+                initialMax: 1f,
+                randomInjectionProbability: 0.1f);
+
+            var ctx = new DummyContext();
+            for (var i = 0; i < 3; i++)
+            {
+                origMap.RunIteration(ref ctx);
+            }
+
+            using var stream = new MemoryStream();
+            using (var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, leaveOpen: true))
+            {
+                origMap.Save(writer);
+            }
+            stream.Position = 0;
+
+            using var restoredArchive = CreateArchive(parameterCount: 8);
+            using var restoredMap = new MapElites<DummyContext>(
+                parameterCount: 8,
+                batchSize: 32,
+                archive: restoredArchive,
+                evaluator: new SimpleDescriptorEvaluator(),
+                seed: 999, // different on purpose
+                mutationSigma: 0.05f,
+                initialMin: -1f,
+                initialMax: 1f,
+                randomInjectionProbability: 0.1f);
+
+            using (var reader = new BinaryReader(stream, System.Text.Encoding.UTF8, leaveOpen: true))
+            {
+                restoredMap.Load(reader);
+            }
+
+            // Issue Ask on both — the candidate parameters must match exactly.
+            var origCandidates = new float[32 * 8];
+            var restoredCandidates = new float[32 * 8];
+            origMap.Ask(origCandidates);
+            restoredMap.Ask(restoredCandidates);
+
+            Assert.Equal(origCandidates, restoredCandidates);
+        }
+
         private static GridEliteArchive CreateArchive(int parameterCount)
         {
             return new GridEliteArchive(

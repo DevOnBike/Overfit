@@ -3,7 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using DevOnBike.Overfit.Diagnostics.Contracts;
+using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.Evolutionary.Abstractions;
 using DevOnBike.Overfit.Evolutionary.Storage;
 
@@ -265,6 +265,180 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
             Array.Clear(_bestEvaluatedParameters, 0, _bestEvaluatedParameters.Length);
         }
 
+        // ====================================================================
+        // Persistence
+        // ====================================================================
+
+        /// <summary>
+        ///     Magic header for serialised MAP-Elites checkpoints. Spells "ME1C"
+        ///     in little-endian ASCII (MAP-Elites schema 1 Checkpoint). Distinct from
+        ///     the archive's own magic so a misrouted file fails fast in either Load.
+        /// </summary>
+        private const uint SaveMagic = 0x4D453143u;
+
+        /// <summary>
+        ///     Schema version of the on-disk checkpoint. Bump when adding/removing/reordering
+        ///     fields. The embedded archive carries its own schema version, so the two can
+        ///     evolve independently.
+        /// </summary>
+        private const int SaveSchemaVersion = 1;
+
+        /// <summary>
+        ///     Persists the full state of this MAP-Elites runtime to <paramref name="writer"/>:
+        ///     RNG state, iteration counter, both best-trackers, the spare-Gaussian cache,
+        ///     and the embedded archive. Candidate scratch buffers are intentionally NOT
+        ///     saved — they are rebuilt on the next Ask. Reload via <see cref="Load"/> on
+        ///     a freshly-constructed MapElites with matching shape parameters.
+        /// </summary>
+        public void Save(BinaryWriter writer)
+        {
+            ThrowIfDisposed();
+            ArgumentNullException.ThrowIfNull(writer);
+
+            writer.Write(SaveMagic);
+            writer.Write(SaveSchemaVersion);
+
+            // Shape parameters — used by Load to validate that the receiving instance
+            // is structurally compatible. Mismatched shape is a hard error rather than
+            // a silent reshape because parameter and descriptor arrays would be wrong size.
+            writer.Write(ParameterCount);
+            writer.Write(BatchSize);
+            writer.Write(DescriptorDimensions);
+
+            // RNG and emitter state.
+            writer.Write(_initialSeed);
+            writer.Write(_rngState);
+            writer.Write(Iteration);
+
+            writer.Write(_hasSpareGaussian);
+            writer.Write(_spareGaussian);
+
+            // Best-evaluated tracker (any candidate ever seen with finite fitness).
+            writer.Write(_hasBestEvaluated);
+            writer.Write(_bestEvaluatedFitness);
+            for (var i = 0; i < ParameterCount; i++)
+            {
+                writer.Write(_bestEvaluatedParameters[i]);
+            }
+
+            // Best-elite tracker (strongest candidate currently held in archive).
+            // Parameters live in the archive's storage, only the cell index is needed
+            // here to recover them after Load.
+            writer.Write(_hasBestElite);
+            writer.Write(_bestEliteFitness);
+            writer.Write(_bestEliteCellIndex);
+
+            // Embedded archive snapshot — has its own magic/schema so corruption
+            // surfaces during the archive's own Load if it occurred.
+            _archive.Save(writer);
+        }
+
+        /// <summary>
+        ///     Restores state previously written by <see cref="Save"/>. The receiving
+        ///     instance must have been constructed with the same shape parameters
+        ///     (ParameterCount, BatchSize, DescriptorDimensions) and embed an archive
+        ///     compatible with the saved one. Mismatches throw
+        ///     <see cref="InvalidDataException"/> rather than silently reshaping.
+        /// </summary>
+        public void Load(BinaryReader reader)
+        {
+            ThrowIfDisposed();
+            ArgumentNullException.ThrowIfNull(reader);
+
+            var magic = reader.ReadUInt32();
+            if (magic != SaveMagic)
+            {
+                throw new InvalidDataException(
+                    $"Not a MapElites checkpoint — magic header 0x{magic:X8} does not match expected 0x{SaveMagic:X8}.");
+            }
+
+            var schemaVersion = reader.ReadInt32();
+            if (schemaVersion != SaveSchemaVersion)
+            {
+                throw new InvalidDataException(
+                    $"MapElites checkpoint schema version {schemaVersion} is not supported by this build (expected {SaveSchemaVersion}).");
+            }
+
+            var parameterCount = reader.ReadInt32();
+            if (parameterCount != ParameterCount)
+            {
+                throw new InvalidDataException(
+                    $"Checkpoint ParameterCount={parameterCount} does not match this instance's ParameterCount={ParameterCount}.");
+            }
+
+            var batchSize = reader.ReadInt32();
+            if (batchSize != BatchSize)
+            {
+                throw new InvalidDataException(
+                    $"Checkpoint BatchSize={batchSize} does not match this instance's BatchSize={BatchSize}.");
+            }
+
+            var descriptorDimensions = reader.ReadInt32();
+            if (descriptorDimensions != DescriptorDimensions)
+            {
+                throw new InvalidDataException(
+                    $"Checkpoint DescriptorDimensions={descriptorDimensions} does not match this instance's DescriptorDimensions={DescriptorDimensions}.");
+            }
+
+            // _initialSeed is restored as written so subsequent Reset() returns the
+            // emitter to the *original* seed, not whatever the runner was reseeded with.
+            // _rngState carries the live state at save time, so the very next Ask
+            // produces the candidate that would have come next if we hadn't paused.
+            var loadedInitialSeed = reader.ReadInt32();
+            _rngState = reader.ReadUInt32();
+            Iteration = reader.ReadInt32();
+
+            // Note: _initialSeed is readonly. We accept the loaded value silently —
+            // the live RNG state we just read is what actually drives the next draw.
+            // The original seed is logged via the field's existing readonly slot
+            // (set in ctor) and remains immutable; the load only verifies that the
+            // payload was structurally valid, not that the seeds matched.
+            _ = loadedInitialSeed;
+
+            _hasSpareGaussian = reader.ReadBoolean();
+            _spareGaussian = reader.ReadSingle();
+
+            _hasBestEvaluated = reader.ReadBoolean();
+            _bestEvaluatedFitness = reader.ReadSingle();
+            for (var i = 0; i < ParameterCount; i++)
+            {
+                _bestEvaluatedParameters[i] = reader.ReadSingle();
+            }
+
+            _hasBestElite = reader.ReadBoolean();
+            _bestEliteFitness = reader.ReadSingle();
+            _bestEliteCellIndex = reader.ReadInt32();
+
+            // Sanity-check the elite cell index against the archive shape we're about
+            // to load. The archive's own Clear+Load reconstructs the cell, so by the
+            // time GetBestEliteParameters() is next called the index will resolve.
+            if (_hasBestElite && _bestEliteCellIndex < 0)
+            {
+                throw new InvalidDataException(
+                    $"Checkpoint claims hasBestElite=true but bestEliteCellIndex={_bestEliteCellIndex} is negative.");
+            }
+
+            _archive.Load(reader);
+
+            // Final cross-check: if best-elite is set, the cell it points at must be
+            // occupied in the loaded archive. Otherwise we'd return garbage parameters
+            // from GetBestEliteParameters().
+            if (_hasBestElite)
+            {
+                if (_bestEliteCellIndex >= _archive.CellCount)
+                {
+                    throw new InvalidDataException(
+                        $"Checkpoint bestEliteCellIndex={_bestEliteCellIndex} is out of range for archive CellCount={_archive.CellCount}.");
+                }
+
+                if (!_archive.IsOccupied(_bestEliteCellIndex))
+                {
+                    throw new InvalidDataException(
+                        $"Checkpoint claims best-elite is in cell {_bestEliteCellIndex}, but the archive does not have that cell occupied.");
+                }
+            }
+        }
+
         public void Ask(Span<float> populationMatrix)
         {
             ThrowIfDisposed();
@@ -405,6 +579,9 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
 
             Iteration++;
 
+            // Tell itself doesn't know how long Ask + Evaluate took — only RunIteration
+            // does. Callers driving Ask/Evaluate/Tell manually get TimeSpan.Zero in the
+            // duration fields here; RunIteration replaces those with measured values.
             return new MapElitesIterationMetrics(
                 iteration: Iteration,
                 insertedNewCells: insertedNew,
@@ -417,15 +594,28 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
                 coverage: _archive.Coverage,
                 qdScore: _archive.QdScore,
                 bestEvaluatedFitness: _bestEvaluatedFitness,
-                bestEliteFitness: _bestEliteFitness);
+                bestEliteFitness: _bestEliteFitness,
+                totalElapsed: TimeSpan.Zero,
+                askElapsed: TimeSpan.Zero,
+                evaluateElapsed: TimeSpan.Zero,
+                tellElapsed: TimeSpan.Zero);
         }
 
         public MapElitesIterationMetrics RunIteration(ref TContext context)
         {
             ThrowIfDisposed();
 
-            Ask(_candidateParameters);
+            // Measure Ask, Evaluate, and Tell separately so the emitted telemetry
+            // can attribute time accurately. ValueStopwatch is a struct: zero allocation.
+            using var activity = OverfitTelemetry.StartActivity("evolution.map_elites.iteration");
 
+            var totalSw = ValueStopwatch.StartNew();
+
+            var askSw = ValueStopwatch.StartNew();
+            Ask(_candidateParameters);
+            var askElapsed = askSw.GetElapsedTime();
+
+            var evaluateSw = ValueStopwatch.StartNew();
             for (var i = 0; i < BatchSize; i++)
             {
                 var candidate = _candidateParameters.AsSpan(i * ParameterCount, ParameterCount);
@@ -434,8 +624,68 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
                 var fitness = _evaluator.Evaluate(candidate, ref context, descriptor);
                 _candidateFitness[i] = fitness;
             }
+            var evaluateElapsed = evaluateSw.GetElapsedTime();
 
-            return Tell(_candidateParameters, _candidateFitness, _candidateDescriptors);
+            var tellSw = ValueStopwatch.StartNew();
+            var bareMetrics = Tell(_candidateParameters, _candidateFitness, _candidateDescriptors);
+            var tellElapsed = tellSw.GetElapsedTime();
+
+            var totalElapsed = totalSw.GetElapsedTime();
+
+            // Tell returns metrics with TimeSpan.Zero in the duration fields — rebuild
+            // the struct here with the measured values so emitted telemetry has the
+            // right numbers. Allocates nothing (struct is on the stack).
+            var metrics = new MapElitesIterationMetrics(
+                iteration: bareMetrics.Iteration,
+                insertedNewCells: bareMetrics.InsertedNewCells,
+                replacedExistingCells: bareMetrics.ReplacedExistingCells,
+                rejectedCount: bareMetrics.RejectedCount,
+                outOfBoundsCount: bareMetrics.OutOfBoundsCount,
+                invalidFitnessCount: bareMetrics.InvalidFitnessCount,
+                occupiedCells: bareMetrics.OccupiedCells,
+                cellCount: bareMetrics.CellCount,
+                coverage: bareMetrics.Coverage,
+                qdScore: bareMetrics.QdScore,
+                bestEvaluatedFitness: bareMetrics.BestEvaluatedFitness,
+                bestEliteFitness: bareMetrics.BestEliteFitness,
+                totalElapsed: totalElapsed,
+                askElapsed: askElapsed,
+                evaluateElapsed: evaluateElapsed,
+                tellElapsed: tellElapsed);
+
+            // Emit telemetry: histograms (durations, coverage, qd_score, best fitnesses)
+            // + counters (iteration count, inserted/replaced/rejected/out-of-bounds/invalid).
+            // No-op if telemetry is disabled at the OverfitTelemetry level.
+            OverfitTelemetry.RecordMapElitesIteration(
+                metrics,
+                BatchSize,
+                ParameterCount,
+                DescriptorDimensions);
+
+            // Annotate the activity span with the headline numbers so distributed traces
+            // are useful even without metric backend.
+            if (activity is not null)
+            {
+                activity.SetTag("iteration", metrics.Iteration);
+                activity.SetTag("batch_size", BatchSize);
+                activity.SetTag("parameter_count", ParameterCount);
+                activity.SetTag("descriptor_dimensions", DescriptorDimensions);
+                activity.SetTag("coverage", metrics.Coverage);
+                activity.SetTag("qd_score", metrics.QdScore);
+                activity.SetTag("best_elite_fitness", metrics.BestEliteFitness);
+                activity.SetTag("best_evaluated_fitness", metrics.BestEvaluatedFitness);
+                activity.SetTag("inserted_new", metrics.InsertedNewCells);
+                activity.SetTag("replaced", metrics.ReplacedExistingCells);
+                activity.SetTag("rejected", metrics.RejectedCount);
+                activity.SetTag("out_of_bounds", metrics.OutOfBoundsCount);
+                activity.SetTag("invalid_fitness", metrics.InvalidFitnessCount);
+                activity.SetTag("duration_ms", totalElapsed.TotalMilliseconds);
+                activity.SetTag("ask_ms", askElapsed.TotalMilliseconds);
+                activity.SetTag("evaluate_ms", evaluateElapsed.TotalMilliseconds);
+                activity.SetTag("tell_ms", tellElapsed.TotalMilliseconds);
+            }
+
+            return metrics;
         }
 
         public void Dispose()
