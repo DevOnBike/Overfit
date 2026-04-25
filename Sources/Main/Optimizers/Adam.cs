@@ -6,8 +6,7 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Runtime.Intrinsics;
-using System.Runtime.Intrinsics.X86;
+using System.Threading.Tasks;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Optimizers.Abstractions;
 using DevOnBike.Overfit.Tensors;
@@ -15,12 +14,26 @@ using DevOnBike.Overfit.Tensors;
 namespace DevOnBike.Overfit.Optimizers
 {
     /// <summary>
-    /// Implements the Adam + AdamW optimizer with SIMD acceleration.
-    /// Sequential Step() avoids TPL allocations in benchmark hot path.
+    /// Adam / AdamW optimizer.
+    ///
+    /// BeastMode:
+    /// - small parameters: sequential SIMD
+    /// - large parameters: Parallel.For over element chunks
+    /// - default worker count: Environment.ProcessorCount
+    /// - ZeroGrad intentionally stays sequential because parallel ZeroGrad was slower
+    ///   and allocated more in MNIST BeastMode.
     /// </summary>
     public sealed class Adam : IOptimizer, IDisposable
     {
-        private const int Avx512Threshold = 512;
+        private const int VectorThreshold = 512;
+        private const int ParallelElementThreshold = 65_536;
+        private const int MinChunkElements = 16_384;
+        private const bool ParallelZeroGrad = false;
+
+        private static readonly ParallelOptions ParallelOptions = new()
+        {
+            MaxDegreeOfParallelism = Environment.ProcessorCount
+        };
 
         private readonly ParamState[] _states;
         private int _t;
@@ -58,8 +71,8 @@ namespace DevOnBike.Overfit.Optimizers
         {
             foreach (var state in _states)
             {
-                state.M?.Dispose();
-                state.V?.Dispose();
+                state.M.Dispose();
+                state.V.Dispose();
             }
         }
 
@@ -85,27 +98,96 @@ namespace DevOnBike.Overfit.Optimizers
             {
                 foreach (var state in _states)
                 {
-                    if (state.Node.RequiresGrad)
+                    if (!state.Node.RequiresGrad)
                     {
-                        StepAdamW(state, b1, b2, b1Inv, b2Inv, invBc1, invBc2, eps, lr, wd);
+                        continue;
                     }
+
+                    StepAdamWState(
+                        state,
+                        b1,
+                        b2,
+                        b1Inv,
+                        b2Inv,
+                        invBc1,
+                        invBc2,
+                        eps,
+                        lr,
+                        wd);
                 }
             }
             else
             {
                 foreach (var state in _states)
                 {
-                    if (state.Node.RequiresGrad)
+                    if (!state.Node.RequiresGrad)
                     {
-                        StepAdam(state, b1, b2, b1Inv, b2Inv, invBc1, invBc2, eps, lr, wd);
+                        continue;
                     }
+
+                    StepAdamState(
+                        state,
+                        b1,
+                        b2,
+                        b1Inv,
+                        b2Inv,
+                        invBc1,
+                        invBc2,
+                        eps,
+                        lr,
+                        wd);
                 }
             }
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static void StepAdamW(
-            in ParamState state,
+        public void ZeroGrad()
+        {
+            foreach (var state in _states)
+            {
+                if (ParallelZeroGrad && state.Size >= ParallelElementThreshold)
+                {
+                    ClearGradParallel(state.Node, state.Size);
+                }
+                else
+                {
+                    state.Node.ZeroGrad();
+                }
+            }
+        }
+
+        public void ResetTime()
+        {
+            _t = 0;
+        }
+
+        private static void ClearGradParallel(AutogradNode node, int size)
+        {
+            var chunks = GetChunkCount(size);
+
+            if (chunks <= 1)
+            {
+                node.ZeroGrad();
+                return;
+            }
+
+            Parallel.For(
+                0,
+                chunks,
+                ParallelOptions,
+                chunk =>
+                {
+                    GetChunkRange(size, chunks, chunk, out var start, out var end);
+
+                    node
+                        .GradView
+                        .AsSpan()
+                        .Slice(start, end - start)
+                        .Clear();
+                });
+        }
+
+        private static void StepAdamWState(
+            ParamState state,
             float b1,
             float b2,
             float b1Inv,
@@ -116,56 +198,142 @@ namespace DevOnBike.Overfit.Optimizers
             float lr,
             float wd)
         {
-            var n = state.Size;
+            var size = state.Size;
 
-            var gSpan = state.Node.GradView.AsSpan();
-            var mSpan = state.M.GetView().AsSpan();
-            var vSpan = state.V.GetView().AsSpan();
-            var wSpan = state.Node.DataView.AsSpan();
+            if (size < ParallelElementThreshold)
+            {
+                StepAdamWRange(
+                    state,
+                    0,
+                    size,
+                    b1,
+                    b2,
+                    b1Inv,
+                    b2Inv,
+                    invBc1,
+                    invBc2,
+                    eps,
+                    lr,
+                    wd);
 
-            ref var gRef = ref MemoryMarshal.GetReference(gSpan);
-            ref var mRef = ref MemoryMarshal.GetReference(mSpan);
-            ref var vRef = ref MemoryMarshal.GetReference(vSpan);
-            ref var wRef = ref MemoryMarshal.GetReference(wSpan);
+                return;
+            }
+
+            var chunks = GetChunkCount(size);
+
+            Parallel.For(
+                0,
+                chunks,
+                ParallelOptions,
+                chunk =>
+                {
+                    GetChunkRange(size, chunks, chunk, out var start, out var end);
+
+                    StepAdamWRange(
+                        state,
+                        start,
+                        end,
+                        b1,
+                        b2,
+                        b1Inv,
+                        b2Inv,
+                        invBc1,
+                        invBc2,
+                        eps,
+                        lr,
+                        wd);
+                });
+        }
+
+        private static void StepAdamState(
+            ParamState state,
+            float b1,
+            float b2,
+            float b1Inv,
+            float b2Inv,
+            float invBc1,
+            float invBc2,
+            float eps,
+            float lr,
+            float wd)
+        {
+            var size = state.Size;
+
+            if (size < ParallelElementThreshold)
+            {
+                StepAdamRange(
+                    state,
+                    0,
+                    size,
+                    b1,
+                    b2,
+                    b1Inv,
+                    b2Inv,
+                    invBc1,
+                    invBc2,
+                    eps,
+                    lr,
+                    wd);
+
+                return;
+            }
+
+            var chunks = GetChunkCount(size);
+
+            Parallel.For(
+                0,
+                chunks,
+                ParallelOptions,
+                chunk =>
+                {
+                    GetChunkRange(size, chunks, chunk, out var start, out var end);
+
+                    StepAdamRange(
+                        state,
+                        start,
+                        end,
+                        b1,
+                        b2,
+                        b1Inv,
+                        b2Inv,
+                        invBc1,
+                        invBc2,
+                        eps,
+                        lr,
+                        wd);
+                });
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void StepAdamWRange(
+            ParamState state,
+            int start,
+            int end,
+            float b1,
+            float b2,
+            float b1Inv,
+            float b2Inv,
+            float invBc1,
+            float invBc2,
+            float eps,
+            float lr,
+            float wd)
+        {
+            var length = end - start;
+
+            if (length <= 0)
+            {
+                return;
+            }
+
+            var gSpan = state.Node.GradView.AsSpan().Slice(start, length);
+            var mSpan = state.M.GetView().AsSpan().Slice(start, length);
+            var vSpan = state.V.GetView().AsSpan().Slice(start, length);
+            var wSpan = state.Node.DataView.AsSpan().Slice(start, length);
 
             var i = 0;
 
-            if (Avx512F.IsSupported && n >= Avx512Threshold)
-            {
-                var simd512 = Vector512<float>.Count;
-
-                var vB1 = Vector512.Create(b1);
-                var vB2 = Vector512.Create(b2);
-                var vB1Inv = Vector512.Create(b1Inv);
-                var vB2Inv = Vector512.Create(b2Inv);
-                var vInvBc1 = Vector512.Create(invBc1);
-                var vInvBc2 = Vector512.Create(invBc2);
-                var vEps = Vector512.Create(eps);
-                var vLr = Vector512.Create(lr);
-                var vWdLr = Vector512.Create(wd * lr);
-
-                for (; i <= n - simd512; i += simd512)
-                {
-                    var vG = Vector512.LoadUnsafe(ref gRef, (nuint)i);
-                    var vM = Vector512.LoadUnsafe(ref mRef, (nuint)i);
-                    var vV = Vector512.LoadUnsafe(ref vRef, (nuint)i);
-                    var vW = Vector512.LoadUnsafe(ref wRef, (nuint)i);
-
-                    vM = Avx512F.FusedMultiplyAdd(vM, vB1, vG * vB1Inv);
-                    vV = Avx512F.FusedMultiplyAdd(vV, vB2, vG * vG * vB2Inv);
-
-                    var vMHat = vM * vInvBc1;
-                    var vVHat = Avx512F.Sqrt(vV * vInvBc2) + vEps;
-
-                    vW = Avx512F.FusedMultiplyAddNegated(vMHat / vVHat, vLr, vW);
-                    vW = Avx512F.FusedMultiplyAddNegated(vW, vWdLr, vW);
-
-                    vM.StoreUnsafe(ref mRef, (nuint)i);
-                    vV.StoreUnsafe(ref vRef, (nuint)i);
-                    vW.StoreUnsafe(ref wRef, (nuint)i);
-                }
-            }
-            else if (Vector.IsHardwareAccelerated && n >= Vector<float>.Count * 4)
+            if (Vector.IsHardwareAccelerated && length >= VectorThreshold)
             {
                 var gVec = MemoryMarshal.Cast<float, Vector<float>>(gSpan);
                 var mVec = MemoryMarshal.Cast<float, Vector<float>>(mSpan);
@@ -196,6 +364,8 @@ namespace DevOnBike.Overfit.Optimizers
                     var vVHat = Vector.SquareRoot(vV * vecInvBc2) + vecEps;
 
                     vW -= vMHat / vVHat * vecLr;
+
+                    // Existing local AdamW behavior: decay after Adam update.
                     vW -= vW * vecWdLr;
 
                     mVec[j] = vM;
@@ -206,12 +376,12 @@ namespace DevOnBike.Overfit.Optimizers
                 i = gVec.Length * Vector<float>.Count;
             }
 
-            for (; i < n; i++)
+            for (; i < length; i++)
             {
-                var gw = Unsafe.Add(ref gRef, i);
-                var mw = Unsafe.Add(ref mRef, i);
-                var vw = Unsafe.Add(ref vRef, i);
-                var ww = Unsafe.Add(ref wRef, i);
+                var gw = gSpan[i];
+                var mw = mSpan[i];
+                var vw = vSpan[i];
+                var ww = wSpan[i];
 
                 mw = b1 * mw + b1Inv * gw;
                 vw = b2 * vw + b2Inv * (gw * gw);
@@ -222,15 +392,17 @@ namespace DevOnBike.Overfit.Optimizers
                 ww -= lr * (mHat / vHat);
                 ww -= ww * wd * lr;
 
-                Unsafe.Add(ref mRef, i) = mw;
-                Unsafe.Add(ref vRef, i) = vw;
-                Unsafe.Add(ref wRef, i) = ww;
+                mSpan[i] = mw;
+                vSpan[i] = vw;
+                wSpan[i] = ww;
             }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static void StepAdam(
-            in ParamState state,
+        private static void StepAdamRange(
+            ParamState state,
+            int start,
+            int end,
             float b1,
             float b2,
             float b1Inv,
@@ -241,57 +413,21 @@ namespace DevOnBike.Overfit.Optimizers
             float lr,
             float wd)
         {
-            var n = state.Size;
+            var length = end - start;
 
-            var gSpan = state.Node.GradView.AsSpan();
-            var mSpan = state.M.GetView().AsSpan();
-            var vSpan = state.V.GetView().AsSpan();
-            var wSpan = state.Node.DataView.AsSpan();
+            if (length <= 0)
+            {
+                return;
+            }
 
-            ref var gRef = ref MemoryMarshal.GetReference(gSpan);
-            ref var mRef = ref MemoryMarshal.GetReference(mSpan);
-            ref var vRef = ref MemoryMarshal.GetReference(vSpan);
-            ref var wRef = ref MemoryMarshal.GetReference(wSpan);
+            var gSpan = state.Node.GradView.AsSpan().Slice(start, length);
+            var mSpan = state.M.GetView().AsSpan().Slice(start, length);
+            var vSpan = state.V.GetView().AsSpan().Slice(start, length);
+            var wSpan = state.Node.DataView.AsSpan().Slice(start, length);
 
             var i = 0;
 
-            if (Avx512F.IsSupported && n >= Avx512Threshold)
-            {
-                var simd512 = Vector512<float>.Count;
-
-                var vB1 = Vector512.Create(b1);
-                var vB2 = Vector512.Create(b2);
-                var vB1Inv = Vector512.Create(b1Inv);
-                var vB2Inv = Vector512.Create(b2Inv);
-                var vInvBc1 = Vector512.Create(invBc1);
-                var vInvBc2 = Vector512.Create(invBc2);
-                var vEps = Vector512.Create(eps);
-                var vLr = Vector512.Create(lr);
-                var vWd = Vector512.Create(wd);
-
-                for (; i <= n - simd512; i += simd512)
-                {
-                    var vG = Vector512.LoadUnsafe(ref gRef, (nuint)i);
-                    var vM = Vector512.LoadUnsafe(ref mRef, (nuint)i);
-                    var vV = Vector512.LoadUnsafe(ref vRef, (nuint)i);
-                    var vW = Vector512.LoadUnsafe(ref wRef, (nuint)i);
-
-                    var vGl2 = Avx512F.FusedMultiplyAdd(vW, vWd, vG);
-
-                    vM = Avx512F.FusedMultiplyAdd(vM, vB1, vGl2 * vB1Inv);
-                    vV = Avx512F.FusedMultiplyAdd(vV, vB2, vGl2 * vGl2 * vB2Inv);
-
-                    var vMHat = vM * vInvBc1;
-                    var vVHat = Avx512F.Sqrt(vV * vInvBc2) + vEps;
-
-                    vW = Avx512F.FusedMultiplyAddNegated(vMHat / vVHat, vLr, vW);
-
-                    vM.StoreUnsafe(ref mRef, (nuint)i);
-                    vV.StoreUnsafe(ref vRef, (nuint)i);
-                    vW.StoreUnsafe(ref wRef, (nuint)i);
-                }
-            }
-            else if (Vector.IsHardwareAccelerated && n >= Vector<float>.Count * 4)
+            if (Vector.IsHardwareAccelerated && length >= VectorThreshold)
             {
                 var gVec = MemoryMarshal.Cast<float, Vector<float>>(gSpan);
                 var mVec = MemoryMarshal.Cast<float, Vector<float>>(mSpan);
@@ -333,12 +469,12 @@ namespace DevOnBike.Overfit.Optimizers
                 i = gVec.Length * Vector<float>.Count;
             }
 
-            for (; i < n; i++)
+            for (; i < length; i++)
             {
-                var gw = Unsafe.Add(ref gRef, i);
-                var ww = Unsafe.Add(ref wRef, i);
-                var mw = Unsafe.Add(ref mRef, i);
-                var vw = Unsafe.Add(ref vRef, i);
+                var gw = gSpan[i];
+                var ww = wSpan[i];
+                var mw = mSpan[i];
+                var vw = vSpan[i];
 
                 var gl2 = gw + wd * ww;
 
@@ -350,23 +486,35 @@ namespace DevOnBike.Overfit.Optimizers
 
                 ww -= lr * (mHat / vHat);
 
-                Unsafe.Add(ref mRef, i) = mw;
-                Unsafe.Add(ref vRef, i) = vw;
-                Unsafe.Add(ref wRef, i) = ww;
+                mSpan[i] = mw;
+                vSpan[i] = vw;
+                wSpan[i] = ww;
             }
         }
 
-        public void ZeroGrad()
+        private static int GetChunkCount(int size)
         {
-            foreach (var state in _states)
+            var maxDegree = ParallelOptions.MaxDegreeOfParallelism;
+
+            if (maxDegree <= 0)
             {
-                state.Node.ZeroGrad();
+                maxDegree = Environment.ProcessorCount;
             }
+
+            var bySize = Math.Max(1, (size + MinChunkElements - 1) / MinChunkElements);
+            return Math.Min(maxDegree, bySize);
         }
 
-        public void ResetTime()
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void GetChunkRange(
+            int size,
+            int chunks,
+            int chunk,
+            out int start,
+            out int end)
         {
-            _t = 0;
+            start = (int)((long)size * chunk / chunks);
+            end = (int)((long)size * (chunk + 1) / chunks);
         }
 
         private readonly struct ParamState
