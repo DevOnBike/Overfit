@@ -112,8 +112,8 @@ namespace DevOnBike.Overfit.Tests
 
             var ctx = new DummyContext();
 
-            float initialCoverage = 0f;
-            float finalCoverage = 0f;
+            var initialCoverage = 0f;
+            var finalCoverage = 0f;
 
             for (var i = 0; i < 40; i++)
             {
@@ -175,7 +175,7 @@ namespace DevOnBike.Overfit.Tests
             Assert.Equal(1, metrics.ReplacedExistingCells);
             Assert.Equal(0, metrics.RejectedCount);
 
-            Assert.True(archive.TryGetCellIndex([0.30f, 0.30f], out int cellIndex));
+            Assert.True(archive.TryGetCellIndex([0.30f, 0.30f], out var cellIndex));
             Assert.Equal(5f, archive.GetFitness(cellIndex), 6);
             Assert.Equal(new[] { 2f, 2f, 2f, 2f }, archive.GetParameters(cellIndex).ToArray());
         }
@@ -205,7 +205,7 @@ namespace DevOnBike.Overfit.Tests
                     throw new ArgumentException("Descriptor length must be 2.", nameof(descriptor));
                 }
 
-                float sumSq = 0f;
+                var sumSq = 0f;
                 for (var i = 0; i < parameters.Length; i++)
                 {
                     sumSq += parameters[i] * parameters[i];
@@ -235,7 +235,7 @@ namespace DevOnBike.Overfit.Tests
                 descriptor[0] = 0.30f;
                 descriptor[1] = 0.30f;
 
-                float fitness = 0f;
+                var fitness = 0f;
                 for (var i = 0; i < parameters.Length; i++)
                 {
                     fitness += parameters[i];

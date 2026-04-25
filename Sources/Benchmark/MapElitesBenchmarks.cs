@@ -84,7 +84,7 @@ namespace Benchmarks
                 ref DummyContext context,
                 Span<float> descriptor)
             {
-                float sumSq = 0f;
+                var sumSq = 0f;
                 for (var i = 0; i < parameters.Length; i++)
                 {
                     sumSq += parameters[i] * parameters[i];

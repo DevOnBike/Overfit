@@ -25,6 +25,8 @@ namespace DevOnBike.Overfit.Autograd
         private int _opCount;
         private TapeOp[] _tape = new TapeOp[InitialCapacity];
 
+        private Conv2DWorkspace? _conv2DWorkspace;
+
         // Huge arena buffer: bypasses GC and ArrayPool for intermediate tensor storage.
         public readonly NativeBufferManaged<float> TapeBuffer = new(50_000_000, clearMemory: false);
 
@@ -39,6 +41,33 @@ namespace DevOnBike.Overfit.Autograd
         public TensorStorage<float> AllocateIntermediate(int length)
         {
             return new TensorStorage<float>(TapeBuffer, length);
+        }
+
+        internal Conv2DWorkspace GetConv2DWorkspace(
+            int batchSize,
+            int inC,
+            int outC,
+            int h,
+            int w,
+            int k)
+        {
+            var outH = h - k + 1;
+            var outW = w - k + 1;
+            var kSqInC = k * k * inC;
+            var spatialOut = outH * outW;
+
+            var colLength = kSqInC * spatialOut;
+            var partialWeightGradientLength = outC * kSqInC;
+
+            var workerCount = Math.Max(1, Math.Min(Environment.ProcessorCount, Math.Max(1, batchSize)));
+
+            _conv2DWorkspace ??= new Conv2DWorkspace();
+            _conv2DWorkspace.Ensure(
+                workerCount,
+                colLength,
+                partialWeightGradientLength);
+
+            return _conv2DWorkspace;
         }
 
         public void Record(
@@ -188,7 +217,7 @@ namespace DevOnBike.Overfit.Autograd
                     break;
 
                 case OpCode.Conv2D:
-                    TensorMath.Conv2DBackward(op.A, op.B, op.Output, op.I0, op.I1, op.I2, op.I3, op.I4);
+                    TensorMath.Conv2DBackward(this, op.A, op.B, op.Output, op.I0, op.I1, op.I2, op.I3, op.I4);
                     break;
 
                 case OpCode.MaxPool2D:
@@ -277,6 +306,7 @@ namespace DevOnBike.Overfit.Autograd
 
         public void Dispose()
         {
+            _conv2DWorkspace?.Dispose();
             TapeBuffer.Dispose();
         }
     }

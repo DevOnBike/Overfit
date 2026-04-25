@@ -24,7 +24,7 @@ namespace DevOnBike.Overfit.Tests
             Assert.Equal(1f / archive.CellCount, archive.Coverage, 6);
             Assert.Equal(5f, archive.QdScore, 6);
 
-            Assert.True(archive.TryGetCellIndex(descriptor, out int cellIndex));
+            Assert.True(archive.TryGetCellIndex(descriptor, out var cellIndex));
             Assert.True(archive.IsOccupied(cellIndex));
             Assert.Equal(5f, archive.GetFitness(cellIndex), 6);
             Assert.Equal(parameters, archive.GetParameters(cellIndex).ToArray());
@@ -46,7 +46,7 @@ namespace DevOnBike.Overfit.Tests
             Assert.Equal(1, archive.OccupiedCount);
             Assert.Equal(10f, archive.QdScore, 6);
 
-            Assert.True(archive.TryGetCellIndex(descriptor, out int cellIndex));
+            Assert.True(archive.TryGetCellIndex(descriptor, out var cellIndex));
             Assert.Equal(10f, archive.GetFitness(cellIndex), 6);
             Assert.Equal(new[] { 1f, 1f, 1f }, archive.GetParameters(cellIndex).ToArray());
         }
@@ -65,7 +65,7 @@ namespace DevOnBike.Overfit.Tests
             Assert.Equal(1, archive.OccupiedCount);
             Assert.Equal(11f, archive.QdScore, 6);
 
-            Assert.True(archive.TryGetCellIndex(descriptor, out int cellIndex));
+            Assert.True(archive.TryGetCellIndex(descriptor, out var cellIndex));
             Assert.Equal(11f, archive.GetFitness(cellIndex), 6);
             Assert.Equal(new[] { 7f, 8f }, archive.GetParameters(cellIndex).ToArray());
         }
@@ -94,8 +94,8 @@ namespace DevOnBike.Overfit.Tests
                 descriptorMin: stackalloc[] { 0f, -1f },
                 descriptorMax: stackalloc[] { 1f, 1f });
 
-            Assert.True(archive.TryGetCellIndex([0f, -1f], out int minCell));
-            Assert.True(archive.TryGetCellIndex([1f, 1f], out int maxCell));
+            Assert.True(archive.TryGetCellIndex([0f, -1f], out var minCell));
+            Assert.True(archive.TryGetCellIndex([1f, 1f], out var maxCell));
 
             Assert.InRange(minCell, 0, archive.CellCount - 1);
             Assert.InRange(maxCell, 0, archive.CellCount - 1);
@@ -110,11 +110,11 @@ namespace DevOnBike.Overfit.Tests
             archive.Insert([1f, 1f], 1f, [0.10f, 0.10f]);
             archive.Insert([2f, 2f], 2f, [0.90f, 0.90f]);
 
-            uint state = 123u;
+            var state = 123u;
 
             for (var i = 0; i < 64; i++)
             {
-                Assert.True(archive.TrySampleOccupiedCell(ref state, out int cellIndex));
+                Assert.True(archive.TrySampleOccupiedCell(ref state, out var cellIndex));
                 Assert.True(archive.IsOccupied(cellIndex));
             }
         }

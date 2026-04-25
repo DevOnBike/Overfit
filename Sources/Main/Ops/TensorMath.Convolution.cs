@@ -3,7 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Collections.Concurrent;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Intrinsics;
 using DevOnBike.Overfit.Tensors;
@@ -17,26 +16,72 @@ namespace DevOnBike.Overfit.Ops
         // CONV2D
         // ====================================================================
 
-        public static AutogradNode Conv2D(ComputationGraph graph, AutogradNode input, AutogradNode weights, int inC, int outC, int h, int w, int k)
+        public static AutogradNode Conv2D(
+            ComputationGraph graph,
+            AutogradNode input,
+            AutogradNode weights,
+            int inC,
+            int outC,
+            int h,
+            int w,
+            int k)
         {
-            int outH = h - k + 1, outW = w - k + 1, batchSize = input.Shape.D0, kSqInC = k * k * inC, colS = kSqInC * outH * outW;
+            var outH = h - k + 1;
+            var outW = w - k + 1;
+            var batchSize = input.Shape.D0;
+            var kSqInC = k * k * inC;
+            var spatialOut = outH * outW;
+            var inputPlaneLength = inC * h * w;
+            var outputPlaneLength = outC * spatialOut;
 
-            var outputNode = AllocateNode(graph, new TensorShape(batchSize, outC, outH, outW), input.RequiresGrad || weights.RequiresGrad, clearMemory: true);
+            var outputNode = AllocateNode(
+                graph,
+                new TensorShape(batchSize, outC, outH, outW),
+                input.RequiresGrad || weights.RequiresGrad,
+                clearMemory: true);
 
-            Parallel.For(0, batchSize,
-                () => new TensorStorage<float>(colS, false),
-                (n, loopState, localWorkspace) =>
+            var workspace = graph.GetConv2DWorkspace(batchSize, inC, outC, h, w, k);
+            var workerCount = workspace.WorkerCount;
+
+            Parallel.For(0, workerCount, workerId =>
+            {
+                var col = workspace.GetColBuffer(workerId);
+
+                for (var n = workerId; n < batchSize; n += workerCount)
                 {
-                    var w2D = weights.DataView.Reshape(new TensorShape(outC, kSqInC));
-                    var colS_n = localWorkspace.AsSpan();
+                    var inputSlice = input
+                        .DataView
+                        .AsReadOnlySpan()
+                        .Slice(n * inputPlaneLength, inputPlaneLength);
 
-                    Im2Col(input.DataView.AsReadOnlySpan().Slice(n * inC * h * w, inC * h * w), inC, h, w, k, 1, 0, colS_n);
-                    MatMulRawSeq(w2D.AsReadOnlySpan(), colS_n, outC, kSqInC, outH * outW, outputNode.DataView.AsSpan().Slice(n * outC * outH * outW, outC * outH * outW));
+                    var weightsSpan = weights
+                        .DataView
+                        .AsReadOnlySpan();
 
-                    return localWorkspace;
-                },
-                localWorkspace => localWorkspace.Dispose()
-            );
+                    var outputSlice = outputNode
+                        .DataView
+                        .AsSpan()
+                        .Slice(n * outputPlaneLength, outputPlaneLength);
+
+                    Im2Col(
+                        inputSlice,
+                        inC,
+                        h,
+                        w,
+                        k,
+                        1,
+                        0,
+                        col);
+
+                    MatMulRawSeq(
+                        weightsSpan,
+                        col,
+                        outC,
+                        kSqInC,
+                        spatialOut,
+                        outputSlice);
+                }
+            });
 
             if (outputNode.RequiresGrad)
             {
@@ -46,96 +91,174 @@ namespace DevOnBike.Overfit.Ops
             return outputNode;
         }
 
-        public static void Conv2DBackward(AutogradNode input, AutogradNode weights, AutogradNode output, int inC, int outC, int h, int w, int k)
+        public static void Conv2DBackward(
+            ComputationGraph graph,
+            AutogradNode input,
+            AutogradNode weights,
+            AutogradNode output,
+            int inC,
+            int outC,
+            int h,
+            int w,
+            int k)
         {
             if (!input.RequiresGrad && !weights.RequiresGrad)
             {
                 return;
             }
 
-            int batchSize = input.Shape.D0, outH = h - k + 1, outW = w - k + 1, K = outH * outW, kSqInC = k * k * inC;
+            var batchSize = input.Shape.D0;
+            var outH = h - k + 1;
+            var outW = w - k + 1;
+            var spatialOut = outH * outW;
+            var kSqInC = k * k * inC;
+            var inputPlaneLength = inC * h * w;
+            var outputPlaneLength = outC * spatialOut;
+            var partialWeightGradientLength = outC * kSqInC;
 
-            var partialWeightGrads = weights.RequiresGrad ? new ConcurrentBag<TensorStorage<float>>() : null;
+            var workspace = graph.GetConv2DWorkspace(batchSize, inC, outC, h, w, k);
+            var workerCount = workspace.WorkerCount;
 
-            Parallel.For(0, batchSize,
-                () => weights.RequiresGrad ? new TensorStorage<float>(outC * kSqInC, clearMemory: true) : null,
-                (n, loopState, localDw) =>
+            if (weights.RequiresGrad)
+            {
+                workspace.ClearPartialWeightGradients();
+            }
+
+            Parallel.For(0, workerCount, workerId =>
+            {
+                var col = workspace.GetColBuffer(workerId);
+                var dCol = workspace.GetDColBuffer(workerId);
+                var partialWeightGrad = workspace.GetPartialWeightGradient(workerId);
+
+                for (var n = workerId; n < batchSize; n += workerCount)
                 {
-                    using var colS = new PooledBuffer<float>(kSqInC * K);
+                    var inputSlice = input
+                        .DataView
+                        .AsReadOnlySpan()
+                        .Slice(n * inputPlaneLength, inputPlaneLength);
 
-                    Im2Col(input.DataView.AsReadOnlySpan().Slice(n * inC * h * w, inC * h * w), inC, h, w, k, 1, 0, colS.Span);
+                    Im2Col(
+                        inputSlice,
+                        inC,
+                        h,
+                        w,
+                        k,
+                        1,
+                        0,
+                        col);
 
-                    var outGS = output.GradView.AsReadOnlySpan().Slice(n * outC * K, outC * K);
+                    var outGradSlice = output
+                        .GradView
+                        .AsReadOnlySpan()
+                        .Slice(n * outputPlaneLength, outputPlaneLength);
 
-                    if (weights.RequiresGrad && localDw != null)
+                    if (weights.RequiresGrad)
                     {
-                        MatMulAdd_A_BT_Seq(outGS, colS.Span, localDw.AsSpan(), outC, K, kSqInC);
+                        MatMulAdd_A_BT_Seq(
+                            outGradSlice,
+                            col,
+                            partialWeightGrad,
+                            outC,
+                            spatialOut,
+                            kSqInC);
                     }
 
                     if (input.RequiresGrad)
                     {
-                        using var dColS = new PooledBuffer<float>(kSqInC * K);
-                        var w2D = weights.DataView.Reshape(new TensorShape(outC, kSqInC));
-                        MatMulAdd_AT_B_Seq(w2D.AsReadOnlySpan(), outGS, dColS.Span, outC, kSqInC, K);
-                        Col2Im(dColS.Span, inC, h, w, k, 1, 0, input.GradView.AsSpan().Slice(n * inC * h * w, inC * h * w));
-                    }
+                        dCol.Clear();
 
-                    return localDw;
-                },
-                localDw =>
-                {
-                    if (localDw != null)
-                    {
-                        partialWeightGrads!.Add(localDw);
-                    }
-                });
+                        var weightsSpan = weights
+                            .DataView
+                            .AsReadOnlySpan();
 
-            if (weights.RequiresGrad && partialWeightGrads != null)
+                        MatMulAdd_AT_B_Seq(
+                            weightsSpan,
+                            outGradSlice,
+                            dCol,
+                            outC,
+                            kSqInC,
+                            spatialOut);
+
+                        var inputGradSlice = input
+                            .GradView
+                            .AsSpan()
+                            .Slice(n * inputPlaneLength, inputPlaneLength);
+
+                        Col2Im(
+                            dCol,
+                            inC,
+                            h,
+                            w,
+                            k,
+                            1,
+                            0,
+                            inputGradSlice);
+                    }
+                }
+            });
+
+            if (weights.RequiresGrad)
             {
                 var weightsGrad = weights.GradView.AsSpan();
-                foreach (var partial in partialWeightGrads)
+
+                for (var workerId = 0; workerId < workerCount; workerId++)
                 {
-                    try
-                    {
-                        Simd.Add(weightsGrad, partial.AsReadOnlySpan(), weightsGrad);
-                    }
-                    finally
-                    {
-                        partial.Dispose();
-                    }
+                    var partialWeightGrad = workspace
+                        .GetPartialWeightGradient(workerId)
+                        .Slice(0, partialWeightGradientLength);
+
+                    Simd.Add(weightsGrad, partialWeightGrad, weightsGrad);
                 }
             }
         }
 
         // ====================================================================
-        // IM2COL / COL2IM (BEZ ZMIAN)
+        // IM2COL / COL2IM
         // ====================================================================
 
-        public static void Im2Col(ReadOnlySpan<float> input, int channels, int h, int w, int k, int s, int p, Span<float> output)
+        public static void Im2Col(
+            ReadOnlySpan<float> input,
+            int channels,
+            int h,
+            int w,
+            int k,
+            int s,
+            int p,
+            Span<float> output)
         {
-            int oH = (h + 2 * p - k) / s + 1, oW = (w + 2 * p - k) / s + 1;
+            var oH = (h + 2 * p - k) / s + 1;
+            var oW = (w + 2 * p - k) / s + 1;
+
             for (var c = 0; c < channels; c++)
             {
                 for (var kh = 0; kh < k; kh++)
                 {
                     for (var kw = 0; kw < k; kw++)
                     {
-                        var rO = (c * k * k + kh * k + kw) * oH * oW;
+                        var rowOffset = (c * k * k + kh * k + kw) * oH * oW;
+
                         for (var y = 0; y < oH; y++)
                         {
-                            var i = y * s - p + kh;
-                            if (i >= 0 && i < h)
+                            var inputY = y * s - p + kh;
+
+                            if (inputY >= 0 && inputY < h)
                             {
-                                var iO = c * h * w + i * w;
+                                var inputOffset = c * h * w + inputY * w;
+
                                 for (var x = 0; x < oW; x++)
                                 {
-                                    var j = x * s - p + kw;
-                                    output[rO + y * oW + x] = j >= 0 && j < w ? input[iO + j] : 0f;
+                                    var inputX = x * s - p + kw;
+                                    output[rowOffset + y * oW + x] =
+                                        inputX >= 0 && inputX < w
+                                            ? input[inputOffset + inputX]
+                                            : 0f;
                                 }
                             }
                             else
                             {
-                                output.Slice(rO + y * oW, oW).Clear();
+                                output
+                                    .Slice(rowOffset + y * oW, oW)
+                                    .Clear();
                             }
                         }
                     }
@@ -143,28 +266,42 @@ namespace DevOnBike.Overfit.Ops
             }
         }
 
-        public static void Col2Im(ReadOnlySpan<float> col, int channels, int h, int w, int k, int s, int p, Span<float> gI)
+        public static void Col2Im(
+            ReadOnlySpan<float> col,
+            int channels,
+            int h,
+            int w,
+            int k,
+            int s,
+            int p,
+            Span<float> gradientInput)
         {
-            int oH = (h + 2 * p - k) / s + 1, oW = (w + 2 * p - k) / s + 1;
+            var oH = (h + 2 * p - k) / s + 1;
+            var oW = (w + 2 * p - k) / s + 1;
+
             for (var c = 0; c < channels; c++)
             {
                 for (var kh = 0; kh < k; kh++)
                 {
                     for (var kw = 0; kw < k; kw++)
                     {
-                        var rO = (c * k * k + kh * k + kw) * oH * oW;
+                        var rowOffset = (c * k * k + kh * k + kw) * oH * oW;
+
                         for (var y = 0; y < oH; y++)
                         {
-                            var i = y * s - p + kh;
-                            if (i >= 0 && i < h)
+                            var inputY = y * s - p + kh;
+
+                            if (inputY >= 0 && inputY < h)
                             {
-                                var iO = c * h * w + i * w;
+                                var inputOffset = c * h * w + inputY * w;
+
                                 for (var x = 0; x < oW; x++)
                                 {
-                                    var j = x * s - p + kw;
-                                    if (j >= 0 && j < w)
+                                    var inputX = x * s - p + kw;
+
+                                    if (inputX >= 0 && inputX < w)
                                     {
-                                        gI[iO + j] += col[rO + y * oW + x];
+                                        gradientInput[inputOffset + inputX] += col[rowOffset + y * oW + x];
                                     }
                                 }
                             }
