@@ -290,6 +290,8 @@ namespace DevOnBike.Overfit.Autograd
             for (var i = 0; i < _opCount; i++)
             {
                 ref readonly var op = ref _tape[i];
+
+                DisposeGraphOwnedAuxiliaryNodes(in op);
                 op.Output?.Dispose();
             }
 
@@ -302,6 +304,31 @@ namespace DevOnBike.Overfit.Autograd
 
             // Reset arena without involving GC.
             TapeBuffer.ResetOffset();
+        }
+
+        private static void DisposeGraphOwnedAuxiliaryNodes(in TapeOp op)
+        {
+            switch (op.Code)
+            {
+                case OpCode.MaxPool2D:
+                    // B is maxIndices created by MaxPool2D forward.
+                    // It is not a model parameter and is owned by the graph tape.
+                    op.B?.Dispose();
+                    break;
+
+                case OpCode.SoftmaxCrossEntropy:
+                    // C0 is probsNode created by SoftmaxCrossEntropy forward.
+                    // It is needed only for backward.
+                    op.C0?.Dispose();
+                    break;
+
+                case OpCode.BatchNorm1D:
+                    // C0/C1 are gamma/beta parameters and must not be disposed.
+                    // C2/C3 are mean/invStd temporary nodes owned by the graph tape.
+                    op.C2?.Dispose();
+                    op.C3?.Dispose();
+                    break;
+            }
         }
 
         public void Dispose()
