@@ -42,7 +42,7 @@ namespace DevOnBike.Overfit.Diagnostics
         public static readonly Counter<long> GraphRecordTotalCount = Meter.CreateCounter<long>(
             "overfit.graph.record_op.count",
             unit: "{op}",
-            description: "Graph record record total count");
+            description: "Graph record op total count.");
 
         public static readonly Histogram<long> ModuleAllocatedBytes = Meter.CreateHistogram<long>(
             "overfit.module.alloc.bytes",
@@ -84,7 +84,92 @@ namespace DevOnBike.Overfit.Diagnostics
             unit: "By",
             description: "Native / unmanaged memory tracked by Overfit diagnostics.");
 
-        // Evolutionary / MAP-Elites metrics
+        // --------------------------------------------------------------------
+        // Low-level tensor storage infrastructure metrics.
+        //
+        // These are intentionally context-free. TensorStorage knows only that
+        // physical storage was created/disposed. It does not know whether the
+        // storage is a graph intermediate, gradient, optimizer buffer, scratch,
+        // user tensor, or evolutionary workspace.
+        // --------------------------------------------------------------------
+
+        public static readonly Counter<long> TensorStorageCreated = Meter.CreateCounter<long>(
+            "overfit.tensor_storage.created",
+            unit: "{storage}",
+            description: "Total number of TensorStorage instances created.");
+
+        public static readonly Counter<long> TensorStorageDisposed = Meter.CreateCounter<long>(
+            "overfit.tensor_storage.disposed",
+            unit: "{storage}",
+            description: "Total number of TensorStorage instances disposed.");
+
+        public static readonly Counter<long> TensorStoragePooledCreated = Meter.CreateCounter<long>(
+            "overfit.tensor_storage.pooled.created",
+            unit: "{storage}",
+            description: "Number of pooled TensorStorage instances created.");
+
+        public static readonly Counter<long> TensorStorageBorrowedCreated = Meter.CreateCounter<long>(
+            "overfit.tensor_storage.borrowed.created",
+            unit: "{storage}",
+            description: "Number of borrowed arena TensorStorage instances created.");
+
+        public static readonly Counter<long> TensorStoragePooledDisposed = Meter.CreateCounter<long>(
+            "overfit.tensor_storage.pooled.disposed",
+            unit: "{storage}",
+            description: "Number of pooled TensorStorage instances disposed.");
+
+        public static readonly Counter<long> TensorStorageBorrowedDisposed = Meter.CreateCounter<long>(
+            "overfit.tensor_storage.borrowed.disposed",
+            unit: "{storage}",
+            description: "Number of borrowed arena TensorStorage instances disposed.");
+
+        public static readonly Counter<long> TensorStorageElementsCreated = Meter.CreateCounter<long>(
+            "overfit.tensor_storage.elements.created",
+            unit: "{element}",
+            description: "Total number of elements requested by created TensorStorage instances.");
+
+        public static readonly Counter<long> TensorStorageBytesCreated = Meter.CreateCounter<long>(
+            "overfit.tensor_storage.bytes.created",
+            unit: "By",
+            description: "Estimated bytes requested by created TensorStorage instances.");
+
+        // Evolutionary generation metrics
+        public static readonly Histogram<double> EvolutionGenerationDurationMs = Meter.CreateHistogram<double>(
+            "overfit.evolution.generation.duration.ms",
+            unit: "ms",
+            description: "Total duration of one evolutionary generation.");
+
+        public static readonly Histogram<double> EvolutionAskDurationMs = Meter.CreateHistogram<double>(
+            "overfit.evolution.ask.duration.ms",
+            unit: "ms",
+            description: "Duration of the Ask phase.");
+
+        public static readonly Histogram<double> EvolutionEvaluateDurationMs = Meter.CreateHistogram<double>(
+            "overfit.evolution.evaluate.duration.ms",
+            unit: "ms",
+            description: "Duration of the Evaluate phase.");
+
+        public static readonly Histogram<double> EvolutionTellDurationMs = Meter.CreateHistogram<double>(
+            "overfit.evolution.tell.duration.ms",
+            unit: "ms",
+            description: "Duration of the Tell phase.");
+
+        public static readonly Histogram<double> EvolutionBestFitness = Meter.CreateHistogram<double>(
+            "overfit.evolution.best_fitness",
+            unit: "{fitness}",
+            description: "Best fitness observed after a generation.");
+
+        public static readonly Counter<long> EvolutionGenerationCount = Meter.CreateCounter<long>(
+            "overfit.evolution.generation.count",
+            unit: "{generation}",
+            description: "Number of completed evolutionary generations.");
+
+        public static readonly Counter<long> EvolutionPopulationEvaluated = Meter.CreateCounter<long>(
+            "overfit.evolution.population.evaluated",
+            unit: "{candidate}",
+            description: "Number of candidates evaluated by the runner.");
+
+        // MAP-Elites metrics
         public static readonly Histogram<double> MapElitesIterationDurationMs = Meter.CreateHistogram<double>(
             "overfit.evolution.map_elites.iteration.duration.ms",
             unit: "ms",
@@ -170,9 +255,54 @@ namespace DevOnBike.Overfit.Diagnostics
             }
 
             TagList tags = default;
-            tags.Add("op", code);
+            tags.Add("op", code.ToString());
 
             GraphRecordTotalCount.Add(1, tags);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void RecordTensorStorageCreated(
+            int length,
+            int elementSizeBytes,
+            bool borrowed)
+        {
+            if (!Enabled)
+            {
+                return;
+            }
+
+            TensorStorageCreated.Add(1);
+            TensorStorageElementsCreated.Add(length);
+            TensorStorageBytesCreated.Add((long)length * elementSizeBytes);
+
+            if (borrowed)
+            {
+                TensorStorageBorrowedCreated.Add(1);
+            }
+            else
+            {
+                TensorStoragePooledCreated.Add(1);
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void RecordTensorStorageDisposed(bool borrowed)
+        {
+            if (!Enabled)
+            {
+                return;
+            }
+
+            TensorStorageDisposed.Add(1);
+
+            if (borrowed)
+            {
+                TensorStorageBorrowedDisposed.Add(1);
+            }
+            else
+            {
+                TensorStoragePooledDisposed.Add(1);
+            }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -190,7 +320,6 @@ namespace DevOnBike.Overfit.Diagnostics
             tags.Add("population_size", populationSize);
             tags.Add("parameter_count", parameterCount);
 
-            /*
             EvolutionGenerationDurationMs.Record(metrics.TotalElapsed.TotalMilliseconds, tags);
             EvolutionAskDurationMs.Record(metrics.AskElapsed.TotalMilliseconds, tags);
             EvolutionEvaluateDurationMs.Record(metrics.EvaluateElapsed.TotalMilliseconds, tags);
@@ -198,7 +327,6 @@ namespace DevOnBike.Overfit.Diagnostics
             EvolutionBestFitness.Record(metrics.BestFitness, tags);
             EvolutionGenerationCount.Add(1, tags);
             EvolutionPopulationEvaluated.Add(populationSize, tags);
-            */
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
