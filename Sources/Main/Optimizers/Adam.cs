@@ -9,6 +9,7 @@ using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Optimizers.Abstractions;
+using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Optimizers
@@ -19,7 +20,7 @@ namespace DevOnBike.Overfit.Optimizers
     /// BeastMode:
     /// - small parameters: sequential SIMD
     /// - large parameters: Parallel.For over element chunks
-    /// - default worker count: Environment.ProcessorCount
+    /// - global parallelism: OverfitParallel.Options
     /// - ZeroGrad intentionally stays sequential because parallel ZeroGrad was slower
     ///   and allocated more in MNIST BeastMode.
     /// </summary>
@@ -30,16 +31,13 @@ namespace DevOnBike.Overfit.Optimizers
         private const int MinChunkElements = 16_384;
         private const bool ParallelZeroGrad = false;
 
-        private static readonly ParallelOptions ParallelOptions = new()
-        {
-            MaxDegreeOfParallelism = Environment.ProcessorCount
-        };
-
         private readonly ParamState[] _states;
         private int _t;
 
         public Adam(IEnumerable<AutogradNode> parameters, float learningRate = 0.001f)
         {
+            _ = OverfitParallel.Options;
+
             LearningRate = learningRate;
 
             var statesList = new List<ParamState>();
@@ -173,7 +171,7 @@ namespace DevOnBike.Overfit.Optimizers
             Parallel.For(
                 0,
                 chunks,
-                ParallelOptions,
+                OverfitParallel.Options,
                 chunk =>
                 {
                     GetChunkRange(size, chunks, chunk, out var start, out var end);
@@ -224,7 +222,7 @@ namespace DevOnBike.Overfit.Optimizers
             Parallel.For(
                 0,
                 chunks,
-                ParallelOptions,
+                OverfitParallel.Options,
                 chunk =>
                 {
                     GetChunkRange(size, chunks, chunk, out var start, out var end);
@@ -283,7 +281,7 @@ namespace DevOnBike.Overfit.Optimizers
             Parallel.For(
                 0,
                 chunks,
-                ParallelOptions,
+                OverfitParallel.Options,
                 chunk =>
                 {
                     GetChunkRange(size, chunks, chunk, out var start, out var end);
@@ -494,15 +492,8 @@ namespace DevOnBike.Overfit.Optimizers
 
         private static int GetChunkCount(int size)
         {
-            var maxDegree = ParallelOptions.MaxDegreeOfParallelism;
-
-            if (maxDegree <= 0)
-            {
-                maxDegree = Environment.ProcessorCount;
-            }
-
             var bySize = Math.Max(1, (size + MinChunkElements - 1) / MinChunkElements);
-            return Math.Min(maxDegree, bySize);
+            return Math.Min(OverfitParallel.MaxDegreeOfParallelism, bySize);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
