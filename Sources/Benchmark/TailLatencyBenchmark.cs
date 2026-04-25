@@ -9,6 +9,7 @@ using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Order;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core; // Dodano namespace DOD
 using Microsoft.ML.OnnxRuntime;
@@ -84,10 +85,11 @@ namespace Benchmarks
 
             for (var i = 0; i < TotalCalls; i++)
             {
-                var start = Stopwatch.GetTimestamp();
+                var sw = ValueStopwatch.StartNew();
                 using var results = _onnxSession.Run(_onnxInputs);
                 _ = results.First().AsTensor<float>()[0];
-                _onnxLatencies[i] = Stopwatch.GetTimestamp() - start;
+                var elapsed = sw.GetElapsedTime();
+                _onnxLatencies[i] = (long)elapsed.TotalMilliseconds;
             }
 
             PrintLatencyReport(
@@ -107,9 +109,10 @@ namespace Benchmarks
 
             for (var i = 0; i < TotalCalls; i++)
             {
-                var start = Stopwatch.GetTimestamp();
+                var sw = ValueStopwatch.StartNew();
                 _ = _overfitModel.Forward(null, _inputNode).DataView.AsReadOnlySpan()[0];
-                _overfitLatencies[i] = Stopwatch.GetTimestamp() - start;
+                var elapsed = sw.GetElapsedTime();
+                _overfitLatencies[i] = (long)elapsed.TotalMilliseconds;
             }
 
             PrintLatencyReport(

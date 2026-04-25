@@ -3,9 +3,9 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Diagnostics;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tensors;
@@ -36,7 +36,7 @@ namespace DevOnBike.Overfit.Tests
             var adam = new Adam(allParameters, learningRate) { UseAdamW = true };
 
             var graph = new ComputationGraph();
-            var sw = Stopwatch.StartNew();
+            var sw = ValueStopwatch.StartNew();
 
             for (var epoch = 0; epoch < epochs; epoch++)
             {
@@ -76,8 +76,8 @@ namespace DevOnBike.Overfit.Tests
                 Console.WriteLine($"Epoch {epoch + 1}/{epochs} | Loss: {lossValue:F4}");
             }
 
-            sw.Stop();
-            Console.WriteLine($"Training took: {sw.ElapsedMilliseconds} ms");
+            var elapsed = sw.GetElapsedTime();
+            Console.WriteLine($"Training took: {elapsed.TotalMilliseconds} ms");
 
             PrintConfusionMatrix(conv1, fc1, trainX, trainY);
         }
