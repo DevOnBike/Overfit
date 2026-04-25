@@ -415,8 +415,9 @@ namespace DevOnBike.Overfit.Ops
 
             if (output.RequiresGrad)
             {
-                graph?.Record(OpCode.Linear, output, input, weights, 0, 0, 0, 0, 0, [bias]);
+                graph?.Record(OpCode.Linear, output, input, weights, c0: bias, contextCount: 1);
             }
+
             return output;
         }
 

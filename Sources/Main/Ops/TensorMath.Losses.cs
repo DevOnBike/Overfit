@@ -46,7 +46,7 @@ namespace DevOnBike.Overfit.Ops
 
             if (logits.RequiresGrad)
             {
-                graph?.Record(OpCode.SoftmaxCrossEntropy, output, logits, target, nodeContext: [probsNode]);
+                graph?.Record(OpCode.SoftmaxCrossEntropy, output, logits, target, c0: probsNode, contextCount: 1);
             }
             else
             {

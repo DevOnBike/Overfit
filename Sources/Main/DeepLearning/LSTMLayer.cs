@@ -140,14 +140,26 @@ namespace DevOnBike.Overfit.DeepLearning
 
             foreach (var h in allH)
             {
-                if (h.RequiresGrad) { requiresGrad = true; break; }
+                if (h.RequiresGrad)
+                {
+                    requiresGrad = true;
+                    break;
+                }
             }
 
             var output = new AutogradNode(res, new TensorShape(batch, seqLen, hiddenSize), requiresGrad);
 
             if (output.RequiresGrad)
             {
-                graph?.Record(OpCode.StackTimesteps, output, null, null, batch, seqLen, hiddenSize, 0, 0, allH);
+                graph?.Record(
+                OpCode.StackTimesteps,
+                output,
+                null,
+                null,
+                batch,
+                seqLen,
+                hiddenSize,
+                nodeContext: allH);
             }
 
             return output;
@@ -158,7 +170,7 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Save(BinaryWriter bw) => _cell.Save(bw);
         public void Load(BinaryReader br) => _cell.Load(br);
         public void Dispose() => _cell.Dispose();
-        public void Save(string path) { }
-        public void Load(string path) { }
+        public void Save(string path) {}
+        public void Load(string path) {}
     }
 }

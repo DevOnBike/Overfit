@@ -82,7 +82,7 @@ namespace DevOnBike.Overfit.Ops
 
             if (output.RequiresGrad && isTraining)
             {
-                graph?.Record(OpCode.BatchNorm1D, output, input, null, 0, 0, 0, 0, 0, [gamma, beta, mean, invStd]);
+                graph?.Record(OpCode.BatchNorm1D, output, input, c0: gamma, c1: beta, c2: mean, c3: invStd, contextCount: 4);
             }
             else if (!isTraining)
             {

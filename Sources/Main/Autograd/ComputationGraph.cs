@@ -51,6 +51,12 @@ namespace DevOnBike.Overfit.Autograd
             int i2 = 0,
             int i3 = 0,
             int i4 = 0,
+            AutogradNode c0 = null,
+            AutogradNode c1 = null,
+            AutogradNode c2 = null,
+            AutogradNode c3 = null,
+            AutogradNode c4 = null,
+            int contextCount = 0,
             AutogradNode[] nodeContext = null)
         {
             if (!IsRecording)
@@ -63,7 +69,23 @@ namespace DevOnBike.Overfit.Autograd
                 Array.Resize(ref _tape, _tape.Length * 2);
             }
 
-            _tape[_opCount++] = new TapeOp(code, output, a, b, i0, i1, i2, i3, i4, nodeContext);
+            _tape[_opCount++] = new TapeOp(
+                code,
+                output,
+                a,
+                b,
+                i0,
+                i1,
+                i2,
+                i3,
+                i4,
+                c0,
+                c1,
+                c2,
+                c3,
+                c4,
+                contextCount,
+                nodeContext);
 
             OverfitTelemetry.RecordGraphRecordOp(code);
         }
@@ -88,15 +110,27 @@ namespace DevOnBike.Overfit.Autograd
         }
 
         public AutogradNode Add(AutogradNode left, AutogradNode right) => TensorMath.Add(this, left, right);
+
         public AutogradNode AddBias(AutogradNode input, AutogradNode bias) => TensorMath.AddBias(this, input, bias);
+
         public AutogradNode MatMul(AutogradNode left, AutogradNode right) => TensorMath.MatMul(this, left, right);
+
         public AutogradNode ReLU(AutogradNode input) => TensorMath.ReLU(this, input);
-        public AutogradNode MeanSquaredError(AutogradNode prediction, AutogradNode target) => TensorMath.MSELoss(this, prediction, target);
-        public AutogradNode DirectionalLoss(AutogradNode prediction, AutogradNode target, float gamma = 10f) => TensorMath.DirectionalLoss(this, prediction, target, gamma);
+
+        public AutogradNode MeanSquaredError(AutogradNode prediction, AutogradNode target) =>
+            TensorMath.MSELoss(this, prediction, target);
+
+        public AutogradNode DirectionalLoss(AutogradNode prediction, AutogradNode target, float gamma = 10f) =>
+            TensorMath.DirectionalLoss(this, prediction, target, gamma);
+
         public AutogradNode Sigmoid(AutogradNode input) => TensorMath.Sigmoid(this, input);
+
         public AutogradNode Tanh(AutogradNode input) => TensorMath.Tanh(this, input);
+
         public AutogradNode Multiply(AutogradNode a, AutogradNode b) => TensorMath.Multiply(this, a, b);
-        public AutogradNode GateSlice(AutogradNode gates, int hiddenSize, int gateIndex) => TensorMath.GateSlice(this, gates, hiddenSize, gateIndex);
+
+        public AutogradNode GateSlice(AutogradNode gates, int hiddenSize, int gateIndex) =>
+            TensorMath.GateSlice(this, gates, hiddenSize, gateIndex);
 
         public AutogradNode AddInPlace(AutogradNode target, AutogradNode source)
         {
@@ -134,7 +168,7 @@ namespace DevOnBike.Overfit.Autograd
                     break;
 
                 case OpCode.Linear:
-                    TensorMath.LinearBackward(op.A, op.B, op.NodeContext[0], op.Output);
+                    TensorMath.LinearBackward(op.A, op.B, op.C0, op.Output);
                     break;
 
                 case OpCode.ReLU:
@@ -150,7 +184,7 @@ namespace DevOnBike.Overfit.Autograd
                     break;
 
                 case OpCode.SoftmaxCrossEntropy:
-                    TensorMath.SoftmaxCrossEntropyBackward(op.A, op.B, op.Output, op.NodeContext[0]);
+                    TensorMath.SoftmaxCrossEntropyBackward(op.A, op.B, op.Output, op.C0);
                     break;
 
                 case OpCode.Conv2D:
@@ -166,7 +200,7 @@ namespace DevOnBike.Overfit.Autograd
                     break;
 
                 case OpCode.BatchNorm1D:
-                    TensorMath.BatchNorm1DBackward(op.A, op.Output, op.NodeContext[0], op.NodeContext[1], op.NodeContext[2], op.NodeContext[3]);
+                    TensorMath.BatchNorm1DBackward(op.A, op.Output, op.C0, op.C1, op.C2, op.C3);
                     break;
 
                 case OpCode.Reshape:
@@ -217,6 +251,7 @@ namespace DevOnBike.Overfit.Autograd
                             op.Output.GradView.AsReadOnlySpan(),
                             op.A.GradView.AsSpan());
                     }
+
                     break;
             }
         }
