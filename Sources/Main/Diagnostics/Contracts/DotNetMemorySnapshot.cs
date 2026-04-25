@@ -18,7 +18,7 @@ namespace DevOnBike.Overfit.Diagnostics.Contracts
         {
             Now = ValueStopwatch.StartNew();
 
-            TotalAllocatedBytes = GC.GetTotalAllocatedBytes(false);
+            TotalAllocatedBytes = GC.GetTotalAllocatedBytes();
             Gen0Collections = GC.CollectionCount(0);
             Gen1Collections = GC.CollectionCount(1);
             Gen2Collections = GC.CollectionCount(2);

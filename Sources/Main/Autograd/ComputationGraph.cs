@@ -26,15 +26,9 @@ namespace DevOnBike.Overfit.Autograd
         private TapeOp[] _tape = new TapeOp[InitialCapacity];
 
         // Huge arena buffer: bypasses GC and ArrayPool for intermediate tensor storage.
-        public readonly NativeBufferManaged<float> TapeBuffer = new NativeBufferManaged<float>(50_000_000, clearMemory: false);
+        public readonly NativeBufferManaged<float> TapeBuffer = new(50_000_000, clearMemory: false);
 
         public bool IsRecording { get; set; } = true;
-
-        /// <summary>
-        /// Enables per-opcode backward profiling independent of runtime diagnostics.
-        /// This adds overhead and should be used only when hunting allocation churn.
-        /// </summary>
-        public bool EnableBackwardProfiling { get; set; }
 
         public int RecordedOpCount => _opCount;
 

@@ -10,7 +10,7 @@ namespace DevOnBike.Overfit.Diagnostics
     [EventSource(Guid = "0866B2B8-5CEF-5DB9-2612-0C0FFD814A44", Name = "System.Buffers.ArrayPoolEventSource")]
     internal sealed partial class ArrayPoolEventSource : EventSource
     {
-        internal static readonly ArrayPoolEventSource Log = new ArrayPoolEventSource();
+        internal static readonly ArrayPoolEventSource Log = new();
 
         /// <summary>Bucket ID used when renting/returning an array that's too large for a pool.</summary>
         internal const int NoBucketId = -1;
