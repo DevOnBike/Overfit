@@ -6,6 +6,7 @@
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Intrinsics;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.Ops
 {
@@ -56,7 +57,7 @@ namespace DevOnBike.Overfit.Ops
             else
             {
                 localWorkspace = new Conv2DWorkspace();
-                var workerCount = Math.Max(1, Math.Min(Environment.ProcessorCount, Math.Max(1, batchSize)));
+                var workerCount = Math.Max(1, Math.Min(OverfitParallel.MaxDegreeOfParallelism, Math.Max(1, batchSize)));
                 localWorkspace.Ensure(
                     workerCount,
                     colLength: kSqInC * spatialOut,
@@ -68,7 +69,7 @@ namespace DevOnBike.Overfit.Ops
             {
                 var workerCount = workspace.WorkerCount;
 
-                Parallel.For(0, workerCount, workerId =>
+                Parallel.For(0, workerCount, OverfitParallel.Options, workerId =>
                 {
                     var col = workspace.GetColBuffer(workerId);
 
@@ -154,7 +155,7 @@ namespace DevOnBike.Overfit.Ops
                 workspace.ClearPartialWeightGradients();
             }
 
-            Parallel.For(0, workerCount, workerId =>
+            Parallel.For(0, workerCount, OverfitParallel.Options, workerId =>
             {
                 var col = workspace.GetColBuffer(workerId);
                 var dCol = workspace.GetDColBuffer(workerId);

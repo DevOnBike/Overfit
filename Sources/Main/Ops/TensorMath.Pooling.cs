@@ -8,6 +8,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.Ops
 {
@@ -38,7 +39,7 @@ namespace DevOnBike.Overfit.Ops
             }
             else
             {
-                Parallel.For(0, batchSize, n =>
+                Parallel.For(0, batchSize, OverfitParallel.Options, n =>
                 {
                     ref var iR = ref MemoryMarshal.GetReference(input.DataView.AsSpan());
                     ref var oR = ref MemoryMarshal.GetReference(output.DataView.AsSpan());
@@ -147,7 +148,7 @@ namespace DevOnBike.Overfit.Ops
             }
             else
             {
-                Parallel.For(0, batchSize, n =>
+                Parallel.For(0, batchSize, OverfitParallel.Options, n =>
                 {
                     for (var c = 0; c < channels; c++)
                     {

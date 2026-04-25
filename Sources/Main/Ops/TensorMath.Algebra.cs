@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 DevOnBike.
+// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -8,6 +8,7 @@ using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Intrinsics;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.Ops
 {
@@ -97,7 +98,7 @@ namespace DevOnBike.Overfit.Ops
             }
             else
             {
-                Parallel.For(0, N, i =>
+                Parallel.For(0, N, OverfitParallel.Options, i =>
                 {
                     Simd.Add(
                         input.DataView.AsReadOnlySpan().Slice(i * C, C),
@@ -174,7 +175,7 @@ namespace DevOnBike.Overfit.Ops
             }
             else
             {
-                Parallel.For(0, aR, i =>
+                Parallel.For(0, aR, OverfitParallel.Options, i =>
                 {
                     var rC = C.DataView.AsSpan().Slice(i * bC, bC);
                     var rA = A.DataView.AsReadOnlySpan().Slice(i * aC, aC);
@@ -246,7 +247,7 @@ namespace DevOnBike.Overfit.Ops
             }
             else
             {
-                Parallel.For(0, N, i =>
+                Parallel.For(0, N, OverfitParallel.Options, i =>
                 {
                     var aRow = (aGrad ? A.GradView.AsReadOnlySpan() : A.DataView.AsReadOnlySpan()).Slice(i * K, K);
                     var cRow = C.GradView.AsSpan().Slice(i * M, M);
@@ -292,7 +293,7 @@ namespace DevOnBike.Overfit.Ops
             }
             else
             {
-                Parallel.For(0, N, i =>
+                Parallel.For(0, N, OverfitParallel.Options, i =>
                 {
                     var cRow = C.GradView.AsSpan().Slice(i * M, M);
                     var aData = aGrad ? A.GradView.AsReadOnlySpan() : A.DataView.AsReadOnlySpan();
@@ -396,7 +397,7 @@ namespace DevOnBike.Overfit.Ops
             }
             else
             {
-                Parallel.For(0, N, i =>
+                Parallel.For(0, N, OverfitParallel.Options, i =>
                 {
                     var rC = output.DataView.AsSpan().Slice(i * M, M);
                     var rA = input.DataView.AsReadOnlySpan().Slice(i * K, K);

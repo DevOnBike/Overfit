@@ -36,19 +36,7 @@ namespace DevOnBike.Overfit.Tests
             const bool enableTelemetry = false;
             const bool measureSections = false;
 
-            ThreadPool.GetMinThreads(out var minWorkerBefore, out var minIoBefore);
-            ThreadPool.GetMaxThreads(out var maxWorker, out var maxIo);
-
             _output.WriteLine($"Environment.ProcessorCount: {Environment.ProcessorCount}");
-            _output.WriteLine($"ThreadPool min worker/io before: {minWorkerBefore}/{minIoBefore}");
-            _output.WriteLine($"ThreadPool max worker/io: {maxWorker}/{maxIo}");
-
-            ThreadPool.SetMinThreads(Environment.ProcessorCount, minIoBefore);
-
-            ThreadPool.GetMinThreads(out var minWorkerAfter, out var minIoAfter);
-            _output.WriteLine($"ThreadPool min worker/io after: {minWorkerAfter}/{minIoAfter}");
-
-
 
             var trainImagesPath = "d:/ml/train-images.idx3-ubyte";
             var trainLabelsPath = "d:/ml/train-labels.idx1-ubyte";
