@@ -15,7 +15,8 @@ using DevOnBike.Overfit.Tensors;
 namespace DevOnBike.Overfit.Optimizers
 {
     /// <summary>
-    /// Implements the Adam + AdamW optimizer with AVX-512 acceleration.
+    /// Implements the Adam + AdamW optimizer with SIMD acceleration.
+    /// Sequential Step() avoids TPL allocations in benchmark hot path.
     /// </summary>
     public sealed class Adam : IOptimizer, IDisposable
     {
@@ -38,14 +39,19 @@ namespace DevOnBike.Overfit.Optimizers
                 }
             }
 
-            _states = [.. statesList];
+            _states = statesList.ToArray();
         }
 
         public float Beta1 { get; set; } = 0.9f;
+
         public float Beta2 { get; set; } = 0.999f;
+
         public float Epsilon { get; set; } = 1e-8f;
+
         public float WeightDecay { get; set; } = 0.0001f;
+
         public bool UseAdamW { get; set; } = true;
+
         public float LearningRate { get; set; }
 
         public void Dispose()
@@ -63,8 +69,10 @@ namespace DevOnBike.Overfit.Optimizers
 
             var bc1 = 1f - MathF.Pow(Beta1, _t);
             var bc2 = 1f - MathF.Pow(Beta2, _t);
+
             var invBc1 = 1f / bc1;
             var invBc2 = 1f / bc2;
+
             var wd = WeightDecay;
             var b1 = Beta1;
             var b2 = Beta2;
@@ -73,51 +81,23 @@ namespace DevOnBike.Overfit.Optimizers
             var eps = Epsilon;
             var lr = LearningRate;
 
-            // Parallel processing for multiple large parameters
-            if (_states.Length >= 4)
+            if (UseAdamW)
             {
-                if (UseAdamW)
+                foreach (var state in _states)
                 {
-                    Parallel.ForEach(_states, state =>
+                    if (state.Node.RequiresGrad)
                     {
-                        if (state.Node.RequiresGrad)
-                        {
-                            StepAdamW(state, b1, b2, b1Inv, b2Inv, invBc1, invBc2, eps, lr, wd);
-                        }
-                    });
-                }
-                else
-                {
-                    Parallel.ForEach(_states, state =>
-                    {
-                        if (state.Node.RequiresGrad)
-                        {
-                            StepAdam(state, b1, b2, b1Inv, b2Inv, invBc1, invBc2, eps, lr, wd);
-                        }
-                    });
+                        StepAdamW(state, b1, b2, b1Inv, b2Inv, invBc1, invBc2, eps, lr, wd);
+                    }
                 }
             }
             else
             {
-                // Sequential for few parameters (less overhead)
-                if (UseAdamW)
+                foreach (var state in _states)
                 {
-                    foreach (var state in _states)
+                    if (state.Node.RequiresGrad)
                     {
-                        if (state.Node.RequiresGrad)
-                        {
-                            StepAdamW(state, b1, b2, b1Inv, b2Inv, invBc1, invBc2, eps, lr, wd);
-                        }
-                    }
-                }
-                else
-                {
-                    foreach (var state in _states)
-                    {
-                        if (state.Node.RequiresGrad)
-                        {
-                            StepAdam(state, b1, b2, b1Inv, b2Inv, invBc1, invBc2, eps, lr, wd);
-                        }
+                        StepAdam(state, b1, b2, b1Inv, b2Inv, invBc1, invBc2, eps, lr, wd);
                     }
                 }
             }
@@ -126,10 +106,18 @@ namespace DevOnBike.Overfit.Optimizers
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void StepAdamW(
             in ParamState state,
-            float b1, float b2, float b1Inv, float b2Inv,
-            float invBc1, float invBc2, float eps, float lr, float wd)
+            float b1,
+            float b2,
+            float b1Inv,
+            float b2Inv,
+            float invBc1,
+            float invBc2,
+            float eps,
+            float lr,
+            float wd)
         {
             var n = state.Size;
+
             var gSpan = state.Node.GradView.AsSpan();
             var mSpan = state.M.GetView().AsSpan();
             var vSpan = state.V.GetView().AsSpan();
@@ -142,10 +130,10 @@ namespace DevOnBike.Overfit.Optimizers
 
             var i = 0;
 
-            // AVX-512 path for large parameters
             if (Avx512F.IsSupported && n >= Avx512Threshold)
             {
-                var simd512 = Vector512<float>.Count; // 16
+                var simd512 = Vector512<float>.Count;
+
                 var vB1 = Vector512.Create(b1);
                 var vB2 = Vector512.Create(b2);
                 var vB1Inv = Vector512.Create(b1Inv);
@@ -163,22 +151,13 @@ namespace DevOnBike.Overfit.Optimizers
                     var vV = Vector512.LoadUnsafe(ref vRef, (nuint)i);
                     var vW = Vector512.LoadUnsafe(ref wRef, (nuint)i);
 
-                    // m = b1 * m + b1Inv * g
                     vM = Avx512F.FusedMultiplyAdd(vM, vB1, vG * vB1Inv);
-
-                    // v = b2 * v + b2Inv * g * g
                     vV = Avx512F.FusedMultiplyAdd(vV, vB2, vG * vG * vB2Inv);
 
-                    // mHat = m * invBc1
                     var vMHat = vM * vInvBc1;
-
-                    // vHat = sqrt(v * invBc2) + eps
                     var vVHat = Avx512F.Sqrt(vV * vInvBc2) + vEps;
 
-                    // w -= lr * mHat / vHat
                     vW = Avx512F.FusedMultiplyAddNegated(vMHat / vVHat, vLr, vW);
-
-                    // w -= w * wd * lr (weight decay)
                     vW = Avx512F.FusedMultiplyAddNegated(vW, vWdLr, vW);
 
                     vM.StoreUnsafe(ref mRef, (nuint)i);
@@ -186,7 +165,6 @@ namespace DevOnBike.Overfit.Optimizers
                     vW.StoreUnsafe(ref wRef, (nuint)i);
                 }
             }
-            // AVX2 path
             else if (Vector.IsHardwareAccelerated && n >= Vector<float>.Count * 4)
             {
                 var gVec = MemoryMarshal.Cast<float, Vector<float>>(gSpan);
@@ -216,6 +194,7 @@ namespace DevOnBike.Overfit.Optimizers
 
                     var vMHat = vM * vecInvBc1;
                     var vVHat = Vector.SquareRoot(vV * vecInvBc2) + vecEps;
+
                     vW -= vMHat / vVHat * vecLr;
                     vW -= vW * vecWdLr;
 
@@ -227,7 +206,6 @@ namespace DevOnBike.Overfit.Optimizers
                 i = gVec.Length * Vector<float>.Count;
             }
 
-            // Scalar remainder
             for (; i < n; i++)
             {
                 var gw = Unsafe.Add(ref gRef, i);
@@ -240,6 +218,7 @@ namespace DevOnBike.Overfit.Optimizers
 
                 var mHat = mw * invBc1;
                 var vHat = MathF.Sqrt(vw * invBc2) + eps;
+
                 ww -= lr * (mHat / vHat);
                 ww -= ww * wd * lr;
 
@@ -252,10 +231,18 @@ namespace DevOnBike.Overfit.Optimizers
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void StepAdam(
             in ParamState state,
-            float b1, float b2, float b1Inv, float b2Inv,
-            float invBc1, float invBc2, float eps, float lr, float wd)
+            float b1,
+            float b2,
+            float b1Inv,
+            float b2Inv,
+            float invBc1,
+            float invBc2,
+            float eps,
+            float lr,
+            float wd)
         {
             var n = state.Size;
+
             var gSpan = state.Node.GradView.AsSpan();
             var mSpan = state.M.GetView().AsSpan();
             var vSpan = state.V.GetView().AsSpan();
@@ -268,10 +255,10 @@ namespace DevOnBike.Overfit.Optimizers
 
             var i = 0;
 
-            // AVX-512 path
             if (Avx512F.IsSupported && n >= Avx512Threshold)
             {
                 var simd512 = Vector512<float>.Count;
+
                 var vB1 = Vector512.Create(b1);
                 var vB2 = Vector512.Create(b2);
                 var vB1Inv = Vector512.Create(b1Inv);
@@ -289,17 +276,14 @@ namespace DevOnBike.Overfit.Optimizers
                     var vV = Vector512.LoadUnsafe(ref vRef, (nuint)i);
                     var vW = Vector512.LoadUnsafe(ref wRef, (nuint)i);
 
-                    // L2 regularization: g += wd * w
                     var vGl2 = Avx512F.FusedMultiplyAdd(vW, vWd, vG);
 
-                    // m = b1 * m + b1Inv * gl2
                     vM = Avx512F.FusedMultiplyAdd(vM, vB1, vGl2 * vB1Inv);
-
-                    // v = b2 * v + b2Inv * gl2 * gl2
                     vV = Avx512F.FusedMultiplyAdd(vV, vB2, vGl2 * vGl2 * vB2Inv);
 
                     var vMHat = vM * vInvBc1;
                     var vVHat = Avx512F.Sqrt(vV * vInvBc2) + vEps;
+
                     vW = Avx512F.FusedMultiplyAddNegated(vMHat / vVHat, vLr, vW);
 
                     vM.StoreUnsafe(ref mRef, (nuint)i);
@@ -307,7 +291,6 @@ namespace DevOnBike.Overfit.Optimizers
                     vW.StoreUnsafe(ref wRef, (nuint)i);
                 }
             }
-            // AVX2 path
             else if (Vector.IsHardwareAccelerated && n >= Vector<float>.Count * 4)
             {
                 var gVec = MemoryMarshal.Cast<float, Vector<float>>(gSpan);
@@ -333,11 +316,13 @@ namespace DevOnBike.Overfit.Optimizers
                     var vW = wVec[j];
 
                     var vGl2 = vG + vW * vecWd;
+
                     vM = vM * vecB1 + vGl2 * vecB1Inv;
                     vV = vV * vecB2 + vGl2 * vGl2 * vecB2Inv;
 
                     var vMHat = vM * vecInvBc1;
                     var vVHat = Vector.SquareRoot(vV * vecInvBc2) + vecEps;
+
                     vW -= vMHat / vVHat * vecLr;
 
                     mVec[j] = vM;
@@ -348,7 +333,6 @@ namespace DevOnBike.Overfit.Optimizers
                 i = gVec.Length * Vector<float>.Count;
             }
 
-            // Scalar remainder
             for (; i < n; i++)
             {
                 var gw = Unsafe.Add(ref gRef, i);
@@ -357,11 +341,13 @@ namespace DevOnBike.Overfit.Optimizers
                 var vw = Unsafe.Add(ref vRef, i);
 
                 var gl2 = gw + wd * ww;
+
                 mw = b1 * mw + b1Inv * gl2;
                 vw = b2 * vw + b2Inv * (gl2 * gl2);
 
                 var mHat = mw * invBc1;
                 var vHat = MathF.Sqrt(vw * invBc2) + eps;
+
                 ww -= lr * (mHat / vHat);
 
                 Unsafe.Add(ref mRef, i) = mw;
@@ -394,7 +380,6 @@ namespace DevOnBike.Overfit.Optimizers
             {
                 Node = node;
                 Size = node.DataView.Size;
-
                 M = new FastTensor<float>(Size, clearMemory: true);
                 V = new FastTensor<float>(Size, clearMemory: true);
             }

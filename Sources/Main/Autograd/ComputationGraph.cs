@@ -3,10 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Diagnostics;
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Diagnostics;
-using DevOnBike.Overfit.Diagnostics.Contracts;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors.Core;
 
@@ -17,14 +15,11 @@ namespace DevOnBike.Overfit.Autograd
     /// </summary>
     public sealed class ComputationGraph : IDisposable
     {
-        private static readonly ActivitySource _activitySource = new("DevOnBike.Overfit.Autograd.ComputationGraph");
-
         private const int InitialCapacity = 4096;
         private static readonly int OpCodeCount = Enum.GetValues<OpCode>().Length;
 
         private int _opCount;
         private TapeOp[] _tape = new TapeOp[InitialCapacity];
-
         private Conv2DWorkspace? _conv2DWorkspace;
 
         // Huge arena buffer: bypasses GC and ArrayPool for intermediate tensor storage.
@@ -55,13 +50,12 @@ namespace DevOnBike.Overfit.Autograd
             var outW = w - k + 1;
             var kSqInC = k * k * inC;
             var spatialOut = outH * outW;
-
             var colLength = kSqInC * spatialOut;
             var partialWeightGradientLength = outC * kSqInC;
-
             var workerCount = Math.Max(1, Math.Min(Environment.ProcessorCount, Math.Max(1, batchSize)));
 
             _conv2DWorkspace ??= new Conv2DWorkspace();
+
             _conv2DWorkspace.Ensure(
                 workerCount,
                 colLength,
@@ -126,16 +120,12 @@ namespace DevOnBike.Overfit.Autograd
                 return;
             }
 
-            var memoryStatsBefore = new DotNetMemorySnapshot();
-
             lossNode.GradView.AsSpan().Fill(1f);
 
             for (var i = _opCount - 1; i >= 0; i--)
             {
                 ExecuteBackward(in _tape[i]);
             }
-
-            var memoryStatsAfter = new DotNetMemorySnapshot();
         }
 
         public AutogradNode Add(AutogradNode left, AutogradNode right) => TensorMath.Add(this, left, right);
@@ -146,8 +136,7 @@ namespace DevOnBike.Overfit.Autograd
 
         public AutogradNode ReLU(AutogradNode input) => TensorMath.ReLU(this, input);
 
-        public AutogradNode MeanSquaredError(AutogradNode prediction, AutogradNode target) =>
-            TensorMath.MSELoss(this, prediction, target);
+        public AutogradNode MeanSquaredError(AutogradNode prediction, AutogradNode target) => TensorMath.MSELoss(this, prediction, target);
 
         public AutogradNode DirectionalLoss(AutogradNode prediction, AutogradNode target, float gamma = 10f) =>
             TensorMath.DirectionalLoss(this, prediction, target, gamma);
@@ -305,7 +294,7 @@ namespace DevOnBike.Overfit.Autograd
             // Reset arena without involving GC.
             TapeBuffer.ResetOffset();
         }
-
+        
         private static void DisposeGraphOwnedAuxiliaryNodes(in TapeOp op)
         {
             switch (op.Code)

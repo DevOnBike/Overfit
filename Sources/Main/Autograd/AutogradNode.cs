@@ -4,44 +4,42 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Tensors;
-using DevOnBike.Overfit.Tensors.Core; // Wpinamy nowy Core!
+using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.Autograd
 {
     /// <summary>
-    /// Węzeł grafu obliczeniowego. 
+    /// Węzeł grafu obliczeniowego.
     /// Przechowuje fizyczną pamięć (TensorStorage) dla danych i gradientów.
     /// Udostępnia bezalokacyjne widoki (TensorSpan) dla logiki matematycznej.
     /// </summary>
     public sealed class AutogradNode : IDisposable
     {
-        // 1. PAMIĘĆ FIZYCZNA NA STERCIE / ARENIE (Magazyny)
         private TensorStorage<float>? _dataStorage;
         private TensorStorage<float>? _gradStorage;
+        private readonly bool _ownsDataStorage;
+        private readonly bool _ownsGradStorage;
         private int _disposed;
 
         public bool RequiresGrad { get; }
 
-        // NOWOŚĆ: Węzeł sam pamięta swój kształt!
         public TensorShape Shape { get; }
 
-        // ========================================================================
-        // 2. BEZALOKACYJNE WIDOKI (Bramy do matematyki)
-        // ========================================================================
-
-        /// <summary> Zwraca widok na dane z Forward Pass. Używane przez TensorMath. </summary>
+        /// <summary>
+        /// Zwraca widok na dane z Forward Pass.
+        /// </summary>
         public TensorSpan<float> DataView
         {
             get
             {
                 ObjectDisposedException.ThrowIf(_disposed == 1, this);
-
-                // ZERO-ALLOC: Składamy widok na stosie za każdym razem w ułamek nanosekundy!
                 return new TensorSpan<float>(_dataStorage!.AsSpan(), Shape);
             }
         }
 
-        /// <summary> Zwraca widok na gradienty z Backward Pass. Używane przez TensorMath. </summary>
+        /// <summary>
+        /// Zwraca widok na gradienty z Backward Pass.
+        /// </summary>
         public TensorSpan<float> GradView
         {
             get
@@ -57,30 +55,75 @@ namespace DevOnBike.Overfit.Autograd
             }
         }
 
-        // ========================================================================
-        // KONSTRUKTOR
-        // ========================================================================
-
         public AutogradNode(TensorStorage<float> data, TensorShape shape, bool requiresGrad = false)
+            : this(data, shape, requiresGrad, ownsDataStorage: true)
         {
-            _dataStorage = data ?? throw new ArgumentNullException(nameof(data));
+        }
+
+        private AutogradNode(
+            TensorStorage<float> data,
+            TensorShape shape,
+            bool requiresGrad,
+            bool ownsDataStorage)
+        {
+            ArgumentNullException.ThrowIfNull(data);
+
+            if (!shape.IsValid)
+            {
+                throw new ArgumentException("Shape is invalid.", nameof(shape));
+            }
+
+            if (data.Length < shape.Size)
+            {
+                throw new ArgumentException(
+                    $"Storage length {data.Length} is smaller than required tensor size {shape.Size}.",
+                    nameof(data));
+            }
+
+            _dataStorage = data;
+            _ownsDataStorage = ownsDataStorage;
+
             Shape = shape;
             RequiresGrad = requiresGrad;
 
             if (requiresGrad)
             {
-                // Używamy nowej Fabryki DOD: sama zadba o to, czy sklonować to na Arenie, czy w Puli!
                 _gradStorage = TensorFactory.CloneStorage(data, clearMemory: true);
+                _ownsGradStorage = true;
             }
         }
 
-        // ========================================================================
-        // OPERACJE NARZĘDZIOWE
-        // ========================================================================
+        /// <summary>
+        /// Tworzy view-node na tym samym data storage.
+        /// Data storage pozostaje własnością source.
+        /// Grad storage jest osobny, bo backward zapisuje gradient w kształcie view.
+        /// </summary>
+        internal static AutogradNode ViewOf(AutogradNode source, TensorShape shape, bool requiresGrad)
+        {
+            ArgumentNullException.ThrowIfNull(source);
+            ObjectDisposedException.ThrowIf(source._disposed == 1, source);
+
+            if (!shape.IsValid)
+            {
+                throw new ArgumentException("Shape is invalid.", nameof(shape));
+            }
+
+            if (shape.Size != source.Shape.Size)
+            {
+                throw new ArgumentException(
+                    $"View shape size {shape.Size} does not match source size {source.Shape.Size}.",
+                    nameof(shape));
+            }
+
+            return new AutogradNode(
+                source._dataStorage!,
+                shape,
+                requiresGrad,
+                ownsDataStorage: false);
+        }
 
         /// <summary>
         /// Zeruje gradienty przed nową epoką lub batchem.
-        /// Wykorzystuje sprzętowe czyszczenie pamięci Span.
         /// </summary>
         public void ZeroGrad()
         {
@@ -90,20 +133,25 @@ namespace DevOnBike.Overfit.Autograd
             }
         }
 
-        // ========================================================================
-        // SPRZĄTANIE (KRYTYCZNE)
-        // ========================================================================
-
         public void Dispose()
         {
-            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            {
+                return;
+            }
+
+            if (_ownsDataStorage)
             {
                 _dataStorage?.Dispose();
-                _dataStorage = null;
-
-                _gradStorage?.Dispose();
-                _gradStorage = null;
             }
+
+            if (_ownsGradStorage)
+            {
+                _gradStorage?.Dispose();
+            }
+
+            _dataStorage = null;
+            _gradStorage = null;
         }
     }
 }
