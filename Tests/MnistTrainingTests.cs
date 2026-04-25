@@ -3,7 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Diagnostics;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Diagnostics;
@@ -64,7 +63,7 @@ namespace DevOnBike.Overfit.Tests
 
             // 1. Podpinamy nasłuchiwacz metryk - koniec z ręcznym mierzeniem czasu i pamięci!
             using var telemetry = new TelemetryListener(_output);
-            telemetry.Subscribe(OverfitTelemetry.MeterName);
+            // telemetry.Subscribe(OverfitTelemetry.MeterName);
 
             var totalSw = ValueStopwatch.StartNew();
             _output.WriteLine("=== START: Trening ResNet na Taśmie (DOD + Zero-Alloc) ===");
@@ -122,7 +121,7 @@ namespace DevOnBike.Overfit.Tests
 
                 var elapsed = totalSw.GetElapsedTime();
 
-                _output.WriteLine($"Epoch {epoch + 1} | Loss: {epochLoss / batches:F4} | Time so far: {elapsed.TotalMilliseconds}ms");
+                _output.WriteLine($"Epoch {epoch + 1} | Loss: {epochLoss / batches:F4} | Time so far: {elapsed.TotalMillisecondsLong()}ms");
             }
 
             // Metryki wypiszą się automatycznie dzięki TelemetryListenerowi!
