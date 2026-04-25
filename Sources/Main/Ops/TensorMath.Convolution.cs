@@ -40,48 +40,79 @@ namespace DevOnBike.Overfit.Ops
                 input.RequiresGrad || weights.RequiresGrad,
                 clearMemory: true);
 
-            var workspace = graph.GetConv2DWorkspace(batchSize, inC, outC, h, w, k);
-            var workerCount = workspace.WorkerCount;
+            // The convolution workspace holds per-worker im2col scratch buffers that the
+            // Parallel.For below writes into. Normally it lives on the graph and is reused
+            // across all conv ops in a training step (zero per-call allocation). For
+            // inference paths that pass graph=null (e.g. a lightweight forward over a
+            // single image without recording a tape), we create a local workspace for the
+            // duration of the call. The local path allocates but isn't on the training
+            // hot path; it's the cost of decoupling inference from graph state.
+            Conv2DWorkspace? localWorkspace = null;
+            Conv2DWorkspace workspace;
 
-            Parallel.For(0, workerCount, workerId =>
+            if (graph is not null)
             {
-                var col = workspace.GetColBuffer(workerId);
+                workspace = graph.GetConv2DWorkspace(batchSize, inC, outC, h, w, k);
+            }
+            else
+            {
+                localWorkspace = new Conv2DWorkspace();
+                var workerCount = Math.Max(1, Math.Min(Environment.ProcessorCount, Math.Max(1, batchSize)));
+                localWorkspace.Ensure(
+                    workerCount,
+                    colLength: kSqInC * spatialOut,
+                    partialWeightGradientLength: outC * kSqInC);
+                workspace = localWorkspace;
+            }
 
-                for (var n = workerId; n < batchSize; n += workerCount)
+            try
+            {
+                var workerCount = workspace.WorkerCount;
+
+                Parallel.For(0, workerCount, workerId =>
                 {
-                    var inputSlice = input
-                        .DataView
-                        .AsReadOnlySpan()
-                        .Slice(n * inputPlaneLength, inputPlaneLength);
+                    var col = workspace.GetColBuffer(workerId);
 
-                    var weightsSpan = weights
-                        .DataView
-                        .AsReadOnlySpan();
+                    for (var n = workerId; n < batchSize; n += workerCount)
+                    {
+                        var inputSlice = input
+                            .DataView
+                            .AsReadOnlySpan()
+                            .Slice(n * inputPlaneLength, inputPlaneLength);
 
-                    var outputSlice = outputNode
-                        .DataView
-                        .AsSpan()
-                        .Slice(n * outputPlaneLength, outputPlaneLength);
+                        var weightsSpan = weights
+                            .DataView
+                            .AsReadOnlySpan();
 
-                    Im2Col(
-                        inputSlice,
-                        inC,
-                        h,
-                        w,
-                        k,
-                        1,
-                        0,
-                        col);
+                        var outputSlice = outputNode
+                            .DataView
+                            .AsSpan()
+                            .Slice(n * outputPlaneLength, outputPlaneLength);
 
-                    MatMulRawSeq(
-                        weightsSpan,
-                        col,
-                        outC,
-                        kSqInC,
-                        spatialOut,
-                        outputSlice);
-                }
-            });
+                        Im2Col(
+                            inputSlice,
+                            inC,
+                            h,
+                            w,
+                            k,
+                            1,
+                            0,
+                            col);
+
+                        MatMulRawSeq(
+                            weightsSpan,
+                            col,
+                            outC,
+                            kSqInC,
+                            spatialOut,
+                            outputSlice);
+                    }
+                });
+            }
+            finally
+            {
+                localWorkspace?.Dispose();
+            }
 
             if (outputNode.RequiresGrad)
             {

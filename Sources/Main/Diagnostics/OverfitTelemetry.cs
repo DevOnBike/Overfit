@@ -200,10 +200,15 @@ namespace DevOnBike.Overfit.Diagnostics
             unit: "{score}",
             description: "QD score after MAP-Elites iteration.");
 
-        public static readonly Histogram<double> MapElitesBestFitness = Meter.CreateHistogram<double>(
-            "overfit.evolution.map_elites.best_fitness",
+        public static readonly Histogram<double> MapElitesBestEvaluatedFitness = Meter.CreateHistogram<double>(
+            "overfit.evolution.map_elites.best_evaluated_fitness",
             unit: "{fitness}",
-            description: "Best fitness after MAP-Elites iteration.");
+            description: "Strongest fitness ever produced by the evaluator (regardless of archive admission).");
+
+        public static readonly Histogram<double> MapElitesBestEliteFitness = Meter.CreateHistogram<double>(
+            "overfit.evolution.map_elites.best_elite_fitness",
+            unit: "{fitness}",
+            description: "Strongest fitness currently held in the archive.");
 
         public static readonly Counter<long> MapElitesIterationCount = Meter.CreateCounter<long>(
             "overfit.evolution.map_elites.iteration.count",
@@ -229,6 +234,11 @@ namespace DevOnBike.Overfit.Diagnostics
             "overfit.evolution.map_elites.out_of_bounds_candidates",
             unit: "{candidate}",
             description: "Number of MAP-Elites candidates whose descriptors were outside archive bounds.");
+
+        public static readonly Counter<long> MapElitesInvalidFitnessCandidates = Meter.CreateCounter<long>(
+            "overfit.evolution.map_elites.invalid_fitness_candidates",
+            unit: "{candidate}",
+            description: "Number of MAP-Elites candidates rejected due to non-finite (NaN/±∞) fitness — almost always indicates an evaluator bug.");
 
         public static readonly Histogram<long> MapElitesOccupiedCells = Meter.CreateHistogram<long>(
             "overfit.evolution.map_elites.occupied_cells",
@@ -353,13 +363,15 @@ namespace DevOnBike.Overfit.Diagnostics
 
             MapElitesCoverage.Record(metrics.Coverage, tags);
             MapElitesQdScore.Record(metrics.QdScore, tags);
-            MapElitesBestFitness.Record(metrics.BestFitness, tags);
+            MapElitesBestEvaluatedFitness.Record(metrics.BestEvaluatedFitness, tags);
+            MapElitesBestEliteFitness.Record(metrics.BestEliteFitness, tags);
 
             MapElitesIterationCount.Add(1, tags);
             MapElitesInsertedNewCells.Add(metrics.InsertedNewCells, tags);
             MapElitesReplacedCells.Add(metrics.ReplacedExistingCells, tags);
             MapElitesRejectedCandidates.Add(metrics.RejectedCount, tags);
             MapElitesOutOfBoundsCandidates.Add(metrics.OutOfBoundsCount, tags);
+            MapElitesInvalidFitnessCandidates.Add(metrics.InvalidFitnessCount, tags);
             MapElitesOccupiedCells.Record(metrics.OccupiedCells, tags);
         }
     }

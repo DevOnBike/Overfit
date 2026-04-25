@@ -54,7 +54,7 @@ namespace DevOnBike.Overfit.Evolutionary.Storage
 
         private readonly float[] _buffer;
 
-        public PrecomputedNoiseTable(int length, int? seed = null)
+        public PrecomputedNoiseTable(int length, int seed)
         {
             if (length <= 0)
             {
@@ -66,7 +66,7 @@ namespace DevOnBike.Overfit.Evolutionary.Storage
             // A single master seed fans out into deterministic per-partition seeds so that
             // rebuilding the table with the same seed produces the same bytes, even though
             // the fill itself runs in parallel with non-deterministic scheduling.
-            var masterSeed = seed ?? new Random().Next();
+            var masterSeed = seed;
 
             var partitionSize = Math.Max(MinPartitionSize, length / Math.Max(1, Environment.ProcessorCount));
             var partitioner = Partitioner.Create(0, length, partitionSize);
@@ -83,6 +83,18 @@ namespace DevOnBike.Overfit.Evolutionary.Storage
 
                 FillRange(_buffer.AsSpan(from, to - from), partitionRng);
             });
+        }
+
+        /// <summary>
+        ///     Creates a noise table seeded with a fresh non-deterministic value drawn
+        ///     from <see cref="Random.Shared"/>. Useful for ad-hoc experiments where the
+        ///     specific noise pattern doesn't matter. <b>Production runs that need to
+        ///     replay an exact training trajectory should always pass an explicit seed</b>
+        ///     to the regular constructor.
+        /// </summary>
+        public static PrecomputedNoiseTable CreateWithRandomSeed(int length)
+        {
+            return new PrecomputedNoiseTable(length, seed: Random.Shared.Next(int.MinValue, int.MaxValue));
         }
 
         public int Length => _buffer.Length;

@@ -67,8 +67,8 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             float eliteFraction,
             ISelectionOperator selectionOperator,
             IMutationOperator mutationOperator,
+            int seed,
             IFitnessShaper? fitnessShaper = null,
-            int? seed = null,
             ICrossoverOperator? crossoverOperator = null)
         {
             if (populationSize <= 1)
@@ -90,7 +90,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             _mutationOperator = mutationOperator ?? throw new ArgumentNullException(nameof(mutationOperator));
             _crossoverOperator = crossoverOperator;
             _fitnessShaper = fitnessShaper;
-            _rng = seed.HasValue ? new Random(seed.Value) : new Random();
+            _rng = new Random(seed);
 
             PopulationSize = populationSize;
             ParameterCount = parameterCount;
@@ -113,6 +113,33 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
                 _crossoverScratch1 = new float[parameterCount];
                 _crossoverScratch2 = new float[parameterCount];
             }
+        }
+
+        /// <summary>
+        ///     Creates a GA with a fresh non-deterministic seed drawn from
+        ///     <see cref="Random.Shared"/>. Useful for ad-hoc experiments and exploratory
+        ///     runs where reproducibility is not a goal. <b>Production runs should always
+        ///     pass an explicit seed</b> to the regular constructor — without it,
+        ///     checkpoints cannot be replayed and statistical results cannot be reproduced.
+        /// </summary>
+        public static GenerationalGeneticAlgorithm CreateWithRandomSeed(
+            int populationSize,
+            int parameterCount,
+            float eliteFraction,
+            ISelectionOperator selectionOperator,
+            IMutationOperator mutationOperator,
+            IFitnessShaper? fitnessShaper = null,
+            ICrossoverOperator? crossoverOperator = null)
+        {
+            return new GenerationalGeneticAlgorithm(
+                populationSize,
+                parameterCount,
+                eliteFraction,
+                selectionOperator,
+                mutationOperator,
+                seed: Random.Shared.Next(int.MinValue, int.MaxValue),
+                fitnessShaper: fitnessShaper,
+                crossoverOperator: crossoverOperator);
         }
 
         public int PopulationSize { get; }

@@ -141,10 +141,34 @@ namespace DevOnBike.Overfit.Evolutionary.Storage
                 or EliteInsertStatus.ReplacedExistingCell;
         }
 
+        /// <summary>
+        ///     Convenience overload that discards the cell index. Use the
+        ///     <see cref="Insert(ReadOnlySpan{float}, float, ReadOnlySpan{float}, out int)"/>
+        ///     overload when the caller needs to track which cell currently holds the
+        ///     archive's strongest elite (e.g. MAP-Elites'
+        ///     <c>BestEliteFitness</c> pointer).
+        /// </summary>
         public EliteInsertStatus Insert(
             ReadOnlySpan<float> parameters,
             float fitness,
             ReadOnlySpan<float> descriptor)
+        {
+            return Insert(parameters, fitness, descriptor, out _);
+        }
+
+        /// <summary>
+        ///     Inserts a candidate and reports which cell received it. <paramref name="cellIndex"/>
+        ///     is set to a valid index for <see cref="EliteInsertStatus.InsertedNewCell"/> and
+        ///     <see cref="EliteInsertStatus.ReplacedExistingCell"/>; for all other outcomes
+        ///     it is set to <c>-1</c>. <see cref="EliteInsertStatus.Rejected"/> still resolves
+        ///     <paramref name="cellIndex"/> to the matched cell so the caller can inspect the
+        ///     existing elite if needed.
+        /// </summary>
+        public EliteInsertStatus Insert(
+            ReadOnlySpan<float> parameters,
+            float fitness,
+            ReadOnlySpan<float> descriptor,
+            out int cellIndex)
         {
             ThrowIfDisposed();
 
@@ -162,8 +186,24 @@ namespace DevOnBike.Overfit.Evolutionary.Storage
                     nameof(descriptor));
             }
 
-            if (!TryGetCellIndex(descriptor, out var cellIndex))
+            // Reject NaN and ±∞ before touching the archive. Without this guard, a NaN
+            // fitness would be stored as the cell's elite and then poison the run:
+            //   - _qdScore += NaN turns the global QD score into NaN for the rest of the run
+            //   - "fitness <= existingFitness" with NaN always returns false, so any later
+            //     valid candidate would replace the NaN cell (good by accident) but the
+            //     QD score is already corrupted and cannot be recovered.
+            // Surfacing this as a distinct status — instead of silently dropping under
+            // EliteInsertStatus.Rejected — gives evaluators a chance to detect that they
+            // produced an invalid fitness for one of their candidates.
+            if (!float.IsFinite(fitness))
             {
+                cellIndex = -1;
+                return EliteInsertStatus.InvalidFitness;
+            }
+
+            if (!TryGetCellIndex(descriptor, out cellIndex))
+            {
+                cellIndex = -1;
                 return EliteInsertStatus.OutOfBounds;
             }
 

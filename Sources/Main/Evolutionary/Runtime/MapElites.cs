@@ -23,7 +23,7 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
         private readonly float[] _candidateParameters;
         private readonly float[] _candidateDescriptors;
         private readonly float[] _candidateFitness;
-        private readonly float[] _bestParameters;
+        private readonly float[] _bestEvaluatedParameters;
 
         private readonly float _initialMin;
         private readonly float _initialMax;
@@ -33,8 +33,24 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
         private readonly int _initialSeed;
         private uint _rngState;
         private bool _disposed;
-        private bool _hasBest;
-        private float _bestFitness;
+
+        // "Evaluated" tracks the strongest candidate ever produced by the evaluator,
+        // regardless of whether the candidate was admitted to the archive. This includes
+        // candidates that were rejected, fell out-of-bounds, or were skipped due to
+        // non-finite fitness — but only finite fitnesses ever update the value, so the
+        // tracker itself never goes NaN. This is the metric to watch for "is the
+        // emitter+evaluator combo capable of finding a strong candidate at all?".
+        private bool _hasBestEvaluated;
+        private float _bestEvaluatedFitness;
+
+        // "Elite" tracks the strongest candidate currently held in the archive. Because
+        // Insert only replaces when the new fitness is strictly higher, this value is
+        // monotone non-decreasing across the run (it can plateau but never regress).
+        // The cell index is cached so BestEliteParameters can read directly without
+        // scanning the entire archive.
+        private bool _hasBestElite;
+        private float _bestEliteFitness;
+        private int _bestEliteCellIndex;
 
         private bool _hasSpareGaussian;
         private float _spareGaussian;
@@ -95,7 +111,7 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
             _candidateParameters = new float[batchSize * parameterCount];
             _candidateDescriptors = new float[batchSize * DescriptorDimensions];
             _candidateFitness = new float[batchSize];
-            _bestParameters = new float[parameterCount];
+            _bestEvaluatedParameters = new float[parameterCount];
 
             _initialMin = initialMin;
             _initialMax = initialMax;
@@ -105,8 +121,11 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
             _initialSeed = seed;
             _rngState = NormalizeSeed(unchecked((uint)seed));
 
-            _bestFitness = float.NaN;
-            _hasBest = false;
+            _bestEvaluatedFitness = float.NaN;
+            _hasBestEvaluated = false;
+            _bestEliteFitness = float.NaN;
+            _bestEliteCellIndex = -1;
+            _hasBestElite = false;
             Iteration = 0;
         }
 
@@ -124,21 +143,52 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
             }
         }
 
-        public float BestFitness
+        /// <summary>
+        ///     Strongest fitness ever produced by the evaluator since the last
+        ///     <see cref="Reset"/>, regardless of archive admission. Updated only on finite
+        ///     fitness values, so this never goes NaN even if the evaluator occasionally
+        ///     emits invalid samples. <c>NaN</c> when no candidate has yet been evaluated;
+        ///     check <see cref="HasBestEvaluated"/> first.
+        /// </summary>
+        public float BestEvaluatedFitness
         {
             get
             {
                 ThrowIfDisposed();
-                return _bestFitness;
+                return _bestEvaluatedFitness;
             }
         }
 
-        public bool HasBest
+        public bool HasBestEvaluated
         {
             get
             {
                 ThrowIfDisposed();
-                return _hasBest;
+                return _hasBestEvaluated;
+            }
+        }
+
+        /// <summary>
+        ///     Strongest fitness currently held by the archive. Monotone non-decreasing:
+        ///     it can plateau but never regress, because <c>Insert</c> only replaces
+        ///     when the new fitness is strictly higher than the existing elite. <c>NaN</c>
+        ///     when the archive is empty; check <see cref="HasBestElite"/> first.
+        /// </summary>
+        public float BestEliteFitness
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return _bestEliteFitness;
+            }
+        }
+
+        public bool HasBestElite
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return _hasBestElite;
             }
         }
 
@@ -169,10 +219,30 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
             }
         }
 
-        public ReadOnlySpan<float> GetBestParameters()
+        /// <summary>
+        ///     Parameters of the strongest candidate ever evaluated. Returns an empty
+        ///     span when no finite-fitness candidate has been seen yet.
+        /// </summary>
+        public ReadOnlySpan<float> GetBestEvaluatedParameters()
         {
             ThrowIfDisposed();
-            return _hasBest ? _bestParameters : ReadOnlySpan<float>.Empty;
+            return _hasBestEvaluated ? _bestEvaluatedParameters : ReadOnlySpan<float>.Empty;
+        }
+
+        /// <summary>
+        ///     Parameters of the archive's strongest elite. Reads from the archive's own
+        ///     storage (no extra copy); the returned span is invalidated by any subsequent
+        ///     <c>Insert</c>/<c>Tell</c> that touches the same cell. Empty when the archive
+        ///     has no occupied cells.
+        /// </summary>
+        public ReadOnlySpan<float> GetBestEliteParameters()
+        {
+            ThrowIfDisposed();
+            if (!_hasBestElite || _bestEliteCellIndex < 0)
+            {
+                return ReadOnlySpan<float>.Empty;
+            }
+            return _archive.GetParameters(_bestEliteCellIndex);
         }
 
         public void Reset()
@@ -181,15 +251,18 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
 
             _rngState = NormalizeSeed(unchecked((uint)_initialSeed));
             Iteration = 0;
-            _hasBest = false;
-            _bestFitness = float.NaN;
+            _hasBestEvaluated = false;
+            _bestEvaluatedFitness = float.NaN;
+            _hasBestElite = false;
+            _bestEliteFitness = float.NaN;
+            _bestEliteCellIndex = -1;
             _hasSpareGaussian = false;
             _spareGaussian = 0f;
 
             Array.Clear(_candidateParameters, 0, _candidateParameters.Length);
             Array.Clear(_candidateDescriptors, 0, _candidateDescriptors.Length);
             Array.Clear(_candidateFitness, 0, _candidateFitness.Length);
-            Array.Clear(_bestParameters, 0, _bestParameters.Length);
+            Array.Clear(_bestEvaluatedParameters, 0, _bestEvaluatedParameters.Length);
         }
 
         public void Ask(Span<float> populationMatrix)
@@ -261,6 +334,7 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
             var replaced = 0;
             var rejected = 0;
             var outOfBounds = 0;
+            var invalidFitness = 0;
 
             for (var i = 0; i < BatchSize; i++)
             {
@@ -268,15 +342,38 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
                 var descriptor = descriptors.Slice(i * DescriptorDimensions, DescriptorDimensions);
                 var candidateFitness = fitness[i];
 
-                var status = _archive.Insert(candidate, candidateFitness, descriptor);
+                var status = _archive.Insert(candidate, candidateFitness, descriptor, out var cellIndex);
                 switch (status)
                 {
                     case EliteInsertStatus.InsertedNewCell:
                         insertedNew++;
+                        // The archive just took ownership of this candidate. If it's
+                        // stronger than any previous elite, redirect _bestEliteCellIndex
+                        // so GetBestEliteParameters reads the new cell. NaN comparison
+                        // semantics ensure the !_hasBestElite guard handles the very
+                        // first insertion correctly.
+                        if (!_hasBestElite || candidateFitness > _bestEliteFitness)
+                        {
+                            _bestEliteFitness = candidateFitness;
+                            _bestEliteCellIndex = cellIndex;
+                            _hasBestElite = true;
+                        }
                         break;
 
                     case EliteInsertStatus.ReplacedExistingCell:
                         replaced++;
+                        // The cell we just wrote *might* be the cached best-elite cell,
+                        // or it might be a different cell that's now stronger than the
+                        // current best. Either way the new fitness is strictly higher
+                        // than what was in this cell before — but it may still be lower
+                        // than the elite stored in some other cell. So check the global
+                        // best, not just the cell we wrote.
+                        if (!_hasBestElite || candidateFitness > _bestEliteFitness)
+                        {
+                            _bestEliteFitness = candidateFitness;
+                            _bestEliteCellIndex = cellIndex;
+                            _hasBestElite = true;
+                        }
                         break;
 
                     case EliteInsertStatus.Rejected:
@@ -286,13 +383,23 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
                     case EliteInsertStatus.OutOfBounds:
                         outOfBounds++;
                         break;
+
+                    case EliteInsertStatus.InvalidFitness:
+                        invalidFitness++;
+                        // Skip the BestEvaluatedFitness update for non-finite fitnesses —
+                        // see below. We don't want NaN poisoning the evaluated tracker.
+                        continue;
                 }
 
-                if (!_hasBest || candidateFitness > _bestFitness)
+                // Update BestEvaluatedFitness for any candidate with a finite fitness,
+                // regardless of archive admission. Out-of-bounds candidates count here
+                // because they were validly evaluated; only invalid (NaN/∞) candidates
+                // are skipped via the 'continue' above.
+                if (!_hasBestEvaluated || candidateFitness > _bestEvaluatedFitness)
                 {
-                    candidate.CopyTo(_bestParameters);
-                    _bestFitness = candidateFitness;
-                    _hasBest = true;
+                    candidate.CopyTo(_bestEvaluatedParameters);
+                    _bestEvaluatedFitness = candidateFitness;
+                    _hasBestEvaluated = true;
                 }
             }
 
@@ -304,11 +411,13 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
                 replacedExistingCells: replaced,
                 rejectedCount: rejected,
                 outOfBoundsCount: outOfBounds,
+                invalidFitnessCount: invalidFitness,
                 occupiedCells: _archive.OccupiedCount,
                 cellCount: _archive.CellCount,
                 coverage: _archive.Coverage,
                 qdScore: _archive.QdScore,
-                bestFitness: _bestFitness);
+                bestEvaluatedFitness: _bestEvaluatedFitness,
+                bestEliteFitness: _bestEliteFitness);
         }
 
         public MapElitesIterationMetrics RunIteration(ref TContext context)

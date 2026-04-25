@@ -52,7 +52,7 @@ namespace DevOnBike.Overfit.Demo.Unity.Server
         float Sigma,
         float LearningRate,
         int NoiseTableLength,
-        int? Seed)
+        int Seed)
     {
         /// <summary>
         ///     Number of trainable parameters in the default MLP (4→16→2):

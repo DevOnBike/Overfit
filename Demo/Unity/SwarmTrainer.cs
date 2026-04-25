@@ -108,7 +108,11 @@ namespace DevOnBike.Overfit.Demo.Unity.Server
 
             ResumeOrInitialize();
 
-            var rng = _config.Seed is int s ? new Random(s) : new Random();
+            // Per-run RNG used for evaluator-side stochastic decisions (independent
+            // of the strategy's internal state, which has its own seed). Now that
+            // SwarmConfig.Seed is mandatory, we always derive a deterministic Random
+            // from it.
+            var rng = new Random(_config.Seed);
             var startGeneration = _strategy.Generation;
             var totalSw = Stopwatch.StartNew();
 

@@ -33,8 +33,8 @@ namespace DevOnBike.Overfit.Tests
             Assert.True(metrics.InsertedNewCells > 0);
             Assert.True(metrics.OccupiedCells > 0);
             Assert.True(metrics.Coverage > 0f);
-            Assert.True(map.HasBest);
-            Assert.False(map.GetBestParameters().IsEmpty);
+            Assert.True(map.HasBestEvaluated);
+            Assert.False(map.GetBestEvaluatedParameters().IsEmpty);
         }
 
         [Fact]
@@ -87,10 +87,11 @@ namespace DevOnBike.Overfit.Tests
                 Assert.Equal(lastA.OccupiedCells, lastB.OccupiedCells);
                 Assert.Equal(lastA.Coverage, lastB.Coverage, 6);
                 Assert.Equal(lastA.QdScore, lastB.QdScore, 5);
-                Assert.Equal(lastA.BestFitness, lastB.BestFitness, 5);
+                Assert.Equal(lastA.BestEvaluatedFitness, lastB.BestEvaluatedFitness, 5);
+                Assert.Equal(lastA.BestEliteFitness, lastB.BestEliteFitness, 5);
             }
 
-            Assert.Equal(mapA.GetBestParameters().ToArray(), mapB.GetBestParameters().ToArray());
+            Assert.Equal(mapA.GetBestEvaluatedParameters().ToArray(), mapB.GetBestEvaluatedParameters().ToArray());
         }
 
         [Fact]

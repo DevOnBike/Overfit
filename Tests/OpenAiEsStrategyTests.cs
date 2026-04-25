@@ -21,7 +21,8 @@ namespace DevOnBike.Overfit.Tests
                 parameterCount: 4,
                 sigma: 0.1f,
                 learningRate: 0.01f,
-                noiseTable: noise));
+                noiseTable: noise,
+                seed: 0));
         }
 
         [Fact]
@@ -34,7 +35,8 @@ namespace DevOnBike.Overfit.Tests
                 parameterCount: 4,
                 sigma: 0f,
                 learningRate: 0.01f,
-                noiseTable: noise));
+                noiseTable: noise,
+                seed: 0));
         }
 
         [Fact]
@@ -47,7 +49,8 @@ namespace DevOnBike.Overfit.Tests
                 parameterCount: 4,
                 sigma: 0.1f,
                 learningRate: -0.01f,
-                noiseTable: noise));
+                noiseTable: noise,
+                seed: 0));
         }
 
         [Fact]
@@ -60,7 +63,8 @@ namespace DevOnBike.Overfit.Tests
                 parameterCount: 32,
                 sigma: 0.1f,
                 learningRate: 0.01f,
-                noiseTable: noise));
+                noiseTable: noise,
+                seed: 0));
         }
 
         [Fact]
@@ -109,7 +113,8 @@ namespace DevOnBike.Overfit.Tests
                 parameterCount: 4,
                 sigma: 0.1f,
                 learningRate: 0.01f,
-                noiseTable: noise);
+                noiseTable: noise,
+                seed: 0);
 
             Assert.True(es.GetBestParameters().IsEmpty);
         }
@@ -511,7 +516,8 @@ namespace DevOnBike.Overfit.Tests
                 parameterCount: 4,
                 sigma: 0.1f,
                 learningRate: 0.01f,
-                noiseTable: noise);
+                noiseTable: noise,
+                seed: 0);
 
             es.Dispose();
 

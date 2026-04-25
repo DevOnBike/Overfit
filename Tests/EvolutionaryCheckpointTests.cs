@@ -222,7 +222,7 @@ namespace DevOnBike.Overfit.Tests
             using var adamEs = new OpenAiEsStrategy(
                 populationSize: 8, parameterCount: 4,
                 sigma: 0.1f, learningRate: 0.01f,
-                noiseTable: noise, useAdam: true);
+                noiseTable: noise, seed: 0, useAdam: true);
             adamEs.Initialize();
 
             byte[] adamBytes;
@@ -236,7 +236,7 @@ namespace DevOnBike.Overfit.Tests
             using var sgdEs = new OpenAiEsStrategy(
                 populationSize: 8, parameterCount: 4,
                 sigma: 0.1f, learningRate: 0.01f,
-                noiseTable: noise, useAdam: false);
+                noiseTable: noise, seed: 0, useAdam: false);
 
             using var msLoad = new MemoryStream(adamBytes);
             using var br = new BinaryReader(msLoad);
@@ -267,7 +267,8 @@ namespace DevOnBike.Overfit.Tests
                 parameterCount: 4,
                 sigma: 0.1f,
                 learningRate: 0.01f,
-                noiseTable: noise);
+                noiseTable: noise,
+                seed: 0);
 
             using var msLoad = new MemoryStream(gaBytes);
             using var br = new BinaryReader(msLoad);

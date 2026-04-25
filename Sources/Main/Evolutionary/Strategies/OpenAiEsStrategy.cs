@@ -53,8 +53,8 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             float sigma,
             float learningRate,
             INoiseTable noiseTable,
+            int seed,
             IFitnessShaper? shaper = null,
-            int? seed = null,
             bool useAdam = true,
             float beta1 = 0.9f,
             float beta2 = 0.999f,
@@ -144,8 +144,41 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
                 _adamStep = 0;
             }
 
-            _initialSeed = seed ?? Random.Shared.Next(int.MinValue, int.MaxValue);
+            _initialSeed = seed;
             _rngState = NormalizeSeed(unchecked((uint)_initialSeed));
+        }
+
+        /// <summary>
+        ///     Creates a strategy with a fresh non-deterministic seed drawn from
+        ///     <see cref="Random.Shared"/>. Useful for ad-hoc experiments and exploratory
+        ///     runs where reproducibility is not a goal. <b>Production runs should always
+        ///     pass an explicit seed</b> to the regular constructor — without it,
+        ///     checkpoints cannot be replayed and statistical results cannot be reproduced.
+        /// </summary>
+        public static OpenAiEsStrategy CreateWithRandomSeed(
+            int populationSize,
+            int parameterCount,
+            float sigma,
+            float learningRate,
+            INoiseTable noiseTable,
+            IFitnessShaper? shaper = null,
+            bool useAdam = true,
+            float beta1 = 0.9f,
+            float beta2 = 0.999f,
+            float epsilon = 1e-8f)
+        {
+            return new OpenAiEsStrategy(
+                populationSize,
+                parameterCount,
+                sigma,
+                learningRate,
+                noiseTable,
+                seed: Random.Shared.Next(int.MinValue, int.MaxValue),
+                shaper: shaper,
+                useAdam: useAdam,
+                beta1: beta1,
+                beta2: beta2,
+                epsilon: epsilon);
         }
 
         public int PopulationSize { get; }

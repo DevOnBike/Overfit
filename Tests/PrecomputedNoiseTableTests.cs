@@ -19,8 +19,8 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void Constructor_ThrowsOnNonPositiveLength()
         {
-            Assert.Throws<ArgumentOutOfRangeException>(() => new PrecomputedNoiseTable(length: 0));
-            Assert.Throws<ArgumentOutOfRangeException>(() => new PrecomputedNoiseTable(length: -1));
+            Assert.Throws<ArgumentOutOfRangeException>(() => new PrecomputedNoiseTable(length: 0, seed: 0));
+            Assert.Throws<ArgumentOutOfRangeException>(() => new PrecomputedNoiseTable(length: -1, seed: 0));
         }
 
         [Fact]
