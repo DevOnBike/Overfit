@@ -1,4 +1,5 @@
-﻿using BenchmarkDotNet.Attributes;
+﻿using System.Numerics;
+using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Diagnosers;
 using BenchmarkDotNet.Jobs;
@@ -36,6 +37,8 @@ namespace Benchmarks
         private const int GapOutputSize = ConvOutChannels;
         private const int OutputSize = OutputClasses;
 
+        private const int OperationsPerInvoke = 32_768;
+
         private Sequential _overfit = null!;
         private ConvLayer _conv = null!;
         private LinearLayer _linear = null!;
@@ -57,8 +60,8 @@ namespace Benchmarks
             public Config()
             {
                 AddJob(Job.Default
-                    .WithWarmupCount(10)
-                    .WithIterationCount(50)
+                    .WithWarmupCount(5)
+                    .WithIterationCount(20)
                     .WithInvocationCount(1)
                     .WithUnrollFactor(1));
 
@@ -108,23 +111,44 @@ namespace Benchmarks
 
             BuildManualCaches();
 
-            // Warmup: JIT + caches outside measured region.
             _overfit.ForwardInference(_input, _overfitOutput);
             ManualCnnForward();
+
+            AssertClose(_overfitOutput, _manualOutput, tolerance: 1e-4f);
+
+            for (var i = 0; i < 256; i++)
+            {
+                _overfit.ForwardInference(_input, _overfitOutput);
+                ManualCnnForward();
+            }
         }
 
-        [Benchmark]
+        [Benchmark(OperationsPerInvoke = OperationsPerInvoke)]
         public float Overfit_Cnn_ZeroAlloc()
         {
-            _overfit.ForwardInference(_input, _overfitOutput);
-            return _overfitOutput[0];
+            var checksum = 0f;
+
+            for (var i = 0; i < OperationsPerInvoke; i++)
+            {
+                _overfit.ForwardInference(_input, _overfitOutput);
+                checksum += _overfitOutput[0];
+            }
+
+            return checksum;
         }
 
-        [Benchmark]
-        public float Manual_Cnn_TrueZeroAlloc()
+        [Benchmark(OperationsPerInvoke = OperationsPerInvoke)]
+        public float Manual_Cnn_FastZeroAlloc()
         {
-            ManualCnnForward();
-            return _manualOutput[0];
+            var checksum = 0f;
+
+            for (var i = 0; i < OperationsPerInvoke; i++)
+            {
+                ManualCnnForward();
+                checksum += _manualOutput[0];
+            }
+
+            return checksum;
         }
 
         [GlobalCleanup]
@@ -140,15 +164,17 @@ namespace Benchmarks
 
         private void BuildManualCaches()
         {
-            _conv.Kernels.DataView.AsReadOnlySpan().CopyTo(_manualConvKernels);
+            _conv.Kernels.DataView
+                .AsReadOnlySpan()
+                .CopyTo(_manualConvKernels);
 
             var weights = _linear.Weights.DataView.AsReadOnlySpan();
             var bias = _linear.Bias.DataView.AsReadOnlySpan();
 
             bias.CopyTo(_manualLinearBias);
 
-            // LinearLayer weights layout: [input, output]
-            // Manual cache layout: [output, input]
+            // Linear weights layout: [input, output]
+            // Manual cache layout:  [output, input]
             for (var i = 0; i < GapOutputSize; i++)
             {
                 var srcBase = i * OutputClasses;
@@ -162,7 +188,7 @@ namespace Benchmarks
 
         private void ManualCnnForward()
         {
-            ManualConv2D(
+            ManualConv2D_1x3x3_Vectorized(
                 _input,
                 _manualConvKernels,
                 _manualConvOutput);
@@ -177,50 +203,122 @@ namespace Benchmarks
                 _manualPoolOutput,
                 _manualGapOutput);
 
-            ManualLinear(
+            ManualLinearOutputMajorDot(
                 _manualGapOutput,
                 _manualLinearWeightsT,
                 _manualLinearBias,
                 _manualOutput);
         }
 
-        private static void ManualConv2D(
+        private static void ManualConv2D_1x3x3_Vectorized(
             ReadOnlySpan<float> input,
             ReadOnlySpan<float> kernels,
             Span<float> output)
         {
-            const int kernelSizePerOutput = InputChannels * Kernel * Kernel;
+            if (!Vector.IsHardwareAccelerated || ConvOutW < Vector<float>.Count)
+            {
+                ManualConv2D_1x3x3_Scalar(input, kernels, output);
+                return;
+            }
+
+            var vectorWidth = Vector<float>.Count;
 
             for (var oc = 0; oc < ConvOutChannels; oc++)
             {
-                var kernelBase = oc * kernelSizePerOutput;
+                var kernelBase = oc * 9;
                 var outputChannelBase = oc * ConvOutH * ConvOutW;
+
+                var k00 = new Vector<float>(kernels[kernelBase + 0]);
+                var k01 = new Vector<float>(kernels[kernelBase + 1]);
+                var k02 = new Vector<float>(kernels[kernelBase + 2]);
+                var k10 = new Vector<float>(kernels[kernelBase + 3]);
+                var k11 = new Vector<float>(kernels[kernelBase + 4]);
+                var k12 = new Vector<float>(kernels[kernelBase + 5]);
+                var k20 = new Vector<float>(kernels[kernelBase + 6]);
+                var k21 = new Vector<float>(kernels[kernelBase + 7]);
+                var k22 = new Vector<float>(kernels[kernelBase + 8]);
 
                 for (var oy = 0; oy < ConvOutH; oy++)
                 {
+                    var inputRow0 = oy * InputW;
+                    var inputRow1 = (oy + 1) * InputW;
+                    var inputRow2 = (oy + 2) * InputW;
+                    var outputRow = outputChannelBase + oy * ConvOutW;
+
+                    var ox = 0;
+
+                    for (; ox <= ConvOutW - vectorWidth; ox += vectorWidth)
+                    {
+                        var acc =
+                            new Vector<float>(input.Slice(inputRow0 + ox, vectorWidth)) * k00 +
+                            new Vector<float>(input.Slice(inputRow0 + ox + 1, vectorWidth)) * k01 +
+                            new Vector<float>(input.Slice(inputRow0 + ox + 2, vectorWidth)) * k02 +
+                            new Vector<float>(input.Slice(inputRow1 + ox, vectorWidth)) * k10 +
+                            new Vector<float>(input.Slice(inputRow1 + ox + 1, vectorWidth)) * k11 +
+                            new Vector<float>(input.Slice(inputRow1 + ox + 2, vectorWidth)) * k12 +
+                            new Vector<float>(input.Slice(inputRow2 + ox, vectorWidth)) * k20 +
+                            new Vector<float>(input.Slice(inputRow2 + ox + 1, vectorWidth)) * k21 +
+                            new Vector<float>(input.Slice(inputRow2 + ox + 2, vectorWidth)) * k22;
+
+                        acc.CopyTo(output.Slice(outputRow + ox, vectorWidth));
+                    }
+
+                    for (; ox < ConvOutW; ox++)
+                    {
+                        output[outputRow + ox] =
+                            input[inputRow0 + ox] * kernels[kernelBase + 0] +
+                            input[inputRow0 + ox + 1] * kernels[kernelBase + 1] +
+                            input[inputRow0 + ox + 2] * kernels[kernelBase + 2] +
+                            input[inputRow1 + ox] * kernels[kernelBase + 3] +
+                            input[inputRow1 + ox + 1] * kernels[kernelBase + 4] +
+                            input[inputRow1 + ox + 2] * kernels[kernelBase + 5] +
+                            input[inputRow2 + ox] * kernels[kernelBase + 6] +
+                            input[inputRow2 + ox + 1] * kernels[kernelBase + 7] +
+                            input[inputRow2 + ox + 2] * kernels[kernelBase + 8];
+                    }
+                }
+            }
+        }
+
+        private static void ManualConv2D_1x3x3_Scalar(
+            ReadOnlySpan<float> input,
+            ReadOnlySpan<float> kernels,
+            Span<float> output)
+        {
+            for (var oc = 0; oc < ConvOutChannels; oc++)
+            {
+                var kernelBase = oc * 9;
+                var outputChannelBase = oc * ConvOutH * ConvOutW;
+
+                var k00 = kernels[kernelBase + 0];
+                var k01 = kernels[kernelBase + 1];
+                var k02 = kernels[kernelBase + 2];
+                var k10 = kernels[kernelBase + 3];
+                var k11 = kernels[kernelBase + 4];
+                var k12 = kernels[kernelBase + 5];
+                var k20 = kernels[kernelBase + 6];
+                var k21 = kernels[kernelBase + 7];
+                var k22 = kernels[kernelBase + 8];
+
+                for (var oy = 0; oy < ConvOutH; oy++)
+                {
+                    var inputRow0 = oy * InputW;
+                    var inputRow1 = (oy + 1) * InputW;
+                    var inputRow2 = (oy + 2) * InputW;
+                    var outputRow = outputChannelBase + oy * ConvOutW;
+
                     for (var ox = 0; ox < ConvOutW; ox++)
                     {
-                        var sum = 0f;
-
-                        for (var ic = 0; ic < InputChannels; ic++)
-                        {
-                            var inputChannelBase = ic * InputH * InputW;
-                            var kernelChannelBase = kernelBase + ic * Kernel * Kernel;
-
-                            for (var ky = 0; ky < Kernel; ky++)
-                            {
-                                var inputRowBase = inputChannelBase + (oy + ky) * InputW + ox;
-                                var kernelRowBase = kernelChannelBase + ky * Kernel;
-
-                                for (var kx = 0; kx < Kernel; kx++)
-                                {
-                                    sum += input[inputRowBase + kx] *
-                                           kernels[kernelRowBase + kx];
-                                }
-                            }
-                        }
-
-                        output[outputChannelBase + oy * ConvOutW + ox] = sum;
+                        output[outputRow + ox] =
+                            input[inputRow0 + ox] * k00 +
+                            input[inputRow0 + ox + 1] * k01 +
+                            input[inputRow0 + ox + 2] * k02 +
+                            input[inputRow1 + ox] * k10 +
+                            input[inputRow1 + ox + 1] * k11 +
+                            input[inputRow1 + ox + 2] * k12 +
+                            input[inputRow2 + ox] * k20 +
+                            input[inputRow2 + ox + 1] * k21 +
+                            input[inputRow2 + ox + 2] * k22;
                     }
                 }
             }
@@ -295,7 +393,7 @@ namespace Benchmarks
             }
         }
 
-        private static void ManualLinear(
+        private static void ManualLinearOutputMajorDot(
             ReadOnlySpan<float> input,
             ReadOnlySpan<float> weightsT,
             ReadOnlySpan<float> bias,
@@ -312,6 +410,29 @@ namespace Benchmarks
                 }
 
                 output[j] = sum;
+            }
+        }
+
+        private static void AssertClose(
+            ReadOnlySpan<float> expected,
+            ReadOnlySpan<float> actual,
+            float tolerance)
+        {
+            if (expected.Length != actual.Length)
+            {
+                throw new InvalidOperationException(
+                    $"Output length mismatch: expected={expected.Length}, actual={actual.Length}");
+            }
+
+            for (var i = 0; i < expected.Length; i++)
+            {
+                var diff = MathF.Abs(expected[i] - actual[i]);
+
+                if (diff > tolerance)
+                {
+                    throw new InvalidOperationException(
+                        $"Mismatch at {i}: expected={expected[i]}, actual={actual[i]}, diff={diff}");
+                }
             }
         }
 
