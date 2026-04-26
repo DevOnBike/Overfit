@@ -10,22 +10,24 @@ using DevOnBike.Overfit.DeepLearning.Abstractions;
 using DevOnBike.Overfit.Maths;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors;
-using DevOnBike.Overfit.Tensors.Core; // Wpinamy Core
+using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
-    public sealed class LinearLayer : IModule
+    public sealed class LinearLayer : IModule, IInferenceShapeProvider
     {
-        private AutogradNode _inferenceOutputNode;
-        private int _inferenceOutputBatchSize = 1;
         private readonly int _inputSize;
         private readonly int _outputSize;
 
-        // Zmieniono FastTensor na TensorStorage
-        private TensorStorage<float>? _weightsTransposed;
+        // Preallocated once. Rebuilt in-place. No TensorFactory.Materialize in inference hot path.
+        private readonly TensorStorage<float> _weightsTransposed;
+        private bool _inferenceCacheValid;
 
         public LinearLayer(int inputSize, int outputSize)
         {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(inputSize);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(outputSize);
+
             _inputSize = inputSize;
             _outputSize = outputSize;
 
@@ -38,19 +40,53 @@ namespace DevOnBike.Overfit.DeepLearning
                 wSpan[i] = MathUtils.NextGaussian() * stdDev;
             }
 
-            // Rozdzielony Kształt i Magazyn!
-            Weights = new AutogradNode(wData, new TensorShape(inputSize, outputSize), requiresGrad: true);
+            Weights = new AutogradNode(
+                wData,
+                new TensorShape(inputSize, outputSize),
+                requiresGrad: true);
 
             var bData = new TensorStorage<float>(outputSize, clearMemory: true);
-            Bias = new AutogradNode(bData, new TensorShape(outputSize), requiresGrad: true);
+
+            Bias = new AutogradNode(
+                bData,
+                new TensorShape(outputSize),
+                requiresGrad: true);
+
+            _weightsTransposed = new TensorStorage<float>(
+                inputSize * outputSize,
+                clearMemory: false);
         }
 
         public AutogradNode Weights { get; }
+
         public AutogradNode Bias { get; }
+
         public bool IsTraining { get; private set; } = true;
 
-        public void Train() => IsTraining = true;
-        public void Eval() => IsTraining = false;
+        public int InferenceInputSize => _inputSize;
+
+        public int InferenceOutputSize => _outputSize;
+
+        public void Train()
+        {
+            IsTraining = true;
+            _inferenceCacheValid = false;
+        }
+
+        public void Eval()
+        {
+            IsTraining = false;
+            PrepareInference();
+        }
+
+        public void PrepareInference()
+        {
+            if (!_inferenceCacheValid)
+            {
+                RebuildTransposedWeightsInPlace();
+                _inferenceCacheValid = true;
+            }
+        }
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
@@ -65,21 +101,25 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void InvalidateParameterCaches()
         {
+            _inferenceCacheValid = false;
+
             if (!IsTraining)
             {
-                RebuildTransposedWeights();
+                PrepareInference();
             }
         }
 
         public void Save(BinaryWriter bw)
         {
             bw.Write(Weights.DataView.Size);
+
             foreach (var val in Weights.DataView.AsReadOnlySpan())
             {
                 bw.Write(val);
             }
 
             bw.Write(Bias.DataView.Size);
+
             foreach (var val in Bias.DataView.AsReadOnlySpan())
             {
                 bw.Write(val);
@@ -89,27 +129,38 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Load(BinaryReader br)
         {
             var lenW = br.ReadInt32();
+
             if (lenW != Weights.DataView.Size)
             {
                 throw new Exception("Weights mismatch");
             }
 
             var wSpan = Weights.DataView.AsSpan();
+
             for (var i = 0; i < lenW; i++)
             {
                 wSpan[i] = br.ReadSingle();
             }
 
             var lenB = br.ReadInt32();
+
             if (lenB != Bias.DataView.Size)
             {
                 throw new Exception("Bias mismatch");
             }
 
             var bSpan = Bias.DataView.AsSpan();
+
             for (var i = 0; i < lenB; i++)
             {
                 bSpan[i] = br.ReadSingle();
+            }
+
+            _inferenceCacheValid = false;
+
+            if (!IsTraining)
+            {
+                PrepareInference();
             }
         }
 
@@ -132,11 +183,22 @@ namespace DevOnBike.Overfit.DeepLearning
             Load(br);
         }
 
-        private void RebuildTransposedWeights()
+        private void RebuildTransposedWeightsInPlace()
         {
-            _weightsTransposed?.Dispose();
-            // FABRYKA: Zamiast FastTensor.FromView
-            _weightsTransposed = TensorFactory.Materialize(Weights.DataView.Transpose2D());
+            var src = Weights.DataView.AsReadOnlySpan();
+            var dst = _weightsTransposed.AsSpan();
+
+            // Weights layout: [input, output]
+            // Transposed cache layout: [output, input]
+            for (var i = 0; i < _inputSize; i++)
+            {
+                var srcBase = i * _outputSize;
+
+                for (var j = 0; j < _outputSize; j++)
+                {
+                    dst[j * _inputSize + i] = src[srcBase + j];
+                }
+            }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -158,37 +220,56 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
-            if (_weightsTransposed == null)
+            if (!_inferenceCacheValid)
             {
-                RebuildTransposedWeights();
+                PrepareInference();
+            }
+
+            if (input.Length % _inputSize != 0)
+            {
+                throw new ArgumentException("Input length is not divisible by layer input size.", nameof(input));
             }
 
             var batchSize = input.Length / _inputSize;
+            var expectedOutputLength = batchSize * _outputSize;
+
+            if (output.Length < expectedOutputLength)
+            {
+                throw new ArgumentException("Output span is too small for LinearLayer inference.", nameof(output));
+            }
+
+            var wTSpan = _weightsTransposed.AsReadOnlySpan();
+            var bSpan = Bias.DataView.AsReadOnlySpan();
 
             if (batchSize == 1)
             {
-                LinearInferenceSimd(input, _weightsTransposed.AsReadOnlySpan(), Bias.DataView.AsReadOnlySpan(), output);
-            }
-            else
-            {
-                var wTSpan = _weightsTransposed.AsReadOnlySpan();
-                var bSpan = Bias.DataView.AsReadOnlySpan();
+                LinearInferenceSimd(
+                    input,
+                    wTSpan,
+                    bSpan,
+                    output.Slice(0, _outputSize));
 
-                for (var b = 0; b < batchSize; b++)
-                {
-                    var inSlice = input.Slice(b * _inputSize, _inputSize);
-                    var outSlice = output.Slice(b * _outputSize, _outputSize);
-                    LinearInferenceSimd(inSlice, wTSpan, bSpan, outSlice);
-                }
+                return;
+            }
+
+            for (var b = 0; b < batchSize; b++)
+            {
+                var inSlice = input.Slice(b * _inputSize, _inputSize);
+                var outSlice = output.Slice(b * _outputSize, _outputSize);
+
+                LinearInferenceSimd(
+                    inSlice,
+                    wTSpan,
+                    bSpan,
+                    outSlice);
             }
         }
 
         public void Dispose()
         {
-            Weights?.Dispose();
-            Bias?.Dispose();
-            _weightsTransposed?.Dispose();
-            _inferenceOutputNode?.Dispose();
+            Weights.Dispose();
+            Bias.Dispose();
+            _weightsTransposed.Dispose();
         }
     }
 }
