@@ -13,7 +13,7 @@ Benchmark machine:
 
 ## Current inference architecture
 
-Overfit now has two separate execution paths:
+Overfit has two separate execution paths.
 
 ### Training path
 
@@ -22,64 +22,97 @@ Used for learning/backpropagation.
 ```text
 AutogradNode
 ComputationGraph
-TensorMath
+TensorMath/Ops
 Optimizer
 ```
 
-This path is allowed to allocate internal graph/tensor state.
+This path may allocate graph/tensor state. Training benchmarks are performance trend benchmarks, not zero-allocation gates.
 
 ### Inference path
 
 Used for production prediction.
 
 ```text
+InferenceEngine.Run(...)
 Sequential.ForwardInference(...)
-Span<float>
-preallocated workspace
-layer-specific inference kernels
+layer.ForwardInference(...)
+Kernels.*(...)
 ```
 
 This path is designed to allocate `0 B/op` after engine/model preparation.
 
-## Confirmed zero-allocation components
+## Confirmed zero-allocation inference components
 
-The following inference paths have been verified as zero-allocation:
+The following paths are verified through current benchmark coverage:
 
 ```text
+InferenceEngine.Run
+Sequential.ForwardInference
 LinearLayer.ForwardInference
 ReluActivation.ForwardInference
-BatchNorm1D.ForwardInference
 ConvLayer.ForwardInference
 MaxPool2DLayer.ForwardInference
 GlobalAveragePool2DLayer.ForwardInference
-Sequential.ForwardInference
 ```
 
-## MLP inference benchmark
+## Benchmark results
 
-Model:
+### Single Linear(784,10)
 
-```text
-Linear(784, 128)
-ReLU
-Linear(128, 10)
-```
-
-Result:
-
-| Runtime | Mean | Allocated |
-|---|---:|---:|
-| Overfit | 3.607 us | 0 B |
-| ONNX Runtime | 4.760 us | 224 B |
+| Benchmark | Overfit | ONNX Runtime | Allocations |
+|---|---:|---:|---:|
+| `SingleInferenceBenchmark` | ~252 ns | ~2.14 us | Overfit 0 B, ONNX 224 B |
+| `OnnxLinearInferenceBenchmarks` | ~272 ns | ~2.18 us | Overfit 0 B, ONNX 224 B |
+| `TailLatencyBenchmark` | ~299 ns | ~2.26 us | Overfit 0 B, ONNX 224 B |
+| `ThroughputBenchmark` | ~253 ns/op | ~1.87 us/op | Overfit 0 B, ONNX 224 B |
 
 Conclusion:
 
 ```text
-Overfit is faster than ONNX Runtime for this small MLP workload.
-Overfit also keeps the hot path at 0 B/op.
+Overfit is roughly 7-9x faster than the preallocated ONNX Runtime path for repeated single-sample Linear(784,10) inference and remains zero-allocation.
 ```
 
-## CNN inference benchmark
+### Scaling by input size
+
+| Model | Overfit | ONNX Runtime | Allocation |
+|---|---:|---:|---:|
+| Linear(64,10) | ~80 ns | ~1.39 us | Overfit 0 B, ONNX 224 B |
+| Linear(784,10) | ~210 ns | ~1.87 us | Overfit 0 B, ONNX 224 B |
+| Linear(4096,10) | ~1.08 us | ~3.74 us | Overfit 0 B, ONNX 224 B |
+
+Conclusion:
+
+```text
+Overfit keeps the Linear inference path allocation-free across tested input sizes. ONNX Runtime fixed call overhead dominates at small model sizes.
+```
+
+### MLP: 784 -> 128 -> 10
+
+| Runtime | Mean | Allocated |
+|---|---:|---:|
+| Overfit | ~3.7 us | 0 B |
+| ONNX Runtime preallocated | ~5.2 us | 224 B |
+
+Conclusion:
+
+```text
+Overfit is faster for this small MLP workload and keeps the hot path at 0 B/op.
+```
+
+### MLP: 784 -> 256 -> 128 -> 10
+
+| Runtime | Mean | Allocated |
+|---|---:|---:|
+| Overfit | ~10-12 us | 0 B |
+| ONNX Runtime preallocated | ~10-11 us | 224 B |
+
+Conclusion:
+
+```text
+Overfit roughly matches ONNX Runtime for this larger 3-layer MLP while staying allocation-free.
+```
+
+### CNN inference
 
 Model:
 
@@ -91,63 +124,73 @@ GlobalAveragePool2D
 Linear(8, 10)
 ```
 
-Result:
-
 | Runtime | Mean | Allocated |
 |---|---:|---:|
-| Manual CNN fast path | 5.147 us | 0 B |
-| Overfit | 5.534–5.592 us | 0 B |
-| ONNX Runtime | 6.049 us | 224 B |
+| Overfit | ~5-6.5 us | 0 B |
+| ONNX Runtime preallocated | ~6-7.7 us | 224 B |
 
 Conclusion:
 
 ```text
-Overfit CNN inference is close to manual specialized code.
-Overfit is faster than ONNX Runtime in this small CNN workload.
-ONNX Runtime still allocates wrapper memory in the measured path.
+Overfit is roughly tied with ONNX Runtime on the small CNN benchmark and remains zero-allocation.
 ```
 
-## Key optimizations added
+### ML.NET API-level benchmark
 
-### Linear inference
+Model: 3-layer MLP, API-level single inference.
 
-For small output sizes, Overfit uses output-major dot-product:
+| Runtime | Mean | Allocated |
+|---|---:|---:|
+| ML.NET PredictionEngine, fresh input | ~10.1 us | ~4.6 KB |
+| ML.NET PredictionEngine, reused input | ~10.1 us | ~4.5 KB |
+| ONNX Runtime preallocated | ~11.2 us | 224 B |
+| Overfit InferenceEngine | ~12.1 us | 0 B |
+
+Conclusion:
 
 ```text
-Linear(784, 10)
-Linear(128, 10)
+ML.NET is slightly faster in this API-level run but allocates several KB/op. Overfit is the only zero-allocation path.
 ```
 
-For larger output sizes, Overfit uses input-major SIMD Vector4 kernel:
+### Batch scaling
+
+| Batch | Overfit | ONNX Runtime | Result |
+|---:|---:|---:|---|
+| 1 | ~286 ns, 0 B | ~1.90 us, 224 B | Overfit wins |
+| 16 | ~3.0 us, 0 B | ~3.7 us, 224 B | Overfit close / wins in this run |
+| 64 | ~14.4 us, 0 B | ~7.2 us, 224 B | ONNX wins |
+| 256 | ~47.4 us, 0 B | ~23.4 us, 224 B | ONNX wins |
+
+Conclusion:
 
 ```text
-Linear(784, 128)
+Overfit's current batch path remains allocation-free but processes batches as repeated sample inference. ONNX Runtime wins at larger batch sizes because it uses batched GEMM-style execution. Next target: LinearKernels.ForwardBatched(...).
 ```
 
-This avoids the slow scalar input-major path and avoids the register pressure regression observed with Vector8.
+### Concurrent inference
 
-### Conv inference
+| Runtime | Mean | Allocated |
+|---|---:|---:|
+| Overfit | ~516 ms | 0 B |
+| ONNX Runtime | ~1811 ms | ~117 MB |
 
-Specialized fast path added for:
+Conclusion:
 
 ```text
-inChannels = 1
-kernel = 3x3
+Overfit performs well in a zero-contention concurrent single-sample inference scenario where each worker owns its own model, engine and buffers.
 ```
 
-This targets the MNIST-style CNN case and uses SIMD over output width.
+## Benchmark interpretation rules
+
+- `Allocated = -` or `0 B` is required for zero-allocation inference claims.
+- ONNX methods should be named `PreAllocated`, not `TrueZeroAlloc`, when allocations remain.
+- `MinIterationTime` warnings should be fixed with `OperationsPerInvoke` before documenting numbers.
+- Training and graph benchmarks can allocate and should be documented separately.
+- Thread-scaling benchmarks are directional unless explicitly stabilized.
 
 ## Current recommendation
 
-Use this public API shape for inference:
-
-```csharp
-using var engine = InferenceEngine.FromSequential(model);
-
-ReadOnlySpan<float> prediction = engine.Predict(input);
-```
-
-For explicit control:
+Use this public API shape for production inference:
 
 ```csharp
 using var engine = InferenceEngine.FromSequential(
@@ -156,46 +199,17 @@ using var engine = InferenceEngine.FromSequential(
     outputSize: 10,
     new InferenceEngineOptions
     {
-        WarmupIterations = 8,
+        WarmupIterations = 16,
         MaxIntermediateElements = 64 * 1024
     });
 
 engine.Run(input, output);
 ```
 
-## Design direction
+For convenience:
 
-Inference should stay separated from training:
-
-```text
-Training:
-    flexible graph/autograd system
-
-Inference:
-    prepared immutable-ish engine
-    preallocated buffers
-    no AutogradNode
-    no graph construction
-    no temporary storage allocation
+```csharp
+ReadOnlySpan<float> prediction = engine.Predict(input);
 ```
 
-The next architectural step is a small `InferenceEngine` facade that hides:
-
-```text
-model.Eval()
-model.PrepareInference(...)
-workspace sizing
-output buffer ownership
-warmup
-input/output validation
-```
-
-while still allowing future backends:
-
-```text
-SequentialInferenceBackend
-OnnxInferenceBackend
-CompiledInferenceBackend
-GpuInferenceBackend
-CustomUserBackend
-```
+The prediction span is internal and overwritten on the next call.

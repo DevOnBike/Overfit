@@ -1,6 +1,6 @@
-# TrainingEngine façade
+# TrainingEngine facade
 
-This patch adds a small training façade that hides common training boilerplate while keeping the training system extensible.
+The training facade hides common training boilerplate while keeping the training system extensible.
 
 ## Purpose
 
@@ -11,8 +11,8 @@ Inference:
 ```text
 InferenceEngine
 preallocated buffers
-Span<float>
-zero allocations on hot path
+Span-based hot path
+zero allocations after preparation
 ```
 
 Training:
@@ -27,21 +27,17 @@ backward
 step
 ```
 
-Training is not promised to be zero-allocation. It owns graph/autograd state and may allocate depending on the active operators.
+Training is not promised to be zero-allocation. It owns graph/autograd state and may allocate depending on active operators.
 
-## Added files
+## Current baseline
 
-```text
-Sources/Main/Training/ITrainingOptimizer.cs
-Sources/Main/Training/DelegateTrainingOptimizer.cs
-Sources/Main/Training/ITrainingLoss.cs
-Sources/Main/Training/DelegateTrainingLoss.cs
-Sources/Main/Training/TrainingEngineOptions.cs
-Sources/Main/Training/TrainingStepResult.cs
-Sources/Main/Training/ITrainingBackend.cs
-Sources/Main/Training/TrainingEngine.cs
-Sources/Main/Training/SequentialTrainingBackend.cs
-```
+Current `TrainingEngineBenchmarks` result on AMD Ryzen 9 9950X3D / .NET 10:
+
+| Benchmark | Mean | Allocated | Purpose |
+|---|---:|---:|---|
+| `TrainingEngine_Mlp_TrainBatch` | ~468 us | ~26.8 KB | performance trend tracking |
+
+This is not a zero-allocation gate. Use it to detect major regressions after graph, optimizer or layer changes.
 
 ## Developer-facing API
 
@@ -71,9 +67,7 @@ var optimizer = new DelegateTrainingOptimizer(
 var loss = new DelegateTrainingLoss(
     forward: (graph, prediction, target) =>
         TensorMath.SoftmaxCrossEntropy(graph, prediction, target),
-
-    backward: (graph, lossNode) =>
-        graph.Backward(lossNode));
+    backward: (graph, lossNode) => graph.Backward(lossNode));
 
 using var trainer = TrainingEngine.FromBackend(
     new SequentialTrainingBackend(
@@ -89,15 +83,8 @@ using var trainer = TrainingEngine.FromBackend(
             ValidateFiniteInput = false,
             ValidateFiniteTarget = false
         }));
-```
 
-Training loop:
-
-```csharp
-TrainingStepResult result = trainer.TrainBatch(
-    batchInput,
-    batchTarget);
-
+TrainingStepResult result = trainer.TrainBatch(batchInput, batchTarget);
 Console.WriteLine(result.Loss);
 ```
 
@@ -110,7 +97,7 @@ ITrainingBackend
 TrainingEngine
 ```
 
-Future backends can be added without changing public `TrainingEngine`:
+Potential future backends:
 
 ```text
 CompiledTrainingBackend
@@ -118,4 +105,18 @@ GradientAccumulationBackend
 MixedPrecisionTrainingBackend
 DistributedTrainingBackend
 CustomReinforcementLearningBackend
+```
+
+## Architecture direction
+
+`TrainingEngine` should remain the workflow facade. It should not absorb the responsibilities of `ComputationGraph`.
+
+Target split:
+
+```text
+TrainingEngine: batch workflow
+ComputationGraph: autograd operation runtime
+Parameter: long-lived model state
+Optimizer: parameter update
+Kernels: pure math
 ```
