@@ -3,9 +3,9 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Numerics;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
+using DevOnBike.Overfit.Kernels;
 using DevOnBike.Overfit.Maths;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors;
@@ -91,7 +91,7 @@ namespace DevOnBike.Overfit.DeepLearning
         public void PrepareInference()
         {
             // Direct inference convolution uses Kernels.DataView directly.
-            // No per-call cache required.
+            // No transformed cache currently required.
         }
 
         public AutogradNode Forward(
@@ -149,238 +149,6 @@ namespace DevOnBike.Overfit.DeepLearning
             }
         }
 
-        public void ForwardInference(
-            ReadOnlySpan<float> input,
-            Span<float> output)
-        {
-            if (input.Length % _inputSize != 0)
-            {
-                throw new ArgumentException(
-                    "Input length is not divisible by ConvLayer inference input size.",
-                    nameof(input));
-            }
-
-            var batchSize = input.Length / _inputSize;
-            var expectedOutputLength = batchSize * _outputSize;
-
-            if (output.Length < expectedOutputLength)
-            {
-                throw new ArgumentException(
-                    "Output span is too small for ConvLayer inference.",
-                    nameof(output));
-            }
-
-            var kernels = Kernels.DataView.AsReadOnlySpan();
-
-            for (var n = 0; n < batchSize; n++)
-            {
-                var inputBatch = input.Slice(n * _inputSize, _inputSize);
-                var outputBatch = output.Slice(n * _outputSize, _outputSize);
-
-                if (_inC == 1 && _k == 3)
-                {
-                    ForwardInferenceSingleChannel3x3(
-                        inputBatch,
-                        outputBatch,
-                        kernels);
-                }
-                else
-                {
-                    ForwardInferenceGenericSingleBatch(
-                        inputBatch,
-                        outputBatch,
-                        kernels);
-                }
-            }
-        }
-
-        private void ForwardInferenceSingleChannel3x3(
-            ReadOnlySpan<float> input,
-            Span<float> output,
-            ReadOnlySpan<float> kernels)
-        {
-            if (Vector.IsHardwareAccelerated &&
-                _outW >= Vector<float>.Count)
-            {
-                ForwardInferenceSingleChannel3x3Vectorized(
-                    input,
-                    output,
-                    kernels);
-
-                return;
-            }
-
-            ForwardInferenceSingleChannel3x3Scalar(
-                input,
-                output,
-                kernels);
-        }
-
-        private void ForwardInferenceSingleChannel3x3Vectorized(
-            ReadOnlySpan<float> input,
-            Span<float> output,
-            ReadOnlySpan<float> kernels)
-        {
-            var vectorWidth = Vector<float>.Count;
-
-            for (var oc = 0; oc < _outC; oc++)
-            {
-                var kernelBase = oc * 9;
-                var outputChannelBase = oc * _outH * _outW;
-
-                var k00 = new Vector<float>(kernels[kernelBase + 0]);
-                var k01 = new Vector<float>(kernels[kernelBase + 1]);
-                var k02 = new Vector<float>(kernels[kernelBase + 2]);
-                var k10 = new Vector<float>(kernels[kernelBase + 3]);
-                var k11 = new Vector<float>(kernels[kernelBase + 4]);
-                var k12 = new Vector<float>(kernels[kernelBase + 5]);
-                var k20 = new Vector<float>(kernels[kernelBase + 6]);
-                var k21 = new Vector<float>(kernels[kernelBase + 7]);
-                var k22 = new Vector<float>(kernels[kernelBase + 8]);
-
-                for (var oy = 0; oy < _outH; oy++)
-                {
-                    var inputRow0 = oy * _w;
-                    var inputRow1 = (oy + 1) * _w;
-                    var inputRow2 = (oy + 2) * _w;
-                    var outputRow = outputChannelBase + oy * _outW;
-
-                    var ox = 0;
-
-                    for (; ox <= _outW - vectorWidth; ox += vectorWidth)
-                    {
-                        var acc =
-                            new Vector<float>(input.Slice(inputRow0 + ox, vectorWidth)) * k00 +
-                            new Vector<float>(input.Slice(inputRow0 + ox + 1, vectorWidth)) * k01 +
-                            new Vector<float>(input.Slice(inputRow0 + ox + 2, vectorWidth)) * k02 +
-                            new Vector<float>(input.Slice(inputRow1 + ox, vectorWidth)) * k10 +
-                            new Vector<float>(input.Slice(inputRow1 + ox + 1, vectorWidth)) * k11 +
-                            new Vector<float>(input.Slice(inputRow1 + ox + 2, vectorWidth)) * k12 +
-                            new Vector<float>(input.Slice(inputRow2 + ox, vectorWidth)) * k20 +
-                            new Vector<float>(input.Slice(inputRow2 + ox + 1, vectorWidth)) * k21 +
-                            new Vector<float>(input.Slice(inputRow2 + ox + 2, vectorWidth)) * k22;
-
-                        acc.CopyTo(output.Slice(outputRow + ox, vectorWidth));
-                    }
-
-                    for (; ox < _outW; ox++)
-                    {
-                        output[outputRow + ox] =
-                            input[inputRow0 + ox] * kernels[kernelBase + 0] +
-                            input[inputRow0 + ox + 1] * kernels[kernelBase + 1] +
-                            input[inputRow0 + ox + 2] * kernels[kernelBase + 2] +
-                            input[inputRow1 + ox] * kernels[kernelBase + 3] +
-                            input[inputRow1 + ox + 1] * kernels[kernelBase + 4] +
-                            input[inputRow1 + ox + 2] * kernels[kernelBase + 5] +
-                            input[inputRow2 + ox] * kernels[kernelBase + 6] +
-                            input[inputRow2 + ox + 1] * kernels[kernelBase + 7] +
-                            input[inputRow2 + ox + 2] * kernels[kernelBase + 8];
-                    }
-                }
-            }
-        }
-
-        private void ForwardInferenceSingleChannel3x3Scalar(
-            ReadOnlySpan<float> input,
-            Span<float> output,
-            ReadOnlySpan<float> kernels)
-        {
-            for (var oc = 0; oc < _outC; oc++)
-            {
-                var kernelBase = oc * 9;
-                var outputChannelBase = oc * _outH * _outW;
-
-                var k00 = kernels[kernelBase + 0];
-                var k01 = kernels[kernelBase + 1];
-                var k02 = kernels[kernelBase + 2];
-                var k10 = kernels[kernelBase + 3];
-                var k11 = kernels[kernelBase + 4];
-                var k12 = kernels[kernelBase + 5];
-                var k20 = kernels[kernelBase + 6];
-                var k21 = kernels[kernelBase + 7];
-                var k22 = kernels[kernelBase + 8];
-
-                for (var oy = 0; oy < _outH; oy++)
-                {
-                    var inputRow0 = oy * _w;
-                    var inputRow1 = (oy + 1) * _w;
-                    var inputRow2 = (oy + 2) * _w;
-                    var outputRow = outputChannelBase + oy * _outW;
-
-                    for (var ox = 0; ox < _outW; ox++)
-                    {
-                        output[outputRow + ox] =
-                            input[inputRow0 + ox] * k00 +
-                            input[inputRow0 + ox + 1] * k01 +
-                            input[inputRow0 + ox + 2] * k02 +
-                            input[inputRow1 + ox] * k10 +
-                            input[inputRow1 + ox + 1] * k11 +
-                            input[inputRow1 + ox + 2] * k12 +
-                            input[inputRow2 + ox] * k20 +
-                            input[inputRow2 + ox + 1] * k21 +
-                            input[inputRow2 + ox + 2] * k22;
-                    }
-                }
-            }
-        }
-
-        private void ForwardInferenceGenericSingleBatch(
-            ReadOnlySpan<float> input,
-            Span<float> output,
-            ReadOnlySpan<float> kernels)
-        {
-            for (var oc = 0; oc < _outC; oc++)
-            {
-                var kernelBase = oc * _kernelSizePerOutput;
-                var outputChannelBase = oc * _outH * _outW;
-
-                for (var oy = 0; oy < _outH; oy++)
-                {
-                    for (var ox = 0; ox < _outW; ox++)
-                    {
-                        var sum = 0f;
-
-                        for (var ic = 0; ic < _inC; ic++)
-                        {
-                            var inputChannelBase = ic * _h * _w;
-                            var kernelChannelBase = kernelBase + ic * _k * _k;
-
-                            for (var ky = 0; ky < _k; ky++)
-                            {
-                                var inputRowBase = inputChannelBase + (oy + ky) * _w + ox;
-                                var kernelRowBase = kernelChannelBase + ky * _k;
-
-                                for (var kx = 0; kx < _k; kx++)
-                                {
-                                    sum += input[inputRowBase + kx] *
-                                           kernels[kernelRowBase + kx];
-                                }
-                            }
-                        }
-
-                        output[outputChannelBase + oy * _outW + ox] = sum;
-                    }
-                }
-            }
-        }
-
-        public void Dispose()
-        {
-            Kernels.Dispose();
-        }
-
-        private static void InitializeKernels(
-            Span<float> span,
-            int fanIn)
-        {
-            var stdDev = MathF.Sqrt(2f / fanIn);
-
-            for (var i = 0; i < span.Length; i++)
-            {
-                span[i] = MathUtils.NextGaussian() * stdDev;
-            }
-        }
-
         public void Save(string path)
         {
             using var fs = new FileStream(path, FileMode.Create);
@@ -400,6 +168,38 @@ namespace DevOnBike.Overfit.DeepLearning
             using var br = new BinaryReader(fs);
 
             Load(br);
+        }
+
+        public void ForwardInference(
+            ReadOnlySpan<float> input,
+            Span<float> output)
+        {
+            Conv2DKernels.ForwardValidNchw(
+                input,
+                Kernels.DataView.AsReadOnlySpan(),
+                output,
+                _inC,
+                _outC,
+                _h,
+                _w,
+                _k);
+        }
+
+        public void Dispose()
+        {
+            Kernels.Dispose();
+        }
+
+        private static void InitializeKernels(
+            Span<float> span,
+            int fanIn)
+        {
+            var stdDev = MathF.Sqrt(2f / fanIn);
+
+            for (var i = 0; i < span.Length; i++)
+            {
+                span[i] = MathUtils.NextGaussian() * stdDev;
+            }
         }
     }
 }

@@ -32,6 +32,7 @@ namespace Benchmarks
             //BenchmarkRunner.Run<GenerationalGeneticAlgorithmBenchmarks>();
             // BenchmarkRunner.Run<EvolutionaryAlgorithmBenchmarks>();
 
+            //BenchmarkRunner.Run<CnnInferenceZeroAllocBenchmarks>();
             BenchmarkRunner.Run<OnnxCnnInferenceBenchmarks>();
         }
     }

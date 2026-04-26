@@ -1,10 +1,11 @@
-﻿// Copyright (c) 2026 DevOnBike.
+// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
+using DevOnBike.Overfit.Kernels;
 using DevOnBike.Overfit.Ops;
 
 namespace DevOnBike.Overfit.DeepLearning
@@ -97,66 +98,13 @@ namespace DevOnBike.Overfit.DeepLearning
             ReadOnlySpan<float> input,
             Span<float> output)
         {
-            if (input.Length % _inputSize != 0)
-            {
-                throw new ArgumentException(
-                    "Input length is not divisible by MaxPool2DLayer inference input size.",
-                    nameof(input));
-            }
-
-            var batchSize = input.Length / _inputSize;
-            var expectedOutputLength = batchSize * _outputSize;
-
-            if (output.Length < expectedOutputLength)
-            {
-                throw new ArgumentException(
-                    "Output span is too small for MaxPool2DLayer inference.",
-                    nameof(output));
-            }
-
-            for (var n = 0; n < batchSize; n++)
-            {
-                ForwardInferenceSingleBatch(
-                    input.Slice(n * _inputSize, _inputSize),
-                    output.Slice(n * _outputSize, _outputSize));
-            }
-        }
-
-        private void ForwardInferenceSingleBatch(
-            ReadOnlySpan<float> input,
-            Span<float> output)
-        {
-            for (var c = 0; c < _channels; c++)
-            {
-                var inputChannelBase = c * _h * _w;
-                var outputChannelBase = c * _outH * _outW;
-
-                for (var oh = 0; oh < _outH; oh++)
-                {
-                    for (var ow = 0; ow < _outW; ow++)
-                    {
-                        var max = float.MinValue;
-
-                        for (var ph = 0; ph < _pool; ph++)
-                        {
-                            var iy = oh * _pool + ph;
-                            var inputRowBase = inputChannelBase + iy * _w + ow * _pool;
-
-                            for (var pw = 0; pw < _pool; pw++)
-                            {
-                                var value = input[inputRowBase + pw];
-
-                                if (value > max)
-                                {
-                                    max = value;
-                                }
-                            }
-                        }
-
-                        output[outputChannelBase + oh * _outW + ow] = max;
-                    }
-                }
-            }
+            PoolingKernels.MaxPool2DForwardNchw(
+                input,
+                output,
+                _channels,
+                _h,
+                _w,
+                _pool);
         }
 
         public void Dispose()
