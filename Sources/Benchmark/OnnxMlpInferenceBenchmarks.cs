@@ -188,7 +188,7 @@ namespace Benchmarks
         }
 
         [Benchmark(OperationsPerInvoke = OperationsPerInvoke)]
-        public float OnnxRuntime_Mlp_TrueZeroAlloc()
+        public float OnnxRuntime_Mlp_PreAllocated()
         {
             var checksum = 0f;
 

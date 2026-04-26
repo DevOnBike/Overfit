@@ -4,16 +4,30 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Configs;
-using BenchmarkDotNet.Diagnosers;
-using BenchmarkDotNet.Jobs;
 using Benchmarks.Helpers;
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.Inference;
+using DevOnBike.Overfit.Inference.Contracts;
 using DevOnBike.Overfit.Licensing;
 using Microsoft.ML.OnnxRuntime;
 
 namespace Benchmarks
 {
+    /// <summary>
+    /// CNN inference benchmark:
+    ///
+    ///     Conv2D(1 -> 8, 3x3)
+    ///     ReLU
+    ///     MaxPool2D(2x2)
+    ///     GlobalAveragePool2D
+    ///     Linear(8, 10)
+    ///
+    /// This benchmark verifies:
+    ///
+    /// - Overfit uses InferenceEngine.Run(...)
+    /// - ONNX Runtime uses preallocated OrtValue input/output buffers
+    /// - no AutogradNode / ComputationGraph / model.Forward(...) path is used
+    /// </summary>
     [Config(typeof(BenchmarkConfig))]
     public class OnnxCnnInferenceBenchmarks : IDisposable
     {
@@ -38,9 +52,10 @@ namespace Benchmarks
 
         private const int OperationsPerInvoke = 32_768;
 
-        private Sequential _overfit = null!;
+        private Sequential _overfitModel = null!;
         private ConvLayer _conv = null!;
         private LinearLayer _linear = null!;
+        private InferenceEngine _overfitEngine = null!;
 
         private float[] _input = null!;
         private float[] _overfitOutput = null!;
@@ -60,20 +75,6 @@ namespace Benchmarks
         private OrtValue[] _onnxInputs = null!;
         private OrtValue[] _onnxOutputs = null!;
 
-        private class Config : ManualConfig
-        {
-            public Config()
-            {
-                AddJob(Job.Default
-                    .WithWarmupCount(5)
-                    .WithIterationCount(20)
-                    .WithInvocationCount(1)
-                    .WithUnrollFactor(1));
-
-                AddDiagnoser(MemoryDiagnoser.Default);
-            }
-        }
-
         [GlobalSetup]
         public void Setup()
         {
@@ -85,6 +86,26 @@ namespace Benchmarks
 
             FillDeterministic(_input);
 
+            SetupOverfit();
+            SetupOnnxRuntime();
+
+            for (var i = 0; i < 512; i++)
+            {
+                _overfitEngine.Run(
+                    _input,
+                    _overfitOutput);
+
+                RunOnnxOnce();
+            }
+
+            AssertClose(
+                _overfitOutput,
+                _onnxOutput,
+                tolerance: 1e-4f);
+        }
+
+        private void SetupOverfit()
+        {
             _conv = new ConvLayer(
                 InputChannels,
                 ConvOutChannels,
@@ -96,18 +117,41 @@ namespace Benchmarks
                 ConvOutChannels,
                 OutputClasses);
 
-            _overfit = new Sequential(
+            _overfitModel = new Sequential(
                 _conv,
                 new ReluActivation(),
-                new MaxPool2DLayer(ConvOutChannels, ConvOutH, ConvOutW, Pool),
-                new GlobalAveragePool2DLayer(ConvOutChannels, PoolOutH, PoolOutW),
+                new MaxPool2DLayer(
+                    ConvOutChannels,
+                    ConvOutH,
+                    ConvOutW,
+                    Pool),
+                new GlobalAveragePool2DLayer(
+                    ConvOutChannels,
+                    PoolOutH,
+                    PoolOutW),
                 _linear);
 
-            _overfit.Eval();
-            _overfit.PrepareInference(maxIntermediateElements: 64 * 1024);
+            _overfitModel.Eval();
 
-            _overfit.ForwardInference(_input, _overfitOutput);
+            _overfitEngine = InferenceEngine.FromSequential(
+                _overfitModel,
+                inputSize: InputSize,
+                outputSize: OutputSize,
+                new InferenceEngineOptions
+                {
+                    WarmupIterations = 32,
+                    MaxIntermediateElements = 64 * 1024,
+                    ValidateFiniteInput = false,
+                    DisposeModelWithEngine = false
+                });
 
+            _overfitEngine.Run(
+                _input,
+                _overfitOutput);
+        }
+
+        private void SetupOnnxRuntime()
+        {
             _onnxModelPath = Path.Combine(
                 Path.GetTempPath(),
                 $"overfit-cnn-{Guid.NewGuid():N}.onnx");
@@ -147,59 +191,56 @@ namespace Benchmarks
                 IntraOpNumThreads = 1
             };
 
-            _onnxSession = new InferenceSession(_onnxModelPath, sessionOptions);
+            _onnxSession = new InferenceSession(
+                _onnxModelPath,
+                sessionOptions);
 
-            _onnxInputNames = [_onnxSession.InputMetadata.Keys.First()];
-            _onnxOutputNames = [_onnxSession.OutputMetadata.Keys.First()];
+            _onnxInputNames = new[]
+            {
+                _onnxSession.InputMetadata.Keys.First()
+            };
+
+            _onnxOutputNames = new[]
+            {
+                _onnxSession.OutputMetadata.Keys.First()
+            };
 
             _onnxRunOptions = new RunOptions();
 
             _onnxInputOrtValue = OrtValue.CreateTensorValueFromMemory<float>(
                 OrtMemoryInfo.DefaultInstance,
                 _input.AsMemory(),
-                [1, InputChannels, InputH, InputW]);
+                new long[] { 1, InputChannels, InputH, InputW });
 
             _onnxOutputOrtValue = OrtValue.CreateTensorValueFromMemory<float>(
                 OrtMemoryInfo.DefaultInstance,
                 _onnxOutput.AsMemory(),
-                [1, OutputClasses]);
+                new long[] { 1, OutputClasses });
 
-            _onnxInputs = [_onnxInputOrtValue];
-            _onnxOutputs = [_onnxOutputOrtValue];
-
-            _onnxSession.Run(
-                _onnxRunOptions,
-                _onnxInputNames,
-                _onnxInputs,
-                _onnxOutputNames,
-                _onnxOutputs);
-
-            _overfit.ForwardInference(_input, _overfitOutput);
-
-            AssertClose(_overfitOutput, _onnxOutput, tolerance: 1e-4f);
-
-            // Extra warmup outside measured region.
-            for (var i = 0; i < 256; i++)
+            _onnxInputs = new[]
             {
-                _overfit.ForwardInference(_input, _overfitOutput);
+                _onnxInputOrtValue
+            };
 
-                _onnxSession.Run(
-                    _onnxRunOptions,
-                    _onnxInputNames,
-                    _onnxInputs,
-                    _onnxOutputNames,
-                    _onnxOutputs);
-            }
+            _onnxOutputs = new[]
+            {
+                _onnxOutputOrtValue
+            };
+
+            RunOnnxOnce();
         }
 
         [Benchmark(OperationsPerInvoke = OperationsPerInvoke)]
-        public float Overfit_Cnn_ZeroAlloc()
+        public float Overfit_Cnn_InferenceEngine_ZeroAlloc()
         {
             var checksum = 0f;
 
             for (var i = 0; i < OperationsPerInvoke; i++)
             {
-                _overfit.ForwardInference(_input, _overfitOutput);
+                _overfitEngine.Run(
+                    _input,
+                    _overfitOutput);
+
                 checksum += _overfitOutput[0];
             }
 
@@ -207,23 +248,27 @@ namespace Benchmarks
         }
 
         [Benchmark(OperationsPerInvoke = OperationsPerInvoke)]
-        public float OnnxRuntime_Cnn_TrueZeroAlloc()
+        public float OnnxRuntime_Cnn_PreAllocated()
         {
             var checksum = 0f;
 
             for (var i = 0; i < OperationsPerInvoke; i++)
             {
-                _onnxSession.Run(
-                    _onnxRunOptions,
-                    _onnxInputNames,
-                    _onnxInputs,
-                    _onnxOutputNames,
-                    _onnxOutputs);
-
+                RunOnnxOnce();
                 checksum += _onnxOutput[0];
             }
 
             return checksum;
+        }
+
+        private void RunOnnxOnce()
+        {
+            _onnxSession.Run(
+                _onnxRunOptions,
+                _onnxInputNames,
+                _onnxInputs,
+                _onnxOutputNames,
+                _onnxOutputs);
         }
 
         [GlobalCleanup]
@@ -234,7 +279,8 @@ namespace Benchmarks
             _onnxRunOptions?.Dispose();
             _onnxSession?.Dispose();
 
-            _overfit?.Dispose();
+            _overfitEngine?.Dispose();
+            _overfitModel?.Dispose();
 
             if (!string.IsNullOrWhiteSpace(_onnxModelPath) &&
                 File.Exists(_onnxModelPath))
@@ -263,7 +309,7 @@ namespace Benchmarks
             if (expected.Length != actual.Length)
             {
                 throw new InvalidOperationException(
-                    $"Output length mismatch: expected {expected.Length}, actual {actual.Length}");
+                    $"Output length mismatch: expected={expected.Length}, actual={actual.Length}");
             }
 
             for (var i = 0; i < expected.Length; i++)
@@ -278,7 +324,8 @@ namespace Benchmarks
             }
         }
 
-        private static void FillDeterministic(float[] data)
+        private static void FillDeterministic(
+            float[] data)
         {
             var seed = 0x12345678u;
 
