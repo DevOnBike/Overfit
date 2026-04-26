@@ -28,6 +28,13 @@ See `ROADMAP.md` for planned features and current priorities.
 
 ---
 
+What is intentionally not claimed:
+
+- Training is not zero-allocation yet. Training benchmarks are performance trend checks.
+- Large batched GEMM workloads are not the strongest Overfit case yet.
+- CNN and larger MLP benchmarks are treated as roughly tied with ONNX Runtime, with Overfit's main advantage being `0 B/op`.
+- Thread-scaling and kernel/training benchmarks are diagnostic unless their individual benchmark output has no setup warnings.
+
 ## Current benchmark snapshot
 
 Hardware and runtime:
