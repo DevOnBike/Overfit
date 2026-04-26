@@ -3,6 +3,7 @@ using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Diagnosers;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Order;
+using Benchmarks.Helpers;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Licensing;
 using DevOnBike.Overfit.Ops;
@@ -11,10 +12,7 @@ using DevOnBike.Overfit.Training;
 
 namespace Benchmarks
 {
-    [MemoryDiagnoser]
-    [Orderer(SummaryOrderPolicy.FastestToSlowest)]
-    [RankColumn]
-    [Config(typeof(Config))]
+    [Config(typeof(BenchmarkConfig))]
     public class TrainingEngineBenchmarks : IDisposable
     {
         private const int BatchSize = 64;

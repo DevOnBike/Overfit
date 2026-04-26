@@ -11,6 +11,7 @@ namespace Benchmarks.Helpers
         public BenchmarkConfig()
         {
             AddJob(Job.Default
+                // .WithRuntime(CoreRuntime.CreateForNewVersion("net10.0", ".NET 10"))
                 .WithWarmupCount(5)
                 .WithIterationCount(20)
                 .WithInvocationCount(1)

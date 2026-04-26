@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using BenchmarkDotNet.Attributes;
+using Benchmarks.Helpers;
 using DevOnBike.Overfit.Evolutionary.Fitness;
 using DevOnBike.Overfit.Evolutionary.Storage;
 using DevOnBike.Overfit.Evolutionary.Strategies;
@@ -11,7 +12,7 @@ using static Benchmarks.GenerationalGeneticAlgorithmBenchmarks;
 
 namespace Benchmarks
 {
-    [Config(typeof(Config))]
+    [Config(typeof(BenchmarkConfig))]
     public class OpenAiEsStrategyBenchmarks
     {
         [Params(256, 1024)]

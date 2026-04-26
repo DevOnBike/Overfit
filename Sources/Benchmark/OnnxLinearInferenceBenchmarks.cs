@@ -14,7 +14,7 @@ using Microsoft.ML.OnnxRuntime;
 
 namespace Benchmarks
 {
-    [Config(typeof(Config))]
+    [Config(typeof(BenchmarkConfig))]
     public class OnnxLinearInferenceBenchmarks : IDisposable
     {
         private const int InputSize = 784;
