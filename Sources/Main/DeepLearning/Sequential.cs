@@ -11,17 +11,23 @@ namespace DevOnBike.Overfit.DeepLearning
 {
     public sealed class Sequential : IModule
     {
-        private const int DefaultInferenceBufferSize = 65_536;
+        private const int DefaultInferenceBufferSize = 64 * 1024;
 
         private readonly List<IModule> _modules = [];
 
         private float[] _inferenceBufferA = [];
         private float[] _inferenceBufferB = [];
 
-        public Sequential(params ReadOnlySpan<IModule> modules)
+        private bool _inferencePrepared;
+        private int _inferencePreparedCapacity;
+
+        public Sequential(params IModule[] modules)
         {
+            ArgumentNullException.ThrowIfNull(modules);
+
             foreach (var module in modules)
             {
+                ArgumentNullException.ThrowIfNull(module);
                 _modules.Add(module);
             }
         }
@@ -31,6 +37,7 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Train()
         {
             IsTraining = true;
+            _inferencePrepared = false;
 
             foreach (var module in _modules)
             {
@@ -45,38 +52,225 @@ namespace DevOnBike.Overfit.DeepLearning
             foreach (var module in _modules)
             {
                 module.Eval();
-
-                if (module is IInferenceShapeProvider inferenceModule)
-                {
-                    inferenceModule.PrepareInference();
-                }
             }
 
-            EnsureInferenceCapacity(DefaultInferenceBufferSize);
+            PrepareInference(DefaultInferenceBufferSize);
         }
 
-        /// <summary>
-        /// Allocates reusable inference workspace outside the inference hot path.
-        /// Call this before BenchmarkDotNet measurement when the model has hidden
-        /// tensors larger than the default buffer.
-        /// </summary>
-        public void PrepareInference(int maxIntermediateElements = DefaultInferenceBufferSize)
+        public void PrepareInference(
+            int maxIntermediateElements = DefaultInferenceBufferSize)
         {
-            ArgumentOutOfRangeException.ThrowIfNegative(maxIntermediateElements);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxIntermediateElements);
+
+            EnsureInferenceCapacitySlow(maxIntermediateElements);
 
             foreach (var module in _modules)
             {
-                if (module is IInferenceShapeProvider inferenceModule)
+                if (module is IInferenceShapeProvider inferenceShapeProvider)
                 {
-                    inferenceModule.PrepareInference();
+                    inferenceShapeProvider.PrepareInference();
                 }
             }
 
-            EnsureInferenceCapacity(maxIntermediateElements);
+            _inferencePreparedCapacity = maxIntermediateElements;
+            _inferencePrepared = true;
         }
 
-        private void EnsureInferenceCapacity(int requiredElements)
+        public void ForwardInference(
+            ReadOnlySpan<float> input,
+            Span<float> output)
         {
+            OverfitLicense.EnsureNotified();
+
+            if (!_inferencePrepared)
+            {
+                PrepareInference(DefaultInferenceBufferSize);
+            }
+
+            ForwardInferencePrepared(input, output);
+        }
+
+        private void ForwardInferencePrepared(
+            ReadOnlySpan<float> input,
+            Span<float> output)
+        {
+            if (_modules.Count == 0)
+            {
+                throw new InvalidOperationException("Sequential contains no modules.");
+            }
+
+            if (_modules.Count == 1)
+            {
+                _modules[0].ForwardInference(input, output);
+                return;
+            }
+
+            var currentInput = input;
+            var useBufferA = true;
+
+            for (var i = 0; i < _modules.Count; i++)
+            {
+                var module = _modules[i];
+                var isLast = i == _modules.Count - 1;
+
+                if (isLast)
+                {
+                    module.ForwardInference(currentInput, output);
+                    return;
+                }
+
+                var nextLength = ResolveIntermediateLength(
+                    module,
+                    currentInput);
+
+                EnsurePreparedCapacityForIntermediate(nextLength);
+
+                var currentOutput = useBufferA
+                    ? _inferenceBufferA.AsSpan(0, nextLength)
+                    : _inferenceBufferB.AsSpan(0, nextLength);
+
+                module.ForwardInference(
+                    currentInput,
+                    currentOutput);
+
+                currentInput = currentOutput;
+                useBufferA = !useBufferA;
+            }
+        }
+
+        private static int ResolveIntermediateLength(
+            IModule module,
+            ReadOnlySpan<float> currentInput)
+        {
+            if (module is not IInferenceShapeProvider shapeProvider)
+            {
+                // Shape-preserving modules, e.g. ReLU.
+                return currentInput.Length;
+            }
+
+            if (currentInput.Length % shapeProvider.InferenceInputSize != 0)
+            {
+                throw new ArgumentException(
+                    $"Input length for module {module.GetType().Name} is not divisible by " +
+                    $"InferenceInputSize={shapeProvider.InferenceInputSize}.");
+            }
+
+            var batchSize = currentInput.Length / shapeProvider.InferenceInputSize;
+
+            return batchSize * shapeProvider.InferenceOutputSize;
+        }
+
+        public AutogradNode Forward(
+            ComputationGraph graph,
+            AutogradNode input)
+        {
+            OverfitLicense.EnsureNotified();
+
+            var current = input;
+
+            foreach (var module in _modules)
+            {
+                current = module.Forward(
+                    graph,
+                    current);
+            }
+
+            return current;
+        }
+
+        public IEnumerable<AutogradNode> Parameters()
+        {
+            foreach (var module in _modules)
+            {
+                foreach (var parameter in module.Parameters())
+                {
+                    yield return parameter;
+                }
+            }
+        }
+
+        public void Save(
+            BinaryWriter bw)
+        {
+            foreach (var module in _modules)
+            {
+                module.Save(bw);
+            }
+        }
+
+        public void Load(
+            BinaryReader br)
+        {
+            foreach (var module in _modules)
+            {
+                module.Load(br);
+            }
+
+            _inferencePrepared = false;
+        }
+
+        public void InvalidateParameterCaches()
+        {
+            _inferencePrepared = false;
+
+            foreach (var module in _modules)
+            {
+                module.InvalidateParameterCaches();
+            }
+        }
+
+        public void Add(
+            IModule module)
+        {
+            ArgumentNullException.ThrowIfNull(module);
+
+            _modules.Add(module);
+            _inferencePrepared = false;
+        }
+
+        public void Dispose()
+        {
+            foreach (var module in _modules)
+            {
+                module.Dispose();
+            }
+
+            _modules.Clear();
+
+            _inferenceBufferA = [];
+            _inferenceBufferB = [];
+            _inferencePrepared = false;
+            _inferencePreparedCapacity = 0;
+        }
+
+        public void Save(
+            string path)
+        {
+            using var fs = new FileStream(path, FileMode.Create);
+            using var bw = new BinaryWriter(fs);
+
+            Save(bw);
+        }
+
+        public void Load(
+            string path)
+        {
+            if (!File.Exists(path))
+            {
+                throw new FileNotFoundException($"Brak pliku modelu: {path}");
+            }
+
+            using var fs = new FileStream(path, FileMode.Open);
+            using var br = new BinaryReader(fs);
+
+            Load(br);
+        }
+
+        private void EnsureInferenceCapacitySlow(
+            int requiredElements)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(requiredElements);
+
             if (_inferenceBufferA.Length < requiredElements)
             {
                 _inferenceBufferA = new float[requiredElements];
@@ -88,181 +282,20 @@ namespace DevOnBike.Overfit.DeepLearning
             }
         }
 
-        public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
+        private void EnsurePreparedCapacityForIntermediate(
+            int requiredElements)
         {
-            OverfitLicense.EnsureNotified();
-
-            var count = _modules.Count;
-
-            if (count == 0)
+            if (requiredElements <= _inferencePreparedCapacity &&
+                requiredElements <= _inferenceBufferA.Length &&
+                requiredElements <= _inferenceBufferB.Length)
             {
-                input.CopyTo(output);
                 return;
             }
 
-            if (count == 1)
-            {
-                _modules[0].ForwardInference(input, output);
-                return;
-            }
-
-            EnsureInferenceCapacity(DefaultInferenceBufferSize);
-
-            ReadOnlySpan<float> currentInput = input;
-            var currentInputLength = input.Length;
-
-            var useA = true;
-
-            for (var i = 0; i < count; i++)
-            {
-                var isLast = i == count - 1;
-                var module = _modules[i];
-
-                var currentOutputLength = isLast
-                    ? output.Length
-                    : GetInferenceOutputLength(module, currentInputLength);
-
-                Span<float> currentOutput;
-
-                if (isLast)
-                {
-                    currentOutput = output;
-                }
-                else
-                {
-                    if (currentOutputLength > _inferenceBufferA.Length)
-                    {
-                        // This allocation is deliberately not hidden.
-                        // Call PrepareInference(maxIntermediateElements) before hot-path inference.
-                        EnsureInferenceCapacity(currentOutputLength);
-                    }
-
-                    currentOutput = useA
-                        ? _inferenceBufferA.AsSpan(0, currentOutputLength)
-                        : _inferenceBufferB.AsSpan(0, currentOutputLength);
-                }
-
-                module.ForwardInference(
-                    currentInput.Slice(0, currentInputLength),
-                    currentOutput);
-
-                currentInput = currentOutput;
-                currentInputLength = currentOutputLength;
-                useA = !useA;
-            }
-        }
-
-        private static int GetInferenceOutputLength(IModule module, int inputLength)
-        {
-            if (module is IInferenceShapeProvider shapeProvider)
-            {
-                var inputSize = shapeProvider.InferenceInputSize;
-
-                if (inputSize <= 0 || inputLength % inputSize != 0)
-                {
-                    throw new InvalidOperationException(
-                        $"Cannot infer output length for module {module.GetType().Name}.");
-                }
-
-                var batchSize = inputLength / inputSize;
-                return batchSize * shapeProvider.InferenceOutputSize;
-            }
-
-            // ReLU/Tanh and other element-wise activations keep the same length.
-            return inputLength;
-        }
-
-        public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
-        {
-            OverfitLicense.EnsureNotified();
-
-            var current = input;
-
-            foreach (var module in _modules)
-            {
-                current = module.Forward(graph, current);
-            }
-
-            return current;
-        }
-
-        public IEnumerable<AutogradNode> Parameters()
-        {
-            foreach (var module in _modules)
-            {
-                foreach (var p in module.Parameters())
-                {
-                    yield return p;
-                }
-            }
-        }
-
-        public void Save(BinaryWriter bw)
-        {
-            foreach (var module in _modules)
-            {
-                module.Save(bw);
-            }
-        }
-
-        public void Load(BinaryReader br)
-        {
-            foreach (var module in _modules)
-            {
-                module.Load(br);
-            }
-
-            InvalidateParameterCaches();
-        }
-
-        public void InvalidateParameterCaches()
-        {
-            foreach (var module in _modules)
-            {
-                module.InvalidateParameterCaches();
-
-                if (!IsTraining && module is IInferenceShapeProvider inferenceModule)
-                {
-                    inferenceModule.PrepareInference();
-                }
-            }
-        }
-
-        public void Dispose()
-        {
-            foreach (var module in _modules)
-            {
-                module.Dispose();
-            }
-
-            _modules.Clear();
-            _inferenceBufferA = [];
-            _inferenceBufferB = [];
-        }
-
-        public void Add(IModule module)
-        {
-            _modules.Add(module);
-            InvalidateParameterCaches();
-        }
-
-        public void Save(string path)
-        {
-            using var fs = new FileStream(path, FileMode.Create);
-            using var bw = new BinaryWriter(fs);
-            Save(bw);
-        }
-
-        public void Load(string path)
-        {
-            if (!File.Exists(path))
-            {
-                throw new FileNotFoundException($"Brak pliku modelu: {path}");
-            }
-
-            using var fs = new FileStream(path, FileMode.Open);
-            using var br = new BinaryReader(fs);
-            Load(br);
+            PrepareInference(
+                Math.Max(
+                    requiredElements,
+                    DefaultInferenceBufferSize));
         }
     }
 }
