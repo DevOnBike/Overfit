@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Numerics;
 using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Autograd;
@@ -16,10 +17,12 @@ namespace DevOnBike.Overfit.DeepLearning
 {
     public sealed class LinearLayer : IModule, IInferenceShapeProvider
     {
+        private const int InputMajorVectorizedOutputThreshold = 32;
+
         private readonly int _inputSize;
         private readonly int _outputSize;
 
-        // Preallocated once. Rebuilt in-place. No TensorFactory.Materialize in inference hot path.
+        // Kept for small-output inference. For Linear(784,10), output-major Dot is still good.
         private readonly TensorStorage<float> _weightsTransposed;
         private bool _inferenceCacheValid;
 
@@ -201,23 +204,6 @@ namespace DevOnBike.Overfit.DeepLearning
             }
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static void LinearInferenceSimd(
-            ReadOnlySpan<float> input,
-            ReadOnlySpan<float> weightsT,
-            ReadOnlySpan<float> bias,
-            Span<float> output)
-        {
-            var inputSize = input.Length;
-            var outputSize = output.Length;
-
-            for (var j = 0; j < outputSize; j++)
-            {
-                var wRow = weightsT.Slice(j * inputSize, inputSize);
-                output[j] = TensorPrimitives.Dot(input, wRow) + bias[j];
-            }
-        }
-
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
             if (!_inferenceCacheValid)
@@ -238,30 +224,142 @@ namespace DevOnBike.Overfit.DeepLearning
                 throw new ArgumentException("Output span is too small for LinearLayer inference.", nameof(output));
             }
 
-            var wTSpan = _weightsTransposed.AsReadOnlySpan();
-            var bSpan = Bias.DataView.AsReadOnlySpan();
-
-            if (batchSize == 1)
-            {
-                LinearInferenceSimd(
-                    input,
-                    wTSpan,
-                    bSpan,
-                    output.Slice(0, _outputSize));
-
-                return;
-            }
+            var weights = Weights.DataView.AsReadOnlySpan();
+            var weightsT = _weightsTransposed.AsReadOnlySpan();
+            var bias = Bias.DataView.AsReadOnlySpan();
 
             for (var b = 0; b < batchSize; b++)
             {
                 var inSlice = input.Slice(b * _inputSize, _inputSize);
                 var outSlice = output.Slice(b * _outputSize, _outputSize);
 
-                LinearInferenceSimd(
-                    inSlice,
-                    wTSpan,
-                    bSpan,
-                    outSlice);
+                if (_outputSize >= InputMajorVectorizedOutputThreshold)
+                {
+                    LinearInferenceInputMajorVectorized(
+                        inSlice,
+                        weights,
+                        bias,
+                        outSlice,
+                        _inputSize,
+                        _outputSize);
+                }
+                else
+                {
+                    LinearInferenceOutputMajorDot(
+                        inSlice,
+                        weightsT,
+                        bias,
+                        outSlice);
+                }
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void LinearInferenceOutputMajorDot(
+            ReadOnlySpan<float> input,
+            ReadOnlySpan<float> weightsT,
+            ReadOnlySpan<float> bias,
+            Span<float> output)
+        {
+            var inputSize = input.Length;
+            var outputSize = output.Length;
+
+            for (var j = 0; j < outputSize; j++)
+            {
+                var wRow = weightsT.Slice(j * inputSize, inputSize);
+                output[j] = TensorPrimitives.Dot(input, wRow) + bias[j];
+            }
+        }
+
+        private static void LinearInferenceInputMajorVectorized(
+            ReadOnlySpan<float> input,
+            ReadOnlySpan<float> weightsInputOutput,
+            ReadOnlySpan<float> bias,
+            Span<float> output,
+            int inputSize,
+            int outputSize)
+        {
+            if (Vector.IsHardwareAccelerated && outputSize >= Vector<float>.Count)
+            {
+                LinearInferenceInputMajorVectorizedSimd(
+                    input,
+                    weightsInputOutput,
+                    bias,
+                    output,
+                    inputSize,
+                    outputSize);
+
+                return;
+            }
+
+            LinearInferenceInputMajorScalar(
+                input,
+                weightsInputOutput,
+                bias,
+                output,
+                inputSize,
+                outputSize);
+        }
+
+        private static void LinearInferenceInputMajorVectorizedSimd(
+            ReadOnlySpan<float> input,
+            ReadOnlySpan<float> weightsInputOutput,
+            ReadOnlySpan<float> bias,
+            Span<float> output,
+            int inputSize,
+            int outputSize)
+        {
+            var vectorWidth = Vector<float>.Count;
+            var j = 0;
+
+            for (; j <= outputSize - vectorWidth; j += vectorWidth)
+            {
+                var acc = new Vector<float>(bias.Slice(j, vectorWidth));
+
+                for (var i = 0; i < inputSize; i++)
+                {
+                    var x = new Vector<float>(input[i]);
+                    var w = new Vector<float>(
+                        weightsInputOutput.Slice(i * outputSize + j, vectorWidth));
+
+                    acc += x * w;
+                }
+
+                acc.CopyTo(output.Slice(j, vectorWidth));
+            }
+
+            for (; j < outputSize; j++)
+            {
+                var sum = bias[j];
+
+                for (var i = 0; i < inputSize; i++)
+                {
+                    sum += input[i] * weightsInputOutput[i * outputSize + j];
+                }
+
+                output[j] = sum;
+            }
+        }
+
+        private static void LinearInferenceInputMajorScalar(
+            ReadOnlySpan<float> input,
+            ReadOnlySpan<float> weightsInputOutput,
+            ReadOnlySpan<float> bias,
+            Span<float> output,
+            int inputSize,
+            int outputSize)
+        {
+            bias.Slice(0, outputSize).CopyTo(output);
+
+            for (var i = 0; i < inputSize; i++)
+            {
+                var x = input[i];
+                var wBase = i * outputSize;
+
+                for (var j = 0; j < outputSize; j++)
+                {
+                    output[j] += x * weightsInputOutput[wBase + j];
+                }
             }
         }
 
