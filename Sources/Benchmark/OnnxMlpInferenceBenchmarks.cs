@@ -19,6 +19,11 @@ namespace Benchmarks
         private const int HiddenSize = 128;
         private const int OutputSize = 10;
 
+        // 16_384 * ~9us = ~147ms dla ONNX
+        // 16_384 * ~28us = ~459ms dla Overfit
+        // Czyli znika ostrzeżenie BenchmarkDotNet o zbyt krótkiej iteracji.
+        private const int OperationsPerInvoke = 32_768;
+
         private Sequential _overfit = null!;
         private LinearLayer _linear1 = null!;
         private LinearLayer _linear2 = null!;
@@ -46,8 +51,8 @@ namespace Benchmarks
             public Config()
             {
                 AddJob(Job.Default
-                    .WithWarmupCount(10)
-                    .WithIterationCount(50)
+                    .WithWarmupCount(5)
+                    .WithIterationCount(20)
                     .WithInvocationCount(1)
                     .WithUnrollFactor(1));
 
@@ -139,6 +144,7 @@ namespace Benchmarks
             _onnxInputs = [_onnxInputOrtValue];
             _onnxOutputs = [_onnxOutputOrtValue];
 
+            // Warmup ONNX.
             _onnxSession.Run(
                 _onnxRunOptions,
                 _onnxInputNames,
@@ -146,29 +152,57 @@ namespace Benchmarks
                 _onnxOutputNames,
                 _onnxOutputs);
 
+            // Warmup Overfit.
             _overfit.ForwardInference(_input, _overfitOutput);
 
             AssertClose(_overfitOutput, _onnxOutput, tolerance: 1e-4f);
+
+            // Dodatkowy warmup poza pomiarem.
+            for (var i = 0; i < 256; i++)
+            {
+                _overfit.ForwardInference(_input, _overfitOutput);
+
+                _onnxSession.Run(
+                    _onnxRunOptions,
+                    _onnxInputNames,
+                    _onnxInputs,
+                    _onnxOutputNames,
+                    _onnxOutputs);
+            }
         }
 
-        [Benchmark]
+        [Benchmark(OperationsPerInvoke = OperationsPerInvoke)]
         public float Overfit_Mlp_ZeroAlloc()
         {
-            _overfit.ForwardInference(_input, _overfitOutput);
-            return _overfitOutput[0];
+            var checksum = 0f;
+
+            for (var i = 0; i < OperationsPerInvoke; i++)
+            {
+                _overfit.ForwardInference(_input, _overfitOutput);
+                checksum += _overfitOutput[0];
+            }
+
+            return checksum;
         }
 
-        [Benchmark]
+        [Benchmark(OperationsPerInvoke = OperationsPerInvoke)]
         public float OnnxRuntime_Mlp_TrueZeroAlloc()
         {
-            _onnxSession.Run(
-                _onnxRunOptions,
-                _onnxInputNames,
-                _onnxInputs,
-                _onnxOutputNames,
-                _onnxOutputs);
+            var checksum = 0f;
 
-            return _onnxOutput[0];
+            for (var i = 0; i < OperationsPerInvoke; i++)
+            {
+                _onnxSession.Run(
+                    _onnxRunOptions,
+                    _onnxInputNames,
+                    _onnxInputs,
+                    _onnxOutputNames,
+                    _onnxOutputs);
+
+                checksum += _onnxOutput[0];
+            }
+
+            return checksum;
         }
 
         [GlobalCleanup]

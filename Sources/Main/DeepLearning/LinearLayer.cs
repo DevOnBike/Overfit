@@ -22,7 +22,8 @@ namespace DevOnBike.Overfit.DeepLearning
         private readonly int _inputSize;
         private readonly int _outputSize;
 
-        // Kept for small-output inference. For Linear(784,10), output-major Dot is still good.
+        // Used for small-output inference path.
+        // Layout: [output, input]
         private readonly TensorStorage<float> _weightsTransposed;
         private bool _inferenceCacheValid;
 
@@ -191,8 +192,8 @@ namespace DevOnBike.Overfit.DeepLearning
             var src = Weights.DataView.AsReadOnlySpan();
             var dst = _weightsTransposed.AsSpan();
 
-            // Weights layout: [input, output]
-            // Transposed cache layout: [output, input]
+            // Source layout: [input, output]
+            // Cache layout:  [output, input]
             for (var i = 0; i < _inputSize; i++)
             {
                 var srcBase = i * _outputSize;
@@ -235,7 +236,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
                 if (_outputSize >= InputMajorVectorizedOutputThreshold)
                 {
-                    LinearInferenceInputMajorVectorized(
+                    LinearInferenceInputMajorVector4(
                         inSlice,
                         weights,
                         bias,
@@ -271,19 +272,20 @@ namespace DevOnBike.Overfit.DeepLearning
             }
         }
 
-        private static void LinearInferenceInputMajorVectorized(
+        private static void LinearInferenceInputMajorVector4(
             ReadOnlySpan<float> input,
-            ReadOnlySpan<float> weightsInputOutput,
+            ReadOnlySpan<float> weights,
             ReadOnlySpan<float> bias,
             Span<float> output,
             int inputSize,
             int outputSize)
         {
-            if (Vector.IsHardwareAccelerated && outputSize >= Vector<float>.Count)
+            if (!Vector.IsHardwareAccelerated ||
+                outputSize < Vector<float>.Count * 4)
             {
-                LinearInferenceInputMajorVectorizedSimd(
+                LinearInferenceInputMajorVector1(
                     input,
-                    weightsInputOutput,
+                    weights,
                     bias,
                     output,
                     inputSize,
@@ -292,23 +294,83 @@ namespace DevOnBike.Overfit.DeepLearning
                 return;
             }
 
-            LinearInferenceInputMajorScalar(
-                input,
-                weightsInputOutput,
-                bias,
-                output,
-                inputSize,
-                outputSize);
+            var vectorWidth = Vector<float>.Count;
+            var blockWidth = vectorWidth * 4;
+
+            var j = 0;
+
+            for (; j <= outputSize - blockWidth; j += blockWidth)
+            {
+                var acc0 = new Vector<float>(bias.Slice(j, vectorWidth));
+                var acc1 = new Vector<float>(bias.Slice(j + vectorWidth, vectorWidth));
+                var acc2 = new Vector<float>(bias.Slice(j + vectorWidth * 2, vectorWidth));
+                var acc3 = new Vector<float>(bias.Slice(j + vectorWidth * 3, vectorWidth));
+
+                for (var i = 0; i < inputSize; i++)
+                {
+                    var x = new Vector<float>(input[i]);
+                    var rowBase = i * outputSize + j;
+
+                    acc0 += x * new Vector<float>(weights.Slice(rowBase, vectorWidth));
+                    acc1 += x * new Vector<float>(weights.Slice(rowBase + vectorWidth, vectorWidth));
+                    acc2 += x * new Vector<float>(weights.Slice(rowBase + vectorWidth * 2, vectorWidth));
+                    acc3 += x * new Vector<float>(weights.Slice(rowBase + vectorWidth * 3, vectorWidth));
+                }
+
+                acc0.CopyTo(output.Slice(j, vectorWidth));
+                acc1.CopyTo(output.Slice(j + vectorWidth, vectorWidth));
+                acc2.CopyTo(output.Slice(j + vectorWidth * 2, vectorWidth));
+                acc3.CopyTo(output.Slice(j + vectorWidth * 3, vectorWidth));
+            }
+
+            for (; j <= outputSize - vectorWidth; j += vectorWidth)
+            {
+                var acc = new Vector<float>(bias.Slice(j, vectorWidth));
+
+                for (var i = 0; i < inputSize; i++)
+                {
+                    acc += new Vector<float>(input[i]) *
+                           new Vector<float>(weights.Slice(i * outputSize + j, vectorWidth));
+                }
+
+                acc.CopyTo(output.Slice(j, vectorWidth));
+            }
+
+            for (; j < outputSize; j++)
+            {
+                var sum = bias[j];
+
+                for (var i = 0; i < inputSize; i++)
+                {
+                    sum += input[i] * weights[i * outputSize + j];
+                }
+
+                output[j] = sum;
+            }
         }
 
-        private static void LinearInferenceInputMajorVectorizedSimd(
+        private static void LinearInferenceInputMajorVector1(
             ReadOnlySpan<float> input,
-            ReadOnlySpan<float> weightsInputOutput,
+            ReadOnlySpan<float> weights,
             ReadOnlySpan<float> bias,
             Span<float> output,
             int inputSize,
             int outputSize)
         {
+            if (!Vector.IsHardwareAccelerated ||
+                outputSize < Vector<float>.Count)
+            {
+                LinearInferenceInputMajorScalar(
+                    input,
+                    weights,
+                    bias,
+                    output,
+                    inputSize,
+                    outputSize);
+
+                return;
+            }
+
             var vectorWidth = Vector<float>.Count;
             var j = 0;
 
@@ -319,8 +381,7 @@ namespace DevOnBike.Overfit.DeepLearning
                 for (var i = 0; i < inputSize; i++)
                 {
                     var x = new Vector<float>(input[i]);
-                    var w = new Vector<float>(
-                        weightsInputOutput.Slice(i * outputSize + j, vectorWidth));
+                    var w = new Vector<float>(weights.Slice(i * outputSize + j, vectorWidth));
 
                     acc += x * w;
                 }
@@ -334,7 +395,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
                 for (var i = 0; i < inputSize; i++)
                 {
-                    sum += input[i] * weightsInputOutput[i * outputSize + j];
+                    sum += input[i] * weights[i * outputSize + j];
                 }
 
                 output[j] = sum;
@@ -343,7 +404,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
         private static void LinearInferenceInputMajorScalar(
             ReadOnlySpan<float> input,
-            ReadOnlySpan<float> weightsInputOutput,
+            ReadOnlySpan<float> weights,
             ReadOnlySpan<float> bias,
             Span<float> output,
             int inputSize,
@@ -358,7 +419,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
                 for (var j = 0; j < outputSize; j++)
                 {
-                    output[j] += x * weightsInputOutput[wBase + j];
+                    output[j] += x * weights[wBase + j];
                 }
             }
         }
