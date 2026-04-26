@@ -55,18 +55,16 @@ namespace DevOnBike.Overfit.DeepLearning
             _outputSize = outChannels * _outH * _outW;
             _kernelSizePerOutput = inChannels * kSize * kSize;
 
-            var kData = new TensorStorage<float>(
-                outChannels * _kernelSizePerOutput,
-                clearMemory: false);
+            var kData = new TensorStorage<float>(outChannels * _kernelSizePerOutput, clearMemory: false);
 
             InitializeKernels(
-                kData.AsSpan(),
-                _kernelSizePerOutput);
+            kData.AsSpan(),
+            _kernelSizePerOutput);
 
             Kernels = new AutogradNode(
-                kData,
-                new TensorShape(outChannels, _kernelSizePerOutput),
-                requiresGrad: true);
+            kData,
+            new TensorShape(outChannels, _kernelSizePerOutput),
+            requiresGrad: true);
         }
 
         public AutogradNode Kernels { get; }
@@ -99,14 +97,14 @@ namespace DevOnBike.Overfit.DeepLearning
             AutogradNode input)
         {
             return TensorMath.Conv2D(
-                graph,
-                input,
-                Kernels,
-                _inC,
-                _outC,
-                _h,
-                _w,
-                _k);
+            graph,
+            input,
+            Kernels,
+            _inC,
+            _outC,
+            _h,
+            _w,
+            _k);
         }
 
         public IEnumerable<AutogradNode> Parameters()
@@ -174,9 +172,15 @@ namespace DevOnBike.Overfit.DeepLearning
             ReadOnlySpan<float> input,
             Span<float> output)
         {
-            ForwardInferencePrepared(
-                input,
-                output);
+            Conv2DKernels.ForwardValidNchw(
+            input,
+            Kernels.DataView.AsReadOnlySpan(),
+            output,
+            _inC,
+            _outC,
+            _h,
+            _w,
+            _k);
         }
 
         public void ForwardInferencePrepared(
@@ -184,14 +188,14 @@ namespace DevOnBike.Overfit.DeepLearning
             Span<float> output)
         {
             Conv2DKernels.ForwardValidNchw(
-                input,
-                Kernels.DataView.AsReadOnlySpan(),
-                output,
-                _inC,
-                _outC,
-                _h,
-                _w,
-                _k);
+            input,
+            Kernels.DataView.AsReadOnlySpan(),
+            output,
+            _inC,
+            _outC,
+            _h,
+            _w,
+            _k);
         }
 
         public void Dispose()
