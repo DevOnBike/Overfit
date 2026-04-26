@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Diagnostics;
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Tensors;
@@ -15,20 +16,54 @@ namespace DevOnBike.Overfit.Ops
         // RESHAPE
         // ====================================================================
 
-        public static AutogradNode Reshape(ComputationGraph graph, AutogradNode input, params int[] newShape)
+        public static AutogradNode Reshape(ComputationGraph? graph, AutogradNode input, params int[] newShape)
         {
-            var totalNewElements = 1;
-            foreach (var dim in newShape)
+            ArgumentNullException.ThrowIfNull(input);
+            ArgumentNullException.ThrowIfNull(newShape);
+
+            if (newShape.Length is < 1 or > 4)
             {
-                totalNewElements *= dim;
+                throw new ArgumentOutOfRangeException(nameof(newShape), "Reshape supports rank 1..4.");
             }
 
-            var newView = input.DataView.Reshape(newShape[0], totalNewElements / newShape[0]);
+            var totalNewElements = 1;
 
-            // TODO: [ARCHITECTURAL CHANGE REQUIRED] Należy podmienić na bezalokacyjne Aliasowanie, np. FastTensor.Alias(newView)
-            var resD = FastTensor<float>.FromView(newView);
+            for (var i = 0; i < newShape.Length; i++)
+            {
+                if (newShape[i] <= 0)
+                {
+                    throw new ArgumentOutOfRangeException(
+                        nameof(newShape),
+                        $"Invalid dimension at index {i}: {newShape[i]}.");
+                }
 
-            var output = new AutogradNode(resD, input.RequiresGrad);
+                checked
+                {
+                    totalNewElements *= newShape[i];
+                }
+            }
+
+            if (totalNewElements != input.Shape.Size)
+            {
+                throw new ArgumentException(
+                    $"New shape size {totalNewElements} does not match input size {input.Shape.Size}.",
+                    nameof(newShape));
+            }
+
+            var outputShape = newShape.Length switch
+            {
+                1 => new TensorShape(newShape[0]),
+                2 => new TensorShape(newShape[0], newShape[1]),
+                3 => new TensorShape(newShape[0], newShape[1], newShape[2]),
+                4 => new TensorShape(newShape[0], newShape[1], newShape[2], newShape[3]),
+                _ => throw new UnreachableException()
+            };
+
+            // Validation: TensorSpan.Reshape already rejects non-contiguous input.
+            _ = input.DataView.Reshape(outputShape);
+
+            var output = AutogradNode.ViewOf(input, outputShape, input.RequiresGrad);
+
             if (output.RequiresGrad)
             {
                 graph?.Record(OpCode.Reshape, output, input);

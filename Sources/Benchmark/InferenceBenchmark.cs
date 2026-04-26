@@ -4,12 +4,11 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Diagnosers;
-using BenchmarkDotNet.Jobs;
-using BenchmarkDotNet.Order;
+using Benchmarks.Helpers;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core; // Zmieniono namespace na Core
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
@@ -19,11 +18,8 @@ namespace Benchmarks
     ///     Performance comparison between ONNX Runtime and Overfit engine.
     ///     Evaluates execution speed and memory allocation overhead during inference.
     /// </summary>
-    [SimpleJob(RuntimeMoniker.Net10_0)]
-    [Orderer(SummaryOrderPolicy.FastestToSlowest)]
-    [MemoryDiagnoser]
-    [DisassemblyDiagnoser(maxDepth: 2)]
-    [HardwareCounters(HardwareCounter.InstructionRetired, HardwareCounter.CacheMisses)]
+    [Config(typeof(BenchmarkConfig))]
+    // [HardwareCounters(HardwareCounter.InstructionRetired, HardwareCounter.CacheMisses)]
     public class InferenceBenchmark
     {
         private const int InputSize = 784;
@@ -49,9 +45,10 @@ namespace Benchmarks
             _overfitModel.Load("benchmark_model.bin");
             _overfitModel.Eval();
 
-            var inputTensor = new FastTensor<float>(1, InputSize, clearMemory: false);
-            _inputData.AsSpan().CopyTo(inputTensor.GetView().AsSpan());
-            _inputNode = new AutogradNode(inputTensor, false);
+            // POPRAWKA: Używamy TensorStorage i TensorShape
+            var inputTensor = new TensorStorage<float>(InputSize, clearMemory: false);
+            _inputData.AsSpan().CopyTo(inputTensor.AsSpan());
+            _inputNode = new AutogradNode(inputTensor, new TensorShape(1, InputSize), false);
 
             for (var i = 0; i < 100; i++)
             {
@@ -82,8 +79,9 @@ namespace Benchmarks
         public void Cleanup()
         {
             _onnxSession?.Dispose();
-            _inputNode?.Dispose();
             _overfitModel?.Dispose();
+            // Dispose logic was moved to _inputNode.Dispose() which holds the storage
+            _inputNode?.Dispose();
         }
     }
 }

@@ -17,8 +17,8 @@ namespace DevOnBike.Overfit.Tensors
             if (size <= 0)
             {
                 _ptr = null;
-                Span = Span<T>.Empty;
-                
+                Span = [];
+
                 return;
             }
 

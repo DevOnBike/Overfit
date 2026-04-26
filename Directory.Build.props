@@ -1,7 +1,7 @@
 ﻿<Project>
     <PropertyGroup>
-        <Version>2026.03.28</Version>
-        <FileVersion>2026.03.28</FileVersion>
+        <Version>2026.04.24</Version>
+        <FileVersion>2026.04.24</FileVersion>
         <InformationalVersion>release+id</InformationalVersion>
         <Authors>DevOnBike</Authors>
         <Company>Sharp IT</Company>

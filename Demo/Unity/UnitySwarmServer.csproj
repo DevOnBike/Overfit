@@ -17,10 +17,4 @@
       <ProjectReference Include="..\..\Sources\Main\Main.csproj" />
     </ItemGroup>
 
-    <ItemGroup>
-      <None Update="swarm_brain.bin">
-        <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-      </None>
-    </ItemGroup>
-
 </Project>

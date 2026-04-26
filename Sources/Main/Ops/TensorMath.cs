@@ -7,6 +7,7 @@ using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core; // Wpinamy Core
 
 namespace DevOnBike.Overfit.Ops
 {
@@ -18,7 +19,7 @@ namespace DevOnBike.Overfit.Ops
 
         private const long ParallelThreshold = 4096;
         private const int StackAllocThreshold = 1024;
-        private const int BatchSequentialThreshold = 32;
+        private const int BatchSequentialThreshold = 128;
 
         // ====================================================================
         // SOFTMAX
@@ -37,21 +38,33 @@ namespace DevOnBike.Overfit.Ops
         }
 
         // ====================================================================
-        // ALLOCATOR
+        // ZERO-ALLOC NODE FACTORY (DOD)
         // ====================================================================
 
+        /// <summary>
+        /// Centralna metoda tworząca nowe węzły na taśmie.
+        /// Wycina pamięć z Areny (jeśli podano Graf) i opakowuje w lekki AutogradNode.
+        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static FastTensor<float> AllocateLike(AutogradNode node, bool clearMemory = true)
+        internal static AutogradNode AllocateNode(ComputationGraph? graph, TensorShape shape, bool requiresGrad, bool clearMemory = true)
         {
-            var v = node.DataView;
-            return v.Rank switch
+            TensorStorage<float> storage;
+
+            if (graph != null)
             {
-                1 => new FastTensor<float>(v.GetDim(0), clearMemory),
-                2 => new FastTensor<float>(v.GetDim(0), v.GetDim(1), clearMemory),
-                3 => new FastTensor<float>(v.GetDim(0), v.GetDim(1), v.GetDim(2), clearMemory),
-                4 => new FastTensor<float>(v.GetDim(0), v.GetDim(1), v.GetDim(2), v.GetDim(3), clearMemory),
-                _ => throw new InvalidOperationException("Nieobsługiwany wymiar")
-            };
+                storage = graph.AllocateIntermediate(shape.Size);
+                if (clearMemory)
+                {
+                    storage.AsSpan().Clear();
+                }
+            }
+            else
+            {
+                storage = new TensorStorage<float>(shape.Size, clearMemory);
+            }
+
+            // Zwracamy od razu gotowy, bezpieczny węzeł
+            return new AutogradNode(storage, shape, requiresGrad);
         }
     }
 }

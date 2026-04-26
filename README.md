@@ -1,280 +1,403 @@
-# Overfit 🚀
+# Overfit
 
-[![NuGet version](https://img.shields.io/nuget/v/DevOnBike.Overfit.svg)](https://www.nuget.org/packages/DevOnBike.Overfit)
-[![Build Status](https://img.shields.io/github/actions/workflow/status/DevOnBike/Overfit/ci.yml?branch=main)](https://github.com/DevOnBike/Overfit/actions)
-[![License: Dual (AGPLv3 / Commercial)](https://img.shields.io/badge/License-Dual-blue.svg)](LICENSE.md)
+![NuGet version](https://img.shields.io/nuget/v/DevOnBike.Overfit.svg)
+![Build Status](https://github.com/DevOnBike/Overfit/actions/workflows/dotnet.yml/badge.svg)
+![License: Dual](https://img.shields.io/badge/license-AGPLv3%20%2F%20Commercial-blue.svg)
 
-**A High-Performance, Zero-Allocation Machine Learning Engine in Pure C#.**
+A high-performance, zero-allocation machine-learning engine in pure C#.
 
-Overfit is a ground-up Deep Learning and Data Preprocessing framework built specifically for modern .NET. It brings the power of neural networks, advanced feature selection, and tabular data pipelines directly to C# **without relying on Python wrappers or heavy external C++ binaries**.
+Overfit is a ground-up deep-learning, inference, evolutionary optimization and data-preprocessing framework built for modern .NET. It targets small and medium CPU inference workloads where predictable latency, no native runtime dependency, no Python sidecar and zero managed allocations matter.
 
-Designed for maximum CPU inference speed, Overfit embraces aggressive memory management, SIMD potential, and full Native AOT compatibility.
+```text
+Training path:   AutogradNode -> ComputationGraph -> TensorMath/Ops -> Optimizer
+Inference path:  InferenceEngine -> Sequential -> layer ForwardInference -> Kernels
+Hot math:        Kernels/LinearKernels.cs, Conv2DKernels.cs, ActivationKernels.cs, PoolingKernels.cs
+```
 
----
+## Which guide is right for you?
 
-## 👥 Which Guide Is Right For You?
+| If you are... | Start here |
+|---|---|
+| .NET architect building ML microservices | `docs/scenarios/aspnet-microservice.md` |
+| Game developer running neural nets at frame rate | `docs/scenarios/game-ai.md` |
+| Embedded / IoT engineer deploying to edge devices | `docs/scenarios/edge-iot.md` |
+| Finance / low-latency engineer | `docs/scenarios/finance-latency.md` |
+| ML engineer coming from PyTorch | `docs/scenarios/for-pytorch-users.md` |
 
-Overfit serves different needs depending on your role. Jump to the scenario that matches your situation:
-
-| If you are... | Read this |
-|--------------|-----------|
-| 🏗️ **.NET Architect** building microservices with ML | [ASP.NET Core integration guide](docs/scenarios/aspnet-microservice.md) |
-| 🎮 **Game developer** running NNs at frame-rate | [Game AI guide](docs/scenarios/game-ai.md) |
-| 📡 **Embedded / IoT engineer** deploying to edge devices | [Edge & IoT guide](docs/scenarios/edge-iot.md) |
-| 💰 **Finance / HFT engineer** with tail-latency requirements | [Finance & Low-Latency guide](docs/scenarios/finance-latency.md) |
-| 🐍 **ML engineer** coming from PyTorch | [For PyTorch users](docs/scenarios/for-pytorch-users.md) |
-
-See [ROADMAP.md](ROADMAP.md) for planned features and current priorities.
-
----
-
-## ⚡ Benchmarks: Overfit vs ONNX Runtime
-
-Single-layer MLP (784→10), measured on AMD Ryzen 9 9950X3D, .NET 10, Windows 11.
-All benchmarks use identical weights exported from the same PyTorch model.
-
-### Single Inference Latency
-
-| Method | Mean | Allocated | Ratio |
-|--------|-----:|----------:|------:|
-| **Overfit** | **188 ns** | **0 B** | **17.7×** |
-| ONNX Runtime | 3,331 ns | 912 B | 1.0× |
-
-### Batch Scaling
-
-| Batch Size | Overfit | ONNX Runtime | Winner | Overfit Alloc |
-|-----------:|--------:|-------------:|:------:|--------------:|
-| 1          | 188 ns   | 3,331 ns    | **Overfit 17.7×** | 0 B |
-| 16         | 2,909 ns | 4,541 ns    | **Overfit 1.56×** | 0 B |
-| 64         | 14,538 ns | 5,564 ns   | ONNX 2.61× | 0 B |
-| 256        | 18,852 ns | 12,242 ns  | ONNX 1.54× | 6.8 KB |
-
-### Throughput (10,000 calls)
-
-| Method | Mean | Gen0 | Allocated | Ratio |
-|--------|-----:|-----:|----------:|------:|
-| **Overfit** | **3.88 ms** | **0** | **0 B** | **9.2×** |
-| ONNX Runtime | 35.60 ms | 154 | 9.12 MB | 1.0× |
-
-### Concurrent (8 threads × 1,000 calls)
-
-| Method | Mean | Gen0 | Allocated | Ratio |
-|--------|-----:|-----:|----------:|------:|
-| **Overfit** | **824 μs** | **0** | **3.3 KB** | **13.4×** |
-| ONNX Runtime | 11,034 μs | 141 | 7.1 MB | 1.0× |
-
-### Cold Start (load + first prediction)
-
-| Method | Mean | Ratio |
-|--------|-----:|------:|
-| **Overfit** | **291 μs** | **4.2×** |
-| ONNX Runtime | 1,224 μs | 1.0× |
-
-### Tail Latency (100,000 calls)
-
-| Metric | Overfit | ONNX Runtime |
-|--------|--------:|-------------:|
-| P50 | 0.40 μs | 3.00 μs |
-| P99 | 0.60 μs | 3.70 μs |
-| P99.9 | 0.80 μs | 5.70 μs |
-| **Max** | **8.40 μs** | **2,184 μs** |
-| GC Gen-0 | 0 | 1 |
-
-### Scaling by Model Size
-
-| Model | Overfit | ONNX Runtime | Ratio |
-|-------|--------:|-------------:|------:|
-| 128 → 10 | 74 ns | 3,116 ns | **42.1×** |
-| 784 → 10 | 188 ns | 3,331 ns | **17.7×** |
-| 4096 → 10 | 1,972 ns | 5,461 ns | **2.8×** |
-
-> **Key takeaway:** ONNX Runtime carries ~3 μs of fixed overhead per call (P/Invoke marshalling, OrtValue allocation, managed↔native transitions). The smaller the model, the more this overhead dominates. At 128→10, the overhead is **42× larger than the actual math**. Overfit eliminates this entirely — pure managed SIMD with zero allocations.
-
-**When to choose Overfit:** single-sample inference, edge/IoT, real-time streaming, game engines, microservices with tight latency budgets, batches ≤ 16.
-
-**When to choose ONNX Runtime:** server-side batch inference (≥ 64), large transformer models, framework interop with PyTorch/TensorFlow.
+See `ROADMAP.md` for planned features and current priorities.
 
 ---
 
-## 🎬 Showcase: Unity Swarm Demo
+What is intentionally not claimed:
 
-**100,000 neural networks running at 60 FPS in Unity.** Each bot makes independent decisions using its own evolved brain (10 parameters via Linear 4→2). Genetic algorithm trains the swarm to orbit a target while avoiding a predator — orbital behavior emerges in under 60 seconds of training.
+- Training is not zero-allocation yet. Training benchmarks are performance trend checks.
+- Large batched GEMM workloads are not the strongest Overfit case yet.
+- CNN and larger MLP benchmarks are treated as roughly tied with ONNX Runtime, with Overfit's main advantage being `0 B/op`.
+- Thread-scaling and kernel/training benchmarks are diagnostic unless their individual benchmark output has no setup warnings.
 
-- Pure C#, zero GC allocations in the hot path
-- 100k inferences per frame (~1.7 ms at 60 FPS)
-- Offline training: 400 generations in **36 seconds** on Ryzen 9 9950X3D
+## Current benchmark snapshot
 
-See [`Demo/Unity/`](Demo/Unity) for the full code, or jump to the [Game AI scenario](docs/scenarios/game-ai.md) for integration details.
+Hardware and runtime:
+
+```text
+CPU: AMD Ryzen 9 9950X3D, 16 physical / 32 logical cores
+OS: Windows 11 25H2
+Runtime: .NET 10.0.7
+JIT: RyuJIT x86-64-v4
+BenchmarkDotNet: 0.15.8
+```
+
+All inference results below use the current `InferenceEngine.Run(...)` hot path with preallocated input/output buffers. ONNX Runtime results use pre-created `OrtValue` buffers where applicable. Remaining ONNX allocation is runtime wrapper/managed overhead reported by BenchmarkDotNet.
+
+### Linear inference: strongest zero-allocation path
+
+| Benchmark | Overfit | ONNX Runtime | Allocations |
+|---|---:|---:|---:|
+| `SingleInferenceBenchmark`, Linear(784,10) | ~252 ns | ~2.14 us | Overfit 0 B, ONNX 224 B |
+| `OnnxLinearInferenceBenchmarks`, Linear(784,10) | ~272 ns | ~2.18 us | Overfit 0 B, ONNX 224 B |
+| `ThroughputBenchmark`, Linear(784,10) | ~253 ns/op | ~1.87 us/op | Overfit 0 B, ONNX 224 B |
+| `TailLatencyBenchmark`, Linear(784,10) | ~299 ns/op | ~2.26 us/op | Overfit 0 B, ONNX 224 B |
+
+Observed result: Overfit is roughly 7-9x faster than the preallocated ONNX Runtime path for repeated single-sample Linear(784,10) inference while remaining allocation-free.
+
+### Scaling by input size
+
+| Model | Overfit | ONNX Runtime | Allocations |
+|---|---:|---:|---:|
+| Linear(64,10) | ~80 ns | ~1.39 us | Overfit 0 B, ONNX 224 B |
+| Linear(784,10) | ~210 ns | ~1.87 us | Overfit 0 B, ONNX 224 B |
+| Linear(4096,10) | ~1.08 us | ~3.74 us | Overfit 0 B, ONNX 224 B |
+
+Observed result: the smaller the model, the more ONNX Runtime fixed overhead dominates. Overfit keeps the path in managed code with no hot-path allocation.
+
+### MLP and CNN inference
+
+| Benchmark | Model | Overfit | Comparison | Allocations |
+|---|---|---:|---:|---:|
+| `OnnxMlpInferenceBenchmarks` | 784 -> 128 -> 10 | ~3.7 us | ONNX ~5.2 us | Overfit 0 B, ONNX 224 B |
+| `MultiLayerInferenceBenchmark` | 784 -> 256 -> 128 -> 10 | ~10-12 us | ONNX ~10-11 us | Overfit 0 B, ONNX 224 B |
+| `OnnxCnnInferenceBenchmarks` | Conv/ReLU/Pool/GAP/Linear | ~5-6.5 us | ONNX ~6-7.7 us | Overfit 0 B, ONNX 224 B |
+
+Observed result: Overfit wins the smaller MLP benchmark and roughly matches ONNX Runtime on larger 3-layer MLP and small CNN workloads while staying allocation-free.
+
+### ML.NET API-level single inference
+
+| Runtime | Mean | Allocated |
+|---|---:|---:|
+| ML.NET `PredictionEngine`, fresh input | ~10.1 us | ~4.6 KB |
+| ML.NET `PredictionEngine`, reused input | ~10.1 us | ~4.5 KB |
+| ONNX Runtime preallocated | ~11.2 us | 224 B |
+| Overfit `InferenceEngine.Run(...)` | ~12.1 us | 0 B |
+
+Observed result: ML.NET can be slightly faster in this API-level 3-layer MLP run, but it allocates several KB/op. Overfit is the only 0 B/op path in this comparison.
+
+### Batch scaling
+
+| Batch | Overfit | ONNX Runtime | Result |
+|---:|---:|---:|---|
+| 1 | ~286 ns, 0 B | ~1.90 us, 224 B | Overfit wins |
+| 16 | ~3.0 us, 0 B | ~3.7 us, 224 B | Overfit close / wins in this run |
+| 64 | ~14.4 us, 0 B | ~7.2 us, 224 B | ONNX wins |
+| 256 | ~47.4 us, 0 B | ~23.4 us, 224 B | ONNX wins |
+
+Observed result: Overfit is excellent for batch-1 and small batches. Larger batches favor ONNX Runtime because it uses batched GEMM-style execution. The next Overfit performance target is `LinearKernels.ForwardBatched(...)`.
+
+### Concurrent inference
+
+| Benchmark | Overfit | ONNX Runtime |
+|---|---:|---:|
+| Concurrent single-sample inference | ~516 ms, 0 B | ~1811 ms, ~117 MB |
+
+Observed result: Overfit performs well in a zero-contention concurrent scenario where each worker owns its own model, engine and buffers.
+
+### Manual baseline comparison
+
+| Method | Mean | Allocated |
+|---|---:|---:|
+| Manual single linear | ~225-228 ns | 0 B |
+| Overfit single linear | ~228-232 ns | 0 B |
+| Manual multilayer baseline | ~3.61 us | 0 B |
+| Overfit multilayer baseline | ~3.61 us | 0 B |
+
+Observed result: Overfit inference overhead is effectively at manual-code level in these internal baseline benchmarks.
+
+### Training and strategy benchmarks
+
+Training is not expected to be zero-allocation in the same sense as inference.
+
+| Benchmark | Mean | Allocated | Notes |
+|---|---:|---:|---|
+| `TrainingEngine_Mlp_TrainBatch` | ~468 us | ~26.8 KB | trend benchmark, allocations allowed |
+| OpenAI-ES tiny `Ask` | ~1.8 us | 0 B | zero-allocation strategy buffer path |
+| OpenAI-ES tiny `AskThenTell` | ~5-6 us | 0 B | zero-allocation full strategy cycle |
+
+### Thread-scaling diagnostics
+
+Thread-scaling benchmarks are directional, not zero-allocation claims. Current useful signals:
+
+| Workload | 1 thread | 8 threads | 16 threads | Notes |
+|---|---:|---:|---:|---|
+| MatMul MSE backward | ~3.23 ms | ~1.21 ms | ~1.22 ms | scales well to ~8 threads |
+| ResidualBlock MSE backward | ~7.97 ms | ~2.27 ms | ~2.10 ms | scales well to 16 threads |
+| ResidualBlock forward inference-style | ~2.60 ms | ~1.11 ms | ~1.34 ms | best around 8 threads |
 
 ---
 
-## 🔥 Key Features
+## Installation
 
-* **Zero-Allocation Hot Paths:** Built heavily on `Span<T>` and custom memory pooling. Training loops and inference passes avoid triggering the Garbage Collector (GC), ensuring flat-line CPU usage.
-* **100% Native AOT Compatible:** Free from runtime reflection (`System.Reflection`), `dynamic` typing, and `Reflection.Emit`. Overfit compiles perfectly into tiny, standalone native binaries with instant cold-starts.
-* **Dynamic Autograd Engine:** Features a scratch-built `ComputationGraph` for automatic differentiation (Reverse-mode AutoDiff).
-* **Deep Learning Toolkit:** Out-of-the-box support for MLPs, Convolutional Neural Networks (Conv2D, MaxPool, GlobalAveragePool), Residual Blocks, Batch Normalization, and LSTMs.
-* **AVX-512 Optimized Optimizers:** Adam and AdamW with vectorized parameter updates (16 floats per cycle on supported CPUs).
-* **Advanced Data Pipelines:** Production-ready `DataPipeline` including Boruta Feature Selection, Correlation Filters, Robust Scaling, and Outlier Clipping.
-* **Reinforcement Learning:** Easily adaptable for RL scenarios (e.g., Q-Learning for game agents).
-* **MNIST Benchmark:** Full 60k training set, ResNet-style architecture, ~26 seconds per epoch reaching 99% test accuracy.
-
----
-
-## 📦 Installation
-
-Install via NuGet Package Manager:
 ```bash
 dotnet add package DevOnBike.Overfit
 ```
 
-Requires .NET 10 or later. No native dependencies.
+Requires .NET 10 or later. No Python runtime, model server or native ML runtime is required for Overfit inference.
 
 ---
 
-## ⚡ Quick Start
+## Quick start: zero-allocation inference
 
-### 1. Building a Neural Network
-
-Overfit makes it easy to build, train, and run inference on deep neural networks.
+Use `InferenceEngine` for production inference. It hides `Eval()`, `PrepareInference(...)`, workspace allocation and warmup.
 
 ```csharp
 using DevOnBike.Overfit.DeepLearning;
-using DevOnBike.Overfit.Optimizers;
+using DevOnBike.Overfit.Inference;
 
-// Define a ResNet-style architecture or MLP
-var model = new Sequential(
-    new ConvLayer(inChannels: 1, outChannels: 8, h: 28, w: 28, kSize: 3),
+using var model = new Sequential(
+    new LinearLayer(784, 128),
     new ReluActivation(),
-    new MaxPool2D(poolSize: 2),
-    // ... flattening ...
-    new LinearLayer(1352, 10)
-);
+    new LinearLayer(128, 10));
 
-// High-performance optimizers out of the box
-using var optimizer = new Adam(model.Parameters(), learningRate: 0.001f);
+using var engine = InferenceEngine.FromSequential(
+    model,
+    inputSize: 784,
+    outputSize: 10,
+    new InferenceEngineOptions
+    {
+        WarmupIterations = 16,
+        MaxIntermediateElements = 64 * 1024
+    });
 
-// Null ComputationGraph disables the tape for ultra-fast Zero-Allocation Inference
-var prediction = model.Forward(null, inputTensor);
+var input = new float[784];
+var output = new float[10];
+
+engine.Run(input, output);
 ```
 
-### 2. Robust Data Preprocessing
-
-Taming messy tabular data before feeding it to a model:
+For convenience, `Predict` returns an internal preallocated output span. The span is overwritten on the next call.
 
 ```csharp
-using DevOnBike.Overfit.Data.Prepare;
-
-var pipeline = new DataPipeline()
-    .AddLayer(new TechnicalSanityLayer(maxCorruptedRatio: 0.3f))
-    .AddLayer(new ConstantColumnFilterLayer())
-    .AddLayer(new OutlierClipLayer(lowerPercentile: 0.01f, upperPercentile: 0.99f))
-    .AddLayer(new RobustScalingLayer(columnIndices: numericColumns));
-
-using var cleanData = pipeline.Execute(rawFeatures, rawTargets);
+ReadOnlySpan<float> prediction = engine.Predict(input);
 ```
 
-### 3. ASP.NET Core Integration
+For batched input:
 
-Deploy a trained model as a REST microservice in three lines:
+```csharp
+var batchInput = new float[784 * 32];
+var batchOutput = new float[10 * 32];
+
+engine.Run(batchInput, batchOutput);
+```
+
+---
+
+## Quick start: training facade
+
+The training facade hides repeated training-loop boilerplate while leaving optimizer and loss selection extensible.
 
 ```csharp
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.Ops;
+using DevOnBike.Overfit.Optimizers;
+using DevOnBike.Overfit.Training;
 
-var builder = WebApplication.CreateBuilder(args);
+const int batchSize = 64;
+const int inputSize = 784;
+const int classCount = 10;
 
-// Load the model once at startup - thread-safe for inference
-var model = new Sequential(new LinearLayer(784, 10));
-model.Load("model.bin");
-model.Eval();
-builder.Services.AddSingleton(model);
+using var model = new Sequential(
+    new LinearLayer(inputSize, 128),
+    new ReluActivation(),
+    new LinearLayer(128, classCount));
 
-var app = builder.Build();
+using var adam = new Adam(
+    model.Parameters(),
+    learningRate: 0.001f);
 
-app.MapPost("/predict", (float[] input, Sequential model) =>
-{
-    using var tensor = new FastTensor<float>(1, 784, clearMemory: false);
-    input.AsSpan().CopyTo(tensor.GetView().AsSpan());
-    using var node = new AutogradNode(tensor, requiresGrad: false);
-    var result = model.Forward(null, node).DataView.AsReadOnlySpan();
-    return result.ToArray();
-});
+var optimizer = new DelegateTrainingOptimizer(
+    zeroGrad: adam.ZeroGrad,
+    step: adam.Step);
 
-app.Run();
+var loss = new DelegateTrainingLoss(
+    forward: (graph, prediction, target) =>
+        TensorMath.SoftmaxCrossEntropy(graph, prediction, target),
+    backward: (graph, lossNode) => graph.Backward(lossNode));
+
+using var trainer = TrainingEngine.FromBackend(
+    new SequentialTrainingBackend(
+        model,
+        optimizer,
+        loss,
+        batchSize,
+        inputSize,
+        classCount));
+
+TrainingStepResult result = trainer.TrainBatch(batchInput, batchTarget);
+Console.WriteLine(result.Loss);
 ```
 
-No Python sidecar. No inter-process serialization. Model lives in the same process as your business logic, with sub-microsecond latency per request. See the [full ASP.NET guide](docs/scenarios/aspnet-microservice.md) for deployment patterns.
+Training constructs and traverses the autograd graph. It is measured as a performance trend, not as a zero-allocation gate.
 
 ---
 
-## 💡 Why Pure C# and Native AOT?
+## CNN inference example
 
-Most .NET ML libraries act as bridges to PyTorch, TensorFlow, or ONNX Runtime. While powerful, they drag along massive dependencies (often gigabytes of CUDA libraries and Python environments).
+```csharp
+using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.Inference;
 
-**Overfit is different.**
-By writing the math and the autograd engine entirely in modern C# (utilizing SIMD and memory-safe structures), Overfit allows you to deploy intelligent applications as **single-file native executables**.
-Whether you're building a microservice, a high-frequency trading bot, or an embedded IoT application, Overfit runs with predictable latency and a tiny memory footprint.
+const int inputChannels = 1;
+const int inputH = 28;
+const int inputW = 28;
+const int convOutChannels = 8;
+const int kernel = 3;
+const int pool = 2;
+const int outputClasses = 10;
 
-### The "Python Tax"
+const int convOutH = inputH - kernel + 1;
+const int convOutW = inputW - kernel + 1;
+const int poolOutH = convOutH / pool;
+const int poolOutW = convOutW / pool;
 
-Many .NET shops maintain a parallel Python stack (FastAPI, conda environments, separate containers) just to serve ML models — while the rest of their backend runs on .NET. This duplication adds operational overhead, increases the attack surface, and introduces cross-process serialization latency.
+using var model = new Sequential(
+    new ConvLayer(inputChannels, convOutChannels, inputH, inputW, kernel),
+    new ReluActivation(),
+    new MaxPool2DLayer(convOutChannels, convOutH, convOutW, pool),
+    new GlobalAveragePool2DLayer(convOutChannels, poolOutH, poolOutW),
+    new LinearLayer(convOutChannels, outputClasses));
 
-Overfit eliminates this by keeping inference in-process, in the same language as the rest of the application.
+using var engine = InferenceEngine.FromSequential(
+    model,
+    inputSize: inputChannels * inputH * inputW,
+    outputSize: outputClasses);
 
----
+var input = new float[inputChannels * inputH * inputW];
+var output = new float[outputClasses];
 
-## 🧱 Architecture Overview
-
-Overfit is organized into clear layers:
-
-- **Tensors** (`DevOnBike.Overfit.Tensors`) — `FastTensor<T>`, `TensorView<T>`, `ReadOnlyTensorView<T>`. Zero-allocation memory primitives.
-- **Autograd** (`DevOnBike.Overfit.Autograd`) — Reverse-mode automatic differentiation via `ComputationGraph` and `AutogradNode`.
-- **Ops** (`DevOnBike.Overfit.Ops`) — Tensor mathematics: `TensorMath.Linear`, `TensorMath.Conv2D`, `TensorMath.BatchNorm1D`, and friends.
-- **DeepLearning** (`DevOnBike.Overfit.DeepLearning`) — High-level modules: `Sequential`, `LinearLayer`, `ConvLayer`, `ResidualBlock`, `LSTMLayer`.
-- **Optimizers** (`DevOnBike.Overfit.Optimizers`) — `Adam`, `AdamW`, `SGD` with AVX-512 optimized update paths.
-- **Data** (`DevOnBike.Overfit.Data`) — Tabular preprocessing pipelines (`DataPipeline`, feature selection, scaling, outlier handling).
-- **Diagnostics** (`DevOnBike.Overfit.Diagnostics`) — Optional per-module timing and allocation tracing for training inspection.
-
-See [ROADMAP.md](ROADMAP.md) for what's planned next.
-
----
-
-## 🎯 Use Cases
-
-Overfit shines in scenarios where ONNX Runtime's per-call overhead dominates or where a Python sidecar is operationally painful:
-
-- **ASP.NET Core microservices** — inference as a first-class citizen of your API, not a separate service. [→ Full guide](docs/scenarios/aspnet-microservice.md)
-- **Game engines** — per-frame AI inference for large populations. [→ Full guide](docs/scenarios/game-ai.md)
-- **Edge and IoT** — single-file AOT executables for field-deployed inference. [→ Full guide](docs/scenarios/edge-iot.md)
-- **High-frequency trading / fraud detection** — predictable sub-microsecond latency with zero GC pauses. [→ Full guide](docs/scenarios/finance-latency.md)
-- **Coming from PyTorch** — bridging models between Python research and .NET production. [→ Full guide](docs/scenarios/for-pytorch-users.md)
+engine.Run(input, output);
+```
 
 ---
 
-## ⚖️ Dual Licensing
+## Architecture overview
 
-This software is released under a **Dual License model**:
+| Area | Responsibility |
+|---|---|
+| `Tensors` | storage, views, pooling and span-backed tensor primitives |
+| `Autograd` | reverse-mode automatic differentiation via `ComputationGraph` and `AutogradNode` |
+| `Ops` | training-path tensor math and graph-aware operations |
+| `Kernels` | low-level inference math and hot loops, including SIMD paths |
+| `DeepLearning` | high-level modules: `Sequential`, layers, pooling, activations, recurrent layers |
+| `Inference` | user-facing inference facade and backend abstraction |
+| `Training` | user-facing training facade and backend/loss/optimizer abstractions |
+| `Optimizers` | Adam, AdamW, SGD and parameter update logic |
+| `Evolutionary` | gradient-free optimization and population evaluation |
+| `Diagnostics` | optional timing/allocation tracing |
 
-1. **Open Source (GNU AGPLv3):** Free for open-source projects, personal use, and academic research. *Note: If you use this engine in your application (even over a network/API), your entire application must also be open-sourced under the AGPLv3.*
-2. **Commercial License:** For businesses building proprietary, closed-source applications or enterprise environments. Purchasing a commercial license frees you from the requirements of the AGPLv3.
+Current inference design rule:
 
-**To purchase a commercial license or discuss enterprise support, please contact:** 👉 **devonbike@gmail.com**
+```text
+Layers own shape, parameters, save/load and train/eval state.
+Kernels own hot math.
+TensorMath/Ops own autograd/training graph math.
+InferenceEngine owns prepared execution and workspace setup.
+```
 
 ---
 
-## 🤝 Contributing
+## Evolutionary training engine
 
-Contributions are welcome! Whether it's adding new activation functions, optimizing tensor math with `System.Numerics.Vectors`, or improving the documentation.
+Overfit includes gradient-free optimization for black-box training and simulation-based tasks.
 
-1. Fork the Project
-2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the Branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+- `GenerationalGeneticAlgorithm` — elitist GA with truncation selection and Gaussian mutation.
+- `OpenAiEsStrategy` — Natural Evolution Strategies with shared `PrecomputedNoiseTable` and antithetic sampling.
+- `ParallelPopulationEvaluator` — thread-pool fan-out with lazy per-worker context reuse.
 
-Each PR should include:
-- A benchmark comparison (before/after) for performance-sensitive changes
-- A correctness test for new functionality
-- Documentation updates where relevant
+Typical flow:
 
-See [ROADMAP.md](ROADMAP.md) for areas where contributions are especially welcome.
+```csharp
+using var evaluator = new ParallelPopulationEvaluator(
+    evaluator: new MyFitnessFunction(),
+    contextFactory: () => BuildContext(),
+    contextDispose: ctx => ctx.Dispose());
+
+using var strategy = new OpenAiEsStrategy(
+    populationSize: 256,
+    parameterCount: adapter.ParameterCount,
+    sigma: 0.1f,
+    learningRate: 0.01f,
+    noiseTable: new PrecomputedNoiseTable(length: 1 << 24, seed: 42));
+
+strategy.Initialize();
+
+var genomes = new float[256 * strategy.ParameterCount];
+var fitness = new float[256];
+
+for (var generation = 0; generation < generations; generation++)
+{
+    strategy.Ask(genomes);
+    evaluator.Evaluate(genomes, fitness, 256, strategy.ParameterCount);
+    strategy.Tell(fitness);
+}
+```
+
+---
+
+## When to choose Overfit
+
+Overfit is a good fit when:
+
+- inference is small or medium sized and latency-sensitive;
+- you need zero managed allocations in the inference hot path;
+- you want in-process inference in a .NET service;
+- you want Native AOT-friendly deployment;
+- a Python sidecar or native model runtime is operationally undesirable;
+- you need simple, controllable CPU inference kernels.
+
+ONNX Runtime or other native runtimes may be the better fit when:
+
+- workloads are large and heavily batched;
+- framework interchange with PyTorch, TensorFlow or external model export is required;
+- GPU execution is required;
+- transformer-scale kernels dominate the workload.
+
+---
+
+## Licensing
+
+Overfit uses a dual-license model.
+
+1. Open source: GNU AGPLv3.
+2. Commercial license: for proprietary, closed-source or enterprise use.
+
+For commercial licensing, contact: devonbike@gmail.com.
+
+---
+
+## Contributing
+
+For performance-sensitive changes, include:
+
+- a correctness test;
+- before/after BenchmarkDotNet output;
+- allocation measurements where relevant;
+- documentation updates when public behavior changes.
+
+Suggested local validation:
+
+```bash
+dotnet test -c Release
+dotnet run -c Release --project Sources/Benchmark --filter "*SingleInferenceBenchmark*"
+dotnet run -c Release --project Sources/Benchmark --filter "*ScalingBenchmark*"
+dotnet run -c Release --project Sources/Benchmark --filter "*ThroughputBenchmark*"
+dotnet run -c Release --project Sources/Benchmark --filter "*OnnxMlpInferenceBenchmarks*"
+dotnet run -c Release --project Sources/Benchmark --filter "*OnnxCnnInferenceBenchmarks*"
+```

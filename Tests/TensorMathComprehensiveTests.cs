@@ -7,6 +7,7 @@ using System.Numerics.Tensors;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core; // Zmieniono na Tensors.Core
 
 namespace DevOnBike.Overfit.Tests
 {
@@ -22,8 +23,10 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void AddBias_ForwardAndBackward_NCHW_Correct()
         {
-            using var input = new AutogradNode(new FastTensor<float>(2, 3, 1, 1, clearMemory: true), requiresGrad: true);
-            using var bias = new AutogradNode(new FastTensor<float>(3, clearMemory: true), requiresGrad: true);
+            using var inputTensor = new TensorStorage<float>(2 * 3 * 1 * 1, clearMemory: true);
+            using var biasTensor = new TensorStorage<float>(3, clearMemory: true);
+            using var input = new AutogradNode(inputTensor, new TensorShape(2, 3, 1, 1), requiresGrad: true);
+            using var bias = new AutogradNode(biasTensor, new TensorShape(3), requiresGrad: true);
 
             input.DataView.AsSpan().Fill(1f);
             var bSpan = bias.DataView.AsSpan();
@@ -52,8 +55,10 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void MatMul_ForwardAndBackward_Correct()
         {
-            using var input = new AutogradNode(new FastTensor<float>(2, 3, clearMemory: true), requiresGrad: true);
-            using var weights = new AutogradNode(new FastTensor<float>(3, 4, clearMemory: true), requiresGrad: true);
+            using var inputTensor = new TensorStorage<float>(2 * 3, clearMemory: true);
+            using var weightsTensor = new TensorStorage<float>(3 * 4, clearMemory: true);
+            using var input = new AutogradNode(inputTensor, new TensorShape(2, 3), requiresGrad: true);
+            using var weights = new AutogradNode(weightsTensor, new TensorShape(3, 4), requiresGrad: true);
 
             input.DataView.AsSpan().Fill(2f);
             weights.DataView.AsSpan().Fill(3f);
@@ -77,8 +82,10 @@ namespace DevOnBike.Overfit.Tests
         public void Conv2D_ForwardAndBackward_Correct()
         {
             int inC = 1, outC = 1, h = 3, w = 3, k = 2;
-            using var input = new AutogradNode(new FastTensor<float>(1, inC, h, w, clearMemory: true), requiresGrad: true);
-            using var weights = new AutogradNode(new FastTensor<float>(outC, inC * k * k, clearMemory: true), requiresGrad: true);
+            using var inputTensor = new TensorStorage<float>(1 * inC * h * w, clearMemory: true);
+            using var weightsTensor = new TensorStorage<float>(outC * inC * k * k, clearMemory: true);
+            using var input = new AutogradNode(inputTensor, new TensorShape(1, inC, h, w), requiresGrad: true);
+            using var weights = new AutogradNode(weightsTensor, new TensorShape(outC, inC * k * k), requiresGrad: true);
 
             input.DataView.AsSpan().Fill(1f);
             weights.DataView.AsSpan().Fill(2f);
@@ -102,7 +109,8 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void ReLU_ForwardAndBackward_Correct()
         {
-            using var input = new AutogradNode(new FastTensor<float>(1, 4, clearMemory: true), requiresGrad: true);
+            using var inputTensor = new TensorStorage<float>(4, clearMemory: true);
+            using var input = new AutogradNode(inputTensor, new TensorShape(1, 4), requiresGrad: true);
             var inSpan = input.DataView.AsSpan();
             inSpan[0] = 5.0f;
             inSpan[1] = -2.0f;
@@ -132,8 +140,10 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void SoftmaxCrossEntropy_ForwardAndBackward_Correct()
         {
-            using var logits = new AutogradNode(new FastTensor<float>(1, 3, clearMemory: true), requiresGrad: true);
-            using var targets = new AutogradNode(new FastTensor<float>(1, 3, clearMemory: true), requiresGrad: false);
+            using var logitsTensor = new TensorStorage<float>(3, clearMemory: true);
+            using var targetsTensor = new TensorStorage<float>(3, clearMemory: true);
+            using var logits = new AutogradNode(logitsTensor, new TensorShape(1, 3), requiresGrad: true);
+            using var targets = new AutogradNode(targetsTensor, new TensorShape(1, 3), requiresGrad: false);
 
             var lSpan = logits.DataView.AsSpan();
             lSpan[0] = 2.0f; lSpan[1] = 1.0f; lSpan[2] = 0.1f;
@@ -160,7 +170,8 @@ namespace DevOnBike.Overfit.Tests
         public void GlobalAveragePool2D_Forward_Correct()
         {
             int batch = 1, channels = 2, h = 2, w = 2;
-            using var input = new AutogradNode(new FastTensor<float>(batch, channels, h, w, clearMemory: true), requiresGrad: false);
+            using var inputTensor = new TensorStorage<float>(batch * channels * h * w, clearMemory: true);
+            using var input = new AutogradNode(inputTensor, new TensorShape(batch, channels, h, w), requiresGrad: false);
             var inSpan = input.DataView.AsSpan();
 
             // Kanał 0
@@ -179,8 +190,10 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void MSELoss_ForwardAndBackward_Correct()
         {
-            using var pred = new AutogradNode(new FastTensor<float>(1, 4, clearMemory: true), requiresGrad: true);
-            using var target = new AutogradNode(new FastTensor<float>(1, 4, clearMemory: true), requiresGrad: false);
+            using var predTensor = new TensorStorage<float>(4, clearMemory: true);
+            using var targetTensor = new TensorStorage<float>(4, clearMemory: true);
+            using var pred = new AutogradNode(predTensor, new TensorShape(1, 4), requiresGrad: true);
+            using var target = new AutogradNode(targetTensor, new TensorShape(1, 4), requiresGrad: false);
 
             pred.DataView.AsSpan().Fill(2f);
             target.DataView.AsSpan().Fill(1f);
@@ -199,8 +212,10 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void DirectionalLoss_ForwardAndBackward_Correct()
         {
-            using var pred = new AutogradNode(new FastTensor<float>(1, 4, clearMemory: true), requiresGrad: true);
-            using var target = new AutogradNode(new FastTensor<float>(1, 4, clearMemory: true), requiresGrad: false);
+            using var predTensor = new TensorStorage<float>(4, clearMemory: true);
+            using var targetTensor = new TensorStorage<float>(4, clearMemory: true);
+            using var pred = new AutogradNode(predTensor, new TensorShape(1, 4), requiresGrad: true);
+            using var target = new AutogradNode(targetTensor, new TensorShape(1, 4), requiresGrad: false);
 
             pred.DataView.AsSpan().Fill(2f);
             target.DataView.AsSpan().Fill(-1f); // Zły kierunek (pred > 0, target < 0)
@@ -221,8 +236,10 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void AddBias_NumericalGradient_MatchesAnalytical()
         {
-            using var input = new AutogradNode(new FastTensor<float>(2, 3, 1, 1, clearMemory: true), requiresGrad: true);
-            using var bias = new AutogradNode(new FastTensor<float>(3, clearMemory: true), requiresGrad: true);
+            using var inputTensor = new TensorStorage<float>(6, clearMemory: true);
+            using var biasTensor = new TensorStorage<float>(3, clearMemory: true);
+            using var input = new AutogradNode(inputTensor, new TensorShape(2, 3, 1, 1), requiresGrad: true);
+            using var bias = new AutogradNode(biasTensor, new TensorShape(3), requiresGrad: true);
 
             input.DataView.AsSpan().Fill(0.5f);
             bias.DataView.AsSpan().Fill(0.2f);
@@ -234,7 +251,8 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void ReLU_NumericalGradient_MatchesAnalytical()
         {
-            using var input = new AutogradNode(new FastTensor<float>(1, 4, clearMemory: true), requiresGrad: true);
+            using var inputTensor = new TensorStorage<float>(4, clearMemory: true);
+            using var input = new AutogradNode(inputTensor, new TensorShape(1, 4), requiresGrad: true);
 
             // Wartości wejściowe "z dala od zera", aby test numeryczny f(x+e)-f(x-e) działał płynnie 
             // poza punktem nieciągłości matematycznej ReLU.
@@ -247,8 +265,10 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void MatMul_NumericalGradient_MatchesAnalytical()
         {
-            using var a = new AutogradNode(new FastTensor<float>(2, 3, clearMemory: true), requiresGrad: true);
-            using var b = new AutogradNode(new FastTensor<float>(3, 2, clearMemory: true), requiresGrad: true);
+            using var aTensor = new TensorStorage<float>(6, clearMemory: true);
+            using var bTensor = new TensorStorage<float>(6, clearMemory: true);
+            using var a = new AutogradNode(aTensor, new TensorShape(2, 3), requiresGrad: true);
+            using var b = new AutogradNode(bTensor, new TensorShape(3, 2), requiresGrad: true);
 
             a.DataView.AsSpan().Fill(0.5f);
             b.DataView.AsSpan().Fill(0.2f);
@@ -259,8 +279,10 @@ namespace DevOnBike.Overfit.Tests
         [Fact]
         public void Conv2D_NumericalGradient_MatchesAnalytical()
         {
-            using var input = new AutogradNode(new FastTensor<float>(1, 1, 4, 4, clearMemory: true), requiresGrad: true);
-            using var weights = new AutogradNode(new FastTensor<float>(1, 4, clearMemory: true), requiresGrad: true);
+            using var inputTensor = new TensorStorage<float>(16, clearMemory: true);
+            using var weightsTensor = new TensorStorage<float>(4, clearMemory: true);
+            using var input = new AutogradNode(inputTensor, new TensorShape(1, 1, 4, 4), requiresGrad: true);
+            using var weights = new AutogradNode(weightsTensor, new TensorShape(1, 4), requiresGrad: true);
 
             input.DataView.AsSpan().Fill(0.5f);
             weights.DataView.AsSpan().Fill(0.2f);

@@ -4,21 +4,21 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Jobs;
-using BenchmarkDotNet.Order;
+using Benchmarks.Helpers;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core;
 
 namespace Benchmarks
 {
-    [SimpleJob(RuntimeMoniker.Net10_0)]
-    [Orderer(SummaryOrderPolicy.FastestToSlowest)]
-    [MemoryDiagnoser]
+    [Config(typeof(BenchmarkConfig))]
     public class ThreadScalingBenchmarks
     {
+        private const int OperationsPerInvoke = 32;
+
         [Params(1, 2, 4, 8, 16)]
         public int Threads { get; set; }
 
@@ -31,10 +31,6 @@ namespace Benchmarks
         private ComputationGraph _inferGraph = null!;
         private ComputationGraph _trainGraph = null!;
 
-        private FastTensor<float> _aTensor = null!;
-        private FastTensor<float> _bTensor = null!;
-        private FastTensor<float> _targetTensor = null!;
-
         private AutogradNode _aNode = null!;
         private AutogradNode _bNode = null!;
         private AutogradNode _targetNode = null!;
@@ -42,8 +38,6 @@ namespace Benchmarks
         private ResidualBlock _residual = null!;
         private LstmLayer _lstm = null!;
 
-        private FastTensor<float> _lstmInputTensor = null!;
-        private FastTensor<float> _lstmTargetTensor = null!;
         private AutogradNode _lstmInputNode = null!;
         private AutogradNode _lstmTargetNode = null!;
 
@@ -52,7 +46,6 @@ namespace Benchmarks
         private int _oldMaxWorker;
         private int _oldMaxIo;
 
-        // 🔥 do stabilizacji benchmarku
         private float _sink;
 
         [GlobalSetup]
@@ -60,177 +53,265 @@ namespace Benchmarks
         {
             var rnd = new Random(123);
 
-            _inferGraph = new ComputationGraph { IsRecording = false };
-            _trainGraph = new ComputationGraph { IsRecording = true };
+            _inferGraph = new ComputationGraph
+            {
+                IsRecording = false
+            };
 
-            _aTensor = new FastTensor<float>(Batch, Hidden, clearMemory: true);
-            _bTensor = new FastTensor<float>(Hidden, Hidden, clearMemory: true);
-            _targetTensor = new FastTensor<float>(Batch, Hidden, clearMemory: true);
+            _trainGraph = new ComputationGraph
+            {
+                IsRecording = true
+            };
 
-            Fill(_aTensor.GetView().AsSpan(), rnd);
-            Fill(_bTensor.GetView().AsSpan(), rnd);
-            Fill(_targetTensor.GetView().AsSpan(), rnd);
+            var aStorage = new TensorStorage<float>(
+                Batch * Hidden,
+                clearMemory: true);
 
-            _aNode = new AutogradNode(_aTensor, requiresGrad: true);
-            _bNode = new AutogradNode(_bTensor, requiresGrad: true);
-            _targetNode = new AutogradNode(_targetTensor, requiresGrad: false);
+            var bStorage = new TensorStorage<float>(
+                Hidden * Hidden,
+                clearMemory: true);
+
+            var targetStorage = new TensorStorage<float>(
+                Batch * Hidden,
+                clearMemory: true);
+
+            Fill(aStorage.AsSpan(), rnd);
+            Fill(bStorage.AsSpan(), rnd);
+            Fill(targetStorage.AsSpan(), rnd);
+
+            _aNode = new AutogradNode(
+                aStorage,
+                new TensorShape(Batch, Hidden),
+                requiresGrad: true);
+
+            _bNode = new AutogradNode(
+                bStorage,
+                new TensorShape(Hidden, Hidden),
+                requiresGrad: true);
+
+            _targetNode = new AutogradNode(
+                targetStorage,
+                new TensorShape(Batch, Hidden),
+                requiresGrad: false);
 
             _residual = new ResidualBlock(Hidden);
-            _lstm = new LstmLayer(inputSize: 32, hiddenSize: 32, returnSequences: false);
 
-            _lstmInputTensor = new FastTensor<float>(Batch, 8, 32, clearMemory: true);
-            _lstmTargetTensor = new FastTensor<float>(Batch, 32, clearMemory: true);
+            _lstm = new LstmLayer(
+                inputSize: 32,
+                hiddenSize: 32,
+                returnSequences: false);
 
-            Fill(_lstmInputTensor.GetView().AsSpan(), rnd);
-            Fill(_lstmTargetTensor.GetView().AsSpan(), rnd);
+            var lstmInputStorage = new TensorStorage<float>(
+                Batch * 8 * 32,
+                clearMemory: true);
 
-            _lstmInputNode = new AutogradNode(_lstmInputTensor, requiresGrad: true);
-            _lstmTargetNode = new AutogradNode(_lstmTargetTensor, requiresGrad: false);
+            var lstmTargetStorage = new TensorStorage<float>(
+                Batch * 32,
+                clearMemory: true);
 
-            ThreadPool.GetMinThreads(out _oldMinWorker, out _oldMinIo);
-            ThreadPool.GetMaxThreads(out _oldMaxWorker, out _oldMaxIo);
+            Fill(lstmInputStorage.AsSpan(), rnd);
+            Fill(lstmTargetStorage.AsSpan(), rnd);
 
-            WarmUp(); // 🔥 KLUCZOWE
-        }
+            _lstmInputNode = new AutogradNode(
+                lstmInputStorage,
+                new TensorShape(Batch, 8, 32),
+                requiresGrad: true);
 
-        private void WarmUp()
-        {
-            // 🔥 JIT + cache + branch warmup
-            for (var i = 0; i < 10; i++)
-            {
-                _inferGraph.Reset();
-                _inferGraph.IsRecording = false;
+            _lstmTargetNode = new AutogradNode(
+                lstmTargetStorage,
+                new TensorShape(Batch, 32),
+                requiresGrad: false);
 
-                using (var y = _inferGraph.MatMul(_aNode, _bNode))
-                {
-                    _sink += y.DataView.AsReadOnlySpan()[0];
-                }
+            ThreadPool.GetMinThreads(
+                out _oldMinWorker,
+                out _oldMinIo);
 
-                _residual.Eval();
-                using (var y = _residual.Forward(_inferGraph, _aNode))
-                {
-                    _sink += y.DataView.AsReadOnlySpan()[0];
-                }
+            ThreadPool.GetMaxThreads(
+                out _oldMaxWorker,
+                out _oldMaxIo);
 
-                _lstm.Eval();
-                using (var y = _lstm.Forward(_inferGraph, _lstmInputNode))
-                {
-                    _sink += y.DataView.AsReadOnlySpan()[0];
-                }
-
-                _trainGraph.Reset();
-                _trainGraph.IsRecording = true;
-
-                using (var y = _trainGraph.MatMul(_aNode, _bNode))
-                using (var loss = TensorMath.MSELoss(_trainGraph, y, _targetNode))
-                {
-                    _sink += loss.DataView.AsReadOnlySpan()[0];
-                    _trainGraph.Backward(loss);
-                }
-            }
+            WarmUp();
         }
 
         [IterationSetup]
         public void IterationSetup()
         {
-            _inferGraph.Reset();
-            _trainGraph.Reset();
-
-            _aNode.ZeroGrad();
-            _bNode.ZeroGrad();
-            _lstmInputNode.ZeroGrad();
-
-            ZeroModuleGradients(_residual);
-            ZeroModuleGradients(_lstm);
+            ResetGraphsAndGradients();
 
             _residual.Train();
             _lstm.Train();
 
-            // 🔥 kontrola wątków
-            ThreadPool.SetMinThreads(Threads, _oldMinIo);
-            ThreadPool.SetMaxThreads(Math.Max(Threads, 1), _oldMaxIo);
+            var workerThreads = Math.Max(1, Threads);
+
+            ThreadPool.SetMinThreads(
+                workerThreads,
+                _oldMinIo);
+
+            ThreadPool.SetMaxThreads(
+                workerThreads,
+                _oldMaxIo);
         }
 
         [IterationCleanup]
         public void IterationCleanup()
         {
-            ThreadPool.SetMinThreads(_oldMinWorker, _oldMinIo);
-            ThreadPool.SetMaxThreads(_oldMaxWorker, _oldMaxIo);
+            ThreadPool.SetMinThreads(
+                _oldMinWorker,
+                _oldMinIo);
+
+            ThreadPool.SetMaxThreads(
+                _oldMaxWorker,
+                _oldMaxIo);
         }
 
-        // ======================
-        // BENCHMARKI
-        // ======================
-
-        [Benchmark(Baseline = true)]
+        [Benchmark(
+            Baseline = true,
+            OperationsPerInvoke = OperationsPerInvoke)]
         public float MatMul_MSE_Backward()
         {
-            _trainGraph.IsRecording = true;
+            var checksum = 0f;
 
-            using var y = _trainGraph.MatMul(_aNode, _bNode);
-            using var loss = TensorMath.MSELoss(_trainGraph, y, _targetNode);
+            for (var i = 0; i < OperationsPerInvoke; i++)
+            {
+                PrepareTrainingOperation();
 
-            var v = loss.DataView.AsReadOnlySpan()[0];
-            _trainGraph.Backward(loss);
+                _trainGraph.IsRecording = true;
 
-            return v;
+                using var y = _trainGraph.MatMul(
+                    _aNode,
+                    _bNode);
+
+                using var loss = TensorMath.MSELoss(
+                    _trainGraph,
+                    y,
+                    _targetNode);
+
+                var v = loss.DataView.AsReadOnlySpan()[0];
+
+                _trainGraph.Backward(loss);
+
+                checksum += v;
+            }
+
+            return checksum;
         }
 
-        [Benchmark]
+        [Benchmark(OperationsPerInvoke = OperationsPerInvoke)]
         public float ResidualBlock_Forward_InferenceStyle()
         {
-            _inferGraph.IsRecording = false;
+            var checksum = 0f;
+
             _residual.Eval();
 
-            using var y = _residual.Forward(_inferGraph, _aNode);
-            return y.DataView.AsReadOnlySpan()[0];
+            for (var i = 0; i < OperationsPerInvoke; i++)
+            {
+                PrepareInferenceOperation();
+
+                using var y = _residual.Forward(
+                    _inferGraph,
+                    _aNode);
+
+                checksum += y.DataView.AsReadOnlySpan()[0];
+            }
+
+            return checksum;
         }
 
-        [Benchmark]
+        [Benchmark(OperationsPerInvoke = OperationsPerInvoke)]
         public float ResidualBlock_MSE_Backward()
         {
-            _trainGraph.IsRecording = true;
+            var checksum = 0f;
+
             _residual.Train();
 
-            using var y = _residual.Forward(_trainGraph, _aNode);
-            using var loss = TensorMath.MSELoss(_trainGraph, y, _targetNode);
+            for (var i = 0; i < OperationsPerInvoke; i++)
+            {
+                PrepareTrainingOperation();
 
-            var v = loss.DataView.AsReadOnlySpan()[0];
-            _trainGraph.Backward(loss);
+                _trainGraph.IsRecording = true;
 
-            return v;
+                using var y = _residual.Forward(
+                    _trainGraph,
+                    _aNode);
+
+                using var loss = TensorMath.MSELoss(
+                    _trainGraph,
+                    y,
+                    _targetNode);
+
+                var v = loss.DataView.AsReadOnlySpan()[0];
+
+                _trainGraph.Backward(loss);
+
+                checksum += v;
+            }
+
+            return checksum;
         }
 
-        [Benchmark]
+        [Benchmark(OperationsPerInvoke = OperationsPerInvoke)]
         public float LSTMLayer_Forward_InferenceStyle()
         {
-            _inferGraph.IsRecording = false;
+            var checksum = 0f;
+
             _lstm.Eval();
 
-            using var y = _lstm.Forward(_inferGraph, _lstmInputNode);
-            return y.DataView.AsReadOnlySpan()[0];
+            for (var i = 0; i < OperationsPerInvoke; i++)
+            {
+                PrepareInferenceOperation();
+
+                using var y = _lstm.Forward(
+                    _inferGraph,
+                    _lstmInputNode);
+
+                checksum += y.DataView.AsReadOnlySpan()[0];
+            }
+
+            return checksum;
         }
 
-        [Benchmark]
+        [Benchmark(OperationsPerInvoke = OperationsPerInvoke)]
         public float LSTMLayer_MSE_Backward()
         {
-            _trainGraph.IsRecording = true;
+            var checksum = 0f;
+
             _lstm.Train();
 
-            using var y = _lstm.Forward(_trainGraph, _lstmInputNode);
-            using var loss = TensorMath.MSELoss(_trainGraph, y, _lstmTargetNode);
+            for (var i = 0; i < OperationsPerInvoke; i++)
+            {
+                PrepareTrainingOperation();
 
-            var v = loss.DataView.AsReadOnlySpan()[0];
-            _trainGraph.Backward(loss);
+                _trainGraph.IsRecording = true;
 
-            return v;
+                using var y = _lstm.Forward(
+                    _trainGraph,
+                    _lstmInputNode);
+
+                using var loss = TensorMath.MSELoss(
+                    _trainGraph,
+                    y,
+                    _lstmTargetNode);
+
+                var v = loss.DataView.AsReadOnlySpan()[0];
+
+                _trainGraph.Backward(loss);
+
+                checksum += v;
+            }
+
+            return checksum;
         }
 
         [GlobalCleanup]
         public void Cleanup()
         {
-            ThreadPool.SetMinThreads(_oldMinWorker, _oldMinIo);
-            ThreadPool.SetMaxThreads(_oldMaxWorker, _oldMaxIo);
+            ThreadPool.SetMinThreads(
+                _oldMinWorker,
+                _oldMinIo);
+
+            ThreadPool.SetMaxThreads(
+                _oldMaxWorker,
+                _oldMaxIo);
 
             _aNode.Dispose();
             _bNode.Dispose();
@@ -243,7 +324,95 @@ namespace Benchmarks
             _lstm.Dispose();
         }
 
-        private static void Fill(Span<float> span, Random rnd)
+        private void WarmUp()
+        {
+            for (var i = 0; i < 8; i++)
+            {
+                PrepareInferenceOperation();
+
+                using (var y = _inferGraph.MatMul(
+                    _aNode,
+                    _bNode))
+                {
+                    _sink += y.DataView.AsReadOnlySpan()[0];
+                }
+
+                _residual.Eval();
+
+                PrepareInferenceOperation();
+
+                using (var y = _residual.Forward(
+                    _inferGraph,
+                    _aNode))
+                {
+                    _sink += y.DataView.AsReadOnlySpan()[0];
+                }
+
+                _lstm.Eval();
+
+                PrepareInferenceOperation();
+
+                using (var y = _lstm.Forward(
+                    _inferGraph,
+                    _lstmInputNode))
+                {
+                    _sink += y.DataView.AsReadOnlySpan()[0];
+                }
+
+                PrepareTrainingOperation();
+
+                using (var y = _trainGraph.MatMul(
+                           _aNode,
+                           _bNode))
+                using (var loss = TensorMath.MSELoss(
+                           _trainGraph,
+                           y,
+                           _targetNode))
+                {
+                    _sink += loss.DataView.AsReadOnlySpan()[0];
+                    _trainGraph.Backward(loss);
+                }
+            }
+        }
+
+        private void PrepareInferenceOperation()
+        {
+            _inferGraph.Reset();
+            _inferGraph.IsRecording = false;
+        }
+
+        private void PrepareTrainingOperation()
+        {
+            _trainGraph.Reset();
+            _trainGraph.IsRecording = true;
+
+            ZeroGradients();
+        }
+
+        private void ResetGraphsAndGradients()
+        {
+            _inferGraph.Reset();
+            _inferGraph.IsRecording = false;
+
+            _trainGraph.Reset();
+            _trainGraph.IsRecording = true;
+
+            ZeroGradients();
+        }
+
+        private void ZeroGradients()
+        {
+            _aNode.ZeroGrad();
+            _bNode.ZeroGrad();
+            _lstmInputNode.ZeroGrad();
+
+            ZeroModuleGradients(_residual);
+            ZeroModuleGradients(_lstm);
+        }
+
+        private static void Fill(
+            Span<float> span,
+            Random rnd)
         {
             for (var i = 0; i < span.Length; i++)
             {
@@ -251,12 +420,15 @@ namespace Benchmarks
             }
         }
 
-        private static void ZeroModuleGradients(IModule module)
+        private static void ZeroModuleGradients(
+            IModule module)
         {
-            foreach (var p in module.Parameters())
+            foreach (var parameter in module.Parameters())
             {
-                if (p.RequiresGrad)
-                    p.ZeroGrad();
+                if (parameter.RequiresGrad)
+                {
+                    parameter.ZeroGrad();
+                }
             }
         }
     }

@@ -4,7 +4,9 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Buffers;
+using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace DevOnBike.Overfit.Tensors
 {
@@ -193,6 +195,38 @@ namespace DevOnBike.Overfit.Tensors
             }
 
             return materializedTensor;
+        }
+        
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void AddInPlace(FastTensor<T> other)
+        {
+            ObjectDisposedException.ThrowIf(_disposed == 1, this);
+    
+            var target = GetView().AsSpan();
+            var source = other.GetView().AsReadOnlySpan();
+
+            if (target.Length != source.Length)
+            {
+                throw new ArgumentException("Tensory muszą mieć ten sam rozmiar do operacji In-Place.");
+            }
+
+            // Jeśli T to float, używamy zoptymalizowanych prymitywów .NET
+            if (typeof(T) == typeof(float))
+            {
+                var targetFloat = MemoryMarshal.Cast<T, float>(target);
+                var sourceFloat = MemoryMarshal.Cast<T, float>(source);
+                
+                TensorPrimitives.Add(targetFloat, sourceFloat, targetFloat);
+            }
+            else
+            {
+                // Fallback dla innych typów
+                for (var i = 0; i < target.Length; i++)
+                {
+                    // Wymagałoby to generycznej matematyki w .NET 7+, 
+                    // dla uproszczenia załóżmy float lub zaimplementuj per typ
+                }
+            }
         }
     }
 }

@@ -8,6 +8,7 @@ using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core; // Added for TensorStorage and TensorShape
 
 namespace DevOnBike.Overfit.UI
 {
@@ -54,11 +55,13 @@ namespace DevOnBike.Overfit.UI
                 throw new ArgumentException("Niepoprawne dane wejściowe. Oczekiwano 784 pikseli.");
             }
 
-            // POPRAWKA: inputMat.GetView().AsSpan() zamiast inputMat.AsSpan()
-            using var inputMat = new FastTensor<float>(1, 1, 28, 28);
-            pixelData.CopyTo(inputMat.GetView().AsSpan());
+            // POPRAWKA: Use TensorStorage instead of FastTensor for the new DOD architecture
+            // We allocate flat memory (1*1*28*28 = 784)
+            using var inputMat = new TensorStorage<float>(784, clearMemory: false);
+            pixelData.CopyTo(inputMat.AsSpan());
 
-            using var input = new AutogradNode(inputMat, false);
+            // POPRAWKA: AutogradNode now requires explicit TensorShape
+            using var input = new AutogradNode(inputMat, new TensorShape(1, 1, 28, 28), false);
 
             // --- INFERENCJA (FORWARD PASS) ---
             // WAŻNE: Usuwamy 'using' przy wynikach Forward, bo zwracają one wewnętrzne bufory warstw.
@@ -73,7 +76,6 @@ namespace DevOnBike.Overfit.UI
             var bnOut = _bn1.Forward(null, p1Flat);
             var output = _fc1.Forward(null, bnOut);
 
-            // POPRAWKA: output.DataView.AsReadOnlySpan() zamiast output.Data.AsSpan()
             return GetArgMax(output.DataView.AsReadOnlySpan());
         }
 

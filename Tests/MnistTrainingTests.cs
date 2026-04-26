@@ -3,13 +3,14 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Diagnostics;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core;
+using DevOnBike.Overfit.Tests.Helpers;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests
@@ -23,13 +24,19 @@ namespace DevOnBike.Overfit.Tests
             _output = output;
         }
 
-        [Fact(Skip ="aaa")]
+        //[Fact]
         public void Mnist_FullTrain60k_CnnBeastMode_Benchmark()
         {
             const int trainSize = 60_000;
             const int batchSize = 64;
             const int epochs = 5;
             const float lr = 0.001f;
+
+            // Set to false for a cleaner allocation baseline without Meter/Listener overhead.
+            const bool enableTelemetry = false;
+            const bool measureSections = false;
+
+            _output.WriteLine($"Environment.ProcessorCount: {Environment.ProcessorCount}");
 
             var trainImagesPath = "d:/ml/train-images.idx3-ubyte";
             var trainLabelsPath = "d:/ml/train-labels.idx1-ubyte";
@@ -40,200 +47,409 @@ namespace DevOnBike.Overfit.Tests
                 return;
             }
 
-            var (trainX, trainY) = MnistLoader.Load(trainImagesPath, trainLabelsPath, trainSize);
+            var previousTelemetryEnabled = OverfitTelemetry.Enabled;
+            OverfitTelemetry.Enabled = enableTelemetry;
 
-            using var conv1 = new ConvLayer(1, 8, 28, 28, 3);
-            using var bn1 = new BatchNorm1D(1352);
-            using var res1 = new ResidualBlock(1352);
-            using var fcOut = new LinearLayer(8, 10);
+            TelemetryListener2? telemetryListener = null;
 
-            var parameters = conv1.Parameters()
-                .Concat(bn1.Parameters())
-                .Concat(res1.Parameters())
-                .Concat(fcOut.Parameters())
-                .ToArray();
-
-            using var optimizer = new Adam(parameters, lr)
+            try
             {
-                UseAdamW = true
-            };
+                var (trainX, trainY) = MnistLoader.Load(trainImagesPath, trainLabelsPath, trainSize);
 
-            var graph = new ComputationGraph();
-            var totalSw = Stopwatch.StartNew();
+                using var conv1 = new ConvLayer(1, 8, 28, 28, 3);
+                using var bn1 = new BatchNorm1D(1352);
+                using var res1 = new ResidualBlock(1352);
+                using var fcOut = new LinearLayer(8, 10);
 
-            var traceCollector = new EpochTraceCollector();
-            var traceDir = Path.Combine(AppContext.BaseDirectory, "diagnostics", "mnist");
-            Directory.CreateDirectory(traceDir);
+                var parameters = conv1.Parameters()
+                    .Concat(bn1.Parameters())
+                    .Concat(res1.Parameters())
+                    .Concat(fcOut.Parameters())
+                    .ToArray();
 
-            var textTracePath = Path.Combine(traceDir, "mnist_trace.log");
-            var jsonlTracePath = Path.Combine(traceDir, "mnist_trace.jsonl");
-
-            if (File.Exists(textTracePath))
-            {
-                File.Delete(textTracePath);
-            }
-
-            if (File.Exists(jsonlTracePath))
-            {
-                File.Delete(jsonlTracePath);
-            }
-
-            using var textSink = TextWriterDiagnosticsSink.CreateFile(textTracePath, append: false);
-            using var jsonlSink = JsonLinesDiagnosticsSink.CreateFile(jsonlTracePath, append: false);
-            var compositeSink = new CompositeOverfitDiagnosticsSink(traceCollector, textSink, jsonlSink);
-
-            using var session = new DiagnosticsSession(enabled: true, sink: compositeSink);
-
-            // Bardzo ważne: reset przed całym benchmarkiem,
-            // żeby nie wciągnąć stanu z wcześniejszych testów/runów.
-            traceCollector.Reset();
-
-            _output.WriteLine("=== START: Trening ResNet na Taśmie (NativeBuffer) ===");
-
-            for (int epoch = 0; epoch < epochs; epoch++)
-            {
-                traceCollector.Reset();
-
-                conv1.Train();
-                bn1.Train();
-                res1.Train();
-                fcOut.Train();
-
-                float epochLoss = 0f;
-                int batches = trainSize / batchSize;
-
-                long tConv = 0;
-                long tBn = 0;
-                long tRes = 0;
-                long tHead = 0;
-                long tLoss = 0;
-                long tBackward = 0;
-                long tOptimizer = 0;
-
-                long aConv = 0;
-                long aBn = 0;
-                long aRes = 0;
-                long aHead = 0;
-                long aLoss = 0;
-                long aBackward = 0;
-                long aOptimizer = 0;
-
-                var sectionSw = new Stopwatch();
-
-                long epochAllocBefore = GC.GetTotalAllocatedBytes(true);
-                int gc0Before = GC.CollectionCount(0);
-                int gc1Before = GC.CollectionCount(1);
-                int gc2Before = GC.CollectionCount(2);
-
-                for (int b = 0; b < batches; b++)
+                using var optimizer = new Adam(parameters, lr)
                 {
-                    graph.Reset();
-                    optimizer.ZeroGrad();
+                    UseAdamW = true
+                };
 
-                    using var xBData = new FastTensor<float>(batchSize, 1, 28, 28, clearMemory: false);
-                    using var yBData = new FastTensor<float>(batchSize, 10, clearMemory: false);
-                    using var xBNode = new AutogradNode(xBData, requiresGrad: false);
-                    using var yBNode = new AutogradNode(yBData, requiresGrad: false);
+                using var graph = new ComputationGraph();
 
-                    trainX.GetView().AsReadOnlySpan()
-                        .Slice(b * batchSize * 784, batchSize * 784)
-                        .CopyTo(xBData.GetView().AsSpan());
+                // Reused batch buffers.
+                // These used to be allocated inside the batch loop.
+                using var xBData = new TensorStorage<float>(batchSize * 1 * 28 * 28, clearMemory: false);
+                using var yBData = new TensorStorage<float>(batchSize * 10, clearMemory: false);
 
-                    trainY.GetView().AsReadOnlySpan()
-                        .Slice(b * batchSize * 10, batchSize * 10)
-                        .CopyTo(yBData.GetView().AsSpan());
+                using var xBNode = new AutogradNode(
+                    xBData,
+                    new TensorShape(batchSize, 1, 28, 28),
+                    requiresGrad: false);
 
-                    long allocBefore;
+                using var yBNode = new AutogradNode(
+                    yBData,
+                    new TensorShape(batchSize, 10),
+                    requiresGrad: false);
 
-                    allocBefore = GC.GetTotalAllocatedBytes(false);
-                    sectionSw.Restart();
-                    using var h1 = conv1.Forward(graph, xBNode);
-                    using var a1 = TensorMath.ReLU(graph, h1);
-                    using var p1 = TensorMath.MaxPool2D(graph, a1, 8, 26, 26, 2);
-                    using var p1F = TensorMath.Reshape(graph, p1, batchSize, 1352);
-                    sectionSw.Stop();
-                    tConv += sectionSw.ElapsedTicks;
-                    aConv += GC.GetTotalAllocatedBytes(false) - allocBefore;
+                if (enableTelemetry)
+                {
+                    telemetryListener = new TelemetryListener2(
+                        _output,
+                        includeTags: false,
+                        maxRows: 64,
+                        metricNamePrefix: "overfit.tensor_storage.");
 
-                    allocBefore = GC.GetTotalAllocatedBytes(false);
-                    sectionSw.Restart();
-                    using var bn1O = bn1.Forward(graph, p1F);
-                    sectionSw.Stop();
-                    tBn += sectionSw.ElapsedTicks;
-                    aBn += GC.GetTotalAllocatedBytes(false) - allocBefore;
-
-                    allocBefore = GC.GetTotalAllocatedBytes(false);
-                    sectionSw.Restart();
-                    using var resO = res1.Forward(graph, bn1O);
-                    sectionSw.Stop();
-                    tRes += sectionSw.ElapsedTicks;
-                    aRes += GC.GetTotalAllocatedBytes(false) - allocBefore;
-
-                    allocBefore = GC.GetTotalAllocatedBytes(false);
-                    sectionSw.Restart();
-                    using var gapO = TensorMath.GlobalAveragePool2D(graph, resO, 8, 13, 13);
-                    using var logits = fcOut.Forward(graph, gapO);
-                    sectionSw.Stop();
-                    tHead += sectionSw.ElapsedTicks;
-                    aHead += GC.GetTotalAllocatedBytes(false) - allocBefore;
-
-                    allocBefore = GC.GetTotalAllocatedBytes(false);
-                    sectionSw.Restart();
-                    using var loss = TensorMath.SoftmaxCrossEntropy(graph, logits, yBNode);
-                    epochLoss += loss.DataView.AsReadOnlySpan()[0];
-                    sectionSw.Stop();
-                    tLoss += sectionSw.ElapsedTicks;
-                    aLoss += GC.GetTotalAllocatedBytes(false) - allocBefore;
-
-                    allocBefore = GC.GetTotalAllocatedBytes(false);
-                    sectionSw.Restart();
-                    graph.Backward(loss);
-                    sectionSw.Stop();
-                    tBackward += sectionSw.ElapsedTicks;
-                    aBackward += GC.GetTotalAllocatedBytes(false) - allocBefore;
-
-                    allocBefore = GC.GetTotalAllocatedBytes(false);
-                    sectionSw.Restart();
-                    optimizer.Step();
-                    sectionSw.Stop();
-                    tOptimizer += sectionSw.ElapsedTicks;
-                    aOptimizer += GC.GetTotalAllocatedBytes(false) - allocBefore;
+                    telemetryListener.Subscribe();
                 }
 
-                long epochAllocAfter = GC.GetTotalAllocatedBytes(true);
-                var snapshot = traceCollector.Snapshot();
+                _output.WriteLine("=== START: Trening ResNet na Taśmie (DOD + Zero-Alloc verification) ===");
+                _output.WriteLine($"telemetry enabled: {enableTelemetry}");
+                _output.WriteLine($"Environment.ProcessorCount: {Environment.ProcessorCount}");
 
-                var epochJson = Path.Combine(traceDir, $"epoch_{epoch + 1:D2}.json");
-                var epochCsv = Path.Combine(traceDir, $"epoch_{epoch + 1:D2}.csv");
-                EpochTraceExporter.WriteJson(epochJson, epoch + 1, snapshot);
-                EpochTraceExporter.WriteCsv(epochCsv, snapshot);
+                ForceFullGc();
 
-                _output.WriteLine($"Epoch {epoch + 1} | Loss: {epochLoss / batches:F4} | Time: {totalSw.ElapsedMilliseconds}ms");
-                _output.WriteLine($"  conv+relu+pool+reshape: {TimeSpan.FromTicks(tConv).TotalMilliseconds:F1} ms | alloc {(aConv / 1024.0 / 1024.0):F2} MB");
-                _output.WriteLine($"  batchnorm:              {TimeSpan.FromTicks(tBn).TotalMilliseconds:F1} ms | alloc {(aBn / 1024.0 / 1024.0):F2} MB");
-                _output.WriteLine($"  residual:               {TimeSpan.FromTicks(tRes).TotalMilliseconds:F1} ms | alloc {(aRes / 1024.0 / 1024.0):F2} MB");
-                _output.WriteLine($"  gap+fc:                 {TimeSpan.FromTicks(tHead).TotalMilliseconds:F1} ms | alloc {(aHead / 1024.0 / 1024.0):F2} MB");
-                _output.WriteLine($"  loss:                   {TimeSpan.FromTicks(tLoss).TotalMilliseconds:F1} ms | alloc {(aLoss / 1024.0 / 1024.0):F2} MB");
-                _output.WriteLine($"  backward:               {TimeSpan.FromTicks(tBackward).TotalMilliseconds:F1} ms | alloc {(aBackward / 1024.0 / 1024.0):F2} MB");
-                _output.WriteLine($"  optimizer:              {TimeSpan.FromTicks(tOptimizer).TotalMilliseconds:F1} ms | alloc {(aOptimizer / 1024.0 / 1024.0):F2} MB");
-                _output.WriteLine($"  allocated total:        {(epochAllocAfter - epochAllocBefore) / 1024.0 / 1024.0:F2} MB");
-                _output.WriteLine($"  GC0/1/2:                {GC.CollectionCount(0) - gc0Before}/{GC.CollectionCount(1) - gc1Before}/{GC.CollectionCount(2) - gc2Before}");
-                _output.WriteLine(BenchmarkTraceFormatter.Format(snapshot));
-                _output.WriteLine($"  trace.json:             {epochJson}");
-                _output.WriteLine($"  trace.csv:              {epochCsv}");
+                var runStart = MemorySnapshot.Capture();
+                var runTotalAllocBefore = GC.GetTotalAllocatedBytes(false);
 
-                if (epoch == epochs - 1)
+                _output.WriteLine(FormatMemorySnapshot("RUN START", runStart));
+
+                var runWatch = ValueStopwatch.StartNew();
+
+                for (var epoch = 0; epoch < epochs; epoch++)
                 {
-                    var baselinePath = Path.Combine(traceDir, "baseline_epoch_05.json");
-                    if (!File.Exists(baselinePath))
+                    conv1.Train();
+                    bn1.Train();
+                    res1.Train();
+                    fcOut.Train();
+
+                    ForceFullGc();
+
+                    var epochStart = MemorySnapshot.Capture();
+                    var epochAllocBefore = GC.GetTotalAllocatedBytes(false);
+
+                    var gc0Before = GC.CollectionCount(0);
+                    var gc1Before = GC.CollectionCount(1);
+                    var gc2Before = GC.CollectionCount(2);
+
+                    var epochWatch = ValueStopwatch.StartNew();
+                    var epochLoss = 0f;
+                    var batches = trainSize / batchSize;
+
+                    var copyInputStats = new OperationStats("copy input/target");
+                    var zeroGradStats = new OperationStats("optimizer.ZeroGrad");
+                    var resetStats = new OperationStats("graph.Reset");
+
+                    var convStats = new OperationStats("Conv2D");
+                    var relu1Stats = new OperationStats("ReLU #1");
+                    var maxPoolStats = new OperationStats("MaxPool2D");
+                    var reshapeStats = new OperationStats("Reshape");
+
+                    var bn1Stats = new OperationStats("BatchNorm1D #1");
+                    var residualStats = new OperationStats("ResidualBlock");
+
+                    var gapStats = new OperationStats("GlobalAveragePool2D");
+                    var fcStats = new OperationStats("Linear FC");
+
+                    var lossStats = new OperationStats("SoftmaxCrossEntropy");
+                    var backwardStats = new OperationStats("graph.Backward");
+                    var optimizerStats = new OperationStats("optimizer.Step");
+
+                    for (var batch = 0; batch < batches; batch++)
                     {
-                        File.Copy(epochJson, baselinePath, overwrite: false);
-                        _output.WriteLine($"  baseline.json:          {baselinePath} (created)");
+                        long allocBefore;
+                        ValueStopwatch sectionWatch;
+                        TimeSpan elapsed;
+
+                        allocBefore = GC.GetTotalAllocatedBytes(false);
+                        sectionWatch = ValueStopwatch.StartNew();
+
+                        graph.Reset();
+
+                        elapsed = sectionWatch.GetElapsedTime();
+                        resetStats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
+
+                        allocBefore = GC.GetTotalAllocatedBytes(false);
+                        sectionWatch = ValueStopwatch.StartNew();
+
+                        optimizer.ZeroGrad();
+
+                        elapsed = sectionWatch.GetElapsedTime();
+                        zeroGradStats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
+
+                        allocBefore = GC.GetTotalAllocatedBytes(false);
+                        sectionWatch = ValueStopwatch.StartNew();
+
+                        trainX.AsReadOnlySpan()
+                            .Slice(batch * batchSize * 784, batchSize * 784)
+                            .CopyTo(xBData.AsSpan());
+
+                        trainY.AsReadOnlySpan()
+                            .Slice(batch * batchSize * 10, batchSize * 10)
+                            .CopyTo(yBData.AsSpan());
+
+                        elapsed = sectionWatch.GetElapsedTime();
+                        copyInputStats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
+
+                        allocBefore = GC.GetTotalAllocatedBytes(false);
+                        sectionWatch = ValueStopwatch.StartNew();
+
+                        using var h1 = conv1.Forward(graph, xBNode);
+
+                        elapsed = sectionWatch.GetElapsedTime();
+                        convStats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
+
+                        allocBefore = GC.GetTotalAllocatedBytes(false);
+                        sectionWatch = ValueStopwatch.StartNew();
+
+                        using var a1 = TensorMath.ReLU(graph, h1);
+
+                        elapsed = sectionWatch.GetElapsedTime();
+                        relu1Stats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
+
+                        allocBefore = GC.GetTotalAllocatedBytes(false);
+                        sectionWatch = ValueStopwatch.StartNew();
+
+                        using var p1 = TensorMath.MaxPool2D(graph, a1, 8, 26, 26, 2);
+
+                        elapsed = sectionWatch.GetElapsedTime();
+                        maxPoolStats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
+
+                        allocBefore = GC.GetTotalAllocatedBytes(false);
+                        sectionWatch = ValueStopwatch.StartNew();
+
+                        using var p1F = TensorMath.Reshape(graph, p1, batchSize, 1352);
+
+                        elapsed = sectionWatch.GetElapsedTime();
+                        reshapeStats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
+
+                        allocBefore = GC.GetTotalAllocatedBytes(false);
+                        sectionWatch = ValueStopwatch.StartNew();
+
+                        using var bn1O = bn1.Forward(graph, p1F);
+
+                        elapsed = sectionWatch.GetElapsedTime();
+                        bn1Stats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
+
+                        allocBefore = GC.GetTotalAllocatedBytes(false);
+                        sectionWatch = ValueStopwatch.StartNew();
+
+                        using var resO = res1.Forward(graph, bn1O);
+
+                        elapsed = sectionWatch.GetElapsedTime();
+                        residualStats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
+
+                        allocBefore = GC.GetTotalAllocatedBytes(false);
+                        sectionWatch = ValueStopwatch.StartNew();
+
+                        using var gapO = TensorMath.GlobalAveragePool2D(graph, resO, 8, 13, 13);
+
+                        elapsed = sectionWatch.GetElapsedTime();
+                        gapStats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
+
+                        allocBefore = GC.GetTotalAllocatedBytes(false);
+                        sectionWatch = ValueStopwatch.StartNew();
+
+                        using var logits = fcOut.Forward(graph, gapO);
+
+                        elapsed = sectionWatch.GetElapsedTime();
+                        fcStats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
+
+                        allocBefore = GC.GetTotalAllocatedBytes(false);
+                        sectionWatch = ValueStopwatch.StartNew();
+
+                        using var loss = TensorMath.SoftmaxCrossEntropy(graph, logits, yBNode);
+                        epochLoss += loss.DataView.AsReadOnlySpan()[0];
+
+                        elapsed = sectionWatch.GetElapsedTime();
+                        lossStats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
+
+                        allocBefore = GC.GetTotalAllocatedBytes(false);
+                        sectionWatch = ValueStopwatch.StartNew();
+
+                        graph.Backward(loss);
+
+                        elapsed = sectionWatch.GetElapsedTime();
+                        backwardStats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
+
+                        allocBefore = GC.GetTotalAllocatedBytes(false);
+                        sectionWatch = ValueStopwatch.StartNew();
+
+                        optimizer.Step();
+
+                        elapsed = sectionWatch.GetElapsedTime();
+                        optimizerStats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
                     }
+
+                    var epochElapsed = epochWatch.GetElapsedTime();
+                    var epochAllocAfter = GC.GetTotalAllocatedBytes(false);
+
+                    ForceFullGc();
+
+                    var epochEnd = MemorySnapshot.Capture();
+                    var epochAllocatedBytes = epochAllocAfter - epochAllocBefore;
+
+                    _output.WriteLine($"Epoch {epoch + 1} | Loss: {epochLoss / batches:F4} | Time: {epochElapsed.TotalMilliseconds:F1}ms | Time so far: {runWatch.GetElapsedTime().TotalMilliseconds:F0}ms");
+                    _output.WriteLine("  === per-op stats ===");
+                    WriteOperationStats(copyInputStats);
+                    WriteOperationStats(resetStats);
+                    WriteOperationStats(zeroGradStats);
+                    WriteOperationStats(convStats);
+                    WriteOperationStats(relu1Stats);
+                    WriteOperationStats(maxPoolStats);
+                    WriteOperationStats(reshapeStats);
+                    WriteOperationStats(bn1Stats);
+                    WriteOperationStats(residualStats);
+                    WriteOperationStats(gapStats);
+                    WriteOperationStats(fcStats);
+                    WriteOperationStats(lossStats);
+                    WriteOperationStats(backwardStats);
+                    WriteOperationStats(optimizerStats);
+
+                    _output.WriteLine("  === grouped stats ===");
+                    _output.WriteLine($"  conv+relu+pool+reshape: {TicksToMs(convStats.Ticks + relu1Stats.Ticks + maxPoolStats.Ticks + reshapeStats.Ticks):F1} ms | alloc {BytesToMb(convStats.AllocatedBytes + relu1Stats.AllocatedBytes + maxPoolStats.AllocatedBytes + reshapeStats.AllocatedBytes):F2} MB");
+                    _output.WriteLine($"  batchnorm:              {TicksToMs(bn1Stats.Ticks):F1} ms | alloc {BytesToMb(bn1Stats.AllocatedBytes):F2} MB");
+                    _output.WriteLine($"  residual:               {TicksToMs(residualStats.Ticks):F1} ms | alloc {BytesToMb(residualStats.AllocatedBytes):F2} MB");
+                    _output.WriteLine($"  gap+fc:                 {TicksToMs(gapStats.Ticks + fcStats.Ticks):F1} ms | alloc {BytesToMb(gapStats.AllocatedBytes + fcStats.AllocatedBytes):F2} MB");
+                    _output.WriteLine($"  loss:                   {TicksToMs(lossStats.Ticks):F1} ms | alloc {BytesToMb(lossStats.AllocatedBytes):F2} MB");
+                    _output.WriteLine($"  backward:               {TicksToMs(backwardStats.Ticks):F1} ms | alloc {BytesToMb(backwardStats.AllocatedBytes):F2} MB");
+                    _output.WriteLine($"  optimizer:              {TicksToMs(optimizerStats.Ticks):F1} ms | alloc {BytesToMb(optimizerStats.AllocatedBytes):F2} MB");
+
+                    // _output.WriteLine(graph.FormatBackwardProfileSnapshot(reset: true));
+
+                    _output.WriteLine($"  allocated total:        {BytesToMb(epochAllocatedBytes):F2} MB");
+                    _output.WriteLine($"  GC0/1/2:                {GC.CollectionCount(0) - gc0Before}/{GC.CollectionCount(1) - gc1Before}/{GC.CollectionCount(2) - gc2Before}");
+                    _output.WriteLine(FormatMemorySnapshot($"EPOCH {epoch + 1} START", epochStart));
+                    _output.WriteLine(FormatMemorySnapshot($"EPOCH {epoch + 1} END", epochEnd));
+                    _output.WriteLine($"  live managed delta:     {BytesToMb(epochEnd.LiveManagedBytes - epochStart.LiveManagedBytes):F2} MB");
+                    _output.WriteLine($"  private bytes delta:    {BytesToMb(epochEnd.PrivateMemoryBytes - epochStart.PrivateMemoryBytes):F2} MB");
+                    _output.WriteLine($"  working set delta:      {BytesToMb(epochEnd.WorkingSetBytes - epochStart.WorkingSetBytes):F2} MB");
                 }
+
+                ForceFullGc();
+
+                var runEnd = MemorySnapshot.Capture();
+                var runTotalAllocAfter = GC.GetTotalAllocatedBytes(false);
+
+                _output.WriteLine(FormatMemorySnapshot("RUN END", runEnd));
+                _output.WriteLine($"run elapsed:              {runWatch.GetElapsedTime().TotalMilliseconds:F1} ms");
+                _output.WriteLine($"run allocated total:      {BytesToMb(runTotalAllocAfter - runTotalAllocBefore):F2} MB");
+                _output.WriteLine($"run live managed delta:   {BytesToMb(runEnd.LiveManagedBytes - runStart.LiveManagedBytes):F2} MB");
+                _output.WriteLine($"run private bytes delta:  {BytesToMb(runEnd.PrivateMemoryBytes - runStart.PrivateMemoryBytes):F2} MB");
+                _output.WriteLine($"run working set delta:    {BytesToMb(runEnd.WorkingSetBytes - runStart.WorkingSetBytes):F2} MB");
+                _output.WriteLine("=== KONIEC ===");
+            }
+            finally
+            {
+                telemetryListener?.Dispose();
+                OverfitTelemetry.Enabled = previousTelemetryEnabled;
+            }
+        }
+
+        private void WriteOperationStats(in OperationStats stats)
+        {
+            _output.WriteLine(
+                $"  {stats.Name,-24} {TicksToMs(stats.Ticks),8:F1} ms | alloc {BytesToMb(stats.AllocatedBytes),8:F2} MB | calls {stats.Calls,5}");
+        }
+
+        private static void ForceFullGc()
+        {
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
+            GC.WaitForPendingFinalizers();
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
+        }
+
+        private static double TicksToMs(long ticks)
+        {
+            return TimeSpan.FromTicks(ticks).TotalMilliseconds;
+        }
+
+        private static double BytesToMb(long bytes)
+        {
+            return bytes / 1024.0 / 1024.0;
+        }
+
+        private static string FormatMemorySnapshot(string name, in MemorySnapshot snapshot)
+        {
+            return
+                $"=== MEMORY SNAPSHOT: {name} ==={Environment.NewLine}" +
+                $"live managed:   {BytesToMb(snapshot.LiveManagedBytes):F2} MB{Environment.NewLine}" +
+                $"total alloc:    {BytesToMb(snapshot.TotalAllocatedBytes):F2} MB{Environment.NewLine}" +
+                $"working set:    {BytesToMb(snapshot.WorkingSetBytes):F2} MB{Environment.NewLine}" +
+                $"private bytes:  {BytesToMb(snapshot.PrivateMemoryBytes):F2} MB{Environment.NewLine}" +
+                $"GC0/1/2 total:  {snapshot.Gen0Collections}/{snapshot.Gen1Collections}/{snapshot.Gen2Collections}";
+        }
+
+        private struct OperationStats
+        {
+            public OperationStats(string name)
+            {
+                Name = name;
+                Ticks = 0;
+                AllocatedBytes = 0;
+                Calls = 0;
             }
 
-            _output.WriteLine("=== KONIEC ===");
+            public string Name { get; }
+
+            public long Ticks { get; private set; }
+
+            public long AllocatedBytes { get; private set; }
+
+            public int Calls { get; private set; }
+
+            public void Add(TimeSpan elapsed, long allocatedBytes)
+            {
+                Ticks += elapsed.Ticks;
+                AllocatedBytes += allocatedBytes;
+                Calls++;
+            }
+        }
+
+        private readonly struct MemorySnapshot
+        {
+            private MemorySnapshot(
+                long liveManagedBytes,
+                long totalAllocatedBytes,
+                long workingSetBytes,
+                long privateMemoryBytes,
+                int gen0Collections,
+                int gen1Collections,
+                int gen2Collections)
+            {
+                LiveManagedBytes = liveManagedBytes;
+                TotalAllocatedBytes = totalAllocatedBytes;
+                WorkingSetBytes = workingSetBytes;
+                PrivateMemoryBytes = privateMemoryBytes;
+                Gen0Collections = gen0Collections;
+                Gen1Collections = gen1Collections;
+                Gen2Collections = gen2Collections;
+            }
+
+            public long LiveManagedBytes { get; }
+
+            public long TotalAllocatedBytes { get; }
+
+            public long WorkingSetBytes { get; }
+
+            public long PrivateMemoryBytes { get; }
+
+            public int Gen0Collections { get; }
+
+            public int Gen1Collections { get; }
+
+            public int Gen2Collections { get; }
+
+            public static MemorySnapshot Capture()
+            {
+                var process = System.Diagnostics.Process.GetCurrentProcess();
+
+                return new MemorySnapshot(
+                    liveManagedBytes: GC.GetTotalMemory(forceFullCollection: false),
+                    totalAllocatedBytes: GC.GetTotalAllocatedBytes(false),
+                    workingSetBytes: process.WorkingSet64,
+                    privateMemoryBytes: process.PrivateMemorySize64,
+                    gen0Collections: GC.CollectionCount(0),
+                    gen1Collections: GC.CollectionCount(1),
+                    gen2Collections: GC.CollectionCount(2));
+            }
         }
     }
 }

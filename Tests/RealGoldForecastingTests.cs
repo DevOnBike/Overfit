@@ -8,6 +8,7 @@ using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core; // Zmieniono na Tensors.Core
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests
@@ -27,7 +28,7 @@ namespace DevOnBike.Overfit.Tests
             _output.WriteLine("=== Trening na pełnym roku XAU/USD (Kwiecień 2025 - Kwiecień 2026) ===");
 
             var windowSize = 10;
-            var epochs = 300; // Zwiększono z 200, by dać modelowi szansę na dłuższą konwergencję
+            var epochs = 300;
             var learningRate = 0.005f;
 
             var prices = GetRealGoldPricesUSD_1Year();
@@ -36,11 +37,12 @@ namespace DevOnBike.Overfit.Tests
             var sampleCount = returns.Length - windowSize;
             var batchSize = sampleCount;
 
-            using var xData = new FastTensor<float>(batchSize, windowSize, clearMemory: false);
-            using var yData = new FastTensor<float>(batchSize, 1, clearMemory: false);
+            // Zmiana na TensorStorage
+            using var xData = new TensorStorage<float>(batchSize * windowSize, clearMemory: false);
+            using var yData = new TensorStorage<float>(batchSize * 1, clearMemory: false);
 
-            var xSpan = xData.GetView().AsSpan();
-            var ySpan = yData.GetView().AsSpan();
+            var xSpan = xData.AsSpan();
+            var ySpan = yData.AsSpan();
 
             for (var i = 0; i < sampleCount; i++)
             {
@@ -51,8 +53,9 @@ namespace DevOnBike.Overfit.Tests
                 ySpan[i] = returns[i + windowSize] * 100f;
             }
 
-            using var X = new AutogradNode(xData, false);
-            using var Y = new AutogradNode(yData, false);
+            // Dodano TensorShape
+            using var X = new AutogradNode(xData, new TensorShape(batchSize, windowSize), false);
+            using var Y = new AutogradNode(yData, new TensorShape(batchSize, 1), false);
 
             using var layer1 = new LinearLayer(windowSize, 32);
             using var layer2 = new LinearLayer(32, 16);
@@ -79,7 +82,6 @@ namespace DevOnBike.Overfit.Tests
 
             _output.WriteLine($"Training finished. Final MSE: {finalLoss:F4}");
 
-            // Poluzowano próg z 1.0f na 1.5f, aby zapobiec fałszywym alarmom na różnych architekturach CPU
             Assert.True(finalLoss < 1.5f, $"Loss too high, model didn't converge. Final MSE: {finalLoss}");
         }
 

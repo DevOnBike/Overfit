@@ -6,6 +6,7 @@
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.Tests
 {
@@ -17,8 +18,8 @@ namespace DevOnBike.Overfit.Tests
         public void TensorAdd_ForwardAndBackward_Correct()
         {
             var graph = new ComputationGraph();
-            using var a = new AutogradNode(new FastTensor<float>(1, 2, clearMemory: true), requiresGrad: true);
-            using var b = new AutogradNode(new FastTensor<float>(1, 2, clearMemory: true), requiresGrad: true);
+            using var a = new AutogradNode(new TensorStorage<float>(2, clearMemory: true), new TensorShape(1, 2), requiresGrad: true);
+            using var b = new AutogradNode(new TensorStorage<float>(2, clearMemory: true), new TensorShape(1, 2), requiresGrad: true);
 
             ((Span<float>)[1.0f, 2.0f]).CopyTo(a.DataView.AsSpan());
             ((Span<float>)[3.0f, 4.0f]).CopyTo(b.DataView.AsSpan());
@@ -32,20 +33,21 @@ namespace DevOnBike.Overfit.Tests
         }
 
         [Fact]
-        public void BatchNorm1D_ForwardAndBackward_Flows()
+        public void TensorBatchNorm_ForwardAndBackward_Correct()
         {
             var graph = new ComputationGraph();
-            using var input = new AutogradNode(new FastTensor<float>(2, 1, clearMemory: true), requiresGrad: true);
-            ((Span<float>)[10.0f, 20.0f]).CopyTo(input.DataView.AsSpan());
+            using var input = new AutogradNode(new TensorStorage<float>(2, clearMemory: true), new TensorShape(2, 1), requiresGrad: true);
+            ((Span<float>)[2.0f, 4.0f]).CopyTo(input.DataView.AsSpan());
 
-            using var gamma = new AutogradNode(new FastTensor<float>(1, clearMemory: true), requiresGrad: true);
-            using var beta = new AutogradNode(new FastTensor<float>(1, clearMemory: true), requiresGrad: true);
+            using var gamma = new AutogradNode(new TensorStorage<float>(1, clearMemory: true), new TensorShape(1), requiresGrad: true);
             gamma.DataView.AsSpan()[0] = 1.0f;
+
+            using var beta = new AutogradNode(new TensorStorage<float>(1, clearMemory: true), new TensorShape(1), requiresGrad: true);
             beta.DataView.AsSpan()[0] = 0.0f;
 
-            using var rm = new FastTensor<float>(1, clearMemory: true);
-            using var rv = new FastTensor<float>(1, clearMemory: true);
-            rv.GetView().AsSpan()[0] = 1.0f;
+            using var rm = new TensorStorage<float>(1, clearMemory: true);
+            using var rv = new TensorStorage<float>(1, clearMemory: true);
+            rv.AsSpan()[0] = 1.0f;
 
             using var res = TensorMath.BatchNorm1D(graph, input, gamma, beta, rm, rv, 0.1f, 1e-5f, true);
             Assert.Equal(1.0f, res.DataView[1, 0], 1e-3f);
@@ -61,20 +63,18 @@ namespace DevOnBike.Overfit.Tests
         public void Tensor_RequiresGradFalse_DoesNotCalculateGradient()
         {
             var graph = new ComputationGraph();
-            using var matA = new FastTensor<float>(1, 1, clearMemory: true);
-            using var matB = new FastTensor<float>(1, 1, clearMemory: true);
+            using var matA = new TensorStorage<float>(1, clearMemory: true);
+            using var matB = new TensorStorage<float>(1, clearMemory: true);
 
-            using var a = new AutogradNode(matA, requiresGrad: false);
-            using var b = new AutogradNode(matB, requiresGrad: false);
+            using var a = new AutogradNode(matA, new TensorShape(1, 1), requiresGrad: false);
+            using var b = new AutogradNode(matB, new TensorShape(1, 1), requiresGrad: false);
 
             using var res = TensorMath.Add(graph, a, b);
             graph.Backward(res);
 
             // Pobieranie GradView dla węzła z RequiresGrad = false wyrzuca wyjątek.
-            // Używamy odrzucenia (discard `_ = `), aby stworzyć poprawną instrukcję void
-            // i uniknąć błędu pakowania (boxing) super-szybkiej struktury `ref struct`.
-            Assert.Throws<InvalidOperationException>(() => { _ = a.GradView; });
-            Assert.Throws<InvalidOperationException>(() => { _ = b.GradView; });
+            Assert.Throws<InvalidOperationException>(() => _ = a.GradView);
+            Assert.Throws<InvalidOperationException>(() => _ = b.GradView);
         }
     }
 }

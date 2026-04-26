@@ -6,7 +6,9 @@
 using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using DevOnBike.Overfit.Autograd;
+using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Ops
@@ -17,41 +19,79 @@ namespace DevOnBike.Overfit.Ops
         // MAX POOL 2D
         // ====================================================================
 
-        public static AutogradNode MaxPool2D(ComputationGraph graph, AutogradNode input, int channels, int h, int w, int pool)
+        public static AutogradNode MaxPool2D(
+            ComputationGraph graph,
+            AutogradNode input,
+            int channels,
+            int h,
+            int w,
+            int pool)
         {
-            int batchSize = input.DataView.GetDim(0);
+            var batchSize = input.Shape.D0;
             int oH = h / pool, oW = w / pool;
 
-            var outD = new FastTensor<float>(batchSize, channels, oH, oW, false);
-            var maxIndices = new FastTensor<float>(batchSize, channels, oH, oW, false);
+            var output = AllocateNode(
+                graph,
+                new TensorShape(batchSize, channels, oH, oW),
+                input.RequiresGrad,
+                clearMemory: false);
+
+            var maxIndices = AllocateNode(
+                graph,
+                new TensorShape(batchSize, channels, oH, oW),
+                false,
+                clearMemory: false);
 
             if (batchSize < BatchSequentialThreshold)
             {
                 ref var iR = ref MemoryMarshal.GetReference(input.DataView.AsSpan());
-                ref var oR = ref MemoryMarshal.GetReference(outD.GetView().AsSpan());
-                ref var xR = ref MemoryMarshal.GetReference(maxIndices.GetView().AsSpan());
+                ref var oR = ref MemoryMarshal.GetReference(output.DataView.AsSpan());
+                ref var xR = ref MemoryMarshal.GetReference(maxIndices.DataView.AsSpan());
 
                 for (var n = 0; n < batchSize; n++)
                 {
-                    ExecuteMaxPoolSingleBatch(n, channels, h, w, oH, oW, pool, ref iR, ref oR, ref xR);
+                    ExecuteMaxPoolSingleBatch(
+                        n,
+                        channels,
+                        h,
+                        w,
+                        oH,
+                        oW,
+                        pool,
+                        ref iR,
+                        ref oR,
+                        ref xR);
                 }
             }
             else
             {
-                Parallel.For(0, batchSize, n =>
-                {
-                    ref var iR = ref MemoryMarshal.GetReference(input.DataView.AsSpan());
-                    ref var oR = ref MemoryMarshal.GetReference(outD.GetView().AsSpan());
-                    ref var xR = ref MemoryMarshal.GetReference(maxIndices.GetView().AsSpan());
+                Parallel.For(
+                    0,
+                    batchSize,
+                    OverfitParallel.Options,
+                    n =>
+                    {
+                        ref var iR = ref MemoryMarshal.GetReference(input.DataView.AsSpan());
+                        ref var oR = ref MemoryMarshal.GetReference(output.DataView.AsSpan());
+                        ref var xR = ref MemoryMarshal.GetReference(maxIndices.DataView.AsSpan());
 
-                    ExecuteMaxPoolSingleBatch(n, channels, h, w, oH, oW, pool, ref iR, ref oR, ref xR);
-                });
+                        ExecuteMaxPoolSingleBatch(
+                            n,
+                            channels,
+                            h,
+                            w,
+                            oH,
+                            oW,
+                            pool,
+                            ref iR,
+                            ref oR,
+                            ref xR);
+                    });
             }
 
-            var output = new AutogradNode(outD, input.RequiresGrad);
             if (output.RequiresGrad)
             {
-                graph?.Record(OpCode.MaxPool2D, output, input, new AutogradNode(maxIndices));
+                graph?.Record(OpCode.MaxPool2D, output, input, maxIndices);
             }
             else
             {
@@ -61,7 +101,17 @@ namespace DevOnBike.Overfit.Ops
             return output;
         }
 
-        private static void ExecuteMaxPoolSingleBatch(int n, int channels, int h, int w, int oH, int oW, int pool, ref float iR, ref float oR, ref float xR)
+        private static void ExecuteMaxPoolSingleBatch(
+            int n,
+            int channels,
+            int h,
+            int w,
+            int oH,
+            int oW,
+            int pool,
+            ref float iR,
+            ref float oR,
+            ref float xR)
         {
             var batchOffset = n * channels * h * w;
             var outBatchOffset = n * channels * oH * oW;
@@ -96,6 +146,7 @@ namespace DevOnBike.Overfit.Ops
                         }
 
                         var outIdx = outChannelOffset + oh * oW + ow;
+
                         Unsafe.Add(ref oR, outIdx) = maxVal;
                         Unsafe.Add(ref xR, outIdx) = maxIdx;
                     }
@@ -103,37 +154,79 @@ namespace DevOnBike.Overfit.Ops
             }
         }
 
-        public static void MaxPool2DBackward(AutogradNode input, AutogradNode maxIndices, AutogradNode output)
+        public static void MaxPool2DBackward(
+            AutogradNode input,
+            AutogradNode maxIndices,
+            AutogradNode output)
         {
             if (!input.RequiresGrad)
             {
                 return;
             }
 
-            var oGS = output.GradView.AsReadOnlySpan();
-            var iGS = input.GradView.AsSpan();
-            var idxS = maxIndices.DataView.AsReadOnlySpan();
+            var batchSize = input.Shape.D0;
+            var outputPerBatch = output.DataView.Size / batchSize;
 
-            for (var i = 0; i < oGS.Length; i++)
+            if (batchSize < BatchSequentialThreshold ||
+                (long)output.DataView.Size < ParallelThreshold)
             {
-                var maxIdx = (int)idxS[i];
-                iGS[maxIdx] += oGS[i];
+                var oGS = output.GradView.AsReadOnlySpan();
+                var iGS = input.GradView.AsSpan();
+                var idxS = maxIndices.DataView.AsReadOnlySpan();
+
+                for (var i = 0; i < oGS.Length; i++)
+                {
+                    var maxIdx = (int)idxS[i];
+                    iGS[maxIdx] += oGS[i];
+                }
+
+                return;
             }
+
+            Parallel.For(
+                0,
+                batchSize,
+                OverfitParallel.Options,
+                n =>
+                {
+                    var oGS = output.GradView.AsReadOnlySpan();
+                    var iGS = input.GradView.AsSpan();
+                    var idxS = maxIndices.DataView.AsReadOnlySpan();
+
+                    var start = n * outputPerBatch;
+                    var end = start + outputPerBatch;
+
+                    for (var i = start; i < end; i++)
+                    {
+                        var maxIdx = (int)idxS[i];
+                        iGS[maxIdx] += oGS[i];
+                    }
+                });
         }
 
         // ====================================================================
         // GLOBAL AVERAGE POOL 2D
         // ====================================================================
 
-        public static AutogradNode GlobalAveragePool2D(ComputationGraph graph, AutogradNode input, int channels, int h, int w)
+        public static AutogradNode GlobalAveragePool2D(
+            ComputationGraph graph,
+            AutogradNode input,
+            int channels,
+            int h,
+            int w)
         {
-            int batchSize = input.DataView.GetDim(0);
-            int spatialSize = h * w;
+            var batchSize = input.Shape.D0;
+            var spatialSize = h * w;
             var scale = 1f / spatialSize;
 
-            var outD = new FastTensor<float>(batchSize, channels, false);
+            var output = AllocateNode(
+                graph,
+                new TensorShape(batchSize, channels),
+                input.RequiresGrad,
+                clearMemory: false);
+
             var inS = input.DataView.AsReadOnlySpan();
-            var outS = outD.GetView().AsSpan();
+            var outS = output.DataView.AsSpan();
 
             if (batchSize < BatchSequentialThreshold)
             {
@@ -141,24 +234,38 @@ namespace DevOnBike.Overfit.Ops
                 {
                     for (var c = 0; c < channels; c++)
                     {
-                        var channelSlice = inS.Slice(n * channels * spatialSize + c * spatialSize, spatialSize);
-                        outS[n * channels + c] = TensorPrimitives.Sum(channelSlice) * scale;
+                        var channelSlice = inS.Slice(
+                            n * channels * spatialSize + c * spatialSize,
+                            spatialSize);
+
+                        outS[n * channels + c] =
+                            TensorPrimitives.Sum(channelSlice) * scale;
                     }
                 }
             }
             else
             {
-                Parallel.For(0, batchSize, n =>
-                {
-                    for (var c = 0; c < channels; c++)
+                Parallel.For(
+                    0,
+                    batchSize,
+                    OverfitParallel.Options,
+                    n =>
                     {
-                        var channelSlice = input.DataView.AsReadOnlySpan().Slice(n * channels * spatialSize + c * spatialSize, spatialSize);
-                        outD.GetView().AsSpan()[n * channels + c] = TensorPrimitives.Sum(channelSlice) * scale;
-                    }
-                });
+                        for (var c = 0; c < channels; c++)
+                        {
+                            var channelSlice = input
+                                .DataView
+                                .AsReadOnlySpan()
+                                .Slice(
+                                    n * channels * spatialSize + c * spatialSize,
+                                    spatialSize);
+
+                            output.DataView.AsSpan()[n * channels + c] =
+                                TensorPrimitives.Sum(channelSlice) * scale;
+                        }
+                    });
             }
 
-            var output = new AutogradNode(outD, input.RequiresGrad);
             if (output.RequiresGrad)
             {
                 graph?.Record(OpCode.GlobalAveragePool2D, output, input, null, h, w, channels);
@@ -167,33 +274,71 @@ namespace DevOnBike.Overfit.Ops
             return output;
         }
 
-        public static void GlobalAvgPool2DBackward(AutogradNode input, AutogradNode output, int h, int w, int channels)
+        public static void GlobalAvgPool2DBackward(
+            AutogradNode input,
+            AutogradNode output,
+            int h,
+            int w,
+            int channels)
         {
             if (!input.RequiresGrad)
             {
                 return;
             }
 
-            int batchSize = input.DataView.GetDim(0);
-            int spatialSize = h * w;
+            var batchSize = input.Shape.D0;
+            var spatialSize = h * w;
             var scale = 1f / spatialSize;
 
-            var oGS = output.GradView.AsReadOnlySpan();
-            var iGS = input.GradView.AsSpan();
-
-            for (var n = 0; n < batchSize; n++)
+            if (batchSize < BatchSequentialThreshold ||
+                (long)batchSize * channels * spatialSize < ParallelThreshold)
             {
-                for (var c = 0; c < channels; c++)
-                {
-                    var grad = oGS[n * channels + c] * scale;
-                    var channelSlice = iGS.Slice(n * channels * spatialSize + c * spatialSize, spatialSize);
+                var oGS = output.GradView.AsReadOnlySpan();
+                var iGS = input.GradView.AsSpan();
 
-                    for (var i = 0; i < spatialSize; i++)
+                for (var n = 0; n < batchSize; n++)
+                {
+                    for (var c = 0; c < channels; c++)
                     {
-                        channelSlice[i] += grad;
+                        var grad = oGS[n * channels + c] * scale;
+
+                        var channelSlice = iGS.Slice(
+                            n * channels * spatialSize + c * spatialSize,
+                            spatialSize);
+
+                        for (var i = 0; i < spatialSize; i++)
+                        {
+                            channelSlice[i] += grad;
+                        }
                     }
                 }
+
+                return;
             }
+
+            Parallel.For(
+                0,
+                batchSize,
+                OverfitParallel.Options,
+                n =>
+                {
+                    var oGS = output.GradView.AsReadOnlySpan();
+                    var iGS = input.GradView.AsSpan();
+
+                    for (var c = 0; c < channels; c++)
+                    {
+                        var grad = oGS[n * channels + c] * scale;
+
+                        var channelSlice = iGS.Slice(
+                            n * channels * spatialSize + c * spatialSize,
+                            spatialSize);
+
+                        for (var i = 0; i < spatialSize; i++)
+                        {
+                            channelSlice[i] += grad;
+                        }
+                    }
+                });
         }
     }
 }

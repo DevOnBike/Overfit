@@ -4,12 +4,13 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Autograd;
-using DevOnBike.Overfit.Data;
 using DevOnBike.Overfit.Data.Contracts;
 using DevOnBike.Overfit.Data.Tabular;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Optimizers;
+using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core; // Dodano DOD Core
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Prepare
@@ -43,32 +44,36 @@ namespace DevOnBike.Overfit.Tests.Prepare
             });
 
             converter.Fit(rawData);
-            var (features, targets) = converter.Convert(rawData);
 
-            // --- NORMALIZACJA CECH WEJŚCIOWYCH ---
-            // Skalujemy wartości, aby uniknąć eksplozji gradientów
-            var fSpan = features.GetView().AsSpan();
-            var nSamples = features.GetView().GetDim(0);
-            var nFeatures = features.GetView().GetDim(1);
+            // Konwerter wciąż zwraca FastTensor, robimy tymczasową przejściówkę do DOD
+            var (oldFeatures, oldTargets) = converter.Convert(rawData);
+
+            var nSamples = rawData.Count;
+            var nFeatures = oldFeatures.Size / nSamples;
+
+            using var features = new TensorStorage<float>(oldFeatures.Size, clearMemory: false);
+            using var targets = new TensorStorage<float>(oldTargets.Size, clearMemory: false);
+
+            oldFeatures.GetView().AsReadOnlySpan().CopyTo(features.AsSpan());
+            oldTargets.GetView().AsReadOnlySpan().CopyTo(targets.AsSpan());
+
+            var fSpan = features.AsSpan();
             for (var i = 0; i < nSamples; i++)
             {
-                // Powierzchnia (30-150) -> ok. 0.3-1.5
                 fSpan[i * nFeatures + 0] /= 100f;
-                // Pietro (0-10) -> ok. 0-1.0
                 fSpan[i * nFeatures + 1] /= 10f;
             }
 
-            // Normalizacja targetów (ceny) - dzielimy przez 100 000
-            var tSpan = targets.GetView().AsSpan();
+            var tSpan = targets.AsSpan();
             for (var i = 0; i < tSpan.Length; i++)
             {
                 tSpan[i] /= 100000f;
             }
 
-            var inputFeatures = features.GetView().GetDim(1);
+            var inputFeatures = nFeatures;
 
-            using var X = new AutogradNode(features, false);
-            using var Y = new AutogradNode(targets, false);
+            using var X = new AutogradNode(features, new TensorShape(nSamples, nFeatures), false);
+            using var Y = new AutogradNode(targets, new TensorShape(nSamples, 1), false);
 
             using var layer1 = new LinearLayer(inputFeatures, 32);
             using var layer2 = new LinearLayer(32, 16);
@@ -76,13 +81,11 @@ namespace DevOnBike.Overfit.Tests.Prepare
 
             var model = new Sequential(layer1, new ReluActivation(), layer2, new ReluActivation(), layer3);
 
-            // Ustawiamy optymalizator Adam z lekkim Weight Decay dla stabilności
             var adam = new Adam(model.Parameters(), 0.01f) { UseAdamW = true, WeightDecay = 0.0001f };
 
             var finalLoss = 0f;
             var graph = new ComputationGraph();
 
-            // 500 epok zapewnia stabilną konwergencję przy tej skali danych
             for (var epoch = 0; epoch < 500; epoch++)
             {
                 graph.Reset();
@@ -91,7 +94,6 @@ namespace DevOnBike.Overfit.Tests.Prepare
                 using var prediction = model.Forward(graph, X);
                 using var loss = TensorMath.MSELoss(graph, prediction, Y);
 
-                // Odczyt straty bez alokacji przy pomocy ReadOnlySpan z DataView
                 finalLoss = loss.DataView.AsReadOnlySpan()[0];
 
                 graph.Backward(loss);
@@ -100,7 +102,6 @@ namespace DevOnBike.Overfit.Tests.Prepare
 
             _output.WriteLine($"Final Real Estate Loss: {finalLoss:F4}");
 
-            // Po poprawieniu LinearLayer.cs strata powinna spaść znacznie poniżej 2.0
             Assert.True(finalLoss < 2.0f, $"Model failed to learn patterns. Final loss: {finalLoss:F4}");
         }
 
@@ -116,7 +117,6 @@ namespace DevOnBike.Overfit.Tests.Prepare
                 var isKam = rnd.NextDouble() > 0.8;
                 var miasto = rnd.NextDouble() > 0.5 ? "Warszawa" : "Krakow";
 
-                // Cena zależy od powierzchni, miasta i piętra
                 var cena = pow * 10000f + (miasto == "Warszawa" ? 200000f : 0f) - pietro * 1000f;
                 if (isKam)
                 {

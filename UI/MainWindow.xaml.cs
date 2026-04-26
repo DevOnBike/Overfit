@@ -3,11 +3,11 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Diagnostics;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using DevOnBike.Overfit.Diagnostics;
 
 namespace DevOnBike.Overfit.UI
 {
@@ -66,12 +66,12 @@ namespace DevOnBike.Overfit.UI
                 var pixelData = GetMnistPixelsFromCanvas();
 
                 // --- INFERENCJA (Nasza 48-sekundowa bestia w akcji) ---
-                var stopwatch = Stopwatch.StartNew();
+                var stopwatch = ValueStopwatch.StartNew();
                 var prediction = _predictor.Predict(pixelData);
-                stopwatch.Stop();
+                var elapsed = stopwatch.GetElapsedTime();
 
                 TxtResult.Text = prediction.ToString();
-                TxtStatus.Text = $"Rozpoznano w {stopwatch.ElapsedMilliseconds} ms!";
+                TxtStatus.Text = $"Rozpoznano w {elapsed.TotalMilliseconds} ms!";
             }
             catch (Exception ex)
             {

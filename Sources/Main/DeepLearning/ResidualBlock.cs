@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -6,8 +6,6 @@
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
-using DevOnBike.Overfit.DeepLearning.Diagnostics;
-using DevOnBike.Overfit.Diagnostics.Contracts;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors;
 
@@ -48,6 +46,14 @@ namespace DevOnBike.Overfit.DeepLearning
             _bn2.Eval();
         }
 
+        public void InvalidateParameterCaches()
+        {
+            _linear1.InvalidateParameterCaches();
+            _bn1.InvalidateParameterCaches();
+            _linear2.InvalidateParameterCaches();
+            _bn2.InvalidateParameterCaches();
+        }
+
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
             var hiddenSize = _linear1.Weights.DataView.GetDim(0);
@@ -58,24 +64,13 @@ namespace DevOnBike.Overfit.DeepLearning
             var b1 = buf1.Span;
             var b2 = buf2.Span;
 
-            using (new DiagnosticScope(
-                   category: "DeepLearning",
-                   name: "ResidualBlock.ForwardInference",
-                   phase: "forward_inference",
-                   isTraining: false,
-                   batchSize: 1,
-                   featureCount: hiddenSize,
-                   inputElements: input.Length,
-                   outputElements: output.Length))
-            {
-                _linear1.ForwardInference(input, b1);
-                _bn1.ForwardInference(b1, b2);
-                TensorPrimitives.Max(b2, 0f, b1);
-                _linear2.ForwardInference(b1, b2);
-                _bn2.ForwardInference(b2, b1);
-                TensorPrimitives.Add(b1, input, output);
-                TensorPrimitives.Max(output, 0f, output);
-            }
+            _linear1.ForwardInference(input, b1);
+            _bn1.ForwardInference(b1, b2);
+            TensorPrimitives.Max(b2, 0f, b1);
+            _linear2.ForwardInference(b1, b2);
+            _bn2.ForwardInference(b2, b1);
+            TensorPrimitives.Add(b1, input, output);
+            TensorPrimitives.Max(output, 0f, output);
         }
 
         public AutogradNode Forward(ComputationGraph? graph, AutogradNode input)
@@ -83,24 +78,7 @@ namespace DevOnBike.Overfit.DeepLearning
             var batch = input.DataView.GetDim(0);
             var cols = input.DataView.Rank > 1 ? input.DataView.GetDim(1) : input.DataView.Size;
 
-            var ctx = ModuleDiagnostics.Begin(
-            moduleType: nameof(ResidualBlock),
-            phase: graph is null || !IsTraining ? "forward_eval" : "forward_train",
-            isTraining: IsTraining,
-            batchSize: batch,
-            inputRows: batch,
-            inputCols: cols,
-            outputRows: batch,
-            outputCols: cols);
-
-            try
-            {
-                return ForwardCore(graph, input);
-            }
-            finally
-            {
-                ModuleDiagnostics.End(ctx);
-            }
+            return ForwardCore(graph, input);
         }
 
         private AutogradNode ForwardCore(ComputationGraph? graph, AutogradNode input)
@@ -112,8 +90,15 @@ namespace DevOnBike.Overfit.DeepLearning
                 using var a1 = TensorMath.ReLU(null, bn1Out);
                 var out2 = _linear2.Forward(null, a1);
                 using var bn2Out = _bn2.Forward(null, out2);
-                using var added = TensorMath.Add(null, bn2Out, input);
-                return TensorMath.ReLU(null, added);
+
+                // IN-PLACE (INFERENCJA): Oszczędność pamięci na produkcji!
+                // Zamiast: using var added = TensorMath.Add(null, bn2Out, input);
+                TensorPrimitives.Add(
+                    bn2Out.DataView.AsSpan(),
+                    input.DataView.AsReadOnlySpan(),
+                    bn2Out.DataView.AsSpan());
+
+                return TensorMath.ReLU(null, bn2Out);
             }
 
             var tOut1 = _linear1.Forward(graph, input);
@@ -121,20 +106,32 @@ namespace DevOnBike.Overfit.DeepLearning
             var tA1 = TensorMath.ReLU(graph, tBn1);
             var tOut2 = _linear2.Forward(graph, tA1);
             var tBn2 = _bn2.Forward(graph, tOut2);
-            var tAdded = TensorMath.Add(graph, tBn2, input);
+
+            // IN-PLACE (TRENING): Zabijamy te 42 MB alokacji na epokę!
+            // Zamiast: var tAdded = TensorMath.Add(graph, tBn2, input);
+            var tAdded = graph.AddInPlace(tBn2, input);
+
             return TensorMath.ReLU(graph, tAdded);
         }
 
         public IEnumerable<AutogradNode> Parameters()
         {
             foreach (var p in _linear1.Parameters())
+            {
                 yield return p;
+            }
             foreach (var p in _bn1.Parameters())
+            {
                 yield return p;
+            }
             foreach (var p in _linear2.Parameters())
+            {
                 yield return p;
+            }
             foreach (var p in _bn2.Parameters())
+            {
                 yield return p;
+            }
         }
 
         public void Save(BinaryWriter bw)

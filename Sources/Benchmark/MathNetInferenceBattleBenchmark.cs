@@ -4,8 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Jobs;
-using BenchmarkDotNet.Order;
+using Benchmarks.Helpers;
 using MathNet.Numerics.LinearAlgebra;
 
 namespace Benchmarks
@@ -14,10 +13,7 @@ namespace Benchmarks
     ///     Performance comparison between ONNX Runtime and Overfit engine.
     ///     Evaluates execution speed and memory allocation overhead during inference.
     /// </summary>
-    [SimpleJob(RuntimeMoniker.Net10_0)]
-    [Orderer(SummaryOrderPolicy.FastestToSlowest)]
-    [MemoryDiagnoser]
-    [DisassemblyDiagnoser(maxDepth: 2)]
+    [Config(typeof(BenchmarkConfig))]
     public class MathNetInferenceBattleBenchmark
     {
         private const int SwarmSize = 100_000;
@@ -45,8 +41,14 @@ namespace Benchmarks
             _overfitOutputs = new float[SwarmSize * OutputSize];
             _overfitBrain = new float[GenomeSize];
 
-            for (int i = 0; i < _overfitInputs.Length; i++) _overfitInputs[i] = (float)rng.NextDouble();
-            for (int i = 0; i < GenomeSize; i++) _overfitBrain[i] = (float)rng.NextDouble();
+            for (var i = 0; i < _overfitInputs.Length; i++)
+            {
+                _overfitInputs[i] = (float)rng.NextDouble();
+            }
+            for (var i = 0; i < GenomeSize; i++)
+            {
+                _overfitBrain[i] = (float)rng.NextDouble();
+            }
 
             // 2. Setup dla MathNet
             // Tworzymy macierz 100_000 x 4 dla wejść

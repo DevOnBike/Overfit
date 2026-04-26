@@ -15,9 +15,10 @@ namespace Benchmarks
             OverfitLicense.SuppressNotice = true;
             OverfitLicense.MessageSink = _ => { };
 
-            BenchmarkRunner.Run<SingleInferenceBenchmark>();
+            // BenchmarkRunner.Run<SingleInferenceBenchmark>();
             // BenchmarkRunner.Run<InferenceBenchmark>();
             // BenchmarkRunner.Run<MultiLayerInferenceBenchmark>();
+            // BenchmarkRunner.Run<MLNetSingleInferenceBenchmark>();
             // BenchmarkRunner.Run<TailLatencyBenchmark>();
             // BenchmarkRunner.Run<ColdStartBenchmark>();
             // BenchmarkRunner.Run<ConcurrentInferenceBenchmark>();
@@ -28,6 +29,15 @@ namespace Benchmarks
             // BenchmarkRunner.Run<ThreadScalingBenchmarks>();
             // BenchmarkRunner.Run<MathNetInferenceBattleBenchmark>();
             // BenchmarkRunner.Run<BatchScalingBenchmark>();
+            //BenchmarkRunner.Run<GenerationalGeneticAlgorithmBenchmarks>();
+            // BenchmarkRunner.Run<EvolutionaryAlgorithmBenchmarks>();
+
+            //BenchmarkRunner.Run<InferenceZeroAllocBenchmarks>();
+            //BenchmarkRunner.Run<OnnxCnnInferenceBenchmarks>();
+            //BenchmarkRunner.Run<OnnxMlpInferenceBenchmarks>();
+
+            //BenchmarkRunner.Run<BatchScalingBenchmark>();
+            BenchmarkRunner.Run<MLNetSingleInferenceBenchmark>();
         }
     }
 }

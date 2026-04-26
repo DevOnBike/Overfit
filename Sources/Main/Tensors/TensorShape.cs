@@ -1,4 +1,9 @@
-﻿using System.Runtime.CompilerServices;
+﻿// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
+
+using System.Runtime.CompilerServices;
 
 namespace DevOnBike.Overfit.Tensors
 {
@@ -28,9 +33,7 @@ namespace DevOnBike.Overfit.Tensors
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get
             {
-                return D3 > 1 ? 4 :
-                    D2 > 1 ? 3 :
-                    D1 > 1 ? 2 : 1;
+                return D3 > 1 ? 4 : D2 > 1 ? 3 : D1 > 1 ? 2 : 1;
             }
         }
 

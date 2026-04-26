@@ -36,7 +36,7 @@ namespace DevOnBike.Overfit.Data.Prepare
 
             _lowerPercentile = lowerPercentile;
             _upperPercentile = upperPercentile;
-            _columnOverrides = columnOverrides ?? new Dictionary<int, (float, float)>();
+            _columnOverrides = columnOverrides ?? [];
             _excludedColumns = excludedColumns ?? [];
 
             foreach (var (col, (lower, upper)) in _columnOverrides)

@@ -4,100 +4,154 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.Autograd
 {
     /// <summary>
-    /// Węzeł grafu obliczeniowego. 
-    /// Przechowuje fizyczną pamięć (FastTensor) dla danych i gradientów.
-    /// Udostępnia bezalokacyjne widoki (TensorView) dla logiki matematycznej.
+    /// Węzeł grafu obliczeniowego.
+    /// Przechowuje fizyczną pamięć (TensorStorage) dla danych i gradientów.
+    /// Udostępnia bezalokacyjne widoki (TensorSpan) dla logiki matematycznej.
     /// </summary>
     public sealed class AutogradNode : IDisposable
     {
-        // 1. PAMIĘĆ FIZYCZNA NA STERCIE (Magazyny)
-        private FastTensor<float>? _dataTensor;
-        private FastTensor<float>? _gradTensor;
+        private TensorStorage<float>? _dataStorage;
+        private TensorStorage<float>? _gradStorage;
+        private readonly bool _ownsDataStorage;
+        private readonly bool _ownsGradStorage;
         private int _disposed;
 
         public bool RequiresGrad { get; }
 
-        // ========================================================================
-        // 2. BEZALOKACYJNE WIDOKI (Bramy do matematyki)
-        // ========================================================================
+        public TensorShape Shape { get; }
 
-        /// <summary> Zwraca widok na dane z Forward Pass. Używane przez TensorMath. </summary>
-        public TensorView<float> DataView
+        /// <summary>
+        /// Zwraca widok na dane z Forward Pass.
+        /// </summary>
+        public TensorSpan<float> DataView
         {
             get
             {
                 ObjectDisposedException.ThrowIf(_disposed == 1, this);
-
-                return _dataTensor!.GetView();
+                return new TensorSpan<float>(_dataStorage!.AsSpan(), Shape);
             }
         }
 
-        /// <summary> Zwraca widok na gradienty z Backward Pass. Używane przez TensorMath. </summary>
-        public TensorView<float> GradView
+        /// <summary>
+        /// Zwraca widok na gradienty z Backward Pass.
+        /// </summary>
+        public TensorSpan<float> GradView
         {
             get
             {
                 ObjectDisposedException.ThrowIf(_disposed == 1, this);
 
-                if (!RequiresGrad || _gradTensor == null)
+                if (!RequiresGrad || _gradStorage == null)
                 {
                     throw new InvalidOperationException("Ten węzeł nie śledzi gradientów (RequiresGrad = false).");
                 }
 
-                return _gradTensor.GetView();
+                return new TensorSpan<float>(_gradStorage.AsSpan(), Shape);
             }
         }
 
-        // ========================================================================
-        // KONSTRUKTOR
-        // ========================================================================
-
-        public AutogradNode(FastTensor<float> data, bool requiresGrad = false)
+        public AutogradNode(TensorStorage<float> data, TensorShape shape, bool requiresGrad = false)
+            : this(data, shape, requiresGrad, ownsDataStorage: true)
         {
-            _dataTensor = data ?? throw new ArgumentNullException(nameof(data));
+        }
 
+        private AutogradNode(
+            TensorStorage<float> data,
+            TensorShape shape,
+            bool requiresGrad,
+            bool ownsDataStorage)
+        {
+            ArgumentNullException.ThrowIfNull(data);
+
+            if (!shape.IsValid)
+            {
+                throw new ArgumentException("Shape is invalid.", nameof(shape));
+            }
+
+            if (data.Length < shape.Size)
+            {
+                throw new ArgumentException(
+                    $"Storage length {data.Length} is smaller than required tensor size {shape.Size}.",
+                    nameof(data));
+            }
+
+            _dataStorage = data;
+            _ownsDataStorage = ownsDataStorage;
+
+            Shape = shape;
             RequiresGrad = requiresGrad;
 
             if (requiresGrad)
             {
-                _gradTensor = FastTensor<float>.SameShape(data, true);
+                _gradStorage = TensorFactory.CloneStorage(data, clearMemory: true);
+                _ownsGradStorage = true;
             }
         }
 
-        // ========================================================================
-        // OPERACJE NARZĘDZIOWE
-        // ========================================================================
+        /// <summary>
+        /// Tworzy view-node na tym samym data storage.
+        /// Data storage pozostaje własnością source.
+        /// Grad storage jest osobny, bo backward zapisuje gradient w kształcie view.
+        /// </summary>
+        internal static AutogradNode ViewOf(AutogradNode source, TensorShape shape, bool requiresGrad)
+        {
+            ArgumentNullException.ThrowIfNull(source);
+            ObjectDisposedException.ThrowIf(source._disposed == 1, source);
+
+            if (!shape.IsValid)
+            {
+                throw new ArgumentException("Shape is invalid.", nameof(shape));
+            }
+
+            if (shape.Size != source.Shape.Size)
+            {
+                throw new ArgumentException(
+                    $"View shape size {shape.Size} does not match source size {source.Shape.Size}.",
+                    nameof(shape));
+            }
+
+            return new AutogradNode(
+                source._dataStorage!,
+                shape,
+                requiresGrad,
+                ownsDataStorage: false);
+        }
 
         /// <summary>
         /// Zeruje gradienty przed nową epoką lub batchem.
-        /// Wykorzystuje sprzętowe czyszczenie pamięci Span.
         /// </summary>
         public void ZeroGrad()
         {
-            if (RequiresGrad && _gradTensor != null)
+            if (RequiresGrad && _gradStorage != null)
             {
-                _gradTensor.GetView().AsSpan().Clear();
+                _gradStorage.AsSpan().Clear();
             }
         }
 
-        // ========================================================================
-        // SPRZĄTANIE (KRYTYCZNE)
-        // ========================================================================
-
         public void Dispose()
         {
-            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
             {
-                _dataTensor?.Dispose();
-                _dataTensor = null;
-
-                _gradTensor?.Dispose();
-                _gradTensor = null;
+                return;
             }
+
+            if (_ownsDataStorage)
+            {
+                _dataStorage?.Dispose();
+            }
+
+            if (_ownsGradStorage)
+            {
+                _gradStorage?.Dispose();
+            }
+
+            _dataStorage = null;
+            _gradStorage = null;
         }
     }
 }

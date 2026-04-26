@@ -7,6 +7,7 @@ using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.Ops
 {
@@ -18,21 +19,23 @@ namespace DevOnBike.Overfit.Ops
 
         public static (AutogradNode hNew, AutogradNode cNew) FusedLSTMStep(ComputationGraph graph, AutogradNode x, AutogradNode hPrev, AutogradNode cPrev, AutogradNode W, AutogradNode U, AutogradNode B)
         {
-            int batchSize = x.DataView.GetDim(0), hS = hPrev.DataView.GetDim(1);
-            var gD = MatMulRaw(x, W);
-            using var uh = MatMulRaw(hPrev, U);
+            int batchSize = x.Shape.D0, hS = hPrev.Shape.D1;
+            var gD = MatMulRaw(graph, x, W);
+            var uh = MatMulRaw(graph, hPrev, U);
 
-            var cnD = new FastTensor<float>(batchSize, hS, false);
-            var hnD = new FastTensor<float>(batchSize, hS, false);
+            var req = x.RequiresGrad || hPrev.RequiresGrad || cPrev.RequiresGrad || W.RequiresGrad || U.RequiresGrad || B.RequiresGrad;
+
+            var cNode = AllocateNode(graph, new TensorShape(batchSize, hS), req, clearMemory: false);
+            var hNode = AllocateNode(graph, new TensorShape(batchSize, hS), req, clearMemory: false);
 
             if (batchSize < BatchSequentialThreshold)
             {
-                var gDS = gD.GetView().AsSpan();
-                var uhS = uh.GetView().AsReadOnlySpan();
+                var gDS = gD.DataView.AsSpan();
+                var uhS = uh.DataView.AsReadOnlySpan();
                 var bS = B.DataView.AsReadOnlySpan();
                 var cPrevS = cPrev.DataView.AsReadOnlySpan();
-                var cnDS = cnD.GetView().AsSpan();
-                var hnDS = hnD.GetView().AsSpan();
+                var cnDS = cNode.DataView.AsSpan();
+                var hnDS = hNode.DataView.AsSpan();
 
                 for (var b = 0; b < batchSize; b++)
                 {
@@ -42,25 +45,24 @@ namespace DevOnBike.Overfit.Ops
             else
             {
                 Parallel.For(0, batchSize, b => ExecuteLSTMInner(b, hS,
-                    gD.GetView().AsSpan(),
-                    uh.GetView().AsReadOnlySpan(),
+                    gD.DataView.AsSpan(),
+                    uh.DataView.AsReadOnlySpan(),
                     B.DataView.AsReadOnlySpan(),
                     cPrev.DataView.AsReadOnlySpan(),
-                    cnD.GetView().AsSpan(),
-                    hnD.GetView().AsSpan()));
+                    cNode.DataView.AsSpan(),
+                    hNode.DataView.AsSpan()));
             }
-
-            var req = x.RequiresGrad || hPrev.RequiresGrad || cPrev.RequiresGrad || W.RequiresGrad || U.RequiresGrad || B.RequiresGrad;
-            var hNode = new AutogradNode(hnD, req);
-            var cNode = new AutogradNode(cnD, req);
 
             if (graph != null && graph.IsRecording && req)
             {
-                graph.Record(OpCode.FusedLSTMStep, hNode, x, hPrev, nodeContext: [cPrev, W, U, B, cNode, new AutogradNode(gD)]);
+                graph.Record(OpCode.FusedLSTMStep, hNode, x, hPrev, nodeContext: [cPrev, W, U, B, cNode, gD]);
             }
             else
             {
-                gD.Dispose();
+                if (!req)
+                {
+                    gD.Dispose();
+                }
             }
 
             return (hNode, cNode);
@@ -99,12 +101,12 @@ namespace DevOnBike.Overfit.Ops
             var B = ctx[3];
             var cNew = ctx[4];
             var gates = ctx[5];
-            int batchSize = x.DataView.GetDim(0), hS = hPrev.DataView.GetDim(1);
+            int batchSize = x.Shape.D0, hS = hPrev.Shape.D1;
 
-            using var dGNode = new AutogradNode(new FastTensor<float>(batchSize, 4 * hS, false));
+            using var dGNode = AllocateNode(null, new TensorShape(batchSize, 4 * hS), false, clearMemory: false);
 
             Parallel.For(0, batchSize,
-                () => new FastTensor<float>(hS * 4, false),
+                () => new TensorStorage<float>(hS * 4, false),
                 (b, state, arrNode) =>
                 {
                     var dGS = dGNode.DataView.AsSpan().Slice(b * 4 * hS, 4 * hS);
@@ -115,7 +117,7 @@ namespace DevOnBike.Overfit.Ops
                     var o = gs.Slice(3 * hS, hS);
                     var dh = hNew.GradView.AsReadOnlySpan().Slice(b * hS, hS);
                     var dc = cNew.GradView.AsSpan().Slice(b * hS, hS);
-                    var tS = arrNode.GetView().AsSpan();
+                    var tS = arrNode.AsSpan();
                     var tanhC = tS.Slice(0, hS);
                     var t1 = tS.Slice(hS, hS);
                     var t2 = tS.Slice(2 * hS, hS);
@@ -156,17 +158,14 @@ namespace DevOnBike.Overfit.Ops
             {
                 MatMulAdd_A_BT_Raw(dGNode, false, W, false, x, true);
             }
-
             if (W.RequiresGrad)
             {
                 MatMulAdd_AT_B_Raw(x, false, dGNode, false, W, true);
             }
-
             if (hPrev.RequiresGrad)
             {
                 MatMulAdd_A_BT_Raw(dGNode, false, U, false, hPrev, true);
             }
-
             if (U.RequiresGrad)
             {
                 MatMulAdd_AT_B_Raw(hPrev, false, dGNode, false, U, true);
@@ -189,11 +188,11 @@ namespace DevOnBike.Overfit.Ops
 
         public static AutogradNode RepeatVector(ComputationGraph graph, AutogradNode input, int seqLen)
         {
-            int batch = input.DataView.GetDim(0), hS = input.DataView.GetDim(1);
-            var res = new FastTensor<float>(batch, seqLen, hS, false);
+            int batch = input.Shape.D0, hS = input.Shape.D1;
+            var output = AllocateNode(graph, new TensorShape(batch, seqLen, hS), input.RequiresGrad, clearMemory: false);
 
             var inS = input.DataView.AsReadOnlySpan();
-            var outS = res.GetView().AsSpan();
+            var outS = output.DataView.AsSpan();
 
             for (var b = 0; b < batch; b++)
             {
@@ -204,7 +203,6 @@ namespace DevOnBike.Overfit.Ops
                 }
             }
 
-            var output = new AutogradNode(res, input.RequiresGrad);
             if (output.RequiresGrad)
             {
                 graph?.Record(OpCode.RepeatVector, output, input, null, seqLen, hS);
@@ -220,7 +218,7 @@ namespace DevOnBike.Overfit.Ops
                 return;
             }
 
-            int batch = input.DataView.GetDim(0);
+            var batch = input.Shape.D0;
             var iGS = input.GradView.AsSpan();
             var oGS = output.GradView.AsReadOnlySpan();
 
@@ -240,18 +238,17 @@ namespace DevOnBike.Overfit.Ops
 
         public static AutogradNode GateSlice(ComputationGraph graph, AutogradNode gates, int hiddenSize, int gateIndex)
         {
-            var res = new FastTensor<float>(gates.DataView.GetDim(0), hiddenSize, false);
-            int batch = gates.DataView.GetDim(0), stride = 4 * hiddenSize, offset = gateIndex * hiddenSize;
+            var output = AllocateNode(graph, new TensorShape(gates.Shape.D0, hiddenSize), gates.RequiresGrad, clearMemory: false);
+            int batch = gates.Shape.D0, stride = 4 * hiddenSize, offset = gateIndex * hiddenSize;
 
             var inS = gates.DataView.AsReadOnlySpan();
-            var outS = res.GetView().AsSpan();
+            var outS = output.DataView.AsSpan();
 
             for (var b = 0; b < batch; b++)
             {
                 inS.Slice(b * stride + offset, hiddenSize).CopyTo(outS.Slice(b * hiddenSize, hiddenSize));
             }
 
-            var output = new AutogradNode(res, gates.RequiresGrad);
             if (output.RequiresGrad)
             {
                 graph?.Record(OpCode.GateSlice, output, gates, null, gateIndex, hiddenSize);
@@ -267,7 +264,7 @@ namespace DevOnBike.Overfit.Ops
                 return;
             }
 
-            int batch = gates.DataView.GetDim(0), offset = gateIndex * hiddenSize, stride = 4 * hiddenSize;
+            int batch = gates.Shape.D0, offset = gateIndex * hiddenSize, stride = 4 * hiddenSize;
             var gGS = gates.GradView.AsSpan();
             var oGS = output.GradView.AsReadOnlySpan();
 
@@ -279,7 +276,7 @@ namespace DevOnBike.Overfit.Ops
         }
 
         // ====================================================================
-        // TIMESTEP SLICE
+        // TIMESTEP SLICE & STACK TIMESTEPS
         // ====================================================================
 
         public static void TimestepSliceBackward(AutogradNode input, AutogradNode output, int t, int seqLen, int inputSize)
@@ -292,16 +289,12 @@ namespace DevOnBike.Overfit.Ops
             var igS = input.GradView.AsSpan();
             var ogS = output.GradView.AsReadOnlySpan();
 
-            for (var b = 0; b < input.DataView.GetDim(0); b++)
+            for (var b = 0; b < input.Shape.D0; b++)
             {
                 var dst = igS.Slice(b * seqLen * inputSize + t * inputSize, inputSize);
                 TensorPrimitives.Add(dst, ogS.Slice(b * inputSize, inputSize), dst);
             }
         }
-
-        // ====================================================================
-        // STACK TIMESTEPS
-        // ====================================================================
 
         public static void StackTimestepsBackward(AutogradNode[] allH, AutogradNode output, int batch, int seqLen, int hiddenSize)
         {

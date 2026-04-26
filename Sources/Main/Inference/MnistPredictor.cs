@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -7,6 +7,7 @@ using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core; // Dodano Core
 
 namespace DevOnBike.Overfit.Inference
 {
@@ -54,10 +55,12 @@ namespace DevOnBike.Overfit.Inference
                 throw new ArgumentException("Invalid input data. Expected a 784-element pixel array.");
             }
 
-            using var inputMat = new FastTensor<float>(1, 1, 28, 28, clearMemory: false);
-            pixelData.CopyTo(inputMat.GetView().AsSpan());
+            // DOD: Alokujemy pamięć bez wiedzy o kształcie...
+            using var inputMat = new TensorStorage<float>(784, clearMemory: false);
+            pixelData.CopyTo(inputMat.AsSpan());
 
-            using var input = new AutogradNode(inputMat, false);
+            // ...a następnie nakładamy na to odpowiedni Kształt w węźle!
+            using var input = new AutogradNode(inputMat, new TensorShape(1, 1, 28, 28), false);
 
             using var h1 = _conv1.Forward(null, input);
             using var bn1Out = _bn1.Forward(null, h1);

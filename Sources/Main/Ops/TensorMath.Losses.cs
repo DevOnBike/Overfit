@@ -18,13 +18,14 @@ namespace DevOnBike.Overfit.Ops
 
         public static AutogradNode SoftmaxCrossEntropy(ComputationGraph graph, AutogradNode logits, AutogradNode target)
         {
-            int rows = logits.DataView.GetDim(0), cols = logits.DataView.GetDim(1);
+            int rows = logits.Shape.D0, cols = logits.Shape.D1;
             var total = 0f;
-            var probs = new FastTensor<float>(rows, cols, false);
+
+            var probsNode = AllocateNode(graph, new TensorShape(rows, cols), false, clearMemory: false);
 
             var inS = logits.DataView.AsReadOnlySpan();
             var targetS = target.DataView.AsReadOnlySpan();
-            var probS = probs.GetView().AsSpan();
+            var probS = probsNode.DataView.AsSpan();
 
             for (var r = 0; r < rows; r++)
             {
@@ -40,17 +41,16 @@ namespace DevOnBike.Overfit.Ops
                 }
             }
 
-            var resTensor = new FastTensor<float>(1, false);
-            resTensor.GetView().AsSpan()[0] = total / rows;
-            var output = new AutogradNode(resTensor, logits.RequiresGrad);
+            var output = AllocateNode(graph, new TensorShape(1), logits.RequiresGrad, clearMemory: false);
+            output.DataView.AsSpan()[0] = total / rows;
 
             if (logits.RequiresGrad)
             {
-                graph?.Record(OpCode.SoftmaxCrossEntropy, output, logits, target, nodeContext: [new AutogradNode(probs)]);
+                graph?.Record(OpCode.SoftmaxCrossEntropy, output, logits, target, c0: probsNode, contextCount: 1);
             }
             else
             {
-                probs.Dispose();
+                probsNode.Dispose();
             }
 
             return output;
@@ -58,7 +58,7 @@ namespace DevOnBike.Overfit.Ops
 
         public static void SoftmaxCrossEntropyBackward(AutogradNode logits, AutogradNode target, AutogradNode output, AutogradNode probsNode)
         {
-            int R = logits.DataView.GetDim(0), C = logits.DataView.GetDim(1);
+            int R = logits.Shape.D0, C = logits.Shape.D1;
             var s = output.GradView.AsReadOnlySpan()[0] / R;
 
             var probS = probsNode.DataView.AsReadOnlySpan();
@@ -81,7 +81,7 @@ namespace DevOnBike.Overfit.Ops
 
         public static AutogradNode MSELoss(ComputationGraph graph, AutogradNode prediction, AutogradNode target)
         {
-            var sz = prediction.DataView.Size;
+            var sz = prediction.Shape.Size;
             float mse;
 
             using (var diffBuf = new PooledBuffer<float>(sz, false))
@@ -91,10 +91,9 @@ namespace DevOnBike.Overfit.Ops
                 mse = TensorPrimitives.Dot(dS, dS) / sz;
             }
 
-            var resTensor = new FastTensor<float>(1, false);
-            resTensor.GetView().AsSpan()[0] = mse;
+            var output = AllocateNode(graph, new TensorShape(1), prediction.RequiresGrad, clearMemory: false);
+            output.DataView.AsSpan()[0] = mse;
 
-            var output = new AutogradNode(resTensor, prediction.RequiresGrad);
             if (output.RequiresGrad)
             {
                 graph?.Record(OpCode.MseLoss, output, prediction, target);
@@ -105,7 +104,7 @@ namespace DevOnBike.Overfit.Ops
 
         public static void MSELossBackward(AutogradNode p, AutogradNode t, AutogradNode o)
         {
-            var f = o.GradView.AsReadOnlySpan()[0] * (2f / p.DataView.Size);
+            var f = o.GradView.AsReadOnlySpan()[0] * (2f / p.Shape.Size);
             TensorPrimitives.MultiplyAdd(p.DataView.AsReadOnlySpan(), f, p.GradView.AsSpan(), p.GradView.AsSpan());
             TensorPrimitives.MultiplyAdd(t.DataView.AsReadOnlySpan(), -f, p.GradView.AsSpan(), p.GradView.AsSpan());
         }
@@ -116,7 +115,7 @@ namespace DevOnBike.Overfit.Ops
 
         public static AutogradNode DirectionalLoss(ComputationGraph graph, AutogradNode prediction, AutogradNode target, float gamma = 10f)
         {
-            var sz = prediction.DataView.Size;
+            var sz = prediction.Shape.Size;
             float loss;
 
             using (var tempBuf = new PooledBuffer<float>(sz, false))
@@ -129,10 +128,9 @@ namespace DevOnBike.Overfit.Ops
                 loss = (mse + TensorPrimitives.Sum(s) * -gamma) / sz;
             }
 
-            var resTensor = new FastTensor<float>(1, false);
-            resTensor.GetView().AsSpan()[0] = loss;
+            var output = AllocateNode(graph, new TensorShape(1), prediction.RequiresGrad, clearMemory: false);
+            output.DataView.AsSpan()[0] = loss;
 
-            var output = new AutogradNode(resTensor, prediction.RequiresGrad);
             if (output.RequiresGrad)
             {
                 graph?.Record(OpCode.DirectionalLoss, output, prediction, target, BitConverter.SingleToInt32Bits(gamma));
@@ -143,7 +141,7 @@ namespace DevOnBike.Overfit.Ops
 
         public static void DirectionalLossBackward(AutogradNode p, AutogradNode t, AutogradNode o, float gamma)
         {
-            var s = o.GradView.AsReadOnlySpan()[0] / p.DataView.Size;
+            var s = o.GradView.AsReadOnlySpan()[0] / p.Shape.Size;
             var pG = p.GradView.AsSpan();
             var pD = p.DataView.AsReadOnlySpan();
             var tD = t.DataView.AsReadOnlySpan();

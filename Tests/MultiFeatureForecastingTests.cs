@@ -8,6 +8,7 @@ using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core; // Zmieniono namespace
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests
@@ -40,11 +41,12 @@ namespace DevOnBike.Overfit.Tests
             var sampleCount = returns.Length - windowSize;
             var batchSize = sampleCount;
 
-            using var xData = new FastTensor<float>(batchSize, inputSize, clearMemory: false);
-            using var yData = new FastTensor<float>(batchSize, 1, clearMemory: false);
+            // POPRAWKA: Przejście na TensorStorage i DOD
+            using var xData = new TensorStorage<float>(batchSize * inputSize, clearMemory: false);
+            using var yData = new TensorStorage<float>(batchSize * 1, clearMemory: false);
 
-            var xSpan = xData.GetView().AsSpan();
-            var ySpan = yData.GetView().AsSpan();
+            var xSpan = xData.AsSpan();
+            var ySpan = yData.AsSpan();
 
             for (var i = 0; i < sampleCount; i++)
             {
@@ -58,8 +60,8 @@ namespace DevOnBike.Overfit.Tests
                 ySpan[i] = returns[i + windowSize] * 100f;
             }
 
-            using var X = new AutogradNode(xData, false);
-            using var Y = new AutogradNode(yData, false);
+            using var X = new AutogradNode(xData, new TensorShape(batchSize, inputSize), false);
+            using var Y = new AutogradNode(yData, new TensorShape(batchSize, 1), false);
 
             using var layer1 = new LinearLayer(inputSize, 64);
             using var layer2 = new LinearLayer(64, 32);

@@ -8,6 +8,7 @@ using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Tensors.Core; // Zmieniono na Tensors.Core
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests
@@ -19,7 +20,7 @@ namespace DevOnBike.Overfit.Tests
 
         public TicTacToeIntelligenceTests(ITestOutputHelper output) => _output = output;
 
-        [Fact(Skip = "aaa")]
+        [Fact]
         public void Bestia_ShouldLearn_TicTacToe_LongTraining()
         {
             using var model = new Sequential(
@@ -46,9 +47,9 @@ namespace DevOnBike.Overfit.Tests
 
                 while (!isOver)
                 {
-                    using var stateTensor = new FastTensor<float>(1, 9, clearMemory: false);
-                    board.CopyTo(stateTensor.GetView().AsSpan());
-                    using var stateNode = new AutogradNode(stateTensor, false);
+                    using var stateTensor = new TensorStorage<float>(9, clearMemory: false);
+                    board.CopyTo(stateTensor.AsSpan());
+                    using var stateNode = new AutogradNode(stateTensor, new TensorShape(1, 9), false);
 
                     // WAŻNE: Nie używamy 'using' dla prediction, bo to współdzielony bufor modelu!
                     var prediction = model.Forward(null, stateNode);
@@ -92,10 +93,10 @@ namespace DevOnBike.Overfit.Tests
                     }
 
                     // TRENING (po zakończeniu tury/gry)
-                    using var targetTensor = new FastTensor<float>(1, 9, clearMemory: false);
-                    qValues.CopyTo(targetTensor.GetView().AsSpan());
-                    targetTensor.GetView().AsSpan()[action] = reward;
-                    using var targetNode = new AutogradNode(targetTensor, false);
+                    using var targetTensor = new TensorStorage<float>(9, clearMemory: false);
+                    qValues.CopyTo(targetTensor.AsSpan());
+                    targetTensor.AsSpan()[action] = reward;
+                    using var targetNode = new AutogradNode(targetTensor, new TensorShape(1, 9), false);
 
                     graph.Reset();
                     optimizer.ZeroGrad();
