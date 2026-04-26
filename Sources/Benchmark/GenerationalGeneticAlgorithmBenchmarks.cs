@@ -4,8 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Jobs;
-using BenchmarkDotNet.Order;
+using Benchmarks.Helpers;
 using DevOnBike.Overfit.Evolutionary.Abstractions;
 using DevOnBike.Overfit.Evolutionary.Fitness;
 using DevOnBike.Overfit.Evolutionary.Mutation;
@@ -14,9 +13,7 @@ using DevOnBike.Overfit.Evolutionary.Strategies;
 
 namespace Benchmarks
 {
-    [SimpleJob(RuntimeMoniker.Net10_0)]
-    [Orderer(SummaryOrderPolicy.FastestToSlowest)]
-    [MemoryDiagnoser]
+    [Config(typeof(BenchmarkConfig))]
     public class GenerationalGeneticAlgorithmBenchmarks
     {
         private GenerationalGeneticAlgorithm _algorithm = null!;

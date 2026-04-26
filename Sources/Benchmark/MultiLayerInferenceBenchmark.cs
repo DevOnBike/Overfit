@@ -4,8 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Jobs;
-using BenchmarkDotNet.Order;
+using Benchmarks.Helpers;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Tensors;
@@ -19,9 +18,7 @@ namespace Benchmarks
     ///     Performance benchmark for a 3-layer MLP architecture: 784 → 256 → 128 → 10.
     ///     Evaluates the cumulative impact of layer depth on inference latency.
     /// </summary>
-    [SimpleJob(RuntimeMoniker.Net10_0)]
-    [Orderer(SummaryOrderPolicy.FastestToSlowest)]
-    [MemoryDiagnoser]
+    [Config(typeof(BenchmarkConfig))]
     public class MultiLayerInferenceBenchmark
     {
         private const int InputSize = 784;

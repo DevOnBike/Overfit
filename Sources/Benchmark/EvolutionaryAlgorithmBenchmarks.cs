@@ -4,8 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Jobs;
-using BenchmarkDotNet.Order;
+using Benchmarks.Helpers;
 using DevOnBike.Overfit.Evolutionary.Abstractions;
 using DevOnBike.Overfit.Evolutionary.Fitness;
 using DevOnBike.Overfit.Evolutionary.Mutation;
@@ -42,9 +41,7 @@ namespace Benchmarks
     ///         Ask+Tell total is what matters in practice.
     ///     </para>
     /// </remarks>
-    [SimpleJob(RuntimeMoniker.Net10_0)]
-    [Orderer(SummaryOrderPolicy.FastestToSlowest)]
-    [MemoryDiagnoser]
+    [Config(typeof(BenchmarkConfig))]
     public class EvolutionaryAlgorithmBenchmarks
     {
         private const int NoiseTableLength = 1 << 20; // 1M floats = 4 MB, fits any tested parameterCount.

@@ -6,40 +6,27 @@
 using System.Buffers.Binary;
 using System.Text;
 
-namespace Benchmarks
+namespace Benchmarks.Helpers
 {
-    internal static class OnnxMlpModelWriter
+    internal static class OnnxLinearModelWriter
     {
         private const int TensorProtoDataTypeFloat = 1;
 
-        public static void WriteLinearReluLinearModel(
+        public static void WriteLinearGemmModel(
             string path,
             int inputSize,
-            int hiddenSize,
             int outputSize,
-            float[] w1InputHidden,
-            float[] b1,
-            float[] w2HiddenOutput,
-            float[] b2)
+            float[] weightsInputOutput,
+            float[] bias)
         {
-            if (w1InputHidden.Length != inputSize * hiddenSize)
+            if (weightsInputOutput.Length != inputSize * outputSize)
             {
-                throw new ArgumentException("W1 length mismatch.", nameof(w1InputHidden));
+                throw new ArgumentException("Weights length mismatch.", nameof(weightsInputOutput));
             }
 
-            if (b1.Length != hiddenSize)
+            if (bias.Length != outputSize)
             {
-                throw new ArgumentException("B1 length mismatch.", nameof(b1));
-            }
-
-            if (w2HiddenOutput.Length != hiddenSize * outputSize)
-            {
-                throw new ArgumentException("W2 length mismatch.", nameof(w2HiddenOutput));
-            }
-
-            if (b2.Length != outputSize)
-            {
-                throw new ArgumentException("B2 length mismatch.", nameof(b2));
+                throw new ArgumentException("Bias length mismatch.", nameof(bias));
             }
 
             using var file = File.Create(path);
@@ -47,44 +34,33 @@ namespace Benchmarks
             WriteModel(
                 file,
                 inputSize,
-                hiddenSize,
                 outputSize,
-                w1InputHidden,
-                b1,
-                w2HiddenOutput,
-                b2);
+                weightsInputOutput,
+                bias);
         }
 
         private static void WriteModel(
             Stream stream,
             int inputSize,
-            int hiddenSize,
             int outputSize,
-            float[] w1InputHidden,
-            float[] b1,
-            float[] w2HiddenOutput,
-            float[] b2)
+            float[] weightsInputOutput,
+            float[] bias)
         {
-            // ModelProto
-            Proto.WriteInt64(stream, 1, 9); // ir_version
-            Proto.WriteString(stream, 2, "DevOnBike.Overfit.Benchmark"); // producer_name
+            Proto.WriteInt64(stream, 1, 9);
+            Proto.WriteString(stream, 2, "DevOnBike.Overfit.Benchmark");
 
             Proto.WriteMessage(stream, 7, graph =>
             {
                 WriteGraph(
                     graph,
                     inputSize,
-                    hiddenSize,
                     outputSize,
-                    w1InputHidden,
-                    b1,
-                    w2HiddenOutput,
-                    b2);
+                    weightsInputOutput,
+                    bias);
             });
 
             Proto.WriteMessage(stream, 8, opset =>
             {
-                // default ONNX domain, opset 13
                 Proto.WriteInt64(opset, 2, 13);
             });
         }
@@ -92,82 +68,38 @@ namespace Benchmarks
         private static void WriteGraph(
             Stream stream,
             int inputSize,
-            int hiddenSize,
             int outputSize,
-            float[] w1InputHidden,
-            float[] b1,
-            float[] w2HiddenOutput,
-            float[] b2)
+            float[] weightsInputOutput,
+            float[] bias)
         {
-            // Node 1: hidden_linear = Gemm(input, W1, B1)
             Proto.WriteMessage(stream, 1, node =>
             {
                 Proto.WriteString(node, 1, "input");
-                Proto.WriteString(node, 1, "W1");
-                Proto.WriteString(node, 1, "B1");
-
-                Proto.WriteString(node, 2, "hidden_linear");
-
-                Proto.WriteString(node, 3, "linear1_gemm");
-                Proto.WriteString(node, 4, "Gemm");
-            });
-
-            // Node 2: hidden_relu = Relu(hidden_linear)
-            Proto.WriteMessage(stream, 1, node =>
-            {
-                Proto.WriteString(node, 1, "hidden_linear");
-
-                Proto.WriteString(node, 2, "hidden_relu");
-
-                Proto.WriteString(node, 3, "relu");
-                Proto.WriteString(node, 4, "Relu");
-            });
-
-            // Node 3: output = Gemm(hidden_relu, W2, B2)
-            Proto.WriteMessage(stream, 1, node =>
-            {
-                Proto.WriteString(node, 1, "hidden_relu");
-                Proto.WriteString(node, 1, "W2");
-                Proto.WriteString(node, 1, "B2");
+                Proto.WriteString(node, 1, "W");
+                Proto.WriteString(node, 1, "B");
 
                 Proto.WriteString(node, 2, "output");
 
-                Proto.WriteString(node, 3, "linear2_gemm");
+                Proto.WriteString(node, 3, "linear_gemm");
                 Proto.WriteString(node, 4, "Gemm");
             });
 
-            Proto.WriteString(stream, 2, "overfit_mlp_graph");
-
-            // Initializers
-            WriteFloatTensor(
-                stream,
-                fieldNumber: 5,
-                name: "W1",
-                dims: [inputSize, hiddenSize],
-                data: w1InputHidden);
+            Proto.WriteString(stream, 2, "overfit_linear_graph");
 
             WriteFloatTensor(
                 stream,
                 fieldNumber: 5,
-                name: "B1",
-                dims: [hiddenSize],
-                data: b1);
+                name: "W",
+                dims: [inputSize, outputSize],
+                data: weightsInputOutput);
 
             WriteFloatTensor(
                 stream,
                 fieldNumber: 5,
-                name: "W2",
-                dims: [hiddenSize, outputSize],
-                data: w2HiddenOutput);
-
-            WriteFloatTensor(
-                stream,
-                fieldNumber: 5,
-                name: "B2",
+                name: "B",
                 dims: [outputSize],
-                data: b2);
+                data: bias);
 
-            // Graph input/output
             WriteValueInfo(
                 stream,
                 fieldNumber: 11,
@@ -221,22 +153,18 @@ namespace Benchmarks
             {
                 Proto.WriteString(valueInfo, 1, name);
 
-                // TypeProto
                 Proto.WriteMessage(valueInfo, 2, typeProto =>
                 {
-                    // TypeProto.tensor_type
                     Proto.WriteMessage(typeProto, 1, tensorType =>
                     {
                         Proto.WriteInt32(tensorType, 1, TensorProtoDataTypeFloat);
 
-                        // TensorShapeProto
                         Proto.WriteMessage(tensorType, 2, shape =>
                         {
                             for (var i = 0; i < dims.Length; i++)
                             {
                                 var dimValue = dims[i];
 
-                                // TensorShapeProto.Dimension
                                 Proto.WriteMessage(shape, 1, dim =>
                                 {
                                     Proto.WriteInt64(dim, 1, dimValue);
@@ -297,7 +225,7 @@ namespace Benchmarks
 
             private static void WriteTag(Stream stream, int fieldNumber, int wireType)
             {
-                WriteVarUInt64(stream, ((ulong)fieldNumber << 3) | (uint)wireType);
+                WriteVarUInt64(stream, (ulong)fieldNumber << 3 | (uint)wireType);
             }
 
             private static void WriteVarUInt64(Stream stream, ulong value)

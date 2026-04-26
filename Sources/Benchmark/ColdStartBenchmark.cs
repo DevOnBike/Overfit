@@ -4,8 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Jobs;
-using BenchmarkDotNet.Order;
+using Benchmarks.Helpers;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Tensors;
@@ -23,9 +22,7 @@ namespace Benchmarks
     ///     and the Overfit engine — the metric that matters for serverless functions,
     ///     CLI tools, and any short-lived process.
     /// </summary>
-    [SimpleJob(RuntimeMoniker.Net10_0)]
-    [Orderer(SummaryOrderPolicy.FastestToSlowest)]
-    [MemoryDiagnoser]
+    [Config(typeof(BenchmarkConfig))]
     public class ColdStartBenchmark
     {
         private const int InputSize = 784;

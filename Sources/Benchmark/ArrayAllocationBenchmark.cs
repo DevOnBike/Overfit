@@ -5,14 +5,11 @@
 
 using System.Buffers;
 using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Jobs;
-using BenchmarkDotNet.Order;
+using Benchmarks.Helpers;
 
 namespace Benchmarks
 {
-    [SimpleJob(RuntimeMoniker.Net10_0)]
-    [Orderer(SummaryOrderPolicy.FastestToSlowest)]
-    [MemoryDiagnoser]
+    [Config(typeof(BenchmarkConfig))]
     public class ArrayAllocationBenchmark
     {
         // Parametryzacja rozmiarów tablicy: 

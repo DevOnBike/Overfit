@@ -7,16 +7,13 @@ using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Diagnosers;
 using BenchmarkDotNet.Jobs;
-using BenchmarkDotNet.Order;
+using Benchmarks.Helpers;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Licensing;
 using Microsoft.ML.OnnxRuntime;
 
 namespace Benchmarks
 {
-    [MemoryDiagnoser]
-    [Orderer(SummaryOrderPolicy.FastestToSlowest)]
-    [RankColumn]
     [Config(typeof(Config))]
     public class OnnxMlpInferenceBenchmarks : IDisposable
     {

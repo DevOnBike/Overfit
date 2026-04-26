@@ -9,14 +9,11 @@ using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Diagnosers;
 using BenchmarkDotNet.Jobs;
-using BenchmarkDotNet.Order;
+using Benchmarks.Helpers;
 
 namespace Benchmarks
 {
-    [MemoryDiagnoser]
-    [Orderer(SummaryOrderPolicy.FastestToSlowest)]
-    [RankColumn]
-    [Config(typeof(Config))]
+    [Config(typeof(BenchmarkConfig))]
     public class LinearKernelBenchmarks
     {
         private const int BigInputSize = 784;

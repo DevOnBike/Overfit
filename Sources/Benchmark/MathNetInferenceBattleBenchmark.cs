@@ -4,8 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Jobs;
-using BenchmarkDotNet.Order;
+using Benchmarks.Helpers;
 using MathNet.Numerics.LinearAlgebra;
 
 namespace Benchmarks
@@ -14,10 +13,7 @@ namespace Benchmarks
     ///     Performance comparison between ONNX Runtime and Overfit engine.
     ///     Evaluates execution speed and memory allocation overhead during inference.
     /// </summary>
-    [SimpleJob(RuntimeMoniker.Net10_0)]
-    [Orderer(SummaryOrderPolicy.FastestToSlowest)]
-    [MemoryDiagnoser]
-    [DisassemblyDiagnoser(maxDepth: 2)]
+    [Config(typeof(BenchmarkConfig))]
     public class MathNetInferenceBattleBenchmark
     {
         private const int SwarmSize = 100_000;

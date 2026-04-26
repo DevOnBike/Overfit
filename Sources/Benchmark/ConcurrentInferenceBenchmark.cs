@@ -4,8 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Jobs;
-using BenchmarkDotNet.Order;
+using Benchmarks.Helpers;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Tensors;
@@ -19,9 +18,7 @@ namespace Benchmarks
     ///     Analyzes multi-threaded inference performance (8 threads × 1000 iterations).
     ///     Compares synchronization overhead and resource contention between ONNX Runtime and Overfit.
     /// </summary>
-    [SimpleJob(RuntimeMoniker.Net10_0)]
-    [Orderer(SummaryOrderPolicy.FastestToSlowest)]
-    [MemoryDiagnoser]
+    [Config(typeof(BenchmarkConfig))]
     public class ConcurrentInferenceBenchmark
     {
         private const int InputSize = 784;

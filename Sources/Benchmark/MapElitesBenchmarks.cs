@@ -4,8 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Jobs;
-using BenchmarkDotNet.Order;
+using Benchmarks.Helpers;
 using DevOnBike.Overfit.Diagnostics.Contracts;
 using DevOnBike.Overfit.Evolutionary.Abstractions;
 using DevOnBike.Overfit.Evolutionary.Runtime;
@@ -13,10 +12,7 @@ using DevOnBike.Overfit.Evolutionary.Storage;
 
 namespace Benchmarks
 {
-    [SimpleJob(RuntimeMoniker.Net10_0)]
-    [Orderer(SummaryOrderPolicy.FastestToSlowest)]
-    [MemoryDiagnoser]
-    [DisassemblyDiagnoser(maxDepth: 2)]
+    [Config(typeof(BenchmarkConfig))]
     public class MapElitesBenchmarks
     {
         private GridEliteArchive _archive = null!;

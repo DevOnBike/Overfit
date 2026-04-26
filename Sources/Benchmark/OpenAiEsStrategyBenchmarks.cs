@@ -4,17 +4,14 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Jobs;
-using BenchmarkDotNet.Order;
 using DevOnBike.Overfit.Evolutionary.Fitness;
 using DevOnBike.Overfit.Evolutionary.Storage;
 using DevOnBike.Overfit.Evolutionary.Strategies;
+using static Benchmarks.GenerationalGeneticAlgorithmBenchmarks;
 
 namespace Benchmarks
 {
-    [SimpleJob(RuntimeMoniker.Net10_0)]
-    [Orderer(SummaryOrderPolicy.FastestToSlowest)]
-    [MemoryDiagnoser]
+    [Config(typeof(Config))]
     public class OpenAiEsStrategyBenchmarks
     {
         [Params(256, 1024)]

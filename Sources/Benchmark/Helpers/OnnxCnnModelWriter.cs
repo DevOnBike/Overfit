@@ -6,7 +6,7 @@
 using System.Buffers.Binary;
 using System.Text;
 
-namespace Benchmarks
+namespace Benchmarks.Helpers
 {
     internal static class OnnxCnnModelWriter
     {
@@ -442,7 +442,7 @@ namespace Benchmarks
 
             private static void WriteTag(Stream stream, int fieldNumber, int wireType)
             {
-                WriteVarUInt64(stream, ((ulong)fieldNumber << 3) | (uint)wireType);
+                WriteVarUInt64(stream, (ulong)fieldNumber << 3 | (uint)wireType);
             }
 
             private static void WriteVarUInt64(Stream stream, ulong value)
