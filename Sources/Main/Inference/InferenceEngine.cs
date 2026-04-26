@@ -109,9 +109,7 @@ namespace DevOnBike.Overfit.Inference
 
             if (input.Length % InputSize != 0)
             {
-                throw new ArgumentException(
-                    $"Input length must be divisible by InputSize={InputSize}. Got {input.Length}.",
-                    nameof(input));
+                throw new ArgumentException($"Input length must be divisible by InputSize={InputSize}. Got {input.Length}.", nameof(input));
             }
 
             var batchSize = input.Length / InputSize;
@@ -119,9 +117,7 @@ namespace DevOnBike.Overfit.Inference
 
             if (output.Length < requiredOutputLength)
             {
-                throw new ArgumentException(
-                    $"Output span is too small. Required {requiredOutputLength}, got {output.Length}.",
-                    nameof(output));
+                throw new ArgumentException($"Output span is too small. Required {requiredOutputLength}, got {output.Length}.", nameof(output));
             }
 
             if (_options.ValidateFiniteInput)
