@@ -3,8 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using DevOnBike.Overfit.Training.Contracts;
-
 namespace DevOnBike.Overfit.Training
 {
     public sealed class TrainingEngine : IDisposable
@@ -42,31 +40,40 @@ namespace DevOnBike.Overfit.Training
         {
             ThrowIfDisposed();
 
-            if (input.Length != BatchSize * InputSize)
+            var expectedInputLength = BatchSize * InputSize;
+            var expectedTargetLength = BatchSize * TargetSize;
+
+            if (input.Length != expectedInputLength)
             {
                 throw new ArgumentException(
-                    $"Expected input length {BatchSize * InputSize}, got {input.Length}.",
+                    $"Expected input length {expectedInputLength}, got {input.Length}.",
                     nameof(input));
             }
 
-            if (target.Length != BatchSize * TargetSize)
+            if (target.Length != expectedTargetLength)
             {
                 throw new ArgumentException(
-                    $"Expected target length {BatchSize * TargetSize}, got {target.Length}.",
+                    $"Expected target length {expectedTargetLength}, got {target.Length}.",
                     nameof(target));
             }
 
             if (_options.ValidateFiniteInput)
             {
-                ValidateFinite(input, nameof(input));
+                ValidateFinite(
+                    input,
+                    nameof(input));
             }
 
             if (_options.ValidateFiniteTarget)
             {
-                ValidateFinite(target, nameof(target));
+                ValidateFinite(
+                    target,
+                    nameof(target));
             }
 
-            return _backend.TrainBatch(input, target);
+            return _backend.TrainBatch(
+                input,
+                target);
         }
 
         public void Dispose()

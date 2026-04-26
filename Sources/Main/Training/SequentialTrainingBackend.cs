@@ -7,7 +7,6 @@ using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
-using DevOnBike.Overfit.Training.Contracts;
 
 namespace DevOnBike.Overfit.Training
 {
@@ -17,12 +16,10 @@ namespace DevOnBike.Overfit.Training
         private readonly ITrainingOptimizer _optimizer;
         private readonly ITrainingLoss _loss;
         private readonly TrainingEngineOptions _options;
-
         private readonly ComputationGraph _graph;
 
         private readonly TensorStorage<float> _inputStorage;
         private readonly TensorStorage<float> _targetStorage;
-
         private readonly AutogradNode _inputNode;
         private readonly AutogradNode _targetNode;
 
@@ -40,7 +37,6 @@ namespace DevOnBike.Overfit.Training
             ArgumentNullException.ThrowIfNull(model);
             ArgumentNullException.ThrowIfNull(optimizer);
             ArgumentNullException.ThrowIfNull(loss);
-
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(batchSize);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(inputSize);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(targetSize);
@@ -49,12 +45,11 @@ namespace DevOnBike.Overfit.Training
             _optimizer = optimizer;
             _loss = loss;
             _options = options ?? new TrainingEngineOptions();
+            _graph = new ComputationGraph();
 
             BatchSize = batchSize;
             InputSize = inputSize;
             TargetSize = targetSize;
-
-            _graph = new ComputationGraph();
 
             _inputStorage = new TensorStorage<float>(
                 batchSize * inputSize,
@@ -89,17 +84,20 @@ namespace DevOnBike.Overfit.Training
         {
             ThrowIfDisposed();
 
-            if (input.Length != BatchSize * InputSize)
+            var expectedInputLength = BatchSize * InputSize;
+            var expectedTargetLength = BatchSize * TargetSize;
+
+            if (input.Length != expectedInputLength)
             {
                 throw new ArgumentException(
-                    $"Expected input length {BatchSize * InputSize}, got {input.Length}.",
+                    $"Expected input length {expectedInputLength}, got {input.Length}.",
                     nameof(input));
             }
 
-            if (target.Length != BatchSize * TargetSize)
+            if (target.Length != expectedTargetLength)
             {
                 throw new ArgumentException(
-                    $"Expected target length {BatchSize * TargetSize}, got {target.Length}.",
+                    $"Expected target length {expectedTargetLength}, got {target.Length}.",
                     nameof(target));
             }
 
@@ -144,13 +142,9 @@ namespace DevOnBike.Overfit.Training
                 return;
             }
 
-            _graph.Dispose();
-
+            _graph.Reset();
             _inputNode.Dispose();
             _targetNode.Dispose();
-
-            _inputStorage.Dispose();
-            _targetStorage.Dispose();
 
             if (_options.DisposeModelWithEngine)
             {

@@ -47,14 +47,14 @@ namespace DevOnBike.Overfit.Training
         private static float DefaultReadScalar(
             AutogradNode loss)
         {
-            var span = loss.DataView.AsReadOnlySpan();
+            var data = loss.DataView.AsReadOnlySpan();
 
-            if (span.Length == 0)
+            if (data.Length == 0)
             {
                 throw new InvalidOperationException("Loss node has empty data.");
             }
 
-            return span[0];
+            return data[0];
         }
     }
 }
