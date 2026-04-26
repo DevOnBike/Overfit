@@ -33,14 +33,27 @@ def export(model, input_size, name):
     if os.path.exists(data_path):
         os.remove(data_path)
 
-    # .bin — wagi transponowane do formatu Overfit (in × out)
+    # .bin — Overfit's LinearLayer.Save format:
+    #   For each Linear layer in order:
+    #     [int32 weight_count][float32 × weight_count]
+    #     [int32 bias_count][float32 × bias_count]
+    # Weights are stored in [in_size, out_size] layout, which is the transpose of
+    # PyTorch's nn.Linear.weight (which uses [out_size, in_size]). Hence the .T below.
     bin_path = f"{name}.bin"
     with open(bin_path, "wb") as f:
         for m in model:
             if isinstance(m, nn.Linear):
-                for val in m.weight.data.T.contiguous().flatten():
+                weight_t = m.weight.data.T.contiguous().flatten()
+                bias = m.bias.data.flatten()
+
+                # Length prefix for weights (int32, little-endian).
+                f.write(struct.pack("i", weight_t.numel()))
+                for val in weight_t:
                     f.write(struct.pack("f", val.item()))
-                for val in m.bias.data.flatten():
+
+                # Length prefix for bias (int32, little-endian).
+                f.write(struct.pack("i", bias.numel()))
+                for val in bias:
                     f.write(struct.pack("f", val.item()))
 
     print(f"  {name}: .onnx={os.path.getsize(onnx_path)}B  .bin={os.path.getsize(bin_path)}B")
@@ -52,7 +65,9 @@ def main():
     models = [
         ("benchmark_model",  784,  nn.Sequential(nn.Linear(784, 10))),
         ("benchmark_mlp3",   784,  nn.Sequential(nn.Linear(784, 256), nn.ReLU(), nn.Linear(256, 128), nn.ReLU(), nn.Linear(128, 10))),
-        ("benchmark_small",  128,  nn.Sequential(nn.Linear(128, 10))),
+        # Sizes are read by ScalingBenchmark.cs, which expects 64 / 784 / 4096 inputs.
+        # Keep these in sync with that file or scaling tests will mismatch shapes.
+        ("benchmark_small",  64,   nn.Sequential(nn.Linear(64, 10))),
         ("benchmark_medium", 784,  nn.Sequential(nn.Linear(784, 10))),
         ("benchmark_large",  4096, nn.Sequential(nn.Linear(4096, 10))),
     ]

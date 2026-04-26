@@ -10,6 +10,8 @@ using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core; // Zmieniono namespace na Core
+using Microsoft.ML;
+using Microsoft.ML.Data;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
@@ -17,7 +19,9 @@ namespace Benchmarks
 {
     /// <summary>
     ///     Measures "Time-to-First-Prediction" (Cold Start) latency.
-    ///     Compares the initialization and execution overhead of ONNX Runtime vs. the Overfit engine.
+    ///     Compares the initialization and execution overhead of ONNX Runtime, ML.NET,
+    ///     and the Overfit engine — the metric that matters for serverless functions,
+    ///     CLI tools, and any short-lived process.
     /// </summary>
     [SimpleJob(RuntimeMoniker.Net10_0)]
     [Orderer(SummaryOrderPolicy.FastestToSlowest)]
@@ -53,6 +57,30 @@ namespace Benchmarks
         }
 
         /// <summary>
+        ///     Benchmark for ML.NET cold start. Includes MLContext creation, the
+        ///     OnnxScoringEstimator pipeline build, Fit on an empty IDataView, and
+        ///     PredictionEngine creation — i.e. everything a real ML.NET app pays
+        ///     once before its first prediction can run.
+        /// </summary>
+        [Benchmark]
+        public float MLNet_ColdStart()
+        {
+            var ml = new MLContext(seed: 42);
+            var emptyData = ml.Data.LoadFromEnumerable(new List<OnnxInput>());
+
+            var pipeline = ml.Transforms.ApplyOnnxModel(
+                modelFile: "benchmark_model.onnx",
+                outputColumnNames: ["output"],
+                inputColumnNames: ["input"]);
+
+            var transformer = pipeline.Fit(emptyData);
+            using var engine = ml.Model.CreatePredictionEngine<OnnxInput, OnnxOutput>(transformer);
+
+            var output = engine.Predict(new OnnxInput { Input = _inputData });
+            return output.Output[0];
+        }
+
+        /// <summary>
         ///     Benchmark for Overfit cold start, including model loading, weight transposition, and the first inference pass.
         /// </summary>
         [Benchmark]
@@ -72,6 +100,23 @@ namespace Benchmarks
 
             model.Dispose();
             return result;
+        }
+
+        // ML.NET schema classes — same shape as in MLNetSingleInferenceBenchmark
+        // but kept here as a copy because BenchmarkDotNet's per-class compilation
+        // doesn't share types across benchmark classes cleanly.
+        public sealed class OnnxInput
+        {
+            [VectorType(InputSize)]
+            [ColumnName("input")]
+            public float[] Input { get; set; }
+        }
+
+        public sealed class OnnxOutput
+        {
+            [VectorType(OutputSize)]
+            [ColumnName("output")]
+            public float[] Output { get; set; }
         }
     }
 }

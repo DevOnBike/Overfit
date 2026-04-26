@@ -25,8 +25,8 @@ namespace Benchmarks
     public class MultiLayerInferenceBenchmark
     {
         private const int InputSize = 784;
-        private const string OnnxPath = "benchmark_mlp3_auto.onnx";
-        private const string BinPath = "benchmark_mlp3_auto.bin";
+        private const string OnnxPath = "benchmark_mlp3.onnx";
+        private const string BinPath = "benchmark_mlp3.bin";
 
         private float[] _inputData;
         private AutogradNode _inputNode;
@@ -52,7 +52,11 @@ namespace Benchmarks
                 _onnxInputs = [NamedOnnxValue.CreateFromTensor("input", tensor)];
             }
 
-            // Overfit Setup (DOD)
+            // Overfit shape MUST exactly mirror what prepare-onnx.py exported, otherwise
+            // we'd be benchmarking different graphs against each other. The .bin file
+            // is a flat float dump from the same PyTorch model that produced the .onnx,
+            // so loading it into a structurally-identical Sequential is what makes the
+            // ONNX-vs-Overfit comparison apples-to-apples.
             _overfitModel = new Sequential(
                 new LinearLayer(InputSize, 256),
                 new ReluActivation(),
@@ -60,9 +64,16 @@ namespace Benchmarks
                 new ReluActivation(),
                 new LinearLayer(128, 10));
 
+            // Earlier versions auto-saved random weights when the .bin was missing.
+            // That hid bugs (silent comparison against fresh-init weights instead of
+            // PyTorch-exported ones) so we now fail loudly and tell the operator how to
+            // regenerate the model files in one shot.
             if (!File.Exists(BinPath))
             {
-                _overfitModel.Save(BinPath);
+                throw new InvalidOperationException(
+                    $"Missing {BinPath}. Generate the model files by running:\n" +
+                    "  pip install torch onnx onnxruntime\n" +
+                    "  python prepare-onnx.py");
             }
 
             _overfitModel.Load(BinPath);
@@ -87,8 +98,9 @@ namespace Benchmarks
             if (_onnxSession == null)
             {
                 throw new InvalidOperationException(
-                $"Missing {OnnxPath}. Please export the model from PyTorch using:\n" +
-                "python export_mlp3.py --input-size 784 --hidden 256 128 --output 10");
+                $"Missing {OnnxPath}. Generate the model files by running:\n" +
+                "  pip install torch onnx onnxruntime\n" +
+                "  python prepare-onnx.py");
             }
 
             using var results = _onnxSession.Run(_onnxInputs);

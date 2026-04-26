@@ -9,7 +9,7 @@
         <SonarQubeExclude>true</SonarQubeExclude>
         <NoWarn>$(NoWarn);1591</NoWarn>
         <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
-		<Thread_UseAllCpuGroups>true</Thread_UseAllCpuGroups>
+		<!--Thread_UseAllCpuGroups>true</Thread_UseAllCpuGroups-->
     </PropertyGroup>
     <ItemGroup>
         <PackageReference Include="Microsoft.NET.Test.Sdk"/>

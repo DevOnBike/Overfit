@@ -17,7 +17,9 @@
         <PackageReference Include="BenchmarkDotNet" />
         <PackageReference Include="BenchmarkDotNet.Diagnostics.Windows" />
         <PackageReference Include="MathNet.Numerics" />
+        <PackageReference Include="Microsoft.ML" />
         <PackageReference Include="Microsoft.ML.OnnxRuntime" />
+        <PackageReference Include="Microsoft.ML.OnnxTransformer" />
         <ProjectReference Include="..\Main\Main.csproj" />
     </ItemGroup>
 
