@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Diagnostics.Contracts;
 using DevOnBike.Overfit.Evolutionary.Abstractions;
 using DevOnBike.Overfit.Evolutionary.Runtime;
 using DevOnBike.Overfit.Evolutionary.Storage;

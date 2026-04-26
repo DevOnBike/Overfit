@@ -3,7 +3,9 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-namespace DevOnBike.Overfit.Evolutionary.Runtime
+using DevOnBike.Overfit.Evolutionary.Runtime;
+
+namespace DevOnBike.Overfit.Diagnostics.Contracts
 {
     /// <summary>
     ///     Per-iteration summary emitted by <c>MapElites.RunIteration</c>.

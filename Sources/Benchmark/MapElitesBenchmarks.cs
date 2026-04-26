@@ -6,6 +6,7 @@
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Order;
+using DevOnBike.Overfit.Diagnostics.Contracts;
 using DevOnBike.Overfit.Evolutionary.Abstractions;
 using DevOnBike.Overfit.Evolutionary.Runtime;
 using DevOnBike.Overfit.Evolutionary.Storage;
