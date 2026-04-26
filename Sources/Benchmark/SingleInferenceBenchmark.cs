@@ -4,141 +4,294 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Jobs;
-using BenchmarkDotNet.Order;
-using DevOnBike.Overfit.Autograd;
+using Benchmarks.Helpers;
 using DevOnBike.Overfit.DeepLearning;
-using DevOnBike.Overfit.Tensors;
-using DevOnBike.Overfit.Tensors.Core; // Zmieniono na Tensors.Core
+using DevOnBike.Overfit.Inference;
+using DevOnBike.Overfit.Inference.Contracts;
+using DevOnBike.Overfit.Licensing;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
 namespace Benchmarks
 {
     /// <summary>
-    ///     Baseline performance comparison for a single inference pass.
-    ///     Includes a "True Zero-Allocation" ONNX test to ensure the fairest possible
-    ///     comparison against Overfit's SIMD-optimized zero-allocation engine.
+    /// Single inference benchmark for Linear(784, 10).
+    ///
+    /// This benchmark verifies the current inference architecture:
+    ///
+    /// - Overfit uses InferenceEngine.Run(...)
+    /// - ONNX Runtime preallocated path uses OrtValue input/output buffers
+    /// - no AutogradNode / ComputationGraph / model.Forward(...) path is used for Overfit
+    ///
+    /// Required files:
+    ///
+    /// - benchmark_model.bin
+    /// - benchmark_model.onnx
     /// </summary>
-    [SimpleJob(RuntimeMoniker.Net10_0)]
-    [Orderer(SummaryOrderPolicy.FastestToSlowest)]
-    [MemoryDiagnoser]
+    [Config(typeof(BenchmarkConfig))]
     [DisassemblyDiagnoser(maxDepth: 2)]
-    // Dodajemy analizę cache'u procesora – to pokaże, dlaczego Overfit dominuje
-    public class SingleInferenceBenchmark
+    public class SingleInferenceBenchmark : IDisposable
     {
         private const int InputSize = 784;
         private const int OutputSize = 10;
-        private float[] _inputData;
-        private AutogradNode _inputNode;
-        private NamedOnnxValue[] _onnxInputs;
 
-        private InferenceSession _onnxSession;
-        private Sequential _overfitModel;
+        private const string BinPath = "benchmark_model.bin";
+        private const string OnnxPath = "benchmark_model.onnx";
 
-        // Zmiana na TensorStorage
-        private TensorStorage<float> _overfitInputTensor;
+        // Single Linear(784,10) is sub-microsecond on Overfit, so BDN needs
+        // a high OperationsPerInvoke to avoid MinIterationTime warnings.
+        private const int OperationsPerInvoke = 524_288;
 
-        // TRUE ZERO-ALLOC ONNX FIELDS
-        private float[] _onnxRawOutputData;
-        private OrtValue _onnxPreAllocatedInput;
-        private OrtValue _onnxPreAllocatedOutput;
-        private RunOptions _onnxRunOptions;
-        private string[] _inputNames;
-        private string[] _outputNames;
-        private OrtValue[] _ortInputValues;
-        private OrtValue[] _ortOutputValues;
+        private float[] _inputData = null!;
+
+        // Overfit
+        private Sequential _overfitModel = null!;
+        private InferenceEngine _overfitEngine = null!;
+        private float[] _overfitOutput = null!;
+
+        // ONNX Runtime standard high-level path
+        private NamedOnnxValue[] _onnxNamedInputs = null!;
+
+        // ONNX Runtime preallocated OrtValue path
+        private InferenceSession _onnxSession = null!;
+        private float[] _onnxOutputData = null!;
+        private OrtValue _onnxInputValue = null!;
+        private OrtValue _onnxOutputValue = null!;
+        private RunOptions _onnxRunOptions = null!;
+        private string[] _inputNames = null!;
+        private string[] _outputNames = null!;
+        private OrtValue[] _ortInputValues = null!;
+        private OrtValue[] _ortOutputValues = null!;
 
         [GlobalSetup]
         public void Setup()
         {
-            var rnd = new Random(42);
-            _inputData = Enumerable.Range(0, InputSize).Select(_ => (float)rnd.NextDouble()).ToArray();
+            OverfitLicense.SuppressNotice = true;
 
-            // 1. STANDARD ONNX SETUP
-            _onnxSession = new InferenceSession("benchmark_model.onnx");
-            var tensor = new DenseTensor<float>(_inputData, [1, InputSize]);
-            _onnxInputs = [NamedOnnxValue.CreateFromTensor("input", tensor)];
+            if (!File.Exists(BinPath) || !File.Exists(OnnxPath))
+            {
+                throw new InvalidOperationException(
+                    $"Missing benchmark files: {BinPath} and/or {OnnxPath}.");
+            }
 
-            // 2. OVERFIT SETUP (DOD)
-            _overfitModel = new Sequential(new LinearLayer(InputSize, OutputSize));
-            _overfitModel.Load("benchmark_model.bin");
+            _inputData = new float[InputSize];
+            _overfitOutput = new float[OutputSize];
+            _onnxOutputData = new float[OutputSize];
+
+            FillDeterministic(_inputData);
+
+            SetupOverfit();
+            SetupOnnxRuntime();
+
+            for (var i = 0; i < 512; i++)
+            {
+                _overfitEngine.Run(
+                    _inputData,
+                    _overfitOutput);
+
+                RunOnnxPreAllocatedOnce();
+
+                using var results = _onnxSession.Run(_onnxNamedInputs);
+                ConsumeFirstResult(results);
+            }
+
+            AssertClose(
+                _onnxOutputData,
+                _overfitOutput,
+                tolerance: 1e-3f);
+        }
+
+        private void SetupOverfit()
+        {
+            _overfitModel = new Sequential(
+                new LinearLayer(InputSize, OutputSize));
+
+            _overfitModel.Load(BinPath);
             _overfitModel.Eval();
 
-            _overfitInputTensor = new TensorStorage<float>(InputSize, clearMemory: false);
-            _inputData.AsSpan().CopyTo(_overfitInputTensor.AsSpan());
-            _inputNode = new AutogradNode(_overfitInputTensor, new TensorShape(1, InputSize), false);
+            _overfitEngine = InferenceEngine.FromSequential(
+                _overfitModel,
+                inputSize: InputSize,
+                outputSize: OutputSize,
+                new InferenceEngineOptions
+                {
+                    WarmupIterations = 32,
+                    MaxIntermediateElements = 64 * 1024,
+                    ValidateFiniteInput = false,
+                    DisposeModelWithEngine = false
+                });
 
-            // 3. TRUE ZERO-ALLOC ONNX SETUP
-            _onnxRawOutputData = new float[OutputSize];
-            var allocator = OrtAllocator.DefaultInstance;
+            _overfitEngine.Run(
+                _inputData,
+                _overfitOutput);
+        }
 
-            var inputShape = new long[] { 1, InputSize };
-            _onnxPreAllocatedInput = OrtValue.CreateTensorValueFromMemory(OrtMemoryInfo.DefaultInstance,
-                _inputData.AsMemory(), inputShape);
+        private void SetupOnnxRuntime()
+        {
+            var sessionOptions = new SessionOptions
+            {
+                EnableCpuMemArena = true,
+                EnableMemoryPattern = true,
+                ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
+                GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
+                InterOpNumThreads = 1,
+                IntraOpNumThreads = 1
+            };
 
-            var outputShape = new long[] { 1, OutputSize };
-            _onnxPreAllocatedOutput = OrtValue.CreateTensorValueFromMemory(OrtMemoryInfo.DefaultInstance,
-                _onnxRawOutputData.AsMemory(), outputShape);
+            _onnxSession = new InferenceSession(
+                OnnxPath,
+                sessionOptions);
+
+            var tensor = new DenseTensor<float>(
+                _inputData,
+                new[] { 1, InputSize });
+
+            _onnxNamedInputs =
+            [
+                NamedOnnxValue.CreateFromTensor(
+                    "input",
+                    tensor)
+            ];
+
+            _onnxInputValue = OrtValue.CreateTensorValueFromMemory<float>(
+                OrtMemoryInfo.DefaultInstance,
+                _inputData.AsMemory(),
+                new long[] { 1, InputSize });
+
+            _onnxOutputValue = OrtValue.CreateTensorValueFromMemory<float>(
+                OrtMemoryInfo.DefaultInstance,
+                _onnxOutputData.AsMemory(),
+                new long[] { 1, OutputSize });
 
             _onnxRunOptions = new RunOptions();
-            _inputNames = ["input"];
-            _outputNames = ["output"];
-            _ortInputValues = [_onnxPreAllocatedInput];
-            _ortOutputValues = [_onnxPreAllocatedOutput];
 
-            // WARMUP
-            for (var i = 0; i < 100; i++)
-            {
-                _overfitModel.Forward(null, _inputNode);
-                _onnxSession.Run(_onnxInputs).Dispose();
-                _onnxSession.Run(_onnxRunOptions, _inputNames, _ortInputValues, _outputNames, _ortOutputValues);
-            }
+            _inputNames = new[] { "input" };
+            _outputNames = new[] { "output" };
+
+            _ortInputValues = new[] { _onnxInputValue };
+            _ortOutputValues = new[] { _onnxOutputValue };
+
+            RunOnnxPreAllocatedOnce();
         }
 
-        /// <summary>
-        ///     Standardowe wywołanie ONNX używane w 99% tutoriali .NET 
-        ///     (Alokuje tablicę wyników pod spodem i nadal tworzy IDisposable).
-        /// </summary>
-        [Benchmark(Baseline = true)]
+        [Benchmark(Baseline = true, OperationsPerInvoke = OperationsPerInvoke)]
         public float OnnxRuntime_PreAllocated()
         {
-            using var results = _onnxSession.Run(_onnxInputs);
-            return results.First().AsTensor<float>()[0];
+            var checksum = 0f;
+
+            for (var i = 0; i < OperationsPerInvoke; i++)
+            {
+                RunOnnxPreAllocatedOnce();
+                checksum += _onnxOutputData[0];
+            }
+
+            return checksum;
         }
 
-        /// <summary>
-        ///     Wywołanie "HPC" dla ONNX. Brak alokacji pamięci w C#. 
-        ///     Mierzymy wyłącznie "podatek P/Invoke" i obliczenia C++.
-        /// </summary>
-        [Benchmark]
-        public float OnnxRuntime_TrueZeroAlloc()
+        [Benchmark(OperationsPerInvoke = OperationsPerInvoke)]
+        public float OnnxRuntime_StandardNamedValue()
         {
-            _onnxSession.Run(_onnxRunOptions, _inputNames, _ortInputValues, _outputNames, _ortOutputValues);
+            var checksum = 0f;
 
-            // Wynik jest zapisywany bezpośrednio przez C++ do naszej tablicy C#
-            return _onnxRawOutputData[0];
+            for (var i = 0; i < OperationsPerInvoke; i++)
+            {
+                using var results = _onnxSession.Run(_onnxNamedInputs);
+                checksum += ConsumeFirstResult(results);
+            }
+
+            return checksum;
         }
 
-        /// <summary>
-        ///     Twoja architektura. Rejestry CPU (SIMD) + Zero Alloc w czystym C#.
-        /// </summary>
-        [Benchmark]
-        public float Overfit_ZeroAlloc()
+        [Benchmark(OperationsPerInvoke = OperationsPerInvoke)]
+        public float Overfit_InferenceEngine_ZeroAlloc()
         {
-            return _overfitModel.Forward(null, _inputNode).DataView.AsReadOnlySpan()[0];
+            var checksum = 0f;
+
+            for (var i = 0; i < OperationsPerInvoke; i++)
+            {
+                _overfitEngine.Run(
+                    _inputData,
+                    _overfitOutput);
+
+                checksum += _overfitOutput[0];
+            }
+
+            return checksum;
+        }
+
+        private void RunOnnxPreAllocatedOnce()
+        {
+            _onnxSession.Run(
+                _onnxRunOptions,
+                _inputNames,
+                _ortInputValues,
+                _outputNames,
+                _ortOutputValues);
+        }
+
+        private static float ConsumeFirstResult(
+            IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results)
+        {
+            foreach (var result in results)
+            {
+                return result.AsTensor<float>()[0];
+            }
+
+            throw new InvalidOperationException("ONNX Runtime returned no outputs.");
         }
 
         [GlobalCleanup]
         public void Cleanup()
         {
-            _onnxPreAllocatedInput?.Dispose();
-            _onnxPreAllocatedOutput?.Dispose();
+            _onnxInputValue?.Dispose();
+            _onnxOutputValue?.Dispose();
             _onnxRunOptions?.Dispose();
             _onnxSession?.Dispose();
+
+            _overfitEngine?.Dispose();
             _overfitModel?.Dispose();
-            _overfitInputTensor?.Dispose();
-            _inputNode?.Dispose();
+        }
+
+        public void Dispose()
+        {
+            Cleanup();
+        }
+
+        private static void AssertClose(
+            ReadOnlySpan<float> expected,
+            ReadOnlySpan<float> actual,
+            float tolerance)
+        {
+            if (expected.Length != actual.Length)
+            {
+                throw new InvalidOperationException(
+                    $"Output length mismatch: expected={expected.Length}, actual={actual.Length}");
+            }
+
+            for (var i = 0; i < expected.Length; i++)
+            {
+                var diff = MathF.Abs(expected[i] - actual[i]);
+
+                if (diff > tolerance)
+                {
+                    throw new InvalidOperationException(
+                        $"Output mismatch at {i}: expected={expected[i]}, actual={actual[i]}, diff={diff}, tolerance={tolerance}");
+                }
+            }
+        }
+
+        private static void FillDeterministic(
+            float[] data)
+        {
+            var seed = 0x12345678u;
+
+            for (var i = 0; i < data.Length; i++)
+            {
+                seed = seed * 1664525u + 1013904223u;
+
+                var normalized = (seed & 0x00FFFFFF) / 16777216f;
+                data[i] = normalized * 2f - 1f;
+            }
         }
     }
 }

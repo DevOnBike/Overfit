@@ -5,135 +5,274 @@
 
 using System.Diagnostics;
 using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Jobs;
-using BenchmarkDotNet.Order;
-using DevOnBike.Overfit.Autograd;
+using Benchmarks.Helpers;
 using DevOnBike.Overfit.DeepLearning;
-using DevOnBike.Overfit.Diagnostics;
-using DevOnBike.Overfit.Tensors;
-using DevOnBike.Overfit.Tensors.Core; // Dodano namespace DOD
+using DevOnBike.Overfit.Inference;
+using DevOnBike.Overfit.Inference.Contracts;
+using DevOnBike.Overfit.Licensing;
 using Microsoft.ML.OnnxRuntime;
-using Microsoft.ML.OnnxRuntime.Tensors;
 
 namespace Benchmarks
 {
     /// <summary>
-    ///     Analyzes the latency distribution (P50 to Max) and jitter performance.
-    ///     This is the most critical benchmark for production Service Level Agreements (SLA).
+    /// Analyzes single-inference tail latency distribution.
+    ///
+    /// This benchmark verifies the current inference architecture:
+    ///
+    /// - Overfit uses InferenceEngine.Run(...)
+    /// - ONNX Runtime uses preallocated OrtValue input/output buffers
+    /// - no AutogradNode / ComputationGraph / model.Forward(...) path is used
+    ///
+    /// Required files:
+    ///
+    /// - benchmark_model.bin
+    /// - benchmark_model.onnx
+    ///
+    /// BenchmarkDotNet reports time per inference because OperationsPerInvoke = TotalCalls.
+    /// Tail latency percentiles are printed in GlobalCleanup from the last measured run.
     /// </summary>
-    [SimpleJob(RuntimeMoniker.Net10_0)]
-    [Orderer(SummaryOrderPolicy.FastestToSlowest)]
-    public class TailLatencyBenchmark
+    [Config(typeof(BenchmarkConfig))]
+    public class TailLatencyBenchmark : IDisposable
     {
         private const int InputSize = 784;
         private const int OutputSize = 10;
-        private const int TotalCalls = 100_000;
 
-        private float[] _inputData;
-        private AutogradNode _inputNode;
-        private NamedOnnxValue[] _onnxInputs;
-        private DenseTensor<float> _onnxInputTensor;
+        private const string BinPath = "benchmark_model.bin";
+        private const string OnnxPath = "benchmark_model.onnx";
 
-        private long[] _onnxLatencies;
+        // Large enough to avoid BenchmarkDotNet MinIterationTime warnings even for
+        // sub-microsecond Overfit single-linear inference.
+        private const int TotalCalls = 500_000;
 
-        private InferenceSession _onnxSession;
+        private float[] _inputData = null!;
 
-        // Zmiana na TensorStorage
-        private TensorStorage<float> _overfitInputTensor;
-        private long[] _overfitLatencies;
+        // Overfit
+        private Sequential _overfitModel = null!;
+        private InferenceEngine _overfitEngine = null!;
+        private float[] _overfitOutput = null!;
+        private long[] _overfitLatencies = null!;
 
-        private Sequential _overfitModel;
+        // ONNX Runtime
+        private InferenceSession _onnxSession = null!;
+        private float[] _onnxOutputData = null!;
+        private OrtValue _onnxInputValue = null!;
+        private OrtValue _onnxOutputValue = null!;
+        private RunOptions _onnxRunOptions = null!;
+        private string[] _inputNames = null!;
+        private string[] _outputNames = null!;
+        private OrtValue[] _ortInputValues = null!;
+        private OrtValue[] _ortOutputValues = null!;
+        private long[] _onnxLatencies = null!;
+
+        private float _overfitChecksum;
+        private float _onnxChecksum;
 
         [GlobalSetup]
         public void Setup()
         {
-            var rnd = new Random(42);
-            _inputData = Enumerable.Range(0, InputSize).Select(_ => (float)rnd.NextDouble()).ToArray();
+            OverfitLicense.SuppressNotice = true;
 
-            _onnxSession = new InferenceSession("benchmark_model.onnx");
-            _onnxInputTensor = new DenseTensor<float>(_inputData, [1, InputSize]);
-            _onnxInputs = [NamedOnnxValue.CreateFromTensor("input", _onnxInputTensor)];
+            if (!File.Exists(BinPath) || !File.Exists(OnnxPath))
+            {
+                throw new InvalidOperationException(
+                    $"Missing benchmark files: {BinPath} and/or {OnnxPath}.");
+            }
 
-            _overfitModel = new Sequential(new LinearLayer(InputSize, OutputSize));
-            _overfitModel.Load("benchmark_model.bin");
+            _inputData = new float[InputSize];
+            _overfitOutput = new float[OutputSize];
+            _onnxOutputData = new float[OutputSize];
+
+            _overfitLatencies = new long[TotalCalls];
+            _onnxLatencies = new long[TotalCalls];
+
+            FillDeterministic(_inputData);
+
+            SetupOverfit();
+            SetupOnnxRuntime();
+
+            for (var i = 0; i < 10_000; i++)
+            {
+                _overfitEngine.Run(
+                    _inputData,
+                    _overfitOutput);
+
+                RunOnnxOnce();
+            }
+
+            AssertClose(
+                _onnxOutputData,
+                _overfitOutput,
+                tolerance: 1e-3f);
+
+            GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+            GC.WaitForPendingFinalizers();
+            GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+        }
+
+        private void SetupOverfit()
+        {
+            _overfitModel = new Sequential(
+                new LinearLayer(InputSize, OutputSize));
+
+            _overfitModel.Load(BinPath);
             _overfitModel.Eval();
 
-            // POPRAWKA: Przejście na TensorStorage
-            _overfitInputTensor = new TensorStorage<float>(InputSize, clearMemory: false);
-            _inputData.AsSpan().CopyTo(_overfitInputTensor.AsSpan());
-            _inputNode = new AutogradNode(_overfitInputTensor, new TensorShape(1, InputSize), false);
+            _overfitEngine = InferenceEngine.FromSequential(
+                _overfitModel,
+                inputSize: InputSize,
+                outputSize: OutputSize,
+                new InferenceEngineOptions
+                {
+                    WarmupIterations = 32,
+                    MaxIntermediateElements = 64 * 1024,
+                    ValidateFiniteInput = false,
+                    DisposeModelWithEngine = false
+                });
 
-            for (var i = 0; i < 1000; i++)
-            {
-                using var r = _onnxSession.Run(_onnxInputs);
-                _overfitModel.Forward(null, _inputNode);
-            }
-
-            GC.Collect(2, GCCollectionMode.Forced, true);
-            GC.WaitForPendingFinalizers();
-
-            _onnxLatencies = new long[TotalCalls];
-            _overfitLatencies = new long[TotalCalls];
+            _overfitEngine.Run(
+                _inputData,
+                _overfitOutput);
         }
 
-        [Benchmark(Baseline = true)]
-        public void OnnxRuntime_LatencyProfile()
+        private void SetupOnnxRuntime()
         {
-            var gc0Before = GC.CollectionCount(0);
-            var gc1Before = GC.CollectionCount(1);
-            var gc2Before = GC.CollectionCount(2);
+            var sessionOptions = new SessionOptions
+            {
+                EnableCpuMemArena = true,
+                EnableMemoryPattern = true,
+                ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
+                GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
+                InterOpNumThreads = 1,
+                IntraOpNumThreads = 1
+            };
+
+            _onnxSession = new InferenceSession(
+                OnnxPath,
+                sessionOptions);
+
+            _onnxInputValue = OrtValue.CreateTensorValueFromMemory<float>(
+                OrtMemoryInfo.DefaultInstance,
+                _inputData.AsMemory(),
+                new long[] { 1, InputSize });
+
+            _onnxOutputValue = OrtValue.CreateTensorValueFromMemory<float>(
+                OrtMemoryInfo.DefaultInstance,
+                _onnxOutputData.AsMemory(),
+                new long[] { 1, OutputSize });
+
+            _onnxRunOptions = new RunOptions();
+
+            _inputNames = new[] { "input" };
+            _outputNames = new[] { "output" };
+
+            _ortInputValues = new[] { _onnxInputValue };
+            _ortOutputValues = new[] { _onnxOutputValue };
+
+            RunOnnxOnce();
+        }
+
+        [Benchmark(Baseline = true, OperationsPerInvoke = TotalCalls)]
+        public float OnnxRuntime_LatencyProfile()
+        {
+            var checksum = 0f;
 
             for (var i = 0; i < TotalCalls; i++)
             {
-                var sw = ValueStopwatch.StartNew();
-                using var results = _onnxSession.Run(_onnxInputs);
-                _ = results.First().AsTensor<float>()[0];
-                var elapsed = sw.GetElapsedTime();
-                _onnxLatencies[i] = (long)elapsed.TotalMilliseconds;
+                var start = Stopwatch.GetTimestamp();
+
+                RunOnnxOnce();
+
+                _onnxLatencies[i] = Stopwatch.GetTimestamp() - start;
+                checksum += _onnxOutputData[0];
             }
 
-            PrintLatencyReport(
-            "ONNX Runtime",
-            _onnxLatencies,
-            GC.CollectionCount(0) - gc0Before,
-            GC.CollectionCount(1) - gc1Before,
-            GC.CollectionCount(2) - gc2Before);
+            _onnxChecksum = checksum;
+
+            return checksum;
         }
 
-        [Benchmark]
-        public void Overfit_LatencyProfile()
+        [Benchmark(OperationsPerInvoke = TotalCalls)]
+        public float Overfit_LatencyProfile()
         {
-            var gc0Before = GC.CollectionCount(0);
-            var gc1Before = GC.CollectionCount(1);
-            var gc2Before = GC.CollectionCount(2);
+            var checksum = 0f;
 
             for (var i = 0; i < TotalCalls; i++)
             {
-                var sw = ValueStopwatch.StartNew();
-                _ = _overfitModel.Forward(null, _inputNode).DataView.AsReadOnlySpan()[0];
-                var elapsed = sw.GetElapsedTime();
-                _overfitLatencies[i] = (long)elapsed.TotalMilliseconds;
+                var start = Stopwatch.GetTimestamp();
+
+                _overfitEngine.Run(
+                    _inputData,
+                    _overfitOutput);
+
+                _overfitLatencies[i] = Stopwatch.GetTimestamp() - start;
+                checksum += _overfitOutput[0];
             }
 
-            PrintLatencyReport(
-            "Overfit",
-            _overfitLatencies,
-            GC.CollectionCount(0) - gc0Before,
-            GC.CollectionCount(1) - gc1Before,
-            GC.CollectionCount(2) - gc2Before);
+            _overfitChecksum = checksum;
+
+            return checksum;
         }
 
-        private static void PrintLatencyReport(string name, long[] latencies, int gc0, int gc1, int gc2)
+        private void RunOnnxOnce()
         {
-            var ticksPerUs = Stopwatch.Frequency / 1_000_000.0;
-            Array.Sort(latencies);
+            _onnxSession.Run(
+                _onnxRunOptions,
+                _inputNames,
+                _ortInputValues,
+                _outputNames,
+                _ortOutputValues);
+        }
 
-            var p50 = latencies[(int)(TotalCalls * 0.50)] / ticksPerUs;
-            var p90 = latencies[(int)(TotalCalls * 0.90)] / ticksPerUs;
-            var p95 = latencies[(int)(TotalCalls * 0.95)] / ticksPerUs;
-            var p99 = latencies[(int)(TotalCalls * 0.99)] / ticksPerUs;
-            var p999 = latencies[(int)(TotalCalls * 0.999)] / ticksPerUs;
-            var max = latencies[TotalCalls - 1] / ticksPerUs;
+        [GlobalCleanup]
+        public void Cleanup()
+        {
+            if (_onnxLatencies is not null)
+            {
+                PrintLatencyReport(
+                    "ONNX Runtime",
+                    _onnxLatencies,
+                    _onnxChecksum);
+            }
+
+            if (_overfitLatencies is not null)
+            {
+                PrintLatencyReport(
+                    "Overfit",
+                    _overfitLatencies,
+                    _overfitChecksum);
+            }
+
+            _onnxInputValue?.Dispose();
+            _onnxOutputValue?.Dispose();
+            _onnxRunOptions?.Dispose();
+            _onnxSession?.Dispose();
+
+            _overfitEngine?.Dispose();
+            _overfitModel?.Dispose();
+        }
+
+        public void Dispose()
+        {
+            Cleanup();
+        }
+
+        private static void PrintLatencyReport(
+            string name,
+            long[] latencies,
+            float checksum)
+        {
+            var sorted = new long[latencies.Length];
+            latencies.AsSpan().CopyTo(sorted);
+
+            Array.Sort(sorted);
+
+            var p50 = TicksToMicroseconds(sorted[(int)(TotalCalls * 0.50)]);
+            var p90 = TicksToMicroseconds(sorted[(int)(TotalCalls * 0.90)]);
+            var p95 = TicksToMicroseconds(sorted[(int)(TotalCalls * 0.95)]);
+            var p99 = TicksToMicroseconds(sorted[(int)(TotalCalls * 0.99)]);
+            var p999 = TicksToMicroseconds(sorted[(int)(TotalCalls * 0.999)]);
+            var max = TicksToMicroseconds(sorted[TotalCalls - 1]);
+
             var jitter = p999 / Math.Max(p50, 0.01);
 
             Console.WriteLine();
@@ -147,18 +286,51 @@ namespace Benchmarks
             Console.WriteLine($"  |  P99.9:     {p999,10:F2} us                       |");
             Console.WriteLine($"  |  Max:       {max,10:F2} us                       |");
             Console.WriteLine($"  |  Jitter:    {jitter,10:F2}x (P99.9/P50)           |");
-            Console.WriteLine($"  |  GC Gen-0:  {gc0,10}                         |");
-            Console.WriteLine($"  |  GC Gen-1:  {gc1,10}                         |");
-            Console.WriteLine($"  |  GC Gen-2:  {gc2,10}                         |");
+            Console.WriteLine($"  |  Checksum:  {checksum,10:F2}                      |");
             Console.WriteLine("  +------------------------------------------------+");
         }
 
-        public void Cleanup()
+        private static double TicksToMicroseconds(
+            long ticks)
         {
-            _onnxSession?.Dispose();
-            _overfitInputTensor?.Dispose();
-            _inputNode?.Dispose();
-            _overfitModel?.Dispose();
+            return ticks * 1_000_000.0 / Stopwatch.Frequency;
+        }
+
+        private static void AssertClose(
+            ReadOnlySpan<float> expected,
+            ReadOnlySpan<float> actual,
+            float tolerance)
+        {
+            if (expected.Length != actual.Length)
+            {
+                throw new InvalidOperationException(
+                    $"Output length mismatch: expected={expected.Length}, actual={actual.Length}");
+            }
+
+            for (var i = 0; i < expected.Length; i++)
+            {
+                var diff = MathF.Abs(expected[i] - actual[i]);
+
+                if (diff > tolerance)
+                {
+                    throw new InvalidOperationException(
+                        $"Output mismatch at {i}: expected={expected[i]}, actual={actual[i]}, diff={diff}, tolerance={tolerance}");
+                }
+            }
+        }
+
+        private static void FillDeterministic(
+            float[] data)
+        {
+            var seed = 0x12345678u;
+
+            for (var i = 0; i < data.Length; i++)
+            {
+                seed = seed * 1664525u + 1013904223u;
+
+                var normalized = (seed & 0x00FFFFFF) / 16777216f;
+                data[i] = normalized * 2f - 1f;
+            }
         }
     }
 }
