@@ -174,6 +174,15 @@ namespace DevOnBike.Overfit.DeepLearning
             ReadOnlySpan<float> input,
             Span<float> output)
         {
+            ForwardInferencePrepared(
+                input,
+                output);
+        }
+
+        public void ForwardInferencePrepared(
+            ReadOnlySpan<float> input,
+            Span<float> output)
+        {
             Conv2DKernels.ForwardValidNchw(
                 input,
                 Kernels.DataView.AsReadOnlySpan(),

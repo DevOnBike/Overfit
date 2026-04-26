@@ -101,7 +101,11 @@ namespace DevOnBike.Overfit.DeepLearning
 
             if (_modules.Count == 1)
             {
-                _modules[0].ForwardInference(input, output);
+                InvokePreparedOrSafe(
+                    _modules[0],
+                    input,
+                    output);
+
                 return;
             }
 
@@ -115,7 +119,11 @@ namespace DevOnBike.Overfit.DeepLearning
 
                 if (isLast)
                 {
-                    module.ForwardInference(currentInput, output);
+                    InvokePreparedOrSafe(
+                        module,
+                        currentInput,
+                        output);
+
                     return;
                 }
 
@@ -129,13 +137,33 @@ namespace DevOnBike.Overfit.DeepLearning
                     ? _inferenceBufferA.AsSpan(0, nextLength)
                     : _inferenceBufferB.AsSpan(0, nextLength);
 
-                module.ForwardInference(
+                InvokePreparedOrSafe(
+                    module,
                     currentInput,
                     currentOutput);
 
                 currentInput = currentOutput;
                 useBufferA = !useBufferA;
             }
+        }
+
+        private static void InvokePreparedOrSafe(
+            IModule module,
+            ReadOnlySpan<float> input,
+            Span<float> output)
+        {
+            if (module is IPreparedInferenceModule preparedModule)
+            {
+                preparedModule.ForwardInferencePrepared(
+                    input,
+                    output);
+
+                return;
+            }
+
+            module.ForwardInference(
+                input,
+                output);
         }
 
         private static int ResolveIntermediateLength(

@@ -3,11 +3,9 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Numerics;
-using System.Numerics.Tensors;
-using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
+using DevOnBike.Overfit.Kernels;
 using DevOnBike.Overfit.Maths;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors;
@@ -15,10 +13,8 @@ using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
-    public sealed class LinearLayer : IModule, IInferenceShapeProvider
+    public sealed class LinearLayer : IModule, IInferenceShapeProvider, IPreparedInferenceModule
     {
-        private const int InputMajorVectorizedOutputThreshold = 32;
-
         private readonly int _inputSize;
         private readonly int _outputSize;
 
@@ -172,6 +168,7 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             using var fs = new FileStream(path, FileMode.Create);
             using var bw = new BinaryWriter(fs);
+
             Save(bw);
         }
 
@@ -184,244 +181,45 @@ namespace DevOnBike.Overfit.DeepLearning
 
             using var fs = new FileStream(path, FileMode.Open);
             using var br = new BinaryReader(fs);
+
             Load(br);
         }
 
         private void RebuildTransposedWeightsInPlace()
         {
-            var src = Weights.DataView.AsReadOnlySpan();
-            var dst = _weightsTransposed.AsSpan();
-
-            // Source layout: [input, output]
-            // Cache layout:  [output, input]
-            for (var i = 0; i < _inputSize; i++)
-            {
-                var srcBase = i * _outputSize;
-
-                for (var j = 0; j < _outputSize; j++)
-                {
-                    dst[j * _inputSize + i] = src[srcBase + j];
-                }
-            }
+            LinearKernels.TransposeInputOutputToOutputInput(
+                Weights.DataView.AsReadOnlySpan(),
+                _weightsTransposed.AsSpan(),
+                _inputSize,
+                _outputSize);
         }
 
-        public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
+        public void ForwardInference(
+            ReadOnlySpan<float> input,
+            Span<float> output)
         {
             if (!_inferenceCacheValid)
             {
                 PrepareInference();
             }
 
-            if (input.Length % _inputSize != 0)
-            {
-                throw new ArgumentException("Input length is not divisible by layer input size.", nameof(input));
-            }
-
-            var batchSize = input.Length / _inputSize;
-            var expectedOutputLength = batchSize * _outputSize;
-
-            if (output.Length < expectedOutputLength)
-            {
-                throw new ArgumentException("Output span is too small for LinearLayer inference.", nameof(output));
-            }
-
-            var weights = Weights.DataView.AsReadOnlySpan();
-            var weightsT = _weightsTransposed.AsReadOnlySpan();
-            var bias = Bias.DataView.AsReadOnlySpan();
-
-            for (var b = 0; b < batchSize; b++)
-            {
-                var inSlice = input.Slice(b * _inputSize, _inputSize);
-                var outSlice = output.Slice(b * _outputSize, _outputSize);
-
-                if (_outputSize >= InputMajorVectorizedOutputThreshold)
-                {
-                    LinearInferenceInputMajorVector4(
-                        inSlice,
-                        weights,
-                        bias,
-                        outSlice,
-                        _inputSize,
-                        _outputSize);
-                }
-                else
-                {
-                    LinearInferenceOutputMajorDot(
-                        inSlice,
-                        weightsT,
-                        bias,
-                        outSlice);
-                }
-            }
+            ForwardInferencePrepared(
+                input,
+                output);
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static void LinearInferenceOutputMajorDot(
+        public void ForwardInferencePrepared(
             ReadOnlySpan<float> input,
-            ReadOnlySpan<float> weightsT,
-            ReadOnlySpan<float> bias,
             Span<float> output)
         {
-            var inputSize = input.Length;
-            var outputSize = output.Length;
-
-            for (var j = 0; j < outputSize; j++)
-            {
-                var wRow = weightsT.Slice(j * inputSize, inputSize);
-                output[j] = TensorPrimitives.Dot(input, wRow) + bias[j];
-            }
-        }
-
-        private static void LinearInferenceInputMajorVector4(
-            ReadOnlySpan<float> input,
-            ReadOnlySpan<float> weights,
-            ReadOnlySpan<float> bias,
-            Span<float> output,
-            int inputSize,
-            int outputSize)
-        {
-            if (!Vector.IsHardwareAccelerated ||
-                outputSize < Vector<float>.Count * 4)
-            {
-                LinearInferenceInputMajorVector1(
-                    input,
-                    weights,
-                    bias,
-                    output,
-                    inputSize,
-                    outputSize);
-
-                return;
-            }
-
-            var vectorWidth = Vector<float>.Count;
-            var blockWidth = vectorWidth * 4;
-
-            var j = 0;
-
-            for (; j <= outputSize - blockWidth; j += blockWidth)
-            {
-                var acc0 = new Vector<float>(bias.Slice(j, vectorWidth));
-                var acc1 = new Vector<float>(bias.Slice(j + vectorWidth, vectorWidth));
-                var acc2 = new Vector<float>(bias.Slice(j + vectorWidth * 2, vectorWidth));
-                var acc3 = new Vector<float>(bias.Slice(j + vectorWidth * 3, vectorWidth));
-
-                for (var i = 0; i < inputSize; i++)
-                {
-                    var x = new Vector<float>(input[i]);
-                    var rowBase = i * outputSize + j;
-
-                    acc0 += x * new Vector<float>(weights.Slice(rowBase, vectorWidth));
-                    acc1 += x * new Vector<float>(weights.Slice(rowBase + vectorWidth, vectorWidth));
-                    acc2 += x * new Vector<float>(weights.Slice(rowBase + vectorWidth * 2, vectorWidth));
-                    acc3 += x * new Vector<float>(weights.Slice(rowBase + vectorWidth * 3, vectorWidth));
-                }
-
-                acc0.CopyTo(output.Slice(j, vectorWidth));
-                acc1.CopyTo(output.Slice(j + vectorWidth, vectorWidth));
-                acc2.CopyTo(output.Slice(j + vectorWidth * 2, vectorWidth));
-                acc3.CopyTo(output.Slice(j + vectorWidth * 3, vectorWidth));
-            }
-
-            for (; j <= outputSize - vectorWidth; j += vectorWidth)
-            {
-                var acc = new Vector<float>(bias.Slice(j, vectorWidth));
-
-                for (var i = 0; i < inputSize; i++)
-                {
-                    acc += new Vector<float>(input[i]) *
-                           new Vector<float>(weights.Slice(i * outputSize + j, vectorWidth));
-                }
-
-                acc.CopyTo(output.Slice(j, vectorWidth));
-            }
-
-            for (; j < outputSize; j++)
-            {
-                var sum = bias[j];
-
-                for (var i = 0; i < inputSize; i++)
-                {
-                    sum += input[i] * weights[i * outputSize + j];
-                }
-
-                output[j] = sum;
-            }
-        }
-
-        private static void LinearInferenceInputMajorVector1(
-            ReadOnlySpan<float> input,
-            ReadOnlySpan<float> weights,
-            ReadOnlySpan<float> bias,
-            Span<float> output,
-            int inputSize,
-            int outputSize)
-        {
-            if (!Vector.IsHardwareAccelerated ||
-                outputSize < Vector<float>.Count)
-            {
-                LinearInferenceInputMajorScalar(
-                    input,
-                    weights,
-                    bias,
-                    output,
-                    inputSize,
-                    outputSize);
-
-                return;
-            }
-
-            var vectorWidth = Vector<float>.Count;
-            var j = 0;
-
-            for (; j <= outputSize - vectorWidth; j += vectorWidth)
-            {
-                var acc = new Vector<float>(bias.Slice(j, vectorWidth));
-
-                for (var i = 0; i < inputSize; i++)
-                {
-                    var x = new Vector<float>(input[i]);
-                    var w = new Vector<float>(weights.Slice(i * outputSize + j, vectorWidth));
-
-                    acc += x * w;
-                }
-
-                acc.CopyTo(output.Slice(j, vectorWidth));
-            }
-
-            for (; j < outputSize; j++)
-            {
-                var sum = bias[j];
-
-                for (var i = 0; i < inputSize; i++)
-                {
-                    sum += input[i] * weights[i * outputSize + j];
-                }
-
-                output[j] = sum;
-            }
-        }
-
-        private static void LinearInferenceInputMajorScalar(
-            ReadOnlySpan<float> input,
-            ReadOnlySpan<float> weights,
-            ReadOnlySpan<float> bias,
-            Span<float> output,
-            int inputSize,
-            int outputSize)
-        {
-            bias.Slice(0, outputSize).CopyTo(output);
-
-            for (var i = 0; i < inputSize; i++)
-            {
-                var x = input[i];
-                var wBase = i * outputSize;
-
-                for (var j = 0; j < outputSize; j++)
-                {
-                    output[j] += x * weights[wBase + j];
-                }
-            }
+            LinearKernels.Forward(
+                input,
+                Weights.DataView.AsReadOnlySpan(),
+                _weightsTransposed.AsReadOnlySpan(),
+                Bias.DataView.AsReadOnlySpan(),
+                output,
+                _inputSize,
+                _outputSize);
         }
 
         public void Dispose()
