@@ -22,6 +22,9 @@ namespace Benchmarks
         private const int HiddenSize = 128;
         private const int ClassCount = 10;
 
+        // ~1.6 ms * 64 = ~102 ms per BDN iteration.
+        private const int OperationsPerInvoke = 64;
+
         private float[] _input = null!;
         private float[] _target = null!;
 
@@ -92,18 +95,26 @@ namespace Benchmarks
                         DisposeModelWithEngine = false
                     }));
 
-            for (var i = 0; i < 8; i++)
+            // Warmup outside measured region.
+            for (var i = 0; i < OperationsPerInvoke; i++)
             {
                 _trainer.TrainBatch(_input, _target);
             }
         }
 
-        [Benchmark]
+        [Benchmark(OperationsPerInvoke = OperationsPerInvoke)]
         public float TrainingEngine_Mlp_TrainBatch()
         {
-            return _trainer.TrainBatch(
-                _input,
-                _target).Loss;
+            var checksum = 0f;
+
+            for (var i = 0; i < OperationsPerInvoke; i++)
+            {
+                checksum += _trainer.TrainBatch(
+                    _input,
+                    _target).Loss;
+            }
+
+            return checksum;
         }
 
         [GlobalCleanup]
