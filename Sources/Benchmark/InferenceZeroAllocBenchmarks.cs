@@ -1,8 +1,4 @@
-﻿// Copyright (c) 2026 DevOnBike.
-// This file is part of DevonBike Overfit.
-// DevonBike Overfit is licensed under the GNU AGPLv3.
-// For commercial licensing options, contact: devonbike@gmail.com
-
+﻿using System.Numerics;
 using System.Numerics.Tensors;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Configs;
@@ -24,37 +20,40 @@ namespace Benchmarks
         private const int HiddenSize = 128;
         private const int OutputSize = 10;
 
-        private Sequential _singleLayerModel = null!;
-        private Sequential _multiLayerModel = null!;
+        private const int SingleLinearOperationsPerInvoke = 524_288;
+        private const int MultiLayerOperationsPerInvoke = 32_768;
 
+        private Sequential _singleLinearModel = null!;
         private LinearLayer _singleLinear = null!;
+
+        private Sequential _multiLayerModel = null!;
         private LinearLayer _multiLinear1 = null!;
         private LinearLayer _multiLinear2 = null!;
 
         private float[] _input = null!;
 
-        private float[] _singleOutput = null!;
-        private float[] _multiOutput = null!;
+        private float[] _overfitSingleOutput = null!;
+        private float[] _overfitMultiOutput = null!;
 
-        private float[] _manualSingleWeightsT = null!;
-        private float[] _manualSingleBias = null!;
         private float[] _manualSingleOutput = null!;
-
-        private float[] _manualMultiWeights1T = null!;
-        private float[] _manualMultiBias1 = null!;
-        private float[] _manualMultiHidden = null!;
-
-        private float[] _manualMultiWeights2T = null!;
-        private float[] _manualMultiBias2 = null!;
         private float[] _manualMultiOutput = null!;
+        private float[] _manualHidden = null!;
+
+        private float[] _singleWeightsT = null!;
+        private float[] _singleBias = null!;
+
+        private float[] _multiWeights1 = null!;
+        private float[] _multiBias1 = null!;
+        private float[] _multiWeights2T = null!;
+        private float[] _multiBias2 = null!;
 
         private class Config : ManualConfig
         {
             public Config()
             {
                 AddJob(Job.Default
-                    .WithWarmupCount(10)
-                    .WithIterationCount(50)
+                    .WithWarmupCount(5)
+                    .WithIterationCount(20)
                     .WithInvocationCount(1)
                     .WithUnrollFactor(1));
 
@@ -69,18 +68,27 @@ namespace Benchmarks
 
             _input = new float[InputSize];
 
-            _singleOutput = new float[OutputSize];
-            _multiOutput = new float[OutputSize];
+            _overfitSingleOutput = new float[OutputSize];
+            _overfitMultiOutput = new float[OutputSize];
 
             _manualSingleOutput = new float[OutputSize];
-
-            _manualMultiHidden = new float[HiddenSize];
             _manualMultiOutput = new float[OutputSize];
+            _manualHidden = new float[HiddenSize];
+
+            _singleWeightsT = new float[OutputSize * InputSize];
+            _singleBias = new float[OutputSize];
+
+            _multiWeights1 = new float[InputSize * HiddenSize];
+            _multiBias1 = new float[HiddenSize];
+            _multiWeights2T = new float[OutputSize * HiddenSize];
+            _multiBias2 = new float[OutputSize];
 
             FillDeterministic(_input);
 
             _singleLinear = new LinearLayer(InputSize, OutputSize);
-            _singleLayerModel = new Sequential(_singleLinear);
+
+            _singleLinearModel = new Sequential(
+                _singleLinear);
 
             _multiLinear1 = new LinearLayer(InputSize, HiddenSize);
             _multiLinear2 = new LinearLayer(HiddenSize, OutputSize);
@@ -90,88 +98,93 @@ namespace Benchmarks
                 new ReluActivation(),
                 _multiLinear2);
 
-            _singleLayerModel.Eval();
-            _singleLayerModel.PrepareInference(maxIntermediateElements: InputSize + HiddenSize + OutputSize + 1024);
+            _singleLinearModel.Eval();
+            _singleLinearModel.PrepareInference(64 * 1024);
 
             _multiLayerModel.Eval();
-            _multiLayerModel.PrepareInference(maxIntermediateElements: InputSize + HiddenSize + OutputSize + 1024);
+            _multiLayerModel.PrepareInference(64 * 1024);
 
-            _manualSingleWeightsT = new float[InputSize * OutputSize];
-            _manualSingleBias = new float[OutputSize];
+            BuildManualCaches();
 
-            _manualMultiWeights1T = new float[InputSize * HiddenSize];
-            _manualMultiBias1 = new float[HiddenSize];
+            _singleLinearModel.ForwardInference(_input, _overfitSingleOutput);
+            ManualSingleLinearForward();
 
-            _manualMultiWeights2T = new float[HiddenSize * OutputSize];
-            _manualMultiBias2 = new float[OutputSize];
+            _multiLayerModel.ForwardInference(_input, _overfitMultiOutput);
+            ManualMultiLayerForward();
 
-            BuildManualLinearCache(
-                _singleLinear,
-                InputSize,
-                OutputSize,
-                _manualSingleWeightsT,
-                _manualSingleBias);
+            AssertClose(_overfitSingleOutput, _manualSingleOutput, 1e-4f);
+            AssertClose(_overfitMultiOutput, _manualMultiOutput, 1e-3f);
 
-            BuildManualLinearCache(
-                _multiLinear1,
-                InputSize,
-                HiddenSize,
-                _manualMultiWeights1T,
-                _manualMultiBias1);
+            for (var i = 0; i < 512; i++)
+            {
+                _singleLinearModel.ForwardInference(_input, _overfitSingleOutput);
+                _multiLayerModel.ForwardInference(_input, _overfitMultiOutput);
 
-            BuildManualLinearCache(
-                _multiLinear2,
-                HiddenSize,
-                OutputSize,
-                _manualMultiWeights2T,
-                _manualMultiBias2);
-
-            // Warmup: JIT + inference cache poza pomiarem.
-            _singleLayerModel.ForwardInference(_input, _singleOutput);
-            _multiLayerModel.ForwardInference(_input, _multiOutput);
-
-            ManualLinear(_input, _manualSingleWeightsT, _manualSingleBias, _manualSingleOutput);
-
-            ManualLinear(_input, _manualMultiWeights1T, _manualMultiBias1, _manualMultiHidden);
-            ManualReluInPlace(_manualMultiHidden);
-            ManualLinear(_manualMultiHidden, _manualMultiWeights2T, _manualMultiBias2, _manualMultiOutput);
+                ManualSingleLinearForward();
+                ManualMultiLayerForward();
+            }
         }
 
-        [Benchmark]
+        [Benchmark(OperationsPerInvoke = SingleLinearOperationsPerInvoke)]
         public float Overfit_SingleLinear_ZeroAlloc()
         {
-            _singleLayerModel.ForwardInference(_input, _singleOutput);
-            return _singleOutput[0];
+            var checksum = 0f;
+
+            for (var i = 0; i < SingleLinearOperationsPerInvoke; i++)
+            {
+                _singleLinearModel.ForwardInference(_input, _overfitSingleOutput);
+                checksum += _overfitSingleOutput[0];
+            }
+
+            return checksum;
         }
 
-        [Benchmark]
+        [Benchmark(OperationsPerInvoke = SingleLinearOperationsPerInvoke)]
         public float Manual_SingleLinear_TrueZeroAlloc()
         {
-            ManualLinear(_input, _manualSingleWeightsT, _manualSingleBias, _manualSingleOutput);
-            return _manualSingleOutput[0];
+            var checksum = 0f;
+
+            for (var i = 0; i < SingleLinearOperationsPerInvoke; i++)
+            {
+                ManualSingleLinearForward();
+                checksum += _manualSingleOutput[0];
+            }
+
+            return checksum;
         }
 
-        [Benchmark]
+        [Benchmark(OperationsPerInvoke = MultiLayerOperationsPerInvoke)]
         public float Overfit_MultiLayer_ZeroAlloc()
         {
-            _multiLayerModel.ForwardInference(_input, _multiOutput);
-            return _multiOutput[0];
+            var checksum = 0f;
+
+            for (var i = 0; i < MultiLayerOperationsPerInvoke; i++)
+            {
+                _multiLayerModel.ForwardInference(_input, _overfitMultiOutput);
+                checksum += _overfitMultiOutput[0];
+            }
+
+            return checksum;
         }
 
-        [Benchmark]
+        [Benchmark(OperationsPerInvoke = MultiLayerOperationsPerInvoke)]
         public float Manual_MultiLayer_TrueZeroAlloc()
         {
-            ManualLinear(_input, _manualMultiWeights1T, _manualMultiBias1, _manualMultiHidden);
-            ManualReluInPlace(_manualMultiHidden);
-            ManualLinear(_manualMultiHidden, _manualMultiWeights2T, _manualMultiBias2, _manualMultiOutput);
+            var checksum = 0f;
 
-            return _manualMultiOutput[0];
+            for (var i = 0; i < MultiLayerOperationsPerInvoke; i++)
+            {
+                ManualMultiLayerForward();
+                checksum += _manualMultiOutput[0];
+            }
+
+            return checksum;
         }
 
         [GlobalCleanup]
         public void Cleanup()
         {
-            _singleLayerModel?.Dispose();
+            _singleLinearModel?.Dispose();
             _multiLayerModel?.Dispose();
         }
 
@@ -180,50 +193,237 @@ namespace Benchmarks
             Cleanup();
         }
 
-        private static void BuildManualLinearCache(
-            LinearLayer layer,
-            int inputSize,
-            int outputSize,
-            float[] weightsT,
-            float[] bias)
+        private void BuildManualCaches()
         {
-            var weights = layer.Weights.DataView.AsReadOnlySpan();
-            var biasSpan = layer.Bias.DataView.AsReadOnlySpan();
+            var singleWeights = _singleLinear.Weights.DataView.AsReadOnlySpan();
+            var singleBias = _singleLinear.Bias.DataView.AsReadOnlySpan();
 
-            biasSpan.CopyTo(bias);
+            TransposeInputOutputToOutputInput(
+                singleWeights,
+                _singleWeightsT,
+                InputSize,
+                OutputSize);
 
-            // Layer weights layout: [input, output]
-            // Manual cache layout: [output, input]
+            singleBias.CopyTo(_singleBias);
+
+            var multiWeights1 = _multiLinear1.Weights.DataView.AsReadOnlySpan();
+            var multiBias1 = _multiLinear1.Bias.DataView.AsReadOnlySpan();
+
+            multiWeights1.CopyTo(_multiWeights1);
+            multiBias1.CopyTo(_multiBias1);
+
+            var multiWeights2 = _multiLinear2.Weights.DataView.AsReadOnlySpan();
+            var multiBias2 = _multiLinear2.Bias.DataView.AsReadOnlySpan();
+
+            TransposeInputOutputToOutputInput(
+                multiWeights2,
+                _multiWeights2T,
+                HiddenSize,
+                OutputSize);
+
+            multiBias2.CopyTo(_multiBias2);
+        }
+
+        private void ManualSingleLinearForward()
+        {
+            LinearOutputMajorDot(
+                _input,
+                _singleWeightsT,
+                _singleBias,
+                _manualSingleOutput);
+        }
+
+        private void ManualMultiLayerForward()
+        {
+            LinearInputMajorVector4(
+                _input,
+                _multiWeights1,
+                _multiBias1,
+                _manualHidden,
+                InputSize,
+                HiddenSize);
+
+            ReluInPlace(_manualHidden);
+
+            LinearOutputMajorDot(
+                _manualHidden,
+                _multiWeights2T,
+                _multiBias2,
+                _manualMultiOutput);
+        }
+
+        private static void LinearOutputMajorDot(
+            ReadOnlySpan<float> input,
+            ReadOnlySpan<float> weightsOutputInput,
+            ReadOnlySpan<float> bias,
+            Span<float> output)
+        {
+            var inputSize = input.Length;
+            var outputSize = output.Length;
+
+            for (var j = 0; j < outputSize; j++)
+            {
+                output[j] =
+                    TensorPrimitives.Dot(
+                        input,
+                        weightsOutputInput.Slice(j * inputSize, inputSize)) +
+                    bias[j];
+            }
+        }
+
+        private static void LinearInputMajorVector4(
+            ReadOnlySpan<float> input,
+            ReadOnlySpan<float> weightsInputOutput,
+            ReadOnlySpan<float> bias,
+            Span<float> output,
+            int inputSize,
+            int outputSize)
+        {
+            if (!Vector.IsHardwareAccelerated ||
+                outputSize < Vector<float>.Count * 4)
+            {
+                LinearInputMajorScalar(
+                    input,
+                    weightsInputOutput,
+                    bias,
+                    output,
+                    inputSize,
+                    outputSize);
+
+                return;
+            }
+
+            var vectorWidth = Vector<float>.Count;
+            var blockWidth = vectorWidth * 4;
+
+            var j = 0;
+
+            for (; j <= outputSize - blockWidth; j += blockWidth)
+            {
+                var acc0 = new Vector<float>(bias.Slice(j, vectorWidth));
+                var acc1 = new Vector<float>(bias.Slice(j + vectorWidth, vectorWidth));
+                var acc2 = new Vector<float>(bias.Slice(j + vectorWidth * 2, vectorWidth));
+                var acc3 = new Vector<float>(bias.Slice(j + vectorWidth * 3, vectorWidth));
+
+                for (var i = 0; i < inputSize; i++)
+                {
+                    var x = new Vector<float>(input[i]);
+                    var rowBase = i * outputSize + j;
+
+                    acc0 += x * new Vector<float>(weightsInputOutput.Slice(rowBase, vectorWidth));
+                    acc1 += x * new Vector<float>(weightsInputOutput.Slice(rowBase + vectorWidth, vectorWidth));
+                    acc2 += x * new Vector<float>(weightsInputOutput.Slice(rowBase + vectorWidth * 2, vectorWidth));
+                    acc3 += x * new Vector<float>(weightsInputOutput.Slice(rowBase + vectorWidth * 3, vectorWidth));
+                }
+
+                acc0.CopyTo(output.Slice(j, vectorWidth));
+                acc1.CopyTo(output.Slice(j + vectorWidth, vectorWidth));
+                acc2.CopyTo(output.Slice(j + vectorWidth * 2, vectorWidth));
+                acc3.CopyTo(output.Slice(j + vectorWidth * 3, vectorWidth));
+            }
+
+            for (; j <= outputSize - vectorWidth; j += vectorWidth)
+            {
+                var acc = new Vector<float>(bias.Slice(j, vectorWidth));
+
+                for (var i = 0; i < inputSize; i++)
+                {
+                    acc += new Vector<float>(input[i]) *
+                           new Vector<float>(weightsInputOutput.Slice(i * outputSize + j, vectorWidth));
+                }
+
+                acc.CopyTo(output.Slice(j, vectorWidth));
+            }
+
+            for (; j < outputSize; j++)
+            {
+                var sum = bias[j];
+
+                for (var i = 0; i < inputSize; i++)
+                {
+                    sum += input[i] * weightsInputOutput[i * outputSize + j];
+                }
+
+                output[j] = sum;
+            }
+        }
+
+        private static void LinearInputMajorScalar(
+            ReadOnlySpan<float> input,
+            ReadOnlySpan<float> weightsInputOutput,
+            ReadOnlySpan<float> bias,
+            Span<float> output,
+            int inputSize,
+            int outputSize)
+        {
+            bias.Slice(0, outputSize).CopyTo(output);
+
+            for (var i = 0; i < inputSize; i++)
+            {
+                var x = input[i];
+                var wBase = i * outputSize;
+
+                for (var j = 0; j < outputSize; j++)
+                {
+                    output[j] += x * weightsInputOutput[wBase + j];
+                }
+            }
+        }
+
+        private static void ReluInPlace(
+            Span<float> values)
+        {
+            for (var i = 0; i < values.Length; i++)
+            {
+                if (values[i] < 0f)
+                {
+                    values[i] = 0f;
+                }
+            }
+        }
+
+        private static void TransposeInputOutputToOutputInput(
+            ReadOnlySpan<float> sourceInputOutput,
+            Span<float> destinationOutputInput,
+            int inputSize,
+            int outputSize)
+        {
             for (var i = 0; i < inputSize; i++)
             {
                 var srcBase = i * outputSize;
 
                 for (var j = 0; j < outputSize; j++)
                 {
-                    weightsT[j * inputSize + i] = weights[srcBase + j];
+                    destinationOutputInput[j * inputSize + i] = sourceInputOutput[srcBase + j];
                 }
             }
         }
 
-        private static void ManualLinear(
-            ReadOnlySpan<float> input,
-            ReadOnlySpan<float> weightsT,
-            ReadOnlySpan<float> bias,
-            Span<float> output)
+        private static void AssertClose(
+            ReadOnlySpan<float> expected,
+            ReadOnlySpan<float> actual,
+            float tolerance)
         {
-            for (var j = 0; j < output.Length; j++)
+            if (expected.Length != actual.Length)
             {
-                var wRow = weightsT.Slice(j * input.Length, input.Length);
-                output[j] = TensorPrimitives.Dot(input, wRow) + bias[j];
+                throw new InvalidOperationException(
+                    $"Output length mismatch: expected={expected.Length}, actual={actual.Length}");
+            }
+
+            for (var i = 0; i < expected.Length; i++)
+            {
+                var diff = MathF.Abs(expected[i] - actual[i]);
+
+                if (diff > tolerance)
+                {
+                    throw new InvalidOperationException(
+                        $"Mismatch at {i}: expected={expected[i]}, actual={actual[i]}, diff={diff}, tolerance={tolerance}");
+                }
             }
         }
 
-        private static void ManualReluInPlace(Span<float> values)
-        {
-            TensorPrimitives.Max(values, 0f, values);
-        }
-
-        private static void FillDeterministic(float[] data)
+        private static void FillDeterministic(
+            float[] data)
         {
             var seed = 0x12345678u;
 
