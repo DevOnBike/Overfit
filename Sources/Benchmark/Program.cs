@@ -36,7 +36,8 @@ namespace Benchmarks
             //BenchmarkRunner.Run<OnnxCnnInferenceBenchmarks>();
             //BenchmarkRunner.Run<OnnxMlpInferenceBenchmarks>();
 
-            BenchmarkRunner.Run<MultiLayerInferenceBenchmark>();
+            //BenchmarkRunner.Run<BatchScalingBenchmark>();
+            BenchmarkRunner.Run<ThroughputBenchmark>();
         }
     }
 }
