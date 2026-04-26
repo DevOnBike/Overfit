@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 DevOnBike.
+// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -16,6 +16,14 @@ namespace DevOnBike.Overfit.Autograd
     public sealed class ComputationGraph : IDisposable
     {
         private const int InitialCapacity = 4096;
+
+        // Default remains the original large arena for local/runtime behavior.
+        // GitHub Actions gets a smaller default to avoid unmanaged OOM in tests that create
+        // many short-lived ComputationGraph instances without disposing them immediately.
+        private const int DefaultTapeBufferElements = 50_000_000;
+        private const int CiTapeBufferElements = 1_048_576;
+        private const string TapeBufferElementsEnvironmentVariable = "OVERFIT_GRAPH_TAPE_BUFFER_ELEMENTS";
+
         private static readonly int OpCodeCount = Enum.GetValues<OpCode>().Length;
 
         private int _opCount;
@@ -23,7 +31,24 @@ namespace DevOnBike.Overfit.Autograd
         private Conv2DWorkspace? _conv2DWorkspace;
 
         // Huge arena buffer: bypasses GC and ArrayPool for intermediate tensor storage.
-        public readonly NativeBufferManaged<float> TapeBuffer = new(50_000_000, clearMemory: false);
+        public readonly NativeBufferManaged<float> TapeBuffer;
+
+        public ComputationGraph()
+            : this(ResolveDefaultTapeBufferElements())
+        {
+        }
+
+        public ComputationGraph(int tapeBufferElements)
+        {
+            if (tapeBufferElements <= 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(tapeBufferElements),
+                    "Tape buffer size must be greater than zero.");
+            }
+
+            TapeBuffer = new NativeBufferManaged<float>(tapeBufferElements, clearMemory: false);
+        }
 
         public bool IsRecording { get; set; } = true;
 
@@ -294,7 +319,7 @@ namespace DevOnBike.Overfit.Autograd
             // Reset arena without involving GC.
             TapeBuffer.ResetOffset();
         }
-        
+
         private static void DisposeGraphOwnedAuxiliaryNodes(in TapeOp op)
         {
             switch (op.Code)
@@ -324,6 +349,25 @@ namespace DevOnBike.Overfit.Autograd
         {
             _conv2DWorkspace?.Dispose();
             TapeBuffer.Dispose();
+        }
+
+        private static int ResolveDefaultTapeBufferElements()
+        {
+            var explicitValue = Environment.GetEnvironmentVariable(TapeBufferElementsEnvironmentVariable);
+
+            if (int.TryParse(explicitValue, out var parsed) && parsed > 0)
+            {
+                return parsed;
+            }
+
+            var isGitHubActions = string.Equals(
+                Environment.GetEnvironmentVariable("GITHUB_ACTIONS"),
+                "true",
+                StringComparison.OrdinalIgnoreCase);
+
+            return isGitHubActions
+                ? CiTapeBufferElements
+                : DefaultTapeBufferElements;
         }
     }
 }
