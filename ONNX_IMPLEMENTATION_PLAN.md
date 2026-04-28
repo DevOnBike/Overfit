@@ -1,209 +1,113 @@
 # ONNX Import — Implementation Plan
 
-**Target:** Load PyTorch-exported ONNX models into Overfit's `Sequential` for inference via `InferenceEngine`.  
-**MVP scope:** MNIST CNN (Conv + ReLU + MaxPool + Flatten + Linear). PyTorch 2.x, opset 11-20, NCHW, FP32.
+**Target:** Load PyTorch-exported ONNX models into Overfit's `Sequential` for inference.
 
----
+**MVP scope:** MNIST CNN (`Conv + ReLU + MaxPool + Flatten + Linear`). PyTorch 2.x exporter, opset 11-20, NCHW layout, FP32.
 
-## Status: ~85% complete
+## Current status
 
-### ✅ Done
+The ONNX import MVP is now implemented far enough to validate the full deployment bridge:
 
-| File | Path | Notes |
-|------|------|-------|
-| `ProtoReader.cs` | `Sources/Main/Onnx/Protobuf/` | Minimal protobuf wire reader, zero deps |
-| `OnnxModel.cs` | `Sources/Main/Onnx/Schema/` | 1 class |
-| `OnnxGraph.cs` | `Sources/Main/Onnx/Schema/` | 1 class |
-| `OnnxNode.cs` | `Sources/Main/Onnx/Schema/` | 1 class |
-| `OnnxAttribute.cs` | `Sources/Main/Onnx/Schema/` | 1 class |
-| `OnnxAttributeType.cs` | `Sources/Main/Onnx/Schema/` | 1 enum |
-| `OnnxDataType.cs` | `Sources/Main/Onnx/Schema/` | 1 enum |
-| `OnnxTensor.cs` | `Sources/Main/Onnx/Schema/` | 1 class, includes ExternalData support |
-| `OnnxExternalDataInfo.cs` | `Sources/Main/Onnx/Schema/` | 1 class |
-| `OnnxValueInfo.cs` | `Sources/Main/Onnx/Schema/` | 1 class |
-| `OnnxOpsetImport.cs` | `Sources/Main/Onnx/Schema/` | 1 class |
-| `OnnxProtoParser.cs` | `Sources/Main/Onnx/` | protobuf → OnnxModel, handles external_data fields 13/14 |
-| `OnnxShapeContext.cs` | `Sources/Main/Onnx/` | Shape propagation through graph |
-| `OnnxImporter.cs` | `Sources/Main/Onnx/` | Entry point, external data resolution, `DecodeFloatTensor` |
-| `OnnxOperatorMapper.cs` | `Sources/Main/Onnx/Operators/` | Dispatch switch, all 5 ops wired |
-| `GemmOperator.cs` | `Sources/Main/Onnx/Operators/` | → LinearLayer, handles transB=1 transpose |
-| `ReluOperator.cs` | `Sources/Main/Onnx/Operators/` | → ReluActivation |
-| `MaxPoolOperator.cs` | `Sources/Main/Onnx/Operators/` | → MaxPool2DLayer |
-| `ConvOperator.cs` | `Sources/Main/Onnx/Operators/` | → ConvLayer, VALID only |
-| `ReshapeOperator.cs` | `Sources/Main/Onnx/Operators/` | → FlattenLayer (rank 4→2), null (no-op if rank unchanged) |
-| `MaxPool2DLayer.cs` | `Sources/Main/DeepLearning/` | IModule wrapper, new TensorStorage API |
-| `GlobalAveragePool2DLayer.cs` | `Sources/Main/DeepLearning/` | IModule wrapper, new TensorStorage API |
-| `FlattenLayer.cs` | `Sources/Main/DeepLearning/` | Zero-copy via AutogradNode.ViewOf |
-| `LinearLayer.cs` | `Sources/Main/DeepLearning/` | +`LoadParameters(ReadOnlySpan, ReadOnlySpan)` |
-| `ConvLayer.cs` | `Sources/Main/DeepLearning/` | +`LoadParameters(ReadOnlySpan)` for kernels |
+```text
+PyTorch ONNX fixture
+-> OnnxImporter.Load(...)
+-> Sequential
+-> InferenceEngine.Run(...)
+```
 
-### ⏳ Remaining
+Current imported ONNX benchmark:
 
-| Item | Effort |
-|------|--------|
-| 2 integration tests | ~1h |
-| Test fixture files in `Tests/test_fixtures/` | 5 min (copy from generated files) |
-| Update README / docs | ~30 min |
+| Runtime | Result | Notes |
+|---|---:|---|
+| Overfit imported ONNX | ~7.5 us/op | BenchmarkDotNet, 0 B/op |
+| ONNX Runtime preallocated | ~7.5 us/op | BenchmarkDotNet, 224 B/op |
+| PyTorch eager CPU | ~27.3 us/op | Python reference script, 1 thread |
 
-**Total remaining: ~2 hours.**
+## Done
 
----
+| Area | Status |
+|---|---|
+| Minimal protobuf reader | Done |
+| ONNX domain model | Done |
+| ONNX protobuf parser | Done |
+| External data resolution | Done |
+| Shape context | Done |
+| Operator mapper | Done |
+| Conv / Gemm / Relu / MaxPool / Reshape-Flatten handlers | Done for MVP |
+| FlattenLayer / MaxPool2DLayer / GlobalAveragePool2DLayer | Done |
+| Fixture generation script | Done |
+| InferenceEngine smoke test | Done |
+| Imported ONNX BenchmarkDotNet benchmark | Done |
+| PyTorch reference script | Done |
 
-## Quick API (after completion)
+## Supported operators in MVP
+
+```text
+Conv       valid convolution only, group=1, dilation=1, stride=1 for current fixture path
+Relu       element-wise activation
+MaxPool    2D square pool, no padding, ceil_mode=0
+Reshape    structural flatten when rank decreases to 2
+Flatten    explicit flatten layer
+Gemm       LinearLayer, with PyTorch [out,in] -> Overfit [in,out] transpose at import time
+```
+
+## Non-goals for MVP
+
+```text
+Full ONNX runtime compatibility
+Branching DAGs / skip connections
+ResNet import
+Grouped/depthwise convolution
+FP16 / INT8 / quantized models
+BatchNormalization operator from train-mode exports
+LSTM / GRU ONNX operators
+Symbolic shape inference beyond concrete model shapes
+```
+
+## Public usage
+
+Prefer documenting imported ONNX models through `InferenceEngine.Run(...)`, not `model.Forward(...)`:
 
 ```csharp
-// Load PyTorch-exported model
-var model = OnnxImporter.Load("mnist_cnn.onnx"); // .data file resolved automatically
+using DevOnBike.Overfit.Onnx;
+using DevOnBike.Overfit.Inference;
+
+var model = OnnxImporter.Load("mnist_cnn.onnx");
 model.Eval();
 
-// Zero-allocation inference via InferenceEngine
 using var engine = InferenceEngine.FromSequential(
     model,
     inputSize: 1 * 28 * 28,
     outputSize: 10);
 
-var output = engine.Predict(inputFloats); // ReadOnlySpan<float>
+var input = new float[1 * 28 * 28];
+var output = new float[10];
+
+engine.Run(input, output);
 ```
 
----
+## Safety and correctness notes
 
-## Test fixtures
+- External data paths must be resolved relative to the model directory.
+- Absolute external data paths should be rejected.
+- Path traversal outside the model directory should be rejected.
+- Import-time allocations are acceptable.
+- Inference-time allocations are not acceptable for zero-allocation claims.
+- `Predict(...).ToArray()` must not be used in zero-allocation tests or benchmarks.
+- `Sources/Main` should avoid LINQ and prefer explicit loops.
 
-Run once with Python to generate:
+## Benchmark commands
+
 ```bash
-pip install torch
-python Tests/test_fixtures/generate_fixture.py
-# Produces: mnist_cnn.onnx, mnist_cnn.onnx.data, mnist_input.bin, mnist_output.bin
+dotnet test -c Release --filter "OnnxImporterTests"
+dotnet run -c Release --project Sources/Benchmark --filter "*ImportedOnnxMnistCnnBenchmark*"
+python Tests/benchmark_pytorch_mnist_cnn.py --fixture-dir Tests/test_fixtures --threads 1
 ```
 
-**Files must be in `Tests/test_fixtures/`** (or wherever the test project's working directory resolves).
+## Next steps
 
----
-
-## Integration tests to write
-
-**Test 1 — structure:**
-```csharp
-[Test]
-public void Load_MnistCnn_BuildsExpectedSequential()
-{
-    var model = OnnxImporter.Load("test_fixtures/mnist_cnn.onnx");
-
-    var modules = model.Modules.ToArray(); // assumes Sequential exposes Modules
-    Assert.That(modules[0], Is.InstanceOf<ConvLayer>());
-    Assert.That(modules[1], Is.InstanceOf<ReluActivation>());
-    Assert.That(modules[2], Is.InstanceOf<MaxPool2DLayer>());
-    Assert.That(modules[3], Is.InstanceOf<FlattenLayer>());
-    Assert.That(modules[4], Is.InstanceOf<LinearLayer>());
-}
-```
-
-**Test 2 — numerical parity:**
-```csharp
-[Test]
-public void Load_MnistCnn_OutputMatchesPyTorchReference()
-{
-    var model = OnnxImporter.Load("test_fixtures/mnist_cnn.onnx");
-    model.Eval();
-
-    using var engine = InferenceEngine.FromSequential(model, inputSize: 784, outputSize: 10);
-
-    var inputBytes = File.ReadAllBytes("test_fixtures/mnist_input.bin");
-    var input = MemoryMarshal.Cast<byte, float>(inputBytes).ToArray();
-
-    var output = engine.Predict(input).ToArray();
-
-    var expectedBytes = File.ReadAllBytes("test_fixtures/mnist_output.bin");
-    var expected = MemoryMarshal.Cast<byte, float>(expectedBytes).ToArray();
-
-    Assert.That(output.Length, Is.EqualTo(expected.Length));
-    for (var i = 0; i < output.Length; i++)
-    {
-        Assert.That(output[i], Is.EqualTo(expected[i]).Within(1e-4f),
-            $"Mismatch at output[{i}]: got {output[i]}, expected {expected[i]}");
-    }
-}
-```
-
----
-
-## File structure (complete)
-
-```
-Sources/Main/Onnx/
-├── OnnxImporter.cs             ← public entry point
-├── OnnxProtoParser.cs          ← byte[] → OnnxModel
-├── OnnxShapeContext.cs         ← shape propagation
-├── Protobuf/
-│   └── ProtoReader.cs          ← wire format reader
-├── Schema/                     ← 1 file per type
-│   ├── OnnxModel.cs
-│   ├── OnnxGraph.cs
-│   ├── OnnxNode.cs
-│   ├── OnnxAttribute.cs
-│   ├── OnnxAttributeType.cs
-│   ├── OnnxDataType.cs
-│   ├── OnnxTensor.cs
-│   ├── OnnxExternalDataInfo.cs
-│   ├── OnnxValueInfo.cs
-│   └── OnnxOpsetImport.cs
-└── Operators/                  ← 1 file per operator
-    ├── OnnxOperatorMapper.cs
-    ├── GemmOperator.cs
-    ├── ReluOperator.cs
-    ├── MaxPoolOperator.cs
-    ├── ConvOperator.cs
-    └── ReshapeOperator.cs
-
-Sources/Main/DeepLearning/
-├── LinearLayer.cs              ← +LoadParameters(ReadOnlySpan, ReadOnlySpan)
-├── ConvLayer.cs                ← +LoadParameters(ReadOnlySpan) for kernels
-├── MaxPool2DLayer.cs           ← new IModule, TensorStorage API
-├── GlobalAveragePool2DLayer.cs ← new IModule, TensorStorage API
-└── FlattenLayer.cs             ← zero-copy via AutogradNode.ViewOf
-
-Tests/test_fixtures/
-├── mnist_cnn.onnx
-├── mnist_cnn.onnx.data
-├── mnist_input.bin
-├── mnist_output.bin
-└── generate_fixture.py
-```
-
----
-
-## Architectural decisions
-
-1. **No Google.Protobuf** — custom ProtoReader, zero added dependencies.
-2. **Linear topology only** — branching DAGs rejected with clear error. Residual/skip connection support deferred.
-3. **External data resolved at load time** — cached per-file. Handles PyTorch ≥ 2.x default behaviour.
-4. **Reshape → FlattenLayer** (never a no-op when rank changes) — explicit is safer than implicit.
-5. **Weight transpose at import** — Gemm transB=1 → transpose once, zero cost at inference.
-6. **`LoadParameters(ReadOnlySpan, ReadOnlySpan)`** — not `float[]`, not reflection, not BinaryWriter round-trip.
-7. **`InferenceEngine.Run`** in docs, not `model.Forward(null, ...)` — promotes zero-alloc path.
-8. **Conv padding deferred** — MNIST fixture uses padding=0; adding padding support touches ConvLayer + TensorMath and risks benchmark regression.
-
-## Out of scope (defer)
-
-- Skip connections / branching DAG
-- Conv padding != 0, stride != 1, dilation != 1, grouped conv
-- BatchNormalization op (folded by PyTorch eval-mode export)
-- FP16 / INT8 quantized models
-- ONNX export (Sequential → .onnx)
-- Transformer ops (MultiHeadAttention, LayerNorm)
-- LSTM/GRU ONNX mapping
-
----
-
-## ONNX schema field numbers (parser reference)
-
-| Proto | Fields |
-|-------|--------|
-| ModelProto | ir_version=1, producer_name=2, producer_version=3, graph=7, opset_import=8 |
-| GraphProto | node=1, name=2, initializer=5, input=11, output=12 |
-| NodeProto | input=1, output=2, name=3, op_type=4, attribute=5 |
-| AttributeProto | name=1, f=2, i=3, s=4, t=5, floats=7, ints=8, type=20 |
-| TensorProto | dims=1, data_type=2, float_data=4, int64_data=7, name=8, raw_data=9, external_data=13, data_location=14 |
-| ValueInfoProto | name=1, type=2 |
-
-Source of truth: [onnx.proto3](https://github.com/onnx/onnx/blob/main/onnx/onnx.proto3)
+1. Add README scenario doc: `docs/scenarios/onnx-import.md`.
+2. Add one or two negative tests for unsupported Conv attributes.
+3. Keep `OnnxImporter` and operators LINQ-free in `Sources/Main`.
+4. Add optional `OnnxImporter.LoadInferenceEngine(...)` convenience API later.
+5. Defer Conv padding/stride until the MVP is stable on `main`.

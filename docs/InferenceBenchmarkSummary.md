@@ -1,78 +1,45 @@
-# Overfit zero-allocation inference summary
+# Inference benchmark summary
+
+This document summarizes the current verified inference benchmark results for Overfit.
 
 ## Environment
 
-Benchmark machine:
+```text
+AMD Ryzen 9 9950X3D
+Windows 11 25H2
+.NET 10.0.7
+BenchmarkDotNet 0.15.8
+```
 
-- CPU: AMD Ryzen 9 9950X3D
-- Cores: 16 physical / 32 logical
-- OS: Windows 11 25H2
-- Runtime: .NET 10.0.7
-- JIT: RyuJIT x86-64-v4
-- BenchmarkDotNet: 0.15.8
+## Policy
 
-## Current inference architecture
+Only benchmarks that use `InferenceEngine.Run(...)` with preallocated input/output buffers are considered valid zero-allocation inference claims.
 
-Overfit has two separate execution paths.
-
-### Training path
-
-Used for learning/backpropagation.
+Invalid for zero-allocation inference claims:
 
 ```text
+model.Forward(...)
 AutogradNode
 ComputationGraph
-TensorMath/Ops
-Optimizer
+TensorStorage created inside benchmark methods
+Predict(...).ToArray()
+new float[] inside benchmark methods
 ```
 
-This path may allocate graph/tensor state. Training benchmarks are performance trend benchmarks, not zero-allocation gates.
+## Linear inference
 
-### Inference path
-
-Used for production prediction.
-
-```text
-InferenceEngine.Run(...)
-Sequential.ForwardInference(...)
-layer.ForwardInference(...)
-Kernels.*(...)
-```
-
-This path is designed to allocate `0 B/op` after engine/model preparation.
-
-## Confirmed zero-allocation inference components
-
-The following paths are verified through current benchmark coverage:
-
-```text
-InferenceEngine.Run
-Sequential.ForwardInference
-LinearLayer.ForwardInference
-ReluActivation.ForwardInference
-ConvLayer.ForwardInference
-MaxPool2DLayer.ForwardInference
-GlobalAveragePool2DLayer.ForwardInference
-```
-
-## Benchmark results
-
-### Single Linear(784,10)
-
-| Benchmark | Overfit | ONNX Runtime | Allocations |
+| Benchmark | Overfit | ONNX Runtime | Allocation |
 |---|---:|---:|---:|
-| `SingleInferenceBenchmark` | ~252 ns | ~2.14 us | Overfit 0 B, ONNX 224 B |
-| `OnnxLinearInferenceBenchmarks` | ~272 ns | ~2.18 us | Overfit 0 B, ONNX 224 B |
-| `TailLatencyBenchmark` | ~299 ns | ~2.26 us | Overfit 0 B, ONNX 224 B |
-| `ThroughputBenchmark` | ~253 ns/op | ~1.87 us/op | Overfit 0 B, ONNX 224 B |
+| SingleInferenceBenchmark Linear(784,10) | ~252 ns | ~2.14 us | Overfit 0 B, ONNX 224 B |
+| OnnxLinearInferenceBenchmarks Linear(784,10) | ~272 ns | ~2.18 us | Overfit 0 B, ONNX 224 B |
+| ThroughputBenchmark Linear(784,10) | ~253 ns/op | ~1.87 us/op | Overfit 0 B, ONNX 224 B |
+| TailLatencyBenchmark Linear(784,10) | ~299 ns | ~2.26 us | Overfit 0 B, ONNX 224 B |
 
-Conclusion:
+Interpretation:
 
-```text
-Overfit is roughly 7-9x faster than the preallocated ONNX Runtime path for repeated single-sample Linear(784,10) inference and remains zero-allocation.
-```
+Overfit is significantly faster than ONNX Runtime for small single-sample linear inference and maintains 0 B/op.
 
-### Scaling by input size
+## Scaling benchmark
 
 | Model | Overfit | ONNX Runtime | Allocation |
 |---|---:|---:|---:|
@@ -80,136 +47,90 @@ Overfit is roughly 7-9x faster than the preallocated ONNX Runtime path for repea
 | Linear(784,10) | ~210 ns | ~1.87 us | Overfit 0 B, ONNX 224 B |
 | Linear(4096,10) | ~1.08 us | ~3.74 us | Overfit 0 B, ONNX 224 B |
 
-Conclusion:
+Interpretation:
+
+The prepared Overfit single-layer path scales cleanly across input sizes while remaining allocation-free.
+
+## MLP inference
+
+| Benchmark | Model | Overfit | Comparison | Allocation |
+|---|---|---:|---:|---:|
+| OnnxMlpInferenceBenchmarks | 784->128->10 | ~3.7 us | ONNX ~5.2 us | Overfit 0 B, ONNX 224 B |
+| MultiLayerInferenceBenchmark | 784->256->128->10 | ~10-12 us | ONNX ~10-11 us | Overfit 0 B, ONNX 224 B |
+| MLNetSingleInferenceBenchmark | API-level 3-layer MLP | ~12.1 us | ML.NET ~10.1 us, ONNX ~11.2 us | Overfit 0 B, ML.NET ~4.5 KB, ONNX 224 B |
+
+Interpretation:
+
+Overfit is competitive with ONNX Runtime on larger MLPs while remaining allocation-free. ML.NET can be slightly faster in the API-level benchmark, but allocates about 4.5 KB/op.
+
+## CNN inference
+
+| Benchmark | Overfit | ONNX Runtime | Allocation |
+|---|---:|---:|---:|
+| Small CNN | ~5-6.5 us | ~6-7.7 us | Overfit 0 B, ONNX 224 B |
+| Imported PyTorch ONNX MNIST CNN | ~7.5 us | ~7.5 us | Overfit 0 B, ONNX 224 B |
+
+Interpretation:
+
+Overfit roughly matches ONNX Runtime on small CNN workloads while keeping the inference path allocation-free.
+
+## Imported ONNX benchmark
+
+The imported ONNX benchmark validates the full bridge:
 
 ```text
-Overfit keeps the Linear inference path allocation-free across tested input sizes. ONNX Runtime fixed call overhead dominates at small model sizes.
+PyTorch export -> ONNX file -> OnnxImporter.Load(...) -> Sequential -> InferenceEngine.Run(...)
 ```
 
-### MLP: 784 -> 128 -> 10
+| Runtime | Result | Notes |
+|---|---:|---|
+| Overfit imported ONNX | ~7.5 us/op | BenchmarkDotNet, 0 B/op |
+| ONNX Runtime preallocated | ~7.5 us/op | BenchmarkDotNet, 224 B/op |
+| PyTorch eager CPU | ~27.3 us/op | Python reference script, 1 thread |
 
-| Runtime | Mean | Allocated |
+The PyTorch result is an external reference script, not a BenchmarkDotNet result. It is used to position deployment overhead, not as a strict apples-to-apples benchmark.
+
+## Concurrent inference
+
+| Benchmark | Overfit | ONNX Runtime |
 |---|---:|---:|
-| Overfit | ~3.7 us | 0 B |
-| ONNX Runtime preallocated | ~5.2 us | 224 B |
+| Concurrent single-sample inference | ~516 ms, 0 B | ~1811 ms, ~117 MB |
 
-Conclusion:
+Interpretation:
 
-```text
-Overfit is faster for this small MLP workload and keeps the hot path at 0 B/op.
-```
+Overfit performs well in a zero-contention concurrent scenario where each worker owns its model, engine and buffers.
 
-### MLP: 784 -> 256 -> 128 -> 10
-
-| Runtime | Mean | Allocated |
-|---|---:|---:|
-| Overfit | ~10-12 us | 0 B |
-| ONNX Runtime preallocated | ~10-11 us | 224 B |
-
-Conclusion:
-
-```text
-Overfit roughly matches ONNX Runtime for this larger 3-layer MLP while staying allocation-free.
-```
-
-### CNN inference
-
-Model:
-
-```text
-Conv2D(1 -> 8, 3x3)
-ReLU
-MaxPool2D(2x2)
-GlobalAveragePool2D
-Linear(8, 10)
-```
-
-| Runtime | Mean | Allocated |
-|---|---:|---:|
-| Overfit | ~5-6.5 us | 0 B |
-| ONNX Runtime preallocated | ~6-7.7 us | 224 B |
-
-Conclusion:
-
-```text
-Overfit is roughly tied with ONNX Runtime on the small CNN benchmark and remains zero-allocation.
-```
-
-### ML.NET API-level benchmark
-
-Model: 3-layer MLP, API-level single inference.
-
-| Runtime | Mean | Allocated |
-|---|---:|---:|
-| ML.NET PredictionEngine, fresh input | ~10.1 us | ~4.6 KB |
-| ML.NET PredictionEngine, reused input | ~10.1 us | ~4.5 KB |
-| ONNX Runtime preallocated | ~11.2 us | 224 B |
-| Overfit InferenceEngine | ~12.1 us | 0 B |
-
-Conclusion:
-
-```text
-ML.NET is slightly faster in this API-level run but allocates several KB/op. Overfit is the only zero-allocation path.
-```
-
-### Batch scaling
+## Batch scaling
 
 | Batch | Overfit | ONNX Runtime | Result |
 |---:|---:|---:|---|
-| 1 | ~286 ns, 0 B | ~1.90 us, 224 B | Overfit wins |
+| 1 | ~286 ns, 0 B | ~1.9 us, 224 B | Overfit wins |
 | 16 | ~3.0 us, 0 B | ~3.7 us, 224 B | Overfit close / wins in this run |
 | 64 | ~14.4 us, 0 B | ~7.2 us, 224 B | ONNX wins |
 | 256 | ~47.4 us, 0 B | ~23.4 us, 224 B | ONNX wins |
 
-Conclusion:
+Interpretation:
+
+The current Overfit batch path is allocation-free but not yet a batched GEMM path. ONNX wins larger batches through optimized batched execution. Next target: batched linear kernels.
+
+## Training benchmark
+
+| Benchmark | Mean | Allocations | Notes |
+|---|---:|---:|---|
+| TrainingEngine MLP TrainBatch | ~468 us | ~26.8 KB | Trend benchmark only |
+
+Training allocations are currently allowed.
+
+## Recommended public claim
+
+Use:
 
 ```text
-Overfit's current batch path remains allocation-free but processes batches as repeated sample inference. ONNX Runtime wins at larger batch sizes because it uses batched GEMM-style execution. Next target: LinearKernels.ForwardBatched(...).
+Overfit provides predictable zero-allocation CPU inference for .NET workloads and can now import a focused PyTorch ONNX CNN into the same inference path.
 ```
 
-### Concurrent inference
-
-| Runtime | Mean | Allocated |
-|---|---:|---:|
-| Overfit | ~516 ms | 0 B |
-| ONNX Runtime | ~1811 ms | ~117 MB |
-
-Conclusion:
+Avoid:
 
 ```text
-Overfit performs well in a zero-contention concurrent single-sample inference scenario where each worker owns its own model, engine and buffers.
+Overfit is always faster than ONNX Runtime or ML.NET.
 ```
-
-## Benchmark interpretation rules
-
-- `Allocated = -` or `0 B` is required for zero-allocation inference claims.
-- ONNX methods should be named `PreAllocated`, not `TrueZeroAlloc`, when allocations remain.
-- `MinIterationTime` warnings should be fixed with `OperationsPerInvoke` before documenting numbers.
-- Training and graph benchmarks can allocate and should be documented separately.
-- Thread-scaling benchmarks are directional unless explicitly stabilized.
-
-## Current recommendation
-
-Use this public API shape for production inference:
-
-```csharp
-using var engine = InferenceEngine.FromSequential(
-    model,
-    inputSize: 784,
-    outputSize: 10,
-    new InferenceEngineOptions
-    {
-        WarmupIterations = 16,
-        MaxIntermediateElements = 64 * 1024
-    });
-
-engine.Run(input, output);
-```
-
-For convenience:
-
-```csharp
-ReadOnlySpan<float> prediction = engine.Predict(input);
-```
-
-The prediction span is internal and overwritten on the next call.

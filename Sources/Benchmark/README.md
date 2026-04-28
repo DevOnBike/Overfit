@@ -6,12 +6,13 @@ BenchmarkDotNet project for Overfit performance and allocation validation.
 
 - Use central `BenchmarkConfig` for normal benchmark runs.
 - Use a separate disassembly config only for JIT/kernel inspection.
-- Benchmark classes must not be `sealed`; BenchmarkDotNet requires benchmark classes referenced by runner to be unsealed.
+- Benchmark classes must not be `sealed`; BenchmarkDotNet requires benchmark classes referenced by the runner to be unsealed.
 - Inference benchmarks must use `InferenceEngine.Run(...)` and preallocated buffers.
 - Avoid `model.Forward(...)`, `AutogradNode`, `TensorStorage` and `ComputationGraph` in inference benchmark methods.
+- Avoid `Predict(...).ToArray()` in zero-allocation inference benchmarks.
 - Use `OperationsPerInvoke` for nanosecond/microsecond operations.
 - Treat `MinIterationTime` as a benchmark defect unless explicitly justified.
-- Name ONNX methods `PreAllocated` when they still allocate wrapper memory.
+- Name ONNX Runtime methods `PreAllocated` when they still allocate wrapper memory.
 - Training/graph benchmarks are trend benchmarks; allocations are allowed unless the benchmark explicitly claims zero allocation.
 
 ## Primary benchmark commands
@@ -25,9 +26,16 @@ dotnet run -c Release --project Sources/Benchmark --filter "*OnnxLinearInference
 dotnet run -c Release --project Sources/Benchmark --filter "*OnnxMlpInferenceBenchmarks*"
 dotnet run -c Release --project Sources/Benchmark --filter "*MultiLayerInferenceBenchmark*"
 dotnet run -c Release --project Sources/Benchmark --filter "*OnnxCnnInferenceBenchmarks*"
+dotnet run -c Release --project Sources/Benchmark --filter "*ImportedOnnxMnistCnnBenchmark*"
 dotnet run -c Release --project Sources/Benchmark --filter "*MLNetSingleInferenceBenchmark*"
 dotnet run -c Release --project Sources/Benchmark --filter "*ConcurrentInferenceBenchmark*"
 dotnet run -c Release --project Sources/Benchmark --filter "*TrainingEngineBenchmarks*"
+```
+
+PyTorch reference script:
+
+```bash
+python Tests/benchmark_pytorch_mnist_cnn.py --fixture-dir Tests/test_fixtures --threads 1
 ```
 
 ## Current stable results
@@ -149,27 +157,33 @@ Linear(8,10)
 | Overfit_Cnn_InferenceEngine_ZeroAlloc | ~5-6.5 us | 0 B |
 | OnnxRuntime_Cnn_PreAllocated | ~6-7.7 us | 224 B |
 
+### `ImportedOnnxMnistCnnBenchmark`
+
+Pipeline:
+
+```text
+PyTorch ONNX fixture
+-> OnnxImporter.Load(...)
+-> Sequential
+-> InferenceEngine.Run(...)
+```
+
+| Runtime | Mean | Allocated | Notes |
+|---|---:|---:|---|
+| Overfit_ImportedOnnxMnistCnn_ZeroAlloc | ~7.5 us | 0 B | BenchmarkDotNet |
+| OnnxRuntime_MnistCnn_PreAllocated | ~7.5 us | 224 B | BenchmarkDotNet |
+| PyTorch eager CPU | ~27.3 us | n/a | Python reference script, 1 thread |
+
 ### `MLNetSingleInferenceBenchmark`
 
 API-level 3-layer MLP comparison.
 
 | Method | Mean | Allocated |
 |---|---:|---:|
-| MLNet_PredictionEngine_FreshInput | ~10.1 us | ~4.6 KB |
-| MLNet_PredictionEngine_ReusedInput | ~10.1 us | ~4.5 KB |
+| MLNet_PredictionEngine_FreshInput | ~10.1 us | ~4568 B |
+| MLNet_PredictionEngine_ReusedInput | ~10.1 us | ~4544 B |
 | OnnxRuntime_PreAllocated | ~11.2 us | 224 B |
 | Overfit_InferenceEngine_ZeroAlloc | ~12.1 us | 0 B |
-
-### `BatchScalingBenchmark`
-
-| Batch | Overfit | ONNX Runtime | Result |
-|---:|---:|---:|---|
-| 1 | ~286 ns, 0 B | ~1.90 us, 224 B | Overfit wins |
-| 16 | ~3.0 us, 0 B | ~3.7 us, 224 B | Overfit close / wins in this run |
-| 64 | ~14.4 us, 0 B | ~7.2 us, 224 B | ONNX wins |
-| 256 | ~47.4 us, 0 B | ~23.4 us, 224 B | ONNX wins |
-
-Next target: `LinearKernels.ForwardBatched(...)`.
 
 ### `ConcurrentInferenceBenchmark`
 
@@ -178,39 +192,26 @@ Next target: `LinearKernels.ForwardBatched(...)`.
 | Overfit_Concurrent_ZeroContention | ~516 ms | 0 B |
 | OnnxRuntime_Concurrent | ~1811 ms | ~117 MB |
 
+### `BatchScalingBenchmark`
+
+| Batch | Overfit | ONNX Runtime | Allocated |
+|---:|---:|---:|---:|
+| 1 | ~286 ns | ~1.9 us | Overfit 0 B, ONNX 224 B |
+| 16 | ~3.0 us | ~3.7 us | Overfit 0 B, ONNX 224 B |
+| 64 | ~14.4 us | ~7.2 us | Overfit 0 B, ONNX 224 B |
+| 256 | ~47.4 us | ~23.4 us | Overfit 0 B, ONNX 224 B |
+
 ### `TrainingEngineBenchmarks`
 
-| Method | Mean | Allocated | Notes |
-|---|---:|---:|---|
-| TrainingEngine_Mlp_TrainBatch | ~468 us | ~26.8 KB | allocations allowed |
+| Method | Mean | Allocated |
+|---|---:|---:|
+| TrainingEngine_Mlp_TrainBatch | ~468 us | ~26.8 KB |
 
-## Diagnostic benchmarks
+Training allocations are allowed.
 
-### `ThreadScalingBenchmarks`
+## Interpretation
 
-Directional only; not zero-allocation claims.
-
-Useful current signals:
-
-| Workload | 1 thread | 8 threads | 16 threads | Notes |
-|---|---:|---:|---:|---|
-| MatMul MSE backward | ~3.23 ms | ~1.21 ms | ~1.22 ms | scales well to 8 threads |
-| ResidualBlock MSE backward | ~7.97 ms | ~2.27 ms | ~2.10 ms | scales well to 16 threads |
-| ResidualBlock forward inference-style | ~2.60 ms | ~1.11 ms | ~1.34 ms | best around 8 threads |
-
-### `OpenAiEsStrategyBenchmarks`
-
-Strategy benchmark, not inference. Current cleaned-up path removes standalone `Tell` because `Tell` requires prior `Ask` state.
-
-| Class | Case | Result |
-|---|---|---|
-| Tiny | P256_N64 | Ask ~1.8 us, AskThenTell ~5-6 us, 0 B |
-| Medium | P256_N256 / P1024_N64 / P256_N1024 | Ask and AskThenTell 0 B |
-| Large | P1024_N256 / P1024_N1024 | Ask and AskThenTell 0 B after OperationsPerInvoke cleanup |
-
-## Rejected or constrained experiments
-
-- `Vector8` linear output blocking caused register pressure/regression.
-- Fused `outputSize == 10` input-major kernel was slower than the output-major `TensorPrimitives.Dot` path.
-- Prepared interface dispatch for Conv/ReLU/Pooling/GAP did not improve the CNN hot path.
-- Old `model.Forward(...)` / `AutogradNode` inference benchmarks are invalid for zero-allocation claims.
+- Overfit is strongest on small single-sample inference and concurrent zero-contention inference.
+- Overfit is roughly tied with ONNX Runtime on larger small-model CNN/MLP cases while keeping 0 B/op.
+- ONNX Runtime wins larger batch sizes because the current Overfit batch path does not yet use batched GEMM.
+- ML.NET can be competitive or slightly faster in API-level MLP runs, but allocates about 4.5 KB/op.
