@@ -4,10 +4,11 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Buffers.Binary;
+using System.Linq;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
 using DevOnBike.Overfit.Onnx.Operators;
-using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Onnx.Schema;
 
 namespace DevOnBike.Overfit.Onnx
 {
@@ -15,22 +16,23 @@ namespace DevOnBike.Overfit.Onnx
     /// Loads PyTorch-exported ONNX models into Overfit's <see cref="Sequential"/>.
     ///
     /// Supported operators (MVP):
-    ///   - Conv (2D, NCHW, no padding for now)
-    ///   - Gemm (general matrix multiply, used as Linear by PyTorch)
-    ///   - Relu, MaxPool, GlobalAveragePool
-    ///   - Reshape, Flatten (no-ops in our linear pipeline)
+    ///   - Gemm  → LinearLayer
+    ///   - Conv  → ConvLayer  (padding=0, stride=1, dilation=1, group=1 only)
+    ///   - Relu  → ReluActivation
+    ///   - MaxPool → MaxPool2DLayer
+    ///   - Reshape / Flatten → FlattenLayer (when rank decreases to 2)
     ///
     /// Limitations:
-    ///   - Linear topology only (no skip connections)
-    ///   - Float32 only
-    ///   - Conv padding must be zero (PyTorch nn.Conv2d(padding=0))
-    ///   - PyTorch model must be exported in eval() mode (BatchNorm folded into Conv)
+    ///   - Linear topology only (no skip connections, no branching DAG)
+    ///   - Float32 weights only
+    ///   - Model must be exported in eval() mode so BatchNorm is folded into Conv
     /// </summary>
     public static class OnnxImporter
     {
         /// <summary>
-        /// Loads an ONNX model from disk. If the model uses external data (PyTorch ≥ 2.x default),
-        /// the data file is automatically resolved relative to the .onnx file's directory.
+        /// Loads an ONNX model from disk.
+        /// External data files (PyTorch ≥ 2.x default) are resolved automatically
+        /// relative to the .onnx file's directory.
         /// </summary>
         public static Sequential Load(string path)
         {
@@ -40,8 +42,8 @@ namespace DevOnBike.Overfit.Onnx
         }
 
         /// <summary>
-        /// Loads an ONNX model from a byte array. If <paramref name="externalDataDir"/> is provided,
-        /// initializers with external_data references will be resolved from that directory.
+        /// Loads an ONNX model from a raw byte array.
+        /// Pass <paramref name="externalDataDir"/> when initializers reference external files.
         /// </summary>
         public static Sequential LoadFromBytes(byte[] modelBytes, string? externalDataDir = null)
         {
@@ -50,19 +52,15 @@ namespace DevOnBike.Overfit.Onnx
             ResolveExternalData(model, externalDataDir);
 
             var initializerLookup = BuildInitializerLookup(model.Graph.Initializers);
+            var shapeContext = new OnnxShapeContext();
             var modules = new List<IModule>();
 
-            // Build a lookup of input shapes propagating through the graph.
-            // For MVP we trust the graph's declared input shape and let operators infer
-            // their output shapes (Conv from kernel_shape, Pool from strides etc.)
-            var shapeContext = new OnnxShapeContext();
-
-            // Seed with graph inputs that have static shapes
+            // Seed shape context from graph inputs with fully static shapes.
             foreach (var graphInput in model.Graph.Inputs)
             {
                 if (initializerLookup.ContainsKey(graphInput.Name))
                 {
-                    continue; // initializers are not real inputs in PyTorch exports
+                    continue; // PyTorch exports weights as both graph inputs and initializers
                 }
 
                 if (graphInput.Shape.All(d => d.HasValue && d.Value > 0))
@@ -70,6 +68,12 @@ namespace DevOnBike.Overfit.Onnx
                     var shape = graphInput.Shape.Select(d => (int)d!.Value).ToArray();
                     shapeContext.SetShape(graphInput.Name, shape);
                 }
+            }
+
+            // Seed shape context from initializers so operators can look up weight dims.
+            foreach (var init in model.Graph.Initializers)
+            {
+                shapeContext.SetShape(init.Name, init.Dims.Select(d => (int)d).ToArray());
             }
 
             foreach (var node in model.Graph.Nodes)
@@ -80,12 +84,13 @@ namespace DevOnBike.Overfit.Onnx
                 {
                     modules.Add(module);
                 }
-                // null = no-op (Reshape, Flatten that's already handled by next layer)
+                // null means structural no-op (e.g., Reshape that doesn't change element layout)
             }
 
             if (modules.Count == 0)
             {
-                throw new InvalidOperationException("ONNX import produced no modules. Check supported operator list.");
+                throw new InvalidOperationException(
+                    "ONNX import produced no modules. Check that the model contains supported operators.");
             }
 
             return new Sequential(modules.ToArray());
@@ -101,15 +106,15 @@ namespace DevOnBike.Overfit.Onnx
             if (model.Graph.Initializers.Count == 0)
             {
                 throw new InvalidOperationException(
-                    "ONNX model has no initializers (weights). Ensure the model was exported with export_params=True.");
+                    "ONNX model has no initializers (weights). " +
+                    "Ensure the model was exported with export_params=True.");
             }
 
-            // Opset version check - we target 11-20 (PyTorch ~2.x range)
             foreach (var opset in model.OpsetImports)
             {
                 if (string.IsNullOrEmpty(opset.Domain) || opset.Domain == "ai.onnx")
                 {
-                    if (opset.Version < 11 || opset.Version > 20)
+                    if (opset.Version is < 11 or > 20)
                     {
                         throw new NotSupportedException(
                             $"ONNX opset version {opset.Version} not supported. Tested range: 11-20.");
@@ -117,7 +122,7 @@ namespace DevOnBike.Overfit.Onnx
                 }
             }
 
-            // Detect branching topology - MVP requires linear graph
+            // MVP requires linear graph — reject branching DAGs.
             var consumerCount = new Dictionary<string, int>();
             foreach (var node in model.Graph.Nodes)
             {
@@ -129,29 +134,22 @@ namespace DevOnBike.Overfit.Onnx
                 }
             }
 
-            var initializerNames = new HashSet<string>();
-            foreach (var init in model.Graph.Initializers)
-            {
-                initializerNames.Add(init.Name);
-            }
+            var initializerNames = new HashSet<string>(
+                model.Graph.Initializers.Select(i => i.Name));
 
             foreach (var (output, count) in consumerCount)
             {
                 if (count > 1 && !initializerNames.Contains(output))
                 {
                     throw new NotSupportedException(
-                        $"Branching topology detected: '{output}' has {count} consumers. " +
-                        $"MVP supports linear graphs only. Skip connections / residual blocks not yet supported.");
+                        $"Branching topology detected: tensor '{output}' has {count} consumers. " +
+                        "MVP supports linear graphs only. Skip connections not yet supported.");
                 }
             }
         }
 
-        /// <summary>
-        /// Loads bytes referenced by external_data into in-memory RawData on each tensor.
-        /// </summary>
         private static void ResolveExternalData(OnnxModel model, string? externalDataDir)
         {
-            // Cache opened external files (often all initializers reference the same .data file)
             var fileCache = new Dictionary<string, byte[]>();
 
             for (var i = 0; i < model.Graph.Initializers.Count; i++)
@@ -162,8 +160,9 @@ namespace DevOnBike.Overfit.Onnx
                 if (string.IsNullOrEmpty(externalDataDir))
                 {
                     throw new InvalidOperationException(
-                        $"Initializer '{init.Name}' references external data '{init.ExternalData.Location}', " +
-                        $"but no externalDataDir was provided. Use OnnxImporter.Load(path) which auto-resolves.");
+                        $"Initializer '{init.Name}' references external data " +
+                        $"'{init.ExternalData.Location}', but no externalDataDir was provided. " +
+                        "Use OnnxImporter.Load(path) which resolves it automatically.");
                 }
 
                 var fullPath = Path.Combine(externalDataDir, init.ExternalData.Location);
@@ -173,8 +172,10 @@ namespace DevOnBike.Overfit.Onnx
                     if (!File.Exists(fullPath))
                     {
                         throw new FileNotFoundException(
-                            $"External data file not found: {fullPath} (referenced by initializer '{init.Name}').");
+                            $"External data file not found: {fullPath} " +
+                            $"(referenced by initializer '{init.Name}').");
                     }
+
                     fileBytes = File.ReadAllBytes(fullPath);
                     fileCache[fullPath] = fileBytes;
                 }
@@ -187,14 +188,13 @@ namespace DevOnBike.Overfit.Onnx
                 if (offset + length > fileBytes.Length)
                 {
                     throw new InvalidDataException(
-                        $"External data for '{init.Name}' references bytes [{offset}, {offset + length}) " +
-                        $"but file '{fullPath}' is only {fileBytes.Length} bytes.");
+                        $"External data for '{init.Name}' requests bytes [{offset}, {offset + length}) " +
+                        $"but '{Path.GetFileName(fullPath)}' is only {fileBytes.Length} bytes.");
                 }
 
                 var raw = new byte[length];
                 Buffer.BlockCopy(fileBytes, offset, raw, 0, length);
 
-                // Replace the initializer with one containing inline raw data (records are immutable)
                 model.Graph.Initializers[i] = new OnnxTensor
                 {
                     Name = init.Name,
@@ -208,7 +208,8 @@ namespace DevOnBike.Overfit.Onnx
             }
         }
 
-        private static Dictionary<string, OnnxTensor> BuildInitializerLookup(List<OnnxTensor> initializers)
+        private static Dictionary<string, OnnxTensor> BuildInitializerLookup(
+            List<OnnxTensor> initializers)
         {
             var lookup = new Dictionary<string, OnnxTensor>(initializers.Count);
             foreach (var init in initializers)
@@ -219,19 +220,19 @@ namespace DevOnBike.Overfit.Onnx
         }
 
         /// <summary>
-        /// Decodes raw float32 bytes from an ONNX tensor.
-        /// Handles both raw_data (most common) and float_data (legacy unpacked).
+        /// Decodes raw float32 bytes from an ONNX tensor initializer.
+        /// Handles both raw_data (packed bytes, most common) and float_data (legacy varint).
         /// </summary>
         internal static float[] DecodeFloatTensor(OnnxTensor tensor)
         {
             if (tensor.DataType != OnnxDataType.Float)
             {
                 throw new NotSupportedException(
-                    $"Tensor '{tensor.Name}' has type {tensor.DataType}, expected Float. " +
-                    $"FP16/FP64/INT quantization not yet supported.");
+                    $"Tensor '{tensor.Name}' has type {tensor.DataType}. " +
+                    "Only Float32 is supported; FP16/INT8 quantization not yet implemented.");
             }
 
-            if (tensor.FloatData != null && tensor.FloatData.Length > 0)
+            if (tensor.FloatData is { Length: > 0 })
             {
                 return tensor.FloatData;
             }
@@ -239,13 +240,14 @@ namespace DevOnBike.Overfit.Onnx
             if (tensor.RawData.Length == 0)
             {
                 throw new InvalidDataException(
-                    $"Tensor '{tensor.Name}' has no data (was external_data resolved?).");
+                    $"Tensor '{tensor.Name}' has no data. Was external_data resolved?");
             }
 
             if (tensor.RawData.Length % 4 != 0)
             {
                 throw new InvalidDataException(
-                    $"Tensor '{tensor.Name}' raw data length {tensor.RawData.Length} not divisible by 4.");
+                    $"Tensor '{tensor.Name}' raw data length {tensor.RawData.Length} " +
+                    "is not divisible by 4.");
             }
 
             var count = tensor.RawData.Length / 4;
@@ -259,71 +261,6 @@ namespace DevOnBike.Overfit.Onnx
             }
 
             return result;
-        }
-
-        /// <summary>
-        /// Loads a float[] into a FastTensor with given shape.
-        /// </summary>
-        internal static FastTensor<float> LoadIntoFastTensor(float[] data, long[] dims, bool transpose2D = false)
-        {
-            if (dims.Length == 1)
-            {
-                var t = new FastTensor<float>((int)dims[0], clearMemory: false);
-                data.AsSpan().CopyTo(t.GetView().AsSpan());
-                return t;
-            }
-
-            if (dims.Length == 2)
-            {
-                if (transpose2D)
-                {
-                    int rows = (int)dims[0], cols = (int)dims[1];
-                    var t = new FastTensor<float>(cols, rows, clearMemory: false);
-                    var dst = t.GetView().AsSpan();
-                    for (var r = 0; r < rows; r++)
-                    {
-                        for (var c = 0; c < cols; c++)
-                        {
-                            dst[c * rows + r] = data[r * cols + c];
-                        }
-                    }
-                    return t;
-                }
-                else
-                {
-                    var t = new FastTensor<float>((int)dims[0], (int)dims[1], clearMemory: false);
-                    data.AsSpan().CopyTo(t.GetView().AsSpan());
-                    return t;
-                }
-            }
-
-            if (dims.Length == 4)
-            {
-                var t = new FastTensor<float>((int)dims[0], (int)dims[1], (int)dims[2], (int)dims[3], clearMemory: false);
-                data.AsSpan().CopyTo(t.GetView().AsSpan());
-                return t;
-            }
-
-            throw new NotSupportedException($"Tensor rank {dims.Length} not supported (only 1D, 2D, 4D).");
-        }
-    }
-
-    /// <summary>
-    /// Tracks tensor shapes propagating through the ONNX graph during import.
-    /// Operators read input shapes here and write output shapes for downstream nodes.
-    /// </summary>
-    internal sealed class OnnxShapeContext
-    {
-        private readonly Dictionary<string, int[]> _shapes = new();
-
-        public void SetShape(string tensorName, int[] shape)
-        {
-            _shapes[tensorName] = shape;
-        }
-
-        public int[]? GetShape(string tensorName)
-        {
-            return _shapes.TryGetValue(tensorName, out var shape) ? shape : null;
         }
     }
 }

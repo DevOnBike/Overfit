@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 DevOnBike.
+// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -56,18 +56,21 @@ namespace DevOnBike.Overfit.DeepLearning
             _kernelSizePerOutput = inChannels * kSize * kSize;
 
             var kData = new TensorStorage<float>(outChannels * _kernelSizePerOutput, clearMemory: false);
-
-            InitializeKernels(
-            kData.AsSpan(),
-            _kernelSizePerOutput);
+            InitializeKernels(kData.AsSpan(), _kernelSizePerOutput);
 
             Kernels = new AutogradNode(
-            kData,
-            new TensorShape(outChannels, _kernelSizePerOutput),
-            requiresGrad: true);
+                kData,
+                new TensorShape(outChannels, _kernelSizePerOutput),
+                requiresGrad: true);
         }
 
         public AutogradNode Kernels { get; }
+
+        /// <summary>
+        /// Optional per-channel bias. Null for layers without bias (e.g., Conv before BN).
+        /// Populated by <see cref="LoadParameters(ReadOnlySpan{float}, ReadOnlySpan{float})"/>.
+        /// </summary>
+        public AutogradNode? Bias { get; private set; }
 
         public bool IsTraining { get; private set; } = true;
 
@@ -75,10 +78,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public int InferenceOutputSize => _outputSize;
 
-        public void Train()
-        {
-            IsTraining = true;
-        }
+        public void Train() => IsTraining = true;
 
         public void Eval()
         {
@@ -88,33 +88,68 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void PrepareInference()
         {
-            // Direct inference convolution uses Kernels.DataView directly.
-            // No transformed cache currently required.
+            // Direct inference convolution uses Kernels.DataView directly — no cache needed.
         }
 
-        public AutogradNode Forward(
-            ComputationGraph graph,
-            AutogradNode input)
+        /// <summary>
+        /// Loads pre-trained kernel weights. Layout: [outChannels, inChannels * kH * kW].
+        /// ONNX Conv weight layout matches this exactly (NCHW ordering).
+        /// </summary>
+        public void LoadParameters(ReadOnlySpan<float> kernels)
         {
-            return TensorMath.Conv2D(
-            graph,
-            input,
-            Kernels,
-            _inC,
-            _outC,
-            _h,
-            _w,
-            _k);
+            var target = Kernels.DataView.AsSpan();
+
+            if (kernels.Length != target.Length)
+            {
+                throw new ArgumentException(
+                    $"Kernel size mismatch: expected {target.Length}, got {kernels.Length}.",
+                    nameof(kernels));
+            }
+
+            kernels.CopyTo(target);
+        }
+
+        /// <summary>
+        /// Loads kernel weights and per-channel bias.
+        /// </summary>
+        public void LoadParameters(ReadOnlySpan<float> kernels, ReadOnlySpan<float> bias)
+        {
+            LoadParameters(kernels);
+
+            if (Bias == null)
+            {
+                var bData = new TensorStorage<float>(_outC, clearMemory: true);
+                Bias = new AutogradNode(bData, new TensorShape(_outC), requiresGrad: true);
+            }
+
+            var bTarget = Bias.DataView.AsSpan();
+
+            if (bias.Length != bTarget.Length)
+            {
+                throw new ArgumentException(
+                    $"Bias size mismatch: expected {bTarget.Length}, got {bias.Length}.",
+                    nameof(bias));
+            }
+
+            bias.CopyTo(bTarget);
+        }
+
+        public void InvalidateParameterCaches()
+        {
+            // No cached transformed weights.
+        }
+
+        public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
+        {
+            return TensorMath.Conv2D(graph, input, Kernels, _inC, _outC, _h, _w, _k);
+            // Note: bias is applied in ForwardInference. Training path does not yet apply
+            // conv bias via autograd — add TensorMath.AddBiasNchw when training with bias is needed.
         }
 
         public IEnumerable<AutogradNode> Parameters()
         {
             yield return Kernels;
-        }
-
-        public void InvalidateParameterCaches()
-        {
-            // No cached transformed weights currently.
+            if (Bias != null) yield return Bias;
         }
 
         public void Save(BinaryWriter bw)
@@ -126,6 +161,16 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 bw.Write(val);
             }
+
+            bw.Write(Bias != null ? 1 : 0);
+
+            if (Bias != null)
+            {
+                foreach (var val in Bias.DataView.AsReadOnlySpan())
+                {
+                    bw.Write(val);
+                }
+            }
         }
 
         public void Load(BinaryReader br)
@@ -133,17 +178,30 @@ namespace DevOnBike.Overfit.DeepLearning
             var rows = br.ReadInt32();
             var cols = br.ReadInt32();
 
-            if (rows != Kernels.Shape.D0 ||
-                cols != Kernels.Shape.D1)
+            if (rows != Kernels.Shape.D0 || cols != Kernels.Shape.D1)
             {
                 throw new Exception("Kernel dimensions in file do not match the ConvLayer architecture.");
             }
 
-            var span = Kernels.DataView.AsSpan();
+            var kSpan = Kernels.DataView.AsSpan();
 
-            for (var i = 0; i < span.Length; i++)
+            for (var i = 0; i < kSpan.Length; i++)
             {
-                span[i] = br.ReadSingle();
+                kSpan[i] = br.ReadSingle();
+            }
+
+            var hasBias = br.ReadInt32();
+
+            if (hasBias == 1)
+            {
+                var bData = new TensorStorage<float>(_outC, clearMemory: false);
+                Bias = new AutogradNode(bData, new TensorShape(_outC), requiresGrad: true);
+                var bSpan = Bias.DataView.AsSpan();
+
+                for (var i = 0; i < _outC; i++)
+                {
+                    bSpan[i] = br.ReadSingle();
+                }
             }
         }
 
@@ -151,7 +209,6 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             using var fs = new FileStream(path, FileMode.Create);
             using var bw = new BinaryWriter(fs);
-
             Save(bw);
         }
 
@@ -164,51 +221,52 @@ namespace DevOnBike.Overfit.DeepLearning
 
             using var fs = new FileStream(path, FileMode.Open);
             using var br = new BinaryReader(fs);
-
             Load(br);
         }
 
-        public void ForwardInference(
-            ReadOnlySpan<float> input,
-            Span<float> output)
+        public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
             Conv2DKernels.ForwardValidNchw(
-            input,
-            Kernels.DataView.AsReadOnlySpan(),
-            output,
-            _inC,
-            _outC,
-            _h,
-            _w,
-            _k);
+                input,
+                Kernels.DataView.AsReadOnlySpan(),
+                output,
+                _inC, _outC, _h, _w, _k);
+
+            // Apply per-channel bias if present
+            if (Bias != null)
+            {
+                ApplyBiasNchw(output, Bias.DataView.AsReadOnlySpan(), _outC, _outH, _outW);
+            }
         }
 
-        public void ForwardInferencePrepared(
-            ReadOnlySpan<float> input,
-            Span<float> output)
+        public void ForwardInferencePrepared(ReadOnlySpan<float> input, Span<float> output)
         {
-            Conv2DKernels.ForwardValidNchw(
-            input,
-            Kernels.DataView.AsReadOnlySpan(),
-            output,
-            _inC,
-            _outC,
-            _h,
-            _w,
-            _k);
+            ForwardInference(input, output);
         }
 
         public void Dispose()
         {
             Kernels.Dispose();
+            Bias?.Dispose();
         }
 
-        private static void InitializeKernels(
-            Span<float> span,
-            int fanIn)
+        private static void ApplyBiasNchw(Span<float> output, ReadOnlySpan<float> bias, int outC, int outH, int outW)
+        {
+            var spatialSize = outH * outW;
+            for (var c = 0; c < outC; c++)
+            {
+                var b = bias[c];
+                var channelSlice = output.Slice(c * spatialSize, spatialSize);
+                for (var i = 0; i < channelSlice.Length; i++)
+                {
+                    channelSlice[i] += b;
+                }
+            }
+        }
+
+        private static void InitializeKernels(Span<float> span, int fanIn)
         {
             var stdDev = MathF.Sqrt(2f / fanIn);
-
             for (var i = 0; i < span.Length; i++)
             {
                 span[i] = MathUtils.NextGaussian() * stdDev;

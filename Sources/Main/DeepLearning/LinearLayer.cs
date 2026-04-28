@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 DevOnBike.
+// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -18,8 +18,7 @@ namespace DevOnBike.Overfit.DeepLearning
         private readonly int _inputSize;
         private readonly int _outputSize;
 
-        // Used for small-output inference path.
-        // Layout: [output, input]
+        // Layout: [output, input] — transposed for inference BLAS call
         private readonly TensorStorage<float> _weightsTransposed;
         private bool _inferenceCacheValid;
 
@@ -88,15 +87,39 @@ namespace DevOnBike.Overfit.DeepLearning
             }
         }
 
-        public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
+        /// <summary>
+        /// Loads pre-trained weights from ONNX or another external source.
+        /// Weights must be in [inputSize, outputSize] layout (row = input neuron, column = output neuron).
+        /// PyTorch exports Linear weights as [outputSize, inputSize] — transpose before calling.
+        /// </summary>
+        public void LoadParameters(ReadOnlySpan<float> weights, ReadOnlySpan<float> bias)
         {
-            return TensorMath.Linear(graph, input, Weights, Bias);
-        }
+            var wTarget = Weights.DataView.AsSpan();
+            if (weights.Length != wTarget.Length)
+            {
+                throw new ArgumentException(
+                    $"Weight size mismatch: expected {wTarget.Length}, got {weights.Length}.",
+                    nameof(weights));
+            }
 
-        public IEnumerable<AutogradNode> Parameters()
-        {
-            yield return Weights;
-            yield return Bias;
+            weights.CopyTo(wTarget);
+
+            var bTarget = Bias.DataView.AsSpan();
+            if (bias.Length != bTarget.Length)
+            {
+                throw new ArgumentException(
+                    $"Bias size mismatch: expected {bTarget.Length}, got {bias.Length}.",
+                    nameof(bias));
+            }
+
+            bias.CopyTo(bTarget);
+
+            _inferenceCacheValid = false;
+
+            if (!IsTraining)
+            {
+                PrepareInference();
+            }
         }
 
         public void InvalidateParameterCaches()
@@ -107,6 +130,17 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 PrepareInference();
             }
+        }
+
+        public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
+        {
+            return TensorMath.Linear(graph, input, Weights, Bias);
+        }
+
+        public IEnumerable<AutogradNode> Parameters()
+        {
+            yield return Weights;
+            yield return Bias;
         }
 
         public void Save(BinaryWriter bw)
@@ -168,7 +202,6 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             using var fs = new FileStream(path, FileMode.Create);
             using var bw = new BinaryWriter(fs);
-
             Save(bw);
         }
 
@@ -181,37 +214,25 @@ namespace DevOnBike.Overfit.DeepLearning
 
             using var fs = new FileStream(path, FileMode.Open);
             using var br = new BinaryReader(fs);
-
             Load(br);
         }
 
-        private void RebuildTransposedWeightsInPlace()
+        public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
-            LinearKernels.TransposeInputOutputToOutputInput(
+            PrepareInference();
+            LinearKernels.Forward(
+                input,
                 Weights.DataView.AsReadOnlySpan(),
-                _weightsTransposed.AsSpan(),
+                _weightsTransposed.AsReadOnlySpan(),
+                Bias.DataView.AsReadOnlySpan(),
+                output,
                 _inputSize,
                 _outputSize);
         }
 
-        public void ForwardInference(
-            ReadOnlySpan<float> input,
-            Span<float> output)
+        public void ForwardInferencePrepared(ReadOnlySpan<float> input, Span<float> output)
         {
-            if (!_inferenceCacheValid)
-            {
-                PrepareInference();
-            }
-
-            ForwardInferencePrepared(
-                input,
-                output);
-        }
-
-        public void ForwardInferencePrepared(
-            ReadOnlySpan<float> input,
-            Span<float> output)
-        {
+            // Cache guaranteed valid — called only after PrepareInference() has run.
             LinearKernels.Forward(
                 input,
                 Weights.DataView.AsReadOnlySpan(),
@@ -227,6 +248,15 @@ namespace DevOnBike.Overfit.DeepLearning
             Weights.Dispose();
             Bias.Dispose();
             _weightsTransposed.Dispose();
+        }
+
+        private void RebuildTransposedWeightsInPlace()
+        {
+            LinearKernels.TransposeInputOutputToOutputInput(
+                Weights.DataView.AsReadOnlySpan(),
+                _weightsTransposed.AsSpan(),
+                _inputSize,
+                _outputSize);
         }
     }
 }
