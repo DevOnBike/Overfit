@@ -196,12 +196,12 @@ namespace DevOnBike.Overfit.Tensors
 
             return materializedTensor;
         }
-        
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void AddInPlace(FastTensor<T> other)
         {
             ObjectDisposedException.ThrowIf(_disposed == 1, this);
-    
+
             var target = GetView().AsSpan();
             var source = other.GetView().AsReadOnlySpan();
 
@@ -215,7 +215,7 @@ namespace DevOnBike.Overfit.Tensors
             {
                 var targetFloat = MemoryMarshal.Cast<T, float>(target);
                 var sourceFloat = MemoryMarshal.Cast<T, float>(source);
-                
+
                 TensorPrimitives.Add(targetFloat, sourceFloat, targetFloat);
             }
             else
@@ -227,6 +227,26 @@ namespace DevOnBike.Overfit.Tensors
                     // dla uproszczenia załóżmy float lub zaimplementuj per typ
                 }
             }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Span<T> AsSpan()
+        {
+            ObjectDisposedException.ThrowIf(_disposed == 1, this);
+
+            return _data.AsSpan(
+                0,
+                Size);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public ReadOnlySpan<T> AsReadOnlySpan()
+        {
+            ObjectDisposedException.ThrowIf(_disposed == 1, this);
+
+            return _data.AsSpan(
+                0,
+                Size);
         }
     }
 }
