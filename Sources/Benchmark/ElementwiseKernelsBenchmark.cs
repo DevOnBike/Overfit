@@ -10,202 +10,263 @@ using DevOnBike.Overfit.Kernels;
 namespace Benchmarks
 {
     /// <summary>
-    /// Experimental benchmark for Overfit's span-only element-wise kernels.
+    /// Benchmarks for internal span-only elementwise kernels.
     ///
-    /// This benchmark is intended to validate the small-span scalar path and
-    /// larger-span TensorPrimitives path without touching model/training behavior.
+    /// These benchmarks are intentionally separated by operation size because
+    /// very small spans need many operations per invocation to avoid
+    /// BenchmarkDotNet MinIterationTime warnings.
+    ///
+    /// The goal is not to prove public API performance. The goal is to verify
+    /// that the internal zero-allocation kernels are stable and suitable for
+    /// future optimizer/loss/autograd cleanup work.
     /// </summary>
     [Config(typeof(BenchmarkConfig))]
     public class ElementwiseKernelsBenchmark
     {
-        private const int OperationsPerInvoke = 32_768;
+        private const int SmallLength = 16;
+        private const int MediumLength = 1024;
+        private const int LargeLength = 1_048_576;
 
-        private float[] _smallA = null!;
-        private float[] _smallB = null!;
-        private float[] _smallDestination = null!;
+        private const int SmallOperationsPerInvoke = 32_768_000;
+        private const int MediumOperationsPerInvoke = 8_388_608;
+        private const int ReluMediumOperationsPerInvoke = 524_288;
+        private const int LargeOperationsPerInvoke = 1024;
 
-        private float[] _mediumA = null!;
-        private float[] _mediumB = null!;
-        private float[] _mediumDestination = null!;
+        private float[] _xSmall = null!;
+        private float[] _ySmall = null!;
+        private float[] _zSmall = null!;
+        private float[] _destinationSmall = null!;
 
-        private float[] _largeA = null!;
-        private float[] _largeB = null!;
-        private float[] _largeDestination = null!;
+        private float[] _xMedium = null!;
+        private float[] _yMedium = null!;
+        private float[] _zMedium = null!;
+        private float[] _destinationMedium = null!;
+
+        private float[] _xLarge = null!;
+        private float[] _yLarge = null!;
+        private float[] _zLarge = null!;
+        private float[] _destinationLarge = null!;
 
         [GlobalSetup]
         public void Setup()
         {
-            _smallA = new float[16];
-            _smallB = new float[16];
-            _smallDestination = new float[16];
+            _xSmall = new float[SmallLength];
+            _ySmall = new float[SmallLength];
+            _zSmall = new float[SmallLength];
+            _destinationSmall = new float[SmallLength];
 
-            _mediumA = new float[1024];
-            _mediumB = new float[1024];
-            _mediumDestination = new float[1024];
+            _xMedium = new float[MediumLength];
+            _yMedium = new float[MediumLength];
+            _zMedium = new float[MediumLength];
+            _destinationMedium = new float[MediumLength];
 
-            _largeA = new float[1 << 20];
-            _largeB = new float[1 << 20];
-            _largeDestination = new float[1 << 20];
+            _xLarge = new float[LargeLength];
+            _yLarge = new float[LargeLength];
+            _zLarge = new float[LargeLength];
+            _destinationLarge = new float[LargeLength];
 
-            FillDeterministic(_smallA, 1);
-            FillDeterministic(_smallB, 2);
-            FillDeterministic(_mediumA, 3);
-            FillDeterministic(_mediumB, 4);
-            FillDeterministic(_largeA, 5);
-            FillDeterministic(_largeB, 6);
+            FillDeterministic(_xSmall, seedOffset: 1);
+            FillDeterministic(_ySmall, seedOffset: 2);
+            FillDeterministic(_zSmall, seedOffset: 3);
+
+            FillDeterministic(_xMedium, seedOffset: 4);
+            FillDeterministic(_yMedium, seedOffset: 5);
+            FillDeterministic(_zMedium, seedOffset: 6);
+
+            FillDeterministic(_xLarge, seedOffset: 7);
+            FillDeterministic(_yLarge, seedOffset: 8);
+            FillDeterministic(_zLarge, seedOffset: 9);
+
+            ElementwiseKernels.Add(
+                _xSmall,
+                _ySmall,
+                _destinationSmall);
+
+            ElementwiseKernels.MultiplyAdd(
+                _xSmall,
+                0.125f,
+                _zSmall,
+                _destinationSmall);
+
+            ElementwiseKernels.Add(
+                _xMedium,
+                _yMedium,
+                _destinationMedium);
+
+            ElementwiseKernels.MultiplyAdd(
+                _xMedium,
+                0.125f,
+                _zMedium,
+                _destinationMedium);
+
+            ElementwiseKernels.ReLU(
+                _xMedium,
+                _destinationMedium);
+
+            ElementwiseKernels.Add(
+                _xLarge,
+                _yLarge,
+                _destinationLarge);
+
+            ElementwiseKernels.MultiplyAdd(
+                _xLarge,
+                0.125f,
+                _zLarge,
+                _destinationLarge);
         }
 
-        [Benchmark(OperationsPerInvoke = OperationsPerInvoke)]
+        [Benchmark(OperationsPerInvoke = SmallOperationsPerInvoke)]
         public float Add_Small16()
         {
             var checksum = 0f;
 
-            for (var i = 0; i < OperationsPerInvoke; i++)
+            for (var i = 0; i < SmallOperationsPerInvoke; i++)
             {
                 ElementwiseKernels.Add(
-                    _smallA,
-                    _smallB,
-                    _smallDestination);
+                    _xSmall,
+                    _ySmall,
+                    _destinationSmall);
 
-                checksum += _smallDestination[0];
+                checksum += _destinationSmall[0];
             }
 
             return checksum;
         }
 
-        [Benchmark(OperationsPerInvoke = OperationsPerInvoke)]
-        public float Add_Medium1024()
-        {
-            var checksum = 0f;
-
-            for (var i = 0; i < OperationsPerInvoke; i++)
-            {
-                ElementwiseKernels.Add(
-                    _mediumA,
-                    _mediumB,
-                    _mediumDestination);
-
-                checksum += _mediumDestination[0];
-            }
-
-            return checksum;
-        }
-
-        [Benchmark(OperationsPerInvoke = 128)]
-        public float Add_Large1M()
-        {
-            var checksum = 0f;
-
-            for (var i = 0; i < 128; i++)
-            {
-                ElementwiseKernels.Add(
-                    _largeA,
-                    _largeB,
-                    _largeDestination);
-
-                checksum += _largeDestination[0];
-            }
-
-            return checksum;
-        }
-
-        [Benchmark(OperationsPerInvoke = OperationsPerInvoke)]
+        [Benchmark(OperationsPerInvoke = SmallOperationsPerInvoke)]
         public float MultiplyAdd_Small16()
         {
             var checksum = 0f;
 
-            for (var i = 0; i < OperationsPerInvoke; i++)
+            for (var i = 0; i < SmallOperationsPerInvoke; i++)
             {
                 ElementwiseKernels.MultiplyAdd(
-                    _smallA,
-                    0.5f,
-                    _smallB,
-                    _smallDestination);
+                    _xSmall,
+                    0.125f,
+                    _zSmall,
+                    _destinationSmall);
 
-                checksum += _smallDestination[0];
+                checksum += _destinationSmall[0];
             }
 
             return checksum;
         }
 
-        [Benchmark(OperationsPerInvoke = OperationsPerInvoke)]
+        [Benchmark(OperationsPerInvoke = MediumOperationsPerInvoke)]
+        public float Add_Medium1024()
+        {
+            var checksum = 0f;
+
+            for (var i = 0; i < MediumOperationsPerInvoke; i++)
+            {
+                ElementwiseKernels.Add(
+                    _xMedium,
+                    _yMedium,
+                    _destinationMedium);
+
+                checksum += _destinationMedium[0];
+            }
+
+            return checksum;
+        }
+
+        [Benchmark(OperationsPerInvoke = MediumOperationsPerInvoke)]
         public float MultiplyAdd_Medium1024()
         {
             var checksum = 0f;
 
-            for (var i = 0; i < OperationsPerInvoke; i++)
+            for (var i = 0; i < MediumOperationsPerInvoke; i++)
             {
                 ElementwiseKernels.MultiplyAdd(
-                    _mediumA,
-                    0.5f,
-                    _mediumB,
-                    _mediumDestination);
+                    _xMedium,
+                    0.125f,
+                    _zMedium,
+                    _destinationMedium);
 
-                checksum += _mediumDestination[0];
+                checksum += _destinationMedium[0];
             }
 
             return checksum;
         }
 
-        [Benchmark(OperationsPerInvoke = 128)]
-        public float MultiplyAdd_Large1M()
-        {
-            var checksum = 0f;
-
-            for (var i = 0; i < 128; i++)
-            {
-                ElementwiseKernels.MultiplyAdd(
-                    _largeA,
-                    0.5f,
-                    _largeB,
-                    _largeDestination);
-
-                checksum += _largeDestination[0];
-            }
-
-            return checksum;
-        }
-
-        [Benchmark(OperationsPerInvoke = OperationsPerInvoke)]
-        public float ReLU_Medium1024()
-        {
-            var checksum = 0f;
-
-            for (var i = 0; i < OperationsPerInvoke; i++)
-            {
-                ElementwiseKernels.ReLU(
-                    _mediumA,
-                    _mediumDestination);
-
-                checksum += _mediumDestination[0];
-            }
-
-            return checksum;
-        }
-
-        [Benchmark(OperationsPerInvoke = OperationsPerInvoke)]
+        [Benchmark(OperationsPerInvoke = MediumOperationsPerInvoke)]
         public float Dot_Medium1024()
         {
             var checksum = 0f;
 
-            for (var i = 0; i < OperationsPerInvoke; i++)
+            for (var i = 0; i < MediumOperationsPerInvoke; i++)
             {
                 checksum += ElementwiseKernels.Dot(
-                    _mediumA,
-                    _mediumB);
+                    _xMedium,
+                    _yMedium);
             }
 
             return checksum;
         }
 
-        [Benchmark(OperationsPerInvoke = OperationsPerInvoke)]
+        [Benchmark(OperationsPerInvoke = MediumOperationsPerInvoke)]
         public float SumOfSquares_Medium1024()
         {
             var checksum = 0f;
 
-            for (var i = 0; i < OperationsPerInvoke; i++)
+            for (var i = 0; i < MediumOperationsPerInvoke; i++)
             {
-                checksum += ElementwiseKernels.SumOfSquares(_mediumA);
+                checksum += ElementwiseKernels.SumOfSquares(
+                    _xMedium);
+            }
+
+            return checksum;
+        }
+
+        [Benchmark(OperationsPerInvoke = ReluMediumOperationsPerInvoke)]
+        public float ReLU_Medium1024()
+        {
+            var checksum = 0f;
+
+            for (var i = 0; i < ReluMediumOperationsPerInvoke; i++)
+            {
+                ElementwiseKernels.ReLU(
+                    _xMedium,
+                    _destinationMedium);
+
+                checksum += _destinationMedium[0];
+            }
+
+            return checksum;
+        }
+
+        [Benchmark(OperationsPerInvoke = LargeOperationsPerInvoke)]
+        public float Add_Large1M()
+        {
+            var checksum = 0f;
+
+            for (var i = 0; i < LargeOperationsPerInvoke; i++)
+            {
+                ElementwiseKernels.Add(
+                    _xLarge,
+                    _yLarge,
+                    _destinationLarge);
+
+                checksum += _destinationLarge[0];
+            }
+
+            return checksum;
+        }
+
+        [Benchmark(OperationsPerInvoke = LargeOperationsPerInvoke)]
+        public float MultiplyAdd_Large1M()
+        {
+            var checksum = 0f;
+
+            for (var i = 0; i < LargeOperationsPerInvoke; i++)
+            {
+                ElementwiseKernels.MultiplyAdd(
+                    _xLarge,
+                    0.125f,
+                    _zLarge,
+                    _destinationLarge);
+
+                checksum += _destinationLarge[0];
             }
 
             return checksum;

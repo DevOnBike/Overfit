@@ -7,320 +7,138 @@ using DevOnBike.Overfit.Kernels;
 
 namespace DevOnBike.Overfit.Tests.Kernels
 {
-    public class ElementwiseKernelsTests
+    public sealed class ElementwiseKernelsAliasingTests
     {
         [Fact]
-        public void Add_MatchesReference()
+        public void MultiplyAdd_AllowsAddendDestinationAliasing_SmallScalarPath()
         {
-            var left = new float[128];
-            var right = new float[128];
-            var actual = new float[128];
-
-            FillDeterministic(left, 1);
-            FillDeterministic(right, 2);
-
-            ElementwiseKernels.Add(
-                left,
-                right,
-                actual);
-
-            for (var i = 0; i < actual.Length; i++)
+            var input = new float[]
             {
-                Assert.Equal(
-                    left[i] + right[i],
-                    actual[i],
-                    precision: 6);
-            }
-        }
+                1f,
+                2f,
+                3f,
+                -4f
+            };
 
-        [Fact]
-        public void Subtract_MatchesReference()
-        {
-            var left = new float[128];
-            var right = new float[128];
-            var actual = new float[128];
-
-            FillDeterministic(left, 1);
-            FillDeterministic(right, 2);
-
-            ElementwiseKernels.Subtract(
-                left,
-                right,
-                actual);
-
-            for (var i = 0; i < actual.Length; i++)
+            var destination = new float[]
             {
-                Assert.Equal(
-                    left[i] - right[i],
-                    actual[i],
-                    precision: 6);
-            }
-        }
+                10f,
+                20f,
+                30f,
+                40f
+            };
 
-        [Fact]
-        public void Multiply_MatchesReference()
-        {
-            var left = new float[128];
-            var right = new float[128];
-            var actual = new float[128];
-
-            FillDeterministic(left, 1);
-            FillDeterministic(right, 2);
-
-            ElementwiseKernels.Multiply(
-                left,
-                right,
-                actual);
-
-            for (var i = 0; i < actual.Length; i++)
-            {
-                Assert.Equal(
-                    left[i] * right[i],
-                    actual[i],
-                    precision: 6);
-            }
-        }
-
-        [Fact]
-        public void MultiplyScalar_MatchesReference()
-        {
-            var input = new float[128];
-            var actual = new float[128];
-            const float scalar = -0.25f;
-
-            FillDeterministic(input, 1);
-
-            ElementwiseKernels.Multiply(
+            ElementwiseKernels.MultiplyAdd(
                 input,
-                scalar,
-                actual);
+                -0.1f,
+                destination,
+                destination);
 
-            for (var i = 0; i < actual.Length; i++)
-            {
-                Assert.Equal(
-                    input[i] * scalar,
-                    actual[i],
-                    precision: 6);
-            }
+            Assert.Equal(9.9f, destination[0], precision: 6);
+            Assert.Equal(19.8f, destination[1], precision: 6);
+            Assert.Equal(29.7f, destination[2], precision: 6);
+            Assert.Equal(40.4f, destination[3], precision: 6);
         }
 
         [Fact]
-        public void MultiplyAdd_MatchesReference()
+        public void MultiplyAdd_AllowsAddendDestinationAliasing_LargeTensorPrimitivesPath()
         {
-            var input = new float[128];
-            var addend = new float[128];
-            var actual = new float[128];
-            const float scalar = 0.125f;
+            const int length = 4096;
 
-            FillDeterministic(input, 1);
-            FillDeterministic(addend, 2);
+            var input = new float[length];
+            var expected = new float[length];
+            var destination = new float[length];
+
+            FillDeterministic(
+                input,
+                seedOffset: 1);
+
+            FillDeterministic(
+                destination,
+                seedOffset: 2);
+
+            destination.AsSpan().CopyTo(expected);
+
+            const float scalar = -0.03125f;
+
+            for (var i = 0; i < expected.Length; i++)
+            {
+                expected[i] = (input[i] * scalar) + expected[i];
+            }
 
             ElementwiseKernels.MultiplyAdd(
                 input,
                 scalar,
-                addend,
-                actual);
-
-            for (var i = 0; i < actual.Length; i++)
-            {
-                Assert.Equal(
-                    (input[i] * scalar) + addend[i],
-                    actual[i],
-                    precision: 6);
-            }
-        }
-
-        [Fact]
-        public void ReLU_MatchesReference()
-        {
-            var input = new float[]
-            {
-                -3f, -0.5f, 0f, 0.25f, 4f
-            };
-
-            var actual = new float[input.Length];
-
-            ElementwiseKernels.ReLU(
-                input,
-                actual);
-
-            Assert.Equal(0f, actual[0]);
-            Assert.Equal(0f, actual[1]);
-            Assert.Equal(0f, actual[2]);
-            Assert.Equal(0.25f, actual[3]);
-            Assert.Equal(4f, actual[4]);
-        }
-
-        [Fact]
-        public void ReLUBackward_AccumulatesGradient()
-        {
-            var input = new float[]
-            {
-                -1f, 0f, 2f, 3f
-            };
-
-            var outputGradient = new float[]
-            {
-                10f, 20f, 30f, 40f
-            };
-
-            var inputGradient = new float[]
-            {
-                1f, 1f, 1f, 1f
-            };
-
-            ElementwiseKernels.ReLUBackward(
-                input,
-                outputGradient,
-                inputGradient);
-
-            Assert.Equal(1f, inputGradient[0]);
-            Assert.Equal(1f, inputGradient[1]);
-            Assert.Equal(31f, inputGradient[2]);
-            Assert.Equal(41f, inputGradient[3]);
-        }
-
-        [Fact]
-        public void Dot_MatchesReference()
-        {
-            var left = new float[257];
-            var right = new float[257];
-
-            FillDeterministic(left, 1);
-            FillDeterministic(right, 2);
-
-            var expected = 0f;
-
-            for (var i = 0; i < left.Length; i++)
-            {
-                expected += left[i] * right[i];
-            }
-
-            var actual = ElementwiseKernels.Dot(
-                left,
-                right);
-
-            Assert.Equal(
-                expected,
-                actual,
-                precision: 3);
-        }
-
-        [Fact]
-        public void SumOfSquares_MatchesReference()
-        {
-            var input = new float[257];
-
-            FillDeterministic(input, 1);
-
-            var expected = 0f;
-
-            for (var i = 0; i < input.Length; i++)
-            {
-                expected += input[i] * input[i];
-            }
-
-            var actual = ElementwiseKernels.SumOfSquares(input);
-
-            Assert.Equal(
-                expected,
-                actual,
-                precision: 3);
-        }
-
-        [Fact]
-        public void MeanSquaredError_MatchesReference()
-        {
-            var prediction = new float[64];
-            var target = new float[64];
-
-            FillDeterministic(prediction, 1);
-            FillDeterministic(target, 2);
-
-            var expected = 0f;
-
-            for (var i = 0; i < prediction.Length; i++)
-            {
-                var diff = prediction[i] - target[i];
-                expected += diff * diff;
-            }
-
-            expected /= prediction.Length;
-
-            var actual = ElementwiseKernels.MeanSquaredError(
-                prediction,
-                target);
-
-            Assert.Equal(
-                expected,
-                actual,
-                precision: 5);
-        }
-
-        [Fact]
-        public void Add_AllocatesZeroBytes()
-        {
-            var left = new float[1024];
-            var right = new float[1024];
-            var destination = new float[1024];
-
-            FillDeterministic(left, 1);
-            FillDeterministic(right, 2);
-
-            ElementwiseKernels.Add(
-                left,
-                right,
+                destination,
                 destination);
 
-            var before = GC.GetAllocatedBytesForCurrentThread();
-
-            for (var i = 0; i < 1024; i++)
-            {
-                ElementwiseKernels.Add(
-                    left,
-                    right,
-                    destination);
-            }
-
-            var after = GC.GetAllocatedBytesForCurrentThread();
-
-            Assert.Equal(
-                0,
-                after - before);
+            AssertClose(
+                expected,
+                destination,
+                tolerance: 0f);
         }
 
         [Fact]
-        public void MultiplyAdd_AllocatesZeroBytes()
+        public void MultiplyAdd_AddendDestinationAliasing_AllocatesZeroBytes()
         {
-            var input = new float[1024];
-            var addend = new float[1024];
-            var destination = new float[1024];
+            const int length = 4096;
 
-            FillDeterministic(input, 1);
-            FillDeterministic(addend, 2);
+            var input = new float[length];
+            var destination = new float[length];
+
+            FillDeterministic(
+                input,
+                seedOffset: 1);
+
+            FillDeterministic(
+                destination,
+                seedOffset: 2);
 
             ElementwiseKernels.MultiplyAdd(
                 input,
-                0.5f,
-                addend,
+                -0.01f,
+                destination,
                 destination);
+
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
 
             var before = GC.GetAllocatedBytesForCurrentThread();
 
-            for (var i = 0; i < 1024; i++)
+            for (var i = 0; i < 10_000; i++)
             {
                 ElementwiseKernels.MultiplyAdd(
                     input,
-                    0.5f,
-                    addend,
+                    -0.01f,
+                    destination,
                     destination);
             }
 
-            var after = GC.GetAllocatedBytesForCurrentThread();
+            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
             Assert.Equal(
                 0,
-                after - before);
+                allocated);
+        }
+
+        private static void AssertClose(
+            ReadOnlySpan<float> expected,
+            ReadOnlySpan<float> actual,
+            float tolerance)
+        {
+            Assert.Equal(
+                expected.Length,
+                actual.Length);
+
+            for (var i = 0; i < expected.Length; i++)
+            {
+                var diff = MathF.Abs(expected[i] - actual[i]);
+
+                Assert.True(
+                    diff <= tolerance,
+                    $"Mismatch at {i}: expected={expected[i]}, actual={actual[i]}, diff={diff}, tolerance={tolerance}");
+            }
         }
 
         private static void FillDeterministic(

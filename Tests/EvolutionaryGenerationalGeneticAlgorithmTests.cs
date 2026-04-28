@@ -137,13 +137,22 @@ namespace DevOnBike.Overfit.Tests
         public void Tell_IsAllocationStable_WithNoAllocOperators()
         {
             using var algorithm = CreateAlgorithm(
-            selection: new FirstEliteSelectionOperator(),
-            mutation: new CopyMutationOperator());
+                selection: new FirstEliteSelectionOperator(),
+                mutation: new CopyMutationOperator());
 
             algorithm.Initialize();
 
-            algorithm.Tell([4f, 3f, 2f, 1f]); // warmup
+            var fitness = new float[]
+            {
+        4f,
+        3f,
+        2f,
+        1f
+            };
 
+            algorithm.Tell(fitness);
+
+            // warmup
             GC.Collect();
             GC.WaitForPendingFinalizers();
             GC.Collect();
@@ -152,12 +161,14 @@ namespace DevOnBike.Overfit.Tests
 
             for (var i = 0; i < 5_000; i++)
             {
-                algorithm.Tell([4f, 3f, 2f, 1f]);
+                algorithm.Tell(fitness);
             }
 
             var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
-            Assert.True(allocated <= 512, $"Tell allocated {allocated} bytes.");
+            Assert.True(
+                allocated <= 512,
+                $"Tell allocated {allocated} bytes.");
         }
 
         [Fact]
