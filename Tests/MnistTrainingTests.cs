@@ -3,9 +3,11 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Diagnostics;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Diagnostics;
+using DevOnBike.Overfit.Diagnostics.Contracts;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tensors;
@@ -24,6 +26,29 @@ namespace DevOnBike.Overfit.Tests
             _output = output;
         }
 
+        /// <summary>
+        /// MNIST training benchmark with a small, idiomatic CNN classifier.
+        ///
+        /// Architecture (~14k parameters):
+        ///   Conv(1→8, 3×3)              → [B, 8, 26, 26]
+        ///   ReLU
+        ///   MaxPool(2×2)                → [B, 8, 13, 13]   = [B, 1352] flat
+        ///   Linear(1352→64)
+        ///   ReLU
+        ///   Linear(64→10)               classification head
+        ///
+        /// Notes:
+        ///   - The previous version of this test used BatchNorm1D(1352) and
+        ///     ResidualBlock(1352). Each contained two Linear(1352, 1352)
+        ///     layers totaling ~3.7 MB of parameters — about 30× too large
+        ///     for MNIST. That made each training step ~21 s/epoch, dominated
+        ///     by Linear math, optimizer updates and backward graph allocations
+        ///     in the giant residual block, not by genuine CNN cost.
+        ///   - This version uses ~14k parameters, which is plenty for MNIST
+        ///     (LeNet-1 had ~2.6k and reached &gt;98 %). The training cost is
+        ///     now dominated by Conv2D and MaxPool2D, which is what we
+        ///     actually want to benchmark.
+        /// </summary>
         //[Fact]
         public void Mnist_FullTrain60k_CnnBeastMode_Benchmark()
         {
@@ -34,7 +59,6 @@ namespace DevOnBike.Overfit.Tests
 
             // Set to false for a cleaner allocation baseline without Meter/Listener overhead.
             const bool enableTelemetry = false;
-            const bool measureSections = false;
 
             _output.WriteLine($"Environment.ProcessorCount: {Environment.ProcessorCount}");
 
@@ -47,6 +71,8 @@ namespace DevOnBike.Overfit.Tests
                 return;
             }
 
+            using var process = Process.GetCurrentProcess();
+
             var previousTelemetryEnabled = OverfitTelemetry.Enabled;
             OverfitTelemetry.Enabled = enableTelemetry;
 
@@ -56,14 +82,13 @@ namespace DevOnBike.Overfit.Tests
             {
                 var (trainX, trainY) = MnistLoader.Load(trainImagesPath, trainLabelsPath, trainSize);
 
-                using var conv1 = new ConvLayer(1, 8, 28, 28, 3);
-                using var bn1 = new BatchNorm1D(1352);
-                using var res1 = new ResidualBlock(1352);
-                using var fcOut = new LinearLayer(8, 10);
+                // Small, idiomatic CNN classifier — not a giant MLP-residual.
+                using var conv1 = new ConvLayer(1, 8, 28, 28, 3);   // → [B, 8, 26, 26]
+                using var fcHidden = new LinearLayer(1352, 64);      // 1352 = 8*13*13 after MaxPool
+                using var fcOut = new LinearLayer(64, 10);
 
                 var parameters = conv1.Parameters()
-                    .Concat(bn1.Parameters())
-                    .Concat(res1.Parameters())
+                    .Concat(fcHidden.Parameters())
                     .Concat(fcOut.Parameters())
                     .ToArray();
 
@@ -74,8 +99,7 @@ namespace DevOnBike.Overfit.Tests
 
                 using var graph = new ComputationGraph();
 
-                // Reused batch buffers.
-                // These used to be allocated inside the batch loop.
+                // Reused batch buffers (allocated once, not per batch).
                 using var xBData = new TensorStorage<float>(batchSize * 1 * 28 * 28, clearMemory: false);
                 using var yBData = new TensorStorage<float>(batchSize * 10, clearMemory: false);
 
@@ -100,13 +124,14 @@ namespace DevOnBike.Overfit.Tests
                     telemetryListener.Subscribe();
                 }
 
-                _output.WriteLine("=== START: Trening ResNet na Taśmie (DOD + Zero-Alloc verification) ===");
+                var paramTotal = parameters.Sum(p => p.DataView.Size);
+                _output.WriteLine($"=== START: Small CNN MNIST training (params: {paramTotal:N0}) ===");
                 _output.WriteLine($"telemetry enabled: {enableTelemetry}");
                 _output.WriteLine($"Environment.ProcessorCount: {Environment.ProcessorCount}");
 
                 ForceFullGc();
 
-                var runStart = MemorySnapshot.Capture();
+                var runStart = new DotNetMemorySnapshot(process);
                 var runTotalAllocBefore = GC.GetTotalAllocatedBytes(false);
 
                 _output.WriteLine(FormatMemorySnapshot("RUN START", runStart));
@@ -116,13 +141,12 @@ namespace DevOnBike.Overfit.Tests
                 for (var epoch = 0; epoch < epochs; epoch++)
                 {
                     conv1.Train();
-                    bn1.Train();
-                    res1.Train();
+                    fcHidden.Train();
                     fcOut.Train();
 
                     ForceFullGc();
 
-                    var epochStart = MemorySnapshot.Capture();
+                    var epochStart = new DotNetMemorySnapshot(process);
                     var epochAllocBefore = GC.GetTotalAllocatedBytes(false);
 
                     var gc0Before = GC.CollectionCount(0);
@@ -142,11 +166,9 @@ namespace DevOnBike.Overfit.Tests
                     var maxPoolStats = new OperationStats("MaxPool2D");
                     var reshapeStats = new OperationStats("Reshape");
 
-                    var bn1Stats = new OperationStats("BatchNorm1D #1");
-                    var residualStats = new OperationStats("ResidualBlock");
-
-                    var gapStats = new OperationStats("GlobalAveragePool2D");
-                    var fcStats = new OperationStats("Linear FC");
+                    var fcHiddenStats = new OperationStats("Linear hidden");
+                    var relu2Stats = new OperationStats("ReLU #2");
+                    var fcOutStats = new OperationStats("Linear out");
 
                     var lossStats = new OperationStats("SoftmaxCrossEntropy");
                     var backwardStats = new OperationStats("graph.Backward");
@@ -188,6 +210,8 @@ namespace DevOnBike.Overfit.Tests
                         elapsed = sectionWatch.GetElapsedTime();
                         copyInputStats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
 
+                        // ─── Forward ─────────────────────────────────────────────────
+
                         allocBefore = GC.GetTotalAllocatedBytes(false);
                         sectionWatch = ValueStopwatch.StartNew();
 
@@ -223,34 +247,28 @@ namespace DevOnBike.Overfit.Tests
                         allocBefore = GC.GetTotalAllocatedBytes(false);
                         sectionWatch = ValueStopwatch.StartNew();
 
-                        using var bn1O = bn1.Forward(graph, p1F);
+                        using var hidden = fcHidden.Forward(graph, p1F);
 
                         elapsed = sectionWatch.GetElapsedTime();
-                        bn1Stats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
+                        fcHiddenStats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
 
                         allocBefore = GC.GetTotalAllocatedBytes(false);
                         sectionWatch = ValueStopwatch.StartNew();
 
-                        using var resO = res1.Forward(graph, bn1O);
+                        using var hiddenAct = TensorMath.ReLU(graph, hidden);
 
                         elapsed = sectionWatch.GetElapsedTime();
-                        residualStats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
+                        relu2Stats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
 
                         allocBefore = GC.GetTotalAllocatedBytes(false);
                         sectionWatch = ValueStopwatch.StartNew();
 
-                        using var gapO = TensorMath.GlobalAveragePool2D(graph, resO, 8, 13, 13);
+                        using var logits = fcOut.Forward(graph, hiddenAct);
 
                         elapsed = sectionWatch.GetElapsedTime();
-                        gapStats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
+                        fcOutStats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
 
-                        allocBefore = GC.GetTotalAllocatedBytes(false);
-                        sectionWatch = ValueStopwatch.StartNew();
-
-                        using var logits = fcOut.Forward(graph, gapO);
-
-                        elapsed = sectionWatch.GetElapsedTime();
-                        fcStats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
+                        // ─── Loss + Backward + Step ─────────────────────────────────
 
                         allocBefore = GC.GetTotalAllocatedBytes(false);
                         sectionWatch = ValueStopwatch.StartNew();
@@ -283,7 +301,7 @@ namespace DevOnBike.Overfit.Tests
 
                     ForceFullGc();
 
-                    var epochEnd = MemorySnapshot.Capture();
+                    var epochEnd = new DotNetMemorySnapshot(process);
                     var epochAllocatedBytes = epochAllocAfter - epochAllocBefore;
 
                     _output.WriteLine($"Epoch {epoch + 1} | Loss: {epochLoss / batches:F4} | Time: {epochElapsed.TotalMilliseconds:F1}ms | Time so far: {runWatch.GetElapsedTime().TotalMilliseconds:F0}ms");
@@ -295,24 +313,19 @@ namespace DevOnBike.Overfit.Tests
                     WriteOperationStats(relu1Stats);
                     WriteOperationStats(maxPoolStats);
                     WriteOperationStats(reshapeStats);
-                    WriteOperationStats(bn1Stats);
-                    WriteOperationStats(residualStats);
-                    WriteOperationStats(gapStats);
-                    WriteOperationStats(fcStats);
+                    WriteOperationStats(fcHiddenStats);
+                    WriteOperationStats(relu2Stats);
+                    WriteOperationStats(fcOutStats);
                     WriteOperationStats(lossStats);
                     WriteOperationStats(backwardStats);
                     WriteOperationStats(optimizerStats);
 
                     _output.WriteLine("  === grouped stats ===");
-                    _output.WriteLine($"  conv+relu+pool+reshape: {TicksToMs(convStats.Ticks + relu1Stats.Ticks + maxPoolStats.Ticks + reshapeStats.Ticks):F1} ms | alloc {BytesToMb(convStats.AllocatedBytes + relu1Stats.AllocatedBytes + maxPoolStats.AllocatedBytes + reshapeStats.AllocatedBytes):F2} MB");
-                    _output.WriteLine($"  batchnorm:              {TicksToMs(bn1Stats.Ticks):F1} ms | alloc {BytesToMb(bn1Stats.AllocatedBytes):F2} MB");
-                    _output.WriteLine($"  residual:               {TicksToMs(residualStats.Ticks):F1} ms | alloc {BytesToMb(residualStats.AllocatedBytes):F2} MB");
-                    _output.WriteLine($"  gap+fc:                 {TicksToMs(gapStats.Ticks + fcStats.Ticks):F1} ms | alloc {BytesToMb(gapStats.AllocatedBytes + fcStats.AllocatedBytes):F2} MB");
+                    _output.WriteLine($"  forward conv:           {TicksToMs(convStats.Ticks + relu1Stats.Ticks + maxPoolStats.Ticks + reshapeStats.Ticks):F1} ms | alloc {BytesToMb(convStats.AllocatedBytes + relu1Stats.AllocatedBytes + maxPoolStats.AllocatedBytes + reshapeStats.AllocatedBytes):F2} MB");
+                    _output.WriteLine($"  forward classifier:     {TicksToMs(fcHiddenStats.Ticks + relu2Stats.Ticks + fcOutStats.Ticks):F1} ms | alloc {BytesToMb(fcHiddenStats.AllocatedBytes + relu2Stats.AllocatedBytes + fcOutStats.AllocatedBytes):F2} MB");
                     _output.WriteLine($"  loss:                   {TicksToMs(lossStats.Ticks):F1} ms | alloc {BytesToMb(lossStats.AllocatedBytes):F2} MB");
                     _output.WriteLine($"  backward:               {TicksToMs(backwardStats.Ticks):F1} ms | alloc {BytesToMb(backwardStats.AllocatedBytes):F2} MB");
                     _output.WriteLine($"  optimizer:              {TicksToMs(optimizerStats.Ticks):F1} ms | alloc {BytesToMb(optimizerStats.AllocatedBytes):F2} MB");
-
-                    // _output.WriteLine(graph.FormatBackwardProfileSnapshot(reset: true));
 
                     _output.WriteLine($"  allocated total:        {BytesToMb(epochAllocatedBytes):F2} MB");
                     _output.WriteLine($"  GC0/1/2:                {GC.CollectionCount(0) - gc0Before}/{GC.CollectionCount(1) - gc1Before}/{GC.CollectionCount(2) - gc2Before}");
@@ -325,7 +338,7 @@ namespace DevOnBike.Overfit.Tests
 
                 ForceFullGc();
 
-                var runEnd = MemorySnapshot.Capture();
+                var runEnd = new DotNetMemorySnapshot(process);
                 var runTotalAllocAfter = GC.GetTotalAllocatedBytes(false);
 
                 _output.WriteLine(FormatMemorySnapshot("RUN END", runEnd));
@@ -366,7 +379,7 @@ namespace DevOnBike.Overfit.Tests
             return bytes / 1024.0 / 1024.0;
         }
 
-        private static string FormatMemorySnapshot(string name, in MemorySnapshot snapshot)
+        private static string FormatMemorySnapshot(string name, in DotNetMemorySnapshot snapshot)
         {
             return
                 $"=== MEMORY SNAPSHOT: {name} ==={Environment.NewLine}" +
@@ -400,55 +413,6 @@ namespace DevOnBike.Overfit.Tests
                 Ticks += elapsed.Ticks;
                 AllocatedBytes += allocatedBytes;
                 Calls++;
-            }
-        }
-
-        private readonly struct MemorySnapshot
-        {
-            private MemorySnapshot(
-                long liveManagedBytes,
-                long totalAllocatedBytes,
-                long workingSetBytes,
-                long privateMemoryBytes,
-                int gen0Collections,
-                int gen1Collections,
-                int gen2Collections)
-            {
-                LiveManagedBytes = liveManagedBytes;
-                TotalAllocatedBytes = totalAllocatedBytes;
-                WorkingSetBytes = workingSetBytes;
-                PrivateMemoryBytes = privateMemoryBytes;
-                Gen0Collections = gen0Collections;
-                Gen1Collections = gen1Collections;
-                Gen2Collections = gen2Collections;
-            }
-
-            public long LiveManagedBytes { get; }
-
-            public long TotalAllocatedBytes { get; }
-
-            public long WorkingSetBytes { get; }
-
-            public long PrivateMemoryBytes { get; }
-
-            public int Gen0Collections { get; }
-
-            public int Gen1Collections { get; }
-
-            public int Gen2Collections { get; }
-
-            public static MemorySnapshot Capture()
-            {
-                var process = System.Diagnostics.Process.GetCurrentProcess();
-
-                return new MemorySnapshot(
-                    liveManagedBytes: GC.GetTotalMemory(forceFullCollection: false),
-                    totalAllocatedBytes: GC.GetTotalAllocatedBytes(false),
-                    workingSetBytes: process.WorkingSet64,
-                    privateMemoryBytes: process.PrivateMemorySize64,
-                    gen0Collections: GC.CollectionCount(0),
-                    gen1Collections: GC.CollectionCount(1),
-                    gen2Collections: GC.CollectionCount(2));
             }
         }
     }
