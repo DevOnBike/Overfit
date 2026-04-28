@@ -5,114 +5,70 @@
 
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
-using DevOnBike.Overfit.Kernels;
 using DevOnBike.Overfit.Ops;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
-    public sealed class MaxPool2DLayer : IModule, IInferenceShapeProvider
+    /// <summary>
+    /// 2D max pooling as an <see cref="IModule"/> wrapper around <see cref="TensorMath.MaxPool2D"/>.
+    /// Required because <see cref="Sequential"/> composes <see cref="IModule"/>s; non-parametric
+    /// pooling functions in <c>TensorMath</c> cannot be inserted into a Sequential pipeline directly.
+    /// </summary>
+    public sealed class MaxPool2DLayer : IModule
     {
         private readonly int _channels;
-        private readonly int _h;
-        private readonly int _w;
-        private readonly int _pool;
-        private readonly int _outH;
-        private readonly int _outW;
-        private readonly int _inputSize;
-        private readonly int _outputSize;
-
-        public MaxPool2DLayer(
-            int channels,
-            int h,
-            int w,
-            int pool)
-        {
-            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(channels);
-            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(h);
-            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(w);
-            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(pool);
-
-            if (h % pool != 0 || w % pool != 0)
-            {
-                throw new ArgumentException("MaxPool2DLayer requires h and w divisible by pool.");
-            }
-
-            _channels = channels;
-            _h = h;
-            _w = w;
-            _pool = pool;
-            _outH = h / pool;
-            _outW = w / pool;
-            _inputSize = channels * h * w;
-            _outputSize = channels * _outH * _outW;
-        }
+        private readonly int _inputH;
+        private readonly int _inputW;
+        private readonly int _poolSize;
 
         public bool IsTraining { get; private set; } = true;
 
-        public int InferenceInputSize => _inputSize;
-
-        public int InferenceOutputSize => _outputSize;
-
-        public void Train()
+        public MaxPool2DLayer(int channels, int inputH, int inputW, int poolSize)
         {
-            IsTraining = true;
+            if (channels <= 0) throw new ArgumentOutOfRangeException(nameof(channels));
+            if (inputH <= 0) throw new ArgumentOutOfRangeException(nameof(inputH));
+            if (inputW <= 0) throw new ArgumentOutOfRangeException(nameof(inputW));
+            if (poolSize <= 0) throw new ArgumentOutOfRangeException(nameof(poolSize));
+            if (inputH % poolSize != 0) throw new ArgumentException($"inputH ({inputH}) must be divisible by poolSize ({poolSize}).");
+            if (inputW % poolSize != 0) throw new ArgumentException($"inputW ({inputW}) must be divisible by poolSize ({poolSize}).");
+
+            _channels = channels;
+            _inputH = inputH;
+            _inputW = inputW;
+            _poolSize = poolSize;
         }
 
-        public void Eval()
+        public int OutputH => _inputH / _poolSize;
+        public int OutputW => _inputW / _poolSize;
+
+        public void Train() => IsTraining = true;
+        public void Eval() => IsTraining = false;
+
+        public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
-            IsTraining = false;
-            PrepareInference();
+            return TensorMath.MaxPool2D(graph, input, _channels, _inputH, _inputW, _poolSize);
         }
 
-        public void PrepareInference()
+        public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
+            // TensorMath.MaxPool2D requires AutogradNode; for single-batch inference we
+            // wrap the input in a transient FastTensor + node, run forward, copy result.
+            // Allocating temporaries here is acceptable given non-Linear inference rarely
+            // appears on the most latency-critical path; revisit if profiling demands.
+            using var inTensor = new FastTensor<float>(1, _channels, _inputH, _inputW, clearMemory: false);
+            input.CopyTo(inTensor.GetView().AsSpan());
+            using var inNode = new AutogradNode(inTensor, requiresGrad: false);
+
+            using var outNode = TensorMath.MaxPool2D(null!, inNode, _channels, _inputH, _inputW, _poolSize);
+            outNode.DataView.AsReadOnlySpan().CopyTo(output);
         }
 
-        public AutogradNode Forward(
-            ComputationGraph graph,
-            AutogradNode input)
-        {
-            return TensorMath.MaxPool2D(
-                graph,
-                input,
-                _channels,
-                _h,
-                _w,
-                _pool);
-        }
+        public IEnumerable<AutogradNode> Parameters() => Array.Empty<AutogradNode>();
 
-        public IEnumerable<AutogradNode> Parameters()
-        {
-            return [];
-        }
+        public void Save(BinaryWriter bw) { /* no learnable parameters */ }
+        public void Load(BinaryReader br) { /* no learnable parameters */ }
 
-        public void Save(BinaryWriter bw)
-        {
-        }
-
-        public void Load(BinaryReader br)
-        {
-        }
-
-        public void ForwardInference(
-            ReadOnlySpan<float> input,
-            Span<float> output)
-        {
-            PoolingKernels.MaxPool2DForwardNchw(
-                input,
-                output,
-                _channels,
-                _h,
-                _w,
-                _pool);
-        }
-
-        public void Dispose()
-        {
-        }
-
-        public void InvalidateParameterCaches()
-        {
-        }
+        public void Dispose() { /* nothing to release */ }
     }
 }

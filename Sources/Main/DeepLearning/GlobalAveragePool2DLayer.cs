@@ -5,99 +5,58 @@
 
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
-using DevOnBike.Overfit.Kernels;
 using DevOnBike.Overfit.Ops;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
-    public sealed class GlobalAveragePool2DLayer : IModule, IInferenceShapeProvider
+    /// <summary>
+    /// Global Average Pooling 2D as an <see cref="IModule"/> wrapper around
+    /// <see cref="TensorMath.GlobalAveragePool2D"/>. Reduces spatial dimensions to scalar
+    /// per channel (output shape becomes [batch, channels]).
+    /// </summary>
+    public sealed class GlobalAveragePool2DLayer : IModule
     {
         private readonly int _channels;
-        private readonly int _h;
-        private readonly int _w;
-        private readonly int _inputSize;
-        private readonly int _outputSize;
-
-        public GlobalAveragePool2DLayer(
-            int channels,
-            int h,
-            int w)
-        {
-            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(channels);
-            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(h);
-            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(w);
-
-            _channels = channels;
-            _h = h;
-            _w = w;
-            _inputSize = channels * h * w;
-            _outputSize = channels;
-        }
+        private readonly int _inputH;
+        private readonly int _inputW;
 
         public bool IsTraining { get; private set; } = true;
 
-        public int InferenceInputSize => _inputSize;
-
-        public int InferenceOutputSize => _outputSize;
-
-        public void Train()
+        public GlobalAveragePool2DLayer(int channels, int inputH, int inputW)
         {
-            IsTraining = true;
+            if (channels <= 0) throw new ArgumentOutOfRangeException(nameof(channels));
+            if (inputH <= 0) throw new ArgumentOutOfRangeException(nameof(inputH));
+            if (inputW <= 0) throw new ArgumentOutOfRangeException(nameof(inputW));
+
+            _channels = channels;
+            _inputH = inputH;
+            _inputW = inputW;
         }
 
-        public void Eval()
+        public void Train() => IsTraining = true;
+        public void Eval() => IsTraining = false;
+
+        public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
-            IsTraining = false;
-            PrepareInference();
+            return TensorMath.GlobalAveragePool2D(graph, input, _channels, _inputH, _inputW);
         }
 
-        public void PrepareInference()
+        public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
+            using var inTensor = new FastTensor<float>(1, _channels, _inputH, _inputW, clearMemory: false);
+            input.CopyTo(inTensor.GetView().AsSpan());
+            using var inNode = new AutogradNode(inTensor, requiresGrad: false);
+
+            using var outNode = TensorMath.GlobalAveragePool2D(null!, inNode, _channels, _inputH, _inputW);
+            outNode.DataView.AsReadOnlySpan().CopyTo(output);
         }
 
-        public AutogradNode Forward(
-            ComputationGraph graph,
-            AutogradNode input)
-        {
-            return TensorMath.GlobalAveragePool2D(
-                graph,
-                input,
-                _channels,
-                _h,
-                _w);
-        }
+        public IEnumerable<AutogradNode> Parameters() => Array.Empty<AutogradNode>();
 
-        public IEnumerable<AutogradNode> Parameters()
-        {
-            return [];
-        }
+        public void Save(BinaryWriter bw) { /* no learnable parameters */ }
+        public void Load(BinaryReader br) { /* no learnable parameters */ }
 
-        public void Save(BinaryWriter bw)
-        {
-        }
-
-        public void Load(BinaryReader br)
-        {
-        }
-
-        public void ForwardInference(
-            ReadOnlySpan<float> input,
-            Span<float> output)
-        {
-            PoolingKernels.GlobalAveragePool2DForwardNchw(
-                input,
-                output,
-                _channels,
-                _h,
-                _w);
-        }
-
-        public void Dispose()
-        {
-        }
-
-        public void InvalidateParameterCaches()
-        {
-        }
+        public void Dispose() { /* nothing to release */ }
     }
 }
