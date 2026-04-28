@@ -1,175 +1,116 @@
 # Sources/Main
 
-This project contains the core Overfit runtime.
+Core Overfit runtime and library code.
 
-## Responsibility split
-
-```text
-Autograd/
-  ComputationGraph and AutogradNode.
-  Current training runtime. Planned cleanup: graph operation facade + ownership metadata.
-
-DeepLearning/
-  User-facing model/layer API.
-  Layers own shape, parameters, save/load and train/eval state.
-
-Kernels/
-  Low-level hot math.
-  SIMD and specialized inference loops live here, not in layers.
-
-Ops/
-  Current TensorMath and graph-aware training operations.
-  Long-term direction: graph-aware operations move to ComputationGraph.*; TensorMath/Kernels become pure math.
-
-Inference/
-  InferenceEngine facade and backend abstraction.
-
-Training/
-  TrainingEngine facade and training backend/loss/optimizer abstractions.
-
-Evolutionary/
-  Gradient-free strategies, population storage and fitness evaluation.
-```
-
-## Inference design rule
-
-The inference path should avoid graph construction and avoid managed allocations after preparation.
-
-Preferred call stack:
+## Current runtime areas
 
 ```text
-InferenceEngine.Run(...)
-  -> Sequential.ForwardInference(...)
-    -> layer.ForwardInference(...)
-      -> Kernels.*(...)
+Autograd      Reverse-mode graph and training operations
+DeepLearning  Layers, Sequential, train/eval state, save/load
+Inference     Prepared zero-allocation inference facade
+Ops           TensorMath and graph-aware training math
+Tensors       Tensor storage, views and memory abstractions
+Evolutionary  Population-based gradient-free optimization
+Onnx          Focused ONNX import MVP for PyTorch-exported inference models
 ```
 
-Prepared path:
+## Inference path
+
+The preferred production-style inference API is:
+
+```csharp
+engine.Run(input, output);
+```
+
+The hot path should avoid:
 
 ```text
-Sequential.PrepareInference(...)
-  -> layer.PrepareInference()
-  -> preallocated intermediate buffers
-  -> prepared dispatch for selected modules
+model.Forward(...)
+AutogradNode
+ComputationGraph
+new arrays per call
+ToArray()
+LINQ in runtime code
 ```
 
-Current prepared module:
+`InferenceEngine.Run(...)` uses caller-owned input/output buffers and prepared reusable internal buffers.
+
+## ONNX import
+
+The ONNX importer is a focused load-time feature. It is not a full ONNX runtime.
+
+Current MVP goal:
 
 ```text
-LinearLayer implements IPreparedInferenceModule
+PyTorch-exported eval-mode ONNX CNN
+-> OnnxImporter.Load(path)
+-> Sequential
+-> InferenceEngine.Run(...)
 ```
 
-Do not add `IPreparedInferenceModule` to a layer unless a benchmark shows a win. It was tested for Conv/ReLU/Pooling/GAP and did not improve the hot path.
-
-## Kernel ownership
-
-### Keep in layers
-
-- constructor validation;
-- parameter initialization;
-- `Weights`, `Bias`, `Kernels` nodes;
-- shape metadata;
-- `Train()`, `Eval()`, `PrepareInference()`;
-- save/load;
-- cache invalidation.
-
-### Move to kernels
-
-- SIMD loops;
-- pooling loops;
-- activation loops;
-- convolution loops;
-- linear algebra hot loops;
-- batch-aware span loops.
-
-## Current kernel files
+Supported MVP operators:
 
 ```text
-Kernels/LinearKernels.cs
-Kernels/Conv2DKernels.cs
-Kernels/ActivationKernels.cs
-Kernels/PoolingKernels.cs
+Conv
+Relu
+MaxPool
+Reshape / Flatten
+Gemm
 ```
 
-## Current inference baseline
-
-The current `InferenceEngine.Run(...)` path is verified as zero-allocation in the benchmark suite.
-
-Representative results on AMD Ryzen 9 9950X3D / .NET 10:
-
-| Workload | Overfit | Allocation |
-|---|---:|---:|
-| Linear(784,10) single inference | ~250-300 ns | 0 B |
-| Linear(4096,10) | ~1.08 us | 0 B |
-| MLP 784->128->10 | ~3.7 us | 0 B |
-| MLP 784->256->128->10 | ~10-12 us | 0 B |
-| Small CNN | ~5-6.5 us | 0 B |
-
-## Next performance target
-
-`BatchScalingBenchmark` shows Overfit winning batch 1/16 while ONNX Runtime wins batch 64/256.
-
-Current reason:
+Constraints:
 
 ```text
-Overfit: repeated sample inference
-ONNX: likely batched GEMM-style execution
+FP32 only
+NCHW layout
+Linear topology only
+Concrete shapes required
+No branching / skip connections
+No grouped/depthwise conv
+No quantized or FP16 tensors
 ```
 
-Next kernel target:
+Example:
+
+```csharp
+using DevOnBike.Overfit.Onnx;
+using DevOnBike.Overfit.Inference;
+
+var model = OnnxImporter.Load("mnist_cnn.onnx");
+model.Eval();
+
+using var engine = InferenceEngine.FromSequential(
+    model,
+    inputSize: 1 * 28 * 28,
+    outputSize: 10);
+
+var input = new float[1 * 28 * 28];
+var output = new float[10];
+
+engine.Run(input, output);
+```
+
+## Main-project coding rules
+
+Runtime code in `Sources/Main` should stay conservative:
+
+- Avoid LINQ in hot/runtime paths.
+- Prefer explicit loops and spans.
+- Avoid hidden allocations.
+- Keep import-time allocations out of inference hot paths.
+- Keep training/graph allocation policy separate from inference policy.
+- Do not add dependencies unless there is a clear architectural reason.
+
+## Benchmark status
+
+Current verified hot-path inference results include:
 
 ```text
-LinearKernels.ForwardBatched(
-    ReadOnlySpan<float> inputBatch,
-    ReadOnlySpan<float> weights,
-    ReadOnlySpan<float> bias,
-    Span<float> outputBatch,
-    int batchSize,
-    int inputSize,
-    int outputSize)
+Linear(784,10): ~250-300 ns/op, 0 B
+Linear(4096,10): ~1.08 us, 0 B
+MLP 784->256->128->10: ~10-12 us, 0 B
+Small CNN: ~5-6.5 us, 0 B
+Imported ONNX MNIST CNN: ~7.5 us, 0 B
 ```
 
-## Training path
-
-Training remains graph-based:
-
-```text
-Layer.Forward(graph, input)
-  -> TensorMath/Ops today
-  -> ComputationGraph
-  -> graph.Backward(...)
-  -> Optimizer.Step()
-```
-
-Training code should prioritize correctness and explicit graph behavior. Inference kernels can be reused by training primitives where useful, but inference must not depend on autograd state.
-
-Current `TrainingEngineBenchmarks` baseline:
-
-```text
-TrainingEngine_Mlp_TrainBatch: ~468 us, ~26.8 KB allocated
-```
-
-Allocations are allowed in training benchmarks. They are tracked as performance trend data.
-
-## Planned graph architecture cleanup
-
-Target model:
-
-```text
-TrainingEngine = workflow facade
-ComputationGraph = autograd brain / operation facade
-Parameter = long-lived trainable model state
-AutogradNode = graph-visible value handle
-Kernels = pure Span-based math
-InferenceEngine = separate zero-allocation inference workflow
-```
-
-Near-term order:
-
-1. Add `ComputationGraph.*` operation facade wrappers.
-2. Add `AutogradNodeOwnership` metadata.
-3. Add graph factory methods for temporary/external/parameter-view nodes.
-4. Introduce `Parameter` as a separate type.
-5. Migrate `LinearLayer` first.
-6. Migrate optimizers to `IEnumerable<Parameter>`.
-7. Clean up graph reset/disposal by ownership.
+See `Sources/Benchmark/README.md` and `docs/InferenceBenchmarkSummary.md` for full benchmark tables.

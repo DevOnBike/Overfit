@@ -15,7 +15,7 @@ namespace DevOnBike.Overfit.Tests
 {
     public class MnistCnnTrainingTests
     {
-        [Fact(Skip = "Long running test")]
+        //[Fact]
         public void Mnist_CnnTraining_ShouldConvergeFast()
         {
             var trainSize = 1000;

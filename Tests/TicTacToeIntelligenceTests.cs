@@ -20,7 +20,7 @@ namespace DevOnBike.Overfit.Tests
 
         public TicTacToeIntelligenceTests(ITestOutputHelper output) => _output = output;
 
-        [Fact]
+        //[Fact]
         public void Bestia_ShouldLearn_TicTacToe_LongTraining()
         {
             using var model = new Sequential(

@@ -10,109 +10,66 @@ using DevOnBike.Overfit.Ops;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
+    /// <summary>
+    /// 2D max pooling as <see cref="IModule"/> + <see cref="IInferenceShapeProvider"/>.
+    /// Uses <see cref="PoolingKernels.MaxPool2DForwardNchw"/> for zero-allocation inference.
+    /// </summary>
     public sealed class MaxPool2DLayer : IModule, IInferenceShapeProvider
     {
         private readonly int _channels;
-        private readonly int _h;
-        private readonly int _w;
-        private readonly int _pool;
-        private readonly int _outH;
-        private readonly int _outW;
-        private readonly int _inputSize;
-        private readonly int _outputSize;
+        private readonly int _inputH;
+        private readonly int _inputW;
+        private readonly int _poolSize;
 
-        public MaxPool2DLayer(
-            int channels,
-            int h,
-            int w,
-            int pool)
+        public MaxPool2DLayer(int channels, int inputH, int inputW, int poolSize)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(channels);
-            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(h);
-            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(w);
-            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(pool);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(inputH);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(inputW);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(poolSize);
 
-            if (h % pool != 0 || w % pool != 0)
-            {
-                throw new ArgumentException("MaxPool2DLayer requires h and w divisible by pool.");
-            }
+            if (inputH % poolSize != 0)
+                throw new ArgumentException($"inputH ({inputH}) must be divisible by poolSize ({poolSize}).");
+
+            if (inputW % poolSize != 0)
+                throw new ArgumentException($"inputW ({inputW}) must be divisible by poolSize ({poolSize}).");
 
             _channels = channels;
-            _h = h;
-            _w = w;
-            _pool = pool;
-            _outH = h / pool;
-            _outW = w / pool;
-            _inputSize = channels * h * w;
-            _outputSize = channels * _outH * _outW;
+            _inputH   = inputH;
+            _inputW   = inputW;
+            _poolSize = poolSize;
         }
+
+        public int OutputH => _inputH / _poolSize;
+        public int OutputW => _inputW / _poolSize;
+
+        public int InferenceInputSize  => _channels * _inputH * _inputW;
+        public int InferenceOutputSize => _channels * OutputH * OutputW;
+        public void PrepareInference() { }
 
         public bool IsTraining { get; private set; } = true;
 
-        public int InferenceInputSize => _inputSize;
+        public void Train() => IsTraining = true;
+        public void Eval()  => IsTraining = false;
 
-        public int InferenceOutputSize => _outputSize;
+        public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
+            => TensorMath.MaxPool2D(graph, input, _channels, _inputH, _inputW, _poolSize);
 
-        public void Train()
-        {
-            IsTraining = true;
-        }
-
-        public void Eval()
-        {
-            IsTraining = false;
-            PrepareInference();
-        }
-
-        public void PrepareInference()
-        {
-        }
-
-        public AutogradNode Forward(
-            ComputationGraph graph,
-            AutogradNode input)
-        {
-            return TensorMath.MaxPool2D(
-                graph,
-                input,
-                _channels,
-                _h,
-                _w,
-                _pool);
-        }
-
-        public IEnumerable<AutogradNode> Parameters()
-        {
-            return [];
-        }
-
-        public void Save(BinaryWriter bw)
-        {
-        }
-
-        public void Load(BinaryReader br)
-        {
-        }
-
-        public void ForwardInference(
-            ReadOnlySpan<float> input,
-            Span<float> output)
+        public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
             PoolingKernels.MaxPool2DForwardNchw(
                 input,
                 output,
                 _channels,
-                _h,
-                _w,
-                _pool);
+                _inputH,
+                _inputW,
+                _poolSize);
         }
 
-        public void Dispose()
-        {
-        }
-
-        public void InvalidateParameterCaches()
-        {
-        }
+        public void InvalidateParameterCaches() { }
+        public IEnumerable<AutogradNode> Parameters() => [];
+        public void Save(BinaryWriter bw) { }
+        public void Load(BinaryReader br) { }
+        public void Dispose() { }
     }
 }
