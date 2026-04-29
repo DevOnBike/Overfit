@@ -18,7 +18,7 @@ namespace DevOnBike.Overfit.DeepLearning
         private readonly int _inputSize;
         private readonly int _outputSize;
 
-        // Layout: [output, input] — transposed for inference BLAS call
+        // Layout: [output, input] â€” transposed for inference BLAS call
         private readonly TensorStorage<float> _weightsTransposed;
         private bool _inferenceCacheValid;
 
@@ -90,7 +90,7 @@ namespace DevOnBike.Overfit.DeepLearning
         /// <summary>
         /// Loads pre-trained weights from ONNX or another external source.
         /// Weights must be in [inputSize, outputSize] layout (row = input neuron, column = output neuron).
-        /// PyTorch exports Linear weights as [outputSize, inputSize] — transpose before calling.
+        /// PyTorch exports Linear weights as [outputSize, inputSize] â€” transpose before calling.
         /// </summary>
         public void LoadParameters(ReadOnlySpan<float> weights, ReadOnlySpan<float> bias)
         {
@@ -134,7 +134,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
-            return TensorMath.Linear(graph, input, Weights, Bias);
+            return ComputationGraph.LinearOp(graph, input, Weights, Bias);
         }
 
         public IEnumerable<AutogradNode> Parameters()
@@ -232,7 +232,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void ForwardInferencePrepared(ReadOnlySpan<float> input, Span<float> output)
         {
-            // Cache guaranteed valid — called only after PrepareInference() has run.
+            // Cache guaranteed valid â€” called only after PrepareInference() has run.
             LinearKernels.Forward(
                 input,
                 Weights.DataView.AsReadOnlySpan(),

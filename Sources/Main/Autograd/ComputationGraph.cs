@@ -13,7 +13,7 @@ namespace DevOnBike.Overfit.Autograd
     /// <summary>
     /// Manages the recording and execution of operations for automatic differentiation (Reverse Mode).
     /// </summary>
-    public sealed class ComputationGraph : IDisposable
+    public sealed partial class ComputationGraph : IDisposable
     {
         private const int InitialCapacity = 4096;
 
@@ -153,6 +153,7 @@ namespace DevOnBike.Overfit.Autograd
             }
         }
 
+        /*
         public AutogradNode Add(AutogradNode left, AutogradNode right) => TensorMath.Add(this, left, right);
 
         public AutogradNode AddBias(AutogradNode input, AutogradNode bias) => TensorMath.AddBias(this, input, bias);
@@ -169,7 +170,7 @@ namespace DevOnBike.Overfit.Autograd
         public AutogradNode Sigmoid(AutogradNode input) => TensorMath.Sigmoid(this, input);
 
         public AutogradNode Tanh(AutogradNode input) => TensorMath.Tanh(this, input);
-
+*/
         public AutogradNode Multiply(AutogradNode a, AutogradNode b) => TensorMath.Multiply(this, a, b);
 
         public AutogradNode GateSlice(AutogradNode gates, int hiddenSize, int gateIndex) =>

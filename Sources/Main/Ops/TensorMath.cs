@@ -42,29 +42,26 @@ namespace DevOnBike.Overfit.Ops
         // ====================================================================
 
         /// <summary>
-        /// Centralna metoda tworząca nowe węzły na taśmie.
-        /// Wycina pamięć z Areny (jeśli podano Graf) i opakowuje w lekki AutogradNode.
+        /// Centralna metoda tworzÄ…ca nowe wÄ™zÅ‚y na taÅ›mie.
+        /// Wycina pamiÄ™Ä‡ z Areny (jeÅ›li podano Graf) i opakowuje w lekki AutogradNode.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static AutogradNode AllocateNode(ComputationGraph? graph, TensorShape shape, bool requiresGrad, bool clearMemory = true)
         {
-            TensorStorage<float> storage;
-
             if (graph != null)
             {
-                storage = graph.AllocateIntermediate(shape.Size);
-                if (clearMemory)
-                {
-                    storage.AsSpan().Clear();
-                }
-            }
-            else
-            {
-                storage = new TensorStorage<float>(shape.Size, clearMemory);
+                // Route through graph factory so Ownership is set from birth.
+                return requiresGrad
+                    ? graph.CreateTemporary(shape, requiresGrad: true,  clearMemory: clearMemory)
+                    : graph.CreateAuxiliary(shape, clearMemory: clearMemory);
             }
 
-            // Zwracamy od razu gotowy, bezpieczny węzeł
-            return new AutogradNode(storage, shape, requiresGrad);
+            // No graph (inference path): standalone allocation, not graph-owned.
+            var storage = new TensorStorage<float>(shape.Size, clearMemory);
+            return new AutogradNode(storage, shape, requiresGrad)
+            {
+                Ownership = AutogradNodeOwnership.ExternalBorrowed,
+            };
         }
     }
 }

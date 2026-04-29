@@ -49,7 +49,7 @@ namespace DevOnBike.Overfit.Tests
         ///     now dominated by Conv2D and MaxPool2D, which is what we
         ///     actually want to benchmark.
         /// </summary>
-        //[Fact]
+        [Fact]
         public void Mnist_FullTrain60k_CnnBeastMode_Benchmark()
         {
             const int trainSize = 60_000;

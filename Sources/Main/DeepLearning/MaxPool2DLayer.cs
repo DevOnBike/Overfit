@@ -53,7 +53,7 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Eval()  => IsTraining = false;
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
-            => TensorMath.MaxPool2D(graph, input, _channels, _inputH, _inputW, _poolSize);
+            => ComputationGraph.MaxPool2DOp(graph, input, _channels, _inputH, _inputW, _poolSize);
 
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {

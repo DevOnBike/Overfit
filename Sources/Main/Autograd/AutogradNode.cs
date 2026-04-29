@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 DevOnBike.
+// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -9,9 +9,9 @@ using DevOnBike.Overfit.Tensors.Core;
 namespace DevOnBike.Overfit.Autograd
 {
     /// <summary>
-    /// Węzeł grafu obliczeniowego.
-    /// Przechowuje fizyczną pamięć (TensorStorage) dla danych i gradientów.
-    /// Udostępnia bezalokacyjne widoki (TensorSpan) dla logiki matematycznej.
+    /// WÄ™zeÅ‚ grafu obliczeniowego.
+    /// Przechowuje fizycznÄ… pamiÄ™Ä‡ (TensorStorage) dla danych i gradientÃ³w.
+    /// UdostÄ™pnia bezalokacyjne widoki (TensorSpan) dla logiki matematycznej.
     /// </summary>
     public sealed class AutogradNode : IDisposable
     {
@@ -24,6 +24,13 @@ namespace DevOnBike.Overfit.Autograd
         public bool RequiresGrad { get; }
 
         public TensorShape Shape { get; }
+
+        /// <summary>
+        /// Lifecycle and ownership classification for this node.
+        /// Used to determine which nodes graph.Reset() may dispose.
+        /// Defaults to <see cref="AutogradNodeOwnership.Unknown"/> for backward compatibility.
+        /// </summary>
+        public AutogradNodeOwnership Ownership { get; internal set; } = AutogradNodeOwnership.Unknown;
 
         /// <summary>
         /// Zwraca widok na dane z Forward Pass.
@@ -48,7 +55,7 @@ namespace DevOnBike.Overfit.Autograd
 
                 if (!RequiresGrad || _gradStorage == null)
                 {
-                    throw new InvalidOperationException("Ten węzeł nie śledzi gradientów (RequiresGrad = false).");
+                    throw new InvalidOperationException("Ten wÄ™zeÅ‚ nie Å›ledzi gradientÃ³w (RequiresGrad = false).");
                 }
 
                 return new TensorSpan<float>(_gradStorage.AsSpan(), Shape);
@@ -95,8 +102,8 @@ namespace DevOnBike.Overfit.Autograd
 
         /// <summary>
         /// Tworzy view-node na tym samym data storage.
-        /// Data storage pozostaje własnością source.
-        /// Grad storage jest osobny, bo backward zapisuje gradient w kształcie view.
+        /// Data storage pozostaje wÅ‚asnoÅ›ciÄ… source.
+        /// Grad storage jest osobny, bo backward zapisuje gradient w ksztaÅ‚cie view.
         /// </summary>
         internal static AutogradNode ViewOf(AutogradNode source, TensorShape shape, bool requiresGrad)
         {
@@ -123,7 +130,7 @@ namespace DevOnBike.Overfit.Autograd
         }
 
         /// <summary>
-        /// Zeruje gradienty przed nową epoką lub batchem.
+        /// Zeruje gradienty przed nowÄ… epokÄ… lub batchem.
         /// </summary>
         public void ZeroGrad()
         {

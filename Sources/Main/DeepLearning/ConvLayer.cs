@@ -88,7 +88,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void PrepareInference()
         {
-            // Direct inference convolution uses Kernels.DataView directly — no cache needed.
+            // Direct inference convolution uses Kernels.DataView directly â€” no cache needed.
         }
 
         /// <summary>
@@ -141,9 +141,9 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
-            return TensorMath.Conv2D(graph, input, Kernels, _inC, _outC, _h, _w, _k);
+            return ComputationGraph.Conv2DOp(graph, input, Kernels, _inC, _outC, _h, _w, _k);
             // Note: bias is applied in ForwardInference. Training path does not yet apply
-            // conv bias via autograd — add TensorMath.AddBiasNchw when training with bias is needed.
+            // conv bias via autograd â€” add TensorMath.AddBiasNchw when training with bias is needed.
         }
 
         public IEnumerable<AutogradNode> Parameters()

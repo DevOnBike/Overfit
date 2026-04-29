@@ -13,7 +13,7 @@ namespace DevOnBike.Overfit.DeepLearning
     /// <summary>
     /// Global Average Pooling 2D as <see cref="IModule"/> + <see cref="IInferenceShapeProvider"/>.
     /// Uses <see cref="PoolingKernels.GlobalAveragePool2DForwardNchw"/> for zero-allocation inference.
-    /// Reduces [batch, C, H, W] → [batch, C].
+    /// Reduces [batch, C, H, W] Ã¢â€ â€™ [batch, C].
     /// </summary>
     public sealed class GlobalAveragePool2DLayer : IModule, IInferenceShapeProvider
     {
@@ -42,7 +42,7 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Eval()  => IsTraining = false;
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
-            => TensorMath.GlobalAveragePool2D(graph, input, _channels, _inputH, _inputW);
+            => ComputationGraph.GlobalAveragePool2DOp(graph, input, _channels, _inputH, _inputW);
 
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {

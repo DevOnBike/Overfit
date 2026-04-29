@@ -112,7 +112,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
-            return TensorMath.BatchNorm1D(
+            return ComputationGraph.BatchNorm1DOp(
                 graph,
                 input,
                 Gamma,
