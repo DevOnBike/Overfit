@@ -62,16 +62,29 @@ namespace DevOnBike.Overfit.Autograd
             }
         }
 
+        /// <summary>
+        /// Standard constructor — node owns data storage, allocates its own grad storage when requiresGrad=true.
+        /// Used by the graph factory (CreateTemporary) and standalone inference nodes.
+        /// </summary>
         public AutogradNode(TensorStorage<float> data, TensorShape shape, bool requiresGrad = false)
-            : this(data, shape, requiresGrad, ownsDataStorage: true)
+            : this(data, shape, requiresGrad,
+                   ownsDataStorage: true,
+                   externalGrad: null,
+                   ownsGradStorage: false)
         {
         }
 
+        /// <summary>
+        /// Full-control private constructor. All ownership flags are explicit.
+        /// Use via static factory methods to ensure Ownership is set correctly.
+        /// </summary>
         private AutogradNode(
             TensorStorage<float> data,
             TensorShape shape,
             bool requiresGrad,
-            bool ownsDataStorage)
+            bool ownsDataStorage,
+            TensorStorage<float>? externalGrad,
+            bool ownsGradStorage)
         {
             ArgumentNullException.ThrowIfNull(data);
 
@@ -89,15 +102,78 @@ namespace DevOnBike.Overfit.Autograd
 
             _dataStorage = data;
             _ownsDataStorage = ownsDataStorage;
-
             Shape = shape;
             RequiresGrad = requiresGrad;
 
             if (requiresGrad)
             {
-                _gradStorage = TensorFactory.CloneStorage(data, clearMemory: true);
-                _ownsGradStorage = true;
+                if (externalGrad != null)
+                {
+                    // Shared grad storage (e.g., Parameter.AsNode): optimizer reads Parameter.Grad directly.
+                    _gradStorage = externalGrad;
+                    _ownsGradStorage = ownsGradStorage;
+                }
+                else
+                {
+                    // Node-owned grad storage: the default for graph temporaries.
+                    _gradStorage = TensorFactory.CloneStorage(data, clearMemory: true);
+                    _ownsGradStorage = true;
+                }
             }
+        }
+
+        // ─────────────────────────────────────────────────────────────────
+        // Factory methods — preferred over public constructor for
+        // non-standard ownership scenarios
+        // ─────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Creates a node that references a Parameter's data and gradient storage.
+        /// The node does NOT own either storage — the Parameter remains the owner.
+        /// Ownership is set to <see cref="AutogradNodeOwnership.Parameter"/>.
+        /// Backward writes into <paramref name="grad"/> directly, so the optimizer
+        /// can read Parameter.Grad without any post-backward sync copy.
+        /// </summary>
+        internal static AutogradNode CreateParameterView(
+            TensorStorage<float> data,
+            TensorStorage<float> grad,
+            TensorShape shape)
+        {
+            ArgumentNullException.ThrowIfNull(data);
+            ArgumentNullException.ThrowIfNull(grad);
+
+            return new AutogradNode(
+                data, shape,
+                requiresGrad: true,
+                ownsDataStorage: false,
+                externalGrad: grad,
+                ownsGradStorage: false)
+            {
+                Ownership = AutogradNodeOwnership.Parameter,
+            };
+        }
+
+        /// <summary>
+        /// Creates a node that wraps externally-owned data storage without taking ownership.
+        /// The graph will NOT dispose this storage on Reset().
+        /// Ownership is set to <see cref="AutogradNodeOwnership.ExternalBorrowed"/>.
+        /// </summary>
+        internal static AutogradNode CreateBorrowed(
+            TensorStorage<float> data,
+            TensorShape shape,
+            bool requiresGrad = false)
+        {
+            ArgumentNullException.ThrowIfNull(data);
+
+            return new AutogradNode(
+                data, shape,
+                requiresGrad,
+                ownsDataStorage: false,
+                externalGrad: null,
+                ownsGradStorage: false)
+            {
+                Ownership = AutogradNodeOwnership.ExternalBorrowed,
+            };
         }
 
         /// <summary>
@@ -126,7 +202,12 @@ namespace DevOnBike.Overfit.Autograd
                 source._dataStorage!,
                 shape,
                 requiresGrad,
-                ownsDataStorage: false);
+                ownsDataStorage: false,
+                externalGrad: null,
+                ownsGradStorage: false)
+            {
+                Ownership = AutogradNodeOwnership.View,
+            };
         }
 
         /// <summary>

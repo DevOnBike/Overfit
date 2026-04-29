@@ -71,15 +71,17 @@ namespace DevOnBike.Overfit.Autograd
         /// The graph will NOT dispose the storage. Use for preallocated batch buffers
         /// that outlive a single forward pass (e.g., xBNode / yBNode in training loops).
         /// </summary>
+        /// <summary>
+        /// Wraps externally-owned storage without taking ownership.
+        /// Uses <see cref="AutogradNode.CreateBorrowed"/> so that <c>ownsDataStorage = false</c>
+        /// is enforced — fixing the bug where the old public constructor always set it to true.
+        /// </summary>
         internal static AutogradNode CreateExternalBorrowed(
             TensorStorage<float> storage,
             TensorShape shape,
             bool requiresGrad = false)
         {
-            return new AutogradNode(storage, shape, requiresGrad)
-            {
-                Ownership = AutogradNodeOwnership.ExternalBorrowed,
-            };
+            return AutogradNode.CreateBorrowed(storage, shape, requiresGrad);
         }
     }
 }
