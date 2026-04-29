@@ -59,8 +59,8 @@ namespace Benchmarks
 
         // Keep enough work per invoke to avoid tiny-iteration noise, but not so much that
         // the full CNN case becomes painful.
-        private const int LightOperationsPerInvoke = 64;
-        private const int HeavyOperationsPerInvoke = 16;
+        private const int LightOperationsPerInvoke = 1024;
+        private const int HeavyOperationsPerInvoke = 128;
 
         private ComputationGraph _graph = null!;
 
