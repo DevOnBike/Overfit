@@ -110,40 +110,43 @@ Machine: AMD Ryzen 9 9950X3D · Windows 11 25H2 · .NET 10.0.7 · BenchmarkDotNe
 
 ### Single inference — Overfit vs ONNX Runtime
 
-| Model | Overfit | ONNX Runtime | Overfit alloc |
-|-------|--------:|-------------:|--------------:|
-| Linear(784→10) | 252 ns | 1989 ns | **0 B** |
-| MLP 784→128→10 | ~3.7 µs | ~5.2 µs | **0 B** |
-| Small CNN (MNIST) | 5.4 µs | 6.5 µs | **0 B** |
+| Method | Mean | Allocated | vs ONNX Runtime |
+|--------|-----:|----------:|----------------:|
+| **Overfit `InferenceEngine`** | **201.6 ns** | **0 B** | **9.2× faster** |
+| ONNX Runtime (pre-allocated) | 1 853 ns | 224 B | baseline |
+| ONNX Runtime (standard) | 3 369 ns | 952 B | 0.55× |
 
-### ONNX-imported model vs ONNX Runtime
+Model: Linear(784→10). Overfit is **9.2× faster** than ONNX Runtime pre-allocated path, **16.7× faster** than standard path, with zero managed allocations.
 
-Same weights, same graph, PyTorch export:
+### DAG inference — ResNet-style model with skip connections
 
 | Method | Mean | Allocated |
 |--------|-----:|----------:|
-| **Overfit (imported ONNX)** | **5.4 µs** | **0 B** |
-| ONNX Runtime | 6.5 µs | 224 B |
+| `OnnxGraphModel.RunInference` (direct) | ~0.9–2.1 µs | **0 B** |
+| `InferenceEngine.FromBackend` (via engine) | ~0.9–2.1 µs | **0 B** |
 
-Overfit runs the PyTorch-exported model **1.2× faster with zero allocations**.
-For small models (Linear 784→10): **7.9× faster** (252 ns vs 1989 ns).
+Model: TinyResNet — Linear(8→8) + skip + Linear(8→4). Both paths: zero allocations.
+Bimodal distribution due to model size (sub-µs math, timer resolution dominates).
 
 ### CNN training throughput (60k MNIST, batch=64)
 
-| Epoch | Time | Alloc/epoch |
-|------:|-----:|------------:|
-| 1 | ~1.7 s | ~33 MB |
-| 2–5 | **~856 ms** | **~26 MB** |
+| Epoch | Time | Alloc/epoch | Notes |
+|------:|-----:|------------:|-------|
+| 1 | ~1.7 s | ~32 MB | JIT warmup |
+| 2–5 | **~800 ms** | **~26 MB** | steady state |
 
-Training allocations come from autograd graph temporaries — expected for the current architecture.
-Inference path: zero allocations.
+Training allocations from autograd graph temporaries — expected.
+Inference path: zero allocations. Live managed memory delta per epoch: **−0.01 MB** (zero leak).
 
-### Concurrent inference (8 threads × 1 000 calls)
+### Concurrent inference (8 threads × 1 000 calls each)
 
-| Method | Mean | Allocated |
-|--------|-----:|----------:|
-| **Overfit** | ~516 ms | **0 B** |
-| ONNX Runtime | ~1811 ms | ~117 MB |
+| Method | Mean | Allocated | vs ONNX Runtime |
+|--------|-----:|----------:|----------------:|
+| **Overfit (concurrent)** | **637.8 ms** | **0 B** | **3.0× faster** |
+| ONNX Runtime (concurrent) | 1 916.7 ms | 117 MB | baseline |
+
+Overfit scales linearly — no shared mutable state, no lock contention.
+ONNX Runtime allocates 117 MB of managed memory under concurrent load (Gen0 GC pressure).
 
 ---
 
@@ -304,6 +307,7 @@ Overfit could run GPT-1 inference once the operator set is complete. Training at
 
 - Graph compilation / kernel fusion for fixed-shape models
 - Batched GEMM parallel path (unsafe fixed-pointer `Parallel.For`)
+- AOT compilation target
 
 ---
 
