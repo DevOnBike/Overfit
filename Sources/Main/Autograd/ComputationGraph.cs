@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -306,8 +306,31 @@ namespace DevOnBike.Overfit.Autograd
             {
                 ref readonly var op = ref _tape[i];
 
-                DisposeGraphOwnedAuxiliaryNodes(in op);
-                op.Output?.Dispose();
+                // Dispose by ownership — no hardcoded OpCode switch needed.
+                //
+                // op.Output  → GraphTemporary  (activation output of this op)
+                // op.B, C0-C4 → GraphAuxiliary (e.g., maxIndices, probsNode, mean/invStd)
+                //               or Parameter   (gamma/beta nodes) → do NOT dispose
+                //               or null
+                // op.A       → output of previous TapeOp, disposed by its own entry → skip
+                //
+                // By routing all allocation through graph factory methods (Etap 3),
+                // every node has Ownership set correctly at birth. Reset() trusts it.
+                DisposeIfGraphOwned(op.Output);
+                DisposeIfGraphOwned(op.B);
+                DisposeIfGraphOwned(op.C0);
+                DisposeIfGraphOwned(op.C1);
+                DisposeIfGraphOwned(op.C2);
+                DisposeIfGraphOwned(op.C3);
+                DisposeIfGraphOwned(op.C4);
+
+                if (op.NodeContext != null)
+                {
+                    foreach (var node in op.NodeContext)
+                    {
+                        DisposeIfGraphOwned(node);
+                    }
+                }
             }
 
             if (_opCount > 0)
@@ -321,30 +344,21 @@ namespace DevOnBike.Overfit.Autograd
             TapeBuffer.ResetOffset();
         }
 
-        private static void DisposeGraphOwnedAuxiliaryNodes(in TapeOp op)
+        [System.Runtime.CompilerServices.MethodImpl(
+            System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+        private static void DisposeIfGraphOwned(AutogradNode? node)
         {
-            switch (op.Code)
+            if (node is
+                {
+                    Ownership: AutogradNodeOwnership.GraphTemporary
+                                  or AutogradNodeOwnership.GraphAuxiliary
+                })
             {
-                case OpCode.MaxPool2D:
-                    // B is maxIndices created by MaxPool2D forward.
-                    // It is not a model parameter and is owned by the graph tape.
-                    op.B?.Dispose();
-                    break;
-
-                case OpCode.SoftmaxCrossEntropy:
-                    // C0 is probsNode created by SoftmaxCrossEntropy forward.
-                    // It is needed only for backward.
-                    op.C0?.Dispose();
-                    break;
-
-                case OpCode.BatchNorm1D:
-                    // C0/C1 are gamma/beta parameters and must not be disposed.
-                    // C2/C3 are mean/invStd temporary nodes owned by the graph tape.
-                    op.C2?.Dispose();
-                    op.C3?.Dispose();
-                    break;
+                node.Dispose();
             }
         }
+
+
 
         public void Dispose()
         {

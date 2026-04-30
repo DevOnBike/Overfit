@@ -49,12 +49,20 @@ namespace DevOnBike.Overfit.Onnx.Operators
                     if (negIdx >= 0 && inputShape != null)
                     {
                         var totalElements = 1;
-                        foreach (var d in inputShape) totalElements *= d;
+                        
+                        foreach (var d in inputShape)
+                        {
+                            totalElements *= d;
+                        }
 
                         var knownProduct = 1;
+                        
                         for (var i = 0; i < targetShape.Length; i++)
                         {
-                            if (i != negIdx) knownProduct *= targetShape[i];
+                            if (i != negIdx)
+                            {
+                                knownProduct *= targetShape[i];
+                            }
                         }
 
                         targetShape[negIdx] = totalElements / knownProduct;
@@ -66,7 +74,10 @@ namespace DevOnBike.Overfit.Onnx.Operators
             if (targetShape == null && inputShape != null)
             {
                 var rest = 1;
-                for (var i = 1; i < inputShape.Length; i++) rest *= inputShape[i];
+                for (var i = 1; i < inputShape.Length; i++)
+                {
+                    rest *= inputShape[i];
+                }
                 targetShape = [inputShape[0], rest];
             }
 

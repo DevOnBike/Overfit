@@ -70,6 +70,20 @@ namespace DevOnBike.Overfit.Parameters
         /// </summary>
         public TensorStorage<float>? Grad { get; }
 
+        /// <summary>
+        /// Returns a <see cref="TensorSpan{T}"/> view over this parameter's data buffer.
+        /// Shape-aware; equivalent to <see cref="AutogradNode.DataView"/> for API compatibility
+        /// with serializers and utilities that accept <c>TensorSpan&lt;float&gt;</c>.
+        /// </summary>
+        public TensorSpan<float> DataView
+        {
+            get
+            {
+                ObjectDisposedException.ThrowIf(_disposed == 1, this);
+                return new TensorSpan<float>(Data.AsSpan(), Shape);
+            }
+        }
+
         /// <summary>Mutable view over the data buffer.</summary>
         public Span<float> DataSpan
         {

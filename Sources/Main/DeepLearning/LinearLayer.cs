@@ -8,6 +8,7 @@ using DevOnBike.Overfit.DeepLearning.Abstractions;
 using DevOnBike.Overfit.Kernels;
 using DevOnBike.Overfit.Maths;
 using DevOnBike.Overfit.Ops;
+using DevOnBike.Overfit.Parameters;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 
@@ -18,9 +19,15 @@ namespace DevOnBike.Overfit.DeepLearning
         private readonly int _inputSize;
         private readonly int _outputSize;
 
-        // Layout: [output, input] â€” transposed for inference BLAS call
+        // Layout: [output, input] — transposed for inference BLAS call
         private readonly TensorStorage<float> _weightsTransposed;
         private bool _inferenceCacheValid;
+
+        // Cached view nodes — created once, reused across batches.
+        // ownsDataStorage=false, ownsGradStorage=false: Parameter owns the storage.
+        // Avoids per-batch AutogradNode heap allocation in Forward().
+        private AutogradNode? _weightsNode;
+        private AutogradNode? _biasNode;
 
         public LinearLayer(int inputSize, int outputSize)
         {
@@ -30,35 +37,29 @@ namespace DevOnBike.Overfit.DeepLearning
             _inputSize = inputSize;
             _outputSize = outputSize;
 
-            var wData = new TensorStorage<float>(inputSize * outputSize, clearMemory: false);
+            Weights = new Parameter(
+                new TensorShape(inputSize, outputSize),
+                requiresGrad: true,
+                clearData: false);
+
             var stdDev = MathF.Sqrt(2f / inputSize);
-            var wSpan = wData.AsSpan();
+            var wSpan = Weights.DataSpan;
 
             for (var i = 0; i < wSpan.Length; i++)
             {
                 wSpan[i] = MathUtils.NextGaussian() * stdDev;
             }
 
-            Weights = new AutogradNode(
-                wData,
-                new TensorShape(inputSize, outputSize),
-                requiresGrad: true);
+            Bias = new Parameter(new TensorShape(outputSize), requiresGrad: true, clearData: true);
 
-            var bData = new TensorStorage<float>(outputSize, clearMemory: true);
-
-            Bias = new AutogradNode(
-                bData,
-                new TensorShape(outputSize),
-                requiresGrad: true);
-
-            _weightsTransposed = new TensorStorage<float>(
-                inputSize * outputSize,
-                clearMemory: false);
+            _weightsTransposed = new TensorStorage<float>(inputSize * outputSize, clearMemory: false);
         }
 
-        public AutogradNode Weights { get; }
+        /// <summary>Long-lived trainable weight matrix [inputSize, outputSize]. Owned by the layer.</summary>
+        public Parameter Weights { get; }
 
-        public AutogradNode Bias { get; }
+        /// <summary>Long-lived trainable bias vector [outputSize]. Owned by the layer.</summary>
+        public Parameter Bias { get; }
 
         public bool IsTraining { get; private set; } = true;
 
@@ -89,30 +90,13 @@ namespace DevOnBike.Overfit.DeepLearning
 
         /// <summary>
         /// Loads pre-trained weights from ONNX or another external source.
-        /// Weights must be in [inputSize, outputSize] layout (row = input neuron, column = output neuron).
-        /// PyTorch exports Linear weights as [outputSize, inputSize] â€” transpose before calling.
+        /// Weights must be in [inputSize, outputSize] layout.
+        /// PyTorch exports as [outputSize, inputSize] — transpose before calling.
         /// </summary>
         public void LoadParameters(ReadOnlySpan<float> weights, ReadOnlySpan<float> bias)
         {
-            var wTarget = Weights.DataView.AsSpan();
-            if (weights.Length != wTarget.Length)
-            {
-                throw new ArgumentException(
-                    $"Weight size mismatch: expected {wTarget.Length}, got {weights.Length}.",
-                    nameof(weights));
-            }
-
-            weights.CopyTo(wTarget);
-
-            var bTarget = Bias.DataView.AsSpan();
-            if (bias.Length != bTarget.Length)
-            {
-                throw new ArgumentException(
-                    $"Bias size mismatch: expected {bTarget.Length}, got {bias.Length}.",
-                    nameof(bias));
-            }
-
-            bias.CopyTo(bTarget);
+            Weights.LoadData(weights);
+            Bias.LoadData(bias);
 
             _inferenceCacheValid = false;
 
@@ -134,10 +118,32 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
-            return ComputationGraph.LinearOp(graph, input, Weights, Bias);
+            // Cached view nodes: created once per layer lifetime, reused each batch.
+            // Eliminates per-batch AutogradNode heap allocation (was: 2 new objects × 937 batches/epoch).
+            // ownsDataStorage=false, ownsGradStorage=false — Parameter owns the storage.
+            // Tape holds references to these nodes; they live until layer.Dispose().
+            _weightsNode ??= Weights.AsNode();
+            _biasNode    ??= Bias.AsNode();
+
+            return ComputationGraph.LinearOp(graph, input, _weightsNode, _biasNode);
         }
 
+        /// <summary>
+        /// IModule compatibility shim — wraps Parameter as AutogradNode for existing optimizers.
+        /// The returned nodes share Parameter's grad storage — ZeroGrad on the node zeroes Parameter.Grad.
+        /// Prefer <see cref="TrainableParameters"/> for new code (Etap 6 optimizer migration).
+        /// </summary>
         public IEnumerable<AutogradNode> Parameters()
+        {
+            yield return Weights.AsNode();
+            yield return Bias.AsNode();
+        }
+
+        /// <summary>
+        /// Returns the <see cref="Parameter"/> objects owned by this layer.
+        /// Used by optimizers after Etap 6 migration to <c>IEnumerable&lt;Parameter&gt;</c>.
+        /// </summary>
+        public IEnumerable<Parameter> TrainableParameters()
         {
             yield return Weights;
             yield return Bias;
@@ -145,50 +151,14 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void Save(BinaryWriter bw)
         {
-            bw.Write(Weights.DataView.Size);
-
-            foreach (var val in Weights.DataView.AsReadOnlySpan())
-            {
-                bw.Write(val);
-            }
-
-            bw.Write(Bias.DataView.Size);
-
-            foreach (var val in Bias.DataView.AsReadOnlySpan())
-            {
-                bw.Write(val);
-            }
+            Weights.Save(bw);
+            Bias.Save(bw);
         }
 
         public void Load(BinaryReader br)
         {
-            var lenW = br.ReadInt32();
-
-            if (lenW != Weights.DataView.Size)
-            {
-                throw new Exception("Weights mismatch");
-            }
-
-            var wSpan = Weights.DataView.AsSpan();
-
-            for (var i = 0; i < lenW; i++)
-            {
-                wSpan[i] = br.ReadSingle();
-            }
-
-            var lenB = br.ReadInt32();
-
-            if (lenB != Bias.DataView.Size)
-            {
-                throw new Exception("Bias mismatch");
-            }
-
-            var bSpan = Bias.DataView.AsSpan();
-
-            for (var i = 0; i < lenB; i++)
-            {
-                bSpan[i] = br.ReadSingle();
-            }
+            Weights.Load(br);
+            Bias.Load(br);
 
             _inferenceCacheValid = false;
 
@@ -222,9 +192,9 @@ namespace DevOnBike.Overfit.DeepLearning
             PrepareInference();
             LinearKernels.Forward(
                 input,
-                Weights.DataView.AsReadOnlySpan(),
+                Weights.DataReadOnlySpan,
                 _weightsTransposed.AsReadOnlySpan(),
-                Bias.DataView.AsReadOnlySpan(),
+                Bias.DataReadOnlySpan,
                 output,
                 _inputSize,
                 _outputSize);
@@ -232,12 +202,11 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void ForwardInferencePrepared(ReadOnlySpan<float> input, Span<float> output)
         {
-            // Cache guaranteed valid â€” called only after PrepareInference() has run.
             LinearKernels.Forward(
                 input,
-                Weights.DataView.AsReadOnlySpan(),
+                Weights.DataReadOnlySpan,
                 _weightsTransposed.AsReadOnlySpan(),
-                Bias.DataView.AsReadOnlySpan(),
+                Bias.DataReadOnlySpan,
                 output,
                 _inputSize,
                 _outputSize);
@@ -245,6 +214,8 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void Dispose()
         {
+            _weightsNode?.Dispose();
+            _biasNode?.Dispose();
             Weights.Dispose();
             Bias.Dispose();
             _weightsTransposed.Dispose();
@@ -253,7 +224,7 @@ namespace DevOnBike.Overfit.DeepLearning
         private void RebuildTransposedWeightsInPlace()
         {
             LinearKernels.TransposeInputOutputToOutputInput(
-                Weights.DataView.AsReadOnlySpan(),
+                Weights.DataReadOnlySpan,
                 _weightsTransposed.AsSpan(),
                 _inputSize,
                 _outputSize);

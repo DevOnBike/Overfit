@@ -89,7 +89,10 @@ namespace DevOnBike.Overfit.Tests
 
             // Write garbage into grad
             var grad = p.GradSpan;
-            for (var i = 0; i < grad.Length; i++) grad[i] = i + 1f;
+            for (var i = 0; i < grad.Length; i++)
+            {
+                grad[i] = i + 1f;
+            }
 
             p.ZeroGrad();
 

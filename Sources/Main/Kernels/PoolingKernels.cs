@@ -186,7 +186,10 @@ namespace DevOnBike.Overfit.Kernels
                             for (var pw = 0; pw < pool; pw++)
                             {
                                 var value = input[rowBase + pw];
-                                if (value > max) max = value;
+                                if (value > max)
+                                {
+                                    max = value;
+                                }
                             }
                         }
 

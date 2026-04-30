@@ -57,7 +57,9 @@ namespace Benchmarks
 
             var rng = new Random(42);
             for (var i = 0; i < InputElements; i++)
+            {
                 _inputArr[i] = (float)rng.NextDouble() * 2f - 1f;
+            }
 
             _inputStorage = new TensorStorage<float>(InputElements, clearMemory: false);
             _inputStorageGrad = new TensorStorage<float>(InputElements, clearMemory: false);

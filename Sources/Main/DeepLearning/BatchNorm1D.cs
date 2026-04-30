@@ -5,6 +5,7 @@
 
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Autograd;
+using DevOnBike.Overfit.Parameters;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors;
@@ -19,23 +20,20 @@ namespace DevOnBike.Overfit.DeepLearning
         private readonly TensorStorage<float> _inferenceShift;
         private bool _inferenceCacheValid;
 
+        // Cached view nodes — eliminates per-batch heap allocation.
+        private AutogradNode? _gammaNode;
+        private AutogradNode? _betaNode;
+
         public BatchNorm1D(int numFeatures)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(numFeatures);
 
             _numFeatures = numFeatures;
 
-            Gamma = new AutogradNode(
-                new TensorStorage<float>(numFeatures, clearMemory: false),
-                new TensorShape(numFeatures),
-                requiresGrad: true);
+            Gamma = new Parameter(new TensorShape(numFeatures), requiresGrad: true, clearData: false);
+            Gamma.DataSpan.Fill(1f);
 
-            Gamma.DataView.AsSpan().Fill(1f);
-
-            Beta = new AutogradNode(
-                new TensorStorage<float>(numFeatures, clearMemory: true),
-                new TensorShape(numFeatures),
-                requiresGrad: true);
+            Beta = new Parameter(new TensorShape(numFeatures), requiresGrad: true, clearData: true);
 
             RunningMean = new TensorStorage<float>(numFeatures, clearMemory: true);
             RunningVar = new TensorStorage<float>(numFeatures, clearMemory: false);
@@ -45,9 +43,9 @@ namespace DevOnBike.Overfit.DeepLearning
             _inferenceShift = new TensorStorage<float>(numFeatures, clearMemory: false);
         }
 
-        public AutogradNode Gamma { get; }
+        public Parameter Gamma { get; }
 
-        public AutogradNode Beta { get; }
+        public Parameter Beta { get; }
 
         public TensorStorage<float> RunningMean { get; }
 
@@ -94,7 +92,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
             TensorPrimitives.Multiply(
                 scaleS,
-                Gamma.DataView.AsReadOnlySpan(),
+                Gamma.DataReadOnlySpan,
                 scaleS);
 
             TensorPrimitives.Multiply(
@@ -103,7 +101,7 @@ namespace DevOnBike.Overfit.DeepLearning
                 shiftS);
 
             TensorPrimitives.Subtract(
-                Beta.DataView.AsReadOnlySpan(),
+                Beta.DataReadOnlySpan,
                 shiftS,
                 shiftS);
 
@@ -112,11 +110,14 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
+            _gammaNode ??= Gamma.AsNode();
+            _betaNode  ??= Beta.AsNode();
+
             return ComputationGraph.BatchNorm1DOp(
                 graph,
                 input,
-                Gamma,
-                Beta,
+                _gammaNode,
+                _betaNode,
                 RunningMean,
                 RunningVar,
                 Momentum,
@@ -126,20 +127,26 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public IEnumerable<AutogradNode> Parameters()
         {
+            yield return Gamma.AsNode();
+            yield return Beta.AsNode();
+        }
+
+        public IEnumerable<Parameter> TrainableParameters()
+        {
             yield return Gamma;
             yield return Beta;
         }
 
         public void Save(BinaryWriter bw)
         {
-            bw.Write(Gamma.DataView.Size);
+            bw.Write(Gamma.Shape.Size);
 
-            foreach (var val in Gamma.DataView.AsReadOnlySpan())
+            foreach (var val in Gamma.DataReadOnlySpan)
             {
                 bw.Write(val);
             }
 
-            foreach (var val in Beta.DataView.AsReadOnlySpan())
+            foreach (var val in Beta.DataReadOnlySpan)
             {
                 bw.Write(val);
             }
@@ -159,19 +166,19 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             var len = br.ReadInt32();
 
-            if (len != Gamma.DataView.Size)
+            if (len != Gamma.Shape.Size)
             {
-                throw new Exception($"Weight dimensions mismatch: {len} vs {Gamma.DataView.Size}");
+                throw new Exception($"Weight dimensions mismatch: {len} vs {Gamma.Shape.Size}");
             }
 
-            var gSpan = Gamma.DataView.AsSpan();
+            var gSpan = Gamma.DataSpan;
 
             for (var i = 0; i < len; i++)
             {
                 gSpan[i] = br.ReadSingle();
             }
 
-            var bSpan = Beta.DataView.AsSpan();
+            var bSpan = Beta.DataSpan;
 
             for (var i = 0; i < len; i++)
             {
@@ -248,6 +255,8 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void Dispose()
         {
+            _gammaNode?.Dispose();
+            _betaNode?.Dispose();
             Gamma.Dispose();
             Beta.Dispose();
             RunningMean.Dispose();

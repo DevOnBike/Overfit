@@ -56,7 +56,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
-            var hiddenSize = _linear1.Weights.DataView.GetDim(0);
+            var hiddenSize = _linear1.Weights.Shape.D0;
 
             using var buf1 = new PooledBuffer<float>(hiddenSize);
             using var buf2 = new PooledBuffer<float>(hiddenSize);

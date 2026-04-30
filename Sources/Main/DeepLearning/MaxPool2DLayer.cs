@@ -6,7 +6,6 @@
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
 using DevOnBike.Overfit.Kernels;
-using DevOnBike.Overfit.Ops;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
@@ -29,10 +28,14 @@ namespace DevOnBike.Overfit.DeepLearning
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(poolSize);
 
             if (inputH % poolSize != 0)
+            {
                 throw new ArgumentException($"inputH ({inputH}) must be divisible by poolSize ({poolSize}).");
+            }
 
             if (inputW % poolSize != 0)
+            {
                 throw new ArgumentException($"inputW ({inputW}) must be divisible by poolSize ({poolSize}).");
+            }
 
             _channels = channels;
             _inputH   = inputH;

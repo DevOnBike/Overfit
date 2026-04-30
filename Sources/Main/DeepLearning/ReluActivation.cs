@@ -6,7 +6,6 @@
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
 using DevOnBike.Overfit.Kernels;
-using DevOnBike.Overfit.Ops;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
