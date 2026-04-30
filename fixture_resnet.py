@@ -1,5 +1,5 @@
 """
-fixture_resnet.py — generuje mini-ResNet z skip connection do testów OnnxGraphImporter.
+fixture_resnet.py — generuje modele ONNX do testów OnnxGraphImporter i AveragePool.
 
 Uruchomienie:
     python fixture_resnet.py
@@ -8,55 +8,36 @@ Wymagania:
     pip install torch onnx numpy
 
 Generowane pliki (w tests/test_fixtures/):
-    tiny_resnet.onnx          — model z skip connection
-    tiny_resnet_input.bin     — reference input (8 float32 LE)
-    tiny_resnet_output.bin    — reference output (4 float32 LE)
+    tiny_resnet.onnx / _input.bin / _output.bin
+        Linear(8,8) + skip + Linear(8,4)
 
-    resnet_block.onnx         — większy model: Conv→BN→ReLU + skip
-    resnet_block_input.bin    — reference input (1×4×8×8 = 256 float32)
-    resnet_block_output.bin   — reference output (1×4×8×8 = 256 float32)
+    resnet_block.onnx / _input.bin / _output.bin
+        Conv2d(4,4,3,padding=1) + BN(folded) + ReLU + skip [1,4,8,8]
 
-Model TinyResNet (Linear residual):
-    fc1 = Linear(8, 8)
-    fc2 = Linear(8, 4)
-    forward(x): h = relu(fc1(x)) + x   ← skip connection (Add)
-                return fc2(h)
-
-Model ResNetBlock (Conv residual — sprawdza Conv+BN+ReLU+Add):
-    conv1 = Conv2d(4, 4, 3, padding=1)
-    bn1   = BatchNorm2d(4)  → eksportuje jako BN node (train mode) lub folded (eval)
-    forward(x): return relu(bn1(conv1(x))) + x  ← skip connection
+    avgpool_model.onnx / _input.bin / _output.bin
+        Conv2d(1,4,3,padding=1) + AveragePool(3,stride=1,padding=1) + GAP [1,1,8,8]
 """
 
-import os
-import struct
-import numpy as np
-import torch
-import torch.nn as nn
+import os, struct, numpy as np, torch, torch.nn as nn
 
 OUT_DIR = os.path.join("tests", "test_fixtures")
 os.makedirs(OUT_DIR, exist_ok=True)
 
-def save_bin(arr: np.ndarray, path: str):
-    """Saves float32 numpy array as little-endian binary."""
-    arr.astype("<f4").tofile(path)
-    print(f"  saved: {path}  ({arr.size} float32, {arr.nbytes} bytes)")
-
-def export_onnx(model, dummy, name, **kwargs):
+def save_bin(arr, name):
     path = os.path.join(OUT_DIR, name)
-    torch.onnx.export(
-        model, dummy, path,
-        export_params=True,
-        input_names=["input"],
-        output_names=["output"],
-        **kwargs,
-    )
+    arr.astype("<f4").flatten().tofile(path)
+    print(f"  saved: {path}  ({arr.size} float32)")
+    return path
+
+def export(model, dummy, name):
+    path = os.path.join(OUT_DIR, name)
+    torch.onnx.export(model, dummy, path, export_params=True,
+                      input_names=["input"], output_names=["output"])
     print(f"  exported: {path}")
     return path
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 1. TinyResNet — Linear(8,8) + skip + Linear(8,4)
-# ─────────────────────────────────────────────────────────────────────────────
+
+# ─── 1. TinyResNet ────────────────────────────────────────────────────────────
 print("\n[1] TinyResNet (Linear + skip connection)")
 
 class TinyResNet(nn.Module):
@@ -64,88 +45,91 @@ class TinyResNet(nn.Module):
         super().__init__()
         self.fc1 = nn.Linear(8, 8)
         self.fc2 = nn.Linear(8, 4)
-
     def forward(self, x):
-        h = torch.relu(self.fc1(x)) + x   # skip: Add node in ONNX graph
-        return self.fc2(h)
+        return self.fc2(torch.relu(self.fc1(x)) + x)
 
 torch.manual_seed(42)
-model = TinyResNet().eval()
-
+m = TinyResNet().eval()
 dummy = torch.randn(1, 8)
-with torch.no_grad():
-    ref_out = model(dummy)
+with torch.no_grad(): out = m(dummy)
+save_bin(dummy.numpy(), "tiny_resnet_input.bin")
+save_bin(out.numpy(), "tiny_resnet_output.bin")
+export(m, dummy, "tiny_resnet.onnx")
 
-save_bin(dummy.numpy().flatten(), os.path.join(OUT_DIR, "tiny_resnet_input.bin"))
-save_bin(ref_out.numpy().flatten(), os.path.join(OUT_DIR, "tiny_resnet_output.bin"))
-export_onnx(model, dummy, "tiny_resnet.onnx")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 2. ResNetBlock — Conv2d + skip (no BatchNorm — eval() folds it)
-# ─────────────────────────────────────────────────────────────────────────────
-print("\n[2] ResNetBlock (Conv2d padding=1 + skip connection, eval mode)")
+# ─── 2. ResNetBlock ───────────────────────────────────────────────────────────
+print("\n[2] ResNetBlock (Conv2d padding=1 + BN folded + skip)")
 
 class ResNetBlock(nn.Module):
-    """Standard residual block: x → Conv→BN→ReLU + x"""
-    def __init__(self, channels=4):
+    def __init__(self, c=4):
         super().__init__()
-        self.conv1 = nn.Conv2d(channels, channels, 3, padding=1, bias=False)
-        self.bn1   = nn.BatchNorm2d(channels)
+        self.conv1 = nn.Conv2d(c, c, 3, padding=1, bias=False)
+        self.bn1   = nn.BatchNorm2d(c)
         self.relu  = nn.ReLU()
-
     def forward(self, x):
-        return self.relu(self.bn1(self.conv1(x))) + x   # BN folded in eval()
+        return self.relu(self.bn1(self.conv1(x))) + x
 
 torch.manual_seed(42)
-resnet_block = ResNetBlock(channels=4).eval()
+blk = ResNetBlock(4)
+blk.train()
+with torch.no_grad(): blk(torch.randn(8, 4, 8, 8))  # warm BN running stats
+blk.eval()
 
-# Warm-up running stats (BN needs a forward pass in train mode first)
-resnet_block.train()
-dummy_train = torch.randn(8, 4, 8, 8)
-with torch.no_grad():
-    resnet_block(dummy_train)
-resnet_block.eval()
+dummy_blk = torch.randn(1, 4, 8, 8)
+with torch.no_grad(): out_blk = blk(dummy_blk)
+save_bin(dummy_blk.numpy(), "resnet_block_input.bin")
+save_bin(out_blk.numpy(), "resnet_block_output.bin")
+export(blk, dummy_blk, "resnet_block.onnx")
 
-dummy_block = torch.randn(1, 4, 8, 8)
-with torch.no_grad():
-    ref_block_out = resnet_block(dummy_block)
 
-save_bin(dummy_block.numpy().flatten(),
-         os.path.join(OUT_DIR, "resnet_block_input.bin"))
-save_bin(ref_block_out.numpy().flatten(),
-         os.path.join(OUT_DIR, "resnet_block_output.bin"))
-export_onnx(resnet_block, dummy_block, "resnet_block.onnx")
+# ─── 3. AveragePool model ─────────────────────────────────────────────────────
+print("\n[3] AveragePool model (Conv2d + AveragePool(3,p=1) + GAP)")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 3. Verify ONNX graphs contain Add nodes (skip connections)
-# ─────────────────────────────────────────────────────────────────────────────
-print("\n[3] Verification")
+class AvgPoolModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv = nn.Conv2d(1, 4, 3, padding=1)
+        self.pool = nn.AvgPool2d(3, stride=1, padding=1)  # same-size pooling
+        self.gap  = nn.AdaptiveAvgPool2d(1)               # GAP → [B, 4, 1, 1]
+        self.fc   = nn.Linear(4, 2)
+    def forward(self, x):
+        x = torch.relu(self.conv(x))  # [1,4,8,8]
+        x = self.pool(x)               # [1,4,8,8]
+        x = self.gap(x)                # [1,4,1,1]
+        x = x.flatten(1)               # [1,4]
+        return self.fc(x)              # [1,2]
 
+torch.manual_seed(42)
+am = AvgPoolModel().eval()
+dummy_ap = torch.randn(1, 1, 8, 8)
+with torch.no_grad(): out_ap = am(dummy_ap)
+save_bin(dummy_ap.numpy(), "avgpool_model_input.bin")
+save_bin(out_ap.numpy(), "avgpool_model_output.bin")
+export(am, dummy_ap, "avgpool_model.onnx")
+
+
+# ─── 4. Verify Add nodes ──────────────────────────────────────────────────────
+print("\n[4] Verification")
 try:
     import onnx
-    for fname in ["tiny_resnet.onnx", "resnet_block.onnx"]:
-        m = onnx.load(os.path.join(OUT_DIR, fname))
-        ops = [n.op_type for n in m.graph.node]
+    for fname, expected_add in [
+        ("tiny_resnet.onnx", 1),
+        ("resnet_block.onnx", 1),
+        ("avgpool_model.onnx", 0),
+    ]:
+        m2 = onnx.load(os.path.join(OUT_DIR, fname))
+        ops = [n.op_type for n in m2.graph.node]
         add_count = ops.count("Add")
-        print(f"  {fname}: ops = {ops}, Add nodes = {add_count}")
-        assert add_count >= 1, f"Expected at least 1 Add node in {fname}"
-    print("  ✓ Both models contain Add (skip connection) nodes")
+        avg_count = ops.count("AveragePool")
+        print(f"  {fname}: ops={ops}, Add={add_count}, AveragePool={avg_count}")
+        assert add_count >= expected_add, f"Expected {expected_add} Add in {fname}"
+    print("  ✓ All models verified")
 except ImportError:
-    print("  (onnx package not installed — skip ONNX graph verification)")
+    print("  (onnx not installed — skip verification)")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 4. Print what to load in C# tests
-# ─────────────────────────────────────────────────────────────────────────────
 print(f"""
-Done. Files saved to: {OUT_DIR}
-
-C# usage — TinyResNet:
-    var model = OnnxGraphImporter.Load("test_fixtures/tiny_resnet.onnx", 8, 4);
-
-C# usage — ResNetBlock (Conv + skip):
-    // Input shape: [1, 4, 8, 8] → flat size = 256
-    // Output shape: [1, 4, 8, 8] → flat size = 256
-    var model = OnnxGraphImporter.Load("test_fixtures/resnet_block.onnx", 256, 256);
-
-Tolerance: 1e-4f (float32 drift between PyTorch and Overfit TensorPrimitives).
+Done. Sizes:
+  tiny_resnet:    input=8, output=4
+  resnet_block:   input=256 (1x4x8x8), output=256
+  avgpool_model:  input=64 (1x1x8x8), output=2
 """)

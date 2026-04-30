@@ -186,10 +186,7 @@ namespace DevOnBike.Overfit.Kernels
                             for (var pw = 0; pw < pool; pw++)
                             {
                                 var value = input[rowBase + pw];
-                                if (value > max)
-                                {
-                                    max = value;
-                                }
+                                if (value > max) max = value;
                             }
                         }
 
@@ -376,5 +373,115 @@ namespace DevOnBike.Overfit.Kernels
                 output[c] = TensorPrimitives.Sum(input.Slice(c * spatialSize, spatialSize)) * scale;
             }
         }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // AveragePool2D forward (ONNX-3b)
+        //
+        // Standard windowed average pooling with:
+        //   - Square kernel (kernelSize × kernelSize)
+        //   - Symmetric zero-padding
+        //   - Configurable stride
+        //   - count_include_pad support (ONNX default = 0)
+        //
+        // Output dims:
+        //   outH = (inputH + 2*padding - kernelSize) / stride + 1
+        //   outW = (inputW + 2*padding - kernelSize) / stride + 1
+        // ─────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Windowed average pooling (NCHW layout).
+        /// </summary>
+        public static void AveragePool2DForwardNchw(
+            ReadOnlySpan<float> input,    // [batch, C, inputH, inputW]
+            Span<float> output,           // [batch, C, outH, outW]
+            int batchSize,
+            int channels,
+            int inputH,
+            int inputW,
+            int kernelSize,
+            int padding,
+            int stride,
+            bool countIncludePad = false)
+        {
+            var outH = (inputH + 2 * padding - kernelSize) / stride + 1;
+            var outW = (inputW + 2 * padding - kernelSize) / stride + 1;
+            var inputPlane  = channels * inputH * inputW;
+            var outputPlane = channels * outH   * outW;
+
+            output.Clear();
+
+            for (var n = 0; n < batchSize; n++)
+            {
+                AveragePool2DForwardSingleBatchNchw(
+                    input.Slice(n * inputPlane,  inputPlane),
+                    output.Slice(n * outputPlane, outputPlane),
+                    channels,
+                    inputH, inputW,
+                    kernelSize,
+                    outH, outW,
+                    padding, stride,
+                    countIncludePad);
+            }
+        }
+
+        private static void AveragePool2DForwardSingleBatchNchw(
+            ReadOnlySpan<float> input,
+            Span<float> output,
+            int channels,
+            int inputH,
+            int inputW,
+            int kernelSize,
+            int outH,
+            int outW,
+            int padding,
+            int stride,
+            bool countIncludePad)
+        {
+            for (var c = 0; c < channels; c++)
+            {
+                var inputChanBase  = c * inputH * inputW;
+                var outputChanBase = c * outH   * outW;
+
+                for (var oy = 0; oy < outH; oy++)
+                {
+                    var inputYBase = oy * stride - padding;
+
+                    for (var ox = 0; ox < outW; ox++)
+                    {
+                        var inputXBase = ox * stride - padding;
+                        var sum   = 0f;
+                        var count = 0;
+
+                        for (var ky = 0; ky < kernelSize; ky++)
+                        {
+                            var iy = inputYBase + ky;
+                            var inBoundsY = (uint)iy < (uint)inputH;
+
+                            for (var kx = 0; kx < kernelSize; kx++)
+                            {
+                                var ix = inputXBase + kx;
+                                var inBoundsX = (uint)ix < (uint)inputW;
+
+                                if (inBoundsY && inBoundsX)
+                                {
+                                    sum += input[inputChanBase + iy * inputW + ix];
+                                    count++;
+                                }
+                                else if (countIncludePad)
+                                {
+                                    // Zero-pad contributes 0 to sum but 1 to count.
+                                    count++;
+                                }
+                            }
+                        }
+
+                        var divisor = countIncludePad ? kernelSize * kernelSize : count;
+                        output[outputChanBase + oy * outW + ox] =
+                            divisor > 0 ? sum / divisor : 0f;
+                    }
+                }
+            }
+        }
+
     }
 }

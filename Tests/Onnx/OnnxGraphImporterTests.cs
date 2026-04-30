@@ -188,6 +188,82 @@ namespace DevOnBike.Overfit.Tests.Onnx
         }
 
         // ─────────────────────────────────────────────────────────────────────
+        // AveragePool model: Conv→ReLU→AveragePool→GAP→Linear
+        // Loaded via OnnxImporter (linear topology, no skip connections)
+        // ─────────────────────────────────────────────────────────────────────
+
+        private const string AvgPoolOnnx   = "avgpool_model.onnx";
+        private const string AvgPoolInput  = "avgpool_model_input.bin";
+        private const string AvgPoolOutput = "avgpool_model_output.bin";
+        private const int    AvgPoolIn     = 64;  // 1 * 1 * 8 * 8
+        private const int    AvgPoolOut    = 2;
+
+        [Fact]
+        public void Load_AvgPoolModel_Sequential_LoadsWithoutException()
+        {
+            SkipIfMissing(AvgPoolOnnx);
+
+            var model = OnnxImporter.Load(OnnxPath(AvgPoolOnnx));
+            model.Eval();
+
+            using var engine = InferenceEngine.FromSequential(model, AvgPoolIn, AvgPoolOut);
+
+            var input  = new float[AvgPoolIn];
+            var output = new float[AvgPoolOut];
+
+            engine.Run(input, output);
+
+            Assert.DoesNotContain(output, float.IsNaN);
+        }
+
+        [Fact]
+        public void Load_AvgPoolModel_OutputMatchesPyTorchReference()
+        {
+            SkipIfMissing(AvgPoolOnnx, AvgPoolInput, AvgPoolOutput);
+
+            var model    = OnnxImporter.Load(OnnxPath(AvgPoolOnnx));
+            model.Eval();
+
+            using var engine = InferenceEngine.FromSequential(model, AvgPoolIn, AvgPoolOut);
+
+            var input    = LoadFloatBin(OnnxPath(AvgPoolInput));
+            var expected = LoadFloatBin(OnnxPath(AvgPoolOutput));
+            var output   = new float[AvgPoolOut];
+
+            engine.Run(input, output);
+
+            for (var i = 0; i < output.Length; i++)
+            {
+                var diff = MathF.Abs(output[i] - expected[i]);
+                Assert.True(
+                    diff <= Tolerance,
+                    $"avgpool output[{i}] = {output[i]:F6}, expected {expected[i]:F6}, diff = {diff:F6}");
+            }
+        }
+
+        [Fact]
+        public void Load_AvgPoolModel_AllocatesZeroBytes()
+        {
+            SkipIfMissing(AvgPoolOnnx);
+
+            var model = OnnxImporter.Load(OnnxPath(AvgPoolOnnx));
+            model.Eval();
+
+            using var engine = InferenceEngine.FromSequential(model, AvgPoolIn, AvgPoolOut);
+
+            var input  = new float[AvgPoolIn];
+            var output = new float[AvgPoolOut];
+
+            for (var i = 0; i < 256; i++) engine.Run(input, output);
+
+            var before    = GC.GetAllocatedBytesForCurrentThread();
+            for (var i = 0; i < 10_000; i++) engine.Run(input, output);
+            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.Equal(0L, allocated);
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
         // Helpers
         // ─────────────────────────────────────────────────────────────────────
 

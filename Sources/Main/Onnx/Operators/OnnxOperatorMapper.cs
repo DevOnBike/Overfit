@@ -43,14 +43,14 @@ namespace DevOnBike.Overfit.Onnx.Operators
                 // Normalisation
                 "BatchNormalization" => BatchNormOperator.Build(node, initializers, shapeContext),
 
+                // ReduceMean over spatial dims [2,3] = GlobalAveragePool
+                "ReduceMean"         => ReduceMeanOperator.Build(node, initializers, shapeContext),
+
                 // True no-ops (eval-mode semantics)
                 "Identity"           => null,
                 "Dropout"            => null,
 
-                // Planned but not yet implemented
-                "AveragePool" =>
-                    throw new NotImplementedException(
-                        $"ONNX operator '{node.OpType}' is planned but not yet implemented."),
+                "AveragePool"        => AveragePoolOperator.Build(node, initializers, shapeContext),
 
                 _ => throw new NotSupportedException(
                     $"Unsupported ONNX operator: '{node.OpType}'. " +

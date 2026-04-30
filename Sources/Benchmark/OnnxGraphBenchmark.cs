@@ -38,19 +38,19 @@ namespace Benchmarks
     [MemoryDiagnoser]
     public class OnnxGraphBenchmark
     {
-        private const int InputSize = 8;
+        private const int InputSize  = 8;
         private const int OutputSize = 4;
-        private const string FixtureDir = "./";
+        private const string FixtureDir = "Helpers";
 
-        private OnnxGraphModel _dagModel = null!;
-        private InferenceEngine _dagEngine = null!;
-        private float[] _input = null!;
-        private float[] _output = null!;
+        private OnnxGraphModel      _dagModel     = null!;
+        private InferenceEngine     _dagEngine    = null!;
+        private float[]             _input        = null!;
+        private float[]             _output       = null!;
 
         [GlobalSetup]
         public void Setup()
         {
-            _input = new float[InputSize];
+            _input  = new float[InputSize];
             _output = new float[OutputSize];
 
             var rng = new Random(42);
