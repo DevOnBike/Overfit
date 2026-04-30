@@ -16,45 +16,13 @@ namespace DevOnBike.Overfit.Ops
         // SOFTMAX CROSS ENTROPY
         // ====================================================================
 
-        public static AutogradNode SoftmaxCrossEntropy(ComputationGraph graph, AutogradNode logits, AutogradNode target)
-        {
-            int rows = logits.Shape.D0, cols = logits.Shape.D1;
-            var total = 0f;
-
-            var probsNode = AllocateNode(graph, new TensorShape(rows, cols), false, clearMemory: false);
-
-            var inS = logits.DataView.AsReadOnlySpan();
-            var targetS = target.DataView.AsReadOnlySpan();
-            var probS = probsNode.DataView.AsSpan();
-
-            for (var r = 0; r < rows; r++)
-            {
-                var pR = probS.Slice(r * cols, cols);
-                TensorPrimitives.SoftMax(inS.Slice(r * cols, cols), pR);
-                var tR = targetS.Slice(r * cols, cols);
-                for (var c = 0; c < cols; c++)
-                {
-                    if (tR[c] > 0.5f)
-                    {
-                        total -= MathF.Log(MathF.Max(pR[c], 1e-7f));
-                    }
-                }
-            }
-
-            var output = AllocateNode(graph, new TensorShape(1), logits.RequiresGrad, clearMemory: false);
-            output.DataView.AsSpan()[0] = total / rows;
-
-            if (logits.RequiresGrad)
-            {
-                graph?.Record(OpCode.SoftmaxCrossEntropy, output, logits, target, c0: probsNode, contextCount: 1);
-            }
-            else
-            {
-                probsNode.Dispose();
-            }
-
-            return output;
-        }
+        /// <summary>Compatibility shim — delegates to <see cref="ComputationGraph.SoftmaxCrossEntropy"/> (PR5-7c).</summary>
+        public static AutogradNode SoftmaxCrossEntropy(
+            ComputationGraph graph, AutogradNode logits, AutogradNode target)
+            => graph != null
+                ? graph.SoftmaxCrossEntropy(logits, target)
+                : throw new InvalidOperationException(
+                    "SoftmaxCrossEntropy requires an active ComputationGraph (graph cannot be null).");
 
         public static void SoftmaxCrossEntropyBackward(AutogradNode logits, AutogradNode target, AutogradNode output, AutogradNode probsNode)
         {

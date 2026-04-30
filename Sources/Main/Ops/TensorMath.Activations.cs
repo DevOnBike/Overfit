@@ -16,20 +16,11 @@ namespace DevOnBike.Overfit.Ops
         // RELU
         // ====================================================================
 
+        /// <summary>Compatibility shim — delegates to <see cref="ComputationGraph.Relu"/> (PR5-7b).</summary>
         public static AutogradNode ReLU(ComputationGraph graph, AutogradNode input)
-        {
-            var output = AllocateNode(graph, input.Shape, input.RequiresGrad, clearMemory: false);
-
-            // Używamy naszego zoptymalizowanego Kernela!
-            TensorKernels.Relu(input.DataView.AsReadOnlySpan(), output.DataView.AsSpan());
-
-            if (output.RequiresGrad)
-            {
-                graph?.Record(OpCode.ReLU, output, input);
-            }
-
-            return output;
-        }
+            => graph != null
+                ? graph.Relu(input)
+                : ComputationGraph.ReluOp(null, input);
 
         public static void ReluBackward(AutogradNode input, AutogradNode output)
         {

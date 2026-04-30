@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Ops;
+using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.Autograd
@@ -13,9 +14,21 @@ namespace DevOnBike.Overfit.Autograd
         /// <summary>
         /// Rectified Linear Unit: output[i] = max(0, input[i]).
         /// </summary>
+        /// <summary>
+        /// ReLU activation: output[i] = max(0, input[i]).
+        /// PR5-7b: implementation moved from TensorMath.ReLU.
+        /// </summary>
         public AutogradNode Relu(AutogradNode input)
         {
-            return TensorMath.ReLU(this, input);
+            var output = CreateTemporary(input.Shape, input.RequiresGrad, clearMemory: false);
+            TensorKernels.Relu(input.DataView.AsReadOnlySpan(), output.DataView.AsSpan());
+
+            if (input.RequiresGrad)
+            {
+                Record(OpCode.ReLU, output, input);
+            }
+
+            return output;
         }
 
         /// <summary>

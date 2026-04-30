@@ -4,7 +4,12 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Numerics.Tensors;
+using System.Threading.Tasks;
+using DevOnBike.Overfit.Kernels;
+using DevOnBike.Overfit.Intrinsics;
+using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Ops;
+using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.Autograd
@@ -15,11 +20,56 @@ namespace DevOnBike.Overfit.Autograd
         // Instance methods — use when graph is guaranteed non-null (training)
         // ─────────────────────────────────────────────────────────────────
 
+        /// <summary>
+        /// Fully-connected linear transformation: output = input @ W + b
+        /// PR5-7a: implementation moved from TensorMath.Linear.
+        /// </summary>
         public AutogradNode Linear(
             AutogradNode input,
             AutogradNode weights,
             AutogradNode bias)
-            => TensorMath.Linear(this, input, weights, bias);
+        {
+            int N = input.Shape.D0, K = input.Shape.D1, M = weights.Shape.D1;
+            var requiresGrad = input.RequiresGrad || weights.RequiresGrad || bias.RequiresGrad;
+            var output = CreateTemporary(new TensorShape(N, M), requiresGrad, clearMemory: false);
+
+            var outS  = output.DataView.AsSpan();
+            var inS   = input.DataView.AsReadOnlySpan();
+            var wS    = weights.DataView.AsReadOnlySpan();
+            var biasS = bias.DataView.AsReadOnlySpan();
+
+            LinearKernels.InitWithBias(outS, biasS, N, M);
+
+            if ((long)N * K * M < LinearKernels.ForwardBatchedThreshold)
+            {
+                LinearKernels.ForwardBatched(inS, wS, outS, N, K, M);
+            }
+            else
+            {
+                Parallel.For(0, N, OverfitParallel.Options, i =>
+                {
+                    var rC  = output.DataView.AsSpan().Slice(i * M, M);
+                    var rA  = input.DataView.AsReadOnlySpan().Slice(i * K, K);
+                    var wS2 = weights.DataView.AsReadOnlySpan();
+
+                    for (var k = 0; k < K; k++)
+                    {
+                        var aVal = rA[k];
+                        if (aVal != 0f)
+                        {
+                            Intrinsics.Simd.MulAdd(wS2.Slice(k * M, M), aVal, rC);
+                        }
+                    }
+                });
+            }
+
+            if (requiresGrad)
+            {
+                Record(OpCode.Linear, output, input, weights, c0: bias, contextCount: 1);
+            }
+
+            return output;
+        }
 
         public AutogradNode Add(AutogradNode left, AutogradNode right)
             => TensorMath.Add(this, left, right);
@@ -49,12 +99,44 @@ namespace DevOnBike.Overfit.Autograd
             AutogradNode input,
             AutogradNode weights,
             AutogradNode bias)
-            => TensorMath.Linear(graph!, input, weights, bias);
+        {
+            if (graph != null)
+            {
+                return graph.Linear(input, weights, bias);
+            }
+
+            // Inference path (graph == null): standalone allocation, no tape.
+            int N = input.Shape.D0, K = input.Shape.D1, M = weights.Shape.D1;
+            var storage = new TensorStorage<float>(N * M, clearMemory: false);
+            var output = AutogradNode.CreateBorrowed(storage, new TensorShape(N, M));
+
+            LinearKernels.InitWithBias(
+                output.DataView.AsSpan(),
+                bias.DataView.AsReadOnlySpan(), N, M);
+
+            LinearKernels.ForwardBatched(
+                input.DataView.AsReadOnlySpan(),
+                weights.DataView.AsReadOnlySpan(),
+                output.DataView.AsSpan(), N, K, M);
+
+            return output;
+        }
 
         internal static AutogradNode ReluOp(
             ComputationGraph? graph,
             AutogradNode input)
-            => TensorMath.ReLU(graph!, input);
+        {
+            if (graph != null)
+            {
+                return graph.Relu(input);
+            }
+
+            // Inference path: standalone allocation.
+            var storage = new TensorStorage<float>(input.Shape.Size, clearMemory: false);
+            var output = AutogradNode.CreateBorrowed(storage, input.Shape);
+            TensorKernels.Relu(input.DataView.AsReadOnlySpan(), output.DataView.AsSpan());
+            return output;
+        }
 
         internal static AutogradNode Conv2DOp(
             ComputationGraph? graph,

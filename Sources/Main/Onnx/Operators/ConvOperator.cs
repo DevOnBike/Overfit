@@ -54,16 +54,19 @@ namespace DevOnBike.Overfit.Onnx.Operators
                     $"Conv dilations=[{string.Join(",", dilations)}]: dilated conv not yet supported.");
             }
 
-            if (strides.Any(sv => sv != 1))
+            // Validate stride: square stride only
+            if (strides[0] != strides[1])
             {
                 throw new NotSupportedException(
-                    $"Conv strides=[{string.Join(",", strides)}]: stride != 1 not yet supported.");
+                    $"Conv: non-square strides [{strides[0]},{strides[1]}] not supported.");
             }
 
-            if (pads.Any(pv => pv != 0))
+            // Validate padding: symmetric (top==bottom, left==right, top==left for square kernel)
+            // ONNX pads format: [pad_top, pad_left, pad_bottom, pad_right]
+            if (pads.Length == 4 && (pads[0] != pads[2] || pads[1] != pads[3]))
             {
                 throw new NotSupportedException(
-                    $"Conv pads=[{string.Join(",", pads)}]: padding != 0 not yet supported.");
+                    $"Conv: asymmetric padding [{string.Join(",", pads)}] not supported.");
             }
 
             // Weight tensor: [outC, inC, kH, kW]
@@ -101,7 +104,10 @@ namespace DevOnBike.Overfit.Onnx.Operators
 
             int h = inputShape[2], w = inputShape[3];
 
-            var layer = new ConvLayer(inC, outC, h, w, kH);
+            var padding = pads.Length >= 1 ? (int)pads[0] : 0;
+            var stride  = strides.Length >= 1 ? (int)strides[0] : 1;
+
+            var layer = new ConvLayer(inC, outC, h, w, kH, padding, stride);
 
             // Third input is per-channel bias (optional but common in PyTorch exports)
             if (node.Inputs.Count >= 3 && !string.IsNullOrEmpty(node.Inputs[2])
@@ -115,9 +121,9 @@ namespace DevOnBike.Overfit.Onnx.Operators
                 layer.LoadParameters(kernelData);
             }
 
-            // VALID convolution output size
-            int outH = h - kH + 1;
-            int outW = w - kW + 1;
+            // General output size with padding and stride
+            int outH = (h + 2 * padding - kH) / stride + 1;
+            int outW = (w + 2 * padding - kW) / stride + 1;
             shapes.SetShape(node.Outputs[0], [inputShape[0], outC, outH, outW]);
 
             return layer;

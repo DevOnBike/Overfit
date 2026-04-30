@@ -26,35 +26,55 @@ namespace DevOnBike.Overfit.DeepLearning
         private readonly int _inputSize;
         private readonly int _outputSize;
         private readonly int _kernelSizePerOutput;
+        private readonly int _padding;
+        private readonly int _stride;
 
         // Cached kernel view node — created once, eliminates per-batch heap allocation.
         private AutogradNode? _kernelsNode;
 
+        /// <summary>
+        /// Creates a ConvLayer with padding=0, stride=1 (VALID convolution).
+        /// </summary>
         public ConvLayer(
             int inChannels,
             int outChannels,
             int h,
             int w,
             int kSize)
+            : this(inChannels, outChannels, h, w, kSize, padding: 0, stride: 1)
+        {
+        }
+
+        /// <summary>
+        /// Creates a ConvLayer with explicit padding and stride.
+        /// Enables SAME-style convolution (padding = kSize/2) and strided convolution.
+        /// </summary>
+        public ConvLayer(
+            int inChannels,
+            int outChannels,
+            int h,
+            int w,
+            int kSize,
+            int padding,
+            int stride)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(inChannels);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(outChannels);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(h);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(w);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(kSize);
-
-            if (kSize > h || kSize > w)
-            {
-                throw new ArgumentException("Kernel size cannot be larger than input spatial dimensions.");
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(stride);
+            ArgumentOutOfRangeException.ThrowIfNegative(padding);
 
             _inC = inChannels;
             _outC = outChannels;
             _h = h;
             _w = w;
             _k = kSize;
-            _outH = h - kSize + 1;
-            _outW = w - kSize + 1;
+            _padding = padding;
+            _stride = stride;
+            _outH = (h + 2 * padding - kSize) / stride + 1;
+            _outW = (w + 2 * padding - kSize) / stride + 1;
             _inputSize = inChannels * h * w;
             _outputSize = outChannels * _outH * _outW;
             _kernelSizePerOutput = inChannels * kSize * kSize;
@@ -132,19 +152,13 @@ namespace DevOnBike.Overfit.DeepLearning
         public IEnumerable<AutogradNode> Parameters()
         {
             yield return Kernels.AsNode();
-            if (Bias != null)
-            {
-                yield return Bias.AsNode();
-            }
+            if (Bias != null) yield return Bias.AsNode();
         }
 
         public IEnumerable<Parameter> TrainableParameters()
         {
             yield return Kernels;
-            if (Bias != null)
-            {
-                yield return Bias;
-            }
+            if (Bias != null) yield return Bias;
         }
 
         public void Save(BinaryWriter bw)
@@ -224,13 +238,20 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
-            Conv2DKernels.ForwardValidNchw(
-                input,
-                Kernels.DataReadOnlySpan,
-                output,
-                _inC, _outC, _h, _w, _k);
+            if (_padding == 0 && _stride == 1)
+            {
+                Conv2DKernels.ForwardValidNchw(
+                    input, Kernels.DataReadOnlySpan, output,
+                    _inC, _outC, _h, _w, _k);
+            }
+            else
+            {
+                Conv2DKernels.ForwardNchw(
+                    input, Kernels.DataReadOnlySpan, output,
+                    batchSize: 1, _inC, _outC, _h, _w, _k,
+                    _padding, _stride);
+            }
 
-            // Apply per-channel bias if present
             if (Bias != null)
             {
                 ApplyBiasNchw(output, Bias.DataReadOnlySpan, _outC, _outH, _outW);

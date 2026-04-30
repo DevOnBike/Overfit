@@ -21,28 +21,31 @@ namespace DevOnBike.Overfit.Onnx.Operators
         {
             return node.OpType switch
             {
-                "Gemm"             => GemmOperator.Build(node, initializers, shapeContext),
-                "Relu"             => ReluOperator.Build(node, initializers, shapeContext),
-                "MaxPool"          => MaxPoolOperator.Build(node, initializers, shapeContext),
-                "Conv"             => ConvOperator.Build(node, initializers, shapeContext),
-                "Reshape"          => ReshapeOperator.Build(node, initializers, shapeContext),
-                "Flatten"          => ReshapeOperator.Build(node, initializers, shapeContext),
+                "Gemm"              => GemmOperator.Build(node, initializers, shapeContext),
+                "Relu"              => ReluOperator.Build(node, initializers, shapeContext),
+                "MaxPool"           => MaxPoolOperator.Build(node, initializers, shapeContext),
+                "Conv"              => ConvOperator.Build(node, initializers, shapeContext),
+                "Reshape"           => ReshapeOperator.Build(node, initializers, shapeContext),
+                "Flatten"           => ReshapeOperator.Build(node, initializers, shapeContext),
+                "Tanh"              => TanhOperator.Build(node, initializers, shapeContext),
+                "Sigmoid"           => SigmoidOperator.Build(node, initializers, shapeContext),
+                "Softmax"           => SoftmaxOperator.Build(node, initializers, shapeContext),
+                "GlobalAveragePool" => GlobalAveragePoolOperator.Build(node, initializers, shapeContext),
 
                 // True no-ops
-                "Identity"         => null,
-                "Dropout"          => null, // eval-mode dropout is identity
+                "Identity"          => null,
+                "Dropout"           => null, // eval-mode dropout is identity
 
-                // Operators on the supported list but not yet wired
-                "GlobalAveragePool" or "AveragePool" or
-                "BatchNormalization" or
-                "Sigmoid" or "Tanh" or "Softmax" =>
+                // Operators known to be planned but not yet wired
+                "AveragePool" or "BatchNormalization" =>
                     throw new NotImplementedException(
                         $"ONNX operator '{node.OpType}' is planned but not yet implemented. " +
                         "See ONNX_IMPLEMENTATION_PLAN.md."),
 
                 _ => throw new NotSupportedException(
                     $"Unsupported ONNX operator: '{node.OpType}'. " +
-                    "Supported: Conv, Gemm, Relu, MaxPool, Reshape, Flatten.")
+                    "Supported: Conv, Gemm, Relu, MaxPool, Reshape, Flatten, " +
+                    "Tanh, Sigmoid, Softmax, GlobalAveragePool.")
             };
         }
     }

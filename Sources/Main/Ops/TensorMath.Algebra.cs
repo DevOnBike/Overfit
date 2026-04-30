@@ -362,58 +362,18 @@ namespace DevOnBike.Overfit.Ops
         // LINEAR
         // ====================================================================
 
-        public static AutogradNode Linear(ComputationGraph graph, AutogradNode input, AutogradNode weights, AutogradNode bias)
-        {
-            int N = input.Shape.D0, K = input.Shape.D1, M = weights.Shape.D1;
-
-            var requiresGrad = input.RequiresGrad || weights.RequiresGrad || bias.RequiresGrad;
-            var output = AllocateNode(graph, new TensorShape(N, M), requiresGrad, clearMemory: false);
-
-            var outS    = output.DataView.AsSpan();
-            var inS     = input.DataView.AsReadOnlySpan();
-            var wS      = weights.DataView.AsReadOnlySpan();
-            var biasS   = bias.DataView.AsReadOnlySpan();
-            var ops     = (long)N * K * M;
-
-            // Initialise output with bias (all paths share this step).
-            LinearKernels.InitWithBias(outS, biasS, N, M);
-
-            if (ops < LinearKernels.ForwardBatchedThreshold)
-            {
-                // Small matrix: weight-stationary sequential outer product.
-                // No zero-skipping → no branch mispredictions on post-ReLU sparse activations.
-                // TensorPrimitives.MultiplyAdd uses AVX-512 FMA automatically.
-                LinearKernels.ForwardBatched(inS, wS, outS, N, K, M);
-            }
-            else
-            {
-                // Large matrix (post-ReLU, ~50% sparse): zero-skipping is worth the branch cost.
-                // Parallel.For over N rows. Span<T> cannot be captured in lambda (ref struct),
-                // so we use DataView which boxes to heap-side span — safe inside the closure.
-                Parallel.For(0, N, OverfitParallel.Options, i =>
-                {
-                    var rC  = output.DataView.AsSpan().Slice(i * M, M);
-                    var rA  = input.DataView.AsReadOnlySpan().Slice(i * K, K);
-                    var wS2 = weights.DataView.AsReadOnlySpan();
-
-                    for (var k = 0; k < K; k++)
-                    {
-                        var aVal = rA[k];
-                        if (aVal != 0f)
-                        {
-                            Simd.MulAdd(wS2.Slice(k * M, M), aVal, rC);
-                        }
-                    }
-                });
-            }
-
-            if (output.RequiresGrad)
-            {
-                graph?.Record(OpCode.Linear, output, input, weights, c0: bias, contextCount: 1);
-            }
-
-            return output;
-        }
+        /// <summary>
+        /// Compatibility shim — delegates to <see cref="ComputationGraph.Linear"/> (PR5-7a).
+        /// Implementation lives in ComputationGraph.Linear.cs.
+        /// </summary>
+        public static AutogradNode Linear(
+            ComputationGraph graph,
+            AutogradNode input,
+            AutogradNode weights,
+            AutogradNode bias)
+            => graph != null
+                ? graph.Linear(input, weights, bias)
+                : ComputationGraph.LinearOp(null, input, weights, bias);
 
         // Linear backward parallel threshold.
         // Below: use new sequential span-only kernels (zero TPL overhead).
