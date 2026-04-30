@@ -97,11 +97,26 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public bool IsTraining { get; private set; } = true;
 
-        public int InferenceInputSize => _inputSize;
+        public int InferenceInputSize
+        {
+            get
+            {
+                return _inputSize;
+            }
+        }
 
-        public int InferenceOutputSize => _outputSize;
+        public int InferenceOutputSize
+        {
+            get
+            {
+                return _outputSize;
+            }
+        }
 
-        public void Train() => IsTraining = true;
+        public void Train()
+        {
+            IsTraining = true;
+        }
 
         public void Eval()
         {

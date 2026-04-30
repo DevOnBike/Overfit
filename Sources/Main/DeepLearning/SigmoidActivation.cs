@@ -18,17 +18,30 @@ namespace DevOnBike.Overfit.DeepLearning
     {
         public bool IsTraining { get; private set; } = true;
 
-        public void Train() => IsTraining = true;
+        public void Train()
+        {
+            IsTraining = true;
+        }
 
-        public void Eval() => IsTraining = false;
+        public void Eval()
+        {
+            IsTraining = false;
+        }
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
-            => TensorMath.Sigmoid(graph, input);
+        {
+            return TensorMath.Sigmoid(graph, input);
+        }
 
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
-            => TensorPrimitives.Sigmoid(input, output);
+        {
+            TensorPrimitives.Sigmoid(input, output);
+        }
 
-        public IEnumerable<AutogradNode> Parameters() => [];
+        public IEnumerable<AutogradNode> Parameters()
+        {
+            return [];
+        }
 
         public void InvalidateParameterCaches() { }
 

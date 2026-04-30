@@ -26,8 +26,14 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public bool IsTraining { get; private set; } = true;
 
-        public void Train() => IsTraining = true;
-        public void Eval() => IsTraining = false;
+        public void Train()
+        {
+            IsTraining = true;
+        }
+        public void Eval()
+        {
+            IsTraining = false;
+        }
 
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
@@ -42,7 +48,10 @@ namespace DevOnBike.Overfit.DeepLearning
             return TensorMath.RepeatVector(graph, input, _seqLen);
         }
 
-        public IEnumerable<AutogradNode> Parameters() => [];
+        public IEnumerable<AutogradNode> Parameters()
+        {
+            return [];
+        }
 
         public void Save(BinaryWriter bw) { }
         public void Load(BinaryReader br) { }

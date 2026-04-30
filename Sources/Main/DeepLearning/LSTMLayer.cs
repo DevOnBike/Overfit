@@ -165,11 +165,26 @@ namespace DevOnBike.Overfit.DeepLearning
             return output;
         }
 
-        public IEnumerable<AutogradNode> Parameters() => _cell.Parameters();
-        public void InvalidateParameterCaches() => _cell.InvalidateParameterCaches();
-        public void Save(BinaryWriter bw) => _cell.Save(bw);
-        public void Load(BinaryReader br) => _cell.Load(br);
-        public void Dispose() => _cell.Dispose();
+        public IEnumerable<AutogradNode> Parameters()
+        {
+            return _cell.Parameters();
+        }
+        public void InvalidateParameterCaches()
+        {
+            _cell.InvalidateParameterCaches();
+        }
+        public void Save(BinaryWriter bw)
+        {
+            _cell.Save(bw);
+        }
+        public void Load(BinaryReader br)
+        {
+            _cell.Load(br);
+        }
+        public void Dispose()
+        {
+            _cell.Dispose();
+        }
         public void Save(string path) {}
         public void Load(string path) {}
     }

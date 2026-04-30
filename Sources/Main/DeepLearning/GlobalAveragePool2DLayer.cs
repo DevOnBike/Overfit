@@ -31,17 +31,39 @@ namespace DevOnBike.Overfit.DeepLearning
             _inputW   = inputW;
         }
 
-        public int InferenceInputSize  => _channels * _inputH * _inputW;
-        public int InferenceOutputSize => _channels;
+        public int InferenceInputSize
+        {
+            get
+            {
+                return _channels * _inputH * _inputW;
+            }
+        }
+
+        public int InferenceOutputSize
+        {
+            get
+            {
+                return _channels;
+            }
+        }
+
         public void PrepareInference() { }
 
         public bool IsTraining { get; private set; } = true;
 
-        public void Train() => IsTraining = true;
-        public void Eval()  => IsTraining = false;
+        public void Train()
+        {
+            IsTraining = true;
+        }
+        public void Eval()
+        {
+            IsTraining = false;
+        }
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
-            => ComputationGraph.GlobalAveragePool2DOp(graph, input, _channels, _inputH, _inputW);
+        {
+            return ComputationGraph.GlobalAveragePool2DOp(graph, input, _channels, _inputH, _inputW);
+        }
 
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
@@ -54,7 +76,10 @@ namespace DevOnBike.Overfit.DeepLearning
         }
 
         public void InvalidateParameterCaches() { }
-        public IEnumerable<AutogradNode> Parameters() => [];
+        public IEnumerable<AutogradNode> Parameters()
+        {
+            return [];
+        }
         public void Save(BinaryWriter bw) { }
         public void Load(BinaryReader br) { }
         public void Dispose() { }
