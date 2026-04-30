@@ -1,239 +1,318 @@
 # Overfit
 
-Overfit is a C# deep-learning and optimization engine focused on predictable CPU performance, explicit memory ownership and zero-allocation inference hot paths.
+Pure C# deep-learning and optimization engine. Predictable CPU performance, explicit memory ownership, zero-allocation inference hot paths.
 
-The current branch adds an ONNX import MVP: PyTorch-exported models can be loaded into Overfit's `Sequential` pipeline and executed through the allocation-free `InferenceEngine.Run(...)` path.
+No native binaries. No Python runtime. No ONNX Runtime dependency.
 
-## Current milestone
+---
 
-The current work validates three connected capabilities:
+## What it does
 
-1. **Zero-allocation CPU inference** for core Overfit inference paths.
-2. **ONNX import MVP** for a PyTorch-exported MNIST CNN.
-3. **Evolutionary optimization** paths with allocation-free strategy execution in the core `Ask` / `AskThenTell` loops.
+**Train in PyTorch or .NET. Load or build a model. Run predictable, allocation-free inference in .NET.**
 
-The product direction is simple:
+- **Zero-allocation CPU inference** — preallocated buffers, no per-call GC pressure, competitive with ONNX Runtime.
+- **ONNX import** — load PyTorch-exported models directly. 11 operators, branching DAGs (ResNet skip connections), output matches PyTorch within 1e-4.
+- **Evolutionary optimization** — allocation-free `Ask`/`AskThenTell` loops for black-box parameter search.
 
-> Train in Python or .NET. Import or build the model. Run predictable inference in .NET with explicit buffers and no per-call managed allocation.
+---
 
-## What works now
+## Quick start
 
-### Inference
-
-Overfit has a prepared inference path:
+### Inference — native model
 
 ```csharp
-engine.Run(input, output);
+using DevOnBike.Overfit.Inference;
+
+var model = new Sequential(
+    new LinearLayer(784, 128),
+    new ReluActivation(),
+    new LinearLayer(128, 10));
+
+model.Load("model.bin");
+model.Eval();
+
+using var engine = InferenceEngine.FromSequential(model, inputSize: 784, outputSize: 10);
+
+Span<float> input  = stackalloc float[784];
+Span<float> output = stackalloc float[10];
+engine.Run(input, output); // zero-allocation
 ```
 
-The caller owns input and output buffers. The engine owns reusable intermediate buffers. The inference hot path avoids `model.Forward(...)`, `AutogradNode`, `ComputationGraph` and per-call tensor allocation.
-
-### ONNX import MVP
-
-The ONNX importer currently targets a focused PyTorch export path:
-
-```text
-PyTorch eval-mode model
-  -> ONNX export
-  -> OnnxImporter.Load(...)
-  -> Sequential
-  -> InferenceEngine.Run(...)
-```
-
-Current MVP scope:
-
-```text
-Conv
-Relu
-MaxPool
-Reshape / Flatten
-Gemm
-FP32
-NCHW
-Linear Sequential topology
-Opset 11-20
-```
-
-Out of scope for the MVP:
-
-```text
-Branching DAGs / skip connections
-Grouped/depthwise convolutions
-Conv padding/stride beyond the supported fixture path
-BatchNormalization as a standalone training-mode op
-FP16 / INT8 / quantized models
-LSTM / GRU ONNX operators
-Full ONNX runtime compatibility
-```
-
-The goal is not to become a full ONNX Runtime replacement. The goal is a practical bridge:
-
-> Train in PyTorch. Export ONNX. Deploy through Overfit's predictable .NET inference path.
-
-### Evolutionary optimization
-
-Overfit also includes evolutionary optimization for black-box problems where gradients are unavailable, noisy or not the right abstraction.
-
-Typical use cases:
-
-```text
-Kubernetes resource/autoscaling tuning
-pricing or bidding strategy search
-inventory and replenishment optimization
-simulation/game AI parameter tuning
-industrial process parameter search
-```
-
-The strategy benchmarks validate allocation-free `Ask` and `AskThenTell` paths for the core population-search loop.
-
-## Verified benchmark environment
-
-Current benchmark results were collected on:
-
-```text
-AMD Ryzen 9 9950X3D
-Windows 11 25H2
-.NET 10.0.7
-BenchmarkDotNet 0.15.8
-```
-
-Performance numbers are hardware-specific. Treat them as a snapshot, not a universal guarantee.
-
-## Current benchmark snapshot
-
-### Single linear inference
-
-| Benchmark | Overfit | Comparison | Allocations |
-|---|---:|---:|---:|
-| Linear(784,10) single inference | ~250-300 ns/op | ONNX Runtime ~2.1-2.3 us/op | Overfit 0 B, ONNX 224 B |
-| Linear(784,10) throughput | ~253 ns/op | ONNX Runtime ~1.87 us/op | Overfit 0 B, ONNX 224 B |
-
-### Scaling
-
-| Model | Overfit | ONNX Runtime | Allocations |
-|---|---:|---:|---:|
-| Linear(64,10) | ~80 ns | ~1.39 us | Overfit 0 B, ONNX 224 B |
-| Linear(784,10) | ~210 ns | ~1.87 us | Overfit 0 B, ONNX 224 B |
-| Linear(4096,10) | ~1.08 us | ~3.74 us | Overfit 0 B, ONNX 224 B |
-
-### MLP and CNN inference
-
-| Benchmark | Overfit | ONNX Runtime / ML.NET | Allocations |
-|---|---:|---:|---:|
-| MLP 784->128->10 | ~3.7 us | ONNX ~5.2 us | Overfit 0 B, ONNX 224 B |
-| MLP 784->256->128->10 | ~10-12 us | ONNX ~10-11 us | Overfit 0 B, ONNX 224 B |
-| Small CNN | ~5-6.5 us | ONNX ~6-7.7 us | Overfit 0 B, ONNX 224 B |
-| ML.NET API-level 3-layer MLP | Overfit ~12.1 us | ML.NET ~10.1 us, ONNX ~11.2 us | Overfit 0 B, ML.NET ~4.5 KB, ONNX 224 B |
-
-### Imported ONNX MNIST CNN
-
-| Runtime | Result | Notes |
-|---|---:|---|
-| Overfit imported ONNX | ~7.5 us/op | BenchmarkDotNet, `InferenceEngine.Run(...)`, 0 B/op |
-| ONNX Runtime preallocated | ~7.5 us/op | BenchmarkDotNet, 224 B/op |
-| PyTorch eager CPU | ~27.3 us/op | Python reference script, 1 thread |
-
-Interpretation:
-
-> Overfit matches ONNX Runtime on the imported PyTorch MNIST CNN while keeping the .NET inference path allocation-free. The PyTorch number is an external reference script, not a BenchmarkDotNet result.
-
-### Concurrent inference
-
-| Benchmark | Overfit | ONNX Runtime |
-|---|---:|---:|
-| Concurrent single-sample inference | ~516 ms, 0 B | ~1811 ms, ~117 MB |
-
-This benchmark validates the zero-contention scenario where each worker owns its model, inference engine and buffers.
-
-### Batch scaling
-
-| Batch | Overfit | ONNX Runtime | Result |
-|---:|---:|---:|---|
-| 1 | ~286 ns, 0 B | ~1.9 us, 224 B | Overfit wins |
-| 16 | ~3.0 us, 0 B | ~3.7 us, 224 B | Overfit close / wins in this run |
-| 64 | ~14.4 us, 0 B | ~7.2 us, 224 B | ONNX wins |
-| 256 | ~47.4 us, 0 B | ~23.4 us, 224 B | ONNX wins |
-
-The current Overfit batch path is allocation-free but still behaves like repeated sample inference. ONNX wins at larger batches through batched GEMM. The next performance target is a batched linear kernel.
-
-### Training
-
-| Benchmark | Mean | Allocations | Notes |
-|---|---:|---:|---|
-| TrainingEngine MLP TrainBatch | ~468 us | ~26.8 KB | Training allocations are allowed; trend benchmark only |
-
-Training is not currently documented as zero-allocation. Training benchmarks are used for performance trends, not allocation gates.
-
-## ONNX importer usage
+### Inference — ONNX import (linear topology)
 
 ```csharp
 using DevOnBike.Overfit.Onnx;
 using DevOnBike.Overfit.Inference;
 
-var model = OnnxImporter.Load("mnist_cnn.onnx");
+var model = OnnxImporter.Load("classifier.onnx"); // .data file resolved automatically
 model.Eval();
 
-using var engine = InferenceEngine.FromSequential(
+using var engine = InferenceEngine.FromSequential(model, inputSize: 784, outputSize: 10);
+var prediction = engine.Predict(input); // ReadOnlySpan<float>, 0 B
+```
+
+### Inference — ONNX import (DAG topology — ResNet, skip connections)
+
+```csharp
+using DevOnBike.Overfit.Onnx;
+using DevOnBike.Overfit.Inference;
+
+// OnnxGraphImporter handles branching graphs: skip connections, residual blocks.
+// OnnxImporter (above) requires linear topology and is faster for simple models.
+var dagModel = OnnxGraphImporter.Load("resnet.onnx", inputSize: 784, outputSize: 10);
+dagModel.Eval();
+
+var backend = new OnnxGraphInferenceBackend(dagModel);
+using var engine = InferenceEngine.FromBackend(backend);
+var prediction = engine.Predict(input); // ReadOnlySpan<float>, 0 B
+```
+
+### Training
+
+```csharp
+using var conv  = new ConvLayer(1, 8, 28, 28, 3);
+using var fcHid = new LinearLayer(1352, 64);
+using var fcOut = new LinearLayer(64, 10);
+
+// Optimizers accept Parameter directly (Etap 6 API)
+using var optimizer = new Adam(
+    conv.TrainableParameters()
+        .Concat(fcHid.TrainableParameters())
+        .Concat(fcOut.TrainableParameters()),
+    learningRate: 0.001f) { UseAdamW = true };
+
+using var graph = new ComputationGraph();
+
+for (var batch = 0; batch < batches; batch++)
+{
+    graph.Reset();
+    optimizer.ZeroGrad();
+
+    using var h  = conv.Forward(graph, input);
+    using var a  = graph.Relu(h);
+    using var p  = graph.MaxPool2D(a, 8, 26, 26, 2);
+    using var pF = graph.Reshape(p, batchSize, 1352);
+    using var hH = fcHid.Forward(graph, pF);
+    using var hA = graph.Relu(hH);
+    using var lo = fcOut.Forward(graph, hA);
+
+    using var loss = graph.SoftmaxCrossEntropy(lo, target);
+    graph.Backward(loss);
+    optimizer.Step();
+}
+```
+
+---
+
+## Benchmark snapshot
+
+Machine: AMD Ryzen 9 9950X3D · Windows 11 25H2 · .NET 10.0.7 · BenchmarkDotNet 0.15.8
+
+### Single inference — Overfit vs ONNX Runtime
+
+| Method | Mean | Allocated | vs ONNX Runtime |
+|--------|-----:|----------:|----------------:|
+| **Overfit `InferenceEngine`** | **201.6 ns** | **0 B** | **9.2× faster** |
+| ONNX Runtime (pre-allocated) | 1 853 ns | 224 B | baseline |
+| ONNX Runtime (standard) | 3 369 ns | 952 B | 0.55× |
+
+Model: Linear(784→10). Overfit is **9.2× faster** than ONNX Runtime pre-allocated path, **16.7× faster** than standard path, with zero managed allocations.
+
+### DAG inference — ResNet-style model with skip connections
+
+| Method | Mean | Allocated |
+|--------|-----:|----------:|
+| `OnnxGraphModel.RunInference` (direct) | ~0.9–2.1 µs | **0 B** |
+| `InferenceEngine.FromBackend` (via engine) | ~0.9–2.1 µs | **0 B** |
+
+Model: TinyResNet — Linear(8→8) + skip + Linear(8→4). Both paths: zero allocations.
+Bimodal distribution due to model size (sub-µs math, timer resolution dominates).
+
+### CNN training throughput (60k MNIST, batch=64)
+
+| Epoch | Time | Alloc/epoch | Notes |
+|------:|-----:|------------:|-------|
+| 1 | ~1.7 s | ~32 MB | JIT warmup |
+| 2–5 | **~800 ms** | **~26 MB** | steady state |
+
+Training allocations from autograd graph temporaries — expected.
+Inference path: zero allocations. Live managed memory delta per epoch: **−0.01 MB** (zero leak).
+
+### Concurrent inference (8 threads × 1 000 calls each)
+
+| Method | Mean | Allocated | vs ONNX Runtime |
+|--------|-----:|----------:|----------------:|
+| **Overfit (concurrent)** | **637.8 ms** | **0 B** | **3.0× faster** |
+| ONNX Runtime (concurrent) | 1 916.7 ms | 117 MB | baseline |
+
+Overfit scales linearly — no shared mutable state, no lock contention.
+ONNX Runtime allocates 117 MB of managed memory under concurrent load (Gen0 GC pressure).
+
+---
+
+## ONNX import
+
+```
+PyTorch model (eval mode)
+  → torch.onnx.export(..., opset_version=17)
+  → OnnxImporter.Load("model.onnx")     # .data file auto-resolved
+  → Sequential
+  → InferenceEngine.Run(input, output)  # zero-allocation
+```
+
+### Supported operators
+
+| ONNX operator | Maps to | Notes |
+|---------------|---------|-------|
+| `Conv` | `ConvLayer` | 2D, NCHW, symmetric padding, any stride |
+| `Gemm` | `LinearLayer` | `transB=1` handled automatically |
+| `Relu` | `ReluActivation` | |
+| `Tanh` | `TanhActivation` | |
+| `Sigmoid` | `SigmoidActivation` | |
+| `Softmax` | `SoftmaxActivation` | axis=-1 only |
+| `MaxPool` | `MaxPool2DLayer` | Square kernel, stride = kernel |
+| `GlobalAveragePool` | `GlobalAveragePool2DLayer` | 2D, NCHW |
+| `BatchNormalization` | `BatchNorm1D` | eval mode (training_mode=0) |
+| `Add` | `OnnxAddLayer` | Element-wise; used for skip connections |
+| `Reshape` / `Flatten` | `FlattenLayer` | Rank reduction (4D→2D) |
+| `Identity` / `Dropout` | _(no-op in eval mode)_ | |
+
+**12 operators** (+ 2 no-ops). Unsupported operators throw a clear `NotSupportedException` naming the operator.
+
+Two importers:
+- **`OnnxImporter`** — linear topology only. Faster for simple CNNs and MLPs.
+- **`OnnxGraphImporter`** — arbitrary DAG topology. Required for ResNet, DenseNet, EfficientNet (any model with skip connections or multiple inputs to a node).
+
+External `.data` files (PyTorch ≥ 2.x default) resolved automatically.
+No `Google.Protobuf` dependency.
+
+### PyTorch export
+
+```python
+model.eval()  # IMPORTANT: folds BatchNorm into Conv weights
+
+torch.onnx.export(
     model,
-    inputSize: 1 * 28 * 28,
-    outputSize: 10);
-
-var input = new float[1 * 28 * 28];
-var output = new float[10];
-
-engine.Run(input, output);
+    dummy_input,
+    "model.onnx",
+    opset_version=17,
+    export_params=True,
+)
 ```
 
-## Benchmark commands
+---
 
-```bash
-dotnet run -c Release --project Sources/Benchmark --filter "*SingleInferenceBenchmark*"
-dotnet run -c Release --project Sources/Benchmark --filter "*ScalingBenchmark*"
-dotnet run -c Release --project Sources/Benchmark --filter "*ThroughputBenchmark*"
-dotnet run -c Release --project Sources/Benchmark --filter "*BatchScalingBenchmark*"
-dotnet run -c Release --project Sources/Benchmark --filter "*OnnxLinearInferenceBenchmarks*"
-dotnet run -c Release --project Sources/Benchmark --filter "*OnnxMlpInferenceBenchmarks*"
-dotnet run -c Release --project Sources/Benchmark --filter "*MultiLayerInferenceBenchmark*"
-dotnet run -c Release --project Sources/Benchmark --filter "*OnnxCnnInferenceBenchmarks*"
-dotnet run -c Release --project Sources/Benchmark --filter "*ImportedOnnxMnistCnnBenchmark*"
-dotnet run -c Release --project Sources/Benchmark --filter "*MLNetSingleInferenceBenchmark*"
-dotnet run -c Release --project Sources/Benchmark --filter "*ConcurrentInferenceBenchmark*"
-dotnet run -c Release --project Sources/Benchmark --filter "*TrainingEngineBenchmarks*"
+## Architecture
+
+```
+InferenceEngine          ← zero-alloc inference facade (caller-owned buffers)
+Sequential               ← module composition
+Layers                   ← Conv, Linear, ReLU, Tanh, Sigmoid, Softmax,
+                           BatchNorm, MaxPool, GlobalAveragePool, Flatten, LSTM
+ComputationGraph         ← autograd tape + backward
+  graph.Linear(...)      ← operation facade (PR5 Etap 1)
+  graph.Conv2D(...)
+  graph.Relu(...)
+  graph.SoftmaxCrossEntropy(...)
+AutogradNodeOwnership    ← lifecycle metadata: Parameter / GraphTemporary /
+                           GraphAuxiliary / ExternalBorrowed / View
+Parameter                ← long-lived trainable state, owns Data + Grad storage
+  layer.TrainableParameters()  ← preferred API for optimizers (Etap 6)
+Kernels                  ← pure Span-based math, no AutogradNode
+  LinearKernels          ← Forward, ForwardBatched, BackwardInput,
+                           AccumulateWeightGrad, AccumulateBiasGrad
+  PoolingKernels         ← MaxPool pool=2 SIMD fast path
+TensorStorage<T>         ← unmanaged memory ownership
+Optimizers               ← Adam(IEnumerable<Parameter>), SGD(IEnumerable<Parameter>)
+OnnxImporter             ← PyTorch ONNX → Sequential (linear topology)
+OnnxGraphImporter        ← PyTorch ONNX → OnnxGraphModel (DAG topology, skip connections)
 ```
 
-PyTorch reference benchmark:
+### Autograd ownership
 
-```bash
-python Tests/benchmark_pytorch_mnist_cnn.py --fixture-dir Tests/test_fixtures --threads 1
+Every `AutogradNode` carries an `Ownership` tag set at creation:
+
+| Ownership | Who disposes | Example |
+|-----------|-------------|---------|
+| `GraphTemporary` | `graph.Reset()` | ReLU output, hidden activations |
+| `GraphAuxiliary` | `graph.Reset()` | MaxPool index map, Softmax probs |
+| `Parameter` | Layer `Dispose()` | `LinearLayer.Weights`, `ConvLayer.Kernels` |
+| `ExternalBorrowed` | Caller | Preallocated input/target batch buffers |
+| `View` | Never (no storage) | `FlattenLayer` output |
+
+`graph.Reset()` disposes by ownership — no hardcoded switch on `OpCode`.
+
+---
+
+## Evolutionary optimization
+
+```csharp
+var strategy = new OpenAIESStrategy(populationSize: 1024, sigma: 0.1f);
+var candidates = strategy.Ask();      // 0 B allocation
+strategy.Tell(fitnesses);
 ```
 
-## Benchmark policy
+Use cases: Kubernetes tuning, game AI, industrial process search, pricing strategy.
 
-- Keep zero-allocation claims scoped to measured `InferenceEngine.Run(...)` paths.
-- Do not use `model.Forward(...)`, `AutogradNode`, `TensorStorage` or `ComputationGraph` inside inference benchmark methods.
-- Use `OperationsPerInvoke` for nanosecond/microsecond benchmark methods.
-- Treat `MinIterationTime` as a benchmark defect unless explicitly justified.
-- Name ONNX methods `PreAllocated` when ONNX still reports wrapper allocation.
-- Use ranges when jitter or multimodal distributions are visible.
-- Do not claim Overfit is always faster. The current positioning is predictable zero-allocation inference.
+---
 
-## Current roadmap
+## Requirements
 
-1. Finalize ONNX import MVP docs and tests.
-2. Keep inference benchmark suite clean and tied to `InferenceEngine.Run(...)`.
-3. Implement batched linear kernels for batch 64/256 workloads.
-4. Continue graph/autograd ownership cleanup: separate parameters, temporaries, storage and views.
-5. Keep training benchmarks as trend benchmarks.
-6. Expand ONNX support only after MVP is stable.
+- .NET 10+
+- No native dependencies
+- No Python runtime
+- Native AOT compatible
 
-## Business-level positioning
+---
 
-Fast is useful. Predictable is more useful.
+## Roadmap
 
-Overfit is aimed at .NET systems where inference is part of the request path and latency spikes, GC pressure and memory churn matter. The practical story is:
+### Recently completed
 
-```text
-Train in PyTorch or .NET.
-Deploy in .NET.
-Run with explicit buffers and predictable allocation behavior.
-```
+- ✅ **ONNX import — 12 operators** (Conv w/padding+stride, Gemm, ReLU, Tanh, Sigmoid, Softmax, MaxPool, GlobalAveragePool, BatchNormalization, Add, Reshape, Flatten)
+- ✅ **ONNX DAG runtime** — `OnnxGraphImporter` supports branching topology (skip connections, residual blocks). Enables ResNet-style models. Zero-allocation inference via `OnnxGraphInferenceBackend`.
+- ✅ **AveragePool + ReduceMean** — windowed average pooling with padding/stride; `ReduceMean` mapped to GlobalAveragePool (PyTorch `AdaptiveAvgPool2d` export pattern). Total: **14 ONNX operators**.
+- ✅ **PR5 Autograd ownership cleanup** — `Parameter` type, `AutogradNodeOwnership` enum, `graph.Reset()` by ownership, all layers migrated (LinearLayer, ConvLayer, BatchNorm1D)
+- ✅ **Optimizers on `Parameter`** — `Adam(IEnumerable<Parameter>)`, `SGD(IEnumerable<Parameter>)`
+- ✅ **PERF-1: Linear backward kernels** — hybrid threshold eliminates `Parallel.For` overhead for small matrices; backward alloc −43% (23 MB → 13 MB per epoch)
+- ✅ **BATCHED-1: `LinearKernels.ForwardBatched`** — weight-stationary outer product for small matrices, no zero-skipping branch mispredictions
+- ✅ **MaxPool pool=2 SIMD** — `TensorPrimitives.Max` fast path, 659 µs vs 815 µs baseline
+
+### Near-term
+
+- **PR5-7d/e** — Move Conv2D/MaxPool2D into `ComputationGraph.*` (architectural cleanup, zero user impact)
+- **ONNX: LSTM/GRU operators** — enables recurrent model import
+- **Depthwise Conv** (group=channels) — MobileNet-style models
+
+### Transformer path (toward GPT-1)
+
+Building GPT-1 (117M params, decoder-only Transformer) requires these components in order:
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| `LayerNorm` | ❌ | Different from BatchNorm — normalises over features, not batch |
+| `Embedding` | ❌ | Token lookup + positional encoding |
+| `ScaledDotProductAttention` | ❌ | Core of every Transformer |
+| `MultiHeadAttention` | ❌ | Parallel attention heads |
+| Causal masking | ❌ | Upper-triangular mask for autoregressive generation |
+| Transformer block | ❌ | Attention + FFN + LayerNorm + residual (DAG ✅ already works) |
+| Tokenizer (BPE) | ❌ | Pre/post processing |
+| Gradient checkpointing | ❌ | Required for 117M params on single machine |
+
+**Distance estimate:** 5–7 new layer types + memory management changes. Estimated 3–4 months of focused work at current pace. The DAG runtime (skip connections) already handles residual blocks — that part is done.
+
+Overfit could run GPT-1 inference once the operator set is complete. Training at scale requires gradient checkpointing.
+
+### Long-term
+
+- Graph compilation / kernel fusion for fixed-shape models
+- Batched GEMM parallel path (unsafe fixed-pointer `Parallel.For`)
+- AOT compilation target
+
+---
+
+## What Overfit is not
+
+Not a PyTorch/TensorFlow replacement. Not GPU-first. Not transformer-scale first.
+
+The differentiator: pure C#, predictable allocation behaviour, competitive CPU inference for small/medium models where managed zero-allocation matters.

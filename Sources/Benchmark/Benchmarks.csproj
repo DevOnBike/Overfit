@@ -24,7 +24,7 @@
     </ItemGroup>
 
     <ItemGroup>
-        <None Update="benchmark_*.onnx;benchmark_*.bin">
+        <None Update="*.onnx;*.bin">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </None>
     </ItemGroup>

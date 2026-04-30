@@ -5,7 +5,6 @@
 
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
-using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
@@ -18,9 +17,15 @@ namespace DevOnBike.Overfit.DeepLearning
     {
         public bool IsTraining { get; private set; } = true;
 
-        public void Train() => IsTraining = true;
+        public void Train()
+        {
+            IsTraining = true;
+        }
 
-        public void Eval() => IsTraining = false;
+        public void Eval()
+        {
+            IsTraining = false;
+        }
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
@@ -38,7 +43,10 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void InvalidateParameterCaches() { }
 
-        public IEnumerable<AutogradNode> Parameters() => [];
+        public IEnumerable<AutogradNode> Parameters()
+        {
+            return [];
+        }
 
         public void Save(BinaryWriter bw) { }
 

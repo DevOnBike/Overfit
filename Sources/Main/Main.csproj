@@ -11,7 +11,7 @@
         <SourceRevisionId>N/A</SourceRevisionId>
         <InformationalVersion>$(Version)+$(SourceRevisionId)</InformationalVersion>
         <PackageId>DevOnBike.Overfit</PackageId>
-        <Version>10.0.13</Version>
+        <Version>10.0.14</Version>
         <Authors>DevOnBike</Authors>
         <Description>High-performance, zero-allocation machine learning and deep learning framework for .NET. Fully optimized for Native AOT, SIMD vectorization, and CPU inference. Includes MLP, ResNet architectures, and advanced data preprocessing pipelines.</Description>
         <PackageTags>machine-learning;deep-learning;neural-network;aot;native-aot;zero-allocation;simd;tensor;ai;csharp</PackageTags>
@@ -36,6 +36,7 @@
         <None Include="logo.png" Pack="true" PackagePath="\" />
         <None Include="README.md" Pack="true" PackagePath="\" />
         <InternalsVisibleTo Include="DevOnBike.Overfit.Tests" />
+		<InternalsVisibleTo Include="Benchmarks" />
     </ItemGroup>
 
     <ItemGroup>

@@ -8,6 +8,7 @@ using DevOnBike.Overfit.DeepLearning.Abstractions;
 using DevOnBike.Overfit.Kernels;
 using DevOnBike.Overfit.Maths;
 using DevOnBike.Overfit.Ops;
+using DevOnBike.Overfit.Parameters;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 
@@ -25,60 +26,97 @@ namespace DevOnBike.Overfit.DeepLearning
         private readonly int _inputSize;
         private readonly int _outputSize;
         private readonly int _kernelSizePerOutput;
+        private readonly int _padding;
+        private readonly int _stride;
 
+        // Cached kernel view node — created once, eliminates per-batch heap allocation.
+        private AutogradNode? _kernelsNode;
+
+        /// <summary>
+        /// Creates a ConvLayer with padding=0, stride=1 (VALID convolution).
+        /// </summary>
         public ConvLayer(
             int inChannels,
             int outChannels,
             int h,
             int w,
             int kSize)
+            : this(inChannels, outChannels, h, w, kSize, padding: 0, stride: 1)
+        {
+        }
+
+        /// <summary>
+        /// Creates a ConvLayer with explicit padding and stride.
+        /// Enables SAME-style convolution (padding = kSize/2) and strided convolution.
+        /// </summary>
+        public ConvLayer(
+            int inChannels,
+            int outChannels,
+            int h,
+            int w,
+            int kSize,
+            int padding,
+            int stride)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(inChannels);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(outChannels);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(h);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(w);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(kSize);
-
-            if (kSize > h || kSize > w)
-            {
-                throw new ArgumentException("Kernel size cannot be larger than input spatial dimensions.");
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(stride);
+            ArgumentOutOfRangeException.ThrowIfNegative(padding);
 
             _inC = inChannels;
             _outC = outChannels;
             _h = h;
             _w = w;
             _k = kSize;
-            _outH = h - kSize + 1;
-            _outW = w - kSize + 1;
+            _padding = padding;
+            _stride = stride;
+            _outH = (h + 2 * padding - kSize) / stride + 1;
+            _outW = (w + 2 * padding - kSize) / stride + 1;
             _inputSize = inChannels * h * w;
             _outputSize = outChannels * _outH * _outW;
             _kernelSizePerOutput = inChannels * kSize * kSize;
 
-            var kData = new TensorStorage<float>(outChannels * _kernelSizePerOutput, clearMemory: false);
-            InitializeKernels(kData.AsSpan(), _kernelSizePerOutput);
-
-            Kernels = new AutogradNode(
-                kData,
+            Kernels = new Parameter(
                 new TensorShape(outChannels, _kernelSizePerOutput),
-                requiresGrad: true);
+                requiresGrad: true,
+                clearData: false);
+
+            InitializeKernels(Kernels.DataSpan, _kernelSizePerOutput);
         }
 
-        public AutogradNode Kernels { get; }
+        public Parameter Kernels { get; }
 
         /// <summary>
         /// Optional per-channel bias. Null for layers without bias (e.g., Conv before BN).
         /// Populated by <see cref="LoadParameters(ReadOnlySpan{float}, ReadOnlySpan{float})"/>.
         /// </summary>
-        public AutogradNode? Bias { get; private set; }
+        public Parameter? Bias { get; private set; }
 
         public bool IsTraining { get; private set; } = true;
 
-        public int InferenceInputSize => _inputSize;
+        public int InferenceInputSize
+        {
+            get
+            {
+                return _inputSize;
+            }
+        }
 
-        public int InferenceOutputSize => _outputSize;
+        public int InferenceOutputSize
+        {
+            get
+            {
+                return _outputSize;
+            }
+        }
 
-        public void Train() => IsTraining = true;
+        public void Train()
+        {
+            IsTraining = true;
+        }
 
         public void Eval()
         {
@@ -88,7 +126,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void PrepareInference()
         {
-            // Direct inference convolution uses Kernels.DataView directly — no cache needed.
+            // Direct inference convolution uses Kernels.DataView directly â€” no cache needed.
         }
 
         /// <summary>
@@ -97,16 +135,7 @@ namespace DevOnBike.Overfit.DeepLearning
         /// </summary>
         public void LoadParameters(ReadOnlySpan<float> kernels)
         {
-            var target = Kernels.DataView.AsSpan();
-
-            if (kernels.Length != target.Length)
-            {
-                throw new ArgumentException(
-                    $"Kernel size mismatch: expected {target.Length}, got {kernels.Length}.",
-                    nameof(kernels));
-            }
-
-            kernels.CopyTo(target);
+            Kernels.LoadData(kernels);
         }
 
         /// <summary>
@@ -114,24 +143,14 @@ namespace DevOnBike.Overfit.DeepLearning
         /// </summary>
         public void LoadParameters(ReadOnlySpan<float> kernels, ReadOnlySpan<float> bias)
         {
-            LoadParameters(kernels);
+            Kernels.LoadData(kernels);
 
             if (Bias == null)
             {
-                var bData = new TensorStorage<float>(_outC, clearMemory: true);
-                Bias = new AutogradNode(bData, new TensorShape(_outC), requiresGrad: true);
+                Bias = new Parameter(new TensorShape(_outC), requiresGrad: true, clearData: true);
             }
 
-            var bTarget = Bias.DataView.AsSpan();
-
-            if (bias.Length != bTarget.Length)
-            {
-                throw new ArgumentException(
-                    $"Bias size mismatch: expected {bTarget.Length}, got {bias.Length}.",
-                    nameof(bias));
-            }
-
-            bias.CopyTo(bTarget);
+            Bias.LoadData(bias);
         }
 
         public void InvalidateParameterCaches()
@@ -141,12 +160,17 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
-            return TensorMath.Conv2D(graph, input, Kernels, _inC, _outC, _h, _w, _k);
-            // Note: bias is applied in ForwardInference. Training path does not yet apply
-            // conv bias via autograd — add TensorMath.AddBiasNchw when training with bias is needed.
+            _kernelsNode ??= Kernels.AsNode();
+            return ComputationGraph.Conv2DOp(graph, input, _kernelsNode, _inC, _outC, _h, _w, _k);
         }
 
         public IEnumerable<AutogradNode> Parameters()
+        {
+            yield return Kernels.AsNode();
+            if (Bias != null) yield return Bias.AsNode();
+        }
+
+        public IEnumerable<Parameter> TrainableParameters()
         {
             yield return Kernels;
             if (Bias != null) yield return Bias;
@@ -157,7 +181,7 @@ namespace DevOnBike.Overfit.DeepLearning
             bw.Write(Kernels.Shape.D0);
             bw.Write(Kernels.Shape.D1);
 
-            foreach (var val in Kernels.DataView.AsReadOnlySpan())
+            foreach (var val in Kernels.DataReadOnlySpan)
             {
                 bw.Write(val);
             }
@@ -166,7 +190,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
             if (Bias != null)
             {
-                foreach (var val in Bias.DataView.AsReadOnlySpan())
+                foreach (var val in Bias.DataReadOnlySpan)
                 {
                     bw.Write(val);
                 }
@@ -183,7 +207,7 @@ namespace DevOnBike.Overfit.DeepLearning
                 throw new Exception("Kernel dimensions in file do not match the ConvLayer architecture.");
             }
 
-            var kSpan = Kernels.DataView.AsSpan();
+            var kSpan = Kernels.DataSpan;
 
             for (var i = 0; i < kSpan.Length; i++)
             {
@@ -194,9 +218,12 @@ namespace DevOnBike.Overfit.DeepLearning
 
             if (hasBias == 1)
             {
-                var bData = new TensorStorage<float>(_outC, clearMemory: false);
-                Bias = new AutogradNode(bData, new TensorShape(_outC), requiresGrad: true);
-                var bSpan = Bias.DataView.AsSpan();
+                if (Bias == null)
+                {
+                    Bias = new Parameter(new TensorShape(_outC), requiresGrad: true, clearData: false);
+                }
+
+                var bSpan = Bias.DataSpan;
 
                 for (var i = 0; i < _outC; i++)
                 {
@@ -226,16 +253,23 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
-            Conv2DKernels.ForwardValidNchw(
-                input,
-                Kernels.DataView.AsReadOnlySpan(),
-                output,
-                _inC, _outC, _h, _w, _k);
+            if (_padding == 0 && _stride == 1)
+            {
+                Conv2DKernels.ForwardValidNchw(
+                    input, Kernels.DataReadOnlySpan, output,
+                    _inC, _outC, _h, _w, _k);
+            }
+            else
+            {
+                Conv2DKernels.ForwardNchw(
+                    input, Kernels.DataReadOnlySpan, output,
+                    batchSize: 1, _inC, _outC, _h, _w, _k,
+                    _padding, _stride);
+            }
 
-            // Apply per-channel bias if present
             if (Bias != null)
             {
-                ApplyBiasNchw(output, Bias.DataView.AsReadOnlySpan(), _outC, _outH, _outW);
+                ApplyBiasNchw(output, Bias.DataReadOnlySpan, _outC, _outH, _outW);
             }
         }
 
@@ -246,6 +280,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void Dispose()
         {
+            _kernelsNode?.Dispose();
             Kernels.Dispose();
             Bias?.Dispose();
         }

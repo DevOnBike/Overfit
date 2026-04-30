@@ -55,7 +55,13 @@ namespace DevOnBike.Overfit.DeepLearning
         public int LatentSize { get; }
         public int DecoderHidden { get; }
 
-        public int ParameterCount => Parameters().Sum(p => p.DataView.Size);
+        public int ParameterCount
+        {
+            get
+            {
+                return Parameters().Sum(p => p.DataView.Size);
+            }
+        }
 
         public bool IsTraining { get; private set; } = true;
 

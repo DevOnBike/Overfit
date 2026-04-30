@@ -5,6 +5,7 @@
 
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Autograd;
+using DevOnBike.Overfit.Kernels;
 using DevOnBike.Overfit.Intrinsics;
 using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Tensors;
@@ -361,88 +362,71 @@ namespace DevOnBike.Overfit.Ops
         // LINEAR
         // ====================================================================
 
-        public static AutogradNode Linear(ComputationGraph graph, AutogradNode input, AutogradNode weights, AutogradNode bias)
+        /// <summary>
+        /// Compatibility shim — delegates to <see cref="ComputationGraph.Linear"/> (PR5-7a).
+        /// Implementation lives in ComputationGraph.Linear.cs.
+        /// Null-graph inference path handled in <see cref="ComputationGraph.LinearOp"/>.
+        /// </summary>
+        public static AutogradNode Linear(
+            ComputationGraph graph,
+            AutogradNode input,
+            AutogradNode weights,
+            AutogradNode bias)
+            => graph != null
+                ? graph.Linear(input, weights, bias)
+                : ComputationGraph.LinearOp(null, input, weights, bias);
+
+        // Linear backward parallel threshold.
+        // Below: use new sequential span-only kernels (zero TPL overhead).
+        // Above: use existing parallel MatMulBackward (TPL justified by work size).
+        // 200_000 ops chosen so that:
+        //   - Linear(8,10):    64 * 8 * 10 =  5120 ops → sequential kernels ✓
+        //   - Linear(64,10):   64 * 64 * 10 = 40960 ops → sequential kernels ✓
+        //   - Linear(1352,64): 64 * 1352 * 64 = 5.5M ops → parallel MatMul ✓
+        private const long LinearBackwardSequentialThreshold = 200_000;
+
+        public static void LinearBackward(AutogradNode input, AutogradNode weights, AutogradNode bias, AutogradNode output)
         {
-            int N = input.Shape.D0, K = input.Shape.D1, M = weights.Shape.D1;
+            var batchSize = input.Shape.D0;
+            var inputSize = weights.Shape.D0;
+            var outputSize = weights.Shape.D1;
+            var ops = (long)batchSize * inputSize * outputSize;
 
-            var requiresGrad = input.RequiresGrad || weights.RequiresGrad || bias.RequiresGrad;
-            var output = AllocateNode(graph, new TensorShape(N, M), requiresGrad, clearMemory: false);
-
-            var outS = output.DataView.AsSpan();
-            var biasS = bias.DataView.AsReadOnlySpan();
-
-            for (var i = 0; i < N; i++)
+            if (ops < LinearBackwardSequentialThreshold)
             {
-                biasS.CopyTo(outS.Slice(i * M, M));
-            }
-
-            if ((long)N * K * M < ParallelThreshold)
-            {
-                var inS = input.DataView.AsReadOnlySpan();
-                var wS = weights.DataView.AsReadOnlySpan();
-
-                for (var i = 0; i < N; i++)
+                // Small matrix: sequential span-only kernels.
+                // Eliminates Parallel.For overhead (was ~1-3 KB TPL alloc per call).
+                if (input.RequiresGrad)
                 {
-                    var rC = outS.Slice(i * M, M);
-                    var rA = inS.Slice(i * K, K);
-                    for (var k = 0; k < K; k++)
-                    {
-                        var aVal = rA[k];
-                        if (aVal != 0f)
-                        {
-                            Simd.MulAdd(wS.Slice(k * M, M), aVal, rC);
-                        }
-                    }
+                    LinearKernels.BackwardInput(
+                        output.GradView.AsReadOnlySpan(),
+                        weights.DataView.AsReadOnlySpan(),
+                        input.GradView.AsSpan(),
+                        batchSize, inputSize, outputSize);
+                }
+
+                if (weights.RequiresGrad)
+                {
+                    LinearKernels.AccumulateWeightGrad(
+                        input.DataView.AsReadOnlySpan(),
+                        output.GradView.AsReadOnlySpan(),
+                        weights.GradView.AsSpan(),
+                        batchSize, inputSize, outputSize);
                 }
             }
             else
             {
-                Parallel.For(0, N, OverfitParallel.Options, i =>
-                {
-                    var rC = output.DataView.AsSpan().Slice(i * M, M);
-                    var rA = input.DataView.AsReadOnlySpan().Slice(i * K, K);
-                    var wS = weights.DataView.AsReadOnlySpan();
-
-                    for (var k = 0; k < K; k++)
-                    {
-                        var aVal = rA[k];
-                        if (aVal != 0f)
-                        {
-                            Simd.MulAdd(wS.Slice(k * M, M), aVal, rC);
-                        }
-                    }
-                });
+                // Large matrix: existing parallel MatMul.
+                MatMulBackward(input, weights, output);
             }
 
-            if (output.RequiresGrad)
+            // Bias grad always sequential (outputSize is small).
+            if (bias.RequiresGrad)
             {
-                graph?.Record(OpCode.Linear, output, input, weights, c0: bias, contextCount: 1);
-            }
-
-            return output;
-        }
-
-        public static void LinearBackward(AutogradNode input, AutogradNode weights, AutogradNode bias, AutogradNode output)
-        {
-            MatMulBackward(input, weights, output);
-
-            if (!bias.RequiresGrad)
-            {
-                return;
-            }
-
-            int N = output.Shape.D0, C = output.Shape.D1;
-
-            // Bias gradient accumulation — same shape of work as in AddBiasBackward.
-            // Sequential SIMD beats Parallel.For for the sizes encountered in practice,
-            // and removes the allocation-heavy per-worker buffer + ConcurrentBag merge.
-            // See AddBiasBackward for the full rationale.
-            var biasGrad = bias.GradView.AsSpan();
-            var outGrad = output.GradView.AsReadOnlySpan();
-
-            for (var i = 0; i < N; i++)
-            {
-                Simd.Add(biasGrad, outGrad.Slice(i * C, C), biasGrad);
+                LinearKernels.AccumulateBiasGrad(
+                    output.GradView.AsReadOnlySpan(),
+                    bias.GradView.AsSpan(),
+                    batchSize, outputSize);
             }
         }
     }

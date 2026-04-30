@@ -35,7 +35,10 @@ namespace DevOnBike.Overfit.Onnx.Schema
             get
             {
                 long count = 1;
-                foreach (var d in Dims) count *= d;
+                foreach (var d in Dims)
+                {
+                    count *= d;
+                }
                 return (int)count;
             }
         }

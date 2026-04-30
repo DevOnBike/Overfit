@@ -6,7 +6,6 @@
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
 using DevOnBike.Overfit.Kernels;
-using DevOnBike.Overfit.Ops;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
@@ -32,9 +31,7 @@ namespace DevOnBike.Overfit.DeepLearning
             ComputationGraph graph,
             AutogradNode input)
         {
-            return TensorMath.ReLU(
-                graph,
-                input);
+            return ComputationGraph.ReluOp(graph, input);
         }
 
         public IEnumerable<AutogradNode> Parameters()

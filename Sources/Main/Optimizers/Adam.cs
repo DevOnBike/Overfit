@@ -6,9 +6,9 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Threading.Tasks;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Optimizers.Abstractions;
+using DevOnBike.Overfit.Parameters;
 using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Tensors;
 
@@ -34,6 +34,35 @@ namespace DevOnBike.Overfit.Optimizers
         private readonly ParamState[] _states;
         private int _t;
 
+        /// <summary>
+        /// Preferred constructor — accepts <see cref="Parameter"/> directly.
+        /// Grad storage is shared with Parameter: backward writes into Parameter.Grad,
+        /// optimizer reads from the same buffer. No sync copy needed.
+        /// </summary>
+        public Adam(IEnumerable<Parameter> parameters, float learningRate = 0.001f)
+        {
+            _ = OverfitParallel.Options;
+
+            LearningRate = learningRate;
+
+            var statesList = new List<ParamState>();
+
+            foreach (var p in parameters)
+            {
+                if (p.RequiresGrad)
+                {
+                    statesList.Add(new ParamState(p));
+                }
+            }
+
+            _states = statesList.ToArray();
+        }
+
+        /// <summary>
+        /// Compatibility shim — accepts legacy <see cref="AutogradNode"/> collections.
+        /// Prefer <see cref="Adam(IEnumerable{Parameter}, float)"/> for new code.
+        /// </summary>
+        [Obsolete("Pass IEnumerable<Parameter> via module.TrainableParameters() instead.")]
         public Adam(IEnumerable<AutogradNode> parameters, float learningRate = 0.001f)
         {
             _ = OverfitParallel.Options;
@@ -96,7 +125,7 @@ namespace DevOnBike.Overfit.Optimizers
             {
                 foreach (var state in _states)
                 {
-                    if (!state.Node.RequiresGrad)
+                    if (!state.RequiresGrad)
                     {
                         continue;
                     }
@@ -118,7 +147,7 @@ namespace DevOnBike.Overfit.Optimizers
             {
                 foreach (var state in _states)
                 {
-                    if (!state.Node.RequiresGrad)
+                    if (!state.RequiresGrad)
                     {
                         continue;
                     }
@@ -144,11 +173,11 @@ namespace DevOnBike.Overfit.Optimizers
             {
                 if (ParallelZeroGrad && state.Size >= ParallelElementThreshold)
                 {
-                    ClearGradParallel(state.Node, state.Size);
+                    ClearGradParallel(state, state.Size);
                 }
                 else
                 {
-                    state.Node.ZeroGrad();
+                    state.ZeroGrad();
                 }
             }
         }
@@ -158,13 +187,13 @@ namespace DevOnBike.Overfit.Optimizers
             _t = 0;
         }
 
-        private static void ClearGradParallel(AutogradNode node, int size)
+        private static void ClearGradParallel(ParamState state, int size)
         {
             var chunks = GetChunkCount(size);
 
             if (chunks <= 1)
             {
-                node.ZeroGrad();
+                state.ZeroGrad();
                 return;
             }
 
@@ -176,9 +205,7 @@ namespace DevOnBike.Overfit.Optimizers
                 {
                     GetChunkRange(size, chunks, chunk, out var start, out var end);
 
-                    node
-                        .GradView
-                        .AsSpan()
+                    state.GradSpan
                         .Slice(start, end - start)
                         .Clear();
                 });
@@ -324,10 +351,10 @@ namespace DevOnBike.Overfit.Optimizers
                 return;
             }
 
-            var gSpan = state.Node.GradView.AsSpan().Slice(start, length);
+            var gSpan = state.GradSpan.Slice(start, length);
             var mSpan = state.M.GetView().AsSpan().Slice(start, length);
             var vSpan = state.V.GetView().AsSpan().Slice(start, length);
-            var wSpan = state.Node.DataView.AsSpan().Slice(start, length);
+            var wSpan = state.DataSpan.Slice(start, length);
 
             var i = 0;
 
@@ -418,10 +445,10 @@ namespace DevOnBike.Overfit.Optimizers
                 return;
             }
 
-            var gSpan = state.Node.GradView.AsSpan().Slice(start, length);
+            var gSpan = state.GradSpan.Slice(start, length);
             var mSpan = state.M.GetView().AsSpan().Slice(start, length);
             var vSpan = state.V.GetView().AsSpan().Slice(start, length);
-            var wSpan = state.Node.DataView.AsSpan().Slice(start, length);
+            var wSpan = state.DataSpan.Slice(start, length);
 
             var i = 0;
 
@@ -510,18 +537,52 @@ namespace DevOnBike.Overfit.Optimizers
 
         private readonly struct ParamState
         {
-            public readonly AutogradNode Node;
+            private readonly Parameter? _param;
+            private readonly AutogradNode? _node;
+
             public readonly FastTensor<float> M;
             public readonly FastTensor<float> V;
             public readonly int Size;
 
+            // Preferred path: Parameter-backed state.
+            // Data and Grad are accessed directly — no AutogradNode overhead.
+            public ParamState(Parameter param)
+            {
+                _param = param;
+                _node  = null;
+                Size   = param.Shape.Size;
+                M      = new FastTensor<float>(Size, clearMemory: true);
+                V      = new FastTensor<float>(Size, clearMemory: true);
+            }
+
+            // Legacy path: AutogradNode-backed state.
             public ParamState(AutogradNode node)
             {
-                Node = node;
-                Size = node.DataView.Size;
-                M = new FastTensor<float>(Size, clearMemory: true);
-                V = new FastTensor<float>(Size, clearMemory: true);
+                _param = null;
+                _node  = node;
+                Size   = node.DataView.Size;
+                M      = new FastTensor<float>(Size, clearMemory: true);
+                V      = new FastTensor<float>(Size, clearMemory: true);
             }
+
+            public Span<float> DataSpan =>
+                _param != null
+                    ? _param.Data.AsSpan()
+                    : _node!.DataView.AsSpan();
+
+            public Span<float> GradSpan =>
+                _param != null
+                    ? _param.Grad!.AsSpan()
+                    : _node!.GradView.AsSpan();
+
+            public void ZeroGrad()
+            {
+                if (_param != null) { _param.ZeroGrad(); }
+                else { _node!.ZeroGrad(); }
+            }
+
+            public bool RequiresGrad =>
+                _param != null ? _param.RequiresGrad : _node!.RequiresGrad;
         }
     }
 }

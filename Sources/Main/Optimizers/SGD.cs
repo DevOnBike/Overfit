@@ -3,76 +3,134 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Numerics.Tensors;
 using DevOnBike.Overfit.Autograd;
+using DevOnBike.Overfit.Kernels;
 using DevOnBike.Overfit.Optimizers.Abstractions;
+using DevOnBike.Overfit.Parameters;
 
 namespace DevOnBike.Overfit.Optimizers
 {
     /// <summary>
-    ///     Implements the Stochastic Gradient Descent (SGD) optimizer.
-    ///     Utilizes hardware-accelerated parameter updates via SIMD primitives.
+    /// Implements the Stochastic Gradient Descent (SGD) optimizer.
     /// </summary>
     public sealed class SGD : IOptimizer
     {
-        private readonly AutogradNode[] _parameters;
+        // Parallel arrays — exactly one of _params[i] / _nodes[i] is non-null per slot.
+        // Parameter path: direct Data/Grad access, no AutogradNode overhead.
+        // Legacy path: AutogradNode (used when constructed from IEnumerable<AutogradNode>).
+        private readonly Parameter?[] _params;
+        private readonly AutogradNode?[] _nodes;
+        private readonly int _count;
 
-        /// <param name="parameters">
-        ///     Collection of parameters to be optimized. Only nodes with <c>RequiresGrad=true</c> are
-        ///     tracked.
-        /// </param>
-        /// <param name="learningRate">The initial learning rate for weight updates.</param>
+        /// <summary>
+        /// Initializes a new SGD optimizer.
+        /// Only parameters with RequiresGrad=true are tracked.
+        /// </summary>
+        /// <summary>Preferred constructor — accepts <see cref="Parameter"/> directly.</summary>
+        public SGD(IEnumerable<Parameter> parameters, float learningRate)
+        {
+            ArgumentNullException.ThrowIfNull(parameters);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(learningRate);
+
+            var list = new List<Parameter>();
+            
+            foreach (var p in parameters)
+            {
+                if (p.RequiresGrad)
+                {
+                    list.Add(p);
+                }
+            }
+
+            _count  = list.Count;
+            _params = list.ToArray();
+            _nodes  = new AutogradNode?[_count];
+            LearningRate = learningRate;
+        }
+
+        /// <summary>Compatibility shim — prefer the <see cref="Parameter"/> overload.</summary>
+        [Obsolete("Pass IEnumerable<Parameter> via module.TrainableParameters() instead.")]
         public SGD(IEnumerable<AutogradNode> parameters, float learningRate)
         {
             ArgumentNullException.ThrowIfNull(parameters);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(learningRate);
 
-            var paramList = new List<AutogradNode>();
-
+            var list = new List<AutogradNode>();
             foreach (var p in parameters)
             {
                 if (p.RequiresGrad)
                 {
-                    paramList.Add(p);
+                    list.Add(p);
                 }
             }
 
-            _parameters = [.. paramList];
+            _count  = list.Count;
+            _nodes  = list.ToArray();
+            _params = new Parameter?[_count];
+            
             LearningRate = learningRate;
         }
 
+        /// <summary>
+        /// Learning rate used by the optimizer.
+        /// </summary>
         public float LearningRate { get; set; }
 
         /// <summary>
-        ///     Performs a single optimization step.
-        ///     Applies the update rule: w = w - lr * grad.
+        /// Performs a single optimization step.
+        /// Applies the update rule:
+        ///
+        ///     w = w - learningRate * grad
+        ///
+        /// Implemented as:
+        ///
+        ///     weights = grad * (-learningRate) + weights
+        ///
+        /// The same weights buffer is used as both addend and destination.
+        /// This requires ElementwiseKernels.MultiplyAdd to support:
+        ///
+        ///     addend == destination
+        ///
+        /// Keep the aliasing test before changing this method.
         /// </summary>
         public void Step()
         {
-            var negativeLr = -LearningRate;
+            var negativeLearningRate = -LearningRate;
 
-            foreach (var p in _parameters)
+            for (var i = 0; i < _count; i++)
             {
-                // Wykorzystujemy bezpieczne widoki DataView i GradView
-                TensorPrimitives.MultiplyAdd(
-                    p.GradView.AsReadOnlySpan(),
-                    negativeLr,
-                    p.DataView.AsReadOnlySpan(),
-                    p.DataView.AsSpan()
-                );
+                if (_params[i] != null)
+                {
+                    var p = _params[i]!;
+                    
+                    ElementwiseKernels.MultiplyAdd(
+                        p.Grad!.AsReadOnlySpan(),
+                        negativeLearningRate,
+                        p.Data.AsReadOnlySpan(),
+                        p.Data.AsSpan());
+                }
+                else
+                {
+                    var n = _nodes[i]!;
+                    ElementwiseKernels.MultiplyAdd(
+                        n.GradView.AsReadOnlySpan(),
+                        negativeLearningRate,
+                        n.DataView.AsReadOnlySpan(),
+                        n.DataView.AsSpan());
+                }
             }
         }
 
         /// <summary>
-        ///     Resets the gradients of all managed parameters to zero.
-        ///     Should be called before each forward pass.
+        /// Resets the gradients of all managed parameters to zero.
+        /// Should be called before each forward pass.
         /// </summary>
         public void ZeroGrad()
         {
-            foreach (var p in _parameters)
+            for (var i = 0; i < _count; i++)
             {
-                // Węzeł sam dba o wyczyszczenie swojego ukrytego magazynu
-                p.ZeroGrad();
+                if (_params[i] != null) { _params[i]!.ZeroGrad(); }
+                else { _nodes[i]!.ZeroGrad(); }
             }
         }
     }

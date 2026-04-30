@@ -14,46 +14,57 @@ namespace DevOnBike.Overfit.Tensors
     /// Klasa zarządzająca wyłącznie cyklem życia pamięci na stercie (Heap).
     /// Nie wykonuje żadnych operacji logicznych ani matematycznych.
     /// </summary>
-    public sealed class FastTensor<T> : IDisposable where T : struct
+    public sealed class FastTensor<T> : IDisposable
+        where T : struct
     {
-        private T[] _data;
+        private T[]? _data;
         private int _disposed;
 
         public readonly int Rank;
         public readonly int Size;
 
-        // Zapamiętujemy tylko bazowy kształt, żeby wiedzieć, jaki widok wydać
-        private readonly int _s0, _s1, _s2, _s3;
+        // Zapamiętujemy tylko bazowy kształt, żeby wiedzieć, jaki widok wydać.
+        private readonly int _s0;
+        private readonly int _s1;
+        private readonly int _s2;
+        private readonly int _s3;
 
         // ========================================================================
         // KONSTRUKTORY ALOKUJĄCE
         // ========================================================================
 
-        public FastTensor(int s0, bool clearMemory = true)
+        public FastTensor(
+            int s0,
+            bool clearMemory = true)
         {
             Rank = 1;
             Size = s0;
-
             _s0 = s0;
 
             Allocate(clearMemory);
         }
 
-        public FastTensor(int s0, int s1, bool clearMemory = true)
+        public FastTensor(
+            int s0,
+            int s1,
+            bool clearMemory = true)
         {
             Rank = 2;
-            Size = s0 * s1;
-
+            Size = checked(s0 * s1);
             _s0 = s0;
             _s1 = s1;
 
             Allocate(clearMemory);
         }
 
-        public FastTensor(int s0, int s1, int s2, bool clearMemory = true)
+        public FastTensor(
+            int s0,
+            int s1,
+            int s2,
+            bool clearMemory = true)
         {
             Rank = 3;
-            Size = s0 * s1 * s2;
+            Size = checked(s0 * s1 * s2);
             _s0 = s0;
             _s1 = s1;
             _s2 = s2;
@@ -61,10 +72,15 @@ namespace DevOnBike.Overfit.Tensors
             Allocate(clearMemory);
         }
 
-        public FastTensor(int s0, int s1, int s2, int s3, bool clearMemory = true)
+        public FastTensor(
+            int s0,
+            int s1,
+            int s2,
+            int s3,
+            bool clearMemory = true)
         {
             Rank = 4;
-            Size = s0 * s1 * s2 * s3;
+            Size = checked(s0 * s1 * s2 * s3);
             _s0 = s0;
             _s1 = s1;
             _s2 = s2;
@@ -74,7 +90,8 @@ namespace DevOnBike.Overfit.Tensors
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void Allocate(bool clearMemory)
+        private void Allocate(
+            bool clearMemory)
         {
             _data = ArrayPool<T>.Shared.Rent(Size);
 
@@ -85,22 +102,78 @@ namespace DevOnBike.Overfit.Tensors
         }
 
         // ========================================================================
-        // WYDAWANIE WIDOKU (Główna rola tej klasy)
+        // BEZPOŚREDNI DOSTĘP DO PAMIĘCI
+        // ========================================================================
+
+        /// <summary>
+        /// Returns the contiguous backing storage as a mutable span.
+        /// This avoids creating a TensorView and is intended for hot paths such as optimizers.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Span<T> AsSpan()
+        {
+            ObjectDisposedException.ThrowIf(
+                _disposed == 1,
+                this);
+
+            return _data!.AsSpan(
+                0,
+                Size);
+        }
+
+        /// <summary>
+        /// Returns the contiguous backing storage as a read-only span.
+        /// This avoids creating a TensorView and is intended for hot paths such as optimizers.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public ReadOnlySpan<T> AsReadOnlySpan()
+        {
+            ObjectDisposedException.ThrowIf(
+                _disposed == 1,
+                this);
+
+            return _data!.AsSpan(
+                0,
+                Size);
+        }
+
+        // ========================================================================
+        // WYDAWANIE WIDOKU
         // ========================================================================
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public TensorView<T> GetView()
         {
-            ObjectDisposedException.ThrowIf(_disposed == 1, this);
+            ObjectDisposedException.ThrowIf(
+                _disposed == 1,
+                this);
 
             return Rank switch
             {
-                1 => new TensorView<T>(_data.AsSpan(0, Size), _s0),
-                2 => new TensorView<T>(_data.AsSpan(0, Size), _s0, _s1),
-                3 => new TensorView<T>(_data.AsSpan(0, Size), _s0, _s1, _s2),
-                4 => new TensorView<T>(_data.AsSpan(0, Size), _s0, _s1, _s2, _s3),
+                1 => new TensorView<T>(
+                    _data!.AsSpan(0, Size),
+                    _s0),
 
-                _ => throw new NotImplementedException("Obsługa max 4 wymiarów")
+                2 => new TensorView<T>(
+                    _data!.AsSpan(0, Size),
+                    _s0,
+                    _s1),
+
+                3 => new TensorView<T>(
+                    _data!.AsSpan(0, Size),
+                    _s0,
+                    _s1,
+                    _s2),
+
+                4 => new TensorView<T>(
+                    _data!.AsSpan(0, Size),
+                    _s0,
+                    _s1,
+                    _s2,
+                    _s3),
+
+                _ => throw new NotImplementedException(
+                    "Obsługa max 4 wymiarów")
             };
         }
 
@@ -109,16 +182,24 @@ namespace DevOnBike.Overfit.Tensors
         /// Używane przez AutogradNode w trybie aliasowania (Reshape zero-copy).
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public TensorView<T> GetViewAs(int s0, int s1)
+        public TensorView<T> GetViewAs(
+            int s0,
+            int s1)
         {
-            ObjectDisposedException.ThrowIf(_disposed == 1, this);
+            ObjectDisposedException.ThrowIf(
+                _disposed == 1,
+                this);
 
-            if (s0 * s1 != Size)
+            if (checked(s0 * s1) != Size)
             {
-                throw new ArgumentException($"Nowy kształt ({s0}×{s1}={s0 * s1}) nie pasuje do rozmiaru tensora ({Size}).");
+                throw new ArgumentException(
+                    $"Nowy kształt ({s0}×{s1}={s0 * s1}) nie pasuje do rozmiaru tensora ({Size}).");
             }
 
-            return new TensorView<T>(_data.AsSpan(0, Size), s0, s1);
+            return new TensorView<T>(
+                _data!.AsSpan(0, Size),
+                s0,
+                s1);
         }
 
         // ========================================================================
@@ -127,22 +208,41 @@ namespace DevOnBike.Overfit.Tensors
 
         public void Dispose()
         {
-            if (Interlocked.Exchange(ref _disposed, 1) == 0 && _data != null)
+            if (Interlocked.Exchange(ref _disposed, 1) == 0 &&
+                _data != null)
             {
                 ArrayPool<T>.Shared.Return(_data);
-
                 _data = null;
             }
         }
 
-        public static FastTensor<T> SameShape(FastTensor<T> template, bool clearMemory = true)
+        public static FastTensor<T> SameShape(
+            FastTensor<T> template,
+            bool clearMemory = true)
         {
             return template.Rank switch
             {
-                1 => new FastTensor<T>(template._s0, clearMemory),
-                2 => new FastTensor<T>(template._s0, template._s1, clearMemory),
-                3 => new FastTensor<T>(template._s0, template._s1, template._s2, clearMemory),
-                4 => new FastTensor<T>(template._s0, template._s1, template._s2, template._s3, clearMemory),
+                1 => new FastTensor<T>(
+                    template._s0,
+                    clearMemory),
+
+                2 => new FastTensor<T>(
+                    template._s0,
+                    template._s1,
+                    clearMemory),
+
+                3 => new FastTensor<T>(
+                    template._s0,
+                    template._s1,
+                    template._s2,
+                    clearMemory),
+
+                4 => new FastTensor<T>(
+                    template._s0,
+                    template._s1,
+                    template._s2,
+                    template._s3,
+                    clearMemory),
 
                 _ => throw new InvalidOperationException()
             };
@@ -155,28 +255,46 @@ namespace DevOnBike.Overfit.Tensors
         /// <summary>
         /// Tworzy nowy, ciągły fizyczny tensor z dowolnego (nawet transponowanego) widoku.
         /// </summary>
-        public static FastTensor<T> FromView(TensorView<T> view)
+        public static FastTensor<T> FromView(
+            TensorView<T> view)
         {
-            // 1. Alokujemy nowy, pusty magazyn pod wymiary widoku
             var materializedTensor = view.Rank switch
             {
-                1 => new FastTensor<T>(view.GetDim(0), clearMemory: false),
-                2 => new FastTensor<T>(view.GetDim(0), view.GetDim(1), clearMemory: false),
-                3 => new FastTensor<T>(view.GetDim(0), view.GetDim(1), view.GetDim(2), clearMemory: false),
-                4 => new FastTensor<T>(view.GetDim(0), view.GetDim(1), view.GetDim(2), view.GetDim(3), clearMemory: false),
+                1 => new FastTensor<T>(
+                    view.GetDim(0),
+                    clearMemory: false),
 
-                _ => throw new InvalidOperationException("Nieobsługiwany wymiar")
+                2 => new FastTensor<T>(
+                    view.GetDim(0),
+                    view.GetDim(1),
+                    clearMemory: false),
+
+                3 => new FastTensor<T>(
+                    view.GetDim(0),
+                    view.GetDim(1),
+                    view.GetDim(2),
+                    clearMemory: false),
+
+                4 => new FastTensor<T>(
+                    view.GetDim(0),
+                    view.GetDim(1),
+                    view.GetDim(2),
+                    view.GetDim(3),
+                    clearMemory: false),
+
+                _ => throw new InvalidOperationException(
+                    "Nieobsługiwany wymiar")
             };
 
             if (view.IsContiguous)
             {
-                view.AsReadOnlySpan().CopyTo(materializedTensor.GetView().AsSpan());
+                view.AsReadOnlySpan().CopyTo(
+                    materializedTensor.AsSpan());
 
                 return materializedTensor;
             }
 
-            // 3. Jeśli widok został "poszatkowany" (np. przez Transpose2D), 
-            var targetSpan = materializedTensor.GetView().AsSpan();
+            var targetSpan = materializedTensor.AsSpan();
             var index = 0;
 
             if (view.Rank == 2)
@@ -191,40 +309,51 @@ namespace DevOnBike.Overfit.Tensors
             }
             else
             {
-                throw new NotImplementedException("todo: Kopiowanie nieciągłych widoków > 2D nie jest zaimplementowane.");
+                throw new NotImplementedException(
+                    "todo: Kopiowanie nieciągłych widoków > 2D nie jest zaimplementowane.");
             }
 
             return materializedTensor;
         }
-        
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void AddInPlace(FastTensor<T> other)
+        public void AddInPlace(
+            FastTensor<T> other)
         {
-            ObjectDisposedException.ThrowIf(_disposed == 1, this);
-    
-            var target = GetView().AsSpan();
-            var source = other.GetView().AsReadOnlySpan();
+            ObjectDisposedException.ThrowIf(
+                _disposed == 1,
+                this);
+
+            var target = AsSpan();
+            var source = other.AsReadOnlySpan();
 
             if (target.Length != source.Length)
             {
-                throw new ArgumentException("Tensory muszą mieć ten sam rozmiar do operacji In-Place.");
+                throw new ArgumentException(
+                    "Tensory muszą mieć ten sam rozmiar do operacji In-Place.");
             }
 
-            // Jeśli T to float, używamy zoptymalizowanych prymitywów .NET
             if (typeof(T) == typeof(float))
             {
-                var targetFloat = MemoryMarshal.Cast<T, float>(target);
-                var sourceFloat = MemoryMarshal.Cast<T, float>(source);
-                
-                TensorPrimitives.Add(targetFloat, sourceFloat, targetFloat);
+                var targetFloat = MemoryMarshal.Cast<T, float>(
+                    target);
+
+                var sourceFloat = MemoryMarshal.Cast<T, float>(
+                    source);
+
+                TensorPrimitives.Add(
+                    targetFloat,
+                    sourceFloat,
+                    targetFloat);
             }
             else
             {
-                // Fallback dla innych typów
+                // Fallback dla innych typów.
+                // Dzisiaj Overfit używa tej ścieżki dla float.
                 for (var i = 0; i < target.Length; i++)
                 {
-                    // Wymagałoby to generycznej matematyki w .NET 7+, 
-                    // dla uproszczenia załóżmy float lub zaimplementuj per typ
+                    throw new NotSupportedException(
+                        $"AddInPlace is only implemented for float tensors. Type: {typeof(T).Name}");
                 }
             }
         }

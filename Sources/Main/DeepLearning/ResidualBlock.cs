@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 DevOnBike.
+// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -56,7 +56,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
-            var hiddenSize = _linear1.Weights.DataView.GetDim(0);
+            var hiddenSize = _linear1.Weights.Shape.D0;
 
             using var buf1 = new PooledBuffer<float>(hiddenSize);
             using var buf2 = new PooledBuffer<float>(hiddenSize);
@@ -91,7 +91,7 @@ namespace DevOnBike.Overfit.DeepLearning
                 var out2 = _linear2.Forward(null, a1);
                 using var bn2Out = _bn2.Forward(null, out2);
 
-                // IN-PLACE (INFERENCJA): Oszczędność pamięci na produkcji!
+                // IN-PLACE (INFERENCJA): OszczÃ„â„¢dnoÃ…â€ºÃ„â€¡ pamiÃ„â„¢ci na produkcji!
                 // Zamiast: using var added = TensorMath.Add(null, bn2Out, input);
                 TensorPrimitives.Add(
                     bn2Out.DataView.AsSpan(),
@@ -103,15 +103,15 @@ namespace DevOnBike.Overfit.DeepLearning
 
             var tOut1 = _linear1.Forward(graph, input);
             var tBn1 = _bn1.Forward(graph, tOut1);
-            var tA1 = TensorMath.ReLU(graph, tBn1);
+            var tA1 = ComputationGraph.ReluOp(graph, tBn1);
             var tOut2 = _linear2.Forward(graph, tA1);
             var tBn2 = _bn2.Forward(graph, tOut2);
 
-            // IN-PLACE (TRENING): Zabijamy te 42 MB alokacji na epokę!
+            // IN-PLACE (TRENING): Zabijamy te 42 MB alokacji na epokÃ„â„¢!
             // Zamiast: var tAdded = TensorMath.Add(graph, tBn2, input);
-            var tAdded = graph.AddInPlace(tBn2, input);
+            var tAdded = ComputationGraph.AddOp(graph, tBn2, input);
 
-            return TensorMath.ReLU(graph, tAdded);
+            return ComputationGraph.ReluOp(graph, tAdded);
         }
 
         public IEnumerable<AutogradNode> Parameters()

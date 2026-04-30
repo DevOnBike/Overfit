@@ -89,8 +89,14 @@ namespace DevOnBike.Overfit.Tests.Helpers
 
         private void OnInstrumentPublished(Instrument instrument, MeterListener listener)
         {
-            if (!string.Equals(instrument.Meter.Name, _targetMeterName, StringComparison.OrdinalIgnoreCase)) return;
-            if (_metricNamePrefix is not null && !instrument.Name.StartsWith(_metricNamePrefix, StringComparison.Ordinal)) return;
+            if (!string.Equals(instrument.Meter.Name, _targetMeterName, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+            if (_metricNamePrefix is not null && !instrument.Name.StartsWith(_metricNamePrefix, StringComparison.Ordinal))
+            {
+                return;
+            }
 
             listener.EnableMeasurementEvents(instrument);
         }
@@ -121,7 +127,10 @@ namespace DevOnBike.Overfit.Tests.Helpers
 
         private void RecordMeasurement(Instrument instrument, double value, ReadOnlySpan<KeyValuePair<string, object?>> tags)
         {
-            if (_disposed) return;
+            if (_disposed)
+            {
+                return;
+            }
 
             // Jeśli tagi są wyłączone, ten string jest internowany w .NET (zero alokacji)
             string formattedTags = string.Empty;
@@ -151,7 +160,10 @@ namespace DevOnBike.Overfit.Tests.Helpers
 
         private static string FormatTags(ReadOnlySpan<KeyValuePair<string, object?>> tags)
         {
-            if (tags.Length == 0) return string.Empty;
+            if (tags.Length == 0)
+            {
+                return string.Empty;
+            }
 
             // ZMIANA ZERO-ALLOC: Używamy ArrayPool zamiast stackalloc, 
             // ponieważ Tagi zawierają typy referencyjne (string i object).
@@ -169,7 +181,10 @@ namespace DevOnBike.Overfit.Tests.Helpers
                 var sb = new StringBuilder(128);
                 for (var i = 0; i < span.Length; i++)
                 {
-                    if (i != 0) sb.Append(", ");
+                    if (i != 0)
+                    {
+                        sb.Append(", ");
+                    }
                     sb.Append(span[i].Key);
                     sb.Append('=');
                     sb.Append(span[i].Value?.ToString() ?? "null");
@@ -201,7 +216,10 @@ namespace DevOnBike.Overfit.Tests.Helpers
             sb.AppendLine(title is null ? "=== OVERFIT TELEMETRY SUMMARY ===" : $"=== OVERFIT TELEMETRY SUMMARY: {title} ===");
             sb.Append("meter: ").AppendLine(_targetMeterName);
 
-            if (_metricNamePrefix is not null) sb.Append("metric prefix: ").AppendLine(_metricNamePrefix);
+            if (_metricNamePrefix is not null)
+            {
+                sb.Append("metric prefix: ").AppendLine(_metricNamePrefix);
+            }
 
             sb.Append("include tags: ").AppendLine(_includeTags ? "true" : "false");
 
@@ -235,18 +253,27 @@ namespace DevOnBike.Overfit.Tests.Helpers
                 }
             }
 
-            if (rows.Length > limit) sb.Append("... truncated ").Append(rows.Length - limit).AppendLine(" metric series");
+            if (rows.Length > limit)
+            {
+                sb.Append("... truncated ").Append(rows.Length - limit).AppendLine(" metric series");
+            }
             _output.WriteLine(sb.ToString());
         }
 
         public void Dispose()
         {
-            if (_disposed) return;
+            if (_disposed)
+            {
+                return;
+            }
             _disposed = true;
 
             try
             {
-                if (_started) WriteSummary();
+                if (_started)
+                {
+                    WriteSummary();
+                }
             }
             finally
             {
@@ -256,9 +283,18 @@ namespace DevOnBike.Overfit.Tests.Helpers
 
         private static string FormatDouble(double value)
         {
-            if (double.IsNaN(value)) return "NaN";
-            if (double.IsPositiveInfinity(value)) return "+Inf";
-            if (double.IsNegativeInfinity(value)) return "-Inf";
+            if (double.IsNaN(value))
+            {
+                return "NaN";
+            }
+            if (double.IsPositiveInfinity(value))
+            {
+                return "+Inf";
+            }
+            if (double.IsNegativeInfinity(value))
+            {
+                return "-Inf";
+            }
             return value.ToString("0.###", CultureInfo.InvariantCulture);
         }
 
@@ -284,8 +320,14 @@ namespace DevOnBike.Overfit.Tests.Helpers
             public void Add(double value)
             {
                 SampleCount++; Sum += value;
-                if (value < Min) Min = value;
-                if (value > Max) Max = value;
+                if (value < Min)
+                {
+                    Min = value;
+                }
+                if (value > Max)
+                {
+                    Max = value;
+                }
                 Last = value;
             }
         }

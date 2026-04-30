@@ -9,6 +9,10 @@ namespace DevOnBike.Overfit.Kernels
 {
     internal static class PoolingKernels
     {
+        // ─────────────────────────────────────────────────────────────────────
+        // MaxPool2D forward — inference only (no index tracking)
+        // ─────────────────────────────────────────────────────────────────────
+
         public static void MaxPool2DForwardNchw(
             ReadOnlySpan<float> input,
             Span<float> output,
@@ -40,9 +44,8 @@ namespace DevOnBike.Overfit.Kernels
             }
 
             var batchSize = input.Length / inputSize;
-            var expectedOutputLength = batchSize * outputSize;
 
-            if (output.Length < expectedOutputLength)
+            if (output.Length < batchSize * outputSize)
             {
                 throw new ArgumentException(
                     "Output span is too small for MaxPool2D.",
@@ -62,6 +65,44 @@ namespace DevOnBike.Overfit.Kernels
                     outW);
             }
         }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // MaxPool2D forward — training path (with index tracking)
+        // Fills output values + flat maxIndices for backward scatter.
+        // batchOffset is the flat offset of this batch's input start in the
+        // full [B, C, H, W] tensor, so indices are globally addressable.
+        // ─────────────────────────────────────────────────────────────────────
+
+        public static void MaxPool2DForwardWithIndicesNchw(
+            ReadOnlySpan<float> input,
+            Span<float> output,
+            Span<float> maxIndices,
+            int channels,
+            int inputH,
+            int inputW,
+            int pool,
+            int batchOffset)
+        {
+            var outH = inputH / pool;
+            var outW = inputW / pool;
+
+            if (pool == 2 && inputW % 2 == 0)
+            {
+                MaxPool2DForwardWithIndicesPool2(
+                    input, output, maxIndices,
+                    channels, inputH, inputW, outH, outW, batchOffset);
+            }
+            else
+            {
+                MaxPool2DForwardWithIndicesGeneric(
+                    input, output, maxIndices,
+                    channels, inputH, inputW, pool, outH, outW, batchOffset);
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // GlobalAveragePool2D forward
+        // ─────────────────────────────────────────────────────────────────────
 
         public static void GlobalAveragePool2DForwardNchw(
             ReadOnlySpan<float> input,
@@ -86,9 +127,8 @@ namespace DevOnBike.Overfit.Kernels
             }
 
             var batchSize = input.Length / inputSize;
-            var expectedOutputLength = batchSize * outputSize;
 
-            if (output.Length < expectedOutputLength)
+            if (output.Length < batchSize * outputSize)
             {
                 throw new ArgumentException(
                     "Output span is too small for GlobalAveragePool2D.",
@@ -108,6 +148,10 @@ namespace DevOnBike.Overfit.Kernels
             }
         }
 
+        // ─────────────────────────────────────────────────────────────────────
+        // Private: inference single batch
+        // ─────────────────────────────────────────────────────────────────────
+
         private static void MaxPool2DForwardSingleBatchNchw(
             ReadOnlySpan<float> input,
             Span<float> output,
@@ -118,6 +162,13 @@ namespace DevOnBike.Overfit.Kernels
             int outH,
             int outW)
         {
+            if (pool == 2 && inputW % 2 == 0)
+            {
+                MaxPool2DForwardSingleBatchPool2NoIndex(
+                    input, output, channels, inputH, inputW, outH, outW);
+                return;
+            }
+
             for (var c = 0; c < channels; c++)
             {
                 var inputChannelBase = c * inputH * inputW;
@@ -131,21 +182,180 @@ namespace DevOnBike.Overfit.Kernels
 
                         for (var ph = 0; ph < pool; ph++)
                         {
-                            var iy = oh * pool + ph;
-                            var inputRowBase = inputChannelBase + iy * inputW + ow * pool;
-
+                            var rowBase = inputChannelBase + (oh * pool + ph) * inputW + ow * pool;
                             for (var pw = 0; pw < pool; pw++)
                             {
-                                var value = input[inputRowBase + pw];
-
-                                if (value > max)
-                                {
-                                    max = value;
-                                }
+                                var value = input[rowBase + pw];
+                                if (value > max) max = value;
                             }
                         }
 
                         output[outputChannelBase + oh * outW + ow] = max;
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Pool=2, stride=2 fast path without index recording (inference).
+        ///
+        /// Two-step approach per output row:
+        ///   1) TensorPrimitives.Max(row0, row1, pairMax) — SIMD element-wise
+        ///      vertical max across the two input rows (hardware-vectorised by the
+        ///      JIT via AVX2/AVX-512 on supported CPUs).
+        ///   2) Scalar loop over outW — collapses adjacent horizontal pairs.
+        ///      Step 2 is only outW iterations (13 for MNIST), negligible cost.
+        ///
+        /// Benchmark context: for [64, 8, 26, 26] → [64, 8, 13, 13]:
+        ///   - 64 batches × 8 channels × 13 rows = 6656 TensorPrimitives.Max calls
+        ///     each on inputW=26 floats → fully vectorised
+        ///   - eliminates all branching in the hot path
+        ///   - pairMax is stackalloc'd (104 bytes for inputW=26) — zero heap alloc
+        /// </summary>
+        private static void MaxPool2DForwardSingleBatchPool2NoIndex(
+            ReadOnlySpan<float> input,
+            Span<float> output,
+            int channels,
+            int inputH,
+            int inputW,
+            int outH,
+            int outW)
+        {
+            Span<float> pairMax = inputW <= 128
+                ? stackalloc float[inputW]
+                : new float[inputW];
+
+            for (var c = 0; c < channels; c++)
+            {
+                var inputChannelBase = c * inputH * inputW;
+                var outputChannelBase = c * outH * outW;
+
+                for (var oh = 0; oh < outH; oh++)
+                {
+                    var row0 = input.Slice(inputChannelBase + oh * 2 * inputW, inputW);
+                    var row1 = input.Slice(inputChannelBase + (oh * 2 + 1) * inputW, inputW);
+
+                    // Vertical max: for each column, keep the larger of the two rows.
+                    TensorPrimitives.Max(row0, row1, pairMax);
+
+                    // Horizontal max: collapse adjacent pairs → output pixels.
+                    var outRowBase = outputChannelBase + oh * outW;
+                    for (var ow = 0; ow < outW; ow++)
+                    {
+                        var a = pairMax[ow * 2];
+                        var b = pairMax[ow * 2 + 1];
+                        output[outRowBase + ow] = a > b ? a : b;
+                    }
+                }
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Private: training paths (with index tracking)
+        // ─────────────────────────────────────────────────────────────────────
+
+        private static void MaxPool2DForwardWithIndicesPool2(
+            ReadOnlySpan<float> input,
+            Span<float> output,
+            Span<float> maxIndices,
+            int channels,
+            int inputH,
+            int inputW,
+            int outH,
+            int outW,
+            int batchOffset)
+        {
+            Span<float> pairMax = inputW <= 128
+                ? stackalloc float[inputW]
+                : new float[inputW];
+
+            for (var c = 0; c < channels; c++)
+            {
+                var inputChannelBase = c * inputH * inputW;
+                var outputChannelBase = c * outH * outW;
+
+                for (var oh = 0; oh < outH; oh++)
+                {
+                    var row0Start = inputChannelBase + oh * 2 * inputW;
+                    var row1Start = inputChannelBase + (oh * 2 + 1) * inputW;
+
+                    var row0 = input.Slice(row0Start, inputW);
+                    var row1 = input.Slice(row1Start, inputW);
+
+                    TensorPrimitives.Max(row0, row1, pairMax);
+
+                    var outRowBase = outputChannelBase + oh * outW;
+
+                    for (var ow = 0; ow < outW; ow++)
+                    {
+                        float a = pairMax[ow * 2];
+                        float b = pairMax[ow * 2 + 1];
+
+                        float maxVal;
+                        int maxIdx;
+
+                        if (a >= b)
+                        {
+                            // Horizontal winner is left column (ow*2).
+                            // Vertical winner: whichever row had the larger value.
+                            var idxInRow0 = row0Start + ow * 2;
+                            var idxInRow1 = row1Start + ow * 2;
+                            maxVal = a;
+                            maxIdx = input[idxInRow0] >= input[idxInRow1] ? idxInRow0 : idxInRow1;
+                        }
+                        else
+                        {
+                            var idxInRow0 = row0Start + ow * 2 + 1;
+                            var idxInRow1 = row1Start + ow * 2 + 1;
+                            maxVal = b;
+                            maxIdx = input[idxInRow0] >= input[idxInRow1] ? idxInRow0 : idxInRow1;
+                        }
+
+                        output[outRowBase + ow] = maxVal;
+                        maxIndices[outRowBase + ow] = batchOffset + maxIdx;
+                    }
+                }
+            }
+        }
+
+        private static void MaxPool2DForwardWithIndicesGeneric(
+            ReadOnlySpan<float> input,
+            Span<float> output,
+            Span<float> maxIndices,
+            int channels,
+            int inputH,
+            int inputW,
+            int pool,
+            int outH,
+            int outW,
+            int batchOffset)
+        {
+            for (var c = 0; c < channels; c++)
+            {
+                var inputChannelBase = c * inputH * inputW;
+                var outputChannelBase = c * outH * outW;
+
+                for (var oh = 0; oh < outH; oh++)
+                {
+                    for (var ow = 0; ow < outW; ow++)
+                    {
+                        var maxVal = float.MinValue;
+                        var maxIdx = 0;
+
+                        for (var ph = 0; ph < pool; ph++)
+                        {
+                            var rowBase = inputChannelBase + (oh * pool + ph) * inputW + ow * pool;
+                            for (var pw = 0; pw < pool; pw++)
+                            {
+                                var idx = rowBase + pw;
+                                var val = input[idx];
+                                if (val > maxVal) { maxVal = val; maxIdx = idx; }
+                            }
+                        }
+
+                        var outIdx = outputChannelBase + oh * outW + ow;
+                        output[outIdx] = maxVal;
+                        maxIndices[outIdx] = batchOffset + maxIdx;
                     }
                 }
             }
@@ -160,9 +370,118 @@ namespace DevOnBike.Overfit.Kernels
         {
             for (var c = 0; c < channels; c++)
             {
-                var channel = input.Slice(c * spatialSize, spatialSize);
-                output[c] = TensorPrimitives.Sum(channel) * scale;
+                output[c] = TensorPrimitives.Sum(input.Slice(c * spatialSize, spatialSize)) * scale;
             }
         }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // AveragePool2D forward (ONNX-3b)
+        //
+        // Standard windowed average pooling with:
+        //   - Square kernel (kernelSize × kernelSize)
+        //   - Symmetric zero-padding
+        //   - Configurable stride
+        //   - count_include_pad support (ONNX default = 0)
+        //
+        // Output dims:
+        //   outH = (inputH + 2*padding - kernelSize) / stride + 1
+        //   outW = (inputW + 2*padding - kernelSize) / stride + 1
+        // ─────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Windowed average pooling (NCHW layout).
+        /// </summary>
+        public static void AveragePool2DForwardNchw(
+            ReadOnlySpan<float> input,    // [batch, C, inputH, inputW]
+            Span<float> output,           // [batch, C, outH, outW]
+            int batchSize,
+            int channels,
+            int inputH,
+            int inputW,
+            int kernelSize,
+            int padding,
+            int stride,
+            bool countIncludePad = false)
+        {
+            var outH = (inputH + 2 * padding - kernelSize) / stride + 1;
+            var outW = (inputW + 2 * padding - kernelSize) / stride + 1;
+            var inputPlane  = channels * inputH * inputW;
+            var outputPlane = channels * outH   * outW;
+
+            output.Clear();
+
+            for (var n = 0; n < batchSize; n++)
+            {
+                AveragePool2DForwardSingleBatchNchw(
+                    input.Slice(n * inputPlane,  inputPlane),
+                    output.Slice(n * outputPlane, outputPlane),
+                    channels,
+                    inputH, inputW,
+                    kernelSize,
+                    outH, outW,
+                    padding, stride,
+                    countIncludePad);
+            }
+        }
+
+        private static void AveragePool2DForwardSingleBatchNchw(
+            ReadOnlySpan<float> input,
+            Span<float> output,
+            int channels,
+            int inputH,
+            int inputW,
+            int kernelSize,
+            int outH,
+            int outW,
+            int padding,
+            int stride,
+            bool countIncludePad)
+        {
+            for (var c = 0; c < channels; c++)
+            {
+                var inputChanBase  = c * inputH * inputW;
+                var outputChanBase = c * outH   * outW;
+
+                for (var oy = 0; oy < outH; oy++)
+                {
+                    var inputYBase = oy * stride - padding;
+
+                    for (var ox = 0; ox < outW; ox++)
+                    {
+                        var inputXBase = ox * stride - padding;
+                        var sum   = 0f;
+                        var count = 0;
+
+                        for (var ky = 0; ky < kernelSize; ky++)
+                        {
+                            var iy = inputYBase + ky;
+                            var inBoundsY = (uint)iy < (uint)inputH;
+
+                            for (var kx = 0; kx < kernelSize; kx++)
+                            {
+                                var ix = inputXBase + kx;
+                                var inBoundsX = (uint)ix < (uint)inputW;
+
+                                if (inBoundsY && inBoundsX)
+                                {
+                                    sum += input[inputChanBase + iy * inputW + ix];
+                                    count++;
+                                }
+                                else if (countIncludePad)
+                                {
+                                    // Zero-pad contributes 0 to sum but 1 to count.
+                                    count++;
+                                }
+                            }
+                        }
+
+                        var divisor = countIncludePad ? kernelSize * kernelSize : count;
+                        output[outputChanBase + oy * outW + ox] =
+                            divisor > 0 ? sum / divisor : 0f;
+                    }
+                }
+            }
+        }
+
     }
 }

@@ -6,7 +6,6 @@
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
 using DevOnBike.Overfit.Kernels;
-using DevOnBike.Overfit.Ops;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
@@ -29,10 +28,14 @@ namespace DevOnBike.Overfit.DeepLearning
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(poolSize);
 
             if (inputH % poolSize != 0)
+            {
                 throw new ArgumentException($"inputH ({inputH}) must be divisible by poolSize ({poolSize}).");
+            }
 
             if (inputW % poolSize != 0)
+            {
                 throw new ArgumentException($"inputW ({inputW}) must be divisible by poolSize ({poolSize}).");
+            }
 
             _channels = channels;
             _inputH   = inputH;
@@ -40,20 +43,55 @@ namespace DevOnBike.Overfit.DeepLearning
             _poolSize = poolSize;
         }
 
-        public int OutputH => _inputH / _poolSize;
-        public int OutputW => _inputW / _poolSize;
+        public int OutputH
+        {
+            get
+            {
+                return _inputH / _poolSize;
+            }
+        }
 
-        public int InferenceInputSize  => _channels * _inputH * _inputW;
-        public int InferenceOutputSize => _channels * OutputH * OutputW;
+        public int OutputW
+        {
+            get
+            {
+                return _inputW / _poolSize;
+            }
+        }
+
+        public int InferenceInputSize
+        {
+            get
+            {
+                return _channels * _inputH * _inputW;
+            }
+        }
+
+        public int InferenceOutputSize
+        {
+            get
+            {
+                return _channels * OutputH * OutputW;
+            }
+        }
+
         public void PrepareInference() { }
 
         public bool IsTraining { get; private set; } = true;
 
-        public void Train() => IsTraining = true;
-        public void Eval()  => IsTraining = false;
+        public void Train()
+        {
+            IsTraining = true;
+        }
+        public void Eval()
+        {
+            IsTraining = false;
+        }
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
-            => TensorMath.MaxPool2D(graph, input, _channels, _inputH, _inputW, _poolSize);
+        {
+            return ComputationGraph.MaxPool2DOp(graph, input, _channels, _inputH, _inputW, _poolSize);
+        }
 
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
@@ -67,7 +105,10 @@ namespace DevOnBike.Overfit.DeepLearning
         }
 
         public void InvalidateParameterCaches() { }
-        public IEnumerable<AutogradNode> Parameters() => [];
+        public IEnumerable<AutogradNode> Parameters()
+        {
+            return [];
+        }
         public void Save(BinaryWriter bw) { }
         public void Load(BinaryReader br) { }
         public void Dispose() { }

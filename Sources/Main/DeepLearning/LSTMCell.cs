@@ -34,8 +34,14 @@ namespace DevOnBike.Overfit.DeepLearning
             InitUniform(U.DataView.AsSpan(), limit);
         }
 
-        public void Train() => IsTraining = true;
-        public void Eval() => IsTraining = false;
+        public void Train()
+        {
+            IsTraining = true;
+        }
+        public void Eval()
+        {
+            IsTraining = false;
+        }
 
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {

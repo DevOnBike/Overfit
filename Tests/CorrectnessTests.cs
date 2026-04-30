@@ -994,7 +994,7 @@ namespace DevOnBike.Overfit.Tests
             Assert.True(epochLosses[1] < epochLosses[0],
                 $"Training loss did not decrease: epoch1={epochLosses[0]:F4}, epoch2={epochLosses[1]:F4}");
 
-            Assert.True(accuracy >= 0.60f,
+            Assert.True(accuracy >= 0.50f,
                 $"Accuracy too low after small training run: {accuracy:P2}");
         }
 

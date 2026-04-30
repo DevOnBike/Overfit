@@ -113,7 +113,10 @@ namespace DevOnBike.Overfit.Tests
             }
 
             var overallMean = 0.0;
-            for (var i = 0; i < 128; i++) overallMean += buffer[i];
+            for (var i = 0; i < 128; i++)
+            {
+                overallMean += buffer[i];
+            }
             overallMean /= 128;
 
             _output.WriteLine($"--- {label} ---");

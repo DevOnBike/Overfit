@@ -79,7 +79,10 @@ namespace DevOnBike.Overfit.Tests
             {
                 sum += values[i];
                 sumSq += values[i] * values[i];
-                if (values[i] > 0f) positives++;
+                if (values[i] > 0f)
+                {
+                    positives++;
+                }
             }
 
             var mean = sum / values.Length;

@@ -292,5 +292,116 @@ namespace DevOnBike.Overfit.Kernels
                 }
             }
         }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // ForwardNchw — general Conv2D with padding and stride (ONNX-4)
+        //
+        // Replaces ForwardValidNchw for ONNX-imported models that use padding/stride.
+        // ForwardValidNchw (padding=0, stride=1) is kept as-is for training path
+        // backward compatibility.
+        // ─────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// General 2-D convolution forward pass (NCHW layout).
+        /// Supports symmetric zero-padding and stride ≥ 1.
+        /// Square kernel assumed (kH == kW == kernelSize).
+        ///
+        /// Output dimensions:
+        ///   outH = (inputH + 2*padding - kernelSize) / stride + 1
+        ///   outW = (inputW + 2*padding - kernelSize) / stride + 1
+        /// </summary>
+        public static void ForwardNchw(
+            ReadOnlySpan<float> input,   // [batch, inC, inputH, inputW]
+            ReadOnlySpan<float> kernels, // [outC, inC, kSize, kSize]
+            Span<float> output,          // [batch, outC, outH, outW]
+            int batchSize,
+            int inChannels,
+            int outChannels,
+            int inputH,
+            int inputW,
+            int kernelSize,
+            int padding,
+            int stride)
+        {
+            var outH = (inputH + 2 * padding - kernelSize) / stride + 1;
+            var outW = (inputW + 2 * padding - kernelSize) / stride + 1;
+            var inputPlaneSize  = inChannels  * inputH * inputW;
+            var outputPlaneSize = outChannels * outH   * outW;
+            var kernelSizePerOutput = inChannels * kernelSize * kernelSize;
+
+            output.Clear();
+
+            for (var n = 0; n < batchSize; n++)
+            {
+                var inputBatch  = input.Slice(n * inputPlaneSize,  inputPlaneSize);
+                var outputBatch = output.Slice(n * outputPlaneSize, outputPlaneSize);
+
+                ForwardNchwSingleBatch(
+                    inputBatch, kernels, outputBatch,
+                    inChannels, outChannels,
+                    inputH, inputW,
+                    kernelSize, outH, outW,
+                    kernelSizePerOutput, padding, stride);
+            }
+        }
+
+        private static void ForwardNchwSingleBatch(
+            ReadOnlySpan<float> input,
+            ReadOnlySpan<float> kernels,
+            Span<float> output,
+            int inChannels,
+            int outChannels,
+            int inputH,
+            int inputW,
+            int kernelSize,
+            int outH,
+            int outW,
+            int kernelSizePerOutput,
+            int padding,
+            int stride)
+        {
+            for (var oc = 0; oc < outChannels; oc++)
+            {
+                var kernelBase      = oc * kernelSizePerOutput;
+                var outputChanBase  = oc * outH * outW;
+
+                for (var oy = 0; oy < outH; oy++)
+                {
+                    var inputYBase = oy * stride - padding;
+
+                    for (var ox = 0; ox < outW; ox++)
+                    {
+                        var inputXBase = ox * stride - padding;
+                        var sum = 0f;
+
+                        for (var ic = 0; ic < inChannels; ic++)
+                        {
+                            var inputChanBase  = ic * inputH * inputW;
+                            var kernelChanBase = kernelBase + ic * kernelSize * kernelSize;
+
+                            for (var ky = 0; ky < kernelSize; ky++)
+                            {
+                                var iy = inputYBase + ky;
+                                if ((uint)iy >= (uint)inputH) continue; // zero-pad: skip out-of-bounds rows
+
+                                var kernelRowBase = kernelChanBase + ky * kernelSize;
+                                var inputRowBase  = inputChanBase  + iy * inputW;
+
+                                for (var kx = 0; kx < kernelSize; kx++)
+                                {
+                                    var ix = inputXBase + kx;
+                                    if ((uint)ix >= (uint)inputW) continue; // zero-pad: skip out-of-bounds cols
+
+                                    sum += input[inputRowBase + ix] * kernels[kernelRowBase + kx];
+                                }
+                            }
+                        }
+
+                        output[outputChanBase + oy * outW + ox] = sum;
+                    }
+                }
+            }
+        }
+
     }
 }
