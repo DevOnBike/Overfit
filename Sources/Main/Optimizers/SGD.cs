@@ -4,9 +4,9 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Autograd;
-using DevOnBike.Overfit.Parameters;
 using DevOnBike.Overfit.Kernels;
 using DevOnBike.Overfit.Optimizers.Abstractions;
+using DevOnBike.Overfit.Parameters;
 
 namespace DevOnBike.Overfit.Optimizers
 {

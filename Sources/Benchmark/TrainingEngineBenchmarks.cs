@@ -1,8 +1,12 @@
-﻿using BenchmarkDotNet.Attributes;
+﻿// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
+
+using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Diagnosers;
 using BenchmarkDotNet.Jobs;
-using BenchmarkDotNet.Order;
 using Benchmarks.Helpers;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Licensing;

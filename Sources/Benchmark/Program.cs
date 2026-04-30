@@ -5,7 +5,6 @@
 
 using BenchmarkDotNet.Running;
 using DevOnBike.Overfit.Licensing;
-using DevOnBike.Overfit.Onnx.Schema;
 
 namespace Benchmarks
 {
@@ -38,7 +37,7 @@ namespace Benchmarks
             //BenchmarkRunner.Run<OnnxMlpInferenceBenchmarks>();
 
             //BenchmarkRunner.Run<BatchScalingBenchmark>();
-           BenchmarkRunner.Run<OnnxGraphBenchmark>();
+            BenchmarkRunner.Run<OnnxGraphBenchmark>();
         }
     }
 }

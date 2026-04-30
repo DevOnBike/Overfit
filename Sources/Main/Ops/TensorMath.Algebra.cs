@@ -365,6 +365,7 @@ namespace DevOnBike.Overfit.Ops
         /// <summary>
         /// Compatibility shim — delegates to <see cref="ComputationGraph.Linear"/> (PR5-7a).
         /// Implementation lives in ComputationGraph.Linear.cs.
+        /// Null-graph inference path handled in <see cref="ComputationGraph.LinearOp"/>.
         /// </summary>
         public static AutogradNode Linear(
             ComputationGraph graph,
@@ -386,10 +387,10 @@ namespace DevOnBike.Overfit.Ops
 
         public static void LinearBackward(AutogradNode input, AutogradNode weights, AutogradNode bias, AutogradNode output)
         {
-            var batchSize  = input.Shape.D0;
-            var inputSize  = weights.Shape.D0;
+            var batchSize = input.Shape.D0;
+            var inputSize = weights.Shape.D0;
             var outputSize = weights.Shape.D1;
-            var ops        = (long)batchSize * inputSize * outputSize;
+            var ops = (long)batchSize * inputSize * outputSize;
 
             if (ops < LinearBackwardSequentialThreshold)
             {

@@ -7,8 +7,8 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using DevOnBike.Overfit.Autograd;
-using DevOnBike.Overfit.Parameters;
 using DevOnBike.Overfit.Optimizers.Abstractions;
+using DevOnBike.Overfit.Parameters;
 using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Tensors;
 

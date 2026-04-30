@@ -26,9 +26,29 @@ namespace DevOnBike.Overfit.Onnx.Protobuf
             _pos = 0;
         }
 
-        public bool IsEnd => _pos >= _data.Length;
-        public int Position => _pos;
-        public int Length => _data.Length;
+        public bool IsEnd
+        {
+            get
+            {
+                return _pos >= _data.Length;
+            }
+        }
+
+        public int Position
+        {
+            get
+            {
+                return _pos;
+            }
+        }
+
+        public int Length
+        {
+            get
+            {
+                return _data.Length;
+            }
+        }
 
         /// <summary>
         /// Reads a tag (field number + wire type combined). Returns -1 at end of stream.
@@ -43,8 +63,14 @@ namespace DevOnBike.Overfit.Onnx.Protobuf
             return (int)ReadVarint();
         }
 
-        public static int GetFieldNumber(int tag) => tag >> 3;
-        public static WireType GetWireType(int tag) => (WireType)(tag & 0x07);
+        public static int GetFieldNumber(int tag)
+        {
+            return tag >> 3;
+        }
+        public static WireType GetWireType(int tag)
+        {
+            return (WireType)(tag & 0x07);
+        }
 
         public ulong ReadVarint()
         {
@@ -75,8 +101,15 @@ namespace DevOnBike.Overfit.Onnx.Protobuf
             }
         }
 
-        public int ReadInt32() => (int)ReadVarint();
-        public long ReadInt64() => (long)ReadVarint();
+        public int ReadInt32()
+        {
+            return (int)ReadVarint();
+        }
+        
+        public long ReadInt64()
+        {
+            return (long)ReadVarint();
+        }
 
         public uint ReadFixed32()
         {
@@ -213,8 +246,7 @@ namespace DevOnBike.Overfit.Onnx.Protobuf
 
             for (var i = 0; i < result.Length; i++)
             {
-                result[i] = BitConverter.UInt32BitsToSingle(
-                    BinaryPrimitives.ReadUInt32LittleEndian(bytes.Slice(i * 4, 4)));
+                result[i] = BitConverter.UInt32BitsToSingle(BinaryPrimitives.ReadUInt32LittleEndian(bytes.Slice(i * 4, 4)));
             }
 
             return result;

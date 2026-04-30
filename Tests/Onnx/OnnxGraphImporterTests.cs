@@ -6,6 +6,7 @@
 using System.Buffers.Binary;
 using DevOnBike.Overfit.Inference;
 using DevOnBike.Overfit.Onnx;
+using Xunit;
 
 namespace DevOnBike.Overfit.Tests.Onnx
 {
@@ -203,6 +204,78 @@ namespace DevOnBike.Overfit.Tests.Onnx
                         "Run fixture.py to generate test fixtures.");
                 }
             }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // ResNetBlock: Conv2d(padding=1) + skip connection + BatchNorm (folded)
+        // ─────────────────────────────────────────────────────────────────────
+
+        private const string ResNetOnnx   = "resnet_block.onnx";
+        private const string ResNetInput  = "resnet_block_input.bin";
+        private const string ResNetOutput = "resnet_block_output.bin";
+        private const int    ResNetFlat   = 256; // 1 * 4 * 8 * 8
+
+        [Fact]
+        public void Load_ResNetBlock_ReturnsModel()
+        {
+            SkipIfMissing(ResNetOnnx);
+
+            using var model = OnnxGraphImporter.Load(
+                OnnxPath(ResNetOnnx),
+                ResNetFlat, ResNetFlat);
+
+            Assert.Equal(ResNetFlat, model.InputSize);
+            Assert.Equal(ResNetFlat, model.OutputSize);
+        }
+
+        [Fact]
+        public void Load_ResNetBlock_OutputMatchesPyTorchReference()
+        {
+            SkipIfMissing(ResNetOnnx, ResNetInput, ResNetOutput);
+
+            using var model = OnnxGraphImporter.Load(
+                OnnxPath(ResNetOnnx),
+                ResNetFlat, ResNetFlat);
+
+            model.Eval();
+
+            var input    = LoadFloatBin(OnnxPath(ResNetInput));
+            var expected = LoadFloatBin(OnnxPath(ResNetOutput));
+            var output   = new float[ResNetFlat];
+
+            model.RunInference(input, output);
+
+            for (var i = 0; i < output.Length; i++)
+            {
+                var diff = MathF.Abs(output[i] - expected[i]);
+                Assert.True(
+                    diff <= Tolerance,
+                    $"resnet_block output[{i}] = {output[i]:F6}, " +
+                    $"expected {expected[i]:F6}, diff = {diff:F6}");
+            }
+        }
+
+        [Fact]
+        public void Load_ResNetBlock_InferenceAllocatesZeroBytes()
+        {
+            SkipIfMissing(ResNetOnnx);
+
+            using var model = OnnxGraphImporter.Load(
+                OnnxPath(ResNetOnnx),
+                ResNetFlat, ResNetFlat);
+
+            model.Eval();
+
+            var input  = new float[ResNetFlat];
+            var output = new float[ResNetFlat];
+
+            for (var i = 0; i < 256; i++) model.RunInference(input, output);
+
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            for (var i = 0; i < 10_000; i++) model.RunInference(input, output);
+            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.Equal(0L, allocated);
         }
 
         private static float[] LoadFloatBin(string path)

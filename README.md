@@ -11,7 +11,7 @@ No native binaries. No Python runtime. No ONNX Runtime dependency.
 **Train in PyTorch or .NET. Load or build a model. Run predictable, allocation-free inference in .NET.**
 
 - **Zero-allocation CPU inference** — preallocated buffers, no per-call GC pressure, competitive with ONNX Runtime.
-- **ONNX import** — load PyTorch-exported models directly. 10 operators supported, output matches PyTorch within 1e-4.
+- **ONNX import** — load PyTorch-exported models directly. 11 operators, branching DAGs (ResNet skip connections), output matches PyTorch within 1e-4.
 - **Evolutionary optimization** — allocation-free `Ask`/`AskThenTell` loops for black-box parameter search.
 
 ---
@@ -38,7 +38,7 @@ Span<float> output = stackalloc float[10];
 engine.Run(input, output); // zero-allocation
 ```
 
-### Inference — ONNX import
+### Inference — ONNX import (linear topology)
 
 ```csharp
 using DevOnBike.Overfit.Onnx;
@@ -48,6 +48,22 @@ var model = OnnxImporter.Load("classifier.onnx"); // .data file resolved automat
 model.Eval();
 
 using var engine = InferenceEngine.FromSequential(model, inputSize: 784, outputSize: 10);
+var prediction = engine.Predict(input); // ReadOnlySpan<float>, 0 B
+```
+
+### Inference — ONNX import (DAG topology — ResNet, skip connections)
+
+```csharp
+using DevOnBike.Overfit.Onnx;
+using DevOnBike.Overfit.Inference;
+
+// OnnxGraphImporter handles branching graphs: skip connections, residual blocks.
+// OnnxImporter (above) requires linear topology and is faster for simple models.
+var dagModel = OnnxGraphImporter.Load("resnet.onnx", inputSize: 784, outputSize: 10);
+dagModel.Eval();
+
+var backend = new OnnxGraphInferenceBackend(dagModel);
+using var engine = InferenceEngine.FromBackend(backend);
 var prediction = engine.Predict(input); // ReadOnlySpan<float>, 0 B
 ```
 
@@ -145,7 +161,7 @@ PyTorch model (eval mode)
 
 | ONNX operator | Maps to | Notes |
 |---------------|---------|-------|
-| `Conv` | `ConvLayer` | 2D, NCHW, padding=0, stride=1 |
+| `Conv` | `ConvLayer` | 2D, NCHW, symmetric padding, any stride |
 | `Gemm` | `LinearLayer` | `transB=1` handled automatically |
 | `Relu` | `ReluActivation` | |
 | `Tanh` | `TanhActivation` | |
@@ -153,10 +169,16 @@ PyTorch model (eval mode)
 | `Softmax` | `SoftmaxActivation` | axis=-1 only |
 | `MaxPool` | `MaxPool2DLayer` | Square kernel, stride = kernel |
 | `GlobalAveragePool` | `GlobalAveragePool2DLayer` | 2D, NCHW |
+| `BatchNormalization` | `BatchNorm1D` | eval mode (training_mode=0) |
+| `Add` | `OnnxAddLayer` | Element-wise; used for skip connections |
 | `Reshape` / `Flatten` | `FlattenLayer` | Rank reduction (4D→2D) |
 | `Identity` / `Dropout` | _(no-op in eval mode)_ | |
 
-10 operators total. Unsupported operators throw a clear `NotSupportedException` naming the operator.
+**12 operators** (+ 2 no-ops). Unsupported operators throw a clear `NotSupportedException` naming the operator.
+
+Two importers:
+- **`OnnxImporter`** — linear topology only. Faster for simple CNNs and MLPs.
+- **`OnnxGraphImporter`** — arbitrary DAG topology. Required for ResNet, DenseNet, EfficientNet (any model with skip connections or multiple inputs to a node).
 
 External `.data` files (PyTorch ≥ 2.x default) resolved automatically.
 No `Google.Protobuf` dependency.
@@ -199,7 +221,8 @@ Kernels                  ← pure Span-based math, no AutogradNode
   PoolingKernels         ← MaxPool pool=2 SIMD fast path
 TensorStorage<T>         ← unmanaged memory ownership
 Optimizers               ← Adam(IEnumerable<Parameter>), SGD(IEnumerable<Parameter>)
-OnnxImporter             ← PyTorch ONNX → Sequential (no Google.Protobuf)
+OnnxImporter             ← PyTorch ONNX → Sequential (linear topology)
+OnnxGraphImporter        ← PyTorch ONNX → OnnxGraphModel (DAG topology, skip connections)
 ```
 
 ### Autograd ownership
@@ -243,7 +266,8 @@ Use cases: Kubernetes tuning, game AI, industrial process search, pricing strate
 
 ### Recently completed
 
-- ✅ **ONNX import — 10 operators** (Conv, Gemm, ReLU, Tanh, Sigmoid, Softmax, MaxPool, GlobalAveragePool, Reshape, Flatten)
+- ✅ **ONNX import — 12 operators** (Conv w/padding+stride, Gemm, ReLU, Tanh, Sigmoid, Softmax, MaxPool, GlobalAveragePool, BatchNormalization, Add, Reshape, Flatten)
+- ✅ **ONNX DAG runtime** — `OnnxGraphImporter` supports branching topology (skip connections, residual blocks). Enables ResNet-style models. Zero-allocation inference via `OnnxGraphInferenceBackend`.
 - ✅ **PR5 Autograd ownership cleanup** — `Parameter` type, `AutogradNodeOwnership` enum, `graph.Reset()` by ownership, all layers migrated (LinearLayer, ConvLayer, BatchNorm1D)
 - ✅ **Optimizers on `Parameter`** — `Adam(IEnumerable<Parameter>)`, `SGD(IEnumerable<Parameter>)`
 - ✅ **PERF-1: Linear backward kernels** — hybrid threshold eliminates `Parallel.For` overhead for small matrices; backward alloc −43% (23 MB → 13 MB per epoch)
@@ -252,15 +276,14 @@ Use cases: Kubernetes tuning, game AI, industrial process search, pricing strate
 
 ### Near-term
 
-- **ONNX-4** — Conv with padding and stride (enables ResNet-style models)
-- **PR5-7** — Move graph-aware TensorMath into `ComputationGraph.*` (op-by-op)
-- **ONNX-3** — `BatchNormalization` standalone operator (train-mode exports)
+- **PR5-7d/e** — Move Conv2D/MaxPool2D implementations into `ComputationGraph.*` (pure architectural cleanup)
+- **ONNX: AveragePool** — remaining planned operator
 
 ### Medium-term
 
-- Skip connections / branching DAG (ResNet support)
 - Batched GEMM parallel path (unsafe fixed-pointer `Parallel.For`)
-- Graph compilation for fixed-shape models
+- Graph compilation for fixed-shape graphs
+- LSTM/GRU ONNX operators
 
 ---
 
