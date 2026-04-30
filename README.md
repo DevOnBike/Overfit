@@ -268,6 +268,7 @@ Use cases: Kubernetes tuning, game AI, industrial process search, pricing strate
 
 - ✅ **ONNX import — 12 operators** (Conv w/padding+stride, Gemm, ReLU, Tanh, Sigmoid, Softmax, MaxPool, GlobalAveragePool, BatchNormalization, Add, Reshape, Flatten)
 - ✅ **ONNX DAG runtime** — `OnnxGraphImporter` supports branching topology (skip connections, residual blocks). Enables ResNet-style models. Zero-allocation inference via `OnnxGraphInferenceBackend`.
+- ✅ **AveragePool + ReduceMean** — windowed average pooling with padding/stride; `ReduceMean` mapped to GlobalAveragePool (PyTorch `AdaptiveAvgPool2d` export pattern). Total: **14 ONNX operators**.
 - ✅ **PR5 Autograd ownership cleanup** — `Parameter` type, `AutogradNodeOwnership` enum, `graph.Reset()` by ownership, all layers migrated (LinearLayer, ConvLayer, BatchNorm1D)
 - ✅ **Optimizers on `Parameter`** — `Adam(IEnumerable<Parameter>)`, `SGD(IEnumerable<Parameter>)`
 - ✅ **PERF-1: Linear backward kernels** — hybrid threshold eliminates `Parallel.For` overhead for small matrices; backward alloc −43% (23 MB → 13 MB per epoch)
@@ -276,14 +277,33 @@ Use cases: Kubernetes tuning, game AI, industrial process search, pricing strate
 
 ### Near-term
 
-- **PR5-7d/e** — Move Conv2D/MaxPool2D implementations into `ComputationGraph.*` (pure architectural cleanup)
-- **ONNX: AveragePool** — remaining planned operator
+- **PR5-7d/e** — Move Conv2D/MaxPool2D into `ComputationGraph.*` (architectural cleanup, zero user impact)
+- **ONNX: LSTM/GRU operators** — enables recurrent model import
+- **Depthwise Conv** (group=channels) — MobileNet-style models
 
-### Medium-term
+### Transformer path (toward GPT-1)
 
+Building GPT-1 (117M params, decoder-only Transformer) requires these components in order:
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| `LayerNorm` | ❌ | Different from BatchNorm — normalises over features, not batch |
+| `Embedding` | ❌ | Token lookup + positional encoding |
+| `ScaledDotProductAttention` | ❌ | Core of every Transformer |
+| `MultiHeadAttention` | ❌ | Parallel attention heads |
+| Causal masking | ❌ | Upper-triangular mask for autoregressive generation |
+| Transformer block | ❌ | Attention + FFN + LayerNorm + residual (DAG ✅ already works) |
+| Tokenizer (BPE) | ❌ | Pre/post processing |
+| Gradient checkpointing | ❌ | Required for 117M params on single machine |
+
+**Distance estimate:** 5–7 new layer types + memory management changes. Estimated 3–4 months of focused work at current pace. The DAG runtime (skip connections) already handles residual blocks — that part is done.
+
+Overfit could run GPT-1 inference once the operator set is complete. Training at scale requires gradient checkpointing.
+
+### Long-term
+
+- Graph compilation / kernel fusion for fixed-shape models
 - Batched GEMM parallel path (unsafe fixed-pointer `Parallel.For`)
-- Graph compilation for fixed-shape graphs
-- LSTM/GRU ONNX operators
 
 ---
 
