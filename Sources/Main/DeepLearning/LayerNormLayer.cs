@@ -92,7 +92,10 @@ namespace DevOnBike.Overfit.DeepLearning
                 var outRow = output.Slice(r * C, C);
                 var mu = 0f;
 
-                for (var i = 0; i < C; i++) mu += inRow[i];
+                for (var i = 0; i < C; i++)
+                {
+                    mu += inRow[i];
+                }
                 mu /= C;
 
                 var variance = 0f;

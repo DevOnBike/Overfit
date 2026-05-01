@@ -167,13 +167,19 @@ namespace DevOnBike.Overfit.DeepLearning
         public IEnumerable<AutogradNode> Parameters()
         {
             yield return Kernels.AsNode();
-            if (Bias != null) yield return Bias.AsNode();
+            if (Bias != null)
+            {
+                yield return Bias.AsNode();
+            }
         }
 
         public IEnumerable<Parameter> TrainableParameters()
         {
             yield return Kernels;
-            if (Bias != null) yield return Bias;
+            if (Bias != null)
+            {
+                yield return Bias;
+            }
         }
 
         public void Save(BinaryWriter bw)

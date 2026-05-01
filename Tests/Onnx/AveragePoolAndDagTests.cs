@@ -86,10 +86,16 @@ namespace DevOnBike.Overfit.Tests.Onnx
             var input  = new float[AvgPoolIn];
             var output = new float[AvgPoolOut];
 
-            for (var i = 0; i < 256; i++) engine.Run(input, output);
+            for (var i = 0; i < 256; i++)
+            {
+                engine.Run(input, output);
+            }
 
             var before    = GC.GetAllocatedBytesForCurrentThread();
-            for (var i = 0; i < 10_000; i++) engine.Run(input, output);
+            for (var i = 0; i < 10_000; i++)
+            {
+                engine.Run(input, output);
+            }
             var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
             Assert.Equal(0L, allocated);
@@ -236,10 +242,16 @@ namespace DevOnBike.Overfit.Tests.Onnx
             var input  = new float[ResNetFlat];
             var output = new float[ResNetFlat];
 
-            for (var i = 0; i < 256; i++) model.RunInference(input, output);
+            for (var i = 0; i < 256; i++)
+            {
+                model.RunInference(input, output);
+            }
 
             var before    = GC.GetAllocatedBytesForCurrentThread();
-            for (var i = 0; i < 10_000; i++) model.RunInference(input, output);
+            for (var i = 0; i < 10_000; i++)
+            {
+                model.RunInference(input, output);
+            }
             var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
             Assert.Equal(0L, allocated);

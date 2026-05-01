@@ -239,7 +239,10 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             var p = new Parameter(new TensorShape(rows, cols), requiresGrad: true, clearData: false);
             var span = p.DataSpan;
-            for (var i = 0; i < span.Length; i++) span[i] = Maths.MathUtils.NextGaussian() * scale;
+            for (var i = 0; i < span.Length; i++)
+            {
+                span[i] = Maths.MathUtils.NextGaussian() * scale;
+            }
             return p;
         }
 

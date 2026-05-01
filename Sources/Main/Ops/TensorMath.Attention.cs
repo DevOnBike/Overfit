@@ -202,7 +202,10 @@ namespace DevOnBike.Overfit.Ops
                         for (var i = 0; i < seqLen; i++)
                         {
                             var aij = aBatch[i * seqLen + j];  // A[i,j] — column j of A
-                            if (aij == 0f) continue;
+                            if (aij == 0f)
+                            {
+                                continue;
+                            }
 
                             TensorPrimitives.MultiplyAdd(
                                 dOBatch.Slice(i * dv, dv),
@@ -262,7 +265,10 @@ namespace DevOnBike.Overfit.Ops
 
                         for (var j = 0; j < seqLen; j++)
                         {
-                            if (dSRow[j] == 0f) continue;
+                            if (dSRow[j] == 0f)
+                            {
+                                continue;
+                            }
 
                             TensorPrimitives.MultiplyAdd(
                                 kBatch.Slice(j * dk, dk),
@@ -285,7 +291,10 @@ namespace DevOnBike.Overfit.Ops
                         for (var i = 0; i < seqLen; i++)
                         {
                             var dsij = dS[i * seqLen + j]; // dS[i,j] transposed
-                            if (dsij == 0f) continue;
+                            if (dsij == 0f)
+                            {
+                                continue;
+                            }
 
                             TensorPrimitives.MultiplyAdd(
                                 qBatch.Slice(i * dk, dk),

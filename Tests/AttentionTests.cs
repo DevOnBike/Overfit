@@ -78,7 +78,10 @@ namespace DevOnBike.Overfit.Tests
 
             // V: each row is a distinct one-hot-like pattern
             var vData = new float[seq * dv];
-            for (var t = 0; t < seq; t++) vData[t * dv + t] = 1f; // row t has 1 at position t
+            for (var t = 0; t < seq; t++)
+            {
+                vData[t * dv + t] = 1f; // row t has 1 at position t
+            }
 
             // Q = K = ones (uniform attention without mask)
             var qData = new float[seq * dk]; qData.AsSpan().Fill(1f);
@@ -158,7 +161,10 @@ namespace DevOnBike.Overfit.Tests
                 using var v2 = MakeNode(vD, batch, seq, dv, true);
                 using var o2 = TensorMath.ScaledDotProductAttention(g, q2, k2, v2, causalMask: true);
                 var sum = 0f;
-                foreach (var x in o2.DataView.AsReadOnlySpan()) sum += x;
+                foreach (var x in o2.DataView.AsReadOnlySpan())
+                {
+                    sum += x;
+                }
                 return sum;
             };
 
@@ -272,14 +278,18 @@ namespace DevOnBike.Overfit.Tests
         public static float[] NextFloats(this Random rng, float[] arr)
         {
             for (var i = 0; i < arr.Length; i++)
+            {
                 arr[i] = (float)(rng.NextDouble() * 2 - 1) * 0.5f;
+            }
             return arr;
         }
 
         public static void NextFloats(this Random rng, Span<float> span)
         {
             for (var i = 0; i < span.Length; i++)
+            {
                 span[i] = (float)(rng.NextDouble() * 2 - 1) * 0.5f;
+            }
         }
     }
 }

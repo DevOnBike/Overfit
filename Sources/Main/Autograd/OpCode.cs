@@ -37,6 +37,7 @@ namespace DevOnBike.Overfit.Autograd
         AddInPlace,
         LayerNorm,
         Embedding,
-        ScaledDotProductAttention
+        ScaledDotProductAttention,
+        Gelu
     }
 }

@@ -106,7 +106,10 @@ namespace DevOnBike.Overfit.Tests
                 using var input = new AutogradNode(storage, new TensorShape(2, 4), requiresGrad: false);
                 using var output = ln.Forward(g, input);
                 var sum = 0f;
-                foreach (var v in output.DataView.AsReadOnlySpan()) sum += v;
+                foreach (var v in output.DataView.AsReadOnlySpan())
+                {
+                    sum += v;
+                }
                 return sum;
             }
 
@@ -187,7 +190,10 @@ namespace DevOnBike.Overfit.Tests
 
             // Set known weights
             var w = emb.Weight.DataSpan;
-            for (var i = 0; i < 15; i++) w[i] = i;
+            for (var i = 0; i < 15; i++)
+            {
+                w[i] = i;
+            }
             // Row 0: [0,1,2], Row 1: [3,4,5], Row 2: [6,7,8] ...
 
             using var graph = new ComputationGraph();
@@ -261,7 +267,10 @@ namespace DevOnBike.Overfit.Tests
         {
             using var emb = new EmbeddingLayer(vocabSize: 3, embeddingDim: 4);
             var w = emb.Weight.DataSpan;
-            for (var i = 0; i < 12; i++) w[i] = i * 0.1f;
+            for (var i = 0; i < 12; i++)
+            {
+                w[i] = i * 0.1f;
+            }
 
             float[] result = new float[4];
             emb.LookupInference(2, result);

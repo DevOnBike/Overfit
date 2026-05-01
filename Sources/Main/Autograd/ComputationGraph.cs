@@ -281,14 +281,12 @@ namespace DevOnBike.Overfit.Autograd
 
                 case OpCode.ScaledDotProductAttention:
                     TensorMath.ScaledDotProductAttentionBackward(
-                        op.A,           // q
-                        op.B,           // k
-                        op.C0,          // v
-                        op.C1,          // attnWeights (GraphAuxiliary)
-                        op.Output,
-                        op.I0,          // seqLen
-                        op.I1,          // dk
-                        op.I2 == 1);    // causalMask
+                        op.A, op.B, op.C0, op.C1, op.Output,
+                        op.I0, op.I1, op.I2 == 1);
+                    break;
+
+                case OpCode.Gelu:
+                    TensorMath.GeluBackward(op.A, op.Output);
                     break;
 
                 case OpCode.Reshape:

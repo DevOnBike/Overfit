@@ -119,7 +119,10 @@ namespace DevOnBike.Overfit.Onnx
 
         public void Dispose()
         {
-            if (_disposed) return;
+            if (_disposed)
+            {
+                return;
+            }
             _disposed = true;
 
             foreach (var node in _nodes)

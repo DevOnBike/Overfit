@@ -71,7 +71,10 @@ namespace Benchmarks
                 _resnetOutput = new float[256];
                 Fill(rng, _resnetInput);
 
-                for (var i = 0; i < 256; i++) _resnetModel.RunInference(_resnetInput, _resnetOutput);
+                for (var i = 0; i < 256; i++)
+                {
+                    _resnetModel.RunInference(_resnetInput, _resnetOutput);
+                }
             }
 
             // TinyResNet
@@ -84,7 +87,10 @@ namespace Benchmarks
                 _tinyOutput  = new float[4];
                 Fill(rng, _tinyInput);
 
-                for (var i = 0; i < 256; i++) _tinyResnet.RunInference(_tinyInput, _tinyOutput);
+                for (var i = 0; i < 256; i++)
+                {
+                    _tinyResnet.RunInference(_tinyInput, _tinyOutput);
+                }
             }
         }
 
@@ -100,7 +106,10 @@ namespace Benchmarks
         [Benchmark]
         public void AvgPool_ConvPoolFc_Sequential()
         {
-            if (_avgPoolEngine == null) return;
+            if (_avgPoolEngine == null)
+            {
+                return;
+            }
             _avgPoolEngine.Run(_avgPoolInput, _avgPoolOutput);
         }
 
@@ -108,7 +117,10 @@ namespace Benchmarks
         [Benchmark]
         public void ResNetBlock_ConvSkip_DAG()
         {
-            if (_resnetModel == null) return;
+            if (_resnetModel == null)
+            {
+                return;
+            }
             _resnetModel.RunInference(_resnetInput, _resnetOutput);
         }
 
@@ -116,14 +128,19 @@ namespace Benchmarks
         [Benchmark(Baseline = true)]
         public void TinyResNet_LinearSkip_DAG()
         {
-            if (_tinyResnet == null) return;
+            if (_tinyResnet == null)
+            {
+                return;
+            }
             _tinyResnet.RunInference(_tinyInput, _tinyOutput);
         }
 
         private static void Fill(Random rng, float[] arr)
         {
             for (var i = 0; i < arr.Length; i++)
+            {
                 arr[i] = (float)(rng.NextDouble() * 2 - 1);
+            }
         }
     }
 }

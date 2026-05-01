@@ -382,7 +382,10 @@ namespace DevOnBike.Overfit.Kernels
                             for (var ky = 0; ky < kernelSize; ky++)
                             {
                                 var iy = inputYBase + ky;
-                                if ((uint)iy >= (uint)inputH) continue; // zero-pad: skip out-of-bounds rows
+                                if ((uint)iy >= (uint)inputH)
+                                {
+                                    continue; // zero-pad: skip out-of-bounds rows
+                                }
 
                                 var kernelRowBase = kernelChanBase + ky * kernelSize;
                                 var inputRowBase  = inputChanBase  + iy * inputW;
@@ -390,7 +393,10 @@ namespace DevOnBike.Overfit.Kernels
                                 for (var kx = 0; kx < kernelSize; kx++)
                                 {
                                     var ix = inputXBase + kx;
-                                    if ((uint)ix >= (uint)inputW) continue; // zero-pad: skip out-of-bounds cols
+                                    if ((uint)ix >= (uint)inputW)
+                                    {
+                                        continue; // zero-pad: skip out-of-bounds cols
+                                    }
 
                                     sum += input[inputRowBase + ix] * kernels[kernelRowBase + kx];
                                 }
