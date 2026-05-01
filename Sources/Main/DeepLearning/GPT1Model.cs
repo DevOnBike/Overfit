@@ -422,7 +422,6 @@ namespace DevOnBike.Overfit.DeepLearning
                     maxIdx = i;
                 }
             }
-
             return maxIdx;
         }
 
