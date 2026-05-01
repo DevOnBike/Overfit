@@ -41,6 +41,10 @@ namespace DevOnBike.Overfit.Autograd
         // for example StackTimesteps / FusedLSTMStep.
         public readonly AutogradNode[] NodeContext;
 
+        // Integer array context — used for Embedding (token ids).
+        // Kept separate from NodeContext to avoid boxing/casting.
+        public readonly int[] IntData;
+
         public TapeOp(
             OpCode code,
             AutogradNode output,
@@ -57,7 +61,8 @@ namespace DevOnBike.Overfit.Autograd
             AutogradNode c3 = null,
             AutogradNode c4 = null,
             int contextCount = 0,
-            AutogradNode[] nodeContext = null)
+            AutogradNode[] nodeContext = null,
+            int[] intData = null)
         {
             Code = code;
 
@@ -79,6 +84,7 @@ namespace DevOnBike.Overfit.Autograd
             ContextCount = contextCount;
 
             NodeContext = nodeContext;
+            IntData    = intData;
         }
     }
 }

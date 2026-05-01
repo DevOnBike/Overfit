@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 DevOnBike.
+// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -138,6 +138,30 @@ namespace DevOnBike.Overfit.Autograd
             OverfitTelemetry.RecordGraphRecordOp(code);
         }
 
+        /// <summary>
+        /// Records an Embedding operation. Token ids are stored in TapeOp.IntData
+        /// for scatter-add gradient accumulation during backward.
+        /// </summary>
+        internal void RecordEmbedding(
+            OpCode code,
+            AutogradNode output,
+            AutogradNode embeddings,
+            int[] tokenIds)
+        {
+            if (!IsRecording) { return; }
+
+            if (_opCount >= _tape.Length)
+            {
+                Array.Resize(ref _tape, _tape.Length * 2);
+            }
+
+            _tape[_opCount++] = new TapeOp(
+                code,
+                output,
+                embeddings,
+                intData: tokenIds);
+        }
+
         public void Backward(AutogradNode lossNode)
         {
             if (lossNode == null || !lossNode.RequiresGrad)
@@ -247,6 +271,26 @@ namespace DevOnBike.Overfit.Autograd
                     TensorMath.BatchNorm1DBackward(op.A, op.Output, op.C0, op.C1, op.C2, op.C3);
                     break;
 
+                case OpCode.LayerNorm:
+                    TensorMath.LayerNormBackward(op.A, op.Output, op.C0, op.C1, op.C2, op.C3);
+                    break;
+
+                case OpCode.Embedding:
+                    TensorMath.EmbeddingBackward(op.A, op.Output, op.IntData);
+                    break;
+
+                case OpCode.ScaledDotProductAttention:
+                    TensorMath.ScaledDotProductAttentionBackward(
+                        op.A,           // q
+                        op.B,           // k
+                        op.C0,          // v
+                        op.C1,          // attnWeights (GraphAuxiliary)
+                        op.Output,
+                        op.I0,          // seqLen
+                        op.I1,          // dk
+                        op.I2 == 1);    // causalMask
+                    break;
+
                 case OpCode.Reshape:
                     TensorMath.ReshapeBackward(op.A, op.Output);
                     break;
@@ -348,11 +392,8 @@ namespace DevOnBike.Overfit.Autograd
             System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
         private static void DisposeIfGraphOwned(AutogradNode? node)
         {
-            if (node is
-                {
-                    Ownership: AutogradNodeOwnership.GraphTemporary
-                                  or AutogradNodeOwnership.GraphAuxiliary
-                })
+            if (node is { Ownership: AutogradNodeOwnership.GraphTemporary
+                                  or AutogradNodeOwnership.GraphAuxiliary })
             {
                 node.Dispose();
             }
