@@ -67,6 +67,35 @@ using var engine = InferenceEngine.FromBackend(backend);
 var prediction = engine.Predict(input); // ReadOnlySpan<float>, 0 B
 ```
 
+### GPT-style language model
+
+```csharp
+using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.Tokenization;
+
+// Small model — fast, fits in RAM, trains on CPU
+var config = new GPT1Config
+{
+    VocabSize     = 65,    // char-level Shakespeare
+    ContextLength = 256,
+    DModel        = 128,
+    NHeads        = 4,
+    NLayers       = 2,
+    DFF           = 512,
+};
+
+var tokenizer = CharacterTokenizer.FromCorpus(File.ReadAllText("input.txt"));
+
+using var model = new GPT1Model(config);
+model.Train();
+
+// Greedy generation (inference)
+model.Eval();
+var prompt    = tokenizer.Encode("ROMEO:");
+var generated = model.Generate(prompt, maxNewTokens: 100);
+Console.WriteLine(tokenizer.Decode(generated));
+```
+
 ### Training
 
 ```csharp
@@ -128,6 +157,25 @@ Model: Linear(784→10). Overfit is **9.2× faster** than ONNX Runtime pre-alloc
 Model: TinyResNet — Linear(8→8) + skip + Linear(8→4). Both paths: zero allocations.
 Bimodal distribution due to model size (sub-µs math, timer resolution dominates).
 
+### GPT-1 inference (pure C#, CPU-only)
+
+Model: GPT-1 scale — 12 layers, 768d, 12 heads, dFF=3072, ~117M params.
+Machine: AMD Ryzen 9 9950X3D · .NET 10 · BenchmarkDotNet.
+
+| Method | SeqLen | Mean | Allocated |
+|--------|-------:|-----:|----------:|
+| Single TransformerBlock | 16 | **5.1 ms** | 950 KB |
+| Single TransformerBlock | 64 | **11.5 ms** | 3.6 MB |
+| Full GPT-1 (12 blocks) | 16 | **81.8 ms** | 13.8 MB |
+| Full GPT-1 (12 blocks) | 64 | **163.9 ms** | 50.6 MB |
+
+One TransformerBlock = MultiHeadAttention + FFN(GELU) + 2×LayerNorm + residuals.
+Full GPT-1 = 12 blocks + token/positional embeddings + final LN + LM head (vocabSize=40478).
+
+**Memory note:** allocations shown are intermediate activation tensors disposed after each call.
+SeqLen=128 exceeds the default 50MB arena — max supported context at inference: ~100 tokens.
+Gradient checkpointing (planned) will reduce this by ~75%.
+
 ### CNN training throughput (60k MNIST, batch=64)
 
 | Epoch | Time | Alloc/epoch | Notes |
@@ -177,7 +225,7 @@ PyTorch model (eval mode)
 | `Reshape` / `Flatten` | `FlattenLayer` | Rank reduction (4D→2D) |
 | `Identity` / `Dropout` | _(no-op in eval mode)_ | |
 
-**12 operators** (+ 2 no-ops). Unsupported operators throw a clear `NotSupportedException` naming the operator.
+**14 operators** (+ 2 no-ops). Unsupported operators throw a clear `NotSupportedException` naming the operator.
 
 Two importers:
 - **`OnnxImporter`** — linear topology only. Faster for simple CNNs and MLPs.
@@ -226,6 +274,13 @@ TensorStorage<T>         ← unmanaged memory ownership
 Optimizers               ← Adam(IEnumerable<Parameter>), SGD(IEnumerable<Parameter>)
 OnnxImporter             ← PyTorch ONNX → Sequential (linear topology)
 OnnxGraphImporter        ← PyTorch ONNX → OnnxGraphModel (DAG topology, skip connections)
+GPT1Model                ← Full GPT-style LM: Embedding + N×TransformerBlock + LM head
+  TransformerBlock       ← MultiHeadAttention + FFN(GELU) + LayerNorm + residuals
+  MultiHeadAttentionLayer ← SDPA × nHeads, causal mask, weight-stationary split/merge
+  LayerNormLayer         ← per-token normalisation, no running stats
+  EmbeddingLayer         ← token/positional lookup, scatter-add backward
+CharacterTokenizer       ← char-level, no external deps
+BytePairEncoder          ← loads GPT-2 vocab.json + merges.txt
 ```
 
 ### Autograd ownership
@@ -271,7 +326,10 @@ Use cases: Kubernetes tuning, game AI, industrial process search, pricing strate
 
 - ✅ **ONNX import — 12 operators** (Conv w/padding+stride, Gemm, ReLU, Tanh, Sigmoid, Softmax, MaxPool, GlobalAveragePool, BatchNormalization, Add, Reshape, Flatten)
 - ✅ **ONNX DAG runtime** — `OnnxGraphImporter` supports branching topology (skip connections, residual blocks). Enables ResNet-style models. Zero-allocation inference via `OnnxGraphInferenceBackend`.
-- ✅ **AveragePool + ReduceMean** — windowed average pooling with padding/stride; `ReduceMean` mapped to GlobalAveragePool (PyTorch `AdaptiveAvgPool2d` export pattern). Total: **14 ONNX operators**.
+- ✅ **AveragePool + ReduceMean** — windowed average pooling; `ReduceMean` mapped to GlobalAveragePool. Total: 14 ONNX operators.
+- ✅ **GPT-1 architecture** — complete transformer stack: LayerNorm, Embedding, ScaledDotProductAttention, MultiHeadAttention, GELU FFN, TransformerBlock (Pre-LN + Post-LN), GPT1Model with weight tying, greedy generation, Save/Load
+- ✅ **Tokenizers** — CharacterTokenizer (no deps) + BytePairEncoder (loads GPT-2 vocab.json/merges.txt)
+- ✅ **BackwardFromGrad** — custom loss backward without overwriting seeded gradient — windowed average pooling with padding/stride; `ReduceMean` mapped to GlobalAveragePool (PyTorch `AdaptiveAvgPool2d` export pattern). Total: **14 ONNX operators**.
 - ✅ **PR5 Autograd ownership cleanup** — `Parameter` type, `AutogradNodeOwnership` enum, `graph.Reset()` by ownership, all layers migrated (LinearLayer, ConvLayer, BatchNorm1D)
 - ✅ **Optimizers on `Parameter`** — `Adam(IEnumerable<Parameter>)`, `SGD(IEnumerable<Parameter>)`
 - ✅ **PERF-1: Linear backward kernels** — hybrid threshold eliminates `Parallel.For` overhead for small matrices; backward alloc −43% (23 MB → 13 MB per epoch)
@@ -280,28 +338,35 @@ Use cases: Kubernetes tuning, game AI, industrial process search, pricing strate
 
 ### Near-term
 
-- **PR5-7d/e** — Move Conv2D/MaxPool2D into `ComputationGraph.*` (architectural cleanup, zero user impact)
-- **ONNX: LSTM/GRU operators** — enables recurrent model import
-- **Depthwise Conv** (group=channels) — MobileNet-style models
+- **GPT-1 training at scale** — gradient checkpointing (recompute activations, ~75% memory reduction)
+- **True batch training (B>1)** — MHA batch dimension refactor
+- **Sampling** — temperature, top-k, top-p for non-greedy generation
+- **ONNX: LSTM/GRU operators** — recurrent model import
+- **PR5-7d/e** — Conv2D/MaxPool2D in ComputationGraph (architectural, zero user impact)
 
-### Transformer path (toward GPT-1)
+### Transformer / GPT-1 status
 
-Building GPT-1 (117M params, decoder-only Transformer) requires these components in order:
+GPT-1 architecture is **complete**. All components implemented and tested:
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| `LayerNorm` | ❌ | Different from BatchNorm — normalises over features, not batch |
-| `Embedding` | ❌ | Token lookup + positional encoding |
-| `ScaledDotProductAttention` | ❌ | Core of every Transformer |
-| `MultiHeadAttention` | ❌ | Parallel attention heads |
-| Causal masking | ❌ | Upper-triangular mask for autoregressive generation |
-| Transformer block | ❌ | Attention + FFN + LayerNorm + residual (DAG ✅ already works) |
-| Tokenizer (BPE) | ❌ | Pre/post processing |
-| Gradient checkpointing | ❌ | Required for 117M params on single machine |
+| `LayerNorm` | ✅ | Per-token, no running stats, full backward |
+| `Embedding` | ✅ | Token + positional, scatter-add backward |
+| `ScaledDotProductAttention` | ✅ | Causal mask, full Q/K/V backward |
+| `MultiHeadAttention` | ✅ | Weight-stationary head split/merge, GPT-1 scale tested |
+| GELU activation | ✅ | Tanh approximation, numerical gradient verified |
+| `FeedForwardLayer` | ✅ | Linear→GELU→Linear, position-wise |
+| `TransformerBlock` | ✅ | Pre-LN and Post-LN variants, Save/Load |
+| `GPT1Model` | ✅ | 12 blocks, weight tying, greedy generation |
+| `CharacterTokenizer` | ✅ | No deps, train from corpus |
+| `BytePairEncoder` | ✅ | GPT-2 vocab.json/merges.txt compatible |
 
-**Distance estimate:** 5–7 new layer types + memory management changes. Estimated 3–4 months of focused work at current pace. The DAG runtime (skip connections) already handles residual blocks — that part is done.
+**What works today:** inference at any scale, training for small models (≤10M params, CPU).
 
-Overfit could run GPT-1 inference once the operator set is complete. Training at scale requires gradient checkpointing.
+**What's next for full GPT-1 training (117M params):**
+- **Gradient checkpointing** — recompute activations during backward, ~75% memory reduction
+- **True batch training (B>1)** — MHA batch dimension refactor
+- **Sampling** — temperature, top-k, top-p
 
 ### Long-term
 
