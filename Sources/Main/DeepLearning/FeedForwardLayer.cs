@@ -27,7 +27,6 @@ namespace DevOnBike.Overfit.DeepLearning
     public sealed class FeedForwardLayer : IModule
     {
         private readonly int _dModel;
-        private readonly int _dFF;
 
         private AutogradNode? _w1Node;
         private AutogradNode? _b1Node;
@@ -40,14 +39,13 @@ namespace DevOnBike.Overfit.DeepLearning
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(dFF);
 
             _dModel = dModel;
-            _dFF    = dFF;
 
             var scale1 = MathF.Sqrt(2f / dModel);
             var scale2 = MathF.Sqrt(2f / dFF);
 
-            W1 = CreateWeight(dModel, dFF,    scale1);
-            B1 = new Parameter(new TensorShape(dFF),    requiresGrad: true, clearData: true);
-            W2 = CreateWeight(dFF,    dModel, scale2);
+            W1 = CreateWeight(dModel, dFF, scale1);
+            B1 = new Parameter(new TensorShape(dFF), requiresGrad: true, clearData: true);
+            W2 = CreateWeight(dFF, dModel, scale2);
             B2 = new Parameter(new TensorShape(dModel), requiresGrad: true, clearData: true);
         }
 
@@ -67,14 +65,13 @@ namespace DevOnBike.Overfit.DeepLearning
         /// </summary>
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
-            var b      = input.Shape.D0;
-            var t      = input.Shape.D1;
+            var b = input.Shape.D0;
+            var t = input.Shape.D1;
             var dModel = input.Shape.D2;
 
             if (dModel != _dModel)
             {
-                throw new ArgumentException(
-                    $"Expected d_model={_dModel}, got {dModel}. Input: {input.Shape}");
+                throw new ArgumentException($"Expected d_model={_dModel}, got {dModel}. Input: {input.Shape}");
             }
 
             _w1Node ??= W1.AsNode();
@@ -86,13 +83,13 @@ namespace DevOnBike.Overfit.DeepLearning
             var flat = graph.Reshape(input, b * t, _dModel);
 
             // [B*T, dModel] @ W1 + b1 → [B*T, dFF]
-            var h1   = graph.Linear(flat, _w1Node, _b1Node);
+            var h1 = graph.Linear(flat, _w1Node, _b1Node);
 
             // GELU([B*T, dFF])
-            var act  = TensorMath.Gelu(graph, h1);
+            var act = TensorMath.Gelu(graph, h1);
 
             // [B*T, dFF] @ W2 + b2 → [B*T, dModel]
-            var h2   = graph.Linear(act, _w2Node, _b2Node);
+            var h2 = graph.Linear(act, _w2Node, _b2Node);
 
             // Reshape back to [B, T, dModel]
             return graph.Reshape(h2, b, t, _dModel);
@@ -115,7 +112,10 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void InvalidateParameterCaches()
         {
-            _w1Node = null; _b1Node = null; _w2Node = null; _b2Node = null;
+            _w1Node = null;
+            _b1Node = null;
+            _w2Node = null;
+            _b2Node = null;
         }
 
         public void Save(BinaryWriter bw)
@@ -130,19 +130,27 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void Dispose()
         {
-            _w1Node?.Dispose(); _b1Node?.Dispose();
-            _w2Node?.Dispose(); _b2Node?.Dispose();
-            W1.Dispose(); B1.Dispose(); W2.Dispose(); B2.Dispose();
+            _w1Node?.Dispose();
+            _b1Node?.Dispose();
+            _w2Node?.Dispose();
+            _b2Node?.Dispose();
+
+            W1.Dispose();
+            B1.Dispose();
+            W2.Dispose();
+            B2.Dispose();
         }
 
         private static Parameter CreateWeight(int rows, int cols, float scale)
         {
             var p = new Parameter(new TensorShape(rows, cols), requiresGrad: true, clearData: false);
             var s = p.DataSpan;
+
             for (var i = 0; i < s.Length; i++)
             {
                 s[i] = Maths.MathUtils.NextGaussian() * scale;
             }
+
             return p;
         }
     }

@@ -161,12 +161,12 @@ namespace DevOnBike.Overfit.Tests
             const int dModel = 8, nHeads = 2, batch = 1, seq = 3;
 
             using var mha1 = new MultiHeadAttentionLayer(dModel, nHeads);
-            using var ms = new System.IO.MemoryStream();
-            using var bw = new System.IO.BinaryWriter(ms);
+            using var ms = new MemoryStream();
+            using var bw = new BinaryWriter(ms);
             mha1.Save(bw);
 
             ms.Position = 0;
-            using var br = new System.IO.BinaryReader(ms);
+            using var br = new BinaryReader(ms);
             using var mha2 = new MultiHeadAttentionLayer(dModel, nHeads);
             mha2.Load(br);
 
@@ -232,7 +232,7 @@ namespace DevOnBike.Overfit.Tests
         {
             var storage = new TensorStorage<float>(data.Length, clearMemory: false);
             data.AsSpan().CopyTo(storage.AsSpan());
-            return new AutogradNode(storage, new DevOnBike.Overfit.Tensors.TensorShape(b, t, d), requiresGrad);
+            return new AutogradNode(storage, new Tensors.TensorShape(b, t, d), requiresGrad);
         }
 
         private static float[] MakeRandom(int size, int seed)

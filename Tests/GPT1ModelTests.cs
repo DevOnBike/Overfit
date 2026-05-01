@@ -205,12 +205,12 @@ namespace DevOnBike.Overfit.Tests
             using var model1 = new GPT1Model(SmallConfig);
             model1.Eval();
 
-            using var ms = new System.IO.MemoryStream();
-            using var bw = new System.IO.BinaryWriter(ms);
+            using var ms = new MemoryStream();
+            using var bw = new BinaryWriter(ms);
             model1.Save(bw);
 
             ms.Position = 0;
-            using var br     = new System.IO.BinaryReader(ms);
+            using var br     = new BinaryReader(ms);
             using var model2 = new GPT1Model(SmallConfig);
             model2.Load(br);
             model2.Eval();

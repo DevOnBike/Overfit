@@ -46,7 +46,7 @@ namespace DevOnBike.Overfit.Tests
             // Reproduce the new VectorizedRandom-backed fill. Same partitionSeed semantics
             // except cast from int to uint preserves the bit pattern.
             var vecBuffer = new float[length];
-            FillRangeWithVectorized(vecBuffer.AsSpan(), new DevOnBike.Overfit.Randomization.VectorizedRandom(unchecked((uint)partitionSeed)));
+            FillRangeWithVectorized(vecBuffer.AsSpan(), new Randomization.VectorizedRandom(unchecked((uint)partitionSeed)));
 
             ReportBias("VectorizedRandom fill", vecBuffer, pairs, paramCount);
         }
@@ -76,7 +76,7 @@ namespace DevOnBike.Overfit.Tests
             }
         }
 
-        private static void FillRangeWithVectorized(Span<float> target, DevOnBike.Overfit.Randomization.VectorizedRandom rng)
+        private static void FillRangeWithVectorized(Span<float> target, Randomization.VectorizedRandom rng)
         {
             // Same algorithm, just with VectorizedRandom as the uniform source. This is
             // literally what PrecomputedNoiseTable does after the switch.

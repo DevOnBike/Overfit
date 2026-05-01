@@ -43,7 +43,7 @@ namespace DevOnBike.Overfit.Tests
                 using var g    = new ComputationGraph();
                 var storage    = new TensorStorage<float>(1, clearMemory: false);
                 storage.AsSpan()[0] = x;
-                using var inp  = new AutogradNode(storage, new DevOnBike.Overfit.Tensors.TensorShape(1), requiresGrad: true);
+                using var inp  = new AutogradNode(storage, new TensorShape(1), requiresGrad: true);
                 using var outp = TensorMath.Gelu(g, inp);
 
                 outp.GradView.AsSpan()[0] = 1f;
@@ -176,12 +176,12 @@ namespace DevOnBike.Overfit.Tests
             const int dModel = 8, nHeads = 2, dFF = 32, batch = 1, seq = 3;
 
             using var block1 = new TransformerBlock(dModel, nHeads, dFF);
-            using var ms     = new System.IO.MemoryStream();
-            using var bw     = new System.IO.BinaryWriter(ms);
+            using var ms     = new MemoryStream();
+            using var bw     = new BinaryWriter(ms);
             block1.Save(bw);
 
             ms.Position = 0;
-            using var br     = new System.IO.BinaryReader(ms);
+            using var br     = new BinaryReader(ms);
             using var block2 = new TransformerBlock(dModel, nHeads, dFF);
             block2.Load(br);
 

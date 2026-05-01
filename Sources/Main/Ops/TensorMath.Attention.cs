@@ -176,8 +176,8 @@ namespace DevOnBike.Overfit.Ops
             var qS = q.DataView.AsReadOnlySpan();
             var kS = k.DataView.AsReadOnlySpan();
 
-            using var dABuf = new Tensors.PooledBuffer<float>(seqLen * seqLen, clearMemory: false);
-            using var dSBuf = new Tensors.PooledBuffer<float>(seqLen * seqLen, clearMemory: false);
+            using var dABuf = new PooledBuffer<float>(seqLen * seqLen, clearMemory: false);
+            using var dSBuf = new PooledBuffer<float>(seqLen * seqLen, clearMemory: false);
 
             for (var b = 0; b < batchSize; b++)
             {

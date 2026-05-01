@@ -57,7 +57,7 @@ namespace DevOnBike.Overfit.Autograd
                         var aVal = rA[k];
                         if (aVal != 0f)
                         {
-                            Intrinsics.Simd.MulAdd(wS2.Slice(k * M, M), aVal, rC);
+                            Simd.MulAdd(wS2.Slice(k * M, M), aVal, rC);
                         }
                     }
                 });

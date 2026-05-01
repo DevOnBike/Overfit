@@ -41,7 +41,7 @@ namespace Benchmarks
         private InferenceEngine _overfitEngine = null!;
 
         private TorchMlp _torchModel = null!;
-        private torch.Tensor _torchInput = null!;
+        private Tensor _torchInput = null!;
 
         [GlobalSetup]
         public void Setup()
@@ -164,13 +164,13 @@ namespace Benchmarks
             }
         }
 
-        private sealed class TorchMlp : nn.Module<torch.Tensor, torch.Tensor>
+        private sealed class TorchMlp : nn.Module<Tensor, Tensor>
         {
-            private readonly nn.Module<torch.Tensor, torch.Tensor> _lin1;
-            private readonly nn.Module<torch.Tensor, torch.Tensor> _relu1;
-            private readonly nn.Module<torch.Tensor, torch.Tensor> _lin2;
-            private readonly nn.Module<torch.Tensor, torch.Tensor> _relu2;
-            private readonly nn.Module<torch.Tensor, torch.Tensor> _lin3;
+            private readonly nn.Module<Tensor, Tensor> _lin1;
+            private readonly nn.Module<Tensor, Tensor> _relu1;
+            private readonly nn.Module<Tensor, Tensor> _lin2;
+            private readonly nn.Module<Tensor, Tensor> _relu2;
+            private readonly nn.Module<Tensor, Tensor> _lin3;
 
             public TorchMlp()
                 : base(nameof(TorchMlp))
@@ -186,7 +186,7 @@ namespace Benchmarks
                 RegisterComponents();
             }
 
-            public override torch.Tensor forward(torch.Tensor input)
+            public override Tensor forward(Tensor input)
             {
                 using var x1 = _lin1.forward(input);
                 using var r1 = _relu1.forward(x1);
