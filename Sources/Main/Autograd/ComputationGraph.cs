@@ -279,16 +279,6 @@ namespace DevOnBike.Overfit.Autograd
                     TensorMath.EmbeddingBackward(op.A, op.Output, op.IntData);
                     break;
 
-                case OpCode.ScaledDotProductAttention:
-                    TensorMath.ScaledDotProductAttentionBackward(
-                        op.A, op.B, op.C0, op.C1, op.Output,
-                        op.I0, op.I1, op.I2 == 1);
-                    break;
-
-                case OpCode.Gelu:
-                    TensorMath.GeluBackward(op.A, op.Output);
-                    break;
-
                 case OpCode.Reshape:
                     TensorMath.ReshapeBackward(op.A, op.Output);
                     break;
@@ -422,6 +412,20 @@ namespace DevOnBike.Overfit.Autograd
             return isGitHubActions
                 ? CiTapeBufferElements
                 : DefaultTapeBufferElements;
+        }
+
+        /// <summary>
+        /// Backward pass using gradient already seeded in <paramref name="node"/>.GradView.
+        /// Does NOT overwrite the gradient with 1.0 — use when caller computes a custom loss
+        /// gradient and seeds the output node manually before calling this.
+        /// </summary>
+        public void BackwardFromGrad(AutogradNode node)
+        {
+            for (var i = _opCount - 1; i >= 0; i--)
+            {
+                ref readonly var op = ref _tape[i];
+                ExecuteBackward(in op);
+            }
         }
     }
 }

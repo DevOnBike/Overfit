@@ -38,6 +38,7 @@ namespace DevOnBike.Overfit.DeepLearning
     {
         private readonly GPT1Config _config;
         private bool _isTraining = true;
+        private AutogradNode? _lmHeadNode;
         private bool _disposed;
 
         public GPT1Model(GPT1Config config)
@@ -293,6 +294,7 @@ namespace DevOnBike.Overfit.DeepLearning
             }
             _disposed = true;
 
+            _lmHeadNode?.Dispose();
             TokenEmbedding.Dispose();
             PositionEmbedding.Dispose();
             foreach (var b in Blocks)
@@ -386,7 +388,6 @@ namespace DevOnBike.Overfit.DeepLearning
             var dModel = _config.DModel;
             var vocabSize = _config.VocabSize;
 
-            // If weight-tying, sync LM head with current token embedding weights
             if (_config.TieWeights)
             {
                 TransposeInto(
@@ -396,32 +397,19 @@ namespace DevOnBike.Overfit.DeepLearning
                     dModel);
             }
 
-            // Flatten [B, T, dModel] → [B*T, dModel]
+            // Flatten [B, T, dModel] -> [B*T, dModel]
             var flat = graph.Reshape(x, batchSize * seqLen, dModel);
 
-            // [B*T, dModel] @ LMHead[dModel, vocabSize] → [B*T, vocabSize]
-            var lmStorage = new TensorStorage<float>(batchSize * seqLen * vocabSize, clearMemory: false);
-            var flatS = flat.DataView.AsReadOnlySpan();
-            var lmHeadS = LMHead.DataReadOnlySpan;
-            var outS = lmStorage.AsSpan();
+            // LM head ON TAPE: gradient flows back through transformer.
+            // graph.Linear(input[B*T,d], weight[d,V], bias[V]) -> [B*T,V]
+            var biasStorage = new TensorStorage<float>(vocabSize, clearMemory: true);
+            var bias = AutogradNode.CreateBorrowed(biasStorage, new TensorShape(vocabSize));
 
-            // Manual matmul: [B*T, dModel] @ [dModel, vocabSize]
-            for (var row = 0; row < batchSize * seqLen; row++)
-            {
-                var inRow = flatS.Slice(row * dModel, dModel);
-                var outRow = outS.Slice(row * vocabSize, vocabSize);
-
-                for (var v = 0; v < vocabSize; v++)
-                {
-                    outRow[v] = TensorPrimitives.Dot(inRow, lmHeadS.Slice(v * dModel, dModel));
-                }
-            }
+            _lmHeadNode ??= LMHead.AsNode();
+            var flatLogits = graph.Linear(flat, _lmHeadNode, bias);
 
             // Reshape to [B, T, vocabSize]
-            // requiresGrad: true so callers can seed GradView for custom loss backward.
-            var logitNode = new AutogradNode(lmStorage, new TensorShape(batchSize, seqLen, vocabSize), requiresGrad: true);
-
-            return logitNode;
+            return graph.Reshape(flatLogits, batchSize, seqLen, vocabSize);
         }
 
         private static int[] CreatePositionIds(int seqLen)
@@ -438,12 +426,10 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             var maxIdx = 0;
             var maxVal = logits[0];
-
             for (var i = 1; i < logits.Length; i++)
             {
                 if (logits[i] > maxVal) { maxVal = logits[i]; maxIdx = i; }
             }
-
             return maxIdx;
         }
 
