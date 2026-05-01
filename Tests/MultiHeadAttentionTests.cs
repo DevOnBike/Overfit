@@ -92,14 +92,14 @@ namespace DevOnBike.Overfit.Tests
             using var mha = new MultiHeadAttentionLayer(dModel, nHeads, causalMask: true);
 
             // Run with original input
-            float[] data1 = MakeRandom(1 * seq * dModel, seed: 42);
+            var data1 = MakeRandom(1 * seq * dModel, seed: 42);
             using var input1 = MakeInputFromData(data1, 1, seq, dModel, requiresGrad: false);
             using var graph1 = new ComputationGraph();
             using var output1 = mha.Forward(graph1, input1);
-            float[] out1 = output1.DataView.AsReadOnlySpan().ToArray();
+            var out1 = output1.DataView.AsReadOnlySpan().ToArray();
 
             // Perturb only position 3 (future for positions 0,1,2)
-            float[] data2 = (float[])data1.Clone();
+            var data2 = (float[])data1.Clone();
             for (var d = 0; d < dModel; d++)
             {
                 data2[3 * dModel + d] += 1f;
@@ -108,7 +108,7 @@ namespace DevOnBike.Overfit.Tests
             using var input2 = MakeInputFromData(data2, 1, seq, dModel, requiresGrad: false);
             using var graph2 = new ComputationGraph();
             using var output2 = mha.Forward(graph2, input2);
-            float[] out2 = output2.DataView.AsReadOnlySpan().ToArray();
+            var out2 = output2.DataView.AsReadOnlySpan().ToArray();
 
             // Positions 0, 1, 2 should be identical (causal — can't see position 3)
             for (var t = 0; t < 3; t++)
@@ -170,7 +170,7 @@ namespace DevOnBike.Overfit.Tests
             using var mha2 = new MultiHeadAttentionLayer(dModel, nHeads);
             mha2.Load(br);
 
-            float[] inputData = MakeRandom(batch * seq * dModel, seed: 99);
+            var inputData = MakeRandom(batch * seq * dModel, seed: 99);
 
             using var graph1 = new ComputationGraph();
             using var input1 = MakeInputFromData(inputData, batch, seq, dModel, requiresGrad: false);

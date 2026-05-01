@@ -169,7 +169,7 @@ namespace DevOnBike.Overfit.Tests
             var graphOut = outNode.DataView.AsReadOnlySpan().ToArray();
 
             // Inference forward
-            float[] infOut = new float[4];
+            var infOut = new float[4];
             ln.ForwardInference(input, infOut);
 
             for (var i = 0; i < 4; i++)
@@ -272,7 +272,7 @@ namespace DevOnBike.Overfit.Tests
                 w[i] = i * 0.1f;
             }
 
-            float[] result = new float[4];
+            var result = new float[4];
             emb.LookupInference(2, result);
 
             // Row 2: [0.8, 0.9, 1.0, 1.1]

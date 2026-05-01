@@ -148,9 +148,9 @@ namespace DevOnBike.Overfit.Tests
             var eps = 1e-3f;
             var idx = 2; // element to perturb
 
-            float[] qData = new float[batch * seq * dk];
-            float[] kData = new float[batch * seq * dk];
-            float[] vData = new float[batch * seq * dv];
+            var qData = new float[batch * seq * dk];
+            var kData = new float[batch * seq * dk];
+            var vData = new float[batch * seq * dv];
             rng.NextFloats(qData); rng.NextFloats(kData); rng.NextFloats(vData);
 
             Func<float[], float[], float[], float> lossFunc = (qD, kD, vD) =>
@@ -169,9 +169,9 @@ namespace DevOnBike.Overfit.Tests
             };
 
             // Numerical
-            float[] perturbedPlus = which == "Q" ? (float[])qData.Clone() :
+            var perturbedPlus = which == "Q" ? (float[])qData.Clone() :
                                      which == "K" ? (float[])kData.Clone() : (float[])vData.Clone();
-            float[] perturbedMinus = which == "Q" ? (float[])qData.Clone() :
+            var perturbedMinus = which == "Q" ? (float[])qData.Clone() :
                                      which == "K" ? (float[])kData.Clone() : (float[])vData.Clone();
             perturbedPlus[idx] += eps;
             perturbedMinus[idx] -= eps;

@@ -112,8 +112,8 @@ namespace DevOnBike.Overfit.Tests
             var trainSize = (int)(allIds.Length * 0.9);
             var trainIds = allIds.AsSpan(0, trainSize).ToArray();
 
-            float initialLoss = 0f;
-            float finalLoss = 0f;
+            var initialLoss = 0f;
+            var finalLoss = 0f;
             var sw = System.Diagnostics.Stopwatch.StartNew();
 
             // ── Pętla treningowa ─────────────────────────────────────────────
@@ -228,8 +228,8 @@ namespace DevOnBike.Overfit.Tests
 
             model.Train();
 
-            float initialLoss = 0f;
-            float finalLoss = 0f;
+            var initialLoss = 0f;
+            var finalLoss = 0f;
 
             for (var step = 0; step < steps; step++)
             {

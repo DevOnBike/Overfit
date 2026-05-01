@@ -133,7 +133,7 @@ namespace DevOnBike.Overfit.Tests.Helpers
             }
 
             // Jeśli tagi są wyłączone, ten string jest internowany w .NET (zero alokacji)
-            string formattedTags = string.Empty;
+            var formattedTags = string.Empty;
 
             if (_includeTags && tags.Length > 0)
             {
