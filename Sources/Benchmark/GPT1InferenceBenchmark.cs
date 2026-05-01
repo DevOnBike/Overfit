@@ -28,34 +28,35 @@ namespace Benchmarks
     ///   dotnet run -c Release --project Sources/Benchmark --filter "*GPT1*"
     /// </summary>
     [Config(typeof(BenchmarkConfig))]
-    [MemoryDiagnoser]
     public class GPT1InferenceBenchmark
     {
         // ── Params ────────────────────────────────────────────────────────────
 
-        [Params(16, 64, 128)]
+        // SeqLen=128 requires >50MB arena (GPT-1 12 blocks × dFF=3072) — exceeds default capacity.
+        // Use smaller context for benchmark; real training uses BackwardFromGrad path with full seqLen.
+        [Params(16, 64)]
         public int SeqLen { get; set; }
 
         // ── State ─────────────────────────────────────────────────────────────
 
-        private TransformerBlock _singleBlock   = null!;
-        private GPT1Model        _gpt1Model     = null!;
-        private AutogradNode     _blockInput    = null!;
-        private ComputationGraph _graph         = null!;
-        private int[]            _tokenIds      = null!;
+        private TransformerBlock _singleBlock = null!;
+        private GPT1Model _gpt1Model = null!;
+        private AutogradNode _blockInput = null!;
+        private ComputationGraph _graph = null!;
+        private int[] _tokenIds = null!;
 
         // ── GPT-1 config ─────────────────────────────────────────────────────
 
         private static readonly GPT1Config Gpt1Config = new()
         {
-            VocabSize     = 40478,
+            VocabSize = 40478,
             ContextLength = 512,
-            DModel        = 768,
-            NHeads        = 12,
-            NLayers       = 12,
-            DFF           = 3072,
-            TieWeights    = true,
-            PreLayerNorm  = true,
+            DModel = 768,
+            NHeads = 12,
+            NLayers = 12,
+            DFF = 3072,
+            TieWeights = true,
+            PreLayerNorm = true,
         };
 
         // ── Setup ─────────────────────────────────────────────────────────────
@@ -72,21 +73,15 @@ namespace Benchmarks
             _gpt1Model.Eval();
 
             // Token ids (random, within vocab)
-            var rng     = new Random(42);
-            _tokenIds   = new int[SeqLen];
-            for (var i = 0; i < SeqLen; i++)
-            {
-                _tokenIds[i] = rng.Next(0, Gpt1Config.VocabSize);
-            }
+            var rng = new Random(42);
+            _tokenIds = new int[SeqLen];
+            for (var i = 0; i < SeqLen; i++) _tokenIds[i] = rng.Next(0, Gpt1Config.VocabSize);
 
             // Pre-allocated block input [1, T, 768]
             var inputData = new float[1 * SeqLen * 768];
-            for (var i = 0; i < inputData.Length; i++)
-            {
-                inputData[i] = (float)(rng.NextDouble() - 0.5) * 0.02f;
-            }
+            for (var i = 0; i < inputData.Length; i++) inputData[i] = (float)(rng.NextDouble() - 0.5) * 0.02f;
 
-            var storage  = new TensorStorage<float>(inputData.Length, clearMemory: false);
+            var storage = new TensorStorage<float>(inputData.Length, clearMemory: false);
             inputData.AsSpan().CopyTo(storage.AsSpan());
             _blockInput = new AutogradNode(storage, new TensorShape(1, SeqLen, 768), requiresGrad: false);
 
@@ -119,6 +114,7 @@ namespace Benchmarks
         [Benchmark]
         public void GPT1_SingleBlock_Forward()
         {
+            _singleBlock.InvalidateParameterCaches();
             _graph.Reset();
             using var output = _singleBlock.Forward(_graph, _blockInput);
         }

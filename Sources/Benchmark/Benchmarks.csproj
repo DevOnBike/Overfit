@@ -21,7 +21,6 @@
         <PackageReference Include="Microsoft.ML" />
         <PackageReference Include="Microsoft.ML.OnnxRuntime" />
         <PackageReference Include="Microsoft.ML.OnnxTransformer" />
-        <PackageReference Include="TorchSharp-cpu" />
         <ProjectReference Include="..\Main\Main.csproj" />
     </ItemGroup>
 

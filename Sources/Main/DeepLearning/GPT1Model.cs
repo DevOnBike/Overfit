@@ -45,7 +45,7 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             _config = config ?? throw new ArgumentNullException(nameof(config));
 
-            TokenEmbedding = new EmbeddingLayer(config.VocabSize, config.DModel);
+            TokenEmbedding    = new EmbeddingLayer(config.VocabSize,     config.DModel);
             PositionEmbedding = new EmbeddingLayer(config.ContextLength, config.DModel);
 
             var blocks = new TransformerBlock[config.NLayers];
@@ -55,12 +55,12 @@ namespace DevOnBike.Overfit.DeepLearning
                     config.DModel,
                     config.NHeads,
                     config.DFF,
-                    causalMask: true,
+                    causalMask:   true,
                     preLayerNorm: config.PreLayerNorm,
-                    lnEps: config.LNEps);
+                    lnEps:        config.LNEps);
             }
 
-            Blocks = blocks;
+            Blocks    = blocks;
             FinalNorm = new LayerNormLayer(config.DModel, config.LNEps);
 
             // LM head: [dModel, vocabSize]
@@ -84,20 +84,17 @@ namespace DevOnBike.Overfit.DeepLearning
             else
             {
                 var scale = MathF.Sqrt(2f / config.DModel);
-                var s = LMHead.DataSpan;
-                for (var i = 0; i < s.Length; i++)
-                {
-                    s[i] = Maths.MathUtils.NextGaussian() * scale;
-                }
+                var s     = LMHead.DataSpan;
+                for (var i = 0; i < s.Length; i++) s[i] = Maths.MathUtils.NextGaussian() * scale;
             }
         }
 
-        public GPT1Config Config => _config;
-        public EmbeddingLayer TokenEmbedding { get; }
-        public EmbeddingLayer PositionEmbedding { get; }
-        public TransformerBlock[] Blocks { get; }
-        public LayerNormLayer FinalNorm { get; }
-        public Parameter LMHead { get; }
+        public GPT1Config              Config            => _config;
+        public EmbeddingLayer          TokenEmbedding    { get; }
+        public EmbeddingLayer          PositionEmbedding { get; }
+        public TransformerBlock[]      Blocks            { get; }
+        public LayerNormLayer          FinalNorm         { get; }
+        public Parameter               LMHead            { get; }
 
         public bool IsTraining => _isTraining;
 
@@ -106,12 +103,7 @@ namespace DevOnBike.Overfit.DeepLearning
             _isTraining = true;
             TokenEmbedding.Train();
             PositionEmbedding.Train();
-
-            foreach (var b in Blocks)
-            {
-                b.Train();
-            }
-
+            foreach (var b in Blocks) b.Train();
             FinalNorm.Train();
         }
 
@@ -120,10 +112,7 @@ namespace DevOnBike.Overfit.DeepLearning
             _isTraining = false;
             TokenEmbedding.Eval();
             PositionEmbedding.Eval();
-            foreach (var b in Blocks)
-            {
-                b.Eval();
-            }
+            foreach (var b in Blocks) b.Eval();
             FinalNorm.Eval();
         }
 
@@ -190,8 +179,8 @@ namespace DevOnBike.Overfit.DeepLearning
             using var graph = new ComputationGraph();
             using var logits = Forward(graph, tokenIds, batchSize: 1, seqLen);
 
-            var logitSpan = logits.DataView.AsReadOnlySpan();
-            var vocabSize = _config.VocabSize;
+            var logitSpan  = logits.DataView.AsReadOnlySpan();
+            var vocabSize  = _config.VocabSize;
 
             // Extract last position: logits[(seqLen-1)*vocabSize .. seqLen*vocabSize)
             var lastLogits = new float[vocabSize];
@@ -214,7 +203,7 @@ namespace DevOnBike.Overfit.DeepLearning
                     ? tokens.GetRange(tokens.Count - _config.ContextLength, _config.ContextLength).ToArray()
                     : tokens.ToArray();
 
-                var logits = GenerateLogits(ctx);
+                var logits  = GenerateLogits(ctx);
                 var nextTok = ArgMax(logits);
                 tokens.Add(nextTok);
             }
@@ -251,25 +240,16 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             TokenEmbedding.Save(bw);
             PositionEmbedding.Save(bw);
-            foreach (var b in Blocks)
-            {
-                b.Save(bw);
-            }
+            foreach (var b in Blocks) b.Save(bw);
             FinalNorm.Save(bw);
-            if (!_config.TieWeights)
-            {
-                LMHead.Save(bw);
-            }
+            if (!_config.TieWeights) LMHead.Save(bw);
         }
 
         public void Load(BinaryReader br)
         {
             TokenEmbedding.Load(br);
             PositionEmbedding.Load(br);
-            foreach (var b in Blocks)
-            {
-                b.Load(br);
-            }
+            foreach (var b in Blocks) b.Load(br);
             FinalNorm.Load(br);
             if (!_config.TieWeights)
             {
@@ -288,19 +268,13 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void Dispose()
         {
-            if (_disposed)
-            {
-                return;
-            }
+            if (_disposed) return;
             _disposed = true;
 
             _lmHeadNode?.Dispose();
             TokenEmbedding.Dispose();
             PositionEmbedding.Dispose();
-            foreach (var b in Blocks)
-            {
-                b.Dispose();
-            }
+            foreach (var b in Blocks) b.Dispose();
             FinalNorm.Dispose();
             LMHead.Dispose();
         }
@@ -318,9 +292,9 @@ namespace DevOnBike.Overfit.DeepLearning
             int seqLen,
             EmbeddingLayer embedding)
         {
-            var dModel = embedding.EmbeddingDim;
+            var dModel  = embedding.EmbeddingDim;
             var storage = new TensorStorage<float>(batchSize * seqLen * dModel, clearMemory: false);
-            var outS = storage.AsSpan();
+            var outS    = storage.AsSpan();
 
             var requiresGrad = embedding.Weight.RequiresGrad;
 
@@ -345,9 +319,9 @@ namespace DevOnBike.Overfit.DeepLearning
             int batchSize,
             int seqLen)
         {
-            var dModel = _config.DModel;
+            var dModel  = _config.DModel;
             var storage = new TensorStorage<float>(batchSize * seqLen * dModel, clearMemory: false);
-            var outS = storage.AsSpan();
+            var outS    = storage.AsSpan();
 
             // No `using` — posNode is GraphTemporary on tape, disposed by graph.Reset().
             var posNode = PositionEmbedding.Forward(graph, posIds);
@@ -369,7 +343,7 @@ namespace DevOnBike.Overfit.DeepLearning
             int seqLen,
             int dModel)
         {
-            var size = batchSize * seqLen * dModel;
+            var size    = batchSize * seqLen * dModel;
             var storage = new TensorStorage<float>(size, clearMemory: false);
             TensorPrimitives.Add(
                 tokEmb.DataView.AsReadOnlySpan(),
@@ -385,7 +359,7 @@ namespace DevOnBike.Overfit.DeepLearning
             int batchSize,
             int seqLen)
         {
-            var dModel = _config.DModel;
+            var dModel    = _config.DModel;
             var vocabSize = _config.VocabSize;
 
             if (_config.TieWeights)
@@ -403,10 +377,10 @@ namespace DevOnBike.Overfit.DeepLearning
             // LM head ON TAPE: gradient flows back through transformer.
             // graph.Linear(input[B*T,d], weight[d,V], bias[V]) -> [B*T,V]
             var biasStorage = new TensorStorage<float>(vocabSize, clearMemory: true);
-            var bias = AutogradNode.CreateBorrowed(biasStorage, new TensorShape(vocabSize));
+            var bias        = AutogradNode.CreateBorrowed(biasStorage, new TensorShape(vocabSize));
 
             _lmHeadNode ??= LMHead.AsNode();
-            var flatLogits = graph.Linear(flat, _lmHeadNode, bias);
+            var flatLogits  = graph.Linear(flat, _lmHeadNode, bias);
 
             // Reshape to [B, T, vocabSize]
             return graph.Reshape(flatLogits, batchSize, seqLen, vocabSize);
@@ -415,10 +389,7 @@ namespace DevOnBike.Overfit.DeepLearning
         private static int[] CreatePositionIds(int seqLen)
         {
             var ids = new int[seqLen];
-            for (var i = 0; i < seqLen; i++)
-            {
-                ids[i] = i;
-            }
+            for (var i = 0; i < seqLen; i++) ids[i] = i;
             return ids;
         }
 

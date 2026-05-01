@@ -97,7 +97,7 @@ namespace DevOnBike.Overfit.Tests
 
             _output.WriteLine($"Model: {config.ParameterCount:N0} parameters");
             _output.WriteLine($"Training: {steps} steps, seqLen={seqLen}, lr={lr}");
-            _output.WriteLine("");
+            _output.WriteLine(string.Empty);
 
             using var model = new GPT1Model(config);
             model.Train();
@@ -149,11 +149,11 @@ namespace DevOnBike.Overfit.Tests
                 }
             }
 
-            _output.WriteLine("");
+            _output.WriteLine(string.Empty);
             _output.WriteLine($"Initial loss: {initialLoss:F4}");
             _output.WriteLine($"Final loss:   {finalLoss:F4}");
             _output.WriteLine($"Improvement:  {(1f - finalLoss / initialLoss) * 100f:F1}%");
-            _output.WriteLine("");
+            _output.WriteLine(string.Empty);
 
             // ── Generacja tekstu po treningu ──────────────────────────────────
             model.Eval();
@@ -163,7 +163,7 @@ namespace DevOnBike.Overfit.Tests
 
             _output.WriteLine("Generated sample after training:");
             _output.WriteLine($"  \"{sampleText}\"");
-            _output.WriteLine("");
+            _output.WriteLine(string.Empty);
 
             // ── Asercje ──────────────────────────────────────────────────────
 
@@ -171,19 +171,19 @@ namespace DevOnBike.Overfit.Tests
             // 15% improvement threshold — 300 steps at lr=3e-4 on 2-layer model.
             // Synthetic test (50 steps) shows ~13% → Shakespeare is harder.
             Assert.True(finalLoss < initialLoss * 0.85f,
-                $"Loss nie spadł wystarczająco: initial={initialLoss:F4}, final={finalLoss:F4}. " +
-                $"Oczekiwano finalLoss < {initialLoss * 0.85f:F4}. " +
-                "Może być problem w backward pass lub gradient flow przez TransformerBlock.");
+            $"Loss nie spadł wystarczająco: initial={initialLoss:F4}, final={finalLoss:F4}. " +
+            $"Oczekiwano finalLoss < {initialLoss * 0.85f:F4}. " +
+            "Może być problem w backward pass lub gradient flow przez TransformerBlock.");
 
             // 2. Loss nie jest NaN/Inf — forward/backward stabilne numerycznie
             Assert.False(float.IsNaN(finalLoss) || float.IsInfinity(finalLoss),
-                "Loss jest NaN lub Inf — problem numeryczny w attention lub LayerNorm.");
+            "Loss jest NaN lub Inf — problem numeryczny w attention lub LayerNorm.");
 
             // 3. Final loss poniżej baseline losowego modelu
             // Losowy model: loss ≈ ln(vocabSize). Jeśli final loss > baseline, model się nie uczy.
             var baseline = MathF.Log(tokenizer.VocabSize);
             Assert.True(finalLoss < baseline,
-                $"Final loss {finalLoss:F4} ≥ baseline (random) {baseline:F4}. Model nie uczy się niczego.");
+            $"Final loss {finalLoss:F4} ≥ baseline (random) {baseline:F4}. Model nie uczy się niczego.");
 
             _output.WriteLine("✓ Loss spada — model uczy się struktury języka angielskiego.");
             _output.WriteLine("✓ Gradient przepływa przez cały stos: Embedding → MHA → FFN → LN → LM head.");
@@ -220,7 +220,10 @@ namespace DevOnBike.Overfit.Tests
             };
 
             using var model = new GPT1Model(config);
-            using var optimizer = new Adam(model.TrainableParameters(), lr) { UseAdamW = true };
+            using var optimizer = new Adam(model.TrainableParameters(), lr)
+            {
+                UseAdamW = true
+            };
             var rng = new Random(42);
 
             model.Train();
@@ -253,7 +256,7 @@ namespace DevOnBike.Overfit.Tests
             _output.WriteLine($"Synthetic | initial={initialLoss:F4}, final={finalLoss:F4}");
 
             Assert.True(finalLoss < initialLoss,
-                $"Loss nie spada nawet na syntetycznych danych: {initialLoss:F4} → {finalLoss:F4}");
+            $"Loss nie spada nawet na syntetycznych danych: {initialLoss:F4} → {finalLoss:F4}");
         }
 
         // ── Helpers ──────────────────────────────────────────────────────────
@@ -292,7 +295,8 @@ namespace DevOnBike.Overfit.Tests
                 // Stable softmax
                 var maxVal = row[0];
                 for (var v = 1; v < vocabSize; v++)
-                    if (row[v] > maxVal) maxVal = row[v];
+                    if (row[v] > maxVal)
+                        maxVal = row[v];
 
                 var sumExp = 0f;
                 for (var v = 0; v < vocabSize; v++)
@@ -317,9 +321,9 @@ namespace DevOnBike.Overfit.Tests
             if (!File.Exists(path))
             {
                 throw new Exception(
-                    $"Fixture '{path}' not found. " +
-                    "Pobierz: curl -o test_fixtures/tiny_shakespeare.txt " +
-                    "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt");
+                $"Fixture '{path}' not found. " +
+                "Pobierz: curl -o test_fixtures/tiny_shakespeare.txt " +
+                "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt");
             }
         }
     }
