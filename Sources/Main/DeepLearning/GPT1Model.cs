@@ -52,12 +52,12 @@ namespace DevOnBike.Overfit.DeepLearning
             for (var i = 0; i < config.NLayers; i++)
             {
                 blocks[i] = new TransformerBlock(
-                    config.DModel,
-                    config.NHeads,
-                    config.DFF,
-                    causalMask: true,
-                    preLayerNorm: config.PreLayerNorm,
-                    lnEps: config.LNEps);
+                config.DModel,
+                config.NHeads,
+                config.DFF,
+                causalMask: true,
+                preLayerNorm: config.PreLayerNorm,
+                lnEps: config.LNEps);
             }
 
             Blocks = blocks;
@@ -67,19 +67,19 @@ namespace DevOnBike.Overfit.DeepLearning
             // When weight-tying: shares Parameter with TokenEmbedding.Weight (transposed).
             // We store as a separate Parameter but copy data post-init (tie via forward).
             LMHead = new Parameter(
-                new TensorShape(config.DModel, config.VocabSize),
-                requiresGrad: !config.TieWeights,  // no grad needed if tied (tok emb has it)
-                clearData: false);
+            new TensorShape(config.DModel, config.VocabSize),
+            requiresGrad: !config.TieWeights, // no grad needed if tied (tok emb has it)
+            clearData: false);
 
             if (config.TieWeights)
             {
                 // Copy transposed token embedding weights as initialisation.
                 // During forward we re-tie dynamically.
                 TransposeInto(
-                    TokenEmbedding.Weight.DataReadOnlySpan,
-                    LMHead.DataSpan,
-                    config.VocabSize,
-                    config.DModel);
+                TokenEmbedding.Weight.DataReadOnlySpan,
+                LMHead.DataSpan,
+                config.VocabSize,
+                config.DModel);
             }
             else
             {
@@ -143,13 +143,13 @@ namespace DevOnBike.Overfit.DeepLearning
             if (seqLen > _config.ContextLength)
             {
                 throw new ArgumentException(
-                    $"seqLen={seqLen} exceeds ContextLength={_config.ContextLength}.");
+                $"seqLen={seqLen} exceeds ContextLength={_config.ContextLength}.");
             }
 
             if (tokenIds.Length != batchSize * seqLen)
             {
                 throw new ArgumentException(
-                    $"tokenIds.Length={tokenIds.Length} must equal batchSize*seqLen={batchSize * seqLen}.");
+                $"tokenIds.Length={tokenIds.Length} must equal batchSize*seqLen={batchSize * seqLen}.");
             }
 
             // ── 1. Token embeddings ──────────────────────────────────────────
@@ -200,12 +200,14 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             if (seqLen > _config.ContextLength)
             {
-                throw new ArgumentException($"seqLen={seqLen} exceeds ContextLength={_config.ContextLength}.");
+                throw new ArgumentException(
+                $"seqLen={seqLen} exceeds ContextLength={_config.ContextLength}.");
             }
 
             if (tokenIds.Length != batchSize * seqLen)
             {
-                throw new ArgumentException($"tokenIds.Length must equal batchSize*seqLen.");
+                throw new ArgumentException(
+                $"tokenIds.Length must equal batchSize*seqLen.");
             }
 
             // ── Phase 1: no-grad forward ─────────────────────────────────────
@@ -262,7 +264,7 @@ namespace DevOnBike.Overfit.DeepLearning
             if (_ckptContext == null)
             {
                 throw new InvalidOperationException(
-                    "Call ForwardCheckpointed before BackwardCheckpointed.");
+                "Call ForwardCheckpointed before BackwardCheckpointed.");
             }
 
             var ctx = _ckptContext;
@@ -328,7 +330,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
             // ── FinalNorm backward (recompute) ────────────────────────────────
             var dXAfterBlocks = RecomputeLayerNormBackward(
-                FinalNorm, ctx.XAfterBlocks, dXAfterNorm, b, t, dModel);
+            FinalNorm, ctx.XAfterBlocks, dXAfterNorm, b, t, dModel);
 
             // ── Transformer blocks backward (recompute each block) ────────────
             var dUpstream = dXAfterBlocks;
@@ -383,7 +385,7 @@ namespace DevOnBike.Overfit.DeepLearning
                 for (var v = 0; v < vocabSize; v++)
                 {
                     outRow[v] = System.Numerics.Tensors.TensorPrimitives.Dot(
-                        inRow, lmHead.Slice(v * dModel, dModel));
+                    inRow, lmHead.Slice(v * dModel, dModel));
                 }
             }
         }
@@ -524,14 +526,11 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             TokenEmbedding.Save(bw);
             PositionEmbedding.Save(bw);
-
             foreach (var b in Blocks)
             {
                 b.Save(bw);
             }
-
             FinalNorm.Save(bw);
-
             if (!_config.TieWeights)
             {
                 LMHead.Save(bw);
@@ -542,12 +541,10 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             TokenEmbedding.Load(br);
             PositionEmbedding.Load(br);
-
             foreach (var b in Blocks)
             {
                 b.Load(br);
             }
-
             FinalNorm.Load(br);
             if (!_config.TieWeights)
             {
@@ -557,10 +554,10 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 // Re-sync LM head with token embedding (weight tying)
                 TransposeInto(
-                    TokenEmbedding.Weight.DataReadOnlySpan,
-                    LMHead.DataSpan,
-                    _config.VocabSize,
-                    _config.DModel);
+                TokenEmbedding.Weight.DataReadOnlySpan,
+                LMHead.DataSpan,
+                _config.VocabSize,
+                _config.DModel);
             }
         }
 
@@ -649,11 +646,10 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             var size = batchSize * seqLen * dModel;
             var storage = new TensorStorage<float>(size, clearMemory: false);
-
             TensorPrimitives.Add(
-                tokEmb.DataView.AsReadOnlySpan(),
-                posEmb.DataView.AsReadOnlySpan(),
-                storage.AsSpan());
+            tokEmb.DataView.AsReadOnlySpan(),
+            posEmb.DataView.AsReadOnlySpan(),
+            storage.AsSpan());
 
             return new AutogradNode(storage, new TensorShape(batchSize, seqLen, dModel), requiresGrad: false);
         }
@@ -670,10 +666,10 @@ namespace DevOnBike.Overfit.DeepLearning
             if (_config.TieWeights)
             {
                 TransposeInto(
-                    TokenEmbedding.Weight.DataReadOnlySpan,
-                    LMHead.DataSpan,
-                    vocabSize,
-                    dModel);
+                TokenEmbedding.Weight.DataReadOnlySpan,
+                LMHead.DataSpan,
+                vocabSize,
+                dModel);
             }
 
             // Flatten [B, T, dModel] -> [B*T, dModel]
@@ -705,7 +701,6 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             var maxIdx = 0;
             var maxVal = logits[0];
-
             for (var i = 1; i < logits.Length; i++)
             {
                 if (logits[i] > maxVal)
@@ -714,7 +709,6 @@ namespace DevOnBike.Overfit.DeepLearning
                     maxIdx = i;
                 }
             }
-
             return maxIdx;
         }
 
