@@ -105,12 +105,12 @@ namespace DevOnBike.Overfit.DeepLearning
             _isTraining = true;
             TokenEmbedding.Train();
             PositionEmbedding.Train();
-            
+
             foreach (var b in Blocks)
             {
                 b.Train();
             }
-            
+
             FinalNorm.Train();
         }
 
@@ -325,7 +325,10 @@ namespace DevOnBike.Overfit.DeepLearning
             for (var b = 0; b < batchSize; b++)
             {
                 var batchTokens = tokenIds.AsSpan(b * seqLen, seqLen).ToArray();
-                using var embNode = embedding.Forward(graph, batchTokens);
+
+                // No `using` — node is GraphTemporary, disposed by graph.Reset().
+                // Using it here would dispose op.Output before backward can read GradView.
+                var embNode = embedding.Forward(graph, batchTokens);
 
                 embNode.DataView.AsReadOnlySpan().CopyTo(outS.Slice(b * seqLen * dModel, seqLen * dModel));
             }
@@ -344,7 +347,8 @@ namespace DevOnBike.Overfit.DeepLearning
             var storage = new TensorStorage<float>(batchSize * seqLen * dModel, clearMemory: false);
             var outS = storage.AsSpan();
 
-            using var posNode = PositionEmbedding.Forward(graph, posIds);
+            // No `using` — posNode is GraphTemporary on tape, disposed by graph.Reset().
+            var posNode = PositionEmbedding.Forward(graph, posIds);
             var posS = posNode.DataView.AsReadOnlySpan();
 
             // Broadcast positional embeddings across batch
@@ -414,7 +418,9 @@ namespace DevOnBike.Overfit.DeepLearning
             }
 
             // Reshape to [B, T, vocabSize]
-            var logitNode = new AutogradNode(lmStorage, new TensorShape(batchSize, seqLen, vocabSize), requiresGrad: false);
+            // requiresGrad: true so callers can seed GradView for custom loss backward.
+            var logitNode = new AutogradNode(lmStorage, new TensorShape(batchSize, seqLen, vocabSize), requiresGrad: true);
+
             return logitNode;
         }
 
@@ -432,10 +438,12 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             var maxIdx = 0;
             var maxVal = logits[0];
+
             for (var i = 1; i < logits.Length; i++)
             {
                 if (logits[i] > maxVal) { maxVal = logits[i]; maxIdx = i; }
             }
+
             return maxIdx;
         }
 
