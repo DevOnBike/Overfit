@@ -52,12 +52,12 @@ namespace DevOnBike.Overfit.DeepLearning
             for (var i = 0; i < config.NLayers; i++)
             {
                 blocks[i] = new TransformerBlock(
-                config.DModel,
-                config.NHeads,
-                config.DFF,
-                causalMask: true,
-                preLayerNorm: config.PreLayerNorm,
-                lnEps: config.LNEps);
+                    config.DModel,
+                    config.NHeads,
+                    config.DFF,
+                    causalMask: true,
+                    preLayerNorm: config.PreLayerNorm,
+                    lnEps: config.LNEps);
             }
 
             Blocks = blocks;
@@ -67,25 +67,24 @@ namespace DevOnBike.Overfit.DeepLearning
             // When weight-tying: shares Parameter with TokenEmbedding.Weight (transposed).
             // We store as a separate Parameter but copy data post-init (tie via forward).
             LMHead = new Parameter(
-            new TensorShape(config.DModel, config.VocabSize),
-            requiresGrad: !config.TieWeights, // no grad needed if tied (tok emb has it)
-            clearData: false);
+                new TensorShape(config.DModel, config.VocabSize),
+                requiresGrad: !config.TieWeights,  // no grad needed if tied (tok emb has it)
+                clearData: false);
 
             if (config.TieWeights)
             {
                 // Copy transposed token embedding weights as initialisation.
                 // During forward we re-tie dynamically.
                 TransposeInto(
-                TokenEmbedding.Weight.DataReadOnlySpan,
-                LMHead.DataSpan,
-                config.VocabSize,
-                config.DModel);
+                    TokenEmbedding.Weight.DataReadOnlySpan,
+                    LMHead.DataSpan,
+                    config.VocabSize,
+                    config.DModel);
             }
             else
             {
                 var scale = MathF.Sqrt(2f / config.DModel);
                 var s = LMHead.DataSpan;
-
                 for (var i = 0; i < s.Length; i++)
                 {
                     s[i] = Maths.MathUtils.NextGaussian() * scale;
@@ -142,14 +141,12 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             if (seqLen > _config.ContextLength)
             {
-                throw new ArgumentException(
-                $"seqLen={seqLen} exceeds ContextLength={_config.ContextLength}.");
+                throw new ArgumentException($"seqLen={seqLen} exceeds ContextLength={_config.ContextLength}.");
             }
 
             if (tokenIds.Length != batchSize * seqLen)
             {
-                throw new ArgumentException(
-                $"tokenIds.Length={tokenIds.Length} must equal batchSize*seqLen={batchSize * seqLen}.");
+                throw new ArgumentException($"tokenIds.Length={tokenIds.Length} must equal batchSize*seqLen={batchSize * seqLen}.");
             }
 
             // ── 1. Token embeddings ──────────────────────────────────────────
@@ -162,7 +159,7 @@ namespace DevOnBike.Overfit.DeepLearning
             var posEmb = EmbedPositions(graph, posIds, batchSize, seqLen);
 
             // ── 3. x = tok_emb + pos_emb ────────────────────────────────────
-            var x = AddEmbeddings(tokEmb, posEmb, batchSize, seqLen, _config.DModel);
+            var x = AddEmbeddings(graph, tokEmb, posEmb, batchSize, seqLen, _config.DModel);
 
             // ── 4. Transformer blocks ────────────────────────────────────────
             foreach (var block in Blocks)
@@ -175,282 +172,6 @@ namespace DevOnBike.Overfit.DeepLearning
 
             // ── 6. LM head: [B, T, dModel] → [B, T, vocabSize] ──────────────
             return LMHeadForward(graph, x, batchSize, seqLen);
-        }
-
-        /// <summary>
-        /// Gradient-checkpointed forward pass.
-        ///
-        /// Memory: O(L × seqLen × dModel) for saved block inputs only.
-        /// vs O(L × seqLen × (4×dModel + nHeads×seqLen + dFF)) without checkpointing.
-        ///
-        /// At SeqLen=256, d=256, 12 layers: ~7MB instead of ~50MB.
-        ///
-        /// Algorithm:
-        ///   Phase 1 (no-grad forward): run all blocks with IsRecording=false,
-        ///             save each block input as float[].
-        ///   Phase 2 (recompute backward): for each block in reverse,
-        ///             recompute forward with a local tape, seed output grad,
-        ///             backward through local tape → accumulate weight gradients,
-        ///             extract input gradient for upstream propagation.
-        /// </summary>
-        public AutogradNode ForwardCheckpointed(
-            int[] tokenIds,
-            int batchSize,
-            int seqLen)
-        {
-            if (seqLen > _config.ContextLength)
-            {
-                throw new ArgumentException(
-                $"seqLen={seqLen} exceeds ContextLength={_config.ContextLength}.");
-            }
-
-            if (tokenIds.Length != batchSize * seqLen)
-            {
-                throw new ArgumentException(
-                $"tokenIds.Length must equal batchSize*seqLen.");
-            }
-
-            // ── Phase 1: no-grad forward ─────────────────────────────────────
-            // Run with IsRecording=false: ops execute but nothing is taped.
-            // Memory: only current activation tensors, not cumulative tape.
-            using var noGradGraph = new ComputationGraph();
-            noGradGraph.IsRecording = false;
-
-            var tokEmb = EmbedBatch(noGradGraph, tokenIds, batchSize, seqLen, TokenEmbedding);
-            var posIds = CreatePositionIds(seqLen);
-            var posEmb = EmbedPositions(noGradGraph, posIds, batchSize, seqLen);
-            var x = AddEmbeddings(tokEmb, posEmb, batchSize, seqLen, _config.DModel);
-
-            // Save embedding output — needed for first block backward
-            var savedInputs = new float[_config.NLayers][];
-
-            for (var i = 0; i < Blocks.Length; i++)
-            {
-                // Save block input (data only — no gradient storage)
-                savedInputs[i] = x.DataView.AsReadOnlySpan().ToArray();
-
-                Blocks[i].InvalidateParameterCaches();
-                x = Blocks[i].Forward(noGradGraph, x);
-            }
-
-            // Save post-blocks tensor for FinalNorm + LM head
-            var xAfterBlocks = x.DataView.AsReadOnlySpan().ToArray();
-            FinalNorm.InvalidateParameterCaches();
-            x = FinalNorm.Forward(noGradGraph, x);
-            var xAfterNorm = x.DataView.AsReadOnlySpan().ToArray();
-
-            // LM head forward (no tape)
-            var logitStorage = new TensorStorage<float>(batchSize * seqLen * _config.VocabSize, clearMemory: false);
-            ComputeLMHeadManual(xAfterNorm, logitStorage.AsSpan(), batchSize, seqLen, _config.DModel, _config.VocabSize);
-
-            // Return logit node with requiresGrad=true so caller can seed GradView
-            var logitNode = new AutogradNode(logitStorage, new TensorShape(batchSize, seqLen, _config.VocabSize), requiresGrad: true);
-
-            // Store context for BackwardCheckpointed
-            _ckptContext = new CheckpointContext(savedInputs, xAfterBlocks, xAfterNorm, batchSize, seqLen);
-
-            return logitNode;
-        }
-
-        /// <summary>
-        /// Backward pass for gradient-checkpointed forward.
-        /// Call after ForwardCheckpointed with logits.GradView seeded.
-        ///
-        /// Recomputes each block forward with a local tape, then backpropagates.
-        /// Weight gradients accumulate into Parameter.GradSpan (same as normal backward).
-        /// </summary>
-        public void BackwardCheckpointed(AutogradNode logitNode)
-        {
-            if (_ckptContext == null)
-            {
-                throw new InvalidOperationException(
-                "Call ForwardCheckpointed before BackwardCheckpointed.");
-            }
-
-            var ctx = _ckptContext;
-            _ckptContext = null;
-
-            var b = ctx.BatchSize;
-            var t = ctx.SeqLen;
-            var dModel = _config.DModel;
-            var vocab = _config.VocabSize;
-
-            // ── LM head backward ─────────────────────────────────────────────
-            // dL/d(xAfterNorm) = dL/d(logits) @ LMHead^T
-            var dLogits = logitNode.GradView.AsReadOnlySpan();
-            var dXAfterNorm = new float[b * t * dModel];
-            var lmHeadData = LMHead.DataReadOnlySpan;
-
-            if (_config.TieWeights)
-            {
-                TransposeInto(TokenEmbedding.Weight.DataReadOnlySpan, LMHead.DataSpan, vocab, dModel);
-            }
-
-            // dX = dLogits @ LMHead.T   ([B*T, V] @ [V, d] → [B*T, d])
-            for (var row = 0; row < b * t; row++)
-            {
-                var dLogRow = dLogits.Slice(row * vocab, vocab);
-                var dXRow = dXAfterNorm.AsSpan().Slice(row * dModel, dModel);
-
-                for (var v = 0; v < vocab; v++)
-                {
-                    if (dLogRow[v] == 0f)
-                    {
-                        continue;
-                    }
-                    for (var c = 0; c < dModel; c++)
-                    {
-                        dXRow[c] += dLogRow[v] * lmHeadData[c * vocab + v];
-                    }
-                }
-            }
-
-            // Weight grad for LM head (if not tied)
-            if (!_config.TieWeights)
-            {
-                var lmGrad = LMHead.GradSpan;
-                var xNormS = ctx.XAfterNorm.AsSpan();
-                for (var row = 0; row < b * t; row++)
-                {
-                    var dLogRow = dLogits.Slice(row * vocab, vocab);
-                    var xRow = xNormS.Slice(row * dModel, dModel);
-                    for (var v = 0; v < vocab; v++)
-                    {
-                        if (dLogRow[v] == 0f)
-                        {
-                            continue;
-                        }
-                        for (var c = 0; c < dModel; c++)
-                        {
-                            lmGrad[c * vocab + v] += dLogRow[v] * xRow[c];
-                        }
-                    }
-                }
-            }
-
-            // ── FinalNorm backward (recompute) ────────────────────────────────
-            var dXAfterBlocks = RecomputeLayerNormBackward(
-            FinalNorm, ctx.XAfterBlocks, dXAfterNorm, b, t, dModel);
-
-            // ── Transformer blocks backward (recompute each block) ────────────
-            var dUpstream = dXAfterBlocks;
-
-            for (var i = Blocks.Length - 1; i >= 0; i--)
-            {
-                dUpstream = RecomputeBlockBackward(Blocks[i], ctx.SavedInputs[i], dUpstream, b, t, dModel);
-            }
-
-            // ── Embedding backward ────────────────────────────────────────────
-            // dUpstream now contains dL/d(x_after_embeddings)
-            // Propagate to token and positional embedding weights
-            RecomputeEmbeddingBackward(dUpstream, tokenIds: null, b, t, dModel);
-        }
-
-        // ── Checkpointing helpers ─────────────────────────────────────────────
-
-        private sealed class CheckpointContext
-        {
-            public CheckpointContext(float[][] savedInputs, float[] xAfterBlocks, float[] xAfterNorm, int batchSize, int seqLen)
-            {
-                SavedInputs = savedInputs;
-                XAfterBlocks = xAfterBlocks;
-                XAfterNorm = xAfterNorm;
-                BatchSize = batchSize;
-                SeqLen = seqLen;
-            }
-
-            public float[][] SavedInputs { get; }
-            public float[] XAfterBlocks { get; }
-            public float[] XAfterNorm { get; }
-            public int BatchSize { get; }
-            public int SeqLen { get; }
-        }
-
-        private CheckpointContext? _ckptContext;
-
-        private void ComputeLMHeadManual(float[] xNorm, Span<float> logits, int batchSize, int seqLen, int dModel, int vocabSize)
-        {
-            if (_config.TieWeights)
-            {
-                TransposeInto(TokenEmbedding.Weight.DataReadOnlySpan, LMHead.DataSpan, vocabSize, dModel);
-            }
-
-            var lmHead = LMHead.DataReadOnlySpan;
-
-            for (var row = 0; row < batchSize * seqLen; row++)
-            {
-                var inRow = xNorm.AsSpan().Slice(row * dModel, dModel);
-                var outRow = logits.Slice(row * vocabSize, vocabSize);
-
-                for (var v = 0; v < vocabSize; v++)
-                {
-                    outRow[v] = System.Numerics.Tensors.TensorPrimitives.Dot(
-                    inRow, lmHead.Slice(v * dModel, dModel));
-                }
-            }
-        }
-
-        private static float[] RecomputeLayerNormBackward(
-            LayerNormLayer ln,
-            float[] inputData,
-            float[] dOutput,
-            int batchSize, int seqLen, int dModel)
-        {
-            var size = batchSize * seqLen * dModel;
-
-            using var inputStorage = new TensorStorage<float>(size, clearMemory: false);
-            inputData.AsSpan().CopyTo(inputStorage.AsSpan());
-
-            using var graph = new ComputationGraph();
-            using var inputN = new AutogradNode(inputStorage, new TensorShape(batchSize, seqLen, dModel), requiresGrad: true);
-            inputN.GradView.AsSpan().Clear();
-
-            ln.InvalidateParameterCaches();
-            using var output = ln.Forward(graph, inputN);
-            dOutput.AsSpan().CopyTo(output.GradView.AsSpan());
-
-            graph.BackwardFromGrad(output);
-
-            return inputN.GradView.AsReadOnlySpan().ToArray();
-        }
-
-        private static float[] RecomputeBlockBackward(
-            TransformerBlock block,
-            float[] inputData,
-            float[] dOutput,
-            int batchSize, int seqLen, int dModel)
-        {
-            var size = batchSize * seqLen * dModel;
-
-            using var inputStorage = new TensorStorage<float>(size, clearMemory: false);
-            inputData.AsSpan().CopyTo(inputStorage.AsSpan());
-
-            using var graph = new ComputationGraph();
-            using var inputN = new AutogradNode(inputStorage, new TensorShape(batchSize, seqLen, dModel), requiresGrad: true);
-            inputN.GradView.AsSpan().Clear();
-
-            block.InvalidateParameterCaches();
-            using var output = block.Forward(graph, inputN);
-
-            // Seed output gradient
-            dOutput.AsSpan().CopyTo(output.GradView.AsSpan());
-
-            graph.BackwardFromGrad(output);
-
-            return inputN.GradView.AsReadOnlySpan().ToArray();
-        }
-
-        private void RecomputeEmbeddingBackward(
-            float[] dOutput, int[]? tokenIds, int batchSize, int seqLen, int dModel)
-        {
-            // Gradient flows to positional embedding (same across batch)
-            var posGrad = PositionEmbedding.Weight.GradSpan;
-            for (var t = 0; t < seqLen; t++)
-            {
-                var dRow = dOutput.AsSpan(t * dModel, dModel);
-                var gRow = posGrad.Slice(t * dModel, dModel);
-                System.Numerics.Tensors.TensorPrimitives.Add(dRow, gRow, gRow);
-            }
         }
 
         /// <summary>
@@ -554,11 +275,23 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 // Re-sync LM head with token embedding (weight tying)
                 TransposeInto(
-                TokenEmbedding.Weight.DataReadOnlySpan,
-                LMHead.DataSpan,
-                _config.VocabSize,
-                _config.DModel);
+                    TokenEmbedding.Weight.DataReadOnlySpan,
+                    LMHead.DataSpan,
+                    _config.VocabSize,
+                    _config.DModel);
             }
+        }
+
+        public void InvalidateAllCaches()
+        {
+            TokenEmbedding.InvalidateParameterCaches();
+            PositionEmbedding.InvalidateParameterCaches();
+            foreach (var b in Blocks)
+            {
+                b.InvalidateParameterCaches();
+            }
+            FinalNorm.InvalidateParameterCaches();
+            _lmHeadNode = null;
         }
 
         public void Dispose()
@@ -594,24 +327,14 @@ namespace DevOnBike.Overfit.DeepLearning
             EmbeddingLayer embedding)
         {
             var dModel = embedding.EmbeddingDim;
-            var storage = new TensorStorage<float>(batchSize * seqLen * dModel, clearMemory: false);
-            var outS = storage.AsSpan();
 
-            var requiresGrad = embedding.Weight.RequiresGrad;
+            // Single embedding forward for all B*T tokens — produces [B*T, dModel] ON TAPE.
+            // requiresGrad flows naturally: grad accumulates into embedding weights during backward.
+            // This is what enables true batch training (B>1).
+            var embNode = embedding.Forward(graph, tokenIds);  // [B*T, dModel]
 
-            for (var b = 0; b < batchSize; b++)
-            {
-                var batchTokens = tokenIds.AsSpan(b * seqLen, seqLen).ToArray();
-
-                // No `using` — node is GraphTemporary, disposed by graph.Reset().
-                // Using it here would dispose op.Output before backward can read GradView.
-                var embNode = embedding.Forward(graph, batchTokens);
-
-                embNode.DataView.AsReadOnlySpan().CopyTo(outS.Slice(b * seqLen * dModel, seqLen * dModel));
-            }
-
-            // Return as [B, T, dModel] — grad flows through the embedding lookup nodes above.
-            return new AutogradNode(storage, new TensorShape(batchSize, seqLen, dModel), requiresGrad: false);
+            // Reshape to [B, T, dModel] — also on tape, grad flows through reshape backward.
+            return graph.Reshape(embNode, batchSize, seqLen, dModel);
         }
 
         private AutogradNode EmbedPositions(
@@ -620,38 +343,28 @@ namespace DevOnBike.Overfit.DeepLearning
             int batchSize,
             int seqLen)
         {
-            var dModel = _config.DModel;
-            var storage = new TensorStorage<float>(batchSize * seqLen * dModel, clearMemory: false);
-            var outS = storage.AsSpan();
-
-            // No `using` — posNode is GraphTemporary on tape, disposed by graph.Reset().
-            var posNode = PositionEmbedding.Forward(graph, posIds);
-            var posS = posNode.DataView.AsReadOnlySpan();
-
-            // Broadcast positional embeddings across batch
+            // Repeat positions [0..T-1] for each batch item → [B*T] ids
+            // Then single embedding forward → [B*T, dModel] ON TAPE.
+            var allPosIds = new int[batchSize * seqLen];
             for (var b = 0; b < batchSize; b++)
             {
-                posS.CopyTo(outS.Slice(b * seqLen * dModel, seqLen * dModel));
+                posIds.AsSpan().CopyTo(allPosIds.AsSpan(b * seqLen, seqLen));
             }
 
-            return new AutogradNode(storage, new TensorShape(batchSize, seqLen, dModel), requiresGrad: false);
+            var posNode = PositionEmbedding.Forward(graph, allPosIds);  // [B*T, dModel]
+            return graph.Reshape(posNode, batchSize, seqLen, _config.DModel);
         }
 
         private static AutogradNode AddEmbeddings(
+            ComputationGraph graph,
             AutogradNode tokEmb,
             AutogradNode posEmb,
             int batchSize,
             int seqLen,
             int dModel)
         {
-            var size = batchSize * seqLen * dModel;
-            var storage = new TensorStorage<float>(size, clearMemory: false);
-            TensorPrimitives.Add(
-            tokEmb.DataView.AsReadOnlySpan(),
-            posEmb.DataView.AsReadOnlySpan(),
-            storage.AsSpan());
-
-            return new AutogradNode(storage, new TensorShape(batchSize, seqLen, dModel), requiresGrad: false);
+            // ON TAPE: gradient flows to both token and positional embeddings.
+            return TensorMath.Add(graph, tokEmb, posEmb);
         }
 
         private AutogradNode LMHeadForward(
@@ -666,10 +379,10 @@ namespace DevOnBike.Overfit.DeepLearning
             if (_config.TieWeights)
             {
                 TransposeInto(
-                TokenEmbedding.Weight.DataReadOnlySpan,
-                LMHead.DataSpan,
-                vocabSize,
-                dModel);
+                    TokenEmbedding.Weight.DataReadOnlySpan,
+                    LMHead.DataSpan,
+                    vocabSize,
+                    dModel);
             }
 
             // Flatten [B, T, dModel] -> [B*T, dModel]
@@ -709,6 +422,7 @@ namespace DevOnBike.Overfit.DeepLearning
                     maxIdx = i;
                 }
             }
+
             return maxIdx;
         }
 

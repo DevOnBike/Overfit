@@ -98,9 +98,9 @@ namespace DevOnBike.Overfit.Tests
 
             var rng = new Random(42);
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            float windowLoss = 0f;
-            float initialLoss = 0f;
-            float finalValLoss = 0f;
+            var windowLoss = 0f;
+            var initialLoss = 0f;
+            var finalValLoss = 0f;
 
             // ── Pętla treningowa ──────────────────────────────────────────────
             for (var step = 0; step < totalSteps; step++)
