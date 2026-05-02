@@ -169,6 +169,20 @@ Machine: AMD Ryzen 9 9950X3D · .NET 10 · BenchmarkDotNet.
 | Full GPT-1 (12 blocks) | 16 | **81.8 ms** | 13.8 MB |
 | Full GPT-1 (12 blocks) | 64 | **163.9 ms** | 50.6 MB |
 
+### GPT-1 training — Tiny Shakespeare
+
+Model: 12 layers, 256d, 8 heads, ~9.5M params. Char-level tokenizer (vocab=68).
+Machine: AMD Ryzen 9 9950X3D · .NET 10 · batch=8 · SeqLen=256.
+
+| Steps | Time | Val loss | Notes |
+|-------|------|----------|-------|
+| 200 | 7 min | ~2.68 | Model learns word boundaries |
+| 1 000 | 37 min | **2.29** | Invents Shakespeare-style character names |
+| — | — | 1.47 | nanoGPT reference (batch=64, GPU) |
+
+Training throughput: **2176ms/step** (batch=8, SeqLen=256, CPU).
+Next: Parallel.For in MatMul → target ~600ms/step (3.5× speedup).
+
 One TransformerBlock = MultiHeadAttention + FFN(GELU) + 2×LayerNorm + residuals.
 Full GPT-1 = 12 blocks + token/positional embeddings + final LN + LM head (vocabSize=40478).
 
@@ -338,8 +352,8 @@ Use cases: Kubernetes tuning, game AI, industrial process search, pricing strate
 
 ### Near-term
 
-- **GPT-1 training at scale** — gradient checkpointing (recompute activations, ~75% memory reduction)
-- **True batch training (B>1)** — MHA batch dimension refactor
+- **Parallel MatMul** — `unsafe Parallel.For` w `MatMulRawSeq`, target 3-4× speedup treningu
+- **Sampling** — temperature, top-k, top-p dla nielosowej generacji
 - **Sampling** — temperature, top-k, top-p for non-greedy generation
 - **ONNX: LSTM/GRU operators** — recurrent model import
 - **PR5-7d/e** — Conv2D/MaxPool2D in ComputationGraph (architectural, zero user impact)
@@ -358,6 +372,8 @@ GPT-1 architecture is **complete**. All components implemented and tested:
 | `FeedForwardLayer` | ✅ | Linear→GELU→Linear, position-wise |
 | `TransformerBlock` | ✅ | Pre-LN and Post-LN variants, Save/Load |
 | `GPT1Model` | ✅ | 12 blocks, weight tying, greedy generation |
+| Batch training (B=8) | ✅ | True batching via on-tape EmbedBatch |
+| Gradient checkpointing | ✅ | Per-block recompute, SeqLen=256 in 2.4GB |
 | `CharacterTokenizer` | ✅ | No deps, train from corpus |
 | `BytePairEncoder` | ✅ | GPT-2 vocab.json/merges.txt compatible |
 
