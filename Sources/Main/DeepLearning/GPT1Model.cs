@@ -110,6 +110,7 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 b.Train();
             }
+
             FinalNorm.Train();
         }
 
@@ -122,6 +123,7 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 b.Eval();
             }
+
             FinalNorm.Eval();
         }
 
@@ -141,12 +143,14 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             if (seqLen > _config.ContextLength)
             {
-                throw new ArgumentException($"seqLen={seqLen} exceeds ContextLength={_config.ContextLength}.");
+                throw new ArgumentException(
+                    $"seqLen={seqLen} exceeds ContextLength={_config.ContextLength}.");
             }
 
             if (tokenIds.Length != batchSize * seqLen)
             {
-                throw new ArgumentException($"tokenIds.Length={tokenIds.Length} must equal batchSize*seqLen={batchSize * seqLen}.");
+                throw new ArgumentException(
+                    $"tokenIds.Length={tokenIds.Length} must equal batchSize*seqLen={batchSize * seqLen}.");
             }
 
             // ── 1. Token embeddings ──────────────────────────────────────────
@@ -183,7 +187,8 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             var seqLen = tokenIds.Length;
 
-            using var graph = new ComputationGraph();
+            // 100M floats = 400MB: wystarczy dla factored MHA przy batch=1, dowolny seqLen.
+            using var graph = new ComputationGraph(100_000_000);
             using var logits = Forward(graph, tokenIds, batchSize: 1, seqLen);
 
             var logitSpan = logits.DataView.AsReadOnlySpan();
@@ -251,6 +256,7 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 b.Save(bw);
             }
+
             FinalNorm.Save(bw);
             if (!_config.TieWeights)
             {
@@ -266,6 +272,7 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 b.Load(br);
             }
+
             FinalNorm.Load(br);
             if (!_config.TieWeights)
             {
@@ -290,6 +297,7 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 b.InvalidateParameterCaches();
             }
+
             FinalNorm.InvalidateParameterCaches();
             _lmHeadNode = null;
         }
@@ -300,6 +308,7 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 return;
             }
+
             _disposed = true;
 
             _lmHeadNode?.Dispose();
@@ -309,6 +318,7 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 b.Dispose();
             }
+
             FinalNorm.Dispose();
             LMHead.Dispose();
         }
@@ -407,6 +417,7 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 ids[i] = i;
             }
+
             return ids;
         }
 
