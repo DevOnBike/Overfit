@@ -1,15 +1,14 @@
 // Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
+//
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Numerics.Tensors;
 using DevOnBike.Overfit.Autograd;
-using DevOnBike.Overfit.DeepLearning.Abstractions;
+using DevOnBike.Overfit.Maths;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Parameters;
 using DevOnBike.Overfit.Tensors;
-using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
@@ -17,22 +16,23 @@ namespace DevOnBike.Overfit.DeepLearning
     /// GPT-1 style language model.
     ///
     /// Architecture:
-    ///   1. Token embedding:     tokens [B, T] → [B, T, dModel]
-    ///   2. Positional embedding: positions [T] → [1, T, dModel]  (learned)
-    ///   3. x = tok_emb + pos_emb                                 (broadcast add)
-    ///   4. x = TransformerBlock(x) × nLayers                     (causal, Pre-LN)
-    ///   5. x = FinalLayerNorm(x)
-    ///   6. logits = x @ W_vocab^T                                 (LM head, weight-tied)
+    /// 1. Token embedding: tokens [B, T] -> [B, T, dModel]
+    /// 2. Positional embedding: positions [T] -> [1, T, dModel] (learned)
+    /// 3. x = tok_emb + pos_emb (broadcast add)
+    /// 4. x = TransformerBlock(x) x nLayers (causal, Pre-LN)
+    /// 5. x = FinalLayerNorm(x)
+    /// 6. logits = x @ W_vocab^T (LM head, weight-tied)
     ///
-    /// Weight tying: the LM head shares weights with the token embedding.
-    /// This is standard for language models (reduces params, improves generalisation).
+    /// Weight tying:
+    /// the LM head shares values with the token embedding. The LM head storage is
+    /// re-synchronised from token embeddings before the LM projection when
+    /// TieWeights=true.
     ///
     /// Forward returns logits [B, T, vocabSize].
-    /// For language modelling loss: use SoftmaxCrossEntropy on logits[:, :-1, :]
-    /// against targets[:, 1:, :] (next-token prediction).
     ///
-    /// Inference: call <see cref="GenerateLogits"/> for a single step,
-    /// then sample or argmax.
+    /// For language modelling loss:
+    /// use SoftmaxCrossEntropy on logits[:, :-1, :] against targets[:, 1:, :]
+    /// (next-token prediction).
     /// </summary>
     public sealed class GPT1Model : IDisposable
     {
@@ -49,6 +49,7 @@ namespace DevOnBike.Overfit.DeepLearning
             PositionEmbedding = new EmbeddingLayer(config.ContextLength, config.DModel);
 
             var blocks = new TransformerBlock[config.NLayers];
+
             for (var i = 0; i < config.NLayers; i++)
             {
                 blocks[i] = new TransformerBlock(
@@ -61,20 +62,19 @@ namespace DevOnBike.Overfit.DeepLearning
             }
 
             Blocks = blocks;
+
             FinalNorm = new LayerNormLayer(config.DModel, config.LNEps);
 
-            // LM head: [dModel, vocabSize]
-            // When weight-tying: shares Parameter with TokenEmbedding.Weight (transposed).
-            // We store as a separate Parameter but copy data post-init (tie via forward).
+            // LM head: [dModel, vocabSize].
+            // When weight-tying: shares values with TokenEmbedding.Weight
+            // transposed from [vocabSize, dModel] to [dModel, vocabSize].
             LMHead = new Parameter(
                 new TensorShape(config.DModel, config.VocabSize),
-                requiresGrad: !config.TieWeights,  // no grad needed if tied (tok emb has it)
+                requiresGrad: !config.TieWeights,
                 clearData: false);
 
             if (config.TieWeights)
             {
-                // Copy transposed token embedding weights as initialisation.
-                // During forward we re-tie dynamically.
                 TransposeInto(
                     TokenEmbedding.Weight.DataReadOnlySpan,
                     LMHead.DataSpan,
@@ -85,18 +85,24 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 var scale = MathF.Sqrt(2f / config.DModel);
                 var s = LMHead.DataSpan;
+
                 for (var i = 0; i < s.Length; i++)
                 {
-                    s[i] = Maths.MathUtils.NextGaussian() * scale;
+                    s[i] = MathUtils.NextGaussian() * scale;
                 }
             }
         }
 
         public GPT1Config Config => _config;
+
         public EmbeddingLayer TokenEmbedding { get; }
+
         public EmbeddingLayer PositionEmbedding { get; }
+
         public TransformerBlock[] Blocks { get; }
+
         public LayerNormLayer FinalNorm { get; }
+
         public Parameter LMHead { get; }
 
         public bool IsTraining => _isTraining;
@@ -104,11 +110,13 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Train()
         {
             _isTraining = true;
+
             TokenEmbedding.Train();
             PositionEmbedding.Train();
-            foreach (var b in Blocks)
+
+            foreach (var block in Blocks)
             {
-                b.Train();
+                block.Train();
             }
 
             FinalNorm.Train();
@@ -117,11 +125,13 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Eval()
         {
             _isTraining = false;
+
             TokenEmbedding.Eval();
             PositionEmbedding.Eval();
-            foreach (var b in Blocks)
+
+            foreach (var block in Blocks)
             {
-                b.Eval();
+                block.Eval();
             }
 
             FinalNorm.Eval();
@@ -141,6 +151,11 @@ namespace DevOnBike.Overfit.DeepLearning
             int batchSize,
             int seqLen)
         {
+            if (graph is null)
+            {
+                throw new ArgumentNullException(nameof(graph));
+            }
+
             if (seqLen > _config.ContextLength)
             {
                 throw new ArgumentException(
@@ -153,77 +168,127 @@ namespace DevOnBike.Overfit.DeepLearning
                     $"tokenIds.Length={tokenIds.Length} must equal batchSize*seqLen={batchSize * seqLen}.");
             }
 
-            // ── 1. Token embeddings ──────────────────────────────────────────
-            // Look up each token independently, then reshape to [B, T, dModel].
-            var tokEmb = EmbedBatch(graph, tokenIds, batchSize, seqLen, TokenEmbedding);
+            // 1. Token embeddings.
+            var tokEmb = EmbedBatch(
+                graph,
+                tokenIds,
+                batchSize,
+                seqLen,
+                TokenEmbedding);
 
-            // ── 2. Positional embeddings ─────────────────────────────────────
-            // Positions 0..seqLen-1, same for all batch items.
+            // 2. Positional embeddings.
             var posIds = CreatePositionIds(seqLen);
-            var posEmb = EmbedPositions(graph, posIds, batchSize, seqLen);
+            var posEmb = EmbedPositions(
+                graph,
+                posIds,
+                batchSize,
+                seqLen);
 
-            // ── 3. x = tok_emb + pos_emb ────────────────────────────────────
-            var x = AddEmbeddings(graph, tokEmb, posEmb, batchSize, seqLen, _config.DModel);
+            // 3. x = token embedding + positional embedding.
+            var x = AddEmbeddings(
+                graph,
+                tokEmb,
+                posEmb,
+                batchSize,
+                seqLen,
+                _config.DModel);
 
-            // ── 4. Transformer blocks ────────────────────────────────────────
+            // 4. Transformer blocks.
             foreach (var block in Blocks)
             {
                 x = block.Forward(graph, x);
             }
 
-            // ── 5. Final LayerNorm ───────────────────────────────────────────
+            // 5. Final LayerNorm.
             x = FinalNorm.Forward(graph, x);
 
-            // ── 6. LM head: [B, T, dModel] → [B, T, vocabSize] ──────────────
-            return LMHeadForward(graph, x, batchSize, seqLen);
+            // 6. LM head.
+            return LMHeadForward(
+                graph,
+                x,
+                batchSize,
+                seqLen);
         }
 
         /// <summary>
-        /// Generates logits for the LAST token position only.
-        /// More efficient for autoregressive generation.
-        /// Returns [1, vocabSize].
+        /// Generates logits for the last token position only.
+        ///
+        /// This is still the pre-KV-cache path: it builds a ComputationGraph,
+        /// computes logits for the full provided context and copies the final
+        /// position to a new float[].
         /// </summary>
         public float[] GenerateLogits(int[] tokenIds)
         {
+            if (tokenIds is null)
+            {
+                throw new ArgumentNullException(nameof(tokenIds));
+            }
+
+            if (tokenIds.Length == 0)
+            {
+                throw new ArgumentException("Token sequence cannot be empty.", nameof(tokenIds));
+            }
+
             var seqLen = tokenIds.Length;
 
-            // 100M floats = 400MB: wystarczy dla factored MHA przy batch=1, dowolny seqLen.
+            // 100M floats = 400MB. This is intentionally large enough for the
+            // current graph-based GPT path. The stateful KV-cache runtime should
+            // not use this path in the future.
             using var graph = new ComputationGraph(100_000_000);
-            using var logits = Forward(graph, tokenIds, batchSize: 1, seqLen);
+            using var logits = Forward(
+                graph,
+                tokenIds,
+                batchSize: 1,
+                seqLen);
 
             var logitSpan = logits.DataView.AsReadOnlySpan();
             var vocabSize = _config.VocabSize;
-
-            // Extract last position: logits[(seqLen-1)*vocabSize .. seqLen*vocabSize)
             var lastLogits = new float[vocabSize];
-            logitSpan.Slice((seqLen - 1) * vocabSize, vocabSize).CopyTo(lastLogits);
+
+            logitSpan
+                .Slice((seqLen - 1) * vocabSize, vocabSize)
+                .CopyTo(lastLogits);
+
             return lastLogits;
         }
 
         /// <summary>
-        /// Greedy argmax token generation for <paramref name="maxNewTokens"/> steps.
-        /// Simple greedy decoding — no sampling, no temperature.
+        /// Greedy argmax token generation for maxNewTokens steps.
+        ///
+        /// This is the legacy pre-KV-cache generation path. It recomputes the full
+        /// context for every generated token.
         /// </summary>
         public int[] Generate(int[] promptTokenIds, int maxNewTokens)
         {
+            if (promptTokenIds is null)
+            {
+                throw new ArgumentNullException(nameof(promptTokenIds));
+            }
+
+            if (maxNewTokens < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(maxNewTokens));
+            }
+
             var tokens = new List<int>(promptTokenIds);
 
             for (var step = 0; step < maxNewTokens; step++)
             {
-                // Truncate to context window
                 var ctx = tokens.Count > _config.ContextLength
                     ? tokens.GetRange(tokens.Count - _config.ContextLength, _config.ContextLength).ToArray()
                     : tokens.ToArray();
 
                 var logits = GenerateLogits(ctx);
                 var nextTok = ArgMax(logits);
+
                 tokens.Add(nextTok);
             }
 
-            return tokens.GetRange(promptTokenIds.Length, tokens.Count - promptTokenIds.Length).ToArray();
+            return tokens
+                .GetRange(promptTokenIds.Length, tokens.Count - promptTokenIds.Length)
+                .ToArray();
         }
 
-        /// <summary>All trainable parameters — for optimizers.</summary>
         public IEnumerable<Parameter> TrainableParameters()
         {
             yield return TokenEmbedding.Weight;
@@ -231,15 +296,15 @@ namespace DevOnBike.Overfit.DeepLearning
 
             foreach (var block in Blocks)
             {
-                foreach (var p in block.TrainableParameters())
+                foreach (var parameter in block.TrainableParameters())
                 {
-                    yield return p;
+                    yield return parameter;
                 }
             }
 
-            foreach (var p in FinalNorm.TrainableParameters())
+            foreach (var parameter in FinalNorm.TrainableParameters())
             {
-                yield return p;
+                yield return parameter;
             }
 
             if (!_config.TieWeights)
@@ -248,39 +313,52 @@ namespace DevOnBike.Overfit.DeepLearning
             }
         }
 
-        public void Save(BinaryWriter bw)
+        public void Save(BinaryWriter writer)
         {
-            TokenEmbedding.Save(bw);
-            PositionEmbedding.Save(bw);
-            foreach (var b in Blocks)
+            if (writer is null)
             {
-                b.Save(bw);
+                throw new ArgumentNullException(nameof(writer));
             }
 
-            FinalNorm.Save(bw);
+            TokenEmbedding.Save(writer);
+            PositionEmbedding.Save(writer);
+
+            foreach (var block in Blocks)
+            {
+                block.Save(writer);
+            }
+
+            FinalNorm.Save(writer);
+
             if (!_config.TieWeights)
             {
-                LMHead.Save(bw);
+                LMHead.Save(writer);
             }
         }
 
-        public void Load(BinaryReader br)
+        public void Load(BinaryReader reader)
         {
-            TokenEmbedding.Load(br);
-            PositionEmbedding.Load(br);
-            foreach (var b in Blocks)
+            if (reader is null)
             {
-                b.Load(br);
+                throw new ArgumentNullException(nameof(reader));
             }
 
-            FinalNorm.Load(br);
+            TokenEmbedding.Load(reader);
+            PositionEmbedding.Load(reader);
+
+            foreach (var block in Blocks)
+            {
+                block.Load(reader);
+            }
+
+            FinalNorm.Load(reader);
+
             if (!_config.TieWeights)
             {
-                LMHead.Load(br);
+                LMHead.Load(reader);
             }
             else
             {
-                // Re-sync LM head with token embedding (weight tying)
                 TransposeInto(
                     TokenEmbedding.Weight.DataReadOnlySpan,
                     LMHead.DataSpan,
@@ -293,12 +371,15 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             TokenEmbedding.InvalidateParameterCaches();
             PositionEmbedding.InvalidateParameterCaches();
-            foreach (var b in Blocks)
+
+            foreach (var block in Blocks)
             {
-                b.InvalidateParameterCaches();
+                block.InvalidateParameterCaches();
             }
 
             FinalNorm.InvalidateParameterCaches();
+
+            _lmHeadNode?.Dispose();
             _lmHeadNode = null;
         }
 
@@ -312,23 +393,19 @@ namespace DevOnBike.Overfit.DeepLearning
             _disposed = true;
 
             _lmHeadNode?.Dispose();
+
             TokenEmbedding.Dispose();
             PositionEmbedding.Dispose();
-            foreach (var b in Blocks)
+
+            foreach (var block in Blocks)
             {
-                b.Dispose();
+                block.Dispose();
             }
 
             FinalNorm.Dispose();
             LMHead.Dispose();
         }
 
-        // ── Private helpers ───────────────────────────────────────────────────
-
-        /// <summary>
-        /// Embeds all tokens in a batch and reshapes to [B, T, dModel].
-        /// Processes each batch item sequentially.
-        /// </summary>
         private static AutogradNode EmbedBatch(
             ComputationGraph graph,
             int[] tokenIds,
@@ -338,13 +415,15 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             var dModel = embedding.EmbeddingDim;
 
-            // Single embedding forward for all B*T tokens — produces [B*T, dModel] ON TAPE.
-            // requiresGrad flows naturally: grad accumulates into embedding weights during backward.
-            // This is what enables true batch training (B>1).
-            var embNode = embedding.Forward(graph, tokenIds);  // [B*T, dModel]
+            // Single embedding forward for all B*T tokens.
+            // Produces [B*T, dModel] on tape.
+            var embNode = embedding.Forward(graph, tokenIds);
 
-            // Reshape to [B, T, dModel] — also on tape, grad flows through reshape backward.
-            return graph.Reshape(embNode, batchSize, seqLen, dModel);
+            return graph.Reshape(
+                embNode,
+                batchSize,
+                seqLen,
+                dModel);
         }
 
         private AutogradNode EmbedPositions(
@@ -353,28 +432,40 @@ namespace DevOnBike.Overfit.DeepLearning
             int batchSize,
             int seqLen)
         {
-            // Repeat positions [0..T-1] for each batch item → [B*T] ids
-            // Then single embedding forward → [B*T, dModel] ON TAPE.
             var allPosIds = new int[batchSize * seqLen];
+
             for (var b = 0; b < batchSize; b++)
             {
-                posIds.AsSpan().CopyTo(allPosIds.AsSpan(b * seqLen, seqLen));
+                posIds
+                    .AsSpan()
+                    .CopyTo(allPosIds.AsSpan(b * seqLen, seqLen));
             }
 
-            var posNode = PositionEmbedding.Forward(graph, allPosIds);  // [B*T, dModel]
-            return graph.Reshape(posNode, batchSize, seqLen, _config.DModel);
+            var posNode = PositionEmbedding.Forward(graph, allPosIds);
+
+            return graph.Reshape(
+                posNode,
+                batchSize,
+                seqLen,
+                _config.DModel);
         }
 
         private static AutogradNode AddEmbeddings(
             ComputationGraph graph,
-            AutogradNode tokEmb,
-            AutogradNode posEmb,
+            AutogradNode tokenEmbedding,
+            AutogradNode positionalEmbedding,
             int batchSize,
             int seqLen,
             int dModel)
         {
-            // ON TAPE: gradient flows to both token and positional embeddings.
-            return TensorMath.Add(graph, tokEmb, posEmb);
+            _ = batchSize;
+            _ = seqLen;
+            _ = dModel;
+
+            return TensorMath.Add(
+                graph,
+                tokenEmbedding,
+                positionalEmbedding);
         }
 
         private AutogradNode LMHeadForward(
@@ -395,24 +486,41 @@ namespace DevOnBike.Overfit.DeepLearning
                     dModel);
             }
 
-            // Flatten [B, T, dModel] -> [B*T, dModel]
-            var flat = graph.Reshape(x, batchSize * seqLen, dModel);
+            // Flatten [B, T, dModel] -> [B*T, dModel].
+            var flat = graph.Reshape(
+                x,
+                batchSize * seqLen,
+                dModel);
 
-            // LM head ON TAPE: gradient flows back through transformer.
-            // graph.Linear(input[B*T,d], weight[d,V], bias[V]) -> [B*T,V]
-            var biasStorage = new TensorStorage<float>(vocabSize, clearMemory: true);
-            var bias = AutogradNode.CreateBorrowed(biasStorage, new TensorShape(vocabSize));
+            // LM head on tape:
+            // graph.Linear(input[B*T,d], weight[d,V], bias[V]) -> [B*T,V].
+            //
+            // This bias is a graph-owned zero tensor. The previous implementation
+            // used new TensorStorage(...) + AutogradNode.CreateBorrowed(...), which
+            // marked locally-created storage as externally-owned. That made graph
+            // ownership metadata incorrect and prevented Reset() from disposing it.
+            var bias = graph.CreateAuxiliary(
+                new TensorShape(vocabSize),
+                clearMemory: true);
 
             _lmHeadNode ??= LMHead.AsNode();
-            var flatLogits = graph.Linear(flat, _lmHeadNode, bias);
 
-            // Reshape to [B, T, vocabSize]
-            return graph.Reshape(flatLogits, batchSize, seqLen, vocabSize);
+            var flatLogits = graph.Linear(
+                flat,
+                _lmHeadNode,
+                bias);
+
+            return graph.Reshape(
+                flatLogits,
+                batchSize,
+                seqLen,
+                vocabSize);
         }
 
         private static int[] CreatePositionIds(int seqLen)
         {
             var ids = new int[seqLen];
+
             for (var i = 0; i < seqLen; i++)
             {
                 ids[i] = i;
@@ -425,6 +533,7 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             var maxIdx = 0;
             var maxVal = logits[0];
+
             for (var i = 1; i < logits.Length; i++)
             {
                 if (logits[i] > maxVal)
@@ -433,17 +542,20 @@ namespace DevOnBike.Overfit.DeepLearning
                     maxIdx = i;
                 }
             }
+
             return maxIdx;
         }
 
         /// <summary>
-        /// Transposes [vocabSize, dModel] → [dModel, vocabSize] in place.
-        /// Used for weight tying: token embedding is [vocabSize, dModel],
+        /// Transposes [rows, cols] to [cols, rows] in place.
+        ///
+        /// Used for weight tying:
+        /// token embedding is [vocabSize, dModel],
         /// LM head needs [dModel, vocabSize].
         /// </summary>
         private static void TransposeInto(
-            ReadOnlySpan<float> src,
-            Span<float> dst,
+            ReadOnlySpan<float> source,
+            Span<float> destination,
             int rows,
             int cols)
         {
@@ -451,7 +563,7 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 for (var c = 0; c < cols; c++)
                 {
-                    dst[c * rows + r] = src[r * cols + c];
+                    destination[c * rows + r] = source[r * cols + c];
                 }
             }
         }
