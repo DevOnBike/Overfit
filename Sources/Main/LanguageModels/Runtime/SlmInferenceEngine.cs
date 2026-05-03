@@ -134,7 +134,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var generated = 0;
             var logits = new float[VocabularySize];
 
-            for (; generated < options.MaxNewTokens; generated++)
+            while (generated < options.MaxNewTokens)
             {
                 var token = session.GenerateNextToken(in sampling);
                 session.GetLastLogits(logits);
