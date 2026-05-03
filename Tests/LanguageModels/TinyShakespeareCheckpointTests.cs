@@ -5,6 +5,8 @@
 
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.LanguageModels.Contracts;
+using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tokenization;
 using Xunit;
@@ -31,6 +33,20 @@ namespace DevOnBike.Overfit.Tests
     {
         private readonly ITestOutputHelper _output;
         private const string FixturePath = "test_fixtures/tiny_shakespeare.txt";
+        private const string DemoCheckpointPath = "test_fixtures/checkpoint.bin";
+
+        private const string DemoPrompt = "ROMEO:";
+        private const int DemoSeqLen = 128;
+        private const int DemoBatchSize = 8;
+        private const int DemoDefaultTrainingSteps = 2_000;
+        private const int DemoArenaSize = 180_000_000;
+        private const int DemoRequestedNewTokens = 120;
+
+        private const float DemoLearningRateMax = 3e-4f;
+        private const float DemoLearningRateMin = 5e-5f;
+        private const int DemoParityRequestedNewTokens = 32;
+        private const int DemoAllocationMeasuredTokenCount = 8;
+        private const int DemoReportEvery = 25;
 
         public TinyShakespeareCheckpointTests(ITestOutputHelper output)
         {
@@ -166,6 +182,260 @@ namespace DevOnBike.Overfit.Tests
                 $"Val loss {finalValLoss:F4} >= 2.4. 1000 kroków batch=8 SeqLen=256. (Wynik: 2.29 po naprawieniu Generate OOM)");
         }
 
+
+        /// <summary>
+        /// DEMO 1/2.
+        ///
+        /// Trenuje mały char-level GPT1Model na TinyShakespeare i zapisuje checkpoint.bin.
+        ///
+        /// Ścieżek nie zmieniamy:
+        /// - corpus:     test_fixtures/tiny_shakespeare.txt
+        /// - checkpoint: test_fixtures/checkpoint.bin
+        ///
+        /// Domyślnie robi 1000 kroków. To jest preset demo, nie szybki smoke test.
+        /// Dla jeszcze lepszego tekstu ustaw:
+        ///
+        /// PowerShell:
+        ///   $env:OVERFIT_TINY_SHAKESPEARE_DEMO_STEPS="2000"
+        ///
+        /// CMD:
+        ///   set OVERFIT_TINY_SHAKESPEARE_DEMO_STEPS=2000
+        /// </summary>
+        [Fact(Skip = "run if u want retrain model for Shakespear demo")]
+        public void Demo_Train_TinyShakespeare_AndWriteCheckpointBin()
+        {
+            SkipIfMissing(FixturePath);
+
+            var steps = GetIntEnvironmentVariable(
+                "OVERFIT_TINY_SHAKESPEARE_DEMO_STEPS",
+                DemoDefaultTrainingSteps);
+
+            var text = File.ReadAllText(FixturePath);
+            var tokenizer = CharacterTokenizer.FromCorpus(text);
+            var allIds = tokenizer.Encode(text);
+
+            var config = CreateDemoConfig(tokenizer.VocabSize);
+
+            _output.WriteLine("=== Overfit TinyShakespeare Training Demo ===");
+            _output.WriteLine($"Corpus: {text.Length:N0} chars");
+            _output.WriteLine($"Vocab: {tokenizer.VocabSize}");
+            _output.WriteLine($"Model: {config}");
+            _output.WriteLine($"Parameters: {config.ParameterCount:N0}");
+            _output.WriteLine($"Steps: {steps}");
+            _output.WriteLine($"BatchSize: {DemoBatchSize}");
+            _output.WriteLine($"SeqLen / ContextLength: {DemoSeqLen}");
+            _output.WriteLine($"LR schedule: {DemoLearningRateMax} -> {DemoLearningRateMin}");
+            _output.WriteLine("Display sampling: TopK(k=16), temperature=0.9, seed=42");
+            _output.WriteLine($"Checkpoint: {Path.GetFullPath(DemoCheckpointPath)}");
+            _output.WriteLine(string.Empty);
+
+            using var model = new GPT1Model(config);
+            using var optimizer = new Adam(model.TrainableParameters(), DemoLearningRateMax)
+            {
+                UseAdamW = true,
+                WeightDecay = 0.1f,
+            };
+
+            model.Train();
+
+            var rng = new Random(42);
+            var firstLoss = 0f;
+            var lastLoss = 0f;
+            var windowLoss = 0f;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+
+            using var graph = new ComputationGraph(DemoArenaSize);
+
+            for (var step = 0; step < steps; step++)
+            {
+                var (inputIds, targetIds) = SampleBatch(allIds, DemoSeqLen, DemoBatchSize, rng);
+
+                optimizer.ZeroGrad();
+                graph.Reset();
+                model.InvalidateAllCaches();
+
+                var logits = model.Forward(graph, inputIds, DemoBatchSize, DemoSeqLen);
+                var loss = ComputeLossAndSeedGradParallel(
+                    logits,
+                    targetIds,
+                    DemoSeqLen,
+                    DemoBatchSize,
+                    config.VocabSize);
+
+                Assert.False(float.IsNaN(loss), $"NaN loss na kroku {step}.");
+                Assert.False(float.IsInfinity(loss), $"Infinity loss na kroku {step}.");
+
+                graph.BackwardFromGrad(logits);
+                logits.Dispose();
+                ClipGradNorm(model.TrainableParameters(), maxNorm: 1.0f);
+
+                var cosine = 0.5f * (1f + MathF.Cos(MathF.PI * (float)step / steps));
+                optimizer.LearningRate = DemoLearningRateMin + (DemoLearningRateMax - DemoLearningRateMin) * cosine;
+                optimizer.Step();
+
+                if (step == 0)
+                {
+                    firstLoss = loss;
+                }
+
+                lastLoss = loss;
+                windowLoss += loss;
+
+                if (step == 0 || (step + 1) % DemoReportEvery == 0 || step + 1 == steps)
+                {
+                    var denominator = step == 0 ? 1 : Math.Min(DemoReportEvery, step + 1);
+                    var avg = windowLoss / denominator;
+                    windowLoss = 0f;
+
+                    _output.WriteLine(
+                        $"Step {step + 1,4}/{steps} | loss={loss:F4} | avg={avg:F4} | elapsed={sw.Elapsed:mm\\:ss}");
+                }
+            }
+
+            model.Eval();
+
+            Directory.CreateDirectory(Path.GetDirectoryName(DemoCheckpointPath)!);
+
+            using (var stream = File.Create(DemoCheckpointPath))
+            using (var writer = new BinaryWriter(stream))
+            {
+                model.Save(writer);
+            }
+
+            var safeSampleTokens = GetSafeGeneratedTokenCount(
+                config.ContextLength,
+                tokenizer.Encode(DemoPrompt).Length,
+                DemoRequestedNewTokens);
+
+            var sample = GenerateDisplaySample(
+                model,
+                tokenizer,
+                DemoPrompt,
+                safeSampleTokens);
+
+            _output.WriteLine(string.Empty);
+            _output.WriteLine($"Loss: {firstLoss:F4} -> {lastLoss:F4}");
+            _output.WriteLine(string.Empty);
+            _output.WriteLine("Training sample:");
+            _output.WriteLine(sample);
+            _output.WriteLine(string.Empty);
+            _output.WriteLine($"Checkpoint written: {Path.GetFullPath(DemoCheckpointPath)}");
+
+            Assert.True(File.Exists(DemoCheckpointPath));
+            Assert.True(new FileInfo(DemoCheckpointPath).Length > 0);
+            Assert.True(lastLoss < firstLoss, $"Loss nie spadł: {firstLoss:F4} -> {lastLoss:F4}.");
+        }
+
+        /// <summary>
+        /// DEMO 2/2.
+        ///
+        /// Ładuje checkpoint.bin z DEMO 1 i robi pokaz cached KV runtime:
+        /// - generuje tekst z promptu ROMEO:,
+        /// - sprawdza parity cached vs legacy greedy,
+        /// - sprawdza 0 B alokacji w continuation hot path.
+        ///
+        /// Uwaga: nie zmieniamy ścieżek. Checkpoint jest czytany z:
+        /// test_fixtures/checkpoint.bin
+        /// </summary>
+        [Fact]
+        public void Demo_LoadCheckpoint_AndShowCachedRuntimeGeneration()
+        {
+            SkipIfMissing(FixturePath);
+
+            if (!File.Exists(DemoCheckpointPath))
+            {
+                throw new Exception(
+                    $"Checkpoint '{DemoCheckpointPath}' not found. Run Demo_Train_TinyShakespeare_AndWriteCheckpointBin first.");
+            }
+
+            var text = File.ReadAllText(FixturePath);
+            var tokenizer = CharacterTokenizer.FromCorpus(text);
+            var config = CreateDemoConfig(tokenizer.VocabSize);
+
+            using var model = new GPT1Model(config);
+
+            using (var stream = File.OpenRead(DemoCheckpointPath))
+            using (var reader = new BinaryReader(stream))
+            {
+                model.Load(reader);
+            }
+
+            model.Eval();
+
+            var promptTokens = tokenizer.Encode(DemoPrompt);
+            var safeGeneratedTokenCount = GetSafeGeneratedTokenCount(
+                config.ContextLength,
+                promptTokens.Length,
+                DemoRequestedNewTokens);
+
+            using var runtime = SlmRuntimeFactory.CreateGpt1(
+                model,
+                SlmRuntimeMode.Cached);
+
+            var generatedTokens = new int[safeGeneratedTokenCount];
+
+            var demoSampling = new SamplingOptions(
+                SamplingStrategy.TopK,
+                temperature: 0.85f,
+                topK: 12,
+                topP: 1.0f,
+                seed: 42);
+
+            var demoOptions = new GenerationOptions(
+                maxNewTokens: safeGeneratedTokenCount,
+                maxContextLength: config.ContextLength,
+                sampling: demoSampling,
+                stopOnEndOfTextToken: false);
+
+            var generated = runtime.Generate(
+                promptTokens,
+                generatedTokens,
+                in demoOptions);
+
+            var fullTokens = promptTokens
+                .Concat(generatedTokens.Take(generated))
+                .ToArray();
+
+            var generatedText = tokenizer.Decode(fullTokens);
+
+            _output.WriteLine("=== Overfit TinyShakespeare Cached Runtime Demo ===");
+            _output.WriteLine(string.Empty);
+            _output.WriteLine("Prompt:");
+            _output.WriteLine(DemoPrompt);
+            _output.WriteLine(string.Empty);
+            _output.WriteLine("Generated text:");
+            _output.WriteLine(generatedText);
+            _output.WriteLine(string.Empty);
+            _output.WriteLine("Runtime:");
+            _output.WriteLine("Cached KV runtime + TopK sampling for display");
+            _output.WriteLine(string.Empty);
+            _output.WriteLine($"Requested generated tokens: {DemoRequestedNewTokens}");
+            _output.WriteLine($"Safe generated tokens: {safeGeneratedTokenCount}");
+            _output.WriteLine($"Generated tokens: {generated}");
+            _output.WriteLine($"ContextLength: {config.ContextLength}");
+            _output.WriteLine($"Prompt tokens: {promptTokens.Length}");
+            _output.WriteLine($"Sampling: TopK(k=12), temperature=0.85, seed=42");
+            _output.WriteLine($"Has KV cache: {runtime.HasKeyValueCache}");
+
+            Assert.True(generated > 0);
+            AssertDisplayTextLooksValid(generatedText);
+
+            AssertDemoCachedMatchesLegacyGreedy(
+                model,
+                tokenizer,
+                DemoPrompt,
+                GetSafeGeneratedTokenCount(
+                    config.ContextLength,
+                    promptTokens.Length,
+                    DemoParityRequestedNewTokens));
+
+            AssertDemoCachedContinuationDoesNotAllocate(
+                model,
+                tokenizer,
+                DemoPrompt,
+                DemoAllocationMeasuredTokenCount);
+        }
+
         private static (int[] inputIds, int[] targetIds) SampleSequence(
             int[] corpus, int seqLen, Random rng)
         {
@@ -258,6 +528,51 @@ namespace DevOnBike.Overfit.Tests
             return total / valSteps;
         }
 
+        private static string GenerateDisplaySample(
+            GPT1Model model,
+            CharacterTokenizer tokenizer,
+            string prompt,
+            int maxTokens)
+        {
+            model.Eval();
+
+            var promptTokens = tokenizer.Encode(prompt);
+            var safeTokens = GetSafeGeneratedTokenCount(
+                model.Config.ContextLength,
+                promptTokens.Length,
+                maxTokens);
+
+            using var runtime = SlmRuntimeFactory.CreateGpt1(
+                model,
+                SlmRuntimeMode.Cached);
+
+            var generatedTokens = new int[safeTokens];
+
+            var sampling = new SamplingOptions(
+                SamplingStrategy.TopK,
+                temperature: 0.9f,
+                topK: 16,
+                topP: 1.0f,
+                seed: 42);
+
+            var options = new GenerationOptions(
+                maxNewTokens: safeTokens,
+                maxContextLength: model.Config.ContextLength,
+                sampling: sampling,
+                stopOnEndOfTextToken: false);
+
+            var generated = runtime.Generate(
+                promptTokens,
+                generatedTokens,
+                in options);
+
+            var fullTokens = promptTokens
+                .Concat(generatedTokens.Take(generated))
+                .ToArray();
+
+            return tokenizer.Decode(fullTokens);
+        }
+
         private static string GenerateSample(
             GPT1Model model, CharacterTokenizer tokenizer, string prompt, int maxTokens)
         {
@@ -299,7 +614,7 @@ namespace DevOnBike.Overfit.Tests
             };
 
             using var model = new GPT1Model(config);
-            using var optimizer = new Adam(model.TrainableParameters(), 3e-4f)
+            using var optimizer = new Adam(model.TrainableParameters(), DemoLearningRateMax)
             {
                 UseAdamW = true,
                 WeightDecay = 0.1f,
@@ -619,7 +934,7 @@ namespace DevOnBike.Overfit.Tests
             };
 
             using var model = new GPT1Model(config);
-            using var optimizer = new Adam(model.TrainableParameters(), 3e-4f)
+            using var optimizer = new Adam(model.TrainableParameters(), DemoLearningRateMax)
             {
                 UseAdamW = true,
                 WeightDecay = 0.1f,
@@ -710,6 +1025,159 @@ namespace DevOnBike.Overfit.Tests
             _output.WriteLine(string.Empty);
             _output.WriteLine("✓ Loss spada, gradient przepływa przez cały stos.");
             _output.WriteLine("✓ Model generuje angielski tekst po 100 krokach batch=8.");
+        }
+
+
+        private static GPT1Config CreateDemoConfig(int vocabSize)
+        {
+            return new GPT1Config
+            {
+                VocabSize = vocabSize,
+                ContextLength = DemoSeqLen,
+                DModel = 128,
+                NHeads = 4,
+                NLayers = 4,
+                DFF = 512,
+                TieWeights = false,
+                PreLayerNorm = true,
+            };
+        }
+
+        private void AssertDemoCachedMatchesLegacyGreedy(
+            GPT1Model model,
+            CharacterTokenizer tokenizer,
+            string prompt,
+            int maxNewTokens)
+        {
+            using var legacyRuntime = SlmRuntimeFactory.CreateGpt1(
+                model,
+                SlmRuntimeMode.Legacy);
+
+            using var cachedRuntime = SlmRuntimeFactory.CreateGpt1(
+                model,
+                SlmRuntimeMode.Cached);
+
+            var promptTokens = tokenizer.Encode(prompt);
+            var legacyTokens = new int[maxNewTokens];
+            var cachedTokens = new int[maxNewTokens];
+
+            var legacyGenerated = legacyRuntime.GenerateGreedy(
+                promptTokens,
+                legacyTokens,
+                maxNewTokens);
+
+            var cachedGenerated = cachedRuntime.GenerateGreedy(
+                promptTokens,
+                cachedTokens,
+                maxNewTokens);
+
+            _output.WriteLine(string.Empty);
+            _output.WriteLine("Validation:");
+            _output.WriteLine($"Legacy greedy generated: {legacyGenerated}");
+            _output.WriteLine($"Cached greedy generated: {cachedGenerated}");
+            _output.WriteLine("Legacy parity: OK");
+
+            Assert.Equal(legacyGenerated, cachedGenerated);
+            Assert.Equal(legacyTokens, cachedTokens);
+        }
+
+        private void AssertDemoCachedContinuationDoesNotAllocate(
+            GPT1Model model,
+            CharacterTokenizer tokenizer,
+            string prompt,
+            int measuredTokenCount)
+        {
+            using var session = new CachedSlmSession(model);
+
+            var promptTokens = tokenizer.Encode(prompt);
+            var requiredContext = promptTokens.Length + 1 + measuredTokenCount;
+
+            if (requiredContext > model.Config.ContextLength)
+            {
+                throw new InvalidOperationException(
+                    $"Allocation demo needs prompt length + warmup + measured tokens <= ContextLength. Required={requiredContext}, ContextLength={model.Config.ContextLength}.");
+            }
+
+            session.Reset(promptTokens);
+
+            var sampling = SamplingOptions.Greedy;
+
+            // Warmup poza mierzoną sekcją.
+            _ = session.GenerateNextToken(in sampling);
+
+            var before = GC.GetAllocatedBytesForCurrentThread();
+
+            var checksum = 0;
+
+            for (var i = 0; i < measuredTokenCount; i++)
+            {
+                checksum ^= session.GenerateNextToken(in sampling);
+            }
+
+            var after = GC.GetAllocatedBytesForCurrentThread();
+            var allocatedBytes = after - before;
+
+            _output.WriteLine($"Continuation allocation check: {allocatedBytes} B for {measuredTokenCount} tokens");
+            _output.WriteLine($"Checksum: {checksum}");
+
+            Assert.Equal(0, allocatedBytes);
+        }
+
+
+        private static void AssertDisplayTextLooksValid(string text)
+        {
+            Assert.False(string.IsNullOrWhiteSpace(text));
+            Assert.True(
+                text.IndexOf('\0') < 0,
+                "Generated text contains a NUL character.");
+
+            var visibleCharacters = 0;
+
+            for (var i = 0; i < text.Length; i++)
+            {
+                if (!char.IsControl(text[i]) || text[i] is '\r' or '\n' or '\t')
+                {
+                    visibleCharacters++;
+                }
+            }
+
+            Assert.True(
+                visibleCharacters >= 16,
+                $"Generated text is too short or mostly control characters. Visible characters: {visibleCharacters}.");
+        }
+
+        private static int GetSafeGeneratedTokenCount(
+            int contextLength,
+            int promptTokenCount,
+            int requestedGeneratedTokenCount)
+        {
+            var available = contextLength - promptTokenCount;
+
+            if (available <= 0)
+            {
+                throw new InvalidOperationException(
+                    $"Prompt length {promptTokenCount} does not fit context length {contextLength}.");
+            }
+
+            return Math.Min(
+                requestedGeneratedTokenCount,
+                available);
+        }
+
+        private static int GetIntEnvironmentVariable(
+            string name,
+            int defaultValue)
+        {
+            var raw = Environment.GetEnvironmentVariable(name);
+
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return defaultValue;
+            }
+
+            return int.TryParse(raw, out var value) && value > 0
+                ? value
+                : defaultValue;
         }
 
         private static void SkipIfMissing(string path)
