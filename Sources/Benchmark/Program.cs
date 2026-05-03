@@ -37,7 +37,7 @@ namespace Benchmarks
             //BenchmarkRunner.Run<OnnxMlpInferenceBenchmarks>();
 
             //BenchmarkRunner.Run<BatchScalingBenchmark>();
-            BenchmarkRunner.Run<SlmCachedMultiHeadAttentionSmallBenchmark>();
+            BenchmarkRunner.Run<SlmCachedFeedForwardGpt1Benchmark>();
         }
     }
 }
