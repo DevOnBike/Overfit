@@ -4,6 +4,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Numerics.Tensors;
+
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
     /// <summary>
@@ -25,6 +27,18 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     /// output:  [outputSize]
     ///
     /// The caller owns all buffers. This kernel does not allocate.
+    ///
+    /// Implementation note:
+    /// This version uses TensorPrimitives.MultiplyAdd over output rows:
+    ///
+    /// output[:] += input[i] * weights[i, :]
+    ///
+    /// That keeps the public API unchanged, but lets the runtime use vectorized
+    /// span primitives for the large output dimension cases that matter for
+    /// cached decode, especially:
+    ///
+    /// - 768 -> 768 projections,
+    /// - 768 -> 40478 LM head.
     /// </summary>
     public static class SingleTokenProjectionKernel
     {
@@ -95,15 +109,26 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 inputSize,
                 outputSize);
 
+            var outputSlice = output.Slice(0, outputSize);
+
             for (var i = 0; i < inputSize; i++)
             {
                 var x = input[i];
-                var weightRowOffset = i * outputSize;
 
-                for (var j = 0; j < outputSize; j++)
+                if (x == 0f)
                 {
-                    output[j] += x * weightsInputOutput[weightRowOffset + j];
+                    continue;
                 }
+
+                var weightRow = weightsInputOutput.Slice(
+                    i * outputSize,
+                    outputSize);
+
+                TensorPrimitives.MultiplyAdd(
+                    weightRow,
+                    x,
+                    outputSlice,
+                    outputSlice);
             }
         }
 
@@ -131,24 +156,35 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 throw new ArgumentException("Bias span is too small for the requested output slice.", nameof(bias));
             }
 
+            var outputSlice = output.Slice(0, outputCount);
+
             if (bias.IsEmpty)
             {
-                output.Slice(0, outputCount).Clear();
+                outputSlice.Clear();
             }
             else
             {
-                bias.Slice(outputOffset, outputCount).CopyTo(output);
+                bias.Slice(outputOffset, outputCount).CopyTo(outputSlice);
             }
 
             for (var i = 0; i < inputSize; i++)
             {
                 var x = input[i];
-                var weightRowOffset = i * fullOutputSize + outputOffset;
 
-                for (var j = 0; j < outputCount; j++)
+                if (x == 0f)
                 {
-                    output[j] += x * weightsInputOutput[weightRowOffset + j];
+                    continue;
                 }
+
+                var weightRow = weightsInputOutput.Slice(
+                    i * fullOutputSize + outputOffset,
+                    outputCount);
+
+                TensorPrimitives.MultiplyAdd(
+                    weightRow,
+                    x,
+                    outputSlice,
+                    outputSlice);
             }
         }
 
