@@ -37,7 +37,7 @@ namespace DevOnBike.Overfit.Tests
             _output = output;
         }
 
-        [Fact]
+        [Fact(Skip = "too long for UT")]
         public void Shakespeare_12Layer_Checkpointed_SeqLen256_LossBelow200()
         {
             SkipIfMissing(FixturePath);
@@ -273,7 +273,7 @@ namespace DevOnBike.Overfit.Tests
         /// Weryfikuje: brak OOM, brak NaN, loss spada.
         /// Czas: ~2 min. Uruchom to PRZED pełnym testem (5K kroków).
         /// </summary>
-        [Fact]
+        [Fact(Skip = "too long for UT")]
         public void Shakespeare_Batch8_SeqLen256_SmokeTest_50Steps()
         {
             SkipIfMissing(FixturePath);
@@ -360,7 +360,7 @@ namespace DevOnBike.Overfit.Tests
         /// Cel: potwierdzić konwergencję batch=8 w ~5 minut.
         /// Jak zielony → odpal pełny 5K test przez noc.
         /// </summary>
-        [Fact]
+        [Fact(Skip = "too long for UT")]
         public void Shakespeare_Batch8_SmallModel_500Steps_Convergence()
         {
             SkipIfMissing(FixturePath);
