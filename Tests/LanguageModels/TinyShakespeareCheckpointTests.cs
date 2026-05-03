@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Diagnostics;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Contracts;
@@ -337,7 +338,7 @@ namespace DevOnBike.Overfit.Tests
         /// Uwaga: nie zmieniamy ścieżek. Checkpoint jest czytany z:
         /// test_fixtures/checkpoint.bin
         /// </summary>
-        [Fact]
+        [Fact(Skip = "main demo logic - uncomment to run")]
         public void Demo_LoadCheckpoint_AndShowCachedRuntimeGeneration()
         {
             SkipIfMissing(FixturePath);
@@ -1066,10 +1067,17 @@ namespace DevOnBike.Overfit.Tests
                 legacyTokens,
                 maxNewTokens);
 
+            var sw = Stopwatch.StartNew();
+
             var cachedGenerated = cachedRuntime.GenerateGreedy(
                 promptTokens,
                 cachedTokens,
                 maxNewTokens);
+
+            sw.Stop();
+
+            _output.WriteLine($"Cached generation time: {sw.Elapsed.TotalMilliseconds:F3} ms");
+            _output.WriteLine($"Time per token: {sw.Elapsed.TotalMilliseconds / cachedGenerated:F3} ms/token");
 
             _output.WriteLine(string.Empty);
             _output.WriteLine("Validation:");
