@@ -202,7 +202,7 @@ namespace DevOnBike.Overfit.Tests
         /// CMD:
         ///   set OVERFIT_TINY_SHAKESPEARE_DEMO_STEPS=2000
         /// </summary>
-        [Fact(Skip = "run if u want retrain model for Shakespear demo")]
+        [Fact]
         public void Demo_Train_TinyShakespeare_AndWriteCheckpointBin()
         {
             SkipIfMissing(FixturePath);
@@ -338,7 +338,7 @@ namespace DevOnBike.Overfit.Tests
         /// Uwaga: nie zmieniamy ścieżek. Checkpoint jest czytany z:
         /// test_fixtures/checkpoint.bin
         /// </summary>
-        [Fact(Skip = "main demo logic - uncomment to run")]
+        [Fact]
         public void Demo_LoadCheckpoint_AndShowCachedRuntimeGeneration()
         {
             SkipIfMissing(FixturePath);
