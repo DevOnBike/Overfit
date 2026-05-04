@@ -1,6 +1,8 @@
 # Overfit
 
-Pure C# deep-learning and optimization engine. Predictable CPU performance, explicit memory ownership, zero-allocation inference hot paths.
+Pure C# deep-learning and optimization engine.
+
+Predictable CPU performance. Explicit memory ownership. Zero-allocation inference hot paths.
 
 No native binaries. No Python runtime. No ONNX Runtime dependency.
 
@@ -8,11 +10,15 @@ No native binaries. No Python runtime. No ONNX Runtime dependency.
 
 ## What it does
 
-**Train in PyTorch or .NET. Load or build a model. Run predictable, allocation-free inference in .NET.**
+Overfit is a managed .NET engine for small and medium CPU workloads where predictable memory behaviour matters.
 
-- **Zero-allocation CPU inference** — preallocated buffers, no per-call GC pressure, competitive with ONNX Runtime.
-- **ONNX import** — load PyTorch-exported models directly. 11 operators, branching DAGs (ResNet skip connections), output matches PyTorch within 1e-4.
-- **Evolutionary optimization** — allocation-free `Ask`/`AskThenTell` loops for black-box parameter search.
+Current focus areas:
+
+- **Zero-allocation CPU inference** — caller-owned buffers, preallocated runtime state, no per-call GC pressure on hot paths.
+- **ONNX import** — load PyTorch-exported models into native Overfit models.
+- **Autograd training** — train small neural networks and language models in pure C#.
+- **GPT-style language models** — small GPT-style character models, checkpointing, cached KV generation.
+- **Evolutionary optimization** — allocation-free `Ask` / `AskThenTell` loops for black-box search.
 
 ---
 
@@ -31,297 +37,332 @@ var model = new Sequential(
 model.Load("model.bin");
 model.Eval();
 
-using var engine = InferenceEngine.FromSequential(model, inputSize: 784, outputSize: 10);
+using var engine = InferenceEngine.FromSequential(
+    model,
+    inputSize: 784,
+    outputSize: 10);
 
-Span<float> input  = stackalloc float[784];
+Span<float> input = stackalloc float[784];
 Span<float> output = stackalloc float[10];
+
 engine.Run(input, output); // zero-allocation
 ```
 
-### Inference — ONNX import (linear topology)
+### Inference — ONNX import
 
 ```csharp
 using DevOnBike.Overfit.Onnx;
 using DevOnBike.Overfit.Inference;
 
-var model = OnnxImporter.Load("classifier.onnx"); // .data file resolved automatically
+var model = OnnxImporter.Load("classifier.onnx");
 model.Eval();
 
-using var engine = InferenceEngine.FromSequential(model, inputSize: 784, outputSize: 10);
+using var engine = InferenceEngine.FromSequential(
+    model,
+    inputSize: 784,
+    outputSize: 10);
+
 var prediction = engine.Predict(input); // ReadOnlySpan<float>, 0 B
 ```
 
-### Inference — ONNX import (DAG topology — ResNet, skip connections)
+### Inference — ONNX DAG topology
+
+Use the graph importer for skip connections, residual blocks, or branching topology.
 
 ```csharp
 using DevOnBike.Overfit.Onnx;
 using DevOnBike.Overfit.Inference;
 
-// OnnxGraphImporter handles branching graphs: skip connections, residual blocks.
-// OnnxImporter (above) requires linear topology and is faster for simple models.
-var dagModel = OnnxGraphImporter.Load("resnet.onnx", inputSize: 784, outputSize: 10);
+var dagModel = OnnxGraphImporter.Load(
+    "resnet.onnx",
+    inputSize: 784,
+    outputSize: 10);
+
 dagModel.Eval();
 
 var backend = new OnnxGraphInferenceBackend(dagModel);
 using var engine = InferenceEngine.FromBackend(backend);
+
 var prediction = engine.Predict(input); // ReadOnlySpan<float>, 0 B
 ```
 
-### GPT-style language model
+---
 
-```csharp
-using DevOnBike.Overfit.DeepLearning;
-using DevOnBike.Overfit.Tokenization;
+## GPT-style language model demo
 
-// Small model — fast, fits in RAM, trains on CPU
-var config = new GPT1Config
-{
-    VocabSize     = 65,    // char-level Shakespeare
-    ContextLength = 256,
-    DModel        = 128,
-    NHeads        = 4,
-    NLayers       = 2,
-    DFF           = 512,
-};
+Overfit includes an end-to-end TinyShakespeare GPT-style demo.
 
-var tokenizer = CharacterTokenizer.FromCorpus(File.ReadAllText("input.txt"));
+In plain terms, the demo proves that Overfit can:
 
-using var model = new GPT1Model(config);
-model.Train();
+1. train a small GPT-style character-level language model,
+2. save the trained weights into `checkpoint.bin`,
+3. load `checkpoint.bin`,
+4. generate text from a prompt,
+5. use a cached KV runtime,
+6. verify cached generation against the legacy/reference path,
+7. keep the cached continuation hot path at **0 B managed allocations**.
 
-// Greedy generation (inference)
-model.Eval();
-var prompt    = tokenizer.Encode("ROMEO:");
-var generated = model.Generate(prompt, maxNewTokens: 100);
-Console.WriteLine(tokenizer.Decode(generated));
+This is not a general-purpose assistant. It is a small Shakespeare-style character model used to validate the GPT training and runtime pipeline.
+
+### What the checkpoint is
+
+`checkpoint.bin` is the trained model weights for the TinyShakespeare demo.
+
+The current demo checkpoint is tied to:
+
+```text
+GPT config
+TinyShakespeare character tokenizer
+test_fixtures/tiny_shakespeare.txt
 ```
 
-### Training
+A future model-package format should include config and tokenizer metadata next to the weights.
+
+### Load and show checkpoint
+
+After `test_fixtures/checkpoint.bin` exists:
+
+```bash
+dotnet test -c Release --filter "Demo_LoadCheckpoint_AndShowCachedRuntimeGeneration_RepetitionAware"
+```
+
+This uses cached KV generation with display sampling:
+
+```text
+TopK = 16
+Temperature = 0.85
+RepetitionPenalty = 1.15
+RepetitionWindow = 64
+```
+
+Expected validations:
+
+```text
+Legacy parity: OK
+Continuation allocation check: 0 B
+Time per token: around 1.2 ms/token on the demo model
+```
+
+### Manual checkpoint training
+
+Checkpoint regeneration is a manual long-running demo test.
+
+```text
+Tests/LanguageModels/Demo/TinyShakespeare/
+```
+
+Long-running training tests are intentionally skipped by default:
 
 ```csharp
-using var conv  = new ConvLayer(1, 8, 28, 28, 3);
-using var fcHid = new LinearLayer(1352, 64);
-using var fcOut = new LinearLayer(64, 10);
+[Fact(Skip = "Manual long-running GPT demo. Remove Skip locally, run once, then restore Skip.")]
+```
 
-// Optimizers accept Parameter directly (Etap 6 API)
-using var optimizer = new Adam(
-    conv.TrainableParameters()
-        .Concat(fcHid.TrainableParameters())
-        .Concat(fcOut.TrainableParameters()),
-    learningRate: 0.001f) { UseAdamW = true };
+Recommended sequential quality preset for a demo checkpoint:
 
-using var graph = new ComputationGraph();
+```text
+SeqLen = 128
+BatchSize = 4
+Steps = 20,000
+DModel = 128
+Heads = 4
+Layers = 4
+DFF = 512
+LR = 3e-4 -> 3e-5
+WeightDecay = 0.05
+GradClip = 1.0
+```
 
-for (var batch = 0; batch < batches; batch++)
-{
-    graph.Reset();
-    optimizer.ZeroGrad();
+### Experimental data-parallel training
 
-    using var h  = conv.Forward(graph, input);
-    using var a  = graph.Relu(h);
-    using var p  = graph.MaxPool2D(a, 8, 26, 26, 2);
-    using var pF = graph.Reshape(p, batchSize, 1352);
-    using var hH = fcHid.Forward(graph, pF);
-    using var hA = graph.Relu(hH);
-    using var lo = fcOut.Forward(graph, hA);
+Data-parallel TinyShakespeare training is kept separate and manual:
 
-    using var loss = graph.SoftmaxCrossEntropy(lo, target);
-    graph.Backward(loss);
-    optimizer.Step();
-}
+```text
+Tests/LanguageModels/Experimental/
+```
+
+Observed local throughput on Ryzen 9 9950X3D:
+
+```text
+8 workers:  ~360 seq/s
+12 workers: ~437 seq/s
+16 workers: ~457 seq/s
+```
+
+This is an experimental performance path, not the default correctness path.
+
+---
+
+## Test policy
+
+Default:
+
+```bash
+dotnet test -c Release
+```
+
+should run fast correctness tests only.
+
+Manual tests must use a clear `Skip` reason:
+
+```csharp
+[Fact(Skip = "Manual long-running GPT demo. Remove Skip locally, run once, then restore Skip.")]
+```
+
+Fast GPT runtime acceptance tests should remain unskipped.
+
+Important GPT validation areas:
+
+```text
+cached greedy == legacy greedy
+GenerateNextToken loop == Generate
+context overflow behavior
+session reset behavior
+0 B cached continuation hot path
+checkpoint load/show
 ```
 
 ---
 
 ## Benchmark snapshot
 
-Machine: AMD Ryzen 9 9950X3D · Windows 11 25H2 · .NET 10.0.7 · BenchmarkDotNet 0.15.8
+Local machine used for recent measurements:
 
-### Single inference — Overfit vs ONNX Runtime
+```text
+AMD Ryzen 9 9950X3D
+Windows 11 25H2
+.NET 10
+BenchmarkDotNet 0.15.8
+```
 
-| Method | Mean | Allocated | vs ONNX Runtime |
-|--------|-----:|----------:|----------------:|
-| **Overfit `InferenceEngine`** | **201.6 ns** | **0 B** | **9.2× faster** |
-| ONNX Runtime (pre-allocated) | 1 853 ns | 224 B | baseline |
-| ONNX Runtime (standard) | 3 369 ns | 952 B | 0.55× |
+### Linear inference — Overfit vs ONNX Runtime
 
-Model: Linear(784→10). Overfit is **9.2× faster** than ONNX Runtime pre-allocated path, **16.7× faster** than standard path, with zero managed allocations.
+```text
+Overfit InferenceEngine: 0 B managed allocations on hot path
+ONNX Runtime preallocated path: small managed allocation remains
+```
 
-### DAG inference — ResNet-style model with skip connections
+The exact numbers depend on benchmark shape and branch state. Use BenchmarkDotNet results for final claims.
 
-| Method | Mean | Allocated |
-|--------|-----:|----------:|
-| `OnnxGraphModel.RunInference` (direct) | ~0.9–2.1 µs | **0 B** |
-| `InferenceEngine.FromBackend` (via engine) | ~0.9–2.1 µs | **0 B** |
+### GPT TinyShakespeare cached runtime
 
-Model: TinyResNet — Linear(8→8) + skip + Linear(8→4). Both paths: zero allocations.
-Bimodal distribution due to model size (sub-µs math, timer resolution dominates).
+Recent demo result:
 
-### GPT-1 inference (pure C#, CPU-only)
+```text
+cached generation: around 1.2 ms/token
+legacy/cached greedy parity: OK
+cached continuation allocation: 0 B for measured continuation tokens
+```
 
-Model: GPT-1 scale — 12 layers, 768d, 12 heads, dFF=3072, ~117M params.
-Machine: AMD Ryzen 9 9950X3D · .NET 10 · BenchmarkDotNet.
+### GPT training
 
-| Method | SeqLen | Mean | Allocated |
-|--------|-------:|-----:|----------:|
-| Single TransformerBlock | 16 | **5.1 ms** | 950 KB |
-| Single TransformerBlock | 64 | **11.5 ms** | 3.6 MB |
-| Full GPT-1 (12 blocks) | 16 | **81.8 ms** | 13.8 MB |
-| Full GPT-1 (12 blocks) | 64 | **163.9 ms** | 50.6 MB |
+Single-model sequential training is the quality baseline.
 
-### GPT-1 training — Tiny Shakespeare
-
-Model: 12 layers, 256d, 8 heads, ~9.5M params. Char-level tokenizer (vocab=68).
-Machine: AMD Ryzen 9 9950X3D · .NET 10 · batch=8 · SeqLen=256.
-
-| Steps | Time | Val loss | Notes |
-|-------|------|----------|-------|
-| 200 | 7 min | ~2.68 | Model learns word boundaries |
-| 1 000 | 37 min | **2.29** | Invents Shakespeare-style character names |
-| — | — | 1.47 | nanoGPT reference (batch=64, GPU) |
-
-Training throughput: **2176ms/step** (batch=8, SeqLen=256, CPU).
-Next: Parallel.For in MatMul → target ~600ms/step (3.5× speedup).
-
-One TransformerBlock = MultiHeadAttention + FFN(GELU) + 2×LayerNorm + residuals.
-Full GPT-1 = 12 blocks + token/positional embeddings + final LN + LM head (vocabSize=40478).
-
-**Memory note:** allocations shown are intermediate activation tensors disposed after each call.
-SeqLen=128 exceeds the default 50MB arena — max supported context at inference: ~100 tokens.
-Gradient checkpointing (planned) will reduce this by ~75%.
-
-### CNN training throughput (60k MNIST, batch=64)
-
-| Epoch | Time | Alloc/epoch | Notes |
-|------:|-----:|------------:|-------|
-| 1 | ~1.7 s | ~32 MB | JIT warmup |
-| 2–5 | **~800 ms** | **~26 MB** | steady state |
-
-Training allocations from autograd graph temporaries — expected.
-Inference path: zero allocations. Live managed memory delta per epoch: **−0.01 MB** (zero leak).
-
-### Concurrent inference (8 threads × 1 000 calls each)
-
-| Method | Mean | Allocated | vs ONNX Runtime |
-|--------|-----:|----------:|----------------:|
-| **Overfit (concurrent)** | **637.8 ms** | **0 B** | **3.0× faster** |
-| ONNX Runtime (concurrent) | 1 916.7 ms | 117 MB | baseline |
-
-Overfit scales linearly — no shared mutable state, no lock contention.
-ONNX Runtime allocates 117 MB of managed memory under concurrent load (Gen0 GC pressure).
+Experimental data-parallel training increases throughput but changes global batch dynamics. It is useful for performance exploration, not a replacement for the default quality checkpoint path yet.
 
 ---
 
 ## ONNX import
 
+Supported ONNX operators include:
+
+```text
+Conv
+Gemm
+Relu
+Tanh
+Sigmoid
+Softmax
+MaxPool
+GlobalAveragePool
+BatchNormalization
+Add
+Reshape
+Flatten
+Identity / Dropout no-op in eval mode
 ```
-PyTorch model (eval mode)
-  → torch.onnx.export(..., opset_version=17)
-  → OnnxImporter.Load("model.onnx")     # .data file auto-resolved
-  → Sequential
-  → InferenceEngine.Run(input, output)  # zero-allocation
-```
-
-### Supported operators
-
-| ONNX operator | Maps to | Notes |
-|---------------|---------|-------|
-| `Conv` | `ConvLayer` | 2D, NCHW, symmetric padding, any stride |
-| `Gemm` | `LinearLayer` | `transB=1` handled automatically |
-| `Relu` | `ReluActivation` | |
-| `Tanh` | `TanhActivation` | |
-| `Sigmoid` | `SigmoidActivation` | |
-| `Softmax` | `SoftmaxActivation` | axis=-1 only |
-| `MaxPool` | `MaxPool2DLayer` | Square kernel, stride = kernel |
-| `GlobalAveragePool` | `GlobalAveragePool2DLayer` | 2D, NCHW |
-| `BatchNormalization` | `BatchNorm1D` | eval mode (training_mode=0) |
-| `Add` | `OnnxAddLayer` | Element-wise; used for skip connections |
-| `Reshape` / `Flatten` | `FlattenLayer` | Rank reduction (4D→2D) |
-| `Identity` / `Dropout` | _(no-op in eval mode)_ | |
-
-**14 operators** (+ 2 no-ops). Unsupported operators throw a clear `NotSupportedException` naming the operator.
 
 Two importers:
-- **`OnnxImporter`** — linear topology only. Faster for simple CNNs and MLPs.
-- **`OnnxGraphImporter`** — arbitrary DAG topology. Required for ResNet, DenseNet, EfficientNet (any model with skip connections or multiple inputs to a node).
 
-External `.data` files (PyTorch ≥ 2.x default) resolved automatically.
-No `Google.Protobuf` dependency.
+- `OnnxImporter` — linear topology, faster for simple CNN/MLP models.
+- `OnnxGraphImporter` — DAG topology, required for skip connections and residual blocks.
 
-### PyTorch export
-
-```python
-model.eval()  # IMPORTANT: folds BatchNorm into Conv weights
-
-torch.onnx.export(
-    model,
-    dummy_input,
-    "model.onnx",
-    opset_version=17,
-    export_params=True,
-)
-```
+External `.data` files from PyTorch exports are resolved automatically.
 
 ---
 
 ## Architecture
 
+```text
+InferenceEngine
+  zero-allocation inference facade
+
+Sequential
+  module composition
+
+ComputationGraph
+  autograd tape and backward execution
+
+Parameter
+  long-lived trainable state with Data + Grad storage
+
+TensorStorage
+  unmanaged memory ownership
+
+Kernels
+  pure Span-based math, no AutogradNode ownership
+
+Optimizers
+  Adam, SGD over Parameter collections
+
+ONNX
+  OnnxImporter and OnnxGraphImporter
+
+GPT1Model
+  Embedding + N x TransformerBlock + final norm + LM head
+
+Cached SLM runtime
+  cached KV token-by-token generation
+
+Tokenizers
+  CharacterTokenizer and BytePairEncoder
 ```
-InferenceEngine          ← zero-alloc inference facade (caller-owned buffers)
-Sequential               ← module composition
-Layers                   ← Conv, Linear, ReLU, Tanh, Sigmoid, Softmax,
-                           BatchNorm, MaxPool, GlobalAveragePool, Flatten, LSTM
-ComputationGraph         ← autograd tape + backward
-  graph.Linear(...)      ← operation facade (PR5 Etap 1)
-  graph.Conv2D(...)
-  graph.Relu(...)
-  graph.SoftmaxCrossEntropy(...)
-AutogradNodeOwnership    ← lifecycle metadata: Parameter / GraphTemporary /
-                           GraphAuxiliary / ExternalBorrowed / View
-Parameter                ← long-lived trainable state, owns Data + Grad storage
-  layer.TrainableParameters()  ← preferred API for optimizers (Etap 6)
-Kernels                  ← pure Span-based math, no AutogradNode
-  LinearKernels          ← Forward, ForwardBatched, BackwardInput,
-                           AccumulateWeightGrad, AccumulateBiasGrad
-  PoolingKernels         ← MaxPool pool=2 SIMD fast path
-TensorStorage<T>         ← unmanaged memory ownership
-Optimizers               ← Adam(IEnumerable<Parameter>), SGD(IEnumerable<Parameter>)
-OnnxImporter             ← PyTorch ONNX → Sequential (linear topology)
-OnnxGraphImporter        ← PyTorch ONNX → OnnxGraphModel (DAG topology, skip connections)
-GPT1Model                ← Full GPT-style LM: Embedding + N×TransformerBlock + LM head
-  TransformerBlock       ← MultiHeadAttention + FFN(GELU) + LayerNorm + residuals
-  MultiHeadAttentionLayer ← SDPA × nHeads, causal mask, weight-stationary split/merge
-  LayerNormLayer         ← per-token normalisation, no running stats
-  EmbeddingLayer         ← token/positional lookup, scatter-add backward
-CharacterTokenizer       ← char-level, no external deps
-BytePairEncoder          ← loads GPT-2 vocab.json + merges.txt
-```
-
-### Autograd ownership
-
-Every `AutogradNode` carries an `Ownership` tag set at creation:
-
-| Ownership | Who disposes | Example |
-|-----------|-------------|---------|
-| `GraphTemporary` | `graph.Reset()` | ReLU output, hidden activations |
-| `GraphAuxiliary` | `graph.Reset()` | MaxPool index map, Softmax probs |
-| `Parameter` | Layer `Dispose()` | `LinearLayer.Weights`, `ConvLayer.Kernels` |
-| `ExternalBorrowed` | Caller | Preallocated input/target batch buffers |
-| `View` | Never (no storage) | `FlattenLayer` output |
-
-`graph.Reset()` disposes by ownership — no hardcoded switch on `OpCode`.
 
 ---
 
-## Evolutionary optimization
+## Current GPT status
 
-```csharp
-var strategy = new OpenAIESStrategy(populationSize: 1024, sigma: 0.1f);
-var candidates = strategy.Ask();      // 0 B allocation
-strategy.Tell(fitnesses);
+Complete and working:
+
+```text
+GPT1Model
+TransformerBlock
+MultiHeadAttention
+ScaledDotProductAttention
+LayerNorm
+Embedding
+GELU FFN
+CharacterTokenizer
+Save/Load checkpoint
+Cached KV runtime
+Legacy/cached parity checks
+0 B continuation hot path
+TinyShakespeare checkpoint demo
 ```
 
-Use cases: Kubernetes tuning, game AI, industrial process search, pricing strategy.
+Experimental:
+
+```text
+data-parallel TinyShakespeare training
+parallel attention backward behind experimental flag
+```
+
+Not yet complete:
+
+```text
+self-contained model package with config + tokenizer metadata
+general-purpose instruction-following model
+production trainer API for GPT
+```
 
 ---
 
@@ -329,71 +370,15 @@ Use cases: Kubernetes tuning, game AI, industrial process search, pricing strate
 
 - .NET 10+
 - No native dependencies
-- No Python runtime
-- Native AOT compatible
-
----
-
-## Roadmap
-
-### Recently completed
-
-- ✅ **ONNX import — 12 operators** (Conv w/padding+stride, Gemm, ReLU, Tanh, Sigmoid, Softmax, MaxPool, GlobalAveragePool, BatchNormalization, Add, Reshape, Flatten)
-- ✅ **ONNX DAG runtime** — `OnnxGraphImporter` supports branching topology (skip connections, residual blocks). Enables ResNet-style models. Zero-allocation inference via `OnnxGraphInferenceBackend`.
-- ✅ **AveragePool + ReduceMean** — windowed average pooling; `ReduceMean` mapped to GlobalAveragePool. Total: 14 ONNX operators.
-- ✅ **GPT-1 architecture** — complete transformer stack: LayerNorm, Embedding, ScaledDotProductAttention, MultiHeadAttention, GELU FFN, TransformerBlock (Pre-LN + Post-LN), GPT1Model with weight tying, greedy generation, Save/Load
-- ✅ **Tokenizers** — CharacterTokenizer (no deps) + BytePairEncoder (loads GPT-2 vocab.json/merges.txt)
-- ✅ **BackwardFromGrad** — custom loss backward without overwriting seeded gradient — windowed average pooling with padding/stride; `ReduceMean` mapped to GlobalAveragePool (PyTorch `AdaptiveAvgPool2d` export pattern). Total: **14 ONNX operators**.
-- ✅ **PR5 Autograd ownership cleanup** — `Parameter` type, `AutogradNodeOwnership` enum, `graph.Reset()` by ownership, all layers migrated (LinearLayer, ConvLayer, BatchNorm1D)
-- ✅ **Optimizers on `Parameter`** — `Adam(IEnumerable<Parameter>)`, `SGD(IEnumerable<Parameter>)`
-- ✅ **PERF-1: Linear backward kernels** — hybrid threshold eliminates `Parallel.For` overhead for small matrices; backward alloc −43% (23 MB → 13 MB per epoch)
-- ✅ **BATCHED-1: `LinearKernels.ForwardBatched`** — weight-stationary outer product for small matrices, no zero-skipping branch mispredictions
-- ✅ **MaxPool pool=2 SIMD** — `TensorPrimitives.Max` fast path, 659 µs vs 815 µs baseline
-
-### Near-term
-
-- **Parallel MatMul** — `unsafe Parallel.For` w `MatMulRawSeq`, target 3-4× speedup treningu
-- **Sampling** — temperature, top-k, top-p dla nielosowej generacji
-- **Sampling** — temperature, top-k, top-p for non-greedy generation
-- **ONNX: LSTM/GRU operators** — recurrent model import
-- **PR5-7d/e** — Conv2D/MaxPool2D in ComputationGraph (architectural, zero user impact)
-
-### Transformer / GPT-1 status
-
-GPT-1 architecture is **complete**. All components implemented and tested:
-
-| Component | Status | Notes |
-|-----------|--------|-------|
-| `LayerNorm` | ✅ | Per-token, no running stats, full backward |
-| `Embedding` | ✅ | Token + positional, scatter-add backward |
-| `ScaledDotProductAttention` | ✅ | Causal mask, full Q/K/V backward |
-| `MultiHeadAttention` | ✅ | Weight-stationary head split/merge, GPT-1 scale tested |
-| GELU activation | ✅ | Tanh approximation, numerical gradient verified |
-| `FeedForwardLayer` | ✅ | Linear→GELU→Linear, position-wise |
-| `TransformerBlock` | ✅ | Pre-LN and Post-LN variants, Save/Load |
-| `GPT1Model` | ✅ | 12 blocks, weight tying, greedy generation |
-| Batch training (B=8) | ✅ | True batching via on-tape EmbedBatch |
-| Gradient checkpointing | ✅ | Per-block recompute, SeqLen=256 in 2.4GB |
-| `CharacterTokenizer` | ✅ | No deps, train from corpus |
-| `BytePairEncoder` | ✅ | GPT-2 vocab.json/merges.txt compatible |
-
-**What works today:** inference at any scale, training for small models (≤10M params, CPU).
-
-**What's next for full GPT-1 training (117M params):**
-- **Gradient checkpointing** — recompute activations during backward, ~75% memory reduction
-- **True batch training (B>1)** — MHA batch dimension refactor
-- **Sampling** — temperature, top-k, top-p
-
-### Long-term
-
-- Graph compilation / kernel fusion for fixed-shape models
-- Batched GEMM parallel path (unsafe fixed-pointer `Parallel.For`)
-- AOT compilation target
+- No Python runtime required for normal use
+- Native AOT friendly design goals
 
 ---
 
 ## What Overfit is not
 
-Not a PyTorch/TensorFlow replacement. Not GPU-first. Not transformer-scale first.
+Overfit is not a PyTorch or TensorFlow replacement.
 
-The differentiator: pure C#, predictable allocation behaviour, competitive CPU inference for small/medium models where managed zero-allocation matters.
+Overfit is not a general-purpose LLM assistant.
+
+The differentiator is pure C#, explicit memory ownership, predictable CPU behavior, and zero-allocation inference paths for small and medium models where managed runtime control matters.

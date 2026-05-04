@@ -1,29 +1,32 @@
 # Overfit test project layout
 
-This test project is organized by product area first, then by purpose.
+The test project is organized by product area first, then by purpose.
 
 Default rule:
 
-```text
-dotnet test
+```bash
+dotnet test -c Release
 ```
 
 should run fast correctness tests only.
 
-Manual / long-running / experimental tests must be explicitly skipped with a clear
-comment, for example:
+Manual / long-running / experimental tests must be skipped by default with a clear comment:
 
 ```csharp
 [Fact(Skip = "Manual long-running GPT demo. Remove Skip locally, run once, then restore Skip.")]
 ```
 
-## Proposed top-level structure
+---
+
+## Top-level structure
 
 ```text
 Tests/
   Core/
     Algorithms/
     Autograd/
+    Distributions/
+    Kernels/
     Memory/
     Parameters/
     Randomization/
@@ -40,6 +43,7 @@ Tests/
   LanguageModels/
     GPT1/
     Runtime/
+      Acceptance/
       Adapters/
       Blocks/
       Cache/
@@ -70,7 +74,6 @@ Tests/
 
   Integrations/
     K8s/
-    OfflineTraining/
     Onnx/
     Shap/
 
@@ -82,10 +85,12 @@ Tests/
     TicTacToe/
 
   TestSupport/
-    Fixtures/
     GradientChecking/
     Helpers/
+    Prepare/
 ```
+
+---
 
 ## Naming rules
 
@@ -96,13 +101,15 @@ Tests/
 - Long-running tests must use `[Fact(Skip = "...")]`.
 - Runtime acceptance tests stay fast and unskipped.
 
+---
+
 ## GPT policy
 
 Stable GPT tests:
 
 ```text
-Tests/LanguageModels/Runtime/**
 Tests/LanguageModels/GPT1/**
+Tests/LanguageModels/Runtime/**
 Tests/LanguageModels/Tokenization/**
 ```
 
