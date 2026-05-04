@@ -9,12 +9,12 @@ namespace DevOnBike.Overfit.LanguageModels.Experimental
     /// Experimental language-model switches.
     ///
     /// Defaults must keep the stable/reference path unchanged.
-    /// These options are intended for manual experiments, demos, and benchmarks
-    /// while GPT training/runtime APIs are being stabilized.
+    /// These options are intended for manual experiments, demos, and
+    /// benchmarks while GPT training/runtime APIs are being stabilized.
     /// </summary>
     public static class ExperimentalLanguageModelOptions
     {
-        private static volatile bool _enableParallelAttentionBackward;
+        private volatile static bool _enableParallelAttentionBackward;
 
         /// <summary>
         /// Enables the experimental parallel implementation of
