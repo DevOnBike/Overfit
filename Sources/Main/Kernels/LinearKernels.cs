@@ -1,4 +1,4 @@
-// Copyright (c) 2026 DevOnBike.
+﻿// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -9,7 +9,7 @@ using System.Runtime.CompilerServices;
 
 namespace DevOnBike.Overfit.Kernels
 {
-    internal static class LinearKernels
+    internal static unsafe class LinearKernels
     {
         private const int InputMajorVectorizedOutputThreshold = 32;
 
@@ -148,7 +148,8 @@ namespace DevOnBike.Overfit.Kernels
             int inputSize,
             int outputSize)
         {
-            if (!Vector.IsHardwareAccelerated || outputSize < Vector<float>.Count * 4)
+            if (!Vector.IsHardwareAccelerated ||
+                outputSize < Vector<float>.Count * 4)
             {
                 ForwardInputMajorVector1(
                     input,
@@ -163,6 +164,7 @@ namespace DevOnBike.Overfit.Kernels
 
             var vectorWidth = Vector<float>.Count;
             var blockWidth = vectorWidth * 4;
+
             var j = 0;
 
             for (; j <= outputSize - blockWidth; j += blockWidth)
@@ -223,7 +225,8 @@ namespace DevOnBike.Overfit.Kernels
             int inputSize,
             int outputSize)
         {
-            if (!Vector.IsHardwareAccelerated || outputSize < Vector<float>.Count)
+            if (!Vector.IsHardwareAccelerated ||
+                outputSize < Vector<float>.Count)
             {
                 ForwardInputMajorScalar(
                     input,
@@ -292,49 +295,92 @@ namespace DevOnBike.Overfit.Kernels
         // ─────────────────────────────────────────────────────────────────────
         // Backward kernels — span-only, no AutogradNode dependency
         //
-        // This intentionally stays sequential for now.
-        //
-        // The previous local experimental version used fixed pointers inside
-        // Parallel.For lambdas. C# disallows that pattern:
-        // CS1764 — "Cannot use fixed local inside an anonymous method,
-        // lambda expression, or query expression."
-        //
-        // Keep the build green first. Add a profiled parallel backward path later,
-        // either with a dedicated unsafe worker method or with per-thread reduction
-        // buffers. Do not mix fixed locals directly into lambdas.
+        // ParallelThreshold: 1_048_576 (1M ops). Much higher than TensorMath's 4096.
+        // Rationale: Parallel.For has ~2-5 µs overhead + TPL allocation (~1-3 KB).
+        // For small matrices (e.g., Linear(8,10) backward: 64×10×8 = 5120 ops)
+        // sequential SIMD via TensorPrimitives.Dot is 10-50× faster than Parallel.For.
+        // For large matrices (e.g., Linear(1352,64) backward: 5.5M ops) parallelism wins.
         // ─────────────────────────────────────────────────────────────────────
 
         /// <summary>
         /// Computes the input gradient:
-        /// gradInput[b, i] += sum_j(gradOutput[b, j] * weights[i, j])
+        ///   gradInput[b, i] += sum_j(gradOutput[b, j] * weights[i, j])
         ///
         /// Equivalent to: gradInput += gradOutput @ weights^T
         /// Layout: weights[inputSize, outputSize] (input-major, same as training path).
         /// </summary>
+        /// <summary>Parallel threshold for BackwardInput: 512K ops.</summary>
+        internal const long BackwardInputThreshold = 524_288;
+
         public static void BackwardInput(
-            ReadOnlySpan<float> gradOutput, // [batchSize, outputSize]
-            ReadOnlySpan<float> weights, // [inputSize, outputSize]
-            Span<float> gradInput, // [batchSize, inputSize] — accumulated in-place
+            ReadOnlySpan<float> gradOutput,    // [batchSize, outputSize]
+            ReadOnlySpan<float> weights,        // [inputSize, outputSize]
+            Span<float> gradInput,              // [batchSize, inputSize]  — accumulated in-place
             int batchSize,
             int inputSize,
             int outputSize)
         {
-            for (var b = 0; b < batchSize; b++)
+            // Threshold: 512K ops. Below threshold sequential SIMD is faster.
+            if ((long)batchSize * inputSize * outputSize < BackwardInputThreshold)
             {
-                BackwardInputRow(
-                    gradOutput.Slice(b * outputSize, outputSize),
-                    weights,
-                    gradInput.Slice(b * inputSize, inputSize),
-                    inputSize,
-                    outputSize);
+                for (var b = 0; b < batchSize; b++)
+                {
+                    BackwardInputRow(
+                        gradOutput.Slice(b * outputSize, outputSize),
+                        weights,
+                        gradInput.Slice(b * inputSize, inputSize),
+                        inputSize,
+                        outputSize);
+                }
+                return;
+            }
+
+            // fixed pointer cannot be captured in Parallel.For lambda (CS1764).
+            // Solution: pass raw pointers to a static unsafe worker method.
+            unsafe
+            {
+                fixed (float* goPtr = gradOutput, wPtr = weights, giPtr = gradInput)
+                {
+                    var ctx = new BackwardInputContext(goPtr, wPtr, giPtr, inputSize, outputSize);
+                    Parallel.For(0, batchSize, Runtime.OverfitParallel.Options,
+                        b => BackwardInputWorker(b, ctx));
+                }
+            }
+        }
+
+        private readonly unsafe struct BackwardInputContext
+        {
+            public readonly float* GradOutput;
+            public readonly float* Weights;
+            public readonly float* GradInput;
+            public readonly int InputSize;
+            public readonly int OutputSize;
+
+            public BackwardInputContext(float* go, float* w, float* gi, int inputSize, int outputSize)
+            {
+                GradOutput = go; Weights = w; GradInput = gi;
+                InputSize = inputSize; OutputSize = outputSize;
+            }
+        }
+
+        private static unsafe void BackwardInputWorker(int b, BackwardInputContext ctx)
+        {
+            var goRow = new ReadOnlySpan<float>(ctx.GradOutput + b * ctx.OutputSize, ctx.OutputSize);
+            var giRow = new Span<float>(ctx.GradInput + b * ctx.InputSize, ctx.InputSize);
+
+            for (var i = 0; i < ctx.InputSize; i++)
+            {
+                giRow[i] += TensorPrimitives.Dot(
+                    goRow,
+                    new ReadOnlySpan<float>(ctx.Weights + i * ctx.OutputSize, ctx.OutputSize));
             }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void BackwardInputRow(
-            ReadOnlySpan<float> gradOutputRow, // [outputSize]
-            ReadOnlySpan<float> weights, // [inputSize, outputSize]
-            Span<float> gradInputRow, // [inputSize]
+            ReadOnlySpan<float> gradOutputRow,   // [outputSize]
+            ReadOnlySpan<float> weights,          // [inputSize, outputSize]
+            Span<float> gradInputRow,             // [inputSize]
             int inputSize,
             int outputSize)
         {
@@ -350,55 +396,100 @@ namespace DevOnBike.Overfit.Kernels
 
         /// <summary>
         /// Accumulates weight gradients:
-        /// gradWeights[i, j] += sum_b(input[b, i] * gradOutput[b, j])
+        ///   gradWeights[i, j] += sum_b(input[b, i] * gradOutput[b, j])
         ///
         /// Equivalent to: gradWeights += input^T @ gradOutput
         /// Layout: gradWeights[inputSize, outputSize] (input-major).
         /// </summary>
+        /// <summary>Parallel threshold for AccumulateWeightGrad: 1M ops.</summary>
+        internal const long AccumulateWeightGradThreshold = 1_048_576;
+
         public static void AccumulateWeightGrad(
-            ReadOnlySpan<float> input, // [batchSize, inputSize]
-            ReadOnlySpan<float> gradOutput, // [batchSize, outputSize]
-            Span<float> gradWeights, // [inputSize, outputSize] — accumulated in-place
+            ReadOnlySpan<float> input,         // [batchSize, inputSize]
+            ReadOnlySpan<float> gradOutput,    // [batchSize, outputSize]
+            Span<float> gradWeights,           // [inputSize, outputSize]  — accumulated in-place
             int batchSize,
             int inputSize,
             int outputSize)
         {
-            // Outer-product accumulation:
-            // for each batch element b:
-            //   for each input dim i:
-            //     gradWeights[i, :] += input[b, i] * gradOutput[b, :]
-            //
-            // Parallelising this correctly requires per-thread partial gradient
-            // buffers or row partitioning with reduction. A naïve Parallel.For
-            // over batch rows races on gradWeights.
+            // Sequential path for small matrices — no overhead.
+            if ((long)batchSize * inputSize * outputSize < AccumulateWeightGradThreshold)
+            {
+                AccumulateWeightGradSeq(input, gradOutput, gradWeights, batchSize, inputSize, outputSize);
+                return;
+            }
+
+            // fixed pointer cannot be captured in lambda (CS1764) — use static unsafe worker.
+            unsafe
+            {
+                fixed (float* inPtr = input, goPtr = gradOutput, gwPtr = gradWeights)
+                {
+                    var ctx = new AccumulateWeightGradContext(inPtr, goPtr, gwPtr, batchSize, inputSize, outputSize);
+                    Parallel.For(0, inputSize, Runtime.OverfitParallel.Options,
+                        i => AccumulateWeightGradWorker(i, ctx));
+                }
+            }
+        }
+
+        private readonly unsafe struct AccumulateWeightGradContext
+        {
+            public readonly float* Input;
+            public readonly float* GradOutput;
+            public readonly float* GradWeights;
+            public readonly int BatchSize;
+            public readonly int InputSize;
+            public readonly int OutputSize;
+
+            public AccumulateWeightGradContext(float* inp, float* go, float* gw, int b, int n, int m)
+            {
+                Input = inp; GradOutput = go; GradWeights = gw;
+                BatchSize = b; InputSize = n; OutputSize = m;
+            }
+        }
+
+        private static unsafe void AccumulateWeightGradWorker(int i, AccumulateWeightGradContext ctx)
+        {
+            var gwRow = new Span<float>(ctx.GradWeights + i * ctx.OutputSize, ctx.OutputSize);
+
+            for (var b = 0; b < ctx.BatchSize; b++)
+            {
+                var xi = ctx.Input[b * ctx.InputSize + i];
+                var goRow = new ReadOnlySpan<float>(ctx.GradOutput + b * ctx.OutputSize, ctx.OutputSize);
+                TensorPrimitives.MultiplyAdd(goRow, xi, gwRow, gwRow);
+            }
+        }
+
+        private static void AccumulateWeightGradSeq(
+            ReadOnlySpan<float> input,
+            ReadOnlySpan<float> gradOutput,
+            Span<float> gradWeights,
+            int batchSize,
+            int inputSize,
+            int outputSize)
+        {
             for (var b = 0; b < batchSize; b++)
             {
                 var inRow = input.Slice(b * inputSize, inputSize);
-                var gradOutputRow = gradOutput.Slice(b * outputSize, outputSize);
+                var gO = gradOutput.Slice(b * outputSize, outputSize);
 
                 for (var i = 0; i < inputSize; i++)
                 {
                     var xi = inRow[i];
-                    var gradWeightRow = gradWeights.Slice(i * outputSize, outputSize);
-
-                    TensorPrimitives.MultiplyAdd(
-                        gradOutputRow,
-                        xi,
-                        gradWeightRow,
-                        gradWeightRow);
+                    var wRow = gradWeights.Slice(i * outputSize, outputSize);
+                    TensorPrimitives.MultiplyAdd(gO, xi, wRow, wRow);
                 }
             }
         }
 
         /// <summary>
         /// Accumulates bias gradients:
-        /// gradBias[j] += sum_b(gradOutput[b, j])
+        ///   gradBias[j] += sum_b(gradOutput[b, j])
         ///
         /// Always sequential — bias is small (outputSize elements).
         /// </summary>
         public static void AccumulateBiasGrad(
-            ReadOnlySpan<float> gradOutput, // [batchSize, outputSize]
-            Span<float> gradBias, // [outputSize] — accumulated in-place
+            ReadOnlySpan<float> gradOutput,    // [batchSize, outputSize]
+            Span<float> gradBias,              // [outputSize]  — accumulated in-place
             int batchSize,
             int outputSize)
         {
@@ -411,6 +502,7 @@ namespace DevOnBike.Overfit.Kernels
             }
         }
 
+
         // ─────────────────────────────────────────────────────────────────────
         // ForwardBatched — weight-stationary outer-product, no zero-skipping
         //
@@ -418,17 +510,22 @@ namespace DevOnBike.Overfit.Kernels
         //
         // Algorithm: for each input feature k, broadcast W[k,:] across all batch
         // rows simultaneously. W[k,:] stays in L1 cache while all B rows are
-        // processed. Eliminates zero-skipping branch mispredictions.
+        // processed. Eliminates zero-skipping branch mispredictions (post-ReLU
+        // activations are ~50% zero → ~50% misprediction rate on the skip branch).
         //
         // Routing in TensorMath.Linear:
-        // batchSize * inputSize * outputSize < ForwardBatchedThreshold
+        //   batchSize * inputSize * outputSize < ForwardBatchedThreshold
         //     → ForwardBatched sequential (weight-stationary)
-        // otherwise
-        //     → future parallel path after profiling
+        //   otherwise
+        //     → ForwardBatched + Parallel.For over K-chunks (TODO) or old path
         // ─────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Threshold above which caller code may choose a different implementation.
+        /// Threshold above which <see cref="ForwardBatched"/> switches to the
+        /// parallel path in <see cref="DevOnBike.Overfit.Ops.TensorMath"/>.
+        /// 500_000 chosen so that:
+        ///   - Linear(64,10)   batch=64: 64*64*10 = 40K → sequential ✓
+        ///   - Linear(1352,64) batch=64: 64*1352*64 = 5.5M → parallel ✓
         /// </summary>
         internal const long ForwardBatchedThreshold = 500_000;
 
@@ -438,19 +535,20 @@ namespace DevOnBike.Overfit.Kernels
         /// the bias before calling (use <see cref="InitWithBias"/>).
         /// </summary>
         public static void ForwardBatched(
-            ReadOnlySpan<float> input, // [batchSize, inputSize]
-            ReadOnlySpan<float> weights, // [inputSize, outputSize] input-major
-            Span<float> output, // [batchSize, outputSize] — bias pre-filled
+            ReadOnlySpan<float> input,    // [batchSize, inputSize]
+            ReadOnlySpan<float> weights,  // [inputSize, outputSize] input-major
+            Span<float> output,           // [batchSize, outputSize]  — bias pre-filled
             int batchSize,
             int inputSize,
             int outputSize)
         {
             // Weight-stationary outer product:
-            // for each input feature k:
-            //   for each batch row b:
-            //     output[b, :] += input[b, k] * W[k, :]
+            //   for each input feature k:
+            //     for each batch row b:
+            //       output[b,:] += input[b,k] * W[k,:]
             //
-            // W[k, :] is loaded once per k and reused for all batch rows.
+            // W[k,:] (outputSize floats) is loaded once per k and reused for all B rows.
+            // For outputSize=64 (256 bytes) this fits in L1 cache across all B=64 iterations.
             for (var k = 0; k < inputSize; k++)
             {
                 var wRow = weights.Slice(k * outputSize, outputSize);
@@ -458,13 +556,11 @@ namespace DevOnBike.Overfit.Kernels
                 for (var b = 0; b < batchSize; b++)
                 {
                     var xi = input[b * inputSize + k];
-                    var outRow = output.Slice(b * outputSize, outputSize);
-
                     TensorPrimitives.MultiplyAdd(
                         wRow,
                         xi,
-                        outRow,
-                        outRow);
+                        output.Slice(b * outputSize, outputSize),
+                        output.Slice(b * outputSize, outputSize));
                 }
             }
         }
@@ -484,5 +580,6 @@ namespace DevOnBike.Overfit.Kernels
                 bias.CopyTo(output.Slice(b * outputSize, outputSize));
             }
         }
+
     }
 }

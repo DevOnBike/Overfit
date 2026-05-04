@@ -27,11 +27,21 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
         private const int SeqLen = 128;
         private const int DefaultLocalBatchSize = 8;
         private const int DefaultWorkerCount = 12;
-        private const int DefaultDataParallelSteps = 5000;
+        private const int DefaultDataParallelSteps = 500;
         private const int ArenaSizePerWorker = 180_000_000;
 
-        private const float LearningRateMax = 3e-4f;
-        private const float LearningRateMin = 5e-5f;
+        // Linear Scaling Rule (Goyal et al. 2017):
+        // Baseline LR tuned for LocalBatchSize=8.
+        // Scale by sqrt(workerCount) for safe multi-worker LR.
+        // sqrt scaling is more stable than linear for small worker counts.
+        private const float BaseLearningRateMax = 3e-4f;
+        private const float BaseLearningRateMin = 5e-5f;
+
+        private static float ScaledLearningRateMax(int workerCount) =>
+            BaseLearningRateMax * MathF.Sqrt(workerCount);
+
+        private static float ScaledLearningRateMin(int workerCount) =>
+            BaseLearningRateMin * MathF.Sqrt(workerCount);
         private const float WeightDecay = 0.1f;
         private const float MaxGradNorm = 1.0f;
 
@@ -109,7 +119,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
                 .TrainableParameters()
                 .ToList();
 
-            using var optimizer = new Adam(masterParameters, LearningRateMax)
+            var lrMax = ScaledLearningRateMax(workerCount);
+            var lrMin = ScaledLearningRateMin(workerCount);
+            using var optimizer = new Adam(masterParameters, lrMax)
             {
                 UseAdamW = true,
                 WeightDecay = WeightDecay
@@ -142,7 +154,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
                 _output.WriteLine($"LocalBatchSize: {localBatchSize}");
                 _output.WriteLine($"GlobalBatchSize: {globalBatchSize}");
                 _output.WriteLine($"SeqLen / ContextLength: {SeqLen}");
-                _output.WriteLine($"LR schedule: {LearningRateMax} -> {LearningRateMin}");
+                _output.WriteLine($"LR schedule: {lrMax:E2} -> {lrMin:E2} (base {BaseLearningRateMax:E2} × √{workerCount}={MathF.Sqrt(workerCount):F2})");
                 _output.WriteLine($"Experimental parallel attention backward: {ExperimentalLanguageModelOptions.EnableParallelAttentionBackward}");
                 _output.WriteLine($"Checkpoint: {Path.GetFullPath(CheckpointPath)}");
                 _output.WriteLine("");
@@ -157,8 +169,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
                 for (var step = 0; step < steps; step++)
                 {
                     var lr = CosineDecay(
-                        LearningRateMax,
-                        LearningRateMin,
+                        lrMax,
+                        lrMin,
                         step,
                         steps);
 

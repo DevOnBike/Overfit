@@ -52,7 +52,7 @@ namespace DevOnBike.Overfit.Tests
             _output = output;
         }
 
-        [Fact]
+        [Fact(Skip = "Manual long-running mini instruction demo. Remove Skip locally, run once, then restore Skip.")]
         public void Shakespeare_12Layer_Checkpointed_SeqLen256_LossBelow200()
         {
             SkipIfMissing(FixturePath);
@@ -378,7 +378,7 @@ namespace DevOnBike.Overfit.Tests
         /// Cel: potwierdzić konwergencję batch=8 w ~5 minut.
         /// Jak zielony → odpal pełny 5K test przez noc.
         /// </summary>
-        [Fact]
+        [Fact(Skip = "Manual long-running mini instruction demo. Remove Skip locally, run once, then restore Skip.")]
         public void Shakespeare_Batch8_SmallModel_500Steps_Convergence()
         {
             SkipIfMissing(FixturePath);

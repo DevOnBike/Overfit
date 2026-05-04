@@ -75,8 +75,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.MiniInstruction
             _output = output;
         }
 
-        //[Fact(Skip = "Manual long-running mini instruction demo. Remove Skip locally, run once, then restore Skip.")]
-        [Fact]
+        [Fact(Skip = "Manual long-running mini instruction demo. Remove Skip locally, run once, then restore Skip.")]
         [Trait("Category", "Demo")]
         [Trait("Category", "LongRunning")]
         public void Demo_Train_MiniInstruction_AndWriteCheckpointBin()
