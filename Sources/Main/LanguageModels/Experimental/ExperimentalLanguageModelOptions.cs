@@ -1,6 +1,5 @@
 // Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
-//
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
@@ -10,8 +9,8 @@ namespace DevOnBike.Overfit.LanguageModels.Experimental
     /// Experimental language-model switches.
     ///
     /// Defaults must keep the stable/reference path unchanged.
-    /// These options are intended for manual experiments, demos, and
-    /// benchmarks while GPT training/runtime APIs are being stabilized.
+    /// These options are intended for manual experiments, demos, and benchmarks
+    /// while GPT training/runtime APIs are being stabilized.
     /// </summary>
     public static class ExperimentalLanguageModelOptions
     {

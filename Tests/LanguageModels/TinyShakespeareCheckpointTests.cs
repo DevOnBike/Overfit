@@ -202,7 +202,7 @@ namespace DevOnBike.Overfit.Tests
         /// CMD:
         ///   set OVERFIT_TINY_SHAKESPEARE_DEMO_STEPS=2000
         /// </summary>
-        [Fact]
+        [Fact(Skip = "Demo test, not a regular unit test")]
         public void Demo_Train_TinyShakespeare_AndWriteCheckpointBin()
         {
             SkipIfMissing(FixturePath);

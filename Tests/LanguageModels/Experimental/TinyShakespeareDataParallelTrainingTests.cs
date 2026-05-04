@@ -18,31 +18,18 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
 {
     /// <summary>
     /// Manual experimental data-parallel TinyShakespeare trainer.
-    ///
     /// This is not a normal correctness test and not a stable public training API.
-    ///
-    /// Master:
-    /// - owns optimizer state,
-    /// - receives averaged gradients,
-    /// - writes checkpoint.bin.
-    ///
-    /// Workers:
-    /// - each owns a GPT1Model,
-    /// - each owns a ComputationGraph,
-    /// - each computes gradients on a local mini-batch.
     /// </summary>
     public class TinyShakespeareDataParallelTrainingTests
     {
         private const string CorpusPath = "test_fixtures/tiny_shakespeare.txt";
         private const string CheckpointPath = "test_fixtures/checkpoint.bin";
-
         private const string Prompt = "ROMEO:";
 
         private const int SeqLen = 128;
         private const int DefaultLocalBatchSize = 8;
         private const int DefaultWorkerCount = 12;
         private const int DefaultDataParallelSteps = 5000;
-
         private const int ArenaSizePerWorker = 180_000_000;
 
         private const float LearningRateMax = 3e-4f;
@@ -178,16 +165,12 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
                         steps);
 
                     optimizer.LearningRate = lr;
-
                     ClearGradients(masterParameters);
 
                     Parallel.For(
                         0,
                         workerCount,
-                        new ParallelOptions
-                        {
-                            MaxDegreeOfParallelism = workerCount
-                        },
+                        new ParallelOptions { MaxDegreeOfParallelism = workerCount },
                         workerIndex =>
                         {
                             var worker = workers[workerIndex];
@@ -207,7 +190,6 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
                         MaxGradNorm);
 
                     optimizer.Step();
-
                     CopyParametersToWorkers(masterParameters, workers);
 
                     var avgLoss = 0f;
@@ -280,7 +262,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
 
                 Assert.True(File.Exists(CheckpointPath));
                 Assert.True(new FileInfo(CheckpointPath).Length > 0);
-                Assert.True(lastLoss < firstLoss, $"Loss did not go down: {firstLoss:F4} -> {lastLoss:F4}.");
+                Assert.True(
+                    lastLoss < firstLoss,
+                    $"Loss did not go down: {firstLoss:F4} -> {lastLoss:F4}.");
             }
             finally
             {
