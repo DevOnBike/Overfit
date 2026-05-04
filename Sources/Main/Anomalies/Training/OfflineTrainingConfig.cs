@@ -42,6 +42,14 @@ namespace DevOnBike.Overfit.Anomalies.Training
         public int   Seed            { get; set; } = 42;
 
         /// <summary>
+        /// Data parallel workers. Each worker runs a separate forward/backward,
+        /// gradients are averaged to master. Effective batch = WorkerCount × 1.
+        /// LR is scaled by sqrt(WorkerCount) automatically.
+        /// Default: 8 workers on Ryzen 9 9950X3D (32 cores).
+        /// </summary>
+        public int   WorkerCount     { get; set; } = 8;
+
+        /// <summary>
         /// ComputationGraph arena in floats. Default 100M = 400MB.
         /// Increase if you get NativeBuffer exhausted during training.
         /// </summary>
@@ -52,6 +60,28 @@ namespace DevOnBike.Overfit.Anomalies.Training
         {
             DModel = 64, NHeads = 2, NLayers = 2, ContextLength = 120,
             Steps = 1_000, ReportEvery = 200,
+        };
+
+        /// <summary>
+        /// Preset for quick validation (~5-10 min training).
+        /// Enough to verify the pipeline works end-to-end before committing to Production.
+        /// Expected val loss: ~3.0-3.5 after 2000 steps.
+        /// </summary>
+        public static GptTrainingConfig Medium => new GptTrainingConfig()
+        {
+            DModel          = 128,
+            NHeads          = 4,
+            NLayers         = 4,
+            ContextLength   = 120,   // 10 snapshots = ~2.5 min context
+            Steps           = 2_000,
+            ReportEvery     = 200,
+            ValSteps        = 30,
+            LearningRateMax = 3e-4f,
+            LearningRateMin = 3e-5f,
+            MaxGradNorm     = 1.0f,
+            WeightDecay     = 0.1f,
+            ArenaSize       = 80_000_000, // 320MB
+            WorkerCount     = 8,   // 8 parallel workers
         };
 
         /// <summary>Preset for production quality (~2h training).</summary>
@@ -69,6 +99,7 @@ namespace DevOnBike.Overfit.Anomalies.Training
             MaxGradNorm     = 1.0f,
             WeightDecay     = 0.1f,
             ArenaSize       = 400_000_000, // 1.6GB
+            WorkerCount     = 8,   // 8 parallel workers
         };
     }
 

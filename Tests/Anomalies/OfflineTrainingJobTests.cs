@@ -89,6 +89,36 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         }
 
         /// <summary>
+        /// Medium training — 128d, 4 warstwy, 2K kroków.
+        /// Czas: ~5-10 min. Weryfikuje pipeline przed Production.
+        /// </summary>
+        [Fact]
+        public async Task TrainMedium_LossDecreases_2000Steps()
+        {
+            if (!File.Exists(CsvPath))
+                throw new Exception($"Fixture '{CsvPath}' not found.");
+
+            const string medCheckpoint = "test_fixtures/k8s_anomaly_medium.bin";
+
+            var config = GptTrainingConfig.Medium;
+
+            var job      = new OfflineTrainingJob(config);
+            var progress = new Progress<TrainingProgress>(p => _output.WriteLine(p.ToString()));
+
+            var result = await job.RunAsync(CsvPath, medCheckpoint, progress);
+
+            _output.WriteLine(string.Empty);
+            _output.WriteLine($"Final val loss: {result.FinalValLoss:F4}");
+            _output.WriteLine($"Training time:  {result.TrainingTime:mm\\:ss}");
+
+            Assert.False(float.IsNaN(result.FinalValLoss));
+            Assert.True(result.FinalValLoss < result.InitialLoss * 0.7f,
+                $"Loss nie spada 30%+: {result.InitialLoss:F4} → {result.FinalValLoss:F4}");
+            Assert.True(File.Exists(medCheckpoint));
+            _output.WriteLine("✓ Medium checkpoint gotowy.");
+        }
+
+        /// <summary>
         /// Production training — 256d, 6 warstw, 10K kroków.
         /// Czas: ~2h na Ryzen 9 9950X3D.
         /// Odpal przez noc:

@@ -4,8 +4,8 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Linq;
+using DevOnBike.Overfit.LanguageModels.Experimental;
 using DevOnBike.Overfit.Anomalies.Monitoring;
-using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Optimizers;
@@ -90,27 +90,55 @@ namespace DevOnBike.Overfit.Anomalies.Training
             float finalValLoss = 0f;
             float windowLoss   = 0f;
 
+            // Parallel SDPA backward — -27% czasu backward przy dużych modelach.
+            ExperimentalLanguageModelOptions.EnableParallelAttentionBackward = true;
+
+            // Data parallel: N workers share gradient per step.
+            // Linear Scaling Rule: lr × sqrt(WorkerCount).
+            var workerCount = _cfg.WorkerCount;
+            var lrScale     = MathF.Sqrt(workerCount);
+            var lrMax       = _cfg.LearningRateMax * lrScale;
+            var lrMin       = _cfg.LearningRateMin * lrScale;
+
+            // Worker models share weights with master — each has its own graph and gradients.
+            var workers = Enumerable.Range(0, workerCount)
+                .Select(_ => new GPT1Model(gptConfig))
+                .ToList();
+
             using var graph = new ComputationGraph(_cfg.ArenaSize);
 
             // 4. Train
             for (var step = 0; step < _cfg.Steps && !ct.IsCancellationRequested; step++)
             {
-                var (inputIds, targetIds) = Sample(trainIds, _cfg.ContextLength, rng);
+                // Copy master weights to workers
+                CopyParametersToWorkers(model.TrainableParameters(), workers);
 
-                optimizer.ZeroGrad();
-                graph.Reset();
-                model.InvalidateAllCaches();
+                // Parallel forward+backward across workers
+                var losses   = new float[workerCount];
+                var workerGraphs = workers.Select(_ => new ComputationGraph(_cfg.ArenaSize / workerCount)).ToList();
 
-                var logits = model.Forward(graph, inputIds, batchSize: 1, _cfg.ContextLength);
-                var loss   = LossAndGrad(logits, targetIds, _cfg.ContextLength, gptConfig.VocabSize);
+                Parallel.For(0, workerCount, w =>
+                {
+                    var (inp, tgt) = Sample(trainIds, _cfg.ContextLength, rng);
+                    workerGraphs[w].Reset();
+                    workers[w].InvalidateAllCaches();
+                    var logits = workers[w].Forward(workerGraphs[w], inp, batchSize: 1, _cfg.ContextLength);
+                    losses[w]  = LossAndGrad(logits, tgt, _cfg.ContextLength, gptConfig.VocabSize);
+                    workerGraphs[w].BackwardFromGrad(logits);
+                    logits.Dispose();
+                });
+
+                // Aggregate gradients from workers → master
+                AggregateGradients(model.TrainableParameters(), workers, scale: 1f / workerCount);
+                foreach (var wg in workerGraphs) wg.Dispose();
+
+                var loss = losses.Average();
                 windowLoss += loss;
 
-                graph.BackwardFromGrad(logits);
-                logits.Dispose();
+                optimizer.ZeroGrad();
                 ClipGradNorm(model.TrainableParameters(), _cfg.MaxGradNorm);
-
                 var cosine = 0.5f * (1f + MathF.Cos(MathF.PI * (float)step / _cfg.Steps));
-                optimizer.LearningRate = _cfg.LearningRateMin + (_cfg.LearningRateMax - _cfg.LearningRateMin) * cosine;
+                optimizer.LearningRate = lrMin + (lrMax - lrMin) * cosine;
                 optimizer.Step();
 
                 if (step == 0) initialLoss = loss;
@@ -134,6 +162,7 @@ namespace DevOnBike.Overfit.Anomalies.Training
                 }
             }
 
+            foreach (var w in workers) w.Dispose();
             ct.ThrowIfCancellationRequested();
 
             // 5. Save checkpoint
@@ -187,6 +216,42 @@ namespace DevOnBike.Overfit.Anomalies.Training
 
             grad.AsSpan().CopyTo(logits.GradView.AsSpan());
             return loss.Sum() / seqLen;
+        }
+
+        private static void CopyParametersToWorkers(
+            IEnumerable<Parameter> masterParams,
+            List<GPT1Model> workers)
+        {
+            var master = masterParams.ToList();
+            foreach (var worker in workers)
+            {
+                var wp = worker.TrainableParameters().ToList();
+                for (var i = 0; i < master.Count && i < wp.Count; i++)
+                {
+                    master[i].DataReadOnlySpan.CopyTo(wp[i].DataSpan);
+                }
+            }
+        }
+
+        private static void AggregateGradients(
+            IEnumerable<Parameter> masterParams,
+            List<GPT1Model> workers,
+            float scale)
+        {
+            var master = masterParams.ToList();
+            master.ForEach(p => p.GradSpan.Clear());
+
+            foreach (var worker in workers)
+            {
+                var wp = worker.TrainableParameters().ToList();
+                for (var i = 0; i < master.Count && i < wp.Count; i++)
+                {
+                    var mg = master[i].GradSpan;
+                    var wg = wp[i].GradSpan;
+                    for (var j = 0; j < mg.Length; j++)
+                        mg[j] += wg[j] * scale;
+                }
+            }
         }
 
         private static void ClipGradNorm(IEnumerable<Parameter> parameters, float maxNorm)

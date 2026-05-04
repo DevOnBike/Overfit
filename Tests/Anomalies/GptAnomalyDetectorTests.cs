@@ -34,10 +34,12 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         {
             _output = output;
 
-            _config = new GptTrainingConfig
-            {
-                DModel = 64, NHeads = 2, NLayers = 2, ContextLength = 120,
-            };
+            // Config musi odpowiadać checkpointowi.
+            // Quick (64d) → k8s_anomaly_checkpoint.bin z TrainOnCsv
+            // Medium (128d) → skopiuj k8s_anomaly_medium.bin jako k8s_anomaly_checkpoint.bin
+            _config = File.Exists(CheckpointPath)
+                ? DetectConfigFromCheckpoint(CheckpointPath)
+                : GptTrainingConfig.Quick;
 
             _model = new GPT1Model(new GPT1Config
             {
@@ -186,6 +188,28 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         }
 
         // ── Helpers ──────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Odczytuje rozmiar pierwszego parametru z checkpointu żeby wykryć DModel.
+        /// Embedding weight = VocabSize × DModel floatów.
+        /// </summary>
+        private static GptTrainingConfig DetectConfigFromCheckpoint(string path)
+        {
+            using var fs = File.OpenRead(path);
+            using var br = new BinaryReader(fs);
+            // Parameter.Load zapisuje: int length + float[] data
+            var length = br.ReadInt32();
+            // length = VocabSize * DModel = 768 * DModel
+            var dModel = length / MetricTokenizer.VocabSize;
+
+            return dModel switch
+            {
+                64  => GptTrainingConfig.Quick,
+                128 => GptTrainingConfig.Medium,
+                256 => GptTrainingConfig.Production,
+                _   => new GptTrainingConfig { DModel = dModel, NHeads = dModel / 32, NLayers = 4, ContextLength = 120 },
+            };
+        }
 
         private static MetricSnapshot MakeNormalSnapshot(string pod) => new()
         {
