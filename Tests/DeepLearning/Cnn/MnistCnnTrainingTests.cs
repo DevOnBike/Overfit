@@ -9,9 +9,12 @@ using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tensors;
-using DevOnBike.Overfit.Tensors.Core; // Wpinamy Core
+using DevOnBike.Overfit.Tensors.Core;
+using DevOnBike.Overfit.Tests.Data.Mnist;
 
-namespace DevOnBike.Overfit.Tests
+// Wpinamy Core
+
+namespace DevOnBike.Overfit.Tests.DeepLearning.Cnn
 {
     public class MnistCnnTrainingTests
     {

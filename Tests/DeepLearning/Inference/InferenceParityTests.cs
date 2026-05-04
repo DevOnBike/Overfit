@@ -9,7 +9,7 @@ using DevOnBike.Overfit.Licensing;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.DeepLearning.Inference
 {
     public sealed class InferenceParityTests
     {

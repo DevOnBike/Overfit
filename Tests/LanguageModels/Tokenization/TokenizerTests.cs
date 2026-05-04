@@ -5,9 +5,8 @@
 
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Tokenization;
-using Xunit;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenization
 {
     /// <summary>
     /// Tests for CharacterTokenizer, BytePairEncoder, and GPT-1 end-to-end pipeline.

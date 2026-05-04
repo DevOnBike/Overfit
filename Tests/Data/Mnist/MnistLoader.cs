@@ -3,9 +3,11 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using DevOnBike.Overfit.Tensors.Core; // Zmieniono na Tensors.Core
+using DevOnBike.Overfit.Tensors.Core;
 
-namespace DevOnBike.Overfit.Tests
+// Zmieniono na Tensors.Core
+
+namespace DevOnBike.Overfit.Tests.Data.Mnist
 {
     public static class MnistLoader
     {

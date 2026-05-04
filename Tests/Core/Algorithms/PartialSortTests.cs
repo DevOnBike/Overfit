@@ -5,7 +5,7 @@
 
 using DevOnBike.Overfit.Maths;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.Core.Algorithms
 {
     public sealed class PartialSortTests
     {

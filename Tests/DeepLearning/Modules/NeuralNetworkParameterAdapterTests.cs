@@ -6,7 +6,7 @@
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Evolutionary.Adapters;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.DeepLearning.Modules
 {
     public sealed class NeuralNetworkParameterAdapterTests
     {

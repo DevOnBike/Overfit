@@ -10,10 +10,9 @@ using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tokenization;
-using Xunit;
 using Xunit.Abstractions;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
 {
     /// <summary>
     /// GPT-1 training z SeqLen=256 — pełny kontekst, poprawny gradient przez residuals.
@@ -909,7 +908,7 @@ namespace DevOnBike.Overfit.Tests
         ///
         /// Czas: ~30 sekund.
         /// </summary>
-        [Fact]
+        [Fact(Skip = "Manual long-running end-to-end GPT1 demo. Remove Skip locally, run once, then restore Skip.")]
         public void GPT1_EndToEnd_100Steps_GeneratesEnglishWords()
         {
             SkipIfMissing(FixturePath);

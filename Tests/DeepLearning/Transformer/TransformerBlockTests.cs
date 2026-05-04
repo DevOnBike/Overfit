@@ -8,9 +8,8 @@ using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
-using Xunit;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.DeepLearning.Transformer
 {
     public class TransformerBlockTests
     {

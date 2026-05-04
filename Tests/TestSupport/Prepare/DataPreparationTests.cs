@@ -9,7 +9,7 @@ using DevOnBike.Overfit.Data.Tabular;
 using DevOnBike.Overfit.Tensors;
 using Xunit.Abstractions;
 
-namespace DevOnBike.Overfit.Tests.Prepare
+namespace DevOnBike.Overfit.Tests.TestSupport.Prepare
 {
     public class DataPreparationTests
     {

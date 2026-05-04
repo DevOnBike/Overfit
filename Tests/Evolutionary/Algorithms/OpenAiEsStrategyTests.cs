@@ -7,7 +7,7 @@ using DevOnBike.Overfit.Evolutionary.Fitness;
 using DevOnBike.Overfit.Evolutionary.Storage;
 using DevOnBike.Overfit.Evolutionary.Strategies;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
 {
     public sealed class OpenAiEsStrategyTests
     {

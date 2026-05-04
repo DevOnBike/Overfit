@@ -5,12 +5,13 @@
 
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
-using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
+using DevOnBike.Overfit.Tests.Data.Mnist;
+using DevOnBike.Overfit.Tests.TestSupport.GradientChecking;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.Core.TensorMath
 {
     public sealed class CorrectnessTests
     {
@@ -49,7 +50,7 @@ namespace DevOnBike.Overfit.Tests
                         t[i] = 0.05f * i;
                     }
 
-                    return TensorMath.MSELoss(graph, y, target);
+                    return Ops.TensorMath.MSELoss(graph, y, target);
                 },
                 epsilon: 1e-3f,
                 tolerance: 2e-2f,
@@ -105,7 +106,7 @@ namespace DevOnBike.Overfit.Tests
                         t[i] = ((i % 3) - 1) * 0.2f;
                     }
 
-                    return TensorMath.MSELoss(graph, y, target);
+                    return Ops.TensorMath.MSELoss(graph, y, target);
                 },
                 epsilon: 1e-3f,
                 tolerance: 8e-2f,
@@ -122,10 +123,10 @@ namespace DevOnBike.Overfit.Tests
             x[0] = -1.2f; x[1] = -0.5f; x[2] = 0.0f; x[3] = 0.3f; x[4] = 0.9f; x[5] = 1.7f;
 
             var graph = new ComputationGraph();
-            using var y = TensorMath.Sigmoid(graph, input);
+            using var y = Ops.TensorMath.Sigmoid(graph, input);
             using var zeroTensor = new TensorStorage<float>(6, clearMemory: true);
             using var zero = new AutogradNode(zeroTensor, new TensorShape(2, 3), requiresGrad: false);
-            using var loss = TensorMath.MSELoss(graph, y, zero);
+            using var loss = Ops.TensorMath.MSELoss(graph, y, zero);
             graph.Backward(loss);
 
             var analytical = input.GradView.AsReadOnlySpan().ToArray();
@@ -151,7 +152,7 @@ namespace DevOnBike.Overfit.Tests
             static float EvalSigmoidSquaredMean(AutogradNode inputNode)
             {
                 var g = new ComputationGraph();
-                using var y2 = TensorMath.Sigmoid(g, inputNode);
+                using var y2 = Ops.TensorMath.Sigmoid(g, inputNode);
                 var sum = 0f;
                 var s = y2.DataView.AsReadOnlySpan();
                 for (var j = 0; j < s.Length; j++)
@@ -172,10 +173,10 @@ namespace DevOnBike.Overfit.Tests
             x[0] = -1.3f; x[1] = -0.4f; x[2] = 0.0f; x[3] = 0.25f; x[4] = 0.8f; x[5] = 1.4f;
 
             var graph = new ComputationGraph();
-            using var y = TensorMath.Tanh(graph, input);
+            using var y = Ops.TensorMath.Tanh(graph, input);
             using var zeroTensor = new TensorStorage<float>(6, clearMemory: true);
             using var zero = new AutogradNode(zeroTensor, new TensorShape(2, 3), requiresGrad: false);
-            using var loss = TensorMath.MSELoss(graph, y, zero);
+            using var loss = Ops.TensorMath.MSELoss(graph, y, zero);
             graph.Backward(loss);
 
             var analytical = input.GradView.AsReadOnlySpan().ToArray();
@@ -201,7 +202,7 @@ namespace DevOnBike.Overfit.Tests
             static float EvalTanhSquaredMean(AutogradNode inputNode)
             {
                 var g = new ComputationGraph();
-                using var y2 = TensorMath.Tanh(g, inputNode);
+                using var y2 = Ops.TensorMath.Tanh(g, inputNode);
                 var sum = 0f;
                 var s = y2.DataView.AsReadOnlySpan();
                 for (var j = 0; j < s.Length; j++)
@@ -229,7 +230,7 @@ namespace DevOnBike.Overfit.Tests
             using var y = repeat.Forward(graph, input);
             using var zeroTensor = new TensorStorage<float>(24, clearMemory: true);
             using var zero = new AutogradNode(zeroTensor, new TensorShape(2, 4, 3), requiresGrad: false);
-            using var loss = TensorMath.MSELoss(graph, y, zero);
+            using var loss = Ops.TensorMath.MSELoss(graph, y, zero);
             graph.Backward(loss);
 
             var analytical = input.GradView.AsReadOnlySpan().ToArray();
@@ -293,7 +294,7 @@ namespace DevOnBike.Overfit.Tests
                         t[i] = ((i % 3) - 1) * 0.1f;
                     }
 
-                    return TensorMath.MSELoss(graph, y, target);
+                    return Ops.TensorMath.MSELoss(graph, y, target);
                 },
                 epsilon: 1e-3f,
                 tolerance: 3e-2f,
@@ -312,7 +313,7 @@ namespace DevOnBike.Overfit.Tests
                 x[i] = i + 1;
             }
 
-            using var pooled = TensorMath.MaxPool2D(null, input, 1, 4, 4, 2);
+            using var pooled = Ops.TensorMath.MaxPool2D(null, input, 1, 4, 4, 2);
             var actual = pooled.DataView.AsReadOnlySpan().ToArray();
 
             Assert.Equal(4, actual.Length);
@@ -332,7 +333,7 @@ namespace DevOnBike.Overfit.Tests
             x[0] = 1f; x[1] = 2f; x[2] = 3f; x[3] = 4f;
             x[4] = 10f; x[5] = 20f; x[6] = 30f; x[7] = 40f;
 
-            using var pooled = TensorMath.GlobalAveragePool2D(null, input, 2, 2, 2);
+            using var pooled = Ops.TensorMath.GlobalAveragePool2D(null, input, 2, 2, 2);
             var actual = pooled.DataView.AsReadOnlySpan().ToArray();
 
             Assert.Equal(2, actual.Length);
@@ -354,7 +355,7 @@ namespace DevOnBike.Overfit.Tests
             var bS = b.DataView.AsSpan();
             bS[0] = 7; bS[1] = 8; bS[2] = 9; bS[3] = 10; bS[4] = 11; bS[5] = 12;
 
-            using var c = TensorMath.MatMul(null, a, b);
+            using var c = Ops.TensorMath.MatMul(null, a, b);
             var actual = c.DataView.AsReadOnlySpan().ToArray();
 
             Assert.Equal(58f, actual[0], 5);
@@ -377,7 +378,7 @@ namespace DevOnBike.Overfit.Tests
             var bs = b.DataView.AsSpan();
             bs[0] = 10; bs[1] = 20; bs[2] = 30;
 
-            using var y = TensorMath.AddBias(null, x, b);
+            using var y = Ops.TensorMath.AddBias(null, x, b);
             var actual = y.DataView.AsReadOnlySpan().ToArray();
 
             Assert.Equal(11f, actual[0], 5);
@@ -408,8 +409,8 @@ namespace DevOnBike.Overfit.Tests
             var t = target.DataView.AsSpan();
             t[0] = 1f; t[1] = 0f; t[2] = 0f;
 
-            using var lossGood = TensorMath.SoftmaxCrossEntropy(new ComputationGraph(), logitsGood, target);
-            using var lossBad = TensorMath.SoftmaxCrossEntropy(new ComputationGraph(), logitsBad, target);
+            using var lossGood = Ops.TensorMath.SoftmaxCrossEntropy(new ComputationGraph(), logitsGood, target);
+            using var lossBad = Ops.TensorMath.SoftmaxCrossEntropy(new ComputationGraph(), logitsBad, target);
 
             Assert.True(lossGood.DataView.AsReadOnlySpan()[0] < lossBad.DataView.AsReadOnlySpan()[0],
                 $"Expected better-target logit to produce lower loss, got good={lossGood.DataView.AsReadOnlySpan()[0]} bad={lossBad.DataView.AsReadOnlySpan()[0]}");
@@ -457,7 +458,7 @@ namespace DevOnBike.Overfit.Tests
                         t[i] = 0.02f * (i + 1);
                     }
 
-                    return TensorMath.MSELoss(graph, y, target);
+                    return Ops.TensorMath.MSELoss(graph, y, target);
                 },
                 epsilon: 1e-3f,
                 tolerance: 8e-2f,
@@ -478,7 +479,7 @@ namespace DevOnBike.Overfit.Tests
                 inData[i] = i + 1;
             }
 
-            using var reshaped = TensorMath.Reshape(graph, input, 3, 2);
+            using var reshaped = Ops.TensorMath.Reshape(graph, input, 3, 2);
 
             graph.Backward(reshaped);
 
@@ -504,7 +505,7 @@ namespace DevOnBike.Overfit.Tests
                 src[i] = i + 1;
             }
 
-            using var reshaped = TensorMath.Reshape(null, input, 3, 2);
+            using var reshaped = Ops.TensorMath.Reshape(null, input, 3, 2);
 
             var actual = reshaped.DataView.AsReadOnlySpan().ToArray();
 
@@ -568,7 +569,7 @@ namespace DevOnBike.Overfit.Tests
             {
                 var graph = new ComputationGraph();
                 using var pred = layer.Forward(graph, xNode);
-                using var loss = TensorMath.MSELoss(graph, pred, yNode);
+                using var loss = Ops.TensorMath.MSELoss(graph, pred, yNode);
                 beforeLoss = loss.DataView.AsReadOnlySpan()[0];
                 graph.Backward(loss);
                 optimizer.Step();
@@ -577,7 +578,7 @@ namespace DevOnBike.Overfit.Tests
             {
                 var graph = new ComputationGraph();
                 using var pred = layer.Forward(graph, xNode);
-                using var loss = TensorMath.MSELoss(graph, pred, yNode);
+                using var loss = Ops.TensorMath.MSELoss(graph, pred, yNode);
                 afterLoss = loss.DataView.AsReadOnlySpan()[0];
             }
 
@@ -612,7 +613,7 @@ namespace DevOnBike.Overfit.Tests
                         t[i] = ((i % 4) - 1.5f) * 0.12f;
                     }
 
-                    return TensorMath.MSELoss(graph, y, target);
+                    return Ops.TensorMath.MSELoss(graph, y, target);
                 },
                 epsilon: 1e-3f,
                 tolerance: 3e-2f,
@@ -807,7 +808,7 @@ namespace DevOnBike.Overfit.Tests
                 optimizer.ZeroGrad();
 
                 using var logits = model.Forward(trainGraph, xNode);
-                using var loss = TensorMath.SoftmaxCrossEntropy(trainGraph, logits, yNode);
+                using var loss = Ops.TensorMath.SoftmaxCrossEntropy(trainGraph, logits, yNode);
 
                 trainGraph.Backward(loss);
                 optimizer.Step();
@@ -857,7 +858,7 @@ namespace DevOnBike.Overfit.Tests
 
             var graph = new ComputationGraph();
             using var pred = layer.Forward(graph, input);
-            using var loss = TensorMath.MSELoss(graph, pred, target);
+            using var loss = Ops.TensorMath.MSELoss(graph, pred, target);
             graph.Backward(loss);
             optimizer.Step();
 
@@ -929,14 +930,14 @@ namespace DevOnBike.Overfit.Tests
                     trainY.AsReadOnlySpan().Slice(b * batchSize * 10, batchSize * 10).CopyTo(yBData.AsSpan());
 
                     using var h1 = conv1.Forward(graph, xBNode);
-                    using var a1 = TensorMath.ReLU(graph, h1);
-                    using var p1 = TensorMath.MaxPool2D(graph, a1, 8, 26, 26, 2);
-                    using var p1F = TensorMath.Reshape(graph, p1, batchSize, 1352);
+                    using var a1 = Ops.TensorMath.ReLU(graph, h1);
+                    using var p1 = Ops.TensorMath.MaxPool2D(graph, a1, 8, 26, 26, 2);
+                    using var p1F = Ops.TensorMath.Reshape(graph, p1, batchSize, 1352);
                     using var bn1O = bn1.Forward(graph, p1F);
                     using var resO = res1.Forward(graph, bn1O);
-                    using var gapO = TensorMath.GlobalAveragePool2D(graph, resO, 8, 13, 13);
+                    using var gapO = Ops.TensorMath.GlobalAveragePool2D(graph, resO, 8, 13, 13);
                     using var logits = fcOut.Forward(graph, gapO);
-                    using var loss = TensorMath.SoftmaxCrossEntropy(graph, logits, yBNode);
+                    using var loss = Ops.TensorMath.SoftmaxCrossEntropy(graph, logits, yBNode);
 
                     epochLoss += loss.DataView.AsReadOnlySpan()[0];
                     graph.Backward(loss);
@@ -967,12 +968,12 @@ namespace DevOnBike.Overfit.Tests
                 var evalGraph = new ComputationGraph { IsRecording = false };
 
                 using var h1 = conv1.Forward(evalGraph, xBNode);
-                using var a1 = TensorMath.ReLU(evalGraph, h1);
-                using var p1 = TensorMath.MaxPool2D(evalGraph, a1, 8, 26, 26, 2);
-                using var p1F = TensorMath.Reshape(evalGraph, p1, batchSize, 1352);
+                using var a1 = Ops.TensorMath.ReLU(evalGraph, h1);
+                using var p1 = Ops.TensorMath.MaxPool2D(evalGraph, a1, 8, 26, 26, 2);
+                using var p1F = Ops.TensorMath.Reshape(evalGraph, p1, batchSize, 1352);
                 using var bn1O = bn1.Forward(evalGraph, p1F);
                 using var resO = res1.Forward(evalGraph, bn1O);
-                using var gapO = TensorMath.GlobalAveragePool2D(evalGraph, resO, 8, 13, 13);
+                using var gapO = Ops.TensorMath.GlobalAveragePool2D(evalGraph, resO, 8, 13, 13);
                 using var logits = fcOut.Forward(evalGraph, gapO);
 
                 var logitsSpan = logits.DataView.AsReadOnlySpan();
@@ -1028,7 +1029,7 @@ namespace DevOnBike.Overfit.Tests
             x[5] = 3f;
 
             var graph = new ComputationGraph();
-            using var y = TensorMath.ReLU(graph, input);
+            using var y = Ops.TensorMath.ReLU(graph, input);
             graph.Backward(y);
 
             var g = input.GradView.AsReadOnlySpan().ToArray();
@@ -1058,7 +1059,7 @@ namespace DevOnBike.Overfit.Tests
             }
 
             var graph = new ComputationGraph();
-            using var c = TensorMath.Add(graph, a, b);
+            using var c = Ops.TensorMath.Add(graph, a, b);
             graph.Backward(c);
 
             var ga = a.GradView.AsReadOnlySpan().ToArray();
@@ -1087,7 +1088,7 @@ namespace DevOnBike.Overfit.Tests
             t[0] = 0f; t[1] = 1f; t[2] = 1f; t[3] = 2f;
 
             var graph = new ComputationGraph();
-            using var loss = TensorMath.MSELoss(graph, pred, tgt);
+            using var loss = Ops.TensorMath.MSELoss(graph, pred, tgt);
             graph.Backward(loss);
 
             var g = pred.GradView.AsReadOnlySpan().ToArray();
@@ -1159,7 +1160,7 @@ namespace DevOnBike.Overfit.Tests
 
             var graph = new ComputationGraph();
             using var y = conv.Forward(graph, input);
-            using var loss = TensorMath.MSELoss(graph, y, target);
+            using var loss = Ops.TensorMath.MSELoss(graph, y, target);
             graph.Backward(loss);
 
             var ig = input.GradView.AsReadOnlySpan();
@@ -1196,7 +1197,7 @@ namespace DevOnBike.Overfit.Tests
             a.DataView.AsSpan().Fill(5f);
             b.DataView.AsSpan().Fill(3f);
 
-            using var output = TensorMath.Subtract(graph, a, b);
+            using var output = Ops.TensorMath.Subtract(graph, a, b);
 
             Assert.Equal(2f, output.DataView.AsReadOnlySpan()[0], 3);
 
@@ -1226,7 +1227,7 @@ namespace DevOnBike.Overfit.Tests
             t[1] = 1f;
             t[2] = 0f;
 
-            using var loss = TensorMath.SoftmaxCrossEntropy(graph, logits, target);
+            using var loss = Ops.TensorMath.SoftmaxCrossEntropy(graph, logits, target);
 
             var lossVal = loss.DataView.AsReadOnlySpan()[0];
 
@@ -1259,7 +1260,7 @@ namespace DevOnBike.Overfit.Tests
 
             var graph = new ComputationGraph();
             using var y = block.Forward(graph, input);
-            using var loss = TensorMath.MSELoss(graph, y, target);
+            using var loss = Ops.TensorMath.MSELoss(graph, y, target);
             graph.Backward(loss);
 
             var ig = input.GradView.AsReadOnlySpan();
@@ -1311,7 +1312,7 @@ namespace DevOnBike.Overfit.Tests
                 optimizer.ZeroGrad();
 
                 using var pred = seq.Forward(graph, xNode);
-                using var loss = TensorMath.MSELoss(graph, pred, yNode);
+                using var loss = Ops.TensorMath.MSELoss(graph, pred, yNode);
 
                 var lv = loss.DataView.AsReadOnlySpan()[0];
                 Assert.True(float.IsFinite(lv), $"Loss became non-finite at step {step}: {lv}");
@@ -1369,7 +1370,7 @@ namespace DevOnBike.Overfit.Tests
 
             {
                 using var pred0 = model.Forward(graph, xNode);
-                using var loss0 = TensorMath.MSELoss(graph, pred0, yNode);
+                using var loss0 = Ops.TensorMath.MSELoss(graph, pred0, yNode);
                 initialLoss = loss0.DataView.AsReadOnlySpan()[0];
                 graph.Reset();
             }
@@ -1381,7 +1382,7 @@ namespace DevOnBike.Overfit.Tests
                 optimizer.ZeroGrad();
 
                 using var pred = model.Forward(graph, xNode);
-                using var loss = TensorMath.MSELoss(graph, pred, yNode);
+                using var loss = Ops.TensorMath.MSELoss(graph, pred, yNode);
 
                 finalLoss = loss.DataView.AsReadOnlySpan()[0];
 
@@ -1452,7 +1453,7 @@ namespace DevOnBike.Overfit.Tests
 
             {
                 using var logits0 = model.Forward(graph, xNode);
-                using var loss0 = TensorMath.SoftmaxCrossEntropy(graph, logits0, yNode);
+                using var loss0 = Ops.TensorMath.SoftmaxCrossEntropy(graph, logits0, yNode);
                 initialLoss = loss0.DataView.AsReadOnlySpan()[0];
                 graph.Reset();
             }
@@ -1463,7 +1464,7 @@ namespace DevOnBike.Overfit.Tests
                 optimizer.ZeroGrad();
 
                 using var logits = model.Forward(graph, xNode);
-                using var loss = TensorMath.SoftmaxCrossEntropy(graph, logits, yNode);
+                using var loss = Ops.TensorMath.SoftmaxCrossEntropy(graph, logits, yNode);
 
                 finalLoss = loss.DataView.AsReadOnlySpan()[0];
 

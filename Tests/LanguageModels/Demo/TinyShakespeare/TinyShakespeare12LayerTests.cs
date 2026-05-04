@@ -7,10 +7,9 @@ using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tokenization;
-using Xunit;
 using Xunit.Abstractions;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
 {
     /// <summary>
     /// Opcja A: 12 warstw, 256d, 8 głów — ~9.5M parametrów.

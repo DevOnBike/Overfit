@@ -3,9 +3,10 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Tests.Diagnostics.Tracing;
 using Xunit.Abstractions;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.Diagnostics
 {
     public sealed class DiagnosticsRegressionTests
     {

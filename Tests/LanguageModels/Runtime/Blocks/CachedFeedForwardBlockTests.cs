@@ -4,9 +4,8 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.LanguageModels.Runtime;
-using Xunit;
 
-namespace DevOnBike.Overfit.Tests.LanguageModels
+namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
 {
     public class CachedFeedForwardBlockTests
     {

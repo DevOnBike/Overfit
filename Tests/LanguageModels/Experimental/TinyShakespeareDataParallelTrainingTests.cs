@@ -10,7 +10,6 @@ using DevOnBike.Overfit.LanguageModels.Experimental;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Parameters;
 using DevOnBike.Overfit.Tokenization;
-using Xunit;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental

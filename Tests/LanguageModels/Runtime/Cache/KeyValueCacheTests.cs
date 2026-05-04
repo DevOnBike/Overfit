@@ -5,9 +5,8 @@
 
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
-using Xunit;
 
-namespace DevOnBike.Overfit.Tests.LanguageModels
+namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Cache
 {
     public sealed class KeyValueCacheTests
     {

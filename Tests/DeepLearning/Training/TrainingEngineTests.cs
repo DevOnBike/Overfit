@@ -5,7 +5,7 @@
 
 using DevOnBike.Overfit.Training;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.DeepLearning.Training
 {
     public sealed class TrainingEngineTests
     {

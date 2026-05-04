@@ -4,7 +4,6 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using Accord.Neuro;
-using Accord.Neuro.Learning;
 using BenchmarkDotNet.Attributes;
 using Benchmarks.Helpers;
 using DevOnBike.Overfit.DeepLearning;

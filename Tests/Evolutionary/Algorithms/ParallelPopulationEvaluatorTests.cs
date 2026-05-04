@@ -7,7 +7,7 @@ using System.Diagnostics;
 using DevOnBike.Overfit.Evolutionary.Abstractions;
 using DevOnBike.Overfit.Evolutionary.Evaluators;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
 {
     public sealed class ParallelPopulationEvaluatorTests
     {

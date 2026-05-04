@@ -4,7 +4,6 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Numerics.Tensors;
-using System.Threading.Tasks;
 using DevOnBike.Overfit.Intrinsics;
 using DevOnBike.Overfit.Kernels;
 using DevOnBike.Overfit.Ops;

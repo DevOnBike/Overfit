@@ -12,7 +12,6 @@ using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Parameters;
 using DevOnBike.Overfit.Tokenization;
-using Xunit;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
@@ -77,7 +76,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
             _output = output;
         }
 
-        [Fact]
+        [Fact(Skip = "Manual long-running single-model GPT quality demo. Remove Skip locally, run once, then restore Skip.")]
         [Trait("Category", "Demo")]
         [Trait("Category", "LongRunning")]
         public void Demo_Train_TinyShakespeare_SequentialQuality_AndWriteCheckpointBin()

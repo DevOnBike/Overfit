@@ -5,7 +5,7 @@
 
 using Xunit.Abstractions;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.Evolutionary.Noise
 {
     /// <summary>
     ///     Direct comparison: for seed=1 and length=1024, what's the per-dimension bias in

@@ -8,10 +8,11 @@ using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tensors;
-using DevOnBike.Overfit.Tensors.Core; // Zmieniono na Tensors.Core
+using DevOnBike.Overfit.Tensors.Core;
 using Xunit.Abstractions;
+// Zmieniono na Tensors.Core
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.Forecasting
 {
     public class VectorForecastingTests
     {

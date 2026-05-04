@@ -5,11 +5,12 @@
 
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Autograd;
-using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors;
-using DevOnBike.Overfit.Tensors.Core; // Zmieniono na Tensors.Core
+using DevOnBike.Overfit.Tensors.Core;
 
-namespace DevOnBike.Overfit.Tests
+// Zmieniono na Tensors.Core
+
+namespace DevOnBike.Overfit.Tests.Core.TensorMath
 {
     public class TensorMathComprehensiveTests
     {
@@ -34,7 +35,7 @@ namespace DevOnBike.Overfit.Tests
             bSpan[1] = 20f;
             bSpan[2] = 30f;
 
-            using var output = TensorMath.AddBias(_graph, input, bias);
+            using var output = Ops.TensorMath.AddBias(_graph, input, bias);
 
             var outSpan = output.DataView.AsSpan();
             Assert.Equal(11f, outSpan[0]); // Batch 0, Ch 0
@@ -63,7 +64,7 @@ namespace DevOnBike.Overfit.Tests
             input.DataView.AsSpan().Fill(2f);
             weights.DataView.AsSpan().Fill(3f);
 
-            using var output = TensorMath.MatMul(_graph, input, weights);
+            using var output = Ops.TensorMath.MatMul(_graph, input, weights);
 
             var outSpan = output.DataView.AsSpan();
             Assert.Equal(2 * 3 * 3f, outSpan[0]); // 18
@@ -90,7 +91,7 @@ namespace DevOnBike.Overfit.Tests
             input.DataView.AsSpan().Fill(1f);
             weights.DataView.AsSpan().Fill(2f);
 
-            using var output = TensorMath.Conv2D(_graph, input, weights, inC, outC, h, w, k);
+            using var output = Ops.TensorMath.Conv2D(_graph, input, weights, inC, outC, h, w, k);
 
             var outSpan = output.DataView.AsSpan();
             Assert.Equal(4 * 2f, outSpan[0]); // 2x2 okno jedynek * 2 = 8
@@ -117,7 +118,7 @@ namespace DevOnBike.Overfit.Tests
             inSpan[2] = 0.0f;
             inSpan[3] = 3.0f;
 
-            using var output = TensorMath.ReLU(_graph, input);
+            using var output = Ops.TensorMath.ReLU(_graph, input);
             var outSpan = output.DataView.AsSpan();
 
             Assert.Equal(5.0f, outSpan[0]);
@@ -151,7 +152,7 @@ namespace DevOnBike.Overfit.Tests
             var tSpan = targets.DataView.AsSpan();
             tSpan[0] = 1.0f; tSpan[1] = 0.0f; tSpan[2] = 0.0f; // Target class 0
 
-            using var loss = TensorMath.SoftmaxCrossEntropy(_graph, logits, targets);
+            using var loss = Ops.TensorMath.SoftmaxCrossEntropy(_graph, logits, targets);
             Assert.True(loss.DataView.AsReadOnlySpan()[0] > 0f);
 
             loss.GradView.AsSpan()[0] = 1.0f;
@@ -179,7 +180,7 @@ namespace DevOnBike.Overfit.Tests
             // Kanał 1
             inSpan[4] = 10f; inSpan[5] = 10f; inSpan[6] = 20f; inSpan[7] = 0f; // Średnia: 10
 
-            using var output = TensorMath.GlobalAveragePool2D(_graph, input, channels, h, w);
+            using var output = Ops.TensorMath.GlobalAveragePool2D(_graph, input, channels, h, w);
             var outSpan = output.DataView.AsSpan();
 
             Assert.Equal(2, outSpan.Length); // Batch = 1, Channels = 2
@@ -198,7 +199,7 @@ namespace DevOnBike.Overfit.Tests
             pred.DataView.AsSpan().Fill(2f);
             target.DataView.AsSpan().Fill(1f);
 
-            using var loss = TensorMath.MSELoss(_graph, pred, target);
+            using var loss = Ops.TensorMath.MSELoss(_graph, pred, target);
 
             Assert.Equal(1f, loss.DataView.AsReadOnlySpan()[0]);
 
@@ -220,7 +221,7 @@ namespace DevOnBike.Overfit.Tests
             pred.DataView.AsSpan().Fill(2f);
             target.DataView.AsSpan().Fill(-1f); // Zły kierunek (pred > 0, target < 0)
 
-            using var loss = TensorMath.DirectionalLoss(_graph, pred, target, gamma: 10f);
+            using var loss = Ops.TensorMath.DirectionalLoss(_graph, pred, target, gamma: 10f);
 
             loss.GradView.AsSpan()[0] = 1f;
             _graph.Backward(loss);
@@ -245,7 +246,7 @@ namespace DevOnBike.Overfit.Tests
             bias.DataView.AsSpan().Fill(0.2f);
 
             // Przekazujemy bezpośrednio operację. VerifyGradients zajmie się sumowaniem.
-            VerifyGradients(bias, () => TensorMath.AddBias(_graph, input, bias));
+            VerifyGradients(bias, () => Ops.TensorMath.AddBias(_graph, input, bias));
         }
 
         [Fact]
@@ -259,7 +260,7 @@ namespace DevOnBike.Overfit.Tests
             var span = input.DataView.AsSpan();
             span[0] = 1.5f; span[1] = -0.5f; span[2] = 2.0f; span[3] = -1.0f;
 
-            VerifyGradients(input, () => TensorMath.ReLU(_graph, input));
+            VerifyGradients(input, () => Ops.TensorMath.ReLU(_graph, input));
         }
 
         [Fact]
@@ -273,7 +274,7 @@ namespace DevOnBike.Overfit.Tests
             a.DataView.AsSpan().Fill(0.5f);
             b.DataView.AsSpan().Fill(0.2f);
 
-            VerifyGradients(a, () => TensorMath.MatMul(_graph, a, b));
+            VerifyGradients(a, () => Ops.TensorMath.MatMul(_graph, a, b));
         }
 
         [Fact]
@@ -287,7 +288,7 @@ namespace DevOnBike.Overfit.Tests
             input.DataView.AsSpan().Fill(0.5f);
             weights.DataView.AsSpan().Fill(0.2f);
 
-            VerifyGradients(weights, () => TensorMath.Conv2D(_graph, input, weights, 1, 1, 4, 4, 2));
+            VerifyGradients(weights, () => Ops.TensorMath.Conv2D(_graph, input, weights, 1, 1, 4, 4, 2));
         }
 
         /// <summary>

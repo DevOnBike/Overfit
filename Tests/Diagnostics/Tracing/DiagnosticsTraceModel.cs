@@ -6,7 +6,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.Diagnostics.Tracing
 {
     internal sealed class DiagnosticsTraceModel
     {

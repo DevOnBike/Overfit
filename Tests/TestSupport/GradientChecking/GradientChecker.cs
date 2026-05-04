@@ -6,7 +6,7 @@
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.TestSupport.GradientChecking
 {
     public static class GradientChecker
     {

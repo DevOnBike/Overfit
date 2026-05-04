@@ -12,10 +12,10 @@ using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
-using DevOnBike.Overfit.Tests.Helpers;
+using DevOnBike.Overfit.Tests.TestSupport.Helpers;
 using Xunit.Abstractions;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.Data.Mnist
 {
     public sealed class MnistTrainingTests
     {

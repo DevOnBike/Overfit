@@ -5,9 +5,8 @@
 
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Runtime;
-using Xunit;
 
-namespace DevOnBike.Overfit.Tests.LanguageModels
+namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Adapters
 {
     /// <summary>
     /// Parity tests between the legacy full-context GPT1Model path and the

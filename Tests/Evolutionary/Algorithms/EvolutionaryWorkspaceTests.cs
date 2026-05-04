@@ -5,7 +5,7 @@
 
 using DevOnBike.Overfit.Evolutionary.Storage;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
 {
     public sealed class EvolutionaryWorkspaceTests
     {

@@ -6,7 +6,7 @@
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Licensing;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.DeepLearning.Cnn
 {
     public sealed class CnnInferenceZeroAllocTests
     {

@@ -10,7 +10,7 @@ using System.Text;
 using DevOnBike.Overfit.Diagnostics;
 using Xunit.Abstractions;
 
-namespace DevOnBike.Overfit.Tests.Helpers
+namespace DevOnBike.Overfit.Tests.TestSupport.Helpers
 {
     public sealed class TelemetryListener2 : IDisposable
     {

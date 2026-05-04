@@ -8,7 +8,7 @@ using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 using DevOnBike.Overfit.Statistical;
 using DevOnBike.Overfit.Tensors;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.Integrations.K8s
 {
     public class K8sPipelineIntegrationTests : IDisposable
     {

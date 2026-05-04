@@ -5,7 +5,7 @@
 
 using System.Diagnostics;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.Diagnostics.Probes
 {
     internal static class MemoryLeakProbe
     {

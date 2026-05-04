@@ -5,7 +5,7 @@
 
 using DevOnBike.Overfit.Kernels;
 
-namespace DevOnBike.Overfit.Tests.Kernels
+namespace DevOnBike.Overfit.Tests.Core.Kernels
 {
     public sealed class ElementwiseKernelsAliasingTests
     {

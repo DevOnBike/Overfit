@@ -5,7 +5,7 @@
 
 using System.Text;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.Diagnostics.Tracing
 {
     internal static class DiagnosticsTraceComparer
     {

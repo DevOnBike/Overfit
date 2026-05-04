@@ -6,9 +6,8 @@
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
-using Xunit;
 
-namespace DevOnBike.Overfit.Tests.LanguageModels
+namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Session
 {
     public sealed class SlmSessionTests
     {

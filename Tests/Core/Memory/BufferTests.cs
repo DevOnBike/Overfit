@@ -5,7 +5,7 @@
 
 using DevOnBike.Overfit.Tensors;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.Core.Memory
 {
     public class BufferTests
     {

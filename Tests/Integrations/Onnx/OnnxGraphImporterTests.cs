@@ -6,9 +6,8 @@
 using System.Buffers.Binary;
 using DevOnBike.Overfit.Inference;
 using DevOnBike.Overfit.Onnx;
-using Xunit;
 
-namespace DevOnBike.Overfit.Tests.Onnx
+namespace DevOnBike.Overfit.Tests.Integrations.Onnx
 {
     /// <summary>
     /// Integration tests for <see cref="OnnxGraphImporter"/> — the DAG-topology ONNX importer.

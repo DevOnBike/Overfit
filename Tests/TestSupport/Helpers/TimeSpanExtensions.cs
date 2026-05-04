@@ -3,7 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-namespace DevOnBike.Overfit.Tests.Helpers
+namespace DevOnBike.Overfit.Tests.TestSupport.Helpers
 // ReSharper restore CheckNamespace once
 {
     public static class TimeSpanExtensions

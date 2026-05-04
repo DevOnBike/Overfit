@@ -7,10 +7,9 @@ using System.Diagnostics;
 using System.Reflection;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
-using Xunit;
 using Xunit.Abstractions;
 
-namespace DevOnBike.Overfit.Tests.Diagnostics
+namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 {
     /// <summary>
     /// Diagnostic profiler for GPT-1 backward tape operations.

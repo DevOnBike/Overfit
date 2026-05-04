@@ -4,11 +4,10 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Autograd;
-using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.Core.Autograd
 {
     public class AutogradTests
     {
@@ -24,7 +23,7 @@ namespace DevOnBike.Overfit.Tests
             ((Span<float>)[1.0f, 2.0f]).CopyTo(a.DataView.AsSpan());
             ((Span<float>)[3.0f, 4.0f]).CopyTo(b.DataView.AsSpan());
 
-            using var res = TensorMath.Add(graph, a, b);
+            using var res = Ops.TensorMath.Add(graph, a, b);
             Assert.Equal([4.0f, 6.0f], res.DataView.AsSpan().ToArray());
 
             graph.Backward(res);
@@ -49,7 +48,7 @@ namespace DevOnBike.Overfit.Tests
             using var rv = new TensorStorage<float>(1, clearMemory: true);
             rv.AsSpan()[0] = 1.0f;
 
-            using var res = TensorMath.BatchNorm1D(graph, input, gamma, beta, rm, rv, 0.1f, 1e-5f, true);
+            using var res = Ops.TensorMath.BatchNorm1D(graph, input, gamma, beta, rm, rv, 0.1f, 1e-5f, true);
             Assert.Equal(1.0f, res.DataView[1, 0], 1e-3f);
 
             graph.Backward(res);
@@ -69,7 +68,7 @@ namespace DevOnBike.Overfit.Tests
             using var a = new AutogradNode(matA, new TensorShape(1, 1), requiresGrad: false);
             using var b = new AutogradNode(matB, new TensorShape(1, 1), requiresGrad: false);
 
-            using var res = TensorMath.Add(graph, a, b);
+            using var res = Ops.TensorMath.Add(graph, a, b);
             graph.Backward(res);
 
             // Pobieranie GradView dla węzła z RequiresGrad = false wyrzuca wyjątek.

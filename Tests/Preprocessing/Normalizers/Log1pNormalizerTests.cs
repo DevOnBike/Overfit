@@ -5,7 +5,7 @@
 
 using DevOnBike.Overfit.Data.Normalizers;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
 {
     public class Log1pNormalizerTests
     {

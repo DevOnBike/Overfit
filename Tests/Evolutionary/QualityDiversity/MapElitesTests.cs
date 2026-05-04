@@ -8,7 +8,7 @@ using DevOnBike.Overfit.Evolutionary.Abstractions;
 using DevOnBike.Overfit.Evolutionary.Runtime;
 using DevOnBike.Overfit.Evolutionary.Storage;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.Evolutionary.QualityDiversity
 {
     public sealed class MapElitesTests
     {

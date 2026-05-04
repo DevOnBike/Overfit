@@ -5,9 +5,8 @@
 
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
-using Xunit;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.LanguageModels.GPT1
 {
     /// <summary>
     /// Tests for GPT1Model and GPT1Config.

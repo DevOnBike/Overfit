@@ -10,7 +10,7 @@ using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 using Xunit.Abstractions;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.Diagnostics.Probes
 {
     /// <summary>
     ///     Per-operation allocation profiling for the ResidualBlock training forward path,

@@ -8,7 +8,7 @@ using DevOnBike.Overfit.Evolutionary.Selection;
 using DevOnBike.Overfit.Evolutionary.Storage;
 using DevOnBike.Overfit.Evolutionary.Strategies;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
 {
     /// <summary>
     ///     Tests for the "best-ever" semantics introduced in round 10: after a strong

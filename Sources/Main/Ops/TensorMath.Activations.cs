@@ -6,7 +6,6 @@
 using System.Numerics;
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Autograd;
-using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.Ops
 {

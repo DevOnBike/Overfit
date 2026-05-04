@@ -8,7 +8,7 @@ using DevOnBike.Overfit.Inference;
 using DevOnBike.Overfit.Inference.Contracts;
 using DevOnBike.Overfit.Licensing;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.DeepLearning.Inference
 {
     public sealed class InferenceEngineTests
     {

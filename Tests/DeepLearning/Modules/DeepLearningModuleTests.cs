@@ -9,7 +9,7 @@ using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.DeepLearning.Modules
 {
     public class DeepLearningModuleTests
     {

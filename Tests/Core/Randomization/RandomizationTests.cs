@@ -5,7 +5,7 @@
 
 using DevOnBike.Overfit.Randomization;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.Core.Randomization
 {
     public class RandomizationTests
     {

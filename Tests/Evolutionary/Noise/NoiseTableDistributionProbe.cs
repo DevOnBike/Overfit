@@ -6,7 +6,7 @@
 using DevOnBike.Overfit.Evolutionary.Storage;
 using Xunit.Abstractions;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.Evolutionary.Noise
 {
     /// <summary>
     ///     Sanity check that the new VectorizedRandom-backed PrecomputedNoiseTable fill

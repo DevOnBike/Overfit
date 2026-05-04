@@ -5,7 +5,7 @@
 
 using DevOnBike.Overfit.Evolutionary.Selection;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
 {
     public sealed class EvolutionaryTournamentSelectionTests
     {
