@@ -1,4 +1,9 @@
-﻿using Accord.Neuro;
+﻿// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
+
+using Accord.Neuro;
 using Accord.Neuro.Learning;
 using BenchmarkDotNet.Attributes;
 using Benchmarks.Helpers;

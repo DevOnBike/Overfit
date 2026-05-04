@@ -5,8 +5,8 @@
 
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Autograd;
-using DevOnBike.Overfit.Kernels;
 using DevOnBike.Overfit.Intrinsics;
+using DevOnBike.Overfit.Kernels;
 using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
