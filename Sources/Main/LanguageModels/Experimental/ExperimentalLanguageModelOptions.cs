@@ -10,10 +10,8 @@ namespace DevOnBike.Overfit.LanguageModels.Experimental
     /// Experimental language-model switches.
     ///
     /// Defaults must keep the stable/reference path unchanged.
-    ///
-    /// These options are intentionally global and explicit. They are for manual
-    /// experiments, demos, and benchmarks while the GPT runtime/training surface
-    /// is being stabilized.
+    /// These options are intended for manual experiments, demos, and
+    /// benchmarks while GPT training/runtime APIs are being stabilized.
     /// </summary>
     public static class ExperimentalLanguageModelOptions
     {
@@ -25,8 +23,8 @@ namespace DevOnBike.Overfit.LanguageModels.Experimental
         ///
         /// Default: false.
         ///
-        /// Keep false for normal correctness tests and stable training paths.
-        /// Set true only in explicit performance experiments, e.g. the
+        /// Keep false for normal correctness tests and the stable training path.
+        /// Set true only in explicit performance experiments, e.g. the manual
         /// TinyShakespeare data-parallel training demo.
         /// </summary>
         public static bool EnableParallelAttentionBackward

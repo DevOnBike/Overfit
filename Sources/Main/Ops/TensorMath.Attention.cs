@@ -7,6 +7,7 @@
 using System.Buffers;
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Autograd;
+using DevOnBike.Overfit.LanguageModels.Experimental;
 using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Tensors;
 
@@ -23,23 +24,6 @@ namespace DevOnBike.Overfit.Ops
         /// S = Q @ K^T / sqrt(d_k) [B, T, T]
         /// A = softmax(S, axis=-1) [B, T, T] (with optional causal mask)
         /// O = A @ V [B, T, d_v]
-        ///
-        /// Inputs:
-        /// q [B, T, d_k] — query vectors
-        /// k [B, T, d_k] — key vectors
-        /// v [B, T, d_v] — value vectors
-        ///
-        /// causalMask: if true, position i cannot attend to j > i.
-        /// Required for autoregressive generation (GPT-style).
-        ///
-        /// Tape layout:
-        /// op.A = q node
-        /// op.B = k node
-        /// op.C0 = v node
-        /// op.C1 = attnWeights (A, GraphAuxiliary) — softmax output, needed for backward
-        /// op.I0 = seqLen (T)
-        /// op.I1 = d_k
-        /// op.I2 = causalMask flag (0/1)
         /// </summary>
         public static AutogradNode ScaledDotProductAttention(
             ComputationGraph graph,
@@ -161,12 +145,9 @@ namespace DevOnBike.Overfit.Ops
         /// <summary>
         /// Scaled Dot-Product Attention backward pass.
         ///
-        /// Given dO [B, T, dv], computes:
-        /// dV = A^T @ dO [B, T, dv]
-        /// dA = dO @ V^T [B, T, T]
-        /// dS = softmax_backward(dA, A) [B, T, T]
-        /// dQ = dS @ K / sqrt(dk) [B, T, dk]
-        /// dK = dS^T @ Q / sqrt(dk) [B, T, dk]
+        /// Stable default: sequential backward path.
+        /// Experimental path: parallel backward is used only when
+        /// ExperimentalLanguageModelOptions.EnableParallelAttentionBackward is true.
         /// </summary>
         public static void ScaledDotProductAttentionBackward(
             AutogradNode q,
@@ -182,7 +163,9 @@ namespace DevOnBike.Overfit.Ops
             var dv = v.Shape.D2;
             var work = (long)batchSize * seqLen * seqLen * Math.Max(dk, dv);
 
-            if (batchSize > 1 && work >= AttentionParallelWorkThreshold)
+            if (ExperimentalLanguageModelOptions.EnableParallelAttentionBackward &&
+                batchSize > 1 &&
+                work >= AttentionParallelWorkThreshold)
             {
                 ScaledDotProductAttentionBackwardParallel(
                     q,
