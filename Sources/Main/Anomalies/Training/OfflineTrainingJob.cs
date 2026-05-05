@@ -46,7 +46,9 @@ namespace DevOnBike.Overfit.Anomalies.Training
             progress?.Report(new TrainingProgress { Phase = "Loading CSV", Step = 0, TotalSteps = _cfg.Steps });
             var snapshots = HistoricalCsvLoader.Load(csvPath, out var skipped);
             if (snapshots.Count == 0)
+            {
                 throw new InvalidDataException($"No snapshots loaded from '{csvPath}'. Skipped rows: {skipped}");
+            }
 
             progress?.Report(new TrainingProgress
             {
@@ -130,7 +132,10 @@ namespace DevOnBike.Overfit.Anomalies.Training
 
                 // Aggregate gradients from workers → master
                 AggregateGradients(model.TrainableParameters(), workers, scale: 1f / workerCount);
-                foreach (var wg in workerGraphs) wg.Dispose();
+                foreach (var wg in workerGraphs)
+                {
+                    wg.Dispose();
+                }
 
                 var loss = losses.Average();
                 windowLoss += loss;
@@ -141,7 +146,10 @@ namespace DevOnBike.Overfit.Anomalies.Training
                 optimizer.LearningRate = lrMin + (lrMax - lrMin) * cosine;
                 optimizer.Step();
 
-                if (step == 0) initialLoss = loss;
+                if (step == 0)
+                {
+                    initialLoss = loss;
+                }
 
                 if ((step + 1) % _cfg.ReportEvery == 0 || step == _cfg.Steps - 1)
                 {
@@ -162,7 +170,10 @@ namespace DevOnBike.Overfit.Anomalies.Training
                 }
             }
 
-            foreach (var w in workers) w.Dispose();
+            foreach (var w in workers)
+            {
+                w.Dispose();
+            }
             ct.ThrowIfCancellationRequested();
 
             // 5. Save checkpoint
@@ -202,9 +213,18 @@ namespace DevOnBike.Overfit.Anomalies.Training
                 var off = t * vocab;
                 var tgt = targets[t];
                 var max = arr[off];
-                for (var v = 1; v < vocab; v++) if (arr[off + v] > max) max = arr[off + v];
+                for (var v = 1; v < vocab; v++)
+                {
+                    if (arr[off + v] > max)
+                    {
+                        max = arr[off + v];
+                    }
+                }
                 var sum = 0f;
-                for (var v = 0; v < vocab; v++) sum += MathF.Exp(arr[off + v] - max);
+                for (var v = 0; v < vocab; v++)
+                {
+                    sum += MathF.Exp(arr[off + v] - max);
+                }
                 loss[t] = max + MathF.Log(sum) - arr[off + tgt];
                 var sc = 1f / seqLen;
                 for (var v = 0; v < vocab; v++)
@@ -249,7 +269,9 @@ namespace DevOnBike.Overfit.Anomalies.Training
                     var mg = master[i].GradSpan;
                     var wg = wp[i].GradSpan;
                     for (var j = 0; j < mg.Length; j++)
+                    {
                         mg[j] += wg[j] * scale;
+                    }
                 }
             }
         }
@@ -258,11 +280,22 @@ namespace DevOnBike.Overfit.Anomalies.Training
         {
             var list = parameters.ToList();
             var sq   = 0f;
-            foreach (var p in list) { var g = p.GradSpan; for (var i = 0; i < g.Length; i++) sq += g[i] * g[i]; }
+            foreach (var p in list) { var g = p.GradSpan; for (var i = 0; i < g.Length; i++)
+                {
+                    sq += g[i] * g[i];
+                }
+            }
             var n = MathF.Sqrt(sq);
-            if (n <= maxNorm) return;
+            if (n <= maxNorm)
+            {
+                return;
+            }
             var s = maxNorm / (n + 1e-6f);
-            foreach (var p in list) { var g = p.GradSpan; for (var i = 0; i < g.Length; i++) g[i] *= s; }
+            foreach (var p in list) { var g = p.GradSpan; for (var i = 0; i < g.Length; i++)
+                {
+                    g[i] *= s;
+                }
+            }
         }
 
         private float Evaluate(GPT1Model model, ComputationGraph graph, GPT1Config config, int[] val, Random rng)

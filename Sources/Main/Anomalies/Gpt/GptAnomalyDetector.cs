@@ -147,7 +147,10 @@ namespace DevOnBike.Overfit.Anomalies.Gpt
 
         public void Dispose()
         {
-            if (_disposed) return;
+            if (_disposed)
+            {
+                return;
+            }
             _disposed = true;
             _handle.Dispose();
         }
@@ -158,11 +161,18 @@ namespace DevOnBike.Overfit.Anomalies.Gpt
         {
             var maxVal = logits[0];
             for (var i = 1; i < logits.Length; i++)
-                if (logits[i] > maxVal) maxVal = logits[i];
+            {
+                if (logits[i] > maxVal)
+                {
+                    maxVal = logits[i];
+                }
+            }
 
             var sumExp = 0f;
             for (var i = 0; i < logits.Length; i++)
+            {
                 sumExp += MathF.Exp(logits[i] - maxVal);
+            }
 
             return -(logits[target] - maxVal - MathF.Log(sumExp));
         }
@@ -171,7 +181,12 @@ namespace DevOnBike.Overfit.Anomalies.Gpt
         {
             var best = 0;
             for (var i = 1; i < logits.Length; i++)
-                if (logits[i] > logits[best]) best = i;
+            {
+                if (logits[i] > logits[best])
+                {
+                    best = i;
+                }
+            }
             return best;
         }
     }

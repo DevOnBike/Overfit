@@ -65,7 +65,9 @@ namespace DevOnBike.Overfit.Anomalies.Live
             ArgumentNullException.ThrowIfNull(checkpointPath);
 
             if (!File.Exists(checkpointPath))
+            {
                 throw new FileNotFoundException($"GPT checkpoint not found: {checkpointPath}");
+            }
 
             // Load GPT model from checkpoint
             var gptConfig = new GPT1Config
@@ -127,7 +129,10 @@ namespace DevOnBike.Overfit.Anomalies.Live
                         var detector = GetOrCreateDetector(snapshot.PodName);
                         var result   = detector.Score(snapshot);
 
-                        if (result.IsWarmup) continue;
+                        if (result.IsWarmup)
+                        {
+                            continue;
+                        }
 
                         _alertEngine.TryAlert(
                             result.PodName,
@@ -152,9 +157,15 @@ namespace DevOnBike.Overfit.Anomalies.Live
 
         public async ValueTask DisposeAsync()
         {
-            if (_disposed) return;
+            if (_disposed)
+            {
+                return;
+            }
             _disposed = true;
-            foreach (var d in _detectors.Values) d.Dispose();
+            foreach (var d in _detectors.Values)
+            {
+                d.Dispose();
+            }
             _detectors.Clear();
             _source.Dispose();
             _model.Dispose();
@@ -165,7 +176,10 @@ namespace DevOnBike.Overfit.Anomalies.Live
 
         private Gpt.GptAnomalyDetector GetOrCreateDetector(string podName)
         {
-            if (_detectors.TryGetValue(podName, out var existing)) return existing;
+            if (_detectors.TryGetValue(podName, out var existing))
+            {
+                return existing;
+            }
             var handle   = SlmRuntimeFactory.CreateGpt1(_model, SlmRuntimeMode.Cached);
             var detector = new Gpt.GptAnomalyDetector(handle, _options.ContextSnapshots);
             _detectors[podName] = detector;

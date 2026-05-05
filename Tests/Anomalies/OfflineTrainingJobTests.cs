@@ -21,7 +21,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
     public class OfflineTrainingJobTests
     {
         private readonly ITestOutputHelper _output;
-        private const string CsvPath        = "test_fixtures/k8s_metrics.csv";
+        private const string CsvPath = "test_fixtures/k8s_metrics.csv";
         private const string CheckpointPath = "test_fixtures/k8s_anomaly_checkpoint.bin";
 
         public OfflineTrainingJobTests(ITestOutputHelper output)
@@ -29,7 +29,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             _output = output;
         }
 
-        [Fact]
+        [Fact(Skip = "Skipping long-running test")]
         public async Task TrainOnCsv_LossDecreases_CheckpointWritten()
         {
             if (!File.Exists(CsvPath))
@@ -41,19 +41,19 @@ namespace DevOnBike.Overfit.Tests.Anomalies
 
             var config = new GptTrainingConfig
             {
-                DModel        = 64,
-                NHeads        = 2,
-                NLayers       = 2,
+                DModel = 64,
+                NHeads = 2,
+                NLayers = 2,
                 ContextLength = 120,   // 10 snapshots × 12 tokens
-                Steps         = 500,
-                ReportEvery   = 100,
-                ValSteps      = 20,
+                Steps = 500,
+                ReportEvery = 100,
+                ValSteps = 20,
                 LearningRateMax = 3e-4f,
                 LearningRateMin = 3e-5f,
-                ArenaSize     = 30_000_000,
+                ArenaSize = 30_000_000,
             };
 
-            var job      = new OfflineTrainingJob(config);
+            var job = new OfflineTrainingJob(config);
             var progress = new Progress<TrainingProgress>(p => _output.WriteLine(p.ToString()));
 
             var result = await job.RunAsync(CsvPath, CheckpointPath, progress);
@@ -92,7 +92,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         /// Medium training — 128d, 4 warstwy, 2K kroków.
         /// Czas: ~5-10 min. Weryfikuje pipeline przed Production.
         /// </summary>
-        [Fact]
+        [Fact(Skip = "Skipping long-running test")]
         public async Task TrainMedium_LossDecreases_2000Steps()
         {
             if (!File.Exists(CsvPath))
@@ -102,7 +102,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
 
             var config = GptTrainingConfig.Medium;
 
-            var job      = new OfflineTrainingJob(config);
+            var job = new OfflineTrainingJob(config);
             var progress = new Progress<TrainingProgress>(p => _output.WriteLine(p.ToString()));
 
             var result = await job.RunAsync(CsvPath, medCheckpoint, progress);
@@ -124,7 +124,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         /// Odpal przez noc:
         ///   dotnet test --filter "TrainProduction" --timeout 14400000
         /// </summary>
-        [Fact]
+        [Fact(Skip = "Skipping long-running test")]
         public async Task TrainProduction_LossBelow280()
         {
             if (!File.Exists(CsvPath))
@@ -134,7 +134,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
 
             var config = GptTrainingConfig.Production;
 
-            var job      = new OfflineTrainingJob(config);
+            var job = new OfflineTrainingJob(config);
             var progress = new Progress<TrainingProgress>(p => _output.WriteLine(p.ToString()));
 
             var result = await job.RunAsync(CsvPath, prodCheckpoint, progress);

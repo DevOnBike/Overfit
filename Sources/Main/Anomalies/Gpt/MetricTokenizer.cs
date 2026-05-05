@@ -138,11 +138,18 @@ namespace DevOnBike.Overfit.Anomalies.Gpt
         private static int Quantize(float value, int m)
         {
             var (max, logScale) = MetricRanges[m];
-            if (value <= 0f) return 0;
-            if (value >= max) return BinsPerMetric - 1;
+            if (value <= 0f)
+            {
+                return 0;
+            }
+            if (value >= max)
+            {
+                return BinsPerMetric - 1;
+            }
             var ratio = logScale
                 ? MathF.Log(1f + value) / MathF.Log(1f + max)
                 : value / max;
+            
             return Math.Clamp((int)(ratio * BinsPerMetric), 0, BinsPerMetric - 1);
         }
     }

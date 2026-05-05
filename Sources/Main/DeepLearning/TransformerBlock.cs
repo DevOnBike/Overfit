@@ -162,18 +162,42 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public IEnumerable<AutogradNode> Parameters()
         {
-            foreach (var p in Norm1.Parameters())     yield return p;
-            foreach (var p in Attention.Parameters()) yield return p;
-            foreach (var p in Norm2.Parameters())     yield return p;
-            foreach (var p in FFN.Parameters())       yield return p;
+            foreach (var p in Norm1.Parameters())
+            {
+                yield return p;
+            }
+            foreach (var p in Attention.Parameters())
+            {
+                yield return p;
+            }
+            foreach (var p in Norm2.Parameters())
+            {
+                yield return p;
+            }
+            foreach (var p in FFN.Parameters())
+            {
+                yield return p;
+            }
         }
 
         public IEnumerable<Parameter> TrainableParameters()
         {
-            foreach (var p in Norm1.TrainableParameters())     yield return p;
-            foreach (var p in Attention.TrainableParameters()) yield return p;
-            foreach (var p in Norm2.TrainableParameters())     yield return p;
-            foreach (var p in FFN.TrainableParameters())       yield return p;
+            foreach (var p in Norm1.TrainableParameters())
+            {
+                yield return p;
+            }
+            foreach (var p in Attention.TrainableParameters())
+            {
+                yield return p;
+            }
+            foreach (var p in Norm2.TrainableParameters())
+            {
+                yield return p;
+            }
+            foreach (var p in FFN.TrainableParameters())
+            {
+                yield return p;
+            }
         }
 
         public void InvalidateParameterCaches()
