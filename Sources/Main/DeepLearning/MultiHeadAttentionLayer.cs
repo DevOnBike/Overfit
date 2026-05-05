@@ -40,10 +40,19 @@ namespace DevOnBike.Overfit.DeepLearning
         private readonly Parameter[] _wvHeads;
         private readonly Parameter[] _woHeads;
 
+        // Per-head Q/K/V biases — zero-initialized by default (GPT-1 training)
+        // Populated from GPT-2 c_attn.bias when loading pretrained weights.
+        private readonly Parameter[] _bqHeads;
+        private readonly Parameter[] _bkHeads;
+        private readonly Parameter[] _bvHeads;
+
         private readonly AutogradNode?[] _wqNodes;
         private readonly AutogradNode?[] _wkNodes;
         private readonly AutogradNode?[] _wvNodes;
         private readonly AutogradNode?[] _woNodes;
+        private readonly AutogradNode?[] _bqNodes;
+        private readonly AutogradNode?[] _bkNodes;
+        private readonly AutogradNode?[] _bvNodes;
 
         public MultiHeadAttentionLayer(
             int dModel,
@@ -74,6 +83,13 @@ namespace DevOnBike.Overfit.DeepLearning
             _wkNodes = new AutogradNode?[nHeads];
             _wvNodes = new AutogradNode?[nHeads];
             _woNodes = new AutogradNode?[nHeads];
+            _bqNodes = new AutogradNode?[nHeads];
+            _bkNodes = new AutogradNode?[nHeads];
+            _bvNodes = new AutogradNode?[nHeads];
+
+            _bqHeads = new Parameter[nHeads];
+            _bkHeads = new Parameter[nHeads];
+            _bvHeads = new Parameter[nHeads];
 
             for (var h = 0; h < nHeads; h++)
             {
@@ -81,6 +97,10 @@ namespace DevOnBike.Overfit.DeepLearning
                 _wkHeads[h] = CreateWeight(dModel, _dHead, scale);
                 _wvHeads[h] = CreateWeight(dModel, _dHead, scale);
                 _woHeads[h] = CreateWeight(_dHead, dModel, scale);
+                // Zero bias — loaded from GPT-2 c_attn.bias when using pretrained weights
+                _bqHeads[h] = new Parameter(new TensorShape(_dHead), requiresGrad: true, clearData: true);
+                _bkHeads[h] = new Parameter(new TensorShape(_dHead), requiresGrad: true, clearData: true);
+                _bvHeads[h] = new Parameter(new TensorShape(_dHead), requiresGrad: true, clearData: true);
             }
 
             Bo = new Parameter(
@@ -90,12 +110,12 @@ namespace DevOnBike.Overfit.DeepLearning
         }
 
         public Parameter[] WqHeads => _wqHeads;
-
         public Parameter[] WkHeads => _wkHeads;
-
         public Parameter[] WvHeads => _wvHeads;
-
         public Parameter[] WoHeads => _woHeads;
+        public Parameter[] BqHeads => _bqHeads;
+        public Parameter[] BkHeads => _bkHeads;
+        public Parameter[] BvHeads => _bvHeads;
 
         public Parameter Bo { get; }
 
@@ -165,24 +185,13 @@ namespace DevOnBike.Overfit.DeepLearning
                 _wvNodes[h] ??= _wvHeads[h].AsNode();
                 _woNodes[h] ??= _woHeads[h].AsNode();
 
-                var zeroBiasQ = ZeroBias(graph, _dHead);
-                var zeroBiasK = ZeroBias(graph, _dHead);
-                var zeroBiasV = ZeroBias(graph, _dHead);
+                _bqNodes[h] ??= _bqHeads[h].AsNode();
+                _bkNodes[h] ??= _bkHeads[h].AsNode();
+                _bvNodes[h] ??= _bvHeads[h].AsNode();
 
-                var qFlat = graph.Linear(
-                    flat,
-                    _wqNodes[h]!,
-                    zeroBiasQ);
-
-                var kFlat = graph.Linear(
-                    flat,
-                    _wkNodes[h]!,
-                    zeroBiasK);
-
-                var vFlat = graph.Linear(
-                    flat,
-                    _wvNodes[h]!,
-                    zeroBiasV);
+                var qFlat = graph.Linear(flat, _wqNodes[h]!, _bqNodes[h]!);
+                var kFlat = graph.Linear(flat, _wkNodes[h]!, _bkNodes[h]!);
+                var vFlat = graph.Linear(flat, _wvNodes[h]!, _bvNodes[h]!);
 
                 var q3d = graph.Reshape(
                     qFlat,
@@ -266,9 +275,9 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             for (var h = 0; h < _nHeads; h++)
             {
-                yield return _wqHeads[h];
-                yield return _wkHeads[h];
-                yield return _wvHeads[h];
+                yield return _wqHeads[h]; yield return _bqHeads[h];
+                yield return _wkHeads[h]; yield return _bkHeads[h];
+                yield return _wvHeads[h]; yield return _bvHeads[h];
                 yield return _woHeads[h];
             }
 
@@ -279,17 +288,13 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             for (var h = 0; h < _nHeads; h++)
             {
-                _wqNodes[h]?.Dispose();
-                _wqNodes[h] = null;
-
-                _wkNodes[h]?.Dispose();
-                _wkNodes[h] = null;
-
-                _wvNodes[h]?.Dispose();
-                _wvNodes[h] = null;
-
-                _woNodes[h]?.Dispose();
-                _woNodes[h] = null;
+                _wqNodes[h]?.Dispose(); _wqNodes[h] = null;
+                _wkNodes[h]?.Dispose(); _wkNodes[h] = null;
+                _wvNodes[h]?.Dispose(); _wvNodes[h] = null;
+                _woNodes[h]?.Dispose(); _woNodes[h] = null;
+                _bqNodes[h]?.Dispose(); _bqNodes[h] = null;
+                _bkNodes[h]?.Dispose(); _bkNodes[h] = null;
+                _bvNodes[h]?.Dispose(); _bvNodes[h] = null;
             }
         }
 
@@ -303,8 +308,11 @@ namespace DevOnBike.Overfit.DeepLearning
             for (var h = 0; h < _nHeads; h++)
             {
                 _wqHeads[h].Save(writer);
+                _bqHeads[h].Save(writer);
                 _wkHeads[h].Save(writer);
+                _bkHeads[h].Save(writer);
                 _wvHeads[h].Save(writer);
+                _bvHeads[h].Save(writer);
                 _woHeads[h].Save(writer);
             }
 
@@ -321,8 +329,11 @@ namespace DevOnBike.Overfit.DeepLearning
             for (var h = 0; h < _nHeads; h++)
             {
                 _wqHeads[h].Load(reader);
+                _bqHeads[h].Load(reader);
                 _wkHeads[h].Load(reader);
+                _bkHeads[h].Load(reader);
                 _wvHeads[h].Load(reader);
+                _bvHeads[h].Load(reader);
                 _woHeads[h].Load(reader);
             }
 
@@ -335,9 +346,9 @@ namespace DevOnBike.Overfit.DeepLearning
 
             for (var h = 0; h < _nHeads; h++)
             {
-                _wqHeads[h].Dispose();
-                _wkHeads[h].Dispose();
-                _wvHeads[h].Dispose();
+                _wqHeads[h].Dispose(); _bqHeads[h].Dispose();
+                _wkHeads[h].Dispose(); _bkHeads[h].Dispose();
+                _wvHeads[h].Dispose(); _bvHeads[h].Dispose();
                 _woHeads[h].Dispose();
             }
 

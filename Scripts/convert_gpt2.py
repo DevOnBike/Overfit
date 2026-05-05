@@ -448,14 +448,27 @@ def write_overfit_checkpoint(
                 n_head,
             )
 
-            for h in range(n_head):
-                write_parameter(f, q_heads[h])
-                write_parameter(f, k_heads[h])
-                write_parameter(f, v_heads[h])
-                write_parameter(f, wo_heads[h])
+            # GPT-2 c_attn.bias [3*n_embd] → split into bq [n_embd], bk [n_embd], bv [n_embd]
+            # then split per-head: bq_h [d_head], bk_h [d_head], bv_h [d_head]
+            c_attn_bias = get_weight(weights, f"{prefix}.attn.c_attn.bias")  # [3*n_embd]
+            d_head = n_embd // n_head
+            bq_all = c_attn_bias[:n_embd]           # [n_embd]
+            bk_all = c_attn_bias[n_embd:2*n_embd]   # [n_embd]
+            bv_all = c_attn_bias[2*n_embd:3*n_embd] # [n_embd]
 
-            # Overfit's current attention layer has no Q/K/V bias parameters.
-            # GPT-2 c_attn.bias is therefore intentionally ignored.
+            bq_heads = [bq_all[h*d_head:(h+1)*d_head] for h in range(n_head)]
+            bk_heads = [bk_all[h*d_head:(h+1)*d_head] for h in range(n_head)]
+            bv_heads = [bv_all[h*d_head:(h+1)*d_head] for h in range(n_head)]
+
+            # New Save order: Wq_h, Bq_h, Wk_h, Bk_h, Wv_h, Bv_h, Wo_h
+            for h in range(n_head):
+                write_parameter(f, q_heads[h])   # Wq_h [d, d_head]
+                write_parameter(f, bq_heads[h])  # Bq_h [d_head]
+                write_parameter(f, k_heads[h])   # Wk_h [d, d_head]
+                write_parameter(f, bk_heads[h])  # Bk_h [d_head]
+                write_parameter(f, v_heads[h])   # Wv_h [d, d_head]
+                write_parameter(f, bv_heads[h])  # Bv_h [d_head]
+                write_parameter(f, wo_heads[h])  # Wo_h [d_head, d]
             write_parameter(
                 f,
                 expect_shape(
