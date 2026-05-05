@@ -1,95 +1,86 @@
 // Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
+//
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace DevOnBike.Overfit.Tokenization
 {
     /// <summary>
-    /// Byte-Pair Encoding (BPE) tokenizer compatible with GPT-1 and GPT-2 vocabularies.
+    /// Byte-Pair Encoding tokenizer compatible with GPT-2-style vocab.json and merges.txt files.
     ///
-    /// Loads vocabulary from two files:
-    ///   vocab.json  — JSON map: token_string → token_id
-    ///   merges.txt  — BPE merge rules, one per line: "token_a token_b"
+    /// This implementation is intentionally dependency-light:
+    /// - vocab.json is parsed with System.Text.Json, because GPT-2 token strings contain escaped
+    ///   JSON keys that are easy to parse incorrectly with a hand-written JSON parser.
+    /// - merges.txt is loaded into a rank dictionary for efficient BPE pair lookup.
     ///
-    /// These files are available from HuggingFace for GPT-2:
-    ///   https://huggingface.co/gpt2/resolve/main/vocab.json
-    ///   https://huggingface.co/gpt2/resolve/main/merges.txt
-    ///
-    /// GPT-1 uses a similar format (40478 vocab).
-    ///
-    /// Usage:
-    ///   var tokenizer = BytePairEncoder.Load("vocab.json", "merges.txt");
-    ///   int[] ids  = tokenizer.Encode("Hello, world!");
-    ///   string txt = tokenizer.Decode(ids);
-    ///
-    /// Implementation: greedy BPE tokenization without regex pre-tokenization.
-    /// This is a simplified version — production use should add regex word splitting
-    /// matching GPT-2's tiktoken patterns.
+    /// This tokenizer is not part of the zero-allocation inference hot path. It is used for
+    /// GPT-2 fixture conversion/inference demos and can allocate during Encode/Decode.
     /// </summary>
     public sealed class BytePairEncoder : ITokenizer
     {
+        private static readonly Regex Gpt2TokenPattern = new(
+            @"'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+",
+            RegexOptions.CultureInvariant);
+
+        private static readonly string[] ByteEncoder = BuildByteEncoder();
+        private static readonly Dictionary<char, byte> ByteDecoder = BuildByteDecoder(ByteEncoder);
+
         private readonly Dictionary<string, int> _tokenToId;
         private readonly string[] _idToToken;
-        private readonly List<(string A, string B)> _merges;
-
-        // Byte-level encoding table (matches GPT-2 byte_encoder)
-        private static readonly string[] ByteEncoder = BuildByteEncoder();
+        private readonly Dictionary<(string A, string B), int> _mergeRanks;
 
         private BytePairEncoder(
             Dictionary<string, int> tokenToId,
             string[] idToToken,
-            List<(string, string)> merges)
+            Dictionary<(string A, string B), int> mergeRanks)
         {
             _tokenToId = tokenToId;
             _idToToken = idToToken;
-            _merges    = merges;
+            _mergeRanks = mergeRanks;
         }
 
-        public int VocabSize      => _idToToken.Length;
-        public int UnknownTokenId => _tokenToId.TryGetValue("[UNK]", out var id) ? id : 0;
+        public int VocabSize => _idToToken.Length;
 
-        /// <summary>
-        /// Loads BPE tokenizer from vocab.json and merges.txt.
-        /// </summary>
-        public static BytePairEncoder Load(string vocabJsonPath, string mergesPath)
+        public int UnknownTokenId =>
+            _tokenToId.TryGetValue("<|endoftext|>", out var endOfText)
+                ? endOfText
+                : _tokenToId.TryGetValue("[UNK]", out var unknown)
+                    ? unknown
+                    : 0;
+
+        public static BytePairEncoder Load(
+            string vocabJsonPath,
+            string mergesPath)
         {
-            var tokenToId = ParseVocabJson(
-                File.ReadAllText(vocabJsonPath));
+            var vocabJson = File.ReadAllText(vocabJsonPath);
+            var mergesLines = File.ReadAllLines(mergesPath);
 
-            var idToToken = new string[tokenToId.Count];
-            
-            foreach (var kv in tokenToId)
-            {
-                idToToken[kv.Value] = kv.Key;
-            }
-
-            var merges = ParseMerges(File.ReadAllLines(mergesPath));
-
-            return new BytePairEncoder(tokenToId, idToToken, merges);
+            return LoadFromStrings(
+                vocabJson,
+                string.Join('\n', mergesLines));
         }
 
-        /// <summary>
-        /// Loads BPE tokenizer from in-memory strings (useful for embedding in resources).
-        /// </summary>
-        public static BytePairEncoder LoadFromStrings(string vocabJson, string mergesText)
+        public static BytePairEncoder LoadFromStrings(
+            string vocabJson,
+            string mergesText)
         {
             var tokenToId = ParseVocabJson(vocabJson);
-            var idToToken = new string[tokenToId.Count];
-            
-            foreach (var kv in tokenToId)
-            {
-                idToToken[kv.Value] = kv.Key;
-            }
-            
-            var merges = ParseMerges(mergesText.Split('\n'));
-            
-            return new BytePairEncoder(tokenToId, idToToken, merges);
+            var idToToken = BuildIdToToken(tokenToId);
+            var mergeRanks = ParseMerges(mergesText.Split('\n'));
+
+            return new BytePairEncoder(
+                tokenToId,
+                idToToken,
+                mergeRanks);
         }
 
-        public int[] Encode(string text)
+        public int[] Encode(
+            string text)
         {
             if (string.IsNullOrEmpty(text))
             {
@@ -98,308 +89,270 @@ namespace DevOnBike.Overfit.Tokenization
 
             var result = new List<int>();
 
-            // Simple whitespace pre-tokenization (no regex for no-dependency build).
-            // For full GPT-2 parity, replace with tiktoken-style word splitting.
-            var words = SplitWords(text);
-
-            foreach (var word in words)
+            foreach (Match match in Gpt2TokenPattern.Matches(text))
             {
-                var tokens = BpeEncode(word);
-                foreach (var t in tokens)
+                if (!match.Success || match.Value.Length == 0)
                 {
-                    if (_tokenToId.TryGetValue(t, out var id))
-                    {
-                        result.Add(id);
-                    }
-                    else
-                    {
-                        result.Add(UnknownTokenId);
-                    }
+                    continue;
+                }
+
+                var bpeTokens = BpeEncode(match.Value);
+
+                foreach (var token in bpeTokens)
+                {
+                    result.Add(
+                        _tokenToId.TryGetValue(token, out var id)
+                            ? id
+                            : UnknownTokenId);
                 }
             }
 
             return result.ToArray();
         }
 
-        public string Decode(int[] tokenIds)
+        public string Decode(
+            int[] tokenIds)
         {
-            var sb = new StringBuilder();
+            if (tokenIds is null)
+            {
+                throw new ArgumentNullException(nameof(tokenIds));
+            }
+
+            var builder = new StringBuilder();
 
             foreach (var id in tokenIds)
             {
-                if (id >= 0 && id < _idToToken.Length)
+                if ((uint)id < (uint)_idToToken.Length)
                 {
-                    sb.Append(DecodeToken(id));
+                    builder.Append(DecodeToken(id));
                 }
             }
 
-            return sb.ToString();
+            return builder.ToString();
         }
 
-        public string DecodeToken(int tokenId)
+        public string DecodeToken(
+            int tokenId)
         {
-            if (tokenId < 0 || tokenId >= _idToToken.Length)
+            if ((uint)tokenId >= (uint)_idToToken.Length)
             {
                 return "?";
             }
 
             var token = _idToToken[tokenId];
 
-            // Decode byte-level encoding back to UTF-8
+            if (string.IsNullOrEmpty(token))
+            {
+                return string.Empty;
+            }
+
             return ByteDecode(token);
         }
 
-        // ── Private ──────────────────────────────────────────────────────────
-
-        private List<string> BpeEncode(string word)
+        private List<string> BpeEncode(
+            string text)
         {
-            // Byte-encode the word
-            var bytes = Encoding.UTF8.GetBytes(word);
-            var chars = new List<string>(bytes.Length);
+            var bytes = Encoding.UTF8.GetBytes(text);
+            var parts = new List<string>(bytes.Length);
 
             foreach (var b in bytes)
             {
-                chars.Add(ByteEncoder[b]);
+                parts.Add(ByteEncoder[b]);
             }
 
-            if (chars.Count <= 1)
+            if (parts.Count <= 1)
             {
-                return chars;
+                return parts;
             }
 
-            // Greedy BPE merge
-            while (chars.Count > 1)
+            while (parts.Count > 1)
             {
-                var bestMergeIdx = -1;
-                var bestPairIdx  = int.MaxValue;
+                var bestRank = int.MaxValue;
+                var bestIndex = -1;
 
-                for (var i = 0; i < chars.Count - 1; i++)
+                for (var i = 0; i < parts.Count - 1; i++)
                 {
-                    var pair = (chars[i], chars[i + 1]);
-                    var mergeIdx = FindMerge(pair);
-
-                    if (mergeIdx >= 0 && mergeIdx < bestPairIdx)
+                    if (!_mergeRanks.TryGetValue((parts[i], parts[i + 1]), out var rank))
                     {
-                        bestPairIdx  = mergeIdx;
-                        bestMergeIdx = i;
+                        continue;
+                    }
+
+                    if (rank < bestRank)
+                    {
+                        bestRank = rank;
+                        bestIndex = i;
                     }
                 }
 
-                if (bestMergeIdx < 0)
+                if (bestIndex < 0)
                 {
                     break;
                 }
 
-                // Apply merge
-                var merged = chars[bestMergeIdx] + chars[bestMergeIdx + 1];
-                
-                chars[bestMergeIdx] = merged;
-                chars.RemoveAt(bestMergeIdx + 1);
+                parts[bestIndex] = parts[bestIndex] + parts[bestIndex + 1];
+                parts.RemoveAt(bestIndex + 1);
             }
 
-            return chars;
+            return parts;
         }
 
-        private int FindMerge((string A, string B) pair)
+        private static Dictionary<string, int> ParseVocabJson(
+            string json)
         {
-            for (var i = 0; i < _merges.Count; i++)
+            var parsed = JsonSerializer.Deserialize<Dictionary<string, int>>(json);
+
+            if (parsed is null || parsed.Count == 0)
             {
-                if (_merges[i].A == pair.A && _merges[i].B == pair.B)
-                {
-                    return i;
-                }
+                throw new InvalidOperationException("The BPE vocab JSON is empty or invalid.");
             }
 
-            return -1;
+            return new Dictionary<string, int>(
+                parsed,
+                StringComparer.Ordinal);
         }
 
-        private static IEnumerable<string> SplitWords(string text)
+        private static string[] BuildIdToToken(
+            Dictionary<string, int> tokenToId)
         {
-            // Simple split: whitespace-aware, preserves leading space (GPT-2 convention).
-            var start = 0;
+            var maxId = -1;
 
-            for (var i = 1; i <= text.Length; i++)
+            foreach (var id in tokenToId.Values)
             {
-                if (i == text.Length || (char.IsWhiteSpace(text[i]) && !char.IsWhiteSpace(text[i - 1])))
+                if (id > maxId)
                 {
-                    if (i < text.Length && char.IsWhiteSpace(text[i]))
-                    {
-                        yield return text.Substring(start, i - start);
-                        start = i;
-                    }
-                    else if (i == text.Length)
-                    {
-                        yield return text.Substring(start, i - start);
-                    }
-                }
-                else if (!char.IsWhiteSpace(text[i]) && char.IsWhiteSpace(text[i - 1]))
-                {
-                    yield return text.Substring(start, i - start);
-                    start = i;
+                    maxId = id;
                 }
             }
+
+            if (maxId < 0)
+            {
+                throw new InvalidOperationException("The BPE vocabulary does not contain any valid token ids.");
+            }
+
+            var idToToken = new string[maxId + 1];
+
+            foreach (var kv in tokenToId)
+            {
+                if (kv.Value < 0)
+                {
+                    throw new InvalidOperationException(
+                        $"Token '{kv.Key}' has a negative id: {kv.Value}.");
+                }
+
+                idToToken[kv.Value] = kv.Key;
+            }
+
+            return idToToken;
         }
 
-        private static string ByteDecode(string token)
+        private static Dictionary<(string A, string B), int> ParseMerges(
+            string[] lines)
         {
-            // Reverse byte-level encoding: Ġ→' ', etc.
+            var ranks = new Dictionary<(string A, string B), int>();
+            var rank = 0;
+
+            foreach (var rawLine in lines)
+            {
+                var line = rawLine.Trim();
+
+                if (line.Length == 0 || line.StartsWith("#", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var split = line.IndexOf(' ');
+
+                if (split <= 0 || split >= line.Length - 1)
+                {
+                    continue;
+                }
+
+                var left = line[..split];
+                var right = line[(split + 1)..];
+
+                ranks[(left, right)] = rank;
+                rank++;
+            }
+
+            return ranks;
+        }
+
+        private static string ByteDecode(
+            string token)
+        {
             var bytes = new List<byte>(token.Length);
 
-            for (var i = 0; i < token.Length; i++)
+            foreach (var ch in token)
             {
-                var c = token[i];
-
-                // Find byte value for this encoded character
-                var found = false;
-
-                for (var b = 0; b < 256; b++)
+                if (ByteDecoder.TryGetValue(ch, out var value))
                 {
-                    if (ByteEncoder[b].Length == 1 && ByteEncoder[b][0] == c)
-                    {
-                        bytes.Add((byte)b);
-                        found = true;
-                        break;
-                    }
-                }
-
-                if (!found)
-                {
-                    // Multi-char encoding or unknown — pass through as UTF-8
-                    var charBytes = Encoding.UTF8.GetBytes(new[] { c });
-                    bytes.AddRange(charBytes);
-                }
-            }
-
-            try { return Encoding.UTF8.GetString(bytes.ToArray()); }
-            catch { return token; }
-        }
-
-        private static Dictionary<string, int> ParseVocabJson(string json)
-        {
-            // Minimal JSON parser for {"token": id, ...} format.
-            // No dependency on System.Text.Json to stay AOT-safe.
-            var result = new Dictionary<string, int>(StringComparer.Ordinal);
-            var pos    = json.IndexOf('{');
-            if (pos < 0)
-            {
-                return result;
-            }
-
-            pos++;
-
-            while (pos < json.Length)
-            {
-                // Skip whitespace
-                while (pos < json.Length && json[pos] != '"' && json[pos] != '}')
-                {
-                    pos++;
-                }
-                if (pos >= json.Length || json[pos] == '}')
-                {
-                    break;
-                }
-
-                // Read key
-                pos++; // skip "
-                var keyStart = pos;
-                while (pos < json.Length && json[pos] != '"')
-                {
-                    pos++;
-                }
-                var key = json.Substring(keyStart, pos - keyStart);
-                pos++; // skip closing "
-
-                // Skip : and whitespace
-                while (pos < json.Length && (json[pos] == ':' || json[pos] == ' '))
-                {
-                    pos++;
-                }
-
-                // Read value (integer)
-                var numStart = pos;
-                while (pos < json.Length && (json[pos] >= '0' && json[pos] <= '9'))
-                {
-                    pos++;
-                }
-
-                if (int.TryParse(json.Substring(numStart, pos - numStart), out var id))
-                {
-                    result[key] = id;
-                }
-
-                // Skip comma
-                while (pos < json.Length && json[pos] != '"' && json[pos] != '}')
-                {
-                    pos++;
-                }
-            }
-
-            return result;
-        }
-
-        private static List<(string, string)> ParseMerges(string[] lines)
-        {
-            var merges = new List<(string, string)>(lines.Length);
-
-            foreach (var line in lines)
-            {
-                var trimmed = line.Trim();
-                if (trimmed.StartsWith("#") || trimmed.Length == 0)
-                {
+                    bytes.Add(value);
                     continue;
                 }
 
-                var spaceIdx = trimmed.IndexOf(' ');
-                if (spaceIdx < 0)
-                {
-                    continue;
-                }
-
-                merges.Add((trimmed.Substring(0, spaceIdx), trimmed.Substring(spaceIdx + 1)));
+                var fallback = Encoding.UTF8.GetBytes(ch.ToString());
+                bytes.AddRange(fallback);
             }
 
-            return merges;
+            try
+            {
+                return Encoding.UTF8.GetString(bytes.ToArray());
+            }
+            catch
+            {
+                return token;
+            }
         }
 
-        /// <summary>
-        /// Builds the GPT-2 byte encoder table.
-        /// Maps each byte (0-255) to a printable Unicode character.
-        /// </summary>
         private static string[] BuildByteEncoder()
         {
             var result = new string[256];
 
-            // Printable ASCII: '!' (33) to '~' (126)
             for (var b = 33; b <= 126; b++)
             {
                 result[b] = ((char)b).ToString();
             }
 
-            // '¡' (161) to '¬' (172)
             for (var b = 161; b <= 172; b++)
             {
                 result[b] = ((char)b).ToString();
             }
 
-            // '®' (174) to 'ÿ' (255)
             for (var b = 174; b <= 255; b++)
             {
                 result[b] = ((char)b).ToString();
             }
 
-            // Remaining bytes (0-32, 127-160, 173) map to Unicode starting at U+0100
             var n = 0;
+
             for (var b = 0; b < 256; b++)
             {
-                if (result[b] == null)
+                if (result[b] is null)
                 {
                     result[b] = ((char)(256 + n)).ToString();
                     n++;
                 }
             }
 
-            // Space (32) → 'Ġ' (U+0120), standard GPT-2 convention
             result[32] = "Ġ";
+
+            return result;
+        }
+
+        private static Dictionary<char, byte> BuildByteDecoder(
+            string[] byteEncoder)
+        {
+            var result = new Dictionary<char, byte>(byteEncoder.Length);
+
+            for (var i = 0; i < byteEncoder.Length; i++)
+            {
+                var encoded = byteEncoder[i];
+
+                if (encoded.Length == 1)
+                {
+                    result[encoded[0]] = (byte)i;
+                }
+            }
 
             return result;
         }

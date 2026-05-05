@@ -5,15 +5,14 @@
 
 namespace DevOnBike.Overfit.LanguageModels.Contracts
 {
-
     public readonly struct SamplingOptions
     {
         public static SamplingOptions Greedy { get; } = new(
-        strategy: SamplingStrategy.Greedy,
-        temperature: 1.0f,
-        topK: 0,
-        topP: 1.0f,
-        seed: 0);
+            strategy: SamplingStrategy.Greedy,
+            temperature: 1.0f,
+            topK: 0,
+            topP: 1.0f,
+            seed: 0);
 
         public SamplingOptions(
             SamplingStrategy strategy,
