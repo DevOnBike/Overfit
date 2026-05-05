@@ -90,11 +90,14 @@ namespace Benchmarks
                 _wq,
                 _wk,
                 _wv,
+                ReadOnlySpan<float>.Empty,  // bq
+                ReadOnlySpan<float>.Empty,  // bk
+                ReadOnlySpan<float>.Empty,  // bv
                 _wo,
                 _cache,
-                layerIndex: 0,
-                headIndex: 0,
-                position: _position,
+                0,  // layerIndex
+                0,  // headIndex
+                _position,  // position
                 _output);
         }
 
@@ -110,11 +113,14 @@ namespace Benchmarks
                     _wq,
                     _wk,
                     _wv,
+                    ReadOnlySpan<float>.Empty,  // bq
+                    ReadOnlySpan<float>.Empty,  // bk
+                    ReadOnlySpan<float>.Empty,  // bv
                     _wo,
                     _cache,
-                    layerIndex: 0,
-                    headIndex: 0,
-                    position: _position,
+                    0,  // layerIndex
+                    0,  // headIndex
+                    _position,  // position
                     _output);
 
                 checksum += _output[i % _output.Length];

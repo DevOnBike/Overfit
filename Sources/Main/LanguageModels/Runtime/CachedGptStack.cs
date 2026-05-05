@@ -140,6 +140,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             IReadOnlyList<IReadOnlyList<float[]>> wkHeadsByLayer,
             IReadOnlyList<IReadOnlyList<float[]>> wvHeadsByLayer,
             IReadOnlyList<IReadOnlyList<float[]>> woHeadsByLayer,
+            IReadOnlyList<IReadOnlyList<float[]>> bqHeadsByLayer,
+            IReadOnlyList<IReadOnlyList<float[]>> bkHeadsByLayer,
+            IReadOnlyList<IReadOnlyList<float[]>> bvHeadsByLayer,
             IReadOnlyList<float[]> attentionOutputBiases,
             IReadOnlyList<float[]> ln2Gammas,
             IReadOnlyList<float[]> ln2Betas,
@@ -163,6 +166,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 wkHeadsByLayer,
                 wvHeadsByLayer,
                 woHeadsByLayer,
+                bqHeadsByLayer,
+                bkHeadsByLayer,
+                bvHeadsByLayer,
                 attentionOutputBiases,
                 ln2Gammas,
                 ln2Betas,
@@ -195,6 +201,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     wkHeadsByLayer[layer],
                     wvHeadsByLayer[layer],
                     woHeadsByLayer[layer],
+                    bqHeadsByLayer[layer],
+                    bkHeadsByLayer[layer],
+                    bvHeadsByLayer[layer],
                     attentionOutputBiases[layer],
                     ln2Gammas[layer],
                     ln2Betas[layer],
@@ -237,6 +246,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             IReadOnlyList<IReadOnlyList<float[]>> wkHeadsByLayer,
             IReadOnlyList<IReadOnlyList<float[]>> wvHeadsByLayer,
             IReadOnlyList<IReadOnlyList<float[]>> woHeadsByLayer,
+            IReadOnlyList<IReadOnlyList<float[]>> bqHeadsByLayer,
+            IReadOnlyList<IReadOnlyList<float[]>> bkHeadsByLayer,
+            IReadOnlyList<IReadOnlyList<float[]>> bvHeadsByLayer,
             IReadOnlyList<float[]> attentionOutputBiases,
             IReadOnlyList<float[]> ffnW1ByLayer,
             IReadOnlyList<float[]> ffnB1ByLayer,
@@ -259,6 +271,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 wkHeadsByLayer,
                 wvHeadsByLayer,
                 woHeadsByLayer,
+                bqHeadsByLayer,
+                bkHeadsByLayer,
+                bvHeadsByLayer,
                 attentionOutputBiases,
                 emptyDModelByLayer,
                 emptyDModelByLayer,
@@ -266,8 +281,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 ffnB1ByLayer,
                 ffnW2ByLayer,
                 ffnB2ByLayer,
-                finalLayerNormGamma: ReadOnlySpan<float>.Empty,
-                finalLayerNormBeta: ReadOnlySpan<float>.Empty,
+                ReadOnlySpan<float>.Empty,
+                ReadOnlySpan<float>.Empty,
                 lmHeadWeights,
                 lmHeadBias,
                 cache,
@@ -325,6 +340,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             IReadOnlyList<IReadOnlyList<float[]>> wkHeadsByLayer,
             IReadOnlyList<IReadOnlyList<float[]>> wvHeadsByLayer,
             IReadOnlyList<IReadOnlyList<float[]>> woHeadsByLayer,
+            IReadOnlyList<IReadOnlyList<float[]>> bqHeadsByLayer,
+            IReadOnlyList<IReadOnlyList<float[]>> bkHeadsByLayer,
+            IReadOnlyList<IReadOnlyList<float[]>> bvHeadsByLayer,
             IReadOnlyList<float[]> attentionOutputBiases,
             IReadOnlyList<float[]> ln2Gammas,
             IReadOnlyList<float[]> ln2Betas,
@@ -359,6 +377,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ValidateHeadCollection(wkHeadsByLayer, nameof(wkHeadsByLayer));
             ValidateHeadCollection(wvHeadsByLayer, nameof(wvHeadsByLayer));
             ValidateHeadCollection(woHeadsByLayer, nameof(woHeadsByLayer));
+            ValidateHeadCollection(bqHeadsByLayer, nameof(bqHeadsByLayer));
+            ValidateHeadCollection(bkHeadsByLayer, nameof(bkHeadsByLayer));
+            ValidateHeadCollection(bvHeadsByLayer, nameof(bvHeadsByLayer));
 
             for (var layer = 0; layer < LayerCount; layer++)
             {

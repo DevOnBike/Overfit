@@ -100,11 +100,14 @@ namespace Benchmarks
             _wqHeads,
             _wkHeads,
             _wvHeads,
+            Array.Empty<float[]>(),  // bqHeads
+            Array.Empty<float[]>(),  // bkHeads
+            Array.Empty<float[]>(),  // bvHeads
             _woHeads,
             _outputBias,
             _cache,
-            layerIndex: 0,
-            position: _position,
+            0,  // layerIndex
+            _position,  // position
             _output);
         }
 
@@ -120,11 +123,14 @@ namespace Benchmarks
                 _wqHeads,
                 _wkHeads,
                 _wvHeads,
+                Array.Empty<float[]>(),  // bqHeads
+                Array.Empty<float[]>(),  // bkHeads
+                Array.Empty<float[]>(),  // bvHeads
                 _woHeads,
                 _outputBias,
                 _cache,
-                layerIndex: 0,
-                position: _position,
+                0,  // layerIndex
+                _position,  // position
                 _output);
 
                 checksum += _output[i % _output.Length];

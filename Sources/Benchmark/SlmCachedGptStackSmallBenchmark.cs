@@ -57,6 +57,7 @@ namespace Benchmarks
         private IReadOnlyList<float[]>[] _wkHeadsByLayer = null!;
         private IReadOnlyList<float[]>[] _wvHeadsByLayer = null!;
         private IReadOnlyList<float[]>[] _woHeadsByLayer = null!;
+        private IReadOnlyList<float[]>[] _emptyHeadsByLayer = null!;
         private float[][] _attentionOutputBiases = null!;
         private float[][] _ln2Gammas = null!;
         private float[][] _ln2Betas = null!;
@@ -114,6 +115,11 @@ namespace Benchmarks
             _wkHeadsByLayer = CreateHeadsByLayer(LayerCount, HeadCount, DModel * _headDimension, seedBase: 20_000);
             _wvHeadsByLayer = CreateHeadsByLayer(LayerCount, HeadCount, DModel * _headDimension, seedBase: 30_000);
             _woHeadsByLayer = CreateHeadsByLayer(LayerCount, HeadCount, _headDimension * DModel, seedBase: 40_000);
+        // Zero bias arrays for Q/K/V (GPT-1 has no QKV bias)
+        _emptyHeadsByLayer = Enumerable.Range(0, LayerCount)
+            .Select(_ => (IReadOnlyList<float[]>)Enumerable.Range(0, HeadCount)
+                .Select(_ => Array.Empty<float>()).ToArray())
+            .ToArray();
 
             _finalLayerNormGamma = new float[DModel];
             _finalLayerNormBeta = new float[DModel];
@@ -144,6 +150,9 @@ namespace Benchmarks
                 _wkHeadsByLayer,
                 _wvHeadsByLayer,
                 _woHeadsByLayer,
+                _emptyHeadsByLayer,  // bqHeadsByLayer
+                _emptyHeadsByLayer,  // bkHeadsByLayer
+                _emptyHeadsByLayer,  // bvHeadsByLayer
                 _attentionOutputBiases,
                 _ln2Gammas,
                 _ln2Betas,
@@ -175,6 +184,9 @@ namespace Benchmarks
                     _wkHeadsByLayer,
                     _wvHeadsByLayer,
                     _woHeadsByLayer,
+                    _emptyHeadsByLayer,  // bqHeadsByLayer
+                    _emptyHeadsByLayer,  // bkHeadsByLayer
+                    _emptyHeadsByLayer,  // bvHeadsByLayer
                     _attentionOutputBiases,
                     _ln2Gammas,
                     _ln2Betas,

@@ -128,6 +128,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 wkHeadsByLayer: zeroHeads,
                 wvHeadsByLayer: zeroHeads,
                 woHeadsByLayer: zeroHeads,
+                bqHeadsByLayer: zeroHeads,
+                bkHeadsByLayer: zeroHeads,
+                bvHeadsByLayer: zeroHeads,
                 attentionOutputBiases: attentionBiases,
                 ffnW1ByLayer: ffnW1,
                 ffnB1ByLayer: ffnB1,
@@ -136,7 +139,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 lmHeadWeights: lmHeadIdentity,
                 lmHeadBias: ReadOnlySpan<float>.Empty,
                 cache,
-                position: 0,
+                0,  // position
                 logits);
 
             var expected = LayerNorm(new float[] { 1f, -1f }, 1e-5f);
@@ -221,6 +224,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 wkHeadsByLayer: zeroHeads,
                 wvHeadsByLayer: zeroHeads,
                 woHeadsByLayer: zeroHeads,
+                bqHeadsByLayer: zeroHeads,
+                bkHeadsByLayer: zeroHeads,
+                bvHeadsByLayer: zeroHeads,
                 attentionOutputBiases: attentionBiases,
                 ffnW1ByLayer: ffnW1,
                 ffnB1ByLayer: ffnB1,
@@ -229,7 +235,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 lmHeadWeights: lmHeadIdentity,
                 lmHeadBias: ReadOnlySpan<float>.Empty,
                 cache,
-                position: 0,
+                0,  // position
                 logits);
 
             var expected = LayerNorm(new float[] { 2f, -2f }, 1e-5f);
@@ -306,6 +312,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 wkHeadsByLayer: zeroHeads,
                 wvHeadsByLayer: zeroHeads,
                 woHeadsByLayer: zeroHeads,
+                bqHeadsByLayer: zeroHeads,
+                bkHeadsByLayer: zeroHeads,
+                bvHeadsByLayer: zeroHeads,
                 attentionOutputBiases: attentionBiases,
                 ffnW1ByLayer: ffnW1,
                 ffnB1ByLayer: ffnB1,
@@ -314,7 +323,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 lmHeadWeights: lmHeadIdentity,
                 lmHeadBias,
                 cache,
-                position: 0,
+                0,  // position
                 logits);
 
             var expected = LayerNorm(new float[] { 1f, -1f }, 1e-5f);
@@ -390,6 +399,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 wkHeadsByLayer: zeroHeads,
                 wvHeadsByLayer: zeroHeads,
                 woHeadsByLayer: zeroHeads,
+                bqHeadsByLayer: zeroHeads,
+                bkHeadsByLayer: zeroHeads,
+                bvHeadsByLayer: zeroHeads,
                 attentionOutputBiases: attentionBiases,
                 ffnW1ByLayer: ffnW1,
                 ffnB1ByLayer: ffnB1,
@@ -398,7 +410,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 lmHeadWeights: lmHeadIdentity,
                 lmHeadBias: ReadOnlySpan<float>.Empty,
                 cache,
-                position: 0,
+                0,  // position
                 logits);
 
             var finalHidden = new float[2];
@@ -443,6 +455,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     wkHeadsByLayer: zeroHeads,
                     wvHeadsByLayer: zeroHeads,
                     woHeadsByLayer: zeroHeads,
+                    bqHeadsByLayer: zeroHeads,
+                    bkHeadsByLayer: zeroHeads,
+                    bvHeadsByLayer: zeroHeads,
                     attentionOutputBiases: new[] { Array.Empty<float>() },
                     ffnW1ByLayer: new[] { new float[2 * 2] },
                     ffnB1ByLayer: new[] { Array.Empty<float>() },
@@ -451,7 +466,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     lmHeadWeights: new float[2 * 2],
                     lmHeadBias: ReadOnlySpan<float>.Empty,
                     cache,
-                    position: 0,
+                    0,  // position
                     logits: new float[2]));
         }
 
@@ -489,6 +504,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     wkHeadsByLayer: zeroHeads,
                     wvHeadsByLayer: zeroHeads,
                     woHeadsByLayer: zeroHeads,
+                    bqHeadsByLayer: zeroHeads,
+                    bkHeadsByLayer: zeroHeads,
+                    bvHeadsByLayer: zeroHeads,
                     attentionOutputBiases: new[] { Array.Empty<float>() },
                     ffnW1ByLayer: new[] { new float[2 * 2] },
                     ffnB1ByLayer: new[] { Array.Empty<float>() },
@@ -497,7 +515,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     lmHeadWeights: new float[2 * 2],
                     lmHeadBias: ReadOnlySpan<float>.Empty,
                     cache,
-                    position: 0,
+                    0,  // position
                     logits: new float[2]));
 
             Assert.Throws<ArgumentException>(() =>
@@ -507,6 +525,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     wkHeadsByLayer: zeroHeads,
                     wvHeadsByLayer: zeroHeads,
                     woHeadsByLayer: zeroHeads,
+                    bqHeadsByLayer: zeroHeads,
+                    bkHeadsByLayer: zeroHeads,
+                    bvHeadsByLayer: zeroHeads,
                     attentionOutputBiases: new[] { Array.Empty<float>() },
                     ffnW1ByLayer: new[] { new float[1] },
                     ffnB1ByLayer: new[] { Array.Empty<float>() },
@@ -515,7 +536,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     lmHeadWeights: new float[2 * 2],
                     lmHeadBias: ReadOnlySpan<float>.Empty,
                     cache,
-                    position: 0,
+                    0,  // position
                     logits: new float[2]));
 
             Assert.Throws<ArgumentException>(() =>
@@ -525,6 +546,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     wkHeadsByLayer: zeroHeads,
                     wvHeadsByLayer: zeroHeads,
                     woHeadsByLayer: zeroHeads,
+                    bqHeadsByLayer: zeroHeads,
+                    bkHeadsByLayer: zeroHeads,
+                    bvHeadsByLayer: zeroHeads,
                     attentionOutputBiases: new[] { Array.Empty<float>() },
                     ffnW1ByLayer: new[] { new float[2 * 2] },
                     ffnB1ByLayer: new[] { Array.Empty<float>() },
@@ -533,7 +557,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     lmHeadWeights: new float[1],
                     lmHeadBias: ReadOnlySpan<float>.Empty,
                     cache,
-                    position: 0,
+                    0,  // position
                     logits: new float[2]));
 
             Assert.Throws<ArgumentException>(() =>
@@ -543,6 +567,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     wkHeadsByLayer: zeroHeads,
                     wvHeadsByLayer: zeroHeads,
                     woHeadsByLayer: zeroHeads,
+                    bqHeadsByLayer: zeroHeads,
+                    bkHeadsByLayer: zeroHeads,
+                    bvHeadsByLayer: zeroHeads,
                     attentionOutputBiases: new[] { Array.Empty<float>() },
                     ffnW1ByLayer: new[] { new float[2 * 2] },
                     ffnB1ByLayer: new[] { Array.Empty<float>() },
@@ -551,7 +578,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     lmHeadWeights: new float[2 * 2],
                     lmHeadBias: ReadOnlySpan<float>.Empty,
                     cache,
-                    position: 0,
+                    0,  // position
                     logits: new float[1]));
         }
 

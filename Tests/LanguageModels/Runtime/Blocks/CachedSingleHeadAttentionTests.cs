@@ -39,11 +39,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 identity,
                 identity,
                 identity,
+                ReadOnlySpan<float>.Empty,  // bq
+                ReadOnlySpan<float>.Empty,  // bk
+                ReadOnlySpan<float>.Empty,  // bv
                 identity,
                 cache,
-                layerIndex: 0,
-                headIndex: 0,
-                position: 0,
+                0,  // layerIndex
+                0,  // headIndex
+                0,  // position
                 output);
 
             AssertClose(3f, output[0]);
@@ -82,11 +85,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 wq: identity,
                 wk: identity,
                 wv: identity,
+                bq: ReadOnlySpan<float>.Empty,
+                bk: ReadOnlySpan<float>.Empty,
+                bv: ReadOnlySpan<float>.Empty,
                 wo: identity,
                 cache,
-                layerIndex: 0,
-                headIndex: 0,
-                position: 0,
+                0,  // layerIndex
+                0,  // headIndex
+                0,  // position
                 output);
 
             cache.Advance();
@@ -96,11 +102,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 wq: identity,
                 wk: identity,
                 wv: identity,
+                bq: ReadOnlySpan<float>.Empty,
+                bk: ReadOnlySpan<float>.Empty,
+                bv: ReadOnlySpan<float>.Empty,
                 wo: identity,
                 cache,
-                layerIndex: 0,
-                headIndex: 0,
-                position: 1,
+                0,  // layerIndex
+                0,  // headIndex
+                1,  // position
                 output);
 
             var scale = 1f / MathF.Sqrt(2f);
@@ -160,12 +169,15 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 wq: wIn,
                 wk: wIn,
                 wv: wIn,
+                bq: ReadOnlySpan<float>.Empty,
+                bk: ReadOnlySpan<float>.Empty,
+                bv: ReadOnlySpan<float>.Empty,
                 wo,
                 outputBias: bias,
                 cache,
-                layerIndex: 0,
-                headIndex: 0,
-                position: 0,
+                0,  // layerIndex
+                0,  // headIndex
+                0,  // position
                 output);
 
             // Single token attention output == V == [2,3].
@@ -203,11 +215,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 wq: identity,
                 wk: identity,
                 wv: identity,
+                bq: ReadOnlySpan<float>.Empty,
+                bk: ReadOnlySpan<float>.Empty,
+                bv: ReadOnlySpan<float>.Empty,
                 wo: identity,
                 cache,
-                layerIndex: 0,
-                headIndex: 0,
-                position: 0,
+                0,  // layerIndex
+                0,  // headIndex
+                0,  // position
                 output);
 
             var query = new float[2];
@@ -252,11 +267,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     wq: identity,
                     wk: identity,
                     wv: identity,
+                bq: ReadOnlySpan<float>.Empty,
+                bk: ReadOnlySpan<float>.Empty,
+                bv: ReadOnlySpan<float>.Empty,
                     wo: identity,
                     cache,
-                    layerIndex: 0,
-                    headIndex: 0,
-                    position: 0,
+                    0,  // layerIndex
+                    0,  // headIndex
+                    0,  // position
                     output: new float[2]));
         }
 
@@ -288,11 +306,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     wq: identity,
                     wk: identity,
                     wv: identity,
+                bq: ReadOnlySpan<float>.Empty,
+                bk: ReadOnlySpan<float>.Empty,
+                bv: ReadOnlySpan<float>.Empty,
                     wo: identity,
                     cache,
-                    layerIndex: 0,
-                    headIndex: 0,
-                    position: 0,
+                    0,  // layerIndex
+                    0,  // headIndex
+                    0,  // position
                     output: new float[2]));
 
             Assert.Throws<ArgumentException>(() =>
@@ -301,11 +322,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     wq: new float[3],
                     wk: identity,
                     wv: identity,
+                bq: ReadOnlySpan<float>.Empty,
+                bk: ReadOnlySpan<float>.Empty,
+                bv: ReadOnlySpan<float>.Empty,
                     wo: identity,
                     cache,
-                    layerIndex: 0,
-                    headIndex: 0,
-                    position: 0,
+                    0,  // layerIndex
+                    0,  // headIndex
+                    0,  // position
                     output: new float[2]));
 
             Assert.Throws<ArgumentException>(() =>
@@ -314,11 +338,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     wq: identity,
                     wk: identity,
                     wv: identity,
+                bq: ReadOnlySpan<float>.Empty,
+                bk: ReadOnlySpan<float>.Empty,
+                bv: ReadOnlySpan<float>.Empty,
                     wo: identity,
                     cache,
-                    layerIndex: 0,
-                    headIndex: 0,
-                    position: 0,
+                    0,  // layerIndex
+                    0,  // headIndex
+                    0,  // position
                     output: new float[1]));
         }
 

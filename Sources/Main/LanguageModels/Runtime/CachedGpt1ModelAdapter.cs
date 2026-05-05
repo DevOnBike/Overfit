@@ -48,6 +48,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly IReadOnlyList<float[]>[] _wkHeadsByLayer;
         private readonly IReadOnlyList<float[]>[] _wvHeadsByLayer;
         private readonly IReadOnlyList<float[]>[] _woHeadsByLayer;
+        private readonly IReadOnlyList<float[]>[] _bqHeadsByLayer;
+        private readonly IReadOnlyList<float[]>[] _bkHeadsByLayer;
+        private readonly IReadOnlyList<float[]>[] _bvHeadsByLayer;
         private readonly float[][] _attentionOutputBiases;
         private readonly float[][] _ln2Gammas;
         private readonly float[][] _ln2Betas;
@@ -132,6 +135,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 HeadCount,
                 HeadDimension * DModel);
 
+            // Q/K/V bias per head — zero for GPT-1, loaded from GPT-2 c_attn.bias
+            _bqHeadsByLayer = CreateHeadsByLayer(LayerCount, HeadCount, HeadDimension);
+            _bkHeadsByLayer = CreateHeadsByLayer(LayerCount, HeadCount, HeadDimension);
+            _bvHeadsByLayer = CreateHeadsByLayer(LayerCount, HeadCount, HeadDimension);
+
             _finalLayerNormGamma = new float[DModel];
             _finalLayerNormBeta = new float[DModel];
             _lmHeadWeights = new float[DModel * VocabSize];
@@ -185,6 +193,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     Copy(block.Attention.WkHeads[head].DataReadOnlySpan, ((float[][])_wkHeadsByLayer[layer])[head]);
                     Copy(block.Attention.WvHeads[head].DataReadOnlySpan, ((float[][])_wvHeadsByLayer[layer])[head]);
                     Copy(block.Attention.WoHeads[head].DataReadOnlySpan, ((float[][])_woHeadsByLayer[layer])[head]);
+                    // Copy Q/K/V bias (zero for GPT-1, non-zero for GPT-2)
+                    Copy(block.Attention.BqHeads[head].DataReadOnlySpan, ((float[][])_bqHeadsByLayer[layer])[head]);
+                    Copy(block.Attention.BkHeads[head].DataReadOnlySpan, ((float[][])_bkHeadsByLayer[layer])[head]);
+                    Copy(block.Attention.BvHeads[head].DataReadOnlySpan, ((float[][])_bvHeadsByLayer[layer])[head]);
                 }
 
                 Copy(block.Attention.Bo.DataReadOnlySpan, _attentionOutputBiases[layer]);
@@ -253,6 +265,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 _wkHeadsByLayer,
                 _wvHeadsByLayer,
                 _woHeadsByLayer,
+                _bqHeadsByLayer,
+                _bkHeadsByLayer,
+                _bvHeadsByLayer,
                 _attentionOutputBiases,
                 _ln2Gammas,
                 _ln2Betas,

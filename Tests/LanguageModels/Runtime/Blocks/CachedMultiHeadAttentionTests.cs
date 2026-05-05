@@ -81,10 +81,13 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 wqHeads: heads,
                 wkHeads: heads,
                 wvHeads: heads,
+                bqHeads: Array.Empty<float[]>(),
+                bkHeads: Array.Empty<float[]>(),
+                bvHeads: Array.Empty<float[]>(),
                 woHeads: heads,
                 cache,
-                layerIndex: 0,
-                position: 0,
+                0,  // layerIndex
+                0,  // position
                 output);
 
             AssertClose(3f, output[0]);
@@ -148,11 +151,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 wqHeads: wq,
                 wkHeads: wk,
                 wvHeads: wv,
+                bqHeads: Array.Empty<float[]>(),
+                bkHeads: Array.Empty<float[]>(),
+                bvHeads: Array.Empty<float[]>(),
                 woHeads: wo,
                 outputBias,
                 cache,
-                layerIndex: 0,
-                position: 0,
+                0,  // layerIndex
+                0,  // position
                 output);
 
             AssertClose(11f, output[0]);
@@ -217,10 +223,13 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 wq,
                 wk,
                 wv,
+                Array.Empty<float[]>(),  // bqHeads
+                Array.Empty<float[]>(),  // bkHeads
+                Array.Empty<float[]>(),  // bvHeads
                 wo,
                 cache,
-                layerIndex: 0,
-                position: 0,
+                0,  // layerIndex
+                0,  // position
                 output);
 
             cache.Advance();
@@ -230,10 +239,13 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 wq,
                 wk,
                 wv,
+                Array.Empty<float[]>(),  // bqHeads
+                Array.Empty<float[]>(),  // bkHeads
+                Array.Empty<float[]>(),  // bvHeads
                 wo,
                 cache,
-                layerIndex: 0,
-                position: 1,
+                0,  // layerIndex
+                1,  // position
                 output);
 
             var scale = 1f / MathF.Sqrt(2f);
@@ -306,11 +318,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 wq,
                 wk,
                 wv,
+                Array.Empty<float[]>(),  // bqHeads
+                Array.Empty<float[]>(),  // bkHeads
+                Array.Empty<float[]>(),  // bvHeads
                 wo,
                 cache,
-                layerIndex: 0,
-                position: 0,
-                output: new float[4]);
+                0,  // layerIndex
+                0,  // position
+                new float[4]);  // output;
 
             Assert.Equal(new float[] { 7f, 8f }, cache.GetKeyReadSpan(0, 0, 0, 1).ToArray());
             Assert.Equal(new float[] { 7f, 8f }, cache.GetValueReadSpan(0, 0, 0, 1).ToArray());
@@ -346,10 +361,13 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     wqHeads: heads,
                     wkHeads: heads,
                     wvHeads: heads,
+                    bqHeads: [],
+                    bkHeads: [],
+                    bvHeads: [],
                     woHeads: heads,
                     cache,
-                    layerIndex: 0,
-                    position: 0,
+                    0,  // layerIndex
+                    0,  // position
                     output: new float[2]));
         }
 
@@ -386,11 +404,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     wqHeads: oneHead,
                     wkHeads: oneHead,
                     wvHeads: oneHead,
+                    bqHeads: [],
+                    bkHeads: [],
+                    bvHeads: [],
                     woHeads: oneHead,
                     cache,
-                    layerIndex: 0,
-                    position: 0,
-                    output: new float[4]));
+                    0,  // layerIndex
+                    0,  // position
+                    new float[4]));  // output);
         }
 
         [Fact]

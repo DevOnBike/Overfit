@@ -108,15 +108,18 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 wqHeads: zeroHeadWeights,
                 wkHeads: zeroHeadWeights,
                 wvHeads: zeroHeadWeights,
+                bqHeads: Array.Empty<float[]>(),
+                bkHeads: Array.Empty<float[]>(),
+                bvHeads: Array.Empty<float[]>(),
                 woHeads: zeroHeadWeights,
-                attentionOutputBias: ReadOnlySpan<float>.Empty,
+                ReadOnlySpan<float>.Empty,  // attentionOutputBias,
                 ffnW1,
-                ffnB1: ReadOnlySpan<float>.Empty,
+                ReadOnlySpan<float>.Empty,
                 ffnW2,
-                ffnB2: ReadOnlySpan<float>.Empty,
+                ReadOnlySpan<float>.Empty,
                 cache,
-                layerIndex: 0,
-                position: 0,
+                0,  // layerIndex
+                0,  // position
                 output);
 
             AssertClose(3f, output[0]);
@@ -160,14 +163,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 heads,
                 heads,
                 heads,
-                attentionOutputBias: ReadOnlySpan<float>.Empty,
+                ReadOnlySpan<float>.Empty,  // attentionOutputBias,
                 ffnW1,
-                ffnB1: ReadOnlySpan<float>.Empty,
+                ReadOnlySpan<float>.Empty,
                 ffnW2,
-                ffnB2: ReadOnlySpan<float>.Empty,
+                ReadOnlySpan<float>.Empty,
                 cache,
-                layerIndex: 0,
-                position: 0,
+                0,  // layerIndex
+                0,  // position
                 output);
 
             var ln1 = LayerNorm(input, epsilon: 1e-5f);
@@ -214,14 +217,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 zeroHeadWeights,
                 zeroHeadWeights,
                 zeroHeadWeights,
-                attentionOutputBias: ReadOnlySpan<float>.Empty,
-                ffnW1: identity,
-                ffnB1: ReadOnlySpan<float>.Empty,
-                ffnW2: identity,
-                ffnB2: ReadOnlySpan<float>.Empty,
+                ReadOnlySpan<float>.Empty,  // attentionOutputBias,
+                identity,
+                ReadOnlySpan<float>.Empty,
+                identity,
+                ReadOnlySpan<float>.Empty,
                 cache,
-                layerIndex: 0,
-                position: 0,
+                0,  // layerIndex
+                0,  // position
                 output);
 
             var ln2 = LayerNorm(input, epsilon: 1e-5f);
@@ -265,14 +268,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 heads,
                 heads,
                 heads,
-                attentionOutputBias: ReadOnlySpan<float>.Empty,
+                ReadOnlySpan<float>.Empty,  // attentionOutputBias,
                 ffnW1,
-                ffnB1: ReadOnlySpan<float>.Empty,
+                ReadOnlySpan<float>.Empty,
                 ffnW2,
-                ffnB2: ReadOnlySpan<float>.Empty,
+                ReadOnlySpan<float>.Empty,
                 cache,
-                layerIndex: 0,
-                position: 0,
+                0,  // layerIndex
+                0,  // position
                 output: new float[2]);
 
             var ln1 = LayerNorm(input, epsilon: 1e-5f);
@@ -317,15 +320,18 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 wqHeads: zeroHeadWeights,
                 wkHeads: zeroHeadWeights,
                 wvHeads: zeroHeadWeights,
+                bqHeads: Array.Empty<float[]>(),
+                bkHeads: Array.Empty<float[]>(),
+                bvHeads: Array.Empty<float[]>(),
                 woHeads: zeroHeadWeights,
-                attentionOutputBias: ReadOnlySpan<float>.Empty,
+                ReadOnlySpan<float>.Empty,  // attentionOutputBias,
                 ffnW1,
-                ffnB1: ReadOnlySpan<float>.Empty,
+                ReadOnlySpan<float>.Empty,
                 ffnW2,
-                ffnB2: ReadOnlySpan<float>.Empty,
+                ReadOnlySpan<float>.Empty,
                 cache,
-                layerIndex: 0,
-                position: 0,
+                0,  // layerIndex
+                0,  // position
                 output: new float[2]);
 
             var ln1 = new float[2];
@@ -373,15 +379,18 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     wqHeads: zeroHeadWeights,
                     wkHeads: zeroHeadWeights,
                     wvHeads: zeroHeadWeights,
+                    bqHeads: [],
+                    bkHeads: [],
+                    bvHeads: [],
                     woHeads: zeroHeadWeights,
-                    attentionOutputBias: ReadOnlySpan<float>.Empty,
-                    ffnW1: new float[2 * 2],
-                    ffnB1: ReadOnlySpan<float>.Empty,
-                    ffnW2: new float[2 * 2],
-                    ffnB2: ReadOnlySpan<float>.Empty,
+                    ReadOnlySpan<float>.Empty,  // attentionOutputBias,
+                    new float[2 * 2],
+                    ReadOnlySpan<float>.Empty,
+                    new float[2 * 2],
+                    ReadOnlySpan<float>.Empty,
                     cache,
-                    layerIndex: 0,
-                    position: 0,
+                    0,  // layerIndex
+                    0,  // position
                     output: new float[2]));
         }
 
@@ -413,15 +422,18 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     wqHeads: zeroHeadWeights,
                     wkHeads: zeroHeadWeights,
                     wvHeads: zeroHeadWeights,
+                    bqHeads: [],
+                    bkHeads: [],
+                    bvHeads: [],
                     woHeads: zeroHeadWeights,
-                    attentionOutputBias: ReadOnlySpan<float>.Empty,
-                    ffnW1: new float[2 * 2],
-                    ffnB1: ReadOnlySpan<float>.Empty,
-                    ffnW2: new float[2 * 2],
-                    ffnB2: ReadOnlySpan<float>.Empty,
+                    ReadOnlySpan<float>.Empty,  // attentionOutputBias,
+                    new float[2 * 2],
+                    ReadOnlySpan<float>.Empty,
+                    new float[2 * 2],
+                    ReadOnlySpan<float>.Empty,
                     cache,
-                    layerIndex: 0,
-                    position: 0,
+                    0,  // layerIndex
+                    0,  // position
                     output: new float[2]));
 
             Assert.Throws<ArgumentException>(() =>
@@ -430,15 +442,18 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     wqHeads: zeroHeadWeights,
                     wkHeads: zeroHeadWeights,
                     wvHeads: zeroHeadWeights,
+                    bqHeads: [],
+                    bkHeads: [],
+                    bvHeads: [],
                     woHeads: zeroHeadWeights,
-                    attentionOutputBias: ReadOnlySpan<float>.Empty,
-                    ffnW1: new float[1],
-                    ffnB1: ReadOnlySpan<float>.Empty,
-                    ffnW2: new float[2 * 2],
-                    ffnB2: ReadOnlySpan<float>.Empty,
+                    ReadOnlySpan<float>.Empty,  // attentionOutputBias,
+                    new float[1],
+                    ReadOnlySpan<float>.Empty,
+                    new float[2 * 2],
+                    ReadOnlySpan<float>.Empty,
                     cache,
-                    layerIndex: 0,
-                    position: 0,
+                    0,  // layerIndex
+                    0,  // position
                     output: new float[2]));
 
             Assert.Throws<ArgumentException>(() =>
@@ -447,15 +462,18 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     wqHeads: zeroHeadWeights,
                     wkHeads: zeroHeadWeights,
                     wvHeads: zeroHeadWeights,
+                    bqHeads: [],
+                    bkHeads: [],
+                    bvHeads: [],
                     woHeads: zeroHeadWeights,
-                    attentionOutputBias: ReadOnlySpan<float>.Empty,
-                    ffnW1: new float[2 * 2],
-                    ffnB1: ReadOnlySpan<float>.Empty,
-                    ffnW2: new float[1],
-                    ffnB2: ReadOnlySpan<float>.Empty,
+                    ReadOnlySpan<float>.Empty,  // attentionOutputBias,
+                    new float[2 * 2],
+                    ReadOnlySpan<float>.Empty,
+                    new float[1],
+                    ReadOnlySpan<float>.Empty,
                     cache,
-                    layerIndex: 0,
-                    position: 0,
+                    0,  // layerIndex
+                    0,  // position
                     output: new float[2]));
 
             Assert.Throws<ArgumentException>(() =>
@@ -464,15 +482,18 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     wqHeads: zeroHeadWeights,
                     wkHeads: zeroHeadWeights,
                     wvHeads: zeroHeadWeights,
+                    bqHeads: [],
+                    bkHeads: [],
+                    bvHeads: [],
                     woHeads: zeroHeadWeights,
-                    attentionOutputBias: ReadOnlySpan<float>.Empty,
-                    ffnW1: new float[2 * 2],
-                    ffnB1: ReadOnlySpan<float>.Empty,
-                    ffnW2: new float[2 * 2],
-                    ffnB2: ReadOnlySpan<float>.Empty,
+                    ReadOnlySpan<float>.Empty,  // attentionOutputBias,
+                    new float[2 * 2],
+                    ReadOnlySpan<float>.Empty,
+                    new float[2 * 2],
+                    ReadOnlySpan<float>.Empty,
                     cache,
-                    layerIndex: 0,
-                    position: 0,
+                    0,  // layerIndex
+                    0,  // position
                     output: new float[1]));
         }
 

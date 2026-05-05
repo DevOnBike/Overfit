@@ -88,6 +88,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ReadOnlySpan<float> wq,
             ReadOnlySpan<float> wk,
             ReadOnlySpan<float> wv,
+            ReadOnlySpan<float> bq,
+            ReadOnlySpan<float> bk,
+            ReadOnlySpan<float> bv,
             ReadOnlySpan<float> wo,
             ReadOnlySpan<float> outputBias,
             KeyValueCache cache,
@@ -109,23 +112,26 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 position,
                 output);
 
-            SingleTokenProjectionKernel.ProjectWithoutBias(
+            SingleTokenProjectionKernel.Project(
                 hidden,
                 wq,
+                bq,
                 _query,
                 DModel,
                 HeadDimension);
 
-            SingleTokenProjectionKernel.ProjectWithoutBias(
+            SingleTokenProjectionKernel.Project(
                 hidden,
                 wk,
+                bk,
                 _key,
                 DModel,
                 HeadDimension);
 
-            SingleTokenProjectionKernel.ProjectWithoutBias(
+            SingleTokenProjectionKernel.Project(
                 hidden,
                 wv,
+                bv,
                 _value,
                 DModel,
                 HeadDimension);
@@ -176,6 +182,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ReadOnlySpan<float> wq,
             ReadOnlySpan<float> wk,
             ReadOnlySpan<float> wv,
+            ReadOnlySpan<float> bq,
+            ReadOnlySpan<float> bk,
+            ReadOnlySpan<float> bv,
             ReadOnlySpan<float> wo,
             KeyValueCache cache,
             int layerIndex,
@@ -188,6 +197,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 wq,
                 wk,
                 wv,
+                bq,
+                bk,
+                bv,
                 wo,
                 ReadOnlySpan<float>.Empty,
                 cache,
