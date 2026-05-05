@@ -76,36 +76,36 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             switch (options.Strategy)
             {
                 case SamplingStrategy.TopK when options.TopK > 0 && options.TopK < logits.Length:
-                {
-                    var count = SelectTopK(logits, options.TopK, temperature, indexScratch, scoreScratch);
-                    return SampleFromPreparedScores(indexScratch[..count], scoreScratch[..count], random);
-                }
-
-                case SamplingStrategy.TopP when options.TopP < 1f:
-                {
-                    var count = SelectTopP(logits, options.TopP, temperature, indexScratch, scoreScratch);
-                    return SampleFromPreparedScores(indexScratch[..count], scoreScratch[..count], random);
-                }
-
-                case SamplingStrategy.TopKTopP:
-                {
-                    // Apply top-k first, then nucleus on the survivors
-                    var k = options.TopK > 0 && options.TopK < logits.Length
-                        ? options.TopK
-                        : logits.Length;
-
-                    var afterK = SelectTopK(logits, k, temperature, indexScratch, scoreScratch);
-
-                    if (options.TopP < 1f)
                     {
-                        var afterP = NucleusFromSorted(
-                            indexScratch[..afterK], scoreScratch[..afterK], options.TopP);
-                        return SampleFromPreparedScores(
-                            indexScratch[..afterP], scoreScratch[..afterP], random);
+                        var count = SelectTopK(logits, options.TopK, temperature, indexScratch, scoreScratch);
+                        return SampleFromPreparedScores(indexScratch[..count], scoreScratch[..count], random);
                     }
 
-                    return SampleFromPreparedScores(indexScratch[..afterK], scoreScratch[..afterK], random);
-                }
+                case SamplingStrategy.TopP when options.TopP < 1f:
+                    {
+                        var count = SelectTopP(logits, options.TopP, temperature, indexScratch, scoreScratch);
+                        return SampleFromPreparedScores(indexScratch[..count], scoreScratch[..count], random);
+                    }
+
+                case SamplingStrategy.TopKTopP:
+                    {
+                        // Apply top-k first, then nucleus on the survivors
+                        var k = options.TopK > 0 && options.TopK < logits.Length
+                            ? options.TopK
+                            : logits.Length;
+
+                        var afterK = SelectTopK(logits, k, temperature, indexScratch, scoreScratch);
+
+                        if (options.TopP < 1f)
+                        {
+                            var afterP = NucleusFromSorted(
+                                indexScratch[..afterK], scoreScratch[..afterK], options.TopP);
+                            return SampleFromPreparedScores(
+                                indexScratch[..afterP], scoreScratch[..afterP], random);
+                        }
+
+                        return SampleFromPreparedScores(indexScratch[..afterK], scoreScratch[..afterK], random);
+                    }
 
                 default:
                     // Temperature-only or fallback
@@ -244,8 +244,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private static void Heapify(Span<int> idx, Span<float> sc, int n, int root)
         {
             var largest = root;
-            var left    = 2 * root + 1;
-            var right   = 2 * root + 2;
+            var left = 2 * root + 1;
+            var right = 2 * root + 2;
 
             if (left < n && sc[left] > sc[largest])
             {
@@ -266,7 +266,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private static void Swap(Span<int> idx, Span<float> sc, int a, int b)
         {
             (idx[a], idx[b]) = (idx[b], idx[a]);
-            (sc[a],  sc[b])  = (sc[b],  sc[a]);
+            (sc[a], sc[b]) = (sc[b], sc[a]);
         }
 
         // ── Existing helpers (unchanged) ──────────────────────────────────────
@@ -368,7 +368,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 return tokenIndexes[0];
             }
 
-            var sample     = random.NextDouble() * sum;
+            var sample = random.NextDouble() * sum;
             var cumulative = 0.0;
 
             for (var i = 0; i < scores.Length; i++)
