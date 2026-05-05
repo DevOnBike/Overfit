@@ -62,7 +62,7 @@ namespace DevOnBike.Overfit.Tests.TestSupport.GradientChecking
             {
                 if (!param.RequiresGrad)
                 {
-                    analyticalGradients.Add(Array.Empty<float>());
+                    analyticalGradients.Add([]);
                     continue;
                 }
 

@@ -278,7 +278,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 _finalLayerNormGamma,
                 _finalLayerNormBeta,
                 _lmHeadWeights,
-                lmHeadBias: ReadOnlySpan<float>.Empty,
+                lmHeadBias: [],
                 _cache,
                 position,
                 logits);

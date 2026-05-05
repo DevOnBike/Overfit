@@ -316,7 +316,7 @@ namespace DevOnBike.Overfit.Onnx
             var dims = new List<long>();
             var dataType = OnnxDataType.Undefined;
             var name = "";
-            byte[] rawData = Array.Empty<byte>();
+            byte[] rawData = [];
             float[]? floatData = null;
             long[]? int64Data = null;
             var externalEntries = new Dictionary<string, string>();
@@ -349,7 +349,7 @@ namespace DevOnBike.Overfit.Onnx
                         else
                         {
                             // unpacked
-                            floatData ??= Array.Empty<float>();
+                            floatData ??= [];
                             var newArr = new float[floatData.Length + 1];
                             floatData.CopyTo(newArr, 0);
                             newArr[^1] = reader.ReadFloat();
@@ -363,7 +363,7 @@ namespace DevOnBike.Overfit.Onnx
                         }
                         else
                         {
-                            int64Data ??= Array.Empty<long>();
+                            int64Data ??= [];
                             var newArr = new long[int64Data.Length + 1];
                             int64Data.CopyTo(newArr, 0);
                             newArr[^1] = reader.ReadInt64();
@@ -458,7 +458,7 @@ namespace DevOnBike.Overfit.Onnx
 
             var name = "";
             var dataType = OnnxDataType.Undefined;
-            long?[] shape = Array.Empty<long?>();
+            long?[] shape = [];
 
             while (!reader.IsEnd)
             {
@@ -488,7 +488,7 @@ namespace DevOnBike.Overfit.Onnx
         private static (OnnxDataType, long?[]) ParseTypeProto(ref ProtoReader reader)
         {
             var dataType = OnnxDataType.Undefined;
-            long?[] shape = Array.Empty<long?>();
+            long?[] shape = [];
 
             while (!reader.IsEnd)
             {

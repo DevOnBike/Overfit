@@ -233,8 +233,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             Decode(
                 input,
-                ReadOnlySpan<float>.Empty,
-                ReadOnlySpan<float>.Empty,
+                [],
+                [],
                 wqHeads,
                 wkHeads,
                 wvHeads,
@@ -243,8 +243,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 bvHeads,
                 woHeads,
                 attentionOutputBias,
-                ReadOnlySpan<float>.Empty,
-                ReadOnlySpan<float>.Empty,
+                [],
+                [],
                 ffnW1,
                 ffnB1,
                 ffnW2,

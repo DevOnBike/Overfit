@@ -63,7 +63,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
                 new SumEvaluator(),
                 () => new Scratch());
 
-            evaluator.Evaluate(ReadOnlySpan<float>.Empty, Span<float>.Empty, populationSize: 0, parameterCount: 4);
+            evaluator.Evaluate([], [], populationSize: 0, parameterCount: 4);
             // Nothing to assert — the test passes if no exception is thrown.
         }
 

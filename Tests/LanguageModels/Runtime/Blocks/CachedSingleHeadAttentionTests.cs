@@ -39,9 +39,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 identity,
                 identity,
                 identity,
-                ReadOnlySpan<float>.Empty,  // bq
-                ReadOnlySpan<float>.Empty,  // bk
-                ReadOnlySpan<float>.Empty,  // bv
+                [],  // bq
+                [],  // bk
+                [],  // bv
                 identity,
                 cache,
                 0,  // layerIndex
@@ -85,9 +85,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 wq: identity,
                 wk: identity,
                 wv: identity,
-                bq: ReadOnlySpan<float>.Empty,
-                bk: ReadOnlySpan<float>.Empty,
-                bv: ReadOnlySpan<float>.Empty,
+                bq: [],
+                bk: [],
+                bv: [],
                 wo: identity,
                 cache,
                 0,  // layerIndex
@@ -102,9 +102,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 wq: identity,
                 wk: identity,
                 wv: identity,
-                bq: ReadOnlySpan<float>.Empty,
-                bk: ReadOnlySpan<float>.Empty,
-                bv: ReadOnlySpan<float>.Empty,
+                bq: [],
+                bk: [],
+                bv: [],
                 wo: identity,
                 cache,
                 0,  // layerIndex
@@ -169,9 +169,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 wq: wIn,
                 wk: wIn,
                 wv: wIn,
-                bq: ReadOnlySpan<float>.Empty,
-                bk: ReadOnlySpan<float>.Empty,
-                bv: ReadOnlySpan<float>.Empty,
+                bq: [],
+                bk: [],
+                bv: [],
                 wo,
                 outputBias: bias,
                 cache,
@@ -215,9 +215,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 wq: identity,
                 wk: identity,
                 wv: identity,
-                bq: ReadOnlySpan<float>.Empty,
-                bk: ReadOnlySpan<float>.Empty,
-                bv: ReadOnlySpan<float>.Empty,
+                bq: [],
+                bk: [],
+                bv: [],
                 wo: identity,
                 cache,
                 0,  // layerIndex
@@ -267,9 +267,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     wq: identity,
                     wk: identity,
                     wv: identity,
-                bq: ReadOnlySpan<float>.Empty,
-                bk: ReadOnlySpan<float>.Empty,
-                bv: ReadOnlySpan<float>.Empty,
+                bq: [],
+                bk: [],
+                bv: [],
                     wo: identity,
                     cache,
                     0,  // layerIndex
@@ -306,9 +306,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     wq: identity,
                     wk: identity,
                     wv: identity,
-                bq: ReadOnlySpan<float>.Empty,
-                bk: ReadOnlySpan<float>.Empty,
-                bv: ReadOnlySpan<float>.Empty,
+                bq: [],
+                bk: [],
+                bv: [],
                     wo: identity,
                     cache,
                     0,  // layerIndex
@@ -322,9 +322,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     wq: new float[3],
                     wk: identity,
                     wv: identity,
-                bq: ReadOnlySpan<float>.Empty,
-                bk: ReadOnlySpan<float>.Empty,
-                bv: ReadOnlySpan<float>.Empty,
+                bq: [],
+                bk: [],
+                bv: [],
                     wo: identity,
                     cache,
                     0,  // layerIndex
@@ -338,9 +338,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     wq: identity,
                     wk: identity,
                     wv: identity,
-                bq: ReadOnlySpan<float>.Empty,
-                bk: ReadOnlySpan<float>.Empty,
-                bv: ReadOnlySpan<float>.Empty,
+                bq: [],
+                bk: [],
+                bv: [],
                     wo: identity,
                     cache,
                     0,  // layerIndex

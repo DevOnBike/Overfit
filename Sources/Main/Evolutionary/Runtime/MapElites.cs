@@ -241,7 +241,7 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
             ThrowIfDisposed();
             if (!_hasBestElite || _bestEliteCellIndex < 0)
             {
-                return ReadOnlySpan<float>.Empty;
+                return [];
             }
             return _archive.GetParameters(_bestEliteCellIndex);
         }

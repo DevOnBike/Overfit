@@ -90,9 +90,9 @@ namespace Benchmarks
                 _wq,
                 _wk,
                 _wv,
-                ReadOnlySpan<float>.Empty,  // bq
-                ReadOnlySpan<float>.Empty,  // bk
-                ReadOnlySpan<float>.Empty,  // bv
+                [],  // bq
+                [],  // bk
+                [],  // bv
                 _wo,
                 _cache,
                 0,  // layerIndex
@@ -113,9 +113,9 @@ namespace Benchmarks
                     _wq,
                     _wk,
                     _wv,
-                    ReadOnlySpan<float>.Empty,  // bq
-                    ReadOnlySpan<float>.Empty,  // bk
-                    ReadOnlySpan<float>.Empty,  // bv
+                    [],  // bq
+                    [],  // bk
+                    [],  // bv
                     _wo,
                     _cache,
                     0,  // layerIndex

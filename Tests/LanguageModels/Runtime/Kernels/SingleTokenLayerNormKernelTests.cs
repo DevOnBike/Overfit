@@ -67,7 +67,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Kernels
             SingleTokenLayerNormKernel.Normalize(
                 input,
                 gamma,
-                beta: ReadOnlySpan<float>.Empty,
+                beta: [],
                 output,
                 size: 2,
                 epsilon: 1e-5f);
@@ -89,7 +89,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Kernels
 
             SingleTokenLayerNormKernel.Normalize(
                 input,
-                gamma: ReadOnlySpan<float>.Empty,
+                gamma: [],
                 beta,
                 output,
                 size: 2,

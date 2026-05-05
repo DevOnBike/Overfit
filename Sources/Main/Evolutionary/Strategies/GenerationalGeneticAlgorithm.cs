@@ -221,7 +221,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
             if (!_hasFitness)
             {
-                return ReadOnlySpan<float>.Empty;
+                return [];
             }
 
             return _bestParameters;

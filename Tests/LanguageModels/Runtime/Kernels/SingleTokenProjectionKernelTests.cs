@@ -187,7 +187,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Kernels
                 SingleTokenProjectionKernel.Project(
                     input: new float[1],
                     weightsInputOutput: new float[1],
-                    bias: Array.Empty<float>(),
+                    bias: [],
                     output: new float[1],
                     inputSize: 0,
                     outputSize: 1));
@@ -196,7 +196,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Kernels
                 SingleTokenProjectionKernel.Project(
                     input: new float[1],
                     weightsInputOutput: new float[1],
-                    bias: Array.Empty<float>(),
+                    bias: [],
                     output: new float[1],
                     inputSize: 1,
                     outputSize: 0));
@@ -205,7 +205,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Kernels
                 SingleTokenProjectionKernel.Project(
                     input: new float[0],
                     weightsInputOutput: new float[1],
-                    bias: Array.Empty<float>(),
+                    bias: [],
                     output: new float[1],
                     inputSize: 1,
                     outputSize: 1));
@@ -214,7 +214,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Kernels
                 SingleTokenProjectionKernel.Project(
                     input: new float[1],
                     weightsInputOutput: new float[0],
-                    bias: Array.Empty<float>(),
+                    bias: [],
                     output: new float[1],
                     inputSize: 1,
                     outputSize: 1));
@@ -254,7 +254,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Kernels
                 SingleTokenProjectionKernel.ProjectSlice(
                     input: new float[1],
                     weightsInputOutput: new float[1],
-                    bias: Array.Empty<float>(),
+                    bias: [],
                     output: new float[1],
                     inputSize: 1,
                     fullOutputSize: 2,
@@ -265,7 +265,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Kernels
                 SingleTokenProjectionKernel.ProjectSlice(
                     input: new float[1],
                     weightsInputOutput: new float[2],
-                    bias: Array.Empty<float>(),
+                    bias: [],
                     output: new float[1],
                     inputSize: 1,
                     fullOutputSize: 2,

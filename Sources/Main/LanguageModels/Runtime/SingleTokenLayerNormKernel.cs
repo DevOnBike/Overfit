@@ -114,8 +114,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             Normalize(
                 input,
-                ReadOnlySpan<float>.Empty,
-                ReadOnlySpan<float>.Empty,
+                [],
+                [],
                 output,
                 size,
                 epsilon);

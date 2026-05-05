@@ -405,20 +405,20 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             public string Prompt { get; set; } = string.Empty;
 
             [JsonPropertyName("tokens")]
-            public int[] Tokens { get; set; } = Array.Empty<int>();
+            public int[] Tokens { get; set; } = [];
 
             [JsonPropertyName("vocab_size")]
             public int VocabSize { get; set; }
 
             [JsonPropertyName("stage_shape")]
-            public int[] StageShape { get; set; } = Array.Empty<int>();
+            public int[] StageShape { get; set; } = [];
 
             [JsonPropertyName("stages")]
             public Dictionary<string, float[]> Stages { get; set; } = new(
                 StringComparer.Ordinal);
 
             [JsonPropertyName("logits")]
-            public float[] Logits { get; set; } = Array.Empty<float>();
+            public float[] Logits { get; set; } = [];
         }
     }
 }

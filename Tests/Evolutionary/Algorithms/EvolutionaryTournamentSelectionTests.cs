@@ -21,7 +21,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
         {
             var op = new TournamentSelectionOperator(tournamentSize: 3);
 
-            Assert.Throws<ArgumentException>(() => op.SelectParent(ReadOnlySpan<int>.Empty, new Random(1)));
+            Assert.Throws<ArgumentException>(() => op.SelectParent([], new Random(1)));
         }
 
         [Fact]

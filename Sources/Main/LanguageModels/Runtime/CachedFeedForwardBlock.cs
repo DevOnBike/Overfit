@@ -103,9 +103,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Decode(
                 hidden,
                 w1,
-                ReadOnlySpan<float>.Empty,
+                [],
                 w2,
-                ReadOnlySpan<float>.Empty,
+                [],
                 output);
         }
 

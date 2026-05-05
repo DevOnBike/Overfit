@@ -88,7 +88,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Project(
                 input,
                 weightsInputOutput,
-                ReadOnlySpan<float>.Empty,
+                [],
                 output,
                 inputSize,
                 outputSize);

@@ -13,10 +13,10 @@ namespace DevOnBike.Overfit.Onnx.Schema
     {
         public string Name { get; init; } = "";
         public OnnxDataType DataType { get; init; }
-        public long[] Dims { get; init; } = Array.Empty<long>();
+        public long[] Dims { get; init; } = [];
 
         /// <summary>Raw little-endian bytes. Populated after ResolveExternalData.</summary>
-        public byte[] RawData { get; init; } = Array.Empty<byte>();
+        public byte[] RawData { get; init; } = [];
 
         /// <summary>Float data when stored unpacked in the protobuf (alternative to RawData).</summary>
         public float[]? FloatData { get; init; }

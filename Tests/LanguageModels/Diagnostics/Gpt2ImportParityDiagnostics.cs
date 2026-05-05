@@ -340,7 +340,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             public string Prompt { get; set; } = string.Empty;
 
             [JsonPropertyName("tokens")]
-            public int[] Tokens { get; set; } = Array.Empty<int>();
+            public int[] Tokens { get; set; } = [];
 
             [JsonPropertyName("vocab_size")]
             public int VocabSize { get; set; }
@@ -352,10 +352,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             public string NextTokenText { get; set; } = string.Empty;
 
             [JsonPropertyName("top_logits")]
-            public TopLogit[] TopLogits { get; set; } = Array.Empty<TopLogit>();
+            public TopLogit[] TopLogits { get; set; } = [];
 
             [JsonPropertyName("logits")]
-            public float[] Logits { get; set; } = Array.Empty<float>();
+            public float[] Logits { get; set; } = [];
         }
 
         private sealed class TopLogit

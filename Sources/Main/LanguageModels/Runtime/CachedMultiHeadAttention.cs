@@ -175,7 +175,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 bkHeads,
                 bvHeads,
                 woHeads,
-                ReadOnlySpan<float>.Empty,
+                [],
                 cache,
                 layerIndex,
                 position,

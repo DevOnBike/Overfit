@@ -177,7 +177,7 @@ namespace DevOnBike.Overfit.Onnx
             IReadOnlyList<long?> source,
             out int[] shape)
         {
-            shape = Array.Empty<int>();
+            shape = [];
 
             if (source.Count == 0)
             {

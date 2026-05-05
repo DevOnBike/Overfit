@@ -36,7 +36,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Sampling
         public void ArgMax_Empty_Throws()
         {
             Assert.Throws<ArgumentException>(
-                () => TokenSampler.ArgMax(Array.Empty<float>()));
+                () => TokenSampler.ArgMax([]));
         }
 
         [Fact]
@@ -65,8 +65,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Sampling
                 logits,
                 SamplingOptions.Greedy,
                 null!,
-                Span<int>.Empty,
-                Span<float>.Empty);
+                [],
+                []);
 
             Assert.Equal(
                 2,

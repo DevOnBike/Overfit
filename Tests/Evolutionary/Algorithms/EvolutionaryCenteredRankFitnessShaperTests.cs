@@ -15,7 +15,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
             var shaper = new CenteredRankFitnessShaper();
             Span<float> shaped = [];
 
-            shaper.Shape(ReadOnlySpan<float>.Empty, shaped);
+            shaper.Shape([], shaped);
 
             Assert.Empty(shaped.ToArray());
         }

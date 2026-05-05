@@ -201,7 +201,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 bk,
                 bv,
                 wo,
-                ReadOnlySpan<float>.Empty,
+                [],
                 cache,
                 layerIndex,
                 headIndex,
