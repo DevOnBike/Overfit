@@ -271,3 +271,6 @@ out_temp/
 
 # Jetbrains Rider
 .idea/
+
+# models
+*.bin
