@@ -8,7 +8,6 @@ using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.Tokenization;
-using Xunit;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels

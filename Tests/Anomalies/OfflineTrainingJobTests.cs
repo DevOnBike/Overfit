@@ -4,7 +4,6 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Anomalies.Training;
-using Xunit;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Anomalies

@@ -8,7 +8,6 @@ using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 using DevOnBike.Overfit.Anomalies.Training;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Runtime;
-using Xunit;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Anomalies

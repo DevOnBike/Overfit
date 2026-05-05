@@ -7,23 +7,6 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
     /// <summary>
     /// Cached GPT-style transformer stack for single-token autoregressive decode.
-    ///
-    /// This composes:
-    ///
-    /// - N cached transformer blocks,
-    /// - final LayerNorm,
-    /// - LM head projection.
-    ///
-    /// Scope:
-    /// - batch = 1,
-    /// - one token,
-    /// - FP32,
-    /// - Pre-LN transformer blocks,
-    /// - caller-owned logits buffer,
-    /// - caller controls KeyValueCache length and position.
-    ///
-    /// This class still does not do token embedding or positional embedding.
-    /// The caller provides the already embedded hidden vector for the current token.
     /// </summary>
     public class CachedGptStack
     {
@@ -200,10 +183,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     wqHeadsByLayer[layer],
                     wkHeadsByLayer[layer],
                     wvHeadsByLayer[layer],
-                    woHeadsByLayer[layer],
                     bqHeadsByLayer[layer],
                     bkHeadsByLayer[layer],
                     bvHeadsByLayer[layer],
+                    woHeadsByLayer[layer],
                     attentionOutputBiases[layer],
                     ln2Gammas[layer],
                     ln2Betas[layer],
@@ -261,7 +244,6 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Span<float> logits)
         {
             var emptyDModelByLayer = CreateEmptyLayerArray();
-            var emptyDffByLayer = CreateEmptyLayerArray();
 
             Decode(
                 inputHidden,
@@ -491,8 +473,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
         }
 
-        private void ValidateLayerCollection<T>(
-            IReadOnlyList<T> values,
+        private void ValidateLayerCollection(
+            IReadOnlyList<float[]> values,
             string name)
         {
             if (values is null)

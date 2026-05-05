@@ -9,65 +9,65 @@ namespace DevOnBike.Overfit.DeepLearning
     /// Hyperparameter configuration for GPT-style models.
     ///
     /// GPT-1 (Radford et al., 2018):
-    ///   VocabSize     = 40478  (BPE vocabulary)
-    ///   ContextLength = 512
-    ///   DModel        = 768
-    ///   NHeads        = 12
-    ///   NLayers       = 12
-    ///   DFF           = 3072   (= 4 * DModel)
+    /// VocabSize = 40478 (BPE vocabulary)
+    /// ContextLength = 512
+    /// DModel = 768
+    /// NHeads = 12
+    /// NLayers = 12
+    /// DFF = 3072 (= 4 * DModel)
     ///
     /// GPT-2 Small (for reference):
-    ///   VocabSize     = 50257
-    ///   ContextLength = 1024
-    ///   DModel        = 768
-    ///   NHeads        = 12
-    ///   NLayers       = 12
-    ///   DFF           = 3072
+    /// VocabSize = 50257
+    /// ContextLength = 1024
+    /// DModel = 768
+    /// NHeads = 12
+    /// NLayers = 12
+    /// DFF = 3072
     /// </summary>
     public sealed class GPT1Config
     {
         /// <summary>GPT-1 original configuration.</summary>
         public static readonly GPT1Config GPT1 = new()
         {
-            VocabSize     = 40478,
+            VocabSize = 40478,
             ContextLength = 512,
-            DModel        = 768,
-            NHeads        = 12,
-            NLayers       = 12,
-            DFF           = 3072,
+            DModel = 768,
+            NHeads = 12,
+            NLayers = 12,
+            DFF = 3072,
         };
 
         /// <summary>Small config for testing (fits in memory, fast to instantiate).</summary>
         public static readonly GPT1Config Small = new()
         {
-            VocabSize     = 256,
+            VocabSize = 256,
             ContextLength = 16,
-            DModel        = 64,
-            NHeads        = 4,
-            NLayers       = 2,
-            DFF           = 256,
+            DModel = 64,
+            NHeads = 4,
+            NLayers = 2,
+            DFF = 256,
         };
 
         /// <summary>Vocabulary size (number of BPE tokens).</summary>
-        public int VocabSize     { get; init; } = 40478;
+        public int VocabSize { get; init; } = 40478;
 
         /// <summary>Maximum sequence length (context window).</summary>
         public int ContextLength { get; init; } = 512;
 
         /// <summary>Model dimension (embedding size, d_model).</summary>
-        public int DModel        { get; init; } = 768;
+        public int DModel { get; init; } = 768;
 
         /// <summary>Number of attention heads per block.</summary>
-        public int NHeads        { get; init; } = 12;
+        public int NHeads { get; init; } = 12;
 
         /// <summary>Number of Transformer blocks.</summary>
-        public int NLayers       { get; init; } = 12;
+        public int NLayers { get; init; } = 12;
 
         /// <summary>Feed-forward inner dimension (typically 4 * DModel).</summary>
-        public int DFF           { get; init; } = 3072;
+        public int DFF { get; init; } = 3072;
 
         /// <summary>Layer norm epsilon.</summary>
-        public float LNEps       { get; init; } = 1e-5f;
+        public float LNEps { get; init; } = 1e-5f;
 
         /// <summary>
         /// Use Pre-LayerNorm (true, GPT-2 style, more stable) or
@@ -80,28 +80,36 @@ namespace DevOnBike.Overfit.DeepLearning
         /// Reduces parameters by VocabSize * DModel.
         /// Standard practice for language models.
         /// </summary>
-        public bool TieWeights   { get; init; } = true;
+        public bool TieWeights { get; init; } = true;
 
-        /// <summary>Total parameter count (approximate, weight-tying aware).</summary>
+        /// <summary>Total parameter count (weight-tying aware).</summary>
         public long ParameterCount
         {
             get
             {
-                long tokEmb  = (long)VocabSize * DModel;
-                long posEmb  = (long)ContextLength * DModel;
-                long perBlock = 2L * DModel                        // LN1
-                              + 4L * DModel * DModel + DModel      // MHA
-                              + 2L * DModel                        // LN2
-                              + 2L * DModel * DFF + DFF + DModel;  // FFN
+                long tokEmb = (long)VocabSize * DModel;
+                long posEmb = (long)ContextLength * DModel;
+
+                long layerNorm1 = 2L * DModel;
+
+                // MHA now has Q/K/V/output weights plus Q/K/V/output biases:
+                // Wq/Wk/Wv/Wo = 4 * DModel * DModel
+                // Bq/Bk/Bv/Bo = 4 * DModel
+                long attention = 4L * DModel * DModel + 4L * DModel;
+
+                long layerNorm2 = 2L * DModel;
+                long feedForward = 2L * DModel * DFF + DFF + DModel;
+
+                long perBlock = layerNorm1 + attention + layerNorm2 + feedForward;
                 long finalLN = 2L * DModel;
-                long lmHead  = TieWeights ? 0 : (long)VocabSize * DModel;
+                long lmHead = TieWeights ? 0 : (long)VocabSize * DModel;
 
                 return tokEmb + posEmb + NLayers * perBlock + finalLN + lmHead;
             }
         }
 
-        public override string ToString()
-            => $"GPT[vocab={VocabSize}, ctx={ContextLength}, d={DModel}, h={NHeads}, L={NLayers}] " +
-               $"~{ParameterCount / 1_000_000.0:F0}M params";
+        public override string ToString() =>
+            $"GPT[vocab={VocabSize}, ctx={ContextLength}, d={DModel}, h={NHeads}, L={NLayers}] " +
+            $"~{ParameterCount / 1_000_000.0:F0}M params";
     }
 }

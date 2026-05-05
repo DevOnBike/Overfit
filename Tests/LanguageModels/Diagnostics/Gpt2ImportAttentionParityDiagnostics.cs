@@ -10,39 +10,37 @@ using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tokenization;
-using Xunit;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 {
     /// <summary>
     /// Manual GPT-2 attention parity diagnostic.
-    ///
+    /// </summary>
+    /// <remarks>
     /// Purpose:
     /// Determine whether the first GPT-2 mismatch is:
-    /// - Q/K/V projection weight orientation/split, or
-    /// - missing GPT-2 Q/K/V bias, or
+    /// - Q/K/V projection weight orientation/split,
+    /// - Q/K/V bias loading/application,
     /// - attention context / output projection mapping.
     ///
     /// Generate/update reference JSON first:
-    ///   python3 Scripts/debug_gpt2_reference.py --size small --fixtures Tests/test_fixtures --out Tests/test_fixtures/gpt2_reference_small.json
+    /// python3 Scripts/debug_gpt2_reference.py --size small --fixtures Tests/test_fixtures --out Tests/test_fixtures/gpt2_reference_small.json
     ///
-    /// Remove Skip locally and run:
-    ///   dotnet test -c Release --filter "Gpt2Small_CompareAttentionInternalsAgainstPyTorchReference"
-    /// </summary>
+    /// Run:
+    /// dotnet test -c Release --filter "Gpt2Small_CompareAttentionInternalsAgainstPyTorchReference"
+    /// </remarks>
     public sealed class Gpt2ImportAttentionParityDiagnostics
     {
         private const string ModelPath = "test_fixtures/gpt2_small.bin";
         private const string VocabPath = "test_fixtures/vocab.json";
         private const string MergesPath = "test_fixtures/merges.txt";
         private const string ReferencePath = "test_fixtures/gpt2_reference_small.json";
-
         private const int DefaultArenaSize = 1_500_000_000;
 
         private readonly ITestOutputHelper _output;
 
-        public Gpt2ImportAttentionParityDiagnostics(
-            ITestOutputHelper output)
+        public Gpt2ImportAttentionParityDiagnostics(ITestOutputHelper output)
         {
             _output = output;
         }
@@ -53,27 +51,15 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         [Trait("Category", "Manual")]
         public void Gpt2Small_CompareAttentionInternalsAgainstPyTorchReference()
         {
-            SkipIfMissing(
-                ModelPath,
-                VocabPath,
-                MergesPath,
-                ReferencePath);
+            SkipIfMissing(ModelPath, VocabPath, MergesPath, ReferencePath);
 
             var reference = LoadReference(ReferencePath);
+            var tokenizer = BytePairEncoder.Load(VocabPath, MergesPath);
 
-            var tokenizer = BytePairEncoder.Load(
-                VocabPath,
-                MergesPath);
-
-            Assert.Equal(
-                reference.VocabSize,
-                tokenizer.VocabSize);
+            Assert.Equal(reference.VocabSize, tokenizer.VocabSize);
 
             var overfitTokens = tokenizer.Encode(reference.Prompt);
-
-            Assert.Equal(
-                reference.Tokens,
-                overfitTokens);
+            Assert.Equal(reference.Tokens, overfitTokens);
 
             _output.WriteLine("=== GPT-2 Attention Parity Diagnostic ===");
             _output.WriteLine($"Prompt: {reference.Prompt}");
@@ -90,12 +76,18 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
                 model.Load(reader);
             }
 
+            _output.WriteLine(
+                $"block0 head0 bias L1: " +
+                $"Bq={L1(model.Blocks[0].Attention.BqHeads[0].DataReadOnlySpan):F6}, " +
+                $"Bk={L1(model.Blocks[0].Attention.BkHeads[0].DataReadOnlySpan):F6}, " +
+                $"Bv={L1(model.Blocks[0].Attention.BvHeads[0].DataReadOnlySpan):F6}");
+            _output.WriteLine("");
+
             var arenaSize = GetIntEnvironmentVariable(
                 "OVERFIT_GPT2_ATTENTION_ARENA",
                 DefaultArenaSize);
 
             using var graph = new ComputationGraph(arenaSize);
-
             model.InvalidateAllCaches();
 
             var ln1 = ComputeBlock0Ln1(
@@ -125,19 +117,19 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
                 attention["block0_v_raw"]);
 
             Compare(
-                "q raw vs PyTorch q WITH bias",
+                "q WITH bias vs PyTorch q WITH bias",
                 reference.Attention["block0_q_with_bias"],
-                attention["block0_q_raw"]);
+                attention["block0_q_with_bias"]);
 
             Compare(
-                "k raw vs PyTorch k WITH bias",
+                "k WITH bias vs PyTorch k WITH bias",
                 reference.Attention["block0_k_with_bias"],
-                attention["block0_k_raw"]);
+                attention["block0_k_with_bias"]);
 
             Compare(
-                "v raw vs PyTorch v WITH bias",
+                "v WITH bias vs PyTorch v WITH bias",
                 reference.Attention["block0_v_with_bias"],
-                attention["block0_v_raw"]);
+                attention["block0_v_with_bias"]);
 
             Compare(
                 "context vs PyTorch context WITHOUT qkv bias",
@@ -147,7 +139,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             Compare(
                 "context vs PyTorch context WITH qkv bias",
                 reference.Attention["block0_context_with_bias"],
-                attention["block0_context"]);
+                attention["block0_context_with_bias"]);
 
             Compare(
                 "attn output vs PyTorch c_proj WITHOUT qkv bias",
@@ -157,12 +149,12 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             Compare(
                 "attn output vs PyTorch c_proj WITH qkv bias",
                 reference.Attention["block0_attn_manual_cproj_with_bias"],
-                attention["block0_attn_output"]);
+                attention["block0_attn_output_with_bias"]);
 
             Compare(
                 "attn output vs PyTorch module block0_attn",
                 reference.Stages["block0_attn"],
-                attention["block0_attn_output"]);
+                attention["block0_attn_output_with_bias"]);
         }
 
         private static float[] ComputeBlock0Ln1(
@@ -184,7 +176,6 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
                 dModel);
 
             var positionIds = new int[seqLen];
-
             for (var i = 0; i < seqLen; i++)
             {
                 positionIds[i] = i;
@@ -228,6 +219,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             var k = new float[seqLen * dModel];
             var v = new float[seqLen * dModel];
 
+            var qWithBias = new float[seqLen * dModel];
+            var kWithBias = new float[seqLen * dModel];
+            var vWithBias = new float[seqLen * dModel];
+
             for (var h = 0; h < nHeads; h++)
             {
                 ProjectHeadIntoConcat(
@@ -256,12 +251,51 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
                     dHead,
                     h,
                     v);
+
+                ProjectHeadIntoConcatWithBias(
+                    ln1,
+                    attention.WqHeads[h].DataReadOnlySpan,
+                    attention.BqHeads[h].DataReadOnlySpan,
+                    seqLen,
+                    dModel,
+                    dHead,
+                    h,
+                    qWithBias);
+
+                ProjectHeadIntoConcatWithBias(
+                    ln1,
+                    attention.WkHeads[h].DataReadOnlySpan,
+                    attention.BkHeads[h].DataReadOnlySpan,
+                    seqLen,
+                    dModel,
+                    dHead,
+                    h,
+                    kWithBias);
+
+                ProjectHeadIntoConcatWithBias(
+                    ln1,
+                    attention.WvHeads[h].DataReadOnlySpan,
+                    attention.BvHeads[h].DataReadOnlySpan,
+                    seqLen,
+                    dModel,
+                    dHead,
+                    h,
+                    vWithBias);
             }
 
             var context = ComputeCausalAttentionContext(
                 q,
                 k,
                 v,
+                seqLen,
+                nHeads,
+                dHead,
+                dModel);
+
+            var contextWithBias = ComputeCausalAttentionContext(
+                qWithBias,
+                kWithBias,
+                vWithBias,
                 seqLen,
                 nHeads,
                 dHead,
@@ -275,14 +309,26 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
                 nHeads,
                 dHead);
 
-            return new Dictionary<string, float[]>(
-                StringComparer.Ordinal)
+            var outputWithBias = ProjectContextThroughWo(
+                contextWithBias,
+                attention,
+                seqLen,
+                dModel,
+                nHeads,
+                dHead);
+
+            return new Dictionary<string, float[]>(StringComparer.Ordinal)
             {
                 ["block0_q_raw"] = q,
                 ["block0_k_raw"] = k,
                 ["block0_v_raw"] = v,
+                ["block0_q_with_bias"] = qWithBias,
+                ["block0_k_with_bias"] = kWithBias,
+                ["block0_v_with_bias"] = vWithBias,
                 ["block0_context"] = context,
-                ["block0_attn_output"] = output
+                ["block0_context_with_bias"] = contextWithBias,
+                ["block0_attn_output"] = output,
+                ["block0_attn_output_with_bias"] = outputWithBias,
             };
         }
 
@@ -308,8 +354,38 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
                     for (var i = 0; i < dModel; i++)
                     {
-                        sum += input[inputOffset + i] *
-                               weight[i * dHead + o];
+                        sum += input[inputOffset + i] * weight[i * dHead + o];
+                    }
+
+                    destination[destOffset + o] = (float)sum;
+                }
+            }
+        }
+
+        private static void ProjectHeadIntoConcatWithBias(
+            float[] input,
+            ReadOnlySpan<float> weight,
+            ReadOnlySpan<float> bias,
+            int seqLen,
+            int dModel,
+            int dHead,
+            int head,
+            float[] destination)
+        {
+            var headOffset = head * dHead;
+
+            for (var t = 0; t < seqLen; t++)
+            {
+                var inputOffset = t * dModel;
+                var destOffset = t * dModel + headOffset;
+
+                for (var o = 0; o < dHead; o++)
+                {
+                    var sum = (double)bias[o];
+
+                    for (var i = 0; i < dModel; i++)
+                    {
+                        sum += input[inputOffset + i] * weight[i * dHead + o];
                     }
 
                     destination[destOffset + o] = (float)sum;
@@ -328,7 +404,6 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         {
             var context = new float[seqLen * dModel];
             var scores = new double[seqLen];
-
             var scale = 1.0 / Math.Sqrt(dHead);
 
             for (var h = 0; h < nHeads; h++)
@@ -342,7 +417,6 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
                     for (var source = 0; source <= t; source++)
                     {
                         var dot = 0.0;
-
                         var qOffset = t * dModel + headOffset;
                         var kOffset = source * dModel + headOffset;
 
@@ -379,7 +453,6 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
                         {
                             var probability = scores[source] / denominator;
                             var vOffset = source * dModel + headOffset;
-
                             sum += probability * v[vOffset + d];
                         }
 
@@ -417,8 +490,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
                         for (var i = 0; i < dHead; i++)
                         {
-                            sum += context[contextOffset + i] *
-                                   weight[i * dModel + o];
+                            sum += context[contextOffset + i] * weight[i * dModel + o];
                         }
 
                         output[outputOffset + o] += (float)sum;
@@ -480,10 +552,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             meanAbs /= reference.Count;
             rms = Math.Sqrt(rms / reference.Count);
 
-            var cosine =
-                refNorm <= 0.0 || actualNorm <= 0.0
-                    ? 0.0
-                    : dot / Math.Sqrt(refNorm * actualNorm);
+            var cosine = refNorm <= 0.0 || actualNorm <= 0.0
+                ? 0.0
+                : dot / Math.Sqrt(refNorm * actualNorm);
 
             _output.WriteLine(
                 $"{name,-52} maxAbs={maxAbs,12:F6} meanAbs={meanAbs,12:F6} rms={rms,12:F6} cosine={cosine,10:F6} maxIndex={maxIndex}");
@@ -492,16 +563,26 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
                 $"  reference[{maxIndex}]={reference[maxIndex]:F6}, overfit[{maxIndex}]={actual[maxIndex]:F6}");
         }
 
-        private static Gpt2AttentionReference LoadReference(
-            string path)
+        private static double L1(ReadOnlySpan<float> values)
+        {
+            var sum = 0.0;
+
+            for (var i = 0; i < values.Length; i++)
+            {
+                sum += Math.Abs(values[i]);
+            }
+
+            return sum;
+        }
+
+        private static Gpt2AttentionReference LoadReference(string path)
         {
             var json = File.ReadAllText(path);
-
             var reference = JsonSerializer.Deserialize<Gpt2AttentionReference>(
                 json,
                 new JsonSerializerOptions
                 {
-                    PropertyNameCaseInsensitive = true
+                    PropertyNameCaseInsensitive = true,
                 });
 
             return reference ?? throw new InvalidOperationException(
@@ -513,14 +594,12 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             int defaultValue)
         {
             var raw = Environment.GetEnvironmentVariable(name);
-
             return int.TryParse(raw, out var parsed) && parsed > 0
                 ? parsed
                 : defaultValue;
         }
 
-        private static void SkipIfMissing(
-            params string[] paths)
+        private static void SkipIfMissing(params string[] paths)
         {
             foreach (var path in paths)
             {
@@ -550,12 +629,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             public int[] StageShape { get; set; } = [];
 
             [JsonPropertyName("stages")]
-            public Dictionary<string, float[]> Stages { get; set; } = new(
-                StringComparer.Ordinal);
+            public Dictionary<string, float[]> Stages { get; set; } = new(StringComparer.Ordinal);
 
             [JsonPropertyName("attention")]
-            public Dictionary<string, float[]> Attention { get; set; } = new(
-                StringComparer.Ordinal);
+            public Dictionary<string, float[]> Attention { get; set; } = new(StringComparer.Ordinal);
         }
     }
 }

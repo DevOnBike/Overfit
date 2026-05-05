@@ -5,7 +5,6 @@
 
 using DevOnBike.Overfit.Anomalies.Gpt;
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
-using Xunit;
 
 namespace DevOnBike.Overfit.Tests.Anomalies
 {

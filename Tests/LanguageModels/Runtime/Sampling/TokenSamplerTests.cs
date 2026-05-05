@@ -6,7 +6,6 @@
 
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
-using Xunit;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Sampling
 {
