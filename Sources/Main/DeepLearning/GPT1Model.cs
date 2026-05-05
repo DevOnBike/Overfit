@@ -67,10 +67,7 @@ namespace DevOnBike.Overfit.DeepLearning
             // LM head: [dModel, vocabSize].
             // When weight-tying: shares values with TokenEmbedding.Weight
             // transposed from [vocabSize, dModel] to [dModel, vocabSize].
-            LMHead = new Parameter(
-                new TensorShape(config.DModel, config.VocabSize),
-                requiresGrad: !config.TieWeights,
-                clearData: false);
+            LMHead = new Parameter(new TensorShape(config.DModel, config.VocabSize), requiresGrad: !config.TieWeights, clearData: false);
 
             if (config.TieWeights)
             {
@@ -233,20 +230,20 @@ namespace DevOnBike.Overfit.DeepLearning
             // 100M floats = 400MB. This is intentionally large enough for the
             // current graph-based GPT path. The stateful KV-cache runtime should
             // not use this path in the future.
-            using var graph = new ComputationGraph(100_000_000);
-            using var logits = Forward(
-                graph,
-                tokenIds,
-                batchSize: 1,
-                seqLen);
+            // Arena must fit LM head output [seqLen, vocabSize] which dominates for large vocabs.
+            // GPT-2: seqLen=1024, vocabSize=50257 → 1024 × 50257 × 4B ≈ 206MB per token position.
+            // Add 3× safety factor for attention intermediates.
+            var arenaFloats = Math.Max(100_000_000, (long)tokenIds.Length * _config.VocabSize * 6);
+            arenaFloats = Math.Min(arenaFloats, 2_000_000_000); // cap at 8GB
+
+            using var graph = new ComputationGraph((int)arenaFloats);
+            using var logits = Forward(graph, tokenIds, batchSize: 1, seqLen);
 
             var logitSpan = logits.DataView.AsReadOnlySpan();
             var vocabSize = _config.VocabSize;
             var lastLogits = new float[vocabSize];
 
-            logitSpan
-                .Slice((seqLen - 1) * vocabSize, vocabSize)
-                .CopyTo(lastLogits);
+            logitSpan.Slice((seqLen - 1) * vocabSize, vocabSize).CopyTo(lastLogits);
 
             return lastLogits;
         }
