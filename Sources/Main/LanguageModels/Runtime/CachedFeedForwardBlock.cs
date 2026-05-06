@@ -30,6 +30,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     public sealed class CachedFeedForwardBlock
     {
         private readonly float[] _intermediate;
+        private readonly float[] _gate;  // SwiGLU gate buffer (empty for GeLU)
 
         public CachedFeedForwardBlock(
             int dModel,
@@ -51,6 +52,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Activation = activation;
 
             _intermediate = new float[dFF];
+            _gate         = activation == FeedForwardActivation.SwiGLU
+                              ? new float[dFF]
+                              : Array.Empty<float>();
         }
 
         public int DModel { get; }
@@ -100,13 +104,46 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ReadOnlySpan<float> w2,
             Span<float> output)
         {
-            Decode(
-                hidden,
-                w1,
-                [],
-                w2,
-                [],
-                output);
+            Decode(hidden, w1, [], w2, [], output);
+        }
+
+        /// <summary>
+        /// SwiGLU feed-forward decode:
+        ///   FFN(x) = (SiLU(x @ Wgate) * (x @ Wup)) @ Wdown
+        ///
+        /// Three weight matrices, no biases (Llama / Mistral / Qwen convention).
+        /// wGate and wUp have shape [dModel, dFF]. wDown has shape [dFF, dModel].
+        /// </summary>
+        public void DecodeSwiGlu(
+            ReadOnlySpan<float> hidden,
+            ReadOnlySpan<float> wGate,
+            ReadOnlySpan<float> wUp,
+            ReadOnlySpan<float> wDown,
+            Span<float> output)
+        {
+            if (hidden.Length < DModel)
+                throw new ArgumentException("Hidden span smaller than dModel.", nameof(hidden));
+            if (wGate.Length < DModel * DFF)
+                throw new ArgumentException("wGate span smaller than dModel * dFF.", nameof(wGate));
+            if (wUp.Length < DModel * DFF)
+                throw new ArgumentException("wUp span smaller than dModel * dFF.", nameof(wUp));
+            if (wDown.Length < DFF * DModel)
+                throw new ArgumentException("wDown span smaller than dFF * dModel.", nameof(wDown));
+            if (output.Length < DModel)
+                throw new ArgumentException("Output span smaller than dModel.", nameof(output));
+
+            // gate = SiLU(hidden @ Wgate)
+            SingleTokenProjectionKernel.Project(hidden, wGate, [], _gate, DModel, DFF);
+            ApplySiLU(_gate);
+
+            // up = hidden @ Wup
+            SingleTokenProjectionKernel.Project(hidden, wUp, [], _intermediate, DModel, DFF);
+
+            // intermediate = gate * up (element-wise)
+            System.Numerics.Tensors.TensorPrimitives.Multiply(_gate, _intermediate, _intermediate);
+
+            // output = intermediate @ Wdown
+            SingleTokenProjectionKernel.Project(_intermediate, wDown, [], output, DFF, DModel);
         }
 
         public void GetLastIntermediate(Span<float> destination)
@@ -175,8 +212,23 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     ApplyGeLU(values);
                     return;
 
+                case FeedForwardActivation.SwiGLU:
+                    // SwiGLU is handled separately via DecodeSwiGlu — not through this path.
+                    throw new InvalidOperationException(
+                        "SwiGLU must be invoked via DecodeSwiGlu, not through the standard Decode path.");
+
                 default:
                     throw new ArgumentOutOfRangeException(nameof(activation));
+            }
+        }
+
+        private static void ApplySiLU(Span<float> values)
+        {
+            // SiLU(x) = x * sigmoid(x) = x / (1 + exp(-x))
+            for (var i = 0; i < values.Length; i++)
+            {
+                var x = values[i];
+                values[i] = x / (1f + MathF.Exp(-x));
             }
         }
 

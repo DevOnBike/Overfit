@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.LanguageModels.Rope;
+
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
     /// <summary>
@@ -128,7 +130,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             KeyValueCache cache,
             int layerIndex,
             int position,
-            Span<float> output)
+            Span<float> output,
+            RopeTable? rope = null)
         {
             SingleTokenLayerNormKernel.Normalize(
                 input,
@@ -144,7 +147,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 cache,
                 layerIndex,
                 position,
-                _attentionOutput);
+                _attentionOutput,
+                rope);
 
             SingleTokenLayerNormKernel.AddResidual(
                 input,
@@ -160,13 +164,27 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 DModel,
                 LayerNormEpsilon);
 
-            _feedForward.Decode(
-                _ln2Output,
-                weights.FfnW1,
-                weights.FfnB1,
-                weights.FfnW2,
-                weights.FfnB2,
-                _feedForwardOutput);
+            // SwiGLU (Llama/Mistral/Qwen): FfnGate is present.
+            // GeLU/ReLU (GPT-1/GPT-2): FfnGate is empty.
+            if (!weights.FfnGate.IsEmpty)
+            {
+                _feedForward.DecodeSwiGlu(
+                    _ln2Output,
+                    weights.FfnGate,
+                    weights.FfnW1,
+                    weights.FfnW2,
+                    _feedForwardOutput);
+            }
+            else
+            {
+                _feedForward.Decode(
+                    _ln2Output,
+                    weights.FfnW1,
+                    weights.FfnB1,
+                    weights.FfnW2,
+                    weights.FfnB2,
+                    _feedForwardOutput);
+            }
 
             SingleTokenLayerNormKernel.AddResidual(
                 _afterAttentionResidual,

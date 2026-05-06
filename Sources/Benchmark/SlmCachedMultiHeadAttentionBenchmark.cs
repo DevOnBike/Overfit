@@ -52,7 +52,7 @@ namespace Benchmarks
 
             _cache = KeyValueCache.Create(
             layerCount: 1,
-            headCount: HeadCount,
+            kvHeadCount: HeadCount,
             maxSequenceLength: SequenceLength,
             headDimension: _headDimension);
 

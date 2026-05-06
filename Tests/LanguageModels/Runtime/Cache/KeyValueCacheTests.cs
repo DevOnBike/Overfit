@@ -15,7 +15,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Cache
         {
             using var cache = KeyValueCache.Create(
                 layerCount: 2,
-                headCount: 4,
+                kvHeadCount: 4,
                 maxSequenceLength: 8,
                 headDimension: 16);
 
@@ -35,7 +35,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Cache
                 new KeyValueCache(
                     new KeyValueCacheShape(
                         layerCount: 0,
-                        headCount: 1,
+                        kvHeadCount: 1,
                         maxSequenceLength: 1,
                         headDimension: 1)));
 
@@ -43,7 +43,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Cache
                 new KeyValueCache(
                     new KeyValueCacheShape(
                         layerCount: 1,
-                        headCount: 0,
+                        kvHeadCount: 0,
                         maxSequenceLength: 1,
                         headDimension: 1)));
 
@@ -51,7 +51,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Cache
                 new KeyValueCache(
                     new KeyValueCacheShape(
                         layerCount: 1,
-                        headCount: 1,
+                        kvHeadCount: 1,
                         maxSequenceLength: 0,
                         headDimension: 1)));
 
@@ -59,7 +59,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Cache
                 new KeyValueCache(
                     new KeyValueCacheShape(
                         layerCount: 1,
-                        headCount: 1,
+                        kvHeadCount: 1,
                         maxSequenceLength: 1,
                         headDimension: 0)));
         }
@@ -69,7 +69,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Cache
         {
             using var cache = KeyValueCache.Create(
                 layerCount: 2,
-                headCount: 3,
+                kvHeadCount: 3,
                 maxSequenceLength: 4,
                 headDimension: 5);
 
@@ -104,7 +104,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Cache
         {
             using var cache = KeyValueCache.Create(
                 layerCount: 1,
-                headCount: 1,
+                kvHeadCount: 1,
                 maxSequenceLength: 4,
                 headDimension: 3);
 
@@ -134,7 +134,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Cache
         {
             using var cache = KeyValueCache.Create(
                 layerCount: 1,
-                headCount: 1,
+                kvHeadCount: 1,
                 maxSequenceLength: 3,
                 headDimension: 2);
 
@@ -154,7 +154,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Cache
         {
             using var cache = KeyValueCache.Create(
                 layerCount: 1,
-                headCount: 1,
+                kvHeadCount: 1,
                 maxSequenceLength: 2,
                 headDimension: 2);
 
@@ -169,7 +169,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Cache
         {
             using var cache = KeyValueCache.Create(
                 layerCount: 1,
-                headCount: 1,
+                kvHeadCount: 1,
                 maxSequenceLength: 2,
                 headDimension: 2);
 
@@ -182,7 +182,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Cache
         {
             using var cache = KeyValueCache.Create(
                 layerCount: 1,
-                headCount: 1,
+                kvHeadCount: 1,
                 maxSequenceLength: 2,
                 headDimension: 2);
 
@@ -209,7 +209,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Cache
         {
             using var cache = KeyValueCache.Create(
                 layerCount: 1,
-                headCount: 1,
+                kvHeadCount: 1,
                 maxSequenceLength: 2,
                 headDimension: 2);
 
@@ -228,7 +228,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Cache
         {
             using var cache = KeyValueCache.Create(
                 layerCount: 1,
-                headCount: 1,
+                kvHeadCount: 1,
                 maxSequenceLength: 4,
                 headDimension: 2);
 
@@ -246,7 +246,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Cache
         {
             using var cache = KeyValueCache.Create(
                 layerCount: 1,
-                headCount: 1,
+                kvHeadCount: 1,
                 maxSequenceLength: 4,
                 headDimension: 2);
 
@@ -264,7 +264,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Cache
         {
             var cache = KeyValueCache.Create(
                 layerCount: 1,
-                headCount: 1,
+                kvHeadCount: 1,
                 maxSequenceLength: 2,
                 headDimension: 2);
 
@@ -282,7 +282,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Cache
         {
             var shape = new KeyValueCacheShape(
                 layerCount: 2,
-                headCount: 3,
+                kvHeadCount: 3,
                 maxSequenceLength: 4,
                 headDimension: 5);
 

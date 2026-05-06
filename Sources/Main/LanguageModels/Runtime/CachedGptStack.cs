@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.LanguageModels.Rope;
+
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
     /// <summary>
@@ -124,16 +126,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             StackWeights weights,
             KeyValueCache cache,
             int position,
-            Span<float> logits)
+            Span<float> logits,
+            RopeTable? rope = null)
         {
             if (inputHidden.Length < DModel)
-            {
                 throw new ArgumentException($"inputHidden length {inputHidden.Length} < DModel {DModel}.");
-            }
             if (logits.Length < VocabSize)
-            {
                 throw new ArgumentException($"logits length {logits.Length} < VocabSize {VocabSize}.");
-            }
 
             inputHidden.Slice(0, DModel).CopyTo(_currentHidden);
 
@@ -148,7 +147,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     cache,
                     layerIndex: layer,
                     position,
-                    next);
+                    next,
+                    rope);
 
                 (current, next) = (next, current);
             }
@@ -185,7 +185,6 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         /// <summary>Exposes internal blocks for testing.</summary>
         internal CachedTransformerBlock[] Blocks => _blocks;
+
     }
 }
-
-

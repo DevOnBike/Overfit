@@ -61,16 +61,21 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         public bool IsFull => CurrentLength >= MaxLength;
 
+        /// <summary>
+        /// Creates a KV cache.
+        /// For GQA: pass the KV head count (smaller than Q head count).
+        /// For MHA: pass the full head count.
+        /// </summary>
         public static KeyValueCache Create(
             int layerCount,
-            int headCount,
+            int kvHeadCount,
             int maxSequenceLength,
             int headDimension)
         {
             return new KeyValueCache(
                 new KeyValueCacheShape(
                     layerCount,
-                    headCount,
+                    kvHeadCount,
                     maxSequenceLength,
                     headDimension));
         }
@@ -180,9 +185,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 throw new ArgumentOutOfRangeException(nameof(shape), "LayerCount must be positive.");
             }
 
-            if (shape.HeadCount <= 0)
+            if (shape.KvHeadCount <= 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(shape), "HeadCount must be positive.");
+                throw new ArgumentOutOfRangeException(nameof(shape), "KvHeadCount must be positive.");
             }
 
             if (shape.MaxSequenceLength <= 0)
@@ -206,7 +211,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 throw new ArgumentOutOfRangeException(nameof(layerIndex));
             }
 
-            if ((uint)headIndex >= (uint)Shape.HeadCount)
+            if ((uint)headIndex >= (uint)Shape.KvHeadCount)
             {
                 throw new ArgumentOutOfRangeException(nameof(headIndex));
             }
@@ -228,7 +233,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 throw new ArgumentOutOfRangeException(nameof(layerIndex));
             }
 
-            if ((uint)headIndex >= (uint)Shape.HeadCount)
+            if ((uint)headIndex >= (uint)Shape.KvHeadCount)
             {
                 throw new ArgumentOutOfRangeException(nameof(headIndex));
             }
@@ -263,7 +268,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int headIndex,
             int position)
         {
-            return (((layerIndex * Shape.HeadCount) + headIndex) *
+            return (((layerIndex * Shape.KvHeadCount) + headIndex) *
                     Shape.MaxSequenceLength +
                     position) *
                    Shape.HeadDimension;

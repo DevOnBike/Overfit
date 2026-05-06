@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.LanguageModels.Rope;
+
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
     /// <summary>
@@ -83,6 +85,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         public int MaxSequenceLength { get; }
 
+        /// <param name="rope">
+        /// Precomputed RoPE table. When non-null, RoPE is applied to Q and K
+        /// after projection and before writing K to the cache.
+        /// Cached K vectors are stored already rotated — no re-rotation at read time.
+        /// </param>
         public void Decode(
             ReadOnlySpan<float> hidden,
             ReadOnlySpan<float> wq,
@@ -96,7 +103,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int layerIndex,
             int headIndex,
             int position,
-            Span<float> output)
+            Span<float> output,
+            RopeTable? rope = null)
         {
             SingleTokenProjectionKernel.Project(
                 hidden,
@@ -121,6 +129,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 _value,
                 DModel,
                 HeadDimension);
+
+            // Apply RoPE to Q and K at the current position before attention and cache write.
+            // Q is rotated for the current step. K is rotated and stored — cached K vectors
+            // are permanently rotated, so no re-rotation is needed at read time.
+            if (rope is not null)
+            {
+                RopeKernel.Apply(_query, rope, position);
+                RopeKernel.Apply(_key,   rope, position);
+            }
 
             _key
                 .AsSpan()

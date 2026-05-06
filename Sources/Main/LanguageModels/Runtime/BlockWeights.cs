@@ -17,35 +17,37 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     /// </summary>
     internal readonly struct BlockWeights
     {
-        private readonly TensorStorage<float> _ln1Gamma;
-        private readonly TensorStorage<float> _ln1Beta;
-        private readonly SingleHeadWeights[] _heads;
-        private readonly TensorStorage<float> _attentionBias;
-        private readonly TensorStorage<float> _ln2Gamma;
-        private readonly TensorStorage<float> _ln2Beta;
-        private readonly TensorStorage<float> _ffnW1;
-        private readonly TensorStorage<float> _ffnB1;
-        private readonly TensorStorage<float> _ffnW2;
-        private readonly TensorStorage<float> _ffnB2;
+        private readonly TensorStorage<float>  _ln1Gamma;
+        private readonly TensorStorage<float>  _ln1Beta;
+        private readonly SingleHeadWeights[]   _heads;
+        private readonly KvHeadWeights[]?      _kvHeads;   // null = MHA (use heads[h].Wk/Wv)
+        private readonly TensorStorage<float>  _attentionBias;
+        private readonly TensorStorage<float>  _ln2Gamma;
+        private readonly TensorStorage<float>  _ln2Beta;
+        private readonly TensorStorage<float>  _ffnW1;
+        private readonly TensorStorage<float>  _ffnB1;
+        private readonly TensorStorage<float>  _ffnW2;
+        private readonly TensorStorage<float>  _ffnB2;
+        private readonly TensorStorage<float>  _ffnGate;   // SwiGLU Wgate (empty for GeLU)
 
         /// <summary>Production constructor — zero-copy references from a real model block.</summary>
         internal BlockWeights(TransformerBlock block, int headCount)
         {
-            _ln1Gamma = block.Norm1.Gamma.Data;
-            _ln1Beta = block.Norm1.Beta.Data;
+            _ln1Gamma      = block.Norm1.Gamma.Data;
+            _ln1Beta       = block.Norm1.Beta.Data;
             _attentionBias = block.Attention.Bo.Data;
-            _ln2Gamma = block.Norm2.Gamma.Data;
-            _ln2Beta = block.Norm2.Beta.Data;
-            _ffnW1 = block.FFN.W1.Data;
-            _ffnB1 = block.FFN.B1.Data;
-            _ffnW2 = block.FFN.W2.Data;
-            _ffnB2 = block.FFN.B2.Data;
+            _ln2Gamma      = block.Norm2.Gamma.Data;
+            _ln2Beta       = block.Norm2.Beta.Data;
+            _ffnW1         = block.FFN.W1.Data;
+            _ffnB1         = block.FFN.B1.Data;
+            _ffnW2         = block.FFN.W2.Data;
+            _ffnB2         = block.FFN.B2.Data;
+            _ffnGate       = TensorStorage<float>.FromArray(Array.Empty<float>()); // GeLU — no gate
+            _kvHeads       = null; // MHA — use SingleHeadWeights.Wk/Wv
 
             _heads = new SingleHeadWeights[headCount];
             for (var h = 0; h < headCount; h++)
-            {
                 _heads[h] = new SingleHeadWeights(block.Attention, h);
-            }
         }
 
         /// <summary>
@@ -53,44 +55,56 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// Uses <see cref="SingleHeadWeights"/> instead of raw float[][] for head weights.
         /// </summary>
         internal BlockWeights(
-            SingleHeadWeights[]? heads = null,
-            float[]? ln1Gamma = null,
-            float[]? ln1Beta = null,
-            float[]? attentionBias = null,
-            float[]? ln2Gamma = null,
-            float[]? ln2Beta = null,
-            float[]? ffnW1 = null,
-            float[]? ffnB1 = null,
-            float[]? ffnW2 = null,
-            float[]? ffnB2 = null)
+            SingleHeadWeights[]? heads        = null,
+            KvHeadWeights[]?     kvHeads      = null,
+            float[]?             ln1Gamma     = null,
+            float[]?             ln1Beta      = null,
+            float[]?             attentionBias= null,
+            float[]?             ln2Gamma     = null,
+            float[]?             ln2Beta      = null,
+            float[]?             ffnW1        = null,
+            float[]?             ffnB1        = null,
+            float[]?             ffnW2        = null,
+            float[]?             ffnB2        = null,
+            float[]?             ffnGate      = null)
         {
             static TensorStorage<float> Store(float[]? a)
                 => TensorStorage<float>.FromArray(a ?? Array.Empty<float>());
 
-            _ln1Gamma = Store(ln1Gamma);
-            _ln1Beta = Store(ln1Beta);
+            _ln1Gamma      = Store(ln1Gamma);
+            _ln1Beta       = Store(ln1Beta);
             _attentionBias = Store(attentionBias);
-            _ln2Gamma = Store(ln2Gamma);
-            _ln2Beta = Store(ln2Beta);
-            _ffnW1 = Store(ffnW1);
-            _ffnB1 = Store(ffnB1);
-            _ffnW2 = Store(ffnW2);
-            _ffnB2 = Store(ffnB2);
+            _ln2Gamma      = Store(ln2Gamma);
+            _ln2Beta       = Store(ln2Beta);
+            _ffnW1         = Store(ffnW1);
+            _ffnB1         = Store(ffnB1);
+            _ffnW2         = Store(ffnW2);
+            _ffnB2         = Store(ffnB2);
+            _ffnGate       = Store(ffnGate);
 
-            _heads = heads ?? Array.Empty<SingleHeadWeights>();
+            _heads   = heads   ?? Array.Empty<SingleHeadWeights>();
+            _kvHeads = kvHeads;
         }
 
-        public ReadOnlySpan<float> Ln1Gamma => _ln1Gamma.AsReadOnlySpan();
-        public ReadOnlySpan<float> Ln1Beta => _ln1Beta.AsReadOnlySpan();
+        public ReadOnlySpan<float> Ln1Gamma     => _ln1Gamma.AsReadOnlySpan();
+        public ReadOnlySpan<float> Ln1Beta       => _ln1Beta.AsReadOnlySpan();
         public ReadOnlySpan<float> AttentionBias => _attentionBias.AsReadOnlySpan();
-        public ReadOnlySpan<float> Ln2Gamma => _ln2Gamma.AsReadOnlySpan();
-        public ReadOnlySpan<float> Ln2Beta => _ln2Beta.AsReadOnlySpan();
-        public ReadOnlySpan<float> FfnW1 => _ffnW1.AsReadOnlySpan();
-        public ReadOnlySpan<float> FfnB1 => _ffnB1.AsReadOnlySpan();
-        public ReadOnlySpan<float> FfnW2 => _ffnW2.AsReadOnlySpan();
-        public ReadOnlySpan<float> FfnB2 => _ffnB2.AsReadOnlySpan();
+        public ReadOnlySpan<float> Ln2Gamma      => _ln2Gamma.AsReadOnlySpan();
+        public ReadOnlySpan<float> Ln2Beta       => _ln2Beta.AsReadOnlySpan();
+        public ReadOnlySpan<float> FfnW1         => _ffnW1.AsReadOnlySpan();
+        public ReadOnlySpan<float> FfnB1         => _ffnB1.AsReadOnlySpan();
+        public ReadOnlySpan<float> FfnW2         => _ffnW2.AsReadOnlySpan();
+        public ReadOnlySpan<float> FfnB2         => _ffnB2.AsReadOnlySpan();
 
-        public ref readonly SingleHeadWeights Head(int h) => ref _heads[h];
-        public int HeadCount => _heads.Length;
+        public ref readonly SingleHeadWeights Head(int h)       => ref _heads[h];
+        public int HeadCount                                    => _heads.Length;
+
+        /// <summary>KV heads for GQA. Null for standard MHA (GPT-1, GPT-2).</summary>
+        public bool HasGqa                                      => _kvHeads is not null;
+        public int KvHeadCount                                  => _kvHeads?.Length ?? _heads.Length;
+        public ref readonly KvHeadWeights KvHead(int kvH)       => ref _kvHeads![kvH];
+
+        /// <summary>SwiGLU gate weight. Empty for GeLU/ReLU FFN.</summary>
+        public ReadOnlySpan<float> FfnGate  => _ffnGate.AsReadOnlySpan();
     }
 }
