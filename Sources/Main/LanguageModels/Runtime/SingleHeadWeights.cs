@@ -10,13 +10,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
     /// <summary>
     /// Zero-copy weight references for a single attention head.
-    ///
-    /// Stores <see cref="TensorStorage{T}"/> references directly — no data is copied.
-    /// Each .AsReadOnlySpan() call returns a view into the original Parameter storage.
-    ///
+    /// Holds <see cref="TensorStorage{T}"/> references — no data copied.
     /// Lifetime: valid as long as the parent GPT1Model is alive.
-    /// LoRA-friendly: if TensorStorage data is updated in-place, spans automatically
-    /// reflect the new weights without rebinding.
+    /// LoRA-friendly: TensorStorage updates are visible immediately.
     /// </summary>
     internal readonly struct SingleHeadWeights
     {
@@ -28,6 +24,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly TensorStorage<float> _bk;
         private readonly TensorStorage<float> _bv;
 
+        /// <summary>Production constructor — zero-copy references from a real attention layer.</summary>
         internal SingleHeadWeights(MultiHeadAttentionLayer attn, int head)
         {
             _wq = attn.WqHeads[head].Data;
@@ -39,6 +36,30 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _bv = attn.BvHeads[head].Data;
         }
 
+        /// <summary>
+        /// Test constructor — unspecified biases default to empty.
+        /// </summary>
+        internal SingleHeadWeights(
+            float[]  wq,
+            float[]  wk,
+            float[]  wv,
+            float[]  wo,
+            float[]? bq = null,
+            float[]? bk = null,
+            float[]? bv = null)
+        {
+            static TensorStorage<float> Store(float[]? a)
+                => TensorStorage<float>.FromArray(a ?? Array.Empty<float>());
+
+            _wq = Store(wq);
+            _wk = Store(wk);
+            _wv = Store(wv);
+            _wo = Store(wo);
+            _bq = Store(bq);
+            _bk = Store(bk);
+            _bv = Store(bv);
+        }
+
         public ReadOnlySpan<float> Wq => _wq.AsReadOnlySpan();
         public ReadOnlySpan<float> Wk => _wk.AsReadOnlySpan();
         public ReadOnlySpan<float> Wv => _wv.AsReadOnlySpan();
@@ -47,5 +68,4 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         public ReadOnlySpan<float> Bk => _bk.AsReadOnlySpan();
         public ReadOnlySpan<float> Bv => _bv.AsReadOnlySpan();
     }
-
 }

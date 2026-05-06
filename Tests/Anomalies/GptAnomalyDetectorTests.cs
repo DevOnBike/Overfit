@@ -99,7 +99,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             for (var i = 0; i < 10; i++)
             {
                 var r = detector.Score(normal);
-                if (!r.IsWarmup) lastNormalScore = r.Score;
+                if (!r.IsWarmup)
+                {
+                    lastNormalScore = r.Score;
+                }
             }
 
             // Score an anomalous snapshot
@@ -126,7 +129,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             using var detector = new GptAnomalyDetector(handle, contextSnapshots: 10);
 
             var normal = MakeNormalSnapshot("worker-processor");
-            for (var i = 0; i < 10; i++) detector.Score(normal);
+            for (var i = 0; i < 10; i++)
+            {
+                detector.Score(normal);
+            }
 
             // OOM: memory near limit, OOM events firing
             var oom = new MetricSnapshot
@@ -176,7 +182,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             using var detector = new GptAnomalyDetector(handle, contextSnapshots: 5);
 
             var normal = MakeNormalSnapshot("api-gateway");
-            for (var i = 0; i < 5; i++) detector.Score(normal);
+            for (var i = 0; i < 5; i++)
+            {
+                detector.Score(normal);
+            }
             Assert.True(detector.WindowFilled);
 
             detector.Reset();
@@ -249,9 +258,11 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         private void SkipIfNoCheckpoint()
         {
             if (!File.Exists(CheckpointPath))
+            {
                 throw new Exception(
-                    $"Checkpoint '{CheckpointPath}' not found. " +
-                    "Run: dotnet test --filter TrainOnCsv first.");
+                $"Checkpoint '{CheckpointPath}' not found. " +
+                "Run: dotnet test --filter TrainOnCsv first.");
+            }
         }
 
         public void Dispose() => _model.Dispose();

@@ -127,9 +127,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Span<float> logits)
         {
             if (inputHidden.Length < DModel)
+            {
                 throw new ArgumentException($"inputHidden length {inputHidden.Length} < DModel {DModel}.");
+            }
             if (logits.Length < VocabSize)
+            {
                 throw new ArgumentException($"logits length {logits.Length} < VocabSize {VocabSize}.");
+            }
 
             inputHidden.Slice(0, DModel).CopyTo(_currentHidden);
 
@@ -171,6 +175,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         // Validation helpers removed — StackWeights guarantees correct dimensions
         // by construction (bound directly to GPT1Model parameters).
 
+
+
+        public void GetLastFinalHidden(Span<float> destination)
+            => _finalHidden.AsSpan(0, DModel).CopyTo(destination);
+
+        public void GetLastLogits(Span<float> destination)
+            => _lastLogits.AsSpan(0, VocabSize).CopyTo(destination);
+
+        /// <summary>Exposes internal blocks for testing.</summary>
+        internal CachedTransformerBlock[] Blocks => _blocks;
 
     }
 }

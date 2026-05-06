@@ -120,7 +120,10 @@ namespace Benchmarks
         [GlobalCleanup]
         public void Cleanup()
         {
-            if (_disposed) return;
+            if (_disposed)
+            {
+                return;
+            }
             _disposed = true;
 
             _cachedEngine.Dispose();

@@ -248,8 +248,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
                 graph.BackwardFromGrad(logits);
                 optimizer.Step();
 
-                if (step == 0) initialLoss = loss;
-                if (step == steps - 1) finalLoss = loss;
+                if (step == 0)
+                {
+                    initialLoss = loss;
+                }
+                if (step == steps - 1)
+                {
+                    finalLoss = loss;
+                }
             }
 
             _output.WriteLine($"Synthetic | initial={initialLoss:F4}, final={finalLoss:F4}");
@@ -294,12 +300,18 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
                 // Stable softmax
                 var maxVal = row[0];
                 for (var v = 1; v < vocabSize; v++)
+                {
                     if (row[v] > maxVal)
+                    {
                         maxVal = row[v];
+                    }
+                }
 
                 var sumExp = 0f;
                 for (var v = 0; v < vocabSize; v++)
+                {
                     sumExp += MathF.Exp(row[v] - maxVal);
+                }
 
                 totalLoss += maxVal + MathF.Log(sumExp) - row[targetId];
 

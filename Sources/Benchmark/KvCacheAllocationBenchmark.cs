@@ -126,7 +126,10 @@ namespace Benchmarks
         [GlobalCleanup]
         public void Cleanup()
         {
-            if (_disposed) return;
+            if (_disposed)
+            {
+                return;
+            }
             _disposed = true;
 
             _cachedEngine.Dispose();
@@ -143,7 +146,9 @@ namespace Benchmarks
             var prompt = new int[length];
             var rng = new Random(seed);
             for (var i = 0; i < prompt.Length; i++)
+            {
                 prompt[i] = rng.Next(0, vocabularySize);
+            }
             return prompt;
         }
     }

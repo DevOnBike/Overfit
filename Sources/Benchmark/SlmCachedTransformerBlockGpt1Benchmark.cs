@@ -39,19 +39,7 @@ namespace Benchmarks
         private KeyValueCache _cache = null!;
 
         private float[] _input = null!;
-        private float[] _ln1Gamma = null!;
-        private float[] _ln1Beta = null!;
-        private float[][] _wqHeads = null!;
-        private float[][] _wkHeads = null!;
-        private float[][] _wvHeads = null!;
-        private float[][] _woHeads = null!;
-        private float[] _attentionOutputBias = null!;
-        private float[] _ln2Gamma = null!;
-        private float[] _ln2Beta = null!;
-        private float[] _ffnW1 = null!;
-        private float[] _ffnB1 = null!;
-        private float[] _ffnW2 = null!;
-        private float[] _ffnB2 = null!;
+        private BlockWeights _blockWeights;
         private float[] _output = null!;
 
         private int _headDimension;
@@ -82,78 +70,37 @@ namespace Benchmarks
                 headDimension: _headDimension);
 
             _input = new float[DModel];
-            _ln1Gamma = new float[DModel];
-            _ln1Beta = new float[DModel];
-            _attentionOutputBias = new float[DModel];
-            _ln2Gamma = new float[DModel];
-            _ln2Beta = new float[DModel];
-            _ffnW1 = new float[DModel * DFF];
-            _ffnB1 = new float[DFF];
-            _ffnW2 = new float[DFF * DModel];
-            _ffnB2 = new float[DModel];
             _output = new float[DModel];
 
-            _wqHeads = CreateHeadWeights(
-                HeadCount,
-                DModel * _headDimension,
-                seedBase: 1000);
+            var heads = new SingleHeadWeights[HeadCount];
+            for (var h = 0; h < HeadCount; h++)
+            {
+                var wq = new float[DModel * _headDimension]; FillDeterministic(wq, 1000 + h);
+                var wk = new float[DModel * _headDimension]; FillDeterministic(wk, 2000 + h);
+                var wv = new float[DModel * _headDimension]; FillDeterministic(wv, 3000 + h);
+                var wo = new float[_headDimension * DModel]; FillDeterministic(wo, 4000 + h);
+                heads[h] = new SingleHeadWeights(wq: wq, wk: wk, wv: wv, wo: wo);
+            }
 
-            _wkHeads = CreateHeadWeights(
-                HeadCount,
-                DModel * _headDimension,
-                seedBase: 2000);
+            var ln1Gamma = new float[DModel]; FillAffineGamma(ln1Gamma);
+            var ln2Gamma = new float[DModel]; FillAffineGamma(ln2Gamma);
+            var ffnW1 = new float[DModel * DFF]; FillDeterministic(ffnW1, 501);
+            var ffnW2 = new float[DFF * DModel]; FillDeterministic(ffnW2, 701);
 
-            _wvHeads = CreateHeadWeights(
-                HeadCount,
-                DModel * _headDimension,
-                seedBase: 3000);
-
-            _woHeads = CreateHeadWeights(
-                HeadCount,
-                _headDimension * DModel,
-                seedBase: 4000);
+            _blockWeights = new BlockWeights(
+                heads:    heads,
+                ln1Gamma: ln1Gamma,
+                ln2Gamma: ln2Gamma,
+                ffnW1:    ffnW1,
+                ffnW2:    ffnW2);
 
             FillDeterministic(_input, seed: 101);
-            FillAffineGamma(_ln1Gamma);
-            FillDeterministic(_ln1Beta, seed: 201);
-            FillDeterministic(_attentionOutputBias, seed: 301);
-            FillAffineGamma(_ln2Gamma);
-            FillDeterministic(_ln2Beta, seed: 401);
-            FillDeterministic(_ffnW1, seed: 501);
-            FillDeterministic(_ffnB1, seed: 601);
-            FillDeterministic(_ffnW2, seed: 701);
-            FillDeterministic(_ffnB2, seed: 801);
 
-            PrefillCache(
-                _cache,
-                HeadCount,
-                SequenceLength,
-                _headDimension);
+            PrefillCache(_cache, HeadCount, SequenceLength, _headDimension);
 
             _position = SequenceLength - 1;
 
-            _block.Decode(
-                _input,
-                _ln1Gamma,
-                _ln1Beta,
-                _wqHeads,
-                _wkHeads,
-                _wvHeads,
-                Array.Empty<float[]>(),  // bqHeads
-                Array.Empty<float[]>(),  // bkHeads
-                Array.Empty<float[]>(),  // bvHeads
-                _woHeads,
-                _attentionOutputBias,
-                _ln2Gamma,
-                _ln2Beta,
-                _ffnW1,
-                _ffnB1,
-                _ffnW2,
-                _ffnB2,
-                _cache,
-                0,  // layerIndex
-                _position,  // position
-                _output);
+            _block.Decode(_input, in _blockWeights, _cache, 0, _position, _output);
         }
 
         [Benchmark(OperationsPerInvoke = OperationsPerInvoke)]
@@ -163,28 +110,7 @@ namespace Benchmarks
 
             for (var i = 0; i < OperationsPerInvoke; i++)
             {
-                _block.Decode(
-                    _input,
-                    _ln1Gamma,
-                    _ln1Beta,
-                    _wqHeads,
-                    _wkHeads,
-                    _wvHeads,
-                    Array.Empty<float[]>(),  // bqHeads
-                    Array.Empty<float[]>(),  // bkHeads
-                    Array.Empty<float[]>(),  // bvHeads
-                    _woHeads,
-                    _attentionOutputBias,
-                    _ln2Gamma,
-                    _ln2Beta,
-                    _ffnW1,
-                    _ffnB1,
-                    _ffnW2,
-                    _ffnB2,
-                    _cache,
-                    0,  // layerIndex
-                    _position,  // position
-                    _output);
+                _block.Decode(_input, in _blockWeights, _cache, 0, _position, _output);
 
                 checksum += _output[i % DModel];
             }
@@ -234,22 +160,6 @@ namespace Benchmarks
 
                 cache.Advance();
             }
-        }
-
-        private static float[][] CreateHeadWeights(
-            int headCount,
-            int length,
-            int seedBase)
-        {
-            var weights = new float[headCount][];
-
-            for (var h = 0; h < headCount; h++)
-            {
-                weights[h] = new float[length];
-                FillDeterministic(weights[h], seedBase + h);
-            }
-
-            return weights;
         }
 
         private static void FillAffineGamma(float[] data)

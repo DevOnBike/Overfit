@@ -5,8 +5,8 @@
 
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
-using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.LanguageModels.Experimental;
+using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tokenization;
 using Xunit.Abstractions;
 
@@ -151,7 +151,10 @@ namespace DevOnBike.Overfit.Tests
                     {
                         var valLoss = EvaluateLoss(model, valIds, config, seqLen, rng, valSteps: 20);
                         valStr = $"| Val: {valLoss:F4} ";
-                        if (step + 1 == totalSteps) finalValLoss = valLoss;
+                        if (step + 1 == totalSteps)
+                        {
+                            finalValLoss = valLoss;
+                        }
                     }
 
                     _output.WriteLine(
@@ -219,11 +222,17 @@ namespace DevOnBike.Overfit.Tests
                 var targetId = targetIds[t];
                 var maxVal = logitArr[offset];
                 for (var v = 1; v < vocabSize; v++)
+                {
                     if (logitArr[offset + v] > maxVal)
+                    {
                         maxVal = logitArr[offset + v];
+                    }
+                }
                 var sumExp = 0f;
                 for (var v = 0; v < vocabSize; v++)
+                {
                     sumExp += MathF.Exp(logitArr[offset + v] - maxVal);
+                }
                 losses[t] = maxVal + MathF.Log(sumExp) - logitArr[offset + targetId];
                 var scale = 1f / seqLen;
                 for (var v = 0; v < vocabSize; v++)
@@ -235,7 +244,10 @@ namespace DevOnBike.Overfit.Tests
 
             gradArr.AsSpan().CopyTo(logits.GradView.AsSpan());
             var total = 0f;
-            for (var t = 0; t < totalTokens; t++) total += losses[t];
+            for (var t = 0; t < totalTokens; t++)
+            {
+                total += losses[t];
+            }
             return total / totalTokens;
         }
 
@@ -247,15 +259,24 @@ namespace DevOnBike.Overfit.Tests
             foreach (var p in paramList)
             {
                 var g = p.GradSpan;
-                for (var i = 0; i < g.Length; i++) totalNormSq += g[i] * g[i];
+                for (var i = 0; i < g.Length; i++)
+                {
+                    totalNormSq += g[i] * g[i];
+                }
             }
             var norm = MathF.Sqrt(totalNormSq);
-            if (norm <= maxNorm) return;
+            if (norm <= maxNorm)
+            {
+                return;
+            }
             var scale = maxNorm / (norm + 1e-6f);
             foreach (var p in paramList)
             {
                 var g = p.GradSpan;
-                for (var i = 0; i < g.Length; i++) g[i] *= scale;
+                for (var i = 0; i < g.Length; i++)
+                {
+                    g[i] *= scale;
+                }
             }
         }
 
@@ -356,8 +377,14 @@ namespace DevOnBike.Overfit.Tests
                 ClipGradNorm(model.TrainableParameters(), maxNorm: 1.0f);
                 optimizer.Step();
 
-                if (step == 0) firstLoss = loss;
-                if (step == steps - 1) lastLoss = loss;
+                if (step == 0)
+                {
+                    firstLoss = loss;
+                }
+                if (step == steps - 1)
+                {
+                    lastLoss = loss;
+                }
 
                 if (step % 10 == 0)
                 {
@@ -447,7 +474,10 @@ namespace DevOnBike.Overfit.Tests
                 optimizer.LearningRate = lrMin + (lrMax - lrMin) * cosine;
                 optimizer.Step();
 
-                if (step == 0) initialLoss = loss;
+                if (step == 0)
+                {
+                    initialLoss = loss;
+                }
 
                 if ((step + 1) % 100 == 0)
                 {
@@ -524,10 +554,17 @@ namespace DevOnBike.Overfit.Tests
                     var off = t * vocab;
                     var maxV = logitArr[off];
                     for (var v = 1; v < vocab; v++)
+                    {
                         if (logitArr[off + v] > maxV)
+                        {
                             maxV = logitArr[off + v];
+                        }
+                    }
                     var sumE = 0f;
-                    for (var v = 0; v < vocab; v++) sumE += MathF.Exp(logitArr[off + v] - maxV);
+                    for (var v = 0; v < vocab; v++)
+                    {
+                        sumE += MathF.Exp(logitArr[off + v] - maxV);
+                    }
                     total += maxV + MathF.Log(sumE) - logitArr[off + targets[t]];
                 }
                 return total / seqLen;
@@ -560,7 +597,10 @@ namespace DevOnBike.Overfit.Tests
                 var numerical = (lossPlus - lossMinus) / (2 * eps);
 
                 // Analityczny gradient
-                foreach (var p in model.TrainableParameters()) p.ZeroGrad();
+                foreach (var p in model.TrainableParameters())
+                {
+                    p.ZeroGrad();
+                }
 
                 using var g2 = new ComputationGraph(10_000_000);
                 model.InvalidateAllCaches();
@@ -573,10 +613,17 @@ namespace DevOnBike.Overfit.Tests
                     var off = t * vocab;
                     var maxV = logArr2[off];
                     for (var v = 1; v < vocab; v++)
+                    {
                         if (logArr2[off + v] > maxV)
+                        {
                             maxV = logArr2[off + v];
+                        }
+                    }
                     var sumE = 0f;
-                    for (var v = 0; v < vocab; v++) sumE += MathF.Exp(logArr2[off + v] - maxV);
+                    for (var v = 0; v < vocab; v++)
+                    {
+                        sumE += MathF.Exp(logArr2[off + v] - maxV);
+                    }
                     var scale = 1f / seqLen;
                     for (var v = 0; v < vocab; v++)
                     {
@@ -595,7 +642,9 @@ namespace DevOnBike.Overfit.Tests
                 _output.WriteLine($"{status} {name,20}: analytical={analytical:F5}, numerical={numerical:F5}, relErr={relErr:P1}");
 
                 if (relErr >= 0.10f)
+                {
                     failures.Add($"{name}: analytical={analytical:F5}, numerical={numerical:F5}, relErr={relErr:P1}");
+                }
             }
 
             Assert.True(failures.Count == 0,
@@ -673,8 +722,14 @@ namespace DevOnBike.Overfit.Tests
                 ClipGradNorm(model.TrainableParameters(), maxNorm: 1.0f);
                 optimizer.Step();
 
-                if (step == 0) firstLoss = loss;
-                if (step == steps - 1) lastLoss = loss;
+                if (step == 0)
+                {
+                    firstLoss = loss;
+                }
+                if (step == steps - 1)
+                {
+                    lastLoss = loss;
+                }
             }
 
             _output.WriteLine($"Loss: {firstLoss:F4} → {lastLoss:F4} ({(1f - lastLoss / firstLoss) * 100:F1}% redukcja)");
@@ -746,9 +801,11 @@ namespace DevOnBike.Overfit.Tests
         private static void SkipIfMissing(string path)
         {
             if (!File.Exists(path))
+            {
                 throw new Exception(
                 $"Fixture '{path}' not found. curl -o Tests/test_fixtures/tiny_shakespeare.txt " +
                 "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt");
+            }
         }
     }
 }

@@ -98,9 +98,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             var bo = weights.AttentionBias;
             if (bo.IsEmpty)
+            {
                 output.Slice(0, DModel).Clear();
+            }
             else
+            {
                 bo.Slice(0, DModel).CopyTo(output);
+            }
 
             for (var h = 0; h < HeadCount; h++)
             {
@@ -144,5 +148,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 destination[i] += source[i];
             }
         }
+
+
     }
 }

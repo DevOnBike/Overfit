@@ -44,7 +44,11 @@ namespace Benchmarks
         {
             var rng = new Random(42);
 
-            void Fill(float[] arr) { for (var i = 0; i < arr.Length; i++) arr[i] = (float)(rng.NextDouble() - 0.5); }
+            void Fill(float[] arr) { for (var i = 0; i < arr.Length; i++)
+                {
+                    arr[i] = (float)(rng.NextDouble() - 0.5);
+                }
+            }
 
             _gradOutput2048x1024 = new float[2048 * 1024]; Fill(_gradOutput2048x1024);
             _weights256x1024     = new float[256 * 1024];  Fill(_weights256x1024);

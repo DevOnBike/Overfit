@@ -3,8 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using DevOnBike.Overfit.DeepLearning;
 using System.Numerics.Tensors;
+using DevOnBike.Overfit.DeepLearning;
 
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
@@ -43,8 +43,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var config = model.Config;
 
             if (!config.PreLayerNorm)
+            {
                 throw new NotSupportedException(
-                    "CachedGpt1ModelAdapter supports Pre-LN GPT blocks only.");
+                "CachedGpt1ModelAdapter supports Pre-LN GPT blocks only.");
+            }
 
             LayerCount      = config.NLayers;
             DModel          = config.DModel;
@@ -108,11 +110,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ThrowIfDisposed();
 
             if (logits.Length < VocabSize)
+            {
                 throw new ArgumentException("Logits span is smaller than vocab size.", nameof(logits));
+            }
 
             if (_cache.IsFull)
+            {
                 throw new InvalidOperationException(
-                    $"KV cache full. MaxContextLength={MaxContextLength}.");
+                $"KV cache full. MaxContextLength={MaxContextLength}.");
+            }
 
             var position = _cache.CurrentLength;
 
@@ -137,13 +143,18 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             ThrowIfDisposed();
             if (destination.Length < VocabSize)
+            {
                 throw new ArgumentException("Destination span is smaller than vocab size.", nameof(destination));
+            }
             _lastLogits.AsSpan().CopyTo(destination);
         }
 
         public void Dispose()
         {
-            if (_disposed) return;
+            if (_disposed)
+            {
+                return;
+            }
             _disposed = true;
             _cache.Dispose();
         }

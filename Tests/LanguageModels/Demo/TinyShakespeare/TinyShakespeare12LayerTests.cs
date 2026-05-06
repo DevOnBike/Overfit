@@ -224,11 +224,18 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
 
                 var maxVal = row[0];
                 for (var v = 1; v < vocabSize; v++)
-                    if (row[v] > maxVal) maxVal = row[v];
+                {
+                    if (row[v] > maxVal)
+                    {
+                        maxVal = row[v];
+                    }
+                }
 
                 var sumExp = 0f;
                 for (var v = 0; v < vocabSize; v++)
+                {
                     sumExp += MathF.Exp(row[v] - maxVal);
+                }
 
                 totalLoss += maxVal + MathF.Log(sumExp) - row[targetId];
 
@@ -304,11 +311,18 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
                 // Stable softmax
                 var maxVal = logitArr[offset];
                 for (var v = 1; v < vocabSize; v++)
-                    if (logitArr[offset + v] > maxVal) maxVal = logitArr[offset + v];
+                {
+                    if (logitArr[offset + v] > maxVal)
+                    {
+                        maxVal = logitArr[offset + v];
+                    }
+                }
 
                 var sumExp = 0f;
                 for (var v = 0; v < vocabSize; v++)
+                {
                     sumExp += MathF.Exp(logitArr[offset + v] - maxVal);
+                }
 
                 losses[t] = maxVal + MathF.Log(sumExp) - logitArr[offset + targetId];
 
@@ -324,7 +338,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
             gradArr.AsSpan().CopyTo(logits.GradView.AsSpan());
 
             var total = 0f;
-            for (var t = 0; t < seqLen; t++) total += losses[t];
+            for (var t = 0; t < seqLen; t++)
+            {
+                total += losses[t];
+            }
             return total / seqLen;
         }
 
@@ -338,11 +355,16 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
             {
                 var grad = p.GradSpan;
                 for (var i = 0; i < grad.Length; i++)
+                {
                     totalNormSq += grad[i] * grad[i];
+                }
             }
 
             var totalNorm = MathF.Sqrt(totalNormSq);
-            if (totalNorm <= maxNorm) return;
+            if (totalNorm <= maxNorm)
+            {
+                return;
+            }
 
             // Przeskaluj gradienty
             var scale = maxNorm / (totalNorm + 1e-6f);
@@ -351,7 +373,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
             {
                 var grad = p.GradSpan;
                 for (var i = 0; i < grad.Length; i++)
+                {
                     grad[i] *= scale;
+                }
             }
         }
 

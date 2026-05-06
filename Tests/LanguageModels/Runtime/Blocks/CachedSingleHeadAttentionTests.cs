@@ -34,7 +34,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
 
             cache.Advance();
 
-            decoder.DecodeWithoutOutputBias(
+            decoder.Decode(
                 hidden,
                 identity,
                 identity,
@@ -80,7 +80,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
 
             cache.Advance();
 
-            decoder.DecodeWithoutOutputBias(
+            decoder.Decode(
                 hidden: new float[] { 1f, 0f },
                 wq: identity,
                 wk: identity,
@@ -97,7 +97,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
 
             cache.Advance();
 
-            decoder.DecodeWithoutOutputBias(
+            decoder.Decode(
                 hidden: new float[] { 0f, 1f },
                 wq: identity,
                 wk: identity,
@@ -173,7 +173,6 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 bk: [],
                 bv: [],
                 wo,
-                outputBias: bias,
                 cache,
                 0,  // layerIndex
                 0,  // headIndex
@@ -210,7 +209,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
 
             cache.Advance();
 
-            decoder.DecodeWithoutOutputBias(
+            decoder.Decode(
                 hidden: new float[] { 5f, 6f },
                 wq: identity,
                 wk: identity,
@@ -262,7 +261,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             };
 
             Assert.Throws<InvalidOperationException>(() =>
-                decoder.DecodeWithoutOutputBias(
+                decoder.Decode(
                     hidden: new float[] { 1f, 2f },
                     wq: identity,
                     wk: identity,
@@ -301,7 +300,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             };
 
             Assert.Throws<ArgumentException>(() =>
-                decoder.DecodeWithoutOutputBias(
+                decoder.Decode(
                     hidden: new float[1],
                     wq: identity,
                     wk: identity,
@@ -317,7 +316,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     output: new float[2]));
 
             Assert.Throws<ArgumentException>(() =>
-                decoder.DecodeWithoutOutputBias(
+                decoder.Decode(
                     hidden: new float[2],
                     wq: new float[3],
                     wk: identity,
@@ -333,7 +332,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     output: new float[2]));
 
             Assert.Throws<ArgumentException>(() =>
-                decoder.DecodeWithoutOutputBias(
+                decoder.Decode(
                     hidden: new float[2],
                     wq: identity,
                     wk: identity,
