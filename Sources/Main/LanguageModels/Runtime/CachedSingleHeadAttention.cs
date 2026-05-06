@@ -92,26 +92,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ReadOnlySpan<float> bk,
             ReadOnlySpan<float> bv,
             ReadOnlySpan<float> wo,
-            ReadOnlySpan<float> outputBias,
             KeyValueCache cache,
             int layerIndex,
             int headIndex,
             int position,
             Span<float> output)
         {
-            ValidateDecodeArguments(
-                hidden,
-                wq,
-                wk,
-                wv,
-                wo,
-                outputBias,
-                cache,
-                layerIndex,
-                headIndex,
-                position,
-                output);
-
             SingleTokenProjectionKernel.Project(
                 hidden,
                 wq,
@@ -171,43 +157,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             SingleTokenProjectionKernel.Project(
                 _attentionOutput,
                 wo,
-                outputBias,
+                ReadOnlySpan<float>.Empty,
                 output,
                 HeadDimension,
                 DModel);
         }
 
-        public void DecodeWithoutOutputBias(
-            ReadOnlySpan<float> hidden,
-            ReadOnlySpan<float> wq,
-            ReadOnlySpan<float> wk,
-            ReadOnlySpan<float> wv,
-            ReadOnlySpan<float> bq,
-            ReadOnlySpan<float> bk,
-            ReadOnlySpan<float> bv,
-            ReadOnlySpan<float> wo,
-            KeyValueCache cache,
-            int layerIndex,
-            int headIndex,
-            int position,
-            Span<float> output)
-        {
-            Decode(
-                hidden,
-                wq,
-                wk,
-                wv,
-                bq,
-                bk,
-                bv,
-                wo,
-                [],
-                cache,
-                layerIndex,
-                headIndex,
-                position,
-                output);
-        }
 
         public void GetLastQuery(Span<float> destination)
         {
@@ -249,90 +204,5 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _attentionOutput.AsSpan().CopyTo(destination);
         }
 
-        private void ValidateDecodeArguments(
-            ReadOnlySpan<float> hidden,
-            ReadOnlySpan<float> wq,
-            ReadOnlySpan<float> wk,
-            ReadOnlySpan<float> wv,
-            ReadOnlySpan<float> wo,
-            ReadOnlySpan<float> outputBias,
-            KeyValueCache cache,
-            int layerIndex,
-            int headIndex,
-            int position,
-            Span<float> output)
-        {
-            if (hidden.Length < DModel)
-            {
-                throw new ArgumentException("Hidden span is smaller than dModel.", nameof(hidden));
-            }
-
-            if (wq.Length < DModel * HeadDimension)
-            {
-                throw new ArgumentException("Wq span is smaller than dModel * headDimension.", nameof(wq));
-            }
-
-            if (wk.Length < DModel * HeadDimension)
-            {
-                throw new ArgumentException("Wk span is smaller than dModel * headDimension.", nameof(wk));
-            }
-
-            if (wv.Length < DModel * HeadDimension)
-            {
-                throw new ArgumentException("Wv span is smaller than dModel * headDimension.", nameof(wv));
-            }
-
-            if (wo.Length < HeadDimension * DModel)
-            {
-                throw new ArgumentException("Wo span is smaller than headDimension * dModel.", nameof(wo));
-            }
-
-            if (!outputBias.IsEmpty && outputBias.Length < DModel)
-            {
-                throw new ArgumentException("Output bias span is smaller than dModel.", nameof(outputBias));
-            }
-
-            if (output.Length < DModel)
-            {
-                throw new ArgumentException("Output span is smaller than dModel.", nameof(output));
-            }
-
-            if (cache is null)
-            {
-                throw new ArgumentNullException(nameof(cache));
-            }
-
-            if (cache.Shape.HeadDimension != HeadDimension)
-            {
-                throw new ArgumentException(
-                    $"Cache head dimension {cache.Shape.HeadDimension} does not match decoder head dimension {HeadDimension}.",
-                    nameof(cache));
-            }
-
-            if (position < 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(position));
-            }
-
-            if (position >= MaxSequenceLength)
-            {
-                throw new ArgumentOutOfRangeException(nameof(position));
-            }
-
-            if (position >= cache.CurrentLength)
-            {
-                throw new InvalidOperationException(
-                    $"Position {position} is not visible in the cache. CurrentLength={cache.CurrentLength}. Advance the cache before Decode.");
-            }
-
-            if (position >= cache.Shape.MaxSequenceLength)
-            {
-                throw new ArgumentOutOfRangeException(nameof(position));
-            }
-
-            // Let KeyValueCache validate layer/head bounds through its spans.
-            _ = layerIndex;
-            _ = headIndex;
-        }
     }
 }

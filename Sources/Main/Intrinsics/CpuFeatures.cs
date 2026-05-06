@@ -9,10 +9,19 @@ namespace DevOnBike.Overfit.Intrinsics
 {
     internal static class CpuFeatures
     {
-        public static readonly bool HasAvx2Fma = Avx2.IsSupported && Fma.IsSupported;
+        public static readonly bool HasFma = Fma.IsSupported;
 
         public static readonly bool HasAvx = Avx.IsSupported;
 
+        public static readonly bool HasAvx2 = Avx2.IsSupported;
+
+        public static readonly bool HasAvx512 = Avx512F.IsSupported;
+
         public static readonly bool HasSse = Sse.IsSupported;
+
+        public static readonly bool HasSse3 = Sse3.IsSupported;
+
+        // to zawsze na koncu - bo zalezy od HasFma i HasAvx2 (pola sa inicjowane od gory do dolu)
+        public static readonly bool HasAvx2Fma = HasAvx2 && HasFma;
     }
 }
