@@ -62,9 +62,11 @@ namespace Benchmarks
         public void Setup()
         {
             if (!File.Exists(CheckpointPath))
+            {
                 throw new FileNotFoundException(
-                    $"GPT-2 checkpoint not found at '{CheckpointPath}'. " +
-                    "Run: python3 Scripts/convert_gpt2.py --size small --out test_fixtures/");
+                $"GPT-2 checkpoint not found at '{CheckpointPath}'. " +
+                "Run: python3 Scripts/convert_gpt2.py --size small --out test_fixtures/");
+            }
 
             _model = new GPT1Model(Gpt2Config.Small);
             _model.Eval();
@@ -100,7 +102,9 @@ namespace Benchmarks
             session.Reset(Prompt.AsSpan());
 
             for (var i = 0; i < MaxNewTokens; i++)
+            {
                 _checksum ^= session.GenerateNextToken(in _sampling);
+            }
 
             return _checksum;
         }
@@ -116,7 +120,9 @@ namespace Benchmarks
             session.Reset(Prompt.AsSpan());
 
             for (var i = 0; i < MaxNewTokens; i++)
+            {
                 _checksum ^= session.GenerateNextToken(in _sampling);
+            }
 
             return _checksum;
         }
@@ -137,7 +143,10 @@ namespace Benchmarks
         [GlobalCleanup]
         public void Cleanup()
         {
-            if (_disposed) return;
+            if (_disposed)
+            {
+                return;
+            }
             _disposed = true;
 
             _cachedEngine.Dispose();

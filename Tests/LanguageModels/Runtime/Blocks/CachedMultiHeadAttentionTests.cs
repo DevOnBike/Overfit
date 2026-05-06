@@ -14,7 +14,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
         private static float[] Identity(int n)
         {
             var m = new float[n * n];
-            for (var i = 0; i < n; i++) m[i * n + i] = 1f;
+            for (var i = 0; i < n; i++)
+            {
+                m[i * n + i] = 1f;
+            }
             return m;
         }
 

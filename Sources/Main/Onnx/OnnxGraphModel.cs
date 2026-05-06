@@ -125,10 +125,14 @@ namespace DevOnBike.Overfit.Onnx
             _disposed = true;
 
             foreach (var node in _nodes)
+            {
                 node.Module.Dispose();
+            }
 
             foreach (var buf in _buffers)
+            {
                 buf.Dispose();
+            }
         }
     }
 }

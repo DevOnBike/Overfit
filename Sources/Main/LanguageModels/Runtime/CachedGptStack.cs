@@ -185,6 +185,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         /// <summary>Exposes internal blocks for testing.</summary>
         internal CachedTransformerBlock[] Blocks => _blocks;
-
     }
 }
+
+

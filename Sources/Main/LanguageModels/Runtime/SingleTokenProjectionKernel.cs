@@ -39,7 +39,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     /// - 768 -> 768 projections,
     /// - 768 -> 40478 LM head.
     /// </summary>
-    public static class SingleTokenProjectionKernel
+    public static unsafe class SingleTokenProjectionKernel
     {
         public static void Project(
             ReadOnlySpan<float> input,
@@ -128,6 +128,102 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     x,
                     outputSlice,
                     outputSlice);
+            }
+        }
+
+        /// <summary>
+        /// Parallel projection for large output dimensions (LM head, FFN W1).
+        ///
+        /// Splits the output dimension into chunks and runs each chunk on a
+        /// separate thread via <see cref="Parallel.For"/>. Uses <c>unsafe</c>
+        /// MemoryMarshal.GetReference + Unsafe.Add to cross the managed/Parallel boundary without
+        /// allocating delegates or closures per call.
+        ///
+        /// Threshold: only parallelises when <c>outputSize</c> exceeds
+        /// <see cref="ParallelThreshold"/>. Below the threshold falls back
+        /// to the sequential <see cref="Project"/> path.
+        ///
+        /// Access pattern: each thread reads ALL input values (small — fits
+        /// in L1) and a contiguous slice of each weight row (cache-friendly
+        /// within the slice). No output sharing between threads.
+        /// </summary>
+        public const int ParallelThreshold = 10_000;
+
+        public static unsafe void ProjectParallel(
+            ReadOnlySpan<float> input,
+            ReadOnlySpan<float> weightsInputOutput,
+            ReadOnlySpan<float> bias,
+            Span<float> output,
+            int inputSize,
+            int outputSize)
+        {
+            if (outputSize < ParallelThreshold)
+            {
+                Project(input, weightsInputOutput, bias, output, inputSize, outputSize);
+                return;
+            }
+
+            ValidateArguments(input, weightsInputOutput, output, inputSize, outputSize);
+
+            if (!bias.IsEmpty && bias.Length < outputSize)
+            {
+                throw new ArgumentException("Bias span is smaller than outputSize.", nameof(bias));
+            }
+
+            // Sequential init: fill output with bias or zero.
+            // Cheaper than parallelising (one pass, no synchronisation).
+            if (!bias.IsEmpty)
+            {
+                bias.Slice(0, outputSize).CopyTo(output);
+            }
+            else
+            {
+                output.Slice(0, outputSize).Clear();
+            }
+
+            var processorCount = Environment.ProcessorCount;
+            var chunkSize      = Math.Max(512, (outputSize + processorCount - 1) / processorCount);
+            var chunkCount     = (outputSize + chunkSize - 1) / chunkSize;
+
+            // CS1764/CS8175: fixed and ref locals cannot be captured in lambdas.
+            // Safe workaround: convert to nint (value type) before Parallel.For.
+            // Parallel.For is synchronous — it blocks until ALL worker threads finish,
+            // so the fixed block is guaranteed to be active for the entire duration.
+            // The nint values are addresses captured by value in the lambda closure.
+            fixed (float* pInput   = input)
+            fixed (float* pWeights = weightsInputOutput)
+            fixed (float* pOutput  = output)
+            {
+                var ip = (nint)pInput;
+                var wp = (nint)pWeights;
+                var op = (nint)pOutput;
+
+                Parallel.For(0, chunkCount, chunk =>
+                {
+                    var start = chunk * chunkSize;
+                    var count = Math.Min(chunkSize, outputSize - start);
+
+                    // Cast nint back to pointer — safe because Parallel.For is
+                    // synchronous and the fixed block is still active.
+                    var outputChunk = new Span<float>((float*)op + start, count);
+
+                    // Accumulate: output[start:start+count] += input[i] * W[i, start:start+count]
+                    // output was already initialised with bias (or zero) above.
+                    for (var i = 0; i < inputSize; i++)
+                    {
+                        var x = ((float*)ip)[i];
+                        if (x == 0f)
+                        {
+                            continue;
+                        }
+
+                        var weightSlice = new ReadOnlySpan<float>(
+                            (float*)wp + (long)i * outputSize + start,
+                            count);
+
+                        TensorPrimitives.MultiplyAdd(weightSlice, x, outputChunk, outputChunk);
+                    }
+                });
             }
         }
 
