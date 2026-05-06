@@ -179,10 +179,13 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 0,  // position
                 output);
 
-            // Single token attention output == V == [2,3].
-            AssertClose(24f, output[0]); // 10 + 2*1 + 3*4
-            AssertClose(39f, output[1]); // 20 + 2*2 + 3*5
-            AssertClose(54f, output[2]); // 30 + 2*3 + 3*6
+            // Single token: q=k=v = wIn^T × [2,3,99] = [2,3] (third row is zero).
+            // attention(one token) = v = [2,3].
+            // output = wo × v = [2*1+3*4, 2*2+3*5, 2*3+3*6] = [14, 19, 24].
+            // Note: outputBias is MHA-level, not SingleHead-level.
+            AssertClose(14f, output[0]);
+            AssertClose(19f, output[1]);
+            AssertClose(24f, output[2]);
         }
 
         [Fact]
@@ -260,7 +263,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 0f, 1f
             };
 
-            Assert.Throws<InvalidOperationException>(() =>
+            Assert.Throws<ArgumentOutOfRangeException>(() =>
                 decoder.Decode(
                     hidden: new float[] { 1f, 2f },
                     wq: identity,

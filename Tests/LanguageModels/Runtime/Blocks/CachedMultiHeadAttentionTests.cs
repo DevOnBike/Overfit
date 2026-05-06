@@ -14,10 +14,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
         private static float[] Identity(int n)
         {
             var m = new float[n * n];
-            for (var i = 0; i < n; i++)
-            {
-                m[i * n + i] = 1f;
-            }
+            for (var i = 0; i < n; i++) m[i * n + i] = 1f;
             return m;
         }
 
@@ -56,10 +53,13 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             using var cache   = KeyValueCache.Create(1, 2, 4, 2);
             var decoder = new CachedMultiHeadAttention(4, 2, 4);
 
-            var head0In  = new float[] { 1f, 0f, 0f, 0f,  0f, 1f, 0f, 0f };
-            var head1In  = new float[] { 0f, 0f, 1f, 0f,  0f, 0f, 0f, 1f };
-            var head0Out = new float[] { 1f, 0f,  0f, 1f };
-            var head1Out = new float[] { 0f, 1f,  1f, 0f };
+            var head0In  = new float[] { 1f, 0f,  0f, 1f,  0f, 0f,  0f, 0f };  // picks hidden dims 0,1
+            var head1In  = new float[] { 0f, 0f,  0f, 0f,  1f, 0f,  0f, 1f };  // picks hidden dims 2,3
+            // wo: headDim=2 → dModel=4, laid out [headDim rows × dModel cols]
+            // head0Out maps head space → output dims 0,1
+            var head0Out = new float[] { 1f, 0f, 0f, 0f,  0f, 1f, 0f, 0f };  // head→output dims 0,1
+            // head1Out maps head space → output dims 2,3
+            var head1Out = new float[] { 0f, 0f, 1f, 0f,  0f, 0f, 0f, 1f };  // head→output dims 2,3
             var bias     = new float[] { 10f, 20f, 30f, 40f };
 
             var bw = new BlockWeights(
@@ -74,10 +74,13 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             cache.Advance();
             decoder.Decode(new float[] { 1f, 2f, 3f, 4f }, in bw, cache, 0, 0, output);
 
-            AssertClose(10f + 1f,      output[0]);
-            AssertClose(20f + 2f + 3f, output[1]);
-            AssertClose(30f + 2f,      output[2]);
-            AssertClose(40f + 4f,      output[3]);
+            // head0: q=k=v = head0In^T × [1,2,3,4] = [1,2], wo → [1,2,0,0]
+            // head1: q=k=v = head1In^T × [1,2,3,4] = [3,4], wo → [0,0,3,4]
+            // output = bias + head0 + head1 = [11,22,33,44]
+            AssertClose(11f, output[0]);
+            AssertClose(22f, output[1]);
+            AssertClose(33f, output[2]);
+            AssertClose(44f, output[3]);
         }
 
         [Fact]
@@ -86,9 +89,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             using var cache   = KeyValueCache.Create(1, 2, 4, 2);
             var decoder = new CachedMultiHeadAttention(4, 2, 4);
 
-            var head0In = new float[] { 1f, 0f, 0f, 0f,  0f, 1f, 0f, 0f };
-            var head1In = new float[] { 0f, 0f, 1f, 0f,  0f, 0f, 0f, 1f };
-            var wo      = new float[] { 1f, 0f,  0f, 1f };
+            var head0In = new float[] { 1f, 0f,  0f, 1f,  0f, 0f,  0f, 0f };  // picks dims 0,1
+            var head1In = new float[] { 0f, 0f,  0f, 0f,  1f, 0f,  0f, 1f };  // picks dims 2,3
+            var wo      = new float[] { 1f, 0f, 0f, 0f,  0f, 1f, 0f, 0f };  // headDim=2 → dModel=4
 
             var bw = new BlockWeights(heads: new[]
             {
