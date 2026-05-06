@@ -36,14 +36,14 @@ namespace DevOnBike.Overfit.DeepLearning
         /// </summary>
         public static GPT1Config Small => new()
         {
-            VocabSize     = 50257,
+            VocabSize = 50257,
             ContextLength = 1024,
-            DModel        = 768,
-            NHeads        = 12,
-            NLayers       = 12,
-            DFF           = 3072,
-            TieWeights    = false,  // Overfit stores LMHead separately after conversion
-            PreLayerNorm  = true,   // GPT-2 uses pre-LN
+            DModel = 768,
+            NHeads = 12,
+            NLayers = 12,
+            DFF = 3072,
+            TieWeights = false,  // Overfit stores LMHead separately after conversion
+            PreLayerNorm = true,   // GPT-2 uses pre-LN
         };
 
         /// <summary>
@@ -53,14 +53,14 @@ namespace DevOnBike.Overfit.DeepLearning
         /// </summary>
         public static GPT1Config Medium => new()
         {
-            VocabSize     = 50257,
+            VocabSize = 50257,
             ContextLength = 1024,
-            DModel        = 1024,
-            NHeads        = 16,
-            NLayers       = 24,
-            DFF           = 4096,
-            TieWeights    = false,
-            PreLayerNorm  = true,
+            DModel = 1024,
+            NHeads = 16,
+            NLayers = 24,
+            DFF = 4096,
+            TieWeights = false,
+            PreLayerNorm = true,
         };
 
         /// <summary>
@@ -70,14 +70,14 @@ namespace DevOnBike.Overfit.DeepLearning
         /// </summary>
         public static GPT1Config Large => new()
         {
-            VocabSize     = 50257,
+            VocabSize = 50257,
             ContextLength = 1024,
-            DModel        = 1280,
-            NHeads        = 20,
-            NLayers       = 36,
-            DFF           = 5120,
-            TieWeights    = false,
-            PreLayerNorm  = true,
+            DModel = 1280,
+            NHeads = 20,
+            NLayers = 36,
+            DFF = 5120,
+            TieWeights = false,
+            PreLayerNorm = true,
         };
 
         /// <summary>
@@ -88,14 +88,14 @@ namespace DevOnBike.Overfit.DeepLearning
         /// </summary>
         public static GPT1Config XL => new()
         {
-            VocabSize     = 50257,
+            VocabSize = 50257,
             ContextLength = 1024,
-            DModel        = 1600,
-            NHeads        = 25,
-            NLayers       = 48,
-            DFF           = 6400,
-            TieWeights    = false,
-            PreLayerNorm  = true,
+            DModel = 1600,
+            NHeads = 25,
+            NLayers = 48,
+            DFF = 6400,
+            TieWeights = false,
+            PreLayerNorm = true,
         };
     }
 }
