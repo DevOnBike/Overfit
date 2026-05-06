@@ -68,10 +68,13 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             var identity = new float[]
             {
                 1f, 0f,
-                0f, 1f
+                0f, 1f,
             };
 
             var heads = new[] { identity };
+            var biases = CreateZeroBiasHeads(
+                headCount: 1,
+                headDimension: 2);
             var output = new float[2];
 
             cache.Advance();
@@ -81,13 +84,13 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 wqHeads: heads,
                 wkHeads: heads,
                 wvHeads: heads,
-                bqHeads: Array.Empty<float[]>(),
-                bkHeads: Array.Empty<float[]>(),
-                bvHeads: Array.Empty<float[]>(),
+                bqHeads: biases,
+                bkHeads: biases,
+                bvHeads: biases,
                 woHeads: heads,
                 cache,
-                0,  // layerIndex
-                0,  // position
+                0, // layerIndex
+                0, // position
                 output);
 
             AssertClose(3f, output[0]);
@@ -113,7 +116,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 1f, 0f,
                 0f, 1f,
                 0f, 0f,
-                0f, 0f
+                0f, 0f,
             };
 
             var head1In = new float[]
@@ -121,26 +124,28 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 0f, 0f,
                 0f, 0f,
                 1f, 0f,
-                0f, 1f
+                0f, 1f,
             };
 
             var head0Out = new float[]
             {
                 1f, 0f, 0f, 0f,
-                0f, 1f, 0f, 0f
+                0f, 1f, 0f, 0f,
             };
 
             var head1Out = new float[]
             {
                 0f, 0f, 1f, 0f,
-                0f, 0f, 0f, 1f
+                0f, 0f, 0f, 1f,
             };
 
             var wq = new[] { head0In, head1In };
             var wk = new[] { head0In, head1In };
             var wv = new[] { head0In, head1In };
             var wo = new[] { head0Out, head1Out };
-
+            var biases = CreateZeroBiasHeads(
+                headCount: 2,
+                headDimension: 2);
             var outputBias = new float[] { 10f, 20f, 30f, 40f };
             var output = new float[4];
 
@@ -151,14 +156,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 wqHeads: wq,
                 wkHeads: wk,
                 wvHeads: wv,
-                bqHeads: Array.Empty<float[]>(),
-                bkHeads: Array.Empty<float[]>(),
-                bvHeads: Array.Empty<float[]>(),
+                bqHeads: biases,
+                bkHeads: biases,
+                bvHeads: biases,
                 woHeads: wo,
                 outputBias,
                 cache,
-                0,  // layerIndex
-                0,  // position
+                0, // layerIndex
+                0, // position
                 output);
 
             AssertClose(11f, output[0]);
@@ -186,7 +191,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 1f, 0f,
                 0f, 1f,
                 0f, 0f,
-                0f, 0f
+                0f, 0f,
             };
 
             var head1In = new float[]
@@ -194,26 +199,28 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 0f, 0f,
                 0f, 0f,
                 1f, 0f,
-                0f, 1f
+                0f, 1f,
             };
 
             var head0Out = new float[]
             {
                 1f, 0f, 0f, 0f,
-                0f, 1f, 0f, 0f
+                0f, 1f, 0f, 0f,
             };
 
             var head1Out = new float[]
             {
                 0f, 0f, 1f, 0f,
-                0f, 0f, 0f, 1f
+                0f, 0f, 0f, 1f,
             };
 
             var wq = new[] { head0In, head1In };
             var wk = new[] { head0In, head1In };
             var wv = new[] { head0In, head1In };
             var wo = new[] { head0Out, head1Out };
-
+            var biases = CreateZeroBiasHeads(
+                headCount: 2,
+                headDimension: 2);
             var output = new float[4];
 
             cache.Advance();
@@ -223,13 +230,13 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 wq,
                 wk,
                 wv,
-                Array.Empty<float[]>(),  // bqHeads
-                Array.Empty<float[]>(),  // bkHeads
-                Array.Empty<float[]>(),  // bvHeads
+                biases, // bqHeads
+                biases, // bkHeads
+                biases, // bvHeads
                 wo,
                 cache,
-                0,  // layerIndex
-                0,  // position
+                0, // layerIndex
+                0, // position
                 output);
 
             cache.Advance();
@@ -239,19 +246,18 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 wq,
                 wk,
                 wv,
-                Array.Empty<float[]>(),  // bqHeads
-                Array.Empty<float[]>(),  // bkHeads
-                Array.Empty<float[]>(),  // bvHeads
+                biases, // bqHeads
+                biases, // bkHeads
+                biases, // bvHeads
                 wo,
                 cache,
-                0,  // layerIndex
-                1,  // position
+                0, // layerIndex
+                1, // position
                 output);
 
             var scale = 1f / MathF.Sqrt(2f);
             var score0 = 0f * scale;
             var score1 = 1f * scale;
-
             var maxScore = MathF.Max(score0, score1);
             var e0 = MathF.Exp(score0 - maxScore);
             var e1 = MathF.Exp(score1 - maxScore);
@@ -283,7 +289,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 1f, 0f,
                 0f, 1f,
                 0f, 0f,
-                0f, 0f
+                0f, 0f,
             };
 
             var head1In = new float[]
@@ -291,25 +297,28 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 0f, 0f,
                 0f, 0f,
                 1f, 0f,
-                0f, 1f
+                0f, 1f,
             };
 
             var head0Out = new float[]
             {
                 1f, 0f, 0f, 0f,
-                0f, 1f, 0f, 0f
+                0f, 1f, 0f, 0f,
             };
 
             var head1Out = new float[]
             {
                 0f, 0f, 1f, 0f,
-                0f, 0f, 0f, 1f
+                0f, 0f, 0f, 1f,
             };
 
             var wq = new[] { head0In, head1In };
             var wk = new[] { head0In, head1In };
             var wv = new[] { head0In, head1In };
             var wo = new[] { head0Out, head1Out };
+            var biases = CreateZeroBiasHeads(
+                headCount: 2,
+                headDimension: 2);
 
             cache.Advance();
 
@@ -318,19 +327,30 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 wq,
                 wk,
                 wv,
-                Array.Empty<float[]>(),  // bqHeads
-                Array.Empty<float[]>(),  // bkHeads
-                Array.Empty<float[]>(),  // bvHeads
+                biases, // bqHeads
+                biases, // bkHeads
+                biases, // bvHeads
                 wo,
                 cache,
-                0,  // layerIndex
-                0,  // position
-                new float[4]);  // output;
+                0, // layerIndex
+                0, // position
+                new float[4]); // output
 
-            Assert.Equal(new float[] { 7f, 8f }, cache.GetKeyReadSpan(0, 0, 0, 1).ToArray());
-            Assert.Equal(new float[] { 7f, 8f }, cache.GetValueReadSpan(0, 0, 0, 1).ToArray());
-            Assert.Equal(new float[] { 9f, 10f }, cache.GetKeyReadSpan(0, 1, 0, 1).ToArray());
-            Assert.Equal(new float[] { 9f, 10f }, cache.GetValueReadSpan(0, 1, 0, 1).ToArray());
+            Assert.Equal(
+                new float[] { 7f, 8f },
+                cache.GetKeyReadSpan(0, 0, 0, 1).ToArray());
+
+            Assert.Equal(
+                new float[] { 7f, 8f },
+                cache.GetValueReadSpan(0, 0, 0, 1).ToArray());
+
+            Assert.Equal(
+                new float[] { 9f, 10f },
+                cache.GetKeyReadSpan(0, 1, 0, 1).ToArray());
+
+            Assert.Equal(
+                new float[] { 9f, 10f },
+                cache.GetValueReadSpan(0, 1, 0, 1).ToArray());
         }
 
         [Fact]
@@ -350,25 +370,27 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             var identity = new float[]
             {
                 1f, 0f,
-                0f, 1f
+                0f, 1f,
             };
 
             var heads = new[] { identity };
+            var biases = CreateZeroBiasHeads(
+                headCount: 1,
+                headDimension: 2);
 
-            Assert.Throws<InvalidOperationException>(() =>
-                decoder.DecodeWithoutOutputBias(
-                    hidden: new float[] { 1f, 2f },
-                    wqHeads: heads,
-                    wkHeads: heads,
-                    wvHeads: heads,
-                    bqHeads: [],
-                    bkHeads: [],
-                    bvHeads: [],
-                    woHeads: heads,
-                    cache,
-                    0,  // layerIndex
-                    0,  // position
-                    output: new float[2]));
+            Assert.Throws<InvalidOperationException>(() => decoder.DecodeWithoutOutputBias(
+                hidden: new float[] { 1f, 2f },
+                wqHeads: heads,
+                wkHeads: heads,
+                wvHeads: heads,
+                bqHeads: biases,
+                bkHeads: biases,
+                bvHeads: biases,
+                woHeads: heads,
+                cache,
+                0, // layerIndex
+                0, // position
+                output: new float[2]));
         }
 
         [Fact]
@@ -394,24 +416,27 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     1f, 0f,
                     0f, 1f,
                     0f, 0f,
-                    0f, 0f
-                }
+                    0f, 0f,
+                },
             };
 
-            Assert.Throws<ArgumentException>(() =>
-                decoder.DecodeWithoutOutputBias(
-                    hidden: new float[] { 1f, 2f, 3f, 4f },
-                    wqHeads: oneHead,
-                    wkHeads: oneHead,
-                    wvHeads: oneHead,
-                    bqHeads: [],
-                    bkHeads: [],
-                    bvHeads: [],
-                    woHeads: oneHead,
-                    cache,
-                    0,  // layerIndex
-                    0,  // position
-                    new float[4]));  // output);
+            var oneBiasHead = CreateZeroBiasHeads(
+                headCount: 1,
+                headDimension: 2);
+
+            Assert.Throws<ArgumentException>(() => decoder.DecodeWithoutOutputBias(
+                hidden: new float[] { 1f, 2f, 3f, 4f },
+                wqHeads: oneHead,
+                wkHeads: oneHead,
+                wvHeads: oneHead,
+                bqHeads: oneBiasHead,
+                bkHeads: oneBiasHead,
+                bvHeads: oneBiasHead,
+                woHeads: oneHead,
+                cache,
+                0, // layerIndex
+                0, // position
+                new float[4])); // output
         }
 
         [Fact]
@@ -425,6 +450,20 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             Assert.NotNull(decoder.GetHeadDecoder(0));
             Assert.NotNull(decoder.GetHeadDecoder(1));
             Assert.Throws<ArgumentOutOfRangeException>(() => decoder.GetHeadDecoder(2));
+        }
+
+        private static float[][] CreateZeroBiasHeads(
+            int headCount,
+            int headDimension)
+        {
+            var result = new float[headCount][];
+
+            for (var i = 0; i < headCount; i++)
+            {
+                result[i] = new float[headDimension];
+            }
+
+            return result;
         }
 
         private static void AssertClose(float expected, float actual)
