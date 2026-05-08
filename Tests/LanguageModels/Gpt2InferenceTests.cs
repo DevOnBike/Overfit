@@ -36,9 +36,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels
     {
         private readonly ITestOutputHelper _output;
 
-        private const string ModelPath = "test_fixtures/gpt2_small.bin";
-        private const string VocabPath = "test_fixtures/vocab.json";
-        private const string MergesPath = "test_fixtures/merges.txt";
+        private const string ModelPath = "d:/gpt2_small.bin";
+        private const string VocabPath = "d:/vocab.json";
+        private const string MergesPath = "d:/merges.txt";
 
         public Gpt2InferenceTests(
             ITestOutputHelper output)

@@ -31,10 +31,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
     /// </remarks>
     public sealed class Gpt2ImportAttentionParityDiagnostics
     {
-        private const string ModelPath = "test_fixtures/gpt2_small.bin";
-        private const string VocabPath = "test_fixtures/vocab.json";
-        private const string MergesPath = "test_fixtures/merges.txt";
-        private const string ReferencePath = "test_fixtures/gpt2_reference_small.json";
+        private const string ModelPath = "d:/gpt2_small.bin";
+        private const string VocabPath = "d:/vocab.json";
+        private const string MergesPath = "d:/merges.txt";
+        private const string ReferencePath = "d:/gpt2_reference_small.json";
         private const int DefaultArenaSize = 1_500_000_000;
 
         private readonly ITestOutputHelper _output;
