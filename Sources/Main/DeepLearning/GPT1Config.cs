@@ -82,6 +82,41 @@ namespace DevOnBike.Overfit.DeepLearning
         /// </summary>
         public bool TieWeights { get; init; } = true;
 
+        // ── GQA ──────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Number of KV attention heads (Grouped Query Attention).
+        /// Must be a divisor of NHeads.
+        /// - NKvHeads == NHeads: standard MHA (GPT-1, GPT-2)
+        /// - NKvHeads == 1:      MQA (one K/V shared by all Q heads)
+        /// - 1 &lt; NKvHeads &lt; NHeads: GQA (Llama 3, Mistral)
+        /// Defaults to NHeads (backward-compatible MHA).
+        /// </summary>
+        public int NKvHeads { get; init; } = 0;  // 0 = same as NHeads
+
+        /// <summary>Resolved KV head count. Returns NKvHeads if set, else NHeads.</summary>
+        public int KvHeads => NKvHeads > 0 ? NKvHeads : NHeads;
+
+        // ── RoPE ─────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Use Rotary Position Embedding (true for Llama/Mistral/Phi/Qwen).
+        /// When false, uses absolute positional embeddings (GPT-1, GPT-2).
+        /// </summary>
+        public bool UseRoPE { get; init; } = false;
+
+        /// <summary>RoPE base frequency theta. Default 10_000 (GPT-NeoX).</summary>
+        public float RoPETheta { get; init; } = 10_000f;
+
+        // ── FFN ───────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Feed-forward activation function.
+        /// GeLU for GPT-2. SwiGLU for Llama/Mistral/Phi/Qwen.
+        /// </summary>
+        public DevOnBike.Overfit.LanguageModels.Runtime.FeedForwardActivation FfnActivation
+            { get; init; } = DevOnBike.Overfit.LanguageModels.Runtime.FeedForwardActivation.GeLU;
+
         /// <summary>Total parameter count (weight-tying aware).</summary>
         public long ParameterCount
         {

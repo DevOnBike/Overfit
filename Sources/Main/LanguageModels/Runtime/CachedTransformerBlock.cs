@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.LanguageModels.Rope;
+
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
     /// <summary>
@@ -49,7 +51,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int dFF,
             int maxSequenceLength,
             float layerNormEpsilon = 1e-5f,
-            FeedForwardActivation feedForwardActivation = FeedForwardActivation.GeLU)
+            FeedForwardActivation feedForwardActivation = FeedForwardActivation.GeLU,
+            int kvHeadCount = 0)
         {
             if (dModel <= 0)
             {
@@ -94,7 +97,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _attention = new CachedMultiHeadAttention(
                 dModel,
                 headCount,
-                maxSequenceLength);
+                maxSequenceLength,
+                kvHeadCount: kvHeadCount > 0 ? kvHeadCount : headCount);
 
             _feedForward = new CachedFeedForwardBlock(
                 dModel,
@@ -122,66 +126,31 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         public FeedForwardActivation FeedForwardActivation { get; }
 
-        public void Decode(
+        internal void Decode(
             ReadOnlySpan<float> input,
-            ReadOnlySpan<float> ln1Gamma,
-            ReadOnlySpan<float> ln1Beta,
-            IReadOnlyList<float[]> wqHeads,
-            IReadOnlyList<float[]> wkHeads,
-            IReadOnlyList<float[]> wvHeads,
-            IReadOnlyList<float[]> bqHeads,
-            IReadOnlyList<float[]> bkHeads,
-            IReadOnlyList<float[]> bvHeads,
-            IReadOnlyList<float[]> woHeads,
-            ReadOnlySpan<float> attentionOutputBias,
-            ReadOnlySpan<float> ln2Gamma,
-            ReadOnlySpan<float> ln2Beta,
-            ReadOnlySpan<float> ffnW1,
-            ReadOnlySpan<float> ffnB1,
-            ReadOnlySpan<float> ffnW2,
-            ReadOnlySpan<float> ffnB2,
+            in BlockWeights weights,
             KeyValueCache cache,
             int layerIndex,
             int position,
-            Span<float> output)
+            Span<float> output,
+            RopeTable? rope = null)
         {
-            ValidateDecodeArguments(
-                input,
-                ln1Gamma,
-                ln1Beta,
-                attentionOutputBias,
-                ln2Gamma,
-                ln2Beta,
-                ffnW1,
-                ffnB1,
-                ffnW2,
-                ffnB2,
-                cache,
-                position,
-                output);
-
             SingleTokenLayerNormKernel.Normalize(
                 input,
-                ln1Gamma,
-                ln1Beta,
+                weights.Ln1Gamma,
+                weights.Ln1Beta,
                 _ln1Output,
                 DModel,
                 LayerNormEpsilon);
 
             _attention.Decode(
                 _ln1Output,
-                wqHeads,
-                wkHeads,
-                wvHeads,
-                bqHeads,
-                bkHeads,
-                bvHeads,
-                woHeads,
-                attentionOutputBias,
+                weights,
                 cache,
                 layerIndex,
                 position,
-                _attentionOutput);
+                _attentionOutput,
+                rope);
 
             SingleTokenLayerNormKernel.AddResidual(
                 input,
@@ -191,19 +160,33 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             SingleTokenLayerNormKernel.Normalize(
                 _afterAttentionResidual,
-                ln2Gamma,
-                ln2Beta,
+                weights.Ln2Gamma,
+                weights.Ln2Beta,
                 _ln2Output,
                 DModel,
                 LayerNormEpsilon);
 
-            _feedForward.Decode(
-                _ln2Output,
-                ffnW1,
-                ffnB1,
-                ffnW2,
-                ffnB2,
-                _feedForwardOutput);
+            // SwiGLU (Llama/Mistral/Qwen): FfnGate is present.
+            // GeLU/ReLU (GPT-1/GPT-2): FfnGate is empty.
+            if (!weights.FfnGate.IsEmpty)
+            {
+                _feedForward.DecodeSwiGlu(
+                    _ln2Output,
+                    weights.FfnGate,
+                    weights.FfnW1,
+                    weights.FfnW2,
+                    _feedForwardOutput);
+            }
+            else
+            {
+                _feedForward.Decode(
+                    _ln2Output,
+                    weights.FfnW1,
+                    weights.FfnB1,
+                    weights.FfnW2,
+                    weights.FfnB2,
+                    _feedForwardOutput);
+            }
 
             SingleTokenLayerNormKernel.AddResidual(
                 _afterAttentionResidual,
@@ -212,48 +195,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 DModel);
         }
 
-        public void DecodeWithoutLayerNormAffine(
-            ReadOnlySpan<float> input,
-            IReadOnlyList<float[]> wqHeads,
-            IReadOnlyList<float[]> wkHeads,
-            IReadOnlyList<float[]> wvHeads,
-            IReadOnlyList<float[]> bqHeads,
-            IReadOnlyList<float[]> bkHeads,
-            IReadOnlyList<float[]> bvHeads,
-            IReadOnlyList<float[]> woHeads,
-            ReadOnlySpan<float> attentionOutputBias,
-            ReadOnlySpan<float> ffnW1,
-            ReadOnlySpan<float> ffnB1,
-            ReadOnlySpan<float> ffnW2,
-            ReadOnlySpan<float> ffnB2,
-            KeyValueCache cache,
-            int layerIndex,
-            int position,
-            Span<float> output)
-        {
-            Decode(
-                input,
-                [],
-                [],
-                wqHeads,
-                wkHeads,
-                wvHeads,
-                bqHeads,
-                bkHeads,
-                bvHeads,
-                woHeads,
-                attentionOutputBias,
-                [],
-                [],
-                ffnW1,
-                ffnB1,
-                ffnW2,
-                ffnB2,
-                cache,
-                layerIndex,
-                position,
-                output);
-        }
+
+
 
         public void GetLastLayerNorm1Output(Span<float> destination)
         {
@@ -280,107 +223,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             CopyDModelBuffer(_feedForwardOutput, destination, nameof(destination));
         }
 
-        private void ValidateDecodeArguments(
-            ReadOnlySpan<float> input,
-            ReadOnlySpan<float> ln1Gamma,
-            ReadOnlySpan<float> ln1Beta,
-            ReadOnlySpan<float> attentionOutputBias,
-            ReadOnlySpan<float> ln2Gamma,
-            ReadOnlySpan<float> ln2Beta,
-            ReadOnlySpan<float> ffnW1,
-            ReadOnlySpan<float> ffnB1,
-            ReadOnlySpan<float> ffnW2,
-            ReadOnlySpan<float> ffnB2,
-            KeyValueCache cache,
-            int position,
-            Span<float> output)
-        {
-            if (input.Length < DModel)
-            {
-                throw new ArgumentException("Input span is smaller than dModel.", nameof(input));
-            }
 
-            if (!ln1Gamma.IsEmpty && ln1Gamma.Length < DModel)
-            {
-                throw new ArgumentException("LN1 gamma span is smaller than dModel.", nameof(ln1Gamma));
-            }
-
-            if (!ln1Beta.IsEmpty && ln1Beta.Length < DModel)
-            {
-                throw new ArgumentException("LN1 beta span is smaller than dModel.", nameof(ln1Beta));
-            }
-
-            if (!attentionOutputBias.IsEmpty && attentionOutputBias.Length < DModel)
-            {
-                throw new ArgumentException("Attention output bias span is smaller than dModel.", nameof(attentionOutputBias));
-            }
-
-            if (!ln2Gamma.IsEmpty && ln2Gamma.Length < DModel)
-            {
-                throw new ArgumentException("LN2 gamma span is smaller than dModel.", nameof(ln2Gamma));
-            }
-
-            if (!ln2Beta.IsEmpty && ln2Beta.Length < DModel)
-            {
-                throw new ArgumentException("LN2 beta span is smaller than dModel.", nameof(ln2Beta));
-            }
-
-            if (ffnW1.Length < DModel * DFF)
-            {
-                throw new ArgumentException("FFN W1 span is smaller than dModel * dFF.", nameof(ffnW1));
-            }
-
-            if (!ffnB1.IsEmpty && ffnB1.Length < DFF)
-            {
-                throw new ArgumentException("FFN B1 span is smaller than dFF.", nameof(ffnB1));
-            }
-
-            if (ffnW2.Length < DFF * DModel)
-            {
-                throw new ArgumentException("FFN W2 span is smaller than dFF * dModel.", nameof(ffnW2));
-            }
-
-            if (!ffnB2.IsEmpty && ffnB2.Length < DModel)
-            {
-                throw new ArgumentException("FFN B2 span is smaller than dModel.", nameof(ffnB2));
-            }
-
-            if (cache is null)
-            {
-                throw new ArgumentNullException(nameof(cache));
-            }
-
-            if (cache.Shape.HeadCount < HeadCount)
-            {
-                throw new ArgumentException("Cache head count is smaller than block head count.", nameof(cache));
-            }
-
-            if (cache.Shape.HeadDimension != HeadDimension)
-            {
-                throw new ArgumentException("Cache head dimension does not match block head dimension.", nameof(cache));
-            }
-
-            if (position < 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(position));
-            }
-
-            if (position >= MaxSequenceLength)
-            {
-                throw new ArgumentOutOfRangeException(nameof(position));
-            }
-
-            if (position >= cache.CurrentLength)
-            {
-                throw new InvalidOperationException(
-                    $"Position {position} is not visible in the cache. CurrentLength={cache.CurrentLength}. Advance the cache before Decode.");
-            }
-
-            if (output.Length < DModel)
-            {
-                throw new ArgumentException("Output span is smaller than dModel.", nameof(output));
-            }
-        }
 
         private void CopyDModelBuffer(
             float[] source,
@@ -394,5 +237,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             source.AsSpan().CopyTo(destination);
         }
+
+
     }
 }

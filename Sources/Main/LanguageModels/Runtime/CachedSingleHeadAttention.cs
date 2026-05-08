@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.LanguageModels.Rope;
+
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
     /// <summary>
@@ -83,6 +85,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         public int MaxSequenceLength { get; }
 
+        /// <param name="rope">
+        /// Precomputed RoPE table. When non-null, RoPE is applied to Q and K
+        /// after projection and before writing K to the cache.
+        /// Cached K vectors are stored already rotated — no re-rotation at read time.
+        /// </param>
         public void Decode(
             ReadOnlySpan<float> hidden,
             ReadOnlySpan<float> wq,
@@ -92,26 +99,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ReadOnlySpan<float> bk,
             ReadOnlySpan<float> bv,
             ReadOnlySpan<float> wo,
-            ReadOnlySpan<float> outputBias,
             KeyValueCache cache,
             int layerIndex,
             int headIndex,
             int position,
-            Span<float> output)
+            Span<float> output,
+            RopeTable? rope = null)
         {
-            ValidateDecodeArguments(
-                hidden,
-                wq,
-                wk,
-                wv,
-                wo,
-                outputBias,
-                cache,
-                layerIndex,
-                headIndex,
-                position,
-                output);
-
             SingleTokenProjectionKernel.Project(
                 hidden,
                 wq,
@@ -135,6 +129,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 _value,
                 DModel,
                 HeadDimension);
+
+            // Apply RoPE to Q and K at the current position before attention and cache write.
+            // Q is rotated for the current step. K is rotated and stored — cached K vectors
+            // are permanently rotated, so no re-rotation is needed at read time.
+            if (rope is not null)
+            {
+                RopeKernel.Apply(_query, rope, position);
+                RopeKernel.Apply(_key,   rope, position);
+            }
 
             _key
                 .AsSpan()
@@ -171,43 +174,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             SingleTokenProjectionKernel.Project(
                 _attentionOutput,
                 wo,
-                outputBias,
+                ReadOnlySpan<float>.Empty,
                 output,
                 HeadDimension,
                 DModel);
         }
 
-        public void DecodeWithoutOutputBias(
-            ReadOnlySpan<float> hidden,
-            ReadOnlySpan<float> wq,
-            ReadOnlySpan<float> wk,
-            ReadOnlySpan<float> wv,
-            ReadOnlySpan<float> bq,
-            ReadOnlySpan<float> bk,
-            ReadOnlySpan<float> bv,
-            ReadOnlySpan<float> wo,
-            KeyValueCache cache,
-            int layerIndex,
-            int headIndex,
-            int position,
-            Span<float> output)
-        {
-            Decode(
-                hidden,
-                wq,
-                wk,
-                wv,
-                bq,
-                bk,
-                bv,
-                wo,
-                [],
-                cache,
-                layerIndex,
-                headIndex,
-                position,
-                output);
-        }
 
         public void GetLastQuery(Span<float> destination)
         {
@@ -249,90 +221,5 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _attentionOutput.AsSpan().CopyTo(destination);
         }
 
-        private void ValidateDecodeArguments(
-            ReadOnlySpan<float> hidden,
-            ReadOnlySpan<float> wq,
-            ReadOnlySpan<float> wk,
-            ReadOnlySpan<float> wv,
-            ReadOnlySpan<float> wo,
-            ReadOnlySpan<float> outputBias,
-            KeyValueCache cache,
-            int layerIndex,
-            int headIndex,
-            int position,
-            Span<float> output)
-        {
-            if (hidden.Length < DModel)
-            {
-                throw new ArgumentException("Hidden span is smaller than dModel.", nameof(hidden));
-            }
-
-            if (wq.Length < DModel * HeadDimension)
-            {
-                throw new ArgumentException("Wq span is smaller than dModel * headDimension.", nameof(wq));
-            }
-
-            if (wk.Length < DModel * HeadDimension)
-            {
-                throw new ArgumentException("Wk span is smaller than dModel * headDimension.", nameof(wk));
-            }
-
-            if (wv.Length < DModel * HeadDimension)
-            {
-                throw new ArgumentException("Wv span is smaller than dModel * headDimension.", nameof(wv));
-            }
-
-            if (wo.Length < HeadDimension * DModel)
-            {
-                throw new ArgumentException("Wo span is smaller than headDimension * dModel.", nameof(wo));
-            }
-
-            if (!outputBias.IsEmpty && outputBias.Length < DModel)
-            {
-                throw new ArgumentException("Output bias span is smaller than dModel.", nameof(outputBias));
-            }
-
-            if (output.Length < DModel)
-            {
-                throw new ArgumentException("Output span is smaller than dModel.", nameof(output));
-            }
-
-            if (cache is null)
-            {
-                throw new ArgumentNullException(nameof(cache));
-            }
-
-            if (cache.Shape.HeadDimension != HeadDimension)
-            {
-                throw new ArgumentException(
-                    $"Cache head dimension {cache.Shape.HeadDimension} does not match decoder head dimension {HeadDimension}.",
-                    nameof(cache));
-            }
-
-            if (position < 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(position));
-            }
-
-            if (position >= MaxSequenceLength)
-            {
-                throw new ArgumentOutOfRangeException(nameof(position));
-            }
-
-            if (position >= cache.CurrentLength)
-            {
-                throw new InvalidOperationException(
-                    $"Position {position} is not visible in the cache. CurrentLength={cache.CurrentLength}. Advance the cache before Decode.");
-            }
-
-            if (position >= cache.Shape.MaxSequenceLength)
-            {
-                throw new ArgumentOutOfRangeException(nameof(position));
-            }
-
-            // Let KeyValueCache validate layer/head bounds through its spans.
-            _ = layerIndex;
-            _ = headIndex;
-        }
     }
 }

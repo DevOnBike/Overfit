@@ -12,10 +12,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
         [Fact]
         public void Constructor_ExposesShape()
         {
-            var decoder = new CachedMultiHeadAttention(
-                dModel: 4,
-                headCount: 2,
-                maxSequenceLength: 8);
+            var decoder = new CachedMultiHeadAttention(dModel: 4, headCount: 2, maxSequenceLength: 8);
 
             Assert.Equal(4, decoder.DModel);
             Assert.Equal(2, decoder.HeadCount);
@@ -27,68 +24,35 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
         public void Constructor_InvalidArguments_Throw()
         {
             Assert.Throws<ArgumentOutOfRangeException>(() =>
-                new CachedMultiHeadAttention(
-                    dModel: 0,
-                    headCount: 2,
-                    maxSequenceLength: 8));
+                new CachedMultiHeadAttention(dModel: 0, headCount: 2, maxSequenceLength: 8));
 
             Assert.Throws<ArgumentOutOfRangeException>(() =>
-                new CachedMultiHeadAttention(
-                    dModel: 4,
-                    headCount: 0,
-                    maxSequenceLength: 8));
+                new CachedMultiHeadAttention(dModel: 4, headCount: 0, maxSequenceLength: 8));
 
             Assert.Throws<ArgumentOutOfRangeException>(() =>
-                new CachedMultiHeadAttention(
-                    dModel: 4,
-                    headCount: 2,
-                    maxSequenceLength: 0));
+                new CachedMultiHeadAttention(dModel: 4, headCount: 2, maxSequenceLength: 0));
 
             Assert.Throws<ArgumentException>(() =>
-                new CachedMultiHeadAttention(
-                    dModel: 5,
-                    headCount: 2,
-                    maxSequenceLength: 8));
+                new CachedMultiHeadAttention(dModel: 5, headCount: 2, maxSequenceLength: 8));
         }
 
         [Fact]
         public void Decode_OneHead_Identity_MatchesHidden()
         {
+            // dModel=2, headDim=2, one head — identity Q/K/V/O → output equals input
             using var cache = KeyValueCache.Create(
-                layerCount: 1,
-                headCount: 1,
-                maxSequenceLength: 4,
-                headDimension: 2);
+                layerCount: 1, kvHeadCount: 1, maxSequenceLength: 4, headDimension: 2);
 
-            var decoder = new CachedMultiHeadAttention(
-                dModel: 2,
-                headCount: 1,
-                maxSequenceLength: 4);
+            var decoder = new CachedMultiHeadAttention(dModel: 2, headCount: 1, maxSequenceLength: 4);
 
-            var identity = new float[]
-            {
-                1f, 0f,
-                0f, 1f
-            };
+            var identity = new float[] { 1f, 0f, 0f, 1f };
+            var bw = MakeBlockWeights(
+                wq: new[] { identity }, wk: new[] { identity },
+                wv: new[] { identity }, wo: new[] { identity });
 
-            var heads = new[] { identity };
             var output = new float[2];
-
             cache.Advance();
-
-            decoder.DecodeWithoutOutputBias(
-                hidden: new float[] { 3f, 4f },
-                wqHeads: heads,
-                wkHeads: heads,
-                wvHeads: heads,
-                bqHeads: Array.Empty<float[]>(),
-                bkHeads: Array.Empty<float[]>(),
-                bvHeads: Array.Empty<float[]>(),
-                woHeads: heads,
-                cache,
-                0,  // layerIndex
-                0,  // position
-                output);
+            decoder.Decode(new float[] { 3f, 4f }, in bw, cache, 0, 0, output);
 
             AssertClose(3f, output[0]);
             AssertClose(4f, output[1]);
@@ -98,68 +62,25 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
         public void Decode_TwoHeads_SumsHeadOutputsAndAddsBias()
         {
             using var cache = KeyValueCache.Create(
-                layerCount: 1,
-                headCount: 2,
-                maxSequenceLength: 4,
-                headDimension: 2);
+                layerCount: 1, kvHeadCount: 2, maxSequenceLength: 4, headDimension: 2);
 
-            var decoder = new CachedMultiHeadAttention(
-                dModel: 4,
-                headCount: 2,
-                maxSequenceLength: 4);
+            var decoder = new CachedMultiHeadAttention(dModel: 4, headCount: 2, maxSequenceLength: 4);
 
-            var head0In = new float[]
-            {
-                1f, 0f,
-                0f, 1f,
-                0f, 0f,
-                0f, 0f
-            };
-
-            var head1In = new float[]
-            {
-                0f, 0f,
-                0f, 0f,
-                1f, 0f,
-                0f, 1f
-            };
-
-            var head0Out = new float[]
-            {
-                1f, 0f, 0f, 0f,
-                0f, 1f, 0f, 0f
-            };
-
-            var head1Out = new float[]
-            {
-                0f, 0f, 1f, 0f,
-                0f, 0f, 0f, 1f
-            };
-
-            var wq = new[] { head0In, head1In };
-            var wk = new[] { head0In, head1In };
-            var wv = new[] { head0In, head1In };
-            var wo = new[] { head0Out, head1Out };
-
+            // head0: picks dims 0,1  head1: picks dims 2,3
+            var head0In  = new float[] { 1f, 0f,  0f, 1f,  0f, 0f,  0f, 0f };
+            var head1In  = new float[] { 0f, 0f,  0f, 0f,  1f, 0f,  0f, 1f };
+            var head0Out = new float[] { 1f, 0f, 0f, 0f,  0f, 1f, 0f, 0f };
+            var head1Out = new float[] { 0f, 0f, 1f, 0f,  0f, 0f, 0f, 1f };
             var outputBias = new float[] { 10f, 20f, 30f, 40f };
+
+            var bw = MakeBlockWeights(
+                wq: new[] { head0In, head1In }, wk: new[] { head0In, head1In },
+                wv: new[] { head0In, head1In }, wo: new[] { head0Out, head1Out },
+                attentionBias: outputBias);
+
             var output = new float[4];
-
             cache.Advance();
-
-            decoder.Decode(
-                hidden: new float[] { 1f, 2f, 3f, 4f },
-                wqHeads: wq,
-                wkHeads: wk,
-                wvHeads: wv,
-                bqHeads: Array.Empty<float[]>(),
-                bkHeads: Array.Empty<float[]>(),
-                bvHeads: Array.Empty<float[]>(),
-                woHeads: wo,
-                outputBias,
-                cache,
-                0,  // layerIndex
-                0,  // position
-                output);
+            decoder.Decode(new float[] { 1f, 2f, 3f, 4f }, in bw, cache, 0, 0, output);
 
             AssertClose(11f, output[0]);
             AssertClose(22f, output[1]);
@@ -171,92 +92,32 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
         public void Decode_TwoTokens_UsesCacheHistoryPerHead()
         {
             using var cache = KeyValueCache.Create(
-                layerCount: 1,
-                headCount: 2,
-                maxSequenceLength: 4,
-                headDimension: 2);
+                layerCount: 1, kvHeadCount: 2, maxSequenceLength: 4, headDimension: 2);
 
-            var decoder = new CachedMultiHeadAttention(
-                dModel: 4,
-                headCount: 2,
-                maxSequenceLength: 4);
+            var decoder = new CachedMultiHeadAttention(dModel: 4, headCount: 2, maxSequenceLength: 4);
 
-            var head0In = new float[]
-            {
-                1f, 0f,
-                0f, 1f,
-                0f, 0f,
-                0f, 0f
-            };
-
-            var head1In = new float[]
-            {
-                0f, 0f,
-                0f, 0f,
-                1f, 0f,
-                0f, 1f
-            };
-
-            var head0Out = new float[]
-            {
-                1f, 0f, 0f, 0f,
-                0f, 1f, 0f, 0f
-            };
-
-            var head1Out = new float[]
-            {
-                0f, 0f, 1f, 0f,
-                0f, 0f, 0f, 1f
-            };
-
-            var wq = new[] { head0In, head1In };
-            var wk = new[] { head0In, head1In };
-            var wv = new[] { head0In, head1In };
-            var wo = new[] { head0Out, head1Out };
+            var head0In  = new float[] { 1f, 0f,  0f, 1f,  0f, 0f,  0f, 0f };
+            var head1In  = new float[] { 0f, 0f,  0f, 0f,  1f, 0f,  0f, 1f };
+            var head0Out = new float[] { 1f, 0f, 0f, 0f,  0f, 1f, 0f, 0f };
+            var head1Out = new float[] { 0f, 0f, 1f, 0f,  0f, 0f, 0f, 1f };
+            var bw = MakeBlockWeights(
+                wq: new[] { head0In, head1In }, wk: new[] { head0In, head1In },
+                wv: new[] { head0In, head1In }, wo: new[] { head0Out, head1Out });
 
             var output = new float[4];
-
             cache.Advance();
-
-            decoder.DecodeWithoutOutputBias(
-                hidden: new float[] { 1f, 0f, 1f, 0f },
-                wq,
-                wk,
-                wv,
-                Array.Empty<float[]>(),  // bqHeads
-                Array.Empty<float[]>(),  // bkHeads
-                Array.Empty<float[]>(),  // bvHeads
-                wo,
-                cache,
-                0,  // layerIndex
-                0,  // position
-                output);
-
+            decoder.Decode(new float[] { 1f, 0f, 1f, 0f }, in bw, cache, 0, 0, output);
             cache.Advance();
+            decoder.Decode(new float[] { 0f, 1f, 0f, 1f }, in bw, cache, 0, 1, output);
 
-            decoder.DecodeWithoutOutputBias(
-                hidden: new float[] { 0f, 1f, 0f, 1f },
-                wq,
-                wk,
-                wv,
-                Array.Empty<float[]>(),  // bqHeads
-                Array.Empty<float[]>(),  // bkHeads
-                Array.Empty<float[]>(),  // bvHeads
-                wo,
-                cache,
-                0,  // layerIndex
-                1,  // position
-                output);
-
-            var scale = 1f / MathF.Sqrt(2f);
+            var scale  = 1f / MathF.Sqrt(2f);
             var score0 = 0f * scale;
             var score1 = 1f * scale;
-
-            var maxScore = MathF.Max(score0, score1);
-            var e0 = MathF.Exp(score0 - maxScore);
-            var e1 = MathF.Exp(score1 - maxScore);
-            var p0 = e0 / (e0 + e1);
-            var p1 = e1 / (e0 + e1);
+            var maxS   = MathF.Max(score0, score1);
+            var e0     = MathF.Exp(score0 - maxS);
+            var e1     = MathF.Exp(score1 - maxS);
+            var p0     = e0 / (e0 + e1);
+            var p1     = e1 / (e0 + e1);
 
             AssertClose(p0, output[0]);
             AssertClose(p1, output[1]);
@@ -268,64 +129,20 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
         public void Decode_WritesKeysAndValuesForAllHeads()
         {
             using var cache = KeyValueCache.Create(
-                layerCount: 1,
-                headCount: 2,
-                maxSequenceLength: 2,
-                headDimension: 2);
+                layerCount: 1, kvHeadCount: 2, maxSequenceLength: 2, headDimension: 2);
 
-            var decoder = new CachedMultiHeadAttention(
-                dModel: 4,
-                headCount: 2,
-                maxSequenceLength: 2);
+            var decoder = new CachedMultiHeadAttention(dModel: 4, headCount: 2, maxSequenceLength: 2);
 
-            var head0In = new float[]
-            {
-                1f, 0f,
-                0f, 1f,
-                0f, 0f,
-                0f, 0f
-            };
-
-            var head1In = new float[]
-            {
-                0f, 0f,
-                0f, 0f,
-                1f, 0f,
-                0f, 1f
-            };
-
-            var head0Out = new float[]
-            {
-                1f, 0f, 0f, 0f,
-                0f, 1f, 0f, 0f
-            };
-
-            var head1Out = new float[]
-            {
-                0f, 0f, 1f, 0f,
-                0f, 0f, 0f, 1f
-            };
-
-            var wq = new[] { head0In, head1In };
-            var wk = new[] { head0In, head1In };
-            var wv = new[] { head0In, head1In };
-            var wo = new[] { head0Out, head1Out };
+            var head0In  = new float[] { 1f, 0f,  0f, 1f,  0f, 0f,  0f, 0f };
+            var head1In  = new float[] { 0f, 0f,  0f, 0f,  1f, 0f,  0f, 1f };
+            var head0Out = new float[] { 1f, 0f, 0f, 0f,  0f, 1f, 0f, 0f };
+            var head1Out = new float[] { 0f, 0f, 1f, 0f,  0f, 0f, 0f, 1f };
+            var bw = MakeBlockWeights(
+                wq: new[] { head0In, head1In }, wk: new[] { head0In, head1In },
+                wv: new[] { head0In, head1In }, wo: new[] { head0Out, head1Out });
 
             cache.Advance();
-
-            decoder.DecodeWithoutOutputBias(
-                hidden: new float[] { 7f, 8f, 9f, 10f },
-                wq,
-                wk,
-                wv,
-                Array.Empty<float[]>(),  // bqHeads
-                Array.Empty<float[]>(),  // bkHeads
-                Array.Empty<float[]>(),  // bvHeads
-                wo,
-                cache,
-                0,  // layerIndex
-                0,  // position
-                new float[4]);  // output;
+            decoder.Decode(new float[] { 7f, 8f, 9f, 10f }, in bw, cache, 0, 0, new float[4]);
 
             Assert.Equal(new float[] { 7f, 8f }, cache.GetKeyReadSpan(0, 0, 0, 1).ToArray());
             Assert.Equal(new float[] { 7f, 8f }, cache.GetValueReadSpan(0, 0, 0, 1).ToArray());
@@ -337,101 +154,43 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
         public void Decode_PositionNotVisible_Throws()
         {
             using var cache = KeyValueCache.Create(
-                layerCount: 1,
-                headCount: 1,
-                maxSequenceLength: 2,
-                headDimension: 2);
+                layerCount: 1, kvHeadCount: 1, maxSequenceLength: 2, headDimension: 2);
 
-            var decoder = new CachedMultiHeadAttention(
-                dModel: 2,
-                headCount: 1,
-                maxSequenceLength: 2);
+            var decoder = new CachedMultiHeadAttention(dModel: 2, headCount: 1, maxSequenceLength: 2);
+            var identity = new float[] { 1f, 0f, 0f, 1f };
+            var bw = MakeBlockWeights(
+                wq: new[] { identity }, wk: new[] { identity },
+                wv: new[] { identity }, wo: new[] { identity });
 
-            var identity = new float[]
-            {
-                1f, 0f,
-                0f, 1f
-            };
-
-            var heads = new[] { identity };
-
-            Assert.Throws<InvalidOperationException>(() =>
-                decoder.DecodeWithoutOutputBias(
-                    hidden: new float[] { 1f, 2f },
-                    wqHeads: heads,
-                    wkHeads: heads,
-                    wvHeads: heads,
-                    bqHeads: [],
-                    bkHeads: [],
-                    bvHeads: [],
-                    woHeads: heads,
-                    cache,
-                    0,  // layerIndex
-                    0,  // position
-                    output: new float[2]));
-        }
-
-        [Fact]
-        public void Decode_InvalidHeadCollections_Throw()
-        {
-            using var cache = KeyValueCache.Create(
-                layerCount: 1,
-                headCount: 2,
-                maxSequenceLength: 2,
-                headDimension: 2);
-
-            cache.Advance();
-
-            var decoder = new CachedMultiHeadAttention(
-                dModel: 4,
-                headCount: 2,
-                maxSequenceLength: 2);
-
-            var oneHead = new[]
-            {
-                new float[]
-                {
-                    1f, 0f,
-                    0f, 1f,
-                    0f, 0f,
-                    0f, 0f
-                }
-            };
-
-            Assert.Throws<ArgumentException>(() =>
-                decoder.DecodeWithoutOutputBias(
-                    hidden: new float[] { 1f, 2f, 3f, 4f },
-                    wqHeads: oneHead,
-                    wkHeads: oneHead,
-                    wvHeads: oneHead,
-                    bqHeads: [],
-                    bkHeads: [],
-                    bvHeads: [],
-                    woHeads: oneHead,
-                    cache,
-                    0,  // layerIndex
-                    0,  // position
-                    new float[4]));  // output);
+            // Cache not advanced — position 0 not visible
+            Assert.Throws<ArgumentOutOfRangeException>(() =>
+                decoder.Decode(new float[] { 1f, 2f }, in bw, cache, 0, 0, new float[2]));
         }
 
         [Fact]
         public void GetHeadDecoder_ReturnsRequestedHead()
         {
-            var decoder = new CachedMultiHeadAttention(
-                dModel: 4,
-                headCount: 2,
-                maxSequenceLength: 2);
+            var decoder = new CachedMultiHeadAttention(dModel: 4, headCount: 2, maxSequenceLength: 2);
 
             Assert.NotNull(decoder.GetHeadDecoder(0));
             Assert.NotNull(decoder.GetHeadDecoder(1));
             Assert.Throws<ArgumentOutOfRangeException>(() => decoder.GetHeadDecoder(2));
         }
 
-        private static void AssertClose(float expected, float actual)
+        // ── helpers ─────────────────────────────────────────────────────────
+
+        private static BlockWeights MakeBlockWeights(
+            float[][] wq, float[][] wk, float[][] wv, float[][] wo,
+            float[]? attentionBias = null)
         {
-            Assert.True(
-                MathF.Abs(expected - actual) <= 1e-5f,
-                $"Expected {expected}, actual {actual}.");
+            var heads = new SingleHeadWeights[wq.Length];
+            for (var h = 0; h < wq.Length; h++)
+                heads[h] = new SingleHeadWeights(wq: wq[h], wk: wk[h], wv: wv[h], wo: wo[h]);
+            return new BlockWeights(heads: heads, attentionBias: attentionBias);
         }
+
+        private static void AssertClose(float expected, float actual, float eps = 1e-5f) =>
+            Assert.True(MathF.Abs(expected - actual) <= eps,
+                $"Expected {expected}, got {actual}");
     }
 }

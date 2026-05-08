@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Linq;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
@@ -66,7 +67,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
         {
             using var cache = KeyValueCache.Create(
                 layerCount: 1,
-                headCount: 1,
+                kvHeadCount: 1,
                 maxSequenceLength: 4,
                 headDimension: 2);
 
@@ -122,24 +123,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
 
             cache.Advance();
 
-            stack.DecodeWithoutLayerNormAffine(
-                inputHidden: new float[] { 1f, -1f },
-                wqHeadsByLayer: zeroHeads,
-                wkHeadsByLayer: zeroHeads,
-                wvHeadsByLayer: zeroHeads,
-                woHeadsByLayer: zeroHeads,
-                bqHeadsByLayer: zeroHeads,
-                bkHeadsByLayer: zeroHeads,
-                bvHeadsByLayer: zeroHeads,
-                attentionOutputBiases: attentionBiases,
-                ffnW1ByLayer: ffnW1,
-                ffnB1ByLayer: ffnB1,
-                ffnW2ByLayer: ffnW2,
-                ffnB2ByLayer: ffnB2,
-                lmHeadWeights: lmHeadIdentity,
-                lmHeadBias: ReadOnlySpan<float>.Empty,
-                cache,
-                0,  // position
+            var _sw = MakeStackWeights(stack.LayerCount, stack.HeadCount, stack.DModel,
+                    zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads,
+                    attentionBiases, ffnW1, ffnB1, ffnW2, ffnB2, lmHeadIdentity);
+            stack.Decode(new float[] { 1f, -1f }, _sw, cache, 0, // position
                 logits);
 
             var expected = LayerNorm(new float[] { 1f, -1f }, 1e-5f);
@@ -153,7 +140,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
         {
             using var cache = KeyValueCache.Create(
                 layerCount: 2,
-                headCount: 1,
+                kvHeadCount: 1,
                 maxSequenceLength: 4,
                 headDimension: 2);
 
@@ -218,24 +205,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
 
             cache.Advance();
 
-            stack.DecodeWithoutLayerNormAffine(
-                inputHidden: new float[] { 2f, -2f },
-                wqHeadsByLayer: zeroHeads,
-                wkHeadsByLayer: zeroHeads,
-                wvHeadsByLayer: zeroHeads,
-                woHeadsByLayer: zeroHeads,
-                bqHeadsByLayer: zeroHeads,
-                bkHeadsByLayer: zeroHeads,
-                bvHeadsByLayer: zeroHeads,
-                attentionOutputBiases: attentionBiases,
-                ffnW1ByLayer: ffnW1,
-                ffnB1ByLayer: ffnB1,
-                ffnW2ByLayer: ffnW2,
-                ffnB2ByLayer: ffnB2,
-                lmHeadWeights: lmHeadIdentity,
-                lmHeadBias: ReadOnlySpan<float>.Empty,
-                cache,
-                0,  // position
+            var _sw = MakeStackWeights(stack.LayerCount, stack.HeadCount, stack.DModel,
+                    zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads,
+                    attentionBiases, ffnW1, ffnB1, ffnW2, ffnB2, lmHeadIdentity);
+            stack.Decode(new float[] { 2f, -2f }, _sw, cache, 0, // position
                 logits);
 
             var expected = LayerNorm(new float[] { 2f, -2f }, 1e-5f);
@@ -249,7 +222,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
         {
             using var cache = KeyValueCache.Create(
                 layerCount: 1,
-                headCount: 1,
+                kvHeadCount: 1,
                 maxSequenceLength: 4,
                 headDimension: 2);
 
@@ -301,35 +274,19 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 0f, 1f
             };
 
-            var lmHeadBias = new float[] { 10f, 20f };
             var logits = new float[2];
 
             cache.Advance();
 
-            stack.DecodeWithoutLayerNormAffine(
-                inputHidden: new float[] { 1f, -1f },
-                wqHeadsByLayer: zeroHeads,
-                wkHeadsByLayer: zeroHeads,
-                wvHeadsByLayer: zeroHeads,
-                woHeadsByLayer: zeroHeads,
-                bqHeadsByLayer: zeroHeads,
-                bkHeadsByLayer: zeroHeads,
-                bvHeadsByLayer: zeroHeads,
-                attentionOutputBiases: attentionBiases,
-                ffnW1ByLayer: ffnW1,
-                ffnB1ByLayer: ffnB1,
-                ffnW2ByLayer: ffnW2,
-                ffnB2ByLayer: ffnB2,
-                lmHeadWeights: lmHeadIdentity,
-                lmHeadBias,
-                cache,
-                0,  // position
-                logits);
+            var _sw = MakeStackWeights(stack.LayerCount, stack.HeadCount, stack.DModel,
+                    zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads,
+                    attentionBiases, ffnW1, ffnB1, ffnW2, ffnB2, lmHeadIdentity);
+            stack.Decode(new float[] { 1f, -1f }, _sw, cache, 0, logits);
 
             var expected = LayerNorm(new float[] { 1f, -1f }, 1e-5f);
 
-            AssertClose(expected[0] + 10f, logits[0]);
-            AssertClose(expected[1] + 20f, logits[1]);
+            AssertClose(expected[0], logits[0]); // LM head bias not in StackWeights API
+            AssertClose(expected[1], logits[1]);
         }
 
         [Fact]
@@ -337,7 +294,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
         {
             using var cache = KeyValueCache.Create(
                 layerCount: 1,
-                headCount: 1,
+                kvHeadCount: 1,
                 maxSequenceLength: 4,
                 headDimension: 2);
 
@@ -393,24 +350,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
 
             cache.Advance();
 
-            stack.DecodeWithoutLayerNormAffine(
-                inputHidden: new float[] { 1f, -1f },
-                wqHeadsByLayer: zeroHeads,
-                wkHeadsByLayer: zeroHeads,
-                wvHeadsByLayer: zeroHeads,
-                woHeadsByLayer: zeroHeads,
-                bqHeadsByLayer: zeroHeads,
-                bkHeadsByLayer: zeroHeads,
-                bvHeadsByLayer: zeroHeads,
-                attentionOutputBiases: attentionBiases,
-                ffnW1ByLayer: ffnW1,
-                ffnB1ByLayer: ffnB1,
-                ffnW2ByLayer: ffnW2,
-                ffnB2ByLayer: ffnB2,
-                lmHeadWeights: lmHeadIdentity,
-                lmHeadBias: ReadOnlySpan<float>.Empty,
-                cache,
-                0,  // position
+            var _sw = MakeStackWeights(stack.LayerCount, stack.HeadCount, stack.DModel,
+                    zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads,
+                    attentionBiases, ffnW1, ffnB1, ffnW2, ffnB2, lmHeadIdentity);
+            stack.Decode(new float[] { 1f, -1f }, _sw, cache, 0, // position
                 logits);
 
             var finalHidden = new float[2];
@@ -428,7 +371,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
         {
             using var cache = KeyValueCache.Create(
                 layerCount: 1,
-                headCount: 1,
+                kvHeadCount: 1,
                 maxSequenceLength: 4,
                 headDimension: 2);
 
@@ -448,26 +391,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 }
             };
 
-            Assert.Throws<InvalidOperationException>(() =>
-                stack.DecodeWithoutLayerNormAffine(
-                    inputHidden: new float[] { 1f, -1f },
-                    wqHeadsByLayer: zeroHeads,
-                    wkHeadsByLayer: zeroHeads,
-                    wvHeadsByLayer: zeroHeads,
-                    woHeadsByLayer: zeroHeads,
-                    bqHeadsByLayer: zeroHeads,
-                    bkHeadsByLayer: zeroHeads,
-                    bvHeadsByLayer: zeroHeads,
-                    attentionOutputBiases: new[] { Array.Empty<float>() },
-                    ffnW1ByLayer: new[] { new float[2 * 2] },
-                    ffnB1ByLayer: new[] { Array.Empty<float>() },
-                    ffnW2ByLayer: new[] { new float[2 * 2] },
-                    ffnB2ByLayer: new[] { Array.Empty<float>() },
-                    lmHeadWeights: new float[2 * 2],
-                    lmHeadBias: ReadOnlySpan<float>.Empty,
-                    cache,
-                    0,  // position
-                    logits: new float[2]));
+            Assert.Throws<ArgumentOutOfRangeException>(() =>
+            {
+                var _sw = MakeStackWeights(stack.LayerCount, stack.HeadCount, stack.DModel,
+                    zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads,
+                    new[] { Array.Empty<float>() }, new[] { new float[2 * 2] }, new[] { Array.Empty<float>() }, new[] { new float[2 * 2] }, new[] { Array.Empty<float>() }, new float[2 * 2]);
+            stack.Decode(new float[] { 1f, -1f }, _sw, cache, 0, // position
+                    logits: new float[2]);
+            });;
         }
 
         [Fact]
@@ -475,7 +406,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
         {
             using var cache = KeyValueCache.Create(
                 layerCount: 1,
-                headCount: 1,
+                kvHeadCount: 1,
                 maxSequenceLength: 4,
                 headDimension: 2);
 
@@ -498,88 +429,40 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             };
 
             Assert.Throws<ArgumentException>(() =>
-                stack.DecodeWithoutLayerNormAffine(
-                    inputHidden: new float[1],
-                    wqHeadsByLayer: zeroHeads,
-                    wkHeadsByLayer: zeroHeads,
-                    wvHeadsByLayer: zeroHeads,
-                    woHeadsByLayer: zeroHeads,
-                    bqHeadsByLayer: zeroHeads,
-                    bkHeadsByLayer: zeroHeads,
-                    bvHeadsByLayer: zeroHeads,
-                    attentionOutputBiases: new[] { Array.Empty<float>() },
-                    ffnW1ByLayer: new[] { new float[2 * 2] },
-                    ffnB1ByLayer: new[] { Array.Empty<float>() },
-                    ffnW2ByLayer: new[] { new float[2 * 2] },
-                    ffnB2ByLayer: new[] { Array.Empty<float>() },
-                    lmHeadWeights: new float[2 * 2],
-                    lmHeadBias: ReadOnlySpan<float>.Empty,
-                    cache,
-                    0,  // position
-                    logits: new float[2]));
+            {
+                var _sw = MakeStackWeights(stack.LayerCount, stack.HeadCount, stack.DModel,
+                    zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads,
+                    new[] { Array.Empty<float>() }, new[] { new float[2 * 2] }, new[] { Array.Empty<float>() }, new[] { new float[2 * 2] }, new[] { Array.Empty<float>() }, new float[2 * 2]);
+            stack.Decode(new float[1], _sw, cache, 0, // position
+                    logits: new float[2]);
+            });;
 
             Assert.Throws<ArgumentException>(() =>
-                stack.DecodeWithoutLayerNormAffine(
-                    inputHidden: new float[2],
-                    wqHeadsByLayer: zeroHeads,
-                    wkHeadsByLayer: zeroHeads,
-                    wvHeadsByLayer: zeroHeads,
-                    woHeadsByLayer: zeroHeads,
-                    bqHeadsByLayer: zeroHeads,
-                    bkHeadsByLayer: zeroHeads,
-                    bvHeadsByLayer: zeroHeads,
-                    attentionOutputBiases: new[] { Array.Empty<float>() },
-                    ffnW1ByLayer: new[] { new float[1] },
-                    ffnB1ByLayer: new[] { Array.Empty<float>() },
-                    ffnW2ByLayer: new[] { new float[2 * 2] },
-                    ffnB2ByLayer: new[] { Array.Empty<float>() },
-                    lmHeadWeights: new float[2 * 2],
-                    lmHeadBias: ReadOnlySpan<float>.Empty,
-                    cache,
-                    0,  // position
-                    logits: new float[2]));
+            {
+                var _sw = MakeStackWeights(stack.LayerCount, stack.HeadCount, stack.DModel,
+                    zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads,
+                    new[] { Array.Empty<float>() }, new[] { new float[1] }, new[] { Array.Empty<float>() }, new[] { new float[2 * 2] }, new[] { Array.Empty<float>() }, new float[2 * 2]);
+            stack.Decode(new float[2], _sw, cache, 0, // position
+                    logits: new float[2]);
+            });;
 
             Assert.Throws<ArgumentException>(() =>
-                stack.DecodeWithoutLayerNormAffine(
-                    inputHidden: new float[2],
-                    wqHeadsByLayer: zeroHeads,
-                    wkHeadsByLayer: zeroHeads,
-                    wvHeadsByLayer: zeroHeads,
-                    woHeadsByLayer: zeroHeads,
-                    bqHeadsByLayer: zeroHeads,
-                    bkHeadsByLayer: zeroHeads,
-                    bvHeadsByLayer: zeroHeads,
-                    attentionOutputBiases: new[] { Array.Empty<float>() },
-                    ffnW1ByLayer: new[] { new float[2 * 2] },
-                    ffnB1ByLayer: new[] { Array.Empty<float>() },
-                    ffnW2ByLayer: new[] { new float[2 * 2] },
-                    ffnB2ByLayer: new[] { Array.Empty<float>() },
-                    lmHeadWeights: new float[1],
-                    lmHeadBias: ReadOnlySpan<float>.Empty,
-                    cache,
-                    0,  // position
-                    logits: new float[2]));
+            {
+                var _sw = MakeStackWeights(stack.LayerCount, stack.HeadCount, stack.DModel,
+                    zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads,
+                    new[] { Array.Empty<float>() }, new[] { new float[2 * 2] }, new[] { Array.Empty<float>() }, new[] { new float[2 * 2] }, new[] { Array.Empty<float>() }, new float[1]);
+            stack.Decode(new float[2], _sw, cache, 0, // position
+                    logits: new float[2]);
+            });;
 
             Assert.Throws<ArgumentException>(() =>
-                stack.DecodeWithoutLayerNormAffine(
-                    inputHidden: new float[2],
-                    wqHeadsByLayer: zeroHeads,
-                    wkHeadsByLayer: zeroHeads,
-                    wvHeadsByLayer: zeroHeads,
-                    woHeadsByLayer: zeroHeads,
-                    bqHeadsByLayer: zeroHeads,
-                    bkHeadsByLayer: zeroHeads,
-                    bvHeadsByLayer: zeroHeads,
-                    attentionOutputBiases: new[] { Array.Empty<float>() },
-                    ffnW1ByLayer: new[] { new float[2 * 2] },
-                    ffnB1ByLayer: new[] { Array.Empty<float>() },
-                    ffnW2ByLayer: new[] { new float[2 * 2] },
-                    ffnB2ByLayer: new[] { Array.Empty<float>() },
-                    lmHeadWeights: new float[2 * 2],
-                    lmHeadBias: ReadOnlySpan<float>.Empty,
-                    cache,
-                    0,  // position
-                    logits: new float[1]));
+            {
+                var _sw = MakeStackWeights(stack.LayerCount, stack.HeadCount, stack.DModel,
+                    zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads,
+                    new[] { Array.Empty<float>() }, new[] { new float[2 * 2] }, new[] { Array.Empty<float>() }, new[] { new float[2 * 2] }, new[] { Array.Empty<float>() }, new float[2 * 2]);
+            stack.Decode(new float[2], _sw, cache, 0, // position
+                    logits: new float[1]);
+            });;
         }
 
         [Fact]
@@ -638,5 +521,33 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 MathF.Abs(expected - actual) <= 1e-5f,
                 $"Expected {expected}, actual {actual}.");
         }
+        private static StackWeights MakeStackWeights(
+            int layerCount, int headCount, int dModel,
+            float[][][] wq, float[][][] wk, float[][][] wv, float[][][] wo,
+            float[][][] bq, float[][][] bk, float[][][] bv,
+            float[][] attBiases, float[][] fw1, float[][] fb1, float[][] fw2, float[][] fb2,
+            float[] lmHead)
+        {
+            var gamma = Enumerable.Repeat(1f, dModel).ToArray();
+            var zero  = new float[dModel];
+            return StackWeights.ForTest(
+                layerCount, headCount,
+                l =>
+                {
+                    var heads = new SingleHeadWeights[headCount];
+                    for (var h = 0; h < headCount; h++)
+                        heads[h] = new SingleHeadWeights(
+                            wq: wq[l][h], wk: wk[l][h], wv: wv[l][h], wo: wo[l][h],
+                            bq: bq[l][h], bk: bk[l][h], bv: bv[l][h]);
+                    return new BlockWeights(
+                        heads:         heads,
+                        ln1Gamma:      gamma, ln1Beta: zero,
+                        attentionBias: attBiases[l],
+                        ln2Gamma:      gamma, ln2Beta: zero,
+                        ffnW1: fw1[l], ffnB1: fb1[l], ffnW2: fw2[l], ffnB2: fb2[l]);
+                },
+                finalNormGamma: gamma, finalNormBeta: zero, lmHead: lmHead);
+        }
+
     }
 }

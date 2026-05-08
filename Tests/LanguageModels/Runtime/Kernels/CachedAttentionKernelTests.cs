@@ -235,7 +235,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Kernels
         {
             using var cache = KeyValueCache.Create(
                 layerCount: 1,
-                headCount: 1,
+                kvHeadCount: 1,
                 maxSequenceLength: 2,
                 headDimension: 2);
 

@@ -33,34 +33,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     /// </summary>
     public class CachedGpt1ModelAdapter : IDisposable
     {
-        private readonly GPT1Model _model;
+        private readonly GPT1Model    _model;
         private readonly CachedGptStack _stack;
-        private readonly KeyValueCache _cache;
+        private readonly KeyValueCache   _cache;
+        private readonly StackWeights    _weights;
 
         private readonly float[] _tokenEmbeddingBuffer;
         private readonly float[] _positionEmbeddingBuffer;
         private readonly float[] _inputHidden;
         private readonly float[] _lastLogits;
-
-        private readonly float[][] _ln1Gammas;
-        private readonly float[][] _ln1Betas;
-        private readonly IReadOnlyList<float[]>[] _wqHeadsByLayer;
-        private readonly IReadOnlyList<float[]>[] _wkHeadsByLayer;
-        private readonly IReadOnlyList<float[]>[] _wvHeadsByLayer;
-        private readonly IReadOnlyList<float[]>[] _woHeadsByLayer;
-        private readonly IReadOnlyList<float[]>[] _bqHeadsByLayer;
-        private readonly IReadOnlyList<float[]>[] _bkHeadsByLayer;
-        private readonly IReadOnlyList<float[]>[] _bvHeadsByLayer;
-        private readonly float[][] _attentionOutputBiases;
-        private readonly float[][] _ln2Gammas;
-        private readonly float[][] _ln2Betas;
-        private readonly float[][] _ffnW1ByLayer;
-        private readonly float[][] _ffnB1ByLayer;
-        private readonly float[][] _ffnW2ByLayer;
-        private readonly float[][] _ffnB2ByLayer;
-        private readonly float[] _finalLayerNormGamma;
-        private readonly float[] _finalLayerNormBeta;
-        private readonly float[] _lmHeadWeights;
 
         private bool _disposed;
 
@@ -96,55 +77,18 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             _cache = KeyValueCache.Create(
                 LayerCount,
-                HeadCount,
+                kvHeadCount: HeadCount,  // MHA — KV heads == Q heads
                 MaxContextLength,
                 HeadDimension);
 
-            _tokenEmbeddingBuffer = new float[DModel];
+            _tokenEmbeddingBuffer    = new float[DModel];
             _positionEmbeddingBuffer = new float[DModel];
-            _inputHidden = new float[DModel];
-            _lastLogits = new float[VocabSize];
+            _inputHidden             = new float[DModel];
+            _lastLogits              = new float[VocabSize];
 
-            _ln1Gammas = CreateLayerArray(LayerCount, DModel);
-            _ln1Betas = CreateLayerArray(LayerCount, DModel);
-            _attentionOutputBiases = CreateLayerArray(LayerCount, DModel);
-            _ln2Gammas = CreateLayerArray(LayerCount, DModel);
-            _ln2Betas = CreateLayerArray(LayerCount, DModel);
-            _ffnW1ByLayer = CreateLayerArray(LayerCount, DModel * DFF);
-            _ffnB1ByLayer = CreateLayerArray(LayerCount, DFF);
-            _ffnW2ByLayer = CreateLayerArray(LayerCount, DFF * DModel);
-            _ffnB2ByLayer = CreateLayerArray(LayerCount, DModel);
-
-            _wqHeadsByLayer = CreateHeadsByLayer(
-                LayerCount,
-                HeadCount,
-                DModel * HeadDimension);
-
-            _wkHeadsByLayer = CreateHeadsByLayer(
-                LayerCount,
-                HeadCount,
-                DModel * HeadDimension);
-
-            _wvHeadsByLayer = CreateHeadsByLayer(
-                LayerCount,
-                HeadCount,
-                DModel * HeadDimension);
-
-            _woHeadsByLayer = CreateHeadsByLayer(
-                LayerCount,
-                HeadCount,
-                HeadDimension * DModel);
-
-            // Q/K/V bias per head — zero for GPT-1, loaded from GPT-2 c_attn.bias
-            _bqHeadsByLayer = CreateHeadsByLayer(LayerCount, HeadCount, HeadDimension);
-            _bkHeadsByLayer = CreateHeadsByLayer(LayerCount, HeadCount, HeadDimension);
-            _bvHeadsByLayer = CreateHeadsByLayer(LayerCount, HeadCount, HeadDimension);
-
-            _finalLayerNormGamma = new float[DModel];
-            _finalLayerNormBeta = new float[DModel];
-            _lmHeadWeights = new float[DModel * VocabSize];
-
-            RefreshWeightsFromModel();
+            // Zero-copy weight binding — no data is copied.
+            // TensorStorage refs point directly to model parameters.
+            _weights = new StackWeights(model);
         }
 
         public int LayerCount { get; }
@@ -176,51 +120,17 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Array.Clear(_positionEmbeddingBuffer);
         }
 
+        /// <summary>
+        /// No-op in the zero-copy StackWeights architecture.
+        /// TensorStorage references in StackWeights point directly to model
+        /// parameters — updates to model weights are immediately visible
+        /// through the spans without any copying.
+        /// </summary>
         public void RefreshWeightsFromModel()
         {
             ThrowIfDisposed();
-
-            for (var layer = 0; layer < LayerCount; layer++)
-            {
-                var block = _model.Blocks[layer];
-
-                Copy(block.Norm1.Gamma.DataReadOnlySpan, _ln1Gammas[layer]);
-                Copy(block.Norm1.Beta.DataReadOnlySpan, _ln1Betas[layer]);
-
-                for (var head = 0; head < HeadCount; head++)
-                {
-                    Copy(block.Attention.WqHeads[head].DataReadOnlySpan, ((float[][])_wqHeadsByLayer[layer])[head]);
-                    Copy(block.Attention.WkHeads[head].DataReadOnlySpan, ((float[][])_wkHeadsByLayer[layer])[head]);
-                    Copy(block.Attention.WvHeads[head].DataReadOnlySpan, ((float[][])_wvHeadsByLayer[layer])[head]);
-                    Copy(block.Attention.WoHeads[head].DataReadOnlySpan, ((float[][])_woHeadsByLayer[layer])[head]);
-                    // Copy Q/K/V bias (zero for GPT-1, non-zero for GPT-2)
-                    Copy(block.Attention.BqHeads[head].DataReadOnlySpan, ((float[][])_bqHeadsByLayer[layer])[head]);
-                    Copy(block.Attention.BkHeads[head].DataReadOnlySpan, ((float[][])_bkHeadsByLayer[layer])[head]);
-                    Copy(block.Attention.BvHeads[head].DataReadOnlySpan, ((float[][])_bvHeadsByLayer[layer])[head]);
-                }
-
-                Copy(block.Attention.Bo.DataReadOnlySpan, _attentionOutputBiases[layer]);
-
-                Copy(block.Norm2.Gamma.DataReadOnlySpan, _ln2Gammas[layer]);
-                Copy(block.Norm2.Beta.DataReadOnlySpan, _ln2Betas[layer]);
-
-                Copy(block.FFN.W1.DataReadOnlySpan, _ffnW1ByLayer[layer]);
-                Copy(block.FFN.B1.DataReadOnlySpan, _ffnB1ByLayer[layer]);
-                Copy(block.FFN.W2.DataReadOnlySpan, _ffnW2ByLayer[layer]);
-                Copy(block.FFN.B2.DataReadOnlySpan, _ffnB2ByLayer[layer]);
-            }
-
-            Copy(_model.FinalNorm.Gamma.DataReadOnlySpan, _finalLayerNormGamma);
-            Copy(_model.FinalNorm.Beta.DataReadOnlySpan, _finalLayerNormBeta);
-
-            if (_model.Config.TieWeights)
-            {
-                TransposeTokenEmbeddingToLmHead();
-            }
-            else
-            {
-                Copy(_model.LMHead.DataReadOnlySpan, _lmHeadWeights);
-            }
+            // Zero-copy: nothing to refresh. StackWeights spans are live views
+            // into TensorStorage, which points to the current model parameters.
         }
 
         public void DecodeNextToken(
@@ -259,26 +169,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             _stack.Decode(
                 _inputHidden,
-                _ln1Gammas,
-                _ln1Betas,
-                _wqHeadsByLayer,
-                _wkHeadsByLayer,
-                _wvHeadsByLayer,
-                _woHeadsByLayer,
-                _bqHeadsByLayer,
-                _bkHeadsByLayer,
-                _bvHeadsByLayer,
-                _attentionOutputBiases,
-                _ln2Gammas,
-                _ln2Betas,
-                _ffnW1ByLayer,
-                _ffnB1ByLayer,
-                _ffnW2ByLayer,
-                _ffnB2ByLayer,
-                _finalLayerNormGamma,
-                _finalLayerNormBeta,
-                _lmHeadWeights,
-                lmHeadBias: [],
+                _weights,
                 _cache,
                 position,
                 logits);
@@ -313,55 +204,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _cache.Dispose();
         }
 
-        private void TransposeTokenEmbeddingToLmHead()
-        {
-            var source = _model.TokenEmbedding.Weight.DataReadOnlySpan;
 
-            for (var token = 0; token < VocabSize; token++)
-            {
-                for (var dim = 0; dim < DModel; dim++)
-                {
-                    _lmHeadWeights[dim * VocabSize + token] =
-                        source[token * DModel + dim];
-                }
-            }
-        }
-
-        private static float[][] CreateLayerArray(
-            int layerCount,
-            int length)
-        {
-            var values = new float[layerCount][];
-
-            for (var layer = 0; layer < layerCount; layer++)
-            {
-                values[layer] = new float[length];
-            }
-
-            return values;
-        }
-
-        private static IReadOnlyList<float[]>[] CreateHeadsByLayer(
-            int layerCount,
-            int headCount,
-            int length)
-        {
-            var layers = new IReadOnlyList<float[]>[layerCount];
-
-            for (var layer = 0; layer < layerCount; layer++)
-            {
-                var heads = new float[headCount][];
-
-                for (var head = 0; head < headCount; head++)
-                {
-                    heads[head] = new float[length];
-                }
-
-                layers[layer] = heads;
-            }
-
-            return layers;
-        }
 
         private static void Copy(
             ReadOnlySpan<float> source,

@@ -18,11 +18,7 @@ namespace Benchmarks
         private KeyValueCache _cache = null!;
 
         private float[] _hidden = null!;
-        private float[][] _wqHeads = null!;
-        private float[][] _wkHeads = null!;
-        private float[][] _wvHeads = null!;
-        private float[][] _woHeads = null!;
-        private float[] _outputBias = null!;
+        private BlockWeights _blockWeights;
         private float[] _output = null!;
 
         private int _headDimension;
@@ -56,59 +52,30 @@ namespace Benchmarks
 
             _cache = KeyValueCache.Create(
             layerCount: 1,
-            headCount: HeadCount,
+            kvHeadCount: HeadCount,
             maxSequenceLength: SequenceLength,
             headDimension: _headDimension);
 
             _hidden = new float[DModel];
-            _outputBias = new float[DModel];
             _output = new float[DModel];
 
-            _wqHeads = CreateHeadWeights(
-            HeadCount,
-            DModel * _headDimension,
-            seedBase: 1000);
-
-            _wkHeads = CreateHeadWeights(
-            HeadCount,
-            DModel * _headDimension,
-            seedBase: 2000);
-
-            _wvHeads = CreateHeadWeights(
-            HeadCount,
-            DModel * _headDimension,
-            seedBase: 3000);
-
-            _woHeads = CreateHeadWeights(
-            HeadCount,
-            _headDimension * DModel,
-            seedBase: 4000);
+            var heads = new SingleHeadWeights[HeadCount];
+            for (var h = 0; h < HeadCount; h++)
+            {
+                var wq = new float[DModel * _headDimension]; FillDeterministic(wq, 1000 + h);
+                var wk = new float[DModel * _headDimension]; FillDeterministic(wk, 2000 + h);
+                var wv = new float[DModel * _headDimension]; FillDeterministic(wv, 3000 + h);
+                var wo = new float[_headDimension * DModel]; FillDeterministic(wo, 4000 + h);
+                heads[h] = new SingleHeadWeights(wq: wq, wk: wk, wv: wv, wo: wo);
+            }
+            _blockWeights = new BlockWeights(heads: heads);
 
             FillDeterministic(_hidden, seed: 101);
-            FillDeterministic(_outputBias, seed: 202);
-
-            PrefillCache(
-            _cache,
-            HeadCount,
-            SequenceLength,
-            _headDimension);
+            PrefillCache(_cache, HeadCount, SequenceLength, _headDimension);
 
             _position = SequenceLength - 1;
 
-            _decoder.Decode(
-            _hidden,
-            _wqHeads,
-            _wkHeads,
-            _wvHeads,
-            Array.Empty<float[]>(),  // bqHeads
-            Array.Empty<float[]>(),  // bkHeads
-            Array.Empty<float[]>(),  // bvHeads
-            _woHeads,
-            _outputBias,
-            _cache,
-            0,  // layerIndex
-            _position,  // position
-            _output);
+            _decoder.Decode(_hidden, in _blockWeights, _cache, 0, _position, _output);
         }
 
         [Benchmark(OperationsPerInvoke = OperationsPerInvoke)]
@@ -118,20 +85,7 @@ namespace Benchmarks
 
             for (var i = 0; i < OperationsPerInvoke; i++)
             {
-                _decoder.Decode(
-                _hidden,
-                _wqHeads,
-                _wkHeads,
-                _wvHeads,
-                Array.Empty<float[]>(),  // bqHeads
-                Array.Empty<float[]>(),  // bkHeads
-                Array.Empty<float[]>(),  // bvHeads
-                _woHeads,
-                _outputBias,
-                _cache,
-                0,  // layerIndex
-                _position,  // position
-                _output);
+                _decoder.Decode(_hidden, in _blockWeights, _cache, 0, _position, _output);
 
                 checksum += _output[i % _output.Length];
             }
@@ -181,22 +135,6 @@ namespace Benchmarks
 
                 cache.Advance();
             }
-        }
-
-        private static float[][] CreateHeadWeights(
-            int headCount,
-            int length,
-            int seedBase)
-        {
-            var weights = new float[headCount][];
-
-            for (var h = 0; h < headCount; h++)
-            {
-                weights[h] = new float[length];
-                FillDeterministic(weights[h], seedBase + h);
-            }
-
-            return weights;
         }
 
         private static void FillDeterministic(float[] data, int seed)

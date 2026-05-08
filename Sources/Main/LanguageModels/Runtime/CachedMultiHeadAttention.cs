@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.LanguageModels.Rope;
+
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
     /// <summary>
@@ -35,49 +37,43 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly CachedSingleHeadAttention[] _heads;
         private readonly float[] _headOutput;
 
+        /// <param name="kvHeadCount">
+        /// Number of KV heads for GQA. 0 or equal to headCount = standard MHA.
+        /// </param>
         public CachedMultiHeadAttention(
             int dModel,
             int headCount,
-            int maxSequenceLength)
+            int maxSequenceLength,
+            int kvHeadCount = 0)
         {
             if (dModel <= 0)
-            {
                 throw new ArgumentOutOfRangeException(nameof(dModel));
-            }
-
             if (headCount <= 0)
-            {
                 throw new ArgumentOutOfRangeException(nameof(headCount));
-            }
-
             if (dModel % headCount != 0)
-            {
                 throw new ArgumentException(
                     $"dModel ({dModel}) must be divisible by headCount ({headCount}).",
                     nameof(dModel));
-            }
-
             if (maxSequenceLength <= 0)
-            {
                 throw new ArgumentOutOfRangeException(nameof(maxSequenceLength));
-            }
 
-            DModel = dModel;
-            HeadCount = headCount;
-            HeadDimension = dModel / headCount;
+            var resolvedKvHeads = kvHeadCount > 0 ? kvHeadCount : headCount;
+            if (headCount % resolvedKvHeads != 0)
+                throw new ArgumentException(
+                    $"headCount ({headCount}) must be divisible by kvHeadCount ({resolvedKvHeads}).");
+
+            DModel            = dModel;
+            HeadCount         = headCount;
+            KvHeadCount       = resolvedKvHeads;
+            HeadDimension     = dModel / headCount;
             MaxSequenceLength = maxSequenceLength;
 
-            _heads = new CachedSingleHeadAttention[headCount];
+            _heads      = new CachedSingleHeadAttention[headCount];
+            _headOutput = new float[dModel];
 
             for (var h = 0; h < headCount; h++)
-            {
                 _heads[h] = new CachedSingleHeadAttention(
-                    dModel,
-                    HeadDimension,
-                    maxSequenceLength);
-            }
-
-            _headOutput = new float[dModel];
+                    dModel, HeadDimension, maxSequenceLength);
         }
 
         public int DModel { get; }
@@ -88,99 +84,66 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         public int MaxSequenceLength { get; }
 
-        public void Decode(
+        /// <summary>Number of KV heads. Equal to HeadCount for MHA, less for GQA.</summary>
+        public int KvHeadCount { get; }
+
+        internal void Decode(
             ReadOnlySpan<float> hidden,
-            IReadOnlyList<float[]> wqHeads,
-            IReadOnlyList<float[]> wkHeads,
-            IReadOnlyList<float[]> wvHeads,
-            IReadOnlyList<float[]> bqHeads,
-            IReadOnlyList<float[]> bkHeads,
-            IReadOnlyList<float[]> bvHeads,
-            IReadOnlyList<float[]> woHeads,
-            ReadOnlySpan<float> outputBias,
+            in BlockWeights weights,
             KeyValueCache cache,
             int layerIndex,
             int position,
-            Span<float> output)
+            Span<float> output,
+            RopeTable? rope = null)
         {
-            ValidateDecodeArguments(
-                hidden,
-                wqHeads,
-                wkHeads,
-                wvHeads,
-                bqHeads,
-                bkHeads,
-                bvHeads,
-                woHeads,
-                outputBias,
-                cache,
-                position,
-                output);
-
-            if (outputBias.IsEmpty)
-            {
+            var bo = weights.AttentionBias;
+            if (bo.IsEmpty)
                 output.Slice(0, DModel).Clear();
-            }
             else
-            {
-                outputBias
-                    .Slice(0, DModel)
-                    .CopyTo(output);
-            }
+                bo.Slice(0, DModel).CopyTo(output);
+
+            var useGqa = weights.HasGqa;
 
             for (var h = 0; h < HeadCount; h++)
             {
-                _heads[h].DecodeWithoutOutputBias(
+                ref readonly var hw = ref weights.Head(h);
+
+                ReadOnlySpan<float> wk, wv, bk, bv;
+                if (useGqa)
+                {
+                    // GQA: multiple Q heads share one KV head
+                    var kvH = h % KvHeadCount;
+                    ref readonly var kv = ref weights.KvHead(kvH);
+                    wk = kv.Wk; wv = kv.Wv;
+                    bk = kv.Bk; bv = kv.Bv;
+                }
+                else
+                {
+                    // Standard MHA: each Q head has its own K/V weights
+                    wk = hw.Wk; wv = hw.Wv;
+                    bk = hw.Bk; bv = hw.Bv;
+                }
+
+                // Map Q head index to KV cache slot (GQA: multiple Q map to same slot)
+                var kvCacheHead = useGqa ? h % KvHeadCount : h;
+
+                _heads[h].Decode(
                     hidden,
-                    wqHeads[h],
-                    wkHeads[h],
-                    wvHeads[h],
-                    bqHeads[h],
-                    bkHeads[h],
-                    bvHeads[h],
-                    woHeads[h],
+                    hw.Wq, wk, wv,
+                    hw.Bq, bk, bv,
+                    hw.Wo,
                     cache,
                     layerIndex,
-                    h,
+                    kvCacheHead,
                     position,
-                    _headOutput);
-
-                AddInPlace(
                     _headOutput,
-                    output,
-                    DModel);
+                    rope);
+
+                AddInPlace(_headOutput, output, DModel);
             }
         }
 
-        public void DecodeWithoutOutputBias(
-            ReadOnlySpan<float> hidden,
-            IReadOnlyList<float[]> wqHeads,
-            IReadOnlyList<float[]> wkHeads,
-            IReadOnlyList<float[]> wvHeads,
-            IReadOnlyList<float[]> bqHeads,
-            IReadOnlyList<float[]> bkHeads,
-            IReadOnlyList<float[]> bvHeads,
-            IReadOnlyList<float[]> woHeads,
-            KeyValueCache cache,
-            int layerIndex,
-            int position,
-            Span<float> output)
-        {
-            Decode(
-                hidden,
-                wqHeads,
-                wkHeads,
-                wvHeads,
-                bqHeads,
-                bkHeads,
-                bvHeads,
-                woHeads,
-                [],
-                cache,
-                layerIndex,
-                position,
-                output);
-        }
+
 
         public CachedSingleHeadAttention GetHeadDecoder(int headIndex)
         {
@@ -192,136 +155,6 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             return _heads[headIndex];
         }
 
-        private void ValidateDecodeArguments(
-            ReadOnlySpan<float> hidden,
-            IReadOnlyList<float[]> wqHeads,
-            IReadOnlyList<float[]> wkHeads,
-            IReadOnlyList<float[]> wvHeads,
-            IReadOnlyList<float[]> bqHeads,
-            IReadOnlyList<float[]> bkHeads,
-            IReadOnlyList<float[]> bvHeads,
-            IReadOnlyList<float[]> woHeads,
-            ReadOnlySpan<float> outputBias,
-            KeyValueCache cache,
-            int position,
-            Span<float> output)
-        {
-            if (hidden.Length < DModel)
-            {
-                throw new ArgumentException("Hidden span is smaller than dModel.", nameof(hidden));
-            }
-
-            if (wqHeads is null)
-            {
-                throw new ArgumentNullException(nameof(wqHeads));
-            }
-
-            if (wkHeads is null)
-            {
-                throw new ArgumentNullException(nameof(wkHeads));
-            }
-
-            if (wvHeads is null)
-            {
-                throw new ArgumentNullException(nameof(wvHeads));
-            }
-
-            if (woHeads is null)
-            {
-                throw new ArgumentNullException(nameof(woHeads));
-            }
-
-            if (wqHeads.Count < HeadCount)
-            {
-                throw new ArgumentException("Wq heads collection is smaller than headCount.", nameof(wqHeads));
-            }
-
-            if (wkHeads.Count < HeadCount)
-            {
-                throw new ArgumentException("Wk heads collection is smaller than headCount.", nameof(wkHeads));
-            }
-
-            if (wvHeads.Count < HeadCount)
-            {
-                throw new ArgumentException("Wv heads collection is smaller than headCount.", nameof(wvHeads));
-            }
-
-            if (woHeads.Count < HeadCount)
-            {
-                throw new ArgumentException("Wo heads collection is smaller than headCount.", nameof(woHeads));
-            }
-
-            var qkvWeightsLength = DModel * HeadDimension;
-            var outputWeightsLength = HeadDimension * DModel;
-
-            for (var h = 0; h < HeadCount; h++)
-            {
-                if (wqHeads[h] is null || wqHeads[h].Length < qkvWeightsLength)
-                {
-                    throw new ArgumentException($"Wq head {h} is smaller than dModel * headDimension.", nameof(wqHeads));
-                }
-
-                if (wkHeads[h] is null || wkHeads[h].Length < qkvWeightsLength)
-                {
-                    throw new ArgumentException($"Wk head {h} is smaller than dModel * headDimension.", nameof(wkHeads));
-                }
-
-                if (wvHeads[h] is null || wvHeads[h].Length < qkvWeightsLength)
-                {
-                    throw new ArgumentException($"Wv head {h} is smaller than dModel * headDimension.", nameof(wvHeads));
-                }
-
-                if (woHeads[h] is null || woHeads[h].Length < outputWeightsLength)
-                {
-                    throw new ArgumentException($"Wo head {h} is smaller than headDimension * dModel.", nameof(woHeads));
-                }
-            }
-
-            if (!outputBias.IsEmpty && outputBias.Length < DModel)
-            {
-                throw new ArgumentException("Output bias span is smaller than dModel.", nameof(outputBias));
-            }
-
-            if (cache is null)
-            {
-                throw new ArgumentNullException(nameof(cache));
-            }
-
-            if (cache.Shape.HeadCount < HeadCount)
-            {
-                throw new ArgumentException(
-                    $"Cache head count {cache.Shape.HeadCount} is smaller than decoder head count {HeadCount}.",
-                    nameof(cache));
-            }
-
-            if (cache.Shape.HeadDimension != HeadDimension)
-            {
-                throw new ArgumentException(
-                    $"Cache head dimension {cache.Shape.HeadDimension} does not match decoder head dimension {HeadDimension}.",
-                    nameof(cache));
-            }
-
-            if (position < 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(position));
-            }
-
-            if (position >= MaxSequenceLength)
-            {
-                throw new ArgumentOutOfRangeException(nameof(position));
-            }
-
-            if (position >= cache.CurrentLength)
-            {
-                throw new InvalidOperationException(
-                    $"Position {position} is not visible in the cache. CurrentLength={cache.CurrentLength}. Advance the cache before Decode.");
-            }
-
-            if (output.Length < DModel)
-            {
-                throw new ArgumentException("Output span is smaller than dModel.", nameof(output));
-            }
-        }
 
         private static void AddInPlace(
             ReadOnlySpan<float> source,
@@ -333,5 +166,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 destination[i] += source[i];
             }
         }
+
+
     }
 }

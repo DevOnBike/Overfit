@@ -27,10 +27,7 @@ namespace Benchmarks
         private KeyValueCache _cache = null!;
 
         private float[] _hidden = null!;
-        private float[] _wq = null!;
-        private float[] _wk = null!;
-        private float[] _wv = null!;
-        private float[] _wo = null!;
+        private SingleHeadWeights _headWeights;
         private float[] _output = null!;
 
         private int _position;
@@ -61,22 +58,19 @@ namespace Benchmarks
 
             _cache = KeyValueCache.Create(
                 layerCount: 1,
-                headCount: 1,
+                kvHeadCount: 1,
                 maxSequenceLength: SequenceLength,
                 headDimension: HeadDimension);
 
             _hidden = new float[DModel];
-            _wq = new float[DModel * HeadDimension];
-            _wk = new float[DModel * HeadDimension];
-            _wv = new float[DModel * HeadDimension];
-            _wo = new float[HeadDimension * DModel];
+            var wq = new float[DModel * HeadDimension]; FillDeterministic(wq, 101);
+            var wk = new float[DModel * HeadDimension]; FillDeterministic(wk, 201);
+            var wv = new float[DModel * HeadDimension]; FillDeterministic(wv, 301);
+            var wo = new float[HeadDimension * DModel]; FillDeterministic(wo, 401);
+            _headWeights = new SingleHeadWeights(wq: wq, wk: wk, wv: wv, wo: wo);
             _output = new float[DModel];
 
             FillDeterministic(_hidden, seed: 101);
-            FillDeterministic(_wq, seed: 201);
-            FillDeterministic(_wk, seed: 301);
-            FillDeterministic(_wv, seed: 401);
-            FillDeterministic(_wo, seed: 501);
 
             PrefillCache(
                 _cache,
@@ -85,20 +79,12 @@ namespace Benchmarks
 
             _position = SequenceLength - 1;
 
-            _decoder.DecodeWithoutOutputBias(
-                _hidden,
-                _wq,
-                _wk,
-                _wv,
-                [],  // bq
-                [],  // bk
-                [],  // bv
-                _wo,
-                _cache,
-                0,  // layerIndex
-                0,  // headIndex
-                _position,  // position
-                _output);
+            _decoder.Decode(
+                    _hidden,
+                    _headWeights.Wq, _headWeights.Wk, _headWeights.Wv,
+                    ReadOnlySpan<float>.Empty, ReadOnlySpan<float>.Empty, ReadOnlySpan<float>.Empty,
+                    _headWeights.Wo,
+                    _cache, 0, 0, _position, _output);
         }
 
         [Benchmark(OperationsPerInvoke = OperationsPerInvoke)]
@@ -108,20 +94,12 @@ namespace Benchmarks
 
             for (var i = 0; i < OperationsPerInvoke; i++)
             {
-                _decoder.DecodeWithoutOutputBias(
+                _decoder.Decode(
                     _hidden,
-                    _wq,
-                    _wk,
-                    _wv,
-                    [],  // bq
-                    [],  // bk
-                    [],  // bv
-                    _wo,
-                    _cache,
-                    0,  // layerIndex
-                    0,  // headIndex
-                    _position,  // position
-                    _output);
+                    _headWeights.Wq, _headWeights.Wk, _headWeights.Wv,
+                    ReadOnlySpan<float>.Empty, ReadOnlySpan<float>.Empty, ReadOnlySpan<float>.Empty,
+                    _headWeights.Wo,
+                    _cache, 0, 0, _position, _output);
 
                 checksum += _output[i % _output.Length];
             }

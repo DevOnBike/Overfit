@@ -14,7 +14,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
         {
             using var cache = KeyValueCache.Create(
                 layerCount: 1,
-                headCount: 1,
+                kvHeadCount: 1,
                 maxSequenceLength: 4,
                 headDimension: 2);
 
@@ -34,7 +34,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
 
             cache.Advance();
 
-            decoder.DecodeWithoutOutputBias(
+            decoder.Decode(
                 hidden,
                 identity,
                 identity,
@@ -61,7 +61,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
         {
             using var cache = KeyValueCache.Create(
                 layerCount: 1,
-                headCount: 1,
+                kvHeadCount: 1,
                 maxSequenceLength: 4,
                 headDimension: 2);
 
@@ -80,7 +80,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
 
             cache.Advance();
 
-            decoder.DecodeWithoutOutputBias(
+            decoder.Decode(
                 hidden: new float[] { 1f, 0f },
                 wq: identity,
                 wk: identity,
@@ -97,7 +97,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
 
             cache.Advance();
 
-            decoder.DecodeWithoutOutputBias(
+            decoder.Decode(
                 hidden: new float[] { 0f, 1f },
                 wq: identity,
                 wk: identity,
@@ -131,7 +131,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
         {
             using var cache = KeyValueCache.Create(
                 layerCount: 1,
-                headCount: 1,
+                kvHeadCount: 1,
                 maxSequenceLength: 2,
                 headDimension: 2);
 
@@ -173,7 +173,6 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 bk: [],
                 bv: [],
                 wo,
-                outputBias: bias,
                 cache,
                 0,  // layerIndex
                 0,  // headIndex
@@ -181,9 +180,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 output);
 
             // Single token attention output == V == [2,3].
-            AssertClose(24f, output[0]); // 10 + 2*1 + 3*4
-            AssertClose(39f, output[1]); // 20 + 2*2 + 3*5
-            AssertClose(54f, output[2]); // 30 + 2*3 + 3*6
+            AssertClose(14f, output[0]); // 2*1 + 3*4 (no outputBias in new API)
+            AssertClose(19f, output[1]); // 2*2 + 3*5
+            AssertClose(24f, output[2]); // 2*3 + 3*6
         }
 
         [Fact]
@@ -191,7 +190,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
         {
             using var cache = KeyValueCache.Create(
                 layerCount: 1,
-                headCount: 1,
+                kvHeadCount: 1,
                 maxSequenceLength: 2,
                 headDimension: 2);
 
@@ -210,7 +209,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
 
             cache.Advance();
 
-            decoder.DecodeWithoutOutputBias(
+            decoder.Decode(
                 hidden: new float[] { 5f, 6f },
                 wq: identity,
                 wk: identity,
@@ -246,7 +245,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
         {
             using var cache = KeyValueCache.Create(
                 layerCount: 1,
-                headCount: 1,
+                kvHeadCount: 1,
                 maxSequenceLength: 2,
                 headDimension: 2);
 
@@ -261,8 +260,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 0f, 1f
             };
 
-            Assert.Throws<InvalidOperationException>(() =>
-                decoder.DecodeWithoutOutputBias(
+            Assert.Throws<ArgumentOutOfRangeException>(() =>
+                decoder.Decode(
                     hidden: new float[] { 1f, 2f },
                     wq: identity,
                     wk: identity,
@@ -283,7 +282,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
         {
             using var cache = KeyValueCache.Create(
                 layerCount: 1,
-                headCount: 1,
+                kvHeadCount: 1,
                 maxSequenceLength: 2,
                 headDimension: 2);
 
@@ -301,7 +300,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             };
 
             Assert.Throws<ArgumentException>(() =>
-                decoder.DecodeWithoutOutputBias(
+                decoder.Decode(
                     hidden: new float[1],
                     wq: identity,
                     wk: identity,
@@ -317,7 +316,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     output: new float[2]));
 
             Assert.Throws<ArgumentException>(() =>
-                decoder.DecodeWithoutOutputBias(
+                decoder.Decode(
                     hidden: new float[2],
                     wq: new float[3],
                     wk: identity,
@@ -333,7 +332,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     output: new float[2]));
 
             Assert.Throws<ArgumentException>(() =>
-                decoder.DecodeWithoutOutputBias(
+                decoder.Decode(
                     hidden: new float[2],
                     wq: identity,
                     wk: identity,

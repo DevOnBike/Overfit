@@ -51,24 +51,7 @@ namespace Benchmarks
         private KeyValueCache _cache = null!;
 
         private float[] _inputHidden = null!;
-        private float[][] _ln1Gammas = null!;
-        private float[][] _ln1Betas = null!;
-        private IReadOnlyList<float[]>[] _wqHeadsByLayer = null!;
-        private IReadOnlyList<float[]>[] _wkHeadsByLayer = null!;
-        private IReadOnlyList<float[]>[] _wvHeadsByLayer = null!;
-        private IReadOnlyList<float[]>[] _woHeadsByLayer = null!;
-        private IReadOnlyList<float[]>[] _emptyHeadsByLayer = null!;
-        private float[][] _attentionOutputBiases = null!;
-        private float[][] _ln2Gammas = null!;
-        private float[][] _ln2Betas = null!;
-        private float[][] _ffnW1ByLayer = null!;
-        private float[][] _ffnB1ByLayer = null!;
-        private float[][] _ffnW2ByLayer = null!;
-        private float[][] _ffnB2ByLayer = null!;
-        private float[] _finalLayerNormGamma = null!;
-        private float[] _finalLayerNormBeta = null!;
-        private float[] _lmHeadWeights = null!;
-        private float[] _lmHeadBias = null!;
+        private StackWeights _weights = null!;
         private float[] _logits = null!;
 
         private int _headDimension;
@@ -96,42 +79,34 @@ namespace Benchmarks
 
             _cache = KeyValueCache.Create(
                 layerCount: LayerCount,
-                headCount: HeadCount,
+                kvHeadCount: HeadCount,
                 maxSequenceLength: SequenceLength,
                 headDimension: _headDimension);
 
             _inputHidden = new float[DModel];
-            _ln1Gammas = CreateLayerVectors(LayerCount, DModel, fillOnes: true, seedBase: 1000);
-            _ln1Betas = CreateLayerVectors(LayerCount, DModel, fillOnes: false, seedBase: 2000);
-            _attentionOutputBiases = CreateLayerVectors(LayerCount, DModel, fillOnes: false, seedBase: 3000);
-            _ln2Gammas = CreateLayerVectors(LayerCount, DModel, fillOnes: true, seedBase: 4000);
-            _ln2Betas = CreateLayerVectors(LayerCount, DModel, fillOnes: false, seedBase: 5000);
-            _ffnW1ByLayer = CreateLayerVectors(LayerCount, DModel * DFF, fillOnes: false, seedBase: 6000);
-            _ffnB1ByLayer = CreateLayerVectors(LayerCount, DFF, fillOnes: false, seedBase: 7000);
-            _ffnW2ByLayer = CreateLayerVectors(LayerCount, DFF * DModel, fillOnes: false, seedBase: 8000);
-            _ffnB2ByLayer = CreateLayerVectors(LayerCount, DModel, fillOnes: false, seedBase: 9000);
-
-            _wqHeadsByLayer = CreateHeadsByLayer(LayerCount, HeadCount, DModel * _headDimension, seedBase: 10_000);
-            _wkHeadsByLayer = CreateHeadsByLayer(LayerCount, HeadCount, DModel * _headDimension, seedBase: 20_000);
-            _wvHeadsByLayer = CreateHeadsByLayer(LayerCount, HeadCount, DModel * _headDimension, seedBase: 30_000);
-            _woHeadsByLayer = CreateHeadsByLayer(LayerCount, HeadCount, _headDimension * DModel, seedBase: 40_000);
-        // Zero bias arrays for Q/K/V (GPT-1 has no QKV bias)
-        _emptyHeadsByLayer = Enumerable.Range(0, LayerCount)
-            .Select(_ => (IReadOnlyList<float[]>)Enumerable.Range(0, HeadCount)
-                .Select(_ => Array.Empty<float>()).ToArray())
-            .ToArray();
-
-            _finalLayerNormGamma = new float[DModel];
-            _finalLayerNormBeta = new float[DModel];
-            _lmHeadWeights = new float[DModel * VocabSize];
-            _lmHeadBias = new float[VocabSize];
-            _logits = new float[VocabSize];
-
+            _logits      = new float[VocabSize];
             FillDeterministic(_inputHidden, seed: 101);
-            FillOnes(_finalLayerNormGamma);
-            FillDeterministic(_finalLayerNormBeta, seed: 201);
-            FillDeterministic(_lmHeadWeights, seed: 301);
-            FillDeterministic(_lmHeadBias, seed: 401);
+
+            var finalNormGamma = CreateVector(DModel, fillOnes: true);
+            var finalNormBeta  = CreateVector(DModel, seed: 201);
+            var lmHead         = CreateVector(DModel * VocabSize, seed: 301);
+
+            _weights = StackWeights.ForTest(
+                LayerCount, HeadCount,
+                l => new BlockWeights(
+                    heads:         CreateHeadWeights(HeadCount, DModel, _headDimension, l),
+                    ln1Gamma:      CreateVector(DModel, fillOnes: true,  seedBase: 1000 + l),
+                    ln1Beta:       CreateVector(DModel,                  seedBase: 2000 + l),
+                    attentionBias: CreateVector(DModel,                  seedBase: 3000 + l),
+                    ln2Gamma:      CreateVector(DModel, fillOnes: true,  seedBase: 4000 + l),
+                    ln2Beta:       CreateVector(DModel,                  seedBase: 5000 + l),
+                    ffnW1:         CreateVector(DModel * DFF,            seedBase: 6000 + l),
+                    ffnB1:         CreateVector(DFF,                     seedBase: 7000 + l),
+                    ffnW2:         CreateVector(DFF * DModel,            seedBase: 8000 + l),
+                    ffnB2:         CreateVector(DModel,                  seedBase: 9000 + l)),
+                finalNormGamma: finalNormGamma,
+                finalNormBeta:  finalNormBeta,
+                lmHead:         lmHead);
 
             PrefillCache(
                 _cache,
@@ -143,30 +118,11 @@ namespace Benchmarks
             _position = SequenceLength - 1;
 
             _stack.Decode(
-                _inputHidden,
-                _ln1Gammas,
-                _ln1Betas,
-                _wqHeadsByLayer,
-                _wkHeadsByLayer,
-                _wvHeadsByLayer,
-                _woHeadsByLayer,
-                _emptyHeadsByLayer,  // bqHeadsByLayer
-                _emptyHeadsByLayer,  // bkHeadsByLayer
-                _emptyHeadsByLayer,  // bvHeadsByLayer
-                _attentionOutputBiases,
-                _ln2Gammas,
-                _ln2Betas,
-                _ffnW1ByLayer,
-                _ffnB1ByLayer,
-                _ffnW2ByLayer,
-                _ffnB2ByLayer,
-                _finalLayerNormGamma,
-                _finalLayerNormBeta,
-                _lmHeadWeights,
-                _lmHeadBias,
-                _cache,
-                _position,
-                _logits);
+                    _inputHidden,
+                    _weights,
+                    _cache,
+                    _position,
+                    _logits);
         }
 
         [Benchmark(OperationsPerInvoke = OperationsPerInvoke)]
@@ -178,26 +134,7 @@ namespace Benchmarks
             {
                 _stack.Decode(
                     _inputHidden,
-                    _ln1Gammas,
-                    _ln1Betas,
-                    _wqHeadsByLayer,
-                    _wkHeadsByLayer,
-                    _wvHeadsByLayer,
-                    _woHeadsByLayer,
-                    _emptyHeadsByLayer,  // bqHeadsByLayer
-                    _emptyHeadsByLayer,  // bkHeadsByLayer
-                    _emptyHeadsByLayer,  // bvHeadsByLayer
-                    _attentionOutputBiases,
-                    _ln2Gammas,
-                    _ln2Betas,
-                    _ffnW1ByLayer,
-                    _ffnB1ByLayer,
-                    _ffnW2ByLayer,
-                    _ffnB2ByLayer,
-                    _finalLayerNormGamma,
-                    _finalLayerNormBeta,
-                    _lmHeadWeights,
-                    _lmHeadBias,
+                    _weights,
                     _cache,
                     _position,
                     _logits);
@@ -256,61 +193,31 @@ namespace Benchmarks
             }
         }
 
-        private static IReadOnlyList<float[]>[] CreateHeadsByLayer(
-            int layerCount,
-            int headCount,
-            int length,
-            int seedBase)
+        private static SingleHeadWeights[] CreateHeadWeights(int headCount, int dModel, int headDim, int layer)
         {
-            var layers = new IReadOnlyList<float[]>[layerCount];
-
-            for (var layer = 0; layer < layerCount; layer++)
+            var heads = new SingleHeadWeights[headCount];
+            for (var h = 0; h < headCount; h++)
             {
-                var heads = new float[headCount][];
-
-                for (var head = 0; head < headCount; head++)
-                {
-                    heads[head] = new float[length];
-                    FillDeterministic(heads[head], seedBase + layer * 100 + head);
-                }
-
-                layers[layer] = heads;
+                var wq = new float[dModel * headDim]; FillDeterministic(wq, 10_000 + layer * 100 + h);
+                var wk = new float[dModel * headDim]; FillDeterministic(wk, 20_000 + layer * 100 + h);
+                var wv = new float[dModel * headDim]; FillDeterministic(wv, 30_000 + layer * 100 + h);
+                var wo = new float[headDim * dModel]; FillDeterministic(wo, 40_000 + layer * 100 + h);
+                heads[h] = new SingleHeadWeights(wq: wq, wk: wk, wv: wv, wo: wo);
             }
-
-            return layers;
+            return heads;
         }
 
-        private static float[][] CreateLayerVectors(
-            int layerCount,
-            int length,
-            bool fillOnes,
-            int seedBase)
+        private static float[] CreateVector(int length, bool fillOnes = false, int seed = 0, int seedBase = 0)
         {
-            var values = new float[layerCount][];
-
-            for (var layer = 0; layer < layerCount; layer++)
-            {
-                values[layer] = new float[length];
-
-                if (fillOnes)
-                {
-                    FillOnes(values[layer]);
-                }
-                else
-                {
-                    FillDeterministic(values[layer], seedBase + layer);
-                }
-            }
-
-            return values;
+            var v = new float[length];
+            if (fillOnes) FillOnes(v);
+            else FillDeterministic(v, seed + seedBase);
+            return v;
         }
 
         private static void FillOnes(float[] data)
         {
-            for (var i = 0; i < data.Length; i++)
-            {
-                data[i] = 1f;
-            }
+            for (var i = 0; i < data.Length; i++) data[i] = 1f;
         }
 
         private static void FillDeterministic(float[] data, int seed)
