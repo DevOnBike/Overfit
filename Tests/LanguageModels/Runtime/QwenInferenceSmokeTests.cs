@@ -3,8 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using DevOnBike.Overfit.LanguageModels.Contracts;
 using System.Linq;
+using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
@@ -129,8 +129,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             var infCount = 0;
             for (var i = 0; i < logits.Length; i++)
             {
-                if (float.IsNaN(logits[i])) nanCount++;
-                if (float.IsInfinity(logits[i])) infCount++;
+                if (float.IsNaN(logits[i]))
+                {
+                    nanCount++;
+                }
+                if (float.IsInfinity(logits[i]))
+                {
+                    infCount++;
+                }
             }
 
             Assert.Equal(0, nanCount);
@@ -139,7 +145,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             var maxLogit = float.MinValue;
             var maxIdx = 0;
             for (var i = 0; i < logits.Length; i++)
+            {
                 if (logits[i] > maxLogit) { maxLogit = logits[i]; maxIdx = i; }
+            }
 
             Console.WriteLine($"Logits OK. Max logit={maxLogit:F3} at token={maxIdx}");
         }

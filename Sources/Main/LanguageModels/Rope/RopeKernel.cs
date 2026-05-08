@@ -30,7 +30,9 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
             var halfDim = headVector.Length / 2;
 
             if (cos.Length < halfDim || sin.Length < halfDim)
+            {
                 throw new ArgumentException("cos/sin spans shorter than headDim/2.");
+            }
 
             for (var i = 0; i < halfDim; i++)
             {

@@ -210,14 +210,23 @@ namespace Benchmarks
         private static float[] CreateVector(int length, bool fillOnes = false, int seed = 0, int seedBase = 0)
         {
             var v = new float[length];
-            if (fillOnes) FillOnes(v);
-            else FillDeterministic(v, seed + seedBase);
+            if (fillOnes)
+            {
+                FillOnes(v);
+            }
+            else
+            {
+                FillDeterministic(v, seed + seedBase);
+            }
             return v;
         }
 
         private static void FillOnes(float[] data)
         {
-            for (var i = 0; i < data.Length; i++) data[i] = 1f;
+            for (var i = 0; i < data.Length; i++)
+            {
+                data[i] = 1f;
+            }
         }
 
         private static void FillDeterministic(float[] data, int seed)

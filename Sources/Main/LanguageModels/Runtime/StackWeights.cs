@@ -16,7 +16,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     {
         private static TensorStorage<float> CreateStorage(float[]? a)
         {
-            if (a is null || a.Length == 0) return new TensorStorage<float>(0);
+            if (a is null || a.Length == 0)
+            {
+                return new TensorStorage<float>(0);
+            }
             var s = new TensorStorage<float>(a.Length);
             a.CopyTo(s.AsSpan());
             return s;
@@ -52,7 +55,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             _blocks = new BlockWeights[cfg.NLayers];
             for (var l = 0; l < cfg.NLayers; l++)
+            {
                 _blocks[l] = new BlockWeights(model.Blocks[l], cfg.NHeads);
+            }
 
             _finalNormGamma = model.FinalNorm.Gamma.Data;
             _finalNormBeta  = model.FinalNorm.Beta.Data;
@@ -91,7 +96,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             };
 
             for (var l = 0; l < layerCount; l++)
+            {
                 sw._blocks[l] = blockFactory(l);
+            }
 
             return sw;
         }
@@ -112,7 +119,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var buf = new float[dModel * vocabSize];
             for (var t = 0; t < vocabSize; t++)
                 for (var d = 0; d < dModel; d++)
-                    buf[d * vocabSize + t] = source[t * dModel + d];
+            {
+                buf[d * vocabSize + t] = source[t * dModel + d];
+            }
             return buf;
         }
     }

@@ -185,7 +185,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
         {
             var heads = new SingleHeadWeights[wq.Length];
             for (var h = 0; h < wq.Length; h++)
+            {
                 heads[h] = new SingleHeadWeights(wq: wq[h], wk: wk[h], wv: wv[h], wo: wo[h]);
+            }
             return new BlockWeights(heads: heads, attentionBias: attentionBias);
         }
 

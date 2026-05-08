@@ -132,9 +132,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             RopeTable? rope = null)
         {
             if (inputHidden.Length < DModel)
+            {
                 throw new ArgumentException($"inputHidden length {inputHidden.Length} < DModel {DModel}.");
+            }
             if (logits.Length < VocabSize)
+            {
                 throw new ArgumentException($"logits length {logits.Length} < VocabSize {VocabSize}.");
+            }
 
             inputHidden.Slice(0, DModel).CopyTo(_currentHidden);
 
@@ -192,7 +196,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         public CachedTransformerBlock GetBlock(int layerIndex)
         {
             if ((uint)layerIndex >= (uint)_blocks.Length)
+            {
                 throw new ArgumentOutOfRangeException(nameof(layerIndex));
+            }
             return _blocks[layerIndex];
         }
     }

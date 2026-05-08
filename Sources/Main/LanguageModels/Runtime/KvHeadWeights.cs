@@ -65,7 +65,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private static TensorStorage<float> CreateStorage(float[]? source)
         {
             if (source is null || source.Length == 0)
+            {
                 return new TensorStorage<float>(0);
+            }
             var storage = new TensorStorage<float>(source.Length);
             source.CopyTo(storage.AsSpan());
             return storage;

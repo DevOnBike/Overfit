@@ -47,7 +47,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             _heads = new SingleHeadWeights[headCount];
             for (var h = 0; h < headCount; h++)
+            {
                 _heads[h] = new SingleHeadWeights(block.Attention, h);
+            }
         }
 
         /// <summary>
@@ -109,7 +111,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private static TensorStorage<float> CreateStorage(float[]? source)
         {
             if (source is null || source.Length == 0)
+            {
                 return new TensorStorage<float>(0);
+            }
             var storage = new TensorStorage<float>(source.Length);
             source.CopyTo(storage.AsSpan());
             return storage;

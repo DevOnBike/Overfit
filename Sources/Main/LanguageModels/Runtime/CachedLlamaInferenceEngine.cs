@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Runtime.InteropServices;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Rope;
 using DevOnBike.Overfit.Tensors.Core;
@@ -113,6 +114,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             using var fs = File.OpenRead(path);
             using var br = new BinaryReader(fs);
+
             return Load(br);
         }
 
@@ -121,13 +123,19 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             // ── Header ────────────────────────────────────────────────────────
             var magic = reader.ReadUInt32();
+            
             if (magic != FilemagicExpected)
+            {
                 throw new InvalidDataException(
-                    $"Not an Overfit SLM file. Expected magic 0x{FilemagicExpected:X8}, got 0x{magic:X8}.");
+                $"Not an Overfit SLM file. Expected magic 0x{FilemagicExpected:X8}, got 0x{magic:X8}.");
+            }
 
             var version = reader.ReadInt32();
+            
             if (version != VersionExpected)
+            {
                 throw new NotSupportedException($"Unsupported file version {version}. Expected {VersionExpected}.");
+            }
 
             var nLayers = reader.ReadInt32();
             var dModel = reader.ReadInt32();
@@ -254,7 +262,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         public void Dispose()
         {
-            if (_disposed) return;
+            if (_disposed)
+            {
+                return;
+            }
             _disposed = true;
 
             _embedWeights.Dispose();
@@ -272,14 +283,38 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 layer.FfnUp.Dispose();
                 layer.FfnDown.Dispose();
 
-                foreach (var t in layer.Wq) t.Dispose();
-                foreach (var t in layer.Bq) t.Dispose();
-                foreach (var t in layer.Wk) t.Dispose();
-                foreach (var t in layer.Bk) t.Dispose();
-                foreach (var t in layer.Wv) t.Dispose();
-                foreach (var t in layer.Bv) t.Dispose();
-                foreach (var t in layer.Wo) t.Dispose();
-                foreach (var t in layer.Bo) t.Dispose();
+                foreach (var t in layer.Wq)
+                {
+                    t.Dispose();
+                }
+                foreach (var t in layer.Bq)
+                {
+                    t.Dispose();
+                }
+                foreach (var t in layer.Wk)
+                {
+                    t.Dispose();
+                }
+                foreach (var t in layer.Bk)
+                {
+                    t.Dispose();
+                }
+                foreach (var t in layer.Wv)
+                {
+                    t.Dispose();
+                }
+                foreach (var t in layer.Bv)
+                {
+                    t.Dispose();
+                }
+                foreach (var t in layer.Wo)
+                {
+                    t.Dispose();
+                }
+                foreach (var t in layer.Bo)
+                {
+                    t.Dispose();
+                }
             }
         }
 
@@ -322,9 +357,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 {
                     kvHeads = new KvHeadWeights[kvCount];
                     for (var kv = 0; kv < kvCount; kv++)
+                    {
                         kvHeads[kv] = new KvHeadWeights(
-                            wk: layer.Wk[kv], wv: layer.Wv[kv],
-                            bk: layer.Bk[kv], bv: layer.Bv[kv]);
+                        wk: layer.Wk[kv], wv: layer.Wv[kv],
+                        bk: layer.Bk[kv], bv: layer.Bv[kv]);
+                    }
                 }
 
                 // Convert TensorStorage → float[] for BlockWeights constructor.
@@ -359,15 +396,19 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var storage = new TensorStorage<float>(count);
             var span = storage.AsSpan();
             var bytes = new byte[count * 4];
+
             reader.Read(bytes, 0, bytes.Length);
-            System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(bytes).CopyTo(span);
+            MemoryMarshal.Cast<byte, float>(bytes).CopyTo(span);
+
             return storage;
         }
 
         private void ThrowIfDisposed()
         {
             if (_disposed)
+            {
                 throw new ObjectDisposedException(nameof(CachedLlamaInferenceEngine));
+            }
         }
     }
 }

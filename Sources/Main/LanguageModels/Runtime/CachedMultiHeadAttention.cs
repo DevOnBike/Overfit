@@ -47,20 +47,30 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int kvHeadCount = 0)
         {
             if (dModel <= 0)
+            {
                 throw new ArgumentOutOfRangeException(nameof(dModel));
+            }
             if (headCount <= 0)
+            {
                 throw new ArgumentOutOfRangeException(nameof(headCount));
+            }
             if (dModel % headCount != 0)
+            {
                 throw new ArgumentException(
-                    $"dModel ({dModel}) must be divisible by headCount ({headCount}).",
-                    nameof(dModel));
+                $"dModel ({dModel}) must be divisible by headCount ({headCount}).",
+                nameof(dModel));
+            }
             if (maxSequenceLength <= 0)
+            {
                 throw new ArgumentOutOfRangeException(nameof(maxSequenceLength));
+            }
 
             var resolvedKvHeads = kvHeadCount > 0 ? kvHeadCount : headCount;
             if (headCount % resolvedKvHeads != 0)
+            {
                 throw new ArgumentException(
-                    $"headCount ({headCount}) must be divisible by kvHeadCount ({resolvedKvHeads}).");
+                $"headCount ({headCount}) must be divisible by kvHeadCount ({resolvedKvHeads}).");
+            }
 
             DModel            = dModel;
             HeadCount         = headCount;
@@ -72,8 +82,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _headOutput = new float[dModel];
 
             for (var h = 0; h < headCount; h++)
+            {
                 _heads[h] = new CachedSingleHeadAttention(
-                    dModel, HeadDimension, maxSequenceLength);
+                dModel, HeadDimension, maxSequenceLength);
+            }
         }
 
         public int DModel { get; }
@@ -98,9 +110,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             var bo = weights.AttentionBias;
             if (bo.IsEmpty)
+            {
                 output.Slice(0, DModel).Clear();
+            }
             else
+            {
                 bo.Slice(0, DModel).CopyTo(output);
+            }
 
             var useGqa = weights.HasGqa;
 

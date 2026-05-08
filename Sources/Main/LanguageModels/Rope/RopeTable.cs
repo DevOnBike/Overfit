@@ -35,11 +35,17 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
         public RopeTable(int maxSequenceLength, int headDimension, float theta = 10_000f)
         {
             if (maxSequenceLength <= 0)
+            {
                 throw new ArgumentOutOfRangeException(nameof(maxSequenceLength));
+            }
             if (headDimension <= 0 || headDimension % 2 != 0)
+            {
                 throw new ArgumentOutOfRangeException(nameof(headDimension), "headDimension must be positive and even.");
+            }
             if (theta <= 0f)
+            {
                 throw new ArgumentOutOfRangeException(nameof(theta));
+            }
 
             MaxSequenceLength = maxSequenceLength;
             HeadDimension     = headDimension;

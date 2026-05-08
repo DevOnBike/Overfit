@@ -122,15 +122,25 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Span<float> output)
         {
             if (hidden.Length < DModel)
+            {
                 throw new ArgumentException("Hidden span smaller than dModel.", nameof(hidden));
+            }
             if (wGate.Length < DModel * DFF)
+            {
                 throw new ArgumentException("wGate span smaller than dModel * dFF.", nameof(wGate));
+            }
             if (wUp.Length < DModel * DFF)
+            {
                 throw new ArgumentException("wUp span smaller than dModel * dFF.", nameof(wUp));
+            }
             if (wDown.Length < DFF * DModel)
+            {
                 throw new ArgumentException("wDown span smaller than dFF * dModel.", nameof(wDown));
+            }
             if (output.Length < DModel)
+            {
                 throw new ArgumentException("Output span smaller than dModel.", nameof(output));
+            }
 
             // gate = SiLU(hidden @ Wgate)
             SingleTokenProjectionKernel.Project(hidden, wGate, [], _gate, DModel, DFF);
