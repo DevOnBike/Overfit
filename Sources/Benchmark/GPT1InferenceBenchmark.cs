@@ -75,11 +75,17 @@ namespace Benchmarks
             // Token ids (random, within vocab)
             var rng = new Random(42);
             _tokenIds = new int[SeqLen];
-            for (var i = 0; i < SeqLen; i++) _tokenIds[i] = rng.Next(0, Gpt1Config.VocabSize);
+            for (var i = 0; i < SeqLen; i++)
+            {
+                _tokenIds[i] = rng.Next(0, Gpt1Config.VocabSize);
+            }
 
             // Pre-allocated block input [1, T, 768]
             var inputData = new float[1 * SeqLen * 768];
-            for (var i = 0; i < inputData.Length; i++) inputData[i] = (float)(rng.NextDouble() - 0.5) * 0.02f;
+            for (var i = 0; i < inputData.Length; i++)
+            {
+                inputData[i] = (float)(rng.NextDouble() - 0.5) * 0.02f;
+            }
 
             var storage = new TensorStorage<float>(inputData.Length, clearMemory: false);
             inputData.AsSpan().CopyTo(storage.AsSpan());

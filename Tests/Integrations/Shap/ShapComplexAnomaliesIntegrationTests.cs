@@ -1,5 +1,7 @@
 // Copyright (c) 2026 DevOnBike.
-// ShapComplexAnomaliesIntegrationTests removed — K8sAnomalyDetector replaced by GptAnomalyDetector.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
 
 namespace DevOnBike.Overfit.Tests.Integrations.Shap
 {

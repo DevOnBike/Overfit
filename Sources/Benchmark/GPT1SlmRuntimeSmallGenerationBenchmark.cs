@@ -11,22 +11,6 @@ using DevOnBike.Overfit.LanguageModels.Runtime;
 
 namespace Benchmarks
 {
-    /// <summary>
-    /// Benchmarks the new SLM runtime API before KV cache exists.
-    ///
-    /// This benchmark intentionally does not expect speedups yet.
-    /// It establishes the baseline for:
-    ///
-    /// - GPT1Model.Generate(...)
-    /// - SlmInferenceEngine.Generate(...)
-    /// - SlmSession.GenerateNextToken(...)
-    ///
-    /// The next major performance PR should keep this public API and replace the
-    /// internals of SlmSession.GenerateNextToken(...) with cached decode.
-    ///
-    /// Run:
-    ///   dotnet run -c Release --project Sources/Benchmark --filter "*GPT1SlmRuntime*"
-    /// </summary>
     [Config(typeof(BenchmarkConfig))]
     public class GPT1SlmRuntimeSmallGenerationBenchmark : IDisposable
     {
@@ -177,5 +161,5 @@ namespace Benchmarks
             _checksum ^= length;
         }
     }
-
 }
+

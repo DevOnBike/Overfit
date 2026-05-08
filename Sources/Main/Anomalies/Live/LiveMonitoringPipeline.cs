@@ -8,9 +8,9 @@ using DevOnBike.Overfit.Anomalies.Alerting.Contracts;
 using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 using DevOnBike.Overfit.Anomalies.Training;
-using GptTrainingConfig = DevOnBike.Overfit.Anomalies.Training.GptTrainingConfig;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Runtime;
+using GptTrainingConfig = DevOnBike.Overfit.Anomalies.Training.GptTrainingConfig;
 
 namespace DevOnBike.Overfit.Anomalies.Live
 {

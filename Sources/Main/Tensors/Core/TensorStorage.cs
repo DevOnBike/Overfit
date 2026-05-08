@@ -84,6 +84,25 @@ namespace DevOnBike.Overfit.Tensors.Core
             return AsSpan();
         }
 
+        /// <summary>
+        /// Returns a Memory&lt;T&gt; view over the data without copying.
+        /// </summary>
+        public Memory<T> AsMemory()
+        {
+            return _data!.AsMemory(0, Length);
+        }
+
+        /// <summary>
+        /// Creates a TensorStorage wrapping a copy of the provided array.
+        /// For internal use — enables test helpers to create weight structs from raw arrays.
+        /// </summary>
+        internal static TensorStorage<T> FromArray(T[] source)
+        {
+            var ts = new TensorStorage<T>(source.Length, clearMemory: false);
+            source.AsSpan().CopyTo(ts.AsSpan());
+            return ts;
+        }
+
         public void Dispose()
         {
             if (Interlocked.Exchange(ref _disposed, 1) == 0)

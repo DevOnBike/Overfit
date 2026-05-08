@@ -5,6 +5,7 @@
 
 using DevOnBike.Overfit.Onnx.Operators;
 using DevOnBike.Overfit.Onnx.Schema;
+using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.Onnx
 {
@@ -119,11 +120,13 @@ namespace DevOnBike.Overfit.Onnx
             }
 
             // ── Allocate buffers ────────────────────────────────────────────
-            var buffers = new float[bufferSizes.Count][];
+            // TensorStorage uses OverfitPool (ArrayPool) — buffers are returned
+            // to pool on OnnxGraphModel.Dispose(), avoiding GC pressure.
+            var buffers = new TensorStorage<float>[bufferSizes.Count];
 
             for (var i = 0; i < bufferSizes.Count; i++)
             {
-                buffers[i] = new float[bufferSizes[i]];
+                buffers[i] = new TensorStorage<float>(bufferSizes[i]);
             }
 
             return new OnnxGraphModel(

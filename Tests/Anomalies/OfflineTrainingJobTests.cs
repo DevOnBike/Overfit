@@ -95,7 +95,9 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         public async Task TrainMedium_LossDecreases_2000Steps()
         {
             if (!File.Exists(CsvPath))
+            {
                 throw new Exception($"Fixture '{CsvPath}' not found.");
+            }
 
             const string medCheckpoint = "test_fixtures/k8s_anomaly_medium.bin";
 
@@ -127,7 +129,9 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         public async Task TrainProduction_LossBelow280()
         {
             if (!File.Exists(CsvPath))
+            {
                 throw new Exception($"Fixture '{CsvPath}' not found.");
+            }
 
             const string prodCheckpoint = "test_fixtures/k8s_anomaly_production.bin";
 
