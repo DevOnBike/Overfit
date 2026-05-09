@@ -22,48 +22,48 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     /// </summary>
     public sealed class CachedLlamaSession : IDisposable
     {
-        private readonly GPT1Config            _config;
-        private readonly CachedGptStack        _stack;
-        private readonly StackWeights          _weights;
-        private readonly KeyValueCache         _cache;
-        private readonly RopeTable?            _rope;
+        private readonly GPT1Config _config;
+        private readonly CachedGptStack _stack;
+        private readonly StackWeights _weights;
+        private readonly KeyValueCache _cache;
+        private readonly RopeTable? _rope;
         private readonly ReadOnlyMemory<float> _embedWeights;
 
         // Per-token working buffers (allocated once)
-        private readonly float[]  _hidden;
-        private readonly float[]  _logits;
-        private readonly int[]    _indexScratch;
-        private readonly float[]  _scoreScratch;
-        private readonly Random   _random;
+        private readonly float[] _hidden;
+        private readonly float[] _logits;
+        private readonly int[] _indexScratch;
+        private readonly float[] _scoreScratch;
+        private readonly Random _random;
 
         private bool _disposed;
 
         internal CachedLlamaSession(
-            GPT1Config            config,
-            CachedGptStack        stack,
-            StackWeights          weights,
-            KeyValueCache         cache,
-            RopeTable?            rope,
-            ReadOnlySpan<float>   embedWeights)
+            GPT1Config config,
+            CachedGptStack stack,
+            StackWeights weights,
+            KeyValueCache cache,
+            RopeTable? rope,
+            ReadOnlySpan<float> embedWeights)
         {
-            _config  = config;
-            _stack   = stack;
+            _config = config;
+            _stack = stack;
             _weights = weights;
-            _cache   = cache;
-            _rope    = rope;
+            _cache = cache;
+            _rope = rope;
 
             // Copy embed weights reference — this points to engine-owned TensorStorage.
             _embedWeights = embedWeights.ToArray().AsMemory();
 
-            _hidden       = new float[config.DModel];
-            _logits       = new float[config.VocabSize];
+            _hidden = new float[config.DModel];
+            _logits = new float[config.VocabSize];
             _indexScratch = new int[config.VocabSize];
             _scoreScratch = new float[config.VocabSize];
-            _random       = new Random();
+            _random = new Random();
         }
 
         public int Position => _cache.CurrentLength;
-        public bool IsFull  => _cache.IsFull;
+        public bool IsFull => _cache.IsFull;
 
         // ── Session lifecycle ─────────────────────────────────────────────────
 
@@ -80,8 +80,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             foreach (var token in promptTokens)
             {
                 if (_cache.IsFull)
+                {
                     throw new InvalidOperationException(
                         $"Prompt length {promptTokens.Length} exceeds ContextLength {_config.ContextLength}.");
+                }
 
                 DecodeToken(token);
             }
@@ -97,12 +99,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ThrowIfDisposed();
 
             if (_cache.IsFull)
+            {
                 throw new InvalidOperationException(
                     $"KV cache is full (ContextLength={_config.ContextLength}). Start a new session.");
+            }
 
             if (Position == 0)
+            {
                 throw new InvalidOperationException(
                     "Session is empty. Call Reset with at least one prompt token first.");
+            }
 
             var token = TokenSampler.Sample(
                 _logits, in sampling, _random, _indexScratch, _scoreScratch);
@@ -111,14 +117,22 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         }
 
         /// <summary>Exposes last logits for custom sampling.</summary>
-        /// <summary>Diagnostic: current hidden state.</summary>
-        public ReadOnlySpan<float> LastHiddenState => _hidden.AsSpan();
-
         public ReadOnlySpan<float> LastLogits => _logits;
+
+        /// <summary>
+        /// Hidden state AFTER all transformer layers, BEFORE final RMSNorm.
+        /// Matches Python: x before rms_norm(x, fg2, eps).
+        /// Previously incorrectly returned _hidden (token embedding input).
+        /// </summary>
+        public ReadOnlySpan<float> LastHiddenState => _stack.LastFinalHidden;
 
         public void Dispose()
         {
-            if (_disposed) return;
+            if (_disposed)
+            {
+                return;
+            }
+
             _disposed = true;
             _cache.Dispose();
         }
@@ -151,7 +165,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private void ThrowIfDisposed()
         {
             if (_disposed)
+            {
                 throw new ObjectDisposedException(nameof(CachedLlamaSession));
+            }
         }
     }
 }

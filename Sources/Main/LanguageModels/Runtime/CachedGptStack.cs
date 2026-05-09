@@ -16,6 +16,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly float[] _currentHidden;
         private readonly float[] _nextHidden;
         private readonly float[] _finalHidden;
+        private readonly float[] _lastFinalHidden;  // hidden BEFORE final norm
         private readonly float[] _lastLogits;
 
         public CachedGptStack(
@@ -98,6 +99,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _currentHidden = new float[dModel];
             _nextHidden = new float[dModel];
             _finalHidden = new float[dModel];
+            _lastFinalHidden = new float[dModel];
             _lastLogits = new float[vocabSize];
         }
 
@@ -159,6 +161,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 (current, next) = (next, current);
             }
 
+            // Save hidden state BEFORE final norm.
+            // LastFinalHidden matches Python: x before rms_norm(x, fg2, eps).
+            new ReadOnlySpan<float>(current, 0, DModel).CopyTo(_lastFinalHidden);
+
             if (weights.FinalNormBeta.IsEmpty)
             {
                 // RMSNorm (Llama/Qwen/Mistral)
@@ -204,6 +210,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         // by construction (bound directly to GPT1Model parameters).
 
 
+
+        /// <summary>
+        /// Hidden state AFTER all transformer layers, BEFORE final RMSNorm.
+        /// Matches Python forward_multitoken.py: x before rms_norm(x, fg2, eps).
+        /// </summary>
+        internal ReadOnlySpan<float> LastFinalHidden => _lastFinalHidden.AsSpan(0, DModel);
 
         public void GetLastFinalHidden(Span<float> destination)
             => _finalHidden.AsSpan(0, DModel).CopyTo(destination);
