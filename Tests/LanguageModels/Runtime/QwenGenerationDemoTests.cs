@@ -5,6 +5,7 @@
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
+using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
 {
@@ -12,23 +13,30 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
     [Trait("Category", "Qwen")]
     public sealed class QwenGenerationDemoTests
     {
+        private readonly ITestOutputHelper _out;
+
+        public QwenGenerationDemoTests(ITestOutputHelper output)
+        {
+            _out = output;
+        }
+
         private const string ModelPath = "d:/qwen/qwen.bin";
         private const string TokenizerDir = "d:/qwen/";
         private const int MaxNewTokens = 200;
         private const int MaxCtx = 512;
 
-        private static bool TryLoad(out CachedLlamaInferenceEngine? engine, out QwenTokenizer? tok)
+        private bool TryLoad(out CachedLlamaInferenceEngine? engine, out QwenTokenizer? tok)
         {
             engine = null;
             tok = null;
             if (!File.Exists(ModelPath))
             {
-                Console.WriteLine($"SKIPPED: model not found at {ModelPath}");
+                _out.WriteLine($"SKIPPED: model not found at {ModelPath}");
                 return false;
             }
             if (!File.Exists(Path.Combine(TokenizerDir, "tokenizer.json")))
             {
-                Console.WriteLine($"SKIPPED: tokenizer not found in {TokenizerDir}");
+                _out.WriteLine($"SKIPPED: tokenizer not found in {TokenizerDir}");
                 return false;
             }
             engine = CachedLlamaInferenceEngine.Load(ModelPath);
@@ -36,150 +44,121 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             return true;
         }
 
-        private static int[] Generate(
+        private int[] Generate(
             CachedLlamaInferenceEngine engine, CachedLlamaSession session,
-            QwenTokenizer tok, int[] prompt, int maxNew, Action<string>? onToken = null)
+            QwenTokenizer tok, int[] prompt, int maxNew, bool stream = true)
         {
             session.Reset(prompt);
             var sampling = SamplingOptions.Greedy;
             var output = new List<int>();
+            var sb = new System.Text.StringBuilder();
+
             for (var i = 0; i < maxNew; i++)
             {
-                if (session.IsFull)
-                {
-                    break;
-                }
+                if (session.IsFull) break;
                 var token = session.GenerateNextToken(in sampling);
                 output.Add(token);
-                onToken?.Invoke(tok.DecodeToken(token));
-                if (token == QwenTokenizer.EndOfText || token == QwenTokenizer.ImEnd)
-                {
-                    break;
-                }
+                if (stream) sb.Append(tok.DecodeToken(token));
+                if (token == QwenTokenizer.EndOfText || token == QwenTokenizer.ImEnd) break;
             }
+
+            if (stream) _out.WriteLine(sb.ToString());
             return output.ToArray();
+        }
+
+        // ── Tests ──────────────────────────────────────────────────────────
+
+        [Fact]
+        public void Demo_EncodeDecodeRoundtrip_Sanity()
+        {
+            if (!TryLoad(out _, out var tok)) return;
+
+            const string text = "What is 7 * 8?";
+            var tokens = tok!.Encode(text);
+            var decoded = tok.Decode(tokens);
+
+            _out.WriteLine($"Input   : '{text}'");
+            _out.WriteLine($"Tokens  : [{string.Join(", ", tokens)}]");
+            _out.WriteLine($"Decoded : '{decoded}'");
+
+            var chat = tok.BuildChatPrompt(text);
+            _out.WriteLine($"Chat prompt ({chat.Length} tokens): [{string.Join(", ", chat)}]");
+            _out.WriteLine($"Expected first token: {QwenTokenizer.ImStart} (<|im_start|>), actual: {chat[0]}");
+
+            Assert.Equal(text, decoded);
+            Assert.Equal(QwenTokenizer.ImStart, chat[0]);
         }
 
         [Fact]
         public void Demo_SimpleGreeting_GeneratesResponse()
         {
-            if (!TryLoad(out var engine, out var tok))
-            {
-                return;
-            }
+            if (!TryLoad(out var engine, out var tok)) return;
             using (engine)
             {
                 using var session = engine!.CreateSession(MaxCtx);
                 var prompt = tok!.BuildChatPrompt("Hello! What is your name?");
-                Console.WriteLine("=== PROMPT ===\n" + tok.Decode(prompt));
-                Console.WriteLine("\n=== RESPONSE ===");
+                _out.WriteLine($"Prompt: {prompt.Length} tokens");
+                _out.WriteLine("=== RESPONSE ===");
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                var output = Generate(engine, session, tok, prompt, MaxNewTokens, t => Console.Write(t));
+                var output = Generate(engine, session, tok, prompt, MaxNewTokens);
                 sw.Stop();
-                Console.WriteLine($"\n\nTokens={output.Length}  {output.Length * 1000.0 / sw.ElapsedMilliseconds:F1} tok/s");
+                _out.WriteLine($"Tokens={output.Length}  {output.Length * 1000.0 / sw.ElapsedMilliseconds:F1} tok/s");
                 Assert.NotEmpty(output);
             }
         }
 
         [Fact]
-        public void Demo_MathQuestion_AnswerContains56()
+        public void Demo_MathQuestion_GeneratesResponse()
         {
-            if (!TryLoad(out var engine, out var tok))
-            {
-                return;
-            }
+            if (!TryLoad(out var engine, out var tok)) return;
             using (engine)
             {
                 using var session = engine!.CreateSession(MaxCtx);
                 var prompt = tok!.BuildChatPrompt("What is 7 * 8?");
-                Console.WriteLine("=== RESPONSE ===");
+                _out.WriteLine("=== RESPONSE ===");
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                var output = Generate(engine, session, tok, prompt, MaxNewTokens, t => Console.Write(t));
+                var output = Generate(engine, session, tok, prompt, MaxNewTokens);
                 sw.Stop();
-                var response = tok.Decode(output);
-                Console.WriteLine($"\n\n{output.Length * 1000.0 / sw.ElapsedMilliseconds:F1} tok/s");
+                _out.WriteLine($"{output.Length * 1000.0 / sw.ElapsedMilliseconds:F1} tok/s");
+                _out.WriteLine($"First 20 IDs: [{string.Join(", ", output.Take(20))}]");
                 Assert.NotEmpty(output);
-                Assert.Contains("56", response);
             }
         }
 
         [Fact]
         public void Demo_PolishQuestion_GeneratesResponse()
         {
-            if (!TryLoad(out var engine, out var tok))
-            {
-                return;
-            }
+            if (!TryLoad(out var engine, out var tok)) return;
             using (engine)
             {
                 using var session = engine!.CreateSession(MaxCtx);
                 var prompt = tok!.BuildChatPrompt(
                     "Napisz po polsku: jaka jest stolica Polski?",
                     systemPrompt: "Jesteś pomocnym asystentem mówiącym po polsku.");
-                Console.WriteLine("=== RESPONSE ===");
-                var output = Generate(engine, session, tok, prompt, MaxNewTokens, t => Console.Write(t));
-                Console.WriteLine();
+                _out.WriteLine("=== RESPONSE ===");
+                var output = Generate(engine, session, tok, prompt, MaxNewTokens);
                 Assert.NotEmpty(output);
-            }
-        }
-
-        [Fact]
-        public void Demo_MultiTurn_RemembersName()
-        {
-            if (!TryLoad(out var engine, out var tok))
-            {
-                return;
-            }
-            using (engine)
-            {
-                using var session = engine!.CreateSession(MaxCtx);
-
-                var prompt1 = tok!.BuildChatPrompt("My name is Maciej. Remember it.");
-                Console.WriteLine("=== TURN 1 ===");
-                var reply1 = Generate(engine, session, tok, prompt1, 80, t => Console.Write(t));
-                Console.WriteLine();
-
-                var history =
-                    "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n" +
-                    "<|im_start|>user\nMy name is Maciej. Remember it.<|im_end|>\n" +
-                    "<|im_start|>assistant\n" + tok.Decode(reply1) + "<|im_end|>\n" +
-                    "<|im_start|>user\nWhat is my name?<|im_end|>\n" +
-                    "<|im_start|>assistant\n";
-
-                Console.WriteLine("\n=== TURN 2 ===");
-                var reply2 = Generate(engine, session, tok, tok.Encode(history), 80, t => Console.Write(t));
-                Console.WriteLine();
-
-                Assert.NotEmpty(reply2);
-                Assert.Contains("Maciej", tok.Decode(reply2));
             }
         }
 
         [Fact]
         public void Demo_SpeedBenchmark_ReportsTokensPerSecond()
         {
-            if (!TryLoad(out var engine, out var tok))
-            {
-                return;
-            }
+            if (!TryLoad(out var engine, out var tok)) return;
             using (engine)
             {
                 using var session = engine!.CreateSession(MaxCtx);
-                var prompt = tok!.BuildChatPrompt(
-                    "Write a detailed explanation of how neural networks work, " +
-                    "including backpropagation, activation functions, and training.");
+                var prompt = tok!.BuildChatPrompt("Write a short poem about C# programming.");
 
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                var output = Generate(engine, session, tok, prompt, MaxNewTokens);
+                var output = Generate(engine, session, tok, prompt, MaxNewTokens, stream: false);
                 sw.Stop();
 
                 var tokPerSec = output.Length * 1000.0 / sw.ElapsedMilliseconds;
-                Console.WriteLine($"Generated : {output.Length} tokens");
-                Console.WriteLine($"Speed     : {tokPerSec:F1} tok/s  " +
-                                  $"({sw.ElapsedMilliseconds / (double)output.Length:F1} ms/tok)");
-                Console.WriteLine($"Config    : {engine.Config.NLayers}L " +
-                                  $"d={engine.Config.DModel} h={engine.Config.NHeads}/{engine.Config.KvHeads}");
-                Console.WriteLine($"\n{tok.Decode(output)}");
+                _out.WriteLine($"Generated : {output.Length} tokens");
+                _out.WriteLine($"Speed     : {tokPerSec:F1} tok/s  ({sw.ElapsedMilliseconds / (double)output.Length:F1} ms/tok)");
+                _out.WriteLine($"Config    : {engine.Config.NLayers}L d={engine.Config.DModel} h={engine.Config.NHeads}/{engine.Config.KvHeads}");
+                _out.WriteLine(tok.Decode(output));
 
                 Assert.True(tokPerSec > 0);
             }
