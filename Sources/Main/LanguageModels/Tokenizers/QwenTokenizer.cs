@@ -86,8 +86,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
             // ── Vocab ──────────────────────────────────────────────────────
             var vocabJson = model.GetProperty("vocab");
-            var vocab = new Dictionary<string, int>(vocabJson.GetArrayLength());
-
+            var vocab = new Dictionary<string, int>();
             foreach (var kv in vocabJson.EnumerateObject())
             {
                 vocab[kv.Name] = kv.Value.GetInt32();
