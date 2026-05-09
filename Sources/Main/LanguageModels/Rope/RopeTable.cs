@@ -48,8 +48,8 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
             }
 
             MaxSequenceLength = maxSequenceLength;
-            HeadDimension     = headDimension;
-            Theta             = theta;
+            HeadDimension = headDimension;
+            Theta = theta;
 
             _halfDim = headDimension / 2;
 
@@ -60,16 +60,20 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
         }
 
         public int MaxSequenceLength { get; }
-        public int HeadDimension     { get; }
-        public float Theta           { get; }
+        public int HeadDimension { get; }
+        public float Theta { get; }
 
         /// <summary>Returns cos values for a given position: [halfDim].</summary>
         public ReadOnlySpan<float> CosAt(int position)
-            => _cos.AsSpan(position * _halfDim, _halfDim);
+        {
+            return _cos.AsSpan(position * _halfDim, _halfDim);
+        }
 
         /// <summary>Returns sin values for a given position: [halfDim].</summary>
         public ReadOnlySpan<float> SinAt(int position)
-            => _sin.AsSpan(position * _halfDim, _halfDim);
+        {
+            return _sin.AsSpan(position * _halfDim, _halfDim);
+        }
 
         private void Precompute()
         {
@@ -81,6 +85,7 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
                 for (var pos = 0; pos < MaxSequenceLength; pos++)
                 {
                     var angle = pos * freq;
+
                     _cos[pos * _halfDim + i] = MathF.Cos(angle);
                     _sin[pos * _halfDim + i] = MathF.Sin(angle);
                 }

@@ -192,5 +192,31 @@ def main():
     print(f"  With system msg [26 tok]:    top-1=[{np.argmax(lg3)}] {np.max(lg3):.3f}  \'4\' rank={int(np.sum(lg3>lg3[19]))+1}")
     print(f"  Without system msg [15 tok]: top-1=[{np.argmax(lg4)}] {np.max(lg4):.3f}  \'4\' rank={int(np.sum(lg4>lg4[19]))+1}")
 
+
+    # ─── TEST 5: Exact C# 36-token sequence ──────────────────────────────────
+    print("\n" + "="*60)
+    print("TEST 5: Exact C# 36-token prompt (Qwen2.5 full system msg)")
+    # From C# QwenLayer0CompareTests Multitoken_ProgressivePrefixTest output:
+    cs_36_tokens = [151644, 8948, 198, 2610, 525, 1207, 16948, 11, 3465, 553,
+                    54364, 14817, 13, 1446, 525, 264, 10950, 17847, 13, 151645,
+                    198, 151644, 872, 198, 3838, 374, 220, 17, 10, 17, 30,
+                    151645, 198, 151644, 77091, 198]
+    assert len(cs_36_tokens) == 36
+    print(f"  Tokens: {cs_36_tokens}")
+    h5, lg5 = forward_sequence(emb, layers, fg2, lm_head, cs_36_tokens, head_dim, n_heads, n_kv_heads, rope_theta)
+    top10_5 = np.argsort(lg5)[-10:][::-1]
+    print(f"  Python Top-10 at position 35:")
+    for t in top10_5:
+        print(f"    [{t:7d}] {lg5[t]:8.4f}")
+    print(f"  Python logit[19]=' 4'  = {lg5[19]:.4f}")
+    print(f"  Python logit[220]=' '  = {lg5[220]:.4f}")
+    print()
+    print("  C# results (from L0_ChatPromptLogits):")
+    print("    # 1  [36366]  11.899  ' orb'")
+    print("    logit[19]=' 4' = 0.6751")
+    print()
+    print("  If Python top-1 matches C# top-1 → inference VERIFIED CORRECT")
+    print("  If different → either Python or C# has remaining bug")
+
 if __name__ == "__main__":
     main()
