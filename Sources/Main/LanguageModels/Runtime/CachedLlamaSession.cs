@@ -80,10 +80,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             foreach (var token in promptTokens)
             {
                 if (_cache.IsFull)
-                {
                     throw new InvalidOperationException(
-                    $"Prompt length {promptTokens.Length} exceeds ContextLength {_config.ContextLength}.");
-                }
+                        $"Prompt length {promptTokens.Length} exceeds ContextLength {_config.ContextLength}.");
 
                 DecodeToken(token);
             }
@@ -99,16 +97,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ThrowIfDisposed();
 
             if (_cache.IsFull)
-            {
                 throw new InvalidOperationException(
-                $"KV cache is full (ContextLength={_config.ContextLength}). Start a new session.");
-            }
+                    $"KV cache is full (ContextLength={_config.ContextLength}). Start a new session.");
 
             if (Position == 0)
-            {
                 throw new InvalidOperationException(
-                "Session is empty. Call Reset with at least one prompt token first.");
-            }
+                    "Session is empty. Call Reset with at least one prompt token first.");
 
             var token = TokenSampler.Sample(
                 _logits, in sampling, _random, _indexScratch, _scoreScratch);
@@ -117,19 +111,21 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         }
 
         /// <summary>Exposes last logits for custom sampling.</summary>
+        /// <summary>Diagnostic: current hidden state.</summary>
+        public ReadOnlySpan<float> LastHiddenState => _hidden.AsSpan();
+
         public ReadOnlySpan<float> LastLogits => _logits;
 
         public void Dispose()
         {
-            if (_disposed)
-            {
-                return;
-            }
+            if (_disposed) return;
             _disposed = true;
             _cache.Dispose();
         }
 
         // ── Private decode ────────────────────────────────────────────────────
+
+        internal CachedGptStack Stack => _stack;
 
         private void DecodeToken(int tokenId)
         {
@@ -155,9 +151,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private void ThrowIfDisposed()
         {
             if (_disposed)
-            {
                 throw new ObjectDisposedException(nameof(CachedLlamaSession));
-            }
         }
     }
 }

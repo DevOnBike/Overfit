@@ -28,7 +28,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     /// </summary>
     public sealed class CachedLlamaInferenceEngine : IDisposable
     {
-        private const uint FilemagicExpected = 0x4F565246u; // "OVRF"
+        private const uint FilemagicExpected = 0x4F565246u;  // "OVRF"
         private const int VersionExpected = 2;
 
         private readonly GPT1Config _config;
@@ -91,15 +91,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var headDim = config.DModel / config.NHeads;
 
             _stack = new CachedGptStack(
-            config.NLayers,
-            config.DModel,
-            config.NHeads,
-            config.DFF,
-            config.VocabSize,
-            config.ContextLength,
-            layerNormEpsilon: 1e-6f,
-            FeedForwardActivation.SwiGLU,
-            config.KvHeads);
+                config.NLayers,
+                config.DModel,
+                config.NHeads,
+                config.DFF,
+                config.VocabSize,
+                config.ContextLength,
+                layerNormEpsilon: 1e-6f,
+                FeedForwardActivation.SwiGLU,
+                config.KvHeads);
 
             _stackWeights = BuildStackWeights();
         }
@@ -227,10 +227,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             var finalNormGamma = ReadTensor(reader, dModel);
             var finalNormBeta = ReadTensor(reader, dModel);
-            var lmHead = ReadTensor(reader, vocabSize * dModel);
 
-            return new CachedLlamaInferenceEngine(
-            config, embedWeights, finalNormGamma, finalNormBeta, lmHead, layers);
+            // LM head in file: [vocabSize, dModel] (same layout as embedding, row = token)
+            // Kernel Project needs: [dModel, vocabSize] (input-major: row = hidden dim)
+            // Transpose at load time — happens once, no effect on inference speed.
+            var lmHeadRaw = ReadTensor(reader, vocabSize * dModel);
+            var lmHead = TransposeLmHead(lmHeadRaw, vocabSize, dModel);
+            lmHeadRaw.Dispose();
+
+            return new CachedLlamaInferenceEngine(config, embedWeights, finalNormGamma, finalNormBeta, lmHead, layers);
         }
 
         /// <summary>Creates an inference session. The caller owns the session and must dispose it.</summary>
@@ -242,18 +247,18 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var headDim = _config.DModel / _config.NHeads;
 
             var cache = KeyValueCache.Create(
-            _config.NLayers,
-            kvHeadCount: _config.KvHeads,
-            ctx,
-            headDim);
+                _config.NLayers,
+                kvHeadCount: _config.KvHeads,
+                ctx,
+                headDim);
 
             return new CachedLlamaSession(
-            _config,
-            _stack,
-            _stackWeights,
-            cache,
-            _rope,
-            _embedWeights.AsReadOnlySpan());
+                _config,
+                _stack,
+                _stackWeights,
+                cache,
+                _rope,
+                _embedWeights.AsReadOnlySpan());
         }
 
         public void Dispose()
@@ -335,7 +340,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     {
                         // GQA: single head has only Wq, bq, Wo — K/V in separate KvHeadWeights
                         heads[h] = new SingleHeadWeights(
-                        wq: layer.Wq[h], bq: layer.Bq[h], wo: layer.Wo[h]);
+                            wq: layer.Wq[h], bq: layer.Bq[h], wo: layer.Wo[h]);
                     }
                     else
                     {
@@ -343,8 +348,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         var kv = h % kvCount;
                         // Use TensorStorage-based constructor (positional: wq, bq, wo, wk?, bk?, wv?, bv?)
                         heads[h] = new SingleHeadWeights(
-                        wq: layer.Wq[h], bq: layer.Bq[h], wo: layer.Wo[h],
-                        wk: layer.Wk[kv], bk: layer.Bk[kv], wv: layer.Wv[kv], bv: layer.Bv[kv]);
+                            wq: layer.Wq[h], bq: layer.Bq[h], wo: layer.Wo[h],
+                            wk: layer.Wk[kv], bk: layer.Bk[kv], wv: layer.Wv[kv], bv: layer.Bv[kv]);
                     }
                 }
 
@@ -365,25 +370,50 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 static float[] Arr(TensorStorage<float> s) => s.AsSpan().ToArray();
 
                 blockWeights[l] = new BlockWeights(
-                heads: heads,
-                kvHeads: kvHeads,
-                ln1Gamma: Arr(layer.AttnNormGamma),
-                ln1Beta: null, // RMSNorm — no beta
-                attentionBias: null,
-                ln2Gamma: Arr(layer.FfnNormGamma),
-                ln2Beta: null, // RMSNorm — no beta
-                ffnW1: Arr(layer.FfnUp),
-                ffnB1: null,
-                ffnW2: Arr(layer.FfnDown),
-                ffnB2: null,
-                ffnGate: Arr(layer.FfnGate));
+                    heads: heads,
+                    kvHeads: kvHeads,
+                    ln1Gamma: Arr(layer.AttnNormGamma),
+                    ln1Beta: null,  // RMSNorm — no beta
+                    attentionBias: null,
+                    ln2Gamma: Arr(layer.FfnNormGamma),
+                    ln2Beta: null,  // RMSNorm — no beta
+                    ffnW1: Arr(layer.FfnUp),
+                    ffnB1: null,
+                    ffnW2: Arr(layer.FfnDown),
+                    ffnB2: null,
+                    ffnGate: Arr(layer.FfnGate));
             }
 
             return new StackWeights(
-            blockWeights,
-            _finalNormGamma,
-            new TensorStorage<float>(0), // RMSNorm — no final norm beta
-            _lmHead);
+                blockWeights,
+                _finalNormGamma,
+                new TensorStorage<float>(0),  // RMSNorm — no final norm beta
+                _lmHead);
+        }
+
+        /// <summary>
+        /// Transposes LM head from file layout [vocabSize, dModel] to kernel layout [dModel, vocabSize].
+        /// The Project kernel computes: output[v] += hidden[d] * weights[d * vocabSize + v]
+        /// So weights must be stored as [dModel, vocabSize].
+        /// </summary>
+        private static TensorStorage<float> TransposeLmHead(
+            TensorStorage<float> raw, int vocabSize, int dModel)
+        {
+            var result = new TensorStorage<float>(vocabSize * dModel);
+            var src = raw.AsReadOnlySpan();
+            var dst = result.AsSpan();
+
+            // src[v * dModel + d] = E[v, d]  (row = token)
+            // dst[d * vocabSize + v] = E[v, d]  (row = hidden dim)
+            for (var d = 0; d < dModel; d++)
+            {
+                for (var v = 0; v < vocabSize; v++)
+                {
+                    dst[d * vocabSize + v] = src[v * dModel + d];
+                }
+            }
+
+            return result;
         }
 
         /// <summary>Reads a float tensor directly into a new TensorStorage.</summary>

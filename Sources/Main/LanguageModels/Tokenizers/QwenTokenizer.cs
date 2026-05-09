@@ -42,6 +42,8 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
         private static readonly char[] _byteToChar = BuildByteToChar();
         private static readonly byte[] _charToByte = BuildCharToByte();
 
+        private const string DefaultSystemMessage = "You are Qwen, created by Alibaba Cloud. You are a helpful assistant.";
+
         // ── Construction ───────────────────────────────────────────────────
 
         private QwenTokenizer(
@@ -253,7 +255,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
         ///          &lt;|im_start|&gt;user\n{user}&lt;|im_end|&gt;\n
         ///          &lt;|im_start|&gt;assistant\n
         /// </summary>
-        public int[] BuildChatPrompt(string userMessage, string systemPrompt = "You are a helpful assistant.")
+        public int[] BuildChatPrompt(string userMessage, string systemPrompt = DefaultSystemMessage)
         {
             var text = $"<|im_start|>system\n{systemPrompt}<|im_end|>\n" +
                        $"<|im_start|>user\n{userMessage}<|im_end|>\n" +
