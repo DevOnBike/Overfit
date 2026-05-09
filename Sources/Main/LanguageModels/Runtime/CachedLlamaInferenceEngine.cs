@@ -3,7 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Runtime.InteropServices;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Rope;
 using DevOnBike.Overfit.Tensors.Core;
@@ -29,7 +28,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     /// </summary>
     public sealed class CachedLlamaInferenceEngine : IDisposable
     {
-        private const uint FilemagicExpected = 0x4F565246u;  // "OVRF"
+        private const uint FilemagicExpected = 0x4F565246u; // "OVRF"
         private const int VersionExpected = 2;
 
         private readonly GPT1Config _config;
@@ -92,15 +91,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var headDim = config.DModel / config.NHeads;
 
             _stack = new CachedGptStack(
-                config.NLayers,
-                config.DModel,
-                config.NHeads,
-                config.DFF,
-                config.VocabSize,
-                config.ContextLength,
-                layerNormEpsilon: 1e-6f,
-                FeedForwardActivation.SwiGLU,
-                config.KvHeads);
+            config.NLayers,
+            config.DModel,
+            config.NHeads,
+            config.DFF,
+            config.VocabSize,
+            config.ContextLength,
+            layerNormEpsilon: 1e-6f,
+            FeedForwardActivation.SwiGLU,
+            config.KvHeads);
 
             _stackWeights = BuildStackWeights();
         }
@@ -114,7 +113,6 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             using var fs = File.OpenRead(path);
             using var br = new BinaryReader(fs);
-
             return Load(br);
         }
 
@@ -123,7 +121,6 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             // ── Header ────────────────────────────────────────────────────────
             var magic = reader.ReadUInt32();
-            
             if (magic != FilemagicExpected)
             {
                 throw new InvalidDataException(
@@ -131,7 +128,6 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             var version = reader.ReadInt32();
-            
             if (version != VersionExpected)
             {
                 throw new NotSupportedException($"Unsupported file version {version}. Expected {VersionExpected}.");
@@ -234,7 +230,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var lmHead = ReadTensor(reader, vocabSize * dModel);
 
             return new CachedLlamaInferenceEngine(
-                config, embedWeights, finalNormGamma, finalNormBeta, lmHead, layers);
+            config, embedWeights, finalNormGamma, finalNormBeta, lmHead, layers);
         }
 
         /// <summary>Creates an inference session. The caller owns the session and must dispose it.</summary>
@@ -246,18 +242,18 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var headDim = _config.DModel / _config.NHeads;
 
             var cache = KeyValueCache.Create(
-                _config.NLayers,
-                kvHeadCount: _config.KvHeads,
-                ctx,
-                headDim);
+            _config.NLayers,
+            kvHeadCount: _config.KvHeads,
+            ctx,
+            headDim);
 
             return new CachedLlamaSession(
-                _config,
-                _stack,
-                _stackWeights,
-                cache,
-                _rope,
-                _embedWeights.AsReadOnlySpan());
+            _config,
+            _stack,
+            _stackWeights,
+            cache,
+            _rope,
+            _embedWeights.AsReadOnlySpan());
         }
 
         public void Dispose()
@@ -339,7 +335,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     {
                         // GQA: single head has only Wq, bq, Wo — K/V in separate KvHeadWeights
                         heads[h] = new SingleHeadWeights(
-                            wq: layer.Wq[h], bq: layer.Bq[h], wo: layer.Wo[h]);
+                        wq: layer.Wq[h], bq: layer.Bq[h], wo: layer.Wo[h]);
                     }
                     else
                     {
@@ -347,8 +343,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         var kv = h % kvCount;
                         // Use TensorStorage-based constructor (positional: wq, bq, wo, wk?, bk?, wv?, bv?)
                         heads[h] = new SingleHeadWeights(
-                            wq: layer.Wq[h], bq: layer.Bq[h], wo: layer.Wo[h],
-                            wk: layer.Wk[kv], bk: layer.Bk[kv], wv: layer.Wv[kv], bv: layer.Bv[kv]);
+                        wq: layer.Wq[h], bq: layer.Bq[h], wo: layer.Wo[h],
+                        wk: layer.Wk[kv], bk: layer.Bk[kv], wv: layer.Wv[kv], bv: layer.Bv[kv]);
                     }
                 }
 
@@ -369,25 +365,25 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 static float[] Arr(TensorStorage<float> s) => s.AsSpan().ToArray();
 
                 blockWeights[l] = new BlockWeights(
-                    heads: heads,
-                    kvHeads: kvHeads,
-                    ln1Gamma: Arr(layer.AttnNormGamma),
-                    ln1Beta: Arr(layer.AttnNormBeta),
-                    attentionBias: null,
-                    ln2Gamma: Arr(layer.FfnNormGamma),
-                    ln2Beta: Arr(layer.FfnNormBeta),
-                    ffnW1: Arr(layer.FfnUp),
-                    ffnB1: null,
-                    ffnW2: Arr(layer.FfnDown),
-                    ffnB2: null,
-                    ffnGate: Arr(layer.FfnGate));
+                heads: heads,
+                kvHeads: kvHeads,
+                ln1Gamma: Arr(layer.AttnNormGamma),
+                ln1Beta: null, // RMSNorm — no beta
+                attentionBias: null,
+                ln2Gamma: Arr(layer.FfnNormGamma),
+                ln2Beta: null, // RMSNorm — no beta
+                ffnW1: Arr(layer.FfnUp),
+                ffnB1: null,
+                ffnW2: Arr(layer.FfnDown),
+                ffnB2: null,
+                ffnGate: Arr(layer.FfnGate));
             }
 
             return new StackWeights(
-                blockWeights,
-                _finalNormGamma,
-                _finalNormBeta,
-                _lmHead);
+            blockWeights,
+            _finalNormGamma,
+            new TensorStorage<float>(0), // RMSNorm — no final norm beta
+            _lmHead);
         }
 
         /// <summary>Reads a float tensor directly into a new TensorStorage.</summary>
@@ -396,10 +392,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var storage = new TensorStorage<float>(count);
             var span = storage.AsSpan();
             var bytes = new byte[count * 4];
-
             reader.Read(bytes, 0, bytes.Length);
-            MemoryMarshal.Cast<byte, float>(bytes).CopyTo(span);
-
+            System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(bytes).CopyTo(span);
             return storage;
         }
 

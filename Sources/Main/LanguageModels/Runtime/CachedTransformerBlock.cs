@@ -135,13 +135,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Span<float> output,
             RopeTable? rope = null)
         {
-            SingleTokenLayerNormKernel.Normalize(
-                input,
-                weights.Ln1Gamma,
-                weights.Ln1Beta,
-                _ln1Output,
-                DModel,
-                LayerNormEpsilon);
+            // Llama/Qwen: RMSNorm when beta is empty; GPT-2: standard LayerNorm
+            if (weights.Ln1Beta.IsEmpty)
+            {
+                RmsNormalize(input, weights.Ln1Gamma, _ln1Output, DModel, LayerNormEpsilon);
+            }
+            else
+            {
+                SingleTokenLayerNormKernel.Normalize(
+                input, weights.Ln1Gamma, weights.Ln1Beta, _ln1Output, DModel, LayerNormEpsilon);
+            }
 
             _attention.Decode(
                 _ln1Output,
@@ -158,13 +161,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 _afterAttentionResidual,
                 DModel);
 
-            SingleTokenLayerNormKernel.Normalize(
-                _afterAttentionResidual,
-                weights.Ln2Gamma,
-                weights.Ln2Beta,
-                _ln2Output,
-                DModel,
-                LayerNormEpsilon);
+            if (weights.Ln2Beta.IsEmpty)
+            {
+                RmsNormalize(_afterAttentionResidual, weights.Ln2Gamma, _ln2Output, DModel, LayerNormEpsilon);
+            }
+            else
+            {
+                SingleTokenLayerNormKernel.Normalize(
+                _afterAttentionResidual, weights.Ln2Gamma, weights.Ln2Beta, _ln2Output, DModel, LayerNormEpsilon);
+            }
 
             // SwiGLU (Llama/Mistral/Qwen): FfnGate is present.
             // GeLU/ReLU (GPT-1/GPT-2): FfnGate is empty.
@@ -236,6 +241,37 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             source.AsSpan().CopyTo(destination);
+        }
+
+
+        // RMSNorm: x / sqrt(mean(x²) + eps) * gamma  (no mean subtraction)
+        private static void RmsNormalize(
+            ReadOnlySpan<float> input,
+            ReadOnlySpan<float> gamma,
+            Span<float> output,
+            int dModel,
+            float eps)
+        {
+            var sumSq = 0f;
+            for (var i = 0; i < dModel; i++)
+            {
+                sumSq += input[i] * input[i];
+            }
+            var scale = 1f / MathF.Sqrt(sumSq / dModel + eps);
+            if (gamma.IsEmpty)
+            {
+                for (var i = 0; i < dModel; i++)
+                {
+                    output[i] = input[i] * scale;
+                }
+            }
+            else
+            {
+                for (var i = 0; i < dModel; i++)
+                {
+                    output[i] = input[i] * scale * gamma[i];
+                }
+            }
         }
 
 

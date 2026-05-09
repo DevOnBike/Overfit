@@ -228,6 +228,9 @@ class GGUFReader:
 
         # ── Q4_K: 144 bytes per 256 elements ─────────────────────────────────────
     # Reference: llama.cpp ggml-quants.c dequantize_row_q4_K
+    # Layout: 4 pairs of 32-byte blocks, each pair → 64 output elements:
+    #   elements[s*64..s*64+31]  = d*scale[2s]   * lo(qs[s*32..s*32+31]) - dmin*min[2s]
+    #   elements[s*64+32..s*64+63] = d*scale[2s+1] * hi(qs[s*32..s*32+31]) - dmin*min[2s+1]
     def _dequant_q4_k(self, raw: bytes, n: int) -> np.ndarray:
         QK_K = 256
         n_blocks = n // QK_K
@@ -239,11 +242,10 @@ class GGUFReader:
             dmin  = np.frombuffer(raw[off+2:off+4], dtype=np.float16)[0].astype(np.float32)
             if not np.isfinite(d):    d    = 0.0
             if not np.isfinite(dmin): dmin = 0.0
-            sc    = raw[off+4 : off+16]          # 12 scale bytes
-            qs    = raw[off+16: off+144]         # 128 quantized bytes
+            sc    = raw[off+4 : off+16]    # 12 scale bytes
+            qs    = raw[off+16: off+144]   # 128 quantized bytes
 
-            # Unpack 6-bit scales (8 scales + 8 mins) from 12 bytes
-            # from llama.cpp get_scale_min_k4
+            # Unpack 8 scales + 8 mins (6-bit each) from 12 bytes
             scales = np.zeros(8, np.float32)
             mins   = np.zeros(8, np.float32)
             for j in range(8):
@@ -254,19 +256,16 @@ class GGUFReader:
                     scales[j] = ((sc[j+4] & 0xF) | ((sc[j-4] >> 6) << 4))
                     mins[j]   = ((sc[j+4] >> 4)  | ((sc[j+0] >> 6) << 4))
 
-            base = b * QK_K
+            base   = b * QK_K
             qs_arr = np.frombuffer(bytes(qs), dtype=np.uint8)
-            lo = (qs_arr & 0x0F).astype(np.float32)
-            hi = ((qs_arr >> 4) & 0x0F).astype(np.float32)
 
-            # Each block has 8 sub-blocks of 32 values
-            for s in range(8):
-                sl = s * 16  # 16 bytes = 32 values (2 nibbles each)
-                block_lo = lo[sl:sl+16]
-                block_hi = hi[sl:sl+16]
-                vals = np.concatenate([block_lo, block_hi])
-                result[base + s*32 : base + s*32 + 32] = \
-                    d * scales[s] * vals - dmin * mins[s]
+            # 4 pairs × 32 bytes → 4 × 64 output elements
+            for s in range(4):
+                qb = qs_arr[s*32:(s+1)*32]
+                lo = (qb & 0x0F).astype(np.float32)
+                hi = ((qb >> 4) & 0x0F).astype(np.float32)
+                result[base + s*64     : base + s*64 + 32] = d * scales[s*2]   * lo - dmin * mins[s*2]
+                result[base + s*64 + 32: base + s*64 + 64] = d * scales[s*2+1] * hi - dmin * mins[s*2+1]
 
         return result
 

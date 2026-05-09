@@ -159,13 +159,35 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 (current, next) = (next, current);
             }
 
-            SingleTokenLayerNormKernel.Normalize(
-                current,
-                weights.FinalNormGamma,
-                weights.FinalNormBeta,
-                _finalHidden,
-                DModel,
-                LayerNormEpsilon);
+            if (weights.FinalNormBeta.IsEmpty)
+            {
+                // RMSNorm (Llama/Qwen/Mistral)
+                var sumSq = 0f;
+                for (var i = 0; i < DModel; i++)
+                {
+                    sumSq += current[i] * current[i];
+                }
+                var scale = 1f / MathF.Sqrt(sumSq / DModel + LayerNormEpsilon);
+                if (weights.FinalNormGamma.IsEmpty)
+                {
+                    for (var i = 0; i < DModel; i++)
+                    {
+                        _finalHidden[i] = current[i] * scale;
+                    }
+                }
+                else
+                {
+                    for (var i = 0; i < DModel; i++)
+                    {
+                        _finalHidden[i] = current[i] * scale * weights.FinalNormGamma[i];
+                    }
+                }
+            }
+            else
+            {
+                SingleTokenLayerNormKernel.Normalize(
+                    current, weights.FinalNormGamma, weights.FinalNormBeta, _finalHidden, DModel, LayerNormEpsilon);
+            }
 
             SingleTokenProjectionKernel.Project(
                 _finalHidden,
@@ -203,6 +225,5 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         }
     }
 }
-
 
 
