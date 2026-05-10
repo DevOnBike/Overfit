@@ -86,7 +86,9 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             {
                 var total = 0L;
                 foreach (var w in _weights.Values)
+                {
                     total += w.ParameterCount;
+                }
                 return total;
             }
         }
@@ -98,7 +100,10 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
         public void Enable()
         {
             ThrowIfDisposed();
-            if (_enabled) return;
+            if (_enabled)
+            {
+                return;
+            }
             ApplyDelta(+Options.Scale);
             _enabled = true;
         }
@@ -110,14 +115,20 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
         public void Disable()
         {
             ThrowIfDisposed();
-            if (!_enabled) return;
+            if (!_enabled)
+            {
+                return;
+            }
             ApplyDelta(-Options.Scale);
             _enabled = false;
         }
 
         public void ZeroGrad()
         {
-            foreach (var w in _weights.Values) w.ZeroGrad();
+            foreach (var w in _weights.Values)
+            {
+                w.ZeroGrad();
+            }
         }
 
         // ── Forward (non-merged, for training) ───────────────────────────────
@@ -135,7 +146,9 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             Span<float> result)
         {
             if (_weights.TryGetValue((layer, module, headIdx), out var w))
+            {
                 w.ForwardAdd(x, result, Options.Scale);
+            }
         }
 
         // ── Save / Load ───────────────────────────────────────────────────────
@@ -171,21 +184,27 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
         {
             ThrowIfDisposed();
             if (_enabled)
+            {
                 throw new InvalidOperationException(
-                    "Call Disable() before loading new LoRA weights.");
+                "Call Disable() before loading new LoRA weights.");
+            }
 
             using var fs = File.OpenRead(path);
             using var br = new BinaryReader(fs);
 
             var magic = br.ReadUInt32();
             if (magic != FileMagic)
+            {
                 throw new InvalidDataException(
-                    $"Not a LoRA file (magic={magic:#x}, expected {FileMagic:#x}).");
+                $"Not a LoRA file (magic={magic:#x}, expected {FileMagic:#x}).");
+            }
 
             var version = br.ReadInt32();
             if (version != FileVersion)
+            {
                 throw new InvalidDataException(
-                    $"Unsupported LoRA file version {version} (expected {FileVersion}).");
+                $"Unsupported LoRA file version {version} (expected {FileVersion}).");
+            }
 
             var count = br.ReadInt32();
             for (var i = 0; i < count; i++)
@@ -196,14 +215,19 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                 var key = (layer, module, headIdx);
                 var loaded = LoRAWeight.Load(br);
 
-                if (!_weights.TryGetValue(key, out var dst)) continue;
+                if (!_weights.TryGetValue(key, out var dst))
+                {
+                    continue;
+                }
 
                 if (loaded.InDim != dst.InDim || loaded.OutDim != dst.OutDim ||
                     loaded.Rank != dst.Rank)
+                {
                     throw new InvalidDataException(
-                        $"Dimension mismatch at ({layer},{module},{headIdx}): " +
-                        $"file=[{loaded.InDim}×{loaded.OutDim} r={loaded.Rank}], " +
-                        $"adapter=[{dst.InDim}×{dst.OutDim} r={dst.Rank}]");
+                    $"Dimension mismatch at ({layer},{module},{headIdx}): " +
+                    $"file=[{loaded.InDim}×{loaded.OutDim} r={loaded.Rank}], " +
+                    $"adapter=[{dst.InDim}×{dst.OutDim} r={dst.Rank}]");
+                }
 
                 loaded.A.CopyTo(dst.AMutable);
                 loaded.B.CopyTo(dst.BMutable);
@@ -214,8 +238,14 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
 
         public void Dispose()
         {
-            if (_disposed) return;
-            if (_enabled) Disable();
+            if (_disposed)
+            {
+                return;
+            }
+            if (_enabled)
+            {
+                Disable();
+            }
             _disposed = true;
         }
 
@@ -232,45 +262,116 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             for (var l = 0; l < nLayers; l++)
             {
                 if (mods.HasFlag(LoRATargetModules.Query))
+                {
                     for (var h = 0; h < nHeads; h++)
+                    {
                         Add(l, LoRATargetModules.Query, h,
-                            new LoRAWeight(dModel, headDim, rank));
+                        new LoRAWeight(dModel, headDim, rank));
+                    }
+                }
 
                 if (mods.HasFlag(LoRATargetModules.Key))
+                {
                     for (var kv = 0; kv < nKvHeads; kv++)
+                    {
                         Add(l, LoRATargetModules.Key, kv,
-                            new LoRAWeight(dModel, headDim, rank));
+                        new LoRAWeight(dModel, headDim, rank));
+                    }
+                }
 
                 if (mods.HasFlag(LoRATargetModules.Value))
+                {
                     for (var kv = 0; kv < nKvHeads; kv++)
+                    {
                         Add(l, LoRATargetModules.Value, kv,
-                            new LoRAWeight(dModel, headDim, rank));
+                        new LoRAWeight(dModel, headDim, rank));
+                    }
+                }
 
                 if (mods.HasFlag(LoRATargetModules.OutputProjection))
+                {
                     for (var h = 0; h < nHeads; h++)
+                    {
                         Add(l, LoRATargetModules.OutputProjection, h,
-                            new LoRAWeight(headDim, dModel, rank));
+                        new LoRAWeight(headDim, dModel, rank));
+                    }
+                }
 
                 if (mods.HasFlag(LoRATargetModules.FeedForwardUp))
+                {
                     Add(l, LoRATargetModules.FeedForwardUp, 0,
-                        new LoRAWeight(dModel, dFF, rank));
+                    new LoRAWeight(dModel, dFF, rank));
+                }
 
                 if (mods.HasFlag(LoRATargetModules.FeedForwardDown))
+                {
                     Add(l, LoRATargetModules.FeedForwardDown, 0,
-                        new LoRAWeight(dFF, dModel, rank));
+                    new LoRAWeight(dFF, dModel, rank));
+                }
             }
         }
 
         private void Add(int l, LoRATargetModules m, int h, LoRAWeight w)
             => _weights[(l, m, h)] = w;
 
+        /// <summary>
+        /// Number of (layer, module, headIdx) entries that matched between
+        /// _weights and _baseRefs during the last Enable/Disable call.
+        /// Should equal TrainableParameterCount / (InDim+OutDim) / Rank.
+        /// If 0: _baseRefs keys don't match _weights keys.
+        /// </summary>
+        public int LastApplyMatchCount { get; private set; }
+
+        /// <summary>Number of entries in _baseRefs (should equal NLayers * targeted modules).</summary>
+        public int BaseRefCount => _baseRefs.Count;
+
+        /// <summary>
+        /// Reads a single value from the base weight TensorStorage (for diagnostics).
+        /// Returns NaN if the key is not in _baseRefs.
+        /// </summary>
+        public float ReadBaseWeight(int layer, LoRATargetModules module, int head, int index)
+        {
+            var key = (layer, module, head);
+            if (!_baseRefs.TryGetValue(key, out var storage))
+            {
+                return float.NaN;
+            }
+            var span = storage.AsSpan();
+            if (index < 0 || index >= span.Length)
+            {
+                return float.NaN;
+            }
+            return span[index];
+        }
+
+        /// <summary>L2 norm of the storage TensorStorage at given key (for diagnostics).</summary>
+        public float ReadBaseWeightNorm(int layer, LoRATargetModules module, int head)
+        {
+            var key = (layer, module, head);
+            if (!_baseRefs.TryGetValue(key, out var storage))
+            {
+                return float.NaN;
+            }
+            var sumSq = 0f;
+            foreach (var v in storage.AsSpan())
+            {
+                sumSq += v * v;
+            }
+            return MathF.Sqrt(sumSq);
+        }
+
         private void ApplyDelta(float scaleFactor)
         {
+            var matched = 0;
             foreach (var ((layer, module, headIdx), w) in _weights)
             {
                 var key = (layer, module, headIdx);
-                if (!_baseRefs.TryGetValue(key, out var storage)) continue;
+                if (!_baseRefs.TryGetValue(key, out var storage))
+                {
+                    continue;
+                }
 
+                matched++;
                 var size = w.InDim * w.OutDim;
                 var delta = _deltaScratch.AsSpan(0, size);
                 w.ComputeDelta(delta);
@@ -278,24 +379,45 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                 var target = storage.AsSpan().Slice(0, size);
                 TensorPrimitives.MultiplyAdd(delta, scaleFactor, target, target);
             }
+            LastApplyMatchCount = matched;
         }
 
         private void ThrowIfDisposed()
         {
             if (_disposed)
+            {
                 throw new ObjectDisposedException(nameof(LlamaLoRAAdapter));
+            }
         }
 
         private static int CountTargetedModules(
             LoRATargetModules mods, int nHeads, int nKvHeads)
         {
             var n = 0;
-            if (mods.HasFlag(LoRATargetModules.Query)) n += nHeads;
-            if (mods.HasFlag(LoRATargetModules.Key)) n += nKvHeads;
-            if (mods.HasFlag(LoRATargetModules.Value)) n += nKvHeads;
-            if (mods.HasFlag(LoRATargetModules.OutputProjection)) n += nHeads;
-            if (mods.HasFlag(LoRATargetModules.FeedForwardUp)) n += 1;
-            if (mods.HasFlag(LoRATargetModules.FeedForwardDown)) n += 1;
+            if (mods.HasFlag(LoRATargetModules.Query))
+            {
+                n += nHeads;
+            }
+            if (mods.HasFlag(LoRATargetModules.Key))
+            {
+                n += nKvHeads;
+            }
+            if (mods.HasFlag(LoRATargetModules.Value))
+            {
+                n += nKvHeads;
+            }
+            if (mods.HasFlag(LoRATargetModules.OutputProjection))
+            {
+                n += nHeads;
+            }
+            if (mods.HasFlag(LoRATargetModules.FeedForwardUp))
+            {
+                n += 1;
+            }
+            if (mods.HasFlag(LoRATargetModules.FeedForwardDown))
+            {
+                n += 1;
+            }
             return n;
         }
     }

@@ -64,7 +64,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
             // B[0,0]=2, B[1,1]=3 → r[0]*2 → out[0], r[1]*3 → out[1]
             b[0] = 2f; b[3] = 3f;
 
-            float[] x = { 5f, 7f, 0f, 0f };
+            float[] x      = { 5f, 7f, 0f, 0f };
             float[] result = new float[2];
             w.ForwardAdd(x, result, scale: 1f);
 
@@ -158,7 +158,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
                 var after = session.LastLogits.ToArray();
 
                 var maxDiffDuring = before.Zip(during).Select(p => MathF.Abs(p.First - p.Second)).Max();
-                var maxDiffAfter = before.Zip(after).Select(p => MathF.Abs(p.First - p.Second)).Max();
+                var maxDiffAfter  = before.Zip(after) .Select(p => MathF.Abs(p.First - p.Second)).Max();
 
                 _out.WriteLine($"Max diff during Enable (B=0, delta=0): {maxDiffDuring:E3}");
                 _out.WriteLine($"Max diff after Disable (restored):      {maxDiffAfter:E3}");
@@ -176,44 +176,133 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
         }
 
         [Fact]
+        public void LoRA_DeltaIsNonZeroWhenBNonZero()
+        {
+            // Unit test — no model needed
+            var w = new LoRAWeight(inDim: 8, outDim: 4, rank: 2);
+
+            // Set B to non-zero
+            var b = w.BMutable;
+            var rng = new Random(1);
+            for (var i = 0; i < b.Length; i++)
+                b[i] = (float)(rng.NextDouble() * 0.1 - 0.05);
+
+            var delta = new float[8 * 4];
+            w.ComputeDelta(delta);
+
+            var norm = 0f;
+            foreach (var v in delta) norm += v * v;
+            norm = MathF.Sqrt(norm);
+
+            _out.WriteLine($"Delta L2 norm = {norm:F6}");
+            Assert.True(norm > 1e-6f, $"Delta must be non-zero when B≠0, got norm={norm}");
+        }
+
+        [Fact]
+        public void LoRA_ForwardAdd_ChangesOutput()
+        {
+            // Verifies ForwardAdd produces delta without merging
+            var w = new LoRAWeight(inDim: 4, outDim: 2, rank: 2);
+            var b = w.BMutable;
+            b[0] = 0.1f; b[1] = 0.2f;  // B[0,:] = [0.1, 0.2]
+            b[2] = 0.3f; b[3] = 0.4f;  // B[1,:] = [0.3, 0.4]
+
+            float[] x      = { 1f, 1f, 0f, 0f };
+            float[] result = new float[2];
+            w.ForwardAdd(x, result, scale: 1f);
+
+            _out.WriteLine($"ForwardAdd result = [{result[0]:F4}, {result[1]:F4}]");
+            var norm = MathF.Sqrt(result[0]*result[0] + result[1]*result[1]);
+            Assert.True(norm > 1e-6f, $"ForwardAdd result must be non-zero when B≠0");
+        }
+
+        [Fact]
         public void LoRA_AfterTraining_LogitsChange()
         {
             if (!File.Exists(ModelPath)) return;
             var engine = CachedLlamaInferenceEngine.Load(ModelPath);
             using (engine)
             {
-                var opts = new LoRAOptions(4, 8f, 0f, LoRATargetModules.Query);
+                var opts = new LoRAOptions(4, 32f, 0f, LoRATargetModules.Query);
                 using var adapter = engine.CreateLoRAAdapter("test", opts);
                 using var session = engine.CreateSession(32);
-                var sampling = SamplingOptions.Greedy;
 
-                // Baseline logits with zero B
+                // Baseline with B=0 (delta=0, logits unchanged)
                 session.Reset(new[] { 151643 });
                 var baseline = session.LastLogits.ToArray();
 
-                // Simulate "trained" adapter: set B to random non-zero values
+                // Directly modify B in all Q LoRAWeights via GetAllWeights
+                var count = 0;
                 foreach (var w in GetAllWeights(adapter))
                 {
-                    var rng = new Random(42);
                     var b = w.BMutable;
+                    // Large values to ensure visible impact
                     for (var i = 0; i < b.Length; i++)
-                        b[i] = (float)(rng.NextDouble() * 0.01 - 0.005);
+                        b[i] = (i % 2 == 0) ? 0.1f : -0.1f;
+                    count++;
                 }
+                _out.WriteLine($"Modified B in {count} LoRAWeight objects");
+                Assert.True(count > 0, "Adapter must have weights");
+
+                // Verify delta is non-zero for first weight
+                LoRAWeight? firstW = null;
+                foreach (var ww in GetAllWeights(adapter)) { firstW = ww; break; }
+                Assert.NotNull(firstW);
+                var delta  = new float[firstW.InDim * firstW.OutDim];
+                firstW.ComputeDelta(delta);
+                var deltaNorm = 0f;
+                foreach (var v in delta) deltaNorm += v * v;
+                deltaNorm = MathF.Sqrt(deltaNorm);
+                _out.WriteLine($"First weight delta L2 norm: {deltaNorm:F4}");
+                Assert.True(deltaNorm > 0.1f, $"Delta must be large, got {deltaNorm:F4}");
+
+                // CRITICAL DIAGNOSTIC: read TensorStorage value before/after Enable
+                var beforeNorm = adapter.ReadBaseWeightNorm(0, LoRATargetModules.Query, 0);
+                var beforeVal0 = adapter.ReadBaseWeight(0, LoRATargetModules.Query, 0, 0);
 
                 adapter.Enable();
+
+                var afterEnableNorm = adapter.ReadBaseWeightNorm(0, LoRATargetModules.Query, 0);
+                var afterEnableVal0 = adapter.ReadBaseWeight(0, LoRATargetModules.Query, 0, 0);
+
+                _out.WriteLine($"=== TensorStorage state via _baseRefs ===");
+                _out.WriteLine($"Q[L0,H0] L2 norm  before/after Enable: {beforeNorm:F4} / {afterEnableNorm:F4}  diff={afterEnableNorm-beforeNorm:F4}");
+                _out.WriteLine($"Q[L0,H0][0]       before/after Enable: {beforeVal0:F6} / {afterEnableVal0:F6}  diff={afterEnableVal0-beforeVal0:F6}");
+
+                if (Math.Abs(afterEnableVal0 - beforeVal0) < 1e-6f)
+                    _out.WriteLine("✗ TensorStorage NOT modified despite delta=14.18 — bug in MultiplyAdd or AsSpan");
+                else
+                    _out.WriteLine("✓ TensorStorage IS modified — bug must be in inference reading separate copy");
+
                 session.Reset(new[] { 151643 });
                 var modified = session.LastLogits.ToArray();
                 adapter.Disable();
 
-                var maxDiff = baseline.Zip(modified).Select(p => MathF.Abs(p.First - p.Second)).Max();
-                _out.WriteLine($"Max logit diff after simulated training: {maxDiff:F4}");
-                _out.WriteLine($"Top-1 baseline: {Array.IndexOf(baseline, baseline.Max())}");
-                _out.WriteLine($"Top-1 modified: {Array.IndexOf(modified, modified.Max())}");
+                // Restore check
+                session.Reset(new[] { 151643 });
+                var restored = session.LastLogits.ToArray();
 
-                Assert.True(maxDiff > 0.001f,
-                    "Non-zero B should change logits");
+                var maxDiffEnabled  = 0f;
+                var maxDiffRestored = 0f;
+                for (var i = 0; i < baseline.Length; i++)
+                {
+                    maxDiffEnabled  = Math.Max(maxDiffEnabled,  MathF.Abs(baseline[i] - modified[i]));
+                    maxDiffRestored = Math.Max(maxDiffRestored, MathF.Abs(baseline[i] - restored[i]));
+                }
 
-                _out.WriteLine("✓ LoRA with non-zero B changes logits as expected");
+                _out.WriteLine($"Max logit diff when enabled:  {maxDiffEnabled:F6}");
+                _out.WriteLine($"Max logit diff after restore: {maxDiffRestored:F6}");
+                _out.WriteLine($"scale = {opts.Scale:F2}  (alpha={opts.Alpha}/rank={opts.Rank})");
+                _out.WriteLine($"BaseRefCount: {adapter.BaseRefCount}");
+                _out.WriteLine($"LastApplyMatchCount: {adapter.LastApplyMatchCount}");
+                _out.WriteLine($"_weights count: {count} (=nLayers*nHeads = 24*14 = 336)");
+
+                // Jeżeli LastApplyMatchCount=0 → klucze _baseRefs nie pasują do _weights
+                Assert.True(adapter.LastApplyMatchCount > 0,
+                    $"ApplyDelta matched 0 entries — key mismatch between _weights and _baseRefs. BaseRefCount={adapter.BaseRefCount}");
+
+                Assert.True(maxDiffEnabled  > 0.001f, $"Enable must change logits, got {maxDiffEnabled:F6}");
+                Assert.True(maxDiffRestored < 1e-4f,  $"Disable must restore weights, got {maxDiffRestored:F6}");
             }
         }
 
