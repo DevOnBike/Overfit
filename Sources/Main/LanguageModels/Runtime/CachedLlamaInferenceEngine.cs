@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.LanguageModels.LoRA;
 using DevOnBike.Overfit.LanguageModels.Rope;
 using DevOnBike.Overfit.Tensors.Core;
 
@@ -425,6 +426,60 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             reader.Read(bytes, 0, bytes.Length);
             System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(bytes).CopyTo(span);
             return storage;
+        }
+
+
+        // ── LoRA ──────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Creates a LoRA adapter targeting this engine's weight matrices.
+        ///
+        /// The adapter holds TensorStorage references — zero weight copying.
+        /// Enable()  → W_eff = W_base + scale*(A@B)  (in-place, zero inference overhead)
+        /// Disable() → W_base restored exactly
+        ///
+        /// Example:
+        ///   var opts = new LoRAOptions(rank: 16, alpha: 32f, dropout: 0f,
+        ///                             LoRATargetModules.Attention);
+        ///   using var adapter = engine.CreateLoRAAdapter("v1", opts);
+        ///   adapter.Load("v1.lora");
+        ///   adapter.Enable();
+        ///   session.GenerateNextToken(in sampling);
+        ///   adapter.Disable();
+        /// </summary>
+        public LlamaLoRAAdapter CreateLoRAAdapter(string name, in LoRAOptions options)
+        {
+            ThrowIfDisposed();
+
+            var headDim = _config.DModel / _config.NHeads;
+            var refs = new Dictionary<(int, LoRATargetModules, int),
+                                      Tensors.Core.TensorStorage<float>>();
+
+            for (var l = 0; l < _config.NLayers; l++)
+            {
+                var layer = _layers[l];
+
+                for (var h = 0; h < _config.NHeads; h++)
+                {
+                    refs[(l, LoRATargetModules.Query,            h)] = layer.Wq[h];
+                    refs[(l, LoRATargetModules.OutputProjection, h)] = layer.Wo[h];
+                }
+
+                for (var kv = 0; kv < _config.KvHeads; kv++)
+                {
+                    refs[(l, LoRATargetModules.Key,   kv)] = layer.Wk[kv];
+                    refs[(l, LoRATargetModules.Value, kv)] = layer.Wv[kv];
+                }
+
+                refs[(l, LoRATargetModules.FeedForwardUp,   0)] = layer.FfnUp;
+                refs[(l, LoRATargetModules.FeedForwardDown, 0)] = layer.FfnDown;
+            }
+
+            return new LlamaLoRAAdapter(
+                name, options,
+                _config.NLayers, _config.NHeads, _config.KvHeads,
+                _config.DModel, headDim, _config.DFF,
+                refs);
         }
 
         private void ThrowIfDisposed()

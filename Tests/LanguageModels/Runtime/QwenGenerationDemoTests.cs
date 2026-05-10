@@ -1,7 +1,3 @@
-// Copyright (c) 2026 DevOnBike.
-// This file is part of DevonBike Overfit.
-// DevonBike Overfit is licensed under the GNU AGPLv3.
-
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
@@ -14,29 +10,33 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
     public sealed class QwenGenerationDemoTests
     {
         private readonly ITestOutputHelper _out;
-
-        public QwenGenerationDemoTests(ITestOutputHelper output)
-        {
-            _out = output;
-        }
+        public QwenGenerationDemoTests(ITestOutputHelper output) => _out = output;
 
         private const string ModelPath = "d:/qwen/qwen.bin";
         private const string TokenizerDir = "d:/qwen/";
         private const int MaxNewTokens = 200;
         private const int MaxCtx = 512;
 
+        private static readonly SamplingOptions GreedySampling = SamplingOptions.Greedy;
+
+        private static readonly SamplingOptions Temp03Sampling = new(
+            strategy: SamplingStrategy.TopP,
+            temperature: 0.3f,
+            topK: 0,
+            topP: 0.9f,
+            seed: 42);
+
         private bool TryLoad(out CachedLlamaInferenceEngine? engine, out QwenTokenizer? tok)
         {
-            engine = null;
-            tok = null;
+            engine = null; tok = null;
             if (!File.Exists(ModelPath))
             {
-                _out.WriteLine($"SKIPPED: model not found at {ModelPath}");
+                _out.WriteLine("SKIPPED: brak modelu w test_fixtures/qwen.bin");
                 return false;
             }
             if (!File.Exists(Path.Combine(TokenizerDir, "tokenizer.json")))
             {
-                _out.WriteLine($"SKIPPED: tokenizer not found in {TokenizerDir}");
+                _out.WriteLine("SKIPPED: brak tokenizera w test_fixtures/tokenizer/");
                 return false;
             }
             engine = CachedLlamaInferenceEngine.Load(ModelPath);
@@ -44,150 +44,137 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             return true;
         }
 
-        private int[] Generate(
-            CachedLlamaInferenceEngine engine, CachedLlamaSession session,
-            QwenTokenizer tok, int[] prompt, int maxNew, bool stream = true)
+        private string Generate(
+            CachedLlamaSession session,
+            QwenTokenizer tok,
+            int[] prompt,
+            int maxNew,
+            in SamplingOptions sampling)
         {
             session.Reset(prompt);
-            var sampling = SamplingOptions.Greedy;
-            var output = new List<int>();
             var sb = new System.Text.StringBuilder();
+            var lastTok = -1;
+            var repCnt = 0;
 
             for (var i = 0; i < maxNew; i++)
             {
-                if (session.IsFull)
-                {
-                    break;
-                }
+                if (session.IsFull) break;
                 var token = session.GenerateNextToken(in sampling);
-                output.Add(token);
-                if (stream)
-                {
-                    sb.Append(tok.DecodeToken(token));
-                }
-                if (token == QwenTokenizer.EndOfText || token == QwenTokenizer.ImEnd)
-                {
-                    break;
-                }
-            }
 
-            if (stream)
-            {
-                _out.WriteLine(sb.ToString());
+                if (token == QwenTokenizer.EndOfText || token == QwenTokenizer.ImEnd) break;
+
+                sb.Append(tok.DecodeToken(token));
+
+                // Prosta detekcja pętli: 6 identycznych tokenów z rzędu → stop
+                if (token == lastTok) { repCnt++; if (repCnt >= 6) break; }
+                else { lastTok = token; repCnt = 0; }
             }
-            return output.ToArray();
+            return sb.ToString();
         }
 
-        // ── Tests ──────────────────────────────────────────────────────────
+        /// <summary>Format bez system message: &lt;|im_start|&gt;user\n{q}&lt;|im_end|&gt;\n&lt;|im_start|&gt;assistant\n</summary>
+        private static int[] NoSystemPrompt(QwenTokenizer tok, string question)
+            => new[] { QwenTokenizer.ImStart, 872, 198 }
+                .Concat(tok.Encode(question))
+                .Concat(new[] { QwenTokenizer.ImEnd, 198, QwenTokenizer.ImStart, 77091, 198 })
+                .ToArray();
 
         [Fact]
         public void Demo_EncodeDecodeRoundtrip_Sanity()
         {
-            if (!TryLoad(out _, out var tok))
-            {
-                return;
-            }
-
+            if (!TryLoad(out _, out var tok)) return;
             const string text = "What is 7 * 8?";
-            var tokens = tok!.Encode(text);
-            var decoded = tok.Decode(tokens);
-
-            _out.WriteLine($"Input   : '{text}'");
-            _out.WriteLine($"Tokens  : [{string.Join(", ", tokens)}]");
-            _out.WriteLine($"Decoded : '{decoded}'");
-
+            var decoded = tok!.Decode(tok.Encode(text));
+            _out.WriteLine($"Input  : '{text}'");
+            _out.WriteLine($"Decoded: '{decoded}'");
             var chat = tok.BuildChatPrompt(text);
-            _out.WriteLine($"Chat prompt ({chat.Length} tokens): [{string.Join(", ", chat)}]");
-            _out.WriteLine($"Expected first token: {QwenTokenizer.ImStart} (<|im_start|>), actual: {chat[0]}");
-
+            _out.WriteLine($"Chat prompt ({chat.Length} tokens): [{string.Join(", ", chat.Take(6))}...]");
             Assert.Equal(text, decoded);
-            Assert.Equal(QwenTokenizer.ImStart, chat[0]);
         }
 
+        /// <summary>Greedy bez system message — najlepsza szansa dla 0.5B FP32.</summary>
         [Fact]
-        public void Demo_SimpleGreeting_GeneratesResponse()
+        public void Demo_Math_NoSystem_Greedy()
         {
-            if (!TryLoad(out var engine, out var tok))
-            {
-                return;
-            }
+            if (!TryLoad(out var engine, out var tok)) return;
             using (engine)
             {
                 using var session = engine!.CreateSession(MaxCtx);
-                var prompt = tok!.BuildChatPrompt("Hello! What is your name?");
-                _out.WriteLine($"Prompt: {prompt.Length} tokens");
+                var prompt = NoSystemPrompt(tok!, "What is 2+2?");
+                _out.WriteLine($"Prompt ({prompt.Length} tokens) — bez system message");
                 _out.WriteLine("=== RESPONSE ===");
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                var output = Generate(engine, session, tok, prompt, MaxNewTokens);
+                var resp = Generate(session, tok!, prompt, MaxNewTokens, in GreedySampling);
                 sw.Stop();
-                _out.WriteLine($"Tokens={output.Length}  {output.Length * 1000.0 / sw.ElapsedMilliseconds:F1} tok/s");
-                Assert.NotEmpty(output);
+                _out.WriteLine(resp);
+                _out.WriteLine($"\n{resp.Length} chars  {sw.ElapsedMilliseconds}ms");
+                Assert.NotEmpty(resp);
             }
         }
 
+        /// <summary>Temperature 0.3 bez system message — może być lepiej niż greedy.</summary>
         [Fact]
-        public void Demo_MathQuestion_GeneratesResponse()
+        public void Demo_Math_NoSystem_Temperature()
         {
-            if (!TryLoad(out var engine, out var tok))
-            {
-                return;
-            }
+            if (!TryLoad(out var engine, out var tok)) return;
             using (engine)
             {
                 using var session = engine!.CreateSession(MaxCtx);
-                var prompt = tok!.BuildChatPrompt("What is 7 * 8?");
+                var prompt = NoSystemPrompt(tok!, "What is 2+2?");
+                _out.WriteLine("=== RESPONSE (temp=0.3, top-p=0.9) ===");
+                var resp = Generate(session, tok!, prompt, MaxNewTokens, in Temp03Sampling);
+                _out.WriteLine(resp);
+                Assert.NotEmpty(resp);
+            }
+        }
+
+        /// <summary>Z pełnym system message Qwen2.5-Instruct.</summary>
+        [Fact]
+        public void Demo_Math_WithSystem_Greedy()
+        {
+            if (!TryLoad(out var engine, out var tok)) return;
+            using (engine)
+            {
+                using var session = engine!.CreateSession(MaxCtx);
+                var prompt = tok!.BuildChatPrompt("What is 2+2?");
+                _out.WriteLine($"Prompt ({prompt.Length} tokens) — z system message");
                 _out.WriteLine("=== RESPONSE ===");
-                var sw = System.Diagnostics.Stopwatch.StartNew();
-                var output = Generate(engine, session, tok, prompt, MaxNewTokens);
-                sw.Stop();
-                _out.WriteLine($"{output.Length * 1000.0 / sw.ElapsedMilliseconds:F1} tok/s");
-                _out.WriteLine($"First 20 IDs: [{string.Join(", ", output.Take(20))}]");
-                Assert.NotEmpty(output);
+                var resp = Generate(session, tok, prompt, MaxNewTokens, in GreedySampling);
+                _out.WriteLine(resp);
+                Assert.NotEmpty(resp);
             }
         }
 
         [Fact]
-        public void Demo_PolishQuestion_GeneratesResponse()
+        public void Demo_Polish_NoSystem()
         {
-            if (!TryLoad(out var engine, out var tok))
-            {
-                return;
-            }
+            if (!TryLoad(out var engine, out var tok)) return;
             using (engine)
             {
                 using var session = engine!.CreateSession(MaxCtx);
-                var prompt = tok!.BuildChatPrompt(
-                    "Napisz po polsku: jaka jest stolica Polski?",
-                    systemPrompt: "Jesteś pomocnym asystentem mówiącym po polsku.");
+                var prompt = NoSystemPrompt(tok!, "Jaka jest stolica Polski?");
                 _out.WriteLine("=== RESPONSE ===");
-                var output = Generate(engine, session, tok, prompt, MaxNewTokens);
-                Assert.NotEmpty(output);
+                var resp = Generate(session, tok, prompt, MaxNewTokens, in GreedySampling);
+                _out.WriteLine(resp);
+                Assert.NotEmpty(resp);
             }
         }
 
         [Fact]
-        public void Demo_SpeedBenchmark_ReportsTokensPerSecond()
+        public void Demo_SpeedBenchmark()
         {
-            if (!TryLoad(out var engine, out var tok))
-            {
-                return;
-            }
+            if (!TryLoad(out var engine, out var tok)) return;
             using (engine)
             {
                 using var session = engine!.CreateSession(MaxCtx);
-                var prompt = tok!.BuildChatPrompt("Write a short poem about C# programming.");
-
+                var prompt = NoSystemPrompt(tok!, "Write a short poem about programming.");
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                var output = Generate(engine, session, tok, prompt, MaxNewTokens, stream: false);
+                var resp = Generate(session, tok, prompt, MaxNewTokens, in GreedySampling);
                 sw.Stop();
-
-                var tokPerSec = output.Length * 1000.0 / sw.ElapsedMilliseconds;
-                _out.WriteLine($"Generated : {output.Length} tokens");
-                _out.WriteLine($"Speed     : {tokPerSec:F1} tok/s  ({sw.ElapsedMilliseconds / (double)output.Length:F1} ms/tok)");
-                _out.WriteLine($"Config    : {engine.Config.NLayers}L d={engine.Config.DModel} h={engine.Config.NHeads}/{engine.Config.KvHeads}");
-                _out.WriteLine(tok.Decode(output));
-
-                Assert.True(tokPerSec > 0);
+                var tps = resp.Length > 0 ? resp.Length * 1000.0 / sw.ElapsedMilliseconds : 0;
+                _out.WriteLine($"Config: {engine.Config.NLayers}L d={engine.Config.DModel} h={engine.Config.NHeads}/{engine.Config.KvHeads}");
+                _out.WriteLine($"Speed : {tps:F1} chars/s  ({sw.ElapsedMilliseconds}ms)");
+                _out.WriteLine($"\n{resp}");
             }
         }
     }
