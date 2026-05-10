@@ -429,6 +429,83 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         }
 
 
+        // ── DIAGNOSTIC ────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Reads the L2 norm of Q weight via the SAME path inference uses
+        /// (through _stackWeights._blocks[l]._heads[h]._wq).
+        /// If this differs from LlamaLoRAAdapter.ReadBaseWeightNorm, then
+        /// _baseRefs and _stackWeights point to different TensorStorage objects.
+        /// </summary>
+        public float ReadInferenceWeightNorm(int layer, int head)
+        {
+            ThrowIfDisposed();
+            var hw = _stackWeights.Block(layer).Head(head);
+            var span = hw.Wq;
+            var sumSq = 0f;
+            foreach (var v in span)
+            {
+                sumSq += v * v;
+            }
+            return MathF.Sqrt(sumSq);
+        }
+
+        /// <summary>
+        /// Writes a value directly to Wq[layer, head, index] via the SAME storage
+        /// inference uses. If subsequent inference doesn't see this change,
+        /// the bug is fundamental in the engine (separate copy somewhere).
+        /// </summary>
+        public void WriteInferenceWeight(int layer, int head, int index, float value)
+        {
+            ThrowIfDisposed();
+            var hw = _stackWeights.Block(layer).Head(head);
+            // Get mutable span via the underlying TensorStorage
+            // Since hw.Wq returns ReadOnlySpan, we need to access _wq directly.
+            // _layers[l].Wq[h] is the SAME TensorStorage as hw._wq (zero-copy).
+            var span = _layers[layer].Wq[head].AsSpan();
+            if (index >= 0 && index < span.Length)
+            {
+                span[index] = value;
+            }
+        }
+
+        /// <summary>Read Wq via _layers path (the path LoRA modifies).</summary>
+        public float ReadLayerWeight(int layer, int head, int index)
+        {
+            ThrowIfDisposed();
+            var span = _layers[layer].Wq[head].AsSpan();
+            if (index < 0 || index >= span.Length)
+            {
+                return float.NaN;
+            }
+            return span[index];
+        }
+
+        /// <summary>True if _layers[l].Wq[h] is the SAME OBJECT as _stackWeights._blocks[l]._heads[h]._wq.</summary>
+        public bool AreSameStorage(int layer, int head)
+        {
+            ThrowIfDisposed();
+            var fromLayers = _layers[layer].Wq[head];
+            var hw = _stackWeights.Block(layer).Head(head);
+            // We can't compare _wq directly (private) but we can use a trick:
+            // write a unique value to fromLayers, read via inference path, and check
+            var span = fromLayers.AsSpan();
+            var saved = span[0];
+            span[0] = 12345.6789f;
+            var infValue = ReadInferenceWeightAt(layer, head, 0);
+            span[0] = saved;  // restore
+            return MathF.Abs(infValue - 12345.6789f) < 1e-4f;
+        }
+
+        /// <summary>Reads Wq[0] via inference path.</summary>
+        public float ReadInferenceWeightAt(int layer, int head, int index)
+        {
+            ThrowIfDisposed();
+            var hw = _stackWeights.Block(layer).Head(head);
+            var span = hw.Wq;
+            return index < 0 || index >= span.Length ? float.NaN : span[index];
+        }
+
         // ── LoRA ──────────────────────────────────────────────────────────────
 
         /// <summary>
@@ -461,17 +538,17 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
                 for (var h = 0; h < _config.NHeads; h++)
                 {
-                    refs[(l, LoRATargetModules.Query,            h)] = layer.Wq[h];
+                    refs[(l, LoRATargetModules.Query, h)] = layer.Wq[h];
                     refs[(l, LoRATargetModules.OutputProjection, h)] = layer.Wo[h];
                 }
 
                 for (var kv = 0; kv < _config.KvHeads; kv++)
                 {
-                    refs[(l, LoRATargetModules.Key,   kv)] = layer.Wk[kv];
+                    refs[(l, LoRATargetModules.Key, kv)] = layer.Wk[kv];
                     refs[(l, LoRATargetModules.Value, kv)] = layer.Wv[kv];
                 }
 
-                refs[(l, LoRATargetModules.FeedForwardUp,   0)] = layer.FfnUp;
+                refs[(l, LoRATargetModules.FeedForwardUp, 0)] = layer.FfnUp;
                 refs[(l, LoRATargetModules.FeedForwardDown, 0)] = layer.FfnDown;
             }
 

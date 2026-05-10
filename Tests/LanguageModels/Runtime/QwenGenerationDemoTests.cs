@@ -58,15 +58,25 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
 
             for (var i = 0; i < maxNew; i++)
             {
-                if (session.IsFull) break;
+                if (session.IsFull)
+                {
+                    break;
+                }
                 var token = session.GenerateNextToken(in sampling);
 
-                if (token == QwenTokenizer.EndOfText || token == QwenTokenizer.ImEnd) break;
+                if (token == QwenTokenizer.EndOfText || token == QwenTokenizer.ImEnd)
+                {
+                    break;
+                }
 
                 sb.Append(tok.DecodeToken(token));
 
                 // Prosta detekcja pętli: 6 identycznych tokenów z rzędu → stop
-                if (token == lastTok) { repCnt++; if (repCnt >= 6) break; }
+                if (token == lastTok) { repCnt++; if (repCnt >= 6)
+                    {
+                        break;
+                    }
+                }
                 else { lastTok = token; repCnt = 0; }
             }
             return sb.ToString();
@@ -82,7 +92,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         [Fact]
         public void Demo_EncodeDecodeRoundtrip_Sanity()
         {
-            if (!TryLoad(out _, out var tok)) return;
+            if (!TryLoad(out _, out var tok))
+            {
+                return;
+            }
             const string text = "What is 7 * 8?";
             var decoded = tok!.Decode(tok.Encode(text));
             _out.WriteLine($"Input  : '{text}'");
@@ -96,7 +109,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         [Fact]
         public void Demo_Math_NoSystem_Greedy()
         {
-            if (!TryLoad(out var engine, out var tok)) return;
+            if (!TryLoad(out var engine, out var tok))
+            {
+                return;
+            }
             using (engine)
             {
                 using var session = engine!.CreateSession(MaxCtx);
@@ -116,7 +132,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         [Fact]
         public void Demo_Math_NoSystem_Temperature()
         {
-            if (!TryLoad(out var engine, out var tok)) return;
+            if (!TryLoad(out var engine, out var tok))
+            {
+                return;
+            }
             using (engine)
             {
                 using var session = engine!.CreateSession(MaxCtx);
@@ -132,7 +151,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         [Fact]
         public void Demo_Math_WithSystem_Greedy()
         {
-            if (!TryLoad(out var engine, out var tok)) return;
+            if (!TryLoad(out var engine, out var tok))
+            {
+                return;
+            }
             using (engine)
             {
                 using var session = engine!.CreateSession(MaxCtx);
@@ -148,7 +170,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         [Fact]
         public void Demo_Polish_NoSystem()
         {
-            if (!TryLoad(out var engine, out var tok)) return;
+            if (!TryLoad(out var engine, out var tok))
+            {
+                return;
+            }
             using (engine)
             {
                 using var session = engine!.CreateSession(MaxCtx);
@@ -163,7 +188,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         [Fact]
         public void Demo_SpeedBenchmark()
         {
-            if (!TryLoad(out var engine, out var tok)) return;
+            if (!TryLoad(out var engine, out var tok))
+            {
+                return;
+            }
             using (engine)
             {
                 using var session = engine!.CreateSession(MaxCtx);

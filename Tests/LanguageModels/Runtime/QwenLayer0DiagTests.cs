@@ -31,7 +31,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         [Fact]
         public void L0Diag_IntermediateValues()
         {
-            if (!File.Exists(ModelPath)) return;
+            if (!File.Exists(ModelPath))
+            {
+                return;
+            }
 
             // Use CachedLlamaInferenceEngine diagnostics
             var engine = CachedLlamaInferenceEngine.Load(ModelPath);
@@ -65,7 +68,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
 
                 _out.WriteLine("C# TOP-5:");
                 foreach (var (v, id) in topN)
+                {
                     _out.WriteLine($"  [{id,7}]  {v,9:F4}");
+                }
 
                 _out.WriteLine(string.Empty);
                 _out.WriteLine("Python TOP-5 (expected from forward_from_bin.py):");
@@ -78,7 +83,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
                 var checkTokens = new[] { 62406, 75101, 34603, 101394, 151644, 198 };
                 _out.WriteLine("C# logit for specific tokens:");
                 foreach (var t in checkTokens)
+                {
                     _out.WriteLine($"  [{t,7}] = {logits[t],9:F4}");
+                }
 
                 _out.WriteLine(string.Empty);
                 _out.WriteLine("Python logit for same tokens:");

@@ -28,7 +28,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         [Fact]
         public void IntDiag_LogitTrace()
         {
-            if (!File.Exists(ModelPath)) return;
+            if (!File.Exists(ModelPath))
+            {
+                return;
+            }
 
             var engine = CachedLlamaInferenceEngine.Load(ModelPath);
             using (engine)
@@ -58,7 +61,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
 
                 foreach (var (tok, pyLogit, note) in checks)
                 {
-                    if (tok >= logits.Length) continue;
+                    if (tok >= logits.Length)
+                    {
+                        continue;
+                    }
                     var cs = logits[tok];
                     var diff = pyLogit != 0f ? cs - pyLogit : float.NaN;
                     var mark = !float.IsNaN(diff) && MathF.Abs(diff) < 0.5f ? "✓" : "?";
@@ -72,11 +78,17 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
                 _out.WriteLine("VERDICT:");
                 var ratio = logits[3352] / 14.206f;
                 if (MathF.Abs(ratio - 1f) < 0.05f)
+                {
                     _out.WriteLine("  ✓ logit[3352] ≈ 14.206 → hidden state is CORRECT, LM head has token-mapping bug");
+                }
                 else if (logits[3352] > 10f)
+                {
                     _out.WriteLine("  ~ logit[3352] is high but off → hidden state slightly wrong OR LM head off");
+                }
                 else
+                {
                     _out.WriteLine("  ✗ logit[3352] << 14.206 → hidden state is WRONG (layer computation bug)");
+                }
             }
         }
     }
