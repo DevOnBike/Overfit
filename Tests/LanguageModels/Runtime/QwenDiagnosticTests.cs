@@ -18,8 +18,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             _out = output;
         }
 
-        private const string ModelPath = "d:/qwen/qwen.bin";
-        private const string TokenizerDir = "d:/qwen/";
+        private const string ModelPath = "c:/qwen3b/qwen.bin";
+        private const string TokenizerDir = "c:/qwen3b/";
 
         private bool TryLoad(out CachedLlamaInferenceEngine? engine, out QwenTokenizer? tok)
         {

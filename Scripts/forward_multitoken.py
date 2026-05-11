@@ -46,18 +46,22 @@ def forward_sequence(emb, layers, fg2, lm_head, tokens, head_dim, n_heads, n_kv_
         for l, (ln1g, wq, bq, wk, bk, wv, bv, wo, bo, ln2g, fg, fu, fd) in enumerate(layers):
             x_norm = rms_norm(x, ln1g, eps)
             attn_out = np.zeros(x.shape, dtype=np.float32)
-            for h in range(n_heads):
-                kvh = h % n_kv_heads
-                q_h = (wq[h].T @ x_norm + bq[h]).astype(np.float32)
+
+            # 1) K, V computed ONCE per KV head per position (outside Q-head loop)
+            group_size = n_heads // n_kv_heads
+            for kvh in range(n_kv_heads):
                 k_h = (wk[kvh].T @ x_norm + bk[kvh]).astype(np.float32)
                 v_h = (wv[kvh].T @ x_norm + bv[kvh]).astype(np.float32)
-                q_h = rope_rotate(q_h, pos, rope_theta, half)
                 k_h = rope_rotate(k_h, pos, rope_theta, half)
-                # Write to KV cache once per KV head (h == kvh is the canonical writer)
-                if h == kvh:
-                    kv_cache[l][kvh]['K'].append(k_h)
-                    kv_cache[l][kvh]['V'].append(v_h)
-                Ks = np.stack(kv_cache[l][kvh]['K'])   # [seqLen, headDim]
+                kv_cache[l][kvh]['K'].append(k_h)
+                kv_cache[l][kvh]['V'].append(v_h)
+
+            # 2) Q-head attention loop using grouped KV mapping (HF repeat_kv convention)
+            for h in range(n_heads):
+                kvh = h // group_size
+                q_h = (wq[h].T @ x_norm + bq[h]).astype(np.float32)
+                q_h = rope_rotate(q_h, pos, rope_theta, half)
+                Ks = np.stack(kv_cache[l][kvh]['K'])
                 Vs = np.stack(kv_cache[l][kvh]['V'])
                 scores = (Ks @ q_h).astype(np.float64) / np.sqrt(head_dim)
                 scores -= scores.max()

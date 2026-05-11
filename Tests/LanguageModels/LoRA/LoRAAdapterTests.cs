@@ -11,13 +11,13 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
     public sealed class LoRAAdapterTests
     {
         private readonly ITestOutputHelper _out;
-        
+
         public LoRAAdapterTests(ITestOutputHelper output)
         {
             _out = output;
         }
 
-        private const string ModelPath = "d:/qwen/qwen.bin";
+        private const string ModelPath = "c:/qwen3b/qwen.bin";
 
         // ── LoRAWeight unit tests (no model needed) ───────────────────────────
 

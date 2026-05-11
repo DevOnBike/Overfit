@@ -13,7 +13,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         private readonly ITestOutputHelper _out;
         public QwenIntermediateDiagTests(ITestOutputHelper output) => _out = output;
 
-        private const string ModelPath = "d:/qwen/qwen.bin";
+        private const string ModelPath = "c:/qwen3b/qwen.bin";
 
         /// <summary>
         /// Compares specific token logits between C# and Python forward_pass_reference.py.

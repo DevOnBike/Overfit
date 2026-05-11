@@ -34,7 +34,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         // Common filenames produced by the conversion scripts:
         private static readonly string[] CandidatePaths =
         [
-            "d:/qwen/qwen.bin",
+            "c:/qwen3b/qwen.bin",
         ];
 
         private static string? FindCheckpoint()
