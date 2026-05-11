@@ -48,7 +48,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         // ── Internal weight container per layer ───────────────────────────────
 
-        private sealed class LayerWeightBuffers
+        public sealed class LayerWeightBuffers
         {
             public required TensorStorage<float> AttnNormGamma;
             public required TensorStorage<float> AttnNormBeta;
@@ -106,6 +106,31 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         }
 
         // ── Public API ────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Factory used by GgufLlamaLoader to construct an engine from pre-built TensorStorages.
+        /// Exposes the otherwise-private constructor without coupling the loader to Runtime internals.
+        /// </summary>
+        public static CachedLlamaInferenceEngine CreateFromBuffers(
+            GPT1Config config,
+            Tensors.Core.TensorStorage<float> embedWeights,
+            Tensors.Core.TensorStorage<float> finalNormGamma,
+            Tensors.Core.TensorStorage<float> finalNormBeta,
+            Tensors.Core.TensorStorage<float> lmHead,
+            LayerWeightBuffers[] layers)
+        {
+            return new CachedLlamaInferenceEngine(
+                config, embedWeights, finalNormGamma, finalNormBeta, lmHead, layers);
+        }
+
+        /// <summary>
+        /// Loads a model directly from a GGUF file (no Python conversion needed).
+        /// Supports F32, F16, BF16 tensors. Quantized formats (Q4_K_M etc.) throw NotSupportedException.
+        /// </summary>
+        public static CachedLlamaInferenceEngine LoadGguf(string path)
+        {
+            return Loading.GgufLlamaLoader.Load(path);
+        }
 
         public GPT1Config Config => _config;
 
@@ -443,10 +468,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var hw = _stackWeights.Block(layer).Head(head);
             var span = hw.Wq;
             var sumSq = 0f;
-            foreach (var v in span)
-            {
-                sumSq += v * v;
-            }
+            foreach (var v in span) sumSq += v * v;
             return MathF.Sqrt(sumSq);
         }
 
@@ -464,9 +486,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // _layers[l].Wq[h] is the SAME TensorStorage as hw._wq (zero-copy).
             var span = _layers[layer].Wq[head].AsSpan();
             if (index >= 0 && index < span.Length)
-            {
                 span[index] = value;
-            }
         }
 
         /// <summary>Read Wq via _layers path (the path LoRA modifies).</summary>
@@ -474,10 +494,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             ThrowIfDisposed();
             var span = _layers[layer].Wq[head].AsSpan();
-            if (index < 0 || index >= span.Length)
-            {
-                return float.NaN;
-            }
+            if (index < 0 || index >= span.Length) return float.NaN;
             return span[index];
         }
 
@@ -538,17 +555,17 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
                 for (var h = 0; h < _config.NHeads; h++)
                 {
-                    refs[(l, LoRATargetModules.Query, h)] = layer.Wq[h];
+                    refs[(l, LoRATargetModules.Query,            h)] = layer.Wq[h];
                     refs[(l, LoRATargetModules.OutputProjection, h)] = layer.Wo[h];
                 }
 
                 for (var kv = 0; kv < _config.KvHeads; kv++)
                 {
-                    refs[(l, LoRATargetModules.Key, kv)] = layer.Wk[kv];
+                    refs[(l, LoRATargetModules.Key,   kv)] = layer.Wk[kv];
                     refs[(l, LoRATargetModules.Value, kv)] = layer.Wv[kv];
                 }
 
-                refs[(l, LoRATargetModules.FeedForwardUp, 0)] = layer.FfnUp;
+                refs[(l, LoRATargetModules.FeedForwardUp,   0)] = layer.FfnUp;
                 refs[(l, LoRATargetModules.FeedForwardDown, 0)] = layer.FfnDown;
             }
 

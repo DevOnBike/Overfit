@@ -103,9 +103,9 @@ namespace DevOnBike.Overfit.Tests
 
             var rng = new Random(42);
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            float windowLoss = 0f;
-            float initialLoss = 0f;
-            float finalValLoss = 0f;
+            var windowLoss = 0f;
+            var initialLoss = 0f;
+            var finalValLoss = 0f;
 
             // SDPA backward parallel — 12ms/op → ~3ms/op na 32 rdzeniach.
             // Flaga jest thread-safe volatile bool, bezpieczna do ustawienia przed pętlą.
@@ -348,8 +348,8 @@ namespace DevOnBike.Overfit.Tests
             var rng = new Random(42);
             var sw = System.Diagnostics.Stopwatch.StartNew();
 
-            float firstLoss = 0f;
-            float lastLoss = 0f;
+            var firstLoss = 0f;
+            var lastLoss = 0f;
 
             // Persistent graph: arena allocated once, Reset() per krok.
             // Eliminuje 50× alokację 2GB natywnej pamięci.
@@ -449,9 +449,9 @@ namespace DevOnBike.Overfit.Tests
             model.Train();
             var rng = new Random(42);
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            float initialLoss = 0f;
-            float finalValLoss = 0f;
-            float windowLoss = 0f;
+            var initialLoss = 0f;
+            var finalValLoss = 0f;
+            var windowLoss = 0f;
 
             using var persistentSmall = new ComputationGraph(100_000_000);
 
@@ -698,8 +698,8 @@ namespace DevOnBike.Overfit.Tests
             model.Train();
             var rng = new Random(42);
 
-            float firstLoss = 0f;
-            float lastLoss = 0f;
+            var firstLoss = 0f;
+            var lastLoss = 0f;
 
             using var graph = new ComputationGraph(80_000_000);
 
