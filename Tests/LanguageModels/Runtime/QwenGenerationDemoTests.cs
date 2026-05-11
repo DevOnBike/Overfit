@@ -17,7 +17,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         private const int MaxNewTokens = 200;
         private const int MaxCtx = 512;
 
-        private static readonly SamplingOptions GreedySampling = SamplingOptions.Greedy;
+        private static readonly SamplingOptions GreedySampling = SamplingOptions.GreedyWithPenalty(1.15f, 64);
 
         private static readonly SamplingOptions Temp03Sampling = new(
             strategy: SamplingStrategy.TopP,

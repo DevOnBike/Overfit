@@ -170,6 +170,40 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             return maxIndex;
         }
 
+        /// <summary>
+        /// Applies HuggingFace-style repetition penalty in-place.
+        /// For each token in <paramref name="recentTokens"/>:
+        ///   if logits[token] &lt; 0: logits[token] *= penalty
+        ///   else:                   logits[token] /= penalty
+        /// No-op when penalty &lt;= 1.0 or recentTokens is empty.
+        /// Duplicate tokens in recentTokens are applied multiple times intentionally —
+        /// repeated tokens get penalized more (matches transformers reference impl).
+        /// </summary>
+        public static void ApplyRepetitionPenalty(
+            Span<float> logits,
+            ReadOnlySpan<int> recentTokens,
+            float penalty)
+        {
+            if (penalty <= 1.0f || recentTokens.IsEmpty)
+            {
+                return;
+            }
+
+            for (var i = 0; i < recentTokens.Length; i++)
+            {
+                var token = recentTokens[i];
+
+                if (token < 0 || token >= logits.Length)
+                {
+                    continue;
+                }
+
+                var logit = logits[token];
+
+                logits[token] = logit < 0f ? logit * penalty : logit / penalty;
+            }
+        }
+
         private static void PrepareAllScores(
             ReadOnlySpan<float> logits,
             Span<int> indexScratch,
@@ -286,8 +320,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             for (var i = 0; i < sortedScores.Length; i++)
             {
-                sum += Math.Exp(
-                    (sortedScores[i] - maxScore) * inverseTemperature);
+                sum += Math.Exp((sortedScores[i] - maxScore) * inverseTemperature);
             }
 
             if (sum <= 0.0 ||

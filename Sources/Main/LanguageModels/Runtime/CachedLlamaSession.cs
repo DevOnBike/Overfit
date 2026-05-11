@@ -36,6 +36,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly float[] _scoreScratch;
         private readonly Random _random;
 
+        // Repetition penalty: track token history + scratch for penalized logits.
+        // Allocated lazily on first use to keep zero-cost when penalty disabled.
+        private readonly int[] _tokenHistory;
+        private int _historyCount;
+        private float[]? _logitsForSampling;
+
         private bool _disposed;
 
         internal CachedLlamaSession(
@@ -60,6 +66,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _indexScratch = new int[config.VocabSize];
             _scoreScratch = new float[config.VocabSize];
             _random = new Random();
+
+            _tokenHistory = new int[config.ContextLength];
+            _historyCount = 0;
         }
 
         public int Position => _cache.CurrentLength;
@@ -76,6 +85,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             ThrowIfDisposed();
             _cache.Reset();
+            _historyCount = 0;
 
             foreach (var token in promptTokens)
             {
@@ -110,8 +120,34 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     "Session is empty. Call Reset with at least one prompt token first.");
             }
 
-            var token = TokenSampler.Sample(
-                _logits, in sampling, _random, _indexScratch, _scoreScratch);
+            int token;
+            if (sampling.RepetitionPenalty > 1.0f && _historyCount > 0)
+            {
+                // Lazy-allocate penalty scratch (vocab_size floats)
+                _logitsForSampling ??= new float[_config.VocabSize];
+
+                _logits.AsSpan().CopyTo(_logitsForSampling);
+
+                var ctxSize = sampling.RepetitionPenaltyContextSize;
+                var windowSize = ctxSize > 0
+                    ? Math.Min(ctxSize, _historyCount)
+                    : _historyCount;
+                var historyStart = _historyCount - windowSize;
+
+                TokenSampler.ApplyRepetitionPenalty(
+                    _logitsForSampling.AsSpan(),
+                    _tokenHistory.AsSpan(historyStart, windowSize),
+                    sampling.RepetitionPenalty);
+
+                token = TokenSampler.Sample(
+                    _logitsForSampling, in sampling, _random, _indexScratch, _scoreScratch);
+            }
+            else
+            {
+                token = TokenSampler.Sample(
+                    _logits, in sampling, _random, _indexScratch, _scoreScratch);
+            }
+
             DecodeToken(token);
             return token;
         }
@@ -143,6 +179,18 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         private void DecodeToken(int tokenId)
         {
+            // Track for repetition penalty (circular if needed)
+            if (_historyCount < _tokenHistory.Length)
+            {
+                _tokenHistory[_historyCount++] = tokenId;
+            }
+            else
+            {
+                // Shift left, keep newest at end (rare path, only if ctx exceeded)
+                Array.Copy(_tokenHistory, 1, _tokenHistory, 0, _tokenHistory.Length - 1);
+                _tokenHistory[^1] = tokenId;
+            }
+
             // Token embedding lookup: row tokenId of embed_weights [vocab × dModel]
             var embedSpan = _embedWeights.Span;
             var row = embedSpan.Slice(tokenId * _config.DModel, _config.DModel);
