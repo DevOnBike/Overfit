@@ -94,10 +94,10 @@ namespace DevOnBike.Overfit.Onnx.Operators
                     $"(normalised: [{norm0},{norm1}]). Only GlobalAveragePool pattern is supported.");
             }
 
-            int batch = inputShape[0];
-            int channels = inputShape[1];
-            int h = inputShape[2];
-            int w = inputShape[3];
+            var batch = inputShape[0];
+            var channels = inputShape[1];
+            var h = inputShape[2];
+            var w = inputShape[3];
 
             // ── Output shape ──────────────────────────────────────────────────
             // keepdims=1 → [N, C, 1, 1]  (ONNX spec)

@@ -88,9 +88,9 @@ namespace DevOnBike.Overfit.Anomalies.Training
             var rng       = new Random(_cfg.Seed);
             var sw        = System.Diagnostics.Stopwatch.StartNew();
 
-            float initialLoss  = 0f;
-            float finalValLoss = 0f;
-            float windowLoss   = 0f;
+            var initialLoss  = 0f;
+            var finalValLoss = 0f;
+            var windowLoss   = 0f;
 
             // Parallel SDPA backward — -27% czasu backward przy dużych modelach.
             ExperimentalLanguageModelOptions.EnableParallelAttentionBackward = true;

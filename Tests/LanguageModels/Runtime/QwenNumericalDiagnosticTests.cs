@@ -1,4 +1,7 @@
-// Copyright (c) 2026 DevOnBike. AGPLv3.
+// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
@@ -25,7 +28,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
                 return;
             }
             var engine = CachedLlamaInferenceEngine.Load(ModelPath);
-            QwenTokenizer? tok = File.Exists(Path.Combine(TokenizerDir, "tokenizer.json"))
+            var tok = File.Exists(Path.Combine(TokenizerDir, "tokenizer.json"))
                 ? QwenTokenizer.Load(TokenizerDir) : null;
             using (engine)
             {

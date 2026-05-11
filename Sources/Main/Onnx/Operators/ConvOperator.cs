@@ -78,10 +78,10 @@ namespace DevOnBike.Overfit.Onnx.Operators
                     $"Conv weight '{weightTensor.Name}' rank should be 4, got {weightTensor.Dims.Length}.");
             }
 
-            int outC = (int)weightTensor.Dims[0];
-            int inC = (int)weightTensor.Dims[1];
-            int kH = (int)weightTensor.Dims[2];
-            int kW = (int)weightTensor.Dims[3];
+            var outC = (int)weightTensor.Dims[0];
+            var inC = (int)weightTensor.Dims[1];
+            var kH = (int)weightTensor.Dims[2];
+            var kW = (int)weightTensor.Dims[3];
 
             if (kH != kW)
             {
@@ -122,8 +122,8 @@ namespace DevOnBike.Overfit.Onnx.Operators
             }
 
             // General output size with padding and stride
-            int outH = (h + 2 * padding - kH) / stride + 1;
-            int outW = (w + 2 * padding - kW) / stride + 1;
+            var outH = (h + 2 * padding - kH) / stride + 1;
+            var outW = (w + 2 * padding - kW) / stride + 1;
             shapes.SetShape(node.Outputs[0], [inputShape[0], outC, outH, outW]);
 
             return layer;

@@ -377,7 +377,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             var n = 0;
 
             // Printable ASCII: assign directly
-            for (int b = 0; b < 256; b++)
+            for (var b = 0; b < 256; b++)
             {
                 if ((b >= '!' && b <= '~') || (b >= '¡' && b <= '¬') || (b >= '®' && b <= 'ÿ'))
                 {
@@ -390,7 +390,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             }
 
             // Remaining bytes: assign to Unicode starting at U+0100
-            for (int b = 0; b < 256; b++)
+            for (var b = 0; b < 256; b++)
             {
                 if (map[b] == (char)0)
                 {

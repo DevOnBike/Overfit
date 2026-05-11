@@ -224,7 +224,7 @@ namespace DevOnBike.Overfit.Kernels
             int outH,
             int outW)
         {
-            Span<float> pairMax = inputW <= 128
+            var pairMax = inputW <= 128
                 ? stackalloc float[inputW]
                 : new float[inputW];
 
@@ -268,7 +268,7 @@ namespace DevOnBike.Overfit.Kernels
             int outW,
             int batchOffset)
         {
-            Span<float> pairMax = inputW <= 128
+            var pairMax = inputW <= 128
                 ? stackalloc float[inputW]
                 : new float[inputW];
 
@@ -291,8 +291,8 @@ namespace DevOnBike.Overfit.Kernels
 
                     for (var ow = 0; ow < outW; ow++)
                     {
-                        float a = pairMax[ow * 2];
-                        float b = pairMax[ow * 2 + 1];
+                        var a = pairMax[ow * 2];
+                        var b = pairMax[ow * 2 + 1];
 
                         float maxVal;
                         int maxIdx;

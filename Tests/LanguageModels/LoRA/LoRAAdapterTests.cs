@@ -1,4 +1,7 @@
-// Copyright (c) 2026 DevOnBike. AGPLv3.
+// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.LoRA;
@@ -72,7 +75,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
             b[0] = 2f; b[3] = 3f;
 
             float[] x = { 5f, 7f, 0f, 0f };
-            float[] result = new float[2];
+            var result = new float[2];
             w.ForwardAdd(x, result, scale: 1f);
 
             _out.WriteLine($"result = [{result[0]}, {result[1]}]");
@@ -230,7 +233,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
             b[2] = 0.3f; b[3] = 0.4f;  // B[1,:] = [0.3, 0.4]
 
             float[] x = { 1f, 1f, 0f, 0f };
-            float[] result = new float[2];
+            var result = new float[2];
             w.ForwardAdd(x, result, scale: 1f);
 
             _out.WriteLine($"ForwardAdd result = [{result[0]:F4}, {result[1]:F4}]");
