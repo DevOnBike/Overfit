@@ -123,10 +123,14 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     ReadBF16ToF32(destination[..(int)elementCount]);
                     return;
 
+                case GgmlType.Q8_0:
+                    ReadQ8_0ToF32(destination[..(int)elementCount]);
+                    return;
+
                 default:
                     throw new NotSupportedException(
-                        $"Tensor type {info.Type} is not supported in Etap A. " +
-                        $"Etap A supports F32, F16, and BF16. Quantized formats will be added in Etap B.");
+                        $"Tensor type {info.Type} is not supported yet. " +
+                        $"Supported: F32, F16, BF16, Q8_0. Q4_K_M coming next.");
             }
         }
 
@@ -250,6 +254,54 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     dst[i + k] = BitConverter.UInt32BitsToSingle(u32);
                 }
                 i += take;
+            }
+        }
+
+        /// <summary>
+        /// Dequantize Q8_0 tensor block-by-block.
+        ///
+        /// Q8_0 layout (34 bytes per block, 32 elements):
+        ///   [2 bytes FP16 scale]
+        ///   [32 signed int8 quants]
+        /// Value: dst[i] = scale * (int8)quants[i]
+        ///
+        /// Element count MUST be divisible by 32 (true for all real model weights).
+        /// </summary>
+        private void ReadQ8_0ToF32(Span<float> dst)
+        {
+            const int BlockElements = 32;
+            const int BlockBytes = 2 + 32;  // FP16 scale + 32 int8 quants
+
+            if (dst.Length % BlockElements != 0)
+            {
+                throw new InvalidDataException(
+                    $"Q8_0 tensor element count {dst.Length} is not divisible by {BlockElements}.");
+            }
+
+            var nBlocks = dst.Length / BlockElements;
+            var buf = new byte[BlockBytes];
+            var dstPos = 0;
+
+            for (var b = 0; b < nBlocks; b++)
+            {
+                // Read one block atomically
+                var read = 0;
+                while (read < BlockBytes)
+                {
+                    var n = _stream.Read(buf, read, BlockBytes - read);
+                    if (n == 0) { throw new EndOfStreamException("Unexpected EOF reading Q8_0 block."); }
+                    read += n;
+                }
+
+                // Dequantize
+                var scaleU16 = BinaryPrimitives.ReadUInt16LittleEndian(buf.AsSpan(0, 2));
+                var scale = (float)BitConverter.UInt16BitsToHalf(scaleU16);
+                for (var i = 0; i < BlockElements; i++)
+                {
+                    var q = (sbyte)buf[2 + i];
+                    dst[dstPos + i] = scale * q;
+                }
+                dstPos += BlockElements;
             }
         }
     }
