@@ -1,5 +1,6 @@
 // Copyright (c) 2026 DevOnBike. AGPLv3.
 
+using System.Buffers;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
@@ -33,13 +34,13 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var arch = reader.GetMeta<string>("general.architecture", "qwen2");
 
             // ─── Config from metadata ─────────────────────────────────────
-            var nLayers   = reader.GetMeta($"{arch}.block_count",           24);
-            var dModel    = reader.GetMeta($"{arch}.embedding_length",      896);
-            var nHeads    = reader.GetMeta($"{arch}.attention.head_count",  14);
-            var nKvHeads  = reader.GetMeta($"{arch}.attention.head_count_kv", nHeads);
-            var dFF       = reader.GetMeta($"{arch}.feed_forward_length",   4864);
-            var ctxLen    = reader.GetMeta($"{arch}.context_length",        8192);
-            var ropeTheta = reader.GetMeta($"{arch}.rope.freq_base",        10000.0f);
+            var nLayers = reader.GetMeta($"{arch}.block_count", 24);
+            var dModel = reader.GetMeta($"{arch}.embedding_length", 896);
+            var nHeads = reader.GetMeta($"{arch}.attention.head_count", 14);
+            var nKvHeads = reader.GetMeta($"{arch}.attention.head_count_kv", nHeads);
+            var dFF = reader.GetMeta($"{arch}.feed_forward_length", 4864);
+            var ctxLen = reader.GetMeta($"{arch}.context_length", 8192);
+            var ropeTheta = reader.GetMeta($"{arch}.rope.freq_base", 10000.0f);
 
             // Cap context length for memory sanity (32k+ models work but consume RAM).
             if (ctxLen > 8192) { ctxLen = 8192; }
@@ -85,64 +86,84 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
             // ─── Layer weights ────────────────────────────────────────────
             var layers = new LayerWeightBuffers[nLayers];
-            // Scratch for full attn_q/k/v/o weight matrices (read once per layer, split into heads)
-            var qFull = new float[(long)dModel * nHeads * headDim];
-            var kFull = new float[(long)dModel * nKvHeads * headDim];
-            var vFull = new float[(long)dModel * nKvHeads * headDim];
-            var oFull = new float[(long)nHeads * headDim * dModel];
-            var qBiasFull = new float[nHeads * headDim];
-            var kBiasFull = new float[nKvHeads * headDim];
-            var vBiasFull = new float[nKvHeads * headDim];
-
-            for (var l = 0; l < nLayers; l++)
+            // Scratch for full attn_q/k/v/o weight matrices.
+            // Pool them so they're returned for reuse rather than waiting for Gen2 GC.
+            var qFullElems = checked((int)((long)dModel * nHeads * headDim));
+            var kFullElems = checked((int)((long)dModel * nKvHeads * headDim));
+            var oFullElems = checked((int)((long)nHeads * headDim * dModel));
+            var qFull = ArrayPool<float>.Shared.Rent(qFullElems);
+            var kFull = ArrayPool<float>.Shared.Rent(kFullElems);
+            var vFull = ArrayPool<float>.Shared.Rent(kFullElems);
+            var oFull = ArrayPool<float>.Shared.Rent(oFullElems);
+            var qBiasFull = ArrayPool<float>.Shared.Rent(nHeads * headDim);
+            var kBiasFull = ArrayPool<float>.Shared.Rent(nKvHeads * headDim);
+            var vBiasFull = ArrayPool<float>.Shared.Rent(nKvHeads * headDim);
+            try
             {
-                // Attention LayerNorm gamma (RMSNorm, no beta)
-                var attnNormGamma = AllocAndLoad(reader, $"blk.{l}.attn_norm.weight", dModel);
-                var attnNormBeta = new TensorStorage<float>(0);
-
-                // Q, K, V, O full matrices
-                LoadTensor(reader, $"blk.{l}.attn_q.weight", qFull);
-                LoadTensor(reader, $"blk.{l}.attn_k.weight", kFull);
-                LoadTensor(reader, $"blk.{l}.attn_v.weight", vFull);
-                LoadTensor(reader, $"blk.{l}.attn_output.weight", oFull);
-
-                // Biases (optional — Qwen has them, Llama doesn't)
-                LoadTensorOrZeros(reader, $"blk.{l}.attn_q.bias", qBiasFull);
-                LoadTensorOrZeros(reader, $"blk.{l}.attn_k.bias", kBiasFull);
-                LoadTensorOrZeros(reader, $"blk.{l}.attn_v.bias", vBiasFull);
-
-                // Split into per-head storages (with transposition)
-                var wq = SplitQuery(qFull, nHeads, dModel, headDim);
-                var bq = SplitBias(qBiasFull, nHeads, headDim);
-                var wk = SplitKeyValue(kFull, nKvHeads, dModel, headDim);
-                var bk = SplitBias(kBiasFull, nKvHeads, headDim);
-                var wv = SplitKeyValue(vFull, nKvHeads, dModel, headDim);
-                var bv = SplitBias(vBiasFull, nKvHeads, headDim);
-                var wo = SplitOutput(oFull, nHeads, dModel, headDim);
-                var bo = new TensorStorage<float>[nHeads];
-                for (var h = 0; h < nHeads; h++) { bo[h] = new TensorStorage<float>(dModel); }
-
-                // FFN
-                var ffnNormGamma = AllocAndLoad(reader, $"blk.{l}.ffn_norm.weight", dModel);
-                var ffnNormBeta = new TensorStorage<float>(0);
-                var ffnGate = AllocAndLoadTransposed(reader, $"blk.{l}.ffn_gate.weight", dModel, dFF);
-                var ffnUp = AllocAndLoadTransposed(reader, $"blk.{l}.ffn_up.weight", dModel, dFF);
-                var ffnDown = AllocAndLoadTransposed(reader, $"blk.{l}.ffn_down.weight", dFF, dModel);
-
-                layers[l] = new LayerWeightBuffers
+                for (var l = 0; l < nLayers; l++)
                 {
-                    AttnNormGamma = attnNormGamma,
-                    AttnNormBeta = attnNormBeta,
-                    Wq = wq, Bq = bq,
-                    Wk = wk, Bk = bk,
-                    Wv = wv, Bv = bv,
-                    Wo = wo, Bo = bo,
-                    FfnNormGamma = ffnNormGamma,
-                    FfnNormBeta = ffnNormBeta,
-                    FfnGate = ffnGate,
-                    FfnUp = ffnUp,
-                    FfnDown = ffnDown,
-                };
+                    // Attention LayerNorm gamma (RMSNorm, no beta)
+                    var attnNormGamma = AllocAndLoad(reader, $"blk.{l}.attn_norm.weight", dModel);
+                    var attnNormBeta = new TensorStorage<float>(0);
+
+                    // Q, K, V, O full matrices
+                    LoadTensor(reader, $"blk.{l}.attn_q.weight", qFull.AsSpan(0, qFullElems));
+                    LoadTensor(reader, $"blk.{l}.attn_k.weight", kFull.AsSpan(0, kFullElems));
+                    LoadTensor(reader, $"blk.{l}.attn_v.weight", vFull.AsSpan(0, kFullElems));
+                    LoadTensor(reader, $"blk.{l}.attn_output.weight", oFull.AsSpan(0, oFullElems));
+
+                    // Biases (optional — Qwen has them, Llama doesn't)
+                    LoadTensorOrZeros(reader, $"blk.{l}.attn_q.bias", qBiasFull.AsSpan(0, nHeads * headDim));
+                    LoadTensorOrZeros(reader, $"blk.{l}.attn_k.bias", kBiasFull.AsSpan(0, nKvHeads * headDim));
+                    LoadTensorOrZeros(reader, $"blk.{l}.attn_v.bias", vBiasFull.AsSpan(0, nKvHeads * headDim));
+
+                    // Split into per-head storages (with transposition)
+                    var wq = SplitQuery(qFull, nHeads, dModel, headDim);
+                    var bq = SplitBias(qBiasFull, nHeads, headDim);
+                    var wk = SplitKeyValue(kFull, nKvHeads, dModel, headDim);
+                    var bk = SplitBias(kBiasFull, nKvHeads, headDim);
+                    var wv = SplitKeyValue(vFull, nKvHeads, dModel, headDim);
+                    var bv = SplitBias(vBiasFull, nKvHeads, headDim);
+                    var wo = SplitOutput(oFull, nHeads, dModel, headDim);
+                    var bo = new TensorStorage<float>[nHeads];
+                    for (var h = 0; h < nHeads; h++) { bo[h] = new TensorStorage<float>(dModel); }
+
+                    // FFN
+                    var ffnNormGamma = AllocAndLoad(reader, $"blk.{l}.ffn_norm.weight", dModel);
+                    var ffnNormBeta = new TensorStorage<float>(0);
+                    var ffnGate = AllocAndLoadTransposed(reader, $"blk.{l}.ffn_gate.weight", dModel, dFF);
+                    var ffnUp = AllocAndLoadTransposed(reader, $"blk.{l}.ffn_up.weight", dModel, dFF);
+                    var ffnDown = AllocAndLoadTransposed(reader, $"blk.{l}.ffn_down.weight", dFF, dModel);
+
+                    layers[l] = new LayerWeightBuffers
+                    {
+                        AttnNormGamma = attnNormGamma,
+                        AttnNormBeta = attnNormBeta,
+                        Wq = wq,
+                        Bq = bq,
+                        Wk = wk,
+                        Bk = bk,
+                        Wv = wv,
+                        Bv = bv,
+                        Wo = wo,
+                        Bo = bo,
+                        FfnNormGamma = ffnNormGamma,
+                        FfnNormBeta = ffnNormBeta,
+                        FfnGate = ffnGate,
+                        FfnUp = ffnUp,
+                        FfnDown = ffnDown,
+                    };
+                }
+            }
+            finally
+            {
+                ArrayPool<float>.Shared.Return(qFull);
+                ArrayPool<float>.Shared.Return(kFull);
+                ArrayPool<float>.Shared.Return(vFull);
+                ArrayPool<float>.Shared.Return(oFull);
+                ArrayPool<float>.Shared.Return(qBiasFull);
+                ArrayPool<float>.Shared.Return(kBiasFull);
+                ArrayPool<float>.Shared.Return(vBiasFull);
             }
 
             // ─── Final norm + LM head ─────────────────────────────────────
@@ -168,15 +189,23 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
             else
             {
-                // Read output.weight and transpose
-                var outputRaw = new float[(long)vocab * dModel];
-                LoadTensor(reader, "output.weight", outputRaw);
-                for (var d = 0; d < dModel; d++)
+                // Read output.weight and transpose — use pool for the ~1.2 GB transient at 3B
+                var outElems = checked((int)((long)vocab * dModel));
+                var outputRaw = ArrayPool<float>.Shared.Rent(outElems);
+                try
                 {
-                    for (var t = 0; t < vocab; t++)
+                    LoadTensor(reader, "output.weight", outputRaw.AsSpan(0, outElems));
+                    for (var d = 0; d < dModel; d++)
                     {
-                        lmHeadSpan[d * vocab + t] = outputRaw[t * dModel + d];
+                        for (var t = 0; t < vocab; t++)
+                        {
+                            lmHeadSpan[d * vocab + t] = outputRaw[t * dModel + d];
+                        }
                     }
+                }
+                finally
+                {
+                    ArrayPool<float>.Shared.Return(outputRaw);
                 }
             }
 
@@ -217,19 +246,27 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 throw new InvalidDataException($"Required tensor '{name}' missing from GGUF.");
             }
 
-            var raw = new float[(long)inDim * outDim];
-            reader.LoadTensorAsF32(info, raw);
-
-            var storage = new TensorStorage<float>(checked((int)((long)inDim * outDim)));
-            var dst = storage.AsSpan();
-            for (var i = 0; i < inDim; i++)
+            var elementCount = checked((int)((long)inDim * outDim));
+            var raw = ArrayPool<float>.Shared.Rent(elementCount);
+            try
             {
-                for (var o = 0; o < outDim; o++)
+                reader.LoadTensorAsF32(info, raw.AsSpan(0, elementCount));
+
+                var storage = new TensorStorage<float>(elementCount);
+                var dst = storage.AsSpan();
+                for (var i = 0; i < inDim; i++)
                 {
-                    dst[i * outDim + o] = raw[o * inDim + i];
+                    for (var o = 0; o < outDim; o++)
+                    {
+                        dst[i * outDim + o] = raw[o * inDim + i];
+                    }
                 }
+                return storage;
             }
-            return storage;
+            finally
+            {
+                ArrayPool<float>.Shared.Return(raw);
+            }
         }
 
         private static void LoadTensor(GgufReader reader, string name, Span<float> dst)

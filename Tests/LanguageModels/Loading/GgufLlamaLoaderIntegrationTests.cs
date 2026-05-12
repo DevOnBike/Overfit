@@ -45,30 +45,53 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
                 return;
             }
 
-            // Load both engines from different sources
-            using var engineGguf = CachedLlamaInferenceEngine.LoadGguf(GgufModelPath);
-            using var engineBin = CachedLlamaInferenceEngine.Load(BinaryModelPath);
-
-            // Verify config matches (same model, just different loader paths)
-            Assert.Equal(engineBin.Config.NLayers, engineGguf.Config.NLayers);
-            Assert.Equal(engineBin.Config.DModel, engineGguf.Config.DModel);
-            Assert.Equal(engineBin.Config.NHeads, engineGguf.Config.NHeads);
-            Assert.Equal(engineBin.Config.NKvHeads, engineGguf.Config.NKvHeads);
-            Assert.Equal(engineBin.Config.VocabSize, engineGguf.Config.VocabSize);
-            Assert.Equal(engineBin.Config.DFF, engineGguf.Config.DFF);
-
-            // Forward the same prompt through both engines
-            using var sessionGguf = engineGguf.CreateSession(64);
-            using var sessionBin = engineBin.CreateSession(64);
-
-            // Known-good 3-token prompt from session work
+            // Known-good 3-token prompt
             int[] prompt = { 151643, 151644, 198 };
 
-            sessionGguf.Reset(prompt);
-            sessionBin.Reset(prompt);
+            // Load engines SEQUENTIALLY to keep peak RAM low.
+            // For 3B FP32, each engine is ~13 GB; holding both at once requires ~30 GB+.
+            // By disposing the first before loading the second, peak stays around ~14 GB.
 
-            var logitsGguf = sessionGguf.LastLogits.ToArray();
-            var logitsBin = sessionBin.LastLogits.ToArray();
+            float[] logitsGguf;
+            int nLayersGguf, dModelGguf, nHeadsGguf, nKvHeadsGguf, vocabGguf, dFFGguf;
+
+            // ─── Phase 1: GGUF ────────────────────────────────────────────
+            using (var engineGguf = CachedLlamaInferenceEngine.LoadGguf(GgufModelPath))
+            {
+                nLayersGguf = engineGguf.Config.NLayers;
+                dModelGguf = engineGguf.Config.DModel;
+                nHeadsGguf = engineGguf.Config.NHeads;
+                nKvHeadsGguf = engineGguf.Config.NKvHeads;
+                vocabGguf = engineGguf.Config.VocabSize;
+                dFFGguf = engineGguf.Config.DFF;
+
+                using var sessionGguf = engineGguf.CreateSession(64);
+                sessionGguf.Reset(prompt);
+                logitsGguf = sessionGguf.LastLogits.ToArray();
+            }
+
+            // Force GC between engines so RAM headroom is available for the binary load
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            float[] logitsBin;
+
+            // ─── Phase 2: Binary ──────────────────────────────────────────
+            using (var engineBin = CachedLlamaInferenceEngine.Load(BinaryModelPath))
+            {
+                // Verify config matches (same model, just different loader paths)
+                Assert.Equal(engineBin.Config.NLayers, nLayersGguf);
+                Assert.Equal(engineBin.Config.DModel, dModelGguf);
+                Assert.Equal(engineBin.Config.NHeads, nHeadsGguf);
+                Assert.Equal(engineBin.Config.NKvHeads, nKvHeadsGguf);
+                Assert.Equal(engineBin.Config.VocabSize, vocabGguf);
+                Assert.Equal(engineBin.Config.DFF, dFFGguf);
+
+                using var sessionBin = engineBin.CreateSession(64);
+                sessionBin.Reset(prompt);
+                logitsBin = sessionBin.LastLogits.ToArray();
+            }
 
             Assert.Equal(logitsBin.Length, logitsGguf.Length);
 
