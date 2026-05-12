@@ -391,29 +391,27 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     }
                 }
 
-                // Convert TensorStorage → float[] for BlockWeights constructor.
-                // This happens once at load time, not during inference.
-                static float[] Arr(TensorStorage<float> s) => s.AsSpan().ToArray();
-
+                // Zero-copy: pass TensorStorage references directly (no float[] duplication).
+                // This avoids doubling the FFN/attention weights (~10 GB for 3B FP32).
                 blockWeights[l] = new BlockWeights(
                     heads: heads,
                     kvHeads: kvHeads,
-                    ln1Gamma: Arr(layer.AttnNormGamma),
-                    ln1Beta: null,  // RMSNorm — no beta
+                    ln1Gamma: layer.AttnNormGamma,
+                    ln1Beta: null,                  // RMSNorm — no beta
                     attentionBias: null,
-                    ln2Gamma: Arr(layer.FfnNormGamma),
-                    ln2Beta: null,  // RMSNorm — no beta
-                    ffnW1: Arr(layer.FfnUp),
+                    ln2Gamma: layer.FfnNormGamma,
+                    ln2Beta: null,                  // RMSNorm — no beta
+                    ffnW1: layer.FfnUp,
                     ffnB1: null,
-                    ffnW2: Arr(layer.FfnDown),
+                    ffnW2: layer.FfnDown,
                     ffnB2: null,
-                    ffnGate: Arr(layer.FfnGate));
+                    ffnGate: layer.FfnGate);
             }
 
             return new StackWeights(
                 blockWeights,
                 _finalNormGamma,
-                new TensorStorage<float>(0),  // RMSNorm — no final norm beta
+                TensorStorage<float>.Unpooled(0),  // RMSNorm — no final norm beta
                 _lmHead);
         }
 
@@ -555,17 +553,17 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
                 for (var h = 0; h < _config.NHeads; h++)
                 {
-                    refs[(l, LoRATargetModules.Query,            h)] = layer.Wq[h];
+                    refs[(l, LoRATargetModules.Query, h)] = layer.Wq[h];
                     refs[(l, LoRATargetModules.OutputProjection, h)] = layer.Wo[h];
                 }
 
                 for (var kv = 0; kv < _config.KvHeads; kv++)
                 {
-                    refs[(l, LoRATargetModules.Key,   kv)] = layer.Wk[kv];
+                    refs[(l, LoRATargetModules.Key, kv)] = layer.Wk[kv];
                     refs[(l, LoRATargetModules.Value, kv)] = layer.Wv[kv];
                 }
 
-                refs[(l, LoRATargetModules.FeedForwardUp,   0)] = layer.FfnUp;
+                refs[(l, LoRATargetModules.FeedForwardUp, 0)] = layer.FfnUp;
                 refs[(l, LoRATargetModules.FeedForwardDown, 0)] = layer.FfnDown;
             }
 

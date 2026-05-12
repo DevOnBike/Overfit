@@ -1,8 +1,10 @@
-// Copyright (c) 2026 DevOnBike. AGPLv3.
+// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Buffers;
 using DevOnBike.Overfit.DeepLearning;
-using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.Tensors.Core;
 
@@ -104,7 +106,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 {
                     // Attention LayerNorm gamma (RMSNorm, no beta)
                     var attnNormGamma = AllocAndLoad(reader, $"blk.{l}.attn_norm.weight", dModel);
-                    var attnNormBeta = new TensorStorage<float>(0);
+                    var attnNormBeta = TensorStorage<float>.Unpooled(0);
 
                     // Q, K, V, O full matrices
                     LoadTensor(reader, $"blk.{l}.attn_q.weight", qFull.AsSpan(0, qFullElems));
@@ -126,11 +128,11 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     var bv = SplitBias(vBiasFull, nKvHeads, headDim);
                     var wo = SplitOutput(oFull, nHeads, dModel, headDim);
                     var bo = new TensorStorage<float>[nHeads];
-                    for (var h = 0; h < nHeads; h++) { bo[h] = new TensorStorage<float>(dModel); }
+                    for (var h = 0; h < nHeads; h++) { bo[h] = TensorStorage<float>.Unpooled(dModel); }
 
                     // FFN
                     var ffnNormGamma = AllocAndLoad(reader, $"blk.{l}.ffn_norm.weight", dModel);
-                    var ffnNormBeta = new TensorStorage<float>(0);
+                    var ffnNormBeta = TensorStorage<float>.Unpooled(0);
                     var ffnGate = AllocAndLoadTransposed(reader, $"blk.{l}.ffn_gate.weight", dModel, dFF);
                     var ffnUp = AllocAndLoadTransposed(reader, $"blk.{l}.ffn_up.weight", dModel, dFF);
                     var ffnDown = AllocAndLoadTransposed(reader, $"blk.{l}.ffn_down.weight", dFF, dModel);
@@ -168,11 +170,11 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
             // ─── Final norm + LM head ─────────────────────────────────────
             var finalNormGamma = AllocAndLoad(reader, "output_norm.weight", dModel);
-            var finalNormBeta = new TensorStorage<float>(0);
+            var finalNormBeta = TensorStorage<float>.Unpooled(0);
 
             // LM head: tied embeddings use token_embd transposed; untied uses output.weight transposed
             // Kernel expects [dModel, vocab] (input-major), but file stores [vocab, dModel].
-            var lmHead = new TensorStorage<float>(checked((int)((long)vocab * dModel)));
+            var lmHead = TensorStorage<float>.Unpooled(checked((int)((long)vocab * dModel)));
             var lmHeadSpan = lmHead.AsSpan();
             var embSpan = embedWeights.AsSpan();
 
@@ -226,7 +228,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 throw new InvalidDataException(
                     $"Tensor '{name}' has {info.ElementCount} elements, expected {elementCount}.");
             }
-            var storage = new TensorStorage<float>(checked((int)elementCount));
+            var storage = TensorStorage<float>.Unpooled(checked((int)elementCount));
             reader.LoadTensorAsF32(info, storage.AsSpan());
             return storage;
         }
@@ -252,7 +254,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             {
                 reader.LoadTensorAsF32(info, raw.AsSpan(0, elementCount));
 
-                var storage = new TensorStorage<float>(elementCount);
+                var storage = TensorStorage<float>.Unpooled(elementCount);
                 var dst = storage.AsSpan();
                 for (var i = 0; i < inDim; i++)
                 {
@@ -301,7 +303,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var wq = new TensorStorage<float>[nHeads];
             for (var h = 0; h < nHeads; h++)
             {
-                wq[h] = new TensorStorage<float>(checked((int)((long)dModel * headDim)));
+                wq[h] = TensorStorage<float>.Unpooled(checked((int)((long)dModel * headDim)));
                 var dst = wq[h].AsSpan();
                 for (var i = 0; i < dModel; i++)
                 {
@@ -320,7 +322,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var wkv = new TensorStorage<float>[nKvHeads];
             for (var kv = 0; kv < nKvHeads; kv++)
             {
-                wkv[kv] = new TensorStorage<float>(checked((int)((long)dModel * headDim)));
+                wkv[kv] = TensorStorage<float>.Unpooled(checked((int)((long)dModel * headDim)));
                 var dst = wkv[kv].AsSpan();
                 for (var i = 0; i < dModel; i++)
                 {
@@ -345,7 +347,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var nHeadsHeadDim = nHeads * headDim;
             for (var h = 0; h < nHeads; h++)
             {
-                wo[h] = new TensorStorage<float>(checked((int)((long)headDim * dModel)));
+                wo[h] = TensorStorage<float>.Unpooled(checked((int)((long)headDim * dModel)));
                 var dst = wo[h].AsSpan();
                 for (var i = 0; i < headDim; i++)
                 {
@@ -363,7 +365,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var bias = new TensorStorage<float>[nHeads];
             for (var h = 0; h < nHeads; h++)
             {
-                bias[h] = new TensorStorage<float>(headDim);
+                bias[h] = TensorStorage<float>.Unpooled(headDim);
                 var dst = bias[h].AsSpan();
                 for (var j = 0; j < headDim; j++)
                 {
