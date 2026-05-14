@@ -49,15 +49,8 @@ namespace DevOnBike.Overfit.Kernels
             int inputSize,
             int outputSize)
         {
-            if (inputSize <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(inputSize));
-            }
-
-            if (outputSize <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(outputSize));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(inputSize);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(outputSize);
 
             if (input.Length % inputSize != 0)
             {

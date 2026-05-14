@@ -37,15 +37,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int dFF,
             FeedForwardActivation activation = FeedForwardActivation.GeLU)
         {
-            if (dModel <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(dModel));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(dModel);
 
-            if (dFF <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(dFF));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(dFF);
 
             DModel = dModel;
             DFF = dFF;

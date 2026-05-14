@@ -10,7 +10,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 {
     /// <summary>
     /// Reads a GGUF file: header, metadata KVs, tensor info, and tensor data.
-    /// Supports F32 and F16 tensors (Etap A). Quantized formats throw NotSupportedException.
+    /// Supports F32, F16, BF16, Q8_0, Q4_K, Q6_K. Other quantized formats throw NotSupportedException.
     ///
     /// Usage:
     ///   using var reader = new GgufReader("model.gguf");
@@ -130,10 +130,18 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     ReadQ8_0ToF32(destination[..(int)elementCount]);
                     return;
 
+                case GgmlType.Q4_K:
+                    ReadQ4_KToF32(destination[..(int)elementCount]);
+                    return;
+
+                case GgmlType.Q6_K:
+                    ReadQ6_KToF32(destination[..(int)elementCount]);
+                    return;
+
                 default:
                     throw new NotSupportedException(
                         $"Tensor type {info.Type} is not supported yet. " +
-                        $"Supported: F32, F16, BF16, Q8_0. Q4_K_M coming next.");
+                        $"Supported: F32, F16, BF16, Q8_0, Q4_K, Q6_K.");
             }
         }
 
@@ -257,6 +265,58 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     dst[i + k] = BitConverter.UInt32BitsToSingle(u32);
                 }
                 i += take;
+            }
+        }
+
+        /// <summary>
+        /// Dequantize a Q4_K tensor block-by-block (144 bytes per 256 elements).
+        /// Decode math lives in <see cref="GgmlDequant.DecodeQ4_KBlock"/>; this method
+        /// only handles streaming. Scratch buffer is stack-allocated — zero managed
+        /// allocations regardless of tensor size.
+        /// </summary>
+        private void ReadQ4_KToF32(Span<float> dst)
+        {
+            const int BlockElements = GgmlDequant.SuperBlockElements;
+            const int BlockBytes = GgmlDequant.Q4_K_BlockBytes;
+
+            if (dst.Length % BlockElements != 0)
+            {
+                throw new InvalidDataException(
+                    $"Q4_K tensor element count {dst.Length} is not divisible by {BlockElements}.");
+            }
+
+            var nBlocks = dst.Length / BlockElements;
+            Span<byte> buf = stackalloc byte[BlockBytes];
+
+            for (var b = 0; b < nBlocks; b++)
+            {
+                _stream.ReadExactly(buf);
+                GgmlDequant.DecodeQ4_KBlock(buf, dst.Slice(b * BlockElements, BlockElements));
+            }
+        }
+
+        /// <summary>
+        /// Dequantize a Q6_K tensor block-by-block (210 bytes per 256 elements).
+        /// Used in Q4_K_M mixed-quant files for token_embd / output tensors.
+        /// </summary>
+        private void ReadQ6_KToF32(Span<float> dst)
+        {
+            const int BlockElements = GgmlDequant.SuperBlockElements;
+            const int BlockBytes = GgmlDequant.Q6_K_BlockBytes;
+
+            if (dst.Length % BlockElements != 0)
+            {
+                throw new InvalidDataException(
+                    $"Q6_K tensor element count {dst.Length} is not divisible by {BlockElements}.");
+            }
+
+            var nBlocks = dst.Length / BlockElements;
+            Span<byte> buf = stackalloc byte[BlockBytes];
+
+            for (var b = 0; b < nBlocks; b++)
+            {
+                _stream.ReadExactly(buf);
+                GgmlDequant.DecodeQ6_KBlock(buf, dst.Slice(b * BlockElements, BlockElements));
             }
         }
 

@@ -24,7 +24,7 @@ namespace DevOnBike.Overfit.Evolutionary.Mutation
     ///     </para>
     ///     <para>
     ///         The spare-sample cache is <see cref="ThreadStaticAttribute">[ThreadStatic]</see>,
-    ///         which makes the operator safe to invoke concurrently from multiple threads —
+    ///         which makes the operator safe to invoke concurrently from multiple threads â€”
     ///         each thread maintains its own half-pair independently. There is no cross-thread
     ///         synchronization; the operator remains stateless at the instance level.
     ///     </para>
@@ -62,10 +62,7 @@ namespace DevOnBike.Overfit.Evolutionary.Mutation
                 throw new ArgumentOutOfRangeException(nameof(mutationProbability));
             }
 
-            if (sigma < 0f)
-            {
-                throw new ArgumentOutOfRangeException(nameof(sigma));
-            }
+            ArgumentOutOfRangeException.ThrowIfLessThan(sigma, 0f);
 
             if (minWeight > maxWeight)
             {

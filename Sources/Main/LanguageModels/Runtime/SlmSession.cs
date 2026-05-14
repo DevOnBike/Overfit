@@ -41,10 +41,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             _model = model ?? throw new ArgumentNullException(nameof(model));
 
-            if (maxContextLength <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(maxContextLength));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxContextLength);
 
             if (maxContextLength > model.Config.ContextLength)
             {

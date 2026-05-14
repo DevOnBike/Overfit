@@ -38,10 +38,7 @@ namespace DevOnBike.Overfit.Evolutionary.Storage
             ReadOnlySpan<float> descriptorMin,
             ReadOnlySpan<float> descriptorMax)
         {
-            if (parameterCount <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(parameterCount));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(parameterCount);
 
             if (binsPerDimension.Length == 0)
             {
@@ -601,10 +598,7 @@ namespace DevOnBike.Overfit.Evolutionary.Storage
 
         private static uint NextUInt32Below(ref uint state, uint maxExclusive)
         {
-            if (maxExclusive == 0u)
-            {
-                throw new ArgumentOutOfRangeException(nameof(maxExclusive));
-            }
+            ArgumentOutOfRangeException.ThrowIfEqual(maxExclusive, 0u);
 
             var product = (ulong)NextUInt32(ref state) * maxExclusive;
             var low = (uint)product;

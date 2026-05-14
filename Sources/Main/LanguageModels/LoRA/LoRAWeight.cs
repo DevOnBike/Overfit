@@ -32,18 +32,9 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
 
         public LoRAWeight(int inDim, int outDim, int rank, Random? rng = null)
         {
-            if (inDim <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(inDim));
-            }
-            if (outDim <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(outDim));
-            }
-            if (rank <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(rank));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(inDim);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(outDim);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rank);
 
             InDim = inDim;
             OutDim = outDim;

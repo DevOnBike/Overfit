@@ -27,15 +27,9 @@ namespace DevOnBike.Overfit.Evolutionary.Storage
 
         public EvolutionWorkspace(int populationSize, int genomeSize, bool clearMemory = false)
         {
-            if (populationSize <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(populationSize));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(populationSize);
 
-            if (genomeSize <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(genomeSize));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(genomeSize);
 
             PopulationSize = populationSize;
             GenomeSize = genomeSize;

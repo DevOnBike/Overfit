@@ -43,10 +43,7 @@ namespace DevOnBike.Overfit.Demo.Unity.Server
 
         public UnityTcpServer(int port, int swarmSize)
         {
-            if (swarmSize <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(swarmSize));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(swarmSize);
 
             _listener = new TcpListener(IPAddress.Loopback, port);
             _swarmSize = swarmSize;

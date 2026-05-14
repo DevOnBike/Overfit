@@ -52,20 +52,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int headDimension,
             int maxSequenceLength)
         {
-            if (dModel <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(dModel));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(dModel);
 
-            if (headDimension <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(headDimension));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(headDimension);
 
-            if (maxSequenceLength <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(maxSequenceLength));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxSequenceLength);
 
             DModel = dModel;
             HeadDimension = headDimension;

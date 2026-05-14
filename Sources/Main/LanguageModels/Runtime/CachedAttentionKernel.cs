@@ -148,15 +148,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int sequenceLength,
             int headDimension)
         {
-            if (sequenceLength < 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(sequenceLength));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegative(sequenceLength);
 
-            if (headDimension <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(headDimension));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(headDimension);
 
             if (query.Length < headDimension)
             {

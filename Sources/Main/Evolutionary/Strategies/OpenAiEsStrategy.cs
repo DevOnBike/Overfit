@@ -593,10 +593,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
         private int NextNoiseOffset(int sliceLength)
         {
-            if (sliceLength <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(sliceLength));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(sliceLength);
 
             var exclusiveUpper = _noiseTable.Length - sliceLength + 1;
             if (exclusiveUpper <= 0)
@@ -625,10 +622,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
         private uint NextUInt32Below(uint maxExclusive)
         {
-            if (maxExclusive == 0u)
-            {
-                throw new ArgumentOutOfRangeException(nameof(maxExclusive));
-            }
+            ArgumentOutOfRangeException.ThrowIfEqual(maxExclusive, 0u);
 
             var product = (ulong)NextUInt32() * maxExclusive;
             var low = (uint)product;

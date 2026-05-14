@@ -118,17 +118,19 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         }
 
         [Fact]
-        public void LoadTensorAsF32_ThrowsOnQuantizedType()
+        public void LoadTensorAsF32_ThrowsOnUnsupportedQuantizedType()
         {
-            // Fake Q4_K tensor (zero bytes, just for type check)
-            using var ms = BuildGgufWithTensorBytes("test_q4k", new ulong[] { 256 }, GgmlType.Q4_K, new byte[144]);
+            // Q4_K and Q6_K are now supported; use Q5_K (still unsupported) to keep
+            // the assertion meaningful. Body bytes are irrelevant — dispatch throws
+            // before reading any tensor data.
+            using var ms = BuildGgufWithTensorBytes("test_q5k", new ulong[] { 256 }, GgmlType.Q5_K, new byte[176]);
             using var reader = new GgufReader(ms);
 
-            var info = reader.Tensors["test_q4k"];
+            var info = reader.Tensors["test_q5k"];
             var dst = new float[256];
 
             var ex = Assert.Throws<NotSupportedException>(() => reader.LoadTensorAsF32(info, dst));
-            Assert.Contains("Q4_K", ex.Message);
+            Assert.Contains("Q5_K", ex.Message);
         }
 
         // ─── Helpers to build minimal in-memory GGUF files ──────────────────

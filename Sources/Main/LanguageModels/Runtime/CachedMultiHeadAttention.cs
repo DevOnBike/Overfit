@@ -46,24 +46,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int maxSequenceLength,
             int kvHeadCount = 0)
         {
-            if (dModel <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(dModel));
-            }
-            if (headCount <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(headCount));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(dModel);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(headCount);
             if (dModel % headCount != 0)
             {
                 throw new ArgumentException(
                 $"dModel ({dModel}) must be divisible by headCount ({headCount}).",
                 nameof(dModel));
             }
-            if (maxSequenceLength <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(maxSequenceLength));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxSequenceLength);
 
             var resolvedKvHeads = kvHeadCount > 0 ? kvHeadCount : headCount;
             if (headCount % resolvedKvHeads != 0)

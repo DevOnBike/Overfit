@@ -261,10 +261,7 @@ namespace DevOnBike.Overfit.DeepLearning
                 throw new ArgumentNullException(nameof(promptTokenIds));
             }
 
-            if (maxNewTokens < 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(maxNewTokens));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegative(maxNewTokens);
 
             var tokens = new List<int>(promptTokenIds);
 

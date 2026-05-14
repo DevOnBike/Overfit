@@ -124,10 +124,7 @@ namespace DevOnBike.Overfit.Evolutionary.Storage
         {
             ArgumentNullException.ThrowIfNull(rng);
 
-            if (sliceLength <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(sliceLength));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(sliceLength);
 
             if (sliceLength > _buffer.Length)
             {

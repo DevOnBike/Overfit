@@ -331,15 +331,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int inputSize,
             int outputSize)
         {
-            if (inputSize <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(inputSize));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(inputSize);
 
-            if (outputSize <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(outputSize));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(outputSize);
 
             if (input.Length < inputSize)
             {
@@ -366,30 +360,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int outputOffset,
             int outputCount)
         {
-            if (inputSize <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(inputSize));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(inputSize);
 
-            if (fullOutputSize <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(fullOutputSize));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(fullOutputSize);
 
-            if (outputOffset < 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(outputOffset));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegative(outputOffset);
 
-            if (outputCount <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(outputCount));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(outputCount);
 
-            if (outputOffset + outputCount > fullOutputSize)
-            {
-                throw new ArgumentOutOfRangeException(nameof(outputCount));
-            }
+            ArgumentOutOfRangeException.ThrowIfLessThan(fullOutputSize, outputOffset + outputCount);
 
             if (input.Length < inputSize)
             {

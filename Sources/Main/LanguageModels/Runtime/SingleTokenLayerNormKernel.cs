@@ -127,10 +127,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Span<float> output,
             int size)
         {
-            if (size <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(size));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(size);
 
             if (residual.Length < size)
             {
@@ -158,10 +155,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ReadOnlySpan<float> update,
             int size)
         {
-            if (size <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(size));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(size);
 
             if (destination.Length < size)
             {
@@ -187,15 +181,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int size,
             float epsilon)
         {
-            if (size <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(size));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(size);
 
-            if (epsilon <= 0f)
-            {
-                throw new ArgumentOutOfRangeException(nameof(epsilon));
-            }
+            ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(epsilon, 0f);
 
             if (input.Length < size)
             {

@@ -54,15 +54,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             FeedForwardActivation feedForwardActivation = FeedForwardActivation.GeLU,
             int kvHeadCount = 0)
         {
-            if (dModel <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(dModel));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(dModel);
 
-            if (headCount <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(headCount));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(headCount);
 
             if (dModel % headCount != 0)
             {
@@ -71,20 +65,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     nameof(dModel));
             }
 
-            if (dFF <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(dFF));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(dFF);
 
-            if (maxSequenceLength <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(maxSequenceLength));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxSequenceLength);
 
-            if (layerNormEpsilon <= 0f)
-            {
-                throw new ArgumentOutOfRangeException(nameof(layerNormEpsilon));
-            }
+            ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(layerNormEpsilon, 0f);
 
             DModel = dModel;
             HeadCount = headCount;

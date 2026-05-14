@@ -67,20 +67,11 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
             float initialMax = 0.3f,
             float randomInjectionProbability = 0.05f)
         {
-            if (parameterCount <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(parameterCount));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(parameterCount);
 
-            if (batchSize <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(batchSize));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(batchSize);
 
-            if (mutationSigma <= 0f)
-            {
-                throw new ArgumentOutOfRangeException(nameof(mutationSigma));
-            }
+            ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(mutationSigma, 0f);
 
             if (initialMin > initialMax)
             {

@@ -61,20 +61,11 @@ namespace DevOnBike.Overfit.Ops
         {
             ThrowIfDisposed();
 
-            if (workerCount <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(workerCount));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(workerCount);
 
-            if (colLength <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(colLength));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(colLength);
 
-            if (partialWeightGradientLength <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(partialWeightGradientLength));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(partialWeightGradientLength);
 
             if (_workerCount == workerCount &&
                 _colLength == colLength &&

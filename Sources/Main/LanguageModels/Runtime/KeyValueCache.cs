@@ -97,10 +97,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             ThrowIfDisposed();
 
-            if (tokenCount < 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(tokenCount));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegative(tokenCount);
 
             if (CurrentLength + tokenCount > MaxLength)
             {
@@ -238,15 +235,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 throw new ArgumentOutOfRangeException(nameof(headIndex));
             }
 
-            if (fromPosition < 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(fromPosition));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegative(fromPosition);
 
-            if (length < 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(length));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegative(length);
 
             if (fromPosition + length > CurrentLength)
             {

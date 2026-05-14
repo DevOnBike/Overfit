@@ -231,15 +231,9 @@ namespace DevOnBike.Overfit.Tensors.Core
                 throw new InvalidOperationException("SliceContiguous1D requires a contiguous tensor span.");
             }
 
-            if (offsetIndex < 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(offsetIndex));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegative(offsetIndex);
 
-            if (sliceLength < 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(sliceLength));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegative(sliceLength);
 
             if (offsetIndex + sliceLength > Size)
             {
