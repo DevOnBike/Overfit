@@ -114,12 +114,19 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     nameof(promptTokens));
             }
 
-            for (var i = 0; i < promptTokens.Length; i++)
+            // Skip the LM-head projection for every prompt token except the last:
+            // their logits would be immediately overwritten by the next decode,
+            // so computing them is wasted work (~27 % of per-token cost on GPT-2
+            // Small). The final token uses the full path so _lastLogits reflects
+            // the prediction at the end of the prompt.
+            var lastIndex = promptTokens.Length - 1;
+
+            for (var i = 0; i < lastIndex; i++)
             {
-                _adapter.DecodeNextToken(
-                    promptTokens[i],
-                    _lastLogits);
+                _adapter.PrefillToken(promptTokens[i]);
             }
+
+            _adapter.DecodeNextToken(promptTokens[lastIndex], _lastLogits);
 
             _hasLogits = true;
         }

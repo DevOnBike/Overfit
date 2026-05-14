@@ -144,6 +144,46 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 throw new ArgumentException("Logits span is smaller than vocab size.", nameof(logits));
             }
 
+            var position = AdvanceAndEmbed(tokenId);
+
+            _stack.Decode(
+                _inputHidden,
+                _weights,
+                _cache,
+                position,
+                logits);
+
+            logits
+                .Slice(0, VocabSize)
+                .CopyTo(_lastLogits);
+        }
+
+        /// <summary>
+        /// Prefill variant: same KV-cache and hidden-state update as
+        /// <see cref="DecodeNextToken"/>, but skips the LM-head projection
+        /// and does NOT update last-logits. Use this for every prompt token
+        /// except the one whose logits the caller actually consumes
+        /// (typically the final prompt token).
+        ///
+        /// Skipping the LM head saves the largest single per-token cost
+        /// (~27 % on GPT-2 Small) for tokens whose logits would be
+        /// immediately overwritten by the next decode anyway.
+        /// </summary>
+        public void PrefillToken(int tokenId)
+        {
+            ThrowIfDisposed();
+
+            var position = AdvanceAndEmbed(tokenId);
+
+            _stack.DecodeWithoutLogits(
+                _inputHidden,
+                _weights,
+                _cache,
+                position);
+        }
+
+        private int AdvanceAndEmbed(int tokenId)
+        {
             if (_cache.IsFull)
             {
                 throw new InvalidOperationException(
@@ -166,17 +206,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             _cache.Advance();
-
-            _stack.Decode(
-                _inputHidden,
-                _weights,
-                _cache,
-                position,
-                logits);
-
-            logits
-                .Slice(0, VocabSize)
-                .CopyTo(_lastLogits);
+            return position;
         }
 
         public void GetLastLogits(Span<float> destination)

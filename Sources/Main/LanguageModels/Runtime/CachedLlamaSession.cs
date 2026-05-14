@@ -101,7 +101,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             ThrowIfDisposed();
 
-            foreach (var token in promptTokens)
+            if (promptTokens.IsEmpty) { return; }
+
+            // Skip the LM-head projection for every prompt token except the last:
+            // their logits would be overwritten anyway. The final token runs the
+            // full decode so _logits reflects the end-of-prompt prediction.
+            var lastIndex = promptTokens.Length - 1;
+
+            for (var i = 0; i < promptTokens.Length; i++)
             {
                 if (_cache.IsFull)
                 {
@@ -110,7 +117,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         $"(current position {Position}).");
                 }
 
-                DecodeToken(token);
+                if (i < lastIndex)
+                {
+                    DecodeTokenWithoutLogits(promptTokens[i]);
+                }
+                else
+                {
+                    DecodeToken(promptTokens[i]);
+                }
             }
         }
 
@@ -257,6 +271,37 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         private void DecodeToken(int tokenId)
         {
+            var position = EmbedAndAdvance(tokenId);
+
+            _stack.Decode(
+                _hidden,
+                _weights,
+                _cache,
+                position,
+                _logits,
+                _rope);
+        }
+
+        /// <summary>
+        /// Prefill variant — same KV-cache + hidden-state update as
+        /// <see cref="DecodeToken"/>, but skips the LM-head projection
+        /// and does NOT touch <c>_logits</c>. Used by <see cref="Prefill"/>
+        /// for every prompt token except the last.
+        /// </summary>
+        private void DecodeTokenWithoutLogits(int tokenId)
+        {
+            var position = EmbedAndAdvance(tokenId);
+
+            _stack.DecodeWithoutLogits(
+                _hidden,
+                _weights,
+                _cache,
+                position,
+                _rope);
+        }
+
+        private int EmbedAndAdvance(int tokenId)
+        {
             // Token embedding lookup: row tokenId of embed_weights [vocab × dModel]
             var embedSpan = _embedWeights.Span;
             var row = embedSpan.Slice(tokenId * _config.DModel, _config.DModel);
@@ -266,14 +311,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             var position = _cache.CurrentLength;
             _cache.Advance();
-
-            _stack.Decode(
-                _hidden,
-                _weights,
-                _cache,
-                position,
-                _logits,
-                _rope);
+            return position;
         }
 
         private void ThrowIfDisposed()

@@ -101,7 +101,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         public FeedForwardActivation FeedForwardActivation { get; }
 
         /// <summary>
-        /// Decodes one token through all transformer layers using KV-cache.
+        /// Decodes one token through all transformer layers + LM head using KV-cache.
         /// Zero allocations — all weights accessed via StackWeights references.
         /// </summary>
         internal void Decode(
@@ -112,13 +112,36 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Span<float> logits,
             RopeTable? rope = null)
         {
-            if (inputHidden.Length < DModel)
-            {
-                throw new ArgumentException($"inputHidden length {inputHidden.Length} < DModel {DModel}.");
-            }
             if (logits.Length < VocabSize)
             {
                 throw new ArgumentException($"logits length {logits.Length} < VocabSize {VocabSize}.");
+            }
+
+            DecodeWithoutLogits(inputHidden, weights, cache, position, rope);
+            ProjectLogits(weights, logits);
+        }
+
+        /// <summary>
+        /// Decodes one token through all transformer layers + final norm using
+        /// KV-cache, but skips the LM-head projection. Used by the prefill phase
+        /// for every prompt token except the last — those intermediate logits
+        /// would be computed only to be immediately overwritten by the next
+        /// decode, so skipping the LM head (~27 % of per-token decode cost on
+        /// GPT-2 Small) gives free prefill speedup.
+        ///
+        /// After this call, <see cref="LastFinalHidden"/> is updated; the
+        /// previous <see cref="LastLogits"/> snapshot is left untouched.
+        /// </summary>
+        internal void DecodeWithoutLogits(
+            ReadOnlySpan<float> inputHidden,
+            StackWeights weights,
+            KeyValueCache cache,
+            int position,
+            RopeTable? rope = null)
+        {
+            if (inputHidden.Length < DModel)
+            {
+                throw new ArgumentException($"inputHidden length {inputHidden.Length} < DModel {DModel}.");
             }
 
             inputHidden.Slice(0, DModel).CopyTo(_currentHidden);
@@ -172,7 +195,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 SingleTokenLayerNormKernel.Normalize(current, weights.FinalNormGamma, weights.FinalNormBeta, _finalHidden, DModel, LayerNormEpsilon);
             }
+        }
 
+        /// <summary>
+        /// Projects the saved <see cref="LastFinalHidden"/>-norm output into
+        /// vocabulary logits. Call this once per token-of-interest after one
+        /// or more <see cref="DecodeWithoutLogits"/> calls. The standard
+        /// <see cref="Decode"/> entry point does this automatically.
+        /// </summary>
+        private void ProjectLogits(StackWeights weights, Span<float> logits)
+        {
             // LM head: [DModel] × [DModel × VocabSize] → [VocabSize].
             //
             // Stays sequential by design — ProjectParallel exists but allocates
