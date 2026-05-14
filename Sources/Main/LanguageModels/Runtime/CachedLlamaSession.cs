@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Rope;
@@ -36,12 +37,6 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly float[] _scoreScratch;
         private readonly Random _random;
 
-        // Repetition penalty: track token history + scratch for penalized logits.
-        // Allocated lazily on first use to keep zero-cost when penalty disabled.
-        private readonly int[] _tokenHistory;
-        private int _historyCount;
-        private float[]? _logitsForSampling;
-
         private bool _disposed;
 
         internal CachedLlamaSession(
@@ -66,9 +61,6 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _indexScratch = new int[config.VocabSize];
             _scoreScratch = new float[config.VocabSize];
             _random = new Random();
-
-            _tokenHistory = new int[config.ContextLength];
-            _historyCount = 0;
         }
 
         public int Position => _cache.CurrentLength;
@@ -85,7 +77,6 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             ThrowIfDisposed();
             _cache.Reset();
-            _historyCount = 0;
 
             foreach (var token in promptTokens)
             {
@@ -120,36 +111,88 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     "Session is empty. Call Reset with at least one prompt token first.");
             }
 
-            int token;
-            if (sampling.RepetitionPenalty > 1.0f && _historyCount > 0)
-            {
-                // Lazy-allocate penalty scratch (vocab_size floats)
-                _logitsForSampling ??= new float[_config.VocabSize];
-
-                _logits.AsSpan().CopyTo(_logitsForSampling);
-
-                var ctxSize = sampling.RepetitionPenaltyContextSize;
-                var windowSize = ctxSize > 0
-                    ? Math.Min(ctxSize, _historyCount)
-                    : _historyCount;
-                var historyStart = _historyCount - windowSize;
-
-                TokenSampler.ApplyRepetitionPenalty(
-                    _logitsForSampling.AsSpan(),
-                    _tokenHistory.AsSpan(historyStart, windowSize),
-                    sampling.RepetitionPenalty);
-
-                token = TokenSampler.Sample(
-                    _logitsForSampling, in sampling, _random, _indexScratch, _scoreScratch);
-            }
-            else
-            {
-                token = TokenSampler.Sample(
-                    _logits, in sampling, _random, _indexScratch, _scoreScratch);
-            }
-
+            var token = TokenSampler.Sample(
+                _logits, in sampling, _random, _indexScratch, _scoreScratch);
             DecodeToken(token);
             return token;
+        }
+
+        /// <summary>
+        /// Streams generated tokens one-by-one as an async sequence.
+        /// Yields each newly-generated token ID; the stream terminates when
+        /// any of these conditions is met:
+        ///   - <paramref name="options"/>.MaxTokens reached
+        ///   - A token from <paramref name="options"/>.StopTokens is sampled
+        ///     (the stop token IS yielded before termination)
+        ///   - The KV cache fills (ContextLength reached)
+        ///   - <paramref name="cancellationToken"/> is signaled
+        ///
+        /// Each iteration yields control via <see cref="Task.Yield"/> so UI
+        /// threads can render token-by-token without blocking.
+        /// </summary>
+        /// <example>
+        /// <code>
+        /// var opts = StreamingOptions.WithStopTokens(
+        ///     maxTokens: 256, QwenTokenizer.ImEnd, QwenTokenizer.EndOfText);
+        ///
+        /// await foreach (var token in session.StreamGenerate(opts, ct))
+        /// {
+        ///     Console.Write(tokenizer.DecodeToken(token));
+        /// }
+        /// </code>
+        /// </example>
+        public async IAsyncEnumerable<int> StreamGenerate(
+            StreamingOptions options,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+
+            if (Position == 0)
+            {
+                throw new InvalidOperationException(
+                    "Session is empty. Call Reset with at least one prompt token first.");
+            }
+
+            var sampling = options.Sampling;
+
+            for (var i = 0; i < options.MaxTokens; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (_cache.IsFull)
+                {
+                    // KV cache exhausted — graceful stop
+                    yield break;
+                }
+
+                var token = TokenSampler.Sample(
+                    _logits, in sampling, _random, _indexScratch, _scoreScratch);
+
+                DecodeToken(token);
+                yield return token;
+
+                // Check stop tokens AFTER yielding so consumer sees the terminator.
+                if (ContainsStopToken(options.StopTokens, token))
+                {
+                    yield break;
+                }
+
+                // Hand control back to the scheduler so the consumer (and any
+                // UI thread) can process the yielded token before we compute
+                // the next one. For server scenarios this is essentially free;
+                // for UI scenarios it's what makes streaming "feel real".
+                await Task.Yield();
+            }
+        }
+
+        private static bool ContainsStopToken(IReadOnlyList<int> stops, int token)
+        {
+            // Avoid LINQ in main code path; small list, linear scan is fine.
+            for (var i = 0; i < stops.Count; i++)
+            {
+                if (stops[i] == token) { return true; }
+            }
+            return false;
         }
 
         /// <summary>Exposes last logits for custom sampling.</summary>
@@ -179,18 +222,6 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         private void DecodeToken(int tokenId)
         {
-            // Track for repetition penalty (circular if needed)
-            if (_historyCount < _tokenHistory.Length)
-            {
-                _tokenHistory[_historyCount++] = tokenId;
-            }
-            else
-            {
-                // Shift left, keep newest at end (rare path, only if ctx exceeded)
-                Array.Copy(_tokenHistory, 1, _tokenHistory, 0, _tokenHistory.Length - 1);
-                _tokenHistory[^1] = tokenId;
-            }
-
             // Token embedding lookup: row tokenId of embed_weights [vocab × dModel]
             var embedSpan = _embedWeights.Span;
             var row = embedSpan.Slice(tokenId * _config.DModel, _config.DModel);
