@@ -18,6 +18,7 @@ namespace DevOnBike.Overfit.Tensors.Core
         private T[]? _data;
         private int _disposed;
         private void* _nativePtr;
+        private readonly bool _pooled;
 
         internal NativeBufferManaged<T>? _buffer;
         internal readonly bool _isBorrowedMemory;
@@ -35,6 +36,7 @@ namespace DevOnBike.Overfit.Tensors.Core
 
             Length = length;
             _data = OverfitPool<T>.Shared.Rent(length);
+            _pooled = true;
 
             if (clearMemory)
             {
@@ -45,6 +47,46 @@ namespace DevOnBike.Overfit.Tensors.Core
                 length,
                 Unsafe.SizeOf<T>(),
                 borrowed: false);
+        }
+
+        /// <summary>
+        /// Private ctor used by <see cref="Unpooled"/>. Wraps a caller-owned, exact-sized
+        /// array. The array is allocated via <c>new T[length]</c> and will be released to
+        /// the GC when this storage is disposed — never returned to <see cref="OverfitPool{T}"/>.
+        /// </summary>
+        private TensorStorage(T[] data)
+        {
+            ArgumentNullException.ThrowIfNull(data);
+
+            Length = data.Length;
+            _data = data;
+            _pooled = false;
+
+            OverfitTelemetry.RecordTensorStorageCreated(
+                Length,
+                Unsafe.SizeOf<T>(),
+                borrowed: false);
+        }
+
+        /// <summary>
+        /// Creates a TensorStorage backed by a GC-managed, exact-sized array (no pool).
+        /// Use this for LONG-LIVED storage (e.g. model weights) where pool retention would
+        /// waste memory: the pool keeps rented arrays alive in its buckets even after
+        /// Dispose, and rounds requests up to the next power-of-2 bucket size.
+        ///
+        /// For inference scratch buffers (short-lived, frequently reused), keep using the
+        /// pooled constructor.
+        /// </summary>
+        public static TensorStorage<T> Unpooled(int length, bool clearMemory = false)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(length);
+
+            var arr = new T[length];
+            // new T[] is zero-initialized by the runtime for primitive types, so clearMemory is a no-op.
+            // Parameter kept for API symmetry with the pooled constructor.
+            _ = clearMemory;
+
+            return new TensorStorage<T>(arr);
         }
 
         /// <summary>
@@ -109,7 +151,8 @@ namespace DevOnBike.Overfit.Tensors.Core
             {
                 OverfitTelemetry.RecordTensorStorageDisposed(_isBorrowedMemory);
 
-                if (!_isBorrowedMemory && _data != null)
+                // Only return to pool if rented from pool. Unpooled storage is GC-managed.
+                if (!_isBorrowedMemory && _pooled && _data != null)
                 {
                     OverfitPool<T>.Shared.Return(_data);
                 }

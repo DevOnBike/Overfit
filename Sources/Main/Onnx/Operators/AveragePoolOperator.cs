@@ -92,16 +92,16 @@ namespace DevOnBike.Overfit.Onnx.Operators
                     $"AveragePool: expected 4-D [N,C,H,W], got rank {inputShape.Length}.");
             }
 
-            int batch    = inputShape[0];
-            int channels = inputShape[1];
-            int h        = inputShape[2];
-            int w        = inputShape[3];
-            int k        = (int)kernelShape[0];
-            int stride   = (int)strides[0];
-            int padding  = pads.Length >= 1 ? (int)pads[0] : 0;
+            var batch    = inputShape[0];
+            var channels = inputShape[1];
+            var h        = inputShape[2];
+            var w        = inputShape[3];
+            var k        = (int)kernelShape[0];
+            var stride   = (int)strides[0];
+            var padding  = pads.Length >= 1 ? (int)pads[0] : 0;
 
-            int outH = (h + 2 * padding - k) / stride + 1;
-            int outW = (w + 2 * padding - k) / stride + 1;
+            var outH = (h + 2 * padding - k) / stride + 1;
+            var outW = (w + 2 * padding - k) / stride + 1;
             shapes.SetShape(node.Outputs[0], [batch, channels, outH, outW]);
 
             return new AveragePool2DLayer(channels, h, w, k, padding, stride, countIncludePad);

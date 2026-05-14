@@ -1,5 +1,7 @@
-// Copyright (c) 2026 DevOnBike. AGPLv3.
-// Layer 0 intermediate value comparison with Python forward_from_bin.py
+// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
@@ -13,7 +15,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
     {
         private readonly ITestOutputHelper _out;
         public QwenLayer0DiagTests(ITestOutputHelper output) => _out = output;
-        private const string ModelPath = "d:/qwen/qwen.bin";
+        private const string ModelPath = "c:/qwen3b/qwen.bin";
 
         /// <summary>
         /// Compare intermediate values after layer 0 with Python forward_from_bin.py.

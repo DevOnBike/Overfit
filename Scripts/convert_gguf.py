@@ -365,7 +365,13 @@ def convert(tensors: dict, meta: dict, out_path: str):
     vocab_size = meta.get("tokenizer.ggml.tokens",             [None] * 151936)
     if isinstance(vocab_size, list):
         vocab_size = len(vocab_size)
-    tie        = int(meta.get("general.tie_embeddings", True))
+    # Auto-detect tied embeddings: if lm_head.weight exists in tensors → untied
+    # GGUF doesn't have a reliable metadata key for this across architectures.
+    # Qwen2.5-0.5B has no lm_head.weight (tied), Qwen2.5-3B has it (untied).
+    if "lm_head.weight" in tensors:
+        tie = 0  # untied — separate lm_head matrix
+    else:
+        tie = 1  # tied — use embed_tokens as lm_head
 
     head_dim = d_model // n_heads
 

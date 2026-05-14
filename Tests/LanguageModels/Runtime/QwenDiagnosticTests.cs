@@ -1,4 +1,7 @@
-// Copyright (c) 2026 DevOnBike. AGPLv3.
+// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
@@ -18,8 +21,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             _out = output;
         }
 
-        private const string ModelPath = "d:/qwen/qwen.bin";
-        private const string TokenizerDir = "d:/qwen/";
+        private const string ModelPath = "c:/qwen3b/qwen.bin";
+        private const string TokenizerDir = "c:/qwen3b/";
 
         private bool TryLoad(out CachedLlamaInferenceEngine? engine, out QwenTokenizer? tok)
         {

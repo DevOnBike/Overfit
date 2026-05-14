@@ -7,7 +7,6 @@ using DevOnBike.Overfit.Anomalies.Alerting;
 using DevOnBike.Overfit.Anomalies.Alerting.Contracts;
 using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
-using DevOnBike.Overfit.Anomalies.Training;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using GptTrainingConfig = DevOnBike.Overfit.Anomalies.Training.GptTrainingConfig;

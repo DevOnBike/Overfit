@@ -3,7 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Linq;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 
@@ -34,7 +33,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         // Common filenames produced by the conversion scripts:
         private static readonly string[] CandidatePaths =
         [
-            "d:/qwen/qwen.bin",
+            "c:/qwen3b/qwen.bin",
         ];
 
         private static string? FindCheckpoint()

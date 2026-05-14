@@ -122,22 +122,22 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             get
             {
-                long tokEmb = (long)VocabSize * DModel;
-                long posEmb = (long)ContextLength * DModel;
+                var tokEmb = (long)VocabSize * DModel;
+                var posEmb = (long)ContextLength * DModel;
 
-                long layerNorm1 = 2L * DModel;
+                var layerNorm1 = 2L * DModel;
 
                 // MHA now has Q/K/V/output weights plus Q/K/V/output biases:
                 // Wq/Wk/Wv/Wo = 4 * DModel * DModel
                 // Bq/Bk/Bv/Bo = 4 * DModel
-                long attention = 4L * DModel * DModel + 4L * DModel;
+                var attention = 4L * DModel * DModel + 4L * DModel;
 
-                long layerNorm2 = 2L * DModel;
-                long feedForward = 2L * DModel * DFF + DFF + DModel;
+                var layerNorm2 = 2L * DModel;
+                var feedForward = 2L * DModel * DFF + DFF + DModel;
 
-                long perBlock = layerNorm1 + attention + layerNorm2 + feedForward;
-                long finalLN = 2L * DModel;
-                long lmHead = TieWeights ? 0 : (long)VocabSize * DModel;
+                var perBlock = layerNorm1 + attention + layerNorm2 + feedForward;
+                var finalLN = 2L * DModel;
+                var lmHead = TieWeights ? 0 : (long)VocabSize * DModel;
 
                 return tokEmb + posEmb + NLayers * perBlock + finalLN + lmHead;
             }

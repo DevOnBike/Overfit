@@ -1,4 +1,7 @@
-// Copyright (c) 2026 DevOnBike. AGPLv3.
+// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
@@ -12,12 +15,13 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
     {
         private readonly ITestOutputHelper _out;
         public QwenLayer0CompareTests(ITestOutputHelper output) => _out = output;
-        private const string ModelPath = "d:/qwen/qwen.bin";
-        private const string TokenizerDir = "d:/qwen/";
+        private const string ModelPath = "c:/qwen3b/qwen.bin";
+        private const string TokenizerDir = "c:/qwen/";
 
         /// <summary>
-        /// Position-0 (BOS): logity C# muszą zgadzać się z Python.
-        /// VERIFIED CORRECT: top-1=[62406] 11.922
+        /// Position-0 (BOS): logity C# muszą zgadzać się z Python forward_multitoken.py.
+        /// Aktualna fixture: Qwen2.5-3B-Instruct FP16 (36 layers, head_dim=128).
+        /// Python TEST 1 → top-1 = [33975] 15.5608.
         /// </summary>
         [Fact]
         public void L0_LogitsAfterReset_NotAfterGenerate()
@@ -42,24 +46,24 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
                     _out.WriteLine($"  [{i,7}]  {v,8:F4}");
                 }
 
-                _out.WriteLine("C# specific tokens:");
-                _out.WriteLine($"  [ 62406] = {logits[62406],8:F4}  Python= 11.922  diff={(logits[62406] - 11.922f):+0.0000;-0.0000}");
-                _out.WriteLine($"  [ 75101] = {logits[75101],8:F4}  Python= 11.033  diff={(logits[75101] - 11.033f):+0.0000;-0.0000}");
-                _out.WriteLine($"  [ 34603] = {logits[34603],8:F4}  Python= 10.855  diff={(logits[34603] - 10.855f):+0.0000;-0.0000}");
+                // Top-1 expected: [33975] 15.5608 (from forward_multitoken.py TEST 1 for 3B FP16)
+                var top1 = top5[0];
+                _out.WriteLine($"C# top-1   = [{top1.i}] {top1.v:F4}");
+                _out.WriteLine($"Python top-1 = [33975] 15.5608");
 
-                Assert.True(Math.Abs(logits[62406] - 11.922f) < 0.05f,
-                    $"logit[62406]={logits[62406]:F4} should be ≈11.922");
+                Assert.Equal(33975, top1.i);
+                Assert.True(Math.Abs(top1.v - 15.5608f) < 0.1f,
+                    $"logit[33975]={top1.v:F4} should be ≈15.5608 (got diff={top1.v - 15.5608f:F4})");
             }
         }
 
         /// <summary>
         /// Porównanie hidden state i logitów C# vs Python dla 2 tokenów [BOS, im_start].
         ///
-        /// Python (forward_multitoken.py z adjacent-pair RoPE):
-        ///   top-1 = [74949] 13.028
-        ///   hidden[:4] = [2.8801217, -1.3621705, -3.6742501, 2.3216434]
-        ///   logit[6622]  = 10.1300
-        ///   logit[198]   = -1.0521
+        /// Python (forward_multitoken.py post-fix, grouped GQA, Qwen2.5-3B FP16):
+        ///   top-1 = [198] 12.3511
+        ///   hidden[:4] = [0.14059, 0.84549, 1.01591, -1.83366]
+        ///   logit[198] = 12.3511
         /// </summary>
         [Fact]
         public void L0_TwoToken_HiddenStateVsPython()
@@ -80,25 +84,18 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
 
                 _out.WriteLine("=== 2-TOKEN [BOS, im_start] ===");
                 _out.WriteLine($"C# top-1 = [{top1.i}] {top1.v:F4}");
-                _out.WriteLine($"  Python:  [74949] 13.028  (adjacent-pair RoPE)");
-                _out.WriteLine($"  Match:   {(top1.i == 74949 ? "✓ SAME TOKEN" : $"✗ DIFFERENT (got {top1.i})")}");
+                _out.WriteLine($"  Python:  [198] 12.3511  (grouped GQA)");
+                _out.WriteLine($"  Match:   {(top1.i == 198 ? "✓ SAME TOKEN" : $"✗ DIFFERENT (got {top1.i})")}");
                 _out.WriteLine(string.Empty);
 
-                _out.WriteLine("C# vs Python logits at pos 1:");
-                _out.WriteLine($"  [  6622] C#={logits[6622],8:F4}  Py=10.1300  diff={logits[6622] - 10.1300f:+0.0000;-0.0000}");
-                _out.WriteLine($"  [  8948] C#={logits[8948],8:F4}  Py=-8.7950  diff={logits[8948] - (-8.7950f):+0.0000;-0.0000}");
-                _out.WriteLine($"  [   198] C#={logits[198],8:F4}  Py=-1.0521  diff={logits[198] - (-1.0521f):+0.0000;-0.0000}");
-                _out.WriteLine(string.Empty);
-
-                // HIDDEN STATE — po naprawieniu LastHiddenState
+                // HIDDEN STATE comparison
                 var hidden = session.LastHiddenState.ToArray();
                 _out.WriteLine("=== HIDDEN STATE (before final RMSNorm) ===");
                 _out.WriteLine($"C# hidden[:4] = [{string.Join(", ", hidden.Take(4).Select(v => v.ToString("F5")))}]");
-                _out.WriteLine($"Py hidden[:4] =  [2.88012, -1.36217, -3.67425,  2.32164]");
+                _out.WriteLine($"Py hidden[:4] = [0.14059, 0.84549, 1.01591, -1.83366]");
                 _out.WriteLine(string.Empty);
 
-                // Poprawne wartości Python po RoPE fix (adjacent-pair)
-                float[] pyHidden = { 2.8801217f, -1.3621705f, -3.6742501f, 2.3216434f };
+                float[] pyHidden = { 0.14059351f, 0.8454995f, 1.0159123f, -1.8336577f };
                 _out.WriteLine("Hidden state diff (C# - Python):");
                 var maxDiff = 0f;
                 for (var i = 0; i < 4; i++)
@@ -107,22 +104,19 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
                     _out.WriteLine($"  [{i}]: C#={hidden[i]:F5}  Py={pyHidden[i]:F5}  diff={diff:+0.00000;-0.00000}");
                     maxDiff = Math.Max(maxDiff, Math.Abs(diff));
                 }
-                _out.WriteLine(string.Empty);
                 _out.WriteLine($"Max |diff| hidden[:4] = {maxDiff:F5}");
-                if (maxDiff < 0.01f)
+
+                if (maxDiff < 0.05f)
                 {
                     _out.WriteLine("→ HIDDEN STATE MATCHES Python ✓");
                 }
-                else if (maxDiff < 0.1f)
-                {
-                    _out.WriteLine("→ HIDDEN STATE CLOSE (float32 accumulation)");
-                }
                 else
                 {
-                    _out.WriteLine("→ HIDDEN STATE DIFFERS — bug in transformer forward");
+                    _out.WriteLine($"→ HIDDEN STATE DIFFERS — bug in transformer forward (diff={maxDiff:F5})");
                 }
 
-                Assert.Equal(74949, top1.i);
+                Assert.Equal(198, top1.i);
+                Assert.True(maxDiff < 0.05f, $"Hidden state must match Python within float32 noise, got {maxDiff:F5}");
             }
         }
 
@@ -164,7 +158,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
                 _out.WriteLine($"logit[19]=' 4'  = {logits[19],8:F4}");
                 _out.WriteLine($"logit[220]=' ' = {logits[220],8:F4}");
                 _out.WriteLine(string.Empty);
-                _out.WriteLine("Python top-1: [36366] 11.902 (MATCHES C# when same token sequence)");
+                _out.WriteLine("Python top-1: [151644] 22.36 (post-fix 3B FP16 grouped GQA)");
             }
         }
 

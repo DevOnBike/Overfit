@@ -48,7 +48,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         // ── Internal weight container per layer ───────────────────────────────
 
-        private sealed class LayerWeightBuffers
+        public sealed class LayerWeightBuffers
         {
             public required TensorStorage<float> AttnNormGamma;
             public required TensorStorage<float> AttnNormBeta;
@@ -106,6 +106,31 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         }
 
         // ── Public API ────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Factory used by GgufLlamaLoader to construct an engine from pre-built TensorStorages.
+        /// Exposes the otherwise-private constructor without coupling the loader to Runtime internals.
+        /// </summary>
+        public static CachedLlamaInferenceEngine CreateFromBuffers(
+            GPT1Config config,
+            Tensors.Core.TensorStorage<float> embedWeights,
+            Tensors.Core.TensorStorage<float> finalNormGamma,
+            Tensors.Core.TensorStorage<float> finalNormBeta,
+            Tensors.Core.TensorStorage<float> lmHead,
+            LayerWeightBuffers[] layers)
+        {
+            return new CachedLlamaInferenceEngine(
+                config, embedWeights, finalNormGamma, finalNormBeta, lmHead, layers);
+        }
+
+        /// <summary>
+        /// Loads a model directly from a GGUF file (no Python conversion needed).
+        /// Supports F32, F16, BF16 tensors. Quantized formats (Q4_K_M etc.) throw NotSupportedException.
+        /// </summary>
+        public static CachedLlamaInferenceEngine LoadGguf(string path)
+        {
+            return Loading.GgufLlamaLoader.Load(path);
+        }
 
         public GPT1Config Config => _config;
 
@@ -366,29 +391,27 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     }
                 }
 
-                // Convert TensorStorage → float[] for BlockWeights constructor.
-                // This happens once at load time, not during inference.
-                static float[] Arr(TensorStorage<float> s) => s.AsSpan().ToArray();
-
+                // Zero-copy: pass TensorStorage references directly (no float[] duplication).
+                // This avoids doubling the FFN/attention weights (~10 GB for 3B FP32).
                 blockWeights[l] = new BlockWeights(
                     heads: heads,
                     kvHeads: kvHeads,
-                    ln1Gamma: Arr(layer.AttnNormGamma),
-                    ln1Beta: null,  // RMSNorm — no beta
+                    ln1Gamma: layer.AttnNormGamma,
+                    ln1Beta: null,                  // RMSNorm — no beta
                     attentionBias: null,
-                    ln2Gamma: Arr(layer.FfnNormGamma),
-                    ln2Beta: null,  // RMSNorm — no beta
-                    ffnW1: Arr(layer.FfnUp),
+                    ln2Gamma: layer.FfnNormGamma,
+                    ln2Beta: null,                  // RMSNorm — no beta
+                    ffnW1: layer.FfnUp,
                     ffnB1: null,
-                    ffnW2: Arr(layer.FfnDown),
+                    ffnW2: layer.FfnDown,
                     ffnB2: null,
-                    ffnGate: Arr(layer.FfnGate));
+                    ffnGate: layer.FfnGate);
             }
 
             return new StackWeights(
                 blockWeights,
                 _finalNormGamma,
-                new TensorStorage<float>(0),  // RMSNorm — no final norm beta
+                TensorStorage<float>.Unpooled(0),  // RMSNorm — no final norm beta
                 _lmHead);
         }
 
@@ -443,10 +466,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var hw = _stackWeights.Block(layer).Head(head);
             var span = hw.Wq;
             var sumSq = 0f;
-            foreach (var v in span)
-            {
-                sumSq += v * v;
-            }
+            foreach (var v in span) sumSq += v * v;
             return MathF.Sqrt(sumSq);
         }
 
@@ -464,9 +484,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // _layers[l].Wq[h] is the SAME TensorStorage as hw._wq (zero-copy).
             var span = _layers[layer].Wq[head].AsSpan();
             if (index >= 0 && index < span.Length)
-            {
                 span[index] = value;
-            }
         }
 
         /// <summary>Read Wq via _layers path (the path LoRA modifies).</summary>
@@ -474,10 +492,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             ThrowIfDisposed();
             var span = _layers[layer].Wq[head].AsSpan();
-            if (index < 0 || index >= span.Length)
-            {
-                return float.NaN;
-            }
+            if (index < 0 || index >= span.Length) return float.NaN;
             return span[index];
         }
 

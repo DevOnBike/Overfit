@@ -95,7 +95,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             var anomaly = MakeAnomalySnapshot("api-gateway");
 
             // Warm up with normal traffic
-            float lastNormalScore = 0f;
+            var lastNormalScore = 0f;
             for (var i = 0; i < 10; i++)
             {
                 var r = detector.Score(normal);

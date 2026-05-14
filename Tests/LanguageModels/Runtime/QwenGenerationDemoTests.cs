@@ -1,3 +1,8 @@
+// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
+
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
@@ -12,12 +17,12 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         private readonly ITestOutputHelper _out;
         public QwenGenerationDemoTests(ITestOutputHelper output) => _out = output;
 
-        private const string ModelPath = "d:/qwen/qwen.bin";
-        private const string TokenizerDir = "d:/qwen/";
+        private const string ModelPath = "c:/qwen3b/qwen.bin";
+        private const string TokenizerDir = "c:/qwen3b/";
         private const int MaxNewTokens = 200;
         private const int MaxCtx = 512;
 
-        private static readonly SamplingOptions GreedySampling = SamplingOptions.Greedy;
+        private static readonly SamplingOptions GreedySampling = SamplingOptions.GreedyWithPenalty(1.15f, 64);
 
         private static readonly SamplingOptions Temp03Sampling = new(
             strategy: SamplingStrategy.TopP,

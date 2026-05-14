@@ -1,4 +1,7 @@
-// Copyright (c) 2026 DevOnBike. AGPLv3.
+// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
@@ -14,8 +17,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         private readonly ITestOutputHelper _out;
         public QwenNumericalDiagnosticTests(ITestOutputHelper output) => _out = output;
 
-        private const string ModelPath = "d:/qwen/qwen.bin";
-        private const string TokenizerDir = "d:/qwen/";
+        private const string ModelPath = "c:/qwen3b/qwen.bin";
+        private const string TokenizerDir = "c:/qwen3b/";
 
         [Fact]
         public void NumDiag_BosToken_Top20_Logits()
@@ -25,7 +28,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
                 return;
             }
             var engine = CachedLlamaInferenceEngine.Load(ModelPath);
-            QwenTokenizer? tok = File.Exists(Path.Combine(TokenizerDir, "tokenizer.json"))
+            var tok = File.Exists(Path.Combine(TokenizerDir, "tokenizer.json"))
                 ? QwenTokenizer.Load(TokenizerDir) : null;
             using (engine)
             {
@@ -41,7 +44,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
                 _out.WriteLine("TOP-20 after BOS:");
                 foreach (var ((v, id), rank) in top20.Select((x, r) => (x, r)))
                 {
-                    _out.WriteLine($"  #{rank+1,2}  [{id,7}]  {v,8:F3}  '{tok?.DecodeToken(id) ?? ""}' ");
+                    _out.WriteLine($"  #{rank + 1,2}  [{id,7}]  {v,8:F3}  '{tok?.DecodeToken(id) ?? ""}' ");
                 }
 
                 _out.WriteLine($"\nlogits[151644]=<|im_start|> = {logits[151644]:F4}");
@@ -63,7 +66,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             }
 
             var engine = CachedLlamaInferenceEngine.Load(ModelPath);
-            var tok    = QwenTokenizer.Load(TokenizerDir);
+            var tok = QwenTokenizer.Load(TokenizerDir);
             using (engine)
             {
                 using var session = engine.CreateSession(64);
@@ -81,21 +84,21 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
                 _out.WriteLine("TOP-20 after full chat prompt:");
                 foreach (var ((v, id), rank) in top20.Select((x, r) => (x, r)))
                 {
-                    _out.WriteLine($"  #{rank+1,2}  [{id,7}]  {v,8:F3}  '{tok.DecodeToken(id)}'");
+                    _out.WriteLine($"  #{rank + 1,2}  [{id,7}]  {v,8:F3}  '{tok.DecodeToken(id)}'");
                 }
 
                 _out.WriteLine("\nWorking Qwen2.5-Instruct should predict:");
                 _out.WriteLine("  token 220 (' ') or 19/56 (digit) or similar short answer tokens");
                 _out.WriteLine($"Logit[220]=' '  = {logits[220]:F4}");
                 _out.WriteLine($"Logit[19]='2'   = {logits[19]:F4}");
-                _out.WriteLine($"Logit[19]='56'? = {logits[20]   :F4}");
+                _out.WriteLine($"Logit[19]='56'? = {logits[20]:F4}");
             }
         }
 
         private static float Std(float[] arr)
         {
             var mean = arr.Average();
-            return MathF.Sqrt(arr.Select(x => (x-mean)*(x-mean)).Average());
+            return MathF.Sqrt(arr.Select(x => (x - mean) * (x - mean)).Average());
         }
     }
 }

@@ -1,4 +1,7 @@
-// Copyright (c) 2026 DevOnBike. AGPLv3.
+// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
@@ -13,7 +16,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         private readonly ITestOutputHelper _out;
         public QwenIntermediateDiagTests(ITestOutputHelper output) => _out = output;
 
-        private const string ModelPath = "d:/qwen/qwen.bin";
+        private const string ModelPath = "c:/qwen3b/qwen.bin";
 
         /// <summary>
         /// Compares specific token logits between C# and Python forward_pass_reference.py.

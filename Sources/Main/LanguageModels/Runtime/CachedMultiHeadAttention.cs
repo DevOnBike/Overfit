@@ -128,7 +128,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 if (useGqa)
                 {
                     // GQA: multiple Q heads share one KV head
-                    var kvH = h % KvHeadCount;
+                    // GQA grouped mapping: Q head h uses KV head h // (nHeads/nKvHeads)
+                    // (matches HuggingFace transformers repeat_kv convention)
+                    var groupSize = HeadCount / KvHeadCount;
+                    var kvH = h / groupSize;
                     ref readonly var kv = ref weights.KvHead(kvH);
                     wk = kv.Wk; wv = kv.Wv;
                     bk = kv.Bk; bv = kv.Bv;
@@ -141,7 +144,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 }
 
                 // Map Q head index to KV cache slot (GQA: multiple Q map to same slot)
-                var kvCacheHead = useGqa ? h % KvHeadCount : h;
+                var kvCacheHead = useGqa ? h / (HeadCount / KvHeadCount) : h;
 
                 _heads[h].Decode(
                     hidden,
