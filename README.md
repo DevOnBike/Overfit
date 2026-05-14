@@ -70,33 +70,30 @@ The future of software development is in the hands of the people. …
 **API** (what the demo wraps):
 
 ```csharp
-using DevOnBike.Overfit.DeepLearning;
-using DevOnBike.Overfit.LanguageModels.Runtime;
+using DevOnBike.Overfit.LanguageModels;
+using DevOnBike.Overfit.LanguageModels.Contracts;
 
-// Load GPT-2 Small weights (convert with Scripts/convert_gpt2.py)
-var model = new GPT1Model(Gpt2Config.Small);
-model.Eval();
-using var fs = File.OpenRead("gpt2_small.bin");
-using var br = new BinaryReader(fs);
-model.Load(br);
+// One handle owns model + KV-cache engine + BPE tokenizer.
+// Directory convention: gpt2_small.bin + vocab.json + merges.txt under modelDir.
+using var gpt2    = Gpt2.LoadSmall(@"C:\gpt2");
+using var session = gpt2.CreateSession();
 
-// Create KV-cache session — weights are zero-copy references to model storage
-using var engine  = CachedSlmInferenceEngine.FromGpt1(model);
-using var session = engine.CreateSession();
+session.Reset(gpt2.Tokenizer.Encode("The future of software development is"));
 
-// Tokenize prompt
-int[] prompt = tokenizer.Encode("The future of software development is");
-session.Reset(prompt);
-
-// Generate — 0 bytes allocated per token after session creation
+// Generate — 0 bytes allocated per token after session creation.
 var sampling = SamplingOptions.Greedy;
 for (var i = 0; i < 32; i++)
 {
     var token = session.GenerateNextToken(in sampling);
-    Console.Write(tokenizer.Decode(token));
+    Console.Write(gpt2.Tokenizer.DecodeToken(token));
 }
 // → " in the hands of the people."
 ```
+
+For non-standard layouts (shared tokenizer across sizes, custom filenames) drop
+to the explicit `Gpt2.Load(modelPath, vocabPath, mergesPath, config)`, or skip
+the facade entirely and compose `new GPT1Model(Gpt2Config.Small)` +
+`CachedSlmInferenceEngine.FromGpt1(model)` directly.
 
 ### Inference — ONNX import (linear topology)
 

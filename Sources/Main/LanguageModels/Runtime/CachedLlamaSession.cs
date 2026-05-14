@@ -69,25 +69,60 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         // ── Session lifecycle ─────────────────────────────────────────────────
 
         /// <summary>
-        /// Resets the session and prefills the KV cache with prompt tokens.
-        /// After Reset the session is positioned at the last prompt token.
-        /// Call GenerateNextToken to generate the first new token.
+        /// Clears the KV cache without feeding any prompt. After <c>Reset()</c>
+        /// the session is empty (<see cref="Position"/> == 0); follow with
+        /// <see cref="Prefill"/> or call the convenience overload
+        /// <see cref="Reset(System.ReadOnlySpan{int})"/> which does both in one
+        /// step.
         /// </summary>
-        public void Reset(ReadOnlySpan<int> promptTokens)
+        public void Reset()
         {
             ThrowIfDisposed();
             _cache.Reset();
+        }
+
+        /// <summary>
+        /// Feeds prompt tokens into the KV cache one at a time. Each token goes
+        /// through embedding → transformer stack → cache write, leaving the
+        /// session ready for <see cref="GenerateNextToken"/>.
+        ///
+        /// Can be called multiple times to append context incrementally
+        /// (e.g. chat history: system → user → assistant → user → …) without
+        /// dropping cache state, provided total tokens stay within
+        /// <c>ContextLength</c>.
+        ///
+        /// **Performance note:** today this is a single-token decode loop —
+        /// O(N) calls through the transformer stack. A multi-token batched
+        /// prefill path (one GEMM per layer over the whole prompt) is the
+        /// upcoming optimization tracked in ROADMAP under
+        /// "Prefill: multi-token batched matmul".
+        /// </summary>
+        public void Prefill(ReadOnlySpan<int> promptTokens)
+        {
+            ThrowIfDisposed();
 
             foreach (var token in promptTokens)
             {
                 if (_cache.IsFull)
                 {
                     throw new InvalidOperationException(
-                        $"Prompt length {promptTokens.Length} exceeds ContextLength {_config.ContextLength}.");
+                        $"Prefill of {promptTokens.Length} tokens would exceed ContextLength {_config.ContextLength} " +
+                        $"(current position {Position}).");
                 }
 
                 DecodeToken(token);
             }
+        }
+
+        /// <summary>
+        /// Convenience overload: clears the cache and prefills it with the
+        /// supplied prompt. Equivalent to <see cref="Reset()"/> followed by
+        /// <see cref="Prefill"/>.
+        /// </summary>
+        public void Reset(ReadOnlySpan<int> promptTokens)
+        {
+            Reset();
+            Prefill(promptTokens);
         }
 
         /// <summary>

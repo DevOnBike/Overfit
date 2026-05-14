@@ -84,11 +84,23 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _hasLogits = false;
         }
 
-        public void Reset(ReadOnlySpan<int> promptTokens)
+        /// <summary>
+        /// Feeds prompt tokens into the KV cache one at a time. Each token goes
+        /// through embedding → transformer stack → cache write, leaving the
+        /// session ready for <see cref="GenerateNextToken"/>.
+        ///
+        /// Can be called multiple times after a single <see cref="Reset()"/> to
+        /// append context incrementally (chat history) provided the cumulative
+        /// token count stays within <see cref="MaxContextLength"/>.
+        ///
+        /// **Performance note:** single-token decode loop today; multi-token
+        /// batched prefill (one GEMM per layer over the whole prompt) is the
+        /// upcoming optimization tracked in ROADMAP under
+        /// "Prefill: multi-token batched matmul".
+        /// </summary>
+        public void Prefill(ReadOnlySpan<int> promptTokens)
         {
             ThrowIfDisposed();
-
-            Reset();
 
             if (promptTokens.IsEmpty)
             {
@@ -110,6 +122,17 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             _hasLogits = true;
+        }
+
+        /// <summary>
+        /// Convenience overload: clears the cache and prefills it with the
+        /// supplied prompt. Equivalent to <see cref="Reset()"/> followed by
+        /// <see cref="Prefill"/>.
+        /// </summary>
+        public void Reset(ReadOnlySpan<int> promptTokens)
+        {
+            Reset();
+            Prefill(promptTokens);
         }
 
         public int GenerateNextToken(in SamplingOptions sampling)

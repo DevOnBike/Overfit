@@ -5,9 +5,8 @@
 
 using System.Diagnostics;
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Contracts;
-using DevOnBike.Overfit.LanguageModels.Runtime;
-using DevOnBike.Overfit.Tokenization;
 
 namespace DevOnBike.Overfit.Demo.Gpt2Console
 {
@@ -53,22 +52,17 @@ namespace DevOnBike.Overfit.Demo.Gpt2Console
         private static void Run(CliOptions opts)
         {
             // ─── Resolve paths ─────────────────────────────────────────────────
-            var modelPath = ResolvePath(opts.ModelPath, "gpt2_small.bin");
-            var vocabPath = ResolvePath(opts.VocabPath, "vocab.json");
+            var modelPath  = ResolvePath(opts.ModelPath,  "gpt2_small.bin");
+            var vocabPath  = ResolvePath(opts.VocabPath,  "vocab.json");
             var mergesPath = ResolvePath(opts.MergesPath, "merges.txt");
 
-            EnsureExists(modelPath, "model");
-            EnsureExists(vocabPath, "vocab.json");
-            EnsureExists(mergesPath, "merges.txt");
-
-            // ─── Banner ────────────────────────────────────────────────────────
             var config = opts.Size switch
             {
-                "Small" => Gpt2Config.Small,
+                "Small"  => Gpt2Config.Small,
                 "Medium" => Gpt2Config.Medium,
-                "Large" => Gpt2Config.Large,
-                "XL" => Gpt2Config.XL,
-                _ => throw new ArgumentException($"Unknown size: {opts.Size}")
+                "Large"  => Gpt2Config.Large,
+                "XL"     => Gpt2Config.XL,
+                _        => throw new ArgumentException($"Unknown size: {opts.Size}")
             };
 
             Console.WriteLine($"GPT-2 {opts.Size}");
@@ -78,22 +72,15 @@ namespace DevOnBike.Overfit.Demo.Gpt2Console
             Console.WriteLine($"  prompt:    \"{opts.Prompt}\"");
             Console.WriteLine($"  tokens:    {opts.MaxTokens}");
 
-            // ─── Load tokenizer ────────────────────────────────────────────────
-            var tokenizer = BytePairEncoder.Load(vocabPath, mergesPath);
-            var promptIds = tokenizer.Encode(opts.Prompt);
+            // ─── Load model + tokenizer + engine in one call ───────────────────
+            // Gpt2.Load throws FileNotFoundException with the missing path baked
+            // in, so we don't need a separate existence-check step.
+            using var gpt2 = Gpt2.Load(modelPath, vocabPath, mergesPath, config);
+
+            var promptIds = gpt2.Tokenizer.Encode(opts.Prompt);
             Console.WriteLine($"  prompt tokens: {promptIds.Length}");
 
-            // ─── Load model ────────────────────────────────────────────────────
-            using var model = new GPT1Model(config);
-            model.Eval();
-            using (var fs = File.OpenRead(modelPath))
-            using (var br = new BinaryReader(fs))
-            {
-                model.Load(br);
-            }
-
-            using var engine = CachedSlmInferenceEngine.FromGpt1(model);
-            using var session = engine.CreateSession();
+            using var session = gpt2.CreateSession();
             session.Reset(promptIds);
 
             Console.WriteLine("  KV-cache:  enabled");
@@ -141,7 +128,7 @@ namespace DevOnBike.Overfit.Demo.Gpt2Console
                 inferTicksSum += Stopwatch.GetTimestamp() - tBefore;
                 inferAllocSum += GC.GetTotalAllocatedBytes(precise: false) - allocBefore;
 
-                Console.Write(tokenizer.DecodeToken(tokenId));
+                Console.Write(gpt2.Tokenizer.DecodeToken(tokenId));
             }
 
             fullSw.Stop();
@@ -202,15 +189,8 @@ namespace DevOnBike.Overfit.Demo.Gpt2Console
             return Path.Combine("models", fileName);
         }
 
-        private static void EnsureExists(string path, string label)
-        {
-            if (!File.Exists(path))
-            {
-                throw new FileNotFoundException(
-                    $"{label} not found at '{path}'. " +
-                    "Pass via CLI arg, set OVERFIT_MODEL_DIR, or place under ./models/.");
-            }
-        }
+        // File-existence checks live in Gpt2.Load now (throws FileNotFoundException
+        // with the missing path baked in). No local EnsureExists helper needed.
 
         private sealed class CliOptions
         {
