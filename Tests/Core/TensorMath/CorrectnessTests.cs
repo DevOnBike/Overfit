@@ -9,6 +9,7 @@ using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 using DevOnBike.Overfit.Tests.Data.Mnist;
+using DevOnBike.Overfit.Tests.TestSupport;
 using DevOnBike.Overfit.Tests.TestSupport.GradientChecking;
 
 namespace DevOnBike.Overfit.Tests.Core.TensorMath
@@ -881,10 +882,10 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
             const int epochs = 2;
             const float lr = 0.001f;
 
-            var trainImagesPath = "d:/ml/train-images.idx3-ubyte";
-            var trainLabelsPath = "d:/ml/train-labels.idx1-ubyte";
-            var testImagesPath = "d:/ml/t10k-images.idx3-ubyte";
-            var testLabelsPath = "d:/ml/t10k-labels.idx1-ubyte";
+            var trainImagesPath = TestModelPaths.Mnist.TrainImagesPath;
+            var trainLabelsPath = TestModelPaths.Mnist.TrainLabelsPath;
+            var testImagesPath  = TestModelPaths.Mnist.TestImagesPath;
+            var testLabelsPath  = TestModelPaths.Mnist.TestLabelsPath;
 
             if (!File.Exists(trainImagesPath) || !File.Exists(trainLabelsPath) ||
                 !File.Exists(testImagesPath) || !File.Exists(testLabelsPath))

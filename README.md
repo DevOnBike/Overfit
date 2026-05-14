@@ -41,6 +41,34 @@ engine.Run(input, output); // zero-allocation
 
 ### Inference — GPT-2 Small (KV-cache)
 
+**One-command demo** (after running `python Scripts/convert_gpt2.py --size small --out models/`):
+
+```bash
+dotnet run -c Release --project Demo/Gpt2ConsoleDemo -- \
+    --prompt "The future of software development is" --tokens 64
+```
+
+Output reports the headline numbers separately from the rest of the loop:
+
+```text
+GPT-2 Small
+  prompt:    "The future of software development is"
+  tokens:    64
+  KV-cache:  enabled
+
+The future of software development is in the hands of the people. …
+
+--- Inference only (GenerateNextToken) ---
+  Tokens/sec:            71.4
+  Managed bytes / token: 0.0  (total: 0 B)        ← the headline claim
+
+--- Full demo loop (inference + decode + Console.Write) ---
+  Tokens/sec:            71.2
+  (string + console alloc dominates; not part of the 0 B / token claim)
+```
+
+**API** (what the demo wraps):
+
 ```csharp
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Runtime;
@@ -372,6 +400,15 @@ Use cases: Kubernetes tuning, game AI, industrial process search, pricing strate
 
 ### Recently completed
 
+- ✅ **`Demo/Gpt2ConsoleDemo`** — user-facing console app: `dotnet run -- --prompt "…" --tokens N`. Reports tokens/sec and managed-bytes-per-token separately for the inference loop vs the full demo loop. First-class entry point for the "see it work in one command" story.
+- ✅ **GPT-2 parity gate runs by default** — `Gpt2ImportParityDiagnostics`, `Gpt2ImportStageParityDiagnostics`, `Gpt2ImportAttentionParityDiagnostics` flipped from `[LongFact]` back to `[Fact]`. Headline claim (top-10 overlap 10/10, maxAbsDiff 0.000107) defended on every `dotnet test`.
+- ✅ **Native GGUF loader** — `GgufLlamaLoader.Load(path)` reads `*.gguf` from Ollama / HuggingFace end-to-end, no Python tooling. Supports F32 / F16 / BF16 / Q8_0 / **Q4_K** / **Q6_K**. Hand-rolled parser, no `Google.Protobuf` dependency.
+- ✅ **Qwen / Llama / Mistral inference** — `CachedLlamaInferenceEngine` decodes GQA + RoPE + SwiGLU stacks. Tested against Qwen2.5-3B (FP32 binary and FP16 GGUF).
+- ✅ **Streaming token API** — `CachedLlamaSession.StreamGenerate(StreamingOptions, CancellationToken)` returns `IAsyncEnumerable<int>`. Stop-token list, cache-full graceful stop, cancellation honored.
+- ✅ **LoRA inference adapter** — `LlamaLoRAAdapter`: Enable/Disable in-place weight injection over zero-copy `TensorStorage` references. Save/Load. Backward (training-side) tracked separately.
+- ✅ **Binary loader RAM optimization** — `Unpooled` `TensorStorage` for model weights + direct `Stream.ReadExactly` into destination span. **3B FP32 peak load: 30 GB → 14 GB**, working set matches file size.
+- ✅ **`[LongFact]` test convention** — integration / diagnostic / training-demo tests skipped by default; default `dotnet test -c Release` runs in ~15 s.
+- ✅ **Central `TestModelPaths` resolver** — `OVERFIT_GPT2_DIR` / `OVERFIT_QWEN3B_DIR` / `OVERFIT_MNIST_DIR` env vars override the dev fallback paths; missing fixtures fail loudly with an actionable error.
 - ✅ **GPT-2 Small inference** — 124M params, pure C#. KV-cache decode: 0 B/token, 6.4× faster than naive O(N²) path. Top-10 logit parity 10/10 vs PyTorch, maxAbsDiff = 0.000107. Generates coherent English text.
 - ✅ **KV-cache runtime** — `CachedSlmInferenceEngine` + `CachedSlmSession`. Zero-copy `SingleHeadWeights` / `BlockWeights` / `StackWeights` structs hold `TensorStorage<float>` references directly — no weight duplication. Session creation: ~80 MB (KV buffers only). Per-token: 0 B.
 - ✅ **GPT-2 weight importer** — `Scripts/convert_gpt2.py` downloads from HuggingFace, splits fused `c_attn` into per-head Q/K/V (including biases), saves in Overfit binary format. Supports Small/Medium/Large/XL.
@@ -386,27 +423,37 @@ Use cases: Kubernetes tuning, game AI, industrial process search, pricing strate
 
 ### Near-term
 
-- **LoRA fine-tuning** — interfaces `ILoRAAdapter` / `ILoRAInjectable` ready; implementation pending. Zero-rebind on adapter update (spans point to live `TensorStorage`).
-- **PR5-7d/e** — Move Conv2D/MaxPool2D into `ComputationGraph.*` (architectural cleanup)
-- **ONNX: LSTM/GRU operators** — enables recurrent model import
-- **Depthwise Conv** (group=channels) — MobileNet-style models
+- **LoRA training** — backward through frozen-base attention/FFN, adapter-only Adam.
+  Inference adapter (`LlamaLoRAAdapter`: Enable/Disable/Save/Load) already lands.
+- **Quantized weight storage at inference** — disk-side Q4_K/Q6_K loading works
+  (Ollama files load directly); RAM-side block storage + dequant-fused matmul
+  still pending. See `ROADMAP.md` "Slot 2b".
+- **ONNX: LSTM/GRU operators** — enables recurrent model import.
+- **Depthwise Conv** (group=channels) — MobileNet-style models.
 
 ### Transformer path
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| `LayerNorm` | ✅ | Pre-LN and Post-LN |
+| `LayerNorm` / `RMSNorm` | ✅ | Pre-LN, Post-LN, RMSNorm |
 | `Embedding` (token + positional) | ✅ | Lookup + additive |
 | `ScaledDotProductAttention` | ✅ | Causal mask, KV-cache |
 | `MultiHeadAttention` | ✅ | Per-head Q/K/V/O weights + biases (GPT-2 style) |
+| `GroupedQueryAttention` | ✅ | KV-head sharing (Llama / Qwen / Mistral) |
+| RoPE positional encoding | ✅ | Per-layer rotation, configurable theta |
+| SwiGLU FFN | ✅ | Modern SLM FFN (Llama / Qwen / Mistral) |
 | Causal masking | ✅ | Auto-regressive generation |
-| Transformer block | ✅ | Pre-LN + FFN (GeLU) + residual |
-| Tokenizer (BPE) | ✅ | GPT-2 byte-pair encoding |
-| GPT-2 inference | ✅ | 124M params, 0 B/token, parity vs PyTorch |
+| Transformer block | ✅ | Pre-LN + FFN + residual (GeLU and SwiGLU) |
+| Tokenizer (BPE) | ✅ | GPT-2 byte-pair encoding, plus Qwen tokenizer.json |
+| GPT-2 inference | ✅ | 124M params, 0 B/token, parity vs PyTorch (top-10 10/10, maxAbsDiff 0.000107) |
+| Qwen / Llama inference | ✅ | 0.5B–3B FP32/F16/BF16, GQA + RoPE + SwiGLU |
+| GGUF native loader | ✅ | F32, F16, BF16, Q8_0, **Q4_K**, **Q6_K** — Ollama files load directly |
+| Streaming token API | ✅ | `IAsyncEnumerable<int>` with stop-tokens + cancellation |
+| LoRA inference adapter | ✅ | Zero-copy weight refs; Enable/Disable/Save/Load |
 | GPT-2 training | ❌ | Gradient checkpointing required at scale |
-| LoRA | ❌ | Interfaces ready; weight injection pending |
-| Quantization (INT8/INT4) | ❌ | Interfaces defined |
-| Transformer training (small) | ❌ | TinyShakespeare proof-of-concept in progress |
+| LoRA training (backward) | ❌ | Adapter-only backward not yet wired |
+| Quantized RAM storage | ❌ | Disk-side Q4_K/Q6_K done; in-memory block storage + dequant-fused matmul pending |
+| Transformer training (small) | 🟡 | TinyShakespeare training tests converge; quality demo runs end-to-end |
 
 ### Long-term
 

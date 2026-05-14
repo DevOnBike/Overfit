@@ -5,6 +5,7 @@
 
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
+using DevOnBike.Overfit.Tests.TestSupport;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
@@ -15,8 +16,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
     {
         private readonly ITestOutputHelper _out;
         public QwenLayer0CompareTests(ITestOutputHelper output) => _out = output;
-        private const string ModelPath = "c:/qwen3b/qwen.bin";
-        private const string TokenizerDir = "c:/qwen/";
+        private static string ModelPath => TestModelPaths.Qwen3B.BinaryPath;
+        // Original code had TokenizerDir = "c:/qwen/" (typo — pointed at a non-existent
+        // sibling dir). The model + tokenizer live under the same Qwen3B root.
+        private static string TokenizerDir => TestModelPaths.Qwen3B.Dir;
 
         /// <summary>
         /// Position-0 (BOS): logity C# muszą zgadzać się z Python forward_multitoken.py.
@@ -26,10 +29,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         [LongFact]
         public void L0_LogitsAfterReset_NotAfterGenerate()
         {
-            if (!File.Exists(ModelPath))
-            {
-                return;
-            }
+            TestModelPaths.Qwen3B.RequireBinaryPath();
 
             var engine = CachedLlamaInferenceEngine.Load(ModelPath);
             using (engine)
@@ -68,10 +68,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         [LongFact]
         public void L0_TwoToken_HiddenStateVsPython()
         {
-            if (!File.Exists(ModelPath))
-            {
-                return;
-            }
+            TestModelPaths.Qwen3B.RequireBinaryPath();
 
             var engine = CachedLlamaInferenceEngine.Load(ModelPath);
             using (engine)
@@ -127,14 +124,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         [LongFact]
         public void L0_ChatPromptLogits()
         {
-            if (!File.Exists(ModelPath))
-            {
-                return;
-            }
-            if (!File.Exists(Path.Combine(TokenizerDir, "tokenizer.json")))
-            {
-                return;
-            }
+            TestModelPaths.Qwen3B.RequireBinaryPath();
+            TestModelPaths.Qwen3B.RequireTokenizerJsonPath();
 
             var engine = CachedLlamaInferenceEngine.Load(ModelPath);
             var tok = QwenTokenizer.Load(TokenizerDir);
@@ -168,14 +159,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         [LongFact]
         public void Multitoken_ProgressivePrefixTest()
         {
-            if (!File.Exists(ModelPath))
-            {
-                return;
-            }
-            if (!File.Exists(Path.Combine(TokenizerDir, "tokenizer.json")))
-            {
-                return;
-            }
+            TestModelPaths.Qwen3B.RequireBinaryPath();
+            TestModelPaths.Qwen3B.RequireTokenizerJsonPath();
 
             var engine = CachedLlamaInferenceEngine.Load(ModelPath);
             var tok = QwenTokenizer.Load(TokenizerDir);

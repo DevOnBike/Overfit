@@ -5,6 +5,7 @@
 
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
+using DevOnBike.Overfit.Tests.TestSupport;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
@@ -15,7 +16,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
     {
         private readonly ITestOutputHelper _out;
         public QwenLayer0DiagTests(ITestOutputHelper output) => _out = output;
-        private const string ModelPath = "c:/qwen3b/qwen.bin";
+        private static string ModelPath => TestModelPaths.Qwen3B.BinaryPath;
 
         /// <summary>
         /// Compare intermediate values after layer 0 with Python forward_from_bin.py.
@@ -33,10 +34,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         [LongFact]
         public void L0Diag_IntermediateValues()
         {
-            if (!File.Exists(ModelPath))
-            {
-                return;
-            }
+            TestModelPaths.Qwen3B.RequireBinaryPath();
 
             // Use CachedLlamaInferenceEngine diagnostics
             var engine = CachedLlamaInferenceEngine.Load(ModelPath);

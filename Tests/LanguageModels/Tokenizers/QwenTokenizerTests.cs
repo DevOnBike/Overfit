@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
+using DevOnBike.Overfit.Tests.TestSupport;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
 {
@@ -15,32 +16,20 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
     [Trait("Category", "Qwen")]
     public sealed class QwenTokenizerTests
     {
-        private static readonly string TokenizerPath = FindTokenizerJson();
+        private static string TokenizerPath => TestModelPaths.Qwen3B.TokenizerJsonPath;
 
-        private static string FindTokenizerJson()
-        {
-            string[] candidates =
-            [
-                "test_fixtures/tokenizer/tokenizer.json",
-                "test_fixtures/tokenizer.json",
-            ];
-            return candidates.FirstOrDefault(File.Exists) ?? candidates[0];
-        }
-
+        /// <summary>
+        /// Loads the Qwen tokenizer or throws <see cref="FileNotFoundException"/>
+        /// (via <c>RequireTokenizerJsonPath</c>) when the fixture is missing.
+        /// Returns the loaded tokenizer — never null, kept signature for source
+        /// compatibility with callers that still check for null.
+        /// </summary>
         private QwenTokenizer? TryLoad()
         {
-            if (!File.Exists(TokenizerPath))
-            {
-                Console.WriteLine($"SKIPPED: tokenizer.json not found at {TokenizerPath}");
-                Console.WriteLine("Copy it from the HuggingFace cache:");
-                Console.WriteLine(@"  %USERPROFILE%\.cache\huggingface\hub\models--Qwen--Qwen2.5-0.5B\snapshots\*\tokenizer.json");
-                return null;
-            }
-
-            return QwenTokenizer.Load(TokenizerPath);
+            return QwenTokenizer.Load(TestModelPaths.Qwen3B.RequireTokenizerJsonPath());
         }
 
-        [Fact]
+        [LongFact]
         public void Load_ValidFile_Succeeds()
         {
             var tok = TryLoad();
@@ -53,7 +42,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
             Console.WriteLine($"Vocab size: {tok.VocabSize}");
         }
 
-        [Fact]
+        [LongFact]
         public void Encode_Hello_ReturnsNonEmptyTokens()
         {
             var tok = TryLoad();
@@ -68,7 +57,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
             Console.WriteLine($"'Hello' → [{string.Join(", ", tokens)}]");
         }
 
-        [Fact]
+        [LongFact]
         public void Encode_Decode_RoundTrip_SimpleAscii()
         {
             var tok = TryLoad();
@@ -85,7 +74,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
             Console.WriteLine($"'{input}' → {tokens.Length} tokens → '{decoded}'");
         }
 
-        [Fact]
+        [LongFact]
         public void Encode_Decode_RoundTrip_Polish()
         {
             var tok = TryLoad();
@@ -102,7 +91,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
             Console.WriteLine($"'{input}' → {tokens.Length} tokens → '{decoded}'");
         }
 
-        [Fact]
+        [LongFact]
         public void Encode_SpecialTokens_Recognised()
         {
             var tok = TryLoad();
@@ -117,7 +106,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
             Console.WriteLine($"Special tokens: [{string.Join(", ", tokens)}]");
         }
 
-        [Fact]
+        [LongFact]
         public void BosTokenId_Is151643()
         {
             var tok = TryLoad();
@@ -130,7 +119,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
             Assert.True(tok.IsSpecialToken(QwenTokenizer.EndOfText));
         }
 
-        [Fact]
+        [LongFact]
         public void BuildChatPrompt_ContainsSystemAndUser()
         {
             var tok = TryLoad();
@@ -150,7 +139,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
             Console.WriteLine(decoded);
         }
 
-        [Fact]
+        [LongFact]
         public void DecodeToken_SingleToken_ReturnsString()
         {
             var tok = TryLoad();

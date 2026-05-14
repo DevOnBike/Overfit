@@ -8,6 +8,7 @@ using System.Text.Json.Serialization;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Ops;
+using DevOnBike.Overfit.Tests.TestSupport;
 using DevOnBike.Overfit.Tokenization;
 using Xunit.Abstractions;
 
@@ -30,10 +31,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
     /// </summary>
     public sealed class Gpt2ImportStageParityDiagnostics
     {
-        private const string ModelPath = "d:/gpt2_small.bin";
-        private const string VocabPath = "d:/vocab.json";
-        private const string MergesPath = "d:/merges.txt";
-        private const string ReferencePath = "d:/gpt2_reference_small.json";
+        private static string ModelPath     => TestModelPaths.Gpt2Small.BinaryPath;
+        private static string VocabPath     => TestModelPaths.Gpt2Small.VocabPath;
+        private static string MergesPath    => TestModelPaths.Gpt2Small.MergesPath;
+        private static string ReferencePath => TestModelPaths.Gpt2Small.ReferenceJsonPath;
 
         private const int DefaultArenaSize = 1_500_000_000;
 
@@ -45,9 +46,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             _output = output;
         }
 
-        [LongFact]
+        [Fact]
         [Trait("Category", "Diagnostics")]
-        [Trait("Category", "Manual")]
+        [Trait("Category", "Parity")]
         public void Gpt2Small_CompareStagesAgainstPyTorchReference()
         {
             SkipIfMissing(

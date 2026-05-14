@@ -5,6 +5,7 @@
 
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
+using DevOnBike.Overfit.Tests.TestSupport;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
@@ -39,8 +40,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
     [Trait("Category", "Parity")]
     public sealed class GgufQ4KMParityTests
     {
-        private const string Fp16ModelPath  = @"c:\qwen3b\qwen.gguf";
-        private const string Q4KMModelPath  = @"c:\qwen3b\qwen.q4km.gguf";
+        private static string Fp16ModelPath => TestModelPaths.Qwen3B.GgufPath;
+        private static string Q4KMModelPath => TestModelPaths.Qwen3B.Q4KmGgufPath;
 
         // Canonical 3-token prompt used by the rest of the Qwen test suite:
         //   [BOS, im_start, "\n"] — exercises embedding + first layer non-trivially.
@@ -56,18 +57,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         [LongFact]
         public void Q4KM_TopTokenMatches_FP16Baseline_OnCanonicalPrompt()
         {
-            if (!File.Exists(Fp16ModelPath))
-            {
-                _out.WriteLine($"SKIPPED: FP16 baseline not found at {Fp16ModelPath}");
-                return;
-            }
-            if (!File.Exists(Q4KMModelPath))
-            {
-                _out.WriteLine(
-                    $"SKIPPED: Q4_K_M model not found at {Q4KMModelPath}. " +
-                    "See class header for download instructions.");
-                return;
-            }
+            TestModelPaths.Qwen3B.RequireGgufPath();
+            TestModelPaths.Qwen3B.RequireQ4KmGgufPath();
 
             // ── Baseline: FP16 GGUF ────────────────────────────────────────────
             var (fp16Top1, fp16Top10, fp16Logits) = RunOneStep(Fp16ModelPath);

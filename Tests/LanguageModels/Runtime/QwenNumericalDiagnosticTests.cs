@@ -6,6 +6,7 @@
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
+using DevOnBike.Overfit.Tests.TestSupport;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
@@ -17,16 +18,13 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         private readonly ITestOutputHelper _out;
         public QwenNumericalDiagnosticTests(ITestOutputHelper output) => _out = output;
 
-        private const string ModelPath = "c:/qwen3b/qwen.bin";
-        private const string TokenizerDir = "c:/qwen3b/";
+        private static string ModelPath => TestModelPaths.Qwen3B.BinaryPath;
+        private static string TokenizerDir => TestModelPaths.Qwen3B.Dir;
 
         [LongFact]
         public void NumDiag_BosToken_Top20_Logits()
         {
-            if (!File.Exists(ModelPath))
-            {
-                return;
-            }
+            TestModelPaths.Qwen3B.RequireBinaryPath();
             var engine = CachedLlamaInferenceEngine.Load(ModelPath);
             var tok = File.Exists(Path.Combine(TokenizerDir, "tokenizer.json"))
                 ? QwenTokenizer.Load(TokenizerDir) : null;
@@ -56,14 +54,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         [LongFact]
         public void NumDiag_AssistantPrompt_Top20_Logits()
         {
-            if (!File.Exists(ModelPath))
-            {
-                return;
-            }
-            if (!File.Exists(Path.Combine(TokenizerDir, "tokenizer.json")))
-            {
-                return;
-            }
+            TestModelPaths.Qwen3B.RequireBinaryPath();
+            TestModelPaths.Qwen3B.RequireTokenizerJsonPath();
 
             var engine = CachedLlamaInferenceEngine.Load(ModelPath);
             var tok = QwenTokenizer.Load(TokenizerDir);

@@ -11,6 +11,7 @@ using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 using DevOnBike.Overfit.Tests.Data.Mnist;
+using DevOnBike.Overfit.Tests.TestSupport;
 
 // Wpinamy Core
 
@@ -27,7 +28,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Cnn
             var learningRate = 0.001f;
 
             // MnistLoader musi teraz zwracać krotkę (TensorStorage<float> trainX, TensorStorage<float> trainY)
-            var (trainX, trainY) = MnistLoader.Load("d:/ml/train-images.idx3-ubyte", "d:/ml/train-labels.idx1-ubyte", trainSize);
+            var (trainX, trainY) = MnistLoader.Load(TestModelPaths.Mnist.TrainImagesPath, TestModelPaths.Mnist.TrainLabelsPath, trainSize);
 
             using var X = new AutogradNode(trainX, new TensorShape(trainSize, 1, 28, 28), false);
             using var Y = new AutogradNode(trainY, new TensorShape(trainSize, 10), false);

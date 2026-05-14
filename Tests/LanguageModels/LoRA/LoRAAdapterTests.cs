@@ -6,6 +6,7 @@
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.LoRA;
 using DevOnBike.Overfit.LanguageModels.Runtime;
+using DevOnBike.Overfit.Tests.TestSupport;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
@@ -20,7 +21,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
             _out = output;
         }
 
-        private const string ModelPath = "c:/qwen3b/qwen.bin";
+        private static string ModelPath => TestModelPaths.Qwen3B.BinaryPath;
 
         // ── LoRAWeight unit tests (no model needed) ───────────────────────────
 
@@ -121,10 +122,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
         [LongFact]
         public void LoRA_CreateAdapter_HasCorrectParamCount()
         {
-            if (!File.Exists(ModelPath))
-            {
-                return;
-            }
+            TestModelPaths.Qwen3B.RequireBinaryPath();
             var engine = CachedLlamaInferenceEngine.Load(ModelPath);
             using (engine)
             {
@@ -153,10 +151,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
         [LongFact]
         public void LoRA_EnableDisable_LogitsUnchanged()
         {
-            if (!File.Exists(ModelPath))
-            {
-                return;
-            }
+            TestModelPaths.Qwen3B.RequireBinaryPath();
             var engine = CachedLlamaInferenceEngine.Load(ModelPath);
             using (engine)
             {
@@ -249,10 +244,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
         [LongFact]
         public void Diagnostic_DirectWeightWrite_ChangesLogits()
         {
-            if (!File.Exists(ModelPath))
-            {
-                return;
-            }
+            TestModelPaths.Qwen3B.RequireBinaryPath();
             var engine = CachedLlamaInferenceEngine.Load(ModelPath);
             using (engine)
             {
@@ -328,10 +320,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
         [LongFact]
         public void LoRA_AfterTraining_LogitsChange()
         {
-            if (!File.Exists(ModelPath))
-            {
-                return;
-            }
+            TestModelPaths.Qwen3B.RequireBinaryPath();
             var engine = CachedLlamaInferenceEngine.Load(ModelPath);
             using (engine)
             {
@@ -463,10 +452,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
         [LongFact]
         public void LoRA_SaveLoad_Roundtrip()
         {
-            if (!File.Exists(ModelPath))
-            {
-                return;
-            }
+            TestModelPaths.Qwen3B.RequireBinaryPath();
             var engine = CachedLlamaInferenceEngine.Load(ModelPath);
             using (engine)
             {

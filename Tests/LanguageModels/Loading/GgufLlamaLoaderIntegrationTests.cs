@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.LanguageModels.Runtime;
+using DevOnBike.Overfit.Tests.TestSupport;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
@@ -22,9 +23,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
     [Trait("Category", "Integration")]
     public sealed class GgufLlamaLoaderIntegrationTests
     {
-        // ── Configure these paths to your local checkpoints ────────────────
-        private const string GgufModelPath = @"c:\qwen3b\qwen.gguf";
-        private const string BinaryModelPath = @"c:\qwen3b\qwen.bin";
+        // ── Paths resolved via TestModelPaths — override via OVERFIT_QWEN3B_DIR ─
+        private static string GgufModelPath   => TestModelPaths.Qwen3B.GgufPath;
+        private static string BinaryModelPath => TestModelPaths.Qwen3B.BinaryPath;
 
         private readonly ITestOutputHelper _output;
 
@@ -36,16 +37,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         [LongFact]
         public void LoadGguf_ProducesSameLogitsAsBinaryLoader_For3B()
         {
-            if (!File.Exists(GgufModelPath))
-            {
-                _output.WriteLine($"SKIPPED: GGUF model not found at {GgufModelPath}");
-                return;
-            }
-            if (!File.Exists(BinaryModelPath))
-            {
-                _output.WriteLine($"SKIPPED: binary model not found at {BinaryModelPath}");
-                return;
-            }
+            TestModelPaths.Qwen3B.RequireGgufPath();
+            TestModelPaths.Qwen3B.RequireBinaryPath();
 
             // Known-good 3-token prompt
             int[] prompt = { 151643, 151644, 198 };

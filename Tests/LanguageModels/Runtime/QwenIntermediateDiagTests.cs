@@ -5,6 +5,7 @@
 
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
+using DevOnBike.Overfit.Tests.TestSupport;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
@@ -16,7 +17,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         private readonly ITestOutputHelper _out;
         public QwenIntermediateDiagTests(ITestOutputHelper output) => _out = output;
 
-        private const string ModelPath = "c:/qwen3b/qwen.bin";
+        private static string ModelPath => TestModelPaths.Qwen3B.BinaryPath;
 
         /// <summary>
         /// Compares specific token logits between C# and Python forward_pass_reference.py.
@@ -31,10 +32,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         [LongFact]
         public void IntDiag_LogitTrace()
         {
-            if (!File.Exists(ModelPath))
-            {
-                return;
-            }
+            TestModelPaths.Qwen3B.RequireBinaryPath();
 
             var engine = CachedLlamaInferenceEngine.Load(ModelPath);
             using (engine)

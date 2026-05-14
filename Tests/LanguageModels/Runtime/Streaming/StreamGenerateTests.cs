@@ -1,8 +1,12 @@
-// Copyright (c) 2026 DevOnBike. AGPLv3.
+// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
+using DevOnBike.Overfit.Tests.TestSupport;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
@@ -15,8 +19,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
     [Trait("Category", "Streaming")]
     public sealed class StreamGenerateTests
     {
-        private const string GgufModelPath = @"c:\qwen3b\qwen.gguf";
-        private const string TokenizerDir = @"c:\qwen3b\";
+        private static string GgufModelPath => TestModelPaths.Qwen3B.GgufPath;
+        private static string TokenizerDir => TestModelPaths.Qwen3B.Dir;
 
         private readonly ITestOutputHelper _output;
 
@@ -28,7 +32,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
         [LongFact]
         public async Task StreamGenerate_YieldsMaxTokensWhenNoStopHit()
         {
-            if (!File.Exists(GgufModelPath)) { _output.WriteLine("SKIP: no model"); return; }
+            TestModelPaths.Qwen3B.RequireGgufPath();
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(GgufModelPath);
             using var session = engine.CreateSession(64);
@@ -52,7 +56,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
         [LongFact]
         public async Task StreamGenerate_TerminatesOnStopToken()
         {
-            if (!File.Exists(GgufModelPath)) { _output.WriteLine("SKIP: no model"); return; }
+            TestModelPaths.Qwen3B.RequireGgufPath();
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(GgufModelPath);
             // Cache must comfortably exceed prompt + maxTokens so the
@@ -96,7 +100,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
         [LongFact]
         public async Task StreamGenerate_RespectsCancellation()
         {
-            if (!File.Exists(GgufModelPath)) { _output.WriteLine("SKIP: no model"); return; }
+            TestModelPaths.Qwen3B.RequireGgufPath();
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(GgufModelPath);
             using var session = engine.CreateSession(64);
@@ -127,7 +131,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
         [LongFact]
         public async Task StreamGenerate_ThrowsWhenSessionEmpty()
         {
-            if (!File.Exists(GgufModelPath)) { _output.WriteLine("SKIP: no model"); return; }
+            TestModelPaths.Qwen3B.RequireGgufPath();
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(GgufModelPath);
             using var session = engine.CreateSession(64);
@@ -147,7 +151,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
         [LongFact]
         public async Task StreamGenerate_MatchesGenerateNextTokenForSamePrompt()
         {
-            if (!File.Exists(GgufModelPath)) { _output.WriteLine("SKIP: no model"); return; }
+            TestModelPaths.Qwen3B.RequireGgufPath();
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(GgufModelPath);
 
@@ -182,7 +186,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
         [LongFact]
         public async Task StreamGenerate_WithFactoryStopTokens_QwenChatTerminators()
         {
-            if (!File.Exists(GgufModelPath)) { _output.WriteLine("SKIP: no model"); return; }
+            TestModelPaths.Qwen3B.RequireGgufPath();
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(GgufModelPath);
             using var session = engine.CreateSession(64);

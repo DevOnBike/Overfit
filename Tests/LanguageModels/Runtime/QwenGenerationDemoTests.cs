@@ -6,6 +6,7 @@
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
+using DevOnBike.Overfit.Tests.TestSupport;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
@@ -17,8 +18,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         private readonly ITestOutputHelper _out;
         public QwenGenerationDemoTests(ITestOutputHelper output) => _out = output;
 
-        private const string ModelPath = "c:/qwen3b/qwen.bin";
-        private const string TokenizerDir = "c:/qwen3b/";
+        private static string ModelPath => TestModelPaths.Qwen3B.BinaryPath;
+        private static string TokenizerDir => TestModelPaths.Qwen3B.Dir;
         private const int MaxNewTokens = 200;
         private const int MaxCtx = 512;
 
@@ -31,19 +32,15 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             topP: 0.9f,
             seed: 42);
 
+        /// <summary>
+        /// Loads engine + tokenizer or throws <see cref="FileNotFoundException"/>
+        /// when either fixture is missing. Always returns true on success — bool
+        /// return kept for source compatibility with existing callers.
+        /// </summary>
         private bool TryLoad(out CachedLlamaInferenceEngine? engine, out QwenTokenizer? tok)
         {
-            engine = null; tok = null;
-            if (!File.Exists(ModelPath))
-            {
-                _out.WriteLine("SKIPPED: brak modelu w test_fixtures/qwen.bin");
-                return false;
-            }
-            if (!File.Exists(Path.Combine(TokenizerDir, "tokenizer.json")))
-            {
-                _out.WriteLine("SKIPPED: brak tokenizera w test_fixtures/tokenizer/");
-                return false;
-            }
+            TestModelPaths.Qwen3B.RequireBinaryPath();
+            TestModelPaths.Qwen3B.RequireTokenizerJsonPath();
             engine = CachedLlamaInferenceEngine.Load(ModelPath);
             tok = QwenTokenizer.Load(TokenizerDir);
             return true;

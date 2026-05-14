@@ -46,11 +46,34 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 
 ---
 
-## Near-term
+## Current focus: GPT-2 Small as primary showcase
+
+**Why:** the parity claim ("top-10 overlap 10/10 vs PyTorch, maxAbsDiff 0.000107, 0 B / generated token, KV-cache decode") is already implemented and validated. Productizing this single story end-to-end (defended in CI, demoable in one command, documented honestly) is higher-value than chasing more model families. Qwen / Llama / LoRA / quantization work continues to live in the codebase but is **explicitly deferred** out of the current week's focus.
+
+### This week
+
+- [x] **GPT-2 parity diagnostics run on every `dotnet test`** — `Gpt2ImportParityDiagnostics`, `Gpt2ImportStageParityDiagnostics`, `Gpt2ImportAttentionParityDiagnostics` flipped from `[LongFact]` back to `[Fact]`. Sweep cost: +2 s. Headline claim now defended on every push.
+- [ ] **`Demo/Gpt2ConsoleDemo` project** — user-facing console app: `dotnet run -- --model path --prompt "..." --tokens N`. Reports: model name, KV-cache enabled, managed allocations/token, tokens/sec. First time the repo looks like a *product* instead of a test suite.
+- [ ] **Fixture / model path resolver** — drop hardcoded `c:\qwen3b\…` / `d:/…` constants. Resolve via env var (`OVERFIT_MODEL_DIR`) + local `models/` directory. Required for the demo to work on anyone else's machine.
+- [ ] **GPT-2 generation benchmark** — BenchmarkDotNet: cold-start, prefill cost, per-token decode time, allocations. Confirm 0 B/token quantitatively for the README.
+- [ ] **README cleanup** — single consolidated story: how to convert weights, how to run, what's measured. Remove stale "repetitive text" / "broken GPT-2 import" comments. Add the benchmark numbers from the previous item.
+
+### Next (after the GPT-2 week)
+
+- [ ] **`Prefill()` vs `GenerateNextToken()` split** — currently fused; separating enables faster multi-token prefill without changing public API.
+- [ ] **LM-head hot-path audit** — vocab 50k means LM projection may dominate per-token cost. Compare `Project` vs `ProjectParallel`, possibly add threshold.
+- [ ] **`Gpt2.Load(...) / CreateSession()` API sugar** — `new GPT1Model(Gpt2Config.Small)` is technically correct but semantically misleading. A typed entry point reads cleaner in the demo.
+- [ ] **Stabilize `GPT1_GradientCheck_BackwardIsCorrect`** — LMHead numerics flaky around threshold, fails ~1-in-3 sweeps.
+
+---
+
+## Deferred — Qwen / Llama / quantization track
+
+These are working in the codebase but **outside the current GPT-2 focus week.** Listed for visibility, not for prioritization.
 
 ### Slot 2b — quantized weight storage at inference
 
-**The gap:** Q4_K_M loader exists (above) but currently dequantizes everything to FP32 on load. A 2 GB Q4_K_M file produces ~14 GB FP32 weights in RAM. The "3B in 4 GB RAM" payoff requires keeping weights quantized in RAM and dequantizing per-block during matmul.
+**The gap:** Q4_K_M loader exists (decodes from disk) but currently dequantizes everything to FP32 on load. A 2 GB Q4_K_M file produces ~14 GB FP32 weights in RAM. The "3B in 4 GB RAM" payoff requires keeping weights quantized in RAM and dequantizing per-block during matmul.
 
 **Work:**
 - [ ] `TensorStorage<TBlock>` or parallel `QuantizedTensorStorage` abstraction (Q4_K and Q6_K block shapes).
@@ -62,13 +85,13 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 
 Estimated effort: 1-2 days. Largest single architectural change since KV-cache runtime.
 
-### Slot 3 — Q4_K_M integration parity test
+### Q4_K_M integration parity test
 
 - [ ] Download `qwen2.5-3b-instruct-q4_k_m.gguf` (Ollama or HF) to `c:\qwen3b\qwen.q4km.gguf`.
-- [ ] Integration test: load via `GgufLlamaLoader`, run greedy on canonical 3-token prompt, compare top-1 token + top-10 overlap vs FP16 GGUF baseline.
+- [ ] Run the existing `GgufQ4KMParityTests.Q4KM_TopTokenMatches_FP16Baseline_OnCanonicalPrompt` test (already written, currently `[LongFact]` + skip-if-missing).
 - [ ] Tolerance: top-1 matches; max abs logit diff within Q4_K_M expected range (~0.5-1.5 % relative).
 
-Synthetic unit tests (already in repo) cover the algorithm; this test catches bit-layout regressions against llama.cpp/Ollama.
+Synthetic unit tests already cover the algorithm; this test catches bit-layout regressions against llama.cpp/Ollama.
 
 ### Other quant formats
 
@@ -76,7 +99,17 @@ Synthetic unit tests (already in repo) cover the algorithm; this test catches bi
 - [ ] Q4_0 / Q5_0 / Q5_1 (legacy formats; lower priority — Ollama defaults to K-quants).
 - [ ] Q2_K / Q3_K_S (very aggressive quant; experimental quality).
 
-### Performance
+### LoRA training
+
+- [ ] Backward pass through Linear / RMSNorm / SwiGLU / attention restricted to adapter parameters (frozen base).
+- [ ] Adam optimizer integration over `LoRAWeight.A` + `LoRAWeight.B` only.
+- [ ] Demo: overfit on 10 instruction pairs, verify adapter steers generation.
+
+Opens "fine-tune LLM locally in pure C#" story. Major scope.
+
+---
+
+## Performance backlog
 
 - [ ] Batched linear kernel — `LinearKernels.ForwardBatched` measured win at batch 64/256 vs ONNX Runtime.
 - [ ] Backward kernels — Linear/Conv backward through pure span kernels where practical.
@@ -86,10 +119,8 @@ Synthetic unit tests (already in repo) cover the algorithm; this test catches bi
 
 ### Correctness
 
-- [ ] Stabilize `GPT1_GradientCheck_BackwardIsCorrect` LMHead numerics (currently flaky around threshold).
 - [ ] Numerical equivalence tests across scalar/SIMD paths.
 - [ ] Determinism policy for parallel training kernels.
-- [ ] Q4_K_M / Q6_K bit-exact parity vs llama.cpp output (Slot 3 above).
 
 ---
 
@@ -97,8 +128,7 @@ Synthetic unit tests (already in repo) cover the algorithm; this test catches bi
 
 ### Features
 
-- [ ] **LoRA training** — backward pass through adapter only (frozen base). Requires backward through Linear/RMSNorm/SwiGLU/attention. Major scope; opens "fine-tune LLM locally in pure C#" story.
-- [ ] **Chat templates** — Qwen/Llama/Mistral chat-format builders (system/user/assistant turns) for ergonomic chat-style API.
+- [ ] **Chat templates** — Qwen/Llama/Mistral chat-format builders (system/user/assistant turns) for ergonomic chat-style API. *(Lives in deferred track until Qwen path returns to focus.)*
 - [ ] **`OverfitClient` facade** — high-level API: `var client = OverfitClient.LoadGguf(...); var response = await client.ChatAsync("...");` — gathers tokenizer + engine + session + sampling defaults.
 - [ ] **ONNX export** — Overfit → ONNX for interop with other runtimes.
 - [ ] **ONNX: LSTM/GRU operators** — enables recurrent model import.
@@ -107,7 +137,7 @@ Synthetic unit tests (already in repo) cover the algorithm; this test catches bi
 
 ### Distribution
 
-- [ ] NuGet package metadata polish, sample console app (50-line Qwen chat).
+- [ ] NuGet package metadata polish.
 - [ ] Sample Blazor app showing streaming generation in browser via Rx/IAsyncEnumerable adapter.
 - [ ] Benchmark page: tabela Format × Model × RAM × tokens/s.
 

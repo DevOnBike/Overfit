@@ -7,37 +7,32 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.Tests.TestSupport;
 using DevOnBike.Overfit.Tokenization;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 {
     /// <summary>
-    /// Manual GPT-2 import parity diagnostic.
+    /// GPT-2 import parity gate — verifies imported weights produce logits matching
+    /// the PyTorch reference for the canonical prompt. Runs by default in the
+    /// release sweep; protects the headline claim (top-10 overlap 10/10,
+    /// maxAbsDiff ≈ 0.000107). Stage-by-stage and attention-internals variants live
+    /// in the sibling <c>Gpt2ImportStageParityDiagnostics</c> /
+    /// <c>Gpt2ImportAttentionParityDiagnostics</c> and run alongside this one.
     ///
-    /// This is intentionally skipped by default because it depends on large GPT-2 fixtures
-    /// and a Python-generated PyTorch reference JSON.
-    ///
-    /// Generate fixtures:
-    ///   python3 Scripts/convert_gpt2.py --size small --out Tests/test_fixtures/
-    ///
-    /// Generate reference:
+    /// Fixtures resolved via <c>TestModelPaths.Gpt2Small</c>
+    /// (override with <c>OVERFIT_GPT2_DIR</c>). The reference JSON
+    /// (<c>gpt2_reference_small.json</c>) is committed in
+    /// <c>Tests/test_fixtures/</c>; regenerate via:
     ///   python3 Scripts/debug_gpt2_reference.py --size small --fixtures Tests/test_fixtures --out Tests/test_fixtures/gpt2_reference_small.json
-    ///
-    /// Then remove Skip locally and run:
-    ///   dotnet test -c Release --filter "Gpt2Small_CompareFinalLogitsAgainstPyTorchReference"
-    ///
-    /// Current expectation:
-    /// - tokenizer ids should match,
-    /// - logits are likely not close yet,
-    /// - output should reveal whether LM head / attention / layer layout is badly mismatched.
     /// </summary>
     public sealed class Gpt2ImportParityDiagnostics
     {
-        private const string ModelPath = "d:/gpt2_small.bin";
-        private const string VocabPath = "d:/vocab.json";
-        private const string MergesPath = "d:/merges.txt";
-        private const string ReferencePath = "d:/gpt2_reference_small.json";
+        private static string ModelPath     => TestModelPaths.Gpt2Small.BinaryPath;
+        private static string VocabPath     => TestModelPaths.Gpt2Small.VocabPath;
+        private static string MergesPath    => TestModelPaths.Gpt2Small.MergesPath;
+        private static string ReferencePath => TestModelPaths.Gpt2Small.ReferenceJsonPath;
 
         private const int DefaultArenaSize = 1_500_000_000;
 
@@ -49,9 +44,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             _output = output;
         }
 
-        [LongFact]
+        [Fact]
         [Trait("Category", "Diagnostics")]
-        [Trait("Category", "Manual")]
+        [Trait("Category", "Parity")]
         public void Gpt2Small_CompareFinalLogitsAgainstPyTorchReference()
         {
             SkipIfMissing(

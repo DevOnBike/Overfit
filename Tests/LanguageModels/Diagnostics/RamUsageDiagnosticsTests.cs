@@ -6,6 +6,7 @@
 using System.Diagnostics;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
+using DevOnBike.Overfit.Tests.TestSupport;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
@@ -22,9 +23,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
     [Trait("Category", "Diagnostics")]
     public sealed class RamUsageDiagnosticsTests
     {
-        private const string GgufModelPath = @"c:\qwen3b\qwen.gguf";
-        private const string BinaryModelPath = @"c:\qwen3b\qwen.bin";
-        private const string TokenizerDir = @"c:\qwen3b\";
+        private static string GgufModelPath   => TestModelPaths.Qwen3B.GgufPath;
+        private static string BinaryModelPath => TestModelPaths.Qwen3B.BinaryPath;
+        private static string TokenizerDir    => TestModelPaths.Qwen3B.Dir;
 
         private readonly ITestOutputHelper _output;
 
@@ -36,11 +37,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         [LongFact]
         public void Diagnose_GgufLoader_3B_RamFootprint()
         {
-            if (!File.Exists(GgufModelPath))
-            {
-                _output.WriteLine($"SKIPPED: {GgufModelPath} not found");
-                return;
-            }
+            TestModelPaths.Qwen3B.RequireGgufPath();
 
             PrintCheckpoint("00. Test start (cold)");
 
@@ -84,11 +81,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         [LongFact]
         public void Diagnose_BinaryLoader_3B_RamFootprint()
         {
-            if (!File.Exists(BinaryModelPath))
-            {
-                _output.WriteLine($"SKIPPED: {BinaryModelPath} not found");
-                return;
-            }
+            TestModelPaths.Qwen3B.RequireBinaryPath();
 
             PrintCheckpoint("00. Test start (cold)");
 

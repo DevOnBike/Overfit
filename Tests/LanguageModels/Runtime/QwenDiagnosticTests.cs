@@ -6,6 +6,7 @@
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
+using DevOnBike.Overfit.Tests.TestSupport;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
@@ -21,18 +22,22 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             _out = output;
         }
 
-        private const string ModelPath = "c:/qwen3b/qwen.bin";
-        private const string TokenizerDir = "c:/qwen3b/";
+        private static string ModelPath => TestModelPaths.Qwen3B.BinaryPath;
+        private static string TokenizerDir => TestModelPaths.Qwen3B.Dir;
 
+        /// <summary>
+        /// Loads the engine + tokenizer or throws <see cref="FileNotFoundException"/>
+        /// if the required model file is missing. Tokenizer is optional — its absence
+        /// leaves <paramref name="tok"/> null. Returns true unconditionally for source
+        /// compatibility with callers that still use <c>if (!TryLoad(...)) return;</c>.
+        /// </summary>
         private bool TryLoad(out CachedLlamaInferenceEngine? engine, out QwenTokenizer? tok)
         {
-            engine = null; tok = null;
-            if (!File.Exists(ModelPath)) { _out.WriteLine($"SKIPPED: {ModelPath}"); return false; }
+            TestModelPaths.Qwen3B.RequireBinaryPath();
             engine = CachedLlamaInferenceEngine.Load(ModelPath);
-            if (File.Exists(Path.Combine(TokenizerDir, "tokenizer.json")))
-            {
-                tok = QwenTokenizer.Load(TokenizerDir);
-            }
+            tok = File.Exists(Path.Combine(TokenizerDir, "tokenizer.json"))
+                ? QwenTokenizer.Load(TokenizerDir)
+                : null;
             return true;
         }
 

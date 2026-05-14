@@ -6,6 +6,7 @@
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
+using DevOnBike.Overfit.Tests.TestSupport;
 using DevOnBike.Overfit.Tokenization;
 using Xunit.Abstractions;
 
@@ -14,31 +15,25 @@ namespace DevOnBike.Overfit.Tests.LanguageModels
     /// <summary>
     /// GPT-2 inference smoke tests.
     ///
-    /// Fixtures required:
-    ///   test_fixtures/gpt2_small.bin
-    ///   test_fixtures/vocab.json
-    ///   test_fixtures/merges.txt
+    /// Fixtures resolved via <c>TestModelPaths.Gpt2Small</c>
+    /// (defaults: <c>C:\gpt2\gpt2_small.bin</c>, <c>vocab.json</c>, <c>merges.txt</c>;
+    ///  override with the <c>OVERFIT_GPT2_DIR</c> env var).
     ///
-    /// Generate fixtures with:
-    ///   python3 Scripts/convert_gpt2.py --size small --out Tests/test_fixtures/
+    /// Generate fixtures once with:
+    ///   python3 Scripts/convert_gpt2.py --size small --out C:\gpt2\
     ///
     /// These are integration/smoke tests for the imported checkpoint path, tokenizer,
     /// and cached generation API. Sampler probability behavior is covered separately
-    /// in TokenSamplerTests.
-    ///
-    /// Note:
-    /// The imported GPT-2 checkpoint currently appears to generate repetitive text.
-    /// That is a model-weight-layout/import quality issue, not a tokenizer or runtime
-    /// API smoke-test failure. These tests intentionally validate load/tokenize/runtime
-    /// execution only.
+    /// in TokenSamplerTests; numerical parity against PyTorch (top-10 logit overlap 10/10,
+    /// maxAbsDiff ≈ 0.000107) lives in <c>Gpt2ImportParityDiagnostics</c>.
     /// </summary>
     public class Gpt2InferenceTests
     {
         private readonly ITestOutputHelper _output;
 
-        private const string ModelPath = "d:/gpt2_small.bin";
-        private const string VocabPath = "d:/vocab.json";
-        private const string MergesPath = "d:/merges.txt";
+        private static string ModelPath  => TestModelPaths.Gpt2Small.BinaryPath;
+        private static string VocabPath  => TestModelPaths.Gpt2Small.VocabPath;
+        private static string MergesPath => TestModelPaths.Gpt2Small.MergesPath;
 
         public Gpt2InferenceTests(
             ITestOutputHelper output)

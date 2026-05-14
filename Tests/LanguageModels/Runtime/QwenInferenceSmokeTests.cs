@@ -5,6 +5,7 @@
 
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
+using DevOnBike.Overfit.Tests.TestSupport;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
 {
@@ -29,23 +30,16 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
     public sealed class QwenInferenceSmokeTests
     {
         // ── Checkpoint discovery ───────────────────────────────────────────
-        // convert_gguf.py saves as <stem_of_input>.bin in the --out directory.
-        // Common filenames produced by the conversion scripts:
-        private static readonly string[] CandidatePaths =
-        [
-            "c:/qwen3b/qwen.bin",
-        ];
-
-        private static string? FindCheckpoint()
-            => CandidatePaths.FirstOrDefault(File.Exists);
+        // Resolved via TestModelPaths; throws FileNotFoundException with an
+        // OVERFIT_QWEN3B_DIR hint if the file isn't there.
+        private static string RequireCheckpoint() => TestModelPaths.Qwen3B.RequireBinaryPath();
 
         // ── Tests ──────────────────────────────────────────────────────────
 
         [LongFact]
         public void Load_ValidCheckpoint_DoesNotThrow()
         {
-            var path = FindCheckpoint();
-            if (path is null) { Console.WriteLine("SKIPPED: No checkpoint. Run: python3 Scripts/convert_gguf.py --input <model.gguf> --out test_fixtures/"); return; }
+            var path = RequireCheckpoint();
 
             using var engine = CachedLlamaInferenceEngine.Load(path!);
 
@@ -65,8 +59,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         [LongFact]
         public void GenerateNextToken_SingleStep_ReturnsValidTokenId()
         {
-            var path = FindCheckpoint();
-            if (path is null) { Console.WriteLine("SKIPPED: No Qwen checkpoint found in test_fixtures/."); return; }
+            var path = RequireCheckpoint();
 
             using var engine = CachedLlamaInferenceEngine.Load(path!);
             using var session = engine.CreateSession(maxContextLength: 64);
@@ -86,8 +79,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         [LongFact]
         public void GenerateNextToken_TenSteps_AllTokensValid()
         {
-            var path = FindCheckpoint();
-            if (path is null) { Console.WriteLine("SKIPPED: No Qwen checkpoint found in test_fixtures/."); return; }
+            var path = RequireCheckpoint();
 
             using var engine = CachedLlamaInferenceEngine.Load(path!);
             using var session = engine.CreateSession(maxContextLength: 64);
@@ -110,8 +102,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         [LongFact]
         public void Logits_AreAllFinite_AfterGeneration()
         {
-            var path = FindCheckpoint();
-            if (path is null) { Console.WriteLine("SKIPPED: No Qwen checkpoint found in test_fixtures/."); return; }
+            var path = RequireCheckpoint();
 
             using var engine = CachedLlamaInferenceEngine.Load(path!);
             using var session = engine.CreateSession(maxContextLength: 64);
@@ -154,8 +145,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         [LongFact]
         public void MultipleSessionsFromSameEngine_Independenet()
         {
-            var path = FindCheckpoint();
-            if (path is null) { Console.WriteLine("SKIPPED: No Qwen checkpoint found in test_fixtures/."); return; }
+            var path = RequireCheckpoint();
 
             using var engine = CachedLlamaInferenceEngine.Load(path!);
 
@@ -178,8 +168,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         [LongFact]
         public void Session_Reset_ClearsState()
         {
-            var path = FindCheckpoint();
-            if (path is null) { Console.WriteLine("SKIPPED: No Qwen checkpoint found in test_fixtures/."); return; }
+            var path = RequireCheckpoint();
 
             using var engine = CachedLlamaInferenceEngine.Load(path!);
             using var session = engine.CreateSession(maxContextLength: 32);

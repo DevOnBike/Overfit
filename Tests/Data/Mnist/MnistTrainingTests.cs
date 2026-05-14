@@ -12,6 +12,7 @@ using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
+using DevOnBike.Overfit.Tests.TestSupport;
 using DevOnBike.Overfit.Tests.TestSupport.Helpers;
 using Xunit.Abstractions;
 
@@ -62,8 +63,8 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
 
             _output.WriteLine($"Environment.ProcessorCount: {Environment.ProcessorCount}");
 
-            var trainImagesPath = "d:/ml/train-images.idx3-ubyte";
-            var trainLabelsPath = "d:/ml/train-labels.idx1-ubyte";
+            var trainImagesPath = TestModelPaths.Mnist.TrainImagesPath;
+            var trainLabelsPath = TestModelPaths.Mnist.TrainLabelsPath;
 
             if (!File.Exists(trainImagesPath) || !File.Exists(trainLabelsPath))
             {

@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <DebugType>embedded</DebugType>
+        <RootNamespace>DevOnBike.Overfit.Demo.Gpt2Console</RootNamespace>
+        <AssemblyName>Gpt2ConsoleDemo</AssemblyName>
+
+        <!--
+            DEMO ONLY — must NOT be published to NuGet.
+            The publish-nuget.yml workflow runs `dotnet pack` at the solution level,
+            so IsPackable=false is what keeps this project out of ./packages/*.nupkg.
+            Do not remove this guard.
+        -->
+        <IsPackable>false</IsPackable>
+
+        <SonarQubeExclude>true</SonarQubeExclude>
+        <NoWarn>$(NoWarn);1591</NoWarn>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\Sources\Main\Main.csproj" />
+    </ItemGroup>
+
+</Project>
