@@ -118,11 +118,37 @@ Opens "fine-tune LLM locally in pure C#" story. Major scope.
 
 ## Performance backlog
 
-- [ ] Batched linear kernel — `LinearKernels.ForwardBatched` measured win at batch 64/256 vs ONNX Runtime.
-- [ ] Backward kernels — Linear/Conv backward through pure span kernels where practical.
-- [ ] Optimizer kernel profiling — Adam/AdamW state updates, zero-grad allocation sources (currently ~96 B/Step on Adam — already tracked by skipped tests in `AdamOptimizerBehaviorTests`).
-- [ ] CPU SIMD audit — AVX2/AVX-512/AVX10 where available.
-- [ ] Thread-scaling stabilization for large training workloads.
+### Training CPU-saturation track
+
+Goal: on 16+ core machines, training step pegs CPU at near-100 % across all cores instead of single-digit cores idle/under-utilized. Inventory of what's already parallel-capable:
+
+| Op | Parallel today | Threshold |
+|----|----------------|-----------|
+| `LinearKernels` backward (input + weight) | ✅ above 1M ops | `ParallelThreshold = 1_048_576` |
+| `Conv2D` forward + backward | ✅ | per `TensorMath.Convolution` |
+| `MaxPool2D`/`AvgPool2D` forward + backward | ✅ | `TensorMath.Pooling` |
+| `LSTM` forward + backward | ✅ over batch | `TensorMath.Sequence` |
+| `Adam.Step` | ✅ over parameters | always parallel |
+| `ScaledDotProductAttentionBackward` | ✅ over batch | **flipped to default ON** (was experimental flag) |
+| `ScaledDotProductAttention` forward | ❌ sequential over batch | candidate |
+| `LayerNorm` / `RMSNorm` forward + backward | ❌ sequential | per-token, usually small enough |
+| `Embedding` backward (scatter-add) | ❌ sequential | hard — atomic conflicts |
+| Activation kernels (GELU/SwiGLU/ReLU) | ❌ SIMD-only, not threaded | usually fine |
+
+Concrete items:
+
+- [x] **`EnableParallelAttentionBackward` default ON** — bit-identical to sequential (parallel only over batch dim, no cross-batch reduction), author measured ~27 % backward speedup on data-parallel TinyShakespeare. Stable training path now uses it by default; remaining single-thread case is intentional fallback for batch=1 where Parallel.For overhead would be pure waste.
+- [x] **`BatchSequentialThreshold` 128 → 32** — `MaxPool2D` / `AvgPool2D` / `LSTM` forward + backward + bias-add (`TensorMath.Algebra`) parallelize across batch only above this threshold. MNIST training (B=64) was falling into the sequential branch (64 < 128) → `MaxPool2D` ate 42 % of epoch time on a 32-core machine, single-threaded. After lowering to 32: **MNIST training −38 % wall clock** (5551 → 3456 ms for 5 epochs, full MNIST 60k @ B=64), with MaxPool2D dropping from 383 ms/epoch to ~87 ms/epoch (−77 %). Full sweep still green (617/0/63). The 32 floor keeps sequential for genuinely small batches where Parallel.For overhead would dominate.
+- [ ] **True batched training (B > 1)** — *biggest single lever for CPU saturation.* MHA in training path is currently batch=1 only. With B=8/16, every existing parallel-over-batch path (attention forward + backward, layer-norm batches, optimizer-over-params) starts working. 2-3 days; ROADMAP'd separately under Qwen track but is GPT-2 training prerequisite.
+- [ ] **Profile real training step** — instrument `GPT1TrainingStepBenchmark.FullTrainStep` with per-kernel timing on 32-core Ryzen 9 9950X3D. Identify which kernel sits below `MaxDegreeOfParallelism` saturation despite Parallel.For being wired up (typically: kernel runtime < Parallel.For overhead at chosen threshold). 0.5 day.
+- [ ] **`ScaledDotProductAttention` forward parallel-over-batch** — symmetric with the backward we just enabled. Likely 15-20 % forward speedup at B ≥ 4.
+- [ ] **Threshold tuning** — `LinearKernels.ParallelThreshold = 1_048_576` is set for inference (avoid Parallel.For overhead on tiny matrices). For training where the per-call work is amortized across many tokens, lower threshold may pay. Need per-op profiling first.
+- [ ] **Data-parallel training as first-class API** — `TinyShakespeareDataParallelTrainingTests` proves N model replicas + gradient averaging works. Promote to public API, with idiomatic worker pool, for "N cores → N replicas" training scaling on a single machine.
+- [ ] **Batched linear kernel** — `LinearKernels.ForwardBatched` measured win at batch 64/256 vs ONNX Runtime.
+- [ ] **Backward kernels** — Linear/Conv backward through pure span kernels where practical.
+- [ ] **Optimizer kernel profiling** — Adam/AdamW state updates, zero-grad allocation sources (currently ~96 B/Step on Adam — already tracked by skipped tests in `AdamOptimizerBehaviorTests`).
+- [ ] **CPU SIMD audit** — AVX2/AVX-512/AVX10 where available.
+- [ ] **Thread-scaling stabilization for large training workloads.**
 
 ### Correctness
 

@@ -19,7 +19,14 @@ namespace DevOnBike.Overfit.Ops
 
         private const long ParallelThreshold = 4096;
         private const int StackAllocThreshold = 1024;
-        private const int BatchSequentialThreshold = 128;
+
+        // Was 128. Lowered to 32 after MNIST profiling showed MaxPool2D
+        // dominating epoch time (42 %) for B=64 because 64 < 128 → fell into
+        // sequential branch. With Parallel.For across batch at B=64 on 32-core
+        // Ryzen, per-batch work (~22k ops for MaxPool with 8c×26×26 spatial)
+        // amortizes the ~5 µs Parallel.For overhead. Below 32 still sequential
+        // — overhead would dominate small-batch cases.
+        private const int BatchSequentialThreshold = 32;
 
         // ====================================================================
         // SOFTMAX

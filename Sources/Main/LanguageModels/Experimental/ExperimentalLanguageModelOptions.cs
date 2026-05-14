@@ -14,17 +14,25 @@ namespace DevOnBike.Overfit.LanguageModels.Experimental
     /// </summary>
     public static class ExperimentalLanguageModelOptions
     {
-        private volatile static bool _enableParallelAttentionBackward;
+        // Default ON: the parallel SDPA backward is bit-identical to sequential
+        // (each batch index runs the same kernel; Parallel.For only splits the
+        // batch loop — no cross-batch reduction). Author observed ~27% backward
+        // speedup on data-parallel TinyShakespeare. Flipped from experimental
+        // to default ON during the CPU-saturation pass.
+        private volatile static bool _enableParallelAttentionBackward = true;
 
         /// <summary>
-        /// Enables the experimental parallel implementation of
-        /// ScaledDotProductAttentionBackward.
+        /// Enables the parallel implementation of
+        /// <c>ScaledDotProductAttentionBackward</c>.
         ///
-        /// Default: false.
+        /// Default: <c>true</c>. Parallel implementation is bit-identical to
+        /// sequential — each batch goes through the same per-batch kernel,
+        /// only the outer batch loop is parallelized. No determinism risk from
+        /// reduction order.
         ///
-        /// Keep false for normal correctness tests and the stable training path.
-        /// Set true only in explicit performance experiments, e.g. the manual
-        /// TinyShakespeare data-parallel training demo.
+        /// Set to <c>false</c> only when debugging suspected parallelism bugs
+        /// or when running with batch size 1 (where parallel-over-batch is a
+        /// no-op and the per-call Parallel.For overhead is pure waste).
         /// </summary>
         public static bool EnableParallelAttentionBackward
         {
