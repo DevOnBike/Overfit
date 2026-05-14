@@ -73,7 +73,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.MiniInstruction
             _output = output;
         }
 
-        [Fact(Skip = "Manual long-running mini instruction demo. Remove Skip locally, run once, then restore Skip.")]
+        [LongFact]
         [Trait("Category", "Demo")]
         [Trait("Category", "LongRunning")]
         public void Demo_Train_MiniInstruction_AndWriteCheckpointBin()
@@ -252,7 +252,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.MiniInstruction
             Assert.False(float.IsNaN(finalValLoss) || float.IsInfinity(finalValLoss), "Final validation loss is NaN/Infinity.");
         }
 
-        [Fact]
+        [LongFact]
         [Trait("Category", "Demo")]
         public void Demo_LoadCheckpoint_AndShowMiniInstructionGeneration()
         {

@@ -52,7 +52,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
             _output = output;
         }
 
-        [Fact(Skip = "Manual experimental long-running GPT data-parallel training demo. Remove Skip locally, run once, then restore Skip.")]
+        [LongFact]
         [Trait("Category", "Demo")]
         [Trait("Category", "LongRunning")]
         [Trait("Category", "Experimental")]

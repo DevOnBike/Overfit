@@ -20,7 +20,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         private const string ModelPath = "c:/qwen3b/qwen.bin";
         private const string TokenizerDir = "c:/qwen3b/";
 
-        [Fact]
+        [LongFact]
         public void NumDiag_BosToken_Top20_Logits()
         {
             if (!File.Exists(ModelPath))
@@ -53,7 +53,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             }
         }
 
-        [Fact]
+        [LongFact]
         public void NumDiag_AssistantPrompt_Top20_Logits()
         {
             if (!File.Exists(ModelPath))

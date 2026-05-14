@@ -41,7 +41,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
 
         // ── Tests ──────────────────────────────────────────────────────────
 
-        [Fact]
+        [LongFact]
         public void Load_ValidCheckpoint_DoesNotThrow()
         {
             var path = FindCheckpoint();
@@ -62,7 +62,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
                 $"vocab={engine.Config.VocabSize} ctx={engine.Config.ContextLength}");
         }
 
-        [Fact]
+        [LongFact]
         public void GenerateNextToken_SingleStep_ReturnsValidTokenId()
         {
             var path = FindCheckpoint();
@@ -83,7 +83,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             Console.WriteLine($"First generated token: {token}");
         }
 
-        [Fact]
+        [LongFact]
         public void GenerateNextToken_TenSteps_AllTokensValid()
         {
             var path = FindCheckpoint();
@@ -107,7 +107,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             Console.WriteLine($"Generated 10 tokens: [{string.Join(", ", tokens)}]");
         }
 
-        [Fact]
+        [LongFact]
         public void Logits_AreAllFinite_AfterGeneration()
         {
             var path = FindCheckpoint();
@@ -151,7 +151,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             Console.WriteLine($"Logits OK. Max logit={maxLogit:F3} at token={maxIdx}");
         }
 
-        [Fact]
+        [LongFact]
         public void MultipleSessionsFromSameEngine_Independenet()
         {
             var path = FindCheckpoint();
@@ -175,7 +175,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             Console.WriteLine($"Session 1: {t1}, Session 2: {t2} — match: {t1 == t2}");
         }
 
-        [Fact]
+        [LongFact]
         public void Session_Reset_ClearsState()
         {
             var path = FindCheckpoint();

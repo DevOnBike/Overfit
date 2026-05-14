@@ -164,11 +164,18 @@ Read `Tests/README.md` and `Tests/LanguageModels/README.md` before adding
 tests — the project is **strict** about test runtime.
 
 - `dotnet test -c Release` must stay fast and contain only correctness checks.
-- Anything long-running (training demos, profilers, throughput experiments)
-  uses `[Fact(Skip = "Manual long-running … demo. Remove Skip locally, run once, then restore Skip.")]`.
-  Restoring the `Skip` is part of the change.
+- Anything long-running uses `[LongFact]` (defined in `Tests/LongFact.cs`, a
+  `FactAttribute` subclass that auto-sets `Skip` so the test is skipped by
+  default). To run a `[LongFact]` locally, temporarily flip it back to `[Fact]`.
+  In scope for `[LongFact]`: integration tests that load real models from
+  `c:\qwen3b\*` (GGUF / binary), training/checkpoint demos, profilers,
+  PyTorch-parity diagnostics, RAM diagnostics, anything 10s+ on the dev box.
+  **Out of scope** — keep these as `[Fact(Skip = "...")]` with the specific
+  reason: bug-tracker skips ("pending optimization guard", "numerical
+  instability"), flaky timing tests. The point of `[Fact(Skip=...)]` vs
+  `[LongFact]` is preserving *why* it's skipped.
 - Diagnostics / profilers live in `Tests/**/Diagnostics/` and are skipped by
-  default.
+  default via `[LongFact]`.
 - Test layout is by domain first, purpose second:
   `Core/`, `DeepLearning/`, `LanguageModels/{GPT1,Runtime,Tokenization,Demo,Experimental,Diagnostics}`,
   `Data/`, `Evolutionary/`, `Forecasting/`, `Preprocessing/`, `Integrations/`,

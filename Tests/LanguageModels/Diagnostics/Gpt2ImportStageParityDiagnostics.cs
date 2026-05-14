@@ -45,8 +45,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             _output = output;
         }
 
-        //        [Fact(Skip = "Manual GPT-2 stage parity diagnostic. Generate PyTorch reference JSON first, remove Skip locally, run once, then restore Skip.")]
-        [Fact]
+        [LongFact]
         [Trait("Category", "Diagnostics")]
         [Trait("Category", "Manual")]
         public void Gpt2Small_CompareStagesAgainstPyTorchReference()

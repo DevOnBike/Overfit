@@ -53,7 +53,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             _output = output;
         }
 
-        [Fact]
+        [LongFact]
         [Trait("Category", "Diagnostics")]
         public void Profile_GPT1TrainingStep_BackwardOps()
         {

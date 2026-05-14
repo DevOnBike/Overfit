@@ -30,7 +30,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         ///   Layer 0 after attn_residual: [-0.0097559, -0.002254, 0.00501522, ...]
         ///   Layer 0 after ffn_residual:  [0.18736684, 0.03360228, -0.11243583, ...]
         /// </summary>
-        [Fact]
+        [LongFact]
         public void L0Diag_IntermediateValues()
         {
             if (!File.Exists(ModelPath))

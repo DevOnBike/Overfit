@@ -135,6 +135,34 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Span<float> output,
             RopeTable? rope = null)
         {
+            // Per-token shape contract — fail loudly on caller-side bugs so the
+            // downstream kernels don't surface them as IndexOutOfRangeException
+            // half-way through the block. Cost: four int compares per token.
+            if (input.Length != DModel)
+            {
+                throw new ArgumentException(
+                    $"input.Length must equal DModel ({DModel}), got {input.Length}.",
+                    nameof(input));
+            }
+            if (output.Length != DModel)
+            {
+                throw new ArgumentException(
+                    $"output.Length must equal DModel ({DModel}), got {output.Length}.",
+                    nameof(output));
+            }
+            if (weights.FfnW1.Length != DModel * DFF)
+            {
+                throw new ArgumentException(
+                    $"weights.FfnW1.Length must equal DModel*DFF ({DModel * DFF}), got {weights.FfnW1.Length}.",
+                    nameof(weights));
+            }
+            if (weights.FfnW2.Length != DFF * DModel)
+            {
+                throw new ArgumentException(
+                    $"weights.FfnW2.Length must equal DFF*DModel ({DFF * DModel}), got {weights.FfnW2.Length}.",
+                    nameof(weights));
+            }
+
             // Llama/Qwen: RMSNorm when beta is empty; GPT-2: standard LayerNorm
             if (weights.Ln1Beta.IsEmpty)
             {

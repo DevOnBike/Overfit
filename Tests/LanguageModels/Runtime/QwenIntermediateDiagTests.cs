@@ -28,7 +28,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         ///   - If C# logit[3352] ≈ 14.206  → hidden state same, token mapping wrong (LM head?)
         ///   - If C# logit[3352] << 14.206 → hidden state different (layer computation bug)
         /// </summary>
-        [Fact]
+        [LongFact]
         public void IntDiag_LogitTrace()
         {
             if (!File.Exists(ModelPath))

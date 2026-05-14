@@ -65,7 +65,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
         /// Karpathy osiąga ~1.47 na tym datasecie po pełnym treningu (5000 steps).
         /// My oczekujemy ~2.5-3.0 po 300 krokach — wyraźne uczenie, nie przepełnienie.
         /// </summary>
-        [Fact]
+        [LongFact]
         public void TinyShakespeare_LossDecreases_After300Steps()
         {
             SkipIfMissing(FixturePath);

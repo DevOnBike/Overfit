@@ -118,7 +118,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
 
         // ── Integration tests (require model) ─────────────────────────────────
 
-        [Fact]
+        [LongFact]
         public void LoRA_CreateAdapter_HasCorrectParamCount()
         {
             if (!File.Exists(ModelPath))
@@ -150,7 +150,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
             }
         }
 
-        [Fact]
+        [LongFact]
         public void LoRA_EnableDisable_LogitsUnchanged()
         {
             if (!File.Exists(ModelPath))
@@ -246,7 +246,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
         /// If this test passes, the engine is fine and LoRA has a bug.
         /// If this test fails, the engine itself has a copy somewhere.
         /// </summary>
-        [Fact]
+        [LongFact]
         public void Diagnostic_DirectWeightWrite_ChangesLogits()
         {
             if (!File.Exists(ModelPath))
@@ -325,7 +325,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
             }
         }
 
-        [Fact]
+        [LongFact]
         public void LoRA_AfterTraining_LogitsChange()
         {
             if (!File.Exists(ModelPath))
@@ -460,7 +460,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
             }
         }
 
-        [Fact]
+        [LongFact]
         public void LoRA_SaveLoad_Roundtrip()
         {
             if (!File.Exists(ModelPath))

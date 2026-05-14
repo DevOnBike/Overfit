@@ -25,7 +25,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
             _output = output;
         }
 
-        [Fact]
+        [LongFact]
         public async Task StreamGenerate_YieldsMaxTokensWhenNoStopHit()
         {
             if (!File.Exists(GgufModelPath)) { _output.WriteLine("SKIP: no model"); return; }
@@ -49,7 +49,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
             _output.WriteLine($"Generated tokens: [{string.Join(", ", tokens)}]");
         }
 
-        [Fact]
+        [LongFact]
         public async Task StreamGenerate_TerminatesOnStopToken()
         {
             if (!File.Exists(GgufModelPath)) { _output.WriteLine("SKIP: no model"); return; }
@@ -93,7 +93,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
             }
         }
 
-        [Fact]
+        [LongFact]
         public async Task StreamGenerate_RespectsCancellation()
         {
             if (!File.Exists(GgufModelPath)) { _output.WriteLine("SKIP: no model"); return; }
@@ -124,7 +124,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
             _output.WriteLine($"Cancellation honored after {produced} tokens.");
         }
 
-        [Fact]
+        [LongFact]
         public async Task StreamGenerate_ThrowsWhenSessionEmpty()
         {
             if (!File.Exists(GgufModelPath)) { _output.WriteLine("SKIP: no model"); return; }
@@ -144,7 +144,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
             });
         }
 
-        [Fact]
+        [LongFact]
         public async Task StreamGenerate_MatchesGenerateNextTokenForSamePrompt()
         {
             if (!File.Exists(GgufModelPath)) { _output.WriteLine("SKIP: no model"); return; }
@@ -179,7 +179,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
             _output.WriteLine($"Both paths produced: [{string.Join(", ", viaStream)}]");
         }
 
-        [Fact]
+        [LongFact]
         public async Task StreamGenerate_WithFactoryStopTokens_QwenChatTerminators()
         {
             if (!File.Exists(GgufModelPath)) { _output.WriteLine("SKIP: no model"); return; }

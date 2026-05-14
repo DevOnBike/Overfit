@@ -94,7 +94,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
                 .Concat(new[] { QwenTokenizer.ImEnd, 198, QwenTokenizer.ImStart, 77091, 198 })
                 .ToArray();
 
-        [Fact]
+        [LongFact]
         public void Demo_EncodeDecodeRoundtrip_Sanity()
         {
             if (!TryLoad(out _, out var tok))
@@ -111,7 +111,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         }
 
         /// <summary>Greedy bez system message — najlepsza szansa dla 0.5B FP32.</summary>
-        [Fact]
+        [LongFact]
         public void Demo_Math_NoSystem_Greedy()
         {
             if (!TryLoad(out var engine, out var tok))
@@ -134,7 +134,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         }
 
         /// <summary>Temperature 0.3 bez system message — może być lepiej niż greedy.</summary>
-        [Fact]
+        [LongFact]
         public void Demo_Math_NoSystem_Temperature()
         {
             if (!TryLoad(out var engine, out var tok))
@@ -153,7 +153,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         }
 
         /// <summary>Z pełnym system message Qwen2.5-Instruct.</summary>
-        [Fact]
+        [LongFact]
         public void Demo_Math_WithSystem_Greedy()
         {
             if (!TryLoad(out var engine, out var tok))
@@ -172,7 +172,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             }
         }
 
-        [Fact]
+        [LongFact]
         public void Demo_Polish_NoSystem()
         {
             if (!TryLoad(out var engine, out var tok))
@@ -190,7 +190,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             }
         }
 
-        [Fact]
+        [LongFact]
         public void Demo_SpeedBenchmark()
         {
             if (!TryLoad(out var engine, out var tok))

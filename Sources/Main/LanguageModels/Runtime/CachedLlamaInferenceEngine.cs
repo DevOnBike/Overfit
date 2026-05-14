@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Runtime.InteropServices;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.LoRA;
 using DevOnBike.Overfit.LanguageModels.Rope;
@@ -423,7 +424,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private static TensorStorage<float> TransposeLmHead(
             TensorStorage<float> raw, int vocabSize, int dModel)
         {
-            var result = new TensorStorage<float>(vocabSize * dModel);
+            var result = TensorStorage<float>.Unpooled(vocabSize * dModel);
             var src = raw.AsReadOnlySpan();
             var dst = result.AsSpan();
 
@@ -443,11 +444,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// <summary>Reads a float tensor directly into a new TensorStorage.</summary>
         private static TensorStorage<float> ReadTensor(BinaryReader reader, int count)
         {
-            var storage = new TensorStorage<float>(count);
-            var span = storage.AsSpan();
-            var bytes = new byte[count * 4];
-            reader.Read(bytes, 0, bytes.Length);
-            System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(bytes).CopyTo(span);
+            // Unpooled: model weights are long-lived. Pool buckets round to pow2 and
+            // retain rented arrays after Dispose — wasteful for multi-GB tensors.
+            var storage = TensorStorage<float>.Unpooled(count);
+            // Stream bytes straight into the destination span — no scratch byte[]
+            // allocation. Peak load RAM stays at file size instead of 2× file size.
+            // Little-endian-only (same constraint as the previous MemoryMarshal.Cast path).
+            var dst = MemoryMarshal.AsBytes(storage.AsSpan());
+            reader.BaseStream.ReadExactly(dst);
             return storage;
         }
 

@@ -75,7 +75,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
             _output = output;
         }
 
-        [Fact(Skip = "Manual long-running single-model GPT quality demo. Remove Skip locally, run once, then restore Skip.")]
+        [LongFact]
         [Trait("Category", "Demo")]
         [Trait("Category", "LongRunning")]
         public void Demo_Train_TinyShakespeare_SequentialQuality_AndWriteCheckpointBin()

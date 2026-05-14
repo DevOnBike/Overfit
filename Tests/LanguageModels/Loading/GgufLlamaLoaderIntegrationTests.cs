@@ -33,7 +33,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             _output = output;
         }
 
-        [Fact]
+        [LongFact]
         public void LoadGguf_ProducesSameLogitsAsBinaryLoader_For3B()
         {
             if (!File.Exists(GgufModelPath))

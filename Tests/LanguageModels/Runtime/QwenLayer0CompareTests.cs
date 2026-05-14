@@ -23,7 +23,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         /// Aktualna fixture: Qwen2.5-3B-Instruct FP16 (36 layers, head_dim=128).
         /// Python TEST 1 → top-1 = [33975] 15.5608.
         /// </summary>
-        [Fact]
+        [LongFact]
         public void L0_LogitsAfterReset_NotAfterGenerate()
         {
             if (!File.Exists(ModelPath))
@@ -65,7 +65,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         ///   hidden[:4] = [0.14059, 0.84549, 1.01591, -1.83366]
         ///   logit[198] = 12.3511
         /// </summary>
-        [Fact]
+        [LongFact]
         public void L0_TwoToken_HiddenStateVsPython()
         {
             if (!File.Exists(ModelPath))
@@ -124,7 +124,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         /// Pełny chat prompt (36 tokenów z poprawnym system message).
         /// C# i Python zgadzają się: top-1 = [36366] ≈ 11.9
         /// </summary>
-        [Fact]
+        [LongFact]
         public void L0_ChatPromptLogits()
         {
             if (!File.Exists(ModelPath))
@@ -165,7 +165,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         /// <summary>
         /// Progressive prefix: kiedy pojawia się token '4' jako top-1.
         /// </summary>
-        [Fact]
+        [LongFact]
         public void Multitoken_ProgressivePrefixTest()
         {
             if (!File.Exists(ModelPath))
