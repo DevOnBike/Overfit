@@ -31,7 +31,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             using (engine)
             {
                 using var session = engine.CreateSession(64);
-                session.Reset(new[] { 151643 });
+                session.Reset([151643]);
                 var s = SamplingOptions.Greedy;
                 session.GenerateNextToken(in s);
                 var logits = session.LastLogits.ToArray();

@@ -18,7 +18,7 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
             // -5f powinno zostać wycięte przez ReLU do 0f. Log1p(0) = 0f.
             // 0f -> Log1p(0) = 0f
             // e-1 (~1.718f) -> Log1p(e-1) = 1f
-            float[] data = { -5.0f, 0.0f, (float)Math.E - 1f };
+            float[] data = [-5.0f, 0.0f, (float)Math.E - 1f];
             var normalizer = new Log1pNormalizer();
 
             // ACT
@@ -35,7 +35,7 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
         public void FitBatch_And_FitIncremental_ShouldYieldIdenticalResults()
         {
             // ARRANGE
-            float[] data = { -10f, 0f, 5f, 100f, 5000f };
+            float[] data = [-10f, 0f, 5f, 100f, 5000f];
             var batchNormalizer = new Log1pNormalizer();
             var incrementalNormalizer = new Log1pNormalizer();
 
@@ -59,7 +59,7 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
         {
             // ARRANGE
             var normalizer = new Log1pNormalizer();
-            normalizer.FitBatch(new float[] { 1f, 2f, 3f });
+            normalizer.FitBatch([1f, 2f, 3f]);
             var dataToTransform = new float[] { 1f };
 
             // ACT & ASSERT
@@ -72,7 +72,7 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
         {
             // ARRANGE
             var originalNormalizer = new Log1pNormalizer();
-            originalNormalizer.FitBatch(new float[] { 10f, 100f, 1000f });
+            originalNormalizer.FitBatch([10f, 100f, 1000f]);
             originalNormalizer.Freeze();
 
             var loadedNormalizer = new Log1pNormalizer();

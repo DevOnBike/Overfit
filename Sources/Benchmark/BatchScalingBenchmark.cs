@@ -131,12 +131,12 @@ namespace Benchmarks
             var onnxInputValue = OrtValue.CreateTensorValueFromMemory<float>(
                 OrtMemoryInfo.DefaultInstance,
                 input.AsMemory(),
-                new long[] { batchSize, InputSize });
+                [batchSize, InputSize]);
 
             var onnxOutputValue = OrtValue.CreateTensorValueFromMemory<float>(
                 OrtMemoryInfo.DefaultInstance,
                 onnxOutput.AsMemory(),
-                new long[] { batchSize, OutputSize });
+                [batchSize, OutputSize]);
 
             return new BatchCase(
                 batchSize,
@@ -344,11 +344,11 @@ namespace Benchmarks
                 OverfitOutput = overfitOutput;
                 OnnxOutput = onnxOutput;
 
-                InputNames = new[] { "input" };
-                OutputNames = new[] { "output" };
+                InputNames = ["input"];
+                OutputNames = ["output"];
 
-                InputValues = new[] { onnxInputValue };
-                OutputValues = new[] { onnxOutputValue };
+                InputValues = [onnxInputValue];
+                OutputValues = [onnxOutputValue];
 
                 RunOptions = new RunOptions();
             }

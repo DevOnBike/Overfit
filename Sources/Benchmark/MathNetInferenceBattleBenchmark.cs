@@ -55,12 +55,15 @@ namespace Benchmarks
             _mathNetInputs = Matrix<float>.Build.DenseOfColumnMajor(SwarmSize, InputSize, _overfitInputs);
 
             // Wagi to macierz 4 x 2
-            float[] weights = { _overfitBrain[0], _overfitBrain[4], _overfitBrain[1], _overfitBrain[5],
-                                _overfitBrain[2], _overfitBrain[6], _overfitBrain[3], _overfitBrain[7] };
+            float[] weights =
+            [
+                _overfitBrain[0], _overfitBrain[4], _overfitBrain[1], _overfitBrain[5],
+                                _overfitBrain[2], _overfitBrain[6], _overfitBrain[3], _overfitBrain[7]
+            ];
             _mathNetWeights = Matrix<float>.Build.DenseOfColumnMajor(InputSize, OutputSize, weights);
 
             // Biasy
-            _mathNetBiases = Vector<float>.Build.Dense(new[] { _overfitBrain[8], _overfitBrain[9] });
+            _mathNetBiases = Vector<float>.Build.Dense([_overfitBrain[8], _overfitBrain[9]]);
         }
 
         // ==============================================================

@@ -213,7 +213,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
                 executeBackwardMethod.Invoke(
                     graph,
-                    new[] { op });
+                    [op]);
 
                 var elapsed = Stopwatch.GetTimestamp() - start;
 

@@ -42,7 +42,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _ffnB1 = block.FFN.B1.Data;
             _ffnW2 = block.FFN.W2.Data;
             _ffnB2 = block.FFN.B2.Data;
-            _ffnGate = CreateStorage(Array.Empty<float>()); // GeLU — no gate
+            _ffnGate = CreateStorage([]); // GeLU — no gate
             _kvHeads = null; // MHA — use SingleHeadWeights.Wk/Wv
 
             _heads = new SingleHeadWeights[headCount];
@@ -71,7 +71,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             float[]? ffnGate = null)
         {
             static TensorStorage<float> Store(float[]? a)
-                => CreateStorage(a ?? Array.Empty<float>());
+                => CreateStorage(a ?? []);
 
             _ln1Gamma = Store(ln1Gamma);
             _ln1Beta = Store(ln1Beta);
@@ -84,7 +84,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _ffnB2 = Store(ffnB2);
             _ffnGate = Store(ffnGate);
 
-            _heads = heads ?? Array.Empty<SingleHeadWeights>();
+            _heads = heads ?? [];
             _kvHeads = kvHeads;
         }
 
@@ -120,7 +120,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _ffnW2 = ffnW2;
             _ffnB2 = ffnB2 ?? Empty();
             _ffnGate = ffnGate ?? Empty();
-            _heads = heads ?? Array.Empty<SingleHeadWeights>();
+            _heads = heads ?? [];
             _kvHeads = kvHeads;
         }
 

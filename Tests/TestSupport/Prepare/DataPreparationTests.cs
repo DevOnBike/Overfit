@@ -52,16 +52,44 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Prepare
 
             var schema = new TableSchema
             {
-                Features = new List<ColumnDefinition>
-                {
-                    new() { Name = nameof(PropertyData.Powierzchnia), Type = ColumnType.Numeric },
-                    new() { Name = nameof(PropertyData.Pietro), Type = ColumnType.Numeric },
-                    new() { Name = nameof(PropertyData.CzyKamienica), Type = ColumnType.Binary },
-                    new() { Name = nameof(PropertyData.CzyMaKomorke), Type = ColumnType.Binary },
-                    new() { Name = nameof(PropertyData.PowKomorki), Type = ColumnType.Numeric },
-                    new() { Name = nameof(PropertyData.Miasto), Type = ColumnType.Categorical },
-                    new() { Name = nameof(PropertyData.NazwaAgencji), Type = ColumnType.Categorical }
-                },
+                Features =
+                [
+                    new()
+                    {
+                        Name = nameof(PropertyData.Powierzchnia),
+                        Type = ColumnType.Numeric
+                    },
+                    new()
+                    {
+                        Name = nameof(PropertyData.Pietro),
+                        Type = ColumnType.Numeric
+                    },
+                    new()
+                    {
+                        Name = nameof(PropertyData.CzyKamienica),
+                        Type = ColumnType.Binary
+                    },
+                    new()
+                    {
+                        Name = nameof(PropertyData.CzyMaKomorke),
+                        Type = ColumnType.Binary
+                    },
+                    new()
+                    {
+                        Name = nameof(PropertyData.PowKomorki),
+                        Type = ColumnType.Numeric
+                    },
+                    new()
+                    {
+                        Name = nameof(PropertyData.Miasto),
+                        Type = ColumnType.Categorical
+                    },
+                    new()
+                    {
+                        Name = nameof(PropertyData.NazwaAgencji),
+                        Type = ColumnType.Categorical
+                    }
+                ],
                 Target = new ColumnDefinition { Name = nameof(PropertyData.Cena), Type = ColumnType.Numeric }
             };
 

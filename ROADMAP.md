@@ -140,7 +140,44 @@ Concrete items:
 - [x] **`EnableParallelAttentionBackward` default ON** — bit-identical to sequential (parallel only over batch dim, no cross-batch reduction), author measured ~27 % backward speedup on data-parallel TinyShakespeare. Stable training path now uses it by default; remaining single-thread case is intentional fallback for batch=1 where Parallel.For overhead would be pure waste.
 - [x] **`BatchSequentialThreshold` 128 → 32** — `MaxPool2D` / `AvgPool2D` / `LSTM` forward + backward + bias-add (`TensorMath.Algebra`) parallelize across batch only above this threshold. MNIST training (B=64) was falling into the sequential branch (64 < 128) → `MaxPool2D` ate 42 % of epoch time on a 32-core machine, single-threaded. After lowering to 32: **MNIST training −38 % wall clock** (5551 → 3456 ms for 5 epochs, full MNIST 60k @ B=64), with MaxPool2D dropping from 383 ms/epoch to ~87 ms/epoch (−77 %). Full sweep still green (617/0/63). The 32 floor keeps sequential for genuinely small batches where Parallel.For overhead would dominate.
 - [ ] **True batched training (B > 1)** — *biggest single lever for CPU saturation.* MHA in training path is currently batch=1 only. With B=8/16, every existing parallel-over-batch path (attention forward + backward, layer-norm batches, optimizer-over-params) starts working. 2-3 days; ROADMAP'd separately under Qwen track but is GPT-2 training prerequisite.
-- [ ] **Profile real training step** — instrument `GPT1TrainingStepBenchmark.FullTrainStep` with per-kernel timing on 32-core Ryzen 9 9950X3D. Identify which kernel sits below `MaxDegreeOfParallelism` saturation despite Parallel.For being wired up (typically: kernel runtime < Parallel.For overhead at chosen threshold). 0.5 day.
+- [x] **Drill-down per-OpCode backward profiler** — added `ComputationGraph.BackwardProfileEnabled` toggle + `GetBackwardOpProfile()` + `ResetBackwardProfile()`. Zero overhead when off (one null-check), ~50 ns per op when on. MNIST CNN training 5-epoch aggregated breakdown: **Linear 52 %**, Conv2D 20 %, ReLU 14 %, MaxPool 7 %, Reshape 4 %, SoftmaxCE <1 %. Linear dominates because Linear(1352→64) backward = 2 GEMMs (dW + dX) per batch × 4685 batches. Already parallel above 524k/1M thresholds; near peak FP32 throughput for this matrix size. Next deeper investigation requires actual CPU-utilization sampling (not just timing).
+- [x] **CPU-utilization probe** during MNIST training — added `Process.TotalProcessorTime` sampling at run + per-epoch granularity. **Measurement on 32-core Ryzen 9 9950X3D: only 6.81 / 32 cores effective (21.3 % utilization).** All major kernels have `Parallel.For` wired, yet 79 % of CPU stays idle. Root cause: ~47k `Parallel.For` calls per MNIST epoch × ~5-10 µs each dispatch overhead = 230–470 ms / 550 ms epoch = **40–85 % of epoch wasted in TPL dispatch/sync**, not compute. **CPU-saturation track is fundamentally blocked by `Parallel.For` overhead, not missing parallelism.**
+
+### Zero-allocation custom Parallel.For — THE unlock
+
+Standard `System.Threading.Tasks.Parallel.For` per call:
+- ~3 KB managed allocation (closure object, `Task[]` chunks, internal bookkeeping)
+- ~5-10 µs dispatch overhead (Task scheduling, thread wake)
+
+Both kill us:
+- The **3 KB alloc** broke the 0 B / generated token claim when we tried `ProjectParallel` on LM head (~92 KB / 31 tokens). Blocked allocation-free parallel inference.
+- The **5-10 µs overhead** dominates training when many small Parallel.For calls fire per batch (MNIST: 47k calls/epoch). Caps utilization at ~20 % regardless of how many `Parallel.For` we add.
+
+**Design — `OverfitParallelFor`:**
+
+- [ ] Pre-spawned `N = ProcessorCount` persistent threads, each with `AutoResetEvent` + work slot + pre-allocated scratch context.
+- [ ] Coordinator with reusable `CountdownEvent` for completion signaling.
+- [ ] Dispatch via `delegate*<int, ref TContext, void>` function pointer (no closure, no delegate allocation). Context passed by ref (caller-owned struct).
+- [ ] Range chunking inline (no `Task[]` allocation).
+- [ ] API: `OverfitParallelFor.Run<TContext>(int start, int end, delegate*<int, ref TContext, void> body, ref TContext ctx)`.
+
+Per-call costs after this:
+- Allocations: **0 B**.
+- Overhead: ~50-100 ns (one atomic counter increment + N signal sets + 1 wait).
+- ~50-100× cheaper than `Parallel.For`.
+
+**Effort**: ~1 day for impl + tests + benchmarks vs `Parallel.For`. Reference: PyTorch `at::parallel_for` is essentially this design (their native thread pool + C function pointers).
+
+**Payoff cascading across multiple roadmap items**:
+- MNIST training: ~6.8 cores → expected ~16-22 cores (2.5-3× speedup) if overhead drops by 50-100×
+- Allocation-free parallel LM head (was blocked by 3 KB / call) — ~30 % decode tokens/sec for GPT-2
+- Parallel attention forward — ~15-20 % forward speedup
+- Multi-token batched prefill kernels (Phases 1-3) — same dispatch hot path
+- Any inference path that could benefit from parallelism without breaking zero-alloc claim
+
+This is the **single highest-leverage performance investment**. Every other parallel-related item in this section either depends on it or becomes 2-3× more impactful with it.
+- [-] **LinearKernels threshold tuning** — verified for MNIST that current thresholds (BackwardInput 524k, AccumulateWeightGrad 1M, ForwardBatched 500k) are correctly placed: Linear(1352→64) at B=64 = 5.5M ops → already parallel; Linear(64→10) at B=64 = 41k ops → sequential (41k / 32 cores = 1.3k ops per thread, well below Parallel.For overhead). No measurable benefit available at MNIST scale. **Revisit when GPT-2 batched training (B>1) lands** — smaller per-batch ops in GPT may benefit from lower thresholds.
+- [ ] **SIMD path for `MaxPool2DForwardWithIndicesNchw` (training path)** — inference path has `TensorPrimitives.Max` fast path for pool=2; training path is scalar because index tracking complicates SIMD (need comparison masks to select max value AND record source index). Estimated saving on MNIST: ~40 ms / epoch (~7 % of post-threshold-fix epoch time). 1-2 hours focused work + parity tests vs scalar.
 - [ ] **`ScaledDotProductAttention` forward parallel-over-batch** — symmetric with the backward we just enabled. Likely 15-20 % forward speedup at B ≥ 4.
 - [ ] **Threshold tuning** — `LinearKernels.ParallelThreshold = 1_048_576` is set for inference (avoid Parallel.For overhead on tiny matrices). For training where the per-call work is amortized across many tokens, lower threshold may pay. Need per-op profiling first.
 - [ ] **Data-parallel training as first-class API** — `TinyShakespeareDataParallelTrainingTests` proves N model replicas + gradient averaging works. Promote to public API, with idiomatic worker pool, for "N cores → N replicas" training scaling on a single machine.

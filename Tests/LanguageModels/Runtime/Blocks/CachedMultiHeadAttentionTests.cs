@@ -47,12 +47,12 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
 
             var identity = new float[] { 1f, 0f, 0f, 1f };
             var bw = MakeBlockWeights(
-                wq: new[] { identity }, wk: new[] { identity },
-                wv: new[] { identity }, wo: new[] { identity });
+                wq: [identity], wk: [identity],
+                wv: [identity], wo: [identity]);
 
             var output = new float[2];
             cache.Advance();
-            decoder.Decode(new float[] { 3f, 4f }, in bw, cache, 0, 0, output);
+            decoder.Decode([3f, 4f], in bw, cache, 0, 0, output);
 
             AssertClose(3f, output[0]);
             AssertClose(4f, output[1]);
@@ -74,13 +74,13 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             var outputBias = new float[] { 10f, 20f, 30f, 40f };
 
             var bw = MakeBlockWeights(
-                wq: new[] { head0In, head1In }, wk: new[] { head0In, head1In },
-                wv: new[] { head0In, head1In }, wo: new[] { head0Out, head1Out },
+                wq: [head0In, head1In], wk: [head0In, head1In],
+                wv: [head0In, head1In], wo: [head0Out, head1Out],
                 attentionBias: outputBias);
 
             var output = new float[4];
             cache.Advance();
-            decoder.Decode(new float[] { 1f, 2f, 3f, 4f }, in bw, cache, 0, 0, output);
+            decoder.Decode([1f, 2f, 3f, 4f], in bw, cache, 0, 0, output);
 
             AssertClose(11f, output[0]);
             AssertClose(22f, output[1]);
@@ -101,14 +101,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             var head0Out = new float[] { 1f, 0f, 0f, 0f,  0f, 1f, 0f, 0f };
             var head1Out = new float[] { 0f, 0f, 1f, 0f,  0f, 0f, 0f, 1f };
             var bw = MakeBlockWeights(
-                wq: new[] { head0In, head1In }, wk: new[] { head0In, head1In },
-                wv: new[] { head0In, head1In }, wo: new[] { head0Out, head1Out });
+                wq: [head0In, head1In], wk: [head0In, head1In],
+                wv: [head0In, head1In], wo: [head0Out, head1Out]);
 
             var output = new float[4];
             cache.Advance();
-            decoder.Decode(new float[] { 1f, 0f, 1f, 0f }, in bw, cache, 0, 0, output);
+            decoder.Decode([1f, 0f, 1f, 0f], in bw, cache, 0, 0, output);
             cache.Advance();
-            decoder.Decode(new float[] { 0f, 1f, 0f, 1f }, in bw, cache, 0, 1, output);
+            decoder.Decode([0f, 1f, 0f, 1f], in bw, cache, 0, 1, output);
 
             var scale  = 1f / MathF.Sqrt(2f);
             var score0 = 0f * scale;
@@ -138,11 +138,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             var head0Out = new float[] { 1f, 0f, 0f, 0f,  0f, 1f, 0f, 0f };
             var head1Out = new float[] { 0f, 0f, 1f, 0f,  0f, 0f, 0f, 1f };
             var bw = MakeBlockWeights(
-                wq: new[] { head0In, head1In }, wk: new[] { head0In, head1In },
-                wv: new[] { head0In, head1In }, wo: new[] { head0Out, head1Out });
+                wq: [head0In, head1In], wk: [head0In, head1In],
+                wv: [head0In, head1In], wo: [head0Out, head1Out]);
 
             cache.Advance();
-            decoder.Decode(new float[] { 7f, 8f, 9f, 10f }, in bw, cache, 0, 0, new float[4]);
+            decoder.Decode([7f, 8f, 9f, 10f], in bw, cache, 0, 0, new float[4]);
 
             Assert.Equal(new float[] { 7f, 8f }, cache.GetKeyReadSpan(0, 0, 0, 1).ToArray());
             Assert.Equal(new float[] { 7f, 8f }, cache.GetValueReadSpan(0, 0, 0, 1).ToArray());
@@ -159,12 +159,12 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             var decoder = new CachedMultiHeadAttention(dModel: 2, headCount: 1, maxSequenceLength: 2);
             var identity = new float[] { 1f, 0f, 0f, 1f };
             var bw = MakeBlockWeights(
-                wq: new[] { identity }, wk: new[] { identity },
-                wv: new[] { identity }, wo: new[] { identity });
+                wq: [identity], wk: [identity],
+                wv: [identity], wo: [identity]);
 
             // Cache not advanced — position 0 not visible
             Assert.Throws<ArgumentOutOfRangeException>(() =>
-                decoder.Decode(new float[] { 1f, 2f }, in bw, cache, 0, 0, new float[2]));
+                decoder.Decode([1f, 2f], in bw, cache, 0, 0, new float[2]));
         }
 
         [Fact]

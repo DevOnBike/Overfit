@@ -45,7 +45,7 @@ namespace Benchmarks
         private const string CheckpointPath = "test_fixtures/gpt2_small.bin";
 
         // "The future of software development is" — GPT-2 BPE token IDs
-        private static readonly int[] Prompt = { 464, 2003, 286, 3788, 2478, 318 };
+        private static readonly int[] Prompt = [464, 2003, 286, 3788, 2478, 318];
 
         private GPT1Model                _model        = null!;
         private SlmInferenceEngine       _legacyEngine = null!;

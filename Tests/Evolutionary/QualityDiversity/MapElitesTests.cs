@@ -138,9 +138,9 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.QualityDiversity
         {
             using var archive = new GridEliteArchive(
                 parameterCount: 4,
-                binsPerDimension: stackalloc[] { 4, 4 },
-                descriptorMin: stackalloc[] { 0f, 0f },
-                descriptorMax: stackalloc[] { 1f, 1f });
+                binsPerDimension: [4, 4],
+                descriptorMin: [0f, 0f],
+                descriptorMax: [1f, 1f]);
 
             var evaluator = new FixedCellEvaluator();
             using var map = new MapElites<DummyContext>(
@@ -412,9 +412,9 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.QualityDiversity
         {
             return new GridEliteArchive(
                 parameterCount: parameterCount,
-                binsPerDimension: stackalloc[] { 16, 16 },
-                descriptorMin: stackalloc[] { 0f, 0f },
-                descriptorMax: stackalloc[] { 1f, 1f });
+                binsPerDimension: [16, 16],
+                descriptorMin: [0f, 0f],
+                descriptorMax: [1f, 1f]);
         }
 
         private readonly struct DummyContext

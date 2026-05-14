@@ -269,7 +269,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
         {
             if (text.Length == 0)
             {
-                return Array.Empty<int>();
+                return [];
             }
 
             // Convert to byte-level characters

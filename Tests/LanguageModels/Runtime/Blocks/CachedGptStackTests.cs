@@ -125,10 +125,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             var _sw = MakeStackWeights(stack.LayerCount, stack.HeadCount, stack.DModel,
                     zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads,
                     attentionBiases, ffnW1, ffnB1, ffnW2, ffnB2, lmHeadIdentity);
-            stack.Decode(new float[] { 1f, -1f }, _sw, cache, 0, // position
+            stack.Decode([1f, -1f], _sw, cache, 0, // position
                 logits);
 
-            var expected = LayerNorm(new float[] { 1f, -1f }, 1e-5f);
+            var expected = LayerNorm([1f, -1f], 1e-5f);
 
             AssertClose(expected[0], logits[0]);
             AssertClose(expected[1], logits[1]);
@@ -207,10 +207,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             var _sw = MakeStackWeights(stack.LayerCount, stack.HeadCount, stack.DModel,
                     zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads,
                     attentionBiases, ffnW1, ffnB1, ffnW2, ffnB2, lmHeadIdentity);
-            stack.Decode(new float[] { 2f, -2f }, _sw, cache, 0, // position
+            stack.Decode([2f, -2f], _sw, cache, 0, // position
                 logits);
 
-            var expected = LayerNorm(new float[] { 2f, -2f }, 1e-5f);
+            var expected = LayerNorm([2f, -2f], 1e-5f);
 
             AssertClose(expected[0], logits[0]);
             AssertClose(expected[1], logits[1]);
@@ -280,9 +280,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             var _sw = MakeStackWeights(stack.LayerCount, stack.HeadCount, stack.DModel,
                     zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads,
                     attentionBiases, ffnW1, ffnB1, ffnW2, ffnB2, lmHeadIdentity);
-            stack.Decode(new float[] { 1f, -1f }, _sw, cache, 0, logits);
+            stack.Decode([1f, -1f], _sw, cache, 0, logits);
 
-            var expected = LayerNorm(new float[] { 1f, -1f }, 1e-5f);
+            var expected = LayerNorm([1f, -1f], 1e-5f);
 
             AssertClose(expected[0], logits[0]); // LM head bias not in StackWeights API
             AssertClose(expected[1], logits[1]);
@@ -352,7 +352,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             var _sw = MakeStackWeights(stack.LayerCount, stack.HeadCount, stack.DModel,
                     zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads,
                     attentionBiases, ffnW1, ffnB1, ffnW2, ffnB2, lmHeadIdentity);
-            stack.Decode(new float[] { 1f, -1f }, _sw, cache, 0, // position
+            stack.Decode([1f, -1f], _sw, cache, 0, // position
                 logits);
 
             var finalHidden = new float[2];
@@ -394,8 +394,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             {
                 var _sw = MakeStackWeights(stack.LayerCount, stack.HeadCount, stack.DModel,
                     zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads,
-                    new[] { Array.Empty<float>() }, new[] { new float[2 * 2] }, new[] { Array.Empty<float>() }, new[] { new float[2 * 2] }, new[] { Array.Empty<float>() }, new float[2 * 2]);
-            stack.Decode(new float[] { 1f, -1f }, _sw, cache, 0, // position
+                    [[]], [new float[2 * 2]], [[]], [new float[2 * 2]], [[]], new float[2 * 2]);
+            stack.Decode([1f, -1f], _sw, cache, 0, // position
                     logits: new float[2]);
             });;
         }
@@ -431,7 +431,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             {
                 var _sw = MakeStackWeights(stack.LayerCount, stack.HeadCount, stack.DModel,
                     zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads,
-                    new[] { Array.Empty<float>() }, new[] { new float[2 * 2] }, new[] { Array.Empty<float>() }, new[] { new float[2 * 2] }, new[] { Array.Empty<float>() }, new float[2 * 2]);
+                    [[]], [new float[2 * 2]], [[]], [new float[2 * 2]], [[]], new float[2 * 2]);
             stack.Decode(new float[1], _sw, cache, 0, // position
                     logits: new float[2]);
             });;
@@ -440,7 +440,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             {
                 var _sw = MakeStackWeights(stack.LayerCount, stack.HeadCount, stack.DModel,
                     zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads,
-                    new[] { Array.Empty<float>() }, new[] { new float[1] }, new[] { Array.Empty<float>() }, new[] { new float[2 * 2] }, new[] { Array.Empty<float>() }, new float[2 * 2]);
+                    [[]], [new float[1]], [[]], [new float[2 * 2]], [[]], new float[2 * 2]);
             stack.Decode(new float[2], _sw, cache, 0, // position
                     logits: new float[2]);
             });;
@@ -449,7 +449,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             {
                 var _sw = MakeStackWeights(stack.LayerCount, stack.HeadCount, stack.DModel,
                     zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads,
-                    new[] { Array.Empty<float>() }, new[] { new float[2 * 2] }, new[] { Array.Empty<float>() }, new[] { new float[2 * 2] }, new[] { Array.Empty<float>() }, new float[1]);
+                    [[]], [new float[2 * 2]], [[]], [new float[2 * 2]], [[]], new float[1]);
             stack.Decode(new float[2], _sw, cache, 0, // position
                     logits: new float[2]);
             });;
@@ -458,7 +458,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             {
                 var _sw = MakeStackWeights(stack.LayerCount, stack.HeadCount, stack.DModel,
                     zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads,
-                    new[] { Array.Empty<float>() }, new[] { new float[2 * 2] }, new[] { Array.Empty<float>() }, new[] { new float[2 * 2] }, new[] { Array.Empty<float>() }, new float[2 * 2]);
+                    [[]], [new float[2 * 2]], [[]], [new float[2 * 2]], [[]], new float[2 * 2]);
             stack.Decode(new float[2], _sw, cache, 0, // position
                     logits: new float[1]);
             });;

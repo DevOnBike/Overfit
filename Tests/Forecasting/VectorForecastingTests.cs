@@ -90,13 +90,14 @@ namespace DevOnBike.Overfit.Tests.Forecasting
         private float[] GetRealGoldPricesUSD_1Year()
         {
             var prices = new float[252];
-            float[] lastMonth = {
+            float[] lastMonth =
+            [
                 4683.50f, 4701.20f, 4715.80f, 4690.10f, 4655.40f,
                 4670.90f, 4688.30f, 4710.60f, 4725.90f, 4740.10f,
                 4735.50f, 4712.80f, 4695.40f, 4680.20f, 4705.60f,
                 4730.40f, 4755.80f, 4742.10f, 4720.50f, 4698.90f,
                 4685.20f, 4711.25f, 4672.01f, 4758.76f, 4676.42f
-            };
+            ];
 
             var rnd = new Random(42);
             var currentPrice = 3800f;

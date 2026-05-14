@@ -144,16 +144,44 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Prepare
         {
             return new TableSchema
             {
-                Features = new List<ColumnDefinition>
-                {
-                    new ColumnDefinition { Name = "Powierzchnia", Type = ColumnType.Numeric },
-                    new ColumnDefinition { Name = "Pietro", Type = ColumnType.Numeric },
-                    new ColumnDefinition { Name = "CzyKamienica", Type = ColumnType.Binary },
-                    new ColumnDefinition { Name = "CzyMaKomorke", Type = ColumnType.Binary },
-                    new ColumnDefinition { Name = "PowKomorki", Type = ColumnType.Numeric },
-                    new ColumnDefinition { Name = "Miasto", Type = ColumnType.Categorical },
-                    new ColumnDefinition { Name = "NazwaAgencji", Type = ColumnType.Categorical }
-                },
+                Features =
+                [
+                    new ColumnDefinition
+                    {
+                        Name = "Powierzchnia",
+                        Type = ColumnType.Numeric
+                    },
+                    new ColumnDefinition
+                    {
+                        Name = "Pietro",
+                        Type = ColumnType.Numeric
+                    },
+                    new ColumnDefinition
+                    {
+                        Name = "CzyKamienica",
+                        Type = ColumnType.Binary
+                    },
+                    new ColumnDefinition
+                    {
+                        Name = "CzyMaKomorke",
+                        Type = ColumnType.Binary
+                    },
+                    new ColumnDefinition
+                    {
+                        Name = "PowKomorki",
+                        Type = ColumnType.Numeric
+                    },
+                    new ColumnDefinition
+                    {
+                        Name = "Miasto",
+                        Type = ColumnType.Categorical
+                    },
+                    new ColumnDefinition
+                    {
+                        Name = "NazwaAgencji",
+                        Type = ColumnType.Categorical
+                    }
+                ],
                 Target = new ColumnDefinition { Name = "Cena", Type = ColumnType.Numeric }
             };
         }

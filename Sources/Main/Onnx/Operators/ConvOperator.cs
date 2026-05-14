@@ -34,13 +34,13 @@ namespace DevOnBike.Overfit.Onnx.Operators
             var group = node.Attributes.TryGetValue("group", out var g) ? g.IntValue : 1L;
             var dilations = node.Attributes.TryGetValue("dilations", out var d)
                 ? d.IntArray
-                : new long[] { 1, 1 };
+                : [1, 1];
             var strides = node.Attributes.TryGetValue("strides", out var s)
                 ? s.IntArray
-                : new long[] { 1, 1 };
+                : [1, 1];
             var pads = node.Attributes.TryGetValue("pads", out var p)
                 ? p.IntArray
-                : new long[] { 0, 0, 0, 0 };
+                : [0, 0, 0, 0];
 
             if (group != 1)
             {

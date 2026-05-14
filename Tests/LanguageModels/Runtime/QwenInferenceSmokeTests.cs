@@ -84,7 +84,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             using var engine = CachedLlamaInferenceEngine.Load(path!);
             using var session = engine.CreateSession(maxContextLength: 64);
 
-            session.Reset(new int[] { 151643 });
+            session.Reset([151643]);
 
             var sampling = SamplingOptions.Greedy;
             var tokens = new List<int>();
@@ -107,7 +107,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             using var engine = CachedLlamaInferenceEngine.Load(path!);
             using var session = engine.CreateSession(maxContextLength: 64);
 
-            session.Reset(new int[] { 151643 });
+            session.Reset([151643]);
 
             var sampling = SamplingOptions.Greedy;
             session.GenerateNextToken(in sampling);
@@ -154,8 +154,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
 
             var sampling = SamplingOptions.Greedy;
 
-            s1.Reset(new int[] { 151643 });
-            s2.Reset(new int[] { 151643 });
+            s1.Reset([151643]);
+            s2.Reset([151643]);
 
             var t1 = s1.GenerateNextToken(in sampling);
             var t2 = s2.GenerateNextToken(in sampling);
@@ -175,11 +175,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
 
             var sampling = SamplingOptions.Greedy;
 
-            session.Reset(new int[] { 151643 });
+            session.Reset([151643]);
             var token1a = session.GenerateNextToken(in sampling);
 
             // Reset and repeat — should give same token (deterministic)
-            session.Reset(new int[] { 151643 });
+            session.Reset([151643]);
             var token1b = session.GenerateNextToken(in sampling);
 
             Assert.Equal(token1a, token1b);

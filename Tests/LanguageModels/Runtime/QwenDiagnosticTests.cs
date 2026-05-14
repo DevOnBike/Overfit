@@ -56,7 +56,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             using (engine)
             {
                 using var session = engine!.CreateSession(64);
-                session.Reset(new[] { QwenTokenizer.EndOfText });
+                session.Reset([QwenTokenizer.EndOfText]);
                 var sampling = SamplingOptions.Greedy;
                 var firstToken = session.GenerateNextToken(in sampling);
 
@@ -105,7 +105,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
                 var sampling = SamplingOptions.Greedy;
 
                 using var s1 = engine!.CreateSession(64);
-                s1.Reset(new[] { QwenTokenizer.EndOfText });
+                s1.Reset([QwenTokenizer.EndOfText]);
                 s1.GenerateNextToken(in sampling);
                 var logits1 = s1.LastLogits.ToArray();
 

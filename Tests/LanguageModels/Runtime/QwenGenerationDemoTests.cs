@@ -88,7 +88,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         private static int[] NoSystemPrompt(QwenTokenizer tok, string question)
             => new[] { QwenTokenizer.ImStart, 872, 198 }
                 .Concat(tok.Encode(question))
-                .Concat(new[] { QwenTokenizer.ImEnd, 198, QwenTokenizer.ImStart, 77091, 198 })
+                .Concat([QwenTokenizer.ImEnd, 198, QwenTokenizer.ImStart, 77091, 198])
                 .ToArray();
 
         [LongFact]

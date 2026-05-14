@@ -264,7 +264,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Kernels
                 cache.AsReader(),
                 layerIndex: 0,
                 headIndex: 0,
-                query: new float[] { 1f, 0f },
+                query: [1f, 0f],
                 output,
                 scratch,
                 scale: 1f);

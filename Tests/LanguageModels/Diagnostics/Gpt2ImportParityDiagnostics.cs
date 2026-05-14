@@ -116,8 +116,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
                 var overfitTop = ArgMax(overfitFinalLogits);
 
                 _output.WriteLine("");
-                _output.WriteLine($"Reference next token: {referenceTop} '{tokenizer.Decode(new[] { referenceTop })}'");
-                _output.WriteLine($"Overfit next token:   {overfitTop} '{tokenizer.Decode(new[] { overfitTop })}'");
+                _output.WriteLine($"Reference next token: {referenceTop} '{tokenizer.Decode([referenceTop])}'");
+                _output.WriteLine($"Overfit next token:   {overfitTop} '{tokenizer.Decode([overfitTop])}'");
 
                 var assertClose = GetBoolEnvironmentVariable(
                     "OVERFIT_GPT2_DIAG_ASSERT_CLOSE",

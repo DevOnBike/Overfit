@@ -15,8 +15,8 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
         public void FitBatch_ShouldFindCorrectMinMax()
         {
             // ARRANGE
-            float[] data1 = { 10f, 20f, 30f };
-            float[] data2 = { 5f, 40f };
+            float[] data1 = [10f, 20f, 30f];
+            float[] data2 = [5f, 40f];
             var normalizer = new MinMaxNormalizer();
 
             // ACT
@@ -33,13 +33,13 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
         public void TransformInPlace_WithClipToRangeFalse_ShouldAllowValuesAboveOne()
         {
             // ARRANGE - Testujemy sygnał anomalii (domyślne zachowanie)
-            float[] trainData = { 0f, 50f, 100f }; // Min=0, Max=100
+            float[] trainData = [0f, 50f, 100f]; // Min=0, Max=100
             var normalizer = new MinMaxNormalizer { ClipToRange = false };
             normalizer.FitBatch(trainData);
             normalizer.Freeze();
 
             // Produkcja: wpadają wartości normalne i jedna anomalia (150f)
-            float[] testData = { -10f, 50f, 150f }; 
+            float[] testData = [-10f, 50f, 150f]; 
 
             // ACT
             normalizer.TransformInPlace(testData);
@@ -57,13 +57,13 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
         public void TransformInPlace_WithClipToRangeTrue_ShouldStrictlyBoundToZeroOne()
         {
             // ARRANGE - Testujemy twarde granice
-            float[] trainData = { 0f, 50f, 100f }; 
+            float[] trainData = [0f, 50f, 100f]; 
             var normalizer = new MinMaxNormalizer { ClipToRange = true };
             normalizer.FitBatch(trainData);
             normalizer.Freeze();
 
             // Produkcja
-            float[] testData = { -50f, 50f, 200f }; 
+            float[] testData = [-50f, 50f, 200f]; 
 
             // ACT
             normalizer.TransformInPlace(testData);
@@ -81,7 +81,7 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
             var normalizer = MinMaxNormalizer.WithClipMax(5f);
 
             // Produkcja: 0 eventów, 3 eventy, 10 eventów (gigantyczna anomalia)
-            float[] testData = { 0f, 3f, 10f };
+            float[] testData = [0f, 3f, 10f];
 
             // ACT - Nie potrzebujemy Fit/Freeze!
             normalizer.TransformInPlace(testData);
@@ -98,7 +98,7 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
         {
             // ARRANGE - Tryb dla flag np. IsThrottled
             var normalizer = MinMaxNormalizer.Binary();
-            float[] testData = { 0f, 1f, -5f, 5f }; // Wrzucamy poprawne flagi i śmieci
+            float[] testData = [0f, 1f, -5f, 5f]; // Wrzucamy poprawne flagi i śmieci
 
             // ACT
             normalizer.TransformInPlace(testData);

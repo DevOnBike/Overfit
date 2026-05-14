@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Diagnostics;
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.Ops;
@@ -177,6 +178,63 @@ namespace DevOnBike.Overfit.Autograd
             }
         }
 
+        // ── Per-OpCode backward profiling (toggleable, zero overhead when off) ──
+        //
+        // When BackwardProfileEnabled = true, ExecuteBackward stamps elapsed
+        // ticks per OpCode into _opTicks / _opCount. Drain via
+        // GetBackwardOpProfile() and reset with ResetBackwardProfile().
+        //
+        // Cost when enabled: 2 × Stopwatch.GetTimestamp() per backward op,
+        // ~50 ns each — negligible vs any real backward kernel. Cost when
+        // disabled: one null check.
+
+        private long[]? _opTicks;
+        private int[]? _opCount2;
+
+        public bool BackwardProfileEnabled
+        {
+            get => _opTicks is not null;
+            set
+            {
+                if (value)
+                {
+                    _opTicks ??= new long[OpCodeCount];
+                    _opCount2 ??= new int[OpCodeCount];
+                }
+                else
+                {
+                    _opTicks = null;
+                    _opCount2 = null;
+                }
+            }
+        }
+
+        public IReadOnlyList<BackwardOpProfile> GetBackwardOpProfile()
+        {
+            if (_opTicks is null || _opCount2 is null)
+            {
+                return [];
+            }
+
+            var result = new List<BackwardOpProfile>(OpCodeCount);
+            for (var i = 0; i < OpCodeCount; i++)
+            {
+                if (_opCount2[i] > 0)
+                {
+                    var ms = _opTicks[i] * 1000.0 / Stopwatch.Frequency;
+                    result.Add(new BackwardOpProfile((OpCode)i, _opCount2[i], ms, 0));
+                }
+            }
+            return result;
+        }
+
+        public void ResetBackwardProfile()
+        {
+            if (_opTicks is null || _opCount2 is null) { return; }
+            Array.Clear(_opTicks);
+            Array.Clear(_opCount2);
+        }
+
         /*
         public AutogradNode Add(AutogradNode left, AutogradNode right) => TensorMath.Add(this, left, right);
 
@@ -216,6 +274,20 @@ namespace DevOnBike.Overfit.Autograd
         }
 
         private void ExecuteBackward(in TapeOp op)
+        {
+            if (_opTicks is null)
+            {
+                ExecuteBackwardInner(in op);
+                return;
+            }
+
+            var start = Stopwatch.GetTimestamp();
+            ExecuteBackwardInner(in op);
+            _opTicks[(int)op.Code] += Stopwatch.GetTimestamp() - start;
+            _opCount2![(int)op.Code]++;
+        }
+
+        private void ExecuteBackwardInner(in TapeOp op)
         {
             switch (op.Code)
             {

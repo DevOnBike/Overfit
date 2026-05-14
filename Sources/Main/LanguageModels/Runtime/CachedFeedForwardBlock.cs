@@ -48,7 +48,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _intermediate = new float[dFF];
             _gate         = activation == FeedForwardActivation.SwiGLU
                               ? new float[dFF]
-                              : Array.Empty<float>();
+                              : [];
         }
 
         public int DModel { get; }

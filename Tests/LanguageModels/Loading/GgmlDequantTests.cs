@@ -337,7 +337,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 
         private static MemoryStream BuildSingleBlockGguf(GgmlType type, int elementCount, float scale, sbyte[] quants)
         {
-            return BuildMultiBlockGguf(type, elementCount, new[] { scale }, quants);
+            return BuildMultiBlockGguf(type, elementCount, [scale], quants);
         }
 
         private static MemoryStream BuildMultiBlockGguf(GgmlType type, int elementCount, float[] scales, sbyte[] quants)

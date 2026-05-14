@@ -1095,12 +1095,12 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
             var g = pred.GradView.AsReadOnlySpan().ToArray();
 
             float[] expected =
-            {
+            [
                 2f * (1f - 0f) / 4f,
                 2f * (2f - 1f) / 4f,
                 2f * (3f - 1f) / 4f,
                 2f * (4f - 2f) / 4f
-            };
+            ];
 
             for (var i = 0; i < expected.Length; i++)
             {

@@ -99,6 +99,7 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
                 };
 
                 using var graph = new ComputationGraph();
+                graph.BackwardProfileEnabled = true;
 
                 // Reused batch buffers (allocated once, not per batch).
                 using var xBData = new TensorStorage<float>(batchSize * 1 * 28 * 28, clearMemory: false);
@@ -137,6 +138,13 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
 
                 _output.WriteLine(FormatMemorySnapshot("RUN START", runStart));
 
+                // CPU-utilization probe: TotalProcessorTime sums CPU consumed
+                // across all cores. Ratio cpu/(wall × cores) → "fraction of
+                // available CPU actually used". 1.0 = saturated, 0.5 = half
+                // idle. Reveals memory-bound or single-thread-stuck regimes
+                // that timing alone hides.
+                process.Refresh();
+                var runCpuBefore = process.TotalProcessorTime;
                 var runWatch = ValueStopwatch.StartNew();
 
                 for (var epoch = 0; epoch < epochs; epoch++)
@@ -149,6 +157,8 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
 
                     var epochStart = new DotNetMemorySnapshot(process);
                     var epochAllocBefore = GC.GetTotalAllocatedBytes(false);
+                    process.Refresh();
+                    var epochCpuBefore = process.TotalProcessorTime;
 
                     var gc0Before = GC.CollectionCount(0);
                     var gc1Before = GC.CollectionCount(1);
@@ -299,13 +309,19 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
 
                     var epochElapsed = epochWatch.GetElapsedTime();
                     var epochAllocAfter = GC.GetTotalAllocatedBytes(false);
+                    process.Refresh();
+                    var epochCpuAfter = process.TotalProcessorTime;
+                    var epochCpuMs = (epochCpuAfter - epochCpuBefore).TotalMilliseconds;
+                    var epochWallMs = epochElapsed.TotalMilliseconds;
+                    var epochCoresUsed = epochCpuMs / epochWallMs;
+                    var epochUtilization = epochCoresUsed / Environment.ProcessorCount;
 
                     ForceFullGc();
 
                     var epochEnd = new DotNetMemorySnapshot(process);
                     var epochAllocatedBytes = epochAllocAfter - epochAllocBefore;
 
-                    _output.WriteLine($"Epoch {epoch + 1} | Loss: {epochLoss / batches:F4} | Time: {epochElapsed.TotalMilliseconds:F1}ms | Time so far: {runWatch.GetElapsedTime().TotalMilliseconds:F0}ms");
+                    _output.WriteLine($"Epoch {epoch + 1} | Loss: {epochLoss / batches:F4} | Time: {epochElapsed.TotalMilliseconds:F1}ms | CPU: {epochCoresUsed:F1}/{Environment.ProcessorCount} cores ({epochUtilization:P0}) | Time so far: {runWatch.GetElapsedTime().TotalMilliseconds:F0}ms");
                     _output.WriteLine("  === per-op stats ===");
                     WriteOperationStats(copyInputStats);
                     WriteOperationStats(resetStats);
@@ -348,6 +364,30 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
                 _output.WriteLine($"run live managed delta:   {BytesToMb(runEnd.LiveManagedBytes - runStart.LiveManagedBytes):F2} MB");
                 _output.WriteLine($"run private bytes delta:  {BytesToMb(runEnd.PrivateMemoryBytes - runStart.PrivateMemoryBytes):F2} MB");
                 _output.WriteLine($"run working set delta:    {BytesToMb(runEnd.WorkingSetBytes - runStart.WorkingSetBytes):F2} MB");
+
+                process.Refresh();
+                var runCpuAfter = process.TotalProcessorTime;
+                var runCpuMs = (runCpuAfter - runCpuBefore).TotalMilliseconds;
+                var runWallMs = runWatch.GetElapsedTime().TotalMilliseconds;
+                var runCoresUsed = runCpuMs / runWallMs;
+                var runUtilization = runCoresUsed / Environment.ProcessorCount;
+                _output.WriteLine(string.Empty);
+                _output.WriteLine("=== CPU UTILIZATION (whole run) ===");
+                _output.WriteLine($"  wall time:        {runWallMs:F1} ms");
+                _output.WriteLine($"  total CPU time:   {runCpuMs:F1} ms");
+                _output.WriteLine($"  cores effective:  {runCoresUsed:F2} of {Environment.ProcessorCount}");
+                _output.WriteLine($"  utilization:      {runUtilization:P1} of available CPU");
+
+                // Per-OpCode breakdown of graph.Backward — sorted descending by time.
+                _output.WriteLine(string.Empty);
+                _output.WriteLine("=== per-OpCode backward profile (all epochs aggregated) ===");
+                var profile = graph.GetBackwardOpProfile()
+                    .OrderByDescending(p => p.ElapsedMs)
+                    .ToArray();
+                foreach (var p in profile)
+                {
+                    _output.WriteLine($"  {p.Code,-28} {p.ElapsedMs,9:F1} ms | calls {p.Count,8}");
+                }
                 _output.WriteLine("=== KONIEC ===");
             }
             finally

@@ -75,7 +75,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
             // B[0,0]=2, B[1,1]=3 → r[0]*2 → out[0], r[1]*3 → out[1]
             b[0] = 2f; b[3] = 3f;
 
-            float[] x = { 5f, 7f, 0f, 0f };
+            float[] x = [5f, 7f, 0f, 0f];
             var result = new float[2];
             w.ForwardAdd(x, result, scale: 1f);
 
@@ -160,16 +160,16 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
                 using var session = engine.CreateSession(32);
                 var sampling = SamplingOptions.Greedy;
 
-                session.Reset(new[] { 151643 });
+                session.Reset([151643]);
                 var before = session.LastLogits.ToArray();
 
                 // Enable LoRA (zero-init B → delta = 0 → no change)
                 adapter.Enable();
-                session.Reset(new[] { 151643 });
+                session.Reset([151643]);
                 var during = session.LastLogits.ToArray();
                 adapter.Disable();
 
-                session.Reset(new[] { 151643 });
+                session.Reset([151643]);
                 var after = session.LastLogits.ToArray();
 
                 var maxDiffDuring = before.Zip(during).Select(p => MathF.Abs(p.First - p.Second)).Max();
@@ -227,7 +227,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
             b[0] = 0.1f; b[1] = 0.2f;  // B[0,:] = [0.1, 0.2]
             b[2] = 0.3f; b[3] = 0.4f;  // B[1,:] = [0.3, 0.4]
 
-            float[] x = { 1f, 1f, 0f, 0f };
+            float[] x = [1f, 1f, 0f, 0f];
             var result = new float[2];
             w.ForwardAdd(x, result, scale: 1f);
 
@@ -252,7 +252,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
 
                 // CRITICAL: use ≥2 tokens so Q weights actually affect attention output.
                 // At position 0, softmax over single position = [1.0], so Q is irrelevant.
-                int[] testPrompt = { 151643, 151644, 198 };  // BOS, im_start, \n
+                int[] testPrompt = [151643, 151644, 198];  // BOS, im_start, \n
 
                 session.Reset(testPrompt);
                 var baseline = session.LastLogits.ToArray();
@@ -329,7 +329,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
                 using var session = engine.CreateSession(32);
 
                 // ≥2 tokens so Q LoRA actually affects attention
-                int[] testPrompt = { 151643, 151644, 198 };
+                int[] testPrompt = [151643, 151644, 198];
 
                 session.Reset(testPrompt);
                 var baseline = session.LastLogits.ToArray();
@@ -483,7 +483,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
                     // Both adapters should produce same logits
                     using var session = engine.CreateSession(32);
 
-                    int[] tp = { 151643, 151644, 198 };
+                    int[] tp = [151643, 151644, 198];
                     adapter.Enable();
                     session.Reset(tp);
                     var logits1 = session.LastLogits.ToArray();

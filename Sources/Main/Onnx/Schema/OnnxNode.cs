@@ -9,8 +9,8 @@ namespace DevOnBike.Overfit.Onnx.Schema
     {
         public string Name { get; init; } = "";
         public string OpType { get; init; } = "";
-        public List<string> Inputs { get; init; } = new();
-        public List<string> Outputs { get; init; } = new();
+        public List<string> Inputs { get; init; } = [];
+        public List<string> Outputs { get; init; } = [];
         public Dictionary<string, OnnxAttribute> Attributes { get; init; } = new();
     }
 }

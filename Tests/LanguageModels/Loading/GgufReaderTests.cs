@@ -78,7 +78,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         {
             // Build GGUF with single F32 tensor [4] = {1, 2, 3, 4}
             var data = new float[] { 1f, 2f, 3f, 4f };
-            using var ms = BuildGgufWithSingleTensor("test", new ulong[] { 4 }, GgmlType.F32, data);
+            using var ms = BuildGgufWithSingleTensor("test", [4], GgmlType.F32, data);
             using var reader = new GgufReader(ms);
 
             var info = reader.Tensors["test"];
@@ -103,7 +103,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
                 BinaryPrimitives.WriteUInt16LittleEndian(f16Bytes.AsSpan(i * 2), u16);
             }
 
-            using var ms = BuildGgufWithTensorBytes("test_f16", new ulong[] { 4 }, GgmlType.F16, f16Bytes);
+            using var ms = BuildGgufWithTensorBytes("test_f16", [4], GgmlType.F16, f16Bytes);
             using var reader = new GgufReader(ms);
 
             var info = reader.Tensors["test_f16"];
@@ -123,7 +123,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             // Q4_K and Q6_K are now supported; use Q5_K (still unsupported) to keep
             // the assertion meaningful. Body bytes are irrelevant — dispatch throws
             // before reading any tensor data.
-            using var ms = BuildGgufWithTensorBytes("test_q5k", new ulong[] { 256 }, GgmlType.Q5_K, new byte[176]);
+            using var ms = BuildGgufWithTensorBytes("test_q5k", [256], GgmlType.Q5_K, new byte[176]);
             using var reader = new GgufReader(ms);
 
             var info = reader.Tensors["test_q5k"];

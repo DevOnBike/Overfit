@@ -68,7 +68,7 @@ namespace Benchmarks
 
             // Prompt: "The future of software development is"
             // Using hand-coded BPE token ids from GPT-2 tokenizer
-            _prompt = new[] { 464, 2003, 286, 3788, 2478, 318 };
+            _prompt = [464, 2003, 286, 3788, 2478, 318];
 
             _sampling = SamplingOptions.Greedy;
 

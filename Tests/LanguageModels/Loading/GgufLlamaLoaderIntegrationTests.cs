@@ -41,7 +41,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             TestModelPaths.Qwen3B.RequireBinaryPath();
 
             // Known-good 3-token prompt
-            int[] prompt = { 151643, 151644, 198 };
+            int[] prompt = [151643, 151644, 198];
 
             // Load engines SEQUENTIALLY to keep peak RAM low.
             // For 3B FP32, each engine is ~13 GB; holding both at once requires ~30 GB+.

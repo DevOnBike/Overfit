@@ -35,7 +35,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             using (engine)
             {
                 using var session = engine.CreateSession(64);
-                session.Reset(new[] { 151643 });
+                session.Reset([151643]);
                 var logits = session.LastLogits.ToArray();
 
                 _out.WriteLine("=== LOGITS AFTER RESET (position 0) ===");
@@ -74,7 +74,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             using (engine)
             {
                 using var session = engine.CreateSession(64);
-                session.Reset(new[] { 151643, 151644 });
+                session.Reset([151643, 151644]);
 
                 var logits = session.LastLogits.ToArray();
                 var top1 = logits.Select((v, i) => (v, i)).OrderByDescending(x => x.v).First();
@@ -92,7 +92,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
                 _out.WriteLine($"Py hidden[:4] = [0.14059, 0.84549, 1.01591, -1.83366]");
                 _out.WriteLine(string.Empty);
 
-                float[] pyHidden = { 0.14059351f, 0.8454995f, 1.0159123f, -1.8336577f };
+                float[] pyHidden = [0.14059351f, 0.8454995f, 1.0159123f, -1.8336577f];
                 _out.WriteLine("Hidden state diff (C# - Python):");
                 var maxDiff = 0f;
                 for (var i = 0; i < 4; i++)

@@ -90,9 +90,9 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.QualityDiversity
         {
             using var archive = new GridEliteArchive(
                 parameterCount: 2,
-                binsPerDimension: stackalloc[] { 4, 5 },
-                descriptorMin: stackalloc[] { 0f, -1f },
-                descriptorMax: stackalloc[] { 1f, 1f });
+                binsPerDimension: [4, 5],
+                descriptorMin: [0f, -1f],
+                descriptorMax: [1f, 1f]);
 
             Assert.True(archive.TryGetCellIndex([0f, -1f], out var minCell));
             Assert.True(archive.TryGetCellIndex([1f, 1f], out var maxCell));
@@ -123,9 +123,9 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.QualityDiversity
         {
             return new GridEliteArchive(
                 parameterCount: parameterCount,
-                binsPerDimension: stackalloc[] { 8, 8 },
-                descriptorMin: stackalloc[] { 0f, 0f },
-                descriptorMax: stackalloc[] { 1f, 1f });
+                binsPerDimension: [8, 8],
+                descriptorMin: [0f, 0f],
+                descriptorMax: [1f, 1f]);
         }
     }
 }

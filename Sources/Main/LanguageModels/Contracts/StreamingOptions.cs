@@ -51,7 +51,7 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
         /// </summary>
         public static StreamingOptions Default => new(
             maxTokens: 256,
-            stopTokens: Array.Empty<int>(),
+            stopTokens: [],
             sampling: SamplingOptions.Greedy);
 
         /// <summary>

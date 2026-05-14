@@ -34,7 +34,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             float[]? bv = null)
         {
             static TensorStorage<float> Store(float[]? a)
-                => CreateStorage(a ?? Array.Empty<float>());
+                => CreateStorage(a ?? []);
 
             _wk = Store(wk);
             _wv = Store(wv);

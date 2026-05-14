@@ -81,7 +81,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             cache.Advance();
 
             decoder.Decode(
-                hidden: new float[] { 1f, 0f },
+                hidden: [1f, 0f],
                 wq: identity,
                 wk: identity,
                 wv: identity,
@@ -98,7 +98,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             cache.Advance();
 
             decoder.Decode(
-                hidden: new float[] { 0f, 1f },
+                hidden: [0f, 1f],
                 wq: identity,
                 wk: identity,
                 wv: identity,
@@ -165,7 +165,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             cache.Advance();
 
             decoder.Decode(
-                hidden: new float[] { 2f, 3f, 99f },
+                hidden: [2f, 3f, 99f],
                 wq: wIn,
                 wk: wIn,
                 wv: wIn,
@@ -210,7 +210,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             cache.Advance();
 
             decoder.Decode(
-                hidden: new float[] { 5f, 6f },
+                hidden: [5f, 6f],
                 wq: identity,
                 wk: identity,
                 wv: identity,
@@ -262,7 +262,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
 
             Assert.Throws<ArgumentOutOfRangeException>(() =>
                 decoder.Decode(
-                    hidden: new float[] { 1f, 2f },
+                    hidden: [1f, 2f],
                     wq: identity,
                     wk: identity,
                     wv: identity,

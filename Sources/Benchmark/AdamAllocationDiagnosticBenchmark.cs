@@ -265,10 +265,9 @@ namespace Benchmarks
             AutogradNode parameter)
         {
             return new Adam(
-                new[]
-                {
-                    parameter
-                },
+            [
+                parameter
+            ],
                 learningRate: 0.001f)
             {
                 Beta1 = 0.9f,

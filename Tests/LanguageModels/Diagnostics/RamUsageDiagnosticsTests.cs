@@ -54,7 +54,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
                 {
                     PrintCheckpoint("03. After CreateSession(64)");
 
-                    int[] prompt = { 151643, 151644, 198 };
+                    int[] prompt = [151643, 151644, 198];
                     session.Reset(prompt);
                     PrintCheckpoint("04. After session.Reset(3 tokens)");
 
@@ -98,7 +98,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
                 {
                     PrintCheckpoint("03. After CreateSession(64)");
 
-                    int[] prompt = { 151643, 151644, 198 };
+                    int[] prompt = [151643, 151644, 198];
                     session.Reset(prompt);
                     PrintCheckpoint("04. After session.Reset(3 tokens)");
                 }

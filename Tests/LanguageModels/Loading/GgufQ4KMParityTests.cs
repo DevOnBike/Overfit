@@ -45,7 +45,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 
         // Canonical 3-token prompt used by the rest of the Qwen test suite:
         //   [BOS, im_start, "\n"] — exercises embedding + first layer non-trivially.
-        private static readonly int[] Prompt = { 151643, 151644, 198 };
+        private static readonly int[] Prompt = [151643, 151644, 198];
 
         private readonly ITestOutputHelper _out;
 

@@ -103,7 +103,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             var _bw = MakeBlockWeights(zeroHeadWeights, zeroHeadWeights, zeroHeadWeights, zeroHeadWeights,
                     zeroHeadBiases, zeroHeadBiases, zeroHeadBiases, [],
                     ffnW1, [], ffnW2, []);
-            block.Decode(new float[] { 3f, 4f }, in _bw, cache: cache, layerIndex: 0, position: 0, output: output);
+            block.Decode([3f, 4f], in _bw, cache: cache, layerIndex: 0, position: 0, output: output);
 
             AssertClose(3f, output[0]);
             AssertClose(4f, output[1]);
@@ -261,7 +261,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             var _bw = MakeBlockWeights(zeroHeadWeights, zeroHeadWeights, zeroHeadWeights, zeroHeadWeights,
                     zeroHeadBiases, zeroHeadBiases, zeroHeadBiases, [],
                     ffnW1, [], ffnW2, []);
-            block.Decode(new float[] { 1f, -1f }, in _bw, cache: cache, layerIndex: 0, position: 0, output: new float[2]);
+            block.Decode([1f, -1f], in _bw, cache: cache, layerIndex: 0, position: 0, output: new float[2]);
 
             var ln1 = new float[2];
             var attn = new float[2];
@@ -305,7 +305,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     var _bw = MakeBlockWeights(zeroHeadWeights, zeroHeadWeights, zeroHeadWeights, zeroHeadWeights,
                     zeroHeadBiases, zeroHeadBiases, zeroHeadBiases, [],
                     new float[2 * 2], [], new float[2 * 2], []);
-            block.Decode(new float[] { 1f, -1f }, in _bw, cache: cache, layerIndex: 0, position: 0, output: new float[2]);
+            block.Decode([1f, -1f], in _bw, cache: cache, layerIndex: 0, position: 0, output: new float[2]);
                 });
         }
 
@@ -364,18 +364,18 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
 
         private static float[][] CreateZeroHeadWeights()
         {
-            return new[]
-            {
+            return
+            [
                 new float[2 * 2]
-            };
+            ];
         }
 
         private static float[][] CreateZeroHeadBiases()
         {
-            return new[]
-            {
+            return
+            [
                 new float[2]
-            };
+            ];
         }
 
         private static float[] LayerNorm(

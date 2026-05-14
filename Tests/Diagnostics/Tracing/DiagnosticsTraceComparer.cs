@@ -101,8 +101,8 @@ namespace DevOnBike.Overfit.Tests.Diagnostics.Tracing
         public double GraphBackwardMsDelta { get; set; }
         public long GraphAllocatedBytesDelta { get; set; }
         public long TapeOpsDelta { get; set; }
-        public List<DiagnosticsTraceEntryDiff> ModuleDiffs { get; } = new();
-        public List<DiagnosticsTraceEntryDiff> KernelDiffs { get; } = new();
+        public List<DiagnosticsTraceEntryDiff> ModuleDiffs { get; } = [];
+        public List<DiagnosticsTraceEntryDiff> KernelDiffs { get; } = [];
     }
 
     internal sealed class DiagnosticsTraceEntryDiff

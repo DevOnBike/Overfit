@@ -37,7 +37,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
             using var engine = CachedLlamaInferenceEngine.LoadGguf(GgufModelPath);
             using var session = engine.CreateSession(64);
 
-            int[] prompt = { 151643, 151644, 198 };  // BOS, im_start, \n
+            int[] prompt = [151643, 151644, 198];  // BOS, im_start, \n
             session.Reset(prompt);
 
             // No stop tokens, very low MaxTokens — should yield exactly that many
@@ -68,14 +68,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
             // The 3-token prompt forces the model to generate "The..." for math
             // (won't hit stop quickly), so we use a higher cap and a fake
             // stop token that the model is very likely to produce.
-            int[] prompt = { 151643, 151644, 198 };
+            int[] prompt = [151643, 151644, 198];
             session.Reset(prompt);
 
             // The model very likely produces a period or comma or newline.
             // Use \n token (198) as a stop token — frequently emitted.
             var opts = new StreamingOptions(
                 maxTokens: 64,
-                stopTokens: new[] { 198 },  // newline
+                stopTokens: [198],  // newline
                 sampling: SamplingOptions.Greedy);
 
             var tokens = new List<int>();
@@ -105,13 +105,13 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
             using var engine = CachedLlamaInferenceEngine.LoadGguf(GgufModelPath);
             using var session = engine.CreateSession(64);
 
-            int[] prompt = { 151643, 151644, 198 };
+            int[] prompt = [151643, 151644, 198];
             session.Reset(prompt);
 
             using var cts = new CancellationTokenSource();
             var opts = new StreamingOptions(
                 maxTokens: 100,
-                stopTokens: Array.Empty<int>(),
+                stopTokens: [],
                 sampling: SamplingOptions.Greedy);
 
             var produced = 0;
@@ -155,7 +155,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(GgufModelPath);
 
-            int[] prompt = { 151643, 151644, 198 };
+            int[] prompt = [151643, 151644, 198];
             const int n = 8;
 
             // ── Path 1: classic GenerateNextToken loop ──
@@ -171,7 +171,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
             using var s2 = engine.CreateSession(64);
             s2.Reset(prompt);
             var viaStream = new List<int>();
-            var opts = new StreamingOptions(n, Array.Empty<int>(), SamplingOptions.Greedy);
+            var opts = new StreamingOptions(n, [], SamplingOptions.Greedy);
             await foreach (var t in s2.StreamGenerate(opts))
             {
                 viaStream.Add(t);
@@ -191,7 +191,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
             using var engine = CachedLlamaInferenceEngine.LoadGguf(GgufModelPath);
             using var session = engine.CreateSession(64);
 
-            int[] prompt = { 151643, 151644, 198 };
+            int[] prompt = [151643, 151644, 198];
             session.Reset(prompt);
 
             // Use the convenience factory with all 3 Qwen chat terminators
