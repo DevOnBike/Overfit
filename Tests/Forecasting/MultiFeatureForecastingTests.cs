@@ -10,6 +10,7 @@ using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 using Xunit.Abstractions;
+
 // Zmieniono namespace
 
 namespace DevOnBike.Overfit.Tests.Forecasting
@@ -37,7 +38,7 @@ namespace DevOnBike.Overfit.Tests.Forecasting
 
             var (prices, volumes) = GenerateMockMarketData(300);
             var returns = CalculateReturns(prices);
-            var rsi = CalculateRSI(prices, 14);
+            var rsi = CalculateRSI(prices);
 
             var sampleCount = returns.Length - windowSize;
             var batchSize = sampleCount;
@@ -61,8 +62,8 @@ namespace DevOnBike.Overfit.Tests.Forecasting
                 ySpan[i] = returns[i + windowSize] * 100f;
             }
 
-            using var X = new AutogradNode(xData, new TensorShape(batchSize, inputSize), false);
-            using var Y = new AutogradNode(yData, new TensorShape(batchSize, 1), false);
+            using var X = new AutogradNode(xData, new TensorShape(batchSize, inputSize));
+            using var Y = new AutogradNode(yData, new TensorShape(batchSize));
 
             using var layer1 = new LinearLayer(inputSize, 64);
             using var layer2 = new LinearLayer(64, 32);

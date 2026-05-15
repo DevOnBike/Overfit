@@ -45,7 +45,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
 
             var decoder = new CachedMultiHeadAttention(dModel: 2, headCount: 1, maxSequenceLength: 4);
 
-            var identity = new float[] { 1f, 0f, 0f, 1f };
+            var identity = new[] { 1f, 0f, 0f, 1f };
             var bw = MakeBlockWeights(
                 wq: [identity], wk: [identity],
                 wv: [identity], wo: [identity]);
@@ -67,11 +67,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             var decoder = new CachedMultiHeadAttention(dModel: 4, headCount: 2, maxSequenceLength: 4);
 
             // head0: picks dims 0,1  head1: picks dims 2,3
-            var head0In  = new float[] { 1f, 0f,  0f, 1f,  0f, 0f,  0f, 0f };
-            var head1In  = new float[] { 0f, 0f,  0f, 0f,  1f, 0f,  0f, 1f };
-            var head0Out = new float[] { 1f, 0f, 0f, 0f,  0f, 1f, 0f, 0f };
-            var head1Out = new float[] { 0f, 0f, 1f, 0f,  0f, 0f, 0f, 1f };
-            var outputBias = new float[] { 10f, 20f, 30f, 40f };
+            var head0In  = new[] { 1f, 0f,  0f, 1f,  0f, 0f,  0f, 0f };
+            var head1In  = new[] { 0f, 0f,  0f, 0f,  1f, 0f,  0f, 1f };
+            var head0Out = new[] { 1f, 0f, 0f, 0f,  0f, 1f, 0f, 0f };
+            var head1Out = new[] { 0f, 0f, 1f, 0f,  0f, 0f, 0f, 1f };
+            var outputBias = new[] { 10f, 20f, 30f, 40f };
 
             var bw = MakeBlockWeights(
                 wq: [head0In, head1In], wk: [head0In, head1In],
@@ -96,10 +96,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
 
             var decoder = new CachedMultiHeadAttention(dModel: 4, headCount: 2, maxSequenceLength: 4);
 
-            var head0In  = new float[] { 1f, 0f,  0f, 1f,  0f, 0f,  0f, 0f };
-            var head1In  = new float[] { 0f, 0f,  0f, 0f,  1f, 0f,  0f, 1f };
-            var head0Out = new float[] { 1f, 0f, 0f, 0f,  0f, 1f, 0f, 0f };
-            var head1Out = new float[] { 0f, 0f, 1f, 0f,  0f, 0f, 0f, 1f };
+            var head0In  = new[] { 1f, 0f,  0f, 1f,  0f, 0f,  0f, 0f };
+            var head1In  = new[] { 0f, 0f,  0f, 0f,  1f, 0f,  0f, 1f };
+            var head0Out = new[] { 1f, 0f, 0f, 0f,  0f, 1f, 0f, 0f };
+            var head1Out = new[] { 0f, 0f, 1f, 0f,  0f, 0f, 0f, 1f };
             var bw = MakeBlockWeights(
                 wq: [head0In, head1In], wk: [head0In, head1In],
                 wv: [head0In, head1In], wo: [head0Out, head1Out]);
@@ -133,10 +133,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
 
             var decoder = new CachedMultiHeadAttention(dModel: 4, headCount: 2, maxSequenceLength: 2);
 
-            var head0In  = new float[] { 1f, 0f,  0f, 1f,  0f, 0f,  0f, 0f };
-            var head1In  = new float[] { 0f, 0f,  0f, 0f,  1f, 0f,  0f, 1f };
-            var head0Out = new float[] { 1f, 0f, 0f, 0f,  0f, 1f, 0f, 0f };
-            var head1Out = new float[] { 0f, 0f, 1f, 0f,  0f, 0f, 0f, 1f };
+            var head0In  = new[] { 1f, 0f,  0f, 1f,  0f, 0f,  0f, 0f };
+            var head1In  = new[] { 0f, 0f,  0f, 0f,  1f, 0f,  0f, 1f };
+            var head0Out = new[] { 1f, 0f, 0f, 0f,  0f, 1f, 0f, 0f };
+            var head1Out = new[] { 0f, 0f, 1f, 0f,  0f, 0f, 0f, 1f };
             var bw = MakeBlockWeights(
                 wq: [head0In, head1In], wk: [head0In, head1In],
                 wv: [head0In, head1In], wo: [head0Out, head1Out]);
@@ -144,10 +144,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             cache.Advance();
             decoder.Decode([7f, 8f, 9f, 10f], in bw, cache, 0, 0, new float[4]);
 
-            Assert.Equal(new float[] { 7f, 8f }, cache.GetKeyReadSpan(0, 0, 0, 1).ToArray());
-            Assert.Equal(new float[] { 7f, 8f }, cache.GetValueReadSpan(0, 0, 0, 1).ToArray());
-            Assert.Equal(new float[] { 9f, 10f }, cache.GetKeyReadSpan(0, 1, 0, 1).ToArray());
-            Assert.Equal(new float[] { 9f, 10f }, cache.GetValueReadSpan(0, 1, 0, 1).ToArray());
+            Assert.Equal(new[] { 7f, 8f }, cache.GetKeyReadSpan(0, 0, 0, 1).ToArray());
+            Assert.Equal(new[] { 7f, 8f }, cache.GetValueReadSpan(0, 0, 0, 1).ToArray());
+            Assert.Equal(new[] { 9f, 10f }, cache.GetKeyReadSpan(0, 1, 0, 1).ToArray());
+            Assert.Equal(new[] { 9f, 10f }, cache.GetValueReadSpan(0, 1, 0, 1).ToArray());
         }
 
         [Fact]
@@ -157,7 +157,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 layerCount: 1, kvHeadCount: 1, maxSequenceLength: 2, headDimension: 2);
 
             var decoder = new CachedMultiHeadAttention(dModel: 2, headCount: 1, maxSequenceLength: 2);
-            var identity = new float[] { 1f, 0f, 0f, 1f };
+            var identity = new[] { 1f, 0f, 0f, 1f };
             var bw = MakeBlockWeights(
                 wq: [identity], wk: [identity],
                 wv: [identity], wo: [identity]);

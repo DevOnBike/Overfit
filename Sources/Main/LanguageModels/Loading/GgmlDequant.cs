@@ -180,10 +180,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     var qhByte = qh[qhBase + l];
                     var is_ = l / 16;     // 0 or 1 within the 32-element stride
 
-                    var q1 = (int)(ql[qlBase + l     ] & 0x0F) | (((qhByte >> 0) & 0x03) << 4);
-                    var q2 = (int)(ql[qlBase + l + 32] & 0x0F) | (((qhByte >> 2) & 0x03) << 4);
-                    var q3 = (int)(ql[qlBase + l     ] >> 4)   | (((qhByte >> 4) & 0x03) << 4);
-                    var q4 = (int)(ql[qlBase + l + 32] >> 4)   | (((qhByte >> 6) & 0x03) << 4);
+                    var q1 = ql[qlBase + l     ] & 0x0F | (((qhByte >> 0) & 0x03) << 4);
+                    var q2 = ql[qlBase + l + 32] & 0x0F | (((qhByte >> 2) & 0x03) << 4);
+                    var q3 = ql[qlBase + l     ] >> 4   | (((qhByte >> 4) & 0x03) << 4);
+                    var q4 = ql[qlBase + l + 32] >> 4   | (((qhByte >> 6) & 0x03) << 4);
 
                     // scales are int8 — sign-extend
                     var s1 = (sbyte)sc[scBase + is_ + 0];

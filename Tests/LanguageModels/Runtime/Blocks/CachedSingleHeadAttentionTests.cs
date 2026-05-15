@@ -23,13 +23,13 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 headDimension: 2,
                 maxSequenceLength: 4);
 
-            var identity = new float[]
+            var identity = new[]
             {
                 1f, 0f,
                 0f, 1f
             };
 
-            var hidden = new float[] { 3f, 4f };
+            var hidden = new[] { 3f, 4f };
             var output = new float[2];
 
             cache.Advance();
@@ -52,8 +52,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             AssertClose(3f, output[0]);
             AssertClose(4f, output[1]);
 
-            Assert.Equal(new float[] { 3f, 4f }, cache.GetKeyReadSpan(0, 0, 0, 1).ToArray());
-            Assert.Equal(new float[] { 3f, 4f }, cache.GetValueReadSpan(0, 0, 0, 1).ToArray());
+            Assert.Equal(new[] { 3f, 4f }, cache.GetKeyReadSpan(0, 0, 0, 1).ToArray());
+            Assert.Equal(new[] { 3f, 4f }, cache.GetValueReadSpan(0, 0, 0, 1).ToArray());
         }
 
         [Fact]
@@ -70,7 +70,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 headDimension: 2,
                 maxSequenceLength: 4);
 
-            var identity = new float[]
+            var identity = new[]
             {
                 1f, 0f,
                 0f, 1f
@@ -141,7 +141,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 maxSequenceLength: 2);
 
             // hidden [3] -> q/k/v [2], use first two dimensions.
-            var wIn = new float[]
+            var wIn = new[]
             {
                 1f, 0f,
                 0f, 1f,
@@ -153,13 +153,13 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             // out0 = a*1 + b*4
             // out1 = a*2 + b*5
             // out2 = a*3 + b*6
-            var wo = new float[]
+            var wo = new[]
             {
                 1f, 2f, 3f,
                 4f, 5f, 6f
             };
 
-            var bias = new float[] { 10f, 20f, 30f };
+            var bias = new[] { 10f, 20f, 30f };
             var output = new float[3];
 
             cache.Advance();
@@ -199,7 +199,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 headDimension: 2,
                 maxSequenceLength: 2);
 
-            var identity = new float[]
+            var identity = new[]
             {
                 1f, 0f,
                 0f, 1f
@@ -234,10 +234,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             decoder.GetLastValue(value);
             decoder.GetLastAttentionOutput(attention);
 
-            Assert.Equal(new float[] { 5f, 6f }, query);
-            Assert.Equal(new float[] { 5f, 6f }, key);
-            Assert.Equal(new float[] { 5f, 6f }, value);
-            Assert.Equal(new float[] { 5f, 6f }, attention);
+            Assert.Equal(new[] { 5f, 6f }, query);
+            Assert.Equal(new[] { 5f, 6f }, key);
+            Assert.Equal(new[] { 5f, 6f }, value);
+            Assert.Equal(new[] { 5f, 6f }, attention);
         }
 
         [Fact]
@@ -254,7 +254,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 headDimension: 2,
                 maxSequenceLength: 2);
 
-            var identity = new float[]
+            var identity = new[]
             {
                 1f, 0f,
                 0f, 1f
@@ -293,7 +293,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 headDimension: 2,
                 maxSequenceLength: 2);
 
-            var identity = new float[]
+            var identity = new[]
             {
                 1f, 0f,
                 0f, 1f

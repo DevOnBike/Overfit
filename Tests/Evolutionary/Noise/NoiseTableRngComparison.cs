@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Randomization;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Evolutionary.Noise
@@ -46,7 +47,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Noise
             // Reproduce the new VectorizedRandom-backed fill. Same partitionSeed semantics
             // except cast from int to uint preserves the bit pattern.
             var vecBuffer = new float[length];
-            FillRangeWithVectorized(vecBuffer.AsSpan(), new Randomization.VectorizedRandom(unchecked((uint)partitionSeed)));
+            FillRangeWithVectorized(vecBuffer.AsSpan(), new VectorizedRandom(unchecked((uint)partitionSeed)));
 
             ReportBias("VectorizedRandom fill", vecBuffer, pairs, paramCount);
         }
@@ -76,7 +77,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Noise
             }
         }
 
-        private static void FillRangeWithVectorized(Span<float> target, Randomization.VectorizedRandom rng)
+        private static void FillRangeWithVectorized(Span<float> target, VectorizedRandom rng)
         {
             // Same algorithm, just with VectorizedRandom as the uniform source. This is
             // literally what PrecomputedNoiseTable does after the switch.

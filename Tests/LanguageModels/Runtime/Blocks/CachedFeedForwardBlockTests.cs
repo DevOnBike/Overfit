@@ -44,31 +44,31 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 dFF: 3,
                 activation: FeedForwardActivation.None);
 
-            var hidden = new float[] { 2f, 3f };
+            var hidden = new[] { 2f, 3f };
 
             // hidden [2] -> intermediate [3]
             // row0: [1, 2, 3]
             // row1: [4, 5, 6]
-            var w1 = new float[]
+            var w1 = new[]
             {
                 1f, 2f, 3f,
                 4f, 5f, 6f
             };
 
-            var b1 = new float[] { 10f, 20f, 30f };
+            var b1 = new[] { 10f, 20f, 30f };
 
             // intermediate [3] -> output [2]
             // row0: [1, 2]
             // row1: [3, 4]
             // row2: [5, 6]
-            var w2 = new float[]
+            var w2 = new[]
             {
                 1f, 2f,
                 3f, 4f,
                 5f, 6f
             };
 
-            var b2 = new float[] { 100f, 200f };
+            var b2 = new[] { 100f, 200f };
             var output = new float[2];
 
             block.Decode(
@@ -98,9 +98,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 dFF: 2,
                 activation: FeedForwardActivation.None);
 
-            var hidden = new float[] { 2f, 3f };
+            var hidden = new[] { 2f, 3f };
 
-            var identity = new float[]
+            var identity = new[]
             {
                 1f, 0f,
                 0f, 1f
@@ -126,15 +126,15 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 dFF: 2,
                 activation: FeedForwardActivation.ReLU);
 
-            var hidden = new float[] { 1f, 1f };
+            var hidden = new[] { 1f, 1f };
 
-            var w1 = new float[]
+            var w1 = new[]
             {
                 -1f, 2f,
                 -1f, 3f
             };
 
-            var w2 = new float[]
+            var w2 = new[]
             {
                 1f, 0f,
                 0f, 1f
@@ -160,9 +160,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 dFF: 1,
                 activation: FeedForwardActivation.GeLU);
 
-            var hidden = new float[] { 1f };
-            var w1 = new float[] { 1f };
-            var w2 = new float[] { 1f };
+            var hidden = new[] { 1f };
+            var w1 = new[] { 1f };
+            var w2 = new[] { 1f };
             var output = new float[1];
 
             block.DecodeWithoutBias(
@@ -184,15 +184,15 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 dFF: 2,
                 activation: FeedForwardActivation.ReLU);
 
-            var hidden = new float[] { 1f, 1f };
+            var hidden = new[] { 1f, 1f };
 
-            var w1 = new float[]
+            var w1 = new[]
             {
                 -1f, 2f,
                 -1f, 3f
             };
 
-            var identity = new float[]
+            var identity = new[]
             {
                 1f, 0f,
                 0f, 1f
@@ -210,7 +210,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
 
             block.GetLastIntermediate(intermediate);
 
-            Assert.Equal(new float[] { 0f, 5f }, intermediate);
+            Assert.Equal(new[] { 0f, 5f }, intermediate);
         }
 
         [Fact]

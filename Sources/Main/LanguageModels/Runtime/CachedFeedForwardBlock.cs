@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Numerics.Tensors;
+
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
     /// <summary>
@@ -144,7 +146,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             SingleTokenProjectionKernel.Project(hidden, wUp, [], _intermediate, DModel, DFF);
 
             // intermediate = gate * up (element-wise)
-            System.Numerics.Tensors.TensorPrimitives.Multiply(_gate, _intermediate, _intermediate);
+            TensorPrimitives.Multiply(_gate, _intermediate, _intermediate);
 
             // output = intermediate @ Wdown
             SingleTokenProjectionKernel.Project(_intermediate, wDown, [], output, DFF, DModel);

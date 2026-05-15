@@ -84,7 +84,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
 
             _output.WriteLine(string.Empty);
             _output.WriteLine($"✓ Model wytrenowany, checkpoint zapisany ({checkpointSize / 1024:N0}KB).");
-            _output.WriteLine($"✓ Gotowy do użycia w GptAnomalyDetector + LiveMonitoringPipeline.");
+            _output.WriteLine("✓ Gotowy do użycia w GptAnomalyDetector + LiveMonitoringPipeline.");
         }
 
         /// <summary>

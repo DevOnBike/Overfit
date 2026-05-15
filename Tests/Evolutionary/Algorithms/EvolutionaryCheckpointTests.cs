@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Text;
 using DevOnBike.Overfit.Evolutionary.Fitness;
 using DevOnBike.Overfit.Evolutionary.Mutation;
 using DevOnBike.Overfit.Evolutionary.Selection;
@@ -46,7 +47,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
             byte[] checkpointBytes;
             using (var ms = new MemoryStream())
             {
-                using var bw = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+                using var bw = new BinaryWriter(ms, Encoding.UTF8, leaveOpen: true);
                 original.Save(bw);
                 checkpointBytes = ms.ToArray();
             }
@@ -101,7 +102,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
             byte[] bytes;
             using (var ms = new MemoryStream())
             {
-                using var bw = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+                using var bw = new BinaryWriter(ms, Encoding.UTF8, leaveOpen: true);
                 source.Save(bw);
                 bytes = ms.ToArray();
             }
@@ -131,7 +132,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
             byte[] bytes;
             using (var ms = new MemoryStream())
             {
-                using var bw = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+                using var bw = new BinaryWriter(ms, Encoding.UTF8, leaveOpen: true);
                 original.Save(bw);
                 bytes = ms.ToArray();
             }
@@ -188,7 +189,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
             byte[] bytes;
             using (var ms = new MemoryStream())
             {
-                using var bw = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+                using var bw = new BinaryWriter(ms, Encoding.UTF8, leaveOpen: true);
                 original.Save(bw);
                 bytes = ms.ToArray();
             }
@@ -228,7 +229,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
             byte[] adamBytes;
             using (var ms = new MemoryStream())
             {
-                using var bw = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+                using var bw = new BinaryWriter(ms, Encoding.UTF8, leaveOpen: true);
                 adamEs.Save(bw);
                 adamBytes = ms.ToArray();
             }
@@ -256,7 +257,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
             byte[] gaBytes;
             using (var ms = new MemoryStream())
             {
-                using var bw = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+                using var bw = new BinaryWriter(ms, Encoding.UTF8, leaveOpen: true);
                 ga.Save(bw);
                 gaBytes = ms.ToArray();
             }

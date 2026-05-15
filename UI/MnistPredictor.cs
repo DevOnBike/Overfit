@@ -8,7 +8,9 @@ using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors;
-using DevOnBike.Overfit.Tensors.Core; // Added for TensorStorage and TensorShape
+using DevOnBike.Overfit.Tensors.Core;
+
+// Added for TensorStorage and TensorShape
 
 namespace DevOnBike.Overfit.UI
 {
@@ -61,7 +63,7 @@ namespace DevOnBike.Overfit.UI
             pixelData.CopyTo(inputMat.AsSpan());
 
             // POPRAWKA: AutogradNode now requires explicit TensorShape
-            using var input = new AutogradNode(inputMat, new TensorShape(1, 1, 28, 28), false);
+            using var input = new AutogradNode(inputMat, new TensorShape(1, 1, 28, 28));
 
             // --- INFERENCJA (FORWARD PASS) ---
             // WAŻNE: Usuwamy 'using' przy wynikach Forward, bo zwracają one wewnętrzne bufory warstw.

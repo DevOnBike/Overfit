@@ -43,7 +43,7 @@ namespace DevOnBike.Overfit.DeepLearning
             DecoderHidden = decoderHidden;
 
             _enc1 = new LstmLayer(inputSize, encoderHidden, true);
-            _enc2 = new LstmLayer(encoderHidden, latentSize, false);
+            _enc2 = new LstmLayer(encoderHidden, latentSize);
             _repeat = new RepeatVector(seqLen);
             _dec1 = new LstmLayer(latentSize, decoderHidden, true);
             _dec2 = new LstmLayer(decoderHidden, inputSize, true);

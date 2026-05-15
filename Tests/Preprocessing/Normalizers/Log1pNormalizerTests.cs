@@ -60,7 +60,7 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
             // ARRANGE
             var normalizer = new Log1pNormalizer();
             normalizer.FitBatch([1f, 2f, 3f]);
-            var dataToTransform = new float[] { 1f };
+            var dataToTransform = new[] { 1f };
 
             // ACT & ASSERT
             // Zapomnieliśmy wywołać Freeze()

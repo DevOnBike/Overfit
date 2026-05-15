@@ -166,7 +166,7 @@ namespace DevOnBike.Overfit.Randomization
             var range = (uint)((long)maxValue - minValue);
             var sample = NextUInt32Below(range);
 
-            return (int)(minValue + (long)sample);
+            return (int)(minValue + sample);
         }
 
         /// <summary>
@@ -289,7 +289,7 @@ namespace DevOnBike.Overfit.Randomization
 
             if (low < maxExclusive)
             {
-                var threshold = unchecked((uint)(0 - maxExclusive)) % maxExclusive;
+                var threshold = unchecked(0 - maxExclusive) % maxExclusive;
 
                 while (low < threshold)
                 {

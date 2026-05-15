@@ -137,12 +137,12 @@ namespace Benchmarks
 
             _onnxRunOptions = new RunOptions();
 
-            _onnxInputValue = OrtValue.CreateTensorValueFromMemory<float>(
+            _onnxInputValue = OrtValue.CreateTensorValueFromMemory(
                 OrtMemoryInfo.DefaultInstance,
                 _input.AsMemory(),
                 [1, 1, 28, 28]);
 
-            _onnxOutputValue = OrtValue.CreateTensorValueFromMemory<float>(
+            _onnxOutputValue = OrtValue.CreateTensorValueFromMemory(
                 OrtMemoryInfo.DefaultInstance,
                 _onnxOutput.AsMemory(),
                 [1, OutputSize]);

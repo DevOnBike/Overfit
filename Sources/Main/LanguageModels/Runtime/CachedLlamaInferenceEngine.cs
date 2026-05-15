@@ -5,6 +5,7 @@
 
 using System.Runtime.InteropServices;
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.LoRA;
 using DevOnBike.Overfit.LanguageModels.Rope;
 using DevOnBike.Overfit.Tensors.Core;
@@ -114,10 +115,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// </summary>
         public static CachedLlamaInferenceEngine CreateFromBuffers(
             GPT1Config config,
-            Tensors.Core.TensorStorage<float> embedWeights,
-            Tensors.Core.TensorStorage<float> finalNormGamma,
-            Tensors.Core.TensorStorage<float> finalNormBeta,
-            Tensors.Core.TensorStorage<float> lmHead,
+            TensorStorage<float> embedWeights,
+            TensorStorage<float> finalNormGamma,
+            TensorStorage<float> finalNormBeta,
+            TensorStorage<float> lmHead,
             LayerWeightBuffers[] layers)
         {
             return new CachedLlamaInferenceEngine(
@@ -130,7 +131,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// </summary>
         public static CachedLlamaInferenceEngine LoadGguf(string path)
         {
-            return Loading.GgufLlamaLoader.Load(path);
+            return GgufLlamaLoader.Load(path);
         }
 
         public GPT1Config Config => _config;
@@ -549,7 +550,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             var headDim = _config.DModel / _config.NHeads;
             var refs = new Dictionary<(int, LoRATargetModules, int),
-                                      Tensors.Core.TensorStorage<float>>();
+                                      TensorStorage<float>>();
 
             for (var l = 0; l < _config.NLayers; l++)
             {

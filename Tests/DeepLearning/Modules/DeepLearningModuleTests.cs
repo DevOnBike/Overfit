@@ -20,7 +20,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Modules
             Assert.Equal(2, layer.Parameters().Count());
 
             using var inputTensor = new TensorStorage<float>(20, clearMemory: true);
-            using var input = new AutogradNode(inputTensor, new TensorShape(2, 10), false);
+            using var input = new AutogradNode(inputTensor, new TensorShape(2, 10));
 
             using var output = layer.Forward(null, input);
 
@@ -58,7 +58,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Modules
             Assert.True(seq.IsTraining);
 
             using var inputTensor = new TensorStorage<float>(5, clearMemory: true);
-            using var input = new AutogradNode(inputTensor, new TensorShape(1, 5), false);
+            using var input = new AutogradNode(inputTensor, new TensorShape(1, 5));
 
             using var output = seq.Forward(null, input);
 
@@ -72,7 +72,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Modules
 
             // POPRAWKA: Blok rezydualny na bazie LinearLayer oczekuje tensora 2D [Batch, HiddenSize]
             using var inputTensor = new TensorStorage<float>(16, clearMemory: true);
-            using var input = new AutogradNode(inputTensor, new TensorShape(2, 8), false);
+            using var input = new AutogradNode(inputTensor, new TensorShape(2, 8));
 
             using var output = res.Forward(null, input);
 

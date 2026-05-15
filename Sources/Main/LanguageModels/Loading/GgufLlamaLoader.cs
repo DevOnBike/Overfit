@@ -7,7 +7,6 @@ using System.Buffers;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.Tensors.Core;
-
 using LayerWeightBuffers = DevOnBike.Overfit.LanguageModels.Runtime.CachedLlamaInferenceEngine.LayerWeightBuffers;
 
 namespace DevOnBike.Overfit.LanguageModels.Loading
@@ -33,7 +32,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
         internal static CachedLlamaInferenceEngine LoadFromReader(GgufReader reader)
         {
-            var arch = reader.GetMeta<string>("general.architecture", "qwen2");
+            var arch = reader.GetMeta("general.architecture", "qwen2");
 
             // ─── Config from metadata ─────────────────────────────────────
             var nLayers = reader.GetMeta($"{arch}.block_count", 24);

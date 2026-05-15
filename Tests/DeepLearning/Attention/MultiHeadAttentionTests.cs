@@ -5,6 +5,7 @@
 
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.Tests.DeepLearning.Attention
@@ -186,7 +187,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Attention
         {
             var storage = new TensorStorage<float>(data.Length, clearMemory: false);
             data.AsSpan().CopyTo(storage.AsSpan());
-            return new AutogradNode(storage, new Tensors.TensorShape(b, t, d), requiresGrad);
+            return new AutogradNode(storage, new TensorShape(b, t, d), requiresGrad);
         }
 
         private static float[] MakeRandom(int size, int seed)

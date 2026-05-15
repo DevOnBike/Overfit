@@ -12,6 +12,7 @@ using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 using Xunit.Abstractions;
+
 // Dodano DOD Core
 
 namespace DevOnBike.Overfit.Tests.TestSupport.Prepare
@@ -73,8 +74,8 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Prepare
 
             var inputFeatures = nFeatures;
 
-            using var X = new AutogradNode(features, new TensorShape(nSamples, nFeatures), false);
-            using var Y = new AutogradNode(targets, new TensorShape(nSamples, 1), false);
+            using var X = new AutogradNode(features, new TensorShape(nSamples, nFeatures));
+            using var Y = new AutogradNode(targets, new TensorShape(nSamples));
 
             using var layer1 = new LinearLayer(inputFeatures, 32);
             using var layer2 = new LinearLayer(32, 16);

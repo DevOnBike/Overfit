@@ -10,7 +10,9 @@ using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors;
-using DevOnBike.Overfit.Tensors.Core; // Zmieniono na Tensors.Core
+using DevOnBike.Overfit.Tensors.Core;
+
+// Zmieniono na Tensors.Core
 
 namespace Benchmarks
 {
@@ -76,10 +78,10 @@ namespace Benchmarks
             _aNode = new AutogradNode(_aTensor, new TensorShape(Batch, Hidden), true);
             _bNode = new AutogradNode(_bTensor, new TensorShape(Hidden, Hidden), true);
             _biasNode = new AutogradNode(_biasTensor, new TensorShape(Hidden), true);
-            _targetNode = new AutogradNode(_targetTensor, new TensorShape(Batch, Hidden), false);
+            _targetNode = new AutogradNode(_targetTensor, new TensorShape(Batch, Hidden));
 
             _lstmInputNode = new AutogradNode(_lstmInputTensor, new TensorShape(Batch, seqLen, inputSize), true);
-            _lstmTargetNode = new AutogradNode(_lstmTargetTensor, new TensorShape(Batch, seqLen, Hidden), false);
+            _lstmTargetNode = new AutogradNode(_lstmTargetTensor, new TensorShape(Batch, seqLen, Hidden));
 
             _linear = new LinearLayer(Hidden, Hidden);
             _residual = new ResidualBlock(Hidden);

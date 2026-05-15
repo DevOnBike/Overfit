@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Text;
+
 namespace DevOnBike.Overfit.Tokenization
 {
     /// <summary>
@@ -111,7 +113,7 @@ namespace DevOnBike.Overfit.Tokenization
 
         public string Decode(int[] tokenIds)
         {
-            var sb = new System.Text.StringBuilder(tokenIds.Length);
+            var sb = new StringBuilder(tokenIds.Length);
 
             foreach (var id in tokenIds)
             {

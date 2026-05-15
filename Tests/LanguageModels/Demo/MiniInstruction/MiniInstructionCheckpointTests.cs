@@ -795,8 +795,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.MiniInstruction
                 SlmRuntimeMode.Legacy);
 
             using var cached = SlmRuntimeFactory.CreateGpt1(
-                model,
-                SlmRuntimeMode.Cached);
+                model);
 
             var legacyGenerated = legacy.GenerateGreedy(
                 promptTokens,
@@ -824,8 +823,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.MiniInstruction
             var sampling = SamplingOptions.Greedy;
 
             using var runtime = SlmRuntimeFactory.CreateGpt1(
-                model,
-                SlmRuntimeMode.Cached);
+                model);
 
             runtime.Session.Reset(promptTokens);
 

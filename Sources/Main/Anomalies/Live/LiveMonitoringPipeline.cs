@@ -4,7 +4,9 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Anomalies.Alerting;
+using DevOnBike.Overfit.Anomalies.Alerting.Abstractions;
 using DevOnBike.Overfit.Anomalies.Alerting.Contracts;
+using DevOnBike.Overfit.Anomalies.Gpt;
 using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 using DevOnBike.Overfit.DeepLearning;
@@ -33,7 +35,7 @@ namespace DevOnBike.Overfit.Anomalies.Live
         private readonly PrometheusMetricSource _source;
         private readonly AlertEngine _alertEngine;
         private readonly GPT1Model _model;
-        private readonly Dictionary<string, Gpt.GptAnomalyDetector> _detectors = new();
+        private readonly Dictionary<string, GptAnomalyDetector> _detectors = new();
         private readonly LiveMonitoringOptions _options;
         private readonly GptTrainingConfig _trainingConfig;
         private bool _disposed;
@@ -57,7 +59,7 @@ namespace DevOnBike.Overfit.Anomalies.Live
             LiveMonitoringOptions options,
             GptTrainingConfig trainingConfig,
             string checkpointPath,
-            params Alerting.Abstractions.IAlertSink[] sinks)
+            params IAlertSink[] sinks)
         {
             ArgumentNullException.ThrowIfNull(options);
             ArgumentNullException.ThrowIfNull(trainingConfig);
@@ -71,7 +73,7 @@ namespace DevOnBike.Overfit.Anomalies.Live
             // Load GPT model from checkpoint
             var gptConfig = new GPT1Config
             {
-                VocabSize     = Gpt.MetricTokenizer.VocabSize,
+                VocabSize     = MetricTokenizer.VocabSize,
                 ContextLength = trainingConfig.ContextLength,
                 DModel        = trainingConfig.DModel,
                 NHeads        = trainingConfig.NHeads,
@@ -173,14 +175,14 @@ namespace DevOnBike.Overfit.Anomalies.Live
 
         // ── Private ──────────────────────────────────────────────────────────
 
-        private Gpt.GptAnomalyDetector GetOrCreateDetector(string podName)
+        private GptAnomalyDetector GetOrCreateDetector(string podName)
         {
             if (_detectors.TryGetValue(podName, out var existing))
             {
                 return existing;
             }
-            var handle   = SlmRuntimeFactory.CreateGpt1(_model, SlmRuntimeMode.Cached);
-            var detector = new Gpt.GptAnomalyDetector(handle, _options.ContextSnapshots);
+            var handle   = SlmRuntimeFactory.CreateGpt1(_model);
+            var detector = new GptAnomalyDetector(handle, _options.ContextSnapshots);
             _detectors[podName] = detector;
             return detector;
         }
@@ -272,7 +274,7 @@ namespace DevOnBike.Overfit.Anomalies.Live
         public int ContextSnapshots { get; init; } = 21;
 
         /// <summary>Called for every scored snapshot (logging, metrics export).</summary>
-        public Action<Gpt.AnomalyScore>? OnScore { get; init; }
+        public Action<AnomalyScore>? OnScore { get; init; }
 
         /// <summary>Called on non-cancellation errors in the scrape loop.</summary>
         public Action<Exception>? OnError { get; init; }

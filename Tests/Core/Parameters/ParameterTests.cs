@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Text;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Parameters;
 using DevOnBike.Overfit.Tensors;
@@ -53,7 +54,7 @@ namespace DevOnBike.Overfit.Tests.Core.Parameters
         public void Parameter_LoadData_CopiesCorrectly()
         {
             using var p = new Parameter(new TensorShape(4), clearData: false);
-            var data = new float[] { 1f, 2f, 3f, 4f };
+            var data = new[] { 1f, 2f, 3f, 4f };
 
             p.LoadData(data);
 
@@ -161,7 +162,7 @@ namespace DevOnBike.Overfit.Tests.Core.Parameters
             original.LoadData(data);
 
             using var ms = new MemoryStream();
-            using (var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true))
+            using (var writer = new BinaryWriter(ms, Encoding.UTF8, leaveOpen: true))
             {
                 original.Save(writer);
             }
@@ -183,7 +184,7 @@ namespace DevOnBike.Overfit.Tests.Core.Parameters
             // Save a 4-element parameter
             using var original = new Parameter(new TensorShape(4));
             using var ms = new MemoryStream();
-            using (var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true))
+            using (var writer = new BinaryWriter(ms, Encoding.UTF8, leaveOpen: true))
             {
                 original.Save(writer);
             }

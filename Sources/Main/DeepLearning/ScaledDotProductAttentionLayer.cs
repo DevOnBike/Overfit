@@ -3,8 +3,10 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Numerics.Tensors;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
+using DevOnBike.Overfit.Maths;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Parameters;
 using DevOnBike.Overfit.Tensors;
@@ -228,7 +230,7 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 var row = outS.Slice(bt * dModel, dModel);
                 inS.Slice(bt * dModel, dModel).CopyTo(row);
-                System.Numerics.Tensors.TensorPrimitives.Add(row, bS, row);
+                TensorPrimitives.Add(row, bS, row);
             }
 
             var node = AutogradNode.CreateBorrowed(outStorage, new TensorShape(batchSize, seqLen, dModel), requiresGrad: false);
@@ -241,7 +243,7 @@ namespace DevOnBike.Overfit.DeepLearning
             var span = p.DataSpan;
             for (var i = 0; i < span.Length; i++)
             {
-                span[i] = Maths.MathUtils.NextGaussian() * scale;
+                span[i] = MathUtils.NextGaussian() * scale;
             }
             return p;
         }

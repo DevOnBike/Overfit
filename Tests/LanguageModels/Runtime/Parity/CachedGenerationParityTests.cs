@@ -79,8 +79,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
                 SlmRuntimeMode.Legacy);
 
             using var cached = SlmRuntimeFactory.CreateGpt1(
-                model,
-                SlmRuntimeMode.Cached);
+                model);
 
             var prompt = new[] { 1, 2, 3 };
             var sampling = SamplingOptions.Greedy;
@@ -117,8 +116,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
                 SlmRuntimeMode.Legacy);
 
             using var cached = SlmRuntimeFactory.CreateGpt1(
-                model,
-                SlmRuntimeMode.Cached);
+                model);
 
             var legacyGenerated = legacy.Generate(
                 prompt,
@@ -145,8 +143,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
 
             using var defaultRuntime = SlmRuntimeFactory.CreateGpt1(model);
             using var cachedRuntime = SlmRuntimeFactory.CreateGpt1(
-                model,
-                SlmRuntimeMode.Cached);
+                model);
 
             var defaultGenerated = defaultRuntime.GenerateGreedy(
                 prompt,
@@ -175,8 +172,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
                 SlmRuntimeMode.Legacy);
 
             using var cached = SlmRuntimeFactory.CreateGpt1(
-                model,
-                SlmRuntimeMode.Cached);
+                model);
 
             var legacyGenerated = legacy.GenerateGreedy(
                 promptTokens,

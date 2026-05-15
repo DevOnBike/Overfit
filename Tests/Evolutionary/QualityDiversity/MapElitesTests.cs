@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Text;
 using DevOnBike.Overfit.Diagnostics.Contracts;
 using DevOnBike.Overfit.Evolutionary.Abstractions;
 using DevOnBike.Overfit.Evolutionary.Runtime;
@@ -199,14 +200,14 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.QualityDiversity
 
             // Save to in-memory stream then immediately load into a fresh archive.
             using var stream = new MemoryStream();
-            using (var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, leaveOpen: true))
+            using (var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true))
             {
                 original.Save(writer);
             }
             stream.Position = 0;
 
             using var restored = CreateArchive(parameterCount: 4);
-            using (var reader = new BinaryReader(stream, System.Text.Encoding.UTF8, leaveOpen: true))
+            using (var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true))
             {
                 restored.Load(reader);
             }
@@ -236,7 +237,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.QualityDiversity
             source.Insert([0.1f, 0.2f, 0.3f, 0.4f], 1.5f, [0.25f, 0.25f]);
 
             using var stream = new MemoryStream();
-            using (var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, leaveOpen: true))
+            using (var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true))
             {
                 source.Save(writer);
             }
@@ -244,7 +245,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.QualityDiversity
 
             // Receiving archive has different parameter count — Load must refuse.
             using var target = CreateArchive(parameterCount: 8);
-            using var reader = new BinaryReader(stream, System.Text.Encoding.UTF8, leaveOpen: true);
+            using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
 
             Assert.Throws<InvalidDataException>(() => target.Load(reader));
         }
@@ -253,7 +254,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.QualityDiversity
         public void Checkpoint_Archive_LoadRejectsBadMagic()
         {
             using var stream = new MemoryStream();
-            using (var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, leaveOpen: true))
+            using (var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true))
             {
                 writer.Write(0xDEADBEEFu); // wrong magic
                 writer.Write(1);           // schema version
@@ -261,7 +262,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.QualityDiversity
             stream.Position = 0;
 
             using var target = CreateArchive(parameterCount: 4);
-            using var reader = new BinaryReader(stream, System.Text.Encoding.UTF8, leaveOpen: true);
+            using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
 
             Assert.Throws<InvalidDataException>(() => target.Load(reader));
         }
@@ -313,7 +314,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.QualityDiversity
 
             // Save → Load.
             using var stream = new MemoryStream();
-            using (var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, leaveOpen: true))
+            using (var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true))
             {
                 origMap.Save(writer);
             }
@@ -331,7 +332,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.QualityDiversity
                 initialMax: 1f,
                 randomInjectionProbability: 0.1f);
 
-            using (var reader = new BinaryReader(stream, System.Text.Encoding.UTF8, leaveOpen: true))
+            using (var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true))
             {
                 restoredMap.Load(reader);
             }
@@ -376,7 +377,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.QualityDiversity
             }
 
             using var stream = new MemoryStream();
-            using (var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, leaveOpen: true))
+            using (var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true))
             {
                 origMap.Save(writer);
             }
@@ -394,7 +395,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.QualityDiversity
                 initialMax: 1f,
                 randomInjectionProbability: 0.1f);
 
-            using (var reader = new BinaryReader(stream, System.Text.Encoding.UTF8, leaveOpen: true))
+            using (var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true))
             {
                 restoredMap.Load(reader);
             }

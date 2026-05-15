@@ -47,7 +47,7 @@ namespace DevOnBike.Overfit.Tests.Core.Memory
 
         // UWAGA: Testy dla NativeBuffer wymagają włączonego <AllowUnsafeBlocks>true</AllowUnsafeBlocks> w pliku .csproj testów
         [Fact]
-        public unsafe void NativeBuffer_ShouldAllocateAndFreeCorrectly()
+        public void NativeBuffer_ShouldAllocateAndFreeCorrectly()
         {
             // Arrange
             var exception = Record.Exception(() =>
@@ -68,7 +68,7 @@ namespace DevOnBike.Overfit.Tests.Core.Memory
         }
 
         [Fact]
-        public unsafe void NativeBuffer_ClearMemory_ShouldZeroOutData()
+        public void NativeBuffer_ClearMemory_ShouldZeroOutData()
         {
             // Arrange & Act
             using var nativeBuffer = new NativeBuffer<int>(100, clearMemory: true);

@@ -163,7 +163,7 @@ namespace DevOnBike.Overfit.Demo.Gpt2Console
             Console.WriteLine("--- Full demo loop (inference + decode + Console.Write) ---");
             Console.WriteLine($"  Elapsed:               {fullElapsedMs:F1} ms");
             Console.WriteLine($"  Tokens/sec:            {fullTokensPerS:F1}");
-            Console.WriteLine($"  (string + console alloc dominates; not part of the 0 B / token claim)");
+            Console.WriteLine("  (string + console alloc dominates; not part of the 0 B / token claim)");
         }
 
         private static string ResolvePath(string? cliValue, string fileName)

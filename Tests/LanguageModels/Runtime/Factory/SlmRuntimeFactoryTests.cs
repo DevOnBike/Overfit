@@ -42,8 +42,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Factory
         {
             using var model = CreateSmallModel();
             using var runtime = SlmRuntimeFactory.CreateGpt1(
-                model,
-                SlmRuntimeMode.Cached);
+                model);
 
             Assert.Equal(SlmRuntimeMode.Cached, runtime.Mode);
             Assert.True(runtime.HasKeyValueCache);

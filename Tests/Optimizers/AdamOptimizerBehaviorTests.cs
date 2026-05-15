@@ -21,7 +21,7 @@ namespace DevOnBike.Overfit.Tests.Optimizers
             const float epsilon = 1e-8f;
             const float weightDecay = 0.0001f;
 
-            var initialWeights = new float[]
+            var initialWeights = new[]
             {
                 0.25f,
                 -0.75f,
@@ -29,7 +29,7 @@ namespace DevOnBike.Overfit.Tests.Optimizers
                 -2.0f
             };
 
-            var gradients = new float[]
+            var gradients = new[]
             {
                 0.125f,
                 -0.25f,
@@ -50,8 +50,7 @@ namespace DevOnBike.Overfit.Tests.Optimizers
             using var optimizer = new Adam(
             [
                 parameter
-            ],
-                learningRate);
+            ]);
 
             optimizer.Beta1 = beta1;
             optimizer.Beta2 = beta2;
@@ -91,7 +90,7 @@ namespace DevOnBike.Overfit.Tests.Optimizers
             const float epsilon = 1e-8f;
             const float weightDecay = 0.0001f;
 
-            var initialWeights = new float[]
+            var initialWeights = new[]
             {
                 0.25f,
                 -0.75f,
@@ -99,7 +98,7 @@ namespace DevOnBike.Overfit.Tests.Optimizers
                 -2.0f
             };
 
-            var gradients = new float[]
+            var gradients = new[]
             {
                 0.125f,
                 -0.25f,
@@ -120,8 +119,7 @@ namespace DevOnBike.Overfit.Tests.Optimizers
             using var optimizer = new Adam(
             [
                 parameter
-            ],
-                learningRate);
+            ]);
 
             optimizer.Beta1 = beta1;
             optimizer.Beta2 = beta2;
@@ -228,7 +226,7 @@ namespace DevOnBike.Overfit.Tests.Optimizers
         [Fact]
         public void ResetTime_RestartsBiasCorrectionBehavior()
         {
-            var initialWeights = new float[]
+            var initialWeights = new[]
             {
                 0.5f,
                 -1.25f,
@@ -236,7 +234,7 @@ namespace DevOnBike.Overfit.Tests.Optimizers
                 -3.75f
             };
 
-            var gradients = new float[]
+            var gradients = new[]
             {
                 0.05f,
                 -0.1f,

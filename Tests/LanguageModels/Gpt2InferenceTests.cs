@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Diagnostics;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
@@ -65,7 +66,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels
             using (var fs = File.OpenRead(ModelPath))
             using (var br = new BinaryReader(fs))
             {
-                var loadWatch = System.Diagnostics.Stopwatch.StartNew();
+                var loadWatch = Stopwatch.StartNew();
 
                 model.Load(br);
 
@@ -196,8 +197,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels
             SamplingOptions sampling)
         {
             using var handle = SlmRuntimeFactory.CreateGpt1(
-                model,
-                SlmRuntimeMode.Cached);
+                model);
 
             handle.Session.Reset(promptTokens);
 

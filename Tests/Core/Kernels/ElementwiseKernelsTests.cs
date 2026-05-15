@@ -12,7 +12,7 @@ namespace DevOnBike.Overfit.Tests.Core.Kernels
         [Fact]
         public void MultiplyAdd_AllowsAddendDestinationAliasing_SmallScalarPath()
         {
-            var input = new float[]
+            var input = new[]
             {
                 1f,
                 2f,
@@ -20,7 +20,7 @@ namespace DevOnBike.Overfit.Tests.Core.Kernels
                 -4f
             };
 
-            var destination = new float[]
+            var destination = new[]
             {
                 10f,
                 20f,

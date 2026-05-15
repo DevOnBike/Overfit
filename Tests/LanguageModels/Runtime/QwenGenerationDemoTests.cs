@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Diagnostics;
+using System.Text;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
@@ -23,7 +25,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         private const int MaxNewTokens = 200;
         private const int MaxCtx = 512;
 
-        private static readonly SamplingOptions GreedySampling = SamplingOptions.GreedyWithPenalty(1.15f, 64);
+        private static readonly SamplingOptions GreedySampling = SamplingOptions.GreedyWithPenalty(1.15f);
 
         private static readonly SamplingOptions Temp03Sampling = new(
             strategy: SamplingStrategy.TopP,
@@ -54,7 +56,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             in SamplingOptions sampling)
         {
             session.Reset(prompt);
-            var sb = new System.Text.StringBuilder();
+            var sb = new StringBuilder();
             var lastTok = -1;
             var repCnt = 0;
 
@@ -121,7 +123,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
                 var prompt = NoSystemPrompt(tok!, "What is 2+2?");
                 _out.WriteLine($"Prompt ({prompt.Length} tokens) — bez system message");
                 _out.WriteLine("=== RESPONSE ===");
-                var sw = System.Diagnostics.Stopwatch.StartNew();
+                var sw = Stopwatch.StartNew();
                 var resp = Generate(session, tok!, prompt, MaxNewTokens, in GreedySampling);
                 sw.Stop();
                 _out.WriteLine(resp);
@@ -198,7 +200,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             {
                 using var session = engine!.CreateSession(MaxCtx);
                 var prompt = NoSystemPrompt(tok!, "Write a short poem about programming.");
-                var sw = System.Diagnostics.Stopwatch.StartNew();
+                var sw = Stopwatch.StartNew();
                 var resp = Generate(session, tok, prompt, MaxNewTokens, in GreedySampling);
                 sw.Stop();
                 var tps = resp.Length > 0 ? resp.Length * 1000.0 / sw.ElapsedMilliseconds : 0;

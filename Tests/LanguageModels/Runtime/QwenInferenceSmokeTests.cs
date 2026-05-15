@@ -66,7 +66,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
 
             // Token 1 is typically BOS in modern SLMs. Feed a minimal prompt.
             // Qwen2.5 BOS token ID = 151643
-            var prompt = new int[] { 151643 };
+            var prompt = new[] { 151643 };
             session.Reset(prompt);
 
             var sampling = SamplingOptions.Greedy;

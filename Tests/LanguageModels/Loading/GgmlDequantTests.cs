@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Buffers.Binary;
+using System.Text;
 using DevOnBike.Overfit.LanguageModels.Loading;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
@@ -49,7 +50,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             // 3 blocks (96 elements) with different scales — verify each block uses its own scale
             const int nBlocks = 3;
             const int totalElements = nBlocks * 32;
-            var scales = new float[] { 0.5f, 1.0f, 0.125f };
+            var scales = new[] { 0.5f, 1.0f, 0.125f };
             var allQuants = new sbyte[totalElements];
             for (var b = 0; b < nBlocks; b++)
             {
@@ -221,7 +222,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         {
             // q = 0 everywhere; biased = 0 − 32 = −32. d=1, scales=1 → dst[i] = −32.
             var block = BuildQ6_KBlock(
-                d: 1.0f, scales: ConstantScales((sbyte)1), qlFill: 0, qhFill: 0);
+                d: 1.0f, scales: ConstantScales(1), qlFill: 0, qhFill: 0);
 
             Span<float> dst = stackalloc float[256];
             GgmlDequant.DecodeQ6_KBlock(block, dst);
@@ -235,7 +236,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             // ql = 0xFF, qh = 0xFF → each q = 0xF | (0b11 << 4) = 0x3F = 63; biased = 31.
             // d = 0.5, scales = -1 (signed!) → dst[i] = 0.5 * -1 * 31 = -15.5.
             var block = BuildQ6_KBlock(
-                d: 0.5f, scales: ConstantScales((sbyte)-1), qlFill: 0xFF, qhFill: 0xFF);
+                d: 0.5f, scales: ConstantScales(-1), qlFill: 0xFF, qhFill: 0xFF);
 
             Span<float> dst = stackalloc float[256];
             GgmlDequant.DecodeQ6_KBlock(block, dst);
@@ -255,7 +256,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             var ql = new byte[128];
             ql[0] = 0x10;
             var block = BuildQ6_KBlock(
-                d: 1.0f, scales: ConstantScales((sbyte)1), ql: ql, qhFill: 0);
+                d: 1.0f, scales: ConstantScales(1), ql: ql, qhFill: 0);
 
             Span<float> dst = stackalloc float[256];
             GgmlDequant.DecodeQ6_KBlock(block, dst);
@@ -365,7 +366,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         private static MemoryStream BuildRawGgufWithDim(GgmlType type, int elementCount, byte[] dataBytes)
         {
             var ms = new MemoryStream();
-            using (var bw = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true))
+            using (var bw = new BinaryWriter(ms, Encoding.UTF8, leaveOpen: true))
             {
                 bw.Write(GgufFormat.Magic);
                 bw.Write((uint)3);  // version
@@ -373,7 +374,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
                 bw.Write((ulong)0);  // metaCount
 
                 // Tensor info: name="test", 1 dim = elementCount, type, offset=0
-                var nameBytes = System.Text.Encoding.UTF8.GetBytes("test");
+                var nameBytes = Encoding.UTF8.GetBytes("test");
                 bw.Write((ulong)nameBytes.Length);
                 bw.Write(nameBytes);
                 bw.Write((uint)1);  // nDims

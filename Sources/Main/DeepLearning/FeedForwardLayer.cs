@@ -5,6 +5,7 @@
 
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
+using DevOnBike.Overfit.Maths;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Parameters;
 using DevOnBike.Overfit.Tensors;
@@ -148,7 +149,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
             for (var i = 0; i < s.Length; i++)
             {
-                s[i] = Maths.MathUtils.NextGaussian() * scale;
+                s[i] = MathUtils.NextGaussian() * scale;
             }
 
             return p;

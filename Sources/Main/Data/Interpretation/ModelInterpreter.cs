@@ -6,7 +6,9 @@
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Data.Contracts;
 using DevOnBike.Overfit.Ops;
-using DevOnBike.Overfit.Tensors.Core; // Dodano Core
+using DevOnBike.Overfit.Tensors.Core;
+
+// Dodano Core
 
 namespace DevOnBike.Overfit.Data.Interpretation
 {
@@ -142,7 +144,7 @@ namespace DevOnBike.Overfit.Data.Interpretation
                 (span[i * cols + colIdx], span[j * cols + colIdx]) = (span[j * cols + colIdx], span[i * cols + colIdx]);
             }
 
-            return new AutogradNode(resStorage, src.Shape, false);
+            return new AutogradNode(resStorage, src.Shape);
         }
     }
 }

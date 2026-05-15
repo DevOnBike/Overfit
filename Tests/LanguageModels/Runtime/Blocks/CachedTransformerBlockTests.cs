@@ -125,7 +125,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 maxSequenceLength: 4,
                 feedForwardActivation: FeedForwardActivation.None);
 
-            var identity = new float[]
+            var identity = new[]
             {
                 1f, 0f,
                 0f, 1f
@@ -135,7 +135,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             var biases = CreateZeroHeadBiases();
             var ffnW1 = new float[2 * 2];
             var ffnW2 = new float[2 * 2];
-            var input = new float[] { 1f, -1f };
+            var input = new[] { 1f, -1f };
             var output = new float[2];
 
             cache.Advance();
@@ -169,12 +169,12 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
 
             var zeroHeadWeights = CreateZeroHeadWeights();
             var zeroHeadBiases = CreateZeroHeadBiases();
-            var identity = new float[]
+            var identity = new[]
             {
                 1f, 0f,
                 0f, 1f
             };
-            var input = new float[] { 1f, -1f };
+            var input = new[] { 1f, -1f };
             var output = new float[2];
 
             cache.Advance();
@@ -206,7 +206,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 maxSequenceLength: 4,
                 feedForwardActivation: FeedForwardActivation.None);
 
-            var identity = new float[]
+            var identity = new[]
             {
                 1f, 0f,
                 0f, 1f
@@ -216,7 +216,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             var biases = CreateZeroHeadBiases();
             var ffnW1 = new float[2 * 2];
             var ffnW2 = new float[2 * 2];
-            var input = new float[] { 1f, -1f };
+            var input = new[] { 1f, -1f };
 
             cache.Advance();
 
@@ -276,10 +276,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             block.GetLastFeedForwardOutput(ffn);
 
             Assert.DoesNotContain(ln1, float.IsNaN);
-            Assert.Equal(new float[] { 0f, 0f }, attn);
-            Assert.Equal(new float[] { 1f, -1f }, residual);
+            Assert.Equal(new[] { 0f, 0f }, attn);
+            Assert.Equal(new[] { 1f, -1f }, residual);
             Assert.DoesNotContain(ln2, float.IsNaN);
-            Assert.Equal(new float[] { 0f, 0f }, ffn);
+            Assert.Equal(new[] { 0f, 0f }, ffn);
         }
 
         [Fact]

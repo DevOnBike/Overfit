@@ -142,7 +142,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
 
             algorithm.Initialize();
 
-            var fitness = new float[]
+            var fitness = new[]
             {
         4f,
         3f,
@@ -247,7 +247,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
             var fitness = new float[algorithm.PopulationSize];
             for (var i = 0; i < fitness.Length; i++)
             {
-                fitness[i] = (float)i;
+                fitness[i] = i;
             }
 
             algorithm.Tell(fitness);

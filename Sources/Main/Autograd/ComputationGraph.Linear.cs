@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Numerics.Tensors;
+using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Intrinsics;
 using DevOnBike.Overfit.Kernels;
 using DevOnBike.Overfit.Ops;
@@ -45,21 +46,21 @@ namespace DevOnBike.Overfit.Autograd
             }
             else
             {
-                Parallel.For(0, N, OverfitParallel.Options, i =>
+                unsafe
                 {
-                    var rC  = output.DataView.AsSpan().Slice(i * M, M);
-                    var rA  = input.DataView.AsReadOnlySpan().Slice(i * K, K);
-                    var wS2 = weights.DataView.AsReadOnlySpan();
-
-                    for (var k = 0; k < K; k++)
+                    fixed (float* inPtr = inS, wPtr = wS, outPtr = outS)
                     {
-                        var aVal = rA[k];
-                        if (aVal != 0f)
+                        var ctx = new LinearForwardCtx
                         {
-                            Simd.MulAdd(wS2.Slice(k * M, M), aVal, rC);
-                        }
+                            Input = inPtr,
+                            Weights = wPtr,
+                            Output = outPtr,
+                            K = K,
+                            M = M,
+                        };
+                        OverfitParallelFor.For(0, N, &LinearForwardChunk, &ctx);
                     }
-                });
+                }
             }
 
             if (requiresGrad)
@@ -68,6 +69,34 @@ namespace DevOnBike.Overfit.Autograd
             }
 
             return output;
+        }
+
+        private unsafe struct LinearForwardCtx
+        {
+            public float* Input;
+            public float* Weights;
+            public float* Output;
+            public int K;
+            public int M;
+        }
+
+        private static unsafe void LinearForwardChunk(int chunkStart, int chunkEnd, void* contextPtr)
+        {
+            ref var ctx = ref Unsafe.AsRef<LinearForwardCtx>(contextPtr);
+            for (var i = chunkStart; i < chunkEnd; i++)
+            {
+                var rC = new Span<float>(ctx.Output + i * ctx.M, ctx.M);
+                var rA = new ReadOnlySpan<float>(ctx.Input + i * ctx.K, ctx.K);
+
+                for (var k = 0; k < ctx.K; k++)
+                {
+                    var aVal = rA[k];
+                    if (aVal != 0f)
+                    {
+                        Simd.MulAdd(new ReadOnlySpan<float>(ctx.Weights + k * ctx.M, ctx.M), aVal, rC);
+                    }
+                }
+            }
         }
 
         public AutogradNode Add(AutogradNode left, AutogradNode right)

@@ -64,7 +64,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         [Fact]
         public void Warmup_ScoreIsZero_UntilWindowFilled()
         {
-            using var handle   = SlmRuntimeFactory.CreateGpt1(_model, SlmRuntimeMode.Cached);
+            using var handle   = SlmRuntimeFactory.CreateGpt1(_model);
             using var detector = new GptAnomalyDetector(handle, contextSnapshots: 5);
 
             Assert.False(detector.WindowFilled);
@@ -88,7 +88,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         {
             SkipIfNoCheckpoint();
 
-            using var handle   = SlmRuntimeFactory.CreateGpt1(_model, SlmRuntimeMode.Cached);
+            using var handle   = SlmRuntimeFactory.CreateGpt1(_model);
             using var detector = new GptAnomalyDetector(handle, contextSnapshots: 10);
 
             var normal  = MakeNormalSnapshot("api-gateway");
@@ -125,7 +125,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         {
             SkipIfNoCheckpoint();
 
-            using var handle   = SlmRuntimeFactory.CreateGpt1(_model, SlmRuntimeMode.Cached);
+            using var handle   = SlmRuntimeFactory.CreateGpt1(_model);
             using var detector = new GptAnomalyDetector(handle, contextSnapshots: 10);
 
             var normal = MakeNormalSnapshot("worker-processor");
@@ -178,7 +178,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         [Fact]
         public void Reset_ClearsWindow_RequiresWarmupAgain()
         {
-            using var handle   = SlmRuntimeFactory.CreateGpt1(_model, SlmRuntimeMode.Cached);
+            using var handle   = SlmRuntimeFactory.CreateGpt1(_model);
             using var detector = new GptAnomalyDetector(handle, contextSnapshots: 5);
 
             var normal = MakeNormalSnapshot("api-gateway");

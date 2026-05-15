@@ -30,8 +30,8 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Cnn
             // MnistLoader musi teraz zwracać krotkę (TensorStorage<float> trainX, TensorStorage<float> trainY)
             var (trainX, trainY) = MnistLoader.Load(TestModelPaths.Mnist.TrainImagesPath, TestModelPaths.Mnist.TrainLabelsPath, trainSize);
 
-            using var X = new AutogradNode(trainX, new TensorShape(trainSize, 1, 28, 28), false);
-            using var Y = new AutogradNode(trainY, new TensorShape(trainSize, 10), false);
+            using var X = new AutogradNode(trainX, new TensorShape(trainSize, 1, 28, 28));
+            using var Y = new AutogradNode(trainY, new TensorShape(trainSize, 10));
 
             var conv1 = new ConvLayer(1, 8, 28, 28, 3);
             var fc1 = new LinearLayer(1352, 10);
@@ -59,8 +59,8 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Cnn
                     trainX.AsReadOnlySpan().Slice(b * batchSize * 784, batchSize * 784).CopyTo(batchX.AsSpan());
                     trainY.AsReadOnlySpan().Slice(b * batchSize * 10, batchSize * 10).CopyTo(batchY.AsSpan());
 
-                    using var bXNode = new AutogradNode(batchX, new TensorShape(batchSize, 1, 28, 28), false);
-                    using var bYNode = new AutogradNode(batchY, new TensorShape(batchSize, 10), false);
+                    using var bXNode = new AutogradNode(batchX, new TensorShape(batchSize, 1, 28, 28));
+                    using var bYNode = new AutogradNode(batchY, new TensorShape(batchSize, 10));
 
                     using var h1 = conv1.Forward(graph, bXNode);
                     using var a1 = TensorMath.ReLU(graph, h1);
@@ -99,7 +99,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Cnn
                 using var rowData = new TensorStorage<float>(784, clearMemory: false);
                 testX.AsReadOnlySpan().Slice(i * 784, 784).CopyTo(rowData.AsSpan());
 
-                using var input = new AutogradNode(rowData, new TensorShape(1, 1, 28, 28), false);
+                using var input = new AutogradNode(rowData, new TensorShape(1, 1, 28, 28));
 
                 var h1 = conv.Forward(null, input);
                 using var a1 = TensorMath.ReLU(null, h1);

@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.IO;
 using BenchmarkDotNet.Attributes;
 using Benchmarks.Helpers;
 using DevOnBike.Overfit.DeepLearning;
@@ -128,12 +129,12 @@ namespace Benchmarks
 
             FillDeterministic(input);
 
-            var onnxInputValue = OrtValue.CreateTensorValueFromMemory<float>(
+            var onnxInputValue = OrtValue.CreateTensorValueFromMemory(
                 OrtMemoryInfo.DefaultInstance,
                 input.AsMemory(),
                 [batchSize, InputSize]);
 
-            var onnxOutputValue = OrtValue.CreateTensorValueFromMemory<float>(
+            var onnxOutputValue = OrtValue.CreateTensorValueFromMemory(
                 OrtMemoryInfo.DefaultInstance,
                 onnxOutput.AsMemory(),
                 [batchSize, OutputSize]);

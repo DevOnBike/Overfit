@@ -24,7 +24,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Training
             const int steps = 80;
 
             var input =
-                new float[]
+                new[]
                 {
                     1f, 0f,
                     0f, 1f,
@@ -33,7 +33,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Training
                 };
 
             var target =
-                new float[]
+                new[]
                 {
                     1f, 0f,
                     0f, 1f,
@@ -100,7 +100,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Training
             const int steps = 120;
 
             var input =
-                new float[]
+                new[]
                 {
                     1f, 0f,
                     0f, 1f,
@@ -109,7 +109,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Training
                 };
 
             var target =
-                new float[]
+                new[]
                 {
                     1f, 0f,
                     0f, 1f,

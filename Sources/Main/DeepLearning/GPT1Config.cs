@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.LanguageModels.Runtime;
+
 namespace DevOnBike.Overfit.DeepLearning
 {
     /// <summary>
@@ -114,8 +116,8 @@ namespace DevOnBike.Overfit.DeepLearning
         /// Feed-forward activation function.
         /// GeLU for GPT-2. SwiGLU for Llama/Mistral/Phi/Qwen.
         /// </summary>
-        public DevOnBike.Overfit.LanguageModels.Runtime.FeedForwardActivation FfnActivation
-            { get; init; } = DevOnBike.Overfit.LanguageModels.Runtime.FeedForwardActivation.GeLU;
+        public FeedForwardActivation FfnActivation
+            { get; init; } = FeedForwardActivation.GeLU;
 
         /// <summary>Total parameter count (weight-tying aware).</summary>
         public long ParameterCount

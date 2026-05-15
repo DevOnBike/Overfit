@@ -13,18 +13,18 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Kernels
         public void Project_WithBias_ComputesMatrixVectorProduct()
         {
             // input [2]
-            var input = new float[] { 2f, 3f };
+            var input = new[] { 2f, 3f };
 
             // weights [inputSize=2, outputSize=3]
             // row 0: [1, 2, 3]
             // row 1: [4, 5, 6]
-            var weights = new float[]
+            var weights = new[]
             {
                 1f, 2f, 3f,
                 4f, 5f, 6f
             };
 
-            var bias = new float[] { 10f, 20f, 30f };
+            var bias = new[] { 10f, 20f, 30f };
             var output = new float[3];
 
             SingleTokenProjectionKernel.Project(
@@ -43,13 +43,13 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Kernels
         [Fact]
         public void ProjectWithoutBias_ComputesMatrixVectorProduct()
         {
-            var input = new float[] { 2f, 3f };
-            var weights = new float[]
+            var input = new[] { 2f, 3f };
+            var weights = new[]
             {
                 1f, 2f,
                 3f, 4f
             };
-            var output = new float[] { 99f, 99f };
+            var output = new[] { 99f, 99f };
 
             SingleTokenProjectionKernel.ProjectWithoutBias(
                 input,
@@ -65,9 +65,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Kernels
         [Fact]
         public void Accumulate_AddsOntoExistingOutput()
         {
-            var input = new float[] { 2f };
-            var weights = new float[] { 3f, 4f };
-            var output = new float[] { 10f, 20f };
+            var input = new[] { 2f };
+            var weights = new[] { 3f, 4f };
+            var output = new[] { 10f, 20f };
 
             SingleTokenProjectionKernel.Accumulate(
                 input,
@@ -83,10 +83,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Kernels
         [Fact]
         public void Project_DoesNotUseStaleOutputValues()
         {
-            var input = new float[] { 1f };
-            var weights = new float[] { 7f };
+            var input = new[] { 1f };
+            var weights = new[] { 7f };
             var bias = Array.Empty<float>();
-            var output = new float[] { 123f };
+            var output = new[] { 123f };
 
             SingleTokenProjectionKernel.Project(
                 input,
@@ -102,16 +102,16 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Kernels
         [Fact]
         public void ProjectSlice_ComputesOnlyRequestedOutputSlice()
         {
-            var input = new float[] { 2f, 3f };
+            var input = new[] { 2f, 3f };
 
             // weights [2, 5]
-            var weights = new float[]
+            var weights = new[]
             {
                 1f, 2f, 3f, 4f, 5f,
                 6f, 7f, 8f, 9f, 10f
             };
 
-            var bias = new float[] { 100f, 200f, 300f, 400f, 500f };
+            var bias = new[] { 100f, 200f, 300f, 400f, 500f };
             var output = new float[2];
 
             SingleTokenProjectionKernel.ProjectSlice(
@@ -137,7 +137,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Kernels
                 maxSequenceLength: 2,
                 headDimension: 3);
 
-            var source = new float[] { 1f, 2f, 3f };
+            var source = new[] { 1f, 2f, 3f };
 
             SingleTokenProjectionKernel.CopyToCachePosition(
                 source,
@@ -150,8 +150,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Kernels
 
             cache.Advance();
 
-            Assert.Equal(new float[] { 1f, 2f, 3f }, cache.GetKeyReadSpan(0, 0, 0, 1).ToArray());
-            Assert.Equal(new float[] { 1f, 2f, 3f }, cache.GetValueReadSpan(0, 0, 0, 1).ToArray());
+            Assert.Equal(new[] { 1f, 2f, 3f }, cache.GetKeyReadSpan(0, 0, 0, 1).ToArray());
+            Assert.Equal(new[] { 1f, 2f, 3f }, cache.GetValueReadSpan(0, 0, 0, 1).ToArray());
         }
 
         [Fact]
@@ -163,7 +163,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Kernels
                 maxSequenceLength: 2,
                 headDimension: 2);
 
-            var source = new float[] { 7f, 8f };
+            var source = new[] { 7f, 8f };
 
             SingleTokenProjectionKernel.CopyToCachePosition(
                 source,
@@ -176,8 +176,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Kernels
 
             cache.Advance();
 
-            Assert.Equal(new float[] { 7f, 8f }, cache.GetKeyReadSpan(0, 0, 0, 1).ToArray());
-            Assert.Equal(new float[] { 0f, 0f }, cache.GetValueReadSpan(0, 0, 0, 1).ToArray());
+            Assert.Equal(new[] { 7f, 8f }, cache.GetKeyReadSpan(0, 0, 0, 1).ToArray());
+            Assert.Equal(new[] { 0f, 0f }, cache.GetValueReadSpan(0, 0, 0, 1).ToArray());
         }
 
         [Fact]

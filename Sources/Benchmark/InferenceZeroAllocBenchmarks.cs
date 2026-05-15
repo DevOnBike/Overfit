@@ -101,10 +101,10 @@ namespace Benchmarks
                 _multiLinear2);
 
             _singleLinearModel.Eval();
-            _singleLinearModel.PrepareInference(64 * 1024);
+            _singleLinearModel.PrepareInference();
 
             _multiLayerModel.Eval();
-            _multiLayerModel.PrepareInference(64 * 1024);
+            _multiLayerModel.PrepareInference();
 
             BuildManualCaches();
 

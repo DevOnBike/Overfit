@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Reflection;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Optimizers;
@@ -64,11 +65,11 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
             using var block = new ResidualBlock(8);
 
             var bn1 = (BatchNorm1D)typeof(ResidualBlock)
-                .GetField("_bn1", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .GetField("_bn1", BindingFlags.Instance | BindingFlags.NonPublic)!
                 .GetValue(block)!;
 
             var bn2 = (BatchNorm1D)typeof(ResidualBlock)
-                .GetField("_bn2", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .GetField("_bn2", BindingFlags.Instance | BindingFlags.NonPublic)!
                 .GetValue(block)!;
 
             bn1.Gamma.DataView.AsSpan().Fill(1f);
@@ -552,7 +553,7 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
             using var xTensor = new TensorStorage<float>(8, clearMemory: true);
             using var yTensor = new TensorStorage<float>(4, clearMemory: true);
             using var xNode = new AutogradNode(xTensor, new TensorShape(4, 2), requiresGrad: false);
-            using var yNode = new AutogradNode(yTensor, new TensorShape(4, 1), requiresGrad: false);
+            using var yNode = new AutogradNode(yTensor, new TensorShape(4), requiresGrad: false);
 
             var x = xNode.DataView.AsSpan();
             var y = yNode.DataView.AsSpan();
@@ -838,7 +839,7 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
         public void Adam_Step_KeepsParametersFinite()
         {
             using var layer = new LinearLayer(4, 3);
-            using var optimizer = new Adam(layer.Parameters(), 0.001f) { UseAdamW = true };
+            using var optimizer = new Adam(layer.Parameters()) { UseAdamW = true };
 
             using var inputTensor = new TensorStorage<float>(8, clearMemory: true);
             using var targetTensor = new TensorStorage<float>(6, clearMemory: true);
@@ -902,7 +903,7 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
             using var fcOut = new LinearLayer(8, 10);
 
             var parameters = conv1.Parameters().Concat(bn1.Parameters()).Concat(res1.Parameters()).Concat(fcOut.Parameters()).ToArray();
-            using var optimizer = new Adam(parameters, lr) { UseAdamW = true };
+            using var optimizer = new Adam(parameters) { UseAdamW = true };
 
             var graph = new ComputationGraph();
             var epochLosses = new float[epochs];
@@ -1288,7 +1289,7 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
                 new ReluActivation(),
                 new LinearLayer(8, 3));
 
-            using var optimizer = new Adam(seq.Parameters(), 0.001f) { UseAdamW = true };
+            using var optimizer = new Adam(seq.Parameters()) { UseAdamW = true };
 
             using var xTensor = new TensorStorage<float>(32, clearMemory: true);
             using var yTensor = new TensorStorage<float>(24, clearMemory: true);
@@ -1359,7 +1360,7 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
                 ]);
 
             using var xNode = new AutogradNode(xTensor, new TensorShape(4, 2), requiresGrad: false);
-            using var yNode = new AutogradNode(yTensor, new TensorShape(4, 1), requiresGrad: false);
+            using var yNode = new AutogradNode(yTensor, new TensorShape(4), requiresGrad: false);
 
             using var optimizer = new Adam(model.Parameters(), learningRate: 0.03f)
             {

@@ -247,12 +247,12 @@ namespace Benchmarks
                         DisposeModelWithEngine = false
                     });
 
-                _onnxInputValue = OrtValue.CreateTensorValueFromMemory<float>(
+                _onnxInputValue = OrtValue.CreateTensorValueFromMemory(
                     OrtMemoryInfo.DefaultInstance,
                     Input.AsMemory(),
                     [1, InputSize]);
 
-                _onnxOutputValue = OrtValue.CreateTensorValueFromMemory<float>(
+                _onnxOutputValue = OrtValue.CreateTensorValueFromMemory(
                     OrtMemoryInfo.DefaultInstance,
                     OnnxOutput.AsMemory(),
                     [1, OutputSize]);

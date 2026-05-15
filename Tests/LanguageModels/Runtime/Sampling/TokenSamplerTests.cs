@@ -13,7 +13,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Sampling
         [Fact]
         public void ArgMax_ReturnsIndexOfLargestLogit()
         {
-            var logits = new float[] { -1f, 0.5f, 7f, 2f, 6f };
+            var logits = new[] { -1f, 0.5f, 7f, 2f, 6f };
 
             Assert.Equal(
                 2,
@@ -23,7 +23,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Sampling
         [Fact]
         public void ArgMax_ReturnsFirstMax_WhenTied()
         {
-            var logits = new float[] { 1f, 5f, 5f, 4f };
+            var logits = new[] { 1f, 5f, 5f, 4f };
 
             Assert.Equal(
                 1,
@@ -40,7 +40,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Sampling
         [Fact]
         public void Sample_Greedy_ReturnsArgMax()
         {
-            var logits = new float[] { 0.1f, 0.2f, 5f, 0.4f };
+            var logits = new[] { 0.1f, 0.2f, 5f, 0.4f };
 
             var token = TokenSampler.Sample(
                 logits,
@@ -57,7 +57,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Sampling
         [Fact]
         public void Sample_Greedy_DoesNotRequireRandomOrScratchBuffers()
         {
-            var logits = new float[] { 0.1f, 0.2f, 5f, 0.4f };
+            var logits = new[] { 0.1f, 0.2f, 5f, 0.4f };
 
             var token = TokenSampler.Sample(
                 logits,
@@ -74,7 +74,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Sampling
         [Fact]
         public void Sample_Temperature_WithSameSeed_IsDeterministic()
         {
-            var logits = new float[] { 0.1f, 0.2f, 0.3f, 0.4f };
+            var logits = new[] { 0.1f, 0.2f, 0.3f, 0.4f };
             var options = new SamplingOptions(
                 SamplingStrategy.Temperature,
                 1.0f,
@@ -104,7 +104,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Sampling
         [Fact]
         public void Sample_Temperature_ScratchTooSmall_Throws()
         {
-            var logits = new float[] { 0.1f, 0.2f, 0.3f };
+            var logits = new[] { 0.1f, 0.2f, 0.3f };
             var options = new SamplingOptions(
                 SamplingStrategy.Temperature,
                 1.0f,
@@ -132,7 +132,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Sampling
         [Fact]
         public void Sample_Temperature_NullRandom_Throws()
         {
-            var logits = new float[] { 0.1f, 0.2f, 0.3f };
+            var logits = new[] { 0.1f, 0.2f, 0.3f };
             var options = new SamplingOptions(
                 SamplingStrategy.Temperature,
                 1.0f,
@@ -152,7 +152,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Sampling
         [Fact]
         public void Sample_TopK_NeverReturnsTokenOutsideTopK()
         {
-            var logits = new float[] { 10f, 9f, 8f, 1f, 0f, -1f };
+            var logits = new[] { 10f, 9f, 8f, 1f, 0f, -1f };
             var options = new SamplingOptions(
                 SamplingStrategy.TopK,
                 1.0f,
@@ -179,7 +179,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Sampling
         [Fact]
         public void Sample_TopK_WithTemperature_NeverReturnsTokenOutsideTopK()
         {
-            var logits = new float[] { 10f, 9f, 8f, 1f, 0f, -1f };
+            var logits = new[] { 10f, 9f, 8f, 1f, 0f, -1f };
             var options = new SamplingOptions(
                 SamplingStrategy.TopK,
                 0.5f,
@@ -206,7 +206,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Sampling
         [Fact]
         public void Sample_TopP_NoLongerThrowsNotSupportedException()
         {
-            var logits = new float[] { 0.1f, 0.2f, 0.3f };
+            var logits = new[] { 0.1f, 0.2f, 0.3f };
             var options = new SamplingOptions(
                 SamplingStrategy.TopP,
                 1.0f,
@@ -228,7 +228,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Sampling
         [Fact]
         public void Sample_TopP_ReturnsTokenInRange()
         {
-            var logits = new float[] { 10f, 9f, 8f, 1f, 0f, -1f };
+            var logits = new[] { 10f, 9f, 8f, 1f, 0f, -1f };
             var options = new SamplingOptions(
                 SamplingStrategy.TopP,
                 1.0f,
@@ -255,7 +255,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Sampling
         [Fact]
         public void Sample_TopP_WithTinyNucleus_AlwaysReturnsBestToken()
         {
-            var logits = new float[] { 100f, -100f, -100f, -100f };
+            var logits = new[] { 100f, -100f, -100f, -100f };
             var options = new SamplingOptions(
                 SamplingStrategy.TopP,
                 1.0f,
@@ -281,7 +281,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Sampling
         [Fact]
         public void Sample_TopP_WithFullNucleus_SamplesFromAll()
         {
-            var logits = new float[] { 0f, 0f, 0f, 0f, 0f };
+            var logits = new[] { 0f, 0f, 0f, 0f, 0f };
             var options = new SamplingOptions(
                 SamplingStrategy.TopP,
                 1.0f,
@@ -311,7 +311,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Sampling
         [Fact]
         public void Sample_TopP_IsDeterministicWithSameSeed()
         {
-            var logits = new float[] { 2f, 1f, 0.5f, 0.1f, -1f };
+            var logits = new[] { 2f, 1f, 0.5f, 0.1f, -1f };
             var options = new SamplingOptions(
                 SamplingStrategy.TopP,
                 0.8f,
@@ -341,7 +341,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Sampling
         [Fact]
         public void Sample_TopP_NeverReturnsBelowNucleusTokens()
         {
-            var logits = new float[] { 10f, 9f, 8f, -50f, -50f };
+            var logits = new[] { 10f, 9f, 8f, -50f, -50f };
             var options = new SamplingOptions(
                 SamplingStrategy.TopP,
                 1.0f,
@@ -368,7 +368,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Sampling
         [Fact]
         public void Sample_TopKTopP_NeverExceedsBothConstraints()
         {
-            var logits = new float[] { 10f, 9f, 8f, 7f, -100f, -100f };
+            var logits = new[] { 10f, 9f, 8f, 7f, -100f, -100f };
             var options = new SamplingOptions(
                 SamplingStrategy.TopKTopP,
                 1.0f,
@@ -395,7 +395,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Sampling
         [Fact]
         public void Sample_TopKTopP_WithSameSeed_IsDeterministic()
         {
-            var logits = new float[] { 3f, 2f, 1f, 0.5f, 0.1f };
+            var logits = new[] { 3f, 2f, 1f, 0.5f, 0.1f };
             var options = new SamplingOptions(
                 SamplingStrategy.TopKTopP,
                 0.8f,
@@ -425,7 +425,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Sampling
         [Fact]
         public void Greedy_Preset_ReturnsArgMax()
         {
-            var logits = new float[] { 1f, 5f, 3f };
+            var logits = new[] { 1f, 5f, 3f };
 
             var token = TokenSampler.Sample(
                 logits,

@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Diagnostics;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Optimizers;
@@ -113,7 +114,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
 
             var initialLoss = 0f;
             var finalLoss = 0f;
-            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var sw = Stopwatch.StartNew();
 
             // ── Pętla treningowa ─────────────────────────────────────────────
             for (var step = 0; step < steps; step++)
@@ -219,7 +220,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
             };
 
             using var model = new GPT1Model(config);
-            using var optimizer = new Adam(model.TrainableParameters(), lr)
+            using var optimizer = new Adam(model.TrainableParameters())
             {
                 UseAdamW = true
             };

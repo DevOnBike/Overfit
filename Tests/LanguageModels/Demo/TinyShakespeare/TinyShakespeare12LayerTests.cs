@@ -3,9 +3,11 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Diagnostics;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Optimizers;
+using DevOnBike.Overfit.Parameters;
 using DevOnBike.Overfit.Tokenization;
 using Xunit.Abstractions;
 
@@ -96,7 +98,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
             model.Train();
 
             var rng = new Random(42);
-            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var sw = Stopwatch.StartNew();
             var windowLoss = 0f;
             var initialLoss = 0f;
             var finalValLoss = 0f;
@@ -168,8 +170,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
             _output.WriteLine($"Trening zakończony: {sw.Elapsed:mm\\:ss}");
             _output.WriteLine($"Initial loss: {initialLoss:F4}");
             _output.WriteLine($"Final val loss: {finalValLoss:F4}");
-            _output.WriteLine($"nanoGPT reference (SeqLen=256): 1.4697");
-            _output.WriteLine($"Nasz cel (SeqLen=64, 10K steps, cosine LR): < 3.0 (nanoGPT 1.47 przy SeqLen=256)");
+            _output.WriteLine("nanoGPT reference (SeqLen=256): 1.4697");
+            _output.WriteLine("Nasz cel (SeqLen=64, 10K steps, cosine LR): < 3.0 (nanoGPT 1.47 przy SeqLen=256)");
             _output.WriteLine(string.Empty);
 
             // Finalna generacja
@@ -345,7 +347,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
             return total / seqLen;
         }
 
-        private static void ClipGradNorm(IEnumerable<DevOnBike.Overfit.Parameters.Parameter> parameters, float maxNorm)
+        private static void ClipGradNorm(IEnumerable<Parameter> parameters, float maxNorm)
         {
             // Oblicz globalną normę wszystkich gradientów
             var totalNormSq = 0f;

@@ -10,6 +10,7 @@ using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 using Xunit.Abstractions;
+
 // Zmieniono na Tensors.Core
 
 namespace DevOnBike.Overfit.Tests.Examples.TicTacToe
@@ -50,7 +51,7 @@ namespace DevOnBike.Overfit.Tests.Examples.TicTacToe
                 {
                     using var stateTensor = new TensorStorage<float>(9, clearMemory: false);
                     board.CopyTo(stateTensor.AsSpan());
-                    using var stateNode = new AutogradNode(stateTensor, new TensorShape(1, 9), false);
+                    using var stateNode = new AutogradNode(stateTensor, new TensorShape(1, 9));
 
                     // WAŻNE: Nie używamy 'using' dla prediction, bo to współdzielony bufor modelu!
                     var prediction = model.Forward(null, stateNode);
@@ -97,7 +98,7 @@ namespace DevOnBike.Overfit.Tests.Examples.TicTacToe
                     using var targetTensor = new TensorStorage<float>(9, clearMemory: false);
                     qValues.CopyTo(targetTensor.AsSpan());
                     targetTensor.AsSpan()[action] = reward;
-                    using var targetNode = new AutogradNode(targetTensor, new TensorShape(1, 9), false);
+                    using var targetNode = new AutogradNode(targetTensor, new TensorShape(1, 9));
 
                     graph.Reset();
                     optimizer.ZeroGrad();

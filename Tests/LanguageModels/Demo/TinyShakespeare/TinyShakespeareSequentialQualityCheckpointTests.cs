@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.ComponentModel;
 using System.Diagnostics;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
@@ -689,7 +690,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
                             isActive: false);
                     }
 
-                    process.ProcessorAffinity = (IntPtr)1;
+                    process.ProcessorAffinity = 1;
 
                     return new SingleLogicalProcessorScope(
                         output,
@@ -701,7 +702,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
                     ex is PlatformNotSupportedException ||
                     ex is NotSupportedException ||
                     ex is InvalidOperationException ||
-                    ex is System.ComponentModel.Win32Exception)
+                    ex is Win32Exception)
                 {
                     output.WriteLine($"Could not restrict process affinity to one logical CPU: {ex.Message}");
 
@@ -735,7 +736,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
                     ex is PlatformNotSupportedException ||
                     ex is NotSupportedException ||
                     ex is InvalidOperationException ||
-                    ex is System.ComponentModel.Win32Exception)
+                    ex is Win32Exception)
                 {
                     _output.WriteLine($"Could not restore process affinity: {ex.Message}");
                 }

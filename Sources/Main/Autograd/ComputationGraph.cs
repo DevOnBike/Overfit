@@ -5,6 +5,7 @@
 
 using System.Diagnostics;
 using System.Numerics.Tensors;
+using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors.Core;
@@ -464,8 +465,8 @@ namespace DevOnBike.Overfit.Autograd
             TapeBuffer.ResetOffset();
         }
 
-        [System.Runtime.CompilerServices.MethodImpl(
-            System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+        [MethodImpl(
+            MethodImplOptions.AggressiveInlining)]
         private static void DisposeIfGraphOwned(AutogradNode? node)
         {
             if (node is { Ownership: AutogradNodeOwnership.GraphTemporary

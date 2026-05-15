@@ -23,8 +23,8 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Training
             using var yData = new TensorStorage<float>(4, clearMemory: true);
             ((Span<float>)[0, 1, 1, 0]).CopyTo(yData.AsSpan());
 
-            using var X = new AutogradNode(xData, new TensorShape(4, 2), false);
-            using var Y = new AutogradNode(yData, new TensorShape(4, 1), false);
+            using var X = new AutogradNode(xData, new TensorShape(4, 2));
+            using var Y = new AutogradNode(yData, new TensorShape(4));
 
             using var layer1 = new LinearLayer(2, 16);
             using var layer2 = new LinearLayer(16, 1);
@@ -80,8 +80,8 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Training
                 ySpan[i] = isOuter ? 1.0f : 0.0f;
             }
 
-            using var X = new AutogradNode(xData, new TensorShape(samples, 2), false);
-            using var Y = new AutogradNode(yData, new TensorShape(samples, 1), false);
+            using var X = new AutogradNode(xData, new TensorShape(samples, 2));
+            using var Y = new AutogradNode(yData, new TensorShape(samples));
 
             using var layer1 = new LinearLayer(2, 32);
             using var layer2 = new LinearLayer(32, 16);

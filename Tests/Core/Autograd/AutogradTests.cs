@@ -35,7 +35,7 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
         public void TensorBatchNorm_ForwardAndBackward_Correct()
         {
             var graph = new ComputationGraph();
-            using var input = new AutogradNode(new TensorStorage<float>(2, clearMemory: true), new TensorShape(2, 1), requiresGrad: true);
+            using var input = new AutogradNode(new TensorStorage<float>(2, clearMemory: true), new TensorShape(2), requiresGrad: true);
             ((Span<float>)[2.0f, 4.0f]).CopyTo(input.DataView.AsSpan());
 
             using var gamma = new AutogradNode(new TensorStorage<float>(1, clearMemory: true), new TensorShape(1), requiresGrad: true);
@@ -65,8 +65,8 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
             using var matA = new TensorStorage<float>(1, clearMemory: true);
             using var matB = new TensorStorage<float>(1, clearMemory: true);
 
-            using var a = new AutogradNode(matA, new TensorShape(1, 1), requiresGrad: false);
-            using var b = new AutogradNode(matB, new TensorShape(1, 1), requiresGrad: false);
+            using var a = new AutogradNode(matA, new TensorShape(1), requiresGrad: false);
+            using var b = new AutogradNode(matB, new TensorShape(1), requiresGrad: false);
 
             using var res = Ops.TensorMath.Add(graph, a, b);
             graph.Backward(res);

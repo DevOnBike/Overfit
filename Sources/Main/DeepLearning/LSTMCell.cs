@@ -109,8 +109,8 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public (AutogradNode h0, AutogradNode c0) ZeroState(int batchSize)
         {
-            var h0 = new AutogradNode(new TensorStorage<float>(batchSize * HiddenSize), new TensorShape(batchSize, HiddenSize), false);
-            var c0 = new AutogradNode(new TensorStorage<float>(batchSize * HiddenSize), new TensorShape(batchSize, HiddenSize), false);
+            var h0 = new AutogradNode(new TensorStorage<float>(batchSize * HiddenSize), new TensorShape(batchSize, HiddenSize));
+            var c0 = new AutogradNode(new TensorStorage<float>(batchSize * HiddenSize), new TensorShape(batchSize, HiddenSize));
 
             return (h0, c0);
         }

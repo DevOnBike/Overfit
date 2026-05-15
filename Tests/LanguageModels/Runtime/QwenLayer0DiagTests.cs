@@ -98,7 +98,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
 
                 _out.WriteLine(string.Empty);
                 _out.WriteLine($"VERDICT: C# top-1 is [{topN[0].i}] = {topN[0].v:F4}");
-                _out.WriteLine($"         Python top-1 is [62406] = 11.9220");
+                _out.WriteLine("         Python top-1 is [62406] = 11.9220");
                 _out.WriteLine(topN[0].i == 62406 ? "✓ MATCH! Logits are correct." :
                                                     "✗ MISMATCH — inference bug exists");
             }

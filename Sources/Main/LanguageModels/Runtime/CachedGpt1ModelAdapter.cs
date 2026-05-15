@@ -72,8 +72,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 DFF,
                 VocabSize,
                 MaxContextLength,
-                config.LNEps,
-                FeedForwardActivation.GeLU);
+                config.LNEps);
 
             _cache = KeyValueCache.Create(
                 LayerCount,

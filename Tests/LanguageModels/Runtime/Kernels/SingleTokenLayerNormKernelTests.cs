@@ -12,7 +12,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Kernels
         [Fact]
         public void NormalizeWithoutAffine_NormalizesToZeroMeanAndUnitVariance()
         {
-            var input = new float[] { 1f, 2f, 3f, 4f };
+            var input = new[] { 1f, 2f, 3f, 4f };
             var output = new float[4];
 
             SingleTokenLayerNormKernel.NormalizeWithoutAffine(
@@ -33,9 +33,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Kernels
         [Fact]
         public void Normalize_WithGammaAndBeta_AppliesAffineTransform()
         {
-            var input = new float[] { 1f, 2f };
-            var gamma = new float[] { 2f, 3f };
-            var beta = new float[] { 10f, 20f };
+            var input = new[] { 1f, 2f };
+            var gamma = new[] { 2f, 3f };
+            var beta = new[] { 10f, 20f };
             var output = new float[2];
 
             SingleTokenLayerNormKernel.Normalize(
@@ -60,8 +60,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Kernels
         [Fact]
         public void Normalize_WithGammaOnly_AppliesScale()
         {
-            var input = new float[] { 1f, 2f };
-            var gamma = new float[] { 2f, 3f };
+            var input = new[] { 1f, 2f };
+            var gamma = new[] { 2f, 3f };
             var output = new float[2];
 
             SingleTokenLayerNormKernel.Normalize(
@@ -83,8 +83,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Kernels
         [Fact]
         public void Normalize_WithBetaOnly_AppliesShift()
         {
-            var input = new float[] { 1f, 2f };
-            var beta = new float[] { 10f, 20f };
+            var input = new[] { 1f, 2f };
+            var beta = new[] { 10f, 20f };
             var output = new float[2];
 
             SingleTokenLayerNormKernel.Normalize(
@@ -106,9 +106,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Kernels
         [Fact]
         public void Normalize_ConstantInput_ReturnsBetaWhenAffineProvided()
         {
-            var input = new float[] { 5f, 5f, 5f };
-            var gamma = new float[] { 2f, 2f, 2f };
-            var beta = new float[] { 1f, 2f, 3f };
+            var input = new[] { 5f, 5f, 5f };
+            var gamma = new[] { 2f, 2f, 2f };
+            var beta = new[] { 1f, 2f, 3f };
             var output = new float[3];
 
             SingleTokenLayerNormKernel.Normalize(
@@ -119,14 +119,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Kernels
                 size: 3,
                 epsilon: 1e-5f);
 
-            Assert.Equal(new float[] { 1f, 2f, 3f }, output);
+            Assert.Equal(new[] { 1f, 2f, 3f }, output);
         }
 
         [Fact]
         public void AddResidual_AddsTwoVectors()
         {
-            var residual = new float[] { 1f, 2f, 3f };
-            var update = new float[] { 10f, 20f, 30f };
+            var residual = new[] { 1f, 2f, 3f };
+            var update = new[] { 10f, 20f, 30f };
             var output = new float[3];
 
             SingleTokenLayerNormKernel.AddResidual(
@@ -135,21 +135,21 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Kernels
                 output,
                 size: 3);
 
-            Assert.Equal(new float[] { 11f, 22f, 33f }, output);
+            Assert.Equal(new[] { 11f, 22f, 33f }, output);
         }
 
         [Fact]
         public void AddResidualInPlace_AddsUpdateToDestination()
         {
-            var destination = new float[] { 1f, 2f, 3f };
-            var update = new float[] { 10f, 20f, 30f };
+            var destination = new[] { 1f, 2f, 3f };
+            var update = new[] { 10f, 20f, 30f };
 
             SingleTokenLayerNormKernel.AddResidualInPlace(
                 destination,
                 update,
                 size: 3);
 
-            Assert.Equal(new float[] { 11f, 22f, 33f }, destination);
+            Assert.Equal(new[] { 11f, 22f, 33f }, destination);
         }
 
         [Fact]

@@ -35,8 +35,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Kernels
         public void ComputeSingleHead_SingleToken_ReturnsValueVector()
         {
             var query = new float[] { 1, 0, 0 };
-            var keys = new float[] { 0.5f, 0.25f, -1f };
-            var values = new float[] { 10f, 20f, 30f };
+            var keys = new[] { 0.5f, 0.25f, -1f };
+            var values = new[] { 10f, 20f, 30f };
             var output = new float[3];
             var scratch = new float[1];
 
@@ -58,13 +58,13 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Kernels
         [Fact]
         public void ComputeSingleHead_TwoTokens_MatchesManualSoftmaxWeightedSum()
         {
-            var query = new float[] { 1f, 0f };
-            var keys = new float[]
+            var query = new[] { 1f, 0f };
+            var keys = new[]
             {
                 1f, 0f,
                 0f, 1f
             };
-            var values = new float[]
+            var values = new[]
             {
                 10f, 0f,
                 0f, 20f
@@ -94,13 +94,13 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Kernels
         [Fact]
         public void ComputeSingleHead_IsNumericallyStableForLargeScores()
         {
-            var query = new float[] { 1000f, 1000f };
-            var keys = new float[]
+            var query = new[] { 1000f, 1000f };
+            var keys = new[]
             {
                 1000f, 1000f,
                 999f, 999f
             };
-            var values = new float[]
+            var values = new[]
             {
                 1f, 2f,
                 3f, 4f
@@ -130,10 +130,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Kernels
         [Fact]
         public void ComputeSingleHead_DoesNotUseStaleOutputValues()
         {
-            var query = new float[] { 1f };
-            var keys = new float[] { 1f };
-            var values = new float[] { 7f };
-            var output = new float[] { 123f };
+            var query = new[] { 1f };
+            var keys = new[] { 1f };
+            var values = new[] { 7f };
+            var output = new[] { 123f };
             var scratch = new float[1];
 
             CachedAttentionKernel.ComputeSingleHead(

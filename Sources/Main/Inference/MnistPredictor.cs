@@ -7,7 +7,9 @@ using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors;
-using DevOnBike.Overfit.Tensors.Core; // Dodano Core
+using DevOnBike.Overfit.Tensors.Core;
+
+// Dodano Core
 
 namespace DevOnBike.Overfit.Inference
 {
@@ -60,7 +62,7 @@ namespace DevOnBike.Overfit.Inference
             pixelData.CopyTo(inputMat.AsSpan());
 
             // ...a następnie nakładamy na to odpowiedni Kształt w węźle!
-            using var input = new AutogradNode(inputMat, new TensorShape(1, 1, 28, 28), false);
+            using var input = new AutogradNode(inputMat, new TensorShape(1, 1, 28, 28));
 
             using var h1 = _conv1.Forward(null, input);
             using var bn1Out = _bn1.Forward(null, h1);

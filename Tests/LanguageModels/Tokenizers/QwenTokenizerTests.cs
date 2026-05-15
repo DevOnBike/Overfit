@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Text;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
 using DevOnBike.Overfit.Tests.TestSupport;
 
@@ -150,7 +151,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
 
             // Encode a simple word and decode each token individually
             var tokens = tok.Encode("Hello");
-            var sb     = new System.Text.StringBuilder();
+            var sb     = new StringBuilder();
             foreach (var t in tokens)
             {
                 sb.Append(tok.DecodeToken(t));

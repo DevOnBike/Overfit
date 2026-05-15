@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Statistical
@@ -194,7 +195,7 @@ namespace DevOnBike.Overfit.Statistical
             return totalLogLikelihood;
         }
 
-        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static float LogSumExp(float a, float b)
         {
             if (float.IsNegativeInfinity(a))

@@ -3,7 +3,9 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Diagnostics;
 using System.Linq;
+using DevOnBike.Overfit.Anomalies.Gpt;
 using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
@@ -58,13 +60,13 @@ namespace DevOnBike.Overfit.Anomalies.Training
             });
 
             // 2. Tokenize
-            var tokenizer = new Gpt.MetricTokenizer();
+            var tokenizer = new MetricTokenizer();
             var allTokens = tokenizer.EncodeSequence(snapshots);
 
             // 3. Model
             var gptConfig = new GPT1Config
             {
-                VocabSize     = Gpt.MetricTokenizer.VocabSize,
+                VocabSize     = MetricTokenizer.VocabSize,
                 ContextLength = _cfg.ContextLength,
                 DModel        = _cfg.DModel,
                 NHeads        = _cfg.NHeads,
@@ -86,7 +88,7 @@ namespace DevOnBike.Overfit.Anomalies.Training
             var trainIds  = allTokens.AsSpan(0, trainSize).ToArray();
             var valIds    = allTokens.AsSpan(trainSize).ToArray();
             var rng       = new Random(_cfg.Seed);
-            var sw        = System.Diagnostics.Stopwatch.StartNew();
+            var sw        = Stopwatch.StartNew();
 
             var initialLoss  = 0f;
             var finalValLoss = 0f;
@@ -142,7 +144,7 @@ namespace DevOnBike.Overfit.Anomalies.Training
 
                 optimizer.ZeroGrad();
                 ClipGradNorm(model.TrainableParameters(), _cfg.MaxGradNorm);
-                var cosine = 0.5f * (1f + MathF.Cos(MathF.PI * (float)step / _cfg.Steps));
+                var cosine = 0.5f * (1f + MathF.Cos(MathF.PI * step / _cfg.Steps));
                 optimizer.LearningRate = lrMin + (lrMax - lrMin) * cosine;
                 optimizer.Step();
 
@@ -208,7 +210,7 @@ namespace DevOnBike.Overfit.Anomalies.Training
             var grad = new float[seqLen * vocab];
             var loss = new float[seqLen];
 
-            System.Threading.Tasks.Parallel.For(0, seqLen, t =>
+            Parallel.For(0, seqLen, t =>
             {
                 var off = t * vocab;
                 var tgt = targets[t];

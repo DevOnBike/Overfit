@@ -38,11 +38,11 @@ namespace DevOnBike.Overfit.Onnx.Operators
         {
             // ── Attributes ────────────────────────────────────────────────────
             var eps = node.Attributes.TryGetValue("epsilon", out var epsAttr)
-                ? (float)epsAttr.FloatValue
+                ? epsAttr.FloatValue
                 : 1e-5f;
 
             var onnxMomentum = node.Attributes.TryGetValue("momentum", out var momAttr)
-                ? (float)momAttr.FloatValue
+                ? momAttr.FloatValue
                 : 0.9f;
 
             var trainingMode = node.Attributes.TryGetValue("training_mode", out var tmAttr)

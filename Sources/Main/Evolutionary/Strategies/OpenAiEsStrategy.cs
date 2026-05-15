@@ -629,7 +629,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
             if (low < maxExclusive)
             {
-                var threshold = unchecked((uint)(0 - maxExclusive)) % maxExclusive;
+                var threshold = unchecked(0 - maxExclusive) % maxExclusive;
                 while (low < threshold)
                 {
                     product = (ulong)NextUInt32() * maxExclusive;

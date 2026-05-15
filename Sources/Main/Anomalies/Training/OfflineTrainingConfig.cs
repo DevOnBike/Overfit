@@ -67,7 +67,7 @@ namespace DevOnBike.Overfit.Anomalies.Training
         /// Enough to verify the pipeline works end-to-end before committing to Production.
         /// Expected val loss: ~3.0-3.5 after 2000 steps.
         /// </summary>
-        public static GptTrainingConfig Medium => new GptTrainingConfig()
+        public static GptTrainingConfig Medium => new GptTrainingConfig
         {
             DModel          = 128,
             NHeads          = 4,
@@ -85,7 +85,7 @@ namespace DevOnBike.Overfit.Anomalies.Training
         };
 
         /// <summary>Preset for production quality (~2h training).</summary>
-        public static GptTrainingConfig Production => new GptTrainingConfig()
+        public static GptTrainingConfig Production => new GptTrainingConfig
         {
             DModel          = 256,
             NHeads          = 8,

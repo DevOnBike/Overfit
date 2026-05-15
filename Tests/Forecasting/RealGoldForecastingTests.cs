@@ -10,6 +10,7 @@ using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 using Xunit.Abstractions;
+
 // Zmieniono na Tensors.Core
 
 namespace DevOnBike.Overfit.Tests.Forecasting
@@ -55,8 +56,8 @@ namespace DevOnBike.Overfit.Tests.Forecasting
             }
 
             // Dodano TensorShape
-            using var X = new AutogradNode(xData, new TensorShape(batchSize, windowSize), false);
-            using var Y = new AutogradNode(yData, new TensorShape(batchSize, 1), false);
+            using var X = new AutogradNode(xData, new TensorShape(batchSize, windowSize));
+            using var Y = new AutogradNode(yData, new TensorShape(batchSize));
 
             using var layer1 = new LinearLayer(windowSize, 32);
             using var layer2 = new LinearLayer(32, 16);

@@ -112,7 +112,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 Array.Empty<float>()
             };
 
-            var lmHeadIdentity = new float[]
+            var lmHeadIdentity = new[]
             {
                 1f, 0f,
                 0f, 1f
@@ -194,7 +194,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 Array.Empty<float>()
             };
 
-            var lmHeadIdentity = new float[]
+            var lmHeadIdentity = new[]
             {
                 1f, 0f,
                 0f, 1f
@@ -267,7 +267,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 Array.Empty<float>()
             };
 
-            var lmHeadIdentity = new float[]
+            var lmHeadIdentity = new[]
             {
                 1f, 0f,
                 0f, 1f
@@ -339,7 +339,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 Array.Empty<float>()
             };
 
-            var lmHeadIdentity = new float[]
+            var lmHeadIdentity = new[]
             {
                 1f, 0f,
                 0f, 1f

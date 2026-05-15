@@ -149,7 +149,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// </summary>
         public const int ParallelThreshold = 10_000;
 
-        public static unsafe void ProjectParallel(
+        public static void ProjectParallel(
             ReadOnlySpan<float> input,
             ReadOnlySpan<float> weightsInputOutput,
             ReadOnlySpan<float> bias,

@@ -6,6 +6,7 @@
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Ops;
+using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.Tests.DeepLearning.Attention
@@ -217,7 +218,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Attention
 
             var storage = new TensorStorage<float>(batch * seq * dModel, clearMemory: false);
             storage.AsSpan().Fill(0.1f);
-            using var input = new AutogradNode(storage, new Tensors.TensorShape(batch, seq, dModel), requiresGrad: true);
+            using var input = new AutogradNode(storage, new TensorShape(batch, seq, dModel), requiresGrad: true);
             using var output = layer.Forward(graph, input);
 
             Assert.Equal(batch, output.Shape.D0);
@@ -235,7 +236,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Attention
 
             var storage = new TensorStorage<float>(batch * seq * dModel, clearMemory: false);
             new Random(42).NextFloats(storage.AsSpan().ToArray()).AsSpan().CopyTo(storage.AsSpan());
-            using var input = new AutogradNode(storage, new Tensors.TensorShape(batch, seq, dModel), requiresGrad: true);
+            using var input = new AutogradNode(storage, new TensorShape(batch, seq, dModel), requiresGrad: true);
             using var output = layer.Forward(graph, input);
 
             foreach (var v in output.DataView.AsReadOnlySpan())
@@ -266,7 +267,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Attention
         {
             var storage = new TensorStorage<float>(data.Length, clearMemory: false);
             data.AsSpan().CopyTo(storage.AsSpan());
-            return new AutogradNode(storage, new Tensors.TensorShape(b, t, d), requiresGrad);
+            return new AutogradNode(storage, new TensorShape(b, t, d), requiresGrad);
         }
     }
 

@@ -50,7 +50,7 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
         ///     now dominated by Conv2D and MaxPool2D, which is what we
         ///     actually want to benchmark.
         /// </summary>
-        [LongFact]
+        [Fact]
         public void Mnist_FullTrain60k_CnnBeastMode_Benchmark()
         {
             const int trainSize = 60_000;
@@ -81,7 +81,7 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
 
             try
             {
-                var (trainX, trainY) = MnistLoader.Load(trainImagesPath, trainLabelsPath, trainSize);
+                var (trainX, trainY) = MnistLoader.Load(trainImagesPath, trainLabelsPath);
 
                 // Small, idiomatic CNN classifier — not a giant MLP-residual.
                 using var conv1 = new ConvLayer(1, 8, 28, 28, 3);   // → [B, 8, 26, 26]
@@ -93,7 +93,7 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
                     .Concat(fcOut.Parameters())
                     .ToArray();
 
-                using var optimizer = new Adam(parameters, lr)
+                using var optimizer = new Adam(parameters)
                 {
                     UseAdamW = true
                 };
@@ -134,7 +134,7 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
                 ForceFullGc();
 
                 var runStart = new DotNetMemorySnapshot(process);
-                var runTotalAllocBefore = GC.GetTotalAllocatedBytes(false);
+                var runTotalAllocBefore = GC.GetTotalAllocatedBytes();
 
                 _output.WriteLine(FormatMemorySnapshot("RUN START", runStart));
 
@@ -156,7 +156,7 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
                     ForceFullGc();
 
                     var epochStart = new DotNetMemorySnapshot(process);
-                    var epochAllocBefore = GC.GetTotalAllocatedBytes(false);
+                    var epochAllocBefore = GC.GetTotalAllocatedBytes();
                     process.Refresh();
                     var epochCpuBefore = process.TotalProcessorTime;
 
@@ -191,23 +191,23 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
                         ValueStopwatch sectionWatch;
                         TimeSpan elapsed;
 
-                        allocBefore = GC.GetTotalAllocatedBytes(false);
+                        allocBefore = GC.GetTotalAllocatedBytes();
                         sectionWatch = ValueStopwatch.StartNew();
 
                         graph.Reset();
 
                         elapsed = sectionWatch.GetElapsedTime();
-                        resetStats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
+                        resetStats.Add(elapsed, GC.GetTotalAllocatedBytes() - allocBefore);
 
-                        allocBefore = GC.GetTotalAllocatedBytes(false);
+                        allocBefore = GC.GetTotalAllocatedBytes();
                         sectionWatch = ValueStopwatch.StartNew();
 
                         optimizer.ZeroGrad();
 
                         elapsed = sectionWatch.GetElapsedTime();
-                        zeroGradStats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
+                        zeroGradStats.Add(elapsed, GC.GetTotalAllocatedBytes() - allocBefore);
 
-                        allocBefore = GC.GetTotalAllocatedBytes(false);
+                        allocBefore = GC.GetTotalAllocatedBytes();
                         sectionWatch = ValueStopwatch.StartNew();
 
                         trainX.AsReadOnlySpan()
@@ -219,96 +219,96 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
                             .CopyTo(yBData.AsSpan());
 
                         elapsed = sectionWatch.GetElapsedTime();
-                        copyInputStats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
+                        copyInputStats.Add(elapsed, GC.GetTotalAllocatedBytes() - allocBefore);
 
                         // ─── Forward ─────────────────────────────────────────────────
 
-                        allocBefore = GC.GetTotalAllocatedBytes(false);
+                        allocBefore = GC.GetTotalAllocatedBytes();
                         sectionWatch = ValueStopwatch.StartNew();
 
                         using var h1 = conv1.Forward(graph, xBNode);
 
                         elapsed = sectionWatch.GetElapsedTime();
-                        convStats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
+                        convStats.Add(elapsed, GC.GetTotalAllocatedBytes() - allocBefore);
 
-                        allocBefore = GC.GetTotalAllocatedBytes(false);
+                        allocBefore = GC.GetTotalAllocatedBytes();
                         sectionWatch = ValueStopwatch.StartNew();
 
                         using var a1 = TensorMath.ReLU(graph, h1);
 
                         elapsed = sectionWatch.GetElapsedTime();
-                        relu1Stats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
+                        relu1Stats.Add(elapsed, GC.GetTotalAllocatedBytes() - allocBefore);
 
-                        allocBefore = GC.GetTotalAllocatedBytes(false);
+                        allocBefore = GC.GetTotalAllocatedBytes();
                         sectionWatch = ValueStopwatch.StartNew();
 
                         using var p1 = TensorMath.MaxPool2D(graph, a1, 8, 26, 26, 2);
 
                         elapsed = sectionWatch.GetElapsedTime();
-                        maxPoolStats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
+                        maxPoolStats.Add(elapsed, GC.GetTotalAllocatedBytes() - allocBefore);
 
-                        allocBefore = GC.GetTotalAllocatedBytes(false);
+                        allocBefore = GC.GetTotalAllocatedBytes();
                         sectionWatch = ValueStopwatch.StartNew();
 
                         using var p1F = TensorMath.Reshape(graph, p1, batchSize, 1352);
 
                         elapsed = sectionWatch.GetElapsedTime();
-                        reshapeStats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
+                        reshapeStats.Add(elapsed, GC.GetTotalAllocatedBytes() - allocBefore);
 
-                        allocBefore = GC.GetTotalAllocatedBytes(false);
+                        allocBefore = GC.GetTotalAllocatedBytes();
                         sectionWatch = ValueStopwatch.StartNew();
 
                         using var hidden = fcHidden.Forward(graph, p1F);
 
                         elapsed = sectionWatch.GetElapsedTime();
-                        fcHiddenStats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
+                        fcHiddenStats.Add(elapsed, GC.GetTotalAllocatedBytes() - allocBefore);
 
-                        allocBefore = GC.GetTotalAllocatedBytes(false);
+                        allocBefore = GC.GetTotalAllocatedBytes();
                         sectionWatch = ValueStopwatch.StartNew();
 
                         using var hiddenAct = TensorMath.ReLU(graph, hidden);
 
                         elapsed = sectionWatch.GetElapsedTime();
-                        relu2Stats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
+                        relu2Stats.Add(elapsed, GC.GetTotalAllocatedBytes() - allocBefore);
 
-                        allocBefore = GC.GetTotalAllocatedBytes(false);
+                        allocBefore = GC.GetTotalAllocatedBytes();
                         sectionWatch = ValueStopwatch.StartNew();
 
                         using var logits = fcOut.Forward(graph, hiddenAct);
 
                         elapsed = sectionWatch.GetElapsedTime();
-                        fcOutStats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
+                        fcOutStats.Add(elapsed, GC.GetTotalAllocatedBytes() - allocBefore);
 
                         // ─── Loss + Backward + Step ─────────────────────────────────
 
-                        allocBefore = GC.GetTotalAllocatedBytes(false);
+                        allocBefore = GC.GetTotalAllocatedBytes();
                         sectionWatch = ValueStopwatch.StartNew();
 
                         using var loss = TensorMath.SoftmaxCrossEntropy(graph, logits, yBNode);
                         epochLoss += loss.DataView.AsReadOnlySpan()[0];
 
                         elapsed = sectionWatch.GetElapsedTime();
-                        lossStats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
+                        lossStats.Add(elapsed, GC.GetTotalAllocatedBytes() - allocBefore);
 
-                        allocBefore = GC.GetTotalAllocatedBytes(false);
+                        allocBefore = GC.GetTotalAllocatedBytes();
                         sectionWatch = ValueStopwatch.StartNew();
 
                         graph.Backward(loss);
 
                         elapsed = sectionWatch.GetElapsedTime();
-                        backwardStats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
+                        backwardStats.Add(elapsed, GC.GetTotalAllocatedBytes() - allocBefore);
 
-                        allocBefore = GC.GetTotalAllocatedBytes(false);
+                        allocBefore = GC.GetTotalAllocatedBytes();
                         sectionWatch = ValueStopwatch.StartNew();
 
                         optimizer.Step();
 
                         elapsed = sectionWatch.GetElapsedTime();
-                        optimizerStats.Add(elapsed, GC.GetTotalAllocatedBytes(false) - allocBefore);
+                        optimizerStats.Add(elapsed, GC.GetTotalAllocatedBytes() - allocBefore);
                     }
 
                     var epochElapsed = epochWatch.GetElapsedTime();
-                    var epochAllocAfter = GC.GetTotalAllocatedBytes(false);
+                    var epochAllocAfter = GC.GetTotalAllocatedBytes();
                     process.Refresh();
                     var epochCpuAfter = process.TotalProcessorTime;
                     var epochCpuMs = (epochCpuAfter - epochCpuBefore).TotalMilliseconds;
@@ -356,7 +356,7 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
                 ForceFullGc();
 
                 var runEnd = new DotNetMemorySnapshot(process);
-                var runTotalAllocAfter = GC.GetTotalAllocatedBytes(false);
+                var runTotalAllocAfter = GC.GetTotalAllocatedBytes();
 
                 _output.WriteLine(FormatMemorySnapshot("RUN END", runEnd));
                 _output.WriteLine($"run elapsed:              {runWatch.GetElapsedTime().TotalMilliseconds:F1} ms");

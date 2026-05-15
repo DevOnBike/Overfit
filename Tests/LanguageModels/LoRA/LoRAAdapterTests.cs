@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Reflection;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.LoRA;
 using DevOnBike.Overfit.LanguageModels.Runtime;
@@ -233,7 +234,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
 
             _out.WriteLine($"ForwardAdd result = [{result[0]:F4}, {result[1]:F4}]");
             var norm = MathF.Sqrt(result[0] * result[0] + result[1] * result[1]);
-            Assert.True(norm > 1e-6f, $"ForwardAdd result must be non-zero when B≠0");
+            Assert.True(norm > 1e-6f, "ForwardAdd result must be non-zero when B≠0");
         }
 
         /// <summary>
@@ -373,7 +374,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
                 var afterEnableNorm = adapter.ReadBaseWeightNorm(0, LoRATargetModules.Query, 0);
                 var afterEnableVal0 = adapter.ReadBaseWeight(0, LoRATargetModules.Query, 0, 0);
 
-                _out.WriteLine($"=== TensorStorage state via _baseRefs ===");
+                _out.WriteLine("=== TensorStorage state via _baseRefs ===");
                 _out.WriteLine($"Q[L0,H0] L2 norm  before/after Enable: {beforeNorm:F4} / {afterEnableNorm:F4}  diff={afterEnableNorm - beforeNorm:F4}");
                 _out.WriteLine($"Q[L0,H0][0]       before/after Enable: {beforeVal0:F6} / {afterEnableVal0:F6}  diff={afterEnableVal0 - beforeVal0:F6}");
 
@@ -389,7 +390,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
                 // CRITICAL: read same weight via inference path (_stackWeights)
                 var infNorm = engine.ReadInferenceWeightNorm(0, 0);
                 var infVal0 = engine.ReadInferenceWeightAt(0, 0, 0);
-                _out.WriteLine($"=== Inference path (engine._stackWeights._blocks[0]._heads[0]._wq) ===");
+                _out.WriteLine("=== Inference path (engine._stackWeights._blocks[0]._heads[0]._wq) ===");
                 _out.WriteLine($"Q[L0,H0] L2 norm via INFERENCE: {infNorm:F4}");
                 _out.WriteLine($"Q[L0,H0][0]    via INFERENCE: {infVal0:F6}");
                 _out.WriteLine($"Match with adapter? norm diff = {MathF.Abs(infNorm - afterEnableNorm):F4}");
@@ -414,7 +415,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
                 // DIAGNOSTIC: storage state AFTER Disable
                 var afterDisableNorm = adapter.ReadBaseWeightNorm(0, LoRATargetModules.Query, 0);
                 var afterDisableVal0 = adapter.ReadBaseWeight(0, LoRATargetModules.Query, 0, 0);
-                _out.WriteLine($"=== Disable diagnostic ===");
+                _out.WriteLine("=== Disable diagnostic ===");
                 _out.WriteLine($"Before Disable: norm={beforeDisableNorm:F4}, val[0]={beforeDisableVal0:F6}");
                 _out.WriteLine($"After  Disable: norm={afterDisableNorm:F4}, val[0]={afterDisableVal0:F6}");
                 _out.WriteLine($"Original was:   norm={beforeNorm:F4}, val[0]={beforeVal0:F6}");
@@ -511,8 +512,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
             // Access via reflection for tests — in production use adapter.ForwardAdd
             var field = typeof(LlamaLoRAAdapter)
                 .GetField("_weights",
-                    System.Reflection.BindingFlags.NonPublic |
-                    System.Reflection.BindingFlags.Instance)!;
+                    BindingFlags.NonPublic |
+                    BindingFlags.Instance)!;
 
             var dict = (Dictionary<(int, LoRATargetModules, int), LoRAWeight>)field.GetValue(adapter)!;
             return dict.Values;

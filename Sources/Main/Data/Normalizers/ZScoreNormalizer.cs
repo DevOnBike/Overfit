@@ -73,7 +73,7 @@ namespace DevOnBike.Overfit.Data.Normalizers
                 var delta = localMean - _mean;
 
                 _mean += delta * n2 / newCount;
-                _m2 += localM2 + delta * delta * (double)_count * n2 / newCount;
+                _m2 += localM2 + delta * delta * _count * n2 / newCount;
                 _count = newCount;
             }
         }

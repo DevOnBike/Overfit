@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Buffers.Binary;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace DevOnBike.Overfit.LanguageModels.Loading
@@ -205,7 +206,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
         private void ReadF32(Span<float> dst)
         {
-            var bytes = System.Runtime.InteropServices.MemoryMarshal.AsBytes(dst);
+            var bytes = MemoryMarshal.AsBytes(dst);
             var read = 0;
             while (read < bytes.Length)
             {

@@ -26,7 +26,7 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
         {
             using var inputTensor = new TensorStorage<float>(2 * 3 * 1 * 1, clearMemory: true);
             using var biasTensor = new TensorStorage<float>(3, clearMemory: true);
-            using var input = new AutogradNode(inputTensor, new TensorShape(2, 3, 1, 1), requiresGrad: true);
+            using var input = new AutogradNode(inputTensor, new TensorShape(2, 3), requiresGrad: true);
             using var bias = new AutogradNode(biasTensor, new TensorShape(3), requiresGrad: true);
 
             input.DataView.AsSpan().Fill(1f);
@@ -239,7 +239,7 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
         {
             using var inputTensor = new TensorStorage<float>(6, clearMemory: true);
             using var biasTensor = new TensorStorage<float>(3, clearMemory: true);
-            using var input = new AutogradNode(inputTensor, new TensorShape(2, 3, 1, 1), requiresGrad: true);
+            using var input = new AutogradNode(inputTensor, new TensorShape(2, 3), requiresGrad: true);
             using var bias = new AutogradNode(biasTensor, new TensorShape(3), requiresGrad: true);
 
             input.DataView.AsSpan().Fill(0.5f);

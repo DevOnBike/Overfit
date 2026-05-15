@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Onnx;
+
 namespace DevOnBike.Overfit.Inference
 {
     /// <summary>
@@ -12,9 +14,9 @@ namespace DevOnBike.Overfit.Inference
     /// </summary>
     public sealed class OnnxGraphInferenceBackend : IInferenceBackend
     {
-        private readonly Onnx.OnnxGraphModel _model;
+        private readonly OnnxGraphModel _model;
 
-        public OnnxGraphInferenceBackend(Onnx.OnnxGraphModel model)
+        public OnnxGraphInferenceBackend(OnnxGraphModel model)
         {
             _model = model ?? throw new ArgumentNullException(nameof(model));
         }

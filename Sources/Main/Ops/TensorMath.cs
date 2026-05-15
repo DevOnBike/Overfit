@@ -7,7 +7,9 @@ using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Tensors;
-using DevOnBike.Overfit.Tensors.Core; // Wpinamy Core
+using DevOnBike.Overfit.Tensors.Core;
+
+// Wpinamy Core
 
 namespace DevOnBike.Overfit.Ops
 {

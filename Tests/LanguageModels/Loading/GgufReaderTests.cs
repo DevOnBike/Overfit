@@ -18,7 +18,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             using var ms = new MemoryStream();
             using (var bw = new BinaryWriter(ms, Encoding.UTF8, leaveOpen: true))
             {
-                bw.Write((uint)0xDEADBEEF);  // wrong magic
+                bw.Write(0xDEADBEEF);  // wrong magic
                 bw.Write((uint)3);
             }
             ms.Position = 0;
@@ -67,17 +67,17 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             using var ms = BuildMinimalGguf(meta, tensors: null);
             using var reader = new GgufReader(ms);
 
-            Assert.Equal("qwen2", reader.GetMeta<string>("general.architecture", ""));
-            Assert.Equal(24, reader.GetMeta<int>("qwen2.block_count", 0));  // widening uint→int
-            Assert.Equal(1_000_000.0f, reader.GetMeta<float>("qwen2.rope.freq_base", 0f));
-            Assert.Equal(99, reader.GetMeta<int>("nonexistent", 99));  // default fallback
+            Assert.Equal("qwen2", reader.GetMeta("general.architecture", ""));
+            Assert.Equal(24, reader.GetMeta("qwen2.block_count", 0));  // widening uint→int
+            Assert.Equal(1_000_000.0f, reader.GetMeta("qwen2.rope.freq_base", 0f));
+            Assert.Equal(99, reader.GetMeta("nonexistent", 99));  // default fallback
         }
 
         [Fact]
         public void LoadTensorAsF32_ReadsF32Directly()
         {
             // Build GGUF with single F32 tensor [4] = {1, 2, 3, 4}
-            var data = new float[] { 1f, 2f, 3f, 4f };
+            var data = new[] { 1f, 2f, 3f, 4f };
             using var ms = BuildGgufWithSingleTensor("test", [4], GgmlType.F32, data);
             using var reader = new GgufReader(ms);
 
@@ -94,7 +94,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         public void LoadTensorAsF32_ConvertsF16ToF32()
         {
             // F16 representation of {1.0, 2.0, -0.5, 100.0}
-            var values = new float[] { 1.0f, 2.0f, -0.5f, 100.0f };
+            var values = new[] { 1.0f, 2.0f, -0.5f, 100.0f };
             var f16Bytes = new byte[values.Length * 2];
             for (var i = 0; i < values.Length; i++)
             {

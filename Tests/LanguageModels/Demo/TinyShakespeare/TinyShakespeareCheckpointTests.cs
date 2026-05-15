@@ -3,10 +3,12 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Diagnostics;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Experimental;
 using DevOnBike.Overfit.Optimizers;
+using DevOnBike.Overfit.Parameters;
 using DevOnBike.Overfit.Tokenization;
 using Xunit.Abstractions;
 
@@ -102,7 +104,7 @@ namespace DevOnBike.Overfit.Tests
             model.Train();
 
             var rng = new Random(42);
-            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var sw = Stopwatch.StartNew();
             var windowLoss = 0f;
             var initialLoss = 0f;
             var finalValLoss = 0f;
@@ -129,7 +131,7 @@ namespace DevOnBike.Overfit.Tests
                 logits.Dispose();
                 ClipGradNorm(model.TrainableParameters(), maxNorm: 1.0f);
 
-                var cosine = 0.5f * (1f + MathF.Cos(MathF.PI * (float)step / totalSteps));
+                var cosine = 0.5f * (1f + MathF.Cos(MathF.PI * step / totalSteps));
                 optimizer.LearningRate = lrMin + (lrMax - lrMin) * cosine;
                 optimizer.Step();
 
@@ -173,7 +175,7 @@ namespace DevOnBike.Overfit.Tests
             _output.WriteLine($"Trening zakończony: {sw.Elapsed:mm\\:ss}");
             _output.WriteLine($"Initial loss: {initialLoss:F4}");
             _output.WriteLine($"Final val loss: {finalValLoss:F4}");
-            _output.WriteLine($"nanoGPT reference (SeqLen=256, batch=64): 1.4697");
+            _output.WriteLine("nanoGPT reference (SeqLen=256, batch=64): 1.4697");
 
             var finalSample = GenerateSample(model, tokenizer, "ROMEO:", maxTokens: 250);
             _output.WriteLine($"Finalna generacja: \"{finalSample}\"");
@@ -252,7 +254,7 @@ namespace DevOnBike.Overfit.Tests
         }
 
         private static void ClipGradNorm(
-            IEnumerable<DevOnBike.Overfit.Parameters.Parameter> parameters, float maxNorm)
+            IEnumerable<Parameter> parameters, float maxNorm)
         {
             var totalNormSq = 0f;
             var paramList = parameters.ToList();
@@ -346,7 +348,7 @@ namespace DevOnBike.Overfit.Tests
 
             model.Train();
             var rng = new Random(42);
-            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var sw = Stopwatch.StartNew();
 
             var firstLoss = 0f;
             var lastLoss = 0f;
@@ -448,7 +450,7 @@ namespace DevOnBike.Overfit.Tests
 
             model.Train();
             var rng = new Random(42);
-            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var sw = Stopwatch.StartNew();
             var initialLoss = 0f;
             var finalValLoss = 0f;
             var windowLoss = 0f;
@@ -470,7 +472,7 @@ namespace DevOnBike.Overfit.Tests
                 logits.Dispose();
                 ClipGradNorm(model.TrainableParameters(), maxNorm: 1.0f);
 
-                var cosine = 0.5f * (1f + MathF.Cos(MathF.PI * (float)step / steps));
+                var cosine = 0.5f * (1f + MathF.Cos(MathF.PI * step / steps));
                 optimizer.LearningRate = lrMin + (lrMax - lrMin) * cosine;
                 optimizer.Step();
 
@@ -504,7 +506,7 @@ namespace DevOnBike.Overfit.Tests
             _output.WriteLine(string.Empty);
             _output.WriteLine($"Initial: {initialLoss:F4} → Val: {finalValLoss:F4}");
             _output.WriteLine($"Sample: {sample}");
-            _output.WriteLine($"nanoGPT (4L, 128d, batch=64): ~1.7");
+            _output.WriteLine("nanoGPT (4L, 128d, batch=64): ~1.7");
 
             Assert.True(finalValLoss < 2.7f, $"Val loss {finalValLoss:F4} >= 2.7.");
         }
@@ -611,7 +613,7 @@ namespace DevOnBike.Overfit.Tests
             var failures = new List<string>();
 
             // Sprawdzamy gradient dla jednego parametru z każdego komponentu
-            var checks = new (string name, DevOnBike.Overfit.Parameters.Parameter param, int idx)[]
+            var checks = new (string name, Parameter param, int idx)[]
             {
                 ("TokenEmb[0]", model.TokenEmbedding.Weight, 0), ("PosEmb[0]", model.PositionEmbedding.Weight, 0), ("LN1.Gamma[0]", model.Blocks[0].Norm1.Gamma, 0), ("MHA.Wq[0]", model.Blocks[0].Attention.Wq, 0), ("FFN.W1[0]", model.Blocks[0].FFN.W1, 0), ("LMHead[0]", model.LMHead, 0),
             };

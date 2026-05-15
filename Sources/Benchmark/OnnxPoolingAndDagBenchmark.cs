@@ -6,6 +6,7 @@
 using BenchmarkDotNet.Attributes;
 using Benchmarks.Helpers;
 using DevOnBike.Overfit.Inference;
+using DevOnBike.Overfit.Inference.Contracts;
 using DevOnBike.Overfit.Onnx;
 
 namespace Benchmarks
@@ -54,7 +55,7 @@ namespace Benchmarks
                 var avgModel = OnnxImporter.Load(avgPoolPath);
                 avgModel.Eval();
                 _avgPoolEngine = InferenceEngine.FromSequential(avgModel, 256, 10,
-                    new DevOnBike.Overfit.Inference.Contracts.InferenceEngineOptions
+                    new InferenceEngineOptions
                     { WarmupIterations = 256 });
                 _avgPoolInput  = new float[256];
                 _avgPoolOutput = new float[10];

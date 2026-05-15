@@ -6,6 +6,7 @@
 using System.Numerics;
 using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.Kernels
 {
@@ -329,19 +330,29 @@ namespace DevOnBike.Overfit.Kernels
             }
 
             // fixed pointer cannot be captured in Parallel.For lambda (CS1764).
-            // Solution: pass raw pointers to a static unsafe worker method.
-            unsafe
+            // OverfitParallelFor takes a static function pointer + void* context,
+            // so closures aren't a concern — but we still want fixed/pinned spans
+            // for the duration of the dispatch.
+            fixed (float* goPtr = gradOutput, wPtr = weights, giPtr = gradInput)
             {
-                fixed (float* goPtr = gradOutput, wPtr = weights, giPtr = gradInput)
-                {
-                    var ctx = new BackwardInputContext(goPtr, wPtr, giPtr, inputSize, outputSize);
-                    Parallel.For(0, batchSize, Runtime.OverfitParallel.Options,
-                        b => BackwardInputWorker(b, ctx));
-                }
+                var ctx = new BackwardInputContext(goPtr, wPtr, giPtr, inputSize, outputSize);
+                OverfitParallelFor.For(0, batchSize, &BackwardInputChunkWorker, &ctx);
             }
         }
 
-        private readonly unsafe struct BackwardInputContext
+        private static void BackwardInputChunkWorker(
+            int chunkStart,
+            int chunkEnd,
+            void* contextPtr)
+        {
+            ref var ctx = ref Unsafe.AsRef<BackwardInputContext>(contextPtr);
+            for (var b = chunkStart; b < chunkEnd; b++)
+            {
+                BackwardInputWorker(b, ctx);
+            }
+        }
+
+        private readonly struct BackwardInputContext
         {
             public readonly float* GradOutput;
             public readonly float* Weights;
@@ -356,7 +367,7 @@ namespace DevOnBike.Overfit.Kernels
             }
         }
 
-        private static unsafe void BackwardInputWorker(int b, BackwardInputContext ctx)
+        private static void BackwardInputWorker(int b, BackwardInputContext ctx)
         {
             var goRow = new ReadOnlySpan<float>(ctx.GradOutput + b * ctx.OutputSize, ctx.OutputSize);
             var giRow = new Span<float>(ctx.GradInput + b * ctx.InputSize, ctx.InputSize);
@@ -412,19 +423,28 @@ namespace DevOnBike.Overfit.Kernels
                 return;
             }
 
-            // fixed pointer cannot be captured in lambda (CS1764) — use static unsafe worker.
-            unsafe
+            // OverfitParallelFor: static function pointer + void* context, zero
+            // allocation per dispatch. Pin spans for the duration of For().
+            fixed (float* inPtr = input, goPtr = gradOutput, gwPtr = gradWeights)
             {
-                fixed (float* inPtr = input, goPtr = gradOutput, gwPtr = gradWeights)
-                {
-                    var ctx = new AccumulateWeightGradContext(inPtr, goPtr, gwPtr, batchSize, inputSize, outputSize);
-                    Parallel.For(0, inputSize, Runtime.OverfitParallel.Options,
-                        i => AccumulateWeightGradWorker(i, ctx));
-                }
+                var ctx = new AccumulateWeightGradContext(inPtr, goPtr, gwPtr, batchSize, inputSize, outputSize);
+                OverfitParallelFor.For(0, inputSize, &AccumulateWeightGradChunkWorker, &ctx);
             }
         }
 
-        private readonly unsafe struct AccumulateWeightGradContext
+        private static void AccumulateWeightGradChunkWorker(
+            int chunkStart,
+            int chunkEnd,
+            void* contextPtr)
+        {
+            ref var ctx = ref Unsafe.AsRef<AccumulateWeightGradContext>(contextPtr);
+            for (var i = chunkStart; i < chunkEnd; i++)
+            {
+                AccumulateWeightGradWorker(i, ctx);
+            }
+        }
+
+        private readonly struct AccumulateWeightGradContext
         {
             public readonly float* Input;
             public readonly float* GradOutput;
@@ -440,7 +460,7 @@ namespace DevOnBike.Overfit.Kernels
             }
         }
 
-        private static unsafe void AccumulateWeightGradWorker(int i, AccumulateWeightGradContext ctx)
+        private static void AccumulateWeightGradWorker(int i, AccumulateWeightGradContext ctx)
         {
             var gwRow = new Span<float>(ctx.GradWeights + i * ctx.OutputSize, ctx.OutputSize);
 

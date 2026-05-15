@@ -49,7 +49,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
                 // Top-1 expected: [33975] 15.5608 (from forward_multitoken.py TEST 1 for 3B FP16)
                 var top1 = top5[0];
                 _out.WriteLine($"C# top-1   = [{top1.i}] {top1.v:F4}");
-                _out.WriteLine($"Python top-1 = [33975] 15.5608");
+                _out.WriteLine("Python top-1 = [33975] 15.5608");
 
                 Assert.Equal(33975, top1.i);
                 Assert.True(Math.Abs(top1.v - 15.5608f) < 0.1f,
@@ -81,7 +81,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
 
                 _out.WriteLine("=== 2-TOKEN [BOS, im_start] ===");
                 _out.WriteLine($"C# top-1 = [{top1.i}] {top1.v:F4}");
-                _out.WriteLine($"  Python:  [198] 12.3511  (grouped GQA)");
+                _out.WriteLine("  Python:  [198] 12.3511  (grouped GQA)");
                 _out.WriteLine($"  Match:   {(top1.i == 198 ? "✓ SAME TOKEN" : $"✗ DIFFERENT (got {top1.i})")}");
                 _out.WriteLine(string.Empty);
 
@@ -89,7 +89,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
                 var hidden = session.LastHiddenState.ToArray();
                 _out.WriteLine("=== HIDDEN STATE (before final RMSNorm) ===");
                 _out.WriteLine($"C# hidden[:4] = [{string.Join(", ", hidden.Take(4).Select(v => v.ToString("F5")))}]");
-                _out.WriteLine($"Py hidden[:4] = [0.14059, 0.84549, 1.01591, -1.83366]");
+                _out.WriteLine("Py hidden[:4] = [0.14059, 0.84549, 1.01591, -1.83366]");
                 _out.WriteLine(string.Empty);
 
                 float[] pyHidden = [0.14059351f, 0.8454995f, 1.0159123f, -1.8336577f];
@@ -138,7 +138,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
 
                 _out.WriteLine($"=== CHAT PROMPT LOGITS (position {fullPrompt.Length - 1}) ===");
                 _out.WriteLine($"Prompt: {fullPrompt.Length} tokens");
-                _out.WriteLine($"C# TOP-10:");
+                _out.WriteLine("C# TOP-10:");
                 var top10 = logits.Select((v, i) => (v, i)).OrderByDescending(x => x.v).Take(10).ToArray();
                 for (var r = 0; r < top10.Length; r++)
                 {
