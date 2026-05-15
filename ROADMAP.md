@@ -202,20 +202,56 @@ Both kill us:
 - `TensorMath.Pooling`: `MaxPool2D` fwd+bwd, `GlobalAveragePool2D` fwd+bwd
 - `TensorMath.Algebra`: `AddBias`, `MatMulRaw`, `MatMulAdd_A_BT_Raw`, `MatMulAdd_AT_B_Raw`
 - `ComputationGraph.Linear` (forward batched parallel path)
-- **`TensorMath.Gelu` (forward + backward)** — was a pure sequential scalar `for` loop; now element-wise parallel above `ParallelThreshold = 4096`.
+- **`TensorMath.Gelu` (forward + backward)** — was a pure sequential scalar `for` loop. Now (a) **OverfitParallelFor over chunks**, AND (b) **SIMD-batched inside each chunk** via `TensorPrimitives.Multiply/Add/Tanh/Subtract` pipeline on 1024-element tiles (stackalloc'd scratch on worker thread stack). Tile size chosen to fit in L1 cache so the multi-pass pipeline stays hot. The scalar `MathF.Tanh` is replaced with SIMD `TensorPrimitives.Tanh` (polynomial approximation). Cumulative GPT-1 batch=32 GELU backward: **1774 → 42 ms (42× faster)** vs the initial scalar-serial baseline, of which the SIMD pipeline contributed an additional **2.6×** on top of the prior parallel-over-chunks version.
 - **`TensorMath.LayerNorm` (forward + backward)** — was sequential per-row. Forward parallelizes trivially (rows independent). Backward needs per-worker partial accumulators for `dGamma[i]` / `dBeta[i]` (shared across rows) — stackalloc'd by caller, sequential SIMD merge after parallel pass. dInput parallelizes in the same pass (per-row, no shared writes). Falls back to sequential when `C > 4096` to keep stackalloc bounded.
 
 **Cumulative GPT-1 training-step impact** (Ryzen 9 9950X3D, 4-layer GPT-1, dModel=128, dFF=512, seqLen=128, per `GPT1CpuUtilizationProbeTests`):
 
-| BatchSize | Wall/step start | + GELU parallel | + LayerNorm parallel | Total Δ wall | Cores start → end | Total Δ cores |
-|---:|---:|---:|---:|---:|---:|---:|
-| 8 | 126 ms | 82 ms | **78 ms** | **−38%** | 3.48 → **6.43** / 32 | **+85%** |
-| 16 | 217 ms | 137 ms | **112 ms** | **−48%** | 2.99 → **6.63** / 32 | **+121%** |
-| 32 | 414 ms | 243 ms | **198 ms** | **−52%** | 3.89 → **7.57** / 32 | **+94%** |
+| BatchSize | Wall/step start | + GELU parallel | + LayerNorm parallel | + SIMD-batched GELU | Total Δ wall | Cores start → end | Total Δ cores |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 8 | 126 ms | 82 ms | 78 ms | **— (small body, no measurable change)** | **−38%** | 3.48 → 6.43 / 32 | **+85%** |
+| 16 | 217 ms | 137 ms | 112 ms | **106 ms** | **−51%** | 2.99 → 7.20 / 32 | **+141%** |
+| 32 | 414 ms | 243 ms | 198 ms | **191 ms** | **−54%** | 3.89 → **7.93** / 32 | **+104%** |
 
 Per-op backward (batch=32, aggregated over 20 steps): GELU 1774 → 109 ms (−94%, 16× faster). LayerNorm 800 → 39 ms (−95%, 20× faster). Now Linear (1042 ms — already parallelized, just much more numerous) dominates the backward profile. The remaining sequential ops on the critical path are smaller: Add residuals (62 ms), Reshape (55 ms), Embedding (2.5 ms).
 
 This validated the whole strategy: dispatcher was correct from the start, and *each* additional element-wise kernel we move from sequential to OverfitParallelFor produces a real, measurable win — the playbook works for any per-element activation/normalization op.
+
+**Future patterns from `vs2022-performance-patterns.md` (catalog for later sessions):**
+
+Reviewed the 45 patterns extracted from VS 2022 decompilation. Already adopted:
+- ✅ Custom Parallel wrapper (pattern 28) → `OverfitParallelFor`
+- ✅ Lock-free `Interlocked` (pattern 7)
+- ✅ Cache-line padding `[StructLayout(Explicit)]` (pattern 32) → `PaddedCounter`
+- ✅ `[MethodImpl(AggressiveInlining)]` selectively (pattern 3)
+- ✅ `readonly struct` defaults (pattern 2)
+- ✅ `EventSource` per component (pattern 29) → `ArrayPoolEventSource`
+- ✅ `ArrayPool<T>.Shared.Rent` (pattern 10) → `OverfitPool<T>`
+- ✅ **`[module: SkipLocalsInit]` assembly-wide (pattern 22)** — landed with audit (caught LoRA accumulator bug as side-effect)
+- ✅ **SIMD-batched element-wise via `TensorPrimitives` (pattern 25)** — applied to GELU as the reusable template
+
+Rejected after evaluation:
+- ❌ `Expression.Compile` / `DynamicMethod` / `ActivatorUtilities.CreateFactory` (patterns 39, 40, 41) — blocked by `BannedSymbols.txt` (no reflection in AOT path)
+- ❌ `[Conditional("DEBUG")]` on validators (pattern 9 fragment) — our `TensorKernelGuards` are caller-contract enforcement, not pure invariants; stripping degrades debuggability without measurable gain
+- ❌ `Channel<T>` (pattern 21) — we don't do streaming/IPC
+- ❌ `IValueTaskSource` / `ValueTask` / `IAsyncDisposable` (patterns 14, 15, 16) — no async paths
+- ❌ WPF patterns (36, 37, 38, 44), MultiplexingStream (19), F# persistent collections (43) — different domains
+
+**Worth adopting in future sessions, prioritized by ROI:**
+
+| Pattern | Where | Effort | Value | When to do it |
+|---|---|---:|---|---|
+| **6 — `FrozenDictionary` for BPE vocab/merges** | `BytePairEncoder` lookup tables | ~30 min | 10-30% faster tokenization | When tokenizer shows up in inference profile |
+| **5 — Segmented arrays (LOH avoidance)** | `TensorStorage<T>` for tensors >85 KB | ~1 day | Removes GC pauses on big-model paths | When LOH symptoms hurt (GPT-2+ scale) |
+| **45 — `[CallerArgumentExpression]` propagation** | `TensorKernelGuards.ValidateSameLength` etc. | ~15 min | Cleaner code, better error messages | Cosmetic — bundle with next guards refactor |
+| **35 — `[PerformanceSensitive]` analyzer hint** | New custom analyzer for "no-alloc hot path" methods | ~few days | Compile-time enforcement of zero-alloc contracts | When team grows beyond one person |
+| **23 — `[InlineArray(N)]` for packed structs** | Maybe GGUF block quant formats | ~hours | Cleaner than `LayoutKind.Explicit` for fixed-size content | Opportunistic — when touching binary IO |
+| **34 — `[ThreadStatic] Stack<T>` per-thread pools** | Hot per-thread scratch in training kernels | ~1 day | Cache-warmer than central pool | When profiler shows pool contention |
+| **24 — `[ModuleInitializer]`** | Run-once setup (e.g. native lib preload) | ~10 min | One-time setup without static-ctor surprises | If we ever ship native deps (we don't today) |
+| **20 — Batched telemetry (timer + flush + persist)** | `ArrayPoolEventSource` upgrade for long training runs | ~hours | Reduce ETW overhead on training | When telemetry becomes a real concern |
+| **30 — `UnmanagedBufferAllocator` (`NativeMemory.Alloc`)** | `TensorStorage<T>` for very-long-lived weights | ~1 day | Removes weights from GC's scope entirely | For multi-GB models pinned in memory |
+
+**The pattern from VS2022 that drove the biggest win in this session:** **#25 (SIMD-batched element-wise via TensorPrimitives)**. The template — outer `OverfitParallelFor.For` over chunks + inner `TensorPrimitives` pipeline on stackalloc'd tiles — is now established and ready to reuse for any future scalar kernel (Sigmoid, SwiGLU, SiLU, custom activations).
 
 **Lesson learned — when NOT to parallelize element-wise:**
 Attempted parallelizing `TensorMath.Add` (residual add) and **measured a regression** (+20% wall on GPT-1 batch=32, +55% on Add backward itself). Reverted. `Add` is **memory-bandwidth-bound** (read 2 arrays + write 1 = 3× data movement). On a typical desktop memory subsystem (~50 GB/s) 2-3 cores already saturate the bus, so the OverfitParallelFor dispatch overhead (~10 µs cold) is pure cost.
