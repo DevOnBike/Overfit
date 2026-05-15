@@ -25,6 +25,13 @@ namespace DevOnBike.Overfit.Ops
             var requiresGrad = left.RequiresGrad || right.RequiresGrad;
             var output = AllocateNode(graph, left.Shape, requiresGrad, clearMemory: false);
 
+            // Sequential SIMD via TensorPrimitives.Add. Add is MEMORY-BANDWIDTH-BOUND
+            // (read 2 arrays + write 1 = 3× data movement). On a typical desktop
+            // memory subsystem (~50 GB/s) 2-3 cores already saturate the bus, so
+            // dispatching to OverfitParallelFor (32 workers, ~10 µs dispatch) is
+            // pure overhead — measured ~+55% latency vs sequential on GPT-1.
+            // Compute-bound element-wise ops (GELU, LayerNorm) parallelize well;
+            // memcpy-like ops (Add, Subtract, Scale) don't. Keep sequential.
             TensorKernels.Add(left.DataView.AsReadOnlySpan(), right.DataView.AsReadOnlySpan(), output.DataView.AsSpan());
 
             if (output.RequiresGrad)
@@ -37,6 +44,7 @@ namespace DevOnBike.Overfit.Ops
 
         public static void AddBackward(AutogradNode a, AutogradNode b, AutogradNode output)
         {
+            // Sequential — same memory-bandwidth-bound reasoning as Add forward.
             if (a.RequiresGrad)
             {
                 TensorPrimitives.Add(a.GradView.AsSpan(), output.GradView.AsReadOnlySpan(), a.GradView.AsSpan());

@@ -217,8 +217,12 @@ Per-op backward (batch=32, aggregated over 20 steps): GELU 1774 → 109 ms (−9
 
 This validated the whole strategy: dispatcher was correct from the start, and *each* additional element-wise kernel we move from sequential to OverfitParallelFor produces a real, measurable win — the playbook works for any per-element activation/normalization op.
 
-**Pending migrations / parallelizations (deferred, prioritized by post-LayerNorm profile):**
-- **`TensorMath.Add` (residual add forward + backward)** — 62 ms / 20 steps on batch=32 GPT-1, all sequential element-wise. 420 calls/run, each touches a 524K-element tensor (batch×seqLen×dModel). Trivial parallelization (element-wise like GELU). Expected gain: ~50 ms / 20 steps ≈ 1-2% wall.
+**Lesson learned — when NOT to parallelize element-wise:**
+Attempted parallelizing `TensorMath.Add` (residual add) and **measured a regression** (+20% wall on GPT-1 batch=32, +55% on Add backward itself). Reverted. `Add` is **memory-bandwidth-bound** (read 2 arrays + write 1 = 3× data movement). On a typical desktop memory subsystem (~50 GB/s) 2-3 cores already saturate the bus, so the OverfitParallelFor dispatch overhead (~10 µs cold) is pure cost.
+
+**Rule of thumb for future migrations:** parallel pays for element-wise ops only if the body is *compute-bound* (heavy per-element math like GELU/LayerNorm/Linear). For *memory-bound* ops (Add/Subtract/Scale/element-wise copy), keep sequential SIMD — the bandwidth ceiling caps you regardless of core count, and dispatch overhead becomes net negative.
+
+**Pending migrations / parallelizations (deferred):**
 - `TensorMath.Convolution` (Conv2D fwd+bwd) — per-worker workspace pattern needs `GCHandle`-pin or POH refactor of `Conv2DWorkspace`. Expected gain on MNIST: ~100-150 ms / 5 epochs (Conv2D backward 459 ms, fwd ~570 ms aggregated). Worth doing if/when GPT-2 batched training adds bigger Conv-heavy workloads.
 - `TensorMath.Sequence` (LSTM) — relevant for LSTM training.
 - `TensorMath.Attention` (`EnableParallelAttentionBackward` path) — relevant for transformer training at B > 1.
