@@ -102,7 +102,11 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
         /// </summary>
         public void ForwardAdd(ReadOnlySpan<float> x, Span<float> result, float scale)
         {
+            // r[] is used as accumulator below (MultiplyAdd reads r[k] then writes).
+            // With `[module: SkipLocalsInit]` stackalloc no longer pre-zeroes —
+            // explicit Clear() is required so the accumulation starts from 0.
             Span<float> r = stackalloc float[Rank];
+            r.Clear();
 
             // r[k] = sum_i( A[i,k] * x[i] )
             for (var i = 0; i < InDim; i++)
