@@ -164,6 +164,26 @@ for (var batch = 0; batch < batches; batch++)
 
 Machine: AMD Ryzen 9 9950X3D · Windows 11 25H2 · .NET 10.0.7 · BenchmarkDotNet 0.15.8
 
+### GPT-1 training step — parallel runtime sprint
+
+End-to-end training step of a 4-layer GPT-1 (dModel=128, dFF=512, seqLen=128), measured by `GPT1CpuUtilizationProbeTests`:
+
+| BatchSize | Wall/step before | Wall/step after | Cores effective | GELU bwd | LayerNorm bwd |
+|---:|---:|---:|---:|---:|---:|
+| 8 | 126 ms | **65 ms** (−48%) | 3.48 → **10.40** / 32 | 448 → 67 ms (7×) | 209 → 26 ms (8×) |
+| 16 | 217 ms | **74 ms** (−66%) | 2.99 → **11.44** / 32 | 882 → 37 ms (24×) | 403 → 23 ms (17×) |
+| 32 | 414 ms | **114 ms** (−72%) | 3.89 → **13.85** / 32 | 1774 → 42 ms (42×) | 800 → 37 ms (22×) |
+
+Real-workload validation on TinyShakespeare (`TinyShakespeareTrainingTests`, 2-layer GPT-1, char-level, 300 steps): **~60–120 s → ~2 s (30–60× faster)**, loss drops 5.04 → 3.23 (35.9% improvement), zero numerical regression vs sequential reference (numerical gradient check passes).
+
+Drivers:
+- **`OverfitParallelFor`** — bulk-wake dispatcher (`SemaphoreSlim.Release(N)` instead of N × `AutoResetEvent.Set`). ~5 µs warm dispatch, 0 B/call.
+- **GELU forward + backward** — re-written as `OverfitParallelFor.For` over chunks + `TensorPrimitives` SIMD pipeline (`Multiply` → `Add` → `Tanh` → …) on stackalloc'd 1024-element tiles.
+- **LayerNorm forward + backward** — parallel-per-row with per-worker partial accumulators for `dGamma` / `dBeta` (stackalloc'd by caller, SIMD merge after parallel pass).
+- **Scaled-Dot-Product Attention forward** — parallel-over-batch (symmetric to existing backward parallel path). For multi-head training the SDPA call sees effective batch `B × H` so even single-batch training parallelizes across heads.
+- **`LinearKernels.BackwardInput` / `AccumulateWeightGrad`** — migrated from `Parallel.For` to `OverfitParallelFor`.
+- **`[module: SkipLocalsInit]`** — assembly-wide; elides per-frame zero-init on 21+ `stackalloc` sites.
+
 ### Single inference — Overfit vs ONNX Runtime
 
 | Method | Mean | Allocated | vs ONNX Runtime |
@@ -210,8 +230,10 @@ Model: TinyResNet — Linear(8→8) + skip + Linear(8→4). Both paths: zero all
 
 | Epoch | Time | Alloc/epoch | Notes |
 |------:|-----:|------------:|-------|
-| 1 | ~1.7 s | ~32 MB | JIT warmup |
-| 2–5 | **~800 ms** | **~26 MB** | steady state |
+| 1 | ~1.6 s | ~32 MB | JIT warmup |
+| 2–5 | **~775 ms** | **~26 MB** | steady state, post-`OverfitParallelFor` migration |
+
+5-epoch run: **5551 → 4870 ms (−12% wall, −18% total CPU)** vs pre-migration baseline. Cores effective: 6.81 → 7.03 of 32 (MNIST CNN at this scale is Amdahl-limited by sequential graph/optimizer slices — the bigger win is on transformer workloads, see GPT-1 section above).
 
 Training allocations from autograd graph temporaries — expected.
 Inference path: zero allocations. Live managed memory delta per epoch: **−0.01 MB** (zero leak).
@@ -339,6 +361,10 @@ Kernels                     ← pure Span-based math, no AutogradNode
   LinearKernels             ← Forward, ForwardBatched, BackwardInput,
                                AccumulateWeightGrad, AccumulateBiasGrad
   PoolingKernels            ← MaxPool pool=2 SIMD fast path
+OverfitParallelFor          ← zero-alloc bulk-wake dispatcher (Runtime/)
+                               replacement for Parallel.For in zero-alloc hot paths
+                               ~5 µs warm dispatch, 0 B/call, configurable via
+                               OVERFIT_PARALLEL_WORKERS env var
 TensorStorage<T>            ← pooled memory ownership (ArrayPool-backed)
 Optimizers                  ← Adam(IEnumerable<Parameter>), SGD(IEnumerable<Parameter>)
 OnnxImporter                ← PyTorch ONNX → Sequential (linear topology)
@@ -397,6 +423,11 @@ Use cases: Kubernetes tuning, game AI, industrial process search, pricing strate
 
 ### Recently completed
 
+- ✅ **Zero-alloc parallel runtime — `OverfitParallelFor`** — bulk-wake dispatcher (`SemaphoreSlim.Release(N)`) replacing `Parallel.For` in hot paths. ~5 µs warm dispatch, 0 B/call, exception propagation via `ExceptionDispatchInfo`, configurable worker count via `OVERFIT_PARALLEL_WORKERS` env var.
+- ✅ **GELU + LayerNorm parallelization (forward + backward)** — was sequential scalar; now `OverfitParallelFor` over chunks + `TensorPrimitives` SIMD pipeline inside each chunk. GPT-1 batch=32: GELU bwd 1774→42 ms (42×), LayerNorm bwd 800→39 ms (20×). Wall/step 414→191 ms (−54%), cores effective 3.89→7.93 / 32 (+104%).
+- ✅ **Migrated hot-path kernels to `OverfitParallelFor`** — `LinearKernels.BackwardInput` + `AccumulateWeightGrad`, `TensorMath.Pooling` (Max/AvgPool fwd+bwd), `TensorMath.Algebra` (AddBias, MatMul variants), `ComputationGraph.Linear` forward. MNIST CNN 5-epoch: −12% wall, −18% total CPU.
+- ✅ **`[module: SkipLocalsInit]` assembly-wide** — elides per-frame zero-init on 21+ `stackalloc` sites. Caught and fixed a silent `LoRAWeight.ForwardAdd` accumulator bug (was relying on incidental zero-init of `stackalloc float[Rank]`) as a side-effect of the audit.
+- ✅ **TinyShakespeare 300-step training validation** — real-workload regression of the parallel sprint: 60-120 s → ~2 s (30-60× faster), loss drops 5.04 → 3.23 (numerical gradient check passes, zero correctness regression).
 - ✅ **`Demo/Gpt2ConsoleDemo`** — user-facing console app: `dotnet run -- --prompt "…" --tokens N`. Reports tokens/sec and managed-bytes-per-token separately for the inference loop vs the full demo loop. First-class entry point for the "see it work in one command" story.
 - ✅ **GPT-2 parity gate runs by default** — `Gpt2ImportParityDiagnostics`, `Gpt2ImportStageParityDiagnostics`, `Gpt2ImportAttentionParityDiagnostics` flipped from `[LongFact]` back to `[Fact]`. Headline claim (top-10 overlap 10/10, maxAbsDiff 0.000107) defended on every `dotnet test`.
 - ✅ **Native GGUF loader** — `GgufLlamaLoader.Load(path)` reads `*.gguf` from Ollama / HuggingFace end-to-end, no Python tooling. Supports F32 / F16 / BF16 / Q8_0 / **Q4_K** / **Q6_K**. Hand-rolled parser, no `Google.Protobuf` dependency.

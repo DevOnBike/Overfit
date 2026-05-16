@@ -5,6 +5,7 @@
 
 using System.Buffers;
 using System.Numerics.Tensors;
+using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.LanguageModels.Experimental;
 using DevOnBike.Overfit.Runtime;
@@ -68,55 +69,43 @@ namespace DevOnBike.Overfit.Ops
             var aS = attnWeights.DataView.AsSpan();
             var oS = output.DataView.AsSpan();
 
-            for (var b = 0; b < batchSize; b++)
+            // Each batch is independent (only writes to per-batch slices of
+            // attnWeights/output). Parallel-over-batch when there's enough
+            // work to amortize the OverfitParallelFor dispatch (~5 µs warm).
+            //
+            // Symmetric guard to ScaledDotProductAttentionBackwardParallel:
+            // batchSize > 1 AND total work above threshold.
+            var work = (long)batchSize * seqLen * seqLen * Math.Max(dk, dv);
+
+            if (batchSize > 1 && work >= AttentionParallelWorkThreshold)
             {
-                var qBatch = qS.Slice(b * seqLen * dk, seqLen * dk);
-                var kBatch = kS.Slice(b * seqLen * dk, seqLen * dk);
-                var vBatch = vS.Slice(b * seqLen * dv, seqLen * dv);
-                var aBatch = aS.Slice(b * seqLen * seqLen, seqLen * seqLen);
-                var oBatch = oS.Slice(b * seqLen * dv, seqLen * dv);
-
-                for (var i = 0; i < seqLen; i++)
+                unsafe
                 {
-                    var qRow = qBatch.Slice(i * dk, dk);
-                    var aRow = aBatch.Slice(i * seqLen, seqLen);
-
-                    for (var j = 0; j < seqLen; j++)
+                    fixed (float* qPtr = qS, kPtr = kS, vPtr = vS,
+                                  aPtr = aS, oPtr = oS)
                     {
-                        if (causalMask && j > i)
+                        var ctx = new SDPAForwardCtx
                         {
-                            aRow[j] = float.NegativeInfinity;
-                        }
-                        else
-                        {
-                            aRow[j] =
-                                TensorPrimitives.Dot(
-                                    qRow,
-                                    kBatch.Slice(j * dk, dk)) *
-                                scale;
-                        }
+                            Q = qPtr,
+                            K = kPtr,
+                            V = vPtr,
+                            A = aPtr,
+                            O = oPtr,
+                            SeqLen = seqLen,
+                            Dk = dk,
+                            Dv = dv,
+                            Scale = scale,
+                            CausalMask = causalMask,
+                        };
+                        OverfitParallelFor.For(0, batchSize, &SDPAForwardChunk, &ctx);
                     }
-
-                    StableSoftmax(
-                        aRow,
-                        aRow);
                 }
-
-                for (var i = 0; i < seqLen; i++)
+            }
+            else
+            {
+                for (var b = 0; b < batchSize; b++)
                 {
-                    var aRow = aBatch.Slice(i * seqLen, seqLen);
-                    var oRow = oBatch.Slice(i * dv, dv);
-
-                    oRow.Clear();
-
-                    for (var j = 0; j < seqLen; j++)
-                    {
-                        TensorPrimitives.MultiplyAdd(
-                            vBatch.Slice(j * dv, dv),
-                            aRow[j],
-                            oRow,
-                            oRow);
-                    }
+                    SDPAForwardBatch(b, qS, kS, vS, aS, oS, seqLen, dk, dv, scale, causalMask);
                 }
             }
 
@@ -431,6 +420,111 @@ namespace DevOnBike.Overfit.Ops
                             dKRow);
                     }
                 }
+            }
+        }
+
+        // ── SDPA forward — per-batch + parallel chunk dispatch ────────────────
+
+        /// <summary>
+        /// Forward pass for one batch slice of SDPA. Independent of other batches —
+        /// only writes to its own [seqLen × seqLen] slice of <paramref name="aS"/>
+        /// and [seqLen × dv] slice of <paramref name="oS"/>.
+        /// </summary>
+        private static void SDPAForwardBatch(
+            int b,
+            ReadOnlySpan<float> qS,
+            ReadOnlySpan<float> kS,
+            ReadOnlySpan<float> vS,
+            Span<float> aS,
+            Span<float> oS,
+            int seqLen, int dk, int dv,
+            float scale, bool causalMask)
+        {
+            var qBatch = qS.Slice(b * seqLen * dk, seqLen * dk);
+            var kBatch = kS.Slice(b * seqLen * dk, seqLen * dk);
+            var vBatch = vS.Slice(b * seqLen * dv, seqLen * dv);
+            var aBatch = aS.Slice(b * seqLen * seqLen, seqLen * seqLen);
+            var oBatch = oS.Slice(b * seqLen * dv, seqLen * dv);
+
+            for (var i = 0; i < seqLen; i++)
+            {
+                var qRow = qBatch.Slice(i * dk, dk);
+                var aRow = aBatch.Slice(i * seqLen, seqLen);
+
+                for (var j = 0; j < seqLen; j++)
+                {
+                    if (causalMask && j > i)
+                    {
+                        aRow[j] = float.NegativeInfinity;
+                    }
+                    else
+                    {
+                        aRow[j] = TensorPrimitives.Dot(qRow, kBatch.Slice(j * dk, dk)) * scale;
+                    }
+                }
+
+                StableSoftmax(aRow, aRow);
+            }
+
+            for (var i = 0; i < seqLen; i++)
+            {
+                var aRow = aBatch.Slice(i * seqLen, seqLen);
+                var oRow = oBatch.Slice(i * dv, dv);
+                oRow.Clear();
+
+                for (var j = 0; j < seqLen; j++)
+                {
+                    TensorPrimitives.MultiplyAdd(vBatch.Slice(j * dv, dv), aRow[j], oRow, oRow);
+                }
+            }
+        }
+
+        private unsafe struct SDPAForwardCtx
+        {
+            public float* Q;
+            public float* K;
+            public float* V;
+            public float* A;
+            public float* O;
+            public int SeqLen;
+            public int Dk;
+            public int Dv;
+            public float Scale;
+            public bool CausalMask;
+        }
+
+        private static unsafe void SDPAForwardChunk(int chunkStart, int chunkEnd, void* contextPtr)
+        {
+            ref var ctx = ref Unsafe.AsRef<SDPAForwardCtx>(contextPtr);
+
+            // Re-create spans from raw pointers + the OUTER batch×... lengths.
+            // (Caller pinned the underlying arrays with `fixed`, so these
+            // pointers stay valid for the duration of the OverfitParallelFor call.)
+            //
+            // We need to know the OUTER buffer length so the per-batch slicing
+            // inside SDPAForwardBatch doesn't trip span bounds — chunkEnd is
+            // already the exclusive end of the batch range, so the largest
+            // batch we'll touch is `chunkEnd - 1`. Buffer must cover up to
+            // `chunkEnd * seqLen * d`.
+            var seqLen = ctx.SeqLen;
+            var dk = ctx.Dk;
+            var dv = ctx.Dv;
+
+            var qLen = chunkEnd * seqLen * dk;
+            var kLen = chunkEnd * seqLen * dk;
+            var vLen = chunkEnd * seqLen * dv;
+            var aLen = chunkEnd * seqLen * seqLen;
+            var oLen = chunkEnd * seqLen * dv;
+
+            var qS = new ReadOnlySpan<float>(ctx.Q, qLen);
+            var kS = new ReadOnlySpan<float>(ctx.K, kLen);
+            var vS = new ReadOnlySpan<float>(ctx.V, vLen);
+            var aS = new Span<float>(ctx.A, aLen);
+            var oS = new Span<float>(ctx.O, oLen);
+
+            for (var b = chunkStart; b < chunkEnd; b++)
+            {
+                SDPAForwardBatch(b, qS, kS, vS, aS, oS, seqLen, dk, dv, ctx.Scale, ctx.CausalMask);
             }
         }
     }

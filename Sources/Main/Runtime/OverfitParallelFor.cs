@@ -354,7 +354,8 @@ namespace DevOnBike.Overfit.Runtime
         [StructLayout(LayoutKind.Explicit, Size = 128)]
         private struct PaddedCounter
         {
-            [FieldOffset(64)] public int Value;
+            [FieldOffset(64)]
+            public int Value;
         }
     }
 }

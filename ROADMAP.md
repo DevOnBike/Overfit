@@ -203,15 +203,16 @@ Both kill us:
 - `TensorMath.Algebra`: `AddBias`, `MatMulRaw`, `MatMulAdd_A_BT_Raw`, `MatMulAdd_AT_B_Raw`
 - `ComputationGraph.Linear` (forward batched parallel path)
 - **`TensorMath.Gelu` (forward + backward)** — was a pure sequential scalar `for` loop. Now (a) **OverfitParallelFor over chunks**, AND (b) **SIMD-batched inside each chunk** via `TensorPrimitives.Multiply/Add/Tanh/Subtract` pipeline on 1024-element tiles (stackalloc'd scratch on worker thread stack). Tile size chosen to fit in L1 cache so the multi-pass pipeline stays hot. The scalar `MathF.Tanh` is replaced with SIMD `TensorPrimitives.Tanh` (polynomial approximation). Cumulative GPT-1 batch=32 GELU backward: **1774 → 42 ms (42× faster)** vs the initial scalar-serial baseline, of which the SIMD pipeline contributed an additional **2.6×** on top of the prior parallel-over-chunks version.
+- **`TensorMath.ScaledDotProductAttention` forward** — was sequential `for (b)` over batch. Symmetric to the existing parallel-over-batch backward — same `batchSize > 1 && work >= AttentionParallelWorkThreshold` guard. Per-batch work is independent (only writes to per-batch slices of `attnWeights` / `output`). For multi-head training the SDPA call sees effective batch = `B × H` (heads flattened), so even at training `B=1` the parallel path kicks in for `H ≥ 4`. Biggest single contributor to cores-effective in the session: GPT-1 batch=32 wall **191 → 114 ms (−40%)**, cores effective **7.93 → 13.85 / 32 (+75%)**. With this change the forward path becomes the second-most parallelized chunk of the training step (after Linear bwd), and `cores effective` finally crosses 1/3 of physical capacity at training batch sizes.
 - **`TensorMath.LayerNorm` (forward + backward)** — was sequential per-row. Forward parallelizes trivially (rows independent). Backward needs per-worker partial accumulators for `dGamma[i]` / `dBeta[i]` (shared across rows) — stackalloc'd by caller, sequential SIMD merge after parallel pass. dInput parallelizes in the same pass (per-row, no shared writes). Falls back to sequential when `C > 4096` to keep stackalloc bounded.
 
 **Cumulative GPT-1 training-step impact** (Ryzen 9 9950X3D, 4-layer GPT-1, dModel=128, dFF=512, seqLen=128, per `GPT1CpuUtilizationProbeTests`):
 
-| BatchSize | Wall/step start | + GELU parallel | + LayerNorm parallel | + SIMD-batched GELU | Total Δ wall | Cores start → end | Total Δ cores |
+| BatchSize | Wall/step start | + GELU parallel | + LayerNorm parallel | + SIMD-batched GELU | + SDPA fwd parallel | Total Δ wall | Cores start → end |
 |---:|---:|---:|---:|---:|---:|---:|---:|
-| 8 | 126 ms | 82 ms | 78 ms | **— (small body, no measurable change)** | **−38%** | 3.48 → 6.43 / 32 | **+85%** |
-| 16 | 217 ms | 137 ms | 112 ms | **106 ms** | **−51%** | 2.99 → 7.20 / 32 | **+141%** |
-| 32 | 414 ms | 243 ms | 198 ms | **191 ms** | **−54%** | 3.89 → **7.93** / 32 | **+104%** |
+| 8 | 126 ms | 82 ms | 78 ms | 78 ms | **65 ms** | **−48%** | 3.48 → **10.40** / 32 |
+| 16 | 217 ms | 137 ms | 112 ms | 106 ms | **74 ms** | **−66%** | 2.99 → **11.44** / 32 |
+| 32 | 414 ms | 243 ms | 198 ms | 191 ms | **114 ms** | **−72%** | 3.89 → **13.85** / 32 |
 
 Per-op backward (batch=32, aggregated over 20 steps): GELU 1774 → 109 ms (−94%, 16× faster). LayerNorm 800 → 39 ms (−95%, 20× faster). Now Linear (1042 ms — already parallelized, just much more numerous) dominates the backward profile. The remaining sequential ops on the critical path are smaller: Add residuals (62 ms), Reshape (55 ms), Embedding (2.5 ms).
 
@@ -229,6 +230,8 @@ Reviewed the 45 patterns extracted from VS 2022 decompilation. Already adopted:
 - ✅ `ArrayPool<T>.Shared.Rent` (pattern 10) → `OverfitPool<T>`
 - ✅ **`[module: SkipLocalsInit]` assembly-wide (pattern 22)** — landed with audit (caught LoRA accumulator bug as side-effect)
 - ✅ **SIMD-batched element-wise via `TensorPrimitives` (pattern 25)** — applied to GELU as the reusable template
+- ✅ **`FrozenDictionary` for load-once lookup tables (pattern 6)** — `BytePairEncoder` `_tokenToId` / `_mergeRanks` / `ByteDecoder` converted from `Dictionary` to `FrozenDictionary`. AOT-clean (zero IL2026/IL3050 from `ToFrozenDictionary`). The merge-rank table is the hottest — `BpeEncode` scans every adjacent pair O(parts²) per word.
+- ✅ **`[CallerArgumentExpression]` in guards (pattern 45)** — `TensorKernelGuards` validators auto-capture argument names; error messages now name the offending span/tensor.
 
 Rejected after evaluation:
 - ❌ `Expression.Compile` / `DynamicMethod` / `ActivatorUtilities.CreateFactory` (patterns 39, 40, 41) — blocked by `BannedSymbols.txt` (no reflection in AOT path)
@@ -241,9 +244,7 @@ Rejected after evaluation:
 
 | Pattern | Where | Effort | Value | When to do it |
 |---|---|---:|---|---|
-| **6 — `FrozenDictionary` for BPE vocab/merges** | `BytePairEncoder` lookup tables | ~30 min | 10-30% faster tokenization | When tokenizer shows up in inference profile |
 | **5 — Segmented arrays (LOH avoidance)** | `TensorStorage<T>` for tensors >85 KB | ~1 day | Removes GC pauses on big-model paths | When LOH symptoms hurt (GPT-2+ scale) |
-| **45 — `[CallerArgumentExpression]` propagation** | `TensorKernelGuards.ValidateSameLength` etc. | ~15 min | Cleaner code, better error messages | Cosmetic — bundle with next guards refactor |
 | **35 — `[PerformanceSensitive]` analyzer hint** | New custom analyzer for "no-alloc hot path" methods | ~few days | Compile-time enforcement of zero-alloc contracts | When team grows beyond one person |
 | **23 — `[InlineArray(N)]` for packed structs** | Maybe GGUF block quant formats | ~hours | Cleaner than `LayoutKind.Explicit` for fixed-size content | Opportunistic — when touching binary IO |
 | **34 — `[ThreadStatic] Stack<T>` per-thread pools** | Hot per-thread scratch in training kernels | ~1 day | Cache-warmer than central pool | When profiler shows pool contention |

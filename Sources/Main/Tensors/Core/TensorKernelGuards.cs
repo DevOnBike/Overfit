@@ -12,22 +12,26 @@ namespace DevOnBike.Overfit.Tensors.Core
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void ValidateSameLength<T>(
             ReadOnlySpan<T> left,
-            ReadOnlySpan<T> right)
+            ReadOnlySpan<T> right,
+            [CallerArgumentExpression(nameof(left))] string leftName = "",
+            [CallerArgumentExpression(nameof(right))] string rightName = "")
         {
             if (left.Length != right.Length)
             {
-                throw new ArgumentException($"Span lengths must match. Left={left.Length}, Right={right.Length}.");
+                throw new ArgumentException($"Span lengths must match: {leftName}.Length={left.Length}, {rightName}.Length={right.Length}.");
             }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void ValidateDestinationLength<T>(
             ReadOnlySpan<T> source,
-            Span<T> destination)
+            Span<T> destination,
+            [CallerArgumentExpression(nameof(source))] string sourceName = "",
+            [CallerArgumentExpression(nameof(destination))] string destinationName = "")
         {
             if (destination.Length < source.Length)
             {
-                throw new ArgumentException($"Destination too short. Source={source.Length}, Destination={destination.Length}.");
+                throw new ArgumentException($"Destination too short: {sourceName}.Length={source.Length}, {destinationName}.Length={destination.Length}.");
             }
         }
 
@@ -35,24 +39,29 @@ namespace DevOnBike.Overfit.Tensors.Core
         public static void ValidateSameLengthAndDestination<T>(
             ReadOnlySpan<T> left,
             ReadOnlySpan<T> right,
-            Span<T> destination)
+            Span<T> destination,
+            [CallerArgumentExpression(nameof(left))] string leftName = "",
+            [CallerArgumentExpression(nameof(right))] string rightName = "",
+            [CallerArgumentExpression(nameof(destination))] string destinationName = "")
         {
-            ValidateSameLength(left, right);
+            ValidateSameLength(left, right, leftName, rightName);
 
             if (destination.Length < left.Length)
             {
-                throw new ArgumentException($"Destination too short. Required={left.Length}, Destination={destination.Length}.");
+                throw new ArgumentException($"Destination too short: required={left.Length} (from {leftName}), {destinationName}.Length={destination.Length}.");
             }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void ValidateInputOutputSpanNonOverlapping<T>(
             ReadOnlySpan<T> input,
-            Span<T> output)
+            Span<T> output,
+            [CallerArgumentExpression(nameof(input))] string inputName = "",
+            [CallerArgumentExpression(nameof(output))] string outputName = "")
         {
             if (input.Overlaps(output, out var elementOffset) && elementOffset != 0)
             {
-                throw new ArgumentException("Input and output spans must not overlap unless they start at the same location.");
+                throw new ArgumentException($"Input and output spans must not overlap unless they start at the same location: {inputName} overlaps {outputName} by {elementOffset} elements.");
             }
         }
 
@@ -60,10 +69,13 @@ namespace DevOnBike.Overfit.Tensors.Core
         public static void ValidateInputOutputSpanNonOverlapping<T>(
             ReadOnlySpan<T> left,
             ReadOnlySpan<T> right,
-            Span<T> output)
+            Span<T> output,
+            [CallerArgumentExpression(nameof(left))] string leftName = "",
+            [CallerArgumentExpression(nameof(right))] string rightName = "",
+            [CallerArgumentExpression(nameof(output))] string outputName = "")
         {
-            ValidateInputOutputSpanNonOverlapping(left, output);
-            ValidateInputOutputSpanNonOverlapping(right, output);
+            ValidateInputOutputSpanNonOverlapping(left, output, leftName, outputName);
+            ValidateInputOutputSpanNonOverlapping(right, output, rightName, outputName);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -76,11 +88,16 @@ namespace DevOnBike.Overfit.Tensors.Core
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static void ValidateSameShape<T>(TensorSpan<T> left, TensorSpan<float> right) where T : unmanaged
+        public static void ValidateSameShape<T>(
+            TensorSpan<T> left,
+            TensorSpan<float> right,
+            [CallerArgumentExpression(nameof(left))] string leftName = "",
+            [CallerArgumentExpression(nameof(right))] string rightName = "")
+            where T : unmanaged
         {
             if (left.Size != right.Size) // W przyszłości można sprawdzać pełny Rank i D0..D3
             {
-                throw new ArgumentException($"Niezgodność kształtów: {left.Shape} vs {right.Shape}.");
+                throw new ArgumentException($"Niezgodność kształtów: {leftName}.Shape={left.Shape} vs {rightName}.Shape={right.Shape}.");
             }
         }
     }

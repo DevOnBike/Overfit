@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Collections.Frozen;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -27,16 +28,24 @@ namespace DevOnBike.Overfit.Tokenization
             RegexOptions.CultureInvariant);
 
         private static readonly string[] ByteEncoder = BuildByteEncoder();
-        private static readonly Dictionary<char, byte> ByteDecoder = BuildByteDecoder(ByteEncoder);
 
-        private readonly Dictionary<string, int> _tokenToId;
+        // FrozenDictionary: built once at class init, looked up per char in
+        // every Decode. ToFrozenDictionary analyzes the keys and picks a
+        // specialized read-optimized layout — slower build, faster lookup.
+        private static readonly FrozenDictionary<char, byte> ByteDecoder = BuildByteDecoder(ByteEncoder);
+
+        // Both lookup tables are load-once / read-many — the BPE merge loop in
+        // BpeEncode scans every adjacent pair O(parts²) times, hammering
+        // _mergeRanks. FrozenDictionary trades a one-time build cost (paid in
+        // LoadFromStrings) for the fastest possible steady-state lookup.
+        private readonly FrozenDictionary<string, int> _tokenToId;
         private readonly string[] _idToToken;
-        private readonly Dictionary<(string A, string B), int> _mergeRanks;
+        private readonly FrozenDictionary<(string A, string B), int> _mergeRanks;
 
         private BytePairEncoder(
-            Dictionary<string, int> tokenToId,
+            FrozenDictionary<string, int> tokenToId,
             string[] idToToken,
-            Dictionary<(string A, string B), int> mergeRanks)
+            FrozenDictionary<(string A, string B), int> mergeRanks)
         {
             _tokenToId = tokenToId;
             _idToToken = idToToken;
@@ -72,10 +81,14 @@ namespace DevOnBike.Overfit.Tokenization
             var idToToken = BuildIdToToken(tokenToId);
             var mergeRanks = ParseMerges(mergesText.Split('\n'));
 
+            // Freeze the mutable build-time dictionaries into read-optimized
+            // FrozenDictionary instances. _tokenToId keeps Ordinal comparison
+            // — GPT-2 token keys are byte-level escaped strings, culture-aware
+            // comparison would be both wrong and slower.
             return new BytePairEncoder(
-                tokenToId,
+                tokenToId.ToFrozenDictionary(StringComparer.Ordinal),
                 idToToken,
-                mergeRanks);
+                mergeRanks.ToFrozenDictionary());
         }
 
         public int[] Encode(
@@ -338,7 +351,7 @@ namespace DevOnBike.Overfit.Tokenization
             return result;
         }
 
-        private static Dictionary<char, byte> BuildByteDecoder(
+        private static FrozenDictionary<char, byte> BuildByteDecoder(
             string[] byteEncoder)
         {
             var result = new Dictionary<char, byte>(byteEncoder.Length);
@@ -353,7 +366,7 @@ namespace DevOnBike.Overfit.Tokenization
                 }
             }
 
-            return result;
+            return result.ToFrozenDictionary();
         }
     }
 }
