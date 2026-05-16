@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Randomization;
+
 namespace DevOnBike.Overfit.Evolutionary.Abstractions
 {
     /// <summary>
@@ -14,11 +16,11 @@ namespace DevOnBike.Overfit.Evolutionary.Abstractions
     /// <remarks>
     ///     Implementations must accept parent spans that alias child spans only when the
     ///     caller explicitly documents it; the safe assumption is that all four spans are
-    ///     disjoint. All operators receive an external <see cref="Random"/> so the caller
-    ///     controls determinism and thread-local RNG state.
+    ///     disjoint. All operators receive an external <see cref="IRandom"/> so the caller
+    ///     controls determinism and RNG state.
     /// </remarks>
     public interface ICrossoverOperator
     {
-        void Crossover(ReadOnlySpan<float> parent1, ReadOnlySpan<float> parent2, Span<float> child1, Span<float> child2, Random rng);
+        void Crossover(ReadOnlySpan<float> parent1, ReadOnlySpan<float> parent2, Span<float> child1, Span<float> child2, IRandom rng);
     }
 }

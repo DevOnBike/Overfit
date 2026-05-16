@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Randomization;
+
 namespace DevOnBike.Overfit.Evolutionary.Abstractions
 {
     /// <summary>
@@ -10,6 +12,6 @@ namespace DevOnBike.Overfit.Evolutionary.Abstractions
     /// </summary>
     public interface IMutationOperator
     {
-        void Mutate(ReadOnlySpan<float> parentGenome, Span<float> childGenome, Random rng);
+        void Mutate(ReadOnlySpan<float> parentGenome, Span<float> childGenome, IRandom rng);
     }
 }

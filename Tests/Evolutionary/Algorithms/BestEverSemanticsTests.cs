@@ -7,6 +7,7 @@ using DevOnBike.Overfit.Evolutionary.Abstractions;
 using DevOnBike.Overfit.Evolutionary.Selection;
 using DevOnBike.Overfit.Evolutionary.Storage;
 using DevOnBike.Overfit.Evolutionary.Strategies;
+using DevOnBike.Overfit.Randomization;
 
 namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
 {
@@ -210,7 +211,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
         /// </summary>
         private sealed class IdentityMutationOperator : IMutationOperator
         {
-            public void Mutate(ReadOnlySpan<float> parentGenome, Span<float> childGenome, Random rng)
+            public void Mutate(ReadOnlySpan<float> parentGenome, Span<float> childGenome, IRandom rng)
             {
                 parentGenome.CopyTo(childGenome);
             }

@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Evolutionary.Abstractions;
+using DevOnBike.Overfit.Randomization;
 
 namespace DevOnBike.Overfit.Evolutionary.Crossover
 {
@@ -86,7 +87,7 @@ namespace DevOnBike.Overfit.Evolutionary.Crossover
             ReadOnlySpan<float> parent2,
             Span<float> child1,
             Span<float> child2,
-            Random rng)
+            IRandom rng)
         {
             if (parent1.Length != parent2.Length ||
                 parent1.Length != child1.Length ||

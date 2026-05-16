@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Evolutionary;
 using DevOnBike.Overfit.Evolutionary.Crossover;
 
 namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
@@ -32,7 +33,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
                 new float[4],
                 new float[4],
                 new float[3],
-                new Random(1)));
+                new SeededXorShiftRandom(1)));
         }
 
         [Fact]
@@ -46,7 +47,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
             var c1 = new float[4];
             var c2 = new float[4];
 
-            op.Crossover(p1, p2, c1, c2, new Random(1));
+            op.Crossover(p1, p2, c1, c2, new SeededXorShiftRandom(1));
 
             Assert.Equal(p1, c1);
             Assert.Equal(p2, c2);
@@ -65,7 +66,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
             float[] p2 = [4f, -1.5f, 0f, -5f];
             var c1 = new float[4];
             var c2 = new float[4];
-            var rng = new Random(42);
+            var rng = new SeededXorShiftRandom(42);
 
             for (var trial = 0; trial < 100; trial++)
             {
@@ -83,24 +84,26 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
         [Fact]
         public void Crossover_WithIdenticalParents_ProducesIdenticalChildren()
         {
-            // If p1 == p2, the SBX formula collapses algebraically to child = p1 regardless
-            // of β: 0.5 · ((1+β)·p + (1−β)·p) = p. The identity holds mathematically, but
-            // the floating-point evaluation accumulates 1–2 ULPs of rounding error through
-            // the (1+β)/(1-β)/·/+ chain, so bit-exact equality is too strict. Assert
-            // numerical equality to 5 decimal digits — tight enough to catch any real bug,
-            // loose enough to tolerate IEEE 754 rounding.
+            // When p1 == p2, SBX is symmetric in the two parents:
+            //   child1 = 0.5 · ((1+β)·p + (1−β)·p)
+            //   child2 = 0.5 · ((1−β)·p + (1+β)·p)
+            // Float addition is commutative, so child1 and child2 are BIT-identical for
+            // any β — and therefore for any RNG. That is the exact, seed-independent
+            // invariant the test name promises. The pair also collapses algebraically to
+            // p, but the (1±β) cancellation loses ULPs that scale with β·|p|, so
+            // child ≈ p only approximately — checked here to a loose tolerance.
             var op = new SbxCrossoverOperator();
 
             float[] p = [1f, -2f, 3.14f, -0.5f, 100f];
             var c1 = new float[p.Length];
             var c2 = new float[p.Length];
 
-            op.Crossover(p, p, c1, c2, new Random(1));
+            op.Crossover(p, p, c1, c2, new SeededXorShiftRandom(1));
 
             for (var i = 0; i < p.Length; i++)
             {
-                Assert.Equal(p[i], c1[i], 5);
-                Assert.Equal(p[i], c2[i], 5);
+                Assert.True(c1[i] == c2[i], $"child1[{i}]={c1[i]} != child2[{i}]={c2[i]}");
+                Assert.Equal(p[i], c1[i], 3);
             }
         }
 
@@ -116,7 +119,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
             float[] p2 = [10f, 10f, 10f, 10f];
             var c1 = new float[4];
             var c2 = new float[4];
-            var rng = new Random(42);
+            var rng = new SeededXorShiftRandom(42);
 
             var totalDrift = 0.0;
             const int trials = 1_000;
@@ -152,7 +155,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
             float[] p2 = [10f, 10f, 10f, 10f];
             var c1 = new float[4];
             var c2 = new float[4];
-            var rng = new Random(42);
+            var rng = new SeededXorShiftRandom(42);
 
             var totalDrift = 0.0;
             const int trials = 1_000;
@@ -184,7 +187,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
             var p2 = new float[64];
             var c1 = new float[64];
             var c2 = new float[64];
-            var rng = new Random(1);
+            var rng = new SeededXorShiftRandom(1);
 
             for (var i = 0; i < 64; i++)
             {

@@ -4,29 +4,32 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Evolutionary.Abstractions;
+using DevOnBike.Overfit.Randomization;
 
 namespace DevOnBike.Overfit.Evolutionary.Mutation
 {
     /// <summary>
     ///     Per-element Gaussian mutation: each gene independently has probability
-    ///     <paramref name="mutationProbability"/> of receiving an additive
-    ///     N(0, sigma^2) perturbation, with the result clamped to
-    ///     [<paramref name="minWeight"/>, <paramref name="maxWeight"/>].
+    ///     <c>mutationProbability</c> of receiving an additive N(0, sigma^2)
+    ///     perturbation, with the result clamped to
+    ///     [<c>minWeight</c>, <c>maxWeight</c>].
     /// </summary>
     /// <remarks>
     ///     <para>
     ///         Standard-normal samples are drawn via the Box-Muller transform with paired-sample
     ///         caching: every pair of uniform draws produces two independent standard-normal
-    ///         samples, and the unused one is retained in a thread-local field and returned on
-    ///         the next call. This halves the number of <see cref="MathF.Sqrt"/>,
-    ///         <see cref="MathF.Log"/>, and <see cref="MathF.SinCos"/> operations compared with
-    ///         the textbook Box-Muller that discards half of each pair.
+    ///         samples, and the unused one is retained and returned on the next draw. This
+    ///         halves the number of <see cref="MathF.Sqrt"/>, <see cref="MathF.Log"/>, and
+    ///         <see cref="MathF.SinCos"/> operations compared with the textbook Box-Muller that
+    ///         discards half of each pair. The spare lives in a local for the duration of a
+    ///         single <see cref="Mutate"/> call and is never carried across calls, so a
+    ///         genome's perturbation depends only on the supplied <see cref="IRandom"/> — which
+    ///         is what lets a run be replayed bit-identically from the RNG state alone.
     ///     </para>
     ///     <para>
-    ///         The spare-sample cache is <see cref="ThreadStaticAttribute">[ThreadStatic]</see>,
-    ///         which makes the operator safe to invoke concurrently from multiple threads —
-    ///         each thread maintains its own half-pair independently. There is no cross-thread
-    ///         synchronization; the operator remains stateless at the instance level.
+    ///         The operator holds no mutable instance or static state, so it is safe to invoke
+    ///         concurrently from multiple threads as long as each call is given its own
+    ///         <see cref="IRandom"/>.
     ///     </para>
     ///     <para>
     ///         Runs entirely in <c>float</c> via <see cref="MathF"/> intrinsics rather than
@@ -37,15 +40,6 @@ namespace DevOnBike.Overfit.Evolutionary.Mutation
     /// </remarks>
     public sealed class GaussianMutationOperator : IMutationOperator
     {
-        // Thread-local Box-Muller spare. The transform produces two independent standard-normal
-        // samples per pair of uniform draws; we return one immediately and stash the other here
-        // for the next call on the same thread. Indexed by thread via [ThreadStatic].
-        [ThreadStatic]
-        private static float _spareGaussian;
-
-        [ThreadStatic]
-        private static bool _hasSpareGaussian;
-
         private readonly float _mutationProbability;
         private readonly float _sigma;
         private readonly float _minWeight;
@@ -78,7 +72,7 @@ namespace DevOnBike.Overfit.Evolutionary.Mutation
         public void Mutate(
             ReadOnlySpan<float> parentGenome,
             Span<float> childGenome,
-            Random rng)
+            IRandom rng)
         {
             if (parentGenome.Length != childGenome.Length)
             {
@@ -93,6 +87,11 @@ namespace DevOnBike.Overfit.Evolutionary.Mutation
             var minWeight = _minWeight;
             var maxWeight = _maxWeight;
 
+            // Box-Muller spare, scoped to this call. Resetting it per call keeps the
+            // genome's randomness a pure function of rng's state on entry.
+            var spareGaussian = 0f;
+            var hasSpareGaussian = false;
+
             for (var i = 0; i < childGenome.Length; i++)
             {
                 // NextSingle returns a float in [0, 1). Cheaper than NextDouble; Box-Muller below
@@ -102,17 +101,18 @@ namespace DevOnBike.Overfit.Evolutionary.Mutation
                     continue;
                 }
 
-                var perturbed = childGenome[i] + NextGaussian(rng) * sigma;
+                var gaussian = NextGaussian(rng, ref spareGaussian, ref hasSpareGaussian);
+                var perturbed = childGenome[i] + (gaussian * sigma);
                 childGenome[i] = Math.Clamp(perturbed, minWeight, maxWeight);
             }
         }
 
-        private static float NextGaussian(Random rng)
+        private static float NextGaussian(IRandom rng, ref float spareGaussian, ref bool hasSpareGaussian)
         {
-            if (_hasSpareGaussian)
+            if (hasSpareGaussian)
             {
-                _hasSpareGaussian = false;
-                return _spareGaussian;
+                hasSpareGaussian = false;
+                return spareGaussian;
             }
 
             // Textbook Box-Muller. Reject u1 == 0 to keep Log finite. The probability of drawing
@@ -133,8 +133,8 @@ namespace DevOnBike.Overfit.Evolutionary.Mutation
             // MathF.SinCos (.NET 7+) computes both values from a single argument reduction.
             var (sin, cos) = MathF.SinCos(angle);
 
-            _spareGaussian = mag * sin;
-            _hasSpareGaussian = true;
+            spareGaussian = mag * sin;
+            hasSpareGaussian = true;
 
             return mag * cos;
         }

@@ -149,6 +149,71 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
             Assert.True(restored.GetBestParameters().IsEmpty);
         }
 
+        [Fact]
+        public void Ga_Checkpoint_RestoresRngState_PostLoadContinuationIsBitIdentical()
+        {
+            // Schema v2 persists the RNG state, so a resumed run is bit-identical, not
+            // merely statistically equivalent. GaussianMutation and truncation selection
+            // both draw from the GA's RNG; if the restored state were wrong the offspring
+            // would diverge from what the original run would have produced.
+            using var original = BuildGa(seed: 1);
+            original.Initialize();
+
+            var pop = new float[original.PopulationSize * original.ParameterCount];
+            var fitness = new float[original.PopulationSize];
+            var warmupRng = new Random(42);
+
+            for (var gen = 0; gen < 5; gen++)
+            {
+                original.Ask(pop);
+                for (var i = 0; i < fitness.Length; i++)
+                {
+                    fitness[i] = warmupRng.NextSingle();
+                }
+
+                original.Tell(fitness);
+            }
+
+            byte[] checkpointBytes;
+            using (var ms = new MemoryStream())
+            {
+                using var bw = new BinaryWriter(ms, Encoding.UTF8, leaveOpen: true);
+                original.Save(bw);
+                checkpointBytes = ms.ToArray();
+            }
+
+            using var restored = BuildGa(seed: 999); // different seed on purpose
+            restored.Initialize();
+
+            using (var ms = new MemoryStream(checkpointBytes))
+            {
+                using var br = new BinaryReader(ms);
+                restored.Load(br);
+            }
+
+            // Drive both forward in lockstep with identical fitness each generation.
+            var continuationRng = new Random(7);
+
+            for (var gen = 0; gen < 3; gen++)
+            {
+                var sharedFitness = new float[original.PopulationSize];
+                for (var i = 0; i < sharedFitness.Length; i++)
+                {
+                    sharedFitness[i] = continuationRng.NextSingle();
+                }
+
+                original.Tell(sharedFitness);
+                restored.Tell(sharedFitness);
+            }
+
+            var popOriginal = new float[pop.Length];
+            var popRestored = new float[pop.Length];
+            original.Ask(popOriginal);
+            restored.Ask(popRestored);
+
+            Assert.Equal(popOriginal, popRestored);
+        }
+
         // ----------------------------------------------------------------------
         // ES
         // ----------------------------------------------------------------------

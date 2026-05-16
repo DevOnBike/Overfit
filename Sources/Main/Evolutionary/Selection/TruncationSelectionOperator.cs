@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Evolutionary.Abstractions;
+using DevOnBike.Overfit.Randomization;
 
 namespace DevOnBike.Overfit.Evolutionary.Selection
 {
@@ -18,7 +19,7 @@ namespace DevOnBike.Overfit.Evolutionary.Selection
     {
         private readonly UniformEliteParentSelector _inner = new();
 
-        public int SelectParent(ReadOnlySpan<int> eliteIndices, Random rng)
+        public int SelectParent(ReadOnlySpan<int> eliteIndices, IRandom rng)
         {
             return _inner.SelectParent(eliteIndices, rng);
         }

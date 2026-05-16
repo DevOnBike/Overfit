@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Evolutionary.Abstractions;
+using DevOnBike.Overfit.Randomization;
 
 namespace DevOnBike.Overfit.Evolutionary.Selection
 {
@@ -53,7 +54,7 @@ namespace DevOnBike.Overfit.Evolutionary.Selection
 
         public int TournamentSize { get; }
 
-        public int SelectParent(ReadOnlySpan<int> eliteIndices, Random rng)
+        public int SelectParent(ReadOnlySpan<int> eliteIndices, IRandom rng)
         {
             if (eliteIndices.Length == 0)
             {

@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Evolutionary;
 using DevOnBike.Overfit.Evolutionary.Selection;
 
 namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
@@ -21,7 +22,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
         {
             var op = new TournamentSelectionOperator(tournamentSize: 3);
 
-            Assert.Throws<ArgumentException>(() => op.SelectParent([], new Random(1)));
+            Assert.Throws<ArgumentException>(() => op.SelectParent([], new SeededXorShiftRandom(1)));
         }
 
         [Fact]
@@ -31,7 +32,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
             // i.e. identical behavior to TruncationSelectionOperator.
             var op = new TournamentSelectionOperator(tournamentSize: 1);
             int[] elites = [10, 20, 30, 40, 50];
-            var rng = new Random(42);
+            var rng = new SeededXorShiftRandom(42);
 
             var counts = new int[5];
             const int trials = 10_000;
@@ -61,7 +62,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
             // often than any other, roughly matching the theoretical hit-rate.
             int[] elites = [10, 20, 30, 40, 50];
             var op = new TournamentSelectionOperator(tournamentSize: elites.Length);
-            var rng = new Random(1);
+            var rng = new SeededXorShiftRandom(1);
 
             var counts = new int[elites.Length];
             const int trials = 10_000;
@@ -93,7 +94,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
             // so the picked elite converges to the best one with overwhelming probability.
             int[] elites = [10, 20, 30, 40, 50];
             var op = new TournamentSelectionOperator(tournamentSize: 100);
-            var rng = new Random(42);
+            var rng = new SeededXorShiftRandom(42);
 
             // P(NOT picking best) = (4/5)^100 ≈ 2e-10. Across 1000 trials, expect zero misses.
             for (var i = 0; i < 1_000; i++)
@@ -126,7 +127,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
         {
             var op = new TournamentSelectionOperator(tournamentSize: 3);
             int[] elites = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-            var rng = new Random(42);
+            var rng = new SeededXorShiftRandom(42);
 
             // Warmup.
             _ = op.SelectParent(elites, rng);
@@ -152,7 +153,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
             int trials,
             int headSize)
         {
-            var rng = new Random(2024);
+            var rng = new SeededXorShiftRandom(2024);
             var head = new HashSet<int>();
             for (var i = 0; i < headSize; i++)
             {

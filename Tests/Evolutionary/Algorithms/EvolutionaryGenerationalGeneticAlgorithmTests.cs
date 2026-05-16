@@ -5,6 +5,7 @@
 
 using DevOnBike.Overfit.Evolutionary.Abstractions;
 using DevOnBike.Overfit.Evolutionary.Strategies;
+using DevOnBike.Overfit.Randomization;
 
 namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
 {
@@ -403,12 +404,12 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
 
         private sealed class FirstEliteSelectionOperator : ISelectionOperator
         {
-            public int SelectParent(ReadOnlySpan<int> eliteIndices, Random rng) => eliteIndices[0];
+            public int SelectParent(ReadOnlySpan<int> eliteIndices, IRandom rng) => eliteIndices[0];
         }
 
         private sealed class CopyMutationOperator : IMutationOperator
         {
-            public void Mutate(ReadOnlySpan<float> parentGenome, Span<float> childGenome, Random rng)
+            public void Mutate(ReadOnlySpan<float> parentGenome, Span<float> childGenome, IRandom rng)
             {
                 parentGenome.CopyTo(childGenome);
             }
@@ -416,7 +417,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
 
         private sealed class AddOneMutationOperator : IMutationOperator
         {
-            public void Mutate(ReadOnlySpan<float> parentGenome, Span<float> childGenome, Random rng)
+            public void Mutate(ReadOnlySpan<float> parentGenome, Span<float> childGenome, IRandom rng)
             {
                 parentGenome.CopyTo(childGenome);
 
@@ -440,7 +441,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
                 ReadOnlySpan<float> parent2,
                 Span<float> child1,
                 Span<float> child2,
-                Random rng)
+                IRandom rng)
             {
                 parent1.CopyTo(child1);
                 parent2.CopyTo(child2);
