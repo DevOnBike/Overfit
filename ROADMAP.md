@@ -46,6 +46,74 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 
 ---
 
+## Active track — Anomaly detector: synthetic-trained base → LoRA fine-tune
+
+**Goal:** train a GPT anomaly model on synthetic K8s metrics, then LoRA-fine-tune
+it on real production metrics. Plan: synthetic base → pull real metrics → LoRA adapt.
+
+### Done this session
+
+- **`OfflineTrainingJob` gradient bug — fixed.** `optimizer.ZeroGrad()` ran
+  *between* `AggregateGradients` and `Step()`, wiping the just-aggregated master
+  gradient → `Step()` applied only AdamW weight decay, so the model never learned
+  (loss merely decayed toward `ln(VocabSize)`). Second bug: worker `Parameter.Grad`
+  never zeroed (`BackwardFromGrad` accumulates) → workers summed gradient over all
+  steps. Fix: removed the misplaced `ZeroGrad`, added per-worker grad zeroing in
+  the `Parallel.For` body. Verified: Quick 500 steps 7.7→1.75 val loss.
+- **Synthetic generator lift.** `Scripts/generate_k8s_metrics.py` rewritten with a
+  shared per-pod AR(1) latent `load` driving cpu/rps/latency/throttle/queue/gc
+  jointly. Old data was independent per-metric Gaussian noise → model hit an
+  entropy floor (~1.08, plateau by step 800). New data has inter-metric correlation
+  + temporal autocorrelation → loss keeps descending. CSV regenerated.
+- **Prometheus parser — fixed.** `PrometheusMetricSource.ParseInstantResponse` and
+  `PrometheusHistoricalSource.ParseRangeResponse` had their value-extraction bodies
+  commented out (original used `EnumerateArray().ToArray()` — LINQ, banned in
+  `Sources/Main`) → both sources silently returned empty lists. Rewrote LINQ-free
+  (indexed `JsonElement`). Added `PrometheusParsingTests` + golden-JSON fixtures
+  under `test_fixtures/prometheus/`.
+- **GPT1 LoRA — Stage 1 (LM head), full loop closed.**
+  - Risk PoC (`LoRAEffectiveWeightInjectionTests`): `graph.Linear` backprops
+    through a *computed* weight node `W_eff = W_frozen + A@B` into A/B; numerically
+    verified; an optimizer step over {A,B} leaves the base bit-identical.
+  - `GPT1Model.LMHeadWeightProvider` — internal per-forward hook (null = production
+    path, zero overhead).
+  - `Gpt1LoRAFineTuner` — trains A/B with the base frozen (`Adam` over {A,B} only).
+    Test: loss 2.26→0.0017, base bit-identical, `.bin` round-trips.
+  - `Gpt1LoRAFile` — shared `.bin` format (magic "LORA", `LanguageModelHead` entry).
+  - `Gpt1LoRAMergeAdapter` — inference-side weight-merge (`Enable`/`Disable`,
+    idempotent, bit-reversible). Test proves the merge is visible to
+    `CachedGpt1ModelAdapter` (the `GptAnomalyDetector` runtime) via the zero-copy
+    `StackWeights._lmHead` ref: cached loss 4.14→0.006 on Enable, exact restore on
+    Disable. No inference-kernel changes.
+
+### Debt found (not yet addressed)
+
+- **Prometheus auth (F3)** — `PrometheusMetricSourceConfig` / `...HistoricalSourceConfig`
+  have no bearer-token / basic-auth field; auth-gated Prometheus/Thanos unreachable.
+- **`MetricTokenizer` binning** — `error_rate`, `gc_pause_ratio`, `cpu_throttle_ratio`
+  use linear `[0,1]` ranges for metrics that live in `[0, 0.05]` → ~95 % of the 64
+  bins unused. Fix = tokenizer range change (log-scale / smaller Max) → needs retrain.
+- **`OfflineTrainingJob` uses `System.Linq`** in `Sources/Main` — contradicts
+  `BannedSymbols.txt` / CLAUDE.md. Compiles today; flag for cleanup.
+- Diagnostics audit (earlier this session): `ArrayPoolEventSource` dead code,
+  ~11 telemetry instruments declared but never recorded, `DiagnosticsRegressionTests`
+  was vacuously green (F1/F4 fixed, F2/F3 outstanding).
+
+### NEXT — resume here (pick one)
+
+- **End-to-end integration test** — one test spanning the whole plan: train base
+  on synthetic → LoRA fine-tune on shifted "production" data → `GptAnomalyDetector`
+  scores with the merged LoRA and flags an injected anomaly.
+- **Stage 2 — LoRA on FFN (W1/W2)** — needs a `TransformerBlock`/FFN hook analogous
+  to `LMHeadWeightProvider`. Stage 3 = attention Q/K/V/O per-head.
+- **Production base training** — `TrainProduction` (10K steps, ~2 h) on the lifted
+  synthetic data → real deployable base model.
+- **Decision pending:** deployment base architecture — Medium (128d/4L, converges
+  fast, ~1.0 loss) vs Production (256d/6L). LoRA targets a fixed architecture, so
+  this gates Stage 2/3.
+
+---
+
 ## Current focus: GPT-2 Small as primary showcase
 
 **Why:** the parity claim ("top-10 overlap 10/10 vs PyTorch, maxAbsDiff 0.000107, 0 B / generated token, KV-cache decode") is already implemented and validated. Productizing this single story end-to-end (defended in CI, demoable in one command, documented honestly) is higher-value than chasing more model families. Qwen / Llama / LoRA / quantization work continues to live in the codebase but is **explicitly deferred** out of the current week's focus.
@@ -108,9 +176,16 @@ Synthetic unit tests already cover the algorithm; this test catches bit-layout r
 
 ### LoRA training
 
-- [ ] Backward pass through Linear / RMSNorm / SwiGLU / attention restricted to adapter parameters (frozen base).
-- [ ] Adam optimizer integration over `LoRAWeight.A` + `LoRAWeight.B` only.
-- [ ] Demo: overfit on 10 instruction pairs, verify adapter steers generation.
+GPT1 LM-head LoRA training **landed** this session — see "Active track" above
+(`Gpt1LoRAFineTuner`: graph-integrated effective-weight injection, `Adam` over
+the LoRA `Parameter`s only, base frozen). Remaining items are the Llama-family
+and broader-module scope:
+
+- [x] Backward restricted to adapter parameters with frozen base — GPT1 LM head (Stage 1).
+- [x] Adam over LoRA factors only — GPT1.
+- [ ] Extend to FFN (Stage 2) and attention Q/K/V/O (Stage 3) — GPT1.
+- [ ] Backward through Linear / RMSNorm / SwiGLU / attention for the Llama family.
+- [ ] Demo: overfit on a few samples, verify the adapter steers generation.
 
 Opens "fine-tune LLM locally in pure C#" story. Major scope.
 

@@ -103,6 +103,17 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public bool IsTraining => _isTraining;
 
+        /// <summary>
+        /// Optional per-forward override for the LM-head weight node. When set,
+        /// <see cref="LMHeadForward"/> uses the node returned by this delegate
+        /// instead of the standard <see cref="LMHead"/> parameter.
+        ///
+        /// This is the LoRA fine-tune hook (see Gpt1LoRAFineTuner): the delegate
+        /// supplies W_eff = LMHead(frozen) + A@B built on the current graph.
+        /// Null on the production path — standard LM head, zero overhead.
+        /// </summary>
+        internal Func<ComputationGraph, AutogradNode>? LMHeadWeightProvider { get; set; }
+
         public void Train()
         {
             _isTraining = true;
@@ -496,11 +507,21 @@ namespace DevOnBike.Overfit.DeepLearning
                 new TensorShape(vocabSize),
                 clearMemory: true);
 
-            _lmHeadNode ??= LMHead.AsNode();
+            AutogradNode headWeight;
+
+            if (LMHeadWeightProvider is not null)
+            {
+                headWeight = LMHeadWeightProvider(graph);
+            }
+            else
+            {
+                _lmHeadNode ??= LMHead.AsNode();
+                headWeight = _lmHeadNode;
+            }
 
             var flatLogits = graph.Linear(
                 flat,
-                _lmHeadNode,
+                headWeight,
                 bias);
 
             return graph.Reshape(
