@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Intrinsics;
 using DevOnBike.Overfit.Runtime;
@@ -41,13 +42,13 @@ namespace DevOnBike.Overfit.Ops
                 clearMemory: true);
 
             // The convolution workspace holds per-worker im2col scratch buffers that the
-            // Parallel.For below writes into. Normally it lives on the graph and is reused
+            // parallel pass below writes into. Normally it lives on the graph and is reused
             // across all conv ops in a training step (zero per-call allocation). For
             // inference paths that pass graph=null (e.g. a lightweight forward over a
             // single image without recording a tape), we create a local workspace for the
             // duration of the call. The local path allocates but isn't on the training
             // hot path; it's the cost of decoupling inference from graph state.
-            Conv2DWorkspace? localWorkspace = null;
+            Conv2DWorkspace localWorkspace = null;
             Conv2DWorkspace workspace;
 
             if (graph is not null)
@@ -57,9 +58,9 @@ namespace DevOnBike.Overfit.Ops
             else
             {
                 localWorkspace = new Conv2DWorkspace();
-                var workerCount = Math.Max(1, Math.Min(OverfitParallel.MaxDegreeOfParallelism, Math.Max(1, batchSize)));
+                var localWorkers = Math.Max(1, Math.Min(OverfitParallel.MaxDegreeOfParallelism, Math.Max(1, batchSize)));
                 localWorkspace.Ensure(
-                    workerCount,
+                    localWorkers,
                     colLength: kSqInC * spatialOut,
                     partialWeightGradientLength: outC * kSqInC);
                 workspace = localWorkspace;
@@ -69,45 +70,39 @@ namespace DevOnBike.Overfit.Ops
             {
                 var workerCount = workspace.WorkerCount;
 
-                Parallel.For(0, workerCount, OverfitParallel.Options, workerId =>
+                // Each worker owns a private col-buffer slice and strides the batch, so the
+                // chunks are independent. Pin the data + the contiguous col buffer once and
+                // dispatch through OverfitParallelFor (zero-allocation, no TPL closure).
+                unsafe
                 {
-                    var col = workspace.GetColBuffer(workerId);
-
-                    for (var n = workerId; n < batchSize; n += workerCount)
+                    fixed (float* inputPtr = input.DataView.AsReadOnlySpan(),
+                                  weightsPtr = weights.DataView.AsReadOnlySpan(),
+                                  outputPtr = outputNode.DataView.AsSpan(),
+                                  colPtr = workspace.ColBuffer)
                     {
-                        var inputSlice = input
-                            .DataView
-                            .AsReadOnlySpan()
-                            .Slice(n * inputPlaneLength, inputPlaneLength);
+                        var ctx = new Conv2DForwardCtx
+                        {
+                            Input = inputPtr,
+                            Weights = weightsPtr,
+                            Output = outputPtr,
+                            Col = colPtr,
+                            BatchSize = batchSize,
+                            WorkerCount = workerCount,
+                            ColLength = workspace.ColLength,
+                            InC = inC,
+                            H = h,
+                            W = w,
+                            K = k,
+                            KSqInC = kSqInC,
+                            SpatialOut = spatialOut,
+                            OutC = outC,
+                            InputPlaneLength = inputPlaneLength,
+                            OutputPlaneLength = outputPlaneLength,
+                        };
 
-                        var weightsSpan = weights
-                            .DataView
-                            .AsReadOnlySpan();
-
-                        var outputSlice = outputNode
-                            .DataView
-                            .AsSpan()
-                            .Slice(n * outputPlaneLength, outputPlaneLength);
-
-                        Im2Col(
-                            inputSlice,
-                            inC,
-                            h,
-                            w,
-                            k,
-                            1,
-                            0,
-                            col);
-
-                        MatMulRawSeq(
-                            weightsSpan,
-                            col,
-                            outC,
-                            kSqInC,
-                            spatialOut,
-                            outputSlice);
+                        OverfitParallelFor.For(0, workerCount, &Conv2DForwardChunk, &ctx);
                     }
-                });
+                }
             }
             finally
             {
@@ -145,7 +140,6 @@ namespace DevOnBike.Overfit.Ops
             var kSqInC = k * k * inC;
             var inputPlaneLength = inC * h * w;
             var outputPlaneLength = outC * spatialOut;
-            var partialWeightGradientLength = outC * kSqInC;
 
             var workspace = graph.GetConv2DWorkspace(batchSize, inC, outC, h, w, k);
             var workerCount = workspace.WorkerCount;
@@ -155,90 +149,197 @@ namespace DevOnBike.Overfit.Ops
                 workspace.ClearPartialWeightGradients();
             }
 
-            Parallel.For(0, workerCount, OverfitParallel.Options, workerId =>
+            // When input gradients aren't needed there is no grad buffer to pin; an empty
+            // span pins to a harmless pointer the chunk body never dereferences (guarded
+            // by InputRequiresGrad).
+            var inputGradSpan = input.RequiresGrad
+                ? input.GradView.AsSpan()
+                : Span<float>.Empty;
+
+            unsafe
             {
-                var col = workspace.GetColBuffer(workerId);
-                var dCol = workspace.GetDColBuffer(workerId);
-                var partialWeightGrad = workspace.GetPartialWeightGradient(workerId);
-
-                for (var n = workerId; n < batchSize; n += workerCount)
+                fixed (float* inputPtr = input.DataView.AsReadOnlySpan(),
+                              inputGradPtr = inputGradSpan,
+                              weightsPtr = weights.DataView.AsReadOnlySpan(),
+                              outputGradPtr = output.GradView.AsReadOnlySpan(),
+                              colPtr = workspace.ColBuffer,
+                              dColPtr = workspace.DColBuffer,
+                              partialWeightGradPtr = workspace.PartialWeightGradientBuffer)
                 {
-                    var inputSlice = input
-                        .DataView
-                        .AsReadOnlySpan()
-                        .Slice(n * inputPlaneLength, inputPlaneLength);
+                    var ctx = new Conv2DBackwardCtx
+                    {
+                        Input = inputPtr,
+                        InputGrad = inputGradPtr,
+                        Weights = weightsPtr,
+                        OutputGrad = outputGradPtr,
+                        Col = colPtr,
+                        DCol = dColPtr,
+                        PartialWeightGrad = partialWeightGradPtr,
+                        BatchSize = batchSize,
+                        WorkerCount = workerCount,
+                        ColLength = workspace.ColLength,
+                        PartialWeightGradLength = workspace.PartialWeightGradientLength,
+                        InC = inC,
+                        H = h,
+                        W = w,
+                        K = k,
+                        KSqInC = kSqInC,
+                        SpatialOut = spatialOut,
+                        OutC = outC,
+                        InputPlaneLength = inputPlaneLength,
+                        OutputPlaneLength = outputPlaneLength,
+                        InputRequiresGrad = input.RequiresGrad ? 1 : 0,
+                        WeightsRequiresGrad = weights.RequiresGrad ? 1 : 0,
+                    };
 
-                    Im2Col(
-                        inputSlice,
-                        inC,
-                        h,
-                        w,
-                        k,
-                        1,
-                        0,
-                        col);
+                    OverfitParallelFor.For(0, workerCount, &Conv2DBackwardChunk, &ctx);
+                }
+            }
 
-                    var outGradSlice = output
-                        .GradView
-                        .AsReadOnlySpan()
-                        .Slice(n * outputPlaneLength, outputPlaneLength);
+            if (weights.RequiresGrad)
+            {
+                // Reduce the per-worker partial weight gradients into the real buffer.
+                var weightsGrad = weights.GradView.AsSpan();
 
-                    if (weights.RequiresGrad)
+                for (var workerId = 0; workerId < workerCount; workerId++)
+                {
+                    var partial = workspace.GetPartialWeightGradient(workerId);
+                    Simd.Add(weightsGrad, partial, weightsGrad);
+                }
+            }
+        }
+
+        // ── Conv2D forward — per-worker chunk dispatch ───────────────────────
+
+        private unsafe struct Conv2DForwardCtx
+        {
+            public float* Input;
+            public float* Weights;
+            public float* Output;
+            public float* Col;
+            public int BatchSize;
+            public int WorkerCount;
+            public int ColLength;
+            public int InC;
+            public int H;
+            public int W;
+            public int K;
+            public int KSqInC;
+            public int SpatialOut;
+            public int OutC;
+            public int InputPlaneLength;
+            public int OutputPlaneLength;
+        }
+
+        private static unsafe void Conv2DForwardChunk(int chunkStart, int chunkEnd, void* contextPtr)
+        {
+            ref var ctx = ref Unsafe.AsRef<Conv2DForwardCtx>(contextPtr);
+
+            var weights = new ReadOnlySpan<float>(ctx.Weights, ctx.OutC * ctx.KSqInC);
+
+            for (var workerId = chunkStart; workerId < chunkEnd; workerId++)
+            {
+                var col = new Span<float>(ctx.Col + ((long)workerId * ctx.ColLength), ctx.ColLength);
+
+                for (var n = workerId; n < ctx.BatchSize; n += ctx.WorkerCount)
+                {
+                    var inputSlice = new ReadOnlySpan<float>(
+                        ctx.Input + ((long)n * ctx.InputPlaneLength),
+                        ctx.InputPlaneLength);
+
+                    var outputSlice = new Span<float>(
+                        ctx.Output + ((long)n * ctx.OutputPlaneLength),
+                        ctx.OutputPlaneLength);
+
+                    Im2Col(inputSlice, ctx.InC, ctx.H, ctx.W, ctx.K, 1, 0, col);
+                    MatMulRawSeq(weights, col, ctx.OutC, ctx.KSqInC, ctx.SpatialOut, outputSlice);
+                }
+            }
+        }
+
+        // ── Conv2D backward — per-worker chunk dispatch ──────────────────────
+
+        private unsafe struct Conv2DBackwardCtx
+        {
+            public float* Input;
+            public float* InputGrad;
+            public float* Weights;
+            public float* OutputGrad;
+            public float* Col;
+            public float* DCol;
+            public float* PartialWeightGrad;
+            public int BatchSize;
+            public int WorkerCount;
+            public int ColLength;
+            public int PartialWeightGradLength;
+            public int InC;
+            public int H;
+            public int W;
+            public int K;
+            public int KSqInC;
+            public int SpatialOut;
+            public int OutC;
+            public int InputPlaneLength;
+            public int OutputPlaneLength;
+            public int InputRequiresGrad;
+            public int WeightsRequiresGrad;
+        }
+
+        private static unsafe void Conv2DBackwardChunk(int chunkStart, int chunkEnd, void* contextPtr)
+        {
+            ref var ctx = ref Unsafe.AsRef<Conv2DBackwardCtx>(contextPtr);
+
+            var weights = new ReadOnlySpan<float>(ctx.Weights, ctx.OutC * ctx.KSqInC);
+
+            for (var workerId = chunkStart; workerId < chunkEnd; workerId++)
+            {
+                var col = new Span<float>(ctx.Col + ((long)workerId * ctx.ColLength), ctx.ColLength);
+                var dCol = new Span<float>(ctx.DCol + ((long)workerId * ctx.ColLength), ctx.ColLength);
+                var partialWeightGrad = new Span<float>(
+                    ctx.PartialWeightGrad + ((long)workerId * ctx.PartialWeightGradLength),
+                    ctx.PartialWeightGradLength);
+
+                for (var n = workerId; n < ctx.BatchSize; n += ctx.WorkerCount)
+                {
+                    var inputSlice = new ReadOnlySpan<float>(
+                        ctx.Input + ((long)n * ctx.InputPlaneLength),
+                        ctx.InputPlaneLength);
+
+                    Im2Col(inputSlice, ctx.InC, ctx.H, ctx.W, ctx.K, 1, 0, col);
+
+                    var outGradSlice = new ReadOnlySpan<float>(
+                        ctx.OutputGrad + ((long)n * ctx.OutputPlaneLength),
+                        ctx.OutputPlaneLength);
+
+                    if (ctx.WeightsRequiresGrad != 0)
                     {
                         MatMulAdd_A_BT_Seq(
                             outGradSlice,
                             col,
                             partialWeightGrad,
-                            outC,
-                            spatialOut,
-                            kSqInC);
+                            ctx.OutC,
+                            ctx.SpatialOut,
+                            ctx.KSqInC);
                     }
 
-                    if (input.RequiresGrad)
+                    if (ctx.InputRequiresGrad != 0)
                     {
                         dCol.Clear();
 
-                        var weightsSpan = weights
-                            .DataView
-                            .AsReadOnlySpan();
-
                         MatMulAdd_AT_B_Seq(
-                            weightsSpan,
+                            weights,
                             outGradSlice,
                             dCol,
-                            outC,
-                            kSqInC,
-                            spatialOut);
+                            ctx.OutC,
+                            ctx.KSqInC,
+                            ctx.SpatialOut);
 
-                        var inputGradSlice = input
-                            .GradView
-                            .AsSpan()
-                            .Slice(n * inputPlaneLength, inputPlaneLength);
+                        var inputGradSlice = new Span<float>(
+                            ctx.InputGrad + ((long)n * ctx.InputPlaneLength),
+                            ctx.InputPlaneLength);
 
-                        Col2Im(
-                            dCol,
-                            inC,
-                            h,
-                            w,
-                            k,
-                            1,
-                            0,
-                            inputGradSlice);
+                        Col2Im(dCol, ctx.InC, ctx.H, ctx.W, ctx.K, 1, 0, inputGradSlice);
                     }
-                }
-            });
-
-            if (weights.RequiresGrad)
-            {
-                var weightsGrad = weights.GradView.AsSpan();
-
-                for (var workerId = 0; workerId < workerCount; workerId++)
-                {
-                    var partialWeightGrad = workspace
-                        .GetPartialWeightGradient(workerId)
-                        .Slice(0, partialWeightGradientLength);
-
-                    Simd.Add(weightsGrad, partialWeightGrad, weightsGrad);
                 }
             }
         }
