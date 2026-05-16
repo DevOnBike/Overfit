@@ -1,0 +1,45 @@
+{
+  "status": "success",
+  "data": {
+    "resultType": "matrix",
+    "result": [
+      {
+        "metric": {
+          "__name__": "container_cpu_usage_seconds_total",
+          "pod": "api-gateway-7d9f",
+          "dc": "east"
+        },
+        "values": [
+          [ 1736500000, "0.40" ],
+          [ 1736500015, "0.42" ],
+          [ 1736500030, "0.45" ]
+        ]
+      },
+      {
+        "metric": {
+          "pod": "scheduler-111",
+          "dc": "east"
+        },
+        "values": [
+          [ 1736500000, "0.05" ],
+          [ 1736500015, "0.06" ]
+        ]
+      },
+      {
+        "metric": {
+          "dc": "east"
+        },
+        "values": [
+          [ 1736500000, "9.9" ]
+        ]
+      },
+      {
+        "metric": {
+          "pod": "empty-pod-000",
+          "dc": "east"
+        },
+        "values": []
+      }
+    ]
+  }
+}

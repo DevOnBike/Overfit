@@ -8,11 +8,20 @@ Columns match HistoricalCsvLoader.ExpectedHeaders exactly:
   latency_p95_ms, latency_p99_ms, requests_per_second,
   error_rate, gc_gen2_heap_bytes, gc_pause_ratio, thread_pool_queue_length
 
+Load model (the reason normal traffic is *learnable*, not just IID noise):
+  Each pod carries a latent activity level `load` — an AR(1) mean-reverting
+  process pulled toward the diurnal day-factor, plus rare traffic bursts.
+  cpu, throttle, requests, latency, threadpool queue and gc all read from the
+  same `load`, so normal operation has genuine inter-metric correlation AND
+  temporal autocorrelation. A next-token model can exploit both; with pure
+  per-metric Gaussian noise (the previous design) it could only learn the
+  marginal means and hit an entropy floor immediately.
+
 Anomalies injected (labelled for validation):
   - OOM + restart cycle (worker-processor)
   - Latency spike / slow DB query (db-proxy, 2x)
   - CPU runaway (scheduler, 2x)
-  - Cascade failure: ml-inference crash → api-gateway error surge
+  - Cascade failure: ml-inference crash -> api-gateway error surge
   - Memory leak (worker-processor)
 
 Usage:
@@ -70,7 +79,22 @@ def main():
             return 0.3 + 0.7 * math.sin(math.pi * (h - 8) / 12)
         return 0.15
 
-    states = {p: {"mem_leak": 0.0, "restart_count": 0} for p in PODS}
+    # AR(1) latent load: mean-reverts toward the diurnal target with momentum
+    # (time constant ~25 steps = ~6 min at 15s), plus rare traffic bursts.
+    LOAD_REVERSION = 0.05
+    LOAD_DRIFT     = 0.02
+    BURST_CHANCE   = 0.0015
+
+    def advance_load(state, target):
+        load = state["load"]
+        load += LOAD_REVERSION * (target - load) + rng.gauss(0, LOAD_DRIFT)
+        if rng.random() < BURST_CHANCE:
+            load += rng.uniform(0.15, 0.45)
+        load = clamp(load, 0.05, 1.5)
+        state["load"] = load
+        return load
+
+    states = {p: {"mem_leak": 0.0, "restart_count": 0, "load": 0.5} for p in PODS}
 
     headers = [
         "timestamp", "pod_name",
@@ -96,80 +120,84 @@ def main():
                 atype, prog = in_anomaly(step, pod)
                 s = states[pod]
 
-                # --- Baseline ---
+                # Shared latent activity level — the common driver behind
+                # cpu / rps / latency / throttle / queue / gc.
+                load = advance_load(s, df)
+
+                # --- Baseline (all activity metrics read from `load`) ---
                 if pod == "api-gateway":
-                    cpu = clamp(0.15*df + noise(0.03), 0.02, 0.9)
-                    throttle = clamp(0.02*df + noise(0.005), 0, 0.5)
-                    mem = clamp(300e6 + noise(20e6), 200e6, 800e6)
+                    cpu = clamp(0.16*load + noise(0.015), 0.02, 0.9)
+                    throttle = clamp(0.03*load*load + noise(0.004), 0, 0.5)
+                    mem = clamp(300e6 + 60e6*load + noise(10e6), 200e6, 800e6)
                     oom = 0.0
-                    p50 = clamp(12 + noise(2), 5, 200)
+                    p50 = clamp(9 + 9*load + noise(1.2), 5, 200)
                     p95 = p50 * clamp(2.5 + noise(0.3), 1.5, 5)
                     p99 = p95 * clamp(2.0 + noise(0.3), 1.2, 4)
-                    rps = clamp(300*df + noise(30), 10, 1000)
-                    err = clamp(0.002 + noise(0.001), 0, 0.05)
-                    gc_heap = clamp(50e6 + noise(5e6), 30e6, 200e6)
-                    gc_pause = clamp(0.005 + noise(0.002), 0, 0.05)
-                    tpq = clamp(8 + noise(3), 0, 100)
+                    rps = clamp(320*load + noise(15), 10, 1000)
+                    err = clamp(0.0015 + 0.004*load + noise(0.0008), 0, 0.05)
+                    gc_heap = clamp(50e6 + 30e6*load + noise(4e6), 30e6, 200e6)
+                    gc_pause = clamp(0.004 + 0.006*load + noise(0.0015), 0, 0.05)
+                    tpq = clamp(4 + 16*load + noise(2), 0, 100)
 
                 elif pod == "worker-processor":
                     s["mem_leak"] += rng.uniform(0, 0.003)
                     if s["mem_leak"] > 0.4:
                         s["mem_leak"] = 0.0
                         s["restart_count"] += 1
-                    cpu = clamp(0.30*df + noise(0.05), 0.05, 0.8)
-                    throttle = clamp(0.05*df + noise(0.01), 0, 0.6)
-                    mem = clamp((350e6 + s["mem_leak"]*1e9) + noise(20e6), 200e6, 8e9)
+                    cpu = clamp(0.32*load + noise(0.025), 0.05, 0.8)
+                    throttle = clamp(0.06*load*load + noise(0.008), 0, 0.6)
+                    mem = clamp((350e6 + s["mem_leak"]*1e9) + 50e6*load + noise(15e6), 200e6, 8e9)
                     oom = 0.0
-                    p50 = clamp(40 + noise(8), 10, 500)
+                    p50 = clamp(30 + 35*load + noise(5), 10, 500)
                     p95 = p50 * clamp(2.0 + noise(0.3), 1.2, 4)
                     p99 = p95 * clamp(2.0 + noise(0.3), 1.2, 4)
-                    rps = clamp(80*df + noise(10), 5, 200)
-                    err = clamp(0.01 + noise(0.003), 0, 0.15)
-                    gc_heap = clamp(80e6 + s["mem_leak"]*500e6 + noise(10e6), 40e6, 4e9)
-                    gc_pause = clamp(0.01 + s["mem_leak"]*0.1 + noise(0.003), 0, 0.5)
-                    tpq = clamp(15 + noise(5), 0, 200)
+                    rps = clamp(85*load + noise(8), 5, 200)
+                    err = clamp(0.008 + 0.012*load + noise(0.0025), 0, 0.15)
+                    gc_heap = clamp(80e6 + s["mem_leak"]*500e6 + 40e6*load + noise(8e6), 40e6, 4e9)
+                    gc_pause = clamp(0.008 + s["mem_leak"]*0.1 + 0.008*load + noise(0.0025), 0, 0.5)
+                    tpq = clamp(8 + 24*load + noise(4), 0, 200)
 
                 elif pod == "db-proxy":
-                    cpu = clamp(0.08 + noise(0.015), 0.02, 0.4)
-                    throttle = clamp(0.01 + noise(0.003), 0, 0.2)
-                    mem = clamp(600e6 + noise(30e6), 500e6, 800e6)
+                    cpu = clamp(0.06 + 0.12*load + noise(0.012), 0.02, 0.4)
+                    throttle = clamp(0.01*load*load + noise(0.0025), 0, 0.2)
+                    mem = clamp(600e6 + noise(25e6), 500e6, 800e6)
                     oom = 0.0
-                    p50 = clamp(8 + noise(1.5), 3, 100)
+                    p50 = clamp(5 + 7*load + noise(1.2), 3, 100)
                     p95 = p50 * clamp(2.0 + noise(0.2), 1.5, 4)
                     p99 = p95 * clamp(2.0 + noise(0.2), 1.3, 4)
-                    rps = clamp(600*df + noise(50), 50, 2000)
-                    err = clamp(0.001 + noise(0.0005), 0, 0.03)
-                    gc_heap = clamp(30e6 + noise(5e6), 20e6, 80e6)
-                    gc_pause = clamp(0.003 + noise(0.001), 0, 0.02)
-                    tpq = clamp(5 + noise(2), 0, 50)
+                    rps = clamp(650*load + noise(40), 50, 2000)
+                    err = clamp(0.0008 + 0.002*load + noise(0.0004), 0, 0.03)
+                    gc_heap = clamp(30e6 + noise(4e6), 20e6, 80e6)
+                    gc_pause = clamp(0.0025 + 0.003*load + noise(0.0008), 0, 0.02)
+                    tpq = clamp(2 + 10*load + noise(2), 0, 50)
 
                 elif pod == "scheduler":
-                    cpu = clamp(0.05 + noise(0.02), 0.02, 0.3)
-                    throttle = clamp(0.005 + noise(0.002), 0, 0.1)
-                    mem = clamp(280e6 + noise(15e6), 200e6, 500e6)
+                    cpu = clamp(0.04 + 0.08*load + noise(0.015), 0.02, 0.3)
+                    throttle = clamp(0.005*load + noise(0.0015), 0, 0.1)
+                    mem = clamp(280e6 + noise(12e6), 200e6, 500e6)
                     oom = 0.0
-                    p50 = clamp(5 + noise(1), 2, 50)
+                    p50 = clamp(3 + 5*load + noise(0.8), 2, 50)
                     p95 = p50 * clamp(1.5 + noise(0.2), 1.2, 3)
                     p99 = p95 * clamp(1.5 + noise(0.2), 1.1, 3)
-                    rps = clamp(25*df + noise(5), 2, 100)
-                    err = clamp(0.0005 + noise(0.0002), 0, 0.01)
-                    gc_heap = clamp(20e6 + noise(3e6), 10e6, 60e6)
-                    gc_pause = clamp(0.002 + noise(0.001), 0, 0.01)
-                    tpq = clamp(3 + noise(1), 0, 30)
+                    rps = clamp(28*load + noise(4), 2, 100)
+                    err = clamp(0.0004 + 0.0006*load + noise(0.0002), 0, 0.01)
+                    gc_heap = clamp(20e6 + noise(2.5e6), 10e6, 60e6)
+                    gc_pause = clamp(0.0015 + 0.002*load + noise(0.0008), 0, 0.01)
+                    tpq = clamp(1 + 6*load + noise(1), 0, 30)
 
                 elif pod == "ml-inference":
-                    cpu = clamp(0.55*df + noise(0.07), 0.2, 0.95)
-                    throttle = clamp(0.1*df + noise(0.02), 0, 0.7)
-                    mem = clamp(6e9 + noise(200e6), 4e9, 15e9)
+                    cpu = clamp(0.35 + 0.45*load + noise(0.04), 0.2, 0.95)
+                    throttle = clamp(0.12*load*load + noise(0.015), 0, 0.7)
+                    mem = clamp(6e9 + 1e9*load + noise(150e6), 4e9, 15e9)
                     oom = 0.0
-                    p50 = clamp(80 + noise(15), 40, 500)
+                    p50 = clamp(60 + 50*load + noise(12), 40, 500)
                     p95 = p50 * clamp(2.5 + noise(0.3), 1.5, 5)
                     p99 = p95 * clamp(2.0 + noise(0.3), 1.2, 4)
-                    rps = clamp(25*df + noise(5), 2, 100)
-                    err = clamp(0.005 + noise(0.002), 0, 0.05)
-                    gc_heap = clamp(500e6 + noise(50e6), 200e6, 3e9)
-                    gc_pause = clamp(0.02 + noise(0.005), 0, 0.15)
-                    tpq = clamp(20 + noise(5), 5, 100)
+                    rps = clamp(28*load + noise(4), 2, 100)
+                    err = clamp(0.004 + 0.005*load + noise(0.0015), 0, 0.05)
+                    gc_heap = clamp(400e6 + 300e6*load + noise(40e6), 200e6, 3e9)
+                    gc_pause = clamp(0.015 + 0.015*load + noise(0.004), 0, 0.15)
+                    tpq = clamp(12 + 26*load + noise(5), 5, 100)
 
                 # --- Anomaly overlays ---
                 if atype == "oom":
