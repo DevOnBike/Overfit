@@ -31,7 +31,6 @@ namespace Benchmarks
     [Config(typeof(BenchmarkConfig))]
     public class Gpt2KvCacheBenchmark : IDisposable
     {
-        private const string CheckpointPath = "D:\\Overfit\\Tests\\test_fixtures\\gpt2_small.bin";
         private const int PromptLength = 8;
 
         private GPT1Model _model = null!;
@@ -49,17 +48,14 @@ namespace Benchmarks
         [GlobalSetup]
         public void Setup()
         {
-            if (!File.Exists(CheckpointPath))
-            {
-                throw new FileNotFoundException(
-                    $"GPT-2 checkpoint not found: {CheckpointPath}\n" +
-                    "Run: python3 Scripts/convert_gpt2.py --size small --out test_fixtures/");
-            }
+            // Env-aware fixture resolution (OVERFIT_GPT2_DIR → c:\gpt2 →
+            // test_fixtures/). Throws an actionable error if none exist.
+            var checkpointPath = BenchmarkModelPaths.ResolveGpt2SmallBinary();
 
             _model = new GPT1Model(Gpt2Config.Small);
             _model.Eval();
 
-            using var fs = File.OpenRead(CheckpointPath);
+            using var fs = File.OpenRead(checkpointPath);
             using var br = new BinaryReader(fs);
             _model.Load(br);
 

@@ -42,8 +42,6 @@ namespace Benchmarks
     [MemoryDiagnoser]
     public class Gpt2TokensPerSecondBenchmark : IDisposable
     {
-        private const string CheckpointPath = "test_fixtures/gpt2_small.bin";
-
         // "The future of software development is" — GPT-2 BPE token IDs
         private static readonly int[] Prompt = [464, 2003, 286, 3788, 2478, 318];
 
@@ -61,17 +59,14 @@ namespace Benchmarks
         [GlobalSetup]
         public void Setup()
         {
-            if (!File.Exists(CheckpointPath))
-            {
-                throw new FileNotFoundException(
-                $"GPT-2 checkpoint not found at '{CheckpointPath}'. " +
-                "Run: python3 Scripts/convert_gpt2.py --size small --out test_fixtures/");
-            }
+            // Env-aware fixture resolution (OVERFIT_GPT2_DIR → c:\gpt2 →
+            // test_fixtures/). Throws an actionable error if none exist.
+            var checkpointPath = BenchmarkModelPaths.ResolveGpt2SmallBinary();
 
             _model = new GPT1Model(Gpt2Config.Small);
             _model.Eval();
 
-            using var fs = File.OpenRead(CheckpointPath);
+            using var fs = File.OpenRead(checkpointPath);
             using var br = new BinaryReader(fs);
             _model.Load(br);
 

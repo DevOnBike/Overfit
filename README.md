@@ -162,7 +162,7 @@ for (var batch = 0; batch < batches; batch++)
 
 ## Benchmark snapshot
 
-Machine: AMD Ryzen 9 9950X3D · Windows 11 25H2 · .NET 10.0.7 · BenchmarkDotNet 0.15.8
+Machine: AMD Ryzen 9 9950X3D · Windows 11 25H2 · .NET 10.0.8 · BenchmarkDotNet 0.15.8
 
 ### GPT-1 training step — parallel runtime sprint
 
@@ -184,30 +184,45 @@ Drivers:
 - **`LinearKernels.BackwardInput` / `AccumulateWeightGrad`** — migrated from `Parallel.For` to `OverfitParallelFor`.
 - **`[module: SkipLocalsInit]`** — assembly-wide; elides per-frame zero-init on 21+ `stackalloc` sites.
 
+**Where this lands vs PyTorch CPU.** The same training step in PyTorch 2.11 (CPU,
+MKL, 16 threads) takes 17.9 / 29.1 / 52.8 ms at batch 8 / 16 / 32. PyTorch is
+still **~2.2–3.6× faster** — its GEMM is Intel MKL/oneDNN, decades of hand-tuned
+AVX-512 assembly that a pure-C# kernel does not out-run. What the parallel sprint
+did is **close the gap from ~7–8× to ~2.2–3.6×** (pre-sprint Overfit was
+126 / 217 / 414 ms). Overfit's axis is pure-managed, zero-allocation,
+Native-AOT-compatible execution with no native or Python dependency — not raw
+GEMM throughput. Reproduce the comparison:
+`python Sources/Benchmark/Helpers/benchmark_pytorch_gpt1_training.py`.
+
 ### Single inference — Overfit vs ONNX Runtime
 
 | Method | Mean | Allocated | vs ONNX Runtime |
 |--------|-----:|----------:|----------------:|
-| **Overfit `InferenceEngine`** | **201.6 ns** | **0 B** | **9.2× faster** |
-| ONNX Runtime (pre-allocated) | 1 853 ns | 224 B | baseline |
-| ONNX Runtime (standard) | 3 369 ns | 952 B | 0.55× |
+| **Overfit `InferenceEngine`** | **250.7 ns** | **0 B** | **7.6× faster** |
+| ONNX Runtime (pre-allocated) | 1 899 ns | 224 B | baseline |
+| ONNX Runtime (standard) | 3 388 ns | 952 B | 0.56× |
 
-Model: Linear(784→10). Overfit is **9.2× faster** than ONNX Runtime pre-allocated path, **16.7× faster** than standard path, with zero managed allocations.
+Model: Linear(784→10). Overfit is **7.6× faster** than ONNX Runtime pre-allocated path, **13.5× faster** than standard path, with zero managed allocations.
 
 ### GPT-2 Small KV-cache inference
 
-| Method | MaxNewTokens | Mean | Allocated | Gen0/1/2 |
-|--------|-------------|-----:|----------:|---------|
-| Legacy (full forward/token) | 64 | 6 818 ms | 232.8 MB | 5000/3000/1000 |
-| **KV-cache** | **64** | **1 061 ms** | **~80 MB\*** | **0 / 0 / 0** |
-| Legacy (full forward/token) | 128 | OOM | — | — |
-| **KV-cache** | **128** | **1 942 ms** | **~80 MB\*** | **0 / 0 / 0** |
+| Method | MaxNewTokens | Mean | Allocated |
+|--------|-------------|-----:|----------:|
+| Legacy (full forward/token) | 64 | 6 318 ms | 62.0 MB |
+| **KV-cache** | **64** | **973 ms** | **74.1 MB\*** |
+| Legacy (full forward/token) | 128 | OOM | — |
+| **KV-cache** | **128** | **1 916 ms** | **74.1 MB\*** |
 
-\* Session creation cost (KV buffers + small working arrays). **Per-token allocation = 0 bytes.**
+\* The KV-cache `Allocated` is **one-time session-creation cost** (KV buffers,
+sized for the full context) — it is **constant: 74.1 MB at 16, 64 and 128
+tokens alike**. **Per-token decode allocation = 0 bytes** — verified on every
+`dotnet test -c Release` by `Demo_Gpt2Small_KvCacheDecode_AllocatesZeroBytesPerToken`.
+The legacy path's allocation instead **grows with token count** (15.9 MB at 16
+→ 62.0 MB at 64 → OOM at 128).
 
 Model: GPT-2 Small (124M params, 12 layers, 12 heads, d=768, vocab=50257).
 
-- **6.4× faster** at 64 tokens. Legacy path OOMs at 128 tokens; KV-cache handles it cleanly.
+- **6.5× faster** at 64 tokens. Legacy path OOMs at 128 tokens; KV-cache handles it cleanly.
 - O(N) scaling vs O(N²) for the naive path.
 - Parity: top-10 logit overlap **10/10** vs PyTorch reference, maxAbsDiff = **0.000107** (float32 noise floor).
 
@@ -221,10 +236,11 @@ Model: GPT-2 Small (124M params, 12 layers, 12 heads, d=768, vocab=50257).
 
 | Method | Mean | Allocated |
 |--------|-----:|----------:|
-| `OnnxGraphModel.RunInference` (direct) | ~0.9–2.1 µs | **0 B** |
-| `InferenceEngine.FromBackend` (via engine) | ~0.9–2.1 µs | **0 B** |
+| `OnnxGraphModel.RunInference` (direct) | ~1.0 µs | **0 B** |
+| `InferenceEngine.FromBackend` (via engine) | ~0.9 µs | **0 B** |
 
 Model: TinyResNet — Linear(8→8) + skip + Linear(8→4). Both paths: zero allocations.
+Sub-µs math at this model size — timer resolution dominates, run-to-run variance is high.
 
 ### CNN training throughput (60k MNIST, batch=64)
 
@@ -242,8 +258,8 @@ Inference path: zero allocations. Live managed memory delta per epoch: **−0.01
 
 | Method | Mean | Allocated | vs ONNX Runtime |
 |--------|-----:|----------:|----------------:|
-| **Overfit (concurrent)** | **637.8 ms** | **0 B** | **3.0× faster** |
-| ONNX Runtime (concurrent) | 1 916.7 ms | 117 MB | baseline |
+| **Overfit (concurrent)** | **522.0 ms** | **0 B** | **3.6× faster** |
+| ONNX Runtime (concurrent) | 1 894.0 ms | 117 MB | baseline |
 
 Overfit scales linearly — no shared mutable state, no lock contention.
 ONNX Runtime allocates 117 MB of managed memory under concurrent load (Gen0 GC pressure).
