@@ -53,7 +53,7 @@ namespace Benchmarks
             switch (Configuration)
             {
                 case Config.Realistic:
-                    selection = new TruncationSelectionOperator();
+                    selection = new UniformEliteParentSelector();
                     mutation = new GaussianMutationOperator();
                     shaper = new CenteredRankFitnessShaper();
                     break;

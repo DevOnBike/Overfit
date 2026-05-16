@@ -31,7 +31,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     /// TokenEmbedding.Weight. This avoids relying on GPT1Model.LMHead being synced
     /// by a previous graph forward pass.
     /// </summary>
-    public class CachedGpt1ModelAdapter : IDisposable
+    public sealed class CachedGpt1ModelAdapter : IDisposable
     {
         private readonly GPT1Model    _model;
         private readonly CachedGptStack _stack;

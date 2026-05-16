@@ -53,6 +53,13 @@ namespace DevOnBike.Overfit.Tensors.Core
         public static TensorStorage<T> Materialize<T>(TensorSpan<T> view)
             where T : unmanaged
         {
+            // Validate the rank before allocating, so no created storage can leak (or be
+            // disposed-then-returned) on the unsupported-rank path.
+            if (view.Rank is < 1 or > 4)
+            {
+                throw new NotSupportedException($"Unsupported tensor rank: {view.Rank}");
+            }
+
             var storage = new TensorStorage<T>(view.Size, clearMemory: false);
             var target = storage.AsSpan();
 
@@ -80,10 +87,6 @@ namespace DevOnBike.Overfit.Tensors.Core
                 case 4:
                     MaterializeRank4(view, target);
                     break;
-
-                default:
-                    storage.Dispose();
-                    throw new NotSupportedException($"Unsupported tensor rank: {view.Rank}");
             }
 
             return storage;

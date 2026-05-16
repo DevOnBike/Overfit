@@ -30,7 +30,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     /// - no tokenizer,
     /// - no sliding-window KV eviction.
     /// </summary>
-    public class CachedSlmInferenceEngine : IDisposable
+    public sealed class CachedSlmInferenceEngine : IDisposable
     {
         private readonly GPT1Model _model;
         private bool _disposed;

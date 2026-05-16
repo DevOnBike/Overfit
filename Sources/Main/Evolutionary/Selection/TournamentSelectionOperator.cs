@@ -16,7 +16,7 @@ namespace DevOnBike.Overfit.Evolutionary.Selection
     /// </summary>
     /// <remarks>
     ///     <para>
-    ///         Compared with <c>TruncationSelectionOperator</c> (uniform pick over elites),
+    ///         Compared with <c>UniformEliteParentSelector</c> (uniform pick over elites),
     ///         tournament selection provides stronger selective pressure without the
     ///         premature convergence that fitness-proportional (roulette) selection can
     ///         cause. Higher <see cref="TournamentSize"/> means stronger pressure:

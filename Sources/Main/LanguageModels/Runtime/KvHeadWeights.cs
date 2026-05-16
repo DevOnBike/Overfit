@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Diagnostics.CodeAnalysis;
 using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.LanguageModels.Runtime
@@ -16,6 +17,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     /// For standard MHA (GPT-1, GPT-2) KvHeadWeights are embedded inside
     /// SingleHeadWeights — this struct is only used when nKvHeads &lt; nQHeads.
     /// </summary>
+    [SuppressMessage(
+        "IDisposableAnalyzers.Correctness",
+        "IDISP008:Don't assign member with injected and created disposables",
+        Justification = "Borrowed zero-copy weight handles - this struct never owns the referenced TensorStorage (see type docs).")]
     internal readonly struct KvHeadWeights
     {
         private readonly TensorStorage<float> _wk;

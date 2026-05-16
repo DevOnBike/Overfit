@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Diagnostics.CodeAnalysis;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Tensors.Core;
 
@@ -15,6 +16,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     /// Production constructor takes a <see cref="TransformerBlock"/> directly.
     /// Test constructor uses optional float[] params so callers only specify what they need.
     /// </summary>
+    [SuppressMessage(
+        "IDisposableAnalyzers.Correctness",
+        "IDISP008:Don't assign member with injected and created disposables",
+        Justification = "Borrowed zero-copy weight handles - this struct never owns the referenced TensorStorage (see type docs).")]
     internal readonly struct BlockWeights
     {
         private readonly TensorStorage<float> _ln1Gamma;

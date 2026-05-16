@@ -130,7 +130,7 @@ namespace Benchmarks
                 populationSize: PopulationSize,
                 parameterCount: ParameterCount,
                 eliteFraction: 0.1f,
-                selectionOperator: new TruncationSelectionOperator(),
+                selectionOperator: new UniformEliteParentSelector(),
                 mutationOperator: new GaussianMutationOperator(),
                 fitnessShaper: new CenteredRankFitnessShaper(),
                 seed: Seed);

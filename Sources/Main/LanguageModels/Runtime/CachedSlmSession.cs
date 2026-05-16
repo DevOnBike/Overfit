@@ -35,7 +35,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     /// This class intentionally does not replace the old SlmSession yet. It lets
     /// tests and benchmarks compare cached vs legacy paths side-by-side.
     /// </summary>
-    public class CachedSlmSession : ISlmSession
+    public sealed class CachedSlmSession : ISlmSession
     {
         private readonly CachedGpt1ModelAdapter _adapter;
         private readonly float[] _lastLogits;

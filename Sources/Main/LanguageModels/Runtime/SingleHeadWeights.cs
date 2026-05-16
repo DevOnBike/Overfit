@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Diagnostics.CodeAnalysis;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Tensors.Core;
 
@@ -14,6 +15,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     /// Lifetime: valid as long as the parent GPT1Model is alive.
     /// LoRA-friendly: TensorStorage updates are visible immediately.
     /// </summary>
+    [SuppressMessage(
+        "IDisposableAnalyzers.Correctness",
+        "IDISP008:Don't assign member with injected and created disposables",
+        Justification = "Borrowed zero-copy weight handles - this struct never owns the referenced TensorStorage (see type docs).")]
     internal readonly struct SingleHeadWeights
     {
         private static TensorStorage<float> CreateStorage(float[]? a)

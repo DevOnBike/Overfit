@@ -29,7 +29,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
         public void SelectParent_WithTournamentSizeOne_IsUniformOverElites()
         {
             // Tournament size 1 reduces to a single uniform draw from the elite set,
-            // i.e. identical behavior to TruncationSelectionOperator.
+            // i.e. identical behavior to UniformEliteParentSelector.
             var op = new TournamentSelectionOperator(tournamentSize: 1);
             int[] elites = [10, 20, 30, 40, 50];
             var rng = new SeededXorShiftRandom(42);

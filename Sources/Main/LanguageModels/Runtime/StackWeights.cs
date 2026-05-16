@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Diagnostics.CodeAnalysis;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Tensors.Core;
 
@@ -12,6 +13,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     /// Zero-copy weight references for the full GPT stack.
     /// Owns one <see cref="BlockWeights"/> per layer plus final norm and LM head.
     /// </summary>
+    [SuppressMessage(
+        "IDisposableAnalyzers.Correctness",
+        "IDISP008:Don't assign member with injected and created disposables",
+        Justification = "Borrowed zero-copy weight handles - this struct never owns the referenced TensorStorage (see type docs).")]
     internal sealed class StackWeights
     {
         private static TensorStorage<float> CreateStorage(float[]? a)

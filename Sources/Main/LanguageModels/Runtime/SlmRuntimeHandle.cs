@@ -17,7 +17,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     /// - session first,
     /// - engine second.
     /// </summary>
-    public class SlmRuntimeHandle : IDisposable
+    public sealed class SlmRuntimeHandle : IDisposable
     {
         private readonly IDisposable? _engine;
         private readonly ISlmSession _session;

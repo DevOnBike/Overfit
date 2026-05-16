@@ -94,7 +94,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
                 populationSize: 16,
                 parameterCount: 4,
                 eliteFraction: 0.25f,
-                selectionOperator: new TruncationSelectionOperator(),
+                selectionOperator: new UniformEliteParentSelector(),
                 mutationOperator: new GaussianMutationOperator(),
                 seed: 1);
             source.Initialize();
@@ -111,7 +111,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
                 populationSize: 32,  // different
                 parameterCount: 4,
                 eliteFraction: 0.25f,
-                selectionOperator: new TruncationSelectionOperator(),
+                selectionOperator: new UniformEliteParentSelector(),
                 mutationOperator: new GaussianMutationOperator(),
                 seed: 2);
 
@@ -352,7 +352,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
                 populationSize: 16,
                 parameterCount: 4,
                 eliteFraction: 0.25f,
-                selectionOperator: new TruncationSelectionOperator(),
+                selectionOperator: new UniformEliteParentSelector(),
                 mutationOperator: new GaussianMutationOperator(),
                 fitnessShaper: new CenteredRankFitnessShaper(),
                 seed: seed);
