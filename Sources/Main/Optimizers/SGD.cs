@@ -48,8 +48,10 @@ namespace DevOnBike.Overfit.Optimizers
             LearningRate = learningRate;
         }
 
-        /// <summary>Compatibility shim — prefer the <see cref="Parameter"/> overload.</summary>
-        [Obsolete("Pass IEnumerable<Parameter> via module.TrainableParameters() instead.")]
+        /// <summary>
+        /// Secondary constructor — accepts raw <see cref="AutogradNode"/> collections.
+        /// Prefer the <see cref="Parameter"/> overload for application code.
+        /// </summary>
         public SGD(IEnumerable<AutogradNode> parameters, float learningRate)
         {
             ArgumentNullException.ThrowIfNull(parameters);

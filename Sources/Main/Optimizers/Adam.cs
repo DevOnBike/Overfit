@@ -59,10 +59,10 @@ namespace DevOnBike.Overfit.Optimizers
         }
 
         /// <summary>
-        /// Compatibility shim — accepts legacy <see cref="AutogradNode"/> collections.
-        /// Prefer <see cref="Adam(IEnumerable{Parameter}, float)"/> for new code.
+        /// Secondary constructor — accepts raw <see cref="AutogradNode"/> collections,
+        /// e.g. for low-level optimizer tests that build nodes directly.
+        /// Prefer <see cref="Adam(IEnumerable{Parameter}, float)"/> for application code.
         /// </summary>
-        [Obsolete("Pass IEnumerable<Parameter> via module.TrainableParameters() instead.")]
         public Adam(IEnumerable<AutogradNode> parameters, float learningRate = 0.001f)
         {
             _ = OverfitParallel.Options;

@@ -111,35 +111,52 @@ namespace DevOnBike.Overfit.Anomalies.Training
 
             using var graph = new ComputationGraph(_cfg.ArenaSize);
 
+            // Per-worker scratch — allocated once and reused every step. These (the worker
+            // graphs especially, each carrying its own arena) were previously re-created and
+            // disposed inside the step loop, churning a whole arena's worth of memory per
+            // step; the Reset() call below is the giveaway that reuse was always intended.
+            var workerGraphs  = new ComputationGraph[workerCount];
+            var sampleInputs  = new int[workerCount][];
+            var sampleTargets = new int[workerCount][];
+            var lossScratch   = new float[workerCount][];
+            var losses        = new float[workerCount];
+
+            for (var w = 0; w < workerCount; w++)
+            {
+                workerGraphs[w]  = new ComputationGraph(_cfg.ArenaSize / workerCount);
+                sampleInputs[w]  = new int[_cfg.ContextLength];
+                sampleTargets[w] = new int[_cfg.ContextLength];
+                lossScratch[w]   = new float[_cfg.ContextLength];
+            }
+
             // 4. Train
             for (var step = 0; step < _cfg.Steps && !ct.IsCancellationRequested; step++)
             {
                 // Copy master weights to workers
                 CopyParametersToWorkers(model.TrainableParameters(), workers);
 
-                // Parallel forward+backward across workers
-                var losses   = new float[workerCount];
-                var workerGraphs = workers.Select(_ => new ComputationGraph(_cfg.ArenaSize / workerCount)).ToList();
-
+                // Parallel forward+backward across workers — reusing the per-worker graphs.
                 Parallel.For(0, workerCount, w =>
                 {
-                    var (inp, tgt) = Sample(trainIds, _cfg.ContextLength, rng);
+                    Sample(trainIds, _cfg.ContextLength, rng, sampleInputs[w], sampleTargets[w]);
                     workerGraphs[w].Reset();
                     workers[w].InvalidateAllCaches();
-                    var logits = workers[w].Forward(workerGraphs[w], inp, batchSize: 1, _cfg.ContextLength);
-                    losses[w]  = LossAndGrad(logits, tgt, _cfg.ContextLength, gptConfig.VocabSize);
+                    var logits = workers[w].Forward(workerGraphs[w], sampleInputs[w], batchSize: 1, _cfg.ContextLength);
+                    losses[w]  = LossAndGrad(logits, sampleTargets[w], _cfg.ContextLength, gptConfig.VocabSize, lossScratch[w]);
                     workerGraphs[w].BackwardFromGrad(logits);
                     logits.Dispose();
                 });
 
                 // Aggregate gradients from workers → master
                 AggregateGradients(model.TrainableParameters(), workers, scale: 1f / workerCount);
-                foreach (var wg in workerGraphs)
+
+                var lossSum = 0f;
+                for (var w = 0; w < workerCount; w++)
                 {
-                    wg.Dispose();
+                    lossSum += losses[w];
                 }
 
-                var loss = losses.Average();
+                var loss = lossSum / workerCount;
                 windowLoss += loss;
 
                 optimizer.ZeroGrad();
@@ -172,6 +189,11 @@ namespace DevOnBike.Overfit.Anomalies.Training
                 }
             }
 
+            foreach (var wg in workerGraphs)
+            {
+                wg.Dispose();
+            }
+
             foreach (var w in workers)
             {
                 w.Dispose();
@@ -197,47 +219,63 @@ namespace DevOnBike.Overfit.Anomalies.Training
 
         // ── Helpers ──────────────────────────────────────────────────────────
 
-        private static (int[] input, int[] target) Sample(int[] corpus, int seqLen, Random rng)
+        private static void Sample(
+            int[] corpus,
+            int seqLen,
+            Random rng,
+            Span<int> input,
+            Span<int> target)
         {
             var start = rng.Next(0, corpus.Length - seqLen - 1);
-            return (corpus.AsSpan(start, seqLen).ToArray(),
-                    corpus.AsSpan(start + 1, seqLen).ToArray());
+            corpus.AsSpan(start, seqLen).CopyTo(input);
+            corpus.AsSpan(start + 1, seqLen).CopyTo(target);
         }
 
-        private static float LossAndGrad(AutogradNode logits, int[] targets, int seqLen, int vocab)
+        private static float LossAndGrad(
+            AutogradNode logits,
+            int[] targets,
+            int seqLen,
+            int vocab,
+            float[] lossScratch)
         {
-            var arr  = logits.DataView.AsReadOnlySpan().ToArray();
-            var grad = new float[seqLen * vocab];
-            var loss = new float[seqLen];
-
+            // Read logits and write gradients straight through the node's own spans —
+            // each parallel iteration owns a disjoint [t*vocab, (t+1)*vocab) slice — so
+            // no per-call logits copy or gradient buffer is allocated.
             Parallel.For(0, seqLen, t =>
             {
+                var data = logits.DataView.AsReadOnlySpan();
+                var grad = logits.GradView.AsSpan();
                 var off = t * vocab;
                 var tgt = targets[t];
-                var max = arr[off];
+                var max = data[off];
                 for (var v = 1; v < vocab; v++)
                 {
-                    if (arr[off + v] > max)
+                    if (data[off + v] > max)
                     {
-                        max = arr[off + v];
+                        max = data[off + v];
                     }
                 }
                 var sum = 0f;
                 for (var v = 0; v < vocab; v++)
                 {
-                    sum += MathF.Exp(arr[off + v] - max);
+                    sum += MathF.Exp(data[off + v] - max);
                 }
-                loss[t] = max + MathF.Log(sum) - arr[off + tgt];
+                lossScratch[t] = max + MathF.Log(sum) - data[off + tgt];
                 var sc = 1f / seqLen;
                 for (var v = 0; v < vocab; v++)
                 {
-                    var sm = MathF.Exp(arr[off + v] - max) / sum;
+                    var sm = MathF.Exp(data[off + v] - max) / sum;
                     grad[off + v] = (sm - (v == tgt ? 1f : 0f)) * sc;
                 }
             });
 
-            grad.AsSpan().CopyTo(logits.GradView.AsSpan());
-            return loss.Sum() / seqLen;
+            var total = 0f;
+            for (var t = 0; t < seqLen; t++)
+            {
+                total += lossScratch[t];
+            }
+
+            return total / seqLen;
         }
 
         private static void CopyParametersToWorkers(
@@ -303,13 +341,19 @@ namespace DevOnBike.Overfit.Anomalies.Training
         private float Evaluate(GPT1Model model, ComputationGraph graph, GPT1Config config, int[] val, Random rng)
         {
             model.Eval();
+
+            // Reused across all validation steps — no per-step array allocation.
+            var input       = new int[_cfg.ContextLength];
+            var target      = new int[_cfg.ContextLength];
+            var lossScratch = new float[_cfg.ContextLength];
+
             var total = 0f;
             for (var s = 0; s < _cfg.ValSteps; s++)
             {
-                var (inp, tgt) = Sample(val, _cfg.ContextLength, rng);
+                Sample(val, _cfg.ContextLength, rng, input, target);
                 graph.Reset(); model.InvalidateAllCaches();
-                var l = model.Forward(graph, inp, batchSize: 1, _cfg.ContextLength);
-                total += LossAndGrad(l, tgt, _cfg.ContextLength, config.VocabSize);
+                var l = model.Forward(graph, input, batchSize: 1, _cfg.ContextLength);
+                total += LossAndGrad(l, target, _cfg.ContextLength, config.VocabSize, lossScratch);
                 l.Dispose();
             }
             model.Train();
