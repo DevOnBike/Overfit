@@ -36,7 +36,6 @@ namespace DevOnBike.Overfit.Ops
             var seqLen = q.Shape.D1;
             var dk = q.Shape.D2;
             var dv = v.Shape.D2;
-            var scale = 1f / MathF.Sqrt(dk);
 
             if (k.Shape.D0 != batchSize || k.Shape.D1 != seqLen || k.Shape.D2 != dk)
             {
@@ -48,9 +47,94 @@ namespace DevOnBike.Overfit.Ops
                 throw new ArgumentException($"V shape {v.Shape} must have batch={batchSize}, seq={seqLen}.");
             }
 
+            return ScaledDotProductAttentionCore(
+                graph,
+                q,
+                k,
+                v,
+                batchSize,
+                seqLen,
+                dk,
+                dv,
+                causalMask,
+                outputShape: new TensorShape(batchSize, seqLen, dv),
+                attnShape: new TensorShape(batchSize, seqLen, seqLen));
+        }
+
+        /// <summary>
+        /// Flattened (<c>[B*T, d]</c>) overload of Scaled Dot-Product Attention.
+        ///
+        /// Q/K/V arrive as 2-D <c>[batchSize*seqLen, d]</c> nodes — the layout
+        /// produced directly by <c>graph.Linear</c> projections — so callers can
+        /// skip the <c>[B*T,d] &lt;-&gt; [B,T,d]</c> reshape round-trip around
+        /// attention. The output is returned 2-D <c>[batchSize*seqLen, dv]</c>,
+        /// ready to feed straight into the next <c>graph.Linear</c>.
+        ///
+        /// The data layout is byte-identical to the 3-D form (row-major,
+        /// batch-major); this is purely a shape-bookkeeping difference. The
+        /// forward/backward kernels operate on flat spans and are rank-agnostic.
+        /// </summary>
+        public static AutogradNode ScaledDotProductAttention(
+            ComputationGraph graph,
+            AutogradNode q,
+            AutogradNode k,
+            AutogradNode v,
+            int batchSize,
+            int seqLen,
+            bool causalMask = true)
+        {
+            var rows = batchSize * seqLen;
+            var dk = q.Shape.D1;
+            var dv = v.Shape.D1;
+
+            if (q.Shape.D0 != rows)
+            {
+                throw new ArgumentException(
+                    $"Q shape {q.Shape} must have D0=batchSize*seqLen={rows}.");
+            }
+
+            if (k.Shape.D0 != rows || k.Shape.D1 != dk)
+            {
+                throw new ArgumentException($"K shape {k.Shape} must match Q shape {q.Shape}.");
+            }
+
+            if (v.Shape.D0 != rows)
+            {
+                throw new ArgumentException(
+                    $"V shape {v.Shape} must have D0=batchSize*seqLen={rows}.");
+            }
+
+            return ScaledDotProductAttentionCore(
+                graph,
+                q,
+                k,
+                v,
+                batchSize,
+                seqLen,
+                dk,
+                dv,
+                causalMask,
+                outputShape: new TensorShape(rows, dv),
+                attnShape: new TensorShape(rows, seqLen));
+        }
+
+        private static AutogradNode ScaledDotProductAttentionCore(
+            ComputationGraph graph,
+            AutogradNode q,
+            AutogradNode k,
+            AutogradNode v,
+            int batchSize,
+            int seqLen,
+            int dk,
+            int dv,
+            bool causalMask,
+            TensorShape outputShape,
+            TensorShape attnShape)
+        {
+            var scale = 1f / MathF.Sqrt(dk);
+
             var requiresGrad = q.RequiresGrad || k.RequiresGrad || v.RequiresGrad;
 
-            var attnShape = new TensorShape(batchSize, seqLen, seqLen);
             var attnWeights = AllocateNode(
                 graph,
                 attnShape,
@@ -59,7 +143,7 @@ namespace DevOnBike.Overfit.Ops
 
             var output = AllocateNode(
                 graph,
-                new TensorShape(batchSize, seqLen, dv),
+                outputShape,
                 requiresGrad,
                 clearMemory: false);
 
@@ -147,8 +231,12 @@ namespace DevOnBike.Overfit.Ops
             int dk,
             bool causalMask)
         {
-            var batchSize = q.Shape.D0;
-            var dv = v.Shape.D2;
+            // Rank-agnostic dim recovery. q/k/v may be 3-D [B,T,d] (the [B,T,d]
+            // overload) or 2-D [B*T,d] (the flattened overload) — the backward
+            // kernels slice flat either way. Total element count plus seqLen and
+            // dk fully determine batchSize and dv regardless of node rank.
+            var batchSize = q.Shape.Size / (seqLen * dk);
+            var dv = v.Shape.Size / (batchSize * seqLen);
             var work = (long)batchSize * seqLen * seqLen * Math.Max(dk, dv);
 
             if (ExperimentalLanguageModelOptions.EnableParallelAttentionBackward &&
@@ -161,6 +249,8 @@ namespace DevOnBike.Overfit.Ops
                     v,
                     attnWeights,
                     output,
+                    batchSize,
+                    dv,
                     seqLen,
                     dk,
                     causalMask);
@@ -174,6 +264,8 @@ namespace DevOnBike.Overfit.Ops
                 v,
                 attnWeights,
                 output,
+                batchSize,
+                dv,
                 seqLen,
                 dk,
                 causalMask);
@@ -185,12 +277,12 @@ namespace DevOnBike.Overfit.Ops
             AutogradNode v,
             AutogradNode attnWeights,
             AutogradNode output,
+            int batchSize,
+            int dv,
             int seqLen,
             int dk,
             bool causalMask)
         {
-            var batchSize = q.Shape.D0;
-            var dv = v.Shape.D2;
             var bufferLength = seqLen * seqLen;
 
             Parallel.For(0, batchSize, OverfitParallel.Options, b =>
@@ -231,12 +323,12 @@ namespace DevOnBike.Overfit.Ops
             AutogradNode v,
             AutogradNode attnWeights,
             AutogradNode output,
+            int batchSize,
+            int dv,
             int seqLen,
             int dk,
             bool causalMask)
         {
-            var batchSize = q.Shape.D0;
-            var dv = v.Shape.D2;
             var bufferLength = seqLen * seqLen;
 
             var dAArray = ArrayPool<float>.Shared.Rent(bufferLength);

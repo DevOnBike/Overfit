@@ -205,6 +205,51 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Attention
         }
 
         // ─────────────────────────────────────────────────────────────────────
+        // Flattened ([B*T, d]) overload parity
+        // ─────────────────────────────────────────────────────────────────────
+
+        [Theory]
+        [InlineData(3, 5, 8, 8)]      // work = 600 — sub-threshold, sequential path
+        [InlineData(4, 64, 16, 16)]   // work ≈ 1.0M — supra-threshold, parallel path
+        public void SDPA_FlattenedOverload_MatchesThreeDimensional(
+            int batch, int seq, int dk, int dv)
+        {
+            // The 2-D [B*T,d] overload and the 3-D [B,T,d] overload share a
+            // byte-identical row-major layout and the same flat kernels, so
+            // forward output AND backward gradients must be BIT-identical.
+            var rng = new Random(7);
+            var qData = new float[batch * seq * dk]; rng.NextFloats(qData);
+            var kData = new float[batch * seq * dk]; rng.NextFloats(kData);
+            var vData = new float[batch * seq * dv]; rng.NextFloats(vData);
+
+            // 3-D reference path.
+            using var g3 = new ComputationGraph();
+            using var q3 = MakeNode((float[])qData.Clone(), batch, seq, dk, true);
+            using var k3 = MakeNode((float[])kData.Clone(), batch, seq, dk, true);
+            using var v3 = MakeNode((float[])vData.Clone(), batch, seq, dv, true);
+            using var o3 = TensorMath.ScaledDotProductAttention(g3, q3, k3, v3, causalMask: true);
+            o3.GradView.AsSpan().Fill(1f);
+            g3.Backward(o3);
+
+            // 2-D flattened path — same data, [B*T, d] node shapes.
+            using var g2 = new ComputationGraph();
+            using var q2 = MakeNode2D((float[])qData.Clone(), batch * seq, dk, true);
+            using var k2 = MakeNode2D((float[])kData.Clone(), batch * seq, dk, true);
+            using var v2 = MakeNode2D((float[])vData.Clone(), batch * seq, dv, true);
+            using var o2 = TensorMath.ScaledDotProductAttention(g2, q2, k2, v2, batch, seq, causalMask: true);
+            o2.GradView.AsSpan().Fill(1f);
+            g2.Backward(o2);
+
+            Assert.Equal(batch * seq, o2.Shape.D0);
+            Assert.Equal(dv, o2.Shape.D1);
+
+            AssertBitIdentical(o3.DataView.AsReadOnlySpan(), o2.DataView.AsReadOnlySpan(), "output");
+            AssertBitIdentical(q3.GradView.AsReadOnlySpan(), q2.GradView.AsReadOnlySpan(), "dQ");
+            AssertBitIdentical(k3.GradView.AsReadOnlySpan(), k2.GradView.AsReadOnlySpan(), "dK");
+            AssertBitIdentical(v3.GradView.AsReadOnlySpan(), v2.GradView.AsReadOnlySpan(), "dV");
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
         // Layer-level test
         // ─────────────────────────────────────────────────────────────────────
 
@@ -268,6 +313,26 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Attention
             var storage = new TensorStorage<float>(data.Length, clearMemory: false);
             data.AsSpan().CopyTo(storage.AsSpan());
             return new AutogradNode(storage, new TensorShape(b, t, d), requiresGrad);
+        }
+
+        private static AutogradNode MakeNode2D(float[] data, int rows, int d, bool requiresGrad)
+        {
+            var storage = new TensorStorage<float>(data.Length, clearMemory: false);
+            data.AsSpan().CopyTo(storage.AsSpan());
+            return new AutogradNode(storage, new TensorShape(rows, d), requiresGrad);
+        }
+
+        private static void AssertBitIdentical(
+            ReadOnlySpan<float> expected, ReadOnlySpan<float> actual, string label)
+        {
+            Assert.Equal(expected.Length, actual.Length);
+
+            for (var i = 0; i < expected.Length; i++)
+            {
+                Assert.True(
+                    expected[i] == actual[i],
+                    $"{label}[{i}]: 3-D={expected[i]} != 2-D={actual[i]}");
+            }
         }
     }
 

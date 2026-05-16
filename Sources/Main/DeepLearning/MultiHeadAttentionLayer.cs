@@ -192,40 +192,22 @@ namespace DevOnBike.Overfit.DeepLearning
                 var kFlat = graph.Linear(flat, _wkNodes[h]!, _bkNodes[h]!);
                 var vFlat = graph.Linear(flat, _wvNodes[h]!, _bvNodes[h]!);
 
-                var q3d = graph.Reshape(
+                // SDPA on the flattened [B*T, dHead] projections directly. The
+                // 2-D overload skips the [B*T,d] <-> [B,T,d] reshape round-trip
+                // — 4 reshape tape nodes per head eliminated (q/k/v + output).
+                var attn = TensorMath.ScaledDotProductAttention(
+                graph,
                 qFlat,
-                batchSize,
-                seqLen,
-                _dHead);
-
-                var k3d = graph.Reshape(
                 kFlat,
-                batchSize,
-                seqLen,
-                _dHead);
-
-                var v3d = graph.Reshape(
                 vFlat,
                 batchSize,
                 seqLen,
-                _dHead);
-
-                var attn = TensorMath.ScaledDotProductAttention(
-                graph,
-                q3d,
-                k3d,
-                v3d,
                 _causalMask);
-
-                var attnFlat = graph.Reshape(
-                attn,
-                batchTime,
-                _dHead);
 
                 var zeroBiasO = ZeroBias(graph, _dModel);
 
                 var proj = graph.Linear(
-                attnFlat,
+                attn,
                 _woNodes[h]!,
                 zeroBiasO);
 
