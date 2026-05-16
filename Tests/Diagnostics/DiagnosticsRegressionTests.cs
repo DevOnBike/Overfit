@@ -17,7 +17,13 @@ namespace DevOnBike.Overfit.Tests.Diagnostics
             _output = output;
         }
 
-        [Fact]
+        // Regression gate for the MNIST diagnostics trace. Skipped because no producer
+        // writes diagnostics/mnist/epoch_05.json — the Mnist_FullTrain60k_CnnBeastMode
+        // benchmark does not yet export per-epoch trace JSON (tracked in ROADMAP under
+        // diagnostics trace export). Until that exists this test could only ever pass
+        // vacuously via early-return, which hides the missing coverage. Remove the Skip
+        // once the benchmark emits epoch JSON.
+        [Fact(Skip = "No producer writes diagnostics/mnist/epoch_05.json yet — see ROADMAP diagnostics trace export.")]
         public void LatestMnistTrace_CanBeCompared_AgainstBaseline_WhenBaselineExists()
         {
             var traceDir = Path.Combine(AppContext.BaseDirectory, "diagnostics", "mnist");
