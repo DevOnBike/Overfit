@@ -446,33 +446,42 @@ namespace DevOnBike.Overfit.Ops
             var aBatch = aS.Slice(b * seqLen * seqLen, seqLen * seqLen);
             var oBatch = oS.Slice(b * seqLen * dv, seqLen * dv);
 
+            // Causal: query row i only attends to keys [0, i]. The masked
+            // suffix [i+1, seqLen) has a fixed post-softmax value of 0
+            // (softmax of -inf). Computing softmax + A·V over the full row
+            // wastes ~half the inner work averaged across rows — instead we
+            // run softmax + accumulation over the valid prefix only and zero
+            // the masked suffix directly. Bit-identical to the −inf round
+            // trip (the masked entries are 0 either way), and backward is
+            // consistent (`SDPABackwardBatch` skips `aij == 0`).
             for (var i = 0; i < seqLen; i++)
             {
                 var qRow = qBatch.Slice(i * dk, dk);
                 var aRow = aBatch.Slice(i * seqLen, seqLen);
+                var validLen = causalMask ? i + 1 : seqLen;
 
-                for (var j = 0; j < seqLen; j++)
+                for (var j = 0; j < validLen; j++)
                 {
-                    if (causalMask && j > i)
-                    {
-                        aRow[j] = float.NegativeInfinity;
-                    }
-                    else
-                    {
-                        aRow[j] = TensorPrimitives.Dot(qRow, kBatch.Slice(j * dk, dk)) * scale;
-                    }
+                    aRow[j] = TensorPrimitives.Dot(qRow, kBatch.Slice(j * dk, dk)) * scale;
                 }
 
-                StableSoftmax(aRow, aRow);
+                if (validLen < seqLen)
+                {
+                    aRow.Slice(validLen).Clear();
+                }
+
+                var aValid = aRow.Slice(0, validLen);
+                StableSoftmax(aValid, aValid);
             }
 
             for (var i = 0; i < seqLen; i++)
             {
                 var aRow = aBatch.Slice(i * seqLen, seqLen);
                 var oRow = oBatch.Slice(i * dv, dv);
+                var validLen = causalMask ? i + 1 : seqLen;
                 oRow.Clear();
 
-                for (var j = 0; j < seqLen; j++)
+                for (var j = 0; j < validLen; j++)
                 {
                     TensorPrimitives.MultiplyAdd(vBatch.Slice(j * dv, dv), aRow[j], oRow, oRow);
                 }
