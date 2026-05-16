@@ -141,6 +141,13 @@ namespace DevOnBike.Overfit.Anomalies.Training
                     Sample(trainIds, _cfg.ContextLength, rng, sampleInputs[w], sampleTargets[w]);
                     workerGraphs[w].Reset();
                     workers[w].InvalidateAllCaches();
+
+                    // BackwardFromGrad accumulates into Parameter.Grad, and graph.Reset()
+                    // does not touch parameter gradients — so each worker must clear its
+                    // own grads every step. Otherwise AggregateGradients would read a
+                    // running sum over all previous steps instead of this step's gradient.
+                    ZeroGrads(workers[w]);
+
                     var logits = workers[w].Forward(workerGraphs[w], sampleInputs[w], batchSize: 1, _cfg.ContextLength);
                     losses[w]  = LossAndGrad(logits, sampleTargets[w], _cfg.ContextLength, gptConfig.VocabSize, lossScratch[w]);
                     workerGraphs[w].BackwardFromGrad(logits);
@@ -159,7 +166,11 @@ namespace DevOnBike.Overfit.Anomalies.Training
                 var loss = lossSum / workerCount;
                 windowLoss += loss;
 
-                optimizer.ZeroGrad();
+                // Do NOT call optimizer.ZeroGrad() here. Master gradients are produced
+                // fresh by AggregateGradients (which clears then accumulates) immediately
+                // above. Zeroing them now would wipe the just-aggregated gradient, and
+                // Step() would run on zeros — only AdamW weight decay would apply, so the
+                // model would never learn (loss would merely decay toward ln(VocabSize)).
                 ClipGradNorm(model.TrainableParameters(), _cfg.MaxGradNorm);
                 var cosine = 0.5f * (1f + MathF.Cos(MathF.PI * step / _cfg.Steps));
                 optimizer.LearningRate = lrMin + (lrMax - lrMin) * cosine;
@@ -276,6 +287,14 @@ namespace DevOnBike.Overfit.Anomalies.Training
             }
 
             return total / seqLen;
+        }
+
+        private static void ZeroGrads(GPT1Model model)
+        {
+            foreach (var p in model.TrainableParameters())
+            {
+                p.ZeroGrad();
+            }
         }
 
         private static void CopyParametersToWorkers(
