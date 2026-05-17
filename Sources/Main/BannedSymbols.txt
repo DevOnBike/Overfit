@@ -1,4 +1,4 @@
-﻿N:System.Linq; LINQ jest zakazany ze względów wydajnościowych. Użyj pętli for/foreach i Span<T>.
-N:System.Reflection; Refleksja jest powolna i często łamie Native AOT. Użyj delegatów, statycznego typowania lub Source Generatorów.
-T:System.Linq.Expressions.Expression; Drzewa wyrażeń używają Reflection.Emit, co wyrzuci błąd w Native AOT (brak JIT). Użyj delegatów i 'switch'.
-T:System.Activator; Activator.CreateInstance jest wolny i wymaga metadanych typu w AOT. Użyj jawnego 'new' lub fabryk (Factory Pattern).
+N:System.Linq; LINQ is banned for performance reasons. Use for/foreach loops and Span<T>.
+N:System.Reflection; Reflection is slow and frequently breaks Native AOT. Use delegates, static typing, or Source Generators.
+T:System.Linq.Expressions.Expression; Expression trees use Reflection.Emit, which throws under Native AOT (no JIT). Use delegates and 'switch'.
+T:System.Activator; Activator.CreateInstance is slow and requires type metadata under AOT. Use explicit 'new' or factories (Factory Pattern).

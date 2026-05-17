@@ -25,18 +25,18 @@ namespace DevOnBike.Overfit.UI
         {
             try
             {
-                TxtStatus.Text = "Ładowanie wag GigaBestii...";
+                TxtStatus.Text = "Loading Beast weights...";
 
                 // PROVIDE THE PATH TO YOUR SAVED MODEL
                 // Make sure the prefix matches what you passed to MnistPredictor!
                 var modelPrefix = @"d:\ml\bestia.bin";
 
                 _predictor = new MnistPredictor(modelPrefix);
-                TxtStatus.Text = "Bestia gotowa! Rysuj!";
+                TxtStatus.Text = "Beast ready! Draw!";
             }
             catch (Exception ex)
             {
-                TxtStatus.Text = "Błąd: " + ex.Message;
+                TxtStatus.Text = "Error: " + ex.Message;
                 TxtStatus.Foreground = Brushes.Red;
             }
         }
@@ -56,7 +56,7 @@ namespace DevOnBike.Overfit.UI
         {
             DrawingCanvas.Strokes.Clear();
             TxtResult.Text = "?";
-            TxtStatus.Text = "Bestia gotowa! Rysuj!";
+            TxtStatus.Text = "Beast ready! Draw!";
         }
 
         private void PredictDigit()
@@ -71,11 +71,11 @@ namespace DevOnBike.Overfit.UI
                 var elapsed = stopwatch.GetElapsedTime();
 
                 TxtResult.Text = prediction.ToString();
-                TxtStatus.Text = $"Rozpoznano w {elapsed.TotalMilliseconds} ms!";
+                TxtStatus.Text = $"Recognized in {elapsed.TotalMilliseconds} ms!";
             }
             catch (Exception ex)
             {
-                TxtStatus.Text = "Błąd predykcji: " + ex.Message;
+                TxtStatus.Text = "Prediction error: " + ex.Message;
             }
         }
 

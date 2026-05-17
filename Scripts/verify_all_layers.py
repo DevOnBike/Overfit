@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Sprawdza WSZYSTKIE 24 warstwy GGUF vs binary.
-Szybkie: jedna reprezentatywna waga per tensor per warstwa.
-Na końcu drukuje tylko rozbieżności (✗) lub "ALL OK".
+Checks ALL 24 GGUF layers against the binary.
+Fast: one representative weight per tensor per layer.
+At the end it prints only the mismatches (✗) or "ALL OK".
 
 Usage:
   python3 Scripts/verify_all_layers.py --gguf <gguf_blob> --bin d:/qwen/qwen.bin

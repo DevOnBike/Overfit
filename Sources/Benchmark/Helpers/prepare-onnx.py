@@ -1,7 +1,7 @@
 """
-Generuje modele ONNX + .bin dla benchmarków DevOnBike.Overfit.
+Generates ONNX models + .bin files for the DevOnBike.Overfit benchmarks.
 
-Użycie:
+Usage:
     pip install torch onnx onnxruntime
     python prepare-onnx.py
 """
@@ -17,7 +17,7 @@ import onnx
 def export(model, input_size, name):
     dummy = torch.randn(1, input_size)
 
-    # ONNX — eksport + wymuszenie inline weights (bez .onnx.data)
+    # ONNX — export + force inline weights (no .onnx.data)
     onnx_path = f"{name}.onnx"
     torch.onnx.export(
         model, dummy, onnx_path,
@@ -28,7 +28,7 @@ def export(model, input_size, name):
     onnx_model = onnx.load(onnx_path)
     onnx.save_model(onnx_model, onnx_path, save_as_external_data=False)
 
-    # Usuń śmieciowy .onnx.data jeśli PyTorch go wygenerował
+    # Remove the junk .onnx.data file if PyTorch generated one
     data_path = f"{onnx_path}.data"
     if os.path.exists(data_path):
         os.remove(data_path)
@@ -75,21 +75,21 @@ def main():
     for name, input_size, model in models:
         export(model, input_size, name)
 
-    # Weryfikacja
+    # Verification
     try:
         import onnxruntime as ort
-        print("\nWeryfikacja:")
+        print("\nVerification:")
         for name, input_size, model in models:
             x = np.random.randn(1, input_size).astype(np.float32)
             onnx_out = ort.InferenceSession(f"{name}.onnx").run(None, {"input": x})[0]
             with torch.no_grad():
                 torch_out = model(torch.from_numpy(x)).numpy()
             diff = np.max(np.abs(onnx_out - torch_out))
-            print(f"  {name}: diff={diff:.8f} {'OK' if diff < 1e-5 else 'BLAD'}")
+            print(f"  {name}: diff={diff:.8f} {'OK' if diff < 1e-5 else 'FAIL'}")
     except ImportError:
-        print("\nPominam weryfikacje (pip install onnxruntime)")
+        print("\nSkipping verification (pip install onnxruntime)")
 
-    print("\nGotowe!")
+    print("\nDone!")
 
 
 if __name__ == "__main__":

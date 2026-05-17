@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Porównaj wagi GGUF FP16 vs Overfit binary.
-Weryfikuje: embedding, layer0 (Q, K, V, O, FFN gate/up/down).
+Compare GGUF FP16 weights against the Overfit binary.
+Verifies: embedding, layer0 (Q, K, V, O, FFN gate/up/down).
 
 Usage:
   python3 Scripts/verify_gguf_vs_bin.py \

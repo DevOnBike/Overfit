@@ -1,6 +1,6 @@
-# Best practices wydajnościowe Microsoftu — z dekompilacji VS 2022
+# Microsoft Performance Best Practices — from VS 2022 Decompilation
 
-Źródło: dekompilacja `.NET` DLL z `C:\Program Files\Microsoft Visual Studio\2022\Community\` narzędziem `ilspycmd` (ICSharpCode.Decompiler 10.0.1). Wyniki zsyntetyzowane z 10 kluczowych assembly:
+Source: decompilation of `.NET` DLLs from `C:\Program Files\Microsoft Visual Studio\2022\Community\` using `ilspycmd` (ICSharpCode.Decompiler 10.0.1). Results synthesised from 10 key assemblies:
 
 - `Microsoft.CodeAnalysis.dll` / `Microsoft.CodeAnalysis.CSharp.dll` (Roslyn)
 - `Microsoft.VisualStudio.Threading.dll` / `Microsoft.VisualStudio.Validation.dll`
@@ -8,20 +8,20 @@
 - `System.Collections.Immutable.dll` / `System.Memory.dll`
 - `Newtonsoft.Json.dll` / `StreamJsonRpc.dll`
 
-Łącznie ~3690 plików `.cs` zdekompilowanych do `C:\Temp\vsdecomp\`.
+~3690 `.cs` files decompiled in total to `C:\Temp\vsdecomp\`.
 
 ---
 
-## 1. Object pooling — fundament (740+ trafień)
+## 1. Object pooling — the foundation (740+ hits)
 
-### Kanoniczny `ObjectPool<T>` (Roslyn)
+### Canonical `ObjectPool<T>` (Roslyn)
 
-Źródło: `Microsoft.CodeAnalysis.PooledObjects.ObjectPool.cs`
+Source: `Microsoft.CodeAnalysis.PooledObjects.ObjectPool.cs`
 
-- **"First item" fast path** — oddzielne pole `_firstItem` + tablica zapasowa `_items[ProcessorCount * 2 - 1]`.
-- **Lock-free** przez `Interlocked.CompareExchange` — nigdy `lock`.
-- **Hot/Slow split** — `Allocate` (inline-able) wywołuje `AllocateSlow` przy missie. JIT może wciągnąć tylko gorącą ścieżkę.
-- `[Conditional("DEBUG")]` na walidacji → zerowy IL w Release.
+- **"First item" fast path** — separate `_firstItem` field + fallback array `_items[ProcessorCount * 2 - 1]`.
+- **Lock-free** via `Interlocked.CompareExchange` — never `lock`.
+- **Hot/Slow split** — `Allocate` (inline-able) calls `AllocateSlow` on a miss. JIT can inline only the hot path.
+- `[Conditional("DEBUG")]` on validation → zero IL in Release.
 
 ```csharp
 internal T Allocate() {
@@ -32,127 +32,127 @@ internal T Allocate() {
 }
 ```
 
-### Pooled wrappers — wzorzec do skopiowania
+### Pooled wrappers — a pattern to copy
 
-Źródło: `PooledStringBuilder.cs`, `PooledHashSet.cs`, `PooledDictionary.cs`, `ArrayBuilder.cs`
+Source: `PooledStringBuilder.cs`, `PooledHashSet.cs`, `PooledDictionary.cs`, `ArrayBuilder.cs`
 
-- `GetInstance()` / `ToStringAndFree()` — idiom wymuszający zwrot.
-- **Discard-when-too-big** — `if (Builder.Capacity <= 1024) { Clear(); Free(); }` żeby duże instancje nie blokowały pamięci w puli.
-- `[Obsolete("Consider calling ToStringAndFree instead.")]` na `ToString()` żeby developer nie zapomniał zwrócić.
-
----
-
-## 2. `readonly struct` jako default (217 trafień / 147 plików)
-
-Praktycznie każdy typ wartościowy w Roslyn/VS jest `readonly struct`. Eliminuje to obronne kopie kompilatora. Przykłady: `SyntaxToken`, `SyntaxTrivia`, `TextSpan`, `LinePosition`, `TypeWithAnnotations`.
-
-**Rule of thumb**: jeśli piszesz nowy value type, zacznij od `readonly struct` i zmień tylko gdy kompilacja się nie powiedzie.
+- `GetInstance()` / `ToStringAndFree()` — idiom that enforces returning to the pool.
+- **Discard-when-too-big** — `if (Builder.Capacity <= 1024) { Clear(); Free(); }` so large instances don't pin memory in the pool.
+- `[Obsolete("Consider calling ToStringAndFree instead.")]` on `ToString()` so developers don't forget to return it.
 
 ---
 
-## 3. `[MethodImpl(AggressiveInlining)]` — celowo, nie wszędzie (250 trafień / 40 plików)
+## 2. `readonly struct` as the default (217 hits / 147 files)
 
-Skupione w:
-- `System.Memory` (Span/ReadOnlySpan acessory, MemoryMarshal, BinaryPrimitives).
+Virtually every value type in Roslyn/VS is a `readonly struct`. This eliminates defensive copies made by the compiler. Examples: `SyntaxToken`, `SyntaxTrivia`, `TextSpan`, `LinePosition`, `TypeWithAnnotations`.
+
+**Rule of thumb**: when writing a new value type, start with `readonly struct` and change it only if the build fails.
+
+---
+
+## 3. `[MethodImpl(AggressiveInlining)]` — deliberate, not everywhere (250 hits / 40 files)
+
+Concentrated in:
+- `System.Memory` (Span/ReadOnlySpan accessors, MemoryMarshal, BinaryPrimitives).
 - `System.Collections.Frozen` (table lookups).
-- Indeksery `SegmentedArray`.
+- `SegmentedArray` indexers.
 
-**Lekcja**: stosować na geterach/indekserach/operatorach matematycznych — NIE na wieloliniowych metodach (JIT i tak je rozważy).
-
----
-
-## 4. Two-tier hash table (`StringTable.cs` w Roslynie)
-
-Dedupe stringów z dwoma poziomami:
-
-| Tier | Rozmiar | Zakres | Synchronizacja |
-|------|---------|--------|---|
-| `_localTable` | 2048 | per-instancja (pooled) | brak (thread-local) |
-| `s_sharedTable` | 65536 (bucket=16) | statyczna | lock-free CAS |
-
-- Wszystkie rozmiary potęgi 2 (`& mask` zamiast `%`).
-- `Environment.TickCount` jako początkowy random dla wyboru bucketu — unika patologicznych chain.
+**Lesson**: apply to getters/indexers/math operators — NOT to multi-line methods (JIT will consider them anyway).
 
 ---
 
-## 5. Segmented arrays — unikanie LOH
+## 4. Two-tier hash table (`StringTable.cs` in Roslyn)
 
-Źródło: `Microsoft.CodeAnalysis.Collections.SegmentedArray<T>`
+String deduplication with two tiers:
 
-`T[][]` (jagged) zamiast `T[]`. Każdy segment < 85kB → omija Large Object Heap. Używane przez `SegmentedDictionary`, `SegmentedHashSet` dla dużych kolekcji w Roslynie.
+| Tier | Size | Scope | Synchronisation |
+|------|------|-------|-----------------|
+| `_localTable` | 2048 | per-instance (pooled) | none (thread-local) |
+| `s_sharedTable` | 65536 (bucket=16) | static | lock-free CAS |
 
-**Why:** alokacje > 85kB trafiają na LOH, który: (a) nie jest kompaktowany domyślnie, (b) generuje fragmentację, (c) długo żyje.
+- All sizes are powers of 2 (`& mask` instead of `%`).
+- `Environment.TickCount` as initial random for bucket selection — avoids pathological chains.
 
 ---
 
-## 6. Frozen collections — kod-generacja per kształt klucza
+## 5. Segmented arrays — avoiding the LOH
 
-`System.Collections.Frozen` zawiera kilkadziesiąt specjalizowanych podklas:
+Source: `Microsoft.CodeAnalysis.Collections.SegmentedArray<T>`
+
+`T[][]` (jagged) instead of `T[]`. Each segment < 85 KB → bypasses the Large Object Heap. Used by `SegmentedDictionary`, `SegmentedHashSet` for large collections in Roslyn.
+
+**Why:** allocations > 85 KB go to the LOH, which: (a) is not compacted by default, (b) causes fragmentation, (c) has long lifetimes.
+
+---
+
+## 6. Frozen collections — code-generated per key shape
+
+`System.Collections.Frozen` contains dozens of specialised subclasses:
 
 - `OrdinalStringFrozenDictionary_LeftJustifiedSingleChar`
 - `OrdinalStringFrozenDictionary_LeftJustifiedSubstring`
 - `OrdinalStringFrozenDictionary_RightJustifiedCaseInsensitiveAsciiSubstring`
 - `Int32FrozenDictionary`, `SmallValueTypeDefaultComparerFrozenDictionary`...
 
-Przy `ToFrozenDictionary()` analizowane są dane i wybierany najszybszy wariant — koszt build'u jednorazowy, read O(1) z minimalnymi instrukcjami.
+On `ToFrozenDictionary()` the data is analysed and the fastest variant is chosen — build cost is one-time, reads are O(1) with minimal instructions.
 
 ---
 
-## 7. Lock-free synchronizacja (738 trafień / 57 plików)
+## 7. Lock-free synchronisation (738 hits / 57 files)
 
-- **`Interlocked.CompareExchange`** dominuje na hot path.
-- **`Volatile.Read/Write`** zamiast `lock` przy single-reader.
-- **`ImmutableInterlocked`** — atomicowe operacje na immutable structures.
-- VS Threading ma **własne**: `AsyncReaderWriterLock`, `AsyncSemaphore`, `ReentrantSemaphore`, `JoinableTaskFactory` (vs BCL — bo BCL nie radzi sobie z UI thread coordination).
-- `ConfigureAwait(false)` użyte 75 razy w samym `Microsoft.VisualStudio.Threading`.
-
----
-
-## 8. Span/stackalloc tylko punktowo (10 trafień)
-
-Wbrew hype'owi — **Span jest sparingly używany w wyższych warstwach**. Pojawia się w:
-- Serializacji JSON-RPC (`TraceParent`, `HeaderDelimitedMessageHandler`).
-- Parserach (`BoundStackAllocArrayCreation`, `SyntaxFacts`).
-
-**Wniosek**: `Span<T>` ma sens gdy faktycznie eliminuje alokację w gorącej pętli — nie jest cudowną zamianą `string`/`array` wszędzie.
+- **`Interlocked.CompareExchange`** dominates on the hot path.
+- **`Volatile.Read/Write`** instead of `lock` for single-reader scenarios.
+- **`ImmutableInterlocked`** — atomic operations on immutable structures.
+- VS Threading has **its own**: `AsyncReaderWriterLock`, `AsyncSemaphore`, `ReentrantSemaphore`, `JoinableTaskFactory` (vs BCL — because BCL cannot handle UI thread coordination).
+- `ConfigureAwait(false)` used 75 times in `Microsoft.VisualStudio.Threading` alone.
 
 ---
 
-## 9. Drobne ale klasyczne
+## 8. Span/stackalloc only at specific points (10 hits)
 
-- **`[Conditional("DEBUG")]`** na walidatorach (Validate, AssertInvariants) — 0 IL w Release.
-- **Boxing avoidance** — `Microsoft.CodeAnalysis.Boxes` z `static readonly object BoxedTrue/BoxedFalse`.
-- **`SharedStopwatch`** — jeden statyczny `Stopwatch`, nie alokuje per pomiar.
-- **`ReaderWriterLockSlimExtensions`** — RAII disposable helper, eliminuje `try/finally` przy lock'u.
-- **`EmptyStruct`** — placeholder dla generic'ów z zerowym footprint.
-- **`WeakKeyDictionary`** — cache który nie trzyma przy życiu.
+Despite the hype — **Span is used sparingly in higher-level layers**. It appears in:
+- JSON-RPC serialisation (`TraceParent`, `HeaderDelimitedMessageHandler`).
+- Parsers (`BoundStackAllocArrayCreation`, `SyntaxFacts`).
 
----
-
-## TL;DR — adopcja
-
-1. **Pool wszystko co alokujesz w pętli** — StringBuilder, List, Dictionary. Wzór z `PooledStringBuilder` + `ObjectPool` to template do skopiowania.
-2. **`readonly struct` jako default** dla nowych value types.
-3. **`Interlocked.CompareExchange` na "first item"** zamiast lock'u w puli/cache.
-4. **Discard pooled object po przekroczeniu progu rozmiaru** — inaczej leak.
-5. **Hot path → oddzielna metoda `*Slow`** — pomaga JIT-owi inline'ować szybką ścieżkę.
-6. **Tablice > LOH? → segmented (jagged)**.
-7. **`[Conditional("DEBUG")]` na assertach** zamiast `if (DEBUG)`.
-8. **Frozen collections** dla read-only lookup table'i ładowanych raz na start.
+**Conclusion**: `Span<T>` makes sense when it genuinely eliminates an allocation in a hot loop — it is not a magic replacement for `string`/`array` everywhere.
 
 ---
 
+## 9. Small but classic
+
+- **`[Conditional("DEBUG")]`** on validators (Validate, AssertInvariants) — 0 IL in Release.
+- **Boxing avoidance** — `Microsoft.CodeAnalysis.Boxes` with `static readonly object BoxedTrue/BoxedFalse`.
+- **`SharedStopwatch`** — one static `Stopwatch`, no allocation per measurement.
+- **`ReaderWriterLockSlimExtensions`** — RAII disposable helper, eliminates `try/finally` around locks.
+- **`EmptyStruct`** — placeholder for generics with zero footprint.
+- **`WeakKeyDictionary`** — a cache that does not keep objects alive.
+
 ---
 
-# Część 2 — druga pula 14 DLL
+## TL;DR — adoption
 
-Dodatkowe assembly: `Microsoft.VisualStudio.Composition`, `Microsoft.VisualStudio.Telemetry` (821 plików), `Microsoft.VisualStudio.RpcContracts`, `Microsoft.VisualStudio.Utilities` (452 pliki), `Microsoft.VisualStudio.Shell.Framework` (373 pliki), `Microsoft.VisualStudio.Text.UI` (447 plików), `Microsoft.VisualStudio.LanguageServer.Protocol`, `Microsoft.VisualStudio.Imaging`, `Microsoft.ServiceHub.Client`, `Microsoft.Bcl.AsyncInterfaces`, `Nerdbank.Streams`, `MessagePack`, `System.IO.Pipelines`, `System.Text.Json`.
+1. **Pool everything you allocate in a loop** — StringBuilder, List, Dictionary. The `PooledStringBuilder` + `ObjectPool` pattern is a ready-made template to copy.
+2. **`readonly struct` as the default** for new value types.
+3. **`Interlocked.CompareExchange` on "first item"** instead of a lock in a pool/cache.
+4. **Discard a pooled object when it exceeds the size threshold** — otherwise it leaks.
+5. **Hot path → separate `*Slow` method** — helps JIT inline the fast path.
+6. **Arrays > LOH? → segmented (jagged)**.
+7. **`[Conditional("DEBUG")]` on assertions** instead of `if (DEBUG)`.
+8. **Frozen collections** for read-only lookup tables loaded once at startup.
 
-## 10. `ArrayPool<byte>.Shared` jako standard dla buforów I/O
+---
 
-Źródło: `System.Text.Json.PooledByteBufferWriter.cs`
+---
 
-Wzorzec idealny do skopiowania:
+# Part 2 — second batch of 14 DLLs
+
+Additional assemblies: `Microsoft.VisualStudio.Composition`, `Microsoft.VisualStudio.Telemetry` (821 files), `Microsoft.VisualStudio.RpcContracts`, `Microsoft.VisualStudio.Utilities` (452 files), `Microsoft.VisualStudio.Shell.Framework` (373 files), `Microsoft.VisualStudio.Text.UI` (447 files), `Microsoft.VisualStudio.LanguageServer.Protocol`, `Microsoft.VisualStudio.Imaging`, `Microsoft.ServiceHub.Client`, `Microsoft.Bcl.AsyncInterfaces`, `Nerdbank.Streams`, `MessagePack`, `System.IO.Pipelines`, `System.Text.Json`.
+
+## 10. `ArrayPool<byte>.Shared` as the standard for I/O buffers
+
+Source: `System.Text.Json.PooledByteBufferWriter.cs`
+
+An ideal pattern to copy:
 
 ```csharp
 public PooledByteBufferWriter(int initialCapacity) {
@@ -162,32 +162,32 @@ public PooledByteBufferWriter(int initialCapacity) {
 
 public void Dispose() {
     if (_rentedBuffer != null) {
-        _rentedBuffer.AsSpan(0, _index).Clear();   // czyść przed zwrotem (sensitive data + GC roots)
+        _rentedBuffer.AsSpan(0, _index).Clear();   // clear before returning (sensitive data + GC roots)
         ArrayPool<byte>.Shared.Return(_rentedBuffer);
         _rentedBuffer = null;
     }
 }
 
 private void CheckAndResizeBuffer(int sizeHint) {
-    // strategia growth: doubling, ale z guard'em na 2GB
+    // growth strategy: doubling, but with a 2 GB guard
     int num4 = num + Math.Max(sizeHint, num);
     ...
-    _rentedBuffer = ArrayPool<byte>.Shared.Rent(num4);   // znowu z poola
-    // skopiuj stare → zwróć stare do poola → kontynuuj na nowym
+    _rentedBuffer = ArrayPool<byte>.Shared.Rent(num4);   // rent from pool again
+    // copy old → return old to pool → continue on new
 }
 ```
 
-**Kluczowe**: Clear() przed Return() — w przeciwnym razie GC może trzymać przy życiu obiekty referencjowane przez bufor.
+**Key**: Clear() before Return() — otherwise the GC may keep alive objects referenced by the buffer.
 
-## 11. `Lazy<T>` jako fundament MEF/Composition (43 trafień)
+## 11. `Lazy<T>` as the foundation of MEF/Composition (43 hits)
 
-`Microsoft.VisualStudio.Composition.LazyServices` + `Roslyn.Utilities.RoslynLazyInitializer` używają `Lazy<T>` z `LazyThreadSafetyMode.PublicationOnly` masowo — komponenty MEF są **leniwie inicjalizowane**.
+`Microsoft.VisualStudio.Composition.LazyServices` + `Roslyn.Utilities.RoslynLazyInitializer` use `Lazy<T>` with `LazyThreadSafetyMode.PublicationOnly` extensively — MEF components are **lazily initialised**.
 
-**Lesson**: VS startuje szybko bo praktycznie nic nie ładuje na starcie. Każdy serwis to lambda w `Lazy<>` lub `ExportFactory<>`. Pierwsze użycie funkcji = pierwsza inicjalizacja zależności. Aplikuj to do każdego "dużego" obiektu w swoim systemie.
+**Lesson**: VS starts fast because practically nothing is loaded at startup. Every service is a lambda in `Lazy<>` or `ExportFactory<>`. First use of a feature = first initialisation of its dependencies. Apply this to every "heavy" object in your system.
 
-## 12. `ConcurrentDictionary.GetOrAdd` jako default cache (700+ trafień)
+## 12. `ConcurrentDictionary.GetOrAdd` as the default cache (700+ hits)
 
-Najczęściej widziany pattern cache'owania:
+The most frequently seen caching pattern:
 
 ```csharp
 private readonly ConcurrentDictionary<Type, IFormatter> _cache = new();
@@ -196,21 +196,21 @@ public IFormatter GetFormatter(Type t) =>
     _cache.GetOrAdd(t, static type => CreateFormatter(type));
 ```
 
-Konkretne lokalizacje:
-- `MessagePack.Resolvers.CachingFormatterResolver` — cache formatterów per typ.
-- `MessagePack.Internal.ThreadsafeTypeKeyHashTable` — własna, lepsza od ConcurrentDictionary dla `Type` jako klucz (custom hash).
-- `System.Text.Json.ReflectionEmitCachingMemberAccessor` — IL-emit raz, cache delegate na zawsze.
-- `Roslyn.Utilities.ConcurrentDictionaryExtensions` — własne rozszerzenia GetOrAdd.
+Specific locations:
+- `MessagePack.Resolvers.CachingFormatterResolver` — formatter cache per type.
+- `MessagePack.Internal.ThreadsafeTypeKeyHashTable` — custom, beats ConcurrentDictionary when the key is `Type` (custom hash).
+- `System.Text.Json.ReflectionEmitCachingMemberAccessor` — IL-emit once, cache the delegate forever.
+- `Roslyn.Utilities.ConcurrentDictionaryExtensions` — custom GetOrAdd extensions.
 
-**Tip z MessagePack**: gdy klucz jest `Type`, własna hashtable z `RuntimeHelpers.GetHashCode` bije ConcurrentDictionary.
+**Tip from MessagePack**: when the key is `Type`, a custom hashtable with `RuntimeHelpers.GetHashCode` beats ConcurrentDictionary.
 
-## 13. `ConcurrentLruCache<K,V>` — gdy GetOrAdd nie wystarcza
+## 13. `ConcurrentLruCache<K,V>` — when GetOrAdd is not enough
 
-Źródło: `Microsoft.CodeAnalysis.InternalUtilities.ConcurrentLruCache.cs`
+Source: `Microsoft.CodeAnalysis.InternalUtilities.ConcurrentLruCache.cs`
 
-Gdy potrzebujesz **ograniczonego** cache'a (eviction LRU), Roslyn używa **Dictionary + LinkedList + lock** zamiast Concurrent. Dlaczego nie `ConcurrentDictionary`?
-- LRU wymaga atomowej operacji na DWÓCH strukturach (mapa + lista).
-- `lock` z krótkimi sekcjami krytycznymi jest tu szybszy niż double-CAS.
+When you need a **bounded** cache (LRU eviction), Roslyn uses **Dictionary + LinkedList + lock** instead of Concurrent. Why not `ConcurrentDictionary`?
+- LRU requires an atomic operation on TWO structures (map + list).
+- `lock` with short critical sections is faster here than double-CAS.
 
 ```csharp
 private readonly Dictionary<K, CacheValue> _cache;
@@ -220,174 +220,174 @@ private readonly object _lockObject = new object();
 
 ## 14. `PipeAwaitable` — custom struct-based awaiter (zero allocation)
 
-Źródło: `System.IO.Pipelines.PipeAwaitable.cs`
+Source: `System.IO.Pipelines.PipeAwaitable.cs`
 
-Jeden z najfajniejszych wzorców niskopoziomowych:
+One of the nicest low-level patterns:
 
-- **`internal struct PipeAwaitable`** — NIE klasa, NIE Task. Sam awaiter to value type.
-- `[Flags] AwaitableState { None, Completed=1, Running=2, Canceled=4, UseSynchronizationContext=8 }` — 4 stany w jednym intie, bit operations.
-- `[MethodImpl(AggressiveInlining)]` na **każdej** metodzie zmieniającej stan.
-- `ValueTaskSourceOnCompletedFlags` zamiast pełnego Task — `ValueTask` nie alokuje.
-- `cancellationToken.UnsafeRegister(...)` (zamiast `Register`) — pomija przechwyt `ExecutionContext` (10x szybsze).
+- **`internal struct PipeAwaitable`** — NOT a class, NOT a Task. The awaiter itself is a value type.
+- `[Flags] AwaitableState { None, Completed=1, Running=2, Canceled=4, UseSynchronizationContext=8 }` — 4 states in one int, bit operations.
+- `[MethodImpl(AggressiveInlining)]` on **every** state-changing method.
+- `ValueTaskSourceOnCompletedFlags` instead of a full Task — `ValueTask` does not allocate.
+- `cancellationToken.UnsafeRegister(...)` (instead of `Register`) — skips `ExecutionContext` capture (10x faster).
 
-**To pokazuje**: gdy faktycznie potrzebujesz zero-allocation async (millions ops/sec), implementujesz własny `IValueTaskSource` na strukturze.
+**This shows**: when you genuinely need zero-allocation async (millions of ops/sec), you implement your own `IValueTaskSource` on a struct.
 
-## 15. `ValueTask` w hot paths (85 trafień / 48 plików)
+## 15. `ValueTask` in hot paths (85 hits / 48 files)
 
-`ValueTask` zamiast `Task` gdy:
-- Operacja często kończy się synchronicznie (dane już w buforze).
-- Hot path z wieloma wywołaniami na sekundę.
+`ValueTask` instead of `Task` when:
+- The operation frequently completes synchronously (data already in the buffer).
+- Hot path with many calls per second.
 
-Klasyk: `PipeReader.ReadAsync` zwraca `ValueTask<ReadResult>` — przy danych w buforze nie ma alokacji `Task`.
+Classic example: `PipeReader.ReadAsync` returns `ValueTask<ReadResult>` — when data is already in the buffer there is no `Task` allocation.
 
-**Roslyn ma `ValueTaskFactory`** — prebuilt `ValueTask` dla typowych przypadków (TrueResult, FalseResult, EmptyResult).
+**Roslyn has `ValueTaskFactory`** — prebuilt `ValueTask` for common cases (TrueResult, FalseResult, EmptyResult).
 
-## 16. `IAsyncDisposable` / `DisposeAsync` (152 trafień / 55 plików)
+## 16. `IAsyncDisposable` / `DisposeAsync` (152 hits / 55 files)
 
-Wszystko co alokuje async resources (streams, pipes, connections, lock'i) implementuje `IAsyncDisposable`. Stary `IDisposable.Dispose()` byłby blokujący — `DisposeAsync` pozwala na czysty cleanup bez block'owania wątku.
+Everything that allocates async resources (streams, pipes, connections, locks) implements `IAsyncDisposable`. The old `IDisposable.Dispose()` would be blocking — `DisposeAsync` allows clean cleanup without blocking a thread.
 
-VS Threading wprowadza **własny** `Microsoft.VisualStudio.Threading.IAsyncDisposable` (przed standardem) — pokazuje jak ważny był to wzorzec.
+VS Threading introduced **its own** `Microsoft.VisualStudio.Threading.IAsyncDisposable` (before the standard) — showing how important this pattern was.
 
-## 17. `CancellationToken` propagacja przez IPC
+## 17. `CancellationToken` propagation over IPC
 
-Źródło: `StreamJsonRpc.StandardCancellationStrategy`, `Microsoft.VisualStudio.Threading.CancellableJoinComputation`
+Source: `StreamJsonRpc.StandardCancellationStrategy`, `Microsoft.VisualStudio.Threading.CancellableJoinComputation`
 
-Cancel w RPC nie ma natywnego wsparcia w JSON-RPC. Microsoft implementuje:
-- Każde wywołanie dostaje correlation ID.
-- Klient anuluje → wysyła `$/cancelRequest` z tym ID.
-- Server tłumaczy to na lokalny `CancellationToken`.
+Cancellation in RPC has no native support in JSON-RPC. Microsoft implements it as:
+- Each call gets a correlation ID.
+- Client cancels → sends `$/cancelRequest` with that ID.
+- Server translates it into a local `CancellationToken`.
 
-**Key insight**: nie ignoruj `CancellationToken` na granicy procesu — przekaż go.
+**Key insight**: do not ignore `CancellationToken` at a process boundary — propagate it.
 
-## 18. `cancellationToken.UnsafeRegister` zamiast `Register` (167 trafień na CancellationTokenSource)
+## 18. `cancellationToken.UnsafeRegister` instead of `Register` (167 hits on CancellationTokenSource)
 
-`UnsafeRegister` pomija przechwyt `ExecutionContext` w `CallbackNode`. Używać gdy callback nie polega na `AsyncLocal`/`CallContext` — czyli **prawie zawsze** w infrastruktrze. Roslyn, Pipelines, StreamJsonRpc, Nerdbank — wszystkie go używają.
+`UnsafeRegister` skips `ExecutionContext` capture in `CallbackNode`. Use it when the callback does not rely on `AsyncLocal`/`CallContext` — which is **almost always** the case in infrastructure code. Roslyn, Pipelines, StreamJsonRpc, Nerdbank — all use it.
 
-## 19. `MultiplexingStream` — wiele logicznych strumieni w jednym fizycznym
+## 19. `MultiplexingStream` — multiple logical streams over one physical connection
 
-Źródło: `Nerdbank.Streams.MultiplexingStream.cs` (41 trafień PipeReader)
+Source: `Nerdbank.Streams.MultiplexingStream.cs` (41 PipeReader hits)
 
-Jak VS multipleksuje wiele kanałów RPC przez jeden named pipe / socket:
-- Każdy logical channel ma 8-bajtowy header (ID + flags + length).
-- Wewnętrznie `PipeReader`/`PipeWriter` per channel + frame demuxer.
-- Backpressure działa per-channel — wolny channel nie blokuje innych.
+How VS multiplexes multiple RPC channels over one named pipe / socket:
+- Each logical channel has an 8-byte header (ID + flags + length).
+- Internally `PipeReader`/`PipeWriter` per channel + frame demuxer.
+- Backpressure operates per-channel — a slow channel does not block others.
 
-**Tym sposobem VS odpala dziesiątki out-of-proc serwisów (Roslyn server, LSP servers) na 1-2 fizycznych połączeniach**.
+**This is how VS runs dozens of out-of-proc services (Roslyn server, LSP servers) over 1-2 physical connections**.
 
-## 20. Batching telemetrii — `TaskTimer` + `PersistenceTransmitter`
+## 20. Telemetry batching — `TaskTimer` + `PersistenceTransmitter`
 
-Źródło: `Microsoft.VisualStudio.Telemetry`
+Source: `Microsoft.VisualStudio.Telemetry`
 
-Zamiast wysyłać każde event natychmiast:
-- `TelemetryCollector` agreguje w buforze.
-- `TaskTimer` (custom timer ze `CancellationTokenSource.CancelAfter`) — flush co N sek.
-- `PersistenceTransmitter` — jeśli sieć nie działa, pisz na dysk, retry później.
+Instead of sending every event immediately:
+- `TelemetryCollector` aggregates into a buffer.
+- `TaskTimer` (custom timer with `CancellationTokenSource.CancelAfter`) — flush every N seconds.
+- `PersistenceTransmitter` — if the network is unavailable, write to disk and retry later.
 
-**Pattern**: nigdy nie blokuj hot path I/O. Batch + delay + persist + retry.
+**Pattern**: never block the hot path with I/O. Batch + delay + persist + retry.
 
-## 21. `Channel<T>` — nieobecne, Microsoft idzie w `Pipe`/`PipeReader`
+## 21. `Channel<T>` — absent; Microsoft favours `Pipe`/`PipeReader`
 
-Co ciekawe: **0 trafień `Channel<T>`** w 24 DLL. Microsoft Visual Studio używa **`System.IO.Pipelines.Pipe`** (binary streaming) zamiast `System.Threading.Channels.Channel<T>` (typed messaging).
+Interestingly: **0 hits for `Channel<T>`** across 24 DLLs. Microsoft Visual Studio uses **`System.IO.Pipelines.Pipe`** (binary streaming) instead of `System.Threading.Channels.Channel<T>` (typed messaging).
 
-Powód: dla komunikacji binarnej IPC `Pipe` jest niżej i bardziej kontrolowalny (rozmiar bufora, backpressure, zero-copy).
+Reason: for binary IPC communication `Pipe` is lower-level and more controllable (buffer size, backpressure, zero-copy).
 
-`Channel<T>` ma sens dla in-process producer/consumer z typami .NET. Pipe ma sens dla bytes-over-wire.
+`Channel<T>` makes sense for in-process producer/consumer with .NET types. Pipe makes sense for bytes-over-wire.
 
 ---
 
-## TL;DR część 2 — dodatkowe wzorce
+## TL;DR Part 2 — additional patterns
 
-| # | Wzorzec | Kiedy |
-|---|---------|-------|
-| 10 | `ArrayPool<byte>.Shared.Rent` + Clear-on-return | Każdy bufor > 1KB w hot path |
-| 11 | `Lazy<T>` z `PublicationOnly` | Każdy "ciężki" singleton/serwis |
+| # | Pattern | When |
+|---|---------|------|
+| 10 | `ArrayPool<byte>.Shared.Rent` + Clear-on-return | Any buffer > 1 KB in a hot path |
+| 11 | `Lazy<T>` with `PublicationOnly` | Any "heavy" singleton/service |
 | 12 | `ConcurrentDictionary.GetOrAdd` static lambda | Default cache (Type → Formatter etc.) |
-| 13 | Custom LRU z `lock` | Bounded cache z eviction |
-| 14 | `IValueTaskSource` na strukturze | Hot async path bez Task alloc |
-| 15 | `ValueTask` zamiast `Task` | Sync-completing async methods |
-| 16 | `IAsyncDisposable` | Resources wymagające async cleanup |
-| 17 | RPC correlation ID + reverse-cancel | Cancel cross-process |
-| 18 | `UnsafeRegister` na CT | Gdy nie potrzebujesz ExecutionContext |
-| 19 | Frame-multiplexing | Wiele logical channels nad 1 socket |
+| 13 | Custom LRU with `lock` | Bounded cache with eviction |
+| 14 | `IValueTaskSource` on a struct | Hot async path without Task allocation |
+| 15 | `ValueTask` instead of `Task` | Sync-completing async methods |
+| 16 | `IAsyncDisposable` | Resources requiring async cleanup |
+| 17 | RPC correlation ID + reverse-cancel | Cross-process cancellation |
+| 18 | `UnsafeRegister` on CT | When you don't need ExecutionContext |
+| 19 | Frame-multiplexing | Multiple logical channels over 1 socket |
 | 20 | Batch + timer + persist | I/O telemetry, logging, analytics |
-| 21 | `Pipe` > `Channel<T>` | Binary IPC; `Channel<T>` dla in-proc typed |
+| 21 | `Pipe` > `Channel<T>` | Binary IPC; `Channel<T>` for in-proc typed |
 
 ---
 
-*Część 2 dopisana 2026-05-15. Łącznie 24 DLL, ~7300 plików `.cs` w `C:\Temp\vsdecomp\`. Brak `Roslyn.Utilities.dll` jako osobny plik — zawartość siedzi wewnątrz `Microsoft.CodeAnalysis.dll`.*
+*Part 2 added 2026-05-15. 24 DLLs in total, ~7300 `.cs` files in `C:\Temp\vsdecomp\`. `Roslyn.Utilities.dll` does not exist as a separate file — its contents live inside `Microsoft.CodeAnalysis.dll`.*
 
 ---
 
-# Część 3 — masowy scan 1000 DLL (252 039 plików `.cs`)
+# Part 3 — mass scan of 1000 DLLs (252,039 `.cs` files)
 
-Po przeskanowaniu 1000 największych managed Microsoft/System DLL z VS 2022 (BCL, ASP.NET Core, Kestrel, Roslyn full stack, ML.NET, Build, MessagePack, Cosmos, etc.) wyłaniają się **nowe** klasy wzorców, niewidoczne w pierwszej puli 24 assembly.
+After scanning the 1000 largest managed Microsoft/System DLLs from VS 2022 (BCL, ASP.NET Core, Kestrel, Roslyn full stack, ML.NET, Build, MessagePack, Cosmos, etc.) **new** classes of patterns emerge that were invisible in the first batch of 24 assemblies.
 
-## 22. `[SkipLocalsInit]` — pomijanie zerowania lokalnych (1068 trafień / 134 plików)
+## 22. `[SkipLocalsInit]` — skipping zero-initialisation of locals (1068 hits / 134 files)
 
-Najczęstszy "ukryty" trick perf w nowym kodzie Microsoftu. CIL ma flagę `init` wymuszającą zerowanie wszystkich lokalnych zmiennych. `[SkipLocalsInit]` ją wyłącza → JIT generuje mniej instrukcji.
+The most common "hidden" perf trick in new Microsoft code. CIL has an `init` flag that forces all local variables to be zeroed. `[SkipLocalsInit]` disables it → JIT generates fewer instructions.
 
-**Critical**: nie używaj jeśli czytasz lokalne przed zapisem (UB). W praktyce bezpieczne dla:
-- Metod intensywnie używających `stackalloc` (bez tego stackalloc zeruje się gratis).
-- Hot paths z prostymi value-type locals zapisywanymi przed odczytem.
+**Critical**: do not use if you read locals before writing (UB). In practice safe for:
+- Methods that make heavy use of `stackalloc` (without this, stackalloc zeroes itself for free).
+- Hot paths with simple value-type locals that are written before being read.
 
-**Praktyka Microsoftu**: applied at **assembly level** w `AssemblyInfo.cs`. Każdy z VS Copilot, CoreUtility, Extensibility, LanguageServer, SolutionPersistence, ProjectSystem, Completions ma własny polyfill `SkipLocalsInitAttribute.cs` (bo atrybut wymaga .NET 5+, więc downlevel projekty go sobie deklarują wewnętrznie — wystarczy, kompilator C# rozpoznaje po nazwie).
+**Microsoft practice**: applied at **assembly level** in `AssemblyInfo.cs`. Each of VS Copilot, CoreUtility, Extensibility, LanguageServer, SolutionPersistence, ProjectSystem, Completions has its own polyfill `SkipLocalsInitAttribute.cs` (because the attribute requires .NET 5+, so down-level projects declare it internally — this is sufficient, the C# compiler recognises it by name).
 
-## 23. `[InlineArray(N)]` (.NET 8) — fixed-size buffer w strukcie
+## 23. `[InlineArray(N)]` (.NET 8) — fixed-size buffer in a struct
 
-47 trafień w 46 plikach. Pliki `__InlineArray2.cs`, `__InlineArray8.cs`, `__InlineArray38.cs` — to **kompilator C# emituje** te typy gdy widzi `Span<T> stackalloc[N]` patterns lub `[InlineArray]` ręcznie.
+47 hits across 46 files. Files `__InlineArray2.cs`, `__InlineArray8.cs`, `__InlineArray38.cs` — these types are **emitted by the C# compiler** when it sees `Span<T> stackalloc[N]` patterns or `[InlineArray]` used manually.
 
-**Konkretne użycie**: `Microsoft.AspNetCore.Razor.Utilities.Checksum` przechowuje 32-byte hash jako `InlineArray<32, byte>` w strukcie — fixed-size content addressing bez heap alloc. Roslyn LSP Protocol, Razor, Workspaces, Features, Copilot — wszystkie używają.
+**Concrete use**: `Microsoft.AspNetCore.Razor.Utilities.Checksum` stores a 32-byte hash as `InlineArray<32, byte>` in a struct — fixed-size content addressing without a heap allocation. Roslyn LSP Protocol, Razor, Workspaces, Features, Copilot — all use it.
 
-**Lekcja**: dla fixed-size data (hash, UUID, fixed packets) `[InlineArray]` zastępuje `unsafe fixed byte[N]` z pełnym typesystem support.
+**Lesson**: for fixed-size data (hash, UUID, fixed packets) `[InlineArray]` replaces `unsafe fixed byte[N]` with full type-system support.
 
-## 24. `[ModuleInitializer]` — run-once code na load assembly (32 trafień)
+## 24. `[ModuleInitializer]` — run-once code on assembly load (32 hits)
 
-Zastępuje statyczny konstruktor klasy gdy chcesz kod uruchamiany **raz, gdy assembly się ładuje**, niezależnie od pierwszego użycia jakiejkolwiek klasy.
+Replaces a static class constructor when you want code that runs **once, when the assembly loads**, regardless of which class is first accessed.
 
 ```csharp
 internal static class StartupInitializer {
     [ModuleInitializer]
     public static void Init() {
-        // np. rejestracja DI, codec registration, SQLite native dll preload
+        // e.g. DI registration, codec registration, SQLite native dll preload
     }
 }
 ```
 
-Konkretni użytkownicy: Copilot (Roslyn, CodeMappers, Common, Service, Vsix, UI.Core), Extensibility Framework, SolutionPersistence, ProjectSystem, **Microsoft.VisualStudio.Cache.SqliteInitializer** (preload native sqlite.dll), `Microsoft.Windows.SDK.NET.ProjectionInitializer` (WinRT projections).
+Concrete users: Copilot (Roslyn, CodeMappers, Common, Service, Vsix, UI.Core), Extensibility Framework, SolutionPersistence, ProjectSystem, **Microsoft.VisualStudio.Cache.SqliteInitializer** (preload native sqlite.dll), `Microsoft.Windows.SDK.NET.ProjectionInitializer` (WinRT projections).
 
-## 25. SIMD intrinsics — gdzie naprawdę żyją (391 trafień / 32 plików)
+## 25. SIMD intrinsics — where they actually live (391 hits / 32 files)
 
-SIMD jest **bardzo selektywnie** używane. Praktycznie tylko:
+SIMD is used **very selectively**. Practically only in:
 
-| Plik | Co robi przez SIMD |
-|------|---|
-| `System.Private.CoreLib\System.Text\Ascii.cs` (38) | walidacja/konwersja ASCII bytes |
+| File | What it does via SIMD |
+|------|-----------------------|
+| `System.Private.CoreLib\System.Text\Ascii.cs` (38) | ASCII byte validation/conversion |
 | `System.Private.CoreLib\System.Text.Unicode\Utf8Utility.cs` (23) | UTF-8 validation/transcoding |
-| `System.Private.CoreLib\System.Buffers\IndexOfAnyAsciiSearcher.cs` (6) | wielo-bajtowe IndexOfAny |
+| `System.Private.CoreLib\System.Buffers\IndexOfAnyAsciiSearcher.cs` (6) | multi-byte IndexOfAny |
 | `System.Private.CoreLib\System.Buffers\ProbabilisticMap.cs` (10) | string search |
 | `System.Private.CoreLib\System.Buffers.Text\Base64.cs` (14) | Base64 encode/decode |
 | `System.Private.CoreLib\System\HexConverter.cs` (9) | hex encoding |
-| **`Kestrel.StringUtilities.cs` (25)** | hex-encoding HTTP connection IDs przez `Ssse3.Shuffle` |
-| `System.Text.Encodings.Web\OptimizedInboxTextEncoder.cs` (46) | HTML/JS escape |
+| **`Kestrel.StringUtilities.cs` (25)** | hex-encoding HTTP connection IDs via `Ssse3.Shuffle` |
+| `System.Text.Encodings.Web\OptimizedInboxTextEncoder.cs` (46) | HTML/JS escaping |
 | `System.Numerics.Tensors\TensorPrimitives.cs` (57) | ML/AI vector math |
 
-Wzór z Kestrel (`StringUtilities.cs:61-68`):
+Pattern from Kestrel (`StringUtilities.cs:61-68`):
 ```csharp
 if (Ssse3.IsSupported) {
     Vector128<byte> vector = Ssse3.Shuffle(
         Vector128.CreateScalarUnsafe(item3).AsByte(),
-        Vector128.Create(15,15,3,15,...).AsByte()); // permutacja nibbli
+        Vector128.Create(15,15,3,15,...).AsByte()); // nibble permutation
     // ...mask, shuffle table "0123456789ABCDEF"... 
-    Unsafe.WriteUnaligned(ref ..., left);  // 16 bajtów w jednej instrukcji
+    Unsafe.WriteUnaligned(ref ..., left);  // 16 bytes in one instruction
 }
 else { /* scalar fallback */ }
 ```
 
-**Pattern**: SIMD ścieżka + scalar fallback, gated przez `Ssse3.IsSupported`/`Avx2.IsSupported`/`AdvSimd.IsSupported`. **Microsoft nie używa SIMD w VS code** — tylko w BCL i Kestrel (request parsing).
+**Pattern**: SIMD path + scalar fallback, gated by `Ssse3.IsSupported`/`Avx2.IsSupported`/`AdvSimd.IsSupported`. **Microsoft does not use SIMD in VS code** — only in BCL and Kestrel (request parsing).
 
-## 26. `ValueStringBuilder` — `ref struct` zamiast `StringBuilder`
+## 26. `ValueStringBuilder` — `ref struct` instead of `StringBuilder`
 
-Stack-allocated string builder z fallbackiem na `ArrayPool` przy growth:
+Stack-allocated string builder with an `ArrayPool` fallback on growth:
 
 ```csharp
 internal ref struct ValueStringBuilder {
@@ -395,60 +395,60 @@ internal ref struct ValueStringBuilder {
     private Span<char> _chars;
     private int _pos;
 
-    public ValueStringBuilder(Span<char> initialBuffer) {  // typowo: stackalloc char[256]
+    public ValueStringBuilder(Span<char> initialBuffer) {  // typically: stackalloc char[256]
         _arrayToReturnToPool = null;
         _chars = initialBuffer;
         _pos = 0;
     }
-    // Grow() → ArrayPool.Rent → CopyTo → Return stary
+    // Grow() → ArrayPool.Rent → CopyTo → Return old
     public override string ToString() {
         string result = _chars.Slice(0, _pos).ToString();
-        Dispose();  // zwraca rented bufor
+        Dispose();  // returns rented buffer
         return result;
     }
 }
 ```
 
-**Microsoft `polyfilluje` ten typ w masie projektów**: ASP.NET HttpLogging, Http.Extensions, Razor, Roslyn (jako `PooledStringBuilder` lub `StringBuilderPool`). To **standardowy zamiennik** dla `new StringBuilder()` w hot path.
+**Microsoft polyfills this type across many projects**: ASP.NET HttpLogging, Http.Extensions, Razor, Roslyn (as `PooledStringBuilder` or `StringBuilderPool`). It is the **standard replacement** for `new StringBuilder()` in hot paths.
 
-**Idiom użycia**:
+**Usage idiom**:
 ```csharp
 Span<char> initialBuffer = stackalloc char[256];
 var sb = new ValueStringBuilder(initialBuffer);
 sb.Append(...);
-return sb.ToString();  // alloc tylko gdy <= 256 nie wystarczy
+return sb.ToString();  // alloc only when <= 256 is not enough
 ```
 
-## 27. `AdaptiveCapacityDictionary` — array dla małego N, Dictionary po promocji
+## 27. `AdaptiveCapacityDictionary` — array for small N, Dictionary after promotion
 
-Źródło: `Microsoft.AspNetCore.Internal.AdaptiveCapacityDictionary`
+Source: `Microsoft.AspNetCore.Internal.AdaptiveCapacityDictionary`
 
 ```csharp
 private const int DefaultArrayThreshold = 10;
 internal KeyValuePair<TKey, TValue>[]? _arrayStorage;
 private int _count;
-// gdy _count > 10 → promocja do Dictionary<TKey, TValue>
+// when _count > 10 → promote to Dictionary<TKey, TValue>
 ```
 
-Linear scan po `_arrayStorage` dla małej liczby kluczy bije Dictionary (hashCode overhead + indirection). Dopiero powyżej 10 elementów przechodzi na hash.
+Linear scan over `_arrayStorage` beats Dictionary for a small number of keys (hashCode overhead + indirection). Only above 10 elements does it switch to a hash.
 
-**Użytkowane głównie w**: HTTP routing (zwykle 3-5 route values), HTTP headers (zwykle 10-15), MVC binders. Wszędzie tam gdzie `N` typowo jest małe ale czasem bywa duże.
+**Mainly used in**: HTTP routing (typically 3-5 route values), HTTP headers (typically 10-15), MVC binders. Anywhere `N` is usually small but can occasionally be large.
 
-## 28. `RoslynParallel` — własny wrapper na `Parallel.ForEach`
+## 28. `RoslynParallel` — custom wrapper for `Parallel.ForEach`
 
-273 trafień `Parallel.*` / 122 plików, ale w VS-specific kod używa **własnego** `RoslynParallel` (4-6 hits per copy w `Microsoft.CodeAnalysis`, `Workspaces`, `MSBuild.BuildHost`).
+273 `Parallel.*` hits / 122 files, but VS-specific code uses its **own** `RoslynParallel` (4-6 hits per copy in `Microsoft.CodeAnalysis`, `Workspaces`, `MSBuild.BuildHost`).
 
-Co wnoszą custom wrappery (vs stock `Parallel.ForEach`):
-- Cancellation propagation z `OperationCanceledException` → `TaskCanceledException`.
+What custom wrappers add over stock `Parallel.ForEach`:
+- Cancellation propagation with `OperationCanceledException` → `TaskCanceledException`.
 - Aggregate exception flattening.
-- `JoinableTaskFactory` integration (nie blokuje UI thread).
-- `IAsyncEnumerable` wsparcie (stock `Parallel` dostał `ForEachAsync` dopiero w .NET 6).
+- `JoinableTaskFactory` integration (does not block the UI thread).
+- `IAsyncEnumerable` support (stock `Parallel` got `ForEachAsync` only in .NET 6).
 
-**ML.NET** ma jeszcze własny `ParallelUtilities`, `KISSParallel`, `ParallelAsync` (Azure Cosmos), `EnumerableParallelizationExtensions`.
+**ML.NET** also has its own `ParallelUtilities`, `KISSParallel`, `ParallelAsync` (Azure Cosmos), `EnumerableParallelizationExtensions`.
 
-## 29. `EventSource` (ETW) — własny per komponent
+## 29. `EventSource` (ETW) — one per component
 
-`HostingEventSource`, `KestrelEventSource`, `MessagePackEventSource`, `HttpConnectionsEventSource` — każdy duży Microsoft komponent ma własny EventSource. Niski koszt (gdy nie ma listenera, `WriteEvent` to no-op po IsEnabled check), strukturalne eventy przez ETW/EventPipe.
+`HostingEventSource`, `KestrelEventSource`, `MessagePackEventSource`, `HttpConnectionsEventSource` — every large Microsoft component has its own EventSource. Low cost (when there is no listener, `WriteEvent` is a no-op after the IsEnabled check), structured events via ETW/EventPipe.
 
 ```csharp
 [EventSource(Name = "Microsoft-AspNetCore-Hosting")]
@@ -459,34 +459,34 @@ internal sealed class HostingEventSource : EventSource {
 }
 ```
 
-**Lekcja**: dla bibliotek `EventSource` > `ILogger.LogTrace` — jest zero-cost gdy nikt nie słucha, a `ILogger` zawsze allokuje argv array.
+**Lesson**: for libraries `EventSource` > `ILogger.LogTrace` — it is zero-cost when nobody is listening, whereas `ILogger` always allocates an argv array.
 
 ## 30. `UnmanagedBufferAllocator` + `MemoryPoolBlock` (Kestrel)
 
-Kestrel idzie *poniżej* GC — używa **unmanaged native memory** dla HTTP buffers:
-- `UnmanagedBufferAllocator` — alokuje przez `NativeMemory.Alloc`.
-- `MemoryPoolBlock` — reusable bloki native pamięci.
+Kestrel goes *below* the GC — it uses **unmanaged native memory** for HTTP buffers:
+- `UnmanagedBufferAllocator` — allocates via `NativeMemory.Alloc`.
+- `MemoryPoolBlock` — reusable blocks of native memory.
 
-**Why**: GC nie skanuje, nie kompaktuje, brak pinning. Dla serwera obsługującego miliony requestów to różnica między pojawiającymi się pauzami a płaską latencją.
+**Why**: GC does not scan it, does not compact it, no pinning needed. For a server handling millions of requests this is the difference between sporadic pauses and flat latency.
 
-**Dla 99% aplikacji**: `ArrayPool<byte>.Shared` wystarczy. To technika dla serwerów high-throughput.
+**For 99% of applications**: `ArrayPool<byte>.Shared` is sufficient. This technique is for high-throughput servers.
 
-## 31. `MessagePack.UnsafeMemory32` / `UnsafeMemory64` — wybór per architecture
+## 31. `MessagePack.UnsafeMemory32` / `UnsafeMemory64` — per-architecture selection
 
-Dwie kopie tego samego kodu — jedna używa 32-bit pointer arithmetic, druga 64-bit:
+Two copies of the same code — one uses 32-bit pointer arithmetic, the other 64-bit:
 ```csharp
 if (IntPtr.Size == 8) UnsafeMemory64.WriteRaw1(...); 
 else UnsafeMemory32.WriteRaw1(...);
 ```
 
-Każda używa `Unsafe.WriteUnaligned` + `Unsafe.As<byte, X>`. To 31 trafień w jednym pliku. **Brutalny** unsafe code dla maksymalnej szybkości serializacji.
+Each uses `Unsafe.WriteUnaligned` + `Unsafe.As<byte, X>`. That is 31 hits in a single file. **Brutal** unsafe code for maximum serialisation speed.
 
 ## 32. `[FieldOffset]` / `LayoutKind.Explicit` — union view
 
-Masowe użycie do "union" w stylu C:
-- `MessagePack.GuidBits` — Guid jako 16 bajtów dla quick encode.
+Heavily used for C-style unions:
+- `MessagePack.GuidBits` — Guid as 16 bytes for quick encoding.
 - `Microsoft.Azure.Cosmos.HybridRow.Float128`, `UnixDateTime`, `HybridRowHeader`, `MongoDbObjectId` — packed binary formats.
-- `Microsoft.AspNetCore.HttpSys.Internal.HttpApiTypes` — interop z natywnym http.sys.
+- `Microsoft.AspNetCore.HttpSys.Internal.HttpApiTypes` — interop with native http.sys.
 - `VSPerfReader._LARGE_INTEGER`, `_EVENTBLOB`, `_SAMPLEEVENTBLOB` — VS profiler binary format.
 
 ```csharp
@@ -498,20 +498,20 @@ internal struct GuidBits {
 }
 ```
 
-Zero kopii, atomicowy odczyt dwóch ulongów zamiast 16 bajtów.
+Zero copies, atomic read of two ulongs instead of 16 bytes.
 
-## 33. `ConditionalWeakTable<TKey, TValue>` — przyczepianie danych bez retencji
+## 33. `ConditionalWeakTable<TKey, TValue>` — attaching data without retention
 
-Pozwala dorzucić "extra" dane do obiektu jakby były polem, ale **nie trzyma obiektu przy życiu**. Microsoft używa do:
+Lets you attach "extra" data to an object as if it were a field, but **does not keep the object alive**. Microsoft uses it for:
 - `Microsoft.Cci.TrivialHashtableUsingWeakReferences`, `WeakValuesEnumerator` — FxCop analyzer state.
 - `System.Management.Automation.WeakReferenceDictionary` — PowerShell engine.
 - VS Debugger `WeakEventDelegate` — unsubscribable event handlers.
 
-**Use case**: cache czy state attached do user-supplied object gdzie nie kontrolujesz lifetime.
+**Use case**: cache or state attached to a user-supplied object whose lifetime you do not control.
 
 ## 34. `StackObjectPool` (ASP.NET Components) — thread-local pool
 
-Stack-based pool LIFO zamiast bag/queue. Idea: ostatnio zwrócony obiekt prawdopodobnie jest "ciepły" w cache CPU.
+Stack-based LIFO pool instead of a bag/queue. Idea: the most recently returned object is probably "warm" in the CPU cache.
 
 ```csharp
 [ThreadStatic] private static Stack<T>? t_pool;
@@ -519,116 +519,116 @@ public T Rent() => (t_pool?.Count > 0) ? t_pool.Pop() : new T();
 public void Return(T item) { (t_pool ??= new Stack<T>()).Push(item); }
 ```
 
-Używane w `RenderTreeBuilder` dla bazillion-times-per-render elementów. Brak kontencji (thread-local), cache-friendly.
+Used in `RenderTreeBuilder` for elements touched many times per render. No contention (thread-local), cache-friendly.
 
 ## 35. `PerformanceSensitiveAttribute` — analyzer hint
 
-Roslyn ma własny attribute `[PerformanceSensitive(...)]` którym oznacza metody gdzie alokacja byłaby zła. Analyzer ostrzega.
+Roslyn has its own attribute `[PerformanceSensitive(...)]` to mark methods where allocation would be harmful. An analyzer warns when this contract is violated.
 
 ```csharp
 [PerformanceSensitive("https://...", AllowCaptures = false)]
 private void HotPath() { ... }
 ```
 
-**Lekcja**: rozważ własny analyzer dla hot path methods w twojej bazie — Roslyn pokazuje że to się skaluje.
+**Lesson**: consider a custom analyzer for hot-path methods in your codebase — Roslyn shows this scales well.
 
 ---
 
-## TL;DR część 3 — co nowego
+## TL;DR Part 3 — what is new
 
-| # | Wzorzec | Adopcja |
-|---|---------|---|
-| 22 | `[SkipLocalsInit]` assembly-wide | Każdy nowy Microsoft projekt |
-| 23 | `[InlineArray(N)]` (.NET 8) | Fixed-size hashe, packets, UUID-like |
-| 24 | `[ModuleInitializer]` | DI rejestracja, native preload na load assembly |
-| 25 | SIMD `Vector128`/`Avx2`/`Ssse3` | Tylko BCL + Kestrel string ops + ML tensors |
-| 26 | `ValueStringBuilder` (`ref struct`) | Zamiast `new StringBuilder()` w hot paths |
-| 27 | `AdaptiveCapacityDictionary` | Routing, headers — małe N typowo |
+| # | Pattern | Adoption |
+|---|---------|----------|
+| 22 | `[SkipLocalsInit]` assembly-wide | Every new Microsoft project |
+| 23 | `[InlineArray(N)]` (.NET 8) | Fixed-size hashes, packets, UUID-like |
+| 24 | `[ModuleInitializer]` | DI registration, native preload on assembly load |
+| 25 | SIMD `Vector128`/`Avx2`/`Ssse3` | BCL + Kestrel string ops + ML tensors only |
+| 26 | `ValueStringBuilder` (`ref struct`) | Instead of `new StringBuilder()` in hot paths |
+| 27 | `AdaptiveCapacityDictionary` | Routing, headers — typically small N |
 | 28 | Custom Parallel wrappers | Cancellation + JoinableTask integration |
-| 29 | Per-komponent `EventSource` | Zamiast `ILogger.LogTrace` w bibliotekach |
+| 29 | Per-component `EventSource` | Instead of `ILogger.LogTrace` in libraries |
 | 30 | `UnmanagedBufferAllocator` | High-throughput servers (Kestrel) |
-| 31 | 32-bit / 64-bit kod-fork | Brutalna szybkość unsafe serializacji |
+| 31 | 32-bit / 64-bit code fork | Brutal speed for unsafe serialisation |
 | 32 | `[FieldOffset]` union | Binary protocols, interop, packed data |
-| 33 | `ConditionalWeakTable` | Attach state do user objects |
+| 33 | `ConditionalWeakTable` | Attach state to user objects |
 | 34 | `[ThreadStatic] Stack<T>` pool | Cache-warm, no contention |
-| 35 | `[PerformanceSensitive]` analyzer | Egzekwowanie no-alloc kontraktu |
+| 35 | `[PerformanceSensitive]` analyzer | Enforcing the no-alloc contract |
 
 ---
 
-## Meta-obserwacje z 1000 DLL
+## Meta-observations from 1000 DLLs
 
-1. **VS-specific kod (`Microsoft.VisualStudio.*`) używa głównie wysokopoziomowych wzorców** — pooling, `JoinableTaskFactory`, `Lazy<T>`, immutable. Mało SIMD, mało unsafe.
+1. **VS-specific code (`Microsoft.VisualStudio.*`) relies mainly on high-level patterns** — pooling, `JoinableTaskFactory`, `Lazy<T>`, immutable. Little SIMD, little unsafe.
 
-2. **ASP.NET Core / Kestrel używa kompletnie innego poziomu agresji** — SIMD, unmanaged memory, własne PipelineSchedulers. Inny constraint (serwer 100K req/s vs IDE).
+2. **ASP.NET Core / Kestrel operates at a completely different level of aggression** — SIMD, unmanaged memory, custom PipelineSchedulers. Different constraints (server at 100K req/s vs an IDE).
 
-3. **System.Private.CoreLib (BCL)** to laboratorium SIMD i `[Intrinsic]`. Patrzysz tam jak się robi `IndexOf` na 1 cykl per 16 bajtów.
+3. **System.Private.CoreLib (BCL)** is the laboratory for SIMD and `[Intrinsic]`. You can see there how `IndexOf` achieves 1 cycle per 16 bytes.
 
-4. **Roslyn jest najbogatszym źródłem ogólnych wzorców** (`ObjectPool`, `ArrayBuilder`, `SegmentedArray`, `StringTable`, `ConcurrentLruCache`). Można skopiować praktycznie jak template.
+4. **Roslyn is the richest source of general patterns** (`ObjectPool`, `ArrayBuilder`, `SegmentedArray`, `StringTable`, `ConcurrentLruCache`). You can copy them almost verbatim as templates.
 
-5. **MessagePack i StreamJsonRpc** to wzorce **IPC perf** — `IValueTaskSource`, `Pipe`, multiplexing.
+5. **MessagePack and StreamJsonRpc** are the reference for **IPC perf patterns** — `IValueTaskSource`, `Pipe`, multiplexing.
 
-6. **Każdy serious komponent ma własny `EventSource`** — ETW jest tańsze niż logging w bibliotekach.
+6. **Every serious component has its own `EventSource`** — ETW is cheaper than logging in libraries.
 
-7. **`SkipLocalsInit` to ukryty trick** — 1068 trafień, nikt o nim głośno nie mówi, ale Microsoft go używa wszędzie.
+7. **`SkipLocalsInit` is a hidden trick** — 1068 hits, nobody talks loudly about it, but Microsoft uses it everywhere.
 
-8. **Brak `Channel<T>` nawet w 1000 DLL** w VS-specific code dla streamingu. To naprawdę pipeline-first stack.
-
----
-
-*Część 3 dopisana 2026-05-15. Łącznie 1024 DLL zdekompilowane do `C:\Temp\vsdecomp\` (~3.5 GB, 252 039 plików `.cs`).*
+8. **No `Channel<T>` even across 1000 DLLs** in VS-specific streaming code. This is truly a pipeline-first stack.
 
 ---
 
-# Część 4 — domknięcie do 2064 DLL (100% managed)
+*Part 3 added 2026-05-15. 1024 DLLs in total decompiled to `C:\Temp\vsdecomp\` (~3.5 GB, 252,039 `.cs` files).*
 
-Dodatkowe 1040 DLL: pełny WPF (`PresentationCore`, `PresentationFramework`, `WindowsBase`), `Microsoft.Extensions.DependencyInjection`, EntityFramework, F# Compiler Service, ML.NET Data, Xamarin, Azure SDK, BuildXL. Dorzucają **nową** klasę wzorców z innych światów niż VS-internal/Roslyn/ASP.NET.
+---
+
+# Part 4 — rounding out to 2064 DLLs (100% managed)
+
+An additional 1040 DLLs: full WPF (`PresentationCore`, `PresentationFramework`, `WindowsBase`), `Microsoft.Extensions.DependencyInjection`, EntityFramework, F# Compiler Service, ML.NET Data, Xamarin, Azure SDK, BuildXL. They contribute a **new** class of patterns from domains other than VS-internal/Roslyn/ASP.NET.
 
 ## 36. WPF DependencyProperty — sparse storage struct (`EffectiveValueEntry`)
 
-Źródło: `WindowsBase\System.Windows\EffectiveValueEntry.cs`, `DependencyObject.cs:69` hits
+Source: `WindowsBase\System.Windows\EffectiveValueEntry.cs`, `DependencyObject.cs:69` hits
 
-WPF musi obsłużyć tysiące właściwości na elementach UI, ale typowy element ustawia ~5-10. Zamiast tablicy `object[N]` dla wszystkich możliwych właściwości — **rzadka tablica struktur 12-bajtowych**:
+WPF must handle thousands of properties on UI elements, but a typical element sets only ~5-10. Instead of an `object[N]` array for all possible properties — a **sparse array of 12-byte structs**:
 
 ```csharp
 internal struct EffectiveValueEntry {
     private object _value;
-    private short _propertyIndex;        // 2 B — index, nie pełna referencja na DependencyProperty
+    private short _propertyIndex;        // 2 B — index, not a full reference to DependencyProperty
     private FullValueSource _source;     // 4 B bitfield (Local|Style|Inherited|Animated...)
 }
 ```
 
-- `short` (2 bajty) zamiast pełnej referencji na `DependencyProperty` (8B) — zakłada <32k DP per type.
-- `FullValueSource` bitfield trzyma 8 priorytetów (Local, Style, Trigger, Inherited...) w jednym intie.
-- Tablica jest sortowana po `_propertyIndex` → binary search.
+- `short` (2 bytes) instead of a full `DependencyProperty` reference (8 B) — assumes < 32k DPs per type.
+- `FullValueSource` bitfield holds 8 priorities (Local, Style, Trigger, Inherited...) in one int.
+- The array is sorted by `_propertyIndex` → binary search.
 - `DTypeMap` (PresentationCore) — fast type→handler dispatch.
 
-**Pattern do skopiowania**: gdy masz "obiekt z opcjonalnie setkami atrybutów ale typowo zestaw kilku" — sparse `Entry[]` sorted po int index bije `Dictionary<Key, Value>` na małym N.
+**Pattern to copy**: when you have "an object with potentially hundreds of attributes but typically a handful" — a sparse `Entry[]` sorted by int index beats `Dictionary<Key, Value>` for small N.
 
 ## 37. WPF Freezable — opt-in immutability
 
-Brushes, Geometries, Animations w WPF dziedziczą po `Freezable`. Domyślnie **mutable** (developer może zmienić kolor pędzla), ale po wywołaniu `.Freeze()`:
-- Staje się **thread-safe** (nie potrzebuje sync).
-- Wszystkie change-notification subskrypcje są odrzucane.
-- Można współdzielić między wątkami / oknami.
+Brushes, Geometries, and Animations in WPF inherit from `Freezable`. By default **mutable** (a developer can change a brush's colour), but after calling `.Freeze()`:
+- It becomes **thread-safe** (requires no synchronisation).
+- All change-notification subscriptions are discarded.
+- It can be shared between threads / windows.
 
 ```csharp
 var brush = new SolidColorBrush(Colors.Red);
-brush.Freeze();  // teraz immutable, shareable, no notifications
+brush.Freeze();  // now immutable, shareable, no notifications
 ```
 
-**Korzyść perf**: jeden `Brushes.Red` (frozen) reused thousands of times. Bez Freezable każdy element UI musiałby mieć własną kopię lub subskrybować change events.
+**Perf benefit**: a single `Brushes.Red` (frozen) reused thousands of times. Without Freezable every UI element would need its own copy or would have to subscribe to change events.
 
-`AbstractFreezable` widoczne też w `ICSharpCode.Decompiler` (build → freeze → use forever).
+`AbstractFreezable` is also visible in `ICSharpCode.Decompiler` (build → freeze → use forever).
 
 ## 38. `RBTree<T>` + `LiveShapingList` (WPF Data) — incremental sort
 
-`MS.Internal.Data.RBTree` — Red-Black tree dla kolekcji widoków. `LiveShapingList` / `LiveShapingTree` aktualizuje filter/sort/group **przyrostowo** gdy źródło się zmienia, zamiast od zera.
+`MS.Internal.Data.RBTree` — Red-Black tree for view collections. `LiveShapingList` / `LiveShapingTree` updates filter/sort/group **incrementally** when the source changes, instead of from scratch.
 
-**Pattern**: dla "always-up-to-date sorted view of changing collection", tree z O(log n) insert > resort O(n log n).
+**Pattern**: for an "always-up-to-date sorted view of a changing collection", a tree with O(log n) insert beats O(n log n) resort.
 
 ## 39. `Expression.Compile` — runtime IL emit cache
 
-Dziesiątki bibliotek (CsvHelper, EntityFramework, MessagePack, F#, MVC ModelBinder, MAPI parserów, Azure SDK) **kompilują wyrażenia raz**, cache'ują delegate forever:
+Dozens of libraries (CsvHelper, EntityFramework, MessagePack, F#, MVC ModelBinder, MAPI parsers, Azure SDK) **compile expressions once** and cache the delegate forever:
 
 ```csharp
 private static readonly ConcurrentDictionary<Type, Func<object>> s_factories = new();
@@ -638,384 +638,384 @@ Func<object> factory = s_factories.GetOrAdd(t, type => {
 });
 ```
 
-**Reflection wywoływany raz na typ, potem JIT'd delegate.** 10-100x szybsze niż `Activator.CreateInstance(t)` na hot path.
+**Reflection called once per type, then a JIT'd delegate.** 10-100x faster than `Activator.CreateInstance(t)` on a hot path.
 
 ## 40. DI `ActivatorUtilities.CreateFactory` — pre-compile constructor
 
 `Microsoft.Extensions.DependencyInjection.ActivatorUtilities`:
-- `CreateFactory(Type, Type[])` — emituje IL z wybranym konstruktorem i lookupami z `IServiceProvider`.
-- Zwraca `ObjectFactory` delegate cached.
+- `CreateFactory(Type, Type[])` — emits IL with the chosen constructor and `IServiceProvider` lookups.
+- Returns a cached `ObjectFactory` delegate.
 
-Zamiast reflection per request: jedna kompilacja na typ na cały lifetime aplikacji.
+Instead of reflection per request: one compilation per type for the entire application lifetime.
 
-`Microsoft.Extensions.DependencyInjection.ServiceLookup` (CallSite engine) buduje graf dependency w postaci wyrażeń, compile do delegate, ponownie używa.
+`Microsoft.Extensions.DependencyInjection.ServiceLookup` (CallSite engine) builds the dependency graph as expressions, compiles them to delegates, and reuses them.
 
-## 41. Runtime IL emit przez `DynamicMethod` / `ILGenerator`
+## 41. Runtime IL emit via `DynamicMethod` / `ILGenerator`
 
-Tam gdzie `Expression.Compile` nie wystarcza (struktury, ref params), Microsoft schodzi do gołego IL:
+Where `Expression.Compile` is not sufficient (structs, ref params), Microsoft drops down to raw IL:
 
-| Konsument | Co emituje |
-|---|---|
+| Consumer | What it emits |
+|----------|---------------|
 | `MessagePack.DynamicObjectTypeBuilder` (96 hits) | Per-type serializer/deserializer (full IL) |
-| `MessagePack.ILGeneratorExtensions` (81 hits) | DSL na ILGenerator dla typowych operacji |
-| `EntityFramework.EntityProxyFactory` (9 hits) | Proxy classes dla lazy-loading entities |
+| `MessagePack.ILGeneratorExtensions` (81 hits) | DSL on ILGenerator for common operations |
+| `EntityFramework.EntityProxyFactory` (9 hits) | Proxy classes for lazy-loading entities |
 | `EntityFramework.IPocoImplementor` (113 hits) | Property getter/setter override |
-| `F# Compiler.ILDynamicAssemblyWriter` (**262 hits**) | F# kompiluje całe assembly do pamięci |
+| `F# Compiler.ILDynamicAssemblyWriter` (**262 hits**) | F# compiles entire assemblies in-memory |
 | `dotnet-svcutil.CodeGenerator` (72 hits) | WCF service contract emission |
 | `SignalR.TypedClientBuilder` (23 hits) | Strongly-typed hub proxies |
 | `Roslyn.MessagePack` (in workspaces) | Code analysis serialization |
 
-**Wniosek**: Runtime IL emit nie jest niszą — używają go największe biblioteki .NET. Pattern: **codegen at first-use, cache result, run forever**.
+**Conclusion**: Runtime IL emit is not a niche — the largest .NET libraries use it. Pattern: **codegen at first-use, cache result, run forever**.
 
 ## 42. Segmented sort — `SegmentedArraySortHelper`
 
-Skoro Roslyn ma `SegmentedArray<T>` (jagged → omija LOH), to `Array.Sort` nie zadziała. Microsoft napisał własny `SegmentedGenericArraySortHelper` (port klasyka introsort/heapsort z BCL `ArraySortHelper`) działający na `T[][]`.
+Since Roslyn has `SegmentedArray<T>` (jagged → bypasses LOH), `Array.Sort` won't work. Microsoft wrote its own `SegmentedGenericArraySortHelper` (a port of the classic introsort/heapsort from BCL `ArraySortHelper`) that operates on `T[][]`.
 
-Ten plik widziany w 7 różnych DLLs (`Microsoft.CodeAnalysis.Workspaces`, `MSBuild.BuildHost`, `Microsoft.VisualStudio.CoreUtility`, `Microsoft.Build.Framework`, `InteractiveHost`) — kod skopiowany identycznie. **Tym jak Microsoft dzieli kod**: copy-paste między assembly zamiast tworzyć dependency.
+This file is seen in 7 different DLLs (`Microsoft.CodeAnalysis.Workspaces`, `MSBuild.BuildHost`, `Microsoft.VisualStudio.CoreUtility`, `Microsoft.Build.Framework`, `InteractiveHost`) — the code copied identically. **This is how Microsoft shares code**: copy-paste between assemblies instead of creating a dependency.
 
-## 43. F# pamięta o **persistent collections** w warstwie sourcu
+## 43. F# uses **persistent collections** at the source level
 
-`FSharp.Core` używa swoich własnych immutable map/set zaimplementowanych jako persistent AVL trees (w `FSharp.Collections`). Każda "zmiana" zwraca nową strukturę dzielącą >90% pamięci ze starą.
+`FSharp.Core` uses its own immutable maps/sets implemented as persistent AVL trees (in `FSharp.Collections`). Every "modification" returns a new structure sharing >90% of memory with the old one.
 
-To **inny model** niż System.Collections.Immutable (które używa B-tree dla `ImmutableSortedDictionary` ale AVL dla `ImmutableSortedSet`). Microsoft utrzymuje OBIE biblioteki bo F# ma odrębne ograniczenia (functional purity, structural equality).
+This is a **different model** from System.Collections.Immutable (which uses a B-tree for `ImmutableSortedDictionary` but AVL for `ImmutableSortedSet`). Microsoft maintains BOTH libraries because F# has distinct constraints (functional purity, structural equality).
 
-## 44. WPF `InsertionSortMap` — sortowanie małych zbiorów
+## 44. WPF `InsertionSortMap` — sorting small sets
 
-`WindowsBase\MS.Utility\InsertionSortMap.cs` — insertion sort jako dedykowany helper dla map/list o N < ~16. WPF zna swój domain: większość kolekcji jest mała → insertion sort O(n²) ale **stała mała**, bez complications quicksort'a.
+`WindowsBase\MS.Utility\InsertionSortMap.cs` — insertion sort as a dedicated helper for maps/lists with N < ~16. WPF knows its domain: most collections are small → insertion sort is O(n²) but with a **small constant**, without quicksort's overhead.
 
-**Pattern**: dla "wiem że N zwykle <16" insertion sort bije quicksort/Array.Sort overhead.
+**Pattern**: when you know N is typically <16, insertion sort beats the quicksort/Array.Sort overhead.
 
 ## 45. `[CallerArgumentExpression]` polyfill + assert helpers
 
-Widoczne we wszystkich nowszych projektach Microsoftu. `ArgumentNullException.ThrowIfNull(x, nameof(x))` używa `[CallerArgumentExpression]` żeby kompilator dostarczył napis automatycznie.
+Visible in all newer Microsoft projects. `ArgumentNullException.ThrowIfNull(x, nameof(x))` uses `[CallerArgumentExpression]` so the compiler supplies the argument text automatically.
 
-`Microsoft.VisualStudio.Validation.Requires` + `Verify` używają tego patternu od dawna — teraz BCL go zaadoptował.
+`Microsoft.VisualStudio.Validation.Requires` + `Verify` have used this pattern for a long time — now BCL has adopted it.
 
 ---
 
-## TL;DR część 4
+## TL;DR Part 4
 
-| # | Wzorzec | Skąd |
-|---|---------|---|
-| 36 | Sparse `Entry[]` struct dla obiektów z setkami opcjonalnych pól | WPF `DependencyObject` |
+| # | Pattern | Origin |
+|---|---------|--------|
+| 36 | Sparse `Entry[]` struct for objects with hundreds of optional fields | WPF `DependencyObject` |
 | 37 | Mutable → `.Freeze()` → immutable shareable | WPF Brushes/Animations |
-| 38 | RB-tree dla "live sorted view" zmieniającej się kolekcji | WPF `LiveShapingList` |
-| 39 | `Expression.Compile` + cache per typ | DI, EF, MessagePack, ASP.NET MVC |
+| 38 | RB-tree for "live sorted view" of a changing collection | WPF `LiveShapingList` |
+| 39 | `Expression.Compile` + cache per type | DI, EF, MessagePack, ASP.NET MVC |
 | 40 | `ActivatorUtilities.CreateFactory` | Microsoft.Extensions.DI |
-| 41 | `DynamicMethod` + `ILGenerator` z cache | MessagePack, EF proxy, F# compiler |
-| 42 | Własny sort na segmented arrays | Roslyn (kopiowany 7×) |
-| 43 | Persistent AVL trees zamiast immutable B-tree | F#.Core |
-| 44 | Insertion sort dla N<16 | WPF |
-| 45 | `[CallerArgumentExpression]` w guardach | Wszędzie w nowym kodzie |
+| 41 | `DynamicMethod` + `ILGenerator` with cache | MessagePack, EF proxy, F# compiler |
+| 42 | Custom sort on segmented arrays | Roslyn (copied 7×) |
+| 43 | Persistent AVL trees instead of immutable B-tree | F#.Core |
+| 44 | Insertion sort for N<16 | WPF |
+| 45 | `[CallerArgumentExpression]` in guards | Everywhere in new code |
 
 ---
 
-## Końcowe meta-obserwacje (po 2064 DLL)
+## Final meta-observations (after 2064 DLLs)
 
-1. **Trzy "szkoły" perf w Microsoft**:
-   - **VS-internal** (Roslyn, VS Threading) — pooling, immutable, async-first, brak SIMD/unsafe
+1. **Three "schools" of perf at Microsoft**:
+   - **VS-internal** (Roslyn, VS Threading) — pooling, immutable, async-first, no SIMD/unsafe
    - **High-throughput server** (Kestrel, ASP.NET Core) — SIMD, unmanaged memory, custom awaiters
-   - **BCL** (`System.Private.CoreLib`) — laboratorium `[Intrinsic]`, AVX/SSE, RyuJIT-aware code
+   - **BCL** (`System.Private.CoreLib`) — the `[Intrinsic]`, AVX/SSE, RyuJIT-aware code laboratory
 
-2. **WPF jest osobnym światem** — opracowano go gdy `Span<T>`/`ArrayPool` nie istniały. Patterns (sparse storage, freezable, RBTree) są wciąż doskonałym wzorcem dla **innych** problemów niż UI.
+2. **WPF is a world of its own** — it was developed before `Span<T>`/`ArrayPool` existed. Its patterns (sparse storage, freezable, RBTree) are still excellent models for **other** problems beyond UI.
 
-3. **Codegen jest standardem** — `Expression.Compile`/`DynamicMethod` wszędzie gdzie liczy się szybkość reflection. Roslyn analyzers wręcz wymuszają tę technikę (`[PerformanceSensitive]`).
+3. **Codegen is the standard** — `Expression.Compile`/`DynamicMethod` everywhere reflection speed matters. Roslyn analyzers actively enforce this technique (`[PerformanceSensitive]`).
 
-4. **Microsoft prefers copy-paste over shared dependency** dla niskopoziomowych utilities (`SegmentedArraySortHelper`, `SkipLocalsInitAttribute`, `ValueStringBuilder`). Większy binary, ale brak version conflicts.
+4. **Microsoft prefers copy-paste over shared dependency** for low-level utilities (`SegmentedArraySortHelper`, `SkipLocalsInitAttribute`, `ValueStringBuilder`). Larger binary, but no version conflicts.
 
-5. **F# i C# stacks rozdzielne** — F# nie używa Roslyn ani BCL collections, ma równoległą implementację compilera + persistent collections.
+5. **F# and C# stacks are separate** — F# does not use Roslyn or BCL collections; it has a parallel compiler implementation + persistent collections.
 
-6. **Pooling > SIMD pod względem ROI** w aplikacjach IDE/biznesowych. SIMD opłaca się gdy parsujesz miliony bajtów/s.
-
----
-
-*Część 4 dopisana 2026-05-15. **Łącznie 2064 managed DLL zdekompilowanych** w `C:\Temp\vsdecomp\` (~5 GB, 370 860 plików `.cs`). 100% pokrycia managed Microsoft+System+3rd-party assembly z VS 2022 install (>=32KB, niefiltrowanych jako native runtime stubs).*
+6. **Pooling > SIMD in terms of ROI** for IDE/business applications. SIMD pays off when you are parsing millions of bytes/s.
 
 ---
 
-# Część 5 — cross-reference z dotnet-optimization-cheatsheet (Nikou Usalp)
+*Part 4 added 2026-05-15. **2064 managed DLLs decompiled** in total in `C:\Temp\vsdecomp\` (~5 GB, 370,860 `.cs` files). 100% coverage of managed Microsoft+System+3rd-party assemblies from the VS 2022 install (>=32 KB, not filtered as native runtime stubs).*
 
-Źródło: <https://github.com/nikouu/dotnet-optimization-cheatsheet> — 40 technik perf zebranych z blogów (Stephen Toub, NDepend, Adam Sitnik et al.).
+---
 
-## Co cheatsheet potwierdza z mojego scanu (cross-validation)
+# Part 5 — cross-reference with dotnet-optimization-cheatsheet (Nikou Usalp)
 
-Praktycznie 1:1 z moim wynikiem — `ArrayPool`, `ObjectPool`, `ValueTask`, `Span<T>`, `stackalloc`, `[MethodImpl(AggressiveInlining)]`, `[SkipLocalsInit]`, `[InlineArray]`, `MemoryMarshal`, `Unsafe.*`, custom struct awaiters, SIMD. To, co Microsoft pisze w blogach, **rzeczywiście robi w kodzie produkcyjnym**. Niewielu firm tak robi.
+Source: <https://github.com/nikouu/dotnet-optimization-cheatsheet> — 40 perf techniques collected from blogs (Stephen Toub, NDepend, Adam Sitnik et al.).
 
-## 46. Co dodaje cheatsheet (nowe vs mój scan)
+## What the cheatsheet confirms from my scan (cross-validation)
 
-### A. Techniki których brakowało mi w analizie
+Practically 1:1 with my findings — `ArrayPool`, `ObjectPool`, `ValueTask`, `Span<T>`, `stackalloc`, `[MethodImpl(AggressiveInlining)]`, `[SkipLocalsInit]`, `[InlineArray]`, `MemoryMarshal`, `Unsafe.*`, custom struct awaiters, SIMD. What Microsoft writes about in blogs, **it actually does in production code**. Very few companies work this way.
 
-**`[SuppressGCTransition]` na P/Invoke** (#36 cheatsheet) — atrybut na `[DllImport]` który pomija przełączenie wątku w "preemptive GC mode" na czas natywnego wywołania. Oszczędza ~10 ns per call. Tylko dla **bardzo szybkich** native calls (jak `GetTickCount`) — dla długich blokujących to się wywali (GC stuck).
+## 46. What the cheatsheet adds (new vs my scan)
 
-**`GC.TryStartNoGCRegion(size)` + `GC.EndNoGCRegion()`** (#37) — wyłącza GC w sekcji krytycznej. Używane w real-time / low-latency (HFT, audio processing). W moim scanie tego nie szukałem — sprawdziłem teraz, faktycznie się pojawia w paru komponentach (zaraz dopiszę gdzie).
+### A. Techniques missing from my analysis
 
-**`CollectionsMarshal.AsSpan(List<T>)`** (#15) — zwraca `Span<T>` na wewnętrzną tablicę listy, **bez kopiowania**. Iteracja indeksowa po spanie bije `foreach` po `List<T>`. Trzeba uważać: nie wolno modyfikować listy w trakcie iteracji.
+**`[SuppressGCTransition]` on P/Invoke** (#36 cheatsheet) — attribute on `[DllImport]` that skips switching the thread to "preemptive GC mode" for the duration of a native call. Saves ~10 ns per call. Only for **very fast** native calls (such as `GetTickCount`) — for long blocking calls this will crash (GC stuck).
 
-**`string.Create<TState>(int length, TState state, SpanAction<char, TState>)`** (#5) — buduje string znanej długości jednym `Span`-write, bez `StringBuilder` ani intermediate buffers. Idealny do formatowania (UUID, hex, czasów).
+**`GC.TryStartNoGCRegion(size)` + `GC.EndNoGCRegion()`** (#37) — disables GC in a critical section. Used in real-time / low-latency scenarios (HFT, audio processing). I did not look for this in my scan — I checked now and it does appear in a few components.
 
-**`MemoryMarshal.GetArrayDataReference()` + `Unsafe.IsAddressLessThan()`** (#31) — "fastest loops" — iteracja przez pointer arithmetic bez bounds check. Używane w BCL (`Ascii.cs`, `Utf8Utility.cs` — mój scan widział te pliki ale nie nazwałem techniki).
+**`CollectionsMarshal.AsSpan(List<T>)`** (#15) — returns a `Span<T>` over the list's internal array **without copying**. Index-based iteration over the span beats `foreach` over `List<T>`. Be careful: the list must not be modified during iteration.
 
-**`[UnscopedRef]`** (#28) — pozwala ref-field w struct "uciec" poza scope metody, gdy normalnie kompilator by zablokował. Wymagane dla niektórych zaawansowanych ref-struct patternów (C# 11+).
+**`string.Create<TState>(int length, TState state, SpanAction<char, TState>)`** (#5) — builds a string of known length with a single `Span`-write, without `StringBuilder` or intermediate buffers. Ideal for formatting (UUID, hex, timestamps).
 
-**Default `GetHashCode`/`Equals` dla `struct` używa reflection** (#29) — jeden z najmniej znanych łapaczy. Jeśli używasz struktury jako klucza `Dictionary`, **musisz** nadpisać `Equals`/`GetHashCode` ręcznie albo dostaniesz reflection-based wolny path. Dla `record struct` kompilator generuje sam.
+**`MemoryMarshal.GetArrayDataReference()` + `Unsafe.IsAddressLessThan()`** (#31) — "fastest loops" — iteration via pointer arithmetic without bounds checks. Used in BCL (`Ascii.cs`, `Utf8Utility.cs` — my scan saw these files but I did not name the technique).
 
-**Static lambdas** (#32) — `Dict.GetOrAdd(key, static k => Create(k))` zamiast `Dict.GetOrAdd(key, k => Create(k))`. `static` keyword wymusza brak closure capture → zero alokacji delegate'a. W moim scanie używane jest implicitnie ale warte wymienienia.
+**`[UnscopedRef]`** (#28) — allows a ref-field in a struct to "escape" beyond a method's scope when the compiler would normally block this. Required for some advanced ref-struct patterns (C# 11+).
 
-### B. Techniki spoza skanu (config / build-level, nie widać w IL)
+**Default `GetHashCode`/`Equals` for `struct` uses reflection** (#29) — one of the least-known gotchas. If you use a struct as a `Dictionary` key, you **must** override `Equals`/`GetHashCode` manually or you will get a reflection-based slow path. For `record struct` the compiler generates them automatically.
 
-- **Server GC** — `<ServerGarbageCollection>true</ServerGarbageCollection>` w csproj. Multi-thread mark/sweep, lepsze dla serwerów (gorsze dla desktopa). VS odpala w trybie Workstation GC.
-- **Native AOT** — `<PublishAot>true</PublishAot>`. Kompilacja natywna, brak JIT, brak reflection runtime. Bardzo szybki start, mały binary. Trade-off: dynamic code (Expression.Compile, EF) odpada.
+**Static lambdas** (#32) — `Dict.GetOrAdd(key, static k => Create(k))` instead of `Dict.GetOrAdd(key, k => Create(k))`. The `static` keyword forces no closure capture → zero delegate allocation. Used implicitly in my scan but worth naming explicitly.
 
-### C. Domain-specific tricks z cheatsheeta
+### B. Techniques outside the scan (config / build-level, not visible in IL)
 
-- **`HttpClient.GetStreamAsync` / `GetFromJsonAsync<T>`** zamiast `GetAsync().ReadAsStringAsync()` — pomija intermediate buffer.
-- **`EF.CompileQuery(...)`** — pre-kompiluje LINQ query do delegate'a. Microsoft Extensions DI używa tego samego patternu (część 4 #40).
-- **`IsSuccessStatusCode` zamiast try/catch na HttpResponse** — exception throw kosztuje 10-100 μs.
-- **Nie używaj `int?`/`bool?` w hot path** — unboxing + null check per access.
-- **`String.Compare(a, b, StringComparison.OrdinalIgnoreCase)`** zamiast `a.ToLower() == b.ToLower()` — żadnych alokacji.
-- **`RecyclableMemoryStream`** (`Microsoft.IO.RecyclableMemoryStream` NuGet) — pooled `MemoryStream` z resizing przez chunki. Zamiennik `new MemoryStream()` w hot path serializacji.
+- **Server GC** — `<ServerGarbageCollection>true</ServerGarbageCollection>` in csproj. Multi-threaded mark/sweep, better for servers (worse for desktop). VS runs in Workstation GC mode.
+- **Native AOT** — `<PublishAot>true</PublishAot>`. Native compilation, no JIT, no reflection runtime. Very fast startup, small binary. Trade-off: dynamic code (Expression.Compile, EF) is not available.
 
-### D. `ReadOnlySequence<T>.Slice` jest wolne (#40)
+### C. Domain-specific tricks from the cheatsheet
 
-Niespodzianka cheatsheeta: `ReadOnlySequence<T>.Slice` ma narzut. Lepiej wziąć `.First.Span` jeśli wystarczy pierwszy segment. Wpływa na każdy kod parserujący Pipelines.
+- **`HttpClient.GetStreamAsync` / `GetFromJsonAsync<T>`** instead of `GetAsync().ReadAsStringAsync()` — skips an intermediate buffer.
+- **`EF.CompileQuery(...)`** — pre-compiles a LINQ query to a delegate. Microsoft Extensions DI uses the same pattern (Part 4 #40).
+- **`IsSuccessStatusCode` instead of try/catch on HttpResponse** — throwing an exception costs 10-100 μs.
+- **Do not use `int?`/`bool?` in a hot path** — unboxing + null check per access.
+- **`String.Compare(a, b, StringComparison.OrdinalIgnoreCase)`** instead of `a.ToLower() == b.ToLower()` — no allocations.
+- **`RecyclableMemoryStream`** (`Microsoft.IO.RecyclableMemoryStream` NuGet) — pooled `MemoryStream` with chunked resizing. A replacement for `new MemoryStream()` in serialisation hot paths.
 
-## Co MOJE scan dodaje czego nie ma w cheatsheecie
+### D. `ReadOnlySequence<T>.Slice` is slow (#40)
 
-To ważne — cheatsheet zbiera techniki "ogólne", ale **nie pokazuje architektur**. Mój scan pokazał wzorce **konstrukcyjne**:
+A cheatsheet surprise: `ReadOnlySequence<T>.Slice` has overhead. It is better to take `.First.Span` if the first segment is sufficient. This affects all code that parses Pipelines.
 
-- **`SegmentedArray<T>` / `SegmentedDictionary` / `SegmentedHashSet`** (Roslyn, kopiowane 7×) — unikanie LOH przez jagged arrays.
+## What MY scan adds that is not in the cheatsheet
+
+This matters — the cheatsheet collects "general" techniques but **does not show architectures**. My scan revealed **structural patterns**:
+
+- **`SegmentedArray<T>` / `SegmentedDictionary` / `SegmentedHashSet`** (Roslyn, copied 7×) — avoiding the LOH via jagged arrays.
 - **Two-tier hash table** (Roslyn `StringTable` — local + shared).
 - **Sparse struct storage** (WPF `EffectiveValueEntry`).
 - **Frame-multiplexing** (Nerdbank `MultiplexingStream`).
 - **RPC correlation-ID cancel propagation** (StreamJsonRpc).
 - **Per-shape frozen dictionaries** (BCL `OrdinalStringFrozenDictionary_LeftJustifiedSingleChar` etc.).
 - **`Freezable` opt-in immutability** (WPF).
-- **Custom LRU z `lock`** (nie `ConcurrentDictionary`, bo eviction wymaga atomic op na 2 strukturach).
-- **`ValueStringBuilder` polyfill w setkach projektów**.
+- **Custom LRU with `lock`** (not `ConcurrentDictionary`, because eviction requires an atomic op on 2 structures).
+- **`ValueStringBuilder` polyfill in hundreds of projects**.
 - **`UnsafeMemory32` / `UnsafeMemory64` dual code path** (MessagePack).
-- **`AdaptiveCapacityDictionary`** (array dla N≤10, promocja).
-- **Hot/Slow split metod** (`Allocate` / `AllocateSlow`).
+- **`AdaptiveCapacityDictionary`** (array for N≤10, then promotion).
+- **Hot/Slow method split** (`Allocate` / `AllocateSlow`).
 - **`[ThreadStatic]` `Stack<T>` pool** (ASP.NET RenderTree).
-- **`PerformanceSensitive` analyzer attribute** w Roslyn.
-- **Per-komponent `EventSource`** zamiast `ILogger`.
-- **F# `ILDynamicAssemblyWriter`** (262 emit calls) — równoległy compiler stack do Roslyn.
+- **`PerformanceSensitive` analyzer attribute** in Roslyn.
+- **Per-component `EventSource`** instead of `ILogger`.
+- **F# `ILDynamicAssemblyWriter`** (262 emit calls) — a parallel compiler stack alongside Roslyn.
 
-Cheatsheet to **lista narzędzi**. Mój scan to **lista architektur**. Razem to dopiero całość.
+The cheatsheet is a **list of tools**. My scan is a **list of architectures**. Together they form the complete picture.
 
 ---
 
-## TL;DR część 5 — co dopisać do toolboxa
+## TL;DR Part 5 — what to add to the toolbox
 
-| # | Technika | Co dodaje |
-|---|----------|---|
-| 46a | `[SuppressGCTransition]` na P/Invoke | ~10 ns/call dla quick native calls |
+| # | Technique | What it adds |
+|---|-----------|-------------|
+| 46a | `[SuppressGCTransition]` on P/Invoke | ~10 ns/call for quick native calls |
 | 46b | `GC.TryStartNoGCRegion` | No-GC critical sections (real-time) |
-| 46c | `CollectionsMarshal.AsSpan(list)` | Span view bez kopiowania List<T> |
-| 46d | `string.Create<TState>` | Known-length string bez intermediate |
+| 46c | `CollectionsMarshal.AsSpan(list)` | Span view without copying List<T> |
+| 46d | `string.Create<TState>` | Known-length string without intermediate buffer |
 | 46e | `MemoryMarshal.GetArrayDataReference` + `Unsafe.IsAddressLessThan` | Fastest loops (pointer arith, no bounds check) |
-| 46f | `[UnscopedRef]` | Ref fields w struct mogą "uciec" |
-| 46g | Override `GetHashCode`/`Equals` dla struct keys | Bo default = reflection |
+| 46f | `[UnscopedRef]` | Ref fields in a struct can "escape" |
+| 46g | Override `GetHashCode`/`Equals` for struct keys | Because default = reflection |
 | 46h | `static` lambdas | Zero closure allocation |
-| 46i | Server GC config | Wielowątkowe app, nie desktop |
-| 46j | Native AOT | Startup + binary size (kosztem reflection) |
-| 46k | `HttpClient.GetStreamAsync` / `GetFromJsonAsync<T>` | Bez intermediate string |
+| 46i | Server GC config | Multi-threaded apps, not desktop |
+| 46j | Native AOT | Startup + binary size (at the cost of reflection) |
+| 46k | `HttpClient.GetStreamAsync` / `GetFromJsonAsync<T>` | No intermediate string |
 | 46l | `EF.CompileQuery` | Pre-compiled LINQ |
-| 46m | `IsSuccessStatusCode` vs throw | Wyjątek = 10-100 μs |
-| 46n | Unikaj `int?`/`bool?` w hot path | Boxing + null check overhead |
-| 46o | `String.Compare(..., StringComparison.X)` | Bez ToLower() alloc |
+| 46m | `IsSuccessStatusCode` vs throw | Exception = 10-100 μs |
+| 46n | Avoid `int?`/`bool?` in hot path | Boxing + null check overhead |
+| 46o | `String.Compare(..., StringComparison.X)` | No ToLower() allocation |
 | 46p | `RecyclableMemoryStream` | Pooled MemoryStream |
-| 46q | `ReadOnlySequence<T>.Slice` jest wolne | Użyj `.First.Span` |
+| 46q | `ReadOnlySequence<T>.Slice` is slow | Use `.First.Span` |
 
 ---
 
-*Część 5 dopisana 2026-05-15. Łącznie **63 wzorce** (45 z mojego scanu + 17 nowych z cheatsheetu + 1 cross-reference). Plik staje się referencyjną kartą perf .NET.*
+*Part 5 added 2026-05-15. **63 patterns** in total (45 from my scan + 17 new from the cheatsheet + 1 cross-reference). The file is becoming a reference card for .NET perf.*
 
 ---
 
-# Część 6 — cross-reference z awesome-dot-net-performance (Adam Sitnik)
+# Part 6 — cross-reference with awesome-dot-net-performance (Adam Sitnik)
 
-Źródło: <https://github.com/adamsitnik/awesome-dot-net-performance> — kuratowana lista tooli, talków, książek od Adama Sitnika (.NET runtime team, autor `Span<T>`/`ArrayPool` perf improvements, BenchmarkDotNet contributor).
+Source: <https://github.com/adamsitnik/awesome-dot-net-performance> — a curated list of tools, talks, and books from Adam Sitnik (.NET runtime team, author of `Span<T>`/`ArrayPool` perf improvements, BenchmarkDotNet contributor).
 
-To **inna oś** niż moja analiza i cheatsheet Nikou: nie wzorce kodu, lecz **meta-wiedza** — narzędzia, ludzie, koncepcje JIT których w decompiled IL **nie zobaczysz**.
+This is a **different axis** from my analysis and Nikou's cheatsheet: not code patterns, but **meta-knowledge** — tools, people, JIT concepts that you **cannot see** in decompiled IL.
 
-## 47. JIT-level mechanizmy (niewidoczne w IL, kluczowe dla perf)
+## 47. JIT-level mechanisms (invisible in IL, critical for perf)
 
-To są techniki które dzieją się **podczas wykonania kodu**, nie w samym kodzie:
+These are techniques that happen **at execution time**, not in the code itself:
 
-### Tiered Compilation (.NET 3.0+, on-by-default)
+### Tiered Compilation (.NET 3.0+, on by default)
 
-JIT kompiluje metodę dwa razy:
-- **Tier 0** (na starcie) — szybka kompilacja, prosty kod, bez optymalizacji. Cel: jak najszybsze załadowanie.
-- **Tier 1** — gdy metoda staje się "hot" (kilka wywołań), JIT re-kompiluje z pełnymi optymalizacjami (inlining, unrolling, etc.).
+JIT compiles a method twice:
+- **Tier 0** (at startup) — fast compilation, simple code, no optimisations. Goal: load as quickly as possible.
+- **Tier 1** — when a method becomes "hot" (after several calls), JIT recompiles it with full optimisations (inlining, unrolling, etc.).
 
-**Konsekwencja**: pierwsze wywołania zawsze wolniejsze. Benchmark musi zrobić warmup, inaczej mierzy tier-0.
+**Consequence**: first calls are always slower. A benchmark must warm up, otherwise it measures tier-0.
 
-### Dynamic PGO (.NET 8+, default-on od .NET 9)
+### Dynamic PGO (.NET 8+, default-on since .NET 9)
 
-W tier 0 JIT **instrumentuje kod** — zlicza która gałąź `if` częściej trafia, jakie typy faktycznie pojawiają się w `virtual call`. Tier 1 używa tych statystyk:
-- Częsta gałąź → fast path inline'owany.
-- Dominujący typ → **devirtualization + guarded inlining** (zamiast `callvirt` jest `if (obj.Type == typeof(X)) X.Method() else callvirt`).
+In tier 0 the JIT **instruments the code** — counting which `if` branch is hit more often, which types actually appear in `virtual call`s. Tier 1 uses those statistics:
+- Frequent branch → fast path inlined.
+- Dominant type → **devirtualization + guarded inlining** (instead of `callvirt` you get `if (obj.Type == typeof(X)) X.Method() else callvirt`).
 
-**Impact**: 5-15% perf w realnych aplikacjach **bez zmiany kodu**. Po prostu update runtime.
+**Impact**: 5-15% perf improvement in real applications **without changing code**. Simply update the runtime.
 
 ### On-Stack Replacement (OSR, .NET 7+)
 
-Problem: długie pętle uruchamiane raz w tier 0 nigdy nie zostaną "promoted" — pętla się nie kończy, więc tier-1 wersji nikt nie uruchomi. **OSR podmienia kod metody W TRAKCIE jej wykonywania** — stack frame przepisywany w locie z tier-0 do tier-1.
+Problem: long loops started once in tier 0 will never be "promoted" — the loop does not end, so nobody ever calls the tier-1 version. **OSR replaces the method code WHILE IT IS EXECUTING** — the stack frame is rewritten on the fly from tier-0 to tier-1.
 
-**Bez OSR**: `for (int i = 0; i < 10_000_000; i++)` zawsze w tier-0.
-**Z OSR**: po kilku sekundach metoda jest "promoted" mid-loop.
+**Without OSR**: `for (int i = 0; i < 10_000_000; i++)` always runs in tier-0.
+**With OSR**: after a few seconds the method is "promoted" mid-loop.
 
 ### Escape Analysis (.NET 9+, partial)
 
-JIT analizuje czy `new MyClass()` faktycznie "ucieka" poza metodę. Jeśli nie → **alokacja na stack zamiast heap**. Dla małych krótko-żyjących obiektów to GC-free.
+JIT analyses whether `new MyClass()` actually "escapes" the method. If not → **allocation on the stack instead of the heap**. For small, short-lived objects this is GC-free.
 
-Wciąż w fazie rozwoju — działa głównie dla `Span<T>`, value-typed result enumerable'ów.
+Still in development — currently works mainly for `Span<T>` and value-typed result enumerables.
 
 ### ReadyToRun (R2R)
 
-Kompilacja AOT-podobna na poziomie assembly. Generuje natywny kod **dodatkowo** do IL, JIT może użyć od razu zamiast kompilować. BCL od .NET 6 jest R2R'd → szybszy startup.
+AOT-like compilation at the assembly level. Generates native code **in addition** to IL; JIT can use it immediately instead of compiling. BCL has been R2R'd since .NET 6 → faster startup.
 
-**Wniosek**: gdy mierzysz perf .NET 8+ vs .NET 6, 10-30% różnicy bierze się **z JIT'a, nie z twojego kodu**. Update runtime przed optymalizacją.
+**Conclusion**: when measuring perf on .NET 8+ vs .NET 6, 10-30% of the difference comes **from the JIT, not your code**. Update the runtime before optimising.
 
-## 48. Pułapki które trzeba znać (nie pojawiają się w blogach perf "tips")
+## 48. Pitfalls you must know (not covered in perf "tips" blogs)
 
-### `Finalize` ~~Dispose~~ to GC podatek
+### `Finalize` ~~Dispose~~ is a GC tax
 
-Każdy obiekt z finalizatorem (`~MyClass()`):
-- Allokuje się wolniej (rejestracja w finalization queue).
-- Żyje **co najmniej 2 generacje GC** (Gen 0 → finalization queue → finalizer thread → Gen 1+).
-- Blokuje cleanup do czasu wykonania finalizera.
+Every object with a finalizer (`~MyClass()`):
+- Allocates more slowly (registration in the finalisation queue).
+- Lives for **at least 2 GC generations** (Gen 0 → finalisation queue → finalizer thread → Gen 1+).
+- Blocks cleanup until the finalizer runs.
 
-**Pattern**: implementuj `IDisposable` zamiast finalizera. Finalizer tylko jako safety net dla unmanaged resources, z `GC.SuppressFinalize(this)` w Dispose.
+**Pattern**: implement `IDisposable` instead of a finalizer. Use a finalizer only as a safety net for unmanaged resources, with `GC.SuppressFinalize(this)` in Dispose.
 
-### `string.Intern` ma lock contention
+### `string.Intern` has lock contention
 
-Globalna tablica intern'd strings używa lock'a. Pod load = bottleneck. Roslyn rezygnuje z `string.Intern` na rzecz własnego `StringTable` (mój scan #4) **właśnie z tego powodu**.
+The global interned-strings table uses a lock. Under load = bottleneck. Roslyn abandons `string.Intern` in favour of its own `StringTable` (my scan #4) **for exactly this reason**.
 
-### `Dictionary<K,V>` read-only **nie jest** thread-safe
+### `Dictionary<K,V>` read-only **is not** thread-safe
 
-Wbrew intuicji: nawet "tylko czytasz", `Dictionary.TryGetValue` może race-condition'ić jeśli inny wątek nawet **resize'uje** structure. Pod load = corruption.
+Counter-intuitively: even when you are "only reading", `Dictionary.TryGetValue` can race-condition if another thread even **resizes** the structure. Under load = corruption.
 
-**Pattern**: użyj `FrozenDictionary` (mój scan #6), `ImmutableDictionary`, albo `ConcurrentDictionary`. Czytanie zwykłego `Dictionary` przez wiele wątków = UB.
+**Pattern**: use `FrozenDictionary` (my scan #6), `ImmutableDictionary`, or `ConcurrentDictionary`. Reading a plain `Dictionary` from multiple threads = UB.
 
 ### `ReaderWriterLock` vs `ReaderWriterLockSlim`
 
-`ReaderWriterLock` to **stary** typ (.NET 1.1), kernel-mode locks, slow. **Nigdy nie używaj** — `ReaderWriterLockSlim` jest user-mode, ~10× szybszy. Niestety obie nazwy są na IntelliSense.
+`ReaderWriterLock` is an **old** type (.NET 1.1), kernel-mode locks, slow. **Never use it** — `ReaderWriterLockSlim` is user-mode, ~10× faster. Unfortunately both names appear in IntelliSense.
 
-## 49. Tooling — co realnie używać
+## 49. Tooling — what to actually use
 
-| Narzędzie | Kiedy |
-|---|---|
-| **BenchmarkDotNet** | Każdy micro-benchmark. Statistical analysis, warmup, GC pressure metrics. Industry standard. |
-| **PerfView** | Snapshot CPU + heap + ETW dla Windows. Steep learning curve, ale niczego lepszego nie ma do GC analysis. |
-| **dotnet-trace** | Cross-platform (Linux/macOS) alternative do PerfView via EventPipe. |
-| **dotMemory** (JetBrains) | Heap snapshot porównanie, retention graphs. UI'd. |
-| **dotTrace** (JetBrains) | Sampling i tracing profiler. Production-safe sampling. |
-| **ultra** (Alexandre Mutel) | Nowy (2023+) sampling profiler dla Windows. Zero-config, ETW pod spodem. |
-| **Visual Studio Profiler** | Zintegrowany. Działa, ale słabszy niż dotTrace/PerfView. |
-| **ClrMD** | Library, NIE narzędzie. Pozwala napisać własny debugger / heap analyzer. |
-| **Clr Heap Allocation Analyzer** | Roslyn analyzer — ostrzega o ukrytych alokacjach (`foreach` na `IEnumerable`, boxing, closures) **w trakcie pisania kodu**. |
+| Tool | When |
+|------|------|
+| **BenchmarkDotNet** | Every micro-benchmark. Statistical analysis, warmup, GC pressure metrics. Industry standard. |
+| **PerfView** | CPU + heap + ETW snapshot for Windows. Steep learning curve, but nothing better exists for GC analysis. |
+| **dotnet-trace** | Cross-platform (Linux/macOS) alternative to PerfView via EventPipe. |
+| **dotMemory** (JetBrains) | Heap snapshot comparison, retention graphs. UI-based. |
+| **dotTrace** (JetBrains) | Sampling and tracing profiler. Production-safe sampling. |
+| **ultra** (Alexandre Mutel) | New (2023+) sampling profiler for Windows. Zero-config, ETW under the hood. |
+| **Visual Studio Profiler** | Integrated. Works, but weaker than dotTrace/PerfView. |
+| **ClrMD** | A library, NOT a tool. Lets you write your own debugger / heap analyser. |
+| **Clr Heap Allocation Analyzer** | Roslyn analyser — warns about hidden allocations (`foreach` over `IEnumerable`, boxing, closures) **while writing code**. |
 
-**Rule of thumb**: zacznij od **BenchmarkDotNet** (mikro) + **dotTrace lub PerfView** (makro snapshot). Reszta to specjalizacja.
+**Rule of thumb**: start with **BenchmarkDotNet** (micro) + **dotTrace or PerfView** (macro snapshot). The rest is specialisation.
 
-## 50. Ludzie do śledzenia
+## 50. People to follow
 
-| Osoba | Czemu |
-|---|---|
-| **Stephen Toub** (Microsoft) | Roczne `"Performance Improvements in .NET X"` blog posty — najlepsze podsumowanie zmian runtime. Lektura obowiązkowa. |
-| **Maoni Stephens** (Microsoft) | GC internals. Jeśli chcesz zrozumieć WHY twój profil pokazuje pauzy. |
-| **Andrey Akinshin** | Autor BenchmarkDotNet. Książka "Pro .NET Benchmarking". |
-| **Adam Sitnik** | `Span<T>`, `ArrayPool`, alokacje. |
-| **Konrad Kokosa** | "Pro .NET Memory Management" (2024) — najbardziej dogłębna książka o GC. |
+| Person | Why |
+|--------|-----|
+| **Stephen Toub** (Microsoft) | Annual `"Performance Improvements in .NET X"` blog posts — the best summary of runtime changes. Essential reading. |
+| **Maoni Stephens** (Microsoft) | GC internals. If you want to understand WHY your profile shows pauses. |
+| **Andrey Akinshin** | Author of BenchmarkDotNet. Book: "Pro .NET Benchmarking". |
+| **Adam Sitnik** | `Span<T>`, `ArrayPool`, allocations. |
+| **Konrad Kokosa** | "Pro .NET Memory Management" (2024) — the most in-depth book on GC. |
 | **Tanner Gooding** | Hardware intrinsics, SIMD. |
-| **Egor Bogatov** | JIT contributions, ostatnio dynamic PGO. |
-| **Matt Warren** | Stary blog (mattwarren.org), wciąż wartościowe deep dives. |
+| **Egor Bogatov** | JIT contributions, recently dynamic PGO. |
+| **Matt Warren** | Old blog (mattwarren.org), still valuable deep dives. |
 
-## 51. Książki — wąska lista
+## 51. Books — a short list
 
-- **Pro .NET Memory Management** (Kokosa, 2024) — *jedyna* aktualna książka o GC. ~700 stron, sztuka.
-- **Writing High-Performance .NET Code** (Watson, 2018) — choć stara, fundamenty wciąż aktualne. Krótka, czytalna.
-- **Pro .NET Benchmarking** (Akinshin, 2019) — metodologia pomiarów, nie tylko BenchmarkDotNet.
-- **CLR via C#** (Richter, 2012) — fundamenty CLR. Stare, ale rozdziały o threading/memory wciąż obowiązują.
+- **Pro .NET Memory Management** (Kokosa, 2024) — the *only* current book on GC. ~700 pages, masterclass.
+- **Writing High-Performance .NET Code** (Watson, 2018) — old but fundamentals still apply. Short and readable.
+- **Pro .NET Benchmarking** (Akinshin, 2019) — measurement methodology, not just BenchmarkDotNet.
+- **CLR via C#** (Richter, 2012) — CLR fundamentals. Old, but the threading/memory chapters still hold.
 
 ## 52. EventPipe — cross-platform ETW
 
-Linux/macOS nie mają ETW (Windows-only). `EventPipe` to przepisanie tej koncepcji cross-platform. `dotnet-trace` używa EventPipe pod spodem.
+Linux/macOS do not have ETW (Windows-only). `EventPipe` is a cross-platform rewrite of that concept. `dotnet-trace` uses EventPipe under the hood.
 
-**Konsekwencja**: `EventSource` (mój scan #29) działa wszędzie — na Windows trafia do ETW, na Linux do EventPipe → ta sama strukturalna telemetria.
+**Consequence**: `EventSource` (my scan #29) works everywhere — on Windows it goes to ETW, on Linux to EventPipe → the same structured telemetry.
 
-## 53. ARM64 — drugi pierwszorzędny target
+## 53. ARM64 — the second first-class target
 
-Microsoft mocno inwestuje w ARM64 (.NET 8+):
-- ARM64 ma **weaker memory model** niż x64 → więcej memory barriers w generated code. To ma koszt.
-- JIT robi **ARM64-specific peephole optimizations** (special instructions: `MADD`, `MSUB`).
-- SIMD na ARM64 to `AdvSimd` (`System.Runtime.Intrinsics.Arm`), inna namespace niż x86 (`Sse2`/`Avx2`).
+Microsoft is investing heavily in ARM64 (.NET 8+):
+- ARM64 has a **weaker memory model** than x64 → more memory barriers in generated code. This has a cost.
+- JIT does **ARM64-specific peephole optimisations** (special instructions: `MADD`, `MSUB`).
+- SIMD on ARM64 is `AdvSimd` (`System.Runtime.Intrinsics.Arm`), a different namespace from x86 (`Sse2`/`Avx2`).
 
-**W moim scanie**: widziałem `AdvSimd.IsSupported` checks w BCL collections, ale `Microsoft.VisualStudio.*` nic nie ma na ARM. VS jest x64-first.
-
----
-
-## Co Adam Sitnik dodaje czego nie ma ani u mnie ani u Nikou
-
-To trzecia oś analizy:
-
-1. **JIT runtime mechanics** — Tiered, PGO, OSR, Escape Analysis, R2R. **Bardzo wpływowe na perf bez zmiany kodu**.
-2. **Pułapki konkretnych BCL API** — `string.Intern`, finalizers, `ReaderWriterLock`, Dictionary thread-safety.
-3. **Tooling ranking** — co faktycznie używać, nie tylko co istnieje.
-4. **Conferences / talks** — żywa wiedza w nagraniach które nie trafiają do blogów.
+**In my scan**: I saw `AdvSimd.IsSupported` checks in BCL collections, but `Microsoft.VisualStudio.*` has nothing for ARM. VS is x64-first.
 
 ---
 
-## TL;DR część 6
+## What Adam Sitnik adds that is absent from both my scan and Nikou's cheatsheet
 
-| # | Koncepcja | Gdzie się dzieje |
-|---|-----------|---|
+This is the third axis of analysis:
+
+1. **JIT runtime mechanics** — Tiered, PGO, OSR, Escape Analysis, R2R. **Highly impactful on perf without changing code**.
+2. **Pitfalls of specific BCL APIs** — `string.Intern`, finalizers, `ReaderWriterLock`, Dictionary thread-safety.
+3. **Tooling ranking** — what to actually use, not just what exists.
+4. **Conferences / talks** — living knowledge in recordings that never make it to blogs.
+
+---
+
+## TL;DR Part 6
+
+| # | Concept | Where it happens |
+|---|---------|-----------------|
 | 47a | Tiered Compilation | JIT, automatic |
 | 47b | Dynamic PGO | JIT, .NET 8+ default |
 | 47c | OSR | JIT, mid-execution |
 | 47d | Escape Analysis | JIT, .NET 9+ partial |
 | 47e | ReadyToRun | Build time + JIT |
-| 48a | Finalizer = GC podatek | Twój kod |
+| 48a | Finalizer = GC tax | Your code |
 | 48b | `string.Intern` lock contention | BCL |
 | 48c | `Dictionary` read-only != thread-safe | BCL |
-| 48d | `ReaderWriterLock` przestarzałe | BCL |
+| 48d | `ReaderWriterLock` is obsolete | BCL |
 | 49 | BenchmarkDotNet + dotTrace/PerfView | Tooling |
 | 50 | Stephen Toub blog (annual) | Resource |
-| 52 | EventPipe = cross-plat ETW | Runtime infra |
-| 53 | ARM64 jako równorzędny target | Runtime |
+| 52 | EventPipe = cross-platform ETW | Runtime infra |
+| 53 | ARM64 as an equal-first target | Runtime |
 
 ---
 
-## Końcowe podsumowanie — 3 osie analizy
+## Final summary — 3 axes of analysis
 
-Plik integruje teraz **trzy uzupełniające się perspektywy** na perf .NET:
+The file now integrates **three complementary perspectives** on .NET perf:
 
-1. **Mój scan 2064 DLL** — *jak Microsoft realnie pisze kod w produkcji* (architektury, wzorce strukturalne).
-2. **Cheatsheet Nikou** — *toolbox technik* do zastosowania w swoim kodzie (Span, ArrayPool, SkipLocalsInit etc.).
-3. **Awesome list Adama** — *meta-wiedza* (JIT mechanics, tooling, ludzie, książki).
+1. **My scan of 2064 DLLs** — *how Microsoft actually writes production code* (architectures, structural patterns).
+2. **Nikou's cheatsheet** — *toolbox of techniques* to apply in your own code (Span, ArrayPool, SkipLocalsInit etc.).
+3. **Adam's awesome list** — *meta-knowledge* (JIT mechanics, tooling, people, books).
 
-Bez którejkolwiek z tych trzech nie masz pełnego obrazu:
-- Sam kod → nie wiesz **co PGO zrobi z twoim kodem**.
-- Sam toolbox → nie wiesz **które techniki realnie Microsoft używa** (a które tylko w blogach).
-- Sama meta-wiedza → nie wiesz **jak to wygląda w 5 GB rzeczywistego IL'a**.
-
----
-
-*Część 6 dopisana 2026-05-15. Łącznie **70+ pojęć** zorganizowanych w 6 części. Kompletna karta referencyjna perf .NET ufundowana na dekompilacji 2064 DLL + dwóch kuratowanych listach.*
+Without any of these three you don't have the full picture:
+- Code alone → you don't know **what PGO will do to your code**.
+- Toolbox alone → you don't know **which techniques Microsoft actually uses** (vs only writes about in blogs).
+- Meta-knowledge alone → you don't know **what it looks like in 5 GB of real IL**.
 
 ---
 
-# Część 7 — cross-reference ze slajdami Konrada Kokosy (Pro .NET Memory Management)
+*Part 6 added 2026-05-15. **70+ concepts** organised in 6 parts in total. A complete .NET perf reference card grounded in decompilation of 2064 DLLs + two curated lists.*
 
-Źródło: <https://prodotnetmemory.com/slides/PerformancePatterns/> — slajdy od Konrada Kokosy (autor *Pro .NET Memory Management* 2024, ~700 stron). To **trzecia oś** — po patternach z kodu (mój scan) i toolboxie technik (cheatsheets) — **principles i memory-layout patterns** z naciskiem na CPU cache.
+---
 
-## 54. Frugal Object Pattern — discriminated union dla "0 / 1 / many"
+# Part 7 — cross-reference with Konrad Kokosa's slides (Pro .NET Memory Management)
 
-To wzorzec którego **nie zauważyłem w scanie** mimo że jest pod nosem.
+Source: <https://prodotnetmemory.com/slides/PerformancePatterns/> — slides from Konrad Kokosa (author of *Pro .NET Memory Management* 2024, ~700 pages). This is the **third axis** — after code patterns (my scan) and the technique toolbox (cheatsheets) — **principles and memory-layout patterns** with a focus on CPU cache.
 
-**Problem**: HTTP header value typowo jest jednym stringiem (`"application/json"`), czasem dwoma (`"gzip, deflate"`), prawie nigdy więcej. Naiwne `string[] values` allokuje tablicę na każdy header — niepotrzebnie.
+## 54. Frugal Object Pattern — discriminated union for "0 / 1 / many"
 
-**Rozwiązanie**: `Microsoft.Extensions.Primitives.StringValues` (ASP.NET Core):
+This is a pattern I **missed in the scan** even though it was right in front of me.
+
+**Problem**: an HTTP header value is typically one string (`"application/json"`), sometimes two (`"gzip, deflate"`), almost never more. A naive `string[] values` allocates an array for every header — unnecessarily.
+
+**Solution**: `Microsoft.Extensions.Primitives.StringValues` (ASP.NET Core):
 
 ```csharp
 public readonly struct StringValues {
@@ -1026,66 +1026,66 @@ public readonly struct StringValues {
 }
 ```
 
-Jedno pole, trzy stany. Dla 90% headerów (single-value) zero alokacji tablicy.
+One field, three states. For 90% of headers (single-value) zero array allocation.
 
-**Inne przykłady**:
-- `WPF.FrugalList<T>` — to samo dla kolekcji dependency properties (typowo 1-3 elementy).
-- `Optional<T>` w wielu API.
+**Other examples**:
+- `WPF.FrugalList<T>` — the same for collections of dependency properties (typically 1-3 elements).
+- `Optional<T>` in many APIs.
 
-**Pattern do skopiowania**: gdy domain mówi "typowo 1, czasem kilka, rzadko dużo" — nie używaj `List<T>` jako default. Discriminated union w jednym polu.
+**Pattern to copy**: when the domain says "typically 1, sometimes a few, rarely many" — don't use `List<T>` as the default. A discriminated union in a single field.
 
 ## 55. Struct of Arrays (SOA) — Data-Oriented Design
 
-**Klasyk game-devu, rzadki w business code.**
+**A classic from game dev, rare in business code.**
 
-Zamiast:
+Instead of:
 ```csharp
 class Particle { float X, Y, VX, VY, R, G, B, A; }
 Particle[] particles;
 ```
 
-Robisz:
+You do:
 ```csharp
 float[] xs, ys, vxs, vys, rs, gs, bs, as_;
 ```
 
-**Why**: pętla "update position" czyta tylko `xs, ys, vxs, vys`. W AoS (Array of Structs) każdy cache line ciągnie cały Particle (~32 B), połowa jest niepotrzebna. W SOA cache line `xs[]` to **16 wartości X** ciasno, prefetcher śledzi liniowy access.
+**Why**: the "update position" loop reads only `xs, ys, vxs, vys`. With AoS (Array of Structs) each cache line pulls the entire Particle (~32 B), half of which is unused. With SOA a cache line of `xs[]` holds **16 X values** tightly packed; the prefetcher tracks linear access.
 
-**Konrad pokazuje 10× speedup** w benchmarku. SIMD-able dodatkowo (`Avx2` może dodać 8 floatów na raz).
+**Konrad shows a 10× speedup** in a benchmark. Also SIMD-able (`Avx2` can add 8 floats at a time).
 
-**Trade-off**: łamie OOP encapsulation. Particle jako konceptualna jednostka rozsypuje się na 8 tablic. Dla **gorących pętli numerycznych** — nieoceniony. Dla CRUD biznesowego — antypattern.
+**Trade-off**: breaks OOP encapsulation. A Particle as a conceptual unit is scattered across 8 arrays. For **hot numerical loops** — invaluable. For business CRUD — an anti-pattern.
 
-**W moim scanie**: System.Numerics.Tensors używa SOA pod spodem. ML.NET też. Reszta kodu Microsoftu — nie.
+**In my scan**: System.Numerics.Tensors uses SOA internally. ML.NET as well. The rest of Microsoft's code — no.
 
-## 56. Sześć "Performance Principles" Konrada — framework myślenia
+## 56. Konrad's six "Performance Principles" — a thinking framework
 
-Zamiast "list of tricks" — meta-framework:
+Instead of a "list of tricks" — a meta-framework:
 
-| # | Zasada | Praktyczna konsekwencja |
-|---|--------|-------------------------|
-| **0** | Memory/CPU disrepancy | RAM jest 100× wolniejszy niż CPU. Każdy cache miss = ~100 cykli stojących. |
-| **1** | Fit cache line (64B) | Hot struct ≤ 64 bajty. Inaczej fetch dwa cache line per access. |
-| **2** | Fit highest cache level | Working set ≤ L1 (~32 KB) → najszybciej. ≤ L2 (~256 KB) → szybko. ≤ L3 (~8 MB) → ok. Powyżej → DRAM, dramat. |
-| **3** | Design for sequential access | Linear access = prefetcher zgaduje co dalej, brak miss'ów. Random access (linked list, hash table) = miss każdy element. |
-| **4** | Avoid GC overhead | Pooling, struct, stackalloc. To wszystko z części 1-6. |
-| **5** | Avoid calls | Virtual call = pipeline stall (branch predict). Interface call = double indirection. Inline hot path lub `sealed`. |
-| **6** | Avoid false sharing | Dwa rdzenie piszące różne pola tego samego cache line → cache coherence storm. |
+| # | Principle | Practical consequence |
+|---|-----------|----------------------|
+| **0** | Memory/CPU discrepancy | RAM is 100x slower than the CPU. Every cache miss = ~100 stalled cycles. |
+| **1** | Fit cache line (64 B) | Hot struct <= 64 bytes. Otherwise two cache-line fetches per access. |
+| **2** | Fit highest cache level | Working set <= L1 (~32 KB) -> fastest. <= L2 (~256 KB) -> fast. <= L3 (~8 MB) -> ok. Above -> DRAM, painful. |
+| **3** | Design for sequential access | Linear access = prefetcher guesses ahead, no misses. Random access (linked list, hash table) = miss on every element. |
+| **4** | Avoid GC overhead | Pooling, struct, stackalloc. Everything from parts 1-6. |
+| **5** | Avoid calls | Virtual call = pipeline stall (branch prediction). Interface call = double indirection. Inline hot path or use `sealed`. |
+| **6** | Avoid false sharing | Two cores writing different fields in the same cache line -> cache coherence storm. |
 
-**Ten framework przewija się przez wszystkie patterns Microsoftu**:
-- `ObjectPool<T>` (mój #1) = #4.
-- `EffectiveValueEntry` sparse struct (#36) = #1, #2 (mniej pamięci → więcej w cache).
-- `SegmentedArray` (#5) = #2 (omija LOH, więcej w L3).
-- `[ThreadStatic] Stack<T>` (#34) = #6 (nie ma false sharing bo thread-local).
+**This framework runs through all of Microsoft's patterns**:
+- `ObjectPool<T>` (my #1) = #4.
+- `EffectiveValueEntry` sparse struct (#36) = #1, #2 (less memory -> more fits in cache).
+- `SegmentedArray` (#5) = #2 (avoids LOH, more fits in L3).
+- `[ThreadStatic] Stack<T>` (#34) = #6 (no false sharing because thread-local).
 
-## 57. False sharing — wzorzec o którym mało kto pamięta
+## 57. False sharing — the pattern few people remember
 
-Dwa rdzenie modyfikują różne pola w tym samym cache line (64 B). Każdy zapis na rdzeniu A unieważnia copy w rdzeniu B → constant cache miss. Bywa **wolniejsze niż lock** mimo "lock-free".
+Two cores modify different fields in the same cache line (64 B). Every write on core A invalidates the copy on core B -> constant cache misses. Can be **slower than a lock** despite being "lock-free".
 
-**Patologiczny przykład**:
+**Pathological example**:
 ```csharp
 class Counter { 
     public long ThreadACount;  // offset 0
-    public long ThreadBCount;  // offset 8 — TEN SAM cache line!
+    public long ThreadBCount;  // offset 8 — SAME cache line!
 }
 ```
 
@@ -1095,175 +1095,175 @@ class Counter {
 struct PaddedCounter { [FieldOffset(0)] public long Value; }
 ```
 
-W BCL: `System.Threading.PaddedReference<T>`. W moim scanie widziałem padding w `ConcurrentQueueSegment.cs` (BCL) — teraz wiem dlaczego.
+In BCL: `System.Threading.PaddedReference<T>`. In my scan I saw padding in `ConcurrentQueueSegment.cs` (BCL) — now I know why.
 
-## 58. `Span<T>` + `async` to jest niemożliwe (i dlaczego)
+## 58. `Span<T>` + `async` is impossible (and why)
 
-`Span<T>` to **`ref struct`** — może żyć tylko na stosie. Nie można go zapakować w pole obiektu (a async methods są kompilowane do state machine **klasy** zapisującej lokalne zmienne).
+`Span<T>` is a **`ref struct`** — it can only live on the stack. It cannot be packed into a field of an object (and async methods are compiled to a state machine **class** that stores local variables).
 
-**Workaround**: `Memory<T>` + `.Span` property tuż przed użyciem:
+**Workaround**: `Memory<T>` + `.Span` property right before use:
 
 ```csharp
 async Task ProcessAsync(Memory<byte> data) {
     await SomethingAsync();
-    var span = data.Span;   // dopiero teraz dostaję Span
+    var span = data.Span;   // only now do I get the Span
     DoStuff(span);
 }
 ```
 
-To dlatego `PipeReader.ReadAsync()` zwraca `ValueTask<ReadResult>` z `Buffer` jako `ReadOnlySequence<byte>` (sequence of `Memory<byte>`), nie `ReadOnlySpan<byte>`.
+This is why `PipeReader.ReadAsync()` returns `ValueTask<ReadResult>` with `Buffer` as `ReadOnlySequence<byte>` (a sequence of `Memory<byte>`), not `ReadOnlySpan<byte>`.
 
-## 59. `stackalloc` ma ukryty koszt — zeroing
+## 59. `stackalloc` has a hidden cost — zeroing
 
-`stackalloc byte[256]` **zeruje 256 bajtów** zanim ci je da. Dla małych buforów to nic, dla dużych w hot loop — mierzalne.
+`stackalloc byte[256]` **zeroes 256 bytes** before giving them to you. For small buffers this is nothing; for large ones in a hot loop — measurable.
 
-**Fix**: `[SkipLocalsInit]` na metodzie (mój #22) — eliminuje zeroing. **Critical**: po tym MUSISZ napisać do buforu przed odczytem (UB inaczej).
+**Fix**: `[SkipLocalsInit]` on the method (my #22) — eliminates zeroing. **Critical**: after this you MUST write to the buffer before reading (UB otherwise).
 
-**Polyfill dla .NET < 5**: Fody plugin `[LocalsInit(false)]` — IL-rewriting wyłączający init flag w generated assembly.
+**Polyfill for .NET < 5**: Fody plugin `[LocalsInit(false)]` — IL-rewriting that disables the init flag in the generated assembly.
 
-## 60. Inne mniejsze obserwacje Konrada
+## 60. Other smaller observations from Konrad
 
-- **`StackOverflowException` jest uncatchable** — proces umiera. `stackalloc` w pętli rekurencyjnej = ryzyko.
-- **`SlabMemoryPool`** (Kestrel) — pool nie tablic, lecz **slabów** (większych bloków po 4 KB) pociętych na chunki. Mniej book-keeping niż `ArrayPool` dla małych alokacji.
-- **`ArrayPool<T>.Shared` ma per-core stacks** — 17 size buckets, max 50 arrays per bucket. Trim wywołuje się sam pod GC pressure.
-- **LLC (Last-Level Cache) miss rate** jako metryka benchmarku — nie tylko CPU%/alloc. PerfView i `dotnet-counters` to pokazują.
-
----
-
-## TL;DR część 7 — to co Konrad dodaje
-
-| # | Wzorzec / Koncepcja | Co dodaje |
-|---|---------------------|---|
-| 54 | Frugal Object (`StringValues`, `FrugalList`) | Discriminated union dla "0/1/many" — zero alokacji w common case |
-| 55 | Struct of Arrays (SOA) | Cache locality + SIMD-friendly dla hot loops |
-| 56 | Sześć Performance Principles | Framework myślenia: cache > GC > alloc > calls |
-| 57 | False sharing + padding | Lock-free może być wolniejsze niż lock bez paddingu |
-| 58 | `Span<T>` + `async` niemożliwe | `ref struct` nie wejdzie do state machine — użyj `Memory<T>` |
-| 59 | `stackalloc` zeruje (koszt) | `[SkipLocalsInit]` + Fody polyfill na starsze .NET |
-| 60a | `SlabMemoryPool` | Pool slabów 4 KB pociętych na chunki (Kestrel) |
-| 60b | LLC miss rate jako metryka | Beyond CPU% — co pokazuje że pattern działa |
+- **`StackOverflowException` is uncatchable** — the process dies. `stackalloc` in a recursive loop = risk.
+- **`SlabMemoryPool`** (Kestrel) — pools not arrays but **slabs** (larger 4 KB blocks) sliced into chunks. Less book-keeping than `ArrayPool` for small allocations.
+- **`ArrayPool<T>.Shared` has per-core stacks** — 17 size buckets, max 50 arrays per bucket. Trimming happens automatically under GC pressure.
+- **LLC (Last-Level Cache) miss rate** as a benchmark metric — not just CPU%/allocs. PerfView and `dotnet-counters` show this.
 
 ---
 
-## Końcowe końcowe podsumowanie — 4 osie
+## TL;DR Part 7 — what Konrad adds
 
-Plik integruje teraz **cztery uzupełniające się perspektywy**:
-
-1. **Mój scan 2064 DLL** — *konkretne architektury produkcyjne*. Co Microsoft robi (sparse storage, frame multiplexing, RPC cancel).
-2. **Cheatsheet Nikou** — *toolbox technik kodowych*. Czego użyć w swoim kodzie (Span, SkipLocalsInit).
-3. **Awesome list Adama** — *meta-wiedza i tooling*. Co dzieje się w runtime (PGO, OSR), czym mierzyć.
-4. **Slajdy Konrada** — *zasady i memory layout*. Dlaczego warto (cache lines, false sharing, sequential access).
-
-Każda oś bez pozostałych jest niekompletna:
-- Bez **#1** → nie wiesz co Microsoft faktycznie robi (vs co pisze w blogach).
-- Bez **#2** → nie masz konkretnego toolboxa.
-- Bez **#3** → nie wiesz **czym mierzyć** ani **jak runtime zachowuje się pod spodem**.
-- Bez **#4** → nie wiesz **dlaczego** — patterns stają się cargo-cult.
+| # | Pattern / Concept | What it adds |
+|---|-------------------|-------------|
+| 54 | Frugal Object (`StringValues`, `FrugalList`) | Discriminated union for "0/1/many" — zero allocation in the common case |
+| 55 | Struct of Arrays (SOA) | Cache locality + SIMD-friendly for hot loops |
+| 56 | Six Performance Principles | Thinking framework: cache > GC > alloc > calls |
+| 57 | False sharing + padding | Lock-free can be slower than a lock without padding |
+| 58 | `Span<T>` + `async` impossible | `ref struct` cannot enter a state machine — use `Memory<T>` |
+| 59 | `stackalloc` zeroes (cost) | `[SkipLocalsInit]` + Fody polyfill for older .NET |
+| 60a | `SlabMemoryPool` | Pool of 4 KB slabs sliced into chunks (Kestrel) |
+| 60b | LLC miss rate as a metric | Beyond CPU% — shows whether the pattern is working |
 
 ---
 
-*Część 7 dopisana 2026-05-15. Łącznie **~75 pojęć** w 7 częściach. Plik osiągnął stan referencyjnej karty perf .NET — od JIT mechaniki przez tooling do konkretnych architektur produkcyjnych.*
+## Final final summary — 4 axes
+
+The file now integrates **four complementary perspectives**:
+
+1. **My scan of 2064 DLLs** — *concrete production architectures*. What Microsoft does (sparse storage, frame multiplexing, RPC cancel).
+2. **Nikou's cheatsheet** — *toolbox of coding techniques*. What to use in your own code (Span, SkipLocalsInit).
+3. **Adam's awesome list** — *meta-knowledge and tooling*. What happens in the runtime (PGO, OSR), what to measure with.
+4. **Konrad's slides** — *principles and memory layout*. Why it matters (cache lines, false sharing, sequential access).
+
+Each axis without the others is incomplete:
+- Without **#1** -> you don't know what Microsoft actually does (vs what it writes about in blogs).
+- Without **#2** -> you don't have a concrete toolbox.
+- Without **#3** -> you don't know **what to measure with** or **how the runtime behaves under the hood**.
+- Without **#4** -> you don't know **why** — patterns become cargo-cult.
 
 ---
 
-# Część 8 — dwa wzorce z ML.NET (`dotnet/machinelearning`)
+*Part 7 added 2026-05-15. **~75 concepts** in 7 parts in total. The file has reached the state of a .NET perf reference card — from JIT mechanics through tooling to concrete production architectures.*
 
-Źródło: przegląd kodu `Microsoft.ML.*` (`src/`) — biblioteka numeryczna przetwarzająca miliony wierszy/wektorów. To **inny constraint** niż VS-internal, ASP.NET czy BCL: nie IDE, nie serwer 100K req/s, lecz **high-throughput numeric pipeline**. Dwa wzorce konstrukcyjne, których nie pokrywały części 1-7.
+---
 
-## 61. Mutable editor nad immutable buffer — `immutable struct` + `ref struct` editor + `Commit()`
+# Part 8 — two patterns from ML.NET (`dotnet/machinelearning`)
 
-Źródło: `Microsoft.ML.DataView/VBuffer.cs`, `VBufferEditor.cs`
+Source: code review of `Microsoft.ML.*` (`src/`) — a numeric library that processes millions of rows/vectors. This is a **different constraint** from VS-internal, ASP.NET, or BCL: not an IDE, not a server at 100K req/s, but a **high-throughput numeric pipeline**. Two structural patterns not covered in parts 1-7.
 
-`ValueStringBuilder` (#26) reużywa wewnętrzny bufor, ale jest *sam w sobie* mutable `ref struct`. ML.NET idzie krok dalej: **publiczny typ jest immutable `readonly struct`**, a mutacja idzie przez **osobny `readonly ref struct` editor**, który przejmuje tablice na własność, edytuje przez `Span`, i składa z powrotem przez `Commit()`.
+## 61. Mutable editor over an immutable buffer — `immutable struct` + `ref struct` editor + `Commit()`
+
+Source: `Microsoft.ML.DataView/VBuffer.cs`, `VBufferEditor.cs`
+
+`ValueStringBuilder` (#26) reuses its internal buffer, but is *itself* a mutable `ref struct`. ML.NET goes one step further: **the public type is an immutable `readonly struct`**, and mutation goes through a **separate `readonly ref struct` editor** that takes ownership of the arrays, edits them through `Span`, and reassembles the result via `Commit()`.
 
 ```csharp
-// 1. Publiczny typ — readonly struct, immutable, trzyma reużywalne tablice
+// 1. Public type — readonly struct, immutable, holds reusable arrays
 public readonly struct VBuffer<T> {
     private readonly T[]   _values;    // re-usable
-    private readonly int[] _indices;   // null/empty => dense; inaczej sparse (parallel do _values)
+    private readonly int[] _indices;   // null/empty => dense; otherwise sparse (parallel to _values)
     private readonly int   _count;
     public readonly int    Length;
     public ReadOnlySpan<T>   GetValues()  => _values.AsSpan(0, _count);
     public ReadOnlySpan<int> GetIndices() => IsDense ? default : _indices.AsSpan(0, _count);
 }
 
-// 2. Editor — readonly ref struct (stack-only, nie ucieknie, nie zaboksuje się)
+// 2. Editor — readonly ref struct (stack-only, won't escape, won't box)
 public readonly ref struct VBufferEditor<T> {
     public readonly Span<T>   Values;
     public readonly Span<int> Indices;
-    public bool CreatedNewValues { get; }   // czy growth wymusił nową alokację?
+    public bool CreatedNewValues { get; }   // did growth force a new allocation?
     public VBuffer<T> Commit()              => new VBuffer<T>(_logicalLength, Values.Length, _values, _indices);
-    public VBuffer<T> CommitTruncated(int physicalCount); // logiczna truncacja bez realokacji
+    public VBuffer<T> CommitTruncated(int physicalCount); // logical truncation without reallocation
 }
 
-// 3. Wejście przez `scoped ref` — sygnał dla JIT/kompilatora że ref nie ucieka
+// 3. Entry via `scoped ref` — signals to JIT/compiler that the ref does not escape
 var editor = VBufferEditor.Create(ref dst, length, keepOldOnResize: true);
 for (int i = 0; i < length; i++) editor.Values[i] = ...;
-dst = editor.Commit();   // dst znów immutable, tablica ta sama
+dst = editor.Commit();   // dst is immutable again, same array
 ```
 
-**Kluczowe decyzje projektowe:**
-- **Editor *przejmuje na własność* tablice ze starego bufora.** Dokumentacja w kodzie wprost: *„the resulting VBufferEditor is assumed to take ownership of this passed-in object... its underlying buffers are being potentially reused"*. Stary `VBuffer` po przekazaniu jest nieważny.
-- **`keepOldOnResize`** — flaga steruje `Array.Resize` (zachowaj dane) vs `new T[]` (porzuć). To samo co `keepOld` w Roslynowym `EnsureSize`.
-- **`CreatedNewValues`** — editor mówi callerowi czy doszło do realokacji, żeby ten przeliczył cache'owane spany. Hot path: gdy `false`, można densyfikować/przesuwać *in-place*.
-- **`CommitTruncated`** — caller alokuje konserwatywnie nadmiarową pojemność (gdy końcowy rozmiar nieznany), potem obcina **logicznie** (zmienia `_count`), bez realokacji tablicy.
+**Key design decisions:**
+- **The editor *takes ownership* of the arrays from the old buffer.** The code documentation states explicitly: *"the resulting VBufferEditor is assumed to take ownership of this passed-in object... its underlying buffers are being potentially reused"*. The old `VBuffer` is invalid after being passed.
+- **`keepOldOnResize`** — flag controls `Array.Resize` (keep data) vs `new T[]` (discard). Same as `keepOld` in Roslyn's `EnsureSize`.
+- **`CreatedNewValues`** — the editor tells the caller whether a reallocation occurred, so the caller can recompute cached spans. Hot path: when `false`, you can densify/shift *in-place*.
+- **`CommitTruncated`** — the caller allocates conservatively with excess capacity (when the final size is unknown), then truncates **logically** (changes `_count`), without reallocating the array.
 
-**Why:** rozdzielenie immutable-API od mutable-mechanizmu daje jednocześnie (a) bezpieczny, niewspółdzielący stanu typ publiczny, (b) zero-alloc reużycie w pętli po milionach elementów. `ref struct` na edytorze gwarantuje stack-only lifetime — editor nie wycieknie do pola, nie zaboksuje się, nie przeżyje scope. To uogólnienie `ValueStringBuilder` na dowolny „rebuilder" kolekcji — w tym dwutablicowy (sparse: values + indices).
+**Why:** separating the immutable API from the mutable mechanism gives simultaneously (a) a safe, non-state-sharing public type, (b) zero-alloc reuse in a loop over millions of elements. The `ref struct` on the editor guarantees a stack-only lifetime — the editor will not escape to a field, will not box, will not outlive its scope. This generalises `ValueStringBuilder` to any "rebuilder" of a collection — including a two-array one (sparse: values + indices).
 
-**How to apply:** dla każdego typu kolekcji/wektora budowanego przyrostowo lub reużywanego w gorącej pętli — nie rób mutable typu publicznego. Zrób trójkę: `readonly struct` (immutable API) + `readonly ref struct` Editor (mutacja przez `Span`) + `Commit()`. Wejście do edytora przez `scoped ref` na starym buforze. Łączy się z [[dotnet-perf-reference]] #26 (ValueStringBuilder) i #5 (segmented arrays — jeśli bufor bywa > LOH).
+**How to apply:** for any collection/vector type built incrementally or reused in a hot loop — do not make the public type mutable. Create a triple: `readonly struct` (immutable API) + `readonly ref struct` Editor (mutation via `Span`) + `Commit()`. Enter the editor via `scoped ref` on the old buffer. Connects with [[dotnet-perf-reference]] #26 (ValueStringBuilder) and #5 (segmented arrays — if the buffer can exceed the LOH).
 
-## 62. `ValueGetter<T>` — delegat „push-into-caller-ref" zamiast `T Get()`
+## 62. `ValueGetter<T>` — "push-into-caller-ref" delegate instead of `T Get()`
 
-Źródło: `Microsoft.ML.DataView/IDataView.cs` (`delegate void ValueGetter<TValue>(ref TValue value);`), `IValueMapper.cs` (`delegate void ValueMapper<TSrc,TDst>(in TSrc src, ref TDst dst);`)
+Source: `Microsoft.ML.DataView/IDataView.cs` (`delegate void ValueGetter<TValue>(ref TValue value);`), `IValueMapper.cs` (`delegate void ValueMapper<TSrc,TDst>(in TSrc src, ref TDst dst);`)
 
-Klasyczny kontrakt `TValue Get()` przy strumieniu wartości tego samego kształtu **alokuje albo kopiuje na każde wywołanie** — typ referencyjny = nowy obiekt, duży struct = obronna kopia, `VBuffer` = nowa tablica. ML.NET odwraca kontrakt:
+The classic `TValue Get()` contract on a stream of values of the same shape **allocates or copies on every call** — reference type = new object, large struct = defensive copy, `VBuffer` = new array. ML.NET inverts the contract:
 
 ```csharp
-// NIE: TValue Get();           — każde wywołanie produkuje wartość
-// LECZ:
-public delegate void ValueGetter<TValue>(ref TValue value);          // pisz do bufora callera
-internal delegate void ValueMapper<TSrc,TDst>(in TSrc src, ref TDst dst); // transformacja: in + ref
+// NOT: TValue Get();           — every call produces a value
+// BUT:
+public delegate void ValueGetter<TValue>(ref TValue value);          // write into caller's buffer
+internal delegate void ValueMapper<TSrc,TDst>(in TSrc src, ref TDst dst); // transform: in + ref
 
-// Użycie — caller alokuje bufor RAZ, getter reużywa go przez cały strumień:
-ValueGetter<VBuffer<float>> getter = cursor.GetGetter<VBuffer<float>>(column); // pobrany raz, przed pętlą
-VBuffer<float> buf = default;                  // jedna alokacja na cały przebieg
+// Usage — caller allocates the buffer ONCE; getter reuses it through the entire stream:
+ValueGetter<VBuffer<float>> getter = cursor.GetGetter<VBuffer<float>>(column); // fetched once, before the loop
+VBuffer<float> buf = default;                  // one allocation for the entire run
 while (cursor.MoveNext())
-    getter(ref buf);                           // 0 alokacji per wiersz — tablica w buf reużyta
+    getter(ref buf);                           // 0 allocations per row — array inside buf reused
 ```
 
-**Why:** wartość nie jest *zwracana* — getter **wpisuje ją do bufora należącego do wywołującego**. Caller jest właścicielem cyklu życia i reużywa ten sam `buf` (a wewnątrz: tę samą tablicę — patrz #61) przez miliony iteracji. `in TSrc` (readonly ref) na wejściu mappera eliminuje obronną kopię dużego structu; `ref TDst` na wyjściu eliminuje alokację wyniku. Delegat pobierany jest **raz przed pętlą** — koszt rozwiązania kolumny/typu zamortyzowany.
+**Why:** the value is not *returned* — the getter **writes it into the caller's buffer**. The caller owns the lifetime and reuses the same `buf` (and internally: the same array — see #61) for millions of iterations. `in TSrc` (readonly ref) on the mapper input eliminates the defensive copy of a large struct; `ref TDst` on the output eliminates result allocation. The delegate is fetched **once before the loop** — the cost of resolving column/type is amortised.
 
-**How to apply:** gdy masz strumień wartości o stałym kształcie (wiersze, próbki, ramki) — zamiast `T Get()` daj `void Get(ref T)`. Caller deklaruje bufor poza pętlą i przekazuje go przez `ref`. Dla transformacji: `void Map(in TSrc, ref TDst)`. Pełni rolę zero-alloc odpowiednika `IEnumerator<T>.Current` — łączy się z wzorcem kursora (`long` position + `MoveNextCore`) i z [[dotnet-perf-reference]] #61 (getter dostaje `ref VBuffer` i edytuje go przez editor).
-
----
-
-## TL;DR część 8
-
-| # | Wzorzec | Kiedy |
-|---|---------|-------|
-| 61 | `immutable struct` + `ref struct` editor + `Commit()` | Każdy typ kolekcji/wektora reużywany lub budowany przyrostowo w hot path |
-| 62 | Delegat `void Get(ref T)` zamiast `T Get()` | Strumień wartości o stałym kształcie — caller reużywa bufor przez `ref` |
-
-**Czego z ML.NET NIE kopiować:** `AlignedArray` z ręcznym realignmentem (od .NET 6 jest `GC.AllocateArray(pinned: true)` + `NativeMemory.AlignedAlloc`); `unsafe char*` w `StringSpanOrdinalKey` (na .NET 9+ jest `Dictionary.GetAlternateLookup<ReadOnlySpan<char>>`); własna pula `BufferPoolManager` poza zakresem LOH (`ArrayPool<T>.Shared` jest lepszy dla < 85 kB). Architektura SIMD `Microsoft.ML.CpuMath` (trójpoziomowy dispatch AVX/SSE/scalar, kaskada szerokości wektora, tablice masek wyrównania, dispatch FMA, redukcja drzewiasta) to trzeci — po BCL i Kestrelu (#25) — wzorcowy przykład organizacji „SIMD + scalar fallback", wart osobnej lektury jeśli liczysz na tablicach liczbowych.
+**How to apply:** when you have a stream of values with a fixed shape (rows, samples, frames) — instead of `T Get()`, provide `void Get(ref T)`. The caller declares the buffer outside the loop and passes it via `ref`. For transformations: `void Map(in TSrc, ref TDst)`. Acts as a zero-alloc equivalent of `IEnumerator<T>.Current` — connects with the cursor pattern (`long` position + `MoveNextCore`) and with [[dotnet-perf-reference]] #61 (the getter receives a `ref VBuffer` and edits it through the editor).
 
 ---
 
-*Część 8 dopisana 2026-05-16. Cross-reference z `dotnet/machinelearning`. Łącznie **~77 pojęć** w 8 częściach. ML.NET jako czwarta „szkoła" perf — high-throughput numeric pipeline: agresywne reużycie buforów (editor pattern), kontrakty push-ref (`ValueGetter`), SIMD z pełną kaskadą.*
+## TL;DR Part 8
+
+| # | Pattern | When |
+|---|---------|------|
+| 61 | `immutable struct` + `ref struct` editor + `Commit()` | Any collection/vector type reused or built incrementally in a hot path |
+| 62 | `void Get(ref T)` delegate instead of `T Get()` | Stream of values with a fixed shape — caller reuses the buffer via `ref` |
+
+**What NOT to copy from ML.NET:** `AlignedArray` with manual realignment (since .NET 6 there is `GC.AllocateArray(pinned: true)` + `NativeMemory.AlignedAlloc`); `unsafe char*` in `StringSpanOrdinalKey` (on .NET 9+ there is `Dictionary.GetAlternateLookup<ReadOnlySpan<char>>`); the custom `BufferPoolManager` pool outside the LOH range (`ArrayPool<T>.Shared` is better for < 85 KB). The SIMD architecture of `Microsoft.ML.CpuMath` (three-tier AVX/SSE/scalar dispatch, vector-width cascade, alignment mask tables, FMA dispatch, tree-based reduction) is the third — after BCL and Kestrel (#25) — exemplary illustration of "SIMD + scalar fallback" organisation, worth a separate read if you do arithmetic on arrays.
 
 ---
 
-# Część 9 — `Microsoft.ML.CpuMath` deep dive: anatomia SIMD + scalar fallback
+*Part 8 added 2026-05-16. Cross-reference with `dotnet/machinelearning`. **~77 concepts** in 8 parts in total. ML.NET as the fourth "school" of perf — high-throughput numeric pipeline: aggressive buffer reuse (editor pattern), push-ref contracts (`ValueGetter`), SIMD with a full cascade.*
 
-Źródło: `src/Microsoft.ML.CpuMath/` (`AvxIntrinsics.cs` 71 kB, `SseIntrinsics.cs` 55 kB, `CpuMathUtils.*.cs`, `Thunk.cs`, `.csproj`). Część 8 wymieniła CpuMath jako trzeci — po BCL i Kestrelu (#25) — wzorcowy przykład organizacji SIMD. Tu pełna sekcja, bo **architektura tej biblioteki to gotowy szablon** dla każdego kodu liczącego na tablicach `float`/`int`.
+---
 
-## 63. Build-time fork per Target Framework — jeden publiczny typ, dwie implementacje
+# Part 9 — `Microsoft.ML.CpuMath` deep dive: anatomy of SIMD + scalar fallback
 
-`Microsoft.ML.CpuMath.csproj` targetuje `netstandard2.0;net8.0` i rozdziela kod **warunkowym `<Compile Remove>`**:
+Source: `src/Microsoft.ML.CpuMath/` (`AvxIntrinsics.cs` 71 KB, `SseIntrinsics.cs` 55 KB, `CpuMathUtils.*.cs`, `Thunk.cs`, `.csproj`). Part 8 listed CpuMath as the third — after BCL and Kestrel (#25) — exemplary illustration of SIMD organisation. A full section here because **this library's architecture is a ready-made template** for any code computing over `float`/`int` arrays.
+
+## 63. Build-time fork per Target Framework — one public type, two implementations
+
+`Microsoft.ML.CpuMath.csproj` targets `netstandard2.0;net8.0` and separates code with **conditional `<Compile Remove>`**:
 
 ```xml
 <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
   <Compile Remove="CpuMathUtils.netcoreapp.cs" />
-  <Compile Remove="SseIntrinsics.cs" />     <!-- managed intrinsics tylko na net8 -->
+  <Compile Remove="SseIntrinsics.cs" />     <!-- managed intrinsics only on net8 -->
   <Compile Remove="AvxIntrinsics.cs" />
 </ItemGroup>
 <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
@@ -1271,195 +1271,195 @@ while (cursor.MoveNext())
 </ItemGroup>
 ```
 
-- `net8.0` → `CpuMathUtils.netcoreapp.cs` + `SseIntrinsics.cs` + `AvxIntrinsics.cs` — **managed** `System.Runtime.Intrinsics`.
-- `netstandard2.0` → `CpuMathUtils.netstandard.cs` → `Thunk.cs` z `[DllImport("CpuMathNative")]` — **natywny C++ DLL** (bo `System.Runtime.Intrinsics` nie istnieje na netstandard).
-- Publiczny typ to **`internal static partial class CpuMathUtils`** — ta sama nazwa, identyczna sygnatura metod (`MatrixTimesSource`, `Sum`, `DotU`...), dwie rozłączne implementacje. Konsument nie wie którą dostał.
-- Pakiet NuGet wozi `build/netstandard2.0/Microsoft.ML.CpuMath.props` — MSBuild props, które na starym TFM dorzucają natywny `CpuMathNative` do output (managed-only paczka nie ma jak).
+- `net8.0` -> `CpuMathUtils.netcoreapp.cs` + `SseIntrinsics.cs` + `AvxIntrinsics.cs` — **managed** `System.Runtime.Intrinsics`.
+- `netstandard2.0` -> `CpuMathUtils.netstandard.cs` -> `Thunk.cs` with `[DllImport("CpuMathNative")]` — **native C++ DLL** (because `System.Runtime.Intrinsics` does not exist on netstandard).
+- The public type is **`internal static partial class CpuMathUtils`** — the same name, identical method signatures (`MatrixTimesSource`, `Sum`, `DotU`...), two disjoint implementations. The consumer does not know which one it got.
+- The NuGet package ships `build/netstandard2.0/Microsoft.ML.CpuMath.props` — MSBuild props that on the old TFM add the native `CpuMathNative` to the output (a managed-only package has no other way).
 
-**Why:** to ten sam idiom co MessagePack `UnsafeMemory32`/`UnsafeMemory64` (#31), tylko granica przebiega po **frameworku, nie architekturze**. Stara platforma bez intrinsics nie dostaje wolnego fallbacku skalarnego — dostaje natywny C++. `partial class` pozwala trzymać wspólne stałe/helpery w trzecim pliku.
+**Why:** this is the same idiom as MessagePack `UnsafeMemory32`/`UnsafeMemory64` (#31), but the boundary runs along the **framework, not the architecture**. An old platform without intrinsics does not get a slow scalar fallback — it gets native C++. `partial class` allows shared constants/helpers to live in a third file.
 
-**How to apply:** gdy biblioteka ma wspierać i nowy, i stary runtime — nie `#if` wewnątrz metod (nieczytelne), lecz **osobne pliki + `<Compile Remove>` per TFM + `partial class`**. P/Invoke do natywnego DLL jako fallback tam, gdzie managed-SIMD nie ma.
+**How to apply:** when a library must support both new and old runtimes — not `#if` inside methods (unreadable), but **separate files + `<Compile Remove>` per TFM + `partial class`**. P/Invoke to a native DLL as fallback where managed SIMD is unavailable.
 
-## 64. Trójpoziomowy runtime dispatch — `IsSupported` WYNIESIONE poza pętlę
+## 64. Three-tier runtime dispatch — `IsSupported` HOISTED outside the loop
 
-`CpuMathUtils.netcoreapp.cs` — fasada sprawdza zdolności CPU raz i routuje do osobnych klas:
+`CpuMathUtils.netcoreapp.cs` — the facade checks CPU capabilities once and routes to separate classes:
 
 ```csharp
 public static void MatrixTimesSource(bool transpose, AlignedArray matrix, ...)
 {
     if (Avx.IsSupported)        AvxIntrinsics.MatMul(matrix, source, destination, ...);
     else if (Sse.IsSupported)   SseIntrinsics.MatMul(matrix, source, destination, ...);
-    else { /* skalarna pętla zagnieżdżona — dot product ręcznie */ }
+    else { /* nested scalar loop — dot product by hand */ }
 }
 ```
 
-- Implementacje AVX i SSE żyją w **osobnych klasach** (`AvxIntrinsics`, `SseIntrinsics`), nie w jednej metodzie z `if`-ami.
-- `Xxx.IsSupported` to `[Intrinsic]` rozwiązywany przez JIT do **stałej** w czasie kompilacji tieru 1 — martwa gałąź jest eliminowana, brak realnego `if` w wygenerowanym kodzie.
-- Sprawdzenie jest **raz, na wejściu**, nigdy w gorącej pętli.
+- AVX and SSE implementations live in **separate classes** (`AvxIntrinsics`, `SseIntrinsics`), not in one method with `if` branches.
+- `Xxx.IsSupported` is an `[Intrinsic]` that JIT resolves to a **constant** during tier-1 compilation — the dead branch is eliminated, no real `if` in the generated code.
+- The check is done **once, at the entry point**, never in the hot loop.
 
-**Why:** branch na zdolność ISA wewnątrz pętli po milionach elementów = katastrofa predykcji. Wyniesiony na zewnątrz + intrinsic-folding JIT-a = zero kosztu.
+**Why:** a branch on ISA capability inside a loop over millions of elements = prediction catastrophe. Hoisted outside + JIT intrinsic-folding = zero cost.
 
-**How to apply:** fasada per operacja → `if (Avx...) else if (Sse...) else scalar` → osobny plik/klasa per ISA. Łączy się z [[dotnet-perf-reference]] #25.
+**How to apply:** one facade per operation -> `if (Avx...) else if (Sse...) else scalar` -> separate file/class per ISA. Connects with [[dotnet-perf-reference]] #25.
 
-## 65. Tablice masek wyrównania — bezgałęziowa obsługa głowy i ogona
+## 65. Alignment mask tables — branchless handling of the head and tail
 
-`AvxIntrinsics.cs` trzyma dwie statyczne tablice `uint[64]` = 8 masek po 8 lanów:
+`AvxIntrinsics.cs` holds two static arrays `uint[64]` = 8 masks of 8 lanes each:
 
 ```csharp
 public static readonly uint[] LeadingAlignmentMask = new uint[64] {
-    0,0,0,0,0,0,0,0,                          // wiersz 0: 0 lanów
-    0xFFFFFFFF,0,0,0,0,0,0,0,                  // wiersz 1: pierwszy lan
-    0xFFFFFFFF,0xFFFFFFFF,0,0,0,0,0,0, ...     // wiersz k: pierwsze k lanów
+    0,0,0,0,0,0,0,0,                          // row 0: 0 lanes
+    0xFFFFFFFF,0,0,0,0,0,0,0,                  // row 1: first lane
+    0xFFFFFFFF,0xFFFFFFFF,0,0,0,0,0,0, ...     // row k: first k lanes
 };
-// TrailingAlignmentMask: lustrzanie — wiersz k = ostatnie k lanów
+// TrailingAlignmentMask: mirror — row k = last k lanes
 ```
 
-Kernel `Sum` (i każdy inny) używa ich tak:
+The `Sum` kernel (and every other) uses them like this:
 
 ```csharp
-int misalignment = (int)((nuint)pValues % 32);     // przesunięcie adresu w bajtach
+int misalignment = (int)((nuint)pValues % 32);     // address offset in bytes
 if (misalignment != 0) {
-    misalignment >>= 2;  misalignment = 8 - misalignment;   // ile floatów do granicy
+    misalignment >>= 2;  misalignment = 8 - misalignment;   // how many floats to the boundary
     Vector256<float> mask = Avx.LoadVector256(pLeadingMask + misalignment * 8);
-    result = Avx.Add(result, Avx.And(mask, Avx.LoadVector256(pValues)));  // 1 maskowany load
-    pValues += misalignment;  length -= misalignment;       // teraz adres wyrównany
+    result = Avx.Add(result, Avx.And(mask, Avx.LoadVector256(pValues)));  // 1 masked load
+    pValues += misalignment;  length -= misalignment;       // address is now aligned
 }
-// ... główna pętla wyrównana, 8 floatów/iterację ...
-if (remainder != 0) {                                       // ogon 1-7 elementów
-    pValues -= (8 - remainder);                             // cofnij, by load sięgnął końca
+// ... main loop aligned, 8 floats/iteration ...
+if (remainder != 0) {                                       // tail: 1-7 elements
+    pValues -= (8 - remainder);                             // step back so load reaches the end
     Vector256<float> mask = Avx.LoadVector256(pTrailingMask + remainder * 8);
     result = Avx.Add(result, Avx.And(mask, Avx.LoadVector256(pValues)));
 }
 ```
 
-**Why:** niewyrównana głowa (0-7 elementów do granicy 32 B) i ogon (0-7 reszty) klasycznie wymagają **pętli skalarnej z brachem na element**. Maska załatwia oba jednym wektorowym `load + AND + add` — bezgałęziowo, pełną szerokością. Tablica masek to jednorazowy koszt statyczny.
+**Why:** an unaligned head (0-7 elements to the 32 B boundary) and tail (0-7 remainder) classically require **a scalar loop with a branch per element**. The mask handles both with a single vector `load + AND + add` — branchlessly, at full width. The mask table is a one-time static cost.
 
-**How to apply:** dla każdej operacji redukcji/transformacji na tablicy o dowolnej długości i wyrównaniu — prekomputuj dwie tablice masek (leading/trailing), obsłuż brzegi maskowanym loadem zamiast pętli skalarnej. Edge case: gdy `misalignment & 3 != 0` (adres niewyrównany nawet do 4 B w siatce 32 B) — wyrównania nie da się osiągnąć krokiem float, idzie się czystą ścieżką unaligned.
+**How to apply:** for any reduction/transform operation on an array of arbitrary length and alignment — precompute two mask tables (leading/trailing), handle the edges with a masked load instead of a scalar loop. Edge case: when `misalignment & 3 != 0` (address not even aligned to 4 B on the 32 B grid) — alignment cannot be achieved in float-size steps, so use the purely unaligned path.
 
-## 66. Kaskada szerokości wektora — osobny akumulator per tier, łączone na końcu
+## 66. Vector-width cascade — separate accumulator per tier, merged at the end
 
-`AvxIntrinsics.DotU` (iloczyn skalarny) — wzorzec 256→128→skalar:
+`AvxIntrinsics.DotU` (dot product) — pattern 256->128->scalar:
 
 ```csharp
 Vector256<float> result256 = Vector256<float>.Zero;
-while (pSrcCurrent + 8 <= pSrcEnd) {                    // TIER 1: po 8 floatów
+while (pSrcCurrent + 8 <= pSrcEnd) {                    // TIER 1: 8 floats at a time
     result256 = MultiplyAdd(pSrcCurrent, Avx.LoadVector256(pDstCurrent), result256);
     pSrcCurrent += 8; pDstCurrent += 8;
 }
-result256 = VectorSum256(result256);                    // redukcja drzewiasta 8→1
+result256 = VectorSum256(result256);                    // tree reduction 8->1
 Vector128<float> resultPadded = Sse.AddScalar(result256.GetLower(), GetHigh(result256));
 
 Vector128<float> result128 = Vector128<float>.Zero;
-if (pSrcCurrent + 4 <= pSrcEnd) {                       // TIER 2: jeden blok 4 floatów
+if (pSrcCurrent + 4 <= pSrcEnd) {                       // TIER 2: one block of 4 floats
     result128 = Sse.Add(result128, Sse.Multiply(Sse.LoadVector128(pSrcCurrent), Sse.LoadVector128(pDstCurrent)));
     pSrcCurrent += 4; pDstCurrent += 4;
 }
 result128 = SseIntrinsics.VectorSum128(result128);
 
-while (pSrcCurrent < pSrcEnd) {                         // TIER 3: skalar, 0-3 reszty
+while (pSrcCurrent < pSrcEnd) {                         // TIER 3: scalar, 0-3 remainder
     result128 = Sse.AddScalar(result128, Sse.MultiplyScalar(
         Sse.LoadScalarVector128(pSrcCurrent), Sse.LoadScalarVector128(pDstCurrent)));
     pSrcCurrent++; pDstCurrent++;
 }
-return Sse.AddScalar(result128, resultPadded).ToScalar();   // SKLEJ wyniki wszystkich tierów
+return Sse.AddScalar(result128, resultPadded).ToScalar();   // MERGE results from all tiers
 ```
 
-**Why:** najszersza dostępna pętla (256 b) miele większość danych; 128 b i skalar dobierają resztę. Każdy tier ma **własny akumulator** — częściowych sum nie gubi się przy przejściu między szerokościami, sklejane są dopiero na końcu. Macierzowe kernele (`MatMul`) dokładają drugi wymiar tej techniki: 4 wiersze wyjścia liczone w 4 osobnych rejestrach naraz (ILP — instrukcje niezależne, procesor je zrównolegla).
+**Why:** the widest available loop (256 b) processes most of the data; 128 b and scalar handle the remainder. Each tier has **its own accumulator** — partial sums are not lost when switching between widths; they are merged only at the end. Matrix kernels (`MatMul`) add a second dimension to this technique: 4 output rows computed in 4 separate registers simultaneously (ILP — independent instructions that the CPU parallelises).
 
-**How to apply:** każda redukcja/mapowanie na tablicy → kaskada `Vector256` → `Vector128` → skalar, osobny akumulator per tier, sklej na końcu. Dla kerneli „dużo iloczynów skalarnych" dodatkowo rozwiń pętlę N× z N akumulatorami.
+**How to apply:** every reduction/map on an array -> cascade `Vector256` -> `Vector128` -> scalar, separate accumulator per tier, merge at the end. For "many dot products" kernels, additionally unroll the loop N times with N accumulators.
 
-## 67. Mikro-dispatch wewnątrz kernela — FMA i gather jako inline-owane helpery
+## 67. Micro-dispatch inside the kernel — FMA and gather as inlined helpers
 
-W środku kernela bywają punktowe sprawdzenia ISA, opakowane w `[MethodImpl(AggressiveInlining)]`:
+Inside a kernel there are occasional ISA checks, wrapped in `[MethodImpl(AggressiveInlining)]`:
 
 ```csharp
 [MethodImpl(MethodImplOptions.AggressiveInlining)]
 private static Vector256<float> MultiplyAdd(Vector256<float> a, Vector256<float> b, Vector256<float> c)
-    => Fma.IsSupported ? Fma.MultiplyAdd(a, b, c)            // 1 instrukcja, lepsza precyzja
+    => Fma.IsSupported ? Fma.MultiplyAdd(a, b, c)            // 1 instruction, better precision
                        : Avx.Add(Avx.Multiply(a, b), c);    // fallback: mul + add
 
 [MethodImpl(MethodImplOptions.AggressiveInlining)]
 private static unsafe Vector256<float> Load8(float* src, int* idx)
-    => Avx2.IsSupported ? Avx2.GatherVector256(src, Avx.LoadVector256(idx), 4)  // 8 rozproszonych → 1 load
-                        : Vector256.Create(src[idx[0]], src[idx[1]], ... src[idx[7]]); // ręcznie
+    => Avx2.IsSupported ? Avx2.GatherVector256(src, Avx.LoadVector256(idx), 4)  // 8 scattered -> 1 load
+                        : Vector256.Create(src[idx[0]], src[idx[1]], ... src[idx[7]]); // manually
 ```
 
-**Why:** `Fma.IsSupported`/`Avx2.IsSupported` to znów intrinsic-stałe — JIT eliminuje martwą gałąź, `AggressiveInlining` (#3) wciąga helper do kernela, więc w hot loopie nie ma ani calla, ani brancha. FMA `a*b+c` to jedna instrukcja (Haswell+) o niższej latencji i bez pośredniego zaokrąglenia. `GatherVector256` ładuje 8 rozproszonych wartości (sparse!) jedną instrukcją.
+**Why:** `Fma.IsSupported`/`Avx2.IsSupported` are again intrinsic constants — JIT eliminates the dead branch, `AggressiveInlining` (#3) pulls the helper into the kernel, so in the hot loop there is neither a call nor a branch. FMA `a*b+c` is one instruction (Haswell+) with lower latency and no intermediate rounding. `GatherVector256` loads 8 scattered values (sparse!) in one instruction.
 
-**How to apply:** punktowe rozgałęzienia ISA trzymaj w maleńkich `AggressiveInlining` helperach z operatorem `?:` na `IsSupported` — nie inline'uj `if`-ów ręcznie w kernelu.
+**How to apply:** keep punctual ISA branches in tiny `AggressiveInlining` helpers with a `?:` operator on `IsSupported` — do not inline `if` statements manually inside the kernel.
 
-## 68. Redukcja drzewiasta w rejestrze — `HorizontalAdd`/`Shuffle`, nie pętla skalarna
+## 68. Tree-based reduction in registers — `HorizontalAdd`/`Shuffle`, not a scalar loop
 
-Zwinięcie wektora do skalara (suma, max) przez drzewo operacji, głębokość log₂(N):
+Folding a vector to a scalar (sum, max) through a tree of operations, depth log₂(N):
 
 ```csharp
 private static Vector256<float> VectorSum256(in Vector256<float> v) {
-    Vector256<float> partial = Avx.HorizontalAdd(v, v);   // sąsiednie pary zsumowane
-    return Avx.HorizontalAdd(partial, partial);            // i jeszcze raz
+    Vector256<float> partial = Avx.HorizontalAdd(v, v);   // adjacent pairs summed
+    return Avx.HorizontalAdd(partial, partial);            // and once more
 }
 private static Vector256<float> VectorMax256(in Vector256<float> v) {
     Vector256<float> x1 = Avx.Shuffle(v, v, 0xB1);         // ABCD|EFGH -> BADC|FEHG
-    Vector256<float> m  = Avx.Max(v, x1);                  // max parami
+    Vector256<float> m  = Avx.Max(v, x1);                  // pairwise max
     x1 = Avx.Shuffle(m, m, 0x02);
-    return Avx.Max(m, x1);                                 // max w pozycji skalarnej
+    return Avx.Max(m, x1);                                 // max in scalar position
 }
 ```
 
-**Why:** 8 elementów → 1 w 2-3 instrukcjach wektorowych zamiast 8 iteracji skalarnych. To `Shuffle` + operacja binarna w drzewie — działa dla każdej operacji łącznej (suma, max, min, AND...).
+**Why:** 8 elements -> 1 in 2-3 vector instructions instead of 8 scalar iterations. This is `Shuffle` + binary operation in a tree — works for any associative operation (sum, max, min, AND...).
 
-**How to apply:** akumuluj w najszerszym wektorze przez całą pętlę, redukuj do skalara dopiero raz, na końcu, drzewem `Shuffle`+op — nigdy pętlą `for` po lanach.
+**How to apply:** accumulate in the widest vector throughout the loop, reduce to scalar only once at the end using a `Shuffle`+op tree — never with a `for` loop over lanes.
 
-## 69. Drobne, ale warte skopiowania (CpuMath)
+## 69. Small but worth copying (CpuMath)
 
-- **Konwencja sufiksów w nazwach** — komentarz nagłówkowy `AvxIntrinsics.cs` definiuje: `A` = aligned+padded, `U` = unaligned+unpadded, `P` = sparse partial vector, `Tran` = transposed. Eksport ma unikalne nazwy (`DotU`, `AddScaleSU`, `MatMulTran`) bo wariantów nie da się rozróżnić po sygnaturze. **Dyscyplina nazewnicza zamiast przeciążeń** — czytając nazwę wiesz o kontrakcie wyrównania.
-- **Unaligned-load API na wyrównanych danych** — w głównej pętli używają `Avx.LoadVector256` (unaligned), mimo że dane *są* wyrównane (asercja `Contracts.Assert(addr % 32 == 0)`). Powód z komentarza w kodzie: JIT składa **unaligned** load w operand pamięci instrukcji konsumującej (VEX-encoding to pozwala), `LoadAligned` zostaje osobną instrukcją. Na nowoczesnym HW aligned i unaligned load są równie szybkie gdy nie przecinają cache-line. Wniosek: trzymaj dane wyrównane (cache-line), ale wołaj **unaligned-load intrinsic** — dla foldowalności.
-- **`[SuppressUnmanagedCodeSecurity]` na P/Invoke** — wszystkie `[DllImport]` w `Thunk.cs` mają ten atrybut: pomija stack-walk bezpieczeństwa przy każdym wywołaniu natywnym (istotne na .NET Framework/netstandard; na .NET Core CAS usunięto i atrybut jest w praktyce no-op). Pokrewne ideowo do `[SuppressGCTransition]` (#46a), ale to **inny** atrybut o innym mechanizmie — nie mylić.
-- **`AlignedArray`** — alokuje `new float[size + cbAlign/4]` z zapasem i przesuwa dane wewnątrz (`GetBase`), by zagwarantować wyrównanie 16/32 B bez osobnej alokacji. Wzorzec historyczny — **na .NET 6+ użyj `GC.AllocateArray<T>(n, pinned: true)` + `NativeMemory.AlignedAlloc`** zamiast powielać realignment ręcznie.
-
----
-
-## TL;DR część 9 — szablon biblioteki SIMD
-
-| # | Wzorzec | Co daje |
-|---|---------|---------|
-| 63 | Fork per TFM: `<Compile Remove>` + `partial class` + natywny fallback | Nowy runtime = managed intrinsics, stary = P/Invoke; jedno publiczne API |
-| 64 | Trójpoziomowy dispatch AVX/SSE/scalar, `IsSupported` poza pętlą | Zero brancha ISA w hot loopie (JIT foldują intrinsic-stałą) |
-| 65 | Tablice masek leading/trailing | Bezgałęziowa obsługa niewyrównanej głowy i ogona |
-| 66 | Kaskada 256→128→skalar, osobny akumulator per tier | Pełne wykorzystanie szerokości + poprawna reszta bez gubienia sum |
-| 67 | Mikro-dispatch FMA/gather w `AggressiveInlining` helperach | 1-instrukcyjne FMA, hardware gather; bez calla i brancha w kernelu |
-| 68 | Redukcja drzewiasta `HorizontalAdd`/`Shuffle` | Wektor→skalar w log₂(N) instrukcjach, nie pętlą skalarną |
-| 69 | Sufiksy nazw (A/U/P/Tran), unaligned-load dla foldowalności, `AlignedArray` (przestarzałe) | Dyscyplina kontraktu wyrównania; nuanse codegenu JIT |
-
-Pełny przepis na bibliotekę SIMD: **fasada per operacja → dispatch ISA na wejściu → osobna klasa per ISA → w kernelu kaskada szerokości + maski brzegów + redukcja drzewiasta → mikro-dispatch FMA/gather inline → natywny fallback dla TFM bez intrinsics.** Obowiązuje przestroga z #25: SIMD opłaca się przy milionach elementów/s — dla CRUD/IDE to overengineering.
+- **Name suffix convention** — the header comment of `AvxIntrinsics.cs` defines: `A` = aligned+padded, `U` = unaligned+unpadded, `P` = sparse partial vector, `Tran` = transposed. Exports have unique names (`DotU`, `AddScaleSU`, `MatMulTran`) because variants cannot be distinguished by signature alone. **Naming discipline instead of overloads** — reading the name tells you the alignment contract.
+- **Unaligned-load API on aligned data** — in the main loop they use `Avx.LoadVector256` (unaligned), even though the data *is* aligned (assertion `Contracts.Assert(addr % 32 == 0)`). Reason from the code comment: JIT folds an **unaligned** load into the memory operand of the consuming instruction (VEX-encoding allows this); `LoadAligned` becomes a separate instruction. On modern hardware aligned and unaligned loads are equally fast when they don't cross a cache line. Conclusion: keep data aligned (cache-line), but call the **unaligned-load intrinsic** — for foldability.
+- **`[SuppressUnmanagedCodeSecurity]` on P/Invoke** — all `[DllImport]` entries in `Thunk.cs` carry this attribute: it skips the security stack-walk on every native call (relevant on .NET Framework/netstandard; on .NET Core CAS was removed and the attribute is practically a no-op). Conceptually related to `[SuppressGCTransition]` (#46a), but a **different** attribute with a different mechanism — do not confuse them.
+- **`AlignedArray`** — allocates `new float[size + cbAlign/4]` with extra capacity and shifts the data internally (`GetBase`) to guarantee 16/32 B alignment without a separate allocation. A historical pattern — **on .NET 6+ use `GC.AllocateArray<T>(n, pinned: true)` + `NativeMemory.AlignedAlloc`** instead of replicating the realignment by hand.
 
 ---
 
-*Część 9 dopisana 2026-05-16. Deep dive `Microsoft.ML.CpuMath`. Łącznie **~84 pojęcia** w 9 częściach. Domknięcie wątku SIMD z #25: po BCL (laboratorium intrinsics) i Kestrelu (parsing HTTP) — ML.NET CpuMath jako trzeci, najczytelniej zorganizowany wzorzec „SIMD + scalar fallback" gotowy do skopiowania jako szablon.*
+## TL;DR Part 9 — SIMD library template
+
+| # | Pattern | What it gives |
+|---|---------|---------------|
+| 63 | Fork per TFM: `<Compile Remove>` + `partial class` + native fallback | New runtime = managed intrinsics, old = P/Invoke; one public API |
+| 64 | Three-tier AVX/SSE/scalar dispatch, `IsSupported` outside the loop | Zero ISA branch in the hot loop (JIT folds the intrinsic constant) |
+| 65 | Leading/trailing mask tables | Branchless handling of the unaligned head and tail |
+| 66 | Cascade 256->128->scalar, separate accumulator per tier | Full width utilisation + correct remainder without losing partial sums |
+| 67 | Micro-dispatch FMA/gather in `AggressiveInlining` helpers | Single-instruction FMA, hardware gather; no call and no branch in the kernel |
+| 68 | Tree-based reduction `HorizontalAdd`/`Shuffle` | Vector->scalar in log2(N) instructions, not a scalar loop |
+| 69 | Name suffixes (A/U/P/Tran), unaligned-load for foldability, `AlignedArray` (obsolete) | Alignment contract discipline; JIT codegen nuances |
+
+Full recipe for a SIMD library: **one facade per operation -> ISA dispatch at entry -> separate class per ISA -> inside the kernel: width cascade + edge masks + tree reduction -> FMA/gather micro-dispatch inline -> native fallback for TFMs without intrinsics.** The warning from #25 applies: SIMD pays off at millions of elements/s — for CRUD/IDE it is overengineering.
 
 ---
 
-# Część 10 — `dotnet/aspnetcore`: 26 wzorców z żywego repozytorium
+*Part 9 added 2026-05-16. Deep dive into `Microsoft.ML.CpuMath`. **~84 concepts** in 9 parts in total. Closing the SIMD thread from #25: after BCL (intrinsics laboratory) and Kestrel (HTTP parsing) — ML.NET CpuMath as the third, most clearly organised "SIMD + scalar fallback" pattern ready to copy as a template.*
 
-Źródło: przegląd kodu repozytorium `C:\Praca\aspnetcore` (gałąź `main`, maj 2026) — pięć równoległych przebiegów: transport Kestrela, protokoły HTTP Kestrela (HTTP/1·2·3), `src/Http` + routing + `WebUtilities`, `src/Shared` (utility source-linked), oraz Components (Blazor) / SignalR / middleware. Wylistowano **wyłącznie** wzorce nieobecne w częściach 1-9. Każdy zweryfikowany w źródle. W odróżnieniu od dekompilacji z części 1-4 to **kod pierwotny z komentarzami autorów** — komentarze cytowane dosłownie są bezcennym uzasadnieniem.
+---
 
-## A. Nowa klasa — codegen / JIT
+# Part 10 — `dotnet/aspnetcore`: 26 patterns from a live repository
 
-### 70. `[UnsafeAccessor]` — dostęp do prywatnych składowych bez refleksji
+Source: code review of the `C:\Praca\aspnetcore` repository (branch `main`, May 2026) — five parallel passes: Kestrel transport, Kestrel HTTP protocols (HTTP/1·2·3), `src/Http` + routing + `WebUtilities`, `src/Shared` (utility source-linked), and Components (Blazor) / SignalR / middleware. Listed are **only** patterns not present in parts 1-9. Each one verified in the source. Unlike the decompilation in parts 1-4, this is **original code with author comments** — literally-quoted comments are invaluable as justification.
 
-Źródło: `src/Shared/Components/ComponentsActivityLinkStore.cs`
+## A. New class — codegen / JIT
+
+### 70. `[UnsafeAccessor]` — access to private members without reflection
+
+Source: `src/Shared/Components/ComponentsActivityLinkStore.cs`
 
 ```csharp
 [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_ActivityLinksStore")]
 static extern object GetActivityLinksStore(Renderer instance);
 ```
 
-**Why:** atrybut .NET 8+ — JIT wiąże `extern` metodę bezpośrednio z prywatną składową typu docelowego. Wynik: zwykłe `call`, zero `MethodInfo.Invoke`, zero stack-walku bezpieczeństwa, zero alokacji `object[]` na argumenty. W odróżnieniu od `Expression.Compile`/`DynamicMethod` ([[dotnet-perf-reference]] #39-41) nie emituje IL w runtime — jest w pełni statyczny, trim-friendly i AOT-friendly.
+**Why:** a .NET 8+ attribute — JIT binds the `extern` method directly to a private member of the target type. Result: a plain `call`, zero `MethodInfo.Invoke`, zero security stack-walk, zero `object[]` allocation for arguments. Unlike `Expression.Compile`/`DynamicMethod` ([[dotnet-perf-reference]] #39-41) it does not emit IL at runtime — it is fully static, trim-friendly, and AOT-friendly.
 
-**How to apply:** gdy musisz wywołać prywatną metodę/pole/konstruktor cudzego typu (interop z BCL, testy, mostki między assembly) — zadeklaruj `static extern` z `[UnsafeAccessor]` zamiast cache'owanego `MethodInfo`. Sygnatura musi pasować; pierwszy parametr to instancja. Łączy się z [[dotnet-perf-reference]] #41 (codegen) jako jego statyczna, lekka alternatywa.
+**How to apply:** when you need to call a private method/field/constructor of someone else's type (BCL interop, tests, bridges between assemblies) — declare `static extern` with `[UnsafeAccessor]` instead of a cached `MethodInfo`. The signature must match; the first parameter is the instance. Connects with [[dotnet-perf-reference]] #41 (codegen) as its static, lightweight alternative.
 
-### 71. `SearchValues<T>` — zbiór znaków skompilowany do SIMD
+### 71. `SearchValues<T>` — character set compiled to SIMD
 
-Źródło: `src/Shared/ServerInfrastructure/HttpCharacters.cs`, `src/Http/Http.Abstractions/src/PathString.cs`
+Source: `src/Shared/ServerInfrastructure/HttpCharacters.cs`, `src/Http/Http.Abstractions/src/PathString.cs`
 
 ```csharp
 private static readonly SearchValues<byte> _allowedAuthorityBytes =
@@ -1469,435 +1469,435 @@ public static bool ContainsInvalidAuthorityChar(ReadOnlySpan<byte> span)
     => span.IndexOfAnyExcept(_allowedAuthorityBytes) >= 0;
 ```
 
-**Why:** `SearchValues<T>` (.NET 8+) analizuje zbiór raz, przy inicjalizacji statycznej, i wybiera najszybszy algorytm wyszukiwania (bitmapa / SIMD / per-znak). `IndexOfAnyExcept` daje walidację „czy wszystko w dozwolonym zbiorze" w tempie wektorowym. `PathString.ToUriComponent()` używa tego jako fast-path: jeśli `SearchValues` nie znajdzie znaku do escapowania — zwraca string bez `StringBuilder`.
+**Why:** `SearchValues<T>` (.NET 8+) analyses the set once at static initialisation and selects the fastest search algorithm (bitmap / SIMD / per-character). `IndexOfAnyExcept` gives "is everything in the allowed set" validation at vector speed. `PathString.ToUriComponent()` uses this as a fast-path: if `SearchValues` finds no character to escape — return the string without `StringBuilder`.
 
-**How to apply:** każda walidacja/klasyfikacja znaków (dozwolone znaki URL, separatory, whitelist) — zamień pętlę `for` po znakach lub regex na statyczny `SearchValues<char>`/`<byte>` + `IndexOfAny`/`IndexOfAnyExcept`. Najpierw fast-path „czy w ogóle trzeba coś robić", dopiero potem wolna ścieżka. Pokrewne #25 (SIMD), ale bez ręcznych intrinsics.
+**How to apply:** any character validation/classification (allowed URL characters, separators, whitelist) — replace a `for` loop over characters or a regex with a static `SearchValues<char>`/`<byte>` + `IndexOfAny`/`IndexOfAnyExcept`. Fast-path "is there anything to do at all" first, then the slow path. Related to #25 (SIMD), but without manual intrinsics.
 
-### 72. Source-generated `KnownHeaders` — dopasowanie nazw nagłówków przez odczyt 8 bajtów jako `ulong`
+### 72. Source-generated `KnownHeaders` — matching header names by reading 8 bytes as a `ulong`
 
-Źródło: `src/Servers/Kestrel/Core/src/Internal/Http/HttpHeaders.Generated.cs` (generowane z `KnownHeaders.cs`)
+Source: `src/Servers/Kestrel/Core/src/Internal/Http/HttpHeaders.Generated.cs` (generated from `KnownHeaders.cs`)
 
 ```csharp
-// case-insensitive: 0xdfdfdfdf zeruje 6. bit każdego bajtu ASCII (49× w pliku)
+// case-insensitive: 0xdfdfdfdf clears bit 6 of every ASCII byte (49x in the file)
 if ((ReadUnalignedLittleEndian_ulong(ref nameStart) & 0xdfdfdfdfdfdfdfdfuL) == 0x...)
-// long _bits — jeden bit na znany nagłówek:
+// long _bits — one bit per known header:
 _bits |= 0x2L;                       // set
-if ((_bits & 0x2L) != 0) { ... }     // test obecności — O(1)
+if ((_bits & 0x2L) != 0) { ... }     // presence test — O(1)
 ```
 
-**Why:** nazwa nagłówka czytana jako liczba (`Unsafe.ReadUnaligned<ulong>`) i porównywana ze stałą — O(1) niezależnie od długości, bez alokacji stringa, bez `string.Equals`. Maska `0xdf...` daje **bezgałęziową** case-insensitivity. `long _bits` mieści ~60 znanych nagłówków: sprawdzenie „czy nagłówek już ustawiony" to jeden test bitu, jeden dostęp do cache line.
+**Why:** the header name is read as a number (`Unsafe.ReadUnaligned<ulong>`) and compared with a constant — O(1) regardless of length, no string allocation, no `string.Equals`. The `0xdf...` mask gives **branchless** case-insensitivity. `long _bits` holds ~60 known headers: checking "is the header already set" is one bit test, one cache-line access.
 
-**How to apply:** parsując protokół ze skończonym słownikiem nazw — wygeneruj (source generator) kod czytający nazwę jako 2/4/8-bajtowe liczby i porównujący ze stałymi; do śledzenia obecności pól użyj bit-flag `long`/`ulong` zamiast `HashSet`. Rozszerza #4 (StringTable) o **codegen dopasowania**, a #6 (frozen) o przypadek słownika znanego w czasie kompilacji.
+**How to apply:** when parsing a protocol with a finite vocabulary of names — generate (via source generator) code that reads names as 2/4/8-byte integers and compares them with constants; use bit-flag `long`/`ulong` instead of `HashSet` to track field presence. Extends #4 (StringTable) with **codegen matching**, and #6 (frozen) with the case of a dictionary known at compile time.
 
-## B. Triki bitowe / sentinel
+## B. Bit tricks / sentinel
 
-### 73. Fuzja bounds-check i sentinela przez rzut na `uint`
+### 73. Fusing bounds-check and sentinel via cast to `uint`
 
-Źródło: `src/Servers/Kestrel/Core/src/Internal/Http/HttpParser.cs`
+Source: `src/Servers/Kestrel/Core/src/Internal/Http/HttpParser.cs`
 
 ```csharp
-var index = (uint)span.IndexOf(target);   // -1 (brak) → uint.MaxValue
-if (index < (uint)span.Length) { ... }    // jeden branch zamiast (index >= 0 && index < len)
+var index = (uint)span.IndexOf(target);   // -1 (not found) -> uint.MaxValue
+if (index < (uint)span.Length) { ... }    // one branch instead of (index >= 0 && index < len)
 ```
 
-**Why:** `IndexOf` zwraca `-1` przy braku trafienia. Rzut na `uint` zamienia `-1` w `uint.MaxValue` — pojedyncze porównanie bez znaku łapie jednocześnie „nie znaleziono" i „poza zakresem". Mniej gałęzi = lepsza predykcja na hot path parsera. JIT używa tego też do eliminacji bounds-checków.
+**Why:** `IndexOf` returns `-1` when nothing is found. Casting to `uint` turns `-1` into `uint.MaxValue` — a single unsigned comparison simultaneously handles "not found" and "out of range". Fewer branches = better prediction on the parser hot path. JIT also uses this to eliminate bounds checks.
 
-**How to apply:** gdy masz indeks, który bywa `-1`, i tak czy tak musisz sprawdzić górną granicę — rzutuj na `uint` i porównaj raz. Idiom uzupełnia #46e (fastest loops) o konkretną sztuczkę sentinelową.
+**How to apply:** when you have an index that can be `-1` and you need to check the upper bound anyway — cast to `uint` and compare once. This idiom complements #46e (fastest loops) with a concrete sentinel trick.
 
-### 74. Bezgałęziowe wyliczanie długości prefiksu hex (chunked encoding)
+### 74. Branchless hex prefix length calculation (chunked encoding)
 
-Źródło: `src/Servers/Kestrel/Core/src/Internal/Http/ChunkWriter.cs`
+Source: `src/Servers/Kestrel/Core/src/Internal/Http/ChunkWriter.cs`
 
 ```csharp
 total = (count > 0xffff) ? 0x10 : 0x00;  count >>= total;
 shift = (count > 0x00ff) ? 0x08 : 0x00;  count >>= shift;  total |= shift;
-total |= (count > 0x000f) ? 0x04 : 0x00;        // pozycja najwyższego niezerowego nibble
-// ...write hex prosto do Span, hex z "0123456789abcdef"u8 (sekcja danych)
+total |= (count > 0x000f) ? 0x04 : 0x00;        // position of the highest non-zero nibble
+// ...write hex directly to Span, hex from "0123456789abcdef"u8 (data section)
 ```
 
-**Why:** wyszukiwanie binarne najwyższego niezerowego nibble — O(1), bez `div`/`mod`, bez pętli, bez alokacji. Rozmiar chunku zapisywany wprost do `Span<byte>`; tablica hex to literał `u8` mapowany do sekcji rodata (zero alokacji). `& 0x0f` przy indeksowaniu daje JIT-owi dowód na eliminację bounds-checku.
+**Why:** binary search for the highest non-zero nibble — O(1), no `div`/`mod`, no loop, no allocation. Chunk size written directly to `Span<byte>`; the hex table is a `u8` literal mapped to the rodata section (zero allocations). `& 0x0f` when indexing gives JIT proof to eliminate the bounds check.
 
-**How to apply:** konwersje o znanej z góry maksymalnej szerokości (hex, rozmiary ramek) — dekomponuj przez przesunięcia bitowe i pisz do dostarczonego bufora; tablice translacji trzymaj jako literały `u8`. Pokrewne #46d (`string.Create`), ale jeszcze niżej — wprost do `Span`.
+**How to apply:** conversions with a known maximum width (hex, frame sizes) — decompose using bit shifts and write to the supplied buffer; keep translation tables as `u8` literals. Related to #46d (`string.Create`), but even lower level — directly to `Span`.
 
-### 75. Ustawianie continuation-bit w 7-bitowym varint przez OR zamiast brancha
+### 75. Setting the continuation bit in a 7-bit varint via OR instead of a branch
 
-Źródło: `src/Shared/Encoding/Int7BitEncodingUtils.cs`
+Source: `src/Shared/Encoding/Int7BitEncodingUtils.cs`
 
 ```csharp
 while (uValue > 0x7Fu) {
-    target[index++] = (byte)(uValue | ~0x7Fu);   // ~0x7F = 0xFFFFFF80 — ustawia bit ciągłości
+    target[index++] = (byte)(uValue | ~0x7Fu);   // ~0x7F = 0xFFFFFF80 — sets the continuation bit
     uValue >>= 7;
 }
 target[index++] = (byte)uValue;
 ```
 
-**Why:** klasyczny varint ustawia 8. bit warunkowo. Tu `uValue | ~0x7F` ustawia bit ciągłości **zawsze**, a rzut `(byte)` odcina nadmiar — bez gałęzi, bez mispredykcji. Operuje wprost na `Span<byte>` (zero `BinaryWriter`). Odczyt waliduje `shift == 35` (przepełnienie >32 bit) — wczesne wykrycie złych danych.
+**Why:** classic varint sets bit 8 conditionally. Here `uValue | ~0x7F` sets the continuation bit **unconditionally**, and the `(byte)` cast discards the overflow — no branch, no misprediction. Operates directly on `Span<byte>` (zero `BinaryWriter`). Reading validates `shift == 35` (overflow > 32 bits) — early detection of bad data.
 
-**How to apply:** kodując liczby o zmiennej długości do bufora — zamień warunkowe ustawianie flagi na bezwarunkowy OR + maskujący rzut. Pokrewne #7/#19 (parsery protokołów).
+**How to apply:** when encoding variable-length numbers to a buffer — replace the conditional flag-setting with an unconditional OR + masking cast. Related to #7/#19 (protocol parsers).
 
-### 76. Perfect hash dla metod HTTP (generowany gperf-em)
+### 76. Perfect hash for HTTP methods (generated by gperf)
 
-Źródło: `src/Servers/Kestrel/Core/src/Internal/Infrastructure/HttpUtilities.cs`
+Source: `src/Servers/Kestrel/Core/src/Internal/Infrastructure/HttpUtilities.cs`
 
 ```csharp
-// "GET " czytane jako uint (z trailing space) — sprawdzane PIERWSZE (najczęstsze)
-// dłuższe metody: do 8 bajtów jako ulong + tablica perfect-hash z GNU gperf
+// "GET " read as uint (with trailing space) — checked FIRST (most common)
+// longer methods: up to 8 bytes as ulong + perfect-hash table from GNU gperf
 ```
 
-**Why:** metody HTTP to krótkie, stałe stringi ASCII — porównanie liczbowe jest O(1) i nie liczy hash stringa. Tablica perfect-hash (bezkolizyjna, minimalna) wygenerowana **offline** narzędziem gperf; lookup to 2-3 odczyty pamięci. Najczęstsza metoda (`GET`) ma osobny, najwcześniejszy fast-path.
+**Why:** HTTP methods are short, fixed ASCII strings — numeric comparison is O(1) and does not hash the string. A perfect-hash table (collision-free, minimal) generated **offline** by gperf; lookup is 2-3 memory reads. The most common method (`GET`) has a separate, earliest fast-path.
 
-**How to apply:** dla każdego skończonego słownika (metody, kody, schematy) — rozważ perfect hash generowany offline zamiast `Dictionary`/`switch` na stringach; uprzywilejuj statystycznie najczęstszy przypadek. Konkretyzacja idei z #6 (frozen collections).
+**How to apply:** for any finite vocabulary (methods, codes, schemes) — consider an offline-generated perfect hash instead of `Dictionary`/`switch` on strings; privilege the statistically most common case. A concrete realisation of the idea from #6 (frozen collections).
 
-## C. Pamięć, write-barriers, pooling
+## C. Memory, write-barriers, pooling
 
-### 77. Struct-wrapper omijający kontrolę kowariancji przy zapisie do tablicy
+### 77. Struct-wrapper bypassing covariance check on array write
 
-Źródło: `src/Shared/Buffers/BufferSegmentStack.cs`, `src/Servers/Kestrel/shared/PooledStreamStack.cs`
+Source: `src/Shared/Buffers/BufferSegmentStack.cs`, `src/Servers/Kestrel/shared/PooledStreamStack.cs`
 
 ```csharp
-// komentarz w kodzie wskazuje wprost: clr!ObjIsInstanceOf
+// code comment points directly to: clr!ObjIsInstanceOf
 private readonly struct SegmentAsValueType {
     private readonly BufferSegment _value;
     private SegmentAsValueType(BufferSegment v) => _value = v;
     public static implicit operator SegmentAsValueType(BufferSegment s) => new(s);
     public static implicit operator BufferSegment(SegmentAsValueType s) => s._value;
 }
-private readonly SegmentAsValueType[] _array;   // tablica STRUKTUR, nie referencji
+private readonly SegmentAsValueType[] _array;   // array of STRUCTS, not references
 ```
 
-**Why:** zapis typu referencyjnego do `T[]` wymusza w CLR kontrolę covariant-array-store (`JIT_Stelem_Ref` → `ObjIsInstanceOf`) — narzut na **każdy** zapis. Opakowanie referencji w `readonly struct` sprawia, że tablica jest tablicą wartości — kontrola znika. Operatory `implicit` czynią wrapper niewidocznym dla wołających. Microsoft zmierzył to w trace'ach ETL (komentarz w `BufferSegmentStack`).
+**Why:** writing a reference type to `T[]` forces the CLR to perform a covariant-array-store check (`JIT_Stelem_Ref` -> `ObjIsInstanceOf`) — overhead on **every** write. Wrapping a reference in a `readonly struct` makes the array an array of values — the check disappears. The `implicit` operators make the wrapper invisible to callers. Microsoft measured this in ETL traces (comment in `BufferSegmentStack`).
 
-**How to apply:** tablica/pula trzymająca typy referencyjne, zapisywana w gorącej pętli — opakuj element w jednopolowy `readonly struct` z operatorami `implicit`. Eliminuje ukryty `ObjIsInstanceOf`. Skrajnie nieoczywiste; warte tylko zmierzonych hot-pathów.
+**How to apply:** an array/pool holding reference types written in a hot loop — wrap the element in a single-field `readonly struct` with `implicit` operators. Eliminates the hidden `ObjIsInstanceOf`. Extremely non-obvious; only worth doing for measured hot paths.
 
-### 78. `nuint` jako wartość w `ConcurrentDictionary` — eliminacja GC write barriers
+### 78. `nuint` as value in `ConcurrentDictionary` — eliminating GC write barriers
 
-Źródło: `src/Servers/Kestrel/Core/src/Internal/PinnedBlockMemoryPoolFactory.cs`
+Source: `src/Servers/Kestrel/Core/src/Internal/PinnedBlockMemoryPoolFactory.cs`
 
 ```csharp
 // micro-optimization: Using nuint as the value type to avoid GC write barriers;
 // could replace with ConcurrentHashSet if that becomes available
 private readonly ConcurrentDictionary<PinnedBlockMemoryPool, nuint> _pools = new();
-_pools.TryAdd(pool, nuint.Zero);   // wartość nieistotna — słownik użyty jako zbiór
+_pools.TryAdd(pool, nuint.Zero);   // value is irrelevant — dictionary used as a set
 ```
 
-**Why:** `ConcurrentDictionary` użyty jako `HashSet` (brak `ConcurrentHashSet` w BCL). Gdyby wartością był `object`, każdy wpis byłby GC-rootem wymagającym **write barrier**. `nuint` to typ wartościowy — wpis nie uczestniczy w skanowaniu GC, zapis bez bariery. Cytat z komentarza autora.
+**Why:** `ConcurrentDictionary` used as a `HashSet` (no `ConcurrentHashSet` in BCL). If the value were `object`, every entry would be a GC root requiring a **write barrier**. `nuint` is a value type — the entry does not participate in GC scanning, write without a barrier. Quoted from the author's comment.
 
-**How to apply:** potrzebujesz współbieżnego zbioru → `ConcurrentDictionary<T, nuint>` (lub inny value-type jak `byte`) zamiast `<T, object>`. Wartość ignorowana, ale znika narzut bariery zapisu. Pokrewne #4 (false sharing) — świadomość kosztów pracy GC z pamięcią.
+**How to apply:** you need a concurrent set -> `ConcurrentDictionary<T, nuint>` (or another value type like `byte`) instead of `<T, object>`. The value is ignored, but the write-barrier overhead disappears. Related to #4 (false sharing) — awareness of GC memory costs.
 
-### 79. Pulowanie przez nadpisanie `Dispose()`
+### 79. Pooling by overriding `Dispose()`
 
-Źródło: `src/Shared/CancellationTokenSourcePool.cs`
+Source: `src/Shared/CancellationTokenSourcePool.cs`
 
 ```csharp
 private sealed class PooledCancellationTokenSource : CancellationTokenSource {
     protected override void Dispose(bool disposing) {
-        if (disposing && !_pool.Return(this))   // próba zwrotu do puli
-            base.Dispose(disposing);             // realny dispose tylko gdy pula pełna
+        if (disposing && !_pool.Return(this))   // attempt to return to the pool
+            base.Dispose(disposing);             // real dispose only when the pool is full
     }
 }
 ```
 
-**Why:** `CancellationTokenSource` jest relatywnie drogi w alokacji. Dziedzicząc i przechwytując `Dispose`, pula staje się **całkowicie przezroczysta** dla wołającego — zwykłe `using (var cts = pool.Rent())` faktycznie oddaje obiekt do puli. Bound puli (`MaxQueueSize = 1024`) — po przekroczeniu graceful fallback do prawdziwego `Dispose`.
+**Why:** `CancellationTokenSource` is relatively expensive to allocate. By inheriting and intercepting `Dispose`, the pool becomes **completely transparent** to the caller — a plain `using (var cts = pool.Rent())` actually returns the object to the pool. Pool bound (`MaxQueueSize = 1024`) — when exceeded, graceful fallback to real `Dispose`.
 
-**How to apply:** typ, który już implementuje `IDisposable` i jest drogi — rozważ podklasę przechwytującą `Dispose` i oddającą `this` do puli. Wołający nie zmienia kodu. Uwaga: tylko gdy typ jest dziedziczalny i bezpieczny do resetu. Pokrewne #1 (object pooling) — wariant „pula niewidoczna".
+**How to apply:** a type that already implements `IDisposable` and is expensive — consider a subclass that intercepts `Dispose` and returns `this` to the pool. The caller changes nothing. Note: only when the type is inheritable and safe to reset. Related to #1 (object pooling) — the "invisible pool" variant.
 
-### 80. Liczenie „na oko" zamiast `ConcurrentQueue.Count`
+### 80. Approximate counting instead of `ConcurrentQueue.Count`
 
-Źródło: `src/Servers/Kestrel/Transport.Sockets/src/Internal/SocketSenderPool.cs`, `src/Shared/CancellationTokenSourcePool.cs`
+Source: `src/Servers/Kestrel/Transport.Sockets/src/Internal/SocketSenderPool.cs`, `src/Shared/CancellationTokenSourcePool.cs`
 
 ```csharp
 // "This counting isn't accurate, but it's good enough ... to avoid using
 //  _queue.Count which could be expensive"
 if (_disposed || Interlocked.Increment(ref _count) > MaxQueueSize) {
     Interlocked.Decrement(ref _count);
-    sender.Dispose();   // pula pełna — porzuć
+    sender.Dispose();   // pool full — discard
     return;
 }
 ```
 
-**Why:** `ConcurrentQueue.Count` jest drogie (synchronizacja, przejście segmentów). Osobny licznik `int` z `Interlocked` jest tani; może chwilowo przekroczyć `MaxQueueSize` przez wyścig, ale ta drobna niedokładność jest nieporównanie tańsza niż dokładny `Count`. Cytat z komentarza.
+**Why:** `ConcurrentQueue.Count` is expensive (synchronisation, traversal of segments). A separate `int` counter with `Interlocked` is cheap; it can momentarily exceed `MaxQueueSize` due to a race, but that minor inaccuracy is incomparably cheaper than an accurate `Count`. Quoted from the comment.
 
-**How to apply:** ograniczasz rozmiar współbieżnej puli/kolejki — trzymaj przybliżony licznik `Interlocked` zamiast wołać `.Count`. Zaakceptuj, że bound jest „miękki". Filozofia „good enough" — pokrewne #13 (LRU), #28 (custom Parallel).
+**How to apply:** bounding the size of a concurrent pool/queue — keep an approximate `Interlocked` counter instead of calling `.Count`. Accept that the bound is "soft". The "good enough" philosophy — related to #13 (LRU), #28 (custom Parallel).
 
-### 81. `RemoveExpired` w jednym skanie dzięki uporządkowaniu FIFO
+### 81. `RemoveExpired` in a single scan thanks to FIFO ordering
 
-Źródło: `src/Servers/Kestrel/shared/PooledStreamStack.cs`
+Source: `src/Servers/Kestrel/shared/PooledStreamStack.cs`
 
 ```csharp
-// streamy w puli są w kolejności wygaśnięcia → pierwszy nie-wygasły = wszystkie dalsze ważne
+// streams in the pool are in expiry order -> first non-expired = all subsequent are valid
 for (var i = 0; i < size; i++)
     if (array[i].PoolExpirationTimestamp >= timestamp) return i;   // cutoff
-// potem: dispose [0..cutoff), kompaktacja in-place, wyczyść ogon — zero alokacji
+// then: dispose [0..cutoff), in-place compaction, clear tail — zero allocations
 ```
 
-**Why:** inwariant „streamy dodawane są w kolejności rosnącego czasu wygaśnięcia" zamienia czyszczenie puli w pojedynczy skan + kompaktację tablicy w miejscu. Brak struktur pomocniczych, brak alokacji, w stanie ustalonym koszt bliski zera.
+**Why:** the invariant "streams are added in ascending expiry order" turns pool cleanup into a single scan + in-place array compaction. No auxiliary structures, no allocations; in steady state the cost is near zero.
 
-**How to apply:** pula z wygasaniem (TTL) — przechowuj elementy w kolejności wygaśnięcia, wtedy eviction to jeden skan do pierwszego żywego + kompaktacja. Pokrewne #13 (bounded LRU cache) — alternatywa bez `LinkedList`.
+**How to apply:** a pool with TTL — store elements in expiry order; eviction becomes a single scan to the first live element + compaction. Related to #13 (bounded LRU cache) — an alternative without `LinkedList`.
 
-### 82. Dwa wskaźniki — przepisywanie spanu w miejscu
+### 82. Two pointers — rewriting a span in-place
 
-Źródło: `src/Shared/UrlDecoder/UrlDecoder.cs`, `src/Shared/PathNormalizer/PathNormalizer.cs`
+Source: `src/Shared/UrlDecoder/UrlDecoder.cs`, `src/Shared/PathNormalizer/PathNormalizer.cs`
 
 ```csharp
 public static int DecodeInPlace(Span<byte> buffer, bool isFormEncoding) {
     var sourceIndex = 0; var destinationIndex = 0;
-    // wynik dekodowania ZAWSZE ≤ wejściu → wskaźnik zapisu nie dogoni wskaźnika czytania
-    while (sourceIndex < buffer.Length) { /* '+', '%XX', literal → buffer[destinationIndex++] */ }
-    return destinationIndex;   // nowa długość
+    // decoded result is ALWAYS <= input -> write pointer never catches read pointer
+    while (sourceIndex < buffer.Length) { /* '+', '%XX', literal -> buffer[destinationIndex++] */ }
+    return destinationIndex;   // new length
 }
 ```
 
-**Why:** URL-decode i RFC-3986 `RemoveDotSegments` mają inwariant „wynik nie jest dłuższy niż wejście". Dzięki temu można przepisać dane **w tym samym buforze**: wskaźnik czytania zawsze wyprzedza wskaźnik zapisu. Zero buforów pośrednich, zero alokacji; metoda zwraca nową długość do obcięcia.
+**Why:** URL-decode and RFC-3986 `RemoveDotSegments` have the invariant "result is no longer than input". This allows rewriting the data **in the same buffer**: the read pointer always stays ahead of the write pointer. Zero intermediate buffers, zero allocations; the method returns the new length for truncation.
 
-**How to apply:** transformacja bufora, która nigdy nie wydłuża danych (dekodowanie, usuwanie znaków, kompresja whitespace) — rób ją in-place techniką dwóch wskaźników zamiast alokować bufor wyjściowy. Pokrewne #61 (editor pattern) i #46c (`CollectionsMarshal.AsSpan`).
+**How to apply:** a buffer transformation that never lengthens data (decoding, removing characters, whitespace compression) — do it in-place with the two-pointer technique instead of allocating an output buffer. Related to #61 (editor pattern) and #46c (`CollectionsMarshal.AsSpan`).
 
-### 83. Numer rewizji — tanie unieważnianie cache przy reuse z puli
+### 83. Revision number — cheap cache invalidation on pool reuse
 
-Źródło: `src/Http/Http/src/DefaultHttpContext.cs` (`Initialize` / `Uninitialize`)
+Source: `src/Http/Http/src/DefaultHttpContext.cs` (`Initialize` / `Uninitialize`)
 
 ```csharp
 public void Initialize(IFeatureCollection features) {
-    _features.Initialize(features, revision: features.Revision);   // bump rewizji
+    _features.Initialize(features, revision: features.Revision);   // bump revision
     _request.Initialize(_features.Revision);
-    // featurowe lookupy porównują zapamiętaną rewizję z bieżącą — niezgodność = przelicz
+    // feature lookups compare the saved revision with the current one — mismatch = recompute
 }
 ```
 
-**Why:** `HttpContext` jest pulowany między żądaniami. Zamiast zerować całą strukturę i wszystkie cache feature'ów przy reuse, inkrementuje się jeden `int Revision`. Cache'owane lookupy wykrywają nieaktualność po niezgodności numeru — leniwie, bez zerowania pamięci.
+**Why:** `HttpContext` is pooled between requests. Instead of zeroing the entire structure and all feature caches on reuse, a single `int Revision` is incremented. Cached lookups detect staleness by a revision mismatch — lazily, without zeroing memory.
 
-**How to apply:** pulowany obiekt z cache'owanym stanem pochodnym — zamiast czyścić cache przy reuse, trzymaj licznik wersji; konsumenci cache zapamiętują wersję i przeliczają przy niezgodności. Pokrewne #1 (pooling), #34 (pula obiektów per-request).
+**How to apply:** a pooled object with cached derived state — instead of clearing the cache on reuse, keep a version counter; cache consumers remember the version and recompute on mismatch. Related to #1 (pooling), #34 (per-request object pool).
 
-## D. Współbieżność / async
+## D. Concurrency / async
 
-### 84. `IOQueue` — `Thread.MemoryBarrier()` + bramka CAS na `_doingWork`
+### 84. `IOQueue` — `Thread.MemoryBarrier()` + CAS gate on `_doingWork`
 
-Źródło: `src/Servers/Kestrel/Transport.Sockets/src/Internal/IOQueue.cs`
+Source: `src/Servers/Kestrel/Transport.Sockets/src/Internal/IOQueue.cs`
 
 ```csharp
 public override void Schedule(Action<object?> action, object? state) {
     _workItems.Enqueue(new Work(action, state));
-    if (Interlocked.CompareExchange(ref _doingWork, 1, 0) == 0)     // tylko PIERWSZY kolejkuje
+    if (Interlocked.CompareExchange(ref _doingWork, 1, 0) == 0)     // only the FIRST queues work
         ThreadPool.UnsafeQueueUserWorkItem(this, preferLocal: false);
 }
 void IThreadPoolWorkItem.Execute() {
     while (true) {
         while (_workItems.TryDequeue(out var item)) item.Callback(item.State);
         _doingWork = 0;
-        Thread.MemoryBarrier();              // porządkuje nie-volatile zapis ↔ odczyt poniżej
+        Thread.MemoryBarrier();              // orders the non-volatile write <-> read below
         if (_workItems.IsEmpty) break;
         if (Interlocked.Exchange(ref _doingWork, 1) == 1) break;
     }
 }
 ```
 
-**Why:** wszystkie callbacki I/O łączą się w **jeden** work item ThreadPoola (mniej kontekst-switchy, lepsza lokalność). Flaga `_doingWork` przez CAS gwarantuje, że tylko pierwszy producent kolejkuje robotę. Jawny `Thread.MemoryBarrier()` ustawia porządek między zwykłym (nie-volatile) zapisem `_doingWork = 0` a późniejszym odczytem `IsEmpty` — bez kosztu volatile-read na każdej iteracji. Klasyczny sposób na wyścig „praca dodana po wyczyszczeniu flagi".
+**Why:** all I/O callbacks merge into **one** ThreadPool work item (fewer context switches, better locality). The `_doingWork` flag via CAS guarantees that only the first producer queues the work. The explicit `Thread.MemoryBarrier()` orders the non-volatile write `_doingWork = 0` with the subsequent `IsEmpty` read — without the cost of a volatile-read on every iteration. The classic fix for the "work added after clearing the flag" race.
 
-**How to apply:** producent/konsument, gdzie chcesz batchować pracę w jeden work item — flaga „pracuję" przez CAS, po opróżnieniu kolejki wyczyść flagę, `MemoryBarrier`, sprawdź ponownie pustość. Pokrewne #7 (lock-free), #21 (`Pipe`).
+**How to apply:** producer/consumer where you want to batch work into one work item — "am working" flag via CAS, after draining the queue clear the flag, `MemoryBarrier`, check emptiness again. Related to #7 (lock-free), #21 (`Pipe`).
 
-### 85. Koalescencja kontynuacji przez singletonowy sentinel `Action`
+### 85. Continuation coalescing via a singleton sentinel `Action`
 
-Źródło: `src/Servers/Kestrel/Transport.Sockets/src/Internal/SocketAwaitableEventArgs.cs`
+Source: `src/Servers/Kestrel/Transport.Sockets/src/Internal/SocketAwaitableEventArgs.cs`
 
 ```csharp
 private static readonly Action<object?> _continuationCompleted = _ => { };
 private volatile Action<object?>? _continuation;
-// w OnCompleted: CAS wstawia albo realną kontynuację, albo sentinel
+// in OnCompleted: CAS inserts either the real continuation or the sentinel
 if (ReferenceEquals(prevContinuation, _continuationCompleted))
     ThreadPool.UnsafeQueueUserWorkItem(continuation, state, preferLocal: true);
 ```
 
-**Why:** jeden statyczny, pusty `Action` jako sentinel pozwala jednym `Interlocked.CompareExchange` rozróżnić trzy stany awaitera (czeka / zakończono / zakończono-przed-rejestracją) bez osobnych pól flag i bez alokacji. Współgra z `IValueTaskSource`.
+**Why:** a single static empty `Action` as a sentinel allows one `Interlocked.CompareExchange` to distinguish three awaiter states (waiting / completed / completed-before-registration) without separate flag fields and without allocation. Works together with `IValueTaskSource`.
 
-**How to apply:** implementując własny awaiter/`IValueTaskSource` — użyj statycznego sentinel-delegata jako wartownika stanu w polu kontynuacji; CAS na tym polu zastępuje oddzielny `enum`/`bool`. Konkretny trik uzupełniający #14 (`PipeAwaitable`).
+**How to apply:** when implementing a custom awaiter/`IValueTaskSource` — use a static sentinel delegate as a state guardian in the continuation field; a CAS on that field replaces a separate `enum`/`bool`. A concrete trick complementing #14 (`PipeAwaitable`).
 
-### 86. Deduplikacja pracy async przez wyścig na `ConcurrentDictionary` + `TaskCompletionSource`
+### 86. Async work deduplication via race on `ConcurrentDictionary` + `TaskCompletionSource`
 
-Źródło: `src/Middleware/OutputCaching/src/DispatcherExtensions.cs` (`WorkDispatcher`)
+Source: `src/Middleware/OutputCaching/src/DispatcherExtensions.cs` (`WorkDispatcher`)
 
 ```csharp
 while (true) {
-    if (_workers.TryGetValue(key, out var task)) return await task;   // dołącz do trwającej pracy
+    if (_workers.TryGetValue(key, out var task)) return await task;   // join in-progress work
     var tcs = new TaskCompletionSource<TValue?>(TaskCreationOptions.RunContinuationsAsynchronously);
-    if (_workers.TryAdd(key, tcs.Task)) {                              // wygrałeś — jesteś producentem
+    if (_workers.TryAdd(key, tcs.Task)) {                              // you won — you are the producer
         try     { tcs.TrySetResult(await valueFactory(key, state)); return await tcs.Task; }
         finally { _workers.TryRemove(key, out _); }
-    }   // przegrałeś wyścig — pętla, dołącz do cudzego Tasku
+    }   // you lost the race — loop and join someone else's Task
 }
 ```
 
-**Why:** klasyczna ochrona przed **cache stampede / dogpile** — N równoległych żądań tego samego klucza wykonuje `valueFactory` tylko raz; reszta `await`-uje wspólny `Task` z `TaskCompletionSource`. Bez locków — synchronizacja wynika z atomowego `TryAdd`. `RunContinuationsAsynchronously` zapobiega odpalaniu kontynuacji na wątku producenta. Wyjątek propaguje się do wszystkich oczekujących.
+**Why:** classic protection against **cache stampede / dogpile** — N parallel requests for the same key execute `valueFactory` only once; the rest `await` the shared `Task` from `TaskCompletionSource`. No locks — synchronisation follows from the atomic `TryAdd`. `RunContinuationsAsynchronously` prevents continuations from running on the producer's thread. Exceptions propagate to all awaiters.
 
-**How to apply:** drogie obliczenie/pobranie cache'owane po kluczu, wołane współbieżnie — trzymaj `ConcurrentDictionary<TKey, Task<TValue>>`, producenta wyłaniaj przez `TryAdd`, usuwaj wpis w `finally`. Pokrewne #12 (`GetOrAdd`) — ale dla pracy **asynchronicznej**, gdzie `GetOrAdd` nie wystarcza.
+**How to apply:** an expensive computation/fetch cached by key, called concurrently — hold a `ConcurrentDictionary<TKey, Task<TValue>>`, elect the producer via `TryAdd`, remove the entry in `finally`. Related to #12 (`GetOrAdd`) — but for **asynchronous** work, where `GetOrAdd` is insufficient.
 
-### 87. `ConcurrentPipeWriter` — tryb passthrough, gdy nic się nie flushuje
+### 87. `ConcurrentPipeWriter` — passthrough mode when nothing is flushing
 
-Źródło: `src/Servers/Kestrel/Core/src/Internal/Infrastructure/PipeWriterHelpers/ConcurrentPipeWriter.cs`
+Source: `src/Servers/Kestrel/Core/src/Internal/Infrastructure/PipeWriterHelpers/ConcurrentPipeWriter.cs`
 
 ```csharp
 public override Memory<byte> GetMemory(int sizeHint = 0) {
-    if (_currentFlushTcs == null && _head == null)        // brak flushu i brak danych
-        return _innerPipeWriter.GetMemory(sizeHint);      // PASSTHROUGH — zero buforowania, zero locka
+    if (_currentFlushTcs == null && _head == null)        // no flush in progress and no data buffered
+        return _innerPipeWriter.GetMemory(sizeHint);      // PASSTHROUGH — zero buffering, zero lock
     AllocateMemoryUnsynchronized(sizeHint);
     return _tailMemory;
 }
 ```
 
-**Why:** dopóki nie trwa flush, writer deleguje wprost do wewnętrznego — żadnego segmentowego bufora, żadnej synchronizacji. Bufor segmentowy (lista reużywalnych segmentów) włącza się **tylko** na czas trwającego flushu, kiedy współbieżne zapisy muszą się gdzieś podziać. Jeden `TaskCompletionSource` na flush jest await-owany przez wszystkich piszących.
+**Why:** as long as no flush is in progress, the writer delegates directly to the inner one — no segmented buffer, no synchronisation. The segmented buffer (list of reusable segments) activates **only** during an in-progress flush, when concurrent writes need somewhere to go. One `TaskCompletionSource` per flush is awaited by all writers.
 
-**How to apply:** dekorator dodający buforowanie/synchronizację „na wszelki wypadek" — wykryj wspólny przypadek, w którym dekoracja jest zbędna, i w nim deleguj bezpośrednio. Pokrewne #7 (`Allocate`/`AllocateSlow` — fast/slow split na poziomie metody).
+**How to apply:** a decorator adding "just in case" buffering/synchronisation — detect the common case where the decoration is unnecessary and delegate directly in that case. Related to #7 (`Allocate`/`AllocateSlow` — fast/slow split at the method level).
 
-## E. Hot-path / architektura
+## E. Hot-path / architecture
 
-### 88. Per-connection cache reuse stringów żądania
+### 88. Per-connection request string reuse cache
 
-Źródło: `src/Servers/Kestrel/Core/src/Internal/Http/Http1Connection.cs`
+Source: `src/Servers/Kestrel/Core/src/Internal/Http/Http1Connection.cs`
 
 ```csharp
 private string? _parsedPath, _parsedQueryString, _parsedRawTarget;
-// keep-alive: jeśli nowy raw target == poprzedni → reużyj referencji stringa, pomiń parsowanie
+// keep-alive: if new raw target == previous -> reuse string reference, skip parsing
 ```
 
-**Why:** połączenie keep-alive często dostaje **identyczne** żądania (polling, retry, healthcheck). Pola instancji trzymają zdekodowane stringi z poprzedniego żądania; jeśli surowy target się zgadza — reużywana jest gotowa referencja, bez ponownego dekodowania i alokacji. Per-connection (nie globalne) → zero kontencji. Wyłączalne `DisableStringReuse` dla multi-tenant.
+**Why:** a keep-alive connection often receives **identical** requests (polling, retry, healthcheck). Instance fields hold the decoded strings from the previous request; if the raw target matches — the ready reference is reused, without re-decoding and re-allocating. Per-connection (not global) -> zero contention. `DisableStringReuse` can be turned off for multi-tenant scenarios.
 
-**How to apply:** stanowy parser przetwarzający strumień podobnych wejść — cache'uj ostatni wynik w polach instancji i sprawdzaj tożsamość wejścia przed ponownym parsowaniem. Pokrewne #4 (`StringTable` dedupe) — ale lokalne, jednoelementowe, bez synchronizacji.
+**How to apply:** a stateful parser processing a stream of similar inputs — cache the last result in instance fields and check input identity before re-parsing. Related to #4 (`StringTable` dedupe) — but local, single-element, without synchronisation.
 
-### 89. Nagłówek `Date` cache'owany przez heartbeat + `Volatile`
+### 89. `Date` header cached by heartbeat + `Volatile`
 
-Źródło: `src/Servers/Kestrel/Core/src/Internal/Http/DateHeaderValueManager.cs`
+Source: `src/Servers/Kestrel/Core/src/Internal/Http/DateHeaderValueManager.cs`
 
 ```csharp
-// timer heartbeatu raz/sek aktualizuje strukturę z gotowym byte[] (z wbudowanym "\r\nDate: ")
-// wszystkie wątki: Volatile.Read tej samej instancji — zero formatowania per odpowiedź
+// heartbeat timer once/sec updates the struct with a ready byte[] (including "\r\nDate: " prefix)
+// all threads: Volatile.Read of the same instance — zero formatting per response
 ```
 
-**Why:** każda odpowiedź HTTP potrzebuje nagłówka `Date`, ale data zmienia się raz na sekundę. Heartbeat (jeden wątek tła) formatuje ją raz; gotowy `byte[]` zawiera już prefiks `"\r\nDate: "` i `\r\n`, więc emisja odpowiedzi to czysta kopia bajtów. Odczyt przez `Volatile.Read` — bez locka.
+**Why:** every HTTP response needs a `Date` header, but the date changes only once per second. The heartbeat (one background thread) formats it once; the ready `byte[]` already includes the `"\r\nDate: "` prefix and `\r\n`, so emitting the response is a pure byte copy. Read via `Volatile.Read` — no lock.
 
-**How to apply:** wartość wysyłana w każdej odpowiedzi, a zmieniająca się rzadko — formatuj ją w tle na timerze, trzymaj gotowy bufor bajtów (z prefiksami), czytaj `Volatile`. Pokrewne #20 (batch + timer) i #60a — wzorzec „cache odświeżany w tle".
+**How to apply:** a value sent in every response but changing rarely — format it in the background on a timer, keep a ready byte buffer (with prefixes), read `Volatile`. Related to #20 (batch + timer) and #60a — the "background-refreshed cache" pattern.
 
-### 90. Pre-boxowany pusty enumerator
+### 90. Pre-boxed empty enumerator
 
-Źródło: `src/Http/Http/src/QueryCollection.cs`, `src/Http/Http/src/FormCollection.cs`
+Source: `src/Http/Http/src/QueryCollection.cs`, `src/Http/Http/src/FormCollection.cs`
 
 ```csharp
 private static readonly IEnumerator<KeyValuePair<string, StringValues>> EmptyIEnumerator
-    = new Enumerator();   // pusty przypadek zboxowany RAZ, statycznie
-// niepusta kolekcja → GetEnumerator zwraca struct Enumerator wprost (bez boxa)
-// UWAGA z kodu: pole _dictionaryEnumerator NIE może być readonly — MoveNext mutuje stan
+    = new Enumerator();   // empty case boxed ONCE, statically
+// non-empty collection -> GetEnumerator returns struct Enumerator directly (no box)
+// NOTE from code: field _dictionaryEnumerator must NOT be readonly — MoveNext mutates state
 ```
 
-**Why:** `foreach` przez `IEnumerable<T>` boksuje struct-enumerator. Pusta kolekcja jest częsta (brak query stringu, brak formularza) — jej enumerator boksowany jest **raz**, do statycznego pola. Niepusta zwraca `struct` bezpośrednio. Komentarz „Do NOT make this readonly" przypomina pułapkę: `readonly` na polu mutowalnego struct-enumeratora powoduje obronne kopie i gubienie stanu.
+**Why:** `foreach` over `IEnumerable<T>` boxes a struct-enumerator. The empty collection is common (no query string, no form) — its enumerator is boxed **once** into a static field. Non-empty returns the `struct` directly. The comment "Do NOT make this readonly" highlights the trap: `readonly` on a field holding a mutable struct-enumerator causes defensive copies and lost state.
 
-**How to apply:** kolekcja często pusta, implementująca `IEnumerable<T>` — zboxuj pusty enumerator do `static readonly`, dla niepustej zwracaj `struct`. Nie oznaczaj `readonly` pól mutowalnych struct-enumeratorów. Pokrewne #54 (frugal object), #29.
+**How to apply:** a collection that is often empty and implements `IEnumerable<T>` — box the empty enumerator into a `static readonly`; for non-empty, return the `struct`. Do not mark fields holding mutable struct-enumerators as `readonly`. Related to #54 (frugal object), #29.
 
-### 91. `KeyValueAccumulator` — stopniowana ekspansja 1 → tablica → `List`
+### 91. `KeyValueAccumulator` — staged expansion 1 -> array -> `List`
 
-Źródło: `src/Http/WebUtilities/src/KeyValueAccumulator.cs`
+Source: `src/Http/WebUtilities/src/KeyValueAccumulator.cs`
 
 ```csharp
-// 1 wartość: inline w głównym słowniku
-// 2 wartości: StringValues z tablicą 2-elementową, wciąż w głównym słowniku
-// 3+:          migracja do osobnego _expandingAccumulator (List, capacity 8),
-//              w głównym słowniku marker (pusty StringValues) → "patrz drugi słownik"
+// 1 value: inline in the main dictionary
+// 2 values: StringValues with a 2-element array, still in the main dictionary
+// 3+:       migration to a separate _expandingAccumulator (List, capacity 8),
+//           marker in main dictionary (empty StringValues) -> "see second dictionary"
 ```
 
-**Why:** klucze multi-value w query/form mają zwykle 1-2 wartości; alokowanie `List` dla każdego jest marnotrawstwem. Akumulator przechodzi przez stany: pojedyncza wartość → tablica 2 → `List` w osobnym słowniku. Główny słownik nie puchnie listami; `List` powstaje dopiero przy 3. wartości, od razu z `capacity: 8`.
+**Why:** multi-value keys in query/form typically have 1-2 values; allocating a `List` for each is wasteful. The accumulator transitions through states: single value -> 2-element array -> `List` in a separate dictionary. The main dictionary does not grow with lists; the `List` is created only on the 3rd value, immediately with `capacity: 8`.
 
-**How to apply:** zbierasz wartości grupowane po kluczu, gdzie „typowo 1-2, rzadko więcej" — implementuj stopniowaną ekspansję ze stanem inline; pełną kolekcję alokuj dopiero po przekroczeniu progu. Pokrewne #54 (frugal `StringValues`/`FrugalList`), #27 (`AdaptiveCapacityDictionary`).
+**How to apply:** collecting values grouped by key where "typically 1-2, rarely more" — implement staged expansion with inline state; allocate the full collection only after exceeding the threshold. Related to #54 (frugal `StringValues`/`FrugalList`), #27 (`AdaptiveCapacityDictionary`).
 
-### 92. `[MethodImpl(NoInlining)]` jawnie na zimnej ścieżce
+### 92. `[MethodImpl(NoInlining)]` explicitly on the cold path
 
-Źródło: `src/Shared/ServerInfrastructure/BufferExtensions.cs` (`WriteNumeric` / `WriteNumericMultiWrite`)
+Source: `src/Shared/ServerInfrastructure/BufferExtensions.cs` (`WriteNumeric` / `WriteNumericMultiWrite`)
 
 ```csharp
 [MethodImpl(MethodImplOptions.AggressiveInlining)]
 internal static void WriteNumeric(...) {
-    if (number < 10  && ...) { ... }            // fast path: 1-3 cyfry inline
+    if (number < 10  && ...) { ... }            // fast path: 1-3 digits inline
     else WriteNumericMultiWrite(ref bufferWriter, number);
 }
-[MethodImpl(MethodImplOptions.NoInlining)]      // ZIMNA ścieżka jawnie wyłączona z inline
-private static void WriteNumericMultiWrite(...) { /* dzielenie, bufor scratch */ }
+[MethodImpl(MethodImplOptions.NoInlining)]      // COLD path explicitly excluded from inlining
+private static void WriteNumericMultiWrite(...) { /* division, scratch buffer */ }
 ```
 
-**Why:** to **doprecyzowanie #5/#7**. Plik mówił „hot path → osobna metoda `*Slow`, pomaga JIT inline'ować szybką ścieżkę". Tu kluczowy jest jawny `[NoInlining]` na zimnej metodzie: gwarantuje, że jej IL **nie powiększy** metody gorącej, dzięki czemu ta pozostaje pod progiem inline'owania. Samo wydzielenie metody nie wystarcza — JIT mógłby ją z powrotem wciągnąć.
+**Why:** this **refines #5/#7**. Earlier sections said "hot path -> separate `*Slow` method, helps JIT inline the fast path". The key here is the explicit `[NoInlining]` on the cold method: it guarantees that its IL **will not enlarge** the hot method, keeping it below the inlining threshold. Extracting the method alone is not enough — JIT might pull it back in.
 
-**How to apply:** split fast/slow — oznacz gorącą `[AggressiveInlining]`, a zimną jawnie `[MethodImpl(MethodImplOptions.NoInlining)]`. Atrybut na zimnej części jest tak samo ważny jak na gorącej.
+**How to apply:** fast/slow split — mark the hot method `[AggressiveInlining]` and the cold one explicitly `[MethodImpl(MethodImplOptions.NoInlining)]`. The attribute on the cold part is just as important as on the hot part.
 
-### 93. Anty-DRY w hot-path — świadoma duplikacja kodu (cytaty autorów)
+### 93. Anti-DRY in hot-path — deliberate code duplication (author quotes)
 
-Źródło: `src/Components/Components/src/RenderTree/RenderTreeDiffBuilder.cs`, `RenderTreeFrameArrayBuilder.cs`
+Source: `src/Components/Components/src/RenderTree/RenderTreeDiffBuilder.cs`, `RenderTreeFrameArrayBuilder.cs`
 
 ```text
-// RenderTreeDiffBuilder (metoda diff ~1000 linii):
+// RenderTreeDiffBuilder (diff method ~1000 lines):
 //   "This is deliberately a very large method ... A naive 'extract methods'-type
-//    refactoring will worsen perf by about 10%."  (koszt przekazywania parametrów)
-// RenderTreeFrameArrayBuilder (check wzrostu bufora skopiowany do każdej metody Append*):
+//    refactoring will worsen perf by about 10%."  (parameter-passing cost)
+// RenderTreeFrameArrayBuilder (buffer growth check copied to every Append* method):
 //   "intentionally inlined into each method because doing so improves intensive
 //    rendering scenarios by around 1%."
 ```
 
-**Why:** w skrajnie gorących ścieżkach (diff drzewa renderu) wydzielanie małych metod kosztuje — przekazywanie parametrów, mniej swobody JIT w alokacji rejestrów. Blazor mierzy: refaktor „extract method" pogarsza diff o ~10%, a skopiowany ręcznie check wzrostu bufora poprawia rendering o ~1%. Zamiast metod — `#region` jako „pre-inlined" sekcje + `ref struct` kontekst (`DiffContext`) przekazywany przez `ref` zamiast 8 parametrów.
+**Why:** in extremely hot paths (render tree diff) extracting small methods costs — parameter passing, less freedom for JIT in register allocation. Blazor measures: an "extract method" refactor worsens diff by ~10%, and a manually copied buffer growth check improves rendering by ~1%. Instead of methods — `#region` as "pre-inlined" sections + `ref struct` context (`DiffContext`) passed by `ref` instead of 8 parameters.
 
-**How to apply:** **tylko** w zmierzonych, najgorętszych ścieżkach — zaakceptuj duże metody i duplikację; udokumentuj decyzję i liczbę z benchmarku; organizuj kod `#region`-ami. Stan recursive algorytmu trzymaj w `ref struct` przekazywanym `ref` (por. #56 — przekazywanie parametrów to realny koszt; #61 — `ref struct` kontekst).
+**How to apply:** **only** in measured, hottest paths — accept large methods and duplication; document the decision and the benchmark number; organise code with `#region`. Hold the state of a recursive algorithm in a `ref struct` passed by `ref` (cf. #56 — parameter passing is a real cost; #61 — `ref struct` context).
 
-### 94. `WeakReference[]`-owy bounded LRU — gdy `ConditionalWeakTable` zawodzi
+### 94. `WeakReference[]`-based bounded LRU — when `ConditionalWeakTable` fails
 
-Źródło: `src/Shared/RoslynUtils/BoundedCacheWithFactory.cs`
+Source: `src/Shared/RoslynUtils/BoundedCacheWithFactory.cs`
 
 ```csharp
-// tablica ~5 WeakReference<Entry>; trafienie przenoszone na koniec listy (LRU),
-// przy zapełnieniu nadpisywany najstarszy / pierwszy martwy slot
+// array of ~5 WeakReference<Entry>; hit moved to end of list (LRU),
+// on overflow: overwrite oldest / first dead slot
 ```
 
-**Why:** `ConditionalWeakTable` (#33) nie zadziała, gdy **wartość cyklicznie referuje klucz** — wtedy CWT nigdy nie zwolni wpisu. Rozwiązanie: mała tablica `WeakReference`, ręczna polityka LRU, twardy bound (~5). GC może zebrać wpisy, sloty są odzyskiwane bez przytrzymywania.
+**Why:** `ConditionalWeakTable` (#33) does not work when the **value cyclically references the key** — in that case CWT will never release the entry. Solution: a small array of `WeakReference`, manual LRU policy, hard bound (~5). GC can collect entries; slots are reclaimed without retention.
 
-**How to apply:** cache klucz→wartość, gdzie wartość trzyma referencję do klucza — nie używaj `ConditionalWeakTable`; użyj ograniczonej tablicy `WeakReference` z LRU. **Uzupełnienie zastrzeżenia do #33**: CWT zawodzi przy cyklu wartość→klucz.
+**How to apply:** a key->value cache where the value holds a reference to the key — do not use `ConditionalWeakTable`; use a bounded `WeakReference` array with LRU. **Addendum to the caveat in #33**: CWT fails on a value->key cycle.
 
-### 95. `ManualResetEventSlim(spinCount: 0)` dla długich oczekiwań
+### 95. `ManualResetEventSlim(spinCount: 0)` for long waits
 
-Źródło: `src/Servers/Kestrel/Core/src/Internal/Infrastructure/Heartbeat.cs`
+Source: `src/Servers/Kestrel/Core/src/Internal/Infrastructure/Heartbeat.cs`
 
 ```csharp
 // "Wait time is long, so don't try to spin to exit early. Spinning would waste CPU time."
 _stopEvent = new ManualResetEventSlim(false, spinCount: 0);
 ```
 
-**Why:** `ManualResetEventSlim` domyślnie spinuje przed zaśnięciem — to opłaca się przy oczekiwaniach rzędu mikrosekund. Wątek-heartbeat czeka **sekundę** między tikami; spinowanie byłoby czystym marnowaniem CPU. Jawne `spinCount: 0` to wyłącza. Dedykowany wątek tła zamiast `Timer` daje przewidywalny tik dla tysięcy połączeń.
+**Why:** `ManualResetEventSlim` spins by default before sleeping — this pays off for waits in the microsecond range. The heartbeat thread waits **one second** between ticks; spinning would be pure CPU waste. Explicit `spinCount: 0` disables it. A dedicated background thread instead of a `Timer` gives a predictable tick for thousands of connections.
 
-**How to apply:** używasz `ManualResetEventSlim`/`SemaphoreSlim` do oczekiwań **długich** (≫ mikrosekundy) — ustaw `spinCount: 0`. Domyślny spin jest zoptymalizowany pod krótkie czekanie. Pokrewne #48d (przestarzałe prymitywy locków) — dobór prymitywu do skali oczekiwania.
-
----
-
-## TL;DR część 10
-
-| # | Wzorzec | Kiedy |
-|---|---------|-------|
-| 70 | `[UnsafeAccessor]` | Wywołanie prywatnej składowej bez refleksji (.NET 8+, AOT-friendly) |
-| 71 | `SearchValues<T>` + `IndexOfAnyExcept` | Walidacja/klasyfikacja znaków — SIMD, zero ręcznych intrinsics |
-| 72 | Codegen nagłówków: `ulong`-read + maska `0xdf` + bit-flagi | Parsing protokołu o skończonym słowniku nazw |
-| 73 | Rzut indeksu na `uint` (−1 → `uint.MaxValue`) | Fuzja sprawdzenia sentinela i górnej granicy w jeden branch |
-| 74 | Bezgałęziowa długość prefiksu hex (kaskada `>>`) | Konwersja o znanej maks. szerokości, write do `Span` |
-| 75 | `value \| ~0x7F` | Bezgałęziowe ustawianie continuation-bit w varint |
-| 76 | Perfect hash (gperf) | Skończony słownik stringów; uprzywilejuj najczęstszy |
-| 77 | `readonly struct`-wrapper na tablicę typów ref | Eliminacja covariant-array-store check (`ObjIsInstanceOf`) |
-| 78 | `ConcurrentDictionary<T, nuint>` | Współbieżny zbiór bez GC write barriers |
-| 79 | Pula przez `override Dispose()` | Przezroczyste pulowanie typu `IDisposable` |
-| 80 | Przybliżony licznik `Interlocked` | Miękki bound puli zamiast drogiego `.Count` |
-| 81 | Eviction jednym skanem (porządek FIFO wygaśnięcia) | Pula/cache z TTL |
-| 82 | Dwa wskaźniki, przepisanie spanu in-place | Transformacja, która nigdy nie wydłuża danych |
-| 83 | Numer rewizji | Tanie unieważnianie cache pulowanego obiektu (bez zerowania) |
-| 84 | `MemoryBarrier` + bramka CAS `_doingWork` | Batchowanie callbacków w jeden work item |
-| 85 | Singletonowy sentinel `Action` | Stan awaitera w jednym polu + CAS |
-| 86 | Wyścig `ConcurrentDictionary` + `TaskCompletionSource` | Deduplikacja drogiej pracy **async** (anti-stampede) |
-| 87 | Tryb passthrough w dekoratorze | Pomiń buforowanie/lock, gdy zbędne we wspólnym przypadku |
-| 88 | Per-connection reuse stringów | Stanowy parser strumienia podobnych wejść |
-| 89 | Heartbeat-cache + `Volatile` | Wartość w każdej odpowiedzi, zmienna rzadko |
-| 90 | Pre-boxowany pusty enumerator | Kolekcja często pusta implementująca `IEnumerable<T>` |
-| 91 | Stopniowana ekspansja 1→tablica→`List` | Wartości grupowane po kluczu, typowo 1-2 |
-| 92 | `[NoInlining]` na zimnej ścieżce | Doprecyzowanie #5 — chroni rozmiar metody gorącej |
-| 93 | Anty-DRY w hot-path (zmierzony) | Najgorętsze ścieżki: duża metoda + duplikacja zamiast extract |
-| 94 | `WeakReference[]` bounded LRU | Cache, gdzie wartość referuje klucz (CWT zawiedzie — por. #33) |
-| 95 | `ManualResetEventSlim(spinCount: 0)` | Oczekiwania długie (≫ µs) — wyłącz domyślny spin |
+**How to apply:** using `ManualResetEventSlim`/`SemaphoreSlim` for **long** waits (much longer than microseconds) — set `spinCount: 0`. The default spin is optimised for short waits. Related to #48d (obsolete lock primitives) — choosing the primitive to match the wait duration.
 
 ---
 
-*Część 10 dopisana 2026-05-16. Przegląd żywego repozytorium `dotnet/aspnetcore` (gałąź `main`). Łącznie **~110 pojęć** w 10 częściach. W odróżnieniu od części 1-9 (dekompilacja + listy kuratowane) — to kod pierwotny z komentarzami autorów; cytaty z komentarzy (`SocketSenderPool` „good enough", `RenderTreeDiffBuilder` „−10%", `PinnedBlockMemoryPoolFactory` „avoid GC write barriers") dają uzasadnienie niewidoczne w zdekompilowanym IL. Cztery najbardziej nieoczywiste: #77 (struct-wrapper vs covariant-store), #78 (`nuint` vs write-barrier), #70 (`[UnsafeAccessor]`), #86 (anti-stampede).*
+## TL;DR Part 10
+
+| # | Pattern | When |
+|---|---------|------|
+| 70 | `[UnsafeAccessor]` | Calling a private member without reflection (.NET 8+, AOT-friendly) |
+| 71 | `SearchValues<T>` + `IndexOfAnyExcept` | Character validation/classification — SIMD, zero manual intrinsics |
+| 72 | Header codegen: `ulong`-read + `0xdf` mask + bit-flags | Protocol parsing with a finite vocabulary of names |
+| 73 | Index cast to `uint` (-1 -> `uint.MaxValue`) | Fusing sentinel check and upper bound into one branch |
+| 74 | Branchless hex prefix length (cascade `>>`) | Conversion with known max width, write to `Span` |
+| 75 | `value \| ~0x7F` | Branchless continuation-bit setting in varint |
+| 76 | Perfect hash (gperf) | Finite string vocabulary; privilege the most common |
+| 77 | `readonly struct` wrapper on array of ref types | Eliminate covariant-array-store check (`ObjIsInstanceOf`) |
+| 78 | `ConcurrentDictionary<T, nuint>` | Concurrent set without GC write barriers |
+| 79 | Pool via `override Dispose()` | Transparent pooling of an `IDisposable` type |
+| 80 | Approximate `Interlocked` counter | Soft pool bound instead of expensive `.Count` |
+| 81 | Eviction in a single scan (FIFO expiry order) | Pool/cache with TTL |
+| 82 | Two pointers, in-place span rewrite | Transformation that never lengthens data |
+| 83 | Revision number | Cheap cache invalidation on pooled object reuse (no zeroing) |
+| 84 | `MemoryBarrier` + CAS gate `_doingWork` | Batching callbacks into one work item |
+| 85 | Singleton sentinel `Action` | Awaiter state in one field + CAS |
+| 86 | Race on `ConcurrentDictionary` + `TaskCompletionSource` | Deduplication of expensive **async** work (anti-stampede) |
+| 87 | Passthrough mode in decorator | Skip buffering/lock when unnecessary in the common case |
+| 88 | Per-connection string reuse | Stateful parser of a stream of similar inputs |
+| 89 | Heartbeat-cache + `Volatile` | Value in every response, changing rarely |
+| 90 | Pre-boxed empty enumerator | Collection often empty and implementing `IEnumerable<T>` |
+| 91 | Staged expansion 1->array->`List` | Values grouped by key, typically 1-2 |
+| 92 | `[NoInlining]` on cold path | Refinement of #5 — protects the hot method's size |
+| 93 | Anti-DRY in hot-path (measured) | Hottest paths: large method + duplication instead of extract |
+| 94 | `WeakReference[]` bounded LRU | Cache where value references key (CWT will fail — cf. #33) |
+| 95 | `ManualResetEventSlim(spinCount: 0)` | Long waits (much longer than us) — disable default spin |
+
+---
+
+*Part 10 added 2026-05-16. Review of the live `dotnet/aspnetcore` repository (branch `main`). **~110 concepts** in 10 parts in total. Unlike parts 1-9 (decompilation + curated lists) — this is original code with author comments; quotes from the comments (`SocketSenderPool` "good enough", `RenderTreeDiffBuilder` "-10%", `PinnedBlockMemoryPoolFactory` "avoid GC write barriers") provide justification not visible in decompiled IL. The four most non-obvious: #77 (struct-wrapper vs covariant-store), #78 (`nuint` vs write-barrier), #70 (`[UnsafeAccessor]`), #86 (anti-stampede).*
