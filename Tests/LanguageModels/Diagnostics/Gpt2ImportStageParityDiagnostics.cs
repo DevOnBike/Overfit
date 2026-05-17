@@ -46,7 +46,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             _output = output;
         }
 
-        [Fact]
+        [Gpt2ModelFact]
         [Trait("Category", "Diagnostics")]
         [Trait("Category", "Parity")]
         public void Gpt2Small_CompareStagesAgainstPyTorchReference()

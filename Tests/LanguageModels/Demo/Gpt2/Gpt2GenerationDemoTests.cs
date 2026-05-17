@@ -42,7 +42,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.Gpt2
             _output = output;
         }
 
-        [Fact]
+        [Gpt2ModelFact]
         public void Demo_Gpt2Small_KvCacheDecode_AllocatesZeroBytesPerToken()
         {
             // ── Resolve fixtures (throw with env-var hint if missing) ──────────

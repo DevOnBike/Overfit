@@ -42,7 +42,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels
             _output = output;
         }
 
-        [Fact]
+        [Gpt2ModelFact]
         public void Gpt2Small_LoadAndGenerate_ProducesText()
         {
             SkipIfMissing(
@@ -120,7 +120,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels
             _output.WriteLine("✓ GPT-2 Small fixture loads and generates through cached runtime.");
         }
 
-        [Fact]
+        [Gpt2ModelFact]
         public void Gpt2Small_TopPSampling_ExecutesThroughCachedRuntime()
         {
             SkipIfMissing(
