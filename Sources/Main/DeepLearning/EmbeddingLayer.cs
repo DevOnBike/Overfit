@@ -119,6 +119,8 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void InvalidateParameterCaches()
         {
+            // Dispose the cached parameter node before dropping it.
+            _embNode?.Dispose();
             _embNode = null;
         }
 

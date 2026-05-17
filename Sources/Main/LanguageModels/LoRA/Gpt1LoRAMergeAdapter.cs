@@ -12,47 +12,55 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
 {
     /// <summary>
     /// Inference-side counterpart of <see cref="Gpt1LoRAFineTuner"/> — applies a
-    /// trained LM-head LoRA adapter to a <see cref="GPT1Model"/> by weight-merge:
+    /// trained LoRA adapter to a <see cref="GPT1Model"/> by in-place weight-merge:
     ///
-    ///   Enable():  LMHead += scale * (A @ B)
-    ///   Disable(): LMHead -= scale * (A @ B)
+    ///   Enable():  W += scale * (A @ B)   for every entry in the .bin
+    ///   Disable(): W -= scale * (A @ B)
     ///
-    /// The merge is done in place on <c>GPT1Model.LMHead.Data</c>. Because the
-    /// cached runtime (<c>StackWeights</c> for an untied model) holds a zero-copy
-    /// reference to that exact <see cref="TensorStorage{T}"/>, the merged weights
-    /// are visible to KV-cached decode immediately — no inference-kernel changes,
-    /// no re-binding. This is how a trained adapter reaches GptAnomalyDetector.
+    /// Entries are merged into the matching <see cref="TensorStorage{T}"/>:
+    ///   <see cref="LoRATargetModules.LanguageModelHead"/> -> GPT1Model.LMHead.Data
+    ///   <see cref="LoRATargetModules.FeedForwardUp"/>      -> Blocks[layer].FFN.W1.Data
+    ///   <see cref="LoRATargetModules.FeedForwardDown"/>    -> Blocks[layer].FFN.W2.Data
     ///
-    /// Stage 1 scope: LM head only (the single module produced by
-    /// <see cref="Gpt1LoRAFineTuner"/>). Multi-tenant use: keep one base model,
-    /// Enable/Disable per-tenant adapters around each request.
+    /// The merge is in place on the model's own weight storage. A KV-cached runtime
+    /// created <i>after</i> <see cref="Enable"/> observes the merged weights — this
+    /// is how a trained adapter (Stage 1 LM head and/or Stage 2 FFN) reaches
+    /// GptAnomalyDetector. Multi-tenant use: keep one base model, Enable/Disable
+    /// per-tenant adapters around each request.
     /// </summary>
     [SuppressMessage(
         "IDisposableAnalyzers.Correctness",
         "IDISP008:Don't assign member with injected and created disposables",
-        Justification = "Borrowed zero-copy handle - the adapter never owns GPT1Model.LMHead storage.")]
+        Justification = "Borrowed zero-copy handles - the adapter never owns GPT1Model weight storage.")]
     public sealed class Gpt1LoRAMergeAdapter : IDisposable
     {
-        private readonly TensorStorage<float> _lmHead;   // borrowed — GPT1Model.LMHead.Data
-        private readonly LoRAWeight _weight;
+        private readonly MergeTarget[] _targets;
         private readonly float[] _deltaScratch;
         private readonly float _scale;
 
         private bool _enabled;
         private bool _disposed;
 
-        private Gpt1LoRAMergeAdapter(TensorStorage<float> lmHead, LoRAWeight weight, float scale)
+        private Gpt1LoRAMergeAdapter(MergeTarget[] targets, float scale)
         {
-            _lmHead = lmHead;
-            _weight = weight;
+            _targets = targets;
             _scale = scale;
-            _deltaScratch = new float[weight.InDim * weight.OutDim];
+
+            var maxDelta = 0;
+            foreach (var target in targets)
+            {
+                maxDelta = Math.Max(maxDelta, target.Weight.InDim * target.Weight.OutDim);
+            }
+
+            _deltaScratch = new float[maxDelta];
         }
 
         /// <summary>
         /// Loads a LoRA adapter saved by <see cref="Gpt1LoRAFineTuner.Save"/> and
-        /// binds it to <paramref name="model"/>'s LM head.
+        /// binds every entry to the matching weight matrix of <paramref name="model"/>.
         /// </summary>
+        /// <param name="model">The model whose weight matrices the adapter merges into.</param>
+        /// <param name="path">Path to a .bin written by <see cref="Gpt1LoRAFineTuner.Save"/>.</param>
         /// <param name="scale">
         /// LoRA scale (alpha/rank). Gpt1LoRAFineTuner trains with scale = 1, so the
         /// default merges the adapter exactly as it was trained.
@@ -61,32 +69,90 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
         {
             ArgumentNullException.ThrowIfNull(model);
 
-            if (model.Config.TieWeights)
-            {
-                throw new NotSupportedException(
-                    "Gpt1LoRAMergeAdapter targets the untied LM head; the model must be built with TieWeights=false.");
-            }
-
-            var weight = Gpt1LoRAFile.LoadLMHead(path);
+            var entries = Gpt1LoRAFile.Load(path);
             var dModel = model.Config.DModel;
+            var dFF = model.Config.DFF;
             var vocab = model.Config.VocabSize;
+            var nLayers = model.Config.NLayers;
 
-            if (weight.InDim != dModel || weight.OutDim != vocab)
+            var targets = new MergeTarget[entries.Count];
+
+            for (var i = 0; i < entries.Count; i++)
             {
-                throw new InvalidDataException(
-                    $"LoRA dimensions [{weight.InDim}x{weight.OutDim}] do not match " +
-                    $"model LM head [{dModel}x{vocab}].");
+                var entry = entries[i];
+                var weight = entry.Weight;
+
+                TensorStorage<float> storage;
+                int expectedIn;
+                int expectedOut;
+
+                switch (entry.Module)
+                {
+                    case LoRATargetModules.LanguageModelHead:
+                        if (model.Config.TieWeights)
+                        {
+                            throw new NotSupportedException(
+                                "LoRA on the LM head requires an untied head; the model must be built with TieWeights=false.");
+                        }
+
+                        storage = model.LMHead.Data;
+                        expectedIn = dModel;
+                        expectedOut = vocab;
+                        break;
+
+                    case LoRATargetModules.FeedForwardUp:
+                        ValidateLayer(entry.Layer, nLayers, entry.Module);
+                        storage = model.Blocks[entry.Layer].FFN.W1.Data;
+                        expectedIn = dModel;
+                        expectedOut = dFF;
+                        break;
+
+                    case LoRATargetModules.FeedForwardDown:
+                        ValidateLayer(entry.Layer, nLayers, entry.Module);
+                        storage = model.Blocks[entry.Layer].FFN.W2.Data;
+                        expectedIn = dFF;
+                        expectedOut = dModel;
+                        break;
+
+                    default:
+                        throw new NotSupportedException(
+                            $"Gpt1LoRAMergeAdapter cannot merge module {entry.Module}.");
+                }
+
+                if (weight.InDim != expectedIn || weight.OutDim != expectedOut)
+                {
+                    throw new InvalidDataException(
+                        $"LoRA entry [{entry.Module} layer {entry.Layer}] dimensions " +
+                        $"[{weight.InDim}x{weight.OutDim}] do not match the model [{expectedIn}x{expectedOut}].");
+                }
+
+                targets[i] = new MergeTarget(storage, weight);
             }
 
-            return new Gpt1LoRAMergeAdapter(model.LMHead.Data, weight, scale);
+            return new Gpt1LoRAMergeAdapter(targets, scale);
         }
 
-        /// <summary>True while the LoRA delta is merged into the base LM head.</summary>
+        /// <summary>True while the LoRA delta is merged into the base weights.</summary>
         public bool IsEnabled => _enabled;
 
-        public long TrainableParameterCount => _weight.ParameterCount;
+        /// <summary>Number of weight matrices this adapter merges into.</summary>
+        public int TargetCount => _targets.Length;
 
-        /// <summary>Merges the LoRA delta into the base LM head. Idempotent.</summary>
+        public long TrainableParameterCount
+        {
+            get
+            {
+                var total = 0L;
+                foreach (var target in _targets)
+                {
+                    total += target.Weight.ParameterCount;
+                }
+
+                return total;
+            }
+        }
+
+        /// <summary>Merges every LoRA delta into the base weights. Idempotent.</summary>
         public void Enable()
         {
             ThrowIfDisposed();
@@ -100,7 +166,7 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             _enabled = true;
         }
 
-        /// <summary>Removes the LoRA delta, restoring the base LM head. Idempotent.</summary>
+        /// <summary>Removes every LoRA delta, restoring the base weights. Idempotent.</summary>
         public void Disable()
         {
             ThrowIfDisposed();
@@ -133,18 +199,33 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
 
         private void ApplyDelta(float signedScale)
         {
-            var size = _weight.InDim * _weight.OutDim;
-            var delta = _deltaScratch.AsSpan(0, size);
+            foreach (var target in _targets)
+            {
+                var size = target.Weight.InDim * target.Weight.OutDim;
+                var delta = _deltaScratch.AsSpan(0, size);
 
-            _weight.ComputeDelta(delta);   // delta = A @ B  [dModel x vocab], row-major
+                target.Weight.ComputeDelta(delta);   // delta = A @ B, row-major
 
-            var target = _lmHead.AsSpan();
-            TensorPrimitives.MultiplyAdd(delta, signedScale, target, target);
+                var storage = target.Storage.AsSpan().Slice(0, size);
+                TensorPrimitives.MultiplyAdd(delta, signedScale, storage, storage);
+            }
+        }
+
+        private static void ValidateLayer(int layer, int nLayers, LoRATargetModules module)
+        {
+            if (layer < 0 || layer >= nLayers)
+            {
+                throw new InvalidDataException(
+                    $"LoRA entry for {module} references layer {layer}; the model has {nLayers} layers.");
+            }
         }
 
         private void ThrowIfDisposed()
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
         }
+
+        /// <summary>A borrowed base weight storage paired with its trained LoRA factors.</summary>
+        private readonly record struct MergeTarget(TensorStorage<float> Storage, LoRAWeight Weight);
     }
 }

@@ -50,7 +50,7 @@ namespace DevOnBike.Overfit.Tests.Diagnostics
 
             _output.WriteLine(DiagnosticsTraceComparer.Format(diff));
 
-            // Porównujemy tylko stabilną epokę końcową, nie epoch_01.
+            // We compare only the stable final epoch, not epoch_01.
             Assert.True(current.TapeOps == baseline.TapeOps,
             $"Tape op count changed. baseline={baseline.TapeOps}, current={current.TapeOps}");
 

@@ -6,39 +6,54 @@
 namespace DevOnBike.Overfit.LanguageModels.LoRA
 {
     /// <summary>
-    /// Binary .bin format for a GPT1 LM-head LoRA adapter — the contract shared
-    /// between <see cref="Gpt1LoRAFineTuner"/> (writer) and
-    /// <see cref="Gpt1LoRAMergeAdapter"/> (reader).
+    /// One LoRA adapter entry: which weight matrix it adapts (module + layer) and
+    /// the trained low-rank factors. <see cref="Layer"/> is -1 for the LM head.
+    /// </summary>
+    internal readonly record struct Gpt1LoRAEntry(int Layer, LoRATargetModules Module, LoRAWeight Weight);
+
+    /// <summary>
+    /// Binary .bin format for a GPT1 LoRA adapter — the contract shared between
+    /// <see cref="Gpt1LoRAFineTuner"/> (writer) and <see cref="Gpt1LoRAMergeAdapter"/>
+    /// (reader).
     ///
-    /// Layout (matches <see cref="LlamaLoRAAdapter"/> so a future multi-module
-    /// reader can consume it): magic "LORA", version, entry count, then per
-    /// entry — layer index, module, head index, <see cref="LoRAWeight"/> blob.
-    /// Stage 1 writes exactly one entry keyed
-    /// <see cref="LoRATargetModules.LanguageModelHead"/>.
+    /// Layout (matches <see cref="LlamaLoRAAdapter"/>): magic "LORA", version,
+    /// entry count, then per entry — layer index, module, head index (always 0 for
+    /// GPT1), <see cref="LoRAWeight"/> blob. A Stage-1 LM-head adapter is simply a
+    /// one-entry file; a Stage-2 FFN adapter carries FeedForwardUp/Down entries for
+    /// every block.
     /// </summary>
     internal static class Gpt1LoRAFile
     {
         private const uint Magic = 0x524F4C4Fu;   // "LORA"
         private const int Version = 1;
 
-        public static void SaveLMHead(string path, LoRAWeight weight)
+        public static void Save(string path, IReadOnlyList<Gpt1LoRAEntry> entries)
         {
             ArgumentException.ThrowIfNullOrEmpty(path);
-            ArgumentNullException.ThrowIfNull(weight);
+            ArgumentNullException.ThrowIfNull(entries);
+
+            if (entries.Count == 0)
+            {
+                throw new ArgumentException("A LoRA adapter must have at least one entry.", nameof(entries));
+            }
 
             using var fs = File.Create(path);
             using var bw = new BinaryWriter(fs);
 
             bw.Write(Magic);
             bw.Write(Version);
-            bw.Write(1);                                        // entry count
-            bw.Write(0);                                        // layer index
-            bw.Write((int)LoRATargetModules.LanguageModelHead); // module
-            bw.Write(0);                                        // head index
-            weight.Save(bw);
+            bw.Write(entries.Count);
+
+            foreach (var entry in entries)
+            {
+                bw.Write(entry.Layer);
+                bw.Write((int)entry.Module);
+                bw.Write(0);                       // head index — unused for GPT1
+                entry.Weight.Save(bw);
+            }
         }
 
-        public static LoRAWeight LoadLMHead(string path)
+        public static IReadOnlyList<Gpt1LoRAEntry> Load(string path)
         {
             ArgumentException.ThrowIfNullOrEmpty(path);
 
@@ -58,21 +73,21 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             }
 
             var count = br.ReadInt32();
-            if (count != 1)
+            if (count <= 0)
             {
-                throw new InvalidDataException($"Expected 1 LoRA entry for the LM head, got {count}.");
+                throw new InvalidDataException($"LoRA file declares {count} entries.");
             }
 
-            _ = br.ReadInt32();                              // layer index
-            var module = (LoRATargetModules)br.ReadInt32();
-            _ = br.ReadInt32();                              // head index
-
-            if (module != LoRATargetModules.LanguageModelHead)
+            var entries = new Gpt1LoRAEntry[count];
+            for (var i = 0; i < count; i++)
             {
-                throw new InvalidDataException($"Expected a LanguageModelHead entry, got {module}.");
+                var layer = br.ReadInt32();
+                var module = (LoRATargetModules)br.ReadInt32();
+                _ = br.ReadInt32();                // head index — unused for GPT1
+                entries[i] = new Gpt1LoRAEntry(layer, module, LoRAWeight.Load(br));
             }
 
-            return LoRAWeight.Load(br);
+            return entries;
         }
     }
 }

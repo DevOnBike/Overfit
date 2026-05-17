@@ -9,7 +9,7 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
 {
     public class DateTimeNormalizerPrecisionTests
     {
-        // Badamy dokładność do 6 miejsc po przecinku (limit typu float to ~7)
+        // Testing precision to 6 decimal places (the limit for float is ~7)
         private const int HighPrecision = 6;
 
         [Fact]
@@ -24,12 +24,12 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
             var (sinPlusOne, cosPlusOne) = DateTimeNormalizer.EncodeFromUnixMilliseconds(plusOneMillis);
 
             // ASSERT
-            // 1 milisekunda na tarczy 24h to bardzo mały kąt, ale MUSI być różny od zera!
+            // 1 millisecond on a 24 h clock is a very small angle, but it MUST be non-zero!
             Assert.NotEqual(sinBase, sinPlusOne);
 
-            // Oczekiwana różnica w radianach dla 1ms:
-            // 1 ms to 1 / (24 * 60 * 60 * 1000) części dnia = 1.1574074e-8
-            // Różnica na Sinusie wokół zera powinna wynosić mniej więcej: 2 * PI * 1.1574e-8 ≈ 7.27e-8
+            // Expected difference in radians for 1 ms:
+            // 1 ms is 1 / (24 * 60 * 60 * 1000) of a day = 1.1574074e-8
+            // The sine difference around zero should be approximately: 2 * PI * 1.1574e-8 ≈ 7.27e-8
             var difference = Math.Abs(sinPlusOne - sinBase);
 
             Assert.True(difference > 0f, "Brak precyzji! 1 milisekunda została zignorowana (pływające zaokrąglenie).");
@@ -37,7 +37,7 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
         }
 
         [Theory]
-        // 1709208000 = 29 Lutego 2024, 12:00:00 UTC (Czwartek - Dzień Przestępny)
+        // 1709208000 = 29 February 2024, 12:00:00 UTC (Thursday - Leap Day)
         [InlineData(1709208000, 0f, -1f, DayOfWeek.Thursday)]
         public void EncodeAllTimeFeatures_ShouldPerfectlyHandleLeapYearMidday(
             long unixSeconds, float expectedHourSin, float expectedHourCos, DayOfWeek expectedDay)
@@ -45,16 +45,16 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
             // ACT
             var result = DateTimeNormalizer.EncodeAllTimeFeaturesFromUnixSeconds(unixSeconds);
 
-            // Obliczamy oczekiwane wartości dla czwartku (Thursday = 4)
+            // Calculate expected values for Thursday (Thursday = 4)
             var expectedDaySin = (float)Math.Sin((4.0 / 7.0) * 2.0 * Math.PI);
             var expectedDayCos = (float)Math.Cos((4.0 / 7.0) * 2.0 * Math.PI);
 
-            // ASSERT - Czas (Idealne 12:00 w południe -> Sin=0, Cos=-1)
-            // Używamy HighPrecision (6), aby upewnić się, że Math.PI nie robi nam śmieci na 7. miejscu po przecinku
+            // ASSERT - Time (Perfect 12:00 noon -> Sin=0, Cos=-1)
+            // We use HighPrecision (6) to ensure Math.PI does not introduce noise at the 7th decimal place
             Assert.Equal(expectedHourSin, result.HourSin, HighPrecision);
             Assert.Equal(expectedHourCos, result.HourCos, HighPrecision);
 
-            // ASSERT - Dzień
+            // ASSERT - Day
             Assert.Equal(expectedDaySin, result.DaySin, HighPrecision);
             Assert.Equal(expectedDayCos, result.DayCos, HighPrecision);
         }
@@ -63,7 +63,7 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
         public void Encode_ZeroCrossing_ShouldNotProduceNaNOrInfinity()
         {
             // ARRANGE
-            // 06:00:00 -> dokładnie 90 stopni, Cosinus powinen być równy 0
+            // 06:00:00 -> exactly 90 degrees, cosine should equal 0
             var time = new TimeSpan(6, 0, 0);
 
             // ACT
@@ -75,8 +75,8 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
             Assert.False(float.IsInfinity(sin));
             Assert.False(float.IsInfinity(cos));
 
-            // Cosinus dla 90 stopni (PI/2) w C# z powodu zaokrągleń PI nie jest idealnym 0, 
-            // ale musi być BARDZO blisko zera (rzędu 10^-7 dla float)
+            // The cosine of 90 degrees (PI/2) in C# is not exactly 0 due to PI rounding,
+            // but it must be VERY close to zero (on the order of 10^-7 for float)
             Assert.Equal(0f, cos, HighPrecision);
             Assert.Equal(1f, sin, HighPrecision);
         }

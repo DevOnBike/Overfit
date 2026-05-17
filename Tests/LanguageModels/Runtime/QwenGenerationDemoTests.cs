@@ -75,7 +75,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
 
                 sb.Append(tok.DecodeToken(token));
 
-                // Prosta detekcja pętli: 6 identycznych tokenów z rzędu → stop
+                // Simple loop detection: 6 identical tokens in a row → stop
                 if (token == lastTok) { repCnt++; if (repCnt >= 6)
                     {
                         break;
@@ -132,7 +132,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             }
         }
 
-        /// <summary>Temperature 0.3 bez system message — może być lepiej niż greedy.</summary>
+        /// <summary>Temperature 0.3 without a system message — may perform better than greedy.</summary>
         [LongFact]
         public void Demo_Math_NoSystem_Temperature()
         {
@@ -151,7 +151,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             }
         }
 
-        /// <summary>Z pełnym system message Qwen2.5-Instruct.</summary>
+        /// <summary>With the full Qwen2.5-Instruct system message.</summary>
         [LongFact]
         public void Demo_Math_WithSystem_Greedy()
         {

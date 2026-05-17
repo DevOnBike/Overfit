@@ -95,7 +95,7 @@ namespace DevOnBike.Overfit.Tensors.Core
             [CallerArgumentExpression(nameof(right))] string rightName = "")
             where T : unmanaged
         {
-            if (left.Size != right.Size) // W przyszłości można sprawdzać pełny Rank i D0..D3
+            if (left.Size != right.Size) // In the future, full Rank and D0..D3 could be checked
             {
                 throw new ArgumentException($"Niezgodność kształtów: {leftName}.Shape={left.Shape} vs {rightName}.Shape={right.Shape}.");
             }

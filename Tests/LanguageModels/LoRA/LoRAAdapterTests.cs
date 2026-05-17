@@ -439,7 +439,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
                 _out.WriteLine($"LastApplyMatchCount: {adapter.LastApplyMatchCount}");
                 _out.WriteLine($"_weights count: {count} (=nLayers*nHeads = 24*14 = 336)");
 
-                // Jeżeli LastApplyMatchCount=0 → klucze _baseRefs nie pasują do _weights
+                // If LastApplyMatchCount=0 → _baseRefs keys do not match _weights keys
                 Assert.True(adapter.LastApplyMatchCount > 0,
                     $"ApplyDelta matched 0 entries — key mismatch between _weights and _baseRefs. BaseRefCount={adapter.BaseRefCount}");
 

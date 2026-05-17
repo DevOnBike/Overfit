@@ -22,7 +22,7 @@ namespace DevOnBike.Overfit.Statistical
 
         public List<FeatureImportance> AnalyzeImportance(FastTensor<float> trainingData)
         {
-            // ZMIANA: Pobieramy bezalokacyjny widok na dane
+            // CHANGE: Obtain an allocation-free view of the data
             var view = trainingData.GetView();
             var rows = view.GetDim(0);
             var span = view.AsReadOnlySpan();
@@ -33,7 +33,7 @@ namespace DevOnBike.Overfit.Statistical
 
             for (var r = 0; r < rows; r++)
             {
-                // ZMIANA: Używamy span z widoku
+                // CHANGE: Use span from the view
                 span.Slice(r * _featureCount, _featureCount).CopyTo(rowBuffer);
                 _shap.Explain(rowBuffer, shapBuffer);
 

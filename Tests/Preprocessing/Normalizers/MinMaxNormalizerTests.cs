@@ -32,24 +32,24 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
         [Fact]
         public void TransformInPlace_WithClipToRangeFalse_ShouldAllowValuesAboveOne()
         {
-            // ARRANGE - Testujemy sygnał anomalii (domyślne zachowanie)
+            // ARRANGE - Testing anomaly signal (default behaviour)
             float[] trainData = [0f, 50f, 100f]; // Min=0, Max=100
             var normalizer = new MinMaxNormalizer { ClipToRange = false };
             normalizer.FitBatch(trainData);
             normalizer.Freeze();
 
-            // Produkcja: wpadają wartości normalne i jedna anomalia (150f)
+            // Production: normal values and one anomaly (150f) come in
             float[] testData = [-10f, 50f, 150f]; 
 
             // ACT
             normalizer.TransformInPlace(testData);
 
             // ASSERT
-            // -10f zostaje podbite do 0 (dolny clip zawsze działa)
+            // -10f is raised to 0 (lower clip always applies)
             Assert.Equal(0f, testData[0], Precision);
-            // 50f ląduje idealnie w połowie
+            // 50f lands exactly at the midpoint
             Assert.Equal(0.5f, testData[1], Precision);
-            // 150f przebija sufit! Dajemy modelowi sygnał o 50% powyżej normy
+            // 150f breaks the ceiling! We give the model a signal 50% above the normal range
             Assert.Equal(1.5f, testData[2], Precision); 
         }
 
@@ -69,18 +69,18 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
             normalizer.TransformInPlace(testData);
 
             // ASSERT
-            Assert.Equal(0f, testData[0], Precision); // Clip z dołu
+            Assert.Equal(0f, testData[0], Precision); // Clip from below
             Assert.Equal(0.5f, testData[1], Precision);
-            Assert.Equal(1.0f, testData[2], Precision); // Clip z góry! Anomalia została stłumiona.
+            Assert.Equal(1.0f, testData[2], Precision); // Clip from above! Anomaly was suppressed.
         }
 
         [Fact]
         public void WithClipMax_ShouldInstantlyFreezeAndClip()
         {
-            // ARRANGE - Tryb dla zdarzeń takich jak OomEventsRate
+            // ARRANGE - Mode for events such as OomEventsRate
             var normalizer = MinMaxNormalizer.WithClipMax(5f);
 
-            // Produkcja: 0 eventów, 3 eventy, 10 eventów (gigantyczna anomalia)
+            // Production: 0 events, 3 events, 10 events (massive anomaly)
             float[] testData = [0f, 3f, 10f];
 
             // ACT - Nie potrzebujemy Fit/Freeze!
@@ -96,9 +96,9 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
         [Fact]
         public void Binary_ShouldNotAlterZerosAndOnes()
         {
-            // ARRANGE - Tryb dla flag np. IsThrottled
+            // ARRANGE - Mode for flags such as IsThrottled
             var normalizer = MinMaxNormalizer.Binary();
-            float[] testData = [0f, 1f, -5f, 5f]; // Wrzucamy poprawne flagi i śmieci
+            float[] testData = [0f, 1f, -5f, 5f]; // We insert valid flags and garbage values
 
             // ACT
             normalizer.TransformInPlace(testData);
@@ -106,8 +106,8 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
             // ASSERT
             Assert.Equal(0f, testData[0], Precision);
             Assert.Equal(1f, testData[1], Precision);
-            Assert.Equal(0f, testData[2], Precision); // Ujemne śmieci stają się zerem
-            Assert.Equal(1f, testData[3], Precision); // Dodatnie śmieci stają się jedynką
+            Assert.Equal(0f, testData[2], Precision); // Negative garbage becomes zero
+            Assert.Equal(1f, testData[3], Precision); // Positive garbage becomes one
         }
 
         [Fact]
@@ -116,7 +116,7 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
             // ARRANGE
             var normalizer = new MinMaxNormalizer();
 
-            // ACT & ASSERT - Zamrażanie bez danych jest nielegalne
+            // ACT & ASSERT - Freezing without data is illegal
             Assert.Throws<InvalidOperationException>(normalizer.Freeze);
         }
     }

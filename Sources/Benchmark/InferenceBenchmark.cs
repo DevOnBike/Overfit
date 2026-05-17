@@ -11,7 +11,7 @@ using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
-// Zmieniono namespace na Core
+// Changed namespace to Core
 
 namespace Benchmarks
 {
@@ -46,7 +46,7 @@ namespace Benchmarks
             _overfitModel.Load("benchmark_model.bin");
             _overfitModel.Eval();
 
-            // POPRAWKA: Używamy TensorStorage i TensorShape
+            // FIX: Using TensorStorage and TensorShape
             var inputTensor = new TensorStorage<float>(InputSize, clearMemory: false);
             _inputData.AsSpan().CopyTo(inputTensor.AsSpan());
             _inputNode = new AutogradNode(inputTensor, new TensorShape(1, InputSize));

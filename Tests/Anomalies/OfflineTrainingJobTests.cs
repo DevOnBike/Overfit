@@ -11,11 +11,11 @@ namespace DevOnBike.Overfit.Tests.Anomalies
     /// <summary>
     /// End-to-end test: CSV → tokenize → train GPT → checkpoint.bin.
     ///
-    /// Czas: ~30-60 sek (Quick config, 500 kroków).
+    /// Time: ~30-60 s (Quick config, 500 steps).
     ///
     /// Fixture:
-    ///   Wygeneruj: python3 Scripts/generate_k8s_metrics.py --days 1 --out test_fixtures/k8s_metrics.csv
-    ///   Lub pobierz z outputs/k8s_metrics.zip i wrzuć do Tests/test_fixtures/
+    ///   Generate: python3 Scripts/generate_k8s_metrics.py --days 1 --out test_fixtures/k8s_metrics.csv
+    ///   Or download from outputs/k8s_metrics.zip and place in Tests/test_fixtures/
     /// </summary>
     public class OfflineTrainingJobTests
     {
@@ -88,8 +88,8 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         }
 
         /// <summary>
-        /// Medium training — 128d, 4 warstwy, 2K kroków.
-        /// Czas: ~5-10 min. Weryfikuje pipeline przed Production.
+        /// Medium training — 128d, 4 layers, 2K steps.
+        /// Time: ~5-10 min. Validates the pipeline before Production.
         /// </summary>
         [LongFact]
         public async Task TrainMedium_LossDecreases_2000Steps()
@@ -120,9 +120,9 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         }
 
         /// <summary>
-        /// Production training — 256d, 6 warstw, 10K kroków.
-        /// Czas: ~2h na Ryzen 9 9950X3D.
-        /// Odpal przez noc:
+        /// Production training — 256d, 6 layers, 10K steps.
+        /// Time: ~2 h on Ryzen 9 9950X3D.
+        /// Run overnight:
         ///   dotnet test --filter "TrainProduction" --timeout 14400000
         /// </summary>
         [LongFact]

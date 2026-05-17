@@ -15,7 +15,7 @@ using Microsoft.ML;
 using Microsoft.ML.Data;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
-// Zmieniono namespace na Core
+// Changed namespace to Core
 
 namespace Benchmarks
 {
@@ -90,7 +90,7 @@ namespace Benchmarks
             model.Load("benchmark_model.bin");
             model.Eval();
 
-            // POPRAWKA: Zmiana na TensorStorage + ucięto GetView()
+            // FIX: Switched to TensorStorage + removed GetView()
             using var inputTensor = new TensorStorage<float>(InputSize, clearMemory: false);
             _inputData.AsSpan().CopyTo(inputTensor.AsSpan());
 

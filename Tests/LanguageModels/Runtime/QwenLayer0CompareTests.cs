@@ -22,8 +22,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         private static string TokenizerDir => TestModelPaths.Qwen3B.Dir;
 
         /// <summary>
-        /// Position-0 (BOS): logity C# muszą zgadzać się z Python forward_multitoken.py.
-        /// Aktualna fixture: Qwen2.5-3B-Instruct FP16 (36 layers, head_dim=128).
+        /// Position-0 (BOS): C# logits must match Python forward_multitoken.py.
+        /// Current fixture: Qwen2.5-3B-Instruct FP16 (36 layers, head_dim=128).
         /// Python TEST 1 → top-1 = [33975] 15.5608.
         /// </summary>
         [LongFact]
@@ -58,7 +58,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         }
 
         /// <summary>
-        /// Porównanie hidden state i logitów C# vs Python dla 2 tokenów [BOS, im_start].
+        /// Comparison of C# hidden state and logits vs Python for 2 tokens [BOS, im_start].
         ///
         /// Python (forward_multitoken.py post-fix, grouped GQA, Qwen2.5-3B FP16):
         ///   top-1 = [198] 12.3511
@@ -118,8 +118,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         }
 
         /// <summary>
-        /// Pełny chat prompt (36 tokenów z poprawnym system message).
-        /// C# i Python zgadzają się: top-1 = [36366] ≈ 11.9
+        /// Full chat prompt (36 tokens with a correct system message).
+        /// C# and Python agree: top-1 = [36366] ≈ 11.9
         /// </summary>
         [LongFact]
         public void L0_ChatPromptLogits()
@@ -154,7 +154,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         }
 
         /// <summary>
-        /// Progressive prefix: kiedy pojawia się token '4' jako top-1.
+        /// Progressive prefix: when does the token '4' appear as top-1.
         /// </summary>
         [LongFact]
         public void Multitoken_ProgressivePrefixTest()

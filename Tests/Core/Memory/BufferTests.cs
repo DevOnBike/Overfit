@@ -35,7 +35,7 @@ namespace DevOnBike.Overfit.Tests.Core.Memory
         [Fact]
         public void PooledBuffer_ShouldNotThrowOnDispose()
         {
-            // Ominięcie użycia lambdy w Assert.Throws dla ref struct
+            // Workaround: avoiding lambda usage inside Assert.Throws for ref struct
             var exception = Record.Exception(() =>
             {
                 using var buffer = new PooledBuffer<double>(100);
@@ -45,7 +45,7 @@ namespace DevOnBike.Overfit.Tests.Core.Memory
             Assert.Null(exception);
         }
 
-        // UWAGA: Testy dla NativeBuffer wymagają włączonego <AllowUnsafeBlocks>true</AllowUnsafeBlocks> w pliku .csproj testów
+        // NOTE: Tests for NativeBuffer require <AllowUnsafeBlocks>true</AllowUnsafeBlocks> to be enabled in the test .csproj file
         [Fact]
         public void NativeBuffer_ShouldAllocateAndFreeCorrectly()
         {

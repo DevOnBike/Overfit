@@ -53,7 +53,7 @@ namespace DevOnBike.Overfit.Tests.Examples.TicTacToe
                     board.CopyTo(stateTensor.AsSpan());
                     using var stateNode = new AutogradNode(stateTensor, new TensorShape(1, 9));
 
-                    // WAŻNE: Nie używamy 'using' dla prediction, bo to współdzielony bufor modelu!
+                    // IMPORTANT: We do not use 'using' for prediction, because it is a shared buffer owned by the model!
                     var prediction = model.Forward(null, stateNode);
                     var qValues = prediction.DataView.AsReadOnlySpan();
 
@@ -80,7 +80,7 @@ namespace DevOnBike.Overfit.Tests.Examples.TicTacToe
 
                     var reward = ExecuteAction(board, action, out isOver);
 
-                    // Jeśli gra trwa, rusza się przeciwnik
+                    // If the game is still ongoing, the opponent moves
                     if (!isOver)
                     {
                         var enemyAction = RandomMove(board);
@@ -89,12 +89,12 @@ namespace DevOnBike.Overfit.Tests.Examples.TicTacToe
                             var enemyReward = ExecuteAction(board, enemyAction, out isOver, -1f);
                             if (enemyReward == 1f)
                             {
-                                reward = -1f; // Przegraliśmy
+                                reward = -1f; // We lost
                             }
                         }
                     }
 
-                    // TRENING (po zakończeniu tury/gry)
+                    // TRAINING (after the turn/game ends)
                     using var targetTensor = new TensorStorage<float>(9, clearMemory: false);
                     qValues.CopyTo(targetTensor.AsSpan());
                     targetTensor.AsSpan()[action] = reward;

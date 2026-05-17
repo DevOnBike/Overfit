@@ -4,6 +4,8 @@ root = true
 dotnet_diagnostic.RS0030.severity = error
 dotnet_diagnostic.IDE0073.severity = warning
 dotnet_diagnostic.IDE0055.severity = warning
+dotnet_diagnostic.SA1202.severity = warning
+dotnet_diagnostic.SA1600.severity = none
 
 csharp_blank_lines_after_using_list = 1
 csharp_blank_lines_after_file_scoped_namespace_directive = 1
@@ -13,5 +15,7 @@ dotnet_sort_system_directives_first = true
 dotnet_separate_import_directive_groups = false
 
 csharp_prefer_braces = true:warning
+
+csharp_space_around_binary_operators = before_and_after
 
 file_header_template = Copyright (c) 2026 DevOnBike.\nThis file is part of DevonBike Overfit.\nDevonBike Overfit is licensed under the GNU AGPLv3.\nFor commercial licensing options, contact: devonbike@gmail.com

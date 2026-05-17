@@ -12,77 +12,110 @@ using DevOnBike.Overfit.Tensors;
 namespace DevOnBike.Overfit.LanguageModels.LoRA
 {
     /// <summary>
-    /// LoRA fine-tuning for a <see cref="GPT1Model"/> — Stage 1: LM head only.
+    /// LoRA fine-tuning for a <see cref="GPT1Model"/>. The base model is frozen;
+    /// only low-rank factors are trained, one A/B pair per targeted weight matrix:
+    ///   W_eff = W(frozen) + (A @ B)
+    ///   A : [inDim x rank]   (Kaiming-uniform init)
+    ///   B : [rank x outDim]  (zero init — adapter starts as the identity)
     ///
-    /// The base model is frozen; only two low-rank factors are trained:
-    ///   W_eff = LMHead(frozen) + (A @ B)
-    ///   A : [dModel x rank]   (Kaiming-uniform init)
-    ///   B : [rank x vocab]    (zero init — adapter starts as identity)
+    /// Targets are selected with <see cref="LoRATargetModules"/>:
+    ///   <see cref="LoRATargetModules.LanguageModelHead"/> — LM head [dModel x vocab]   (Stage 1)
+    ///   <see cref="LoRATargetModules.FeedForwardUp"/>      — each block's FFN W1 [dModel x dFF]  (Stage 2)
+    ///   <see cref="LoRATargetModules.FeedForwardDown"/>    — each block's FFN W2 [dFF x dModel]  (Stage 2)
+    ///   <see cref="LoRATargetModules.FeedForward"/>        — both FFN matrices, every block
+    /// Attention modules are not supported.
     ///
     /// A and B become <see cref="Parameter"/>s on the autograd graph, so
-    /// <c>ComputationGraph.Backward</c> produces their gradients automatically
-    /// (validated by LoRAEffectiveWeightInjectionTests). The optimizer only ever
-    /// sees {A, B}, so the base weights are never updated.
+    /// <c>ComputationGraph.Backward</c> produces their gradients automatically; the
+    /// optimizer only ever sees the {A, B} pairs, so base weights are never updated.
     ///
-    /// While a fine-tuner is attached, the model's <see cref="GPT1Model"/>
-    /// LM-head is LoRA-adapted via <c>GPT1Model.LMHeadWeightProvider</c>;
-    /// <see cref="Dispose"/> detaches it.
-    ///
-    /// Exported adapters use the LoRA .bin format (magic "LORA", one entry keyed
-    /// <see cref="LoRATargetModules.LanguageModelHead"/>) shared with
-    /// <see cref="LlamaLoRAAdapter"/>.
+    /// While a fine-tuner is attached, effective weights are injected per-forward
+    /// via <c>GPT1Model.LMHeadWeightProvider</c> and
+    /// <c>FeedForwardLayer.W1/W2WeightProvider</c>; <see cref="Dispose"/> detaches
+    /// every hook. Exported adapters use the multi-entry LoRA .bin format
+    /// (<see cref="Gpt1LoRAFile"/>) consumed by <see cref="Gpt1LoRAMergeAdapter"/>.
     /// </summary>
     public sealed class Gpt1LoRAFineTuner : IDisposable
     {
+        private const LoRATargetModules SupportedTargets =
+            LoRATargetModules.LanguageModelHead
+            | LoRATargetModules.FeedForwardUp
+            | LoRATargetModules.FeedForwardDown;
+
+        private const int LMHeadLayer = -1;
+
         private readonly GPT1Model _model;
         private readonly int _dModel;
+        private readonly int _dFF;
         private readonly int _vocab;
+        private readonly int _nLayers;
         private readonly int _rank;
-
-        private readonly Parameter _a;          // [dModel, rank]
-        private readonly Parameter _b;          // [rank, vocab]
-        private readonly AutogradNode _aNode;
-        private readonly AutogradNode _bNode;
-        private readonly AutogradNode _wBaseNode;   // frozen view of LMHead
+        private readonly LoRATargetModules _targets;
+        private readonly ModuleAdapter[] _adapters;
 
         private bool _disposed;
 
-        public Gpt1LoRAFineTuner(GPT1Model model, int rank, int seed = 42)
+        public Gpt1LoRAFineTuner(
+            GPT1Model model,
+            int rank,
+            LoRATargetModules targets = LoRATargetModules.LanguageModelHead,
+            int seed = 42)
         {
             ArgumentNullException.ThrowIfNull(model);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rank);
 
-            if (model.Config.TieWeights)
+            if (targets == LoRATargetModules.None)
+            {
+                throw new ArgumentException("At least one target module must be selected.", nameof(targets));
+            }
+
+            if ((targets & ~SupportedTargets) != 0)
             {
                 throw new NotSupportedException(
-                    "Gpt1LoRAFineTuner targets the untied LM head; the model must be built with TieWeights=false.");
+                    $"Gpt1LoRAFineTuner supports {SupportedTargets}; attention modules are not implemented.");
+            }
+
+            if (targets.HasFlag(LoRATargetModules.LanguageModelHead) && model.Config.TieWeights)
+            {
+                throw new NotSupportedException(
+                    "LoRA on the LM head requires an untied head; the model must be built with TieWeights=false.");
             }
 
             _model = model;
             _dModel = model.Config.DModel;
+            _dFF = model.Config.DFF;
             _vocab = model.Config.VocabSize;
+            _nLayers = model.Config.NLayers;
             _rank = rank;
+            _targets = targets;
 
-            _a = new Parameter(new TensorShape(_dModel, _rank), requiresGrad: true, clearData: true);
-            _b = new Parameter(new TensorShape(_rank, _vocab), requiresGrad: true, clearData: true);
-
-            InitializeA(seed);
-            // B stays zero — standard LoRA init: the adapter starts as the identity.
-
-            _aNode = _a.AsNode();
-            _bNode = _b.AsNode();
-            _wBaseNode = model.LMHead.AsNode();
-
-            // Attach the LoRA-adapted LM head. Detached again in Dispose().
-            _model.LMHeadWeightProvider = BuildEffectiveLMHead;
+            _adapters = BuildAdapters(seed);
+            AttachProviders();
         }
 
         public int Rank => _rank;
 
-        public long TrainableParameterCount => (long)_a.Shape.Size + _b.Shape.Size;
+        public LoRATargetModules Targets => _targets;
+
+        /// <summary>Number of A/B adapter pairs (one per targeted weight matrix).</summary>
+        public int AdapterCount => _adapters.Length;
+
+        public long TrainableParameterCount
+        {
+            get
+            {
+                var total = 0L;
+                foreach (var adapter in _adapters)
+                {
+                    total += adapter.A.Shape.Size + adapter.B.Shape.Size;
+                }
+
+                return total;
+            }
+        }
 
         /// <summary>
-        /// Fine-tunes the LoRA factors on a flat token corpus (next-token loss).
+        /// Fine-tunes every LoRA factor on a flat token corpus (next-token loss).
         /// Returns the per-step training loss for inspection.
         /// </summary>
         public IReadOnlyList<float> FineTune(
@@ -106,12 +139,8 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
 
             _model.Eval(); // base is frozen — no dropout / train-mode behaviour wanted
 
-            var arenaFloats = (int)Math.Min(
-                256_000_000L,
-                Math.Max(16_000_000L, (long)contextLength * _vocab * 32 + (long)_dModel * _vocab * 8));
-
-            using var graph = new ComputationGraph(arenaFloats);
-            using var optimizer = new Adam(new[] { _a, _b }, learningRate) { UseAdamW = true };
+            using var graph = new ComputationGraph(EstimateArenaFloats(contextLength));
+            using var optimizer = new Adam(CollectParameters(), learningRate) { UseAdamW = true };
 
             var rng = new Random(seed);
             var input = new int[contextLength];
@@ -127,8 +156,11 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                 graph.Reset();
                 _model.InvalidateAllCaches();
 
-                _a.ZeroGrad();
-                _b.ZeroGrad();
+                foreach (var adapter in _adapters)
+                {
+                    adapter.A.ZeroGrad();
+                    adapter.B.ZeroGrad();
+                }
 
                 var logits = _model.Forward(graph, input, batchSize: 1, contextLength);
                 history[step] = ComputeLossAndGrad(logits, target, _vocab, writeGrad: true);
@@ -154,11 +186,7 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                 throw new ArgumentOutOfRangeException(nameof(start));
             }
 
-            var arenaFloats = (int)Math.Min(
-                256_000_000L,
-                Math.Max(16_000_000L, (long)contextLength * _vocab * 32 + (long)_dModel * _vocab * 8));
-
-            using var graph = new ComputationGraph(arenaFloats);
+            using var graph = new ComputationGraph(EstimateArenaFloats(contextLength));
 
             _model.Eval();
             graph.Reset();
@@ -174,18 +202,27 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
         }
 
         /// <summary>
-        /// Saves the trained LoRA factors in the shared LoRA .bin format
-        /// (one entry, keyed <see cref="LoRATargetModules.LanguageModelHead"/>).
+        /// Saves the trained LoRA factors in the multi-entry LoRA .bin format —
+        /// one entry per targeted weight matrix.
         /// </summary>
         public void Save(string path)
         {
             ThrowIfDisposed();
 
-            var weight = new LoRAWeight(_dModel, _vocab, _rank);
-            _a.DataReadOnlySpan.CopyTo(weight.AMutable);
-            _b.DataReadOnlySpan.CopyTo(weight.BMutable);
+            var entries = new Gpt1LoRAEntry[_adapters.Length];
 
-            Gpt1LoRAFile.SaveLMHead(path, weight);
+            for (var i = 0; i < _adapters.Length; i++)
+            {
+                var adapter = _adapters[i];
+                var weight = new LoRAWeight(adapter.InDim, adapter.OutDim, _rank);
+
+                adapter.A.DataReadOnlySpan.CopyTo(weight.AMutable);
+                adapter.B.DataReadOnlySpan.CopyTo(weight.BMutable);
+
+                entries[i] = new Gpt1LoRAEntry(adapter.Layer, adapter.Module, weight);
+            }
+
+            Gpt1LoRAFile.Save(path, entries);
         }
 
         /// <summary>Loads LoRA factors previously written by <see cref="Save"/>.</summary>
@@ -193,16 +230,40 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
         {
             ThrowIfDisposed();
 
-            var weight = Gpt1LoRAFile.LoadLMHead(path);
-            if (weight.InDim != _dModel || weight.OutDim != _vocab || weight.Rank != _rank)
-            {
-                throw new InvalidDataException(
-                    $"LoRA dimensions [{weight.InDim}x{weight.OutDim} r={weight.Rank}] " +
-                    $"do not match this fine-tuner [{_dModel}x{_vocab} r={_rank}].");
-            }
+            var entries = Gpt1LoRAFile.Load(path);
 
-            weight.A.CopyTo(_a.DataSpan);
-            weight.B.CopyTo(_b.DataSpan);
+            foreach (var adapter in _adapters)
+            {
+                var matched = false;
+
+                foreach (var entry in entries)
+                {
+                    if (entry.Layer != adapter.Layer || entry.Module != adapter.Module)
+                    {
+                        continue;
+                    }
+
+                    var weight = entry.Weight;
+                    if (weight.InDim != adapter.InDim || weight.OutDim != adapter.OutDim || weight.Rank != _rank)
+                    {
+                        throw new InvalidDataException(
+                            $"LoRA entry [{adapter.Module} layer {adapter.Layer}] dimensions " +
+                            $"[{weight.InDim}x{weight.OutDim} r={weight.Rank}] do not match this fine-tuner " +
+                            $"[{adapter.InDim}x{adapter.OutDim} r={_rank}].");
+                    }
+
+                    weight.A.CopyTo(adapter.A.DataSpan);
+                    weight.B.CopyTo(adapter.B.DataSpan);
+                    matched = true;
+                    break;
+                }
+
+                if (!matched)
+                {
+                    throw new InvalidDataException(
+                        $"LoRA file has no entry for [{adapter.Module} layer {adapter.Layer}].");
+                }
+            }
         }
 
         public void Dispose()
@@ -214,27 +275,172 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
 
             _disposed = true;
 
-            if (ReferenceEquals(_model.LMHeadWeightProvider, (Func<ComputationGraph, AutogradNode>)BuildEffectiveLMHead))
+            foreach (var adapter in _adapters)
             {
-                _model.LMHeadWeightProvider = null;
-            }
+                DetachProvider(adapter);
 
-            _aNode.Dispose();
-            _bNode.Dispose();
-            _wBaseNode.Dispose();
-            _a.Dispose();
-            _b.Dispose();
+                adapter.ANode.Dispose();
+                adapter.BNode.Dispose();
+                adapter.WBaseNode.Dispose();
+                adapter.A.Dispose();
+                adapter.B.Dispose();
+            }
         }
 
         // ── Private ───────────────────────────────────────────────────────────
 
-        private AutogradNode BuildEffectiveLMHead(ComputationGraph graph)
+        private ModuleAdapter[] BuildAdapters(int seed)
+        {
+            var list = new List<ModuleAdapter>();
+
+            if (_targets.HasFlag(LoRATargetModules.LanguageModelHead))
+            {
+                list.Add(CreateAdapter(
+                    LMHeadLayer, LoRATargetModules.LanguageModelHead,
+                    _dModel, _vocab, _model.LMHead, seed));
+            }
+
+            for (var layer = 0; layer < _nLayers; layer++)
+            {
+                var ffn = _model.Blocks[layer].FFN;
+
+                if (_targets.HasFlag(LoRATargetModules.FeedForwardUp))
+                {
+                    list.Add(CreateAdapter(
+                        layer, LoRATargetModules.FeedForwardUp,
+                        _dModel, _dFF, ffn.W1, seed + 1 + (2 * layer)));
+                }
+
+                if (_targets.HasFlag(LoRATargetModules.FeedForwardDown))
+                {
+                    list.Add(CreateAdapter(
+                        layer, LoRATargetModules.FeedForwardDown,
+                        _dFF, _dModel, ffn.W2, seed + 2 + (2 * layer)));
+                }
+            }
+
+            return list.ToArray();
+        }
+
+        private ModuleAdapter CreateAdapter(
+            int layer,
+            LoRATargetModules module,
+            int inDim,
+            int outDim,
+            Parameter wBase,
+            int seed)
+        {
+            var a = new Parameter(new TensorShape(inDim, _rank), requiresGrad: true, clearData: true);
+            var b = new Parameter(new TensorShape(_rank, outDim), requiresGrad: true, clearData: true);
+
+            InitializeA(a, seed);
+            // B stays zero — standard LoRA init: the adapter starts as the identity.
+
+            var adapter = new ModuleAdapter
+            {
+                Layer = layer,
+                Module = module,
+                InDim = inDim,
+                OutDim = outDim,
+                A = a,
+                B = b,
+                ANode = a.AsNode(),
+                BNode = b.AsNode(),
+                WBaseNode = wBase.AsNode(),
+            };
+
+            adapter.Provider = graph => BuildEffectiveWeight(graph, adapter);
+            return adapter;
+        }
+
+        private void AttachProviders()
+        {
+            foreach (var adapter in _adapters)
+            {
+                switch (adapter.Module)
+                {
+                    case LoRATargetModules.LanguageModelHead:
+                        _model.LMHeadWeightProvider = adapter.Provider;
+                        break;
+
+                    case LoRATargetModules.FeedForwardUp:
+                        _model.Blocks[adapter.Layer].FFN.W1WeightProvider = adapter.Provider;
+                        break;
+
+                    case LoRATargetModules.FeedForwardDown:
+                        _model.Blocks[adapter.Layer].FFN.W2WeightProvider = adapter.Provider;
+                        break;
+                }
+            }
+        }
+
+        private void DetachProvider(ModuleAdapter adapter)
+        {
+            switch (adapter.Module)
+            {
+                case LoRATargetModules.LanguageModelHead:
+                    if (ReferenceEquals(_model.LMHeadWeightProvider, adapter.Provider))
+                    {
+                        _model.LMHeadWeightProvider = null;
+                    }
+
+                    break;
+
+                case LoRATargetModules.FeedForwardUp:
+                    {
+                        var ffn = _model.Blocks[adapter.Layer].FFN;
+                        if (ReferenceEquals(ffn.W1WeightProvider, adapter.Provider))
+                        {
+                            ffn.W1WeightProvider = null;
+                        }
+
+                        break;
+                    }
+
+                case LoRATargetModules.FeedForwardDown:
+                    {
+                        var ffn = _model.Blocks[adapter.Layer].FFN;
+                        if (ReferenceEquals(ffn.W2WeightProvider, adapter.Provider))
+                        {
+                            ffn.W2WeightProvider = null;
+                        }
+
+                        break;
+                    }
+            }
+        }
+
+        private static AutogradNode BuildEffectiveWeight(ComputationGraph graph, ModuleAdapter adapter)
         {
             // W_eff = W_base(frozen) + (A @ B). graph.Linear treats A@B as an
             // ordinary matmul; backward flows W_eff -> A@B -> A and B.
-            var zeroBias = graph.CreateAuxiliary(new TensorShape(_vocab), clearMemory: true);
-            var ab = graph.Linear(_aNode, _bNode, zeroBias);   // [dModel, vocab]
-            return graph.Add(_wBaseNode, ab);
+            var zeroBias = graph.CreateAuxiliary(new TensorShape(adapter.OutDim), clearMemory: true);
+            var ab = graph.Linear(adapter.ANode, adapter.BNode, zeroBias);   // [inDim, outDim]
+            return graph.Add(adapter.WBaseNode, ab);
+        }
+
+        private Parameter[] CollectParameters()
+        {
+            var parameters = new Parameter[_adapters.Length * 2];
+
+            for (var i = 0; i < _adapters.Length; i++)
+            {
+                parameters[2 * i] = _adapters[i].A;
+                parameters[(2 * i) + 1] = _adapters[i].B;
+            }
+
+            return parameters;
+        }
+
+        private int EstimateArenaFloats(int contextLength)
+        {
+            // Logits dominate; the FFN LoRA temporaries (A@B + Add per W1/W2 across
+            // all blocks) add the third term.
+            var perStep = ((long)contextLength * _vocab * 32)
+                          + ((long)_dModel * _vocab * 8)
+                          + ((long)_nLayers * _dModel * _dFF * 24);
+
+            return (int)Math.Min(256_000_000L, Math.Max(16_000_000L, perStep));
         }
 
         private static float ComputeLossAndGrad(
@@ -284,12 +490,12 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             return total / seqLen;
         }
 
-        private void InitializeA(int seed)
+        private void InitializeA(Parameter a, int seed)
         {
             // Kaiming-uniform U(-1/sqrt(rank), 1/sqrt(rank)) — matches LoRAWeight.
             var rng = new Random(seed);
             var bound = 1f / MathF.Sqrt(_rank);
-            var data = _a.DataSpan;
+            var data = a.DataSpan;
 
             for (var i = 0; i < data.Length; i++)
             {
@@ -300,6 +506,21 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
         private void ThrowIfDisposed()
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
+        }
+
+        /// <summary>One trained weight matrix: its LoRA factors and the graph hook.</summary>
+        private sealed class ModuleAdapter
+        {
+            public int Layer;
+            public LoRATargetModules Module;
+            public int InDim;
+            public int OutDim;
+            public Parameter A = null!;
+            public Parameter B = null!;
+            public AutogradNode ANode = null!;
+            public AutogradNode BNode = null!;
+            public AutogradNode WBaseNode = null!;
+            public Func<ComputationGraph, AutogradNode> Provider = null!;
         }
     }
 }

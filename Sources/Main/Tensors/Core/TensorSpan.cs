@@ -64,7 +64,7 @@ namespace DevOnBike.Overfit.Tensors.Core
             Strides = TensorStrides.Contiguous(shape);
             Offset = 0;
 
-            // Ponieważ używamy metody Contiguous, wiemy na 100%, że pamięć jest ciągła
+            // Because we use the Contiguous factory method, we know with certainty that the memory is contiguous
             IsContiguous = true;
         }
 
@@ -89,7 +89,7 @@ namespace DevOnBike.Overfit.Tensors.Core
             Strides = strides;
             Offset = offset;
 
-            // Obliczane tylko raz przy tworzeniu niestandardowego widoku (np. przy Transpose)
+            // Computed only once when creating a custom view (e.g. during Transpose)
             IsContiguous = strides.IsContiguous(shape);
         }
 

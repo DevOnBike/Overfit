@@ -19,9 +19,9 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
     ///   var tok = QwenTokenizer.Load("tokenizer.json");
     ///
     /// Known special token IDs:
-    ///   151643 = <|endoftext|>  (EOS / BOS)
-    ///   151644 = <|im_start|>
-    ///   151645 = <|im_end|>
+    ///   151643 = &lt;|endoftext|&gt;  (EOS / BOS)
+    ///   151644 = &lt;|im_start|&gt;
+    ///   151645 = &lt;|im_end|&gt;
     /// </summary>
     public sealed class QwenTokenizer
     {

@@ -63,14 +63,14 @@ namespace DevOnBike.Overfit.Optimizers
             {
                 var view = _parameters[i].DataView;
 
-                // Alokujemy kopię zapasową na stercie na podstawie wymiarów widoku
+                // Allocate a heap backup based on the view's dimensions
                 _checkpoint[i] = view.Rank switch
                 {
                     1 => new FastTensor<float>(view.GetDim(0), clearMemory: false),
                     2 => new FastTensor<float>(view.GetDim(0), view.GetDim(1), clearMemory: false),
                     3 => new FastTensor<float>(view.GetDim(0), view.GetDim(1), view.GetDim(2), clearMemory: false),
                     4 => new FastTensor<float>(view.GetDim(0), view.GetDim(1), view.GetDim(2), view.GetDim(3), clearMemory: false),
-                    _ => throw new InvalidOperationException("Wymiar nieobsługiwany przez LRScheduler")
+                    _ => throw new InvalidOperationException("Rank not supported by LRScheduler")
                 };
 
                 view.AsReadOnlySpan().CopyTo(_checkpoint[i].GetView().AsSpan());

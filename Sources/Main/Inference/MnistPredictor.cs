@@ -9,7 +9,7 @@ using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 
-// Dodano Core
+// Added Core
 
 namespace DevOnBike.Overfit.Inference
 {
@@ -57,11 +57,11 @@ namespace DevOnBike.Overfit.Inference
                 throw new ArgumentException("Invalid input data. Expected a 784-element pixel array.");
             }
 
-            // DOD: Alokujemy pamięć bez wiedzy o kształcie...
+            // DOD: Allocate memory without knowledge of shape...
             using var inputMat = new TensorStorage<float>(784, clearMemory: false);
             pixelData.CopyTo(inputMat.AsSpan());
 
-            // ...a następnie nakładamy na to odpowiedni Kształt w węźle!
+            // ...then overlay the appropriate Shape on top of it in the node!
             using var input = new AutogradNode(inputMat, new TensorShape(1, 1, 28, 28));
 
             using var h1 = _conv1.Forward(null, input);

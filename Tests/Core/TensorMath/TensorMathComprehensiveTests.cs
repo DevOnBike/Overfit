@@ -8,17 +8,17 @@ using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 
-// Zmieniono na Tensors.Core
+// Changed to Tensors.Core
 
 namespace DevOnBike.Overfit.Tests.Core.TensorMath
 {
     public class TensorMathComprehensiveTests
     {
-        // Prywatna instancja grafu na potrzeby weryfikacji operacji
+        // Private graph instance used for operation verification
         private readonly ComputationGraph _graph = new();
 
         // ====================================================================
-        // 1. TESTY LOGIKI MATEMATYCZNEJ (FORWARD & BACKWARD THEORY)
+        // 1. MATHEMATICAL LOGIC TESTS (FORWARD & BACKWARD THEORY)
         // ====================================================================
 
         [Fact]
@@ -49,7 +49,7 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
             var bGrad = bias.GradView.AsSpan();
 
             Assert.Equal(1f, inGrad[0]);
-            Assert.Equal(2f, bGrad[0]); // Batch size = 2, gradient sumuje się po batchach i pikselach
+            Assert.Equal(2f, bGrad[0]); // Batch size = 2, gradient accumulates across batches and pixels
             Assert.Equal(2f, bGrad[1]);
         }
 
@@ -75,8 +75,8 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
             var inGrad = input.GradView.AsSpan();
             var wGrad = weights.GradView.AsSpan();
 
-            Assert.Equal(4 * 3f, inGrad[0]); // 4 kolumny wag, każda waga = 3 -> grad względem wejścia = sum(grad_out * W^T)
-            Assert.Equal(2 * 2f, wGrad[0]);  // 2 wiersze wejścia, każdy = 2 -> grad względem wagi = sum(X^T * grad_out)
+            Assert.Equal(4 * 3f, inGrad[0]); // 4 weight columns, each weight = 3 -> input gradient = sum(grad_out * W^T)
+            Assert.Equal(2 * 2f, wGrad[0]);  // 2 input rows, each = 2 -> weight gradient = sum(X^T * grad_out)
         }
 
         [Fact]
@@ -94,7 +94,7 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
             using var output = Ops.TensorMath.Conv2D(_graph, input, weights, inC, outC, h, w, k);
 
             var outSpan = output.DataView.AsSpan();
-            Assert.Equal(4 * 2f, outSpan[0]); // 2x2 okno jedynek * 2 = 8
+            Assert.Equal(4 * 2f, outSpan[0]); // 2x2 window of ones * 2 = 8
 
             output.GradView.AsSpan().Fill(1f);
             _graph.Backward(output);
@@ -102,9 +102,9 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
             var inGrad = input.GradView.AsSpan();
             var wGrad = weights.GradView.AsSpan();
 
-            Assert.Equal(2f, inGrad[0]); // Narożnik użyty raz
-            Assert.Equal(4f, inGrad[1]); // Krawędź użyta dwa razy
-            Assert.Equal(4f, wGrad[0]);  // 4 pozycje filtra
+            Assert.Equal(2f, inGrad[0]); // Corner pixel used once
+            Assert.Equal(4f, inGrad[1]); // Edge pixel used twice
+            Assert.Equal(4f, wGrad[0]);  // 4 filter positions
         }
 
         [Fact]
@@ -126,16 +126,16 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
             Assert.Equal(0.0f, outSpan[2]);
             Assert.Equal(3.0f, outSpan[3]);
 
-            // Wywołanie Backward() automatycznie zaleje węzeł wyjściowy gradientem = 1.0f
+            // Calling Backward() automatically seeds the output node with gradient = 1.0f
             _graph.Backward(output);
 
             var gradSpan = input.GradView.AsSpan();
 
-            // Oczekujemy teraz prądu 1.0f, bo taki generuje na starcie ComputationGraph
-            Assert.Equal(1.0f, gradSpan[0]); // Przepuścił prąd 
-            Assert.Equal(0.0f, gradSpan[1]); // Zablokował (ujemne)
-            Assert.Equal(0.0f, gradSpan[2]); // Zablokował (zero)
-            Assert.Equal(1.0f, gradSpan[3]); // Przepuścił prąd 
+            // We now expect 1.0f, because that is what ComputationGraph seeds at the start
+            Assert.Equal(1.0f, gradSpan[0]); // Let the gradient through
+            Assert.Equal(0.0f, gradSpan[1]); // Blocked (negative)
+            Assert.Equal(0.0f, gradSpan[2]); // Blocked (zero)
+            Assert.Equal(1.0f, gradSpan[3]); // Let the gradient through
         }
 
         [Fact]
@@ -161,9 +161,9 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
             var grad = logits.GradView.AsSpan();
             var sum = grad[0] + grad[1] + grad[2];
 
-            Assert.True(Math.Abs(sum) < 1e-5f); // Suma gradientów softmax_ce wynosi ~0
-            Assert.True(grad[0] < 0f); // Klasa poprawna ma gradient ujemny (chce zwiększyć wartość)
-            Assert.True(grad[1] > 0f); // Błędne mają dodatni (chcą zmniejszyć)
+            Assert.True(Math.Abs(sum) < 1e-5f); // Sum of softmax_ce gradients is ~0
+            Assert.True(grad[0] < 0f); // Correct class has negative gradient (wants to increase its logit)
+            Assert.True(grad[1] > 0f); // Wrong classes have positive gradient (want to decrease their logits)
             Assert.True(grad[2] > 0f);
         }
 
@@ -175,10 +175,10 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
             using var input = new AutogradNode(inputTensor, new TensorShape(batch, channels, h, w), requiresGrad: false);
             var inSpan = input.DataView.AsSpan();
 
-            // Kanał 0
-            inSpan[0] = 1f; inSpan[1] = 3f; inSpan[2] = 5f; inSpan[3] = 7f; // Średnia: 4
-            // Kanał 1
-            inSpan[4] = 10f; inSpan[5] = 10f; inSpan[6] = 20f; inSpan[7] = 0f; // Średnia: 10
+            // Channel 0
+            inSpan[0] = 1f; inSpan[1] = 3f; inSpan[2] = 5f; inSpan[3] = 7f; // Mean: 4
+            // Channel 1
+            inSpan[4] = 10f; inSpan[5] = 10f; inSpan[6] = 20f; inSpan[7] = 0f; // Mean: 10
 
             using var output = Ops.TensorMath.GlobalAveragePool2D(_graph, input, channels, h, w);
             var outSpan = output.DataView.AsSpan();
@@ -219,7 +219,7 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
             using var target = new AutogradNode(targetTensor, new TensorShape(1, 4), requiresGrad: false);
 
             pred.DataView.AsSpan().Fill(2f);
-            target.DataView.AsSpan().Fill(-1f); // Zły kierunek (pred > 0, target < 0)
+            target.DataView.AsSpan().Fill(-1f); // Wrong direction (pred > 0, target < 0)
 
             using var loss = Ops.TensorMath.DirectionalLoss(_graph, pred, target, gamma: 10f);
 
@@ -231,7 +231,7 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
         }
 
         // ====================================================================
-        // 2. TESTY NUMERYCZNE (NUMERICAL GRADIENT CHECKING)
+        // 2. NUMERICAL TESTS (NUMERICAL GRADIENT CHECKING)
         // ====================================================================
 
         [Fact]
@@ -245,7 +245,7 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
             input.DataView.AsSpan().Fill(0.5f);
             bias.DataView.AsSpan().Fill(0.2f);
 
-            // Przekazujemy bezpośrednio operację. VerifyGradients zajmie się sumowaniem.
+            // We pass the operation directly. VerifyGradients will handle the summation.
             VerifyGradients(bias, () => Ops.TensorMath.AddBias(_graph, input, bias));
         }
 
@@ -255,8 +255,8 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
             using var inputTensor = new TensorStorage<float>(4, clearMemory: true);
             using var input = new AutogradNode(inputTensor, new TensorShape(1, 4), requiresGrad: true);
 
-            // Wartości wejściowe "z dala od zera", aby test numeryczny f(x+e)-f(x-e) działał płynnie 
-            // poza punktem nieciągłości matematycznej ReLU.
+            // Input values are "away from zero" so the numerical test f(x+e)-f(x-e) runs smoothly
+            // away from the mathematical discontinuity of ReLU.
             var span = input.DataView.AsSpan();
             span[0] = 1.5f; span[1] = -0.5f; span[2] = 2.0f; span[3] = -1.0f;
 
@@ -292,58 +292,58 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
         }
 
         /// <summary>
-        /// Uniwersalna metoda porównująca Gradient Analityczny z Numerycznym Różniczkowaniem.
+        /// General-purpose method that compares the analytical gradient against numerical differentiation.
         /// </summary>
         private void VerifyGradients(AutogradNode parameter, Func<AutogradNode> opFunc, float epsilon = 1e-3f, float tolerance = 1e-2f)
         {
-            // 1. Resetujemy gradient z poprzednich wywołań
+            // 1. Reset gradients from previous calls
             parameter.ZeroGrad();
             _graph.Reset();
 
-            // 2. Generujemy graf
+            // 2. Build the graph
             using var outNode = opFunc();
 
-            // ---> NAPRAWA GRAFU: Inicjujemy tensor wyjściowy jedynkami! 
-            // Matematycznie jest to równoznaczne ze zrobieniem Loss = Sum(outNode) i Loss.Backward().
+            // ---> GRAPH FIX: Initialize the output tensor with ones!
+            // Mathematically this is equivalent to computing Loss = Sum(outNode) and calling Loss.Backward().
             outNode.GradView.AsSpan().Fill(1f);
 
-            // 3. Propagacja wsteczna (Liczy gradienty analityczne bezpośrednio w grafie)
+            // 3. Backward pass (computes analytical gradients directly in the graph)
             _graph.Backward(outNode);
 
             var analyticalGrads = parameter.GradView.AsSpan().ToArray();
             var numGrads = new float[parameter.DataView.Size];
             var dataSpan = parameter.DataView.AsSpan();
 
-            // 4. Numeryczne sprawdzanie każdego elementu
+            // 4. Numerical check of every element
             for (var i = 0; i < parameter.DataView.Size; i++)
             {
                 var originalValue = dataSpan[i];
 
-                // Krok do przodu f(x + epsilon)
+                // Forward step f(x + epsilon)
                 dataSpan[i] = originalValue + epsilon;
                 _graph.Reset();
                 using (var outPlus = opFunc())
                 {
-                    // Liczymy numeryczną sumę na wyjściu (TensorPrimitives wspiera przyspieszenie sprzętowe)
+                    // Compute the numerical sum on the output (TensorPrimitives supports hardware acceleration)
                     var fPlus = TensorPrimitives.Sum(outPlus.DataView.AsReadOnlySpan());
 
-                    // Krok w tył f(x - epsilon)
+                    // Backward step f(x - epsilon)
                     dataSpan[i] = originalValue - epsilon;
                     _graph.Reset();
                     using (var outMinus = opFunc())
                     {
                         var fMinus = TensorPrimitives.Sum(outMinus.DataView.AsReadOnlySpan());
 
-                        // Aproksymacja pochodnej numerycznej
+                        // Numerical derivative approximation
                         numGrads[i] = (fPlus - fMinus) / (2 * epsilon);
                     }
                 }
 
-                // Przywrócenie stanu oryginalnego
+                // Restore the original value
                 dataSpan[i] = originalValue;
             }
 
-            // 5. Asercje
+            // 5. Assertions
             for (var i = 0; i < analyticalGrads.Length; i++)
             {
                 var diff = Math.Abs(analyticalGrads[i] - numGrads[i]);

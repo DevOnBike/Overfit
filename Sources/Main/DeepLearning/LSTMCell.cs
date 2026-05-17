@@ -96,10 +96,10 @@ namespace DevOnBike.Overfit.DeepLearning
             }
         }
 
-        // --- BRAKUJĄCA METODA Z IMODULE ---
+        // --- MISSING METHOD FROM IMODULE ---
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
-            throw new NotSupportedException("LstmCell wymaga przekazania stanów ukrytych (hidden) oraz komórki (cell). Użyj specjalnego przeciążenia Forward.");
+            throw new NotSupportedException("LstmCell requires the hidden state and cell state to be passed. Use the dedicated Forward overload.");
         }
 
         public (AutogradNode h, AutogradNode c) Forward(ComputationGraph graph, AutogradNode x, AutogradNode h, AutogradNode c)

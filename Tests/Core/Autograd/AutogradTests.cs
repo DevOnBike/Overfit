@@ -53,7 +53,7 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
 
             graph.Backward(res);
 
-            // Jeżeli RequiresGrad = true, GradView bez błędu udostępni Span z gradientami
+            // If RequiresGrad = true, GradView will expose a Span with gradients without error
             Assert.False(input.GradView.AsSpan().IsEmpty);
             Assert.False(gamma.GradView.AsSpan().IsEmpty);
         }
@@ -71,7 +71,7 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
             using var res = Ops.TensorMath.Add(graph, a, b);
             graph.Backward(res);
 
-            // Pobieranie GradView dla węzła z RequiresGrad = false wyrzuca wyjątek.
+            // Accessing GradView for a node with RequiresGrad = false throws an exception.
             Assert.Throws<InvalidOperationException>(() => _ = a.GradView);
             Assert.Throws<InvalidOperationException>(() => _ = b.GradView);
         }

@@ -12,7 +12,7 @@ using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 
-// Zmieniono na Tensors.Core
+// Changed to Tensors.Core
 
 namespace Benchmarks
 {
@@ -28,7 +28,7 @@ namespace Benchmarks
         private ComputationGraph _inferGraph = null!;
         private ComputationGraph _trainGraph = null!;
 
-        // Zmiana z FastTensor na TensorStorage
+        // Changed from FastTensor to TensorStorage
         private TensorStorage<float> _aTensor = null!;
         private TensorStorage<float> _bTensor = null!;
         private TensorStorage<float> _biasTensor = null!;
@@ -56,7 +56,7 @@ namespace Benchmarks
             _inferGraph = new ComputationGraph { IsRecording = false };
             _trainGraph = new ComputationGraph { IsRecording = true };
 
-            // Alokacja płaska dla DOD
+            // Flat allocation for DOD (data-oriented design)
             _aTensor = new TensorStorage<float>(Batch * Hidden, clearMemory: false);
             _bTensor = new TensorStorage<float>(Hidden * Hidden, clearMemory: false);
             _biasTensor = new TensorStorage<float>(Hidden, clearMemory: false);
@@ -74,7 +74,7 @@ namespace Benchmarks
             Fill(_lstmInputTensor.AsSpan(), rnd);
             Fill(_lstmTargetTensor.AsSpan(), rnd);
 
-            // Węzły dostają parametry TensorShape
+            // Nodes receive TensorShape parameters
             _aNode = new AutogradNode(_aTensor, new TensorShape(Batch, Hidden), true);
             _bNode = new AutogradNode(_bTensor, new TensorShape(Hidden, Hidden), true);
             _biasNode = new AutogradNode(_biasTensor, new TensorShape(Hidden), true);

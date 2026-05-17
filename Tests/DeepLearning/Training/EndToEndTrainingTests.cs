@@ -29,8 +29,8 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Training
             using var layer1 = new LinearLayer(2, 16);
             using var layer2 = new LinearLayer(16, 1);
 
-            // POPRAWKA: Usunięto końcowe ReLU. Wyjście regresyjne powinno być liniowe,
-            // w przeciwnym razie początkowe ujemne wagi całkowicie ubijają gradient (Dead ReLU).
+            // FIX: Removed the final ReLU. Regression output should be linear;
+            // otherwise initially negative weights completely kill the gradient (Dead ReLU).
             var model = new Sequential(
                 layer1, new ReluActivation(),
                 layer2);

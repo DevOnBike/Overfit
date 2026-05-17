@@ -74,8 +74,8 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Helpers
 
             _listener.InstrumentPublished = OnInstrumentPublished;
 
-            // ZMIANA ZERO-ALLOC: Silnie typowane rejestracje!
-            // Żadnych generyków i ukrytego Boxingu struktur do "object".
+            // ZERO-ALLOC CHANGE: Strongly-typed registrations!
+            // No generics and no hidden boxing of structs to "object".
             _listener.SetMeasurementEventCallback<double>(OnMeasurementDouble);
             _listener.SetMeasurementEventCallback<float>(OnMeasurementFloat);
             _listener.SetMeasurementEventCallback<long>(OnMeasurementLong);
@@ -102,7 +102,7 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Helpers
         }
 
         // ====================================================================
-        // SILNIE TYPOWANE HANDLERY (Omijają Convert.ToDouble(object))
+        // STRONGLY-TYPED HANDLERS (bypass Convert.ToDouble(object))
         // ====================================================================
 
         private void OnMeasurementDouble(Instrument inst, double measurement, ReadOnlySpan<KeyValuePair<string, object?>> tags, object? state)
@@ -132,7 +132,7 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Helpers
                 return;
             }
 
-            // Jeśli tagi są wyłączone, ten string jest internowany w .NET (zero alokacji)
+            // When tags are disabled this string is interned by .NET (zero allocations)
             var formattedTags = string.Empty;
 
             if (_includeTags && tags.Length > 0)
@@ -147,12 +147,12 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Helpers
                 if (_metrics.TryGetValue(key, out var aggregate))
                 {
                     aggregate.Add(value);
-                    // Struktura (value type), więc po prostu nadpisujemy
+                    // Struct (value type), so just overwrite in place
                     _metrics[key] = aggregate;
                 }
                 else
                 {
-                    // To wywoła się tylko RAZ dla każdej unikalnej serii metryk.
+                    // This will only be called ONCE for each unique metric series.
                     _metrics.Add(key, new MetricAggregate(value));
                 }
             }
@@ -165,17 +165,17 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Helpers
                 return string.Empty;
             }
 
-            // ZMIANA ZERO-ALLOC: Używamy ArrayPool zamiast stackalloc, 
-            // ponieważ Tagi zawierają typy referencyjne (string i object).
+            // ZERO-ALLOC CHANGE: Use ArrayPool instead of stackalloc,
+            // because Tags contain reference types (string and object).
             var rentedArray = ArrayPool<KeyValuePair<string, object?>>.Shared.Rent(tags.Length);
 
             try
             {
-                // Ograniczamy widok tylko do faktycznej liczby tagów (ArrayPool może zwrócić dłuższą tablicę)
+                // Restrict the view to the actual number of tags (ArrayPool may return a longer array)
                 var span = rentedArray.AsSpan(0, tags.Length);
                 tags.CopyTo(span);
 
-                // Sortowanie bez alokacji na spanie
+                // Allocation-free sort on the span
                 span.Sort((a, b) => string.CompareOrdinal(a.Key, b.Key));
 
                 var sb = new StringBuilder(128);
@@ -194,16 +194,16 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Helpers
             }
             finally
             {
-                // WAŻNE: Zwracamy tablicę do puli. 
-                // clearArray: true jest tu krytyczne, bo tablica trzyma referencje do obiektów, 
-                // a nie chcemy blokować GC przed ich posprzątaniem (wyciek pamięci).
+                // IMPORTANT: Return the array to the pool.
+                // clearArray: true is critical here because the array holds references to objects,
+                // and we do not want to prevent GC from collecting them (memory leak).
                 ArrayPool<KeyValuePair<string, object?>>.Shared.Return(rentedArray, clearArray: true);
             }
         }
 
         public void WriteSummary(string? title = null)
         {
-            // ... (Zawartość tej metody pozostaje bez zmian, bo jest wywoływana tylko na końcu testu)
+            // ... (Body of this method is unchanged; it is only called at the end of the test)
             MetricRow[] rows;
             lock (_gate)
             {

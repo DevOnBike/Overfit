@@ -15,7 +15,7 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
         public void FitBatch_ShouldApplyReluAndLog1pCorrectly()
         {
             // ARRANGE
-            // -5f powinno zostać wycięte przez ReLU do 0f. Log1p(0) = 0f.
+            // -5f should be clipped by ReLU to 0f. Log1p(0) = 0f.
             // 0f -> Log1p(0) = 0f
             // e-1 (~1.718f) -> Log1p(e-1) = 1f
             float[] data = [-5.0f, 0.0f, (float)Math.E - 1f];
@@ -27,7 +27,7 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
 
             // ASSERT
             Assert.Equal(3, normalizer.Count);
-            // Oczekiwana średnia z {0, 0, 1} wynosi ~0.3333
+            // Expected mean of {0, 0, 1} is ~0.3333
             Assert.Equal(1f / 3f, normalizer.Mean, Precision);
         }
 
@@ -63,7 +63,7 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
             var dataToTransform = new[] { 1f };
 
             // ACT & ASSERT
-            // Zapomnieliśmy wywołać Freeze()
+            // We forgot to call Freeze()
             Assert.Throws<InvalidOperationException>(() => normalizer.TransformInPlace(dataToTransform));
         }
 
@@ -77,14 +77,14 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
 
             var loadedNormalizer = new Log1pNormalizer();
 
-            // ACT - Zapis do pamięci operacyjnej i odczyt
+            // ACT - Write to memory stream and read back
             using var memoryStream = new MemoryStream();
             using var writer = new BinaryWriter(memoryStream);
             using var reader = new BinaryReader(memoryStream);
 
             originalNormalizer.Save(writer);
             
-            memoryStream.Position = 0; // Przewijamy taśmę do początku
+            memoryStream.Position = 0; // Rewind the stream to the beginning
             loadedNormalizer.Load(reader);
 
             // ASSERT

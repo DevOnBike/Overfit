@@ -13,12 +13,12 @@ using Xunit.Abstractions;
 namespace DevOnBike.Overfit.Tests.Anomalies
 {
     /// <summary>
-    /// GptAnomalyDetector tests — weryfikuje że detektor:
-    ///   1. Przypisuje wyższe score anomalnym snapshotom niż normalnym
-    ///   2. Poprawnie identyfikuje najgorszy metric w anomalii
-    ///   3. Warmup działa — Score=0 dopóki okno nie jest pełne
+    /// GptAnomalyDetector tests — verifies that the detector:
+    ///   1. Assigns higher scores to anomalous snapshots than to normal ones
+    ///   2. Correctly identifies the worst metric in an anomaly
+    ///   3. Warmup works — Score=0 until the window is full
     ///
-    /// Wymaga: test_fixtures/k8s_anomaly_checkpoint.bin
+    /// Requires: test_fixtures/k8s_anomaly_checkpoint.bin
     ///   (generowany przez OfflineTrainingJobTests.TrainOnCsv_LossDecreases_CheckpointWritten)
     /// </summary>
     public class GptAnomalyDetectorTests : IDisposable
@@ -33,9 +33,9 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         {
             _output = output;
 
-            // Config musi odpowiadać checkpointowi.
-            // Quick (64d) → k8s_anomaly_checkpoint.bin z TrainOnCsv
-            // Medium (128d) → skopiuj k8s_anomaly_medium.bin jako k8s_anomaly_checkpoint.bin
+            // Config must match the checkpoint.
+            // Quick (64d) → k8s_anomaly_checkpoint.bin from TrainOnCsv
+            // Medium (128d) → copy k8s_anomaly_medium.bin as k8s_anomaly_checkpoint.bin
             _config = File.Exists(CheckpointPath)
                 ? DetectConfigFromCheckpoint(CheckpointPath)
                 : GptTrainingConfig.Quick;
@@ -164,15 +164,15 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             Assert.True(result.Score > 1.0f,
                 $"OOM anomalia powinna mieć score > 1.0, dostała {result.Score:F4}");
 
-            // Worst metric powinien być związany z pamięcią lub OOM
+            // Worst metric should be related to memory or OOM
             var isMemoryRelated =
                 result.WorstMetric.Contains("memory") ||
                 result.WorstMetric.Contains("oom") ||
                 result.WorstMetric.Contains("gc");
 
             _output.WriteLine($"Memory-related worst metric: {isMemoryRelated}");
-            // Nie asertujemy WorstMetric — małe modele (64d) mogą wskazać inną metrykę
-            // Production model (256d) będzie dokładniejszy
+            // We do not assert WorstMetric — small models (64d) may point to a different metric
+            // The production model (256d) will be more accurate
         }
 
         [Fact]
@@ -198,8 +198,8 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         // ── Helpers ──────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Odczytuje rozmiar pierwszego parametru z checkpointu żeby wykryć DModel.
-        /// Embedding weight = VocabSize × DModel floatów.
+        /// Reads the size of the first parameter from the checkpoint to detect DModel.
+        /// Embedding weight = VocabSize × DModel floats.
         /// </summary>
         private static GptTrainingConfig DetectConfigFromCheckpoint(string path)
         {

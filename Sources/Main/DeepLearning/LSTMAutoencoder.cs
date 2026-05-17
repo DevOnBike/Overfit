@@ -97,8 +97,8 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
-            // Adapter dla standardowego interfejsu IModule. 
-            // Wymusza predykcję dla pojedynczej sekwencji (Batch = 1).
+            // Adapter for the standard IModule interface.
+            // Forces prediction for a single sequence (Batch = 1).
             Reconstruct(1, input, output);
         }
 
@@ -191,7 +191,7 @@ namespace DevOnBike.Overfit.DeepLearning
             var repLen = batchSize * SeqLen * LatentSize;
             var dec1Len = batchSize * SeqLen * DecoderHidden;
 
-            // Brak wielkich bloków try-finally, wszystko załatwiają PooledBuffery
+            // No large try-finally blocks — PooledBuffers handle everything
             using var enc1Buf = new PooledBuffer<float>(enc1Len);
             using var latentBuf = new PooledBuffer<float>(latentLen);
             using var repBuf = new PooledBuffer<float>(repLen);

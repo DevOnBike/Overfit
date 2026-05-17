@@ -891,7 +891,7 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
             if (!File.Exists(trainImagesPath) || !File.Exists(trainLabelsPath) ||
                 !File.Exists(testImagesPath) || !File.Exists(testLabelsPath))
             {
-                return; // Przeskakuje, jeśli brakuje datasetu
+                return; // Skip if the dataset is missing
             }
 
             var (trainX, trainY) = MnistLoader.Load(trainImagesPath, trainLabelsPath, trainSize);
@@ -1329,7 +1329,7 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
         {
             var graph = new ComputationGraph();
 
-            // Zwiększono pojemność z 8 na 16 neuronów, by uniknąć problemu Dead ReLU
+            // Capacity increased from 8 to 16 neurons to avoid the Dead ReLU problem
             var model = new Sequential(
                 new LinearLayer(2, 16),
                 new ReluActivation(),
@@ -1377,7 +1377,7 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
                 graph.Reset();
             }
 
-            // Zwiększono liczbę kroków z 300 na 600
+            // Step count increased from 300 to 600
             for (var step = 0; step < 600; step++)
             {
                 graph.Reset();

@@ -439,6 +439,7 @@ Use cases: Kubernetes tuning, game AI, industrial process search, pricing strate
 
 ### Recently completed
 
+- ✅ **GPT1 LoRA fine-tuning — Stages 1 & 2** — `Gpt1LoRAFineTuner` trains low-rank adapters on a frozen `GPT1Model`: Stage 1 the LM head, Stage 2 the per-block feed-forward matrices (`LoRATargetModules` selection — LM head / FFN-up / FFN-down, any combination). Backward through the frozen base, adapter-only Adam. `Gpt1LoRAMergeAdapter` merges trained adapters in place so KV-cached decode observes them; multi-entry `.bin` format.
 - ✅ **Zero-alloc parallel runtime — `OverfitParallelFor`** — bulk-wake dispatcher (`SemaphoreSlim.Release(N)`) replacing `Parallel.For` in hot paths. ~5 µs warm dispatch, 0 B/call, exception propagation via `ExceptionDispatchInfo`, configurable worker count via `OVERFIT_PARALLEL_WORKERS` env var.
 - ✅ **GELU + LayerNorm parallelization (forward + backward)** — was sequential scalar; now `OverfitParallelFor` over chunks + `TensorPrimitives` SIMD pipeline inside each chunk. GPT-1 batch=32: GELU bwd 1774→42 ms (42×), LayerNorm bwd 800→39 ms (20×). Wall/step 414→191 ms (−54%), cores effective 3.89→7.93 / 32 (+104%).
 - ✅ **Migrated hot-path kernels to `OverfitParallelFor`** — `LinearKernels.BackwardInput` + `AccumulateWeightGrad`, `TensorMath.Pooling` (Max/AvgPool fwd+bwd), `TensorMath.Algebra` (AddBias, MatMul variants), `ComputationGraph.Linear` forward. MNIST CNN 5-epoch: −12% wall, −18% total CPU.
@@ -467,8 +468,9 @@ Use cases: Kubernetes tuning, game AI, industrial process search, pricing strate
 
 ### Near-term
 
-- **LoRA training** — backward through frozen-base attention/FFN, adapter-only Adam.
-  Inference adapter (`LlamaLoRAAdapter`: Enable/Disable/Save/Load) already lands.
+- **LoRA training — attention modules + Llama path** — GPT1 LM-head and FFN LoRA
+  training already lands (`Gpt1LoRAFineTuner`, Stages 1 & 2); attention-module LoRA
+  and Llama/Qwen-side adapter training are still pending.
 - **Quantized weight storage at inference** — disk-side Q4_K/Q6_K loading works
   (Ollama files load directly); RAM-side block storage + dequant-fused matmul
   still pending. See `ROADMAP.md` "Slot 2b".
@@ -495,7 +497,7 @@ Use cases: Kubernetes tuning, game AI, industrial process search, pricing strate
 | Streaming token API | ✅ | `IAsyncEnumerable<int>` with stop-tokens + cancellation |
 | LoRA inference adapter | ✅ | Zero-copy weight refs; Enable/Disable/Save/Load |
 | GPT-2 training | ❌ | Gradient checkpointing required at scale |
-| LoRA training (backward) | ❌ | Adapter-only backward not yet wired |
+| LoRA training (backward) | 🟡 | GPT1 LM-head + FFN LoRA wired (`Gpt1LoRAFineTuner`, adapter-only Adam through the frozen base); attention LoRA + Llama-side training pending |
 | Quantized RAM storage | ❌ | Disk-side Q4_K/Q6_K done; in-memory block storage + dequant-fused matmul pending |
 | Transformer training (small) | 🟡 | TinyShakespeare training tests converge; quality demo runs end-to-end |
 

@@ -55,6 +55,22 @@ namespace DevOnBike.Overfit.DeepLearning
         public Parameter W2 { get; }
         public Parameter B2 { get; }
 
+        /// <summary>
+        /// Optional per-forward override for the W1 (up-projection) weight node —
+        /// the LoRA fine-tune hook (see Gpt1LoRAFineTuner, Stage 2). When set,
+        /// <see cref="Forward"/> uses the node this delegate returns instead of the
+        /// plain <see cref="W1"/> parameter; the delegate supplies
+        /// W_eff = W1(frozen) + A@B built on the current graph. Null on the
+        /// production path — plain weight, zero overhead.
+        /// </summary>
+        internal Func<ComputationGraph, AutogradNode>? W1WeightProvider { get; set; }
+
+        /// <summary>
+        /// Optional per-forward override for the W2 (down-projection) weight node.
+        /// See <see cref="W1WeightProvider"/>.
+        /// </summary>
+        internal Func<ComputationGraph, AutogradNode>? W2WeightProvider { get; set; }
+
         public bool IsTraining { get; private set; } = true;
 
         public void Train() => IsTraining = true;
@@ -75,22 +91,45 @@ namespace DevOnBike.Overfit.DeepLearning
                 throw new ArgumentException($"Expected d_model={_dModel}, got {dModel}. Input: {input.Shape}");
             }
 
-            _w1Node ??= W1.AsNode();
             _b1Node ??= B1.AsNode();
-            _w2Node ??= W2.AsNode();
             _b2Node ??= B2.AsNode();
+
+            // W1 / W2 nodes: a LoRA fine-tuner can override these with an effective
+            // weight W_eff = W(frozen) + A@B via the providers; the production path
+            // uses the plain cached parameter node, zero overhead.
+            AutogradNode w1Node;
+            if (W1WeightProvider is not null)
+            {
+                w1Node = W1WeightProvider(graph);
+            }
+            else
+            {
+                _w1Node ??= W1.AsNode();
+                w1Node = _w1Node;
+            }
+
+            AutogradNode w2Node;
+            if (W2WeightProvider is not null)
+            {
+                w2Node = W2WeightProvider(graph);
+            }
+            else
+            {
+                _w2Node ??= W2.AsNode();
+                w2Node = _w2Node;
+            }
 
             // Flatten [B, T, dModel] → [B*T, dModel]
             var flat = graph.Reshape(input, b * t, _dModel);
 
             // [B*T, dModel] @ W1 + b1 → [B*T, dFF]
-            var h1 = graph.Linear(flat, _w1Node, _b1Node);
+            var h1 = graph.Linear(flat, w1Node, _b1Node);
 
             // GELU([B*T, dFF])
             var act = TensorMath.Gelu(graph, h1);
 
             // [B*T, dFF] @ W2 + b2 → [B*T, dModel]
-            var h2 = graph.Linear(act, _w2Node, _b2Node);
+            var h2 = graph.Linear(act, w2Node, _b2Node);
 
             // Reshape back to [B, T, dModel]
             return graph.Reshape(h2, b, t, _dModel);
@@ -113,9 +152,15 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void InvalidateParameterCaches()
         {
+            // Dispose the cached parameter nodes before dropping them — consistent
+            // with GPT1Model.InvalidateAllCaches / MultiHeadAttentionLayer.
+            _w1Node?.Dispose();
             _w1Node = null;
+            _b1Node?.Dispose();
             _b1Node = null;
+            _w2Node?.Dispose();
             _w2Node = null;
+            _b2Node?.Dispose();
             _b2Node = null;
         }
 

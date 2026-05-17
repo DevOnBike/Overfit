@@ -51,10 +51,10 @@ namespace Benchmarks
             }
 
             // 2. Setup dla MathNet
-            // Tworzymy macierz 100_000 x 4 dla wejść
+            // Build a 100_000 x 4 matrix for inputs
             _mathNetInputs = Matrix<float>.Build.DenseOfColumnMajor(SwarmSize, InputSize, _overfitInputs);
 
-            // Wagi to macierz 4 x 2
+            // Weights are a 4 x 2 matrix
             float[] weights =
             [
                 _overfitBrain[0], _overfitBrain[4], _overfitBrain[1], _overfitBrain[5],
@@ -62,26 +62,26 @@ namespace Benchmarks
             ];
             _mathNetWeights = Matrix<float>.Build.DenseOfColumnMajor(InputSize, OutputSize, weights);
 
-            // Biasy
+            // Biases
             _mathNetBiases = Vector<float>.Build.Dense([_overfitBrain[8], _overfitBrain[9]]);
         }
 
         // ==============================================================
-        // TEST 1: Podejście MathNet.Numerics (Standard inżynieryjny w C#)
+        // TEST 1: MathNet.Numerics approach (standard C# engineering library)
         // ==============================================================
         [Benchmark]
         public void Infer_MathNet()
         {
-            // Mnożenie macierzy: (100_000 x 4) * (4 x 2) = Macierz (100_000 x 2)
-            // UWAGA: To tutaj MathNet alokuje nową macierz w pamięci dla wyniku!
+            // Matrix multiplication: (100_000 x 4) * (4 x 2) = matrix (100_000 x 2)
+            // NOTE: This is where MathNet allocates a new result matrix on the heap!
             var result = _mathNetInputs * _mathNetWeights;
 
-            // Dodanie biasu i aktywacja Tanh (In-place, żeby chociaż trochę pomóc MathNetowi)
+            // Add bias and apply Tanh activation (in-place, to at least give MathNet a fighting chance)
             result.MapIndexedInplace((row, col, val) => MathF.Tanh(val + _mathNetBiases[col]));
         }
 
         // ==============================================================
-        // TEST 2: Podejście Overfit (Twoje brutalnie szybkie Span/SIMD)
+        // TEST 2: Overfit approach (brutally fast Span/SIMD)
         // ==============================================================
         [Benchmark(Baseline = true)]
         public void Infer_Overfit_ZeroAlloc()

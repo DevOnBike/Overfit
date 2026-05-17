@@ -23,7 +23,7 @@ namespace DevOnBike.Overfit.UI
 
         public MnistPredictor(string modelPath)
         {
-            // 1. Definicja architektury (Musi być identyczna jak w treningu)
+            // 1. Architecture definition (must be identical to what was used during training)
             _conv1 = new ConvLayer(1, 8, 28, 28, 3);
             _bn1 = new BatchNorm1D(1352);
             _fc1 = new LinearLayer(1352, 10);
@@ -41,7 +41,7 @@ namespace DevOnBike.Overfit.UI
                 _weightsContainer.Load(br);
             }
 
-            // Tryb inferencji - wyłącza Dropout i BatchNorm Momentum
+            // Inference mode — disables Dropout and BatchNorm momentum
             _weightsContainer.Eval();
         }
 
@@ -65,9 +65,9 @@ namespace DevOnBike.Overfit.UI
             // POPRAWKA: AutogradNode now requires explicit TensorShape
             using var input = new AutogradNode(inputMat, new TensorShape(1, 1, 28, 28));
 
-            // --- INFERENCJA (FORWARD PASS) ---
-            // WAŻNE: Usuwamy 'using' przy wynikach Forward, bo zwracają one wewnętrzne bufory warstw.
-            // Ich zdisposowanie uniemożliwiłoby kolejne wywołania Predict!
+            // --- INFERENCE (FORWARD PASS) ---
+            // IMPORTANT: Do not wrap Forward results in 'using' — they return internal layer buffers.
+            // Disposing them would break subsequent calls to Predict!
 
             var h1 = _conv1.Forward(null, input);
             using var a1 = TensorMath.ReLU(null, h1);

@@ -94,7 +94,7 @@ namespace DevOnBike.Overfit.Anomalies.Training
             var finalValLoss = 0f;
             var windowLoss   = 0f;
 
-            // Parallel SDPA backward — -27% czasu backward przy dużych modelach.
+            // Parallel SDPA backward — -27% backward time on large models.
             ExperimentalLanguageModelOptions.EnableParallelAttentionBackward = true;
 
             // Data parallel: N workers share gradient per step.

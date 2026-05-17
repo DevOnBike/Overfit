@@ -127,8 +127,11 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void InvalidateParameterCaches()
         {
+            // Dispose the cached parameter nodes before dropping them.
+            _gammaNode?.Dispose();
             _gammaNode = null;
-            _betaNode  = null;
+            _betaNode?.Dispose();
+            _betaNode = null;
         }
 
         public void Save(BinaryWriter bw)

@@ -47,7 +47,7 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Prepare
 
             converter.Fit(rawData);
 
-            // Konwerter wciąż zwraca FastTensor, robimy tymczasową przejściówkę do DOD
+            // The converter still returns FastTensor; we make a temporary bridge to DOD
             var (oldFeatures, oldTargets) = converter.Convert(rawData);
 
             var nSamples = rawData.Count;

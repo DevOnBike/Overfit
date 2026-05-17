@@ -11,17 +11,17 @@ namespace DevOnBike.Overfit.Tests.TestSupport.GradientChecking
     public static class GradientChecker
     {
         /// <summary>
-        /// Weryfikuje gradienty analityczne modułu poprzez porównanie ich z numeryczną aproksymacją.
+        /// Verifies the analytical gradients of a module by comparing them against a numerical approximation.
         /// </summary>
-        /// <param name="module">Moduł (warstwa lub cała sieć) do przetestowania.</param>
-        /// <param name="forwardAndLoss">Delegat wykonujący Forward Pass i zwracający skalar funkcji straty.</param>
-        /// <param name="epsilon">Krok do numerycznej pochodnej.</param>
-        /// <param name="tolerance">Maksymalny dopuszczalny błąd względny.</param>
+        /// <param name="module">The module (layer or full network) to test.</param>
+        /// <param name="forwardAndLoss">Delegate that runs the forward pass and returns a scalar loss value.</param>
+        /// <param name="epsilon">Step size for the numerical derivative.</param>
+        /// <param name="tolerance">Maximum allowable relative error.</param>
         /// <param name="maxChecksPerParameter">
-        /// Maksymalna liczba sprawdzanych elementów na parametr.
-        /// Gdy null albo <= 0, sprawdzane są wszystkie elementy.
+        /// Maximum number of elements to check per parameter.
+        /// When null or &lt;= 0, all elements are checked.
         /// </param>
-        /// <param name="seed">Seed do deterministycznego próbkowania indeksów.</param>
+        /// <param name="seed">Seed for deterministic index sampling.</param>
         public static void Verify(
             IModule module,
             Func<ComputationGraph, AutogradNode> forwardAndLoss,
@@ -41,7 +41,7 @@ namespace DevOnBike.Overfit.Tests.TestSupport.GradientChecking
 
             var graph = new ComputationGraph { IsRecording = true };
 
-            // 1. Zerowanie gradientów parametrów przed analitycznym backwardem.
+            // 1. Zero out parameter gradients before the analytical backward pass.
             foreach (var param in parameters)
             {
                 if (param.RequiresGrad)
@@ -50,13 +50,13 @@ namespace DevOnBike.Overfit.Tests.TestSupport.GradientChecking
                 }
             }
 
-            // 2. Forward + Backward dla gradientów analitycznych.
+            // 2. Forward + Backward for analytical gradients.
             var lossNode = forwardAndLoss(graph);
             EnsureScalarLoss(lossNode);
 
             graph.Backward(lossNode);
 
-            // 3. Kopiowanie gradientów analitycznych do bezpiecznego magazynu.
+            // 3. Copy analytical gradients to a safe storage buffer.
             var analyticalGradients = new List<float[]>(parameters.Count);
             foreach (var param in parameters)
             {
@@ -71,7 +71,7 @@ namespace DevOnBike.Overfit.Tests.TestSupport.GradientChecking
                 analyticalGradients.Add(gradCopy);
             }
 
-            // Czyścimy tape i gradienty, żeby nic nie przeciekało do części numerycznej.
+            // Clear the tape and gradients so nothing leaks into the numerical part.
             graph.Reset();
             foreach (var param in parameters)
             {
@@ -83,7 +83,7 @@ namespace DevOnBike.Overfit.Tests.TestSupport.GradientChecking
 
             var rng = new Random(seed);
 
-            // 4. Gradient numeryczny i porównanie.
+            // 4. Numerical gradient and comparison.
             for (var pIdx = 0; pIdx < parameters.Count; pIdx++)
             {
                 var param = parameters[pIdx];
@@ -107,7 +107,7 @@ namespace DevOnBike.Overfit.Tests.TestSupport.GradientChecking
                     dataSpan[i] = originalValue - epsilon;
                     var lossMinus = EvaluateScalarLoss(graph, forwardAndLoss);
 
-                    // Przywrócenie oryginalnej wartości
+                    // Restore the original value
                     dataSpan[i] = originalValue;
 
                     var numericalGrad = (lossPlus - lossMinus) / (2f * epsilon);
@@ -115,7 +115,7 @@ namespace DevOnBike.Overfit.Tests.TestSupport.GradientChecking
 
                     var absError = MathF.Abs(analyticalGrad - numericalGrad);
 
-                    // Bardziej czuły i standardowy mianownik niż max(1,...)
+                    // More sensitive and standard denominator than max(1,...)
                     var relDenom = MathF.Max(1e-6f, MathF.Abs(analyticalGrad) + MathF.Abs(numericalGrad));
                     var relativeError = absError / relDenom;
 

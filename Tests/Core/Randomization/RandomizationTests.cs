@@ -12,20 +12,20 @@ namespace DevOnBike.Overfit.Tests.Core.Randomization
         [Fact]
         public void PRNG_RegressionTest_MustBeFullyDeterministic()
         {
-            // Arrange: Twardy seed gwarantuje zawsze ten sam strumień
+            // Arrange: Hard seed guarantees the same stream every time
             var prng = new VectorizedRandom(seed: 12345);
             var buffer = new float[10000];
 
             // Act
             prng.Fill(buffer);
 
-            // Assert: Liczymy sumę z 10 000 wylosowanych floatów. 
-            // Każda zmiana w matematyce wektorów natychmiast wyrzuci ten test.
-            // (Uwaga: pierwszą wyliczoną sumę musisz sobie skopiować z odpalenia debuggera 
-            // i wkleić tu jako "expected", tu używam przykładowej 4987.123f)
+            // Assert: We sum 10,000 sampled floats.
+            // Any change in the vector math will immediately fail this test.
+            // (Note: copy the first computed sum from a debugger run
+            // and paste it here as "expected"; here I use the example value 4987.123f)
             var sum = buffer.Sum();
 
-            // Dajemy małą tolerancję na błędy precyzji float
+            // We allow a small tolerance for float precision errors
             Assert.InRange(sum, 5077.00f, 5077.20f);
         }
 
@@ -40,21 +40,21 @@ namespace DevOnBike.Overfit.Tests.Core.Randomization
             // Act
             prng.Fill(buffer);
 
-            // Assert 1: Zakres (żadna liczba nie może uciec poza [0, 1) )
+            // Assert 1: Range (no number may escape outside [0, 1) )
             var min = buffer.Min();
             var max = buffer.Max();
             Assert.True(min >= 0.0f, "Wygenerowano liczbę mniejszą niż 0!");
             Assert.True(max < 1.0f, "Wygenerowano liczbę większą lub równą 1!");
 
-            // Assert 2: Średnia (~0.5)
+            // Assert 2: Mean (~0.5)
             var mean = buffer.Average(x => (double)x);
-            Assert.InRange(mean, 0.499, 0.501); // Bardzo blisko 0.5
+            Assert.InRange(mean, 0.499, 0.501); // Very close to 0.5
 
-            // Assert 3: Wariancja (~0.08333)
+            // Assert 3: Variance (~0.08333)
             var variance = buffer.Average(x => Math.Pow(x - mean, 2));
             Assert.InRange(variance, 0.083, 0.084);
 
-            // Assert 4: Test wiaderkowy (Prosty Chi-Kwadrat / Histogram)
+            // Assert 4: Bucket test (Simple Chi-Square / Histogram)
             var numBuckets = 10;
             var buckets = new int[numBuckets];
 
@@ -68,9 +68,9 @@ namespace DevOnBike.Overfit.Tests.Core.Randomization
                 buckets[bucketIndex]++;
             }
 
-            // Spodziewamy się 100,000 elementów w każdym z 10 wiader
+            // We expect 100,000 elements in each of the 10 buckets
             var expectedPerBucket = sampleSize / numBuckets;
-            var tolerance = (int)(expectedPerBucket * 0.015); // Tolerancja odchylenia 1.5%
+            var tolerance = (int)(expectedPerBucket * 0.015); // Deviation tolerance 1.5%
 
             for (var i = 0; i < numBuckets; i++)
             {

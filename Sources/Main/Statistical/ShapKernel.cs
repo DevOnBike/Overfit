@@ -52,7 +52,7 @@ namespace DevOnBike.Overfit.Statistical
                 phi[i] = marginalSum / samplesPerFeature;
             }
 
-            // Korekta efektywności (Aksjomat SHAP)
+            // Efficiency correction (SHAP Axiom)
             float sum = 0;
             
             for (var i = 0; i < _m; i++)

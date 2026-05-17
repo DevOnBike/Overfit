@@ -10,8 +10,8 @@ using DevOnBike.Overfit.Tensors;
 namespace DevOnBike.Overfit.Statistical
 {
     /// <summary>
-    /// Wyodrębnia statystyki (Mean, Std, P95, Delta) z okna czasowego dla każdej cechy.
-    /// Działa w trybie Zero-Allocation dla okien poniżej 256 próbek.
+    /// Extracts statistics (Mean, Std, P95, Delta) from a time window for each feature.
+    /// Operates in Zero-Allocation mode for windows below 256 samples.
     /// </summary>
     public static class FeatureExtractor
     {
@@ -69,7 +69,7 @@ namespace DevOnBike.Overfit.Statistical
             }
             else
             {
-                // ZMIANA: Zastosowanie PooledBuffer!
+                // CHANGE: Using PooledBuffer!
                 using var rented = new PooledBuffer<float>(windowSize);
                 ExtractCore(window, windowSize, featureCount, output, rented.Span);
             }

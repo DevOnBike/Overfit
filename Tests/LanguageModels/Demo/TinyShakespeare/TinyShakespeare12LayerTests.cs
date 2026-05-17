@@ -14,17 +14,17 @@ using Xunit.Abstractions;
 namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
 {
     /// <summary>
-    /// Opcja A: 12 warstw, 256d, 8 głów — ~9.5M parametrów.
+    /// Option A: 12 layers, 256d, 8 heads — ~9.5 M parameters.
     ///
-    /// Cel: val loss poniżej 2.0 po 5000 krokach.
-    /// Punkt odniesienia: nanoGPT (Karpathy) osiąga 1.47 przy SeqLen=256.
-    /// My używamy SeqLen=64 (limit areny 50MB) więc cel to ~1.8-2.0.
+    /// Goal: val loss below 2.0 after 5000 steps.
+    /// Reference: nanoGPT (Karpathy) reaches 1.47 at SeqLen=256.
+    /// We use SeqLen=64 (50 MB arena limit) so the target is ~1.8-2.0.
     ///
-    /// Co pokazuje:
-    ///   Pełna głębokość GPT-1 (12 warstw) uczy się struktury języka angielskiego
-    ///   na Tiny Shakespeare. Gradient przepływa przez cały stos bez dywergencji.
+    /// What this demonstrates:
+    ///   Full GPT-1 depth (12 layers) learns the structure of English
+    ///   on Tiny Shakespeare. Gradient flows through the entire stack without divergence.
     ///
-    /// Czas: ~5-8 minut na Ryzen 9 9950X3D.
+    /// Time: ~5-8 minutes on Ryzen 9 9950X3D.
     ///
     /// Fixture:
     ///   curl -o Tests/test_fixtures/tiny_shakespeare.txt \
@@ -45,9 +45,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
         {
             SkipIfMissing(FixturePath);
 
-            // ── Konfiguracja ─────────────────────────────────────────────────
-            // 12 warstw, 256d, 8 głów, dFF=1024, SeqLen=64
-            // Params: ~9.5M | Arena: ~8MB (mieści się w 50MB)
+            // ── Configuration ────────────────────────────────────────────────
+            // 12 layers, 256d, 8 heads, dFF=1024, SeqLen=64
+            // Params: ~9.5M | Arena: ~8MB (fits within 50MB)
             const int seqLen = 64;
             const int totalSteps = 10_000;
             const int reportEvery = 1_000;
@@ -103,7 +103,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
             var initialLoss = 0f;
             var finalValLoss = 0f;
 
-            // ── Pętla treningowa ──────────────────────────────────────────────
+            // ── Training loop ─────────────────────────────────────────────────
             for (var step = 0; step < totalSteps; step++)
             {
                 var (inputIds, targetIds) = SampleSequence(trainIds, seqLen, rng);
@@ -118,7 +118,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
                 graph.BackwardFromGrad(logits);
                 ClipGradNorm(model.TrainableParameters(), maxNorm: 1.0f);
 
-                // Cosine decay: sprawna zbieżność na końcu treningu
+                // Cosine decay: smooth convergence toward the end of training
                 var progress = (float)step / totalSteps;
                 var cosineDecay = 0.5f * (1f + MathF.Cos(MathF.PI * progress));
                 optimizer.LearningRate = lrMin + (lrMax - lrMin) * cosineDecay;
@@ -138,7 +138,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
                     var avgLoss = windowLoss / reportEvery;
                     windowLoss = 0f;
 
-                    // Val eval co valEvery kroków — 50 forward passes kosztuje ~3s
+                    // Val eval every valEvery steps — 50 forward passes cost ~3 s
                     var valLoss = (step + 1) % valEvery == 0
                         ? EvaluateLoss(model, valIds, config, seqLen, rng, valSteps: 50)
                         : float.NaN;
@@ -149,7 +149,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
                         $"Step {step + 1,5} | Train: {avgLoss:F4} | Val: {valStr} | " +
                         $"{elapsed:mm\\:ss} | {elapsed.TotalMilliseconds / (step + 1):F0}ms/step");
 
-                    // Sample text po każdych 2500 krokach
+                    // Sample text every 2500 steps
                     if ((step + 1) % 2500 == 0)
                     {
                         var sample = GenerateSample(model, tokenizer, "ROMEO:", maxTokens: 120);
@@ -182,7 +182,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
 
             // ── Asercje ───────────────────────────────────────────────────────
 
-            // 1. Val loss poniżej 2.5 — realny cel przy SeqLen=64 (nanoGPT: 1.47 przy SeqLen=256)
+            // 1. Val loss below 2.5 — realistic target at SeqLen=64 (nanoGPT: 1.47 at SeqLen=256)
             Assert.True(finalValLoss < 3.0f,
                 $"Val loss {finalValLoss:F4} >= 3.0. " +
                 "Oczekiwano < 3.0 przy 10K krokach z cosine LR decay.");
@@ -289,9 +289,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
         }
 
         /// <summary>
-        /// Parallel cross-entropy loss — 64 pozycje sekwencji niezależne → Parallel.For.
-        /// Używa tablic zamiast Span żeby ominąć ograniczenie ref struct w lambda.
-        /// ~3-5ms szybsze niż wersja sekwencyjna przy seqLen=64.
+        /// Parallel cross-entropy loss — 64 sequence positions are independent → Parallel.For.
+        /// Uses arrays instead of Span to work around the ref struct capture restriction in lambdas.
+        /// ~3-5 ms faster than the sequential version at seqLen=64.
         /// </summary>
         private static float ComputeLossAndSeedGradParallel(
             AutogradNode logits,
@@ -299,7 +299,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
             int seqLen,
             int vocabSize)
         {
-            // Kopiuj do tablic managed — Span nie może być captured w lambda
+            // Copy to managed arrays — Span cannot be captured in a lambda
             var logitArr = logits.DataView.AsReadOnlySpan().ToArray();
             var gradArr = new float[seqLen * vocabSize];
 
@@ -336,7 +336,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
                 }
             });
 
-            // Zapisz gradienty z powrotem do logits.GradView
+            // Write gradients back to logits.GradView
             gradArr.AsSpan().CopyTo(logits.GradView.AsSpan());
 
             var total = 0f;
@@ -349,7 +349,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
 
         private static void ClipGradNorm(IEnumerable<Parameter> parameters, float maxNorm)
         {
-            // Oblicz globalną normę wszystkich gradientów
+            // Compute the global norm of all gradients
             var totalNormSq = 0f;
             var paramList = parameters.ToList();
 
@@ -368,7 +368,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
                 return;
             }
 
-            // Przeskaluj gradienty
+            // Scale the gradients
             var scale = maxNorm / (totalNorm + 1e-6f);
 
             foreach (var p in paramList)

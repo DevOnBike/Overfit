@@ -43,7 +43,7 @@ namespace DevOnBike.Overfit.Tests.Forecasting
             var sampleCount = returns.Length - windowSize;
             var batchSize = sampleCount;
 
-            // POPRAWKA: Przejście na TensorStorage i DOD
+            // FIX: Switch to TensorStorage and DOD
             using var xData = new TensorStorage<float>(batchSize * inputSize, clearMemory: false);
             using var yData = new TensorStorage<float>(batchSize * 1, clearMemory: false);
 

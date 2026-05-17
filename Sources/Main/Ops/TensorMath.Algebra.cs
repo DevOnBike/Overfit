@@ -202,7 +202,7 @@ namespace DevOnBike.Overfit.Ops
         {
             int aR = A.Shape.D0, aC = A.Shape.D1, bC = B.Shape.D1;
 
-            // Konieczne clearMemory: true, bo będziemy akumulować mnożenie (+=)
+            // clearMemory: true required, because we will accumulate multiplication results (+=)
             var C = AllocateNode(graph, new TensorShape(aR, bC), requiresGrad, clearMemory: true);
 
             if ((long)aR * aC * bC < ParallelThreshold)

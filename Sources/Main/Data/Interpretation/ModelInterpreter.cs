@@ -8,7 +8,7 @@ using DevOnBike.Overfit.Data.Contracts;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors.Core;
 
-// Dodano Core
+// Added Core
 
 namespace DevOnBike.Overfit.Data.Interpretation
 {
@@ -23,7 +23,7 @@ namespace DevOnBike.Overfit.Data.Interpretation
             _featureNames = expandedFeatureNames;
         }
 
-        // Zmiana z FastTensor na AutogradNode
+        // Changed from FastTensor to AutogradNode
         public void PrintFeatureImportance(
             AutogradNode w1,
             AutogradNode b1,
@@ -65,7 +65,7 @@ namespace DevOnBike.Overfit.Data.Interpretation
             }
         }
 
-        // Zmiana z FastTensor na AutogradNode
+        // Changed from FastTensor to AutogradNode
         public void PrintCorrelations(AutogradNode features)
         {
             var cols = features.Shape.D1;
@@ -85,7 +85,7 @@ namespace DevOnBike.Overfit.Data.Interpretation
             }
         }
 
-        // Zmiana z FastTensor na AutogradNode
+        // Changed from FastTensor to AutogradNode
         private float CalculateLoss(
             AutogradNode w1,
             AutogradNode b1,
@@ -94,7 +94,7 @@ namespace DevOnBike.Overfit.Data.Interpretation
             AutogradNode input,
             AutogradNode target)
         {
-            // Ponieważ input to teraz AutogradNode, wchodzimy tu bezpośrednio, zero alokacji "using"!
+            // Because input is now an AutogradNode, we enter directly here — zero "using" allocations!
             using var l1 = TensorMath.ReLU(null, TensorMath.AddBias(null, TensorMath.MatMul(null, input, w1), b1));
             using var pred = TensorMath.AddBias(null, TensorMath.MatMul(null, l1, w2), b2);
             using var loss = TensorMath.MSELoss(null, pred, target);
@@ -102,7 +102,7 @@ namespace DevOnBike.Overfit.Data.Interpretation
             return loss.DataView.AsReadOnlySpan()[0];
         }
 
-        // Zmiana z FastTensor na AutogradNode
+        // Changed from FastTensor to AutogradNode
         private float CalculatePearson(AutogradNode t, int colA, int colB)
         {
             var rows = t.Shape.D0;
@@ -128,7 +128,7 @@ namespace DevOnBike.Overfit.Data.Interpretation
             return den == 0 ? 0 : num / den;
         }
 
-        // Zmiana na zero-alloc TensorStorage
+        // Changed to zero-alloc TensorStorage
         private AutogradNode CloneAndShuffleColumn(AutogradNode src, int colIdx)
         {
             var resStorage = new TensorStorage<float>(src.Shape.Size, clearMemory: false);

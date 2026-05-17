@@ -27,7 +27,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Cnn
             var epochs = 3;
             var learningRate = 0.001f;
 
-            // MnistLoader musi teraz zwracać krotkę (TensorStorage<float> trainX, TensorStorage<float> trainY)
+            // MnistLoader must now return a tuple (TensorStorage&lt;float&gt; trainX, TensorStorage&lt;float&gt; trainY)
             var (trainX, trainY) = MnistLoader.Load(TestModelPaths.Mnist.TrainImagesPath, TestModelPaths.Mnist.TrainLabelsPath, trainSize);
 
             using var X = new AutogradNode(trainX, new TensorShape(trainSize, 1, 28, 28));
@@ -52,7 +52,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Cnn
                     graph.Reset();
                     adam.ZeroGrad();
 
-                    // Używamy surowych buforów i kształtów
+                    // We use raw buffers and shapes
                     using var batchX = new TensorStorage<float>(batchSize * 1 * 28 * 28, clearMemory: false);
                     using var batchY = new TensorStorage<float>(batchSize * 10, clearMemory: false);
 

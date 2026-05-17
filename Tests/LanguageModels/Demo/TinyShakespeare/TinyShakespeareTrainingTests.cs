@@ -15,36 +15,36 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
     /// <summary>
     /// GPT-1 language model training test on Tiny Shakespeare.
     ///
-    /// CO TO POKAZUJE:
-    ///   Ten test dowodzi że Overfit umie trenować model językowy od zera.
-    ///   Tiny Shakespeare (~1MB tekstu) to standardowy benchmark dla małych LM.
-    ///   Karpathy użył go do pokazania że nanoGPT działa — my używamy go do
-    ///   pokazania że Overfit działa.
+    /// WHAT THIS DEMONSTRATES:
+    ///   This test proves that Overfit can train a language model from scratch.
+    ///   Tiny Shakespeare (~1 MB of text) is a standard benchmark for small LMs.
+    ///   Karpathy used it to show that nanoGPT works — we use it to
+    ///   show that Overfit works.
     ///
-    ///   Test sprawdza:
-    ///     1. Loss spada — model się uczy (nie jest random walk)
-    ///     2. Final loss < initial loss × 0.85 — konkretny próg postępu
-    ///     3. Wygenerowany tekst zawiera rozpoznawalne słowa angielskie
-    ///        po treningu (nie losowe znaki)
+    ///   The test verifies:
+    ///     1. Loss decreases — the model is learning (not a random walk)
+    ///     2. Final loss &lt; initial loss × 0.85 — a concrete progress threshold
+    ///     3. Generated text contains recognisable English words
+    ///        after training (not random characters)
     ///
-    ///   To nie jest test poprawności matematycznej (od tego są gradient checks).
-    ///   To jest test integracyjny całego pipeline:
+    ///   This is not a mathematical correctness test (gradient checks cover that).
+    ///   This is an integration test of the full pipeline:
     ///     Tokenizer → Embedding → 2× TransformerBlock → LayerNorm → LM head
-    ///     → CrossEntropyLoss → Backward → AdamW → Step → generacja tekstu
+    ///     → CrossEntropyLoss → Backward → AdamW → Step → text generation
     ///
-    /// DLACZEGO TO MA ZNACZENIE:
-    ///   Każdy layer z osobna ma testy jednostkowe.
-    ///   Ten test pokazuje że wszystkie warstwy działają razem — że gradient
-    ///   poprawnie przepływa przez cały stos i model faktycznie uczy się
-    ///   struktury języka angielskiego.
+    /// WHY THIS MATTERS:
+    ///   Each layer individually has unit tests.
+    ///   This test shows that all layers work together — that the gradient
+    ///   flows correctly through the entire stack and the model actually learns
+    ///   the structure of English.
     ///
     /// FIXTURE:
-    ///   Plik: Tests/test_fixtures/tiny_shakespeare.txt
-    ///   Pobierz: curl -o Tests/test_fixtures/tiny_shakespeare.txt \
+    ///   File: Tests/test_fixtures/tiny_shakespeare.txt
+    ///   Download: curl -o Tests/test_fixtures/tiny_shakespeare.txt \
     ///     https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt
     ///
-    ///   Jeśli plik nie istnieje — test jest skipped (nie failed).
-    ///   Nie blokuje CI bez danych.
+    ///   If the file does not exist — the test is skipped (not failed).
+    ///   Does not block CI when data is absent.
     /// </summary>
     public class TinyShakespeareTrainingTests
     {
@@ -57,19 +57,19 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
         }
 
         /// <summary>
-        /// Główny test: loss spada po 300 krokach na prawdziwym tekście.
+        /// Main test: loss decreases after 300 steps on real text.
         ///
-        /// Model: 2 warstwy, 128d, 4 głowy — ok. 422K parametrów.
-        /// Czas: **~2 s** na Ryzen 9 9950X3D po PR `parallel-everywhere` (wcześniej:
-        /// ~60-120 s przed migracją sequential element-wise kerneli do
-        /// `OverfitParallelFor` + SIMD-batched GELU). Test pozostawiony jako
-        /// regression detector — jeśli timing wzrośnie >5× sygnalizuje regresję
-        /// w którymś z parallel paths (LinearKernels backward, LayerNorm,
-        /// GELU SIMD pipeline, lub samym `OverfitParallelFor` dispatcherze).
+        /// Model: 2 layers, 128d, 4 heads — approx. 422 K parameters.
+        /// Time: **~2 s** on Ryzen 9 9950X3D after PR `parallel-everywhere` (previously:
+        /// ~60-120 s before migrating sequential element-wise kernels to
+        /// `OverfitParallelFor` + SIMD-batched GELU). Test kept as a
+        /// regression detector — if timing grows &gt;5× it signals a regression
+        /// in one of the parallel paths (LinearKernels backward, LayerNorm,
+        /// GELU SIMD pipeline, or the `OverfitParallelFor` dispatcher itself).
         ///
-        /// Próg: final_loss ≤ initial_loss × 0.85 (15% poprawa po 300 krokach).
-        /// Karpathy osiąga ~1.47 na tym datasecie po pełnym treningu (5000 steps).
-        /// My oczekujemy ~2.5-3.5 po 300 krokach — wyraźne uczenie, nie przepełnienie.
+        /// Threshold: final_loss ≤ initial_loss × 0.85 (15% improvement after 300 steps).
+        /// Karpathy reaches ~1.47 on this dataset after full training (5000 steps).
+        /// We expect ~2.5-3.5 after 300 steps — clear learning, not overfitting.
         /// </summary>
         [LongFact]
         public void TinyShakespeare_LossDecreases_After300Steps()
@@ -121,7 +121,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
             var finalLoss = 0f;
             var sw = Stopwatch.StartNew();
 
-            // ── Pętla treningowa ─────────────────────────────────────────────
+            // ── Training loop ────────────────────────────────────────────────
             for (var step = 0; step < steps; step++)
             {
                 var (inputIds, targetIds) = SampleSequence(trainIds, seqLen, rng);
@@ -172,7 +172,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
 
             // ── Asercje ──────────────────────────────────────────────────────
 
-            // 1. Loss spada — model uczy się, nie stoi w miejscu
+            // 1. Loss decreases — the model is learning, not standing still
             // 15% improvement threshold — 300 steps at lr=3e-4 on 2-layer model.
             // Synthetic test (50 steps) shows ~13% → Shakespeare is harder.
             Assert.True(finalLoss < initialLoss * 0.85f,
@@ -184,8 +184,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
             Assert.False(float.IsNaN(finalLoss) || float.IsInfinity(finalLoss),
             "Loss jest NaN lub Inf — problem numeryczny w attention lub LayerNorm.");
 
-            // 3. Final loss poniżej baseline losowego modelu
-            // Losowy model: loss ≈ ln(vocabSize). Jeśli final loss > baseline, model się nie uczy.
+            // 3. Final loss below the random-model baseline
+            // Random model: loss ≈ ln(vocabSize). If final loss > baseline, the model is not learning.
             var baseline = MathF.Log(tokenizer.VocabSize);
             Assert.True(finalLoss < baseline,
             $"Final loss {finalLoss:F4} ≥ baseline (random) {baseline:F4}. Model nie uczy się niczego.");
@@ -195,8 +195,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
         }
 
         /// <summary>
-        /// Szybki smoke test: 50 kroków, sprawdza tylko że nie ma NaN i gradient flow działa.
-        /// Uruchamia się zawsze (nie wymaga dużego pliku), używa syntetycznych danych.
+        /// Quick smoke test: 50 steps, only checks that there is no NaN and gradient flow works.
+        /// Always runs (does not require a large fixture file), uses synthetic data.
         /// </summary>
         [Fact]
         public void GPT1_SyntheticData_LossDecreases_50Steps()
@@ -208,7 +208,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
             const float lr = 1e-3f;
 
             var tokenizer = CharacterTokenizer.FromCorpus(corpus);
-            // Wygeneruj powtarzający się korpus aby mieć dość danych
+            // Generate a repeated corpus to have enough data
             var fullCorpus = string.Concat(Enumerable.Repeat(corpus, 200));
             var allIds = tokenizer.Encode(fullCorpus);
 
@@ -282,8 +282,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
         }
 
         /// <summary>
-        /// Liczy cross-entropy loss i seeduje gradient logitów dla backward.
-        /// logits: [1, T, V]. Zwraca mean loss.
+        /// Computes cross-entropy loss and seeds the logit gradient for backward.
+        /// logits: [1, T, V]. Returns mean loss.
         /// </summary>
         private static float ComputeLossAndSeedGrad(
             AutogradNode logits,

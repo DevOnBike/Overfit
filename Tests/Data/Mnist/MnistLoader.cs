@@ -21,7 +21,7 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
             imgReader.ReadBytes(16);
             lblReader.ReadBytes(8);
 
-            // DOD: Alokujemy płaską pamięć za pomocą TensorStorage
+            // DOD: Allocate flat memory using TensorStorage
             var images = new TensorStorage<float>(maxSamples * 784, clearMemory: false);
             var labels = new TensorStorage<float>(maxSamples * 10, clearMemory: true);
 
@@ -34,12 +34,12 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
 
                 for (var j = 0; j < 784; j++)
                 {
-                    // Składamy indeks płasko: i * 784 + j
+                    // Compose the flat index: i * 784 + j
                     imgSpan[i * 784 + j] = pixels[j] / 255f;
                 }
 
                 var label = lblReader.ReadByte();
-                // One-hot encoding na płaskiej strukturze
+                // One-hot encoding on the flat structure
                 lblSpan[i * 10 + label] = 1f;
             }
 

@@ -21,25 +21,25 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
             float[] part2 = [10f, 20f, 30f, 40f, 50f];
             float[] part3 = [-5f, -10f, -15f];
 
-            // Scalona tablica jako nasze źródło prawdy (Ground Truth)
+            // Merged array as our ground truth
             var fullData = part1.Concat(part2).Concat(part3).ToArray();
 
             var splitNormalizer = new ZScoreNormalizer();
             var fullNormalizer = new ZScoreNormalizer();
 
             // ACT
-            // 1. Fitujemy w 3 osobnych kawałkach (to wymusza zadziałanie Chan's Merge)
+            // 1. Fit in 3 separate chunks (this forces Chan's Merge to activate)
             splitNormalizer.FitBatch(part1);
             splitNormalizer.FitBatch(part2);
             splitNormalizer.FitBatch(part3);
 
-            // 2. Fitujemy całość za jednym zamachem
+            // 2. Fit the entire dataset in one shot
             fullNormalizer.FitBatch(fullData);
 
             // ASSERT
             Assert.Equal(fullData.Length, splitNormalizer.Count);
 
-            // Średnia i StdDev muszą być identyczne (z dokładnością do 5 miejsc, bo to double pod spodem)
+            // Mean and StdDev must be identical (to 5 decimal places, since the underlying type is double)
             Assert.Equal(fullNormalizer.Mean, splitNormalizer.Mean, precision: 5);
             Assert.Equal(fullNormalizer.StandardDeviation, splitNormalizer.StandardDeviation, precision: 5);
         }
@@ -53,20 +53,20 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
             var val2 = 250f;
             float[] batch2 = [-100f, -200f];
 
-            // Znów tworzymy absolutne źródło prawdy
+            // Again create the definitive ground truth
             float[] fullData = [100f, 200f, 300f, 150f, 250f, -100f, -200f];
 
             var mixedNormalizer = new ZScoreNormalizer();
             var baselineNormalizer = new ZScoreNormalizer();
 
             // ACT
-            // Mieszamy na pełnej petardzie: Batch -> Incremental -> Incremental -> Batch
+            // Mix at full throttle: Batch -> Incremental -> Incremental -> Batch
             mixedNormalizer.FitBatch(batch1);
             mixedNormalizer.FitIncremental(val1);
             mixedNormalizer.FitIncremental(val2);
             mixedNormalizer.FitBatch(batch2);
 
-            // Baseline fituje po jednym elemencie przez klasycznego Welforda (100% pewności)
+            // Baseline fits one element at a time via classic Welford (100% certainty)
             foreach (var val in fullData)
             {
                 baselineNormalizer.FitIncremental(val);
@@ -79,7 +79,7 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
         }
 
         // ---------------------------------------------------------------------
-        // ISTNIEJĄCE TESTY (Pozostałe weryfikacje zachowania)
+        // EXISTING TESTS (remaining behavioural verifications)
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -104,7 +104,7 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
         [Fact]
         public void TransformInPlace_ShouldCorrectlyStandardizeData()
         {
-            // Średnia = 5.0, StdDev = 2.0
+            // Mean = 5.0, StdDev = 2.0
             float[] data = [2f, 4f, 4f, 4f, 5f, 5f, 7f, 9f];
             var normalizer = new ZScoreNormalizer();
             normalizer.FitBatch(data);

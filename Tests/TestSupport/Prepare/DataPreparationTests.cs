@@ -147,19 +147,19 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Prepare
         [Fact]
         public void CorrelationFilter_Should_Remove_Redundant_Columns()
         {
-            // 5 wierszy, 3 kolumny — kolumna 0 i 2 niemal identyczne (r ≈ 1.0)
+            // 5 rows, 3 columns — columns 0 and 2 are nearly identical (r ≈ 1.0)
             var features = new FastTensor<float>(5, 3, clearMemory: true);
             var targets = new FastTensor<float>(5, 1, clearMemory: true);
             var fSpan = features.GetView().AsSpan();
             var tSpan = targets.GetView().AsSpan();
 
-            // Kolumna 0: [1, 2, 3, 4, 5]
-            // Kolumna 1: [10, 5, 20, 3, 15] — nieskorelowana (nieliniowa, chaotyczna)
-            // Kolumna 2: [1.01, 2.02, 3.03, 4.04, 5.05] — niemal kopia kolumny 0
+            // Column 0: [1, 2, 3, 4, 5]
+            // Column 1: [10, 5, 20, 3, 15] — uncorrelated (non-linear, chaotic)
+            // Column 2: [1.01, 2.02, 3.03, 4.04, 5.05] — almost a copy of column 0
             float[] col0 = [1f, 2f, 3f, 4f, 5f];
             float[] col1 = [10f, 5f, 20f, 3f, 15f];
             float[] col2 = [1.01f, 2.02f, 3.03f, 4.04f, 5.05f];
-            float[] targ = [1f, 2f, 3f, 4f, 5f]; // Targets mocno skorelowane z kolumną 0
+            float[] targ = [1f, 2f, 3f, 4f, 5f]; // Targets strongly correlated with column 0
 
             for (var r = 0; r < 5; r++)
             {
@@ -174,7 +174,7 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Prepare
 
             var result = filter.Process(ctx);
 
-            // Spodziewamy się usunięcia jednej z redundantnych kolumn (zostaną 2)
+            // We expect one of the redundant columns to be removed (2 will remain)
             Assert.Equal(2, result.Features.GetView().GetDim(1));
         }
 

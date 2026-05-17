@@ -15,19 +15,19 @@ using Xunit.Abstractions;
 namespace DevOnBike.Overfit.Tests
 {
     /// <summary>
-    /// GPT-1 training z SeqLen=256 — pełny kontekst, poprawny gradient przez residuals.
+    /// GPT-1 training with SeqLen=256 — full context, correct gradient through residuals.
     ///
-    /// Naprawiono:
-    ///   TransformerBlock.Residual() był off-tape → gradient nie przepływał przez bloki.
-    ///   Teraz używamy TensorMath.Add(graph, x, sublayer) — ON TAPE.
-    ///   Gradient przepływa przez oba ramiona residual (identity + sublayer).
+    /// Fixed:
+    ///   TransformerBlock.Residual() was off-tape → gradient did not flow through the blocks.
+    ///   Now uses TensorMath.Add(graph, x, sublayer) — ON TAPE.
+    ///   Gradient flows through both residual branches (identity + sublayer).
     ///
-    /// SeqLen=256 mieści się w domyślnej arenie (200MB) dla vocab=68 (char-level).
+    /// SeqLen=256 fits in the default arena (200 MB) for vocab=68 (char-level).
     ///
-    /// Cel: val loss poniżej 2.0 po 5000 krokach.
-    /// nanoGPT reference: 1.47 przy SeqLen=256, batch=64, 5K iteracji.
+    /// Goal: val loss below 2.0 after 5000 steps.
+    /// nanoGPT reference: 1.47 at SeqLen=256, batch=64, 5K iterations.
     ///
-    /// Czas: ~15-20 minut na Ryzen 9 9950X3D.
+    /// Time: ~15-20 minutes on Ryzen 9 9950X3D.
     /// </summary>
     public class TinyShakespeareCheckpointTests
     {
@@ -59,8 +59,8 @@ namespace DevOnBike.Overfit.Tests
             SkipIfMissing(FixturePath);
 
             const int seqLen = 256;
-            const int batchSize = 8; // true batch: 8 sekwencji na krok
-            const int arenaSize = 700_000_000; // 2.8GB — factored MHA tworzy więcej tensorów per krok
+            const int batchSize = 8; // true batch: 8 sequences per step
+            const int arenaSize = 700_000_000; // 2.8GB — factored MHA creates more tensors per step
             const int totalSteps = 1_000;
             const int reportEvery = 200;
             const float lrMax = 3e-4f;
@@ -109,8 +109,8 @@ namespace DevOnBike.Overfit.Tests
             var initialLoss = 0f;
             var finalValLoss = 0f;
 
-            // SDPA backward parallel — 12ms/op → ~3ms/op na 32 rdzeniach.
-            // Flaga jest thread-safe volatile bool, bezpieczna do ustawienia przed pętlą.
+            // SDPA backward parallel — 12ms/op → ~3ms/op on 32 cores.
+            // The flag is a thread-safe volatile bool, safe to set before the loop.
             ExperimentalLanguageModelOptions.EnableParallelAttentionBackward = true;
 
             // Persistent graph: jedna alokacja 2GB zamiast 5000 × alokacja/zwolnienie.
@@ -310,9 +310,9 @@ namespace DevOnBike.Overfit.Tests
         }
 
         /// <summary>
-        /// Szybki smoke test: 50 kroków, batch=8, SeqLen=256.
-        /// Weryfikuje: brak OOM, brak NaN, loss spada.
-        /// Czas: ~2 min. Uruchom to PRZED pełnym testem (5K kroków).
+        /// Quick smoke test: 50 steps, batch=8, SeqLen=256.
+        /// Verifies: no OOM, no NaN, loss decreases.
+        /// Time: ~2 min. Run this BEFORE the full test (5K steps).
         /// </summary>
         [LongFact]
         public void Shakespeare_Batch8_SeqLen256_SmokeTest_50Steps()
@@ -353,8 +353,8 @@ namespace DevOnBike.Overfit.Tests
             var firstLoss = 0f;
             var lastLoss = 0f;
 
-            // Persistent graph: arena allocated once, Reset() per krok.
-            // Eliminuje 50× alokację 2GB natywnej pamięci.
+            // Persistent graph: arena allocated once, Reset() per step.
+            // Eliminates 50× allocation of 2 GB of native memory.
             using var smokeGraph = new ComputationGraph(600_000_000);
 
             for (var step = 0; step < steps; step++)
@@ -403,9 +403,9 @@ namespace DevOnBike.Overfit.Tests
         }
 
         /// <summary>
-        /// Szybki weryfikacyjny test: mniejszy model, batch=8, 500 kroków.
-        /// Cel: potwierdzić konwergencję batch=8 w ~5 minut.
-        /// Jak zielony → odpal pełny 5K test przez noc.
+        /// Quick verification test: smaller model, batch=8, 500 steps.
+        /// Goal: confirm batch=8 convergence in ~5 minutes.
+        /// If green → run the full 5K test overnight.
         /// </summary>
         [LongFact]
         public void Shakespeare_Batch8_SmallModel_500Steps_Convergence()
@@ -425,7 +425,7 @@ namespace DevOnBike.Overfit.Tests
             var trainIds = allIds.AsSpan(0, trainSize).ToArray();
             var valIds = allIds.AsSpan(trainSize).ToArray();
 
-            // Mniejszy model: 4 warstwy, 128d — szybki do weryfikacji
+            // Smaller model: 4 layers, 128d — fast to verify
             var config = new GPT1Config
             {
                 VocabSize = tokenizer.VocabSize,
@@ -512,36 +512,36 @@ namespace DevOnBike.Overfit.Tests
         }
 
         /// <summary>
-        /// Gradient check — weryfikuje poprawność backward w ~10 sekund.
-        /// Porównuje analityczny gradient (backward) z numerycznym (finite difference).
-        /// Testuje jeden parametr z każdego komponentu: Embedding, LN, MHA, FFN, LMHead.
+        /// Gradient check — verifies backward correctness in ~10 seconds.
+        /// Compares the analytical gradient (backward) with the numerical one (finite difference).
+        /// Tests one parameter from each component: Embedding, LN, MHA, FFN, LMHead.
         ///
-        /// **Mixed tolerance** (przejście jeśli SPEŁNIONE którekolwiek):
-        ///   - relErr &lt; 50 %                — luźny próg dla FP32 gradient-check
-        ///   - absErr &lt; 5e-4                — finite-diff w FP32 z eps=1e-3 ma
+        /// **Mixed tolerance** (passes if EITHER condition is satisfied):
+        ///   - relErr &lt; 50 %                — loose threshold for FP32 gradient-check
+        ///   - absErr &lt; 5e-4                — finite-diff in FP32 with eps=1e-3 has a
         ///                                      noise floor ~ loss_precision / (2*eps)
-        ///                                      ≈ 5e-6 / 2e-3 ≈ 2.5e-3 na gradient.
-        ///                                      Wartości &lt; 5e-4 są efektem FP32
-        ///                                      rounding, nie błędu backward.
+        ///                                      ≈ 5e-6 / 2e-3 ≈ 2.5e-3 on the gradient.
+        ///                                      Values &lt; 5e-4 are an effect of FP32
+        ///                                      rounding, not a backward error.
         ///
-        /// Co ten test wyłapuje (poza FP32 noise):
-        ///   - błędy znaku (analytical i numerical z odwrotnymi znakami → ~200% relErr)
-        ///   - błędy faktora (np. brakujące × 2 → ~50–100% relErr na DUŻYCH gradientach)
-        ///   - backward zwracający 0 zamiast non-zero (lub odwrotnie) na DUŻYM gradiencie
+        /// What this test catches (beyond FP32 noise):
+        ///   - sign errors (analytical and numerical with opposite signs → ~200% relErr)
+        ///   - factor errors (e.g. missing × 2 → ~50–100% relErr on LARGE gradients)
+        ///   - backward returning 0 instead of non-zero (or vice versa) on a LARGE gradient
         ///
-        /// Co świadomie akceptuje: niewielkie różnice na tiny gradientach. Pełna
-        /// weryfikacja parity zachowana jest w `Gpt2ImportParityDiagnostics`
+        /// What it deliberately accepts: small differences on tiny gradients. Full
+        /// parity verification is kept in `Gpt2ImportParityDiagnostics`
         /// (logit-level vs PyTorch reference).
         ///
-        /// Wagi inicjalizowane z seeded RNG (poniżej) — eliminuje run-to-run
-        /// variation w wartościach finite-diff.
+        /// Weights initialised from a seeded RNG (below) — eliminates run-to-run
+        /// variation in finite-diff values.
         /// </summary>
         [Fact]
         public void GPT1_GradientCheck_BackwardIsCorrect()
         {
-            const int seqLen = 8; // małe żeby szybko
+            const int seqLen = 8; // small for speed
             const int batchSize = 1;
-            const int vocab = 30; // małe vocab
+            const int vocab = 30; // small vocab
 
             var config = new GPT1Config
             {
@@ -612,7 +612,7 @@ namespace DevOnBike.Overfit.Tests
             var eps = 1e-3f;
             var failures = new List<string>();
 
-            // Sprawdzamy gradient dla jednego parametru z każdego komponentu
+            // Check the gradient for one parameter from each component
             var checks = new (string name, Parameter param, int idx)[]
             {
                 ("TokenEmb[0]", model.TokenEmbedding.Weight, 0), ("PosEmb[0]", model.PositionEmbedding.Weight, 0), ("LN1.Gamma[0]", model.Blocks[0].Norm1.Gamma, 0), ("MHA.Wq[0]", model.Blocks[0].Attention.Wq, 0), ("FFN.W1[0]", model.Blocks[0].FFN.W1, 0), ("LMHead[0]", model.LMHead, 0),
@@ -700,16 +700,16 @@ namespace DevOnBike.Overfit.Tests
         }
 
         /// <summary>
-        /// End-to-end test: 100 kroków treningu batch=8, SeqLen=64 → generacja tekstu.
-        /// Weryfikuje pełny pipeline: dane → forward → backward → optymizer → generacja.
+        /// End-to-end test: 100 training steps batch=8, SeqLen=64 → text generation.
+        /// Verifies the full pipeline: data → forward → backward → optimizer → generation.
         ///
-        /// Co sprawdza:
-        ///   1. Loss spada (backward działa)
-        ///   2. Model generuje tekst z angielskimi słowami (nie losowe znaki)
-        ///   3. Prawdopodobieństwo poprawnych znaków rośnie (perplexity spada)
-        ///   4. Brak NaN, Inf, OOM
+        /// What it checks:
+        ///   1. Loss decreases (backward works)
+        ///   2. Model generates text containing English words (not random characters)
+        ///   3. Probability of correct characters increases (perplexity decreases)
+        ///   4. No NaN, Inf, OOM
         ///
-        /// Czas: ~30 sekund.
+        /// Time: ~30 seconds.
         /// </summary>
         [LongFact]
         public void GPT1_EndToEnd_100Steps_GeneratesEnglishWords()

@@ -10,7 +10,7 @@ namespace DevOnBike.Overfit.Tests.Core.Distributions
 {
     public class CholeskyMultivariateGaussianLogicTests
     {
-        private const int Precision = 5; // Dokładność dla porównań zmiennoprzecinkowych
+        private const int Precision = 5; // Precision for floating-point comparisons
 
         [Fact]
         public void ValidateInputs_ValidInputs_DoesNotThrow()
@@ -42,16 +42,16 @@ namespace DevOnBike.Overfit.Tests.Core.Distributions
             // Arrange
             const int dimensions = 2;
             var observation = new[] { 0.5f, 0.5f };
-            var mean = new[] { 0.5f, 0.5f }; // Obserwacja == Średnia -> odległość Mahalanobisa = 0
+            var mean = new[] { 0.5f, 0.5f }; // Observation == Mean -> Mahalanobis distance = 0
 
             using var L = new FastTensor<float>(dimensions, dimensions, clearMemory: true);
             var lView = L.GetView();
             lView[0, 0] = 1.0f;
-            lView[1, 1] = 1.0f; // Macierz identycznościowa
+            lView[1, 1] = 1.0f; // Identity matrix
 
             var logNormConst = CholeskyMultivariateGaussianLogic.CalculateLogNormConstant(dimensions, lView);
 
-            // Skoro distance = 0, LogProbabilityDensity powinno być równe logNormConst
+            // Since distance = 0, LogProbabilityDensity should equal logNormConst
             var expectedLogProb = logNormConst - 0.0;
 
             // Act
@@ -65,8 +65,8 @@ namespace DevOnBike.Overfit.Tests.Core.Distributions
         public void LogProbabilityDensity_DimensionMismatch_ThrowsArgumentException()
         {
             // Arrange
-            var observation = new[] { 1.0f, 2.0f, 3.0f }; // Długość 3
-            var mean = new[] { 1.0f, 2.0f }; // Długość 2
+            var observation = new[] { 1.0f, 2.0f, 3.0f }; // Length 3
+            var mean = new[] { 1.0f, 2.0f }; // Length 2
             using var L = new FastTensor<float>(2, 2, clearMemory: true);
 
             // Act & Assert
