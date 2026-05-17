@@ -31,9 +31,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
     /// </summary>
     public sealed class Gpt2ImportStageParityDiagnostics
     {
-        private static string ModelPath     => TestModelPaths.Gpt2Small.BinaryPath;
-        private static string VocabPath     => TestModelPaths.Gpt2Small.VocabPath;
-        private static string MergesPath    => TestModelPaths.Gpt2Small.MergesPath;
+        private static string ModelPath => TestModelPaths.Gpt2Small.BinaryPath;
+        private static string VocabPath => TestModelPaths.Gpt2Small.VocabPath;
+        private static string MergesPath => TestModelPaths.Gpt2Small.MergesPath;
         private static string ReferencePath => TestModelPaths.Gpt2Small.ReferenceJsonPath;
 
         private const int DefaultArenaSize = 1_500_000_000;

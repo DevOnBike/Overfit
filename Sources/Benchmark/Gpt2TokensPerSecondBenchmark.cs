@@ -45,13 +45,13 @@ namespace Benchmarks
         // "The future of software development is" — GPT-2 BPE token IDs
         private static readonly int[] Prompt = [464, 2003, 286, 3788, 2478, 318];
 
-        private GPT1Model                _model        = null!;
-        private SlmInferenceEngine       _legacyEngine = null!;
+        private GPT1Model _model = null!;
+        private SlmInferenceEngine _legacyEngine = null!;
         private CachedSlmInferenceEngine _cachedEngine = null!;
-        private SamplingOptions          _sampling;
-        private GenerationOptions        _legacyOptions;
-        private int                      _checksum;
-        private bool                     _disposed;
+        private SamplingOptions _sampling;
+        private GenerationOptions _legacyOptions;
+        private int _checksum;
+        private bool _disposed;
 
         [Params(16, 64, 128)]
         public int MaxNewTokens { get; set; }
@@ -72,7 +72,7 @@ namespace Benchmarks
 
             _legacyEngine = SlmInferenceEngine.FromGpt1(_model);
             _cachedEngine = CachedSlmInferenceEngine.FromGpt1(_model);
-            _sampling     = SamplingOptions.Greedy;
+            _sampling = SamplingOptions.Greedy;
 
             _legacyOptions = new GenerationOptions(
                 maxNewTokens: MaxNewTokens,

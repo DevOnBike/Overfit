@@ -56,7 +56,7 @@ namespace DevOnBike.Overfit.Ops
                 requiresGrad: false,
                 clearMemory: false);
 
-            var inputSize  = channels * h * w;
+            var inputSize = channels * h * w;
             var outputSize = channels * oH * oW;
 
             if (batchSize < BatchSequentialThreshold)
@@ -64,9 +64,9 @@ namespace DevOnBike.Overfit.Ops
                 for (var n = 0; n < batchSize; n++)
                 {
                     PoolingKernels.MaxPool2DForwardWithIndicesNchw(
-                        input.DataView.AsReadOnlySpan().Slice(n * inputSize,  inputSize),
-                        output.DataView.AsSpan()          .Slice(n * outputSize, outputSize),
-                        maxIndices.DataView.AsSpan()      .Slice(n * outputSize, outputSize),
+                        input.DataView.AsReadOnlySpan().Slice(n * inputSize, inputSize),
+                        output.DataView.AsSpan().Slice(n * outputSize, outputSize),
+                        maxIndices.DataView.AsSpan().Slice(n * outputSize, outputSize),
                         channels, h, w, pool,
                         batchOffset: n * inputSize);
                 }
@@ -120,8 +120,8 @@ namespace DevOnBike.Overfit.Ops
             if (batchSize < BatchSequentialThreshold ||
                 output.DataView.Size < ParallelThreshold)
             {
-                var oGS  = output.GradView.AsReadOnlySpan();
-                var iGS  = input.GradView.AsSpan();
+                var oGS = output.GradView.AsReadOnlySpan();
+                var iGS = input.GradView.AsSpan();
                 var idxS = maxIndices.DataView.AsReadOnlySpan();
 
                 for (var i = 0; i < oGS.Length; i++)
@@ -163,9 +163,9 @@ namespace DevOnBike.Overfit.Ops
             int h,
             int w)
         {
-            var batchSize   = input.Shape.D0;
+            var batchSize = input.Shape.D0;
             var spatialSize = h * w;
-            var scale       = 1f / spatialSize;
+            var scale = 1f / spatialSize;
 
             var output = AllocateNode(
                 graph,
@@ -173,7 +173,7 @@ namespace DevOnBike.Overfit.Ops
                 input.RequiresGrad,
                 clearMemory: false);
 
-            var inS  = input.DataView.AsReadOnlySpan();
+            var inS = input.DataView.AsReadOnlySpan();
             var outS = output.DataView.AsSpan();
 
             if (batchSize < BatchSequentialThreshold)
@@ -228,9 +228,9 @@ namespace DevOnBike.Overfit.Ops
                 return;
             }
 
-            var batchSize   = input.Shape.D0;
+            var batchSize = input.Shape.D0;
             var spatialSize = h * w;
-            var scale       = 1f / spatialSize;
+            var scale = 1f / spatialSize;
 
             if (batchSize < BatchSequentialThreshold ||
                 (long)batchSize * channels * spatialSize < ParallelThreshold)
@@ -242,7 +242,7 @@ namespace DevOnBike.Overfit.Ops
                 {
                     for (var c = 0; c < channels; c++)
                     {
-                        var grad         = oGS[n * channels + c] * scale;
+                        var grad = oGS[n * channels + c] * scale;
                         var channelSlice = iGS.Slice(
                             n * channels * spatialSize + c * spatialSize,
                             spatialSize);

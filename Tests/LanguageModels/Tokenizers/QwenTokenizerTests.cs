@@ -68,7 +68,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
             }
 
             const string input = "Hello, world! How are you?";
-            var tokens  = tok.Encode(input);
+            var tokens = tok.Encode(input);
             var decoded = tok.Decode(tokens);
 
             Assert.Equal(input, decoded);
@@ -85,7 +85,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
             }
 
             const string input = "Cześć, jak się masz?";
-            var tokens  = tok.Encode(input);
+            var tokens = tok.Encode(input);
             var decoded = tok.Decode(tokens);
 
             Assert.Equal(input, decoded);
@@ -103,7 +103,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
 
             var tokens = tok.Encode("<|im_start|>user\nHello<|im_end|>");
             Assert.Contains(QwenTokenizer.ImStart, tokens);
-            Assert.Contains(QwenTokenizer.ImEnd,   tokens);
+            Assert.Contains(QwenTokenizer.ImEnd, tokens);
             Console.WriteLine($"Special tokens: [{string.Join(", ", tokens)}]");
         }
 
@@ -151,7 +151,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenizers
 
             // Encode a simple word and decode each token individually
             var tokens = tok.Encode("Hello");
-            var sb     = new StringBuilder();
+            var sb = new StringBuilder();
             foreach (var t in tokens)
             {
                 sb.Append(tok.DecodeToken(t));

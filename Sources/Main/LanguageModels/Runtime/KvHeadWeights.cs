@@ -33,8 +33,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// Unspecified biases default to empty (Llama has no attention biases).
         /// </summary>
         internal KvHeadWeights(
-            float[]  wk,
-            float[]  wv,
+            float[] wk,
+            float[] wv,
             float[]? bk = null,
             float[]? bv = null)
         {

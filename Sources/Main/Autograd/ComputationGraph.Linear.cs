@@ -33,9 +33,9 @@ namespace DevOnBike.Overfit.Autograd
             var requiresGrad = input.RequiresGrad || weights.RequiresGrad || bias.RequiresGrad;
             var output = CreateTemporary(new TensorShape(N, M), requiresGrad, clearMemory: false);
 
-            var outS  = output.DataView.AsSpan();
-            var inS   = input.DataView.AsReadOnlySpan();
-            var wS    = weights.DataView.AsReadOnlySpan();
+            var outS = output.DataView.AsSpan();
+            var inS = input.DataView.AsReadOnlySpan();
+            var wS = weights.DataView.AsReadOnlySpan();
             var biasS = bias.DataView.AsReadOnlySpan();
 
             LinearKernels.InitWithBias(outS, biasS, N, M);

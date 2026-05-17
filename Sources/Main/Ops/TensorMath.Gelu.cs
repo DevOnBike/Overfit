@@ -14,7 +14,7 @@ namespace DevOnBike.Overfit.Ops
     {
         // GELU constants (tanh approximation as used in OpenAI's GPT).
         private const float GELUSqrt2OverPi = 0.7978845608028654f;  // sqrt(2/π)
-        private const float GELUCoeff       = 0.044715f;
+        private const float GELUCoeff = 0.044715f;
 
         // Tile size for the SIMD pipeline inside chunk bodies. Two scratch
         // spans of this size live on the worker thread's stack (= 8 KB total
@@ -53,8 +53,8 @@ namespace DevOnBike.Overfit.Ops
         public static AutogradNode Gelu(ComputationGraph graph, AutogradNode input)
         {
             var output = AllocateNode(graph, input.Shape, input.RequiresGrad, clearMemory: false);
-            var inS    = input.DataView.AsReadOnlySpan();
-            var outS   = output.DataView.AsSpan();
+            var inS = input.DataView.AsReadOnlySpan();
+            var outS = output.DataView.AsSpan();
 
             if (inS.Length < ParallelThreshold)
             {
@@ -95,9 +95,9 @@ namespace DevOnBike.Overfit.Ops
                 return;
             }
 
-            var inS  = input.DataView.AsReadOnlySpan();
+            var inS = input.DataView.AsReadOnlySpan();
             var dOut = output.GradView.AsReadOnlySpan();
-            var dIn  = input.GradView.AsSpan();
+            var dIn = input.GradView.AsSpan();
 
             if (inS.Length < ParallelThreshold)
             {
@@ -131,16 +131,16 @@ namespace DevOnBike.Overfit.Ops
         private static void GeluForwardSimd(ReadOnlySpan<float> input, Span<float> output)
         {
             Span<float> innerBuf = stackalloc float[GeluTile];
-            Span<float> tanhBuf  = stackalloc float[GeluTile];
+            Span<float> tanhBuf = stackalloc float[GeluTile];
 
             var len = input.Length;
             for (var offset = 0; offset < len; offset += GeluTile)
             {
                 var n = Math.Min(GeluTile, len - offset);
-                var x   = input.Slice(offset, n);
-                var y   = output.Slice(offset, n);
+                var x = input.Slice(offset, n);
+                var y = output.Slice(offset, n);
                 var inner = innerBuf[..n];
-                var tanh  = tanhBuf[..n];
+                var tanh = tanhBuf[..n];
 
                 // inner = sqrt2pi * x * (1 + c * x²)
                 TensorPrimitives.Multiply(x, x, inner);                 // inner = x²
@@ -171,19 +171,19 @@ namespace DevOnBike.Overfit.Ops
             Span<float> gradInput)
         {
             Span<float> innerBuf = stackalloc float[GeluTile];
-            Span<float> tanhBuf  = stackalloc float[GeluTile];
-            Span<float> factor   = stackalloc float[GeluTile];
+            Span<float> tanhBuf = stackalloc float[GeluTile];
+            Span<float> factor = stackalloc float[GeluTile];
 
             var len = input.Length;
             for (var offset = 0; offset < len; offset += GeluTile)
             {
-                var n  = Math.Min(GeluTile, len - offset);
-                var x  = input.Slice(offset, n);
+                var n = Math.Min(GeluTile, len - offset);
+                var x = input.Slice(offset, n);
                 var dO = gradOutput.Slice(offset, n);
                 var dI = gradInput.Slice(offset, n);
                 var inner = innerBuf[..n];
-                var tanh  = tanhBuf[..n];
-                var f     = factor[..n];
+                var tanh = tanhBuf[..n];
+                var f = factor[..n];
 
                 // inner = sqrt2pi · (x + c·x³)   AND   f = sqrt2pi · (1 + 3·c·x²)
                 TensorPrimitives.Multiply(x, x, inner);                 // inner = x²
@@ -237,9 +237,9 @@ namespace DevOnBike.Overfit.Ops
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static float GeluGradScalar(float x)
         {
-            var inner  = GELUSqrt2OverPi * (x + GELUCoeff * x * x * x);
-            var tanhV  = MathF.Tanh(inner);
-            var dtanh  = 1f - tanhV * tanhV; // sech²
+            var inner = GELUSqrt2OverPi * (x + GELUCoeff * x * x * x);
+            var tanhV = MathF.Tanh(inner);
+            var dtanh = 1f - tanhV * tanhV; // sech²
             var dinner = GELUSqrt2OverPi * (1f + 3f * GELUCoeff * x * x);
             return 0.5f * (1f + tanhV) + 0.5f * x * dtanh * dinner;
         }

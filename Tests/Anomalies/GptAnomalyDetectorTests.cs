@@ -42,14 +42,14 @@ namespace DevOnBike.Overfit.Tests.Anomalies
 
             _model = new GPT1Model(new GPT1Config
             {
-                VocabSize     = MetricTokenizer.VocabSize,
+                VocabSize = MetricTokenizer.VocabSize,
                 ContextLength = _config.ContextLength,
-                DModel        = _config.DModel,
-                NHeads        = _config.NHeads,
-                NLayers       = _config.NLayers,
-                DFF           = _config.DModel * 4,
-                TieWeights    = false,
-                PreLayerNorm  = true,
+                DModel = _config.DModel,
+                NHeads = _config.NHeads,
+                NLayers = _config.NLayers,
+                DFF = _config.DModel * 4,
+                TieWeights = false,
+                PreLayerNorm = true,
             });
             _model.Eval();
 
@@ -64,7 +64,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         [Fact]
         public void Warmup_ScoreIsZero_UntilWindowFilled()
         {
-            using var handle   = SlmRuntimeFactory.CreateGpt1(_model);
+            using var handle = SlmRuntimeFactory.CreateGpt1(_model);
             using var detector = new GptAnomalyDetector(handle, contextSnapshots: 5);
 
             Assert.False(detector.WindowFilled);
@@ -88,10 +88,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         {
             SkipIfNoCheckpoint();
 
-            using var handle   = SlmRuntimeFactory.CreateGpt1(_model);
+            using var handle = SlmRuntimeFactory.CreateGpt1(_model);
             using var detector = new GptAnomalyDetector(handle, contextSnapshots: 10);
 
-            var normal  = MakeNormalSnapshot("api-gateway");
+            var normal = MakeNormalSnapshot("api-gateway");
             var anomaly = MakeAnomalySnapshot("api-gateway");
 
             // Warm up with normal traffic
@@ -125,7 +125,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         {
             SkipIfNoCheckpoint();
 
-            using var handle   = SlmRuntimeFactory.CreateGpt1(_model);
+            using var handle = SlmRuntimeFactory.CreateGpt1(_model);
             using var detector = new GptAnomalyDetector(handle, contextSnapshots: 10);
 
             var normal = MakeNormalSnapshot("worker-processor");
@@ -137,19 +137,19 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             // OOM: memory near limit, OOM events firing
             var oom = new MetricSnapshot
             {
-                Timestamp             = DateTime.UtcNow,
-                PodName               = "worker-processor",
-                CpuUsageRatio         = 0.55f,
-                CpuThrottleRatio      = 0.30f,
+                Timestamp = DateTime.UtcNow,
+                PodName = "worker-processor",
+                CpuUsageRatio = 0.55f,
+                CpuThrottleRatio = 0.30f,
                 MemoryWorkingSetBytes = 7_800_000_000f,  // ~97% of 8GB
-                OomEventsRate         = 0.08f,           // OOM events firing
-                LatencyP50Ms          = 45f,
-                LatencyP95Ms          = 120f,
-                LatencyP99Ms          = 350f,
-                RequestsPerSecond     = 60f,
-                ErrorRate             = 0.12f,
-                GcGen2HeapBytes       = 5_500_000_000f,
-                GcPauseRatio          = 0.35f,
+                OomEventsRate = 0.08f,           // OOM events firing
+                LatencyP50Ms = 45f,
+                LatencyP95Ms = 120f,
+                LatencyP99Ms = 350f,
+                RequestsPerSecond = 60f,
+                ErrorRate = 0.12f,
+                GcGen2HeapBytes = 5_500_000_000f,
+                GcPauseRatio = 0.35f,
                 ThreadPoolQueueLength = 85f,
             };
 
@@ -178,7 +178,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         [Fact]
         public void Reset_ClearsWindow_RequiresWarmupAgain()
         {
-            using var handle   = SlmRuntimeFactory.CreateGpt1(_model);
+            using var handle = SlmRuntimeFactory.CreateGpt1(_model);
             using var detector = new GptAnomalyDetector(handle, contextSnapshots: 5);
 
             var normal = MakeNormalSnapshot("api-gateway");
@@ -212,46 +212,46 @@ namespace DevOnBike.Overfit.Tests.Anomalies
 
             return dModel switch
             {
-                64  => GptTrainingConfig.Quick,
+                64 => GptTrainingConfig.Quick,
                 128 => GptTrainingConfig.Medium,
                 256 => GptTrainingConfig.Production,
-                _   => new GptTrainingConfig { DModel = dModel, NHeads = dModel / 32, NLayers = 4, ContextLength = 120 },
+                _ => new GptTrainingConfig { DModel = dModel, NHeads = dModel / 32, NLayers = 4, ContextLength = 120 },
             };
         }
 
         private static MetricSnapshot MakeNormalSnapshot(string pod) => new()
         {
-            Timestamp             = DateTime.UtcNow,
-            PodName               = pod,
-            CpuUsageRatio         = 0.20f,
-            CpuThrottleRatio      = 0.02f,
+            Timestamp = DateTime.UtcNow,
+            PodName = pod,
+            CpuUsageRatio = 0.20f,
+            CpuThrottleRatio = 0.02f,
             MemoryWorkingSetBytes = 350_000_000f,
-            OomEventsRate         = 0f,
-            LatencyP50Ms          = 12f,
-            LatencyP95Ms          = 35f,
-            LatencyP99Ms          = 75f,
-            RequestsPerSecond     = 280f,
-            ErrorRate             = 0.002f,
-            GcGen2HeapBytes       = 55_000_000f,
-            GcPauseRatio          = 0.004f,
+            OomEventsRate = 0f,
+            LatencyP50Ms = 12f,
+            LatencyP95Ms = 35f,
+            LatencyP99Ms = 75f,
+            RequestsPerSecond = 280f,
+            ErrorRate = 0.002f,
+            GcGen2HeapBytes = 55_000_000f,
+            GcPauseRatio = 0.004f,
             ThreadPoolQueueLength = 8f,
         };
 
         private static MetricSnapshot MakeAnomalySnapshot(string pod) => new()
         {
-            Timestamp             = DateTime.UtcNow,
-            PodName               = pod,
-            CpuUsageRatio         = 0.97f,
-            CpuThrottleRatio      = 0.85f,
+            Timestamp = DateTime.UtcNow,
+            PodName = pod,
+            CpuUsageRatio = 0.97f,
+            CpuThrottleRatio = 0.85f,
             MemoryWorkingSetBytes = 7_500_000_000f,
-            OomEventsRate         = 0.06f,
-            LatencyP50Ms          = 950f,
-            LatencyP95Ms          = 3200f,
-            LatencyP99Ms          = 7500f,
-            RequestsPerSecond     = 30f,
-            ErrorRate             = 0.40f,
-            GcGen2HeapBytes       = 4_800_000_000f,
-            GcPauseRatio          = 0.45f,
+            OomEventsRate = 0.06f,
+            LatencyP50Ms = 950f,
+            LatencyP95Ms = 3200f,
+            LatencyP99Ms = 7500f,
+            RequestsPerSecond = 30f,
+            ErrorRate = 0.40f,
+            GcGen2HeapBytes = 4_800_000_000f,
+            GcPauseRatio = 0.45f,
             ThreadPoolQueueLength = 460f,
         };
 

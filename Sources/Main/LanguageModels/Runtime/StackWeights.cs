@@ -30,11 +30,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             return s;
         }
 
-        private BlockWeights[]       _blocks = null!;
+        private BlockWeights[] _blocks = null!;
         private TensorStorage<float> _finalNormGamma = null!;
-        private TensorStorage<float> _finalNormBeta  = null!;
+        private TensorStorage<float> _finalNormBeta = null!;
         private TensorStorage<float>? _lmHead;
-        private float[]?             _lmHeadTransposed;
+        private float[]? _lmHeadTransposed;
 
         private StackWeights() { }
 
@@ -43,15 +43,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// Used by CachedLlamaInferenceEngine.
         /// </summary>
         internal StackWeights(
-            BlockWeights[]       blocks,
+            BlockWeights[] blocks,
             TensorStorage<float> finalNormGamma,
             TensorStorage<float> finalNormBeta,
             TensorStorage<float> lmHead)
         {
-            _blocks         = blocks;
+            _blocks = blocks;
             _finalNormGamma = finalNormGamma;
-            _finalNormBeta  = finalNormBeta;
-            _lmHead         = lmHead;
+            _finalNormBeta = finalNormBeta;
+            _lmHead = lmHead;
         }
 
         internal StackWeights(GPT1Model model)
@@ -65,7 +65,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             _finalNormGamma = model.FinalNorm.Gamma.Data;
-            _finalNormBeta  = model.FinalNorm.Beta.Data;
+            _finalNormBeta = model.FinalNorm.Beta.Data;
 
             if (cfg.TieWeights)
             {
@@ -93,11 +93,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             var sw = new StackWeights
             {
-                _blocks           = new BlockWeights[layerCount],
-                _finalNormGamma   = CreateStorage(finalNormGamma),
-                _finalNormBeta    = CreateStorage(finalNormBeta),
+                _blocks = new BlockWeights[layerCount],
+                _finalNormGamma = CreateStorage(finalNormGamma),
+                _finalNormBeta = CreateStorage(finalNormBeta),
                 _lmHeadTransposed = null,
-                _lmHead           = CreateStorage(lmHead),
+                _lmHead = CreateStorage(lmHead),
             };
 
             for (var l = 0; l < layerCount; l++)
@@ -109,9 +109,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         }
 
         public ref readonly BlockWeights Block(int layer) => ref _blocks[layer];
-        public int LayerCount                             => _blocks.Length;
-        public ReadOnlySpan<float> FinalNormGamma         => _finalNormGamma.AsReadOnlySpan();
-        public ReadOnlySpan<float> FinalNormBeta          => _finalNormBeta.AsReadOnlySpan();
+        public int LayerCount => _blocks.Length;
+        public ReadOnlySpan<float> FinalNormGamma => _finalNormGamma.AsReadOnlySpan();
+        public ReadOnlySpan<float> FinalNormBeta => _finalNormBeta.AsReadOnlySpan();
 
         public ReadOnlySpan<float> LmHeadWeights =>
             _lmHeadTransposed is not null
@@ -123,10 +123,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             var buf = new float[dModel * vocabSize];
             for (var t = 0; t < vocabSize; t++)
-                for (var d = 0; d < dModel; d++)
             {
-                buf[d * vocabSize + t] = source[t * dModel + d];
+                for (var d = 0; d < dModel; d++)
+                {
+                    buf[d * vocabSize + t] = source[t * dModel + d];
+                }
             }
+
             return buf;
         }
     }

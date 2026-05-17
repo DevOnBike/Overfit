@@ -469,8 +469,11 @@ namespace DevOnBike.Overfit.Autograd
             MethodImplOptions.AggressiveInlining)]
         private static void DisposeIfGraphOwned(AutogradNode? node)
         {
-            if (node is { Ownership: AutogradNodeOwnership.GraphTemporary
-                                  or AutogradNodeOwnership.GraphAuxiliary })
+            if (node is
+                {
+                    Ownership: AutogradNodeOwnership.GraphTemporary
+                                  or AutogradNodeOwnership.GraphAuxiliary
+                })
             {
                 node.Dispose();
             }

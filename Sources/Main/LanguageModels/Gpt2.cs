@@ -178,10 +178,10 @@ namespace DevOnBike.Overfit.LanguageModels
             }
 
             return Load(
-                modelPath:  Path.Combine(modelDir, $"gpt2_{sizeSuffix}.bin"),
-                vocabPath:  Path.Combine(modelDir, "vocab.json"),
+                modelPath: Path.Combine(modelDir, $"gpt2_{sizeSuffix}.bin"),
+                vocabPath: Path.Combine(modelDir, "vocab.json"),
                 mergesPath: Path.Combine(modelDir, "merges.txt"),
-                config:     config);
+                config: config);
         }
     }
 }

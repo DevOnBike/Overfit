@@ -185,7 +185,7 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             _cell.Dispose();
         }
-        public void Save(string path) {}
-        public void Load(string path) {}
+        public void Save(string path) { }
+        public void Load(string path) { }
     }
 }

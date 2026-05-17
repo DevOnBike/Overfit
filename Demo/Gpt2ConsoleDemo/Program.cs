@@ -52,17 +52,17 @@ namespace DevOnBike.Overfit.Demo.Gpt2Console
         private static void Run(CliOptions opts)
         {
             // ─── Resolve paths ─────────────────────────────────────────────────
-            var modelPath  = ResolvePath(opts.ModelPath,  "gpt2_small.bin");
-            var vocabPath  = ResolvePath(opts.VocabPath,  "vocab.json");
+            var modelPath = ResolvePath(opts.ModelPath, "gpt2_small.bin");
+            var vocabPath = ResolvePath(opts.VocabPath, "vocab.json");
             var mergesPath = ResolvePath(opts.MergesPath, "merges.txt");
 
             var config = opts.Size switch
             {
-                "Small"  => Gpt2Config.Small,
+                "Small" => Gpt2Config.Small,
                 "Medium" => Gpt2Config.Medium,
-                "Large"  => Gpt2Config.Large,
-                "XL"     => Gpt2Config.XL,
-                _        => throw new ArgumentException($"Unknown size: {opts.Size}")
+                "Large" => Gpt2Config.Large,
+                "XL" => Gpt2Config.XL,
+                _ => throw new ArgumentException($"Unknown size: {opts.Size}")
             };
 
             Console.WriteLine($"GPT-2 {opts.Size}");

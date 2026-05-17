@@ -471,7 +471,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var hw = _stackWeights.Block(layer).Head(head);
             var span = hw.Wq;
             var sumSq = 0f;
-            foreach (var v in span) sumSq += v * v;
+            foreach (var v in span)
+            {
+                sumSq += v * v;
+            }
+
             return MathF.Sqrt(sumSq);
         }
 
@@ -489,7 +493,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // _layers[l].Wq[h] is the SAME TensorStorage as hw._wq (zero-copy).
             var span = _layers[layer].Wq[head].AsSpan();
             if (index >= 0 && index < span.Length)
+            {
                 span[index] = value;
+            }
         }
 
         /// <summary>Read Wq via _layers path (the path LoRA modifies).</summary>
@@ -497,7 +503,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             ThrowIfDisposed();
             var span = _layers[layer].Wq[head].AsSpan();
-            if (index < 0 || index >= span.Length) return float.NaN;
+            if (index < 0 || index >= span.Length)
+            {
+                return float.NaN;
+            }
+
             return span[index];
         }
 

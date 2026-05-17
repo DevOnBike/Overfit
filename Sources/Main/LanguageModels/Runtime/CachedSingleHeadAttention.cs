@@ -127,7 +127,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             if (rope is not null)
             {
                 RopeKernel.Apply(_query, rope, position);
-                RopeKernel.Apply(_key,   rope, position);
+                RopeKernel.Apply(_key, rope, position);
             }
 
             _key

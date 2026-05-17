@@ -121,7 +121,7 @@ namespace DevOnBike.Overfit.Tensors
             {
                 throw new InvalidOperationException("Nie można zmienić kształtu nieciągłego widoku.");
             }
-            
+
             if (newS0 * newS1 != Size)
             {
                 throw new ArgumentException($"Nowy rozmiar {newS0 * newS1} nie pasuje do obecnego {Size}");

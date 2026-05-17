@@ -56,10 +56,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// Test constructor — unspecified biases default to empty.
         /// </summary>
         internal SingleHeadWeights(
-            float[]  wq,
-            float[]  wk,
-            float[]  wv,
-            float[]  wo,
+            float[] wq,
+            float[] wk,
+            float[] wv,
+            float[] wo,
             float[]? bq = null,
             float[]? bk = null,
             float[]? bv = null)
@@ -79,9 +79,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// In GQA mode wk/wv/bk/bv are ignored (supplied via KvHeadWeights instead).
         /// </summary>
         internal SingleHeadWeights(
-            TensorStorage<float>  wq,
-            TensorStorage<float>  bq,
-            TensorStorage<float>  wo,
+            TensorStorage<float> wq,
+            TensorStorage<float> bq,
+            TensorStorage<float> wo,
             TensorStorage<float>? wk = null,
             TensorStorage<float>? bk = null,
             TensorStorage<float>? wv = null,

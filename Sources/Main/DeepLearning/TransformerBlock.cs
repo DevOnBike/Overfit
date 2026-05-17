@@ -41,30 +41,30 @@ namespace DevOnBike.Overfit.DeepLearning
             int dModel,
             int nHeads,
             int dFF,
-            bool causalMask    = true,
-            bool preLayerNorm  = true,
-            float lnEps        = 1e-5f)
+            bool causalMask = true,
+            bool preLayerNorm = true,
+            float lnEps = 1e-5f)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(dModel);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(nHeads);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(dFF);
 
-            _dModel       = dModel;
-            PreLayerNorm  = preLayerNorm;
+            _dModel = dModel;
+            PreLayerNorm = preLayerNorm;
 
-            Norm1     = new LayerNormLayer(dModel, lnEps);
+            Norm1 = new LayerNormLayer(dModel, lnEps);
             Attention = new MultiHeadAttentionLayer(dModel, nHeads, causalMask);
-            Norm2     = new LayerNormLayer(dModel, lnEps);
-            FFN       = new FeedForwardLayer(dModel, dFF);
+            Norm2 = new LayerNormLayer(dModel, lnEps);
+            FFN = new FeedForwardLayer(dModel, dFF);
         }
 
         /// <summary>Pre-LayerNorm (true) or Post-LayerNorm (false, original GPT-1).</summary>
         public bool PreLayerNorm { get; }
 
-        public LayerNormLayer         Norm1     { get; }
+        public LayerNormLayer Norm1 { get; }
         public MultiHeadAttentionLayer Attention { get; }
-        public LayerNormLayer         Norm2     { get; }
-        public FeedForwardLayer       FFN       { get; }
+        public LayerNormLayer Norm2 { get; }
+        public FeedForwardLayer FFN { get; }
 
         public bool IsTraining { get; private set; } = true;
 
@@ -110,13 +110,13 @@ namespace DevOnBike.Overfit.DeepLearning
         private AutogradNode ForwardPreLN(ComputationGraph graph, AutogradNode x)
         {
             // x = x + Attention(LN1(x))  — Add is ON TAPE so gradient flows correctly.
-            var ln1Out  = Norm1.Forward(graph, x);
+            var ln1Out = Norm1.Forward(graph, x);
             var attnOut = Attention.Forward(graph, ln1Out);
-            var x2      = TensorMath.Add(graph, x, attnOut);
+            var x2 = TensorMath.Add(graph, x, attnOut);
 
             // x = x + FFN(LN2(x))
-            var ln2Out  = Norm2.Forward(graph, x2);
-            var ffnOut  = FFN.Forward(graph, ln2Out);
+            var ln2Out = Norm2.Forward(graph, x2);
+            var ffnOut = FFN.Forward(graph, ln2Out);
             return TensorMath.Add(graph, x2, ffnOut);
         }
 
@@ -124,12 +124,12 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             // x = LN1(x + Attention(x))
             var attnOut = Attention.Forward(graph, x);
-            var sum1    = TensorMath.Add(graph, x, attnOut);
-            var x2      = Norm1.Forward(graph, sum1);
+            var sum1 = TensorMath.Add(graph, x, attnOut);
+            var x2 = Norm1.Forward(graph, sum1);
 
             // x = LN2(x + FFN(x))
             var ffnOut = FFN.Forward(graph, x2);
-            var sum2   = TensorMath.Add(graph, x2, ffnOut);
+            var sum2 = TensorMath.Add(graph, x2, ffnOut);
             return Norm2.Forward(graph, sum2);
         }
 
@@ -141,16 +141,16 @@ namespace DevOnBike.Overfit.DeepLearning
         /// </summary>
         private static AutogradNode Residual(AutogradNode x, AutogradNode sublayerOut)
         {
-            var size    = x.DataView.Size;
+            var size = x.DataView.Size;
             var storage = new TensorStorage<float>(size, clearMemory: false);
-            var xS      = x.DataView.AsReadOnlySpan();
-            var sS      = sublayerOut.DataView.AsReadOnlySpan();
-            var outS    = storage.AsSpan();
+            var xS = x.DataView.AsReadOnlySpan();
+            var sS = sublayerOut.DataView.AsReadOnlySpan();
+            var outS = storage.AsSpan();
 
             TensorPrimitives.Add(xS, sS, outS);
 
             // requiresGrad: true if either input needs grad so backward can propagate
-            var rg   = x.RequiresGrad || sublayerOut.RequiresGrad;
+            var rg = x.RequiresGrad || sublayerOut.RequiresGrad;
             var node = new AutogradNode(storage, x.Shape, requiresGrad: rg);
             return node;
         }

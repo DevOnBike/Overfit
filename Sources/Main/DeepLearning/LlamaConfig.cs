@@ -21,18 +21,18 @@ namespace DevOnBike.Overfit.DeepLearning
         /// </summary>
         public static GPT1Config Llama32_1B => new()
         {
-            VocabSize      = 128_256,
-            ContextLength  = 8_192,    // practical for CPU; model supports 131072
-            DModel         = 2_048,
-            NHeads         = 32,
-            NKvHeads       = 8,
-            NLayers        = 16,
-            DFF            = 8_192,
-            TieWeights     = true,
-            PreLayerNorm   = true,
-            FfnActivation  = FeedForwardActivation.SwiGLU,
-            UseRoPE        = true,
-            RoPETheta      = 500_000f,
+            VocabSize = 128_256,
+            ContextLength = 8_192,    // practical for CPU; model supports 131072
+            DModel = 2_048,
+            NHeads = 32,
+            NKvHeads = 8,
+            NLayers = 16,
+            DFF = 8_192,
+            TieWeights = true,
+            PreLayerNorm = true,
+            FfnActivation = FeedForwardActivation.SwiGLU,
+            UseRoPE = true,
+            RoPETheta = 500_000f,
         };
 
         /// <summary>
@@ -41,18 +41,18 @@ namespace DevOnBike.Overfit.DeepLearning
         /// </summary>
         public static GPT1Config Llama32_3B => new()
         {
-            VocabSize      = 128_256,
-            ContextLength  = 8_192,
-            DModel         = 3_072,
-            NHeads         = 24,
-            NKvHeads       = 8,
-            NLayers        = 28,
-            DFF            = 8_192,
-            TieWeights     = true,
-            PreLayerNorm   = true,
-            FfnActivation  = FeedForwardActivation.SwiGLU,
-            UseRoPE        = true,
-            RoPETheta      = 500_000f,
+            VocabSize = 128_256,
+            ContextLength = 8_192,
+            DModel = 3_072,
+            NHeads = 24,
+            NKvHeads = 8,
+            NLayers = 28,
+            DFF = 8_192,
+            TieWeights = true,
+            PreLayerNorm = true,
+            FfnActivation = FeedForwardActivation.SwiGLU,
+            UseRoPE = true,
+            RoPETheta = 500_000f,
         };
 
         // ── Phi-3 ─────────────────────────────────────────────────────────────
@@ -63,18 +63,18 @@ namespace DevOnBike.Overfit.DeepLearning
         /// </summary>
         public static GPT1Config Phi3Mini => new()
         {
-            VocabSize      = 32_064,
-            ContextLength  = 4_096,
-            DModel         = 3_072,
-            NHeads         = 32,
-            NKvHeads       = 32,   // MHA — no GQA
-            NLayers        = 32,
-            DFF            = 8_192,
-            TieWeights     = false,
-            PreLayerNorm   = true,
-            FfnActivation  = FeedForwardActivation.SwiGLU,
-            UseRoPE        = true,
-            RoPETheta      = 10_000f,
+            VocabSize = 32_064,
+            ContextLength = 4_096,
+            DModel = 3_072,
+            NHeads = 32,
+            NKvHeads = 32,   // MHA — no GQA
+            NLayers = 32,
+            DFF = 8_192,
+            TieWeights = false,
+            PreLayerNorm = true,
+            FfnActivation = FeedForwardActivation.SwiGLU,
+            UseRoPE = true,
+            RoPETheta = 10_000f,
         };
 
         // ── Qwen 2.5 ──────────────────────────────────────────────────────────
@@ -85,18 +85,18 @@ namespace DevOnBike.Overfit.DeepLearning
         /// </summary>
         public static GPT1Config Qwen25_0_5B => new()
         {
-            VocabSize      = 151_936,
-            ContextLength  = 4_096,
-            DModel         = 896,
-            NHeads         = 14,
-            NKvHeads       = 2,
-            NLayers        = 24,
-            DFF            = 4_864,
-            TieWeights     = true,
-            PreLayerNorm   = true,
-            FfnActivation  = FeedForwardActivation.SwiGLU,
-            UseRoPE        = true,
-            RoPETheta      = 1_000_000f,
+            VocabSize = 151_936,
+            ContextLength = 4_096,
+            DModel = 896,
+            NHeads = 14,
+            NKvHeads = 2,
+            NLayers = 24,
+            DFF = 4_864,
+            TieWeights = true,
+            PreLayerNorm = true,
+            FfnActivation = FeedForwardActivation.SwiGLU,
+            UseRoPE = true,
+            RoPETheta = 1_000_000f,
         };
 
         /// <summary>
@@ -104,18 +104,18 @@ namespace DevOnBike.Overfit.DeepLearning
         /// </summary>
         public static GPT1Config Qwen25_1_5B => new()
         {
-            VocabSize      = 151_936,
-            ContextLength  = 4_096,
-            DModel         = 1_536,
-            NHeads         = 12,
-            NKvHeads       = 2,
-            NLayers        = 28,
-            DFF            = 8_960,
-            TieWeights     = true,
-            PreLayerNorm   = true,
-            FfnActivation  = FeedForwardActivation.SwiGLU,
-            UseRoPE        = true,
-            RoPETheta      = 1_000_000f,
+            VocabSize = 151_936,
+            ContextLength = 4_096,
+            DModel = 1_536,
+            NHeads = 12,
+            NKvHeads = 2,
+            NLayers = 28,
+            DFF = 8_960,
+            TieWeights = true,
+            PreLayerNorm = true,
+            FfnActivation = FeedForwardActivation.SwiGLU,
+            UseRoPE = true,
+            RoPETheta = 1_000_000f,
         };
     }
 }

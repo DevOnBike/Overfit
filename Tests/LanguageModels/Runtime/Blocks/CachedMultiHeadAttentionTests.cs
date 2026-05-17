@@ -67,10 +67,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             var decoder = new CachedMultiHeadAttention(dModel: 4, headCount: 2, maxSequenceLength: 4);
 
             // head0: picks dims 0,1  head1: picks dims 2,3
-            var head0In  = new[] { 1f, 0f,  0f, 1f,  0f, 0f,  0f, 0f };
-            var head1In  = new[] { 0f, 0f,  0f, 0f,  1f, 0f,  0f, 1f };
-            var head0Out = new[] { 1f, 0f, 0f, 0f,  0f, 1f, 0f, 0f };
-            var head1Out = new[] { 0f, 0f, 1f, 0f,  0f, 0f, 0f, 1f };
+            var head0In = new[] { 1f, 0f, 0f, 1f, 0f, 0f, 0f, 0f };
+            var head1In = new[] { 0f, 0f, 0f, 0f, 1f, 0f, 0f, 1f };
+            var head0Out = new[] { 1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f };
+            var head1Out = new[] { 0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f };
             var outputBias = new[] { 10f, 20f, 30f, 40f };
 
             var bw = MakeBlockWeights(
@@ -96,10 +96,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
 
             var decoder = new CachedMultiHeadAttention(dModel: 4, headCount: 2, maxSequenceLength: 4);
 
-            var head0In  = new[] { 1f, 0f,  0f, 1f,  0f, 0f,  0f, 0f };
-            var head1In  = new[] { 0f, 0f,  0f, 0f,  1f, 0f,  0f, 1f };
-            var head0Out = new[] { 1f, 0f, 0f, 0f,  0f, 1f, 0f, 0f };
-            var head1Out = new[] { 0f, 0f, 1f, 0f,  0f, 0f, 0f, 1f };
+            var head0In = new[] { 1f, 0f, 0f, 1f, 0f, 0f, 0f, 0f };
+            var head1In = new[] { 0f, 0f, 0f, 0f, 1f, 0f, 0f, 1f };
+            var head0Out = new[] { 1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f };
+            var head1Out = new[] { 0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f };
             var bw = MakeBlockWeights(
                 wq: [head0In, head1In], wk: [head0In, head1In],
                 wv: [head0In, head1In], wo: [head0Out, head1Out]);
@@ -110,14 +110,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             cache.Advance();
             decoder.Decode([0f, 1f, 0f, 1f], in bw, cache, 0, 1, output);
 
-            var scale  = 1f / MathF.Sqrt(2f);
+            var scale = 1f / MathF.Sqrt(2f);
             var score0 = 0f * scale;
             var score1 = 1f * scale;
-            var maxS   = MathF.Max(score0, score1);
-            var e0     = MathF.Exp(score0 - maxS);
-            var e1     = MathF.Exp(score1 - maxS);
-            var p0     = e0 / (e0 + e1);
-            var p1     = e1 / (e0 + e1);
+            var maxS = MathF.Max(score0, score1);
+            var e0 = MathF.Exp(score0 - maxS);
+            var e1 = MathF.Exp(score1 - maxS);
+            var p0 = e0 / (e0 + e1);
+            var p1 = e1 / (e0 + e1);
 
             AssertClose(p0, output[0]);
             AssertClose(p1, output[1]);
@@ -133,10 +133,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
 
             var decoder = new CachedMultiHeadAttention(dModel: 4, headCount: 2, maxSequenceLength: 2);
 
-            var head0In  = new[] { 1f, 0f,  0f, 1f,  0f, 0f,  0f, 0f };
-            var head1In  = new[] { 0f, 0f,  0f, 0f,  1f, 0f,  0f, 1f };
-            var head0Out = new[] { 1f, 0f, 0f, 0f,  0f, 1f, 0f, 0f };
-            var head1Out = new[] { 0f, 0f, 1f, 0f,  0f, 0f, 0f, 1f };
+            var head0In = new[] { 1f, 0f, 0f, 1f, 0f, 0f, 0f, 0f };
+            var head1In = new[] { 0f, 0f, 0f, 0f, 1f, 0f, 0f, 1f };
+            var head0Out = new[] { 1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f };
+            var head1Out = new[] { 0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f };
             var bw = MakeBlockWeights(
                 wq: [head0In, head1In], wk: [head0In, head1In],
                 wv: [head0In, head1In], wo: [head0Out, head1Out]);

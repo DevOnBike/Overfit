@@ -63,13 +63,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 $"headCount ({headCount}) must be divisible by kvHeadCount ({resolvedKvHeads}).");
             }
 
-            DModel            = dModel;
-            HeadCount         = headCount;
-            KvHeadCount       = resolvedKvHeads;
-            HeadDimension     = dModel / headCount;
+            DModel = dModel;
+            HeadCount = headCount;
+            KvHeadCount = resolvedKvHeads;
+            HeadDimension = dModel / headCount;
             MaxSequenceLength = maxSequenceLength;
 
-            _heads      = new CachedSingleHeadAttention[headCount];
+            _heads = new CachedSingleHeadAttention[headCount];
             _headOutput = new float[dModel];
 
             for (var h = 0; h < headCount; h++)

@@ -105,7 +105,7 @@ namespace DevOnBike.Overfit.Onnx.Operators
             int h = inputShape[2], w = inputShape[3];
 
             var padding = pads.Length >= 1 ? (int)pads[0] : 0;
-            var stride  = strides.Length >= 1 ? (int)strides[0] : 1;
+            var stride = strides.Length >= 1 ? (int)strides[0] : 1;
 
             var layer = new ConvLayer(inC, outC, h, w, kH, padding, stride);
 

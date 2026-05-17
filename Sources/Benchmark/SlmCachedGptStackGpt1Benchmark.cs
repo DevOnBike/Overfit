@@ -84,29 +84,29 @@ namespace Benchmarks
                 headDimension: _headDimension);
 
             _inputHidden = new float[DModel];
-            _logits      = new float[VocabSize];
+            _logits = new float[VocabSize];
             FillDeterministic(_inputHidden, seed: 101);
 
             var finalNormGamma = CreateVector(DModel, fillOnes: true);
-            var finalNormBeta  = CreateVector(DModel, seed: 201);
-            var lmHead         = CreateVector(DModel * VocabSize, seed: 301);
+            var finalNormBeta = CreateVector(DModel, seed: 201);
+            var lmHead = CreateVector(DModel * VocabSize, seed: 301);
 
             _weights = StackWeights.ForTest(
                 LayerCount, HeadCount,
                 l => new BlockWeights(
-                    heads:         CreateHeadWeights(HeadCount, DModel, _headDimension, l),
-                    ln1Gamma:      CreateVector(DModel, fillOnes: true,  seedBase: 1000 + l),
-                    ln1Beta:       CreateVector(DModel,                  seedBase: 2000 + l),
-                    attentionBias: CreateVector(DModel,                  seedBase: 3000 + l),
-                    ln2Gamma:      CreateVector(DModel, fillOnes: true,  seedBase: 4000 + l),
-                    ln2Beta:       CreateVector(DModel,                  seedBase: 5000 + l),
-                    ffnW1:         CreateVector(DModel * DFF,            seedBase: 6000 + l),
-                    ffnB1:         CreateVector(DFF,                     seedBase: 7000 + l),
-                    ffnW2:         CreateVector(DFF * DModel,            seedBase: 8000 + l),
-                    ffnB2:         CreateVector(DModel,                  seedBase: 9000 + l)),
+                    heads: CreateHeadWeights(HeadCount, DModel, _headDimension, l),
+                    ln1Gamma: CreateVector(DModel, fillOnes: true, seedBase: 1000 + l),
+                    ln1Beta: CreateVector(DModel, seedBase: 2000 + l),
+                    attentionBias: CreateVector(DModel, seedBase: 3000 + l),
+                    ln2Gamma: CreateVector(DModel, fillOnes: true, seedBase: 4000 + l),
+                    ln2Beta: CreateVector(DModel, seedBase: 5000 + l),
+                    ffnW1: CreateVector(DModel * DFF, seedBase: 6000 + l),
+                    ffnB1: CreateVector(DFF, seedBase: 7000 + l),
+                    ffnW2: CreateVector(DFF * DModel, seedBase: 8000 + l),
+                    ffnB2: CreateVector(DModel, seedBase: 9000 + l)),
                 finalNormGamma: finalNormGamma,
-                finalNormBeta:  finalNormBeta,
-                lmHead:         lmHead);
+                finalNormBeta: finalNormBeta,
+                lmHead: lmHead);
 
             PrefillCache(
                 _cache,

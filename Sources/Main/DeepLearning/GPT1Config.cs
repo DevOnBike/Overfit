@@ -117,7 +117,7 @@ namespace DevOnBike.Overfit.DeepLearning
         /// GeLU for GPT-2. SwiGLU for Llama/Mistral/Phi/Qwen.
         /// </summary>
         public FeedForwardActivation FfnActivation
-            { get; init; } = FeedForwardActivation.GeLU;
+        { get; init; } = FeedForwardActivation.GeLU;
 
         /// <summary>Total parameter count (weight-tying aware).</summary>
         public long ParameterCount

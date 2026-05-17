@@ -32,8 +32,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels
     {
         private readonly ITestOutputHelper _output;
 
-        private static string ModelPath  => TestModelPaths.Gpt2Small.BinaryPath;
-        private static string VocabPath  => TestModelPaths.Gpt2Small.VocabPath;
+        private static string ModelPath => TestModelPaths.Gpt2Small.BinaryPath;
+        private static string VocabPath => TestModelPaths.Gpt2Small.VocabPath;
         private static string MergesPath => TestModelPaths.Gpt2Small.MergesPath;
 
         public Gpt2InferenceTests(

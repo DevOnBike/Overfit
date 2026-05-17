@@ -549,20 +549,20 @@ namespace DevOnBike.Overfit.Optimizers
             public ParamState(Parameter param)
             {
                 _param = param;
-                _node  = null;
-                Size   = param.Shape.Size;
-                M      = new FastTensor<float>(Size, clearMemory: true);
-                V      = new FastTensor<float>(Size, clearMemory: true);
+                _node = null;
+                Size = param.Shape.Size;
+                M = new FastTensor<float>(Size, clearMemory: true);
+                V = new FastTensor<float>(Size, clearMemory: true);
             }
 
             // Legacy path: AutogradNode-backed state.
             public ParamState(AutogradNode node)
             {
                 _param = null;
-                _node  = node;
-                Size   = node.DataView.Size;
-                M      = new FastTensor<float>(Size, clearMemory: true);
-                V      = new FastTensor<float>(Size, clearMemory: true);
+                _node = node;
+                Size = node.DataView.Size;
+                M = new FastTensor<float>(Size, clearMemory: true);
+                V = new FastTensor<float>(Size, clearMemory: true);
             }
 
             public Span<float> DataSpan =>

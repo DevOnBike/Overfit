@@ -54,8 +54,8 @@ namespace DevOnBike.Overfit.Anomalies.Training
 
             progress?.Report(new TrainingProgress
             {
-                Phase      = $"Loaded {snapshots.Count:N0} snapshots, {skipped} skipped",
-                Step       = 0,
+                Phase = $"Loaded {snapshots.Count:N0} snapshots, {skipped} skipped",
+                Step = 0,
                 TotalSteps = _cfg.Steps,
             });
 
@@ -66,33 +66,33 @@ namespace DevOnBike.Overfit.Anomalies.Training
             // 3. Model
             var gptConfig = new GPT1Config
             {
-                VocabSize     = MetricTokenizer.VocabSize,
+                VocabSize = MetricTokenizer.VocabSize,
                 ContextLength = _cfg.ContextLength,
-                DModel        = _cfg.DModel,
-                NHeads        = _cfg.NHeads,
-                NLayers       = _cfg.NLayers,
-                DFF           = _cfg.DModel * 4,
-                TieWeights    = false,
-                PreLayerNorm  = true,
+                DModel = _cfg.DModel,
+                NHeads = _cfg.NHeads,
+                NLayers = _cfg.NLayers,
+                DFF = _cfg.DModel * 4,
+                TieWeights = false,
+                PreLayerNorm = true,
             };
 
             using var model = new GPT1Model(gptConfig);
             using var optimizer = new Adam(model.TrainableParameters(), _cfg.LearningRateMax)
             {
-                UseAdamW    = true,
+                UseAdamW = true,
                 WeightDecay = _cfg.WeightDecay,
             };
             model.Train();
 
             var trainSize = (int)(allTokens.Length * 0.9);
-            var trainIds  = allTokens.AsSpan(0, trainSize).ToArray();
-            var valIds    = allTokens.AsSpan(trainSize).ToArray();
-            var rng       = new Random(_cfg.Seed);
-            var sw        = Stopwatch.StartNew();
+            var trainIds = allTokens.AsSpan(0, trainSize).ToArray();
+            var valIds = allTokens.AsSpan(trainSize).ToArray();
+            var rng = new Random(_cfg.Seed);
+            var sw = Stopwatch.StartNew();
 
-            var initialLoss  = 0f;
+            var initialLoss = 0f;
             var finalValLoss = 0f;
-            var windowLoss   = 0f;
+            var windowLoss = 0f;
 
             // Parallel SDPA backward — -27% backward time on large models.
             ExperimentalLanguageModelOptions.EnableParallelAttentionBackward = true;
@@ -100,9 +100,9 @@ namespace DevOnBike.Overfit.Anomalies.Training
             // Data parallel: N workers share gradient per step.
             // Linear Scaling Rule: lr × sqrt(WorkerCount).
             var workerCount = _cfg.WorkerCount;
-            var lrScale     = MathF.Sqrt(workerCount);
-            var lrMax       = _cfg.LearningRateMax * lrScale;
-            var lrMin       = _cfg.LearningRateMin * lrScale;
+            var lrScale = MathF.Sqrt(workerCount);
+            var lrMax = _cfg.LearningRateMax * lrScale;
+            var lrMin = _cfg.LearningRateMin * lrScale;
 
             // Worker models share weights with master — each has its own graph and gradients.
             var workers = Enumerable.Range(0, workerCount)
@@ -115,18 +115,18 @@ namespace DevOnBike.Overfit.Anomalies.Training
             // graphs especially, each carrying its own arena) were previously re-created and
             // disposed inside the step loop, churning a whole arena's worth of memory per
             // step; the Reset() call below is the giveaway that reuse was always intended.
-            var workerGraphs  = new ComputationGraph[workerCount];
-            var sampleInputs  = new int[workerCount][];
+            var workerGraphs = new ComputationGraph[workerCount];
+            var sampleInputs = new int[workerCount][];
             var sampleTargets = new int[workerCount][];
-            var lossScratch   = new float[workerCount][];
-            var losses        = new float[workerCount];
+            var lossScratch = new float[workerCount][];
+            var losses = new float[workerCount];
 
             for (var w = 0; w < workerCount; w++)
             {
-                workerGraphs[w]  = new ComputationGraph(_cfg.ArenaSize / workerCount);
-                sampleInputs[w]  = new int[_cfg.ContextLength];
+                workerGraphs[w] = new ComputationGraph(_cfg.ArenaSize / workerCount);
+                sampleInputs[w] = new int[_cfg.ContextLength];
                 sampleTargets[w] = new int[_cfg.ContextLength];
-                lossScratch[w]   = new float[_cfg.ContextLength];
+                lossScratch[w] = new float[_cfg.ContextLength];
             }
 
             // 4. Train
@@ -149,7 +149,7 @@ namespace DevOnBike.Overfit.Anomalies.Training
                     ZeroGrads(workers[w]);
 
                     var logits = workers[w].Forward(workerGraphs[w], sampleInputs[w], batchSize: 1, _cfg.ContextLength);
-                    losses[w]  = LossAndGrad(logits, sampleTargets[w], _cfg.ContextLength, gptConfig.VocabSize, lossScratch[w]);
+                    losses[w] = LossAndGrad(logits, sampleTargets[w], _cfg.ContextLength, gptConfig.VocabSize, lossScratch[w]);
                     workerGraphs[w].BackwardFromGrad(logits);
                     logits.Dispose();
                 });
@@ -183,19 +183,19 @@ namespace DevOnBike.Overfit.Anomalies.Training
 
                 if ((step + 1) % _cfg.ReportEvery == 0 || step == _cfg.Steps - 1)
                 {
-                    var avg     = windowLoss / _cfg.ReportEvery;
-                    windowLoss  = 0f;
+                    var avg = windowLoss / _cfg.ReportEvery;
+                    windowLoss = 0f;
                     var valLoss = Evaluate(model, graph, gptConfig, valIds, rng);
                     finalValLoss = valLoss;
 
                     progress?.Report(new TrainingProgress
                     {
-                        Phase      = "Training",
-                        Step       = step + 1,
+                        Phase = "Training",
+                        Step = step + 1,
                         TotalSteps = _cfg.Steps,
-                        TrainLoss  = avg,
-                        ValLoss    = valLoss,
-                        Elapsed    = sw.Elapsed,
+                        TrainLoss = avg,
+                        ValLoss = valLoss,
+                        Elapsed = sw.Elapsed,
                     });
                 }
             }
@@ -220,11 +220,11 @@ namespace DevOnBike.Overfit.Anomalies.Training
             return new OfflineTrainingResult
             {
                 SnapshotsLoaded = snapshots.Count,
-                SkippedCsvRows  = skipped,
-                InitialLoss     = initialLoss,
-                FinalValLoss    = finalValLoss,
-                CheckpointPath  = checkpointPath,
-                TrainingTime    = sw.Elapsed,
+                SkippedCsvRows = skipped,
+                InitialLoss = initialLoss,
+                FinalValLoss = finalValLoss,
+                CheckpointPath = checkpointPath,
+                TrainingTime = sw.Elapsed,
             };
         }
 
@@ -338,8 +338,10 @@ namespace DevOnBike.Overfit.Anomalies.Training
         private static void ClipGradNorm(IEnumerable<Parameter> parameters, float maxNorm)
         {
             var list = parameters.ToList();
-            var sq   = 0f;
-            foreach (var p in list) { var g = p.GradSpan; for (var i = 0; i < g.Length; i++)
+            var sq = 0f;
+            foreach (var p in list)
+            {
+                var g = p.GradSpan; for (var i = 0; i < g.Length; i++)
                 {
                     sq += g[i] * g[i];
                 }
@@ -350,7 +352,9 @@ namespace DevOnBike.Overfit.Anomalies.Training
                 return;
             }
             var s = maxNorm / (n + 1e-6f);
-            foreach (var p in list) { var g = p.GradSpan; for (var i = 0; i < g.Length; i++)
+            foreach (var p in list)
+            {
+                var g = p.GradSpan; for (var i = 0; i < g.Length; i++)
                 {
                     g[i] *= s;
                 }
@@ -362,8 +366,8 @@ namespace DevOnBike.Overfit.Anomalies.Training
             model.Eval();
 
             // Reused across all validation steps — no per-step array allocation.
-            var input       = new int[_cfg.ContextLength];
-            var target      = new int[_cfg.ContextLength];
+            var input = new int[_cfg.ContextLength];
+            var target = new int[_cfg.ContextLength];
             var lossScratch = new float[_cfg.ContextLength];
 
             var total = 0f;
@@ -382,12 +386,12 @@ namespace DevOnBike.Overfit.Anomalies.Training
 
     public sealed class TrainingProgress
     {
-        public string  Phase      { get; init; } = string.Empty;
-        public int     Step       { get; init; }
-        public int     TotalSteps { get; init; }
-        public float   TrainLoss  { get; init; }
-        public float   ValLoss    { get; init; }
-        public TimeSpan Elapsed   { get; init; }
+        public string Phase { get; init; } = string.Empty;
+        public int Step { get; init; }
+        public int TotalSteps { get; init; }
+        public float TrainLoss { get; init; }
+        public float ValLoss { get; init; }
+        public TimeSpan Elapsed { get; init; }
 
         public override string ToString() =>
             $"[{Phase}] {Step}/{TotalSteps} train={TrainLoss:F4} val={ValLoss:F4} {Elapsed:mm\\:ss}";

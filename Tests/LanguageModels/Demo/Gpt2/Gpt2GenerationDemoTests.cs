@@ -46,8 +46,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.Gpt2
         public void Demo_Gpt2Small_KvCacheDecode_AllocatesZeroBytesPerToken()
         {
             // ── Resolve fixtures (throw with env-var hint if missing) ──────────
-            var modelPath  = TestModelPaths.Gpt2Small.RequireBinaryPath();
-            var vocabPath  = TestModelPaths.Gpt2Small.RequireVocabPath();
+            var modelPath = TestModelPaths.Gpt2Small.RequireBinaryPath();
+            var vocabPath = TestModelPaths.Gpt2Small.RequireVocabPath();
             var mergesPath = TestModelPaths.Gpt2Small.RequireMergesPath();
 
             const string prompt = "The future of software development is";
@@ -65,7 +65,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.Gpt2
                 model.Load(br);
             }
 
-            using var engine  = CachedSlmInferenceEngine.FromGpt1(model);
+            using var engine = CachedSlmInferenceEngine.FromGpt1(model);
             using var session = engine.CreateSession();
             session.Reset(tokenizer.Encode(prompt));
 
@@ -105,10 +105,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.Gpt2
             }
 
             // ── Report ─────────────────────────────────────────────────────────
-            var elapsedMs    = inferTicks / (double)Stopwatch.Frequency * 1000.0;
+            var elapsedMs = inferTicks / (double)Stopwatch.Frequency * 1000.0;
             var tokensPerSec = generated.Length * 1000.0 / elapsedMs;
-            var bytesPerTok  = (double)inferAlloc / generated.Length;
-            var text         = prompt + tokenizer.Decode(generated);
+            var bytesPerTok = (double)inferAlloc / generated.Length;
+            var text = prompt + tokenizer.Decode(generated);
 
             _output.WriteLine($"Prompt:               \"{prompt}\"");
             _output.WriteLine($"Output:               \"{text}\"");

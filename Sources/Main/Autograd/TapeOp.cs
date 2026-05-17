@@ -84,7 +84,7 @@ namespace DevOnBike.Overfit.Autograd
             ContextCount = contextCount;
 
             NodeContext = nodeContext;
-            IntData    = intData;
+            IntData = intData;
         }
     }
 }

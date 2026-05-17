@@ -28,38 +28,40 @@ namespace Benchmarks
     {
         // FFN W1 backward: batchSize=2048, inputSize=256, outputSize=1024
         private float[] _gradOutput2048x1024 = null!;
-        private float[] _weights256x1024     = null!;
-        private float[] _gradInput2048x256   = null!;
-        private float[] _input2048x256       = null!;
+        private float[] _weights256x1024 = null!;
+        private float[] _gradInput2048x256 = null!;
+        private float[] _input2048x256 = null!;
         private float[] _gradWeights256x1024 = null!;
 
         // MHA Q backward: batchSize=2048, inputSize=256, outputSize=32
-        private float[] _gradOutput2048x32  = null!;
-        private float[] _weights256x32      = null!;
+        private float[] _gradOutput2048x32 = null!;
+        private float[] _weights256x32 = null!;
         private float[] _gradInput2048x256b = null!;
-        private float[] _gradWeights256x32  = null!;
+        private float[] _gradWeights256x32 = null!;
 
         [GlobalSetup]
         public void Setup()
         {
             var rng = new Random(42);
 
-            void Fill(float[] arr) { for (var i = 0; i < arr.Length; i++)
+            void Fill(float[] arr)
+            {
+                for (var i = 0; i < arr.Length; i++)
                 {
                     arr[i] = (float)(rng.NextDouble() - 0.5);
                 }
             }
 
             _gradOutput2048x1024 = new float[2048 * 1024]; Fill(_gradOutput2048x1024);
-            _weights256x1024     = new float[256 * 1024];  Fill(_weights256x1024);
-            _gradInput2048x256   = new float[2048 * 256];
-            _input2048x256       = new float[2048 * 256];  Fill(_input2048x256);
+            _weights256x1024 = new float[256 * 1024]; Fill(_weights256x1024);
+            _gradInput2048x256 = new float[2048 * 256];
+            _input2048x256 = new float[2048 * 256]; Fill(_input2048x256);
             _gradWeights256x1024 = new float[256 * 1024];
 
-            _gradOutput2048x32  = new float[2048 * 32]; Fill(_gradOutput2048x32);
-            _weights256x32      = new float[256 * 32];  Fill(_weights256x32);
+            _gradOutput2048x32 = new float[2048 * 32]; Fill(_gradOutput2048x32);
+            _weights256x32 = new float[256 * 32]; Fill(_weights256x32);
             _gradInput2048x256b = new float[2048 * 256];
-            _gradWeights256x32  = new float[256 * 32];
+            _gradWeights256x32 = new float[256 * 32];
         }
 
         // ── FFN W1: [2048, 256] backward ────────────────────────────────────
@@ -72,8 +74,8 @@ namespace Benchmarks
                 _gradOutput2048x1024,
                 _weights256x1024,
                 _gradInput2048x256,
-                batchSize:  2048,
-                inputSize:  256,
+                batchSize: 2048,
+                inputSize: 256,
                 outputSize: 1024);
         }
 
@@ -85,8 +87,8 @@ namespace Benchmarks
                 _input2048x256,
                 _gradOutput2048x1024,
                 _gradWeights256x1024,
-                batchSize:  2048,
-                inputSize:  256,
+                batchSize: 2048,
+                inputSize: 256,
                 outputSize: 1024);
         }
 
@@ -100,8 +102,8 @@ namespace Benchmarks
                 _gradOutput2048x32,
                 _weights256x32,
                 _gradInput2048x256b,
-                batchSize:  2048,
-                inputSize:  256,
+                batchSize: 2048,
+                inputSize: 256,
                 outputSize: 32);
         }
 
@@ -113,8 +115,8 @@ namespace Benchmarks
                 _input2048x256,
                 _gradOutput2048x32,
                 _gradWeights256x32,
-                batchSize:  2048,
-                inputSize:  256,
+                batchSize: 2048,
+                inputSize: 256,
                 outputSize: 32);
         }
     }

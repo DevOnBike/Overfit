@@ -26,10 +26,10 @@ namespace DevOnBike.Overfit.Onnx
             int outputSlot,
             int outputSize)
         {
-            Module      = module;
-            InputSlots  = inputSlots;
-            OutputSlot  = outputSlot;
-            OutputSize  = outputSize;
+            Module = module;
+            InputSlots = inputSlots;
+            OutputSlot = outputSlot;
+            OutputSize = outputSize;
         }
 
         /// <summary>The layer that computes this node's output.</summary>

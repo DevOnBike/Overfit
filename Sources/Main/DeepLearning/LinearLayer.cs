@@ -134,7 +134,7 @@ namespace DevOnBike.Overfit.DeepLearning
             // ownsDataStorage=false, ownsGradStorage=false — Parameter owns the storage.
             // Tape holds references to these nodes; they live until layer.Dispose().
             _weightsNode ??= Weights.AsNode();
-            _biasNode    ??= Bias.AsNode();
+            _biasNode ??= Bias.AsNode();
 
             return ComputationGraph.LinearOp(graph, input, _weightsNode, _biasNode);
         }

@@ -37,13 +37,13 @@ namespace DevOnBike.Overfit.Onnx
             int inputSize,
             int outputSize)
         {
-            _nodes      = nodes;
-            _buffers    = buffers;
-            _inputSize  = inputSize;
+            _nodes = nodes;
+            _buffers = buffers;
+            _inputSize = inputSize;
             _outputSize = outputSize;
         }
 
-        public int InputSize  => _inputSize;
+        public int InputSize => _inputSize;
         public int OutputSize => _outputSize;
 
         /// <summary>
@@ -77,7 +77,7 @@ namespace DevOnBike.Overfit.Onnx
                 if (node.InputSlots.Length == 2 && node.Module is OnnxAddLayer addLayer)
                 {
                     // Skip connection: Add(left, right) → output.
-                    var left  = _buffers[node.InputSlots[0]].AsSpan();
+                    var left = _buffers[node.InputSlots[0]].AsSpan();
                     var right = _buffers[node.InputSlots[1]].AsSpan();
                     addLayer.ForwardInference(left, right, outBuf);
                 }

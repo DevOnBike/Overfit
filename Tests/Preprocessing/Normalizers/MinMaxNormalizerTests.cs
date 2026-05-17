@@ -39,7 +39,7 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
             normalizer.Freeze();
 
             // Production: normal values and one anomaly (150f) come in
-            float[] testData = [-10f, 50f, 150f]; 
+            float[] testData = [-10f, 50f, 150f];
 
             // ACT
             normalizer.TransformInPlace(testData);
@@ -50,20 +50,20 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
             // 50f lands exactly at the midpoint
             Assert.Equal(0.5f, testData[1], Precision);
             // 150f breaks the ceiling! We give the model a signal 50% above the normal range
-            Assert.Equal(1.5f, testData[2], Precision); 
+            Assert.Equal(1.5f, testData[2], Precision);
         }
 
         [Fact]
         public void TransformInPlace_WithClipToRangeTrue_ShouldStrictlyBoundToZeroOne()
         {
             // ARRANGE - Testujemy twarde granice
-            float[] trainData = [0f, 50f, 100f]; 
+            float[] trainData = [0f, 50f, 100f];
             var normalizer = new MinMaxNormalizer { ClipToRange = true };
             normalizer.FitBatch(trainData);
             normalizer.Freeze();
 
             // Produkcja
-            float[] testData = [-50f, 50f, 200f]; 
+            float[] testData = [-50f, 50f, 200f];
 
             // ACT
             normalizer.TransformInPlace(testData);

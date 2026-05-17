@@ -25,7 +25,7 @@ namespace DevOnBike.Overfit.Statistical
         public void Explain(ReadOnlySpan<float> x, Span<float> phi)
         {
             phi.Clear();
-            
+
             using var zWithBuf = new PooledBuffer<float>(_m, clearMemory: false);
             using var zWithoutBuf = new PooledBuffer<float>(_m, clearMemory: false);
 
@@ -39,7 +39,7 @@ namespace DevOnBike.Overfit.Statistical
             for (var i = 0; i < _m; i++)
             {
                 float marginalSum = 0;
-                
+
                 for (var s = 0; s < samplesPerFeature; s++)
                 {
                     PrepareCoalition(zWithout, i, x);
@@ -48,20 +48,20 @@ namespace DevOnBike.Overfit.Statistical
 
                     marginalSum += (_modelFunc(zWith) - _modelFunc(zWithout));
                 }
-                
+
                 phi[i] = marginalSum / samplesPerFeature;
             }
 
             // Efficiency correction (SHAP Axiom)
             float sum = 0;
-            
+
             for (var i = 0; i < _m; i++)
             {
                 sum += phi[i];
             }
-            
+
             var diff = (fX - fNull - sum) / _m;
-            
+
             for (var i = 0; i < _m; i++)
             {
                 phi[i] += diff;
@@ -71,9 +71,9 @@ namespace DevOnBike.Overfit.Statistical
         private void PrepareCoalition(Span<float> dest, int excludedIdx, ReadOnlySpan<float> x)
         {
             _background.AsSpan().CopyTo(dest);
-            
+
             var rnd = Random.Shared;
-            
+
             for (var i = 0; i < _m; i++)
             {
                 if (i != excludedIdx && rnd.NextDouble() > 0.5)
@@ -85,7 +85,7 @@ namespace DevOnBike.Overfit.Statistical
 
         public void Dispose()
         {
-            
+
         }
     }
 }

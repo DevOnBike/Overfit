@@ -49,14 +49,14 @@ namespace DevOnBike.Overfit.Onnx.Operators
                     if (negIdx >= 0 && inputShape != null)
                     {
                         var totalElements = 1;
-                        
+
                         foreach (var d in inputShape)
                         {
                             totalElements *= d;
                         }
 
                         var knownProduct = 1;
-                        
+
                         for (var i = 0; i < targetShape.Length; i++)
                         {
                             if (i != negIdx)

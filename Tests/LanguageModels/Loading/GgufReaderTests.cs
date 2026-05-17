@@ -217,12 +217,12 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         {
             switch (vtype)
             {
-                case GgufValueType.UInt32:  bw.Write((uint)value); break;
-                case GgufValueType.Int32:   bw.Write((int)value); break;
+                case GgufValueType.UInt32: bw.Write((uint)value); break;
+                case GgufValueType.Int32: bw.Write((int)value); break;
                 case GgufValueType.Float32: bw.Write((float)value); break;
-                case GgufValueType.String:  WriteString(bw, (string)value); break;
-                case GgufValueType.UInt64:  bw.Write((ulong)value); break;
-                case GgufValueType.Bool:    bw.Write((bool)value); break;
+                case GgufValueType.String: WriteString(bw, (string)value); break;
+                case GgufValueType.UInt64: bw.Write((ulong)value); break;
+                case GgufValueType.Bool: bw.Write((bool)value); break;
                 default: throw new NotImplementedException($"WriteValue: {vtype}");
             }
         }

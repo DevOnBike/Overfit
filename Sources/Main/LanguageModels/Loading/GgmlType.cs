@@ -11,8 +11,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
     /// </summary>
     public enum GgmlType : uint
     {
-        F32  = 0,
-        F16  = 1,
+        F32 = 0,
+        F16 = 1,
         Q4_0 = 2,
         Q4_1 = 3,
         Q5_0 = 6,

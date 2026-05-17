@@ -99,16 +99,16 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             // packed[8..11] left zero so scales[4..7]=mins[4..7]=0.
             Span<byte> packed = stackalloc byte[12];
             packed[0] = 10; packed[1] = 20; packed[2] = 30; packed[3] = 40;
-            packed[4] =  5; packed[5] = 15; packed[6] = 21; packed[7] = 27;
+            packed[4] = 5; packed[5] = 15; packed[6] = 21; packed[7] = 27;
 
             Span<byte> scales = stackalloc byte[8];
-            Span<byte> mins   = stackalloc byte[8];
+            Span<byte> mins = stackalloc byte[8];
             GgmlDequant.UnpackQ4_KScalesMins(packed, scales, mins);
 
             Assert.Equal(10, scales[0]); Assert.Equal(20, scales[1]);
             Assert.Equal(30, scales[2]); Assert.Equal(40, scales[3]);
-            Assert.Equal( 5, mins[0]);   Assert.Equal(15, mins[1]);
-            Assert.Equal(21, mins[2]);   Assert.Equal(27, mins[3]);
+            Assert.Equal(5, mins[0]); Assert.Equal(15, mins[1]);
+            Assert.Equal(21, mins[2]); Assert.Equal(27, mins[3]);
             for (var j = 4; j < 8; j++) { Assert.Equal(0, scales[j]); Assert.Equal(0, mins[j]); }
         }
 
@@ -123,12 +123,12 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             //   packed[8..11] = 0x35 (low nibble 0x05, high nibble 0x03)
             // → scales[4..7] = 0x30 | 0x05 = 0x35, mins[4..7] = 0x20 | 0x03 = 0x23.
             Span<byte> packed = stackalloc byte[12];
-            for (var i = 0; i < 4; i++)  { packed[i]     = 0xC0; }
-            for (var i = 4; i < 8; i++)  { packed[i]     = 0x80; }
-            for (var i = 8; i < 12; i++) { packed[i]     = 0x35; }
+            for (var i = 0; i < 4; i++) { packed[i] = 0xC0; }
+            for (var i = 4; i < 8; i++) { packed[i] = 0x80; }
+            for (var i = 8; i < 12; i++) { packed[i] = 0x35; }
 
             Span<byte> scales = stackalloc byte[8];
-            Span<byte> mins   = stackalloc byte[8];
+            Span<byte> mins = stackalloc byte[8];
             GgmlDequant.UnpackQ4_KScalesMins(packed, scales, mins);
 
             for (var j = 0; j < 4; j++) { Assert.Equal(0, scales[j]); Assert.Equal(0, mins[j]); }
@@ -167,7 +167,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             {
                 for (var i = 0; i < 32; i++)
                 {
-                    Assert.Equal(1.0f, dst[64 * p + i],      precision: 6);
+                    Assert.Equal(1.0f, dst[64 * p + i], precision: 6);
                     Assert.Equal(2.0f, dst[64 * p + 32 + i], precision: 6);
                 }
             }
@@ -179,7 +179,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             // d = 2, dmin = 1; scales = 1..8, mins = 0..7; nibbles = 0x53 (low=3, high=5).
             // sub-pair p uses scales[2p], scales[2p+1], mins[2p], mins[2p+1].
             var packed = new byte[12];
-            for (var i = 0; i < 4; i++) { packed[i]     = (byte)(i + 1); } // scales[0..3] = 1..4
+            for (var i = 0; i < 4; i++) { packed[i] = (byte)(i + 1); } // scales[0..3] = 1..4
             for (var i = 0; i < 4; i++) { packed[i + 4] = (byte)i; }       // mins[0..3]   = 0..3
             for (var j = 4; j < 8; j++)
             {
@@ -196,11 +196,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 
             for (var p = 0; p < 4; p++)
             {
-                var expectedLow  = 2.0f * (2 * p + 1) * 3 - 1.0f * (2 * p);
+                var expectedLow = 2.0f * (2 * p + 1) * 3 - 1.0f * (2 * p);
                 var expectedHigh = 2.0f * (2 * p + 2) * 5 - 1.0f * (2 * p + 1);
                 for (var i = 0; i < 32; i++)
                 {
-                    Assert.Equal(expectedLow,  dst[64 * p + i],      precision: 4);
+                    Assert.Equal(expectedLow, dst[64 * p + i], precision: 4);
                     Assert.Equal(expectedHigh, dst[64 * p + 32 + i], precision: 4);
                 }
             }
@@ -262,7 +262,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             GgmlDequant.DecodeQ6_KBlock(block, dst);
 
             Assert.Equal(-31f, dst[64], precision: 4);
-            Assert.Equal(-32f, dst[0],  precision: 4);
+            Assert.Equal(-32f, dst[0], precision: 4);
             Assert.Equal(-32f, dst[32], precision: 4);
             Assert.Equal(-32f, dst[96], precision: 4);
             // Random other elements stay at the all-zero baseline.
@@ -316,8 +316,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             //   packed[4..7] = 0x00
             //   packed[8..11]: low nibble = 1 (→ scales[4..7]=1), high nibble = 0 (→ mins[4..7]=0)
             var packed = new byte[12];
-            for (var i = 0; i < 4; i++)  { packed[i]     = 0x01; }
-            for (var i = 8; i < 12; i++) { packed[i]     = 0x01; }
+            for (var i = 0; i < 4; i++) { packed[i] = 0x01; }
+            for (var i = 8; i < 12; i++) { packed[i] = 0x01; }
             return packed;
         }
 

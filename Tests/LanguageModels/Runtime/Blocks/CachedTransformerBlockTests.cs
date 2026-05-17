@@ -305,7 +305,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     var _bw = MakeBlockWeights(zeroHeadWeights, zeroHeadWeights, zeroHeadWeights, zeroHeadWeights,
                     zeroHeadBiases, zeroHeadBiases, zeroHeadBiases, [],
                     new float[2 * 2], [], new float[2 * 2], []);
-            block.Decode([1f, -1f], in _bw, cache: cache, layerIndex: 0, position: 0, output: new float[2]);
+                    block.Decode([1f, -1f], in _bw, cache: cache, layerIndex: 0, position: 0, output: new float[2]);
                 });
         }
 
@@ -334,7 +334,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     var _bw = MakeBlockWeights(zeroHeadWeights, zeroHeadWeights, zeroHeadWeights, zeroHeadWeights,
                     zeroHeadBiases, zeroHeadBiases, zeroHeadBiases, [],
                     new float[2 * 2], [], new float[2 * 2], []);
-            block.Decode(new float[1], in _bw, cache: cache, layerIndex: 0, position: 0, output: new float[2]);
+                    block.Decode(new float[1], in _bw, cache: cache, layerIndex: 0, position: 0, output: new float[2]);
                 });
 
             Assert.Throws<ArgumentException>(() =>
@@ -342,7 +342,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     var _bw = MakeBlockWeights(zeroHeadWeights, zeroHeadWeights, zeroHeadWeights, zeroHeadWeights,
                     zeroHeadBiases, zeroHeadBiases, zeroHeadBiases, [],
                     new float[1], [], new float[2 * 2], []);
-            block.Decode(new float[2], in _bw, cache: cache, layerIndex: 0, position: 0, output: new float[2]);
+                    block.Decode(new float[2], in _bw, cache: cache, layerIndex: 0, position: 0, output: new float[2]);
                 });
 
             Assert.Throws<ArgumentException>(() =>
@@ -350,7 +350,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     var _bw = MakeBlockWeights(zeroHeadWeights, zeroHeadWeights, zeroHeadWeights, zeroHeadWeights,
                     zeroHeadBiases, zeroHeadBiases, zeroHeadBiases, [],
                     new float[2 * 2], [], new float[1], []);
-            block.Decode(new float[2], in _bw, cache: cache, layerIndex: 0, position: 0, output: new float[2]);
+                    block.Decode(new float[2], in _bw, cache: cache, layerIndex: 0, position: 0, output: new float[2]);
                 });
 
             Assert.Throws<ArgumentException>(() =>
@@ -358,7 +358,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     var _bw = MakeBlockWeights(zeroHeadWeights, zeroHeadWeights, zeroHeadWeights, zeroHeadWeights,
                     zeroHeadBiases, zeroHeadBiases, zeroHeadBiases, [],
                     new float[2 * 2], [], new float[2 * 2], []);
-            block.Decode(new float[2], in _bw, cache: cache, layerIndex: 0, position: 0, output: new float[1]);
+                    block.Decode(new float[2], in _bw, cache: cache, layerIndex: 0, position: 0, output: new float[1]);
                 });
         }
 

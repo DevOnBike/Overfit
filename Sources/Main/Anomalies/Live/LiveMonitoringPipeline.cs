@@ -47,10 +47,10 @@ namespace DevOnBike.Overfit.Anomalies.Live
             LiveMonitoringOptions options,
             GptTrainingConfig trainingConfig)
         {
-            _source         = source;
-            _model          = model;
-            _alertEngine    = alertEngine;
-            _options        = options;
+            _source = source;
+            _model = model;
+            _alertEngine = alertEngine;
+            _options = options;
             _trainingConfig = trainingConfig;
         }
 
@@ -73,14 +73,14 @@ namespace DevOnBike.Overfit.Anomalies.Live
             // Load GPT model from checkpoint
             var gptConfig = new GPT1Config
             {
-                VocabSize     = MetricTokenizer.VocabSize,
+                VocabSize = MetricTokenizer.VocabSize,
                 ContextLength = trainingConfig.ContextLength,
-                DModel        = trainingConfig.DModel,
-                NHeads        = trainingConfig.NHeads,
-                NLayers       = trainingConfig.NLayers,
-                DFF           = trainingConfig.DModel * 4,
-                TieWeights    = false,
-                PreLayerNorm  = true,
+                DModel = trainingConfig.DModel,
+                NHeads = trainingConfig.NHeads,
+                NLayers = trainingConfig.NLayers,
+                DFF = trainingConfig.DModel * 4,
+                TieWeights = false,
+                PreLayerNorm = true,
             };
 
             var model = new GPT1Model(gptConfig);
@@ -94,17 +94,17 @@ namespace DevOnBike.Overfit.Anomalies.Live
             var sourceConfig = new PrometheusMetricSourceConfig
             {
                 PrometheusBaseUrl = options.PrometheusBaseUrl,
-                PodRegex          = options.PodRegex,
-                ScrapeInterval    = options.ScrapeInterval,
+                PodRegex = options.PodRegex,
+                ScrapeInterval = options.ScrapeInterval,
             };
             var source = new PrometheusMetricSource(sourceConfig);
 
             // Alert engine
             var alertConfig = new AlertEngineConfig
             {
-                AlertThreshold    = options.AlertThreshold,
+                AlertThreshold = options.AlertThreshold,
                 CriticalThreshold = options.CriticalThreshold,
-                CooldownDuration  = options.CooldownDuration,
+                CooldownDuration = options.CooldownDuration,
             };
             var alertEngine = new AlertEngine(alertConfig, sinks);
 
@@ -122,13 +122,13 @@ namespace DevOnBike.Overfit.Anomalies.Live
                 try
                 {
                     var scrapeTime = DateTime.UtcNow;
-                    var series     = await _source.ReadAsync(ct).ConfigureAwait(false);
-                    var snapshots  = ConvertToSnapshots(series, scrapeTime);
+                    var series = await _source.ReadAsync(ct).ConfigureAwait(false);
+                    var snapshots = ConvertToSnapshots(series, scrapeTime);
 
                     foreach (var snapshot in snapshots)
                     {
                         var detector = GetOrCreateDetector(snapshot.PodName);
-                        var result   = detector.Score(snapshot);
+                        var result = detector.Score(snapshot);
 
                         if (result.IsWarmup)
                         {
@@ -181,7 +181,7 @@ namespace DevOnBike.Overfit.Anomalies.Live
             {
                 return existing;
             }
-            var handle   = SlmRuntimeFactory.CreateGpt1(_model);
+            var handle = SlmRuntimeFactory.CreateGpt1(_model);
             var detector = new GptAnomalyDetector(handle, _options.ContextSnapshots);
             _detectors[podName] = detector;
             return detector;
@@ -214,19 +214,19 @@ namespace DevOnBike.Overfit.Anomalies.Live
             {
                 result.Add(new MetricSnapshot
                 {
-                    Timestamp             = timestamp,
-                    PodName               = podName,
-                    CpuUsageRatio         = f[0],
-                    CpuThrottleRatio      = f[1],
+                    Timestamp = timestamp,
+                    PodName = podName,
+                    CpuUsageRatio = f[0],
+                    CpuThrottleRatio = f[1],
                     MemoryWorkingSetBytes = f[2],
-                    OomEventsRate         = f[3],
-                    LatencyP50Ms          = f[4],
-                    LatencyP95Ms          = f[5],
-                    LatencyP99Ms          = f[6],
-                    RequestsPerSecond     = f[7],
-                    ErrorRate             = f[8],
-                    GcGen2HeapBytes       = f[9],
-                    GcPauseRatio          = f[10],
+                    OomEventsRate = f[3],
+                    LatencyP50Ms = f[4],
+                    LatencyP95Ms = f[5],
+                    LatencyP99Ms = f[6],
+                    RequestsPerSecond = f[7],
+                    ErrorRate = f[8],
+                    GcGen2HeapBytes = f[9],
+                    GcPauseRatio = f[10],
                     ThreadPoolQueueLength = f[11],
                 });
             }
@@ -262,10 +262,10 @@ namespace DevOnBike.Overfit.Anomalies.Live
         /// <summary>PromQL regex matching pods to monitor, e.g. "my-service-.*".</summary>
         public required string PodRegex { get; init; }
 
-        public TimeSpan ScrapeInterval    { get; init; } = TimeSpan.FromSeconds(15);
-        public float    AlertThreshold    { get; init; } = 3.0f;
-        public float    CriticalThreshold { get; init; } = 6.0f;
-        public TimeSpan CooldownDuration  { get; init; } = TimeSpan.FromMinutes(5);
+        public TimeSpan ScrapeInterval { get; init; } = TimeSpan.FromSeconds(15);
+        public float AlertThreshold { get; init; } = 3.0f;
+        public float CriticalThreshold { get; init; } = 6.0f;
+        public TimeSpan CooldownDuration { get; init; } = TimeSpan.FromMinutes(5);
 
         /// <summary>
         /// Rolling window in snapshots fed to each detector.

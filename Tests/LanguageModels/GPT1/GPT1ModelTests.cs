@@ -49,11 +49,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.GPT1
             model.Eval();
 
             int[] tokens = [1, 2, 3, 4, 5];
-            using var graph  = new ComputationGraph();
+            using var graph = new ComputationGraph();
             using var logits = model.Forward(graph, tokens, batchSize: 1, seqLen: 5);
 
-            Assert.Equal(1,                    logits.Shape.D0);
-            Assert.Equal(5,                    logits.Shape.D1);
+            Assert.Equal(1, logits.Shape.D0);
+            Assert.Equal(5, logits.Shape.D1);
             Assert.Equal(SmallConfig.VocabSize, logits.Shape.D2);
         }
 
@@ -64,12 +64,12 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.GPT1
             model.Eval();
 
             int[] tokens = [0, 10, 20, 30];
-            using var graph  = new ComputationGraph();
+            using var graph = new ComputationGraph();
             using var logits = model.Forward(graph, tokens, batchSize: 1, seqLen: 4);
 
             foreach (var v in logits.DataView.AsReadOnlySpan())
             {
-                Assert.False(float.IsNaN(v),      "NaN in GPT1 logits");
+                Assert.False(float.IsNaN(v), "NaN in GPT1 logits");
                 Assert.False(float.IsInfinity(v), "Inf in GPT1 logits");
             }
         }
@@ -96,13 +96,13 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.GPT1
         {
             var config = new GPT1Config
             {
-                VocabSize     = 16,
+                VocabSize = 16,
                 ContextLength = 8,
-                DModel        = 8,
-                NHeads        = 2,
-                NLayers       = 1,
-                DFF           = 16,
-                TieWeights    = true,
+                DModel = 8,
+                NHeads = 2,
+                NLayers = 1,
+                DFF = 16,
+                TieWeights = true,
             };
 
             using var model = new GPT1Model(config);
@@ -116,7 +116,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.GPT1
                 for (var c = 0; c < config.DModel; c++)
                 {
                     var expected = tokEmb[r * config.DModel + c];
-                    var actual   = lmHead[c * config.VocabSize + r];
+                    var actual = lmHead[c * config.VocabSize + r];
                     Assert.True(MathF.Abs(expected - actual) < 1e-6f,
                         $"Weight tie mismatch at [{r},{c}]: emb={expected}, lmhead={actual}");
                 }
@@ -132,7 +132,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.GPT1
         {
             using var model = new GPT1Model(SmallConfig);
 
-            var actual   = model.TrainableParameters().Sum(p => (long)p.Shape.Size);
+            var actual = model.TrainableParameters().Sum(p => (long)p.Shape.Size);
             var expected = SmallConfig.ParameterCount;
 
             Assert.Equal(expected, actual);
@@ -145,7 +145,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.GPT1
         [Fact]
         public void GPT1Model_GenerateLogits_LengthIsVocabSize()
         {
-            using var model  = new GPT1Model(SmallConfig);
+            using var model = new GPT1Model(SmallConfig);
             model.Eval();
 
             var logits = model.GenerateLogits([1, 2, 3]);
@@ -156,7 +156,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.GPT1
         [Fact]
         public void GPT1Model_GenerateLogits_NoNaNOrInf()
         {
-            using var model  = new GPT1Model(SmallConfig);
+            using var model = new GPT1Model(SmallConfig);
             model.Eval();
 
             var logits = model.GenerateLogits([0, 1, 2, 3, 4]);
@@ -209,7 +209,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.GPT1
             model1.Save(bw);
 
             ms.Position = 0;
-            using var br     = new BinaryReader(ms);
+            using var br = new BinaryReader(ms);
             using var model2 = new GPT1Model(SmallConfig);
             model2.Load(br);
             model2.Eval();

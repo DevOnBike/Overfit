@@ -32,25 +32,25 @@ namespace Benchmarks
     [Config(typeof(BenchmarkConfig))]
     public class LmHeadParallelBenchmark
     {
-        private const int DModel    = 768;
+        private const int DModel = 768;
         private const int VocabSize = 50_257;   // GPT-2 vocab
 
-        private float[] _hidden  = null!;
+        private float[] _hidden = null!;
         private float[] _weights = null!;
-        private float[] _logits  = null!;
+        private float[] _logits = null!;
 
         [GlobalSetup]
         public void Setup()
         {
             var rng = new Random(42);
 
-            _hidden  = new float[DModel];
+            _hidden = new float[DModel];
             _weights = new float[DModel * VocabSize];
-            _logits  = new float[VocabSize];
+            _logits = new float[VocabSize];
 
-            for (var i = 0; i < _hidden.Length;  i++)
+            for (var i = 0; i < _hidden.Length; i++)
             {
-                _hidden[i]  = (float)(rng.NextDouble() * 2 - 1);
+                _hidden[i] = (float)(rng.NextDouble() * 2 - 1);
             }
             for (var i = 0; i < _weights.Length; i++)
             {

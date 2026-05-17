@@ -61,7 +61,7 @@ namespace DevOnBike.Overfit.Ops
             {
                 // Route through graph factory so Ownership is set from birth.
                 return requiresGrad
-                    ? graph.CreateTemporary(shape, requiresGrad: true,  clearMemory: clearMemory)
+                    ? graph.CreateTemporary(shape, requiresGrad: true, clearMemory: clearMemory)
                     : graph.CreateAuxiliary(shape, clearMemory: clearMemory);
             }
 

@@ -10,9 +10,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     /// </summary>
     public enum FeedForwardActivation
     {
-        None   = 0,
-        ReLU   = 1,
-        GeLU   = 2,
+        None = 0,
+        ReLU = 1,
+        GeLU = 2,
 
         /// <summary>
         /// SwiGLU (Shazeer, 2020) — used by Llama, Mistral, Qwen, Phi.

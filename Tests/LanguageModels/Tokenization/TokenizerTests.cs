@@ -29,8 +29,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenization
         [Fact]
         public void CharTokenizer_Encode_Decode_RoundTrip()
         {
-            var tok  = CharacterTokenizer.FromCorpus("hello world");
-            var ids  = tok.Encode("hello");
+            var tok = CharacterTokenizer.FromCorpus("hello world");
+            var ids = tok.Encode("hello");
             var text = tok.Decode(ids);
 
             Assert.Equal("hello", text);
@@ -65,8 +65,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenization
         [Fact]
         public void CharTokenizer_Ascii_EncodesAsciiText()
         {
-            var tok  = CharacterTokenizer.Ascii();
-            var ids  = tok.Encode("Hello!");
+            var tok = CharacterTokenizer.Ascii();
+            var ids = tok.Encode("Hello!");
             var text = tok.Decode(ids);
 
             Assert.Equal("Hello!", text);
@@ -98,8 +98,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenization
         [Fact]
         public void CharTokenizer_AllIds_InRange()
         {
-            var tok  = CharacterTokenizer.Ascii();
-            var ids  = tok.Encode("The quick brown fox");
+            var tok = CharacterTokenizer.Ascii();
+            var ids = tok.Encode("The quick brown fox");
 
             foreach (var id in ids)
             {
@@ -122,20 +122,20 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenization
             // Config: vocab matches tokenizer
             var config = new GPT1Config
             {
-                VocabSize     = tokenizer.VocabSize,
+                VocabSize = tokenizer.VocabSize,
                 ContextLength = 32,
-                DModel        = 32,
-                NHeads        = 2,
-                NLayers       = 1,
-                DFF           = 64,
-                TieWeights    = false,
+                DModel = 32,
+                NHeads = 2,
+                NLayers = 1,
+                DFF = 64,
+                TieWeights = false,
             };
 
             using var model = new GPT1Model(config);
             model.Eval();
 
             // Encode prompt
-            var prompt    = "hello";
+            var prompt = "hello";
             var promptIds = tokenizer.Encode(prompt);
 
             // Generate 5 more tokens
@@ -158,22 +158,22 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenization
         public void GPT1_EndToEnd_GenerateLogits_ShapeIsVocabSize()
         {
             var tokenizer = CharacterTokenizer.FromCorpus("abcdef ghij");
-            var config    = new GPT1Config
+            var config = new GPT1Config
             {
-                VocabSize     = tokenizer.VocabSize,
+                VocabSize = tokenizer.VocabSize,
                 ContextLength = 16,
-                DModel        = 16,
-                NHeads        = 2,
-                NLayers       = 1,
-                DFF           = 32,
-                TieWeights    = false,
+                DModel = 16,
+                NHeads = 2,
+                NLayers = 1,
+                DFF = 32,
+                TieWeights = false,
             };
 
-            using var model   = new GPT1Model(config);
+            using var model = new GPT1Model(config);
             model.Eval();
 
             var promptIds = tokenizer.Encode("abc");
-            var logits    = model.GenerateLogits(promptIds);
+            var logits = model.GenerateLogits(promptIds);
 
             Assert.Equal(tokenizer.VocabSize, logits.Length);
             Assert.DoesNotContain(logits, float.IsNaN);
@@ -184,23 +184,23 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenization
         public void GPT1_EndToEnd_DeterministicGreedy_SameResultTwice()
         {
             var tokenizer = CharacterTokenizer.Ascii();
-            var config    = new GPT1Config
+            var config = new GPT1Config
             {
-                VocabSize     = tokenizer.VocabSize,
+                VocabSize = tokenizer.VocabSize,
                 ContextLength = 16,
-                DModel        = 16,
-                NHeads        = 2,
-                NLayers       = 1,
-                DFF           = 32,
-                TieWeights    = false,
+                DModel = 16,
+                NHeads = 2,
+                NLayers = 1,
+                DFF = 32,
+                TieWeights = false,
             };
 
             using var model = new GPT1Model(config);
             model.Eval();
 
             var prompt = tokenizer.Encode("Hi");
-            var gen1   = model.Generate(prompt, maxNewTokens: 4);
-            var gen2   = model.Generate(prompt, maxNewTokens: 4);
+            var gen1 = model.Generate(prompt, maxNewTokens: 4);
+            var gen2 = model.Generate(prompt, maxNewTokens: 4);
 
             Assert.Equal(gen1, gen2);
         }
@@ -208,16 +208,16 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenization
         [Fact]
         public void GPT1_EndToEnd_ContextTruncation_WorksCorrectly()
         {
-            var tok    = CharacterTokenizer.Ascii();
+            var tok = CharacterTokenizer.Ascii();
             var config = new GPT1Config
             {
-                VocabSize     = tok.VocabSize,
+                VocabSize = tok.VocabSize,
                 ContextLength = 8,  // very short context
-                DModel        = 16,
-                NHeads        = 2,
-                NLayers       = 1,
-                DFF           = 32,
-                TieWeights    = false,
+                DModel = 16,
+                NHeads = 2,
+                NLayers = 1,
+                DFF = 32,
+                TieWeights = false,
             };
 
             using var model = new GPT1Model(config);
@@ -225,7 +225,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenization
 
             // 20-token prompt — model should truncate to last 8 tokens automatically
             var longPrompt = tok.Encode("Hello World Foo Bar");
-            var generated  = model.Generate(longPrompt, maxNewTokens: 3);
+            var generated = model.Generate(longPrompt, maxNewTokens: 3);
 
             Assert.Equal(3, generated.Length);
         }

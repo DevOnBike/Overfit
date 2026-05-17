@@ -22,24 +22,24 @@ namespace DevOnBike.Overfit.Anomalies.Gpt
     /// </summary>
     public sealed class MetricTokenizer
     {
-        public const int MetricCount       = MetricSnapshot.FeatureCount; // 12
-        public const int BinsPerMetric     = 64;
-        public const int VocabSize         = MetricCount * BinsPerMetric; // 768
+        public const int MetricCount = MetricSnapshot.FeatureCount; // 12
+        public const int BinsPerMetric = 64;
+        public const int VocabSize = MetricCount * BinsPerMetric; // 768
         public const int TokensPerSnapshot = MetricCount;                  // 12
 
         // Metric index constants — must match MetricSnapshot.WriteFeatureVector order
-        private const int IdxCpuUsage       = 0;
-        private const int IdxCpuThrottle    = 1;
-        private const int IdxMemoryBytes    = 2;
-        private const int IdxOomRate        = 3;
-        private const int IdxLatencyP50     = 4;
-        private const int IdxLatencyP95     = 5;
-        private const int IdxLatencyP99     = 6;
+        private const int IdxCpuUsage = 0;
+        private const int IdxCpuThrottle = 1;
+        private const int IdxMemoryBytes = 2;
+        private const int IdxOomRate = 3;
+        private const int IdxLatencyP50 = 4;
+        private const int IdxLatencyP95 = 5;
+        private const int IdxLatencyP99 = 6;
         private const int IdxRequestsPerSec = 7;
-        private const int IdxErrorRate      = 8;
-        private const int IdxGcHeapBytes    = 9;
-        private const int IdxGcPauseRatio   = 10;
-        private const int IdxThreadPoolQueue= 11;
+        private const int IdxErrorRate = 8;
+        private const int IdxGcHeapBytes = 9;
+        private const int IdxGcPauseRatio = 10;
+        private const int IdxThreadPoolQueue = 11;
 
         // Per-metric (maxValue, isLogScale)
         private static readonly (float Max, bool LogScale)[] MetricRanges =
@@ -105,7 +105,7 @@ namespace DevOnBike.Overfit.Anomalies.Gpt
         /// </summary>
         public static float Decode(int token)
         {
-            var m   = MetricIndexOf(token);
+            var m = MetricIndexOf(token);
             var bin = BinOf(token);
             var (max, logScale) = MetricRanges[m];
             var ratio = (bin + 0.5f) / BinsPerMetric;
@@ -118,17 +118,17 @@ namespace DevOnBike.Overfit.Anomalies.Gpt
         public static string MetricNameOf(int token) =>
             MetricIndexOf(token) switch
             {
-                IdxCpuUsage        => "cpu_usage_ratio",
-                IdxCpuThrottle     => "cpu_throttle_ratio",
-                IdxMemoryBytes     => "memory_working_set_bytes",
-                IdxOomRate         => "oom_events_rate",
-                IdxLatencyP50      => "latency_p50_ms",
-                IdxLatencyP95      => "latency_p95_ms",
-                IdxLatencyP99      => "latency_p99_ms",
-                IdxRequestsPerSec  => "requests_per_second",
-                IdxErrorRate       => "error_rate",
-                IdxGcHeapBytes     => "gc_gen2_heap_bytes",
-                IdxGcPauseRatio    => "gc_pause_ratio",
+                IdxCpuUsage => "cpu_usage_ratio",
+                IdxCpuThrottle => "cpu_throttle_ratio",
+                IdxMemoryBytes => "memory_working_set_bytes",
+                IdxOomRate => "oom_events_rate",
+                IdxLatencyP50 => "latency_p50_ms",
+                IdxLatencyP95 => "latency_p95_ms",
+                IdxLatencyP99 => "latency_p99_ms",
+                IdxRequestsPerSec => "requests_per_second",
+                IdxErrorRate => "error_rate",
+                IdxGcHeapBytes => "gc_gen2_heap_bytes",
+                IdxGcPauseRatio => "gc_pause_ratio",
                 IdxThreadPoolQueue => "threadpool_queue_length",
                 _ => $"metric_{MetricIndexOf(token)}"
             };
@@ -149,7 +149,7 @@ namespace DevOnBike.Overfit.Anomalies.Gpt
             var ratio = logScale
                 ? MathF.Log(1f + value) / MathF.Log(1f + max)
                 : value / max;
-            
+
             return Math.Clamp((int)(ratio * BinsPerMetric), 0, BinsPerMetric - 1);
         }
     }

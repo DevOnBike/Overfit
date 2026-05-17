@@ -35,7 +35,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
-            var batchSize  = input.Shape.D0;
+            var batchSize = input.Shape.D0;
             var outputSize = input.Shape.D1;
 
             var output = TensorMath.AllocateNode(
@@ -44,7 +44,7 @@ namespace DevOnBike.Overfit.DeepLearning
                 input.RequiresGrad,
                 clearMemory: false);
 
-            var inS  = input.DataView.AsReadOnlySpan();
+            var inS = input.DataView.AsReadOnlySpan();
             var outS = output.DataView.AsSpan();
 
             for (var b = 0; b < batchSize; b++)

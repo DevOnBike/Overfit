@@ -33,10 +33,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     /// </summary>
     public sealed class CachedGpt1ModelAdapter : IDisposable
     {
-        private readonly GPT1Model    _model;
+        private readonly GPT1Model _model;
         private readonly CachedGptStack _stack;
-        private readonly KeyValueCache   _cache;
-        private readonly StackWeights    _weights;
+        private readonly KeyValueCache _cache;
+        private readonly StackWeights _weights;
 
         private readonly float[] _tokenEmbeddingBuffer;
         private readonly float[] _positionEmbeddingBuffer;
@@ -80,10 +80,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 MaxContextLength,
                 HeadDimension);
 
-            _tokenEmbeddingBuffer    = new float[DModel];
+            _tokenEmbeddingBuffer = new float[DModel];
             _positionEmbeddingBuffer = new float[DModel];
-            _inputHidden             = new float[DModel];
-            _lastLogits              = new float[VocabSize];
+            _inputHidden = new float[DModel];
+            _lastLogits = new float[VocabSize];
 
             // Zero-copy weight binding — no data is copied.
             // TensorStorage refs point directly to model parameters.

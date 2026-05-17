@@ -885,8 +885,8 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
 
             var trainImagesPath = TestModelPaths.Mnist.TrainImagesPath;
             var trainLabelsPath = TestModelPaths.Mnist.TrainLabelsPath;
-            var testImagesPath  = TestModelPaths.Mnist.TestImagesPath;
-            var testLabelsPath  = TestModelPaths.Mnist.TestLabelsPath;
+            var testImagesPath = TestModelPaths.Mnist.TestImagesPath;
+            var testLabelsPath = TestModelPaths.Mnist.TestLabelsPath;
 
             if (!File.Exists(trainImagesPath) || !File.Exists(trainLabelsPath) ||
                 !File.Exists(testImagesPath) || !File.Exists(testLabelsPath))

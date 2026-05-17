@@ -178,27 +178,27 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         {
             switch (vtype)
             {
-                case GgufValueType.UInt8:   return _reader.ReadByte();
-                case GgufValueType.Int8:    return _reader.ReadSByte();
-                case GgufValueType.UInt16:  return _reader.ReadUInt16();
-                case GgufValueType.Int16:   return _reader.ReadInt16();
-                case GgufValueType.UInt32:  return _reader.ReadUInt32();
-                case GgufValueType.Int32:   return _reader.ReadInt32();
+                case GgufValueType.UInt8: return _reader.ReadByte();
+                case GgufValueType.Int8: return _reader.ReadSByte();
+                case GgufValueType.UInt16: return _reader.ReadUInt16();
+                case GgufValueType.Int16: return _reader.ReadInt16();
+                case GgufValueType.UInt32: return _reader.ReadUInt32();
+                case GgufValueType.Int32: return _reader.ReadInt32();
                 case GgufValueType.Float32: return _reader.ReadSingle();
-                case GgufValueType.Bool:    return _reader.ReadBoolean();
-                case GgufValueType.String:  return ReadString();
-                case GgufValueType.UInt64:  return _reader.ReadUInt64();
-                case GgufValueType.Int64:   return _reader.ReadInt64();
+                case GgufValueType.Bool: return _reader.ReadBoolean();
+                case GgufValueType.String: return ReadString();
+                case GgufValueType.UInt64: return _reader.ReadUInt64();
+                case GgufValueType.Int64: return _reader.ReadInt64();
                 case GgufValueType.Float64: return _reader.ReadDouble();
                 case GgufValueType.Array:
-                {
-                    var elemType = (GgufValueType)_reader.ReadUInt32();
-                    var count = _reader.ReadUInt64();
-                    if (count > int.MaxValue) { throw new InvalidDataException("Array too large."); }
-                    var arr = new object[(int)count];
-                    for (var i = 0; i < arr.Length; i++) { arr[i] = ReadValue(elemType); }
-                    return arr;
-                }
+                    {
+                        var elemType = (GgufValueType)_reader.ReadUInt32();
+                        var count = _reader.ReadUInt64();
+                        if (count > int.MaxValue) { throw new InvalidDataException("Array too large."); }
+                        var arr = new object[(int)count];
+                        for (var i = 0; i < arr.Length; i++) { arr[i] = ReadValue(elemType); }
+                        return arr;
+                    }
                 default:
                     throw new NotSupportedException($"GGUF value type {vtype} not supported.");
             }

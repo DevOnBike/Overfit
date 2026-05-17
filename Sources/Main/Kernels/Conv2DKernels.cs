@@ -325,15 +325,15 @@ namespace DevOnBike.Overfit.Kernels
         {
             var outH = (inputH + 2 * padding - kernelSize) / stride + 1;
             var outW = (inputW + 2 * padding - kernelSize) / stride + 1;
-            var inputPlaneSize  = inChannels  * inputH * inputW;
-            var outputPlaneSize = outChannels * outH   * outW;
+            var inputPlaneSize = inChannels * inputH * inputW;
+            var outputPlaneSize = outChannels * outH * outW;
             var kernelSizePerOutput = inChannels * kernelSize * kernelSize;
 
             output.Clear();
 
             for (var n = 0; n < batchSize; n++)
             {
-                var inputBatch  = input.Slice(n * inputPlaneSize,  inputPlaneSize);
+                var inputBatch = input.Slice(n * inputPlaneSize, inputPlaneSize);
                 var outputBatch = output.Slice(n * outputPlaneSize, outputPlaneSize);
 
                 ForwardNchwSingleBatch(
@@ -362,8 +362,8 @@ namespace DevOnBike.Overfit.Kernels
         {
             for (var oc = 0; oc < outChannels; oc++)
             {
-                var kernelBase      = oc * kernelSizePerOutput;
-                var outputChanBase  = oc * outH * outW;
+                var kernelBase = oc * kernelSizePerOutput;
+                var outputChanBase = oc * outH * outW;
 
                 for (var oy = 0; oy < outH; oy++)
                 {
@@ -376,7 +376,7 @@ namespace DevOnBike.Overfit.Kernels
 
                         for (var ic = 0; ic < inChannels; ic++)
                         {
-                            var inputChanBase  = ic * inputH * inputW;
+                            var inputChanBase = ic * inputH * inputW;
                             var kernelChanBase = kernelBase + ic * kernelSize * kernelSize;
 
                             for (var ky = 0; ky < kernelSize; ky++)
@@ -388,7 +388,7 @@ namespace DevOnBike.Overfit.Kernels
                                 }
 
                                 var kernelRowBase = kernelChanBase + ky * kernelSize;
-                                var inputRowBase  = inputChanBase  + iy * inputW;
+                                var inputRowBase = inputChanBase + iy * inputW;
 
                                 for (var kx = 0; kx < kernelSize; kx++)
                                 {

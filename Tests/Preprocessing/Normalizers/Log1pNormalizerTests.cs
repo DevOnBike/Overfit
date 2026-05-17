@@ -83,7 +83,7 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
             using var reader = new BinaryReader(memoryStream);
 
             originalNormalizer.Save(writer);
-            
+
             memoryStream.Position = 0; // Rewind the stream to the beginning
             loadedNormalizer.Load(reader);
 

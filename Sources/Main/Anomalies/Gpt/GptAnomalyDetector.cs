@@ -50,11 +50,11 @@ namespace DevOnBike.Overfit.Anomalies.Gpt
             ArgumentNullException.ThrowIfNull(handle);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(contextSnapshots);
 
-            _handle          = handle;
-            _session         = handle.Session;
+            _handle = handle;
+            _session = handle.Session;
             _contextSnapshots = contextSnapshots;
-            _tokenizer        = new MetricTokenizer();
-            _window           = new Queue<MetricSnapshot>(contextSnapshots + 1);
+            _tokenizer = new MetricTokenizer();
+            _window = new Queue<MetricSnapshot>(contextSnapshots + 1);
         }
 
         /// <summary>True once the window is full — scores are reliable.</summary>
@@ -76,16 +76,16 @@ namespace DevOnBike.Overfit.Anomalies.Gpt
             {
                 return new AnomalyScore
                 {
-                    IsWarmup  = true,
-                    Score     = 0f,
-                    PodName   = snapshot.PodName,
+                    IsWarmup = true,
+                    Score = 0f,
+                    PodName = snapshot.PodName,
                     Timestamp = snapshot.Timestamp,
                 };
             }
 
             // Tokenize full window as context
-            var history       = _window.ToArray();
-            var contextCount  = history.Length - 1;
+            var history = _window.ToArray();
+            var contextCount = history.Length - 1;
             var contextTokens = new int[contextCount * MetricTokenizer.TokensPerSnapshot];
             for (var i = 0; i < contextCount; i++)
             {
@@ -99,12 +99,12 @@ namespace DevOnBike.Overfit.Anomalies.Gpt
             // Score each metric token using GetLastLogits after priming the session
             _session.Reset(contextTokens);
 
-            var logitBuf      = new float[MetricTokenizer.VocabSize];
-            var totalNegLog   = 0f;
-            var worstMetric   = 0;
-            var worstScore    = float.MinValue;
+            var logitBuf = new float[MetricTokenizer.VocabSize];
+            var totalNegLog = 0f;
+            var worstMetric = 0;
+            var worstScore = float.MinValue;
             var worstExpected = 0;
-            var worstActual   = 0;
+            var worstActual = 0;
 
             for (var m = 0; m < MetricTokenizer.TokensPerSnapshot; m++)
             {
@@ -112,14 +112,14 @@ namespace DevOnBike.Overfit.Anomalies.Gpt
                 _session.GetLastLogits(logitBuf);
 
                 var actual = actualTokens[m];
-                var score  = ComputeNegLogProb(logitBuf, actual);
+                var score = ComputeNegLogProb(logitBuf, actual);
                 totalNegLog += score;
 
                 if (score > worstScore)
                 {
-                    worstScore    = score;
-                    worstMetric   = m;
-                    worstActual   = actual;
+                    worstScore = score;
+                    worstMetric = m;
+                    worstActual = actual;
                     worstExpected = ArgMax(logitBuf);
                 }
 
@@ -132,13 +132,13 @@ namespace DevOnBike.Overfit.Anomalies.Gpt
 
             return new AnomalyScore
             {
-                IsWarmup      = false,
-                Score         = totalNegLog / MetricTokenizer.TokensPerSnapshot,
-                PodName       = snapshot.PodName,
-                Timestamp     = snapshot.Timestamp,
-                WorstMetric   = MetricTokenizer.MetricNameOf(worstMetric * MetricTokenizer.BinsPerMetric),
+                IsWarmup = false,
+                Score = totalNegLog / MetricTokenizer.TokensPerSnapshot,
+                PodName = snapshot.PodName,
+                Timestamp = snapshot.Timestamp,
+                WorstMetric = MetricTokenizer.MetricNameOf(worstMetric * MetricTokenizer.BinsPerMetric),
                 ExpectedValue = MetricTokenizer.Decode(worstExpected),
-                ActualValue   = MetricTokenizer.Decode(worstActual),
+                ActualValue = MetricTokenizer.Decode(worstActual),
             };
         }
 
@@ -203,11 +203,11 @@ namespace DevOnBike.Overfit.Anomalies.Gpt
         /// </summary>
         public float Score { get; init; }
 
-        public string   PodName       { get; init; } = string.Empty;
-        public DateTime Timestamp     { get; init; }
-        public string   WorstMetric   { get; init; } = string.Empty;
-        public float    ExpectedValue { get; init; }
-        public float    ActualValue   { get; init; }
+        public string PodName { get; init; } = string.Empty;
+        public DateTime Timestamp { get; init; }
+        public string WorstMetric { get; init; } = string.Empty;
+        public float ExpectedValue { get; init; }
+        public float ActualValue { get; init; }
 
         public override string ToString() =>
             IsWarmup

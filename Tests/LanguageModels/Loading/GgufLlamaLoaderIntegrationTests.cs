@@ -24,7 +24,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
     public sealed class GgufLlamaLoaderIntegrationTests
     {
         // ── Paths resolved via TestModelPaths — override via OVERFIT_QWEN3B_DIR ─
-        private static string GgufModelPath   => TestModelPaths.Qwen3B.GgufPath;
+        private static string GgufModelPath => TestModelPaths.Qwen3B.GgufPath;
         private static string BinaryModelPath => TestModelPaths.Qwen3B.BinaryPath;
 
         private readonly ITestOutputHelper _output;

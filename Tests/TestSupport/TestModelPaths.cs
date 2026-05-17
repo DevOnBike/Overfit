@@ -35,9 +35,9 @@ namespace DevOnBike.Overfit.Tests.TestSupport
         {
             private const string EnvVar = "OVERFIT_GPT2_DIR";
             public static string Dir => Resolve(EnvVar, @"c:\gpt2");
-            public static string BinaryPath  => Path.Combine(Dir, "gpt2_small.bin");
-            public static string VocabPath   => Path.Combine(Dir, "vocab.json");
-            public static string MergesPath  => Path.Combine(Dir, "merges.txt");
+            public static string BinaryPath => Path.Combine(Dir, "gpt2_small.bin");
+            public static string VocabPath => Path.Combine(Dir, "vocab.json");
+            public static string MergesPath => Path.Combine(Dir, "merges.txt");
 
             /// <summary>
             /// PyTorch reference logits JSON. Small (~kilobytes), committed under
@@ -57,9 +57,9 @@ namespace DevOnBike.Overfit.Tests.TestSupport
                 }
             }
 
-            public static string RequireBinaryPath()        => Require(BinaryPath,        EnvVar, "GPT-2 binary weights");
-            public static string RequireVocabPath()         => Require(VocabPath,         EnvVar, "GPT-2 BPE vocab.json");
-            public static string RequireMergesPath()        => Require(MergesPath,        EnvVar, "GPT-2 BPE merges.txt");
+            public static string RequireBinaryPath() => Require(BinaryPath, EnvVar, "GPT-2 binary weights");
+            public static string RequireVocabPath() => Require(VocabPath, EnvVar, "GPT-2 BPE vocab.json");
+            public static string RequireMergesPath() => Require(MergesPath, EnvVar, "GPT-2 BPE merges.txt");
             public static string RequireReferenceJsonPath() => Require(ReferenceJsonPath, EnvVar, "GPT-2 PyTorch reference JSON");
         }
 
@@ -67,16 +67,16 @@ namespace DevOnBike.Overfit.Tests.TestSupport
         {
             private const string EnvVar = "OVERFIT_QWEN3B_DIR";
             public static string Dir => Resolve(EnvVar, @"c:\qwen3b");
-            public static string BinaryPath        => Path.Combine(Dir, "qwen.bin");
-            public static string GgufPath          => Path.Combine(Dir, "qwen.gguf");
-            public static string Q4KmGgufPath      => Path.Combine(Dir, "qwen.q4km.gguf");
-            public static string VocabPath         => Path.Combine(Dir, "vocab.json");
-            public static string MergesPath        => Path.Combine(Dir, "merges.txt");
+            public static string BinaryPath => Path.Combine(Dir, "qwen.bin");
+            public static string GgufPath => Path.Combine(Dir, "qwen.gguf");
+            public static string Q4KmGgufPath => Path.Combine(Dir, "qwen.q4km.gguf");
+            public static string VocabPath => Path.Combine(Dir, "vocab.json");
+            public static string MergesPath => Path.Combine(Dir, "merges.txt");
             public static string TokenizerJsonPath => Path.Combine(Dir, "tokenizer.json");
 
-            public static string RequireBinaryPath()        => Require(BinaryPath,        EnvVar, "Qwen3B Overfit binary weights");
-            public static string RequireGgufPath()          => Require(GgufPath,          EnvVar, "Qwen3B FP16 GGUF");
-            public static string RequireQ4KmGgufPath()      => Require(Q4KmGgufPath,      EnvVar, "Qwen3B Q4_K_M GGUF");
+            public static string RequireBinaryPath() => Require(BinaryPath, EnvVar, "Qwen3B Overfit binary weights");
+            public static string RequireGgufPath() => Require(GgufPath, EnvVar, "Qwen3B FP16 GGUF");
+            public static string RequireQ4KmGgufPath() => Require(Q4KmGgufPath, EnvVar, "Qwen3B Q4_K_M GGUF");
             public static string RequireTokenizerJsonPath() => Require(TokenizerJsonPath, EnvVar, "Qwen3B tokenizer.json");
             public static string RequireDir()
             {
@@ -96,13 +96,13 @@ namespace DevOnBike.Overfit.Tests.TestSupport
             public static string Dir => Resolve(EnvVar, @"d:\ml");
             public static string TrainImagesPath => Path.Combine(Dir, "train-images.idx3-ubyte");
             public static string TrainLabelsPath => Path.Combine(Dir, "train-labels.idx1-ubyte");
-            public static string TestImagesPath  => Path.Combine(Dir, "t10k-images.idx3-ubyte");
-            public static string TestLabelsPath  => Path.Combine(Dir, "t10k-labels.idx1-ubyte");
+            public static string TestImagesPath => Path.Combine(Dir, "t10k-images.idx3-ubyte");
+            public static string TestLabelsPath => Path.Combine(Dir, "t10k-labels.idx1-ubyte");
 
             public static string RequireTrainImagesPath() => Require(TrainImagesPath, EnvVar, "MNIST train images");
             public static string RequireTrainLabelsPath() => Require(TrainLabelsPath, EnvVar, "MNIST train labels");
-            public static string RequireTestImagesPath()  => Require(TestImagesPath,  EnvVar, "MNIST test images");
-            public static string RequireTestLabelsPath()  => Require(TestLabelsPath,  EnvVar, "MNIST test labels");
+            public static string RequireTestImagesPath() => Require(TestImagesPath, EnvVar, "MNIST test images");
+            public static string RequireTestLabelsPath() => Require(TestLabelsPath, EnvVar, "MNIST test labels");
         }
 
         private static string Resolve(string envVar, string fallback)

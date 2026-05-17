@@ -105,7 +105,7 @@ namespace DevOnBike.Overfit.Onnx.Protobuf
         {
             return (int)ReadVarint();
         }
-        
+
         public long ReadInt64()
         {
             return (long)ReadVarint();

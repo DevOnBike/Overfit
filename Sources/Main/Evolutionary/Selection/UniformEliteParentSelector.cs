@@ -40,5 +40,5 @@ namespace DevOnBike.Overfit.Evolutionary.Selection
         }
     }
 
-    
+
 }

@@ -27,13 +27,13 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
     /// </summary>
     public class OnnxGraphImporterTests
     {
-        private const string FixtureDir   = "test_fixtures";
-        private const string OnnxFile     = "tiny_resnet.onnx";
-        private const string InputBin     = "tiny_resnet_input.bin";
-        private const string OutputBin    = "tiny_resnet_output.bin";
-        private const int    InputSize    = 8;
-        private const int    OutputSize   = 4;
-        private const float  Tolerance    = 1e-4f;
+        private const string FixtureDir = "test_fixtures";
+        private const string OnnxFile = "tiny_resnet.onnx";
+        private const string InputBin = "tiny_resnet_input.bin";
+        private const string OutputBin = "tiny_resnet_output.bin";
+        private const int InputSize = 8;
+        private const int OutputSize = 4;
+        private const float Tolerance = 1e-4f;
 
         // ─────────────────────────────────────────────────────────────────────
         // Structural tests (no reference I/O needed)
@@ -49,7 +49,7 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
                 InputSize,
                 OutputSize);
 
-            Assert.Equal(InputSize,  model.InputSize);
+            Assert.Equal(InputSize, model.InputSize);
             Assert.Equal(OutputSize, model.OutputSize);
         }
 
@@ -65,7 +65,7 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
 
             model.Eval();
 
-            var input  = new float[InputSize];
+            var input = new float[InputSize];
             var output = new float[OutputSize];
 
             model.RunInference(input, output);
@@ -79,13 +79,13 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
         {
             SkipIfMissing(OnnxFile);
 
-            using var model   = OnnxGraphImporter.Load(OnnxPath(OnnxFile), InputSize, OutputSize);
+            using var model = OnnxGraphImporter.Load(OnnxPath(OnnxFile), InputSize, OutputSize);
             model.Eval();
 
             var backend = new OnnxGraphInferenceBackend(model);
             using var engine = InferenceEngine.FromBackend(backend);
 
-            var input  = new float[InputSize];
+            var input = new float[InputSize];
             var output = engine.Predict(input);
 
             Assert.Equal(OutputSize, output.Length);
@@ -108,9 +108,9 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
 
             model.Eval();
 
-            var input    = LoadFloatBin(OnnxPath(InputBin));
+            var input = LoadFloatBin(OnnxPath(InputBin));
             var expected = LoadFloatBin(OnnxPath(OutputBin));
-            var output   = new float[OutputSize];
+            var output = new float[OutputSize];
 
             model.RunInference(input, output);
 
@@ -137,14 +137,14 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
 
             model.Eval();
 
-            var input    = LoadFloatBin(OnnxPath(InputBin));
+            var input = LoadFloatBin(OnnxPath(InputBin));
             var expected = LoadFloatBin(OnnxPath(OutputBin));
-            var output   = new float[OutputSize];
+            var output = new float[OutputSize];
 
             model.RunInference(input, output);
 
             var expectedArgmax = Array.IndexOf(expected, expected.Max());
-            var actualArgmax   = Array.IndexOf(output,   output.Max());
+            var actualArgmax = Array.IndexOf(output, output.Max());
 
             Assert.Equal(expectedArgmax, actualArgmax);
         }
@@ -165,7 +165,7 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
 
             model.Eval();
 
-            var input  = new float[InputSize];
+            var input = new float[InputSize];
             var output = new float[OutputSize];
 
             // Warmup
@@ -191,11 +191,11 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
         // Loaded via OnnxImporter (linear topology, no skip connections)
         // ─────────────────────────────────────────────────────────────────────
 
-        private const string AvgPoolOnnx   = "avgpool_model.onnx";
-        private const string AvgPoolInput  = "avgpool_model_input.bin";
+        private const string AvgPoolOnnx = "avgpool_model.onnx";
+        private const string AvgPoolInput = "avgpool_model_input.bin";
         private const string AvgPoolOutput = "avgpool_model_output.bin";
-        private const int    AvgPoolIn     = 64;  // 1 * 1 * 8 * 8
-        private const int    AvgPoolOut    = 2;
+        private const int AvgPoolIn = 64;  // 1 * 1 * 8 * 8
+        private const int AvgPoolOut = 2;
 
         [Fact]
         public void Load_AvgPoolModel_Sequential_LoadsWithoutException()
@@ -207,7 +207,7 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
 
             using var engine = InferenceEngine.FromSequential(model, AvgPoolIn, AvgPoolOut);
 
-            var input  = new float[AvgPoolIn];
+            var input = new float[AvgPoolIn];
             var output = new float[AvgPoolOut];
 
             engine.Run(input, output);
@@ -220,14 +220,14 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
         {
             SkipIfMissing(AvgPoolOnnx, AvgPoolInput, AvgPoolOutput);
 
-            var model    = OnnxImporter.Load(OnnxPath(AvgPoolOnnx));
+            var model = OnnxImporter.Load(OnnxPath(AvgPoolOnnx));
             model.Eval();
 
             using var engine = InferenceEngine.FromSequential(model, AvgPoolIn, AvgPoolOut);
 
-            var input    = LoadFloatBin(OnnxPath(AvgPoolInput));
+            var input = LoadFloatBin(OnnxPath(AvgPoolInput));
             var expected = LoadFloatBin(OnnxPath(AvgPoolOutput));
-            var output   = new float[AvgPoolOut];
+            var output = new float[AvgPoolOut];
 
             engine.Run(input, output);
 
@@ -250,7 +250,7 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
 
             using var engine = InferenceEngine.FromSequential(model, AvgPoolIn, AvgPoolOut);
 
-            var input  = new float[AvgPoolIn];
+            var input = new float[AvgPoolIn];
             var output = new float[AvgPoolOut];
 
             for (var i = 0; i < 256; i++)
@@ -258,7 +258,7 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
                 engine.Run(input, output);
             }
 
-            var before    = GC.GetAllocatedBytesForCurrentThread();
+            var before = GC.GetAllocatedBytesForCurrentThread();
             for (var i = 0; i < 10_000; i++)
             {
                 engine.Run(input, output);
@@ -291,10 +291,10 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
         // ResNetBlock: Conv2d(padding=1) + skip connection + BatchNorm (folded)
         // ─────────────────────────────────────────────────────────────────────
 
-        private const string ResNetOnnx   = "resnet_block.onnx";
-        private const string ResNetInput  = "resnet_block_input.bin";
+        private const string ResNetOnnx = "resnet_block.onnx";
+        private const string ResNetInput = "resnet_block_input.bin";
         private const string ResNetOutput = "resnet_block_output.bin";
-        private const int    ResNetFlat   = 256; // 1 * 4 * 8 * 8
+        private const int ResNetFlat = 256; // 1 * 4 * 8 * 8
 
         [Fact]
         public void Load_ResNetBlock_ReturnsModel()
@@ -320,9 +320,9 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
 
             model.Eval();
 
-            var input    = LoadFloatBin(OnnxPath(ResNetInput));
+            var input = LoadFloatBin(OnnxPath(ResNetInput));
             var expected = LoadFloatBin(OnnxPath(ResNetOutput));
-            var output   = new float[ResNetFlat];
+            var output = new float[ResNetFlat];
 
             model.RunInference(input, output);
 
@@ -347,7 +347,7 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
 
             model.Eval();
 
-            var input  = new float[ResNetFlat];
+            var input = new float[ResNetFlat];
             var output = new float[ResNetFlat];
 
             for (var i = 0; i < 256; i++)

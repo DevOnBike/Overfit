@@ -182,17 +182,17 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             var processorCount = Environment.ProcessorCount;
-            var chunkSize      = Math.Max(512, (outputSize + processorCount - 1) / processorCount);
-            var chunkCount     = (outputSize + chunkSize - 1) / chunkSize;
+            var chunkSize = Math.Max(512, (outputSize + processorCount - 1) / processorCount);
+            var chunkCount = (outputSize + chunkSize - 1) / chunkSize;
 
             // CS1764/CS8175: fixed and ref locals cannot be captured in lambdas.
             // Safe workaround: convert to nint (value type) before Parallel.For.
             // Parallel.For is synchronous — it blocks until ALL worker threads finish,
             // so the fixed block is guaranteed to be active for the entire duration.
             // The nint values are addresses captured by value in the lambda closure.
-            fixed (float* pInput   = input)
+            fixed (float* pInput = input)
             fixed (float* pWeights = weightsInputOutput)
-            fixed (float* pOutput  = output)
+            fixed (float* pOutput = output)
             {
                 var ip = (nint)pInput;
                 var wp = (nint)pWeights;

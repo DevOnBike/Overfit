@@ -40,7 +40,7 @@ namespace DevOnBike.Overfit.DeepLearning
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(vocabSize);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(embeddingDim);
 
-            _vocabSize    = vocabSize;
+            _vocabSize = vocabSize;
             _embeddingDim = embeddingDim;
 
             Weight = new Parameter(
@@ -59,7 +59,7 @@ namespace DevOnBike.Overfit.DeepLearning
         /// <summary>The embedding table, shape [vocabSize, embeddingDim].</summary>
         public Parameter Weight { get; }
 
-        public int VocabSize    => _vocabSize;
+        public int VocabSize => _vocabSize;
         public int EmbeddingDim => _embeddingDim;
 
         public bool IsTraining { get; private set; } = true;

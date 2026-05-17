@@ -37,10 +37,10 @@ namespace DevOnBike.Overfit.Onnx.Operators
                     $"GlobalAveragePool: expected 4-D input [N,C,H,W], got rank {inputShape.Length}.");
             }
 
-            var batch    = inputShape[0];
+            var batch = inputShape[0];
             var channels = inputShape[1];
-            var h        = inputShape[2];
-            var w        = inputShape[3];
+            var h = inputShape[2];
+            var w = inputShape[3];
 
             // Overfit's GlobalAveragePool2DLayer outputs [batch, channels] (drops H×W).
             // ONNX spec says output is [batch, channels, 1, 1] but downstream Gemm/Linear

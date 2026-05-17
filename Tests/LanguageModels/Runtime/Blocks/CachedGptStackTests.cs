@@ -395,9 +395,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 var _sw = MakeStackWeights(stack.LayerCount, stack.HeadCount, stack.DModel,
                     zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads,
                     [[]], [new float[2 * 2]], [[]], [new float[2 * 2]], [[]], new float[2 * 2]);
-            stack.Decode([1f, -1f], _sw, cache, 0, // position
-                    logits: new float[2]);
-            });;
+                stack.Decode([1f, -1f], _sw, cache, 0, // position
+                        logits: new float[2]);
+            }); ;
         }
 
         [Fact]
@@ -432,36 +432,36 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 var _sw = MakeStackWeights(stack.LayerCount, stack.HeadCount, stack.DModel,
                     zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads,
                     [[]], [new float[2 * 2]], [[]], [new float[2 * 2]], [[]], new float[2 * 2]);
-            stack.Decode(new float[1], _sw, cache, 0, // position
-                    logits: new float[2]);
-            });;
+                stack.Decode(new float[1], _sw, cache, 0, // position
+                        logits: new float[2]);
+            }); ;
 
             Assert.Throws<ArgumentException>(() =>
             {
                 var _sw = MakeStackWeights(stack.LayerCount, stack.HeadCount, stack.DModel,
                     zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads,
                     [[]], [new float[1]], [[]], [new float[2 * 2]], [[]], new float[2 * 2]);
-            stack.Decode(new float[2], _sw, cache, 0, // position
-                    logits: new float[2]);
-            });;
+                stack.Decode(new float[2], _sw, cache, 0, // position
+                        logits: new float[2]);
+            }); ;
 
             Assert.Throws<ArgumentException>(() =>
             {
                 var _sw = MakeStackWeights(stack.LayerCount, stack.HeadCount, stack.DModel,
                     zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads,
                     [[]], [new float[2 * 2]], [[]], [new float[2 * 2]], [[]], new float[1]);
-            stack.Decode(new float[2], _sw, cache, 0, // position
-                    logits: new float[2]);
-            });;
+                stack.Decode(new float[2], _sw, cache, 0, // position
+                        logits: new float[2]);
+            }); ;
 
             Assert.Throws<ArgumentException>(() =>
             {
                 var _sw = MakeStackWeights(stack.LayerCount, stack.HeadCount, stack.DModel,
                     zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads, zeroHeads,
                     [[]], [new float[2 * 2]], [[]], [new float[2 * 2]], [[]], new float[2 * 2]);
-            stack.Decode(new float[2], _sw, cache, 0, // position
-                    logits: new float[1]);
-            });;
+                stack.Decode(new float[2], _sw, cache, 0, // position
+                        logits: new float[1]);
+            }); ;
         }
 
         [Fact]
@@ -528,7 +528,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
             float[] lmHead)
         {
             var gamma = Enumerable.Repeat(1f, dModel).ToArray();
-            var zero  = new float[dModel];
+            var zero = new float[dModel];
             return StackWeights.ForTest(
                 layerCount, headCount,
                 l =>
@@ -541,10 +541,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                         bq: bq[l][h], bk: bk[l][h], bv: bv[l][h]);
                     }
                     return new BlockWeights(
-                        heads:         heads,
-                        ln1Gamma:      gamma, ln1Beta: zero,
+                        heads: heads,
+                        ln1Gamma: gamma, ln1Beta: zero,
                         attentionBias: attBiases[l],
-                        ln2Gamma:      gamma, ln2Beta: zero,
+                        ln2Gamma: gamma, ln2Beta: zero,
                         ffnW1: fw1[l], ffnB1: fb1[l], ffnW2: fw2[l], ffnB2: fb2[l]);
                 },
                 finalNormGamma: gamma, finalNormBeta: zero, lmHead: lmHead);

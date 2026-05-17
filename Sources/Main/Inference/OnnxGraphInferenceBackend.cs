@@ -21,7 +21,7 @@ namespace DevOnBike.Overfit.Inference
             _model = model ?? throw new ArgumentNullException(nameof(model));
         }
 
-        public int InputSize  => _model.InputSize;
+        public int InputSize => _model.InputSize;
         public int OutputSize => _model.OutputSize;
 
         public void Run(ReadOnlySpan<float> input, Span<float> output)
@@ -29,7 +29,7 @@ namespace DevOnBike.Overfit.Inference
 
         public void Warmup(int iterations)
         {
-            var dummyInput  = new float[InputSize];
+            var dummyInput = new float[InputSize];
             var dummyOutput = new float[OutputSize];
 
             for (var i = 0; i < iterations; i++)

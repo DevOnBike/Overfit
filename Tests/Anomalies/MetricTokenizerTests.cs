@@ -22,7 +22,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         public void EncodeSnapshot_Produces_TokensPerSnapshot_Tokens()
         {
             var snapshot = MakeNormalSnapshot();
-            var tokens   = new int[MetricTokenizer.TokensPerSnapshot];
+            var tokens = new int[MetricTokenizer.TokensPerSnapshot];
 
             _sut.EncodeSnapshot(snapshot, tokens);
 
@@ -33,7 +33,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         public void AllTokens_AreInVocabRange()
         {
             var snapshot = MakeNormalSnapshot();
-            var tokens   = new int[MetricTokenizer.TokensPerSnapshot];
+            var tokens = new int[MetricTokenizer.TokensPerSnapshot];
             _sut.EncodeSnapshot(snapshot, tokens);
 
             foreach (var t in tokens)
@@ -45,13 +45,13 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         [Fact]
         public void NormalSnapshot_ProducesDifferentTokens_ThanAnomalySnapshot()
         {
-            var normal  = MakeNormalSnapshot();
+            var normal = MakeNormalSnapshot();
             var anomaly = MakeAnomalySnapshot();
 
-            var tokNormal  = new int[MetricTokenizer.TokensPerSnapshot];
+            var tokNormal = new int[MetricTokenizer.TokensPerSnapshot];
             var tokAnomaly = new int[MetricTokenizer.TokensPerSnapshot];
 
-            _sut.EncodeSnapshot(normal,  tokNormal);
+            _sut.EncodeSnapshot(normal, tokNormal);
             _sut.EncodeSnapshot(anomaly, tokAnomaly);
 
             // At least some tokens should differ
@@ -61,7 +61,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         [Fact]
         public void ZeroSnapshot_AllTokensAreZeroBin()
         {
-            var zero   = MakeZeroSnapshot();
+            var zero = MakeZeroSnapshot();
             var tokens = new int[MetricTokenizer.TokensPerSnapshot];
             _sut.EncodeSnapshot(zero, tokens);
 
@@ -97,11 +97,11 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         {
             // Encode high CPU (90%) → decode → should be approximately 0.9
             var snapshot = new MetricSnapshot { CpuUsageRatio = 0.9f, PodName = "test" };
-            var tokens   = new int[MetricTokenizer.TokensPerSnapshot];
+            var tokens = new int[MetricTokenizer.TokensPerSnapshot];
             _sut.EncodeSnapshot(snapshot, tokens);
 
-            var cpuToken  = tokens[0]; // metric 0 = CpuUsageRatio
-            var decoded   = MetricTokenizer.Decode(cpuToken);
+            var cpuToken = tokens[0]; // metric 0 = CpuUsageRatio
+            var decoded = MetricTokenizer.Decode(cpuToken);
 
             // Should be within ±5% of actual value
             Assert.InRange(decoded, 0.80f, 1.0f);
@@ -136,37 +136,37 @@ namespace DevOnBike.Overfit.Tests.Anomalies
 
         private static MetricSnapshot MakeNormalSnapshot() => new()
         {
-            Timestamp             = DateTime.UtcNow,
-            PodName               = "api-gateway",
-            CpuUsageRatio         = 0.25f,
-            CpuThrottleRatio      = 0.02f,
+            Timestamp = DateTime.UtcNow,
+            PodName = "api-gateway",
+            CpuUsageRatio = 0.25f,
+            CpuThrottleRatio = 0.02f,
             MemoryWorkingSetBytes = 300_000_000f,
-            OomEventsRate         = 0f,
-            LatencyP50Ms          = 12f,
-            LatencyP95Ms          = 35f,
-            LatencyP99Ms          = 80f,
-            RequestsPerSecond     = 250f,
-            ErrorRate             = 0.002f,
-            GcGen2HeapBytes       = 50_000_000f,
-            GcPauseRatio          = 0.005f,
+            OomEventsRate = 0f,
+            LatencyP50Ms = 12f,
+            LatencyP95Ms = 35f,
+            LatencyP99Ms = 80f,
+            RequestsPerSecond = 250f,
+            ErrorRate = 0.002f,
+            GcGen2HeapBytes = 50_000_000f,
+            GcPauseRatio = 0.005f,
             ThreadPoolQueueLength = 8f,
         };
 
         private static MetricSnapshot MakeAnomalySnapshot() => new()
         {
-            Timestamp             = DateTime.UtcNow,
-            PodName               = "api-gateway",
-            CpuUsageRatio         = 0.95f,  // CPU spike
-            CpuThrottleRatio      = 0.80f,  // Heavy throttling
+            Timestamp = DateTime.UtcNow,
+            PodName = "api-gateway",
+            CpuUsageRatio = 0.95f,  // CPU spike
+            CpuThrottleRatio = 0.80f,  // Heavy throttling
             MemoryWorkingSetBytes = 7_000_000_000f, // Near OOM
-            OomEventsRate         = 0.05f,  // OOM events
-            LatencyP50Ms          = 800f,   // High latency
-            LatencyP95Ms          = 2500f,
-            LatencyP99Ms          = 5000f,
-            RequestsPerSecond     = 50f,    // Dropping requests
-            ErrorRate             = 0.35f,  // High error rate
-            GcGen2HeapBytes       = 5_000_000_000f,
-            GcPauseRatio          = 0.4f,   // GC thrashing
+            OomEventsRate = 0.05f,  // OOM events
+            LatencyP50Ms = 800f,   // High latency
+            LatencyP95Ms = 2500f,
+            LatencyP99Ms = 5000f,
+            RequestsPerSecond = 50f,    // Dropping requests
+            ErrorRate = 0.35f,  // High error rate
+            GcGen2HeapBytes = 5_000_000_000f,
+            GcPauseRatio = 0.4f,   // GC thrashing
             ThreadPoolQueueLength = 480f,   // Thread starvation
         };
 

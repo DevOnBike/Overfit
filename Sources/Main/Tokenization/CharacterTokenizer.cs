@@ -32,8 +32,8 @@ namespace DevOnBike.Overfit.Tokenization
         private readonly string[] _idToToken;
 
         public const int UnknownId = 0;
-        public const int BosId     = 1;
-        public const int EosId     = 2;
+        public const int BosId = 1;
+        public const int EosId = 2;
 
         private CharacterTokenizer(Dictionary<char, int> charToId, string[] idToToken)
         {
@@ -41,8 +41,8 @@ namespace DevOnBike.Overfit.Tokenization
             _idToToken = idToToken;
         }
 
-        public int VocabSize       => _idToToken.Length;
-        public int UnknownTokenId  => UnknownId;
+        public int VocabSize => _idToToken.Length;
+        public int UnknownTokenId => UnknownId;
 
         /// <summary>
         /// Builds a character tokenizer from a corpus.
@@ -66,7 +66,7 @@ namespace DevOnBike.Overfit.Tokenization
         /// </summary>
         public static CharacterTokenizer FromCharSet(IEnumerable<char> chars)
         {
-            var charToId  = new Dictionary<char, int>();
+            var charToId = new Dictionary<char, int>();
             var idToToken = new List<string> { "[UNK]", "[BOS]", "[EOS]" };
 
             foreach (var c in chars)
@@ -150,7 +150,7 @@ namespace DevOnBike.Overfit.Tokenization
         /// <summary>Loads vocabulary from a text file saved by <see cref="Save"/>.</summary>
         public static CharacterTokenizer Load(string path)
         {
-            var lines    = File.ReadAllLines(path);
+            var lines = File.ReadAllLines(path);
             var charToId = new Dictionary<char, int>();
 
             for (var i = 3; i < lines.Length; i++)

@@ -58,12 +58,12 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             for (var j = 0; j < 4; j++)
             {
                 scales8[j] = (byte)(packed12[j] & 0x3F);
-                mins8[j]   = (byte)(packed12[j + 4] & 0x3F);
+                mins8[j] = (byte)(packed12[j + 4] & 0x3F);
             }
             for (var j = 4; j < 8; j++)
             {
                 scales8[j] = (byte)((packed12[j + 4] & 0x0F) | ((packed12[j - 4] >> 6) << 4));
-                mins8[j]   = (byte)((packed12[j + 4] >> 4)   | ((packed12[j]     >> 6) << 4));
+                mins8[j] = (byte)((packed12[j + 4] >> 4) | ((packed12[j] >> 6) << 4));
             }
         }
 
@@ -96,13 +96,13 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     $"dst must be exactly {SuperBlockElements} floats.", nameof(dst256));
             }
 
-            var d    = (float)BitConverter.UInt16BitsToHalf(
+            var d = (float)BitConverter.UInt16BitsToHalf(
                 BinaryPrimitives.ReadUInt16LittleEndian(block144[..2]));
             var dmin = (float)BitConverter.UInt16BitsToHalf(
                 BinaryPrimitives.ReadUInt16LittleEndian(block144.Slice(2, 2)));
 
             Span<byte> scales = stackalloc byte[8];
-            Span<byte> mins   = stackalloc byte[8];
+            Span<byte> mins = stackalloc byte[8];
             UnpackQ4_KScalesMins(block144.Slice(4, 12), scales, mins);
 
             var qs = block144.Slice(16, 128);  // 256 nibbles in 128 bytes
@@ -110,10 +110,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             // Four sub-pairs × 64 elements each = 256.
             for (var p = 0; p < 4; p++)
             {
-                var scale1 = d    * scales[2 * p + 0];
-                var min1   = dmin * mins  [2 * p + 0];
-                var scale2 = d    * scales[2 * p + 1];
-                var min2   = dmin * mins  [2 * p + 1];
+                var scale1 = d * scales[2 * p + 0];
+                var min1 = dmin * mins[2 * p + 0];
+                var scale2 = d * scales[2 * p + 1];
+                var min2 = dmin * mins[2 * p + 1];
 
                 var qsBase = 32 * p;
                 var dstBase = 64 * p;
@@ -163,16 +163,16 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var ql = block210[..128];
             var qh = block210.Slice(128, 64);
             var sc = block210.Slice(192, 16);
-            var d  = (float)BitConverter.UInt16BitsToHalf(
+            var d = (float)BitConverter.UInt16BitsToHalf(
                 BinaryPrimitives.ReadUInt16LittleEndian(block210.Slice(208, 2)));
 
             // Two half-blocks of 128 elements; in each, write 4 strides of 32.
             // Half h ∈ {0,1}: uses ql[h*64..h*64+64], qh[h*32..h*32+32], sc[h*8..h*8+8].
             for (var h = 0; h < 2; h++)
             {
-                var qlBase  = 64 * h;
-                var qhBase  = 32 * h;
-                var scBase  = 8  * h;
+                var qlBase = 64 * h;
+                var qhBase = 32 * h;
+                var scBase = 8 * h;
                 var dstBase = 128 * h;
 
                 for (var l = 0; l < 32; l++)
@@ -180,10 +180,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     var qhByte = qh[qhBase + l];
                     var is_ = l / 16;     // 0 or 1 within the 32-element stride
 
-                    var q1 = ql[qlBase + l     ] & 0x0F | (((qhByte >> 0) & 0x03) << 4);
+                    var q1 = ql[qlBase + l] & 0x0F | (((qhByte >> 0) & 0x03) << 4);
                     var q2 = ql[qlBase + l + 32] & 0x0F | (((qhByte >> 2) & 0x03) << 4);
-                    var q3 = ql[qlBase + l     ] >> 4   | (((qhByte >> 4) & 0x03) << 4);
-                    var q4 = ql[qlBase + l + 32] >> 4   | (((qhByte >> 6) & 0x03) << 4);
+                    var q3 = ql[qlBase + l] >> 4 | (((qhByte >> 4) & 0x03) << 4);
+                    var q4 = ql[qlBase + l + 32] >> 4 | (((qhByte >> 6) & 0x03) << 4);
 
                     // scales are int8 — sign-extend
                     var s1 = (sbyte)sc[scBase + is_ + 0];
@@ -191,10 +191,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     var s3 = (sbyte)sc[scBase + is_ + 4];
                     var s4 = (sbyte)sc[scBase + is_ + 6];
 
-                    dst256[dstBase + l      ] = d * s1 * (q1 - 32);
-                    dst256[dstBase + l + 32 ] = d * s2 * (q2 - 32);
-                    dst256[dstBase + l + 64 ] = d * s3 * (q3 - 32);
-                    dst256[dstBase + l + 96 ] = d * s4 * (q4 - 32);
+                    dst256[dstBase + l] = d * s1 * (q1 - 32);
+                    dst256[dstBase + l + 32] = d * s2 * (q2 - 32);
+                    dst256[dstBase + l + 64] = d * s3 * (q3 - 32);
+                    dst256[dstBase + l + 96] = d * s4 * (q4 - 32);
                 }
             }
         }

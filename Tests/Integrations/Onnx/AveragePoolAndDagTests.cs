@@ -23,17 +23,17 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
     public class AveragePoolAndDagTests
     {
         private const string FixtureDir = "test_fixtures";
-        private const float  Tolerance  = 1e-4f;
+        private const float Tolerance = 1e-4f;
 
         // ─────────────────────────────────────────────────────────────────────
         // AveragePool via OnnxImporter (linear topology)
         // ─────────────────────────────────────────────────────────────────────
 
-        private const string AvgPoolOnnx   = "tiny_avgpool.onnx";
-        private const string AvgPoolInput  = "tiny_avgpool_input.bin";
+        private const string AvgPoolOnnx = "tiny_avgpool.onnx";
+        private const string AvgPoolInput = "tiny_avgpool_input.bin";
         private const string AvgPoolOutput = "tiny_avgpool_output.bin";
-        private const int    AvgPoolIn     = 256;  // 1×4×8×8
-        private const int    AvgPoolOut    = 10;
+        private const int AvgPoolIn = 256;  // 1×4×8×8
+        private const int AvgPoolOut = 10;
 
         [Fact]
         public void AveragePool_Load_ReturnsNonEmptySequential()
@@ -57,9 +57,9 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
 
             using var engine = InferenceEngine.FromSequential(model, AvgPoolIn, AvgPoolOut);
 
-            var input    = LoadFloatBin(OnnxPath(AvgPoolInput));
+            var input = LoadFloatBin(OnnxPath(AvgPoolInput));
             var expected = LoadFloatBin(OnnxPath(AvgPoolOutput));
-            var output   = new float[AvgPoolOut];
+            var output = new float[AvgPoolOut];
 
             engine.Run(input, output);
 
@@ -82,7 +82,7 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
 
             using var engine = InferenceEngine.FromSequential(model, AvgPoolIn, AvgPoolOut);
 
-            var input  = new float[AvgPoolIn];
+            var input = new float[AvgPoolIn];
             var output = new float[AvgPoolOut];
 
             for (var i = 0; i < 256; i++)
@@ -90,7 +90,7 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
                 engine.Run(input, output);
             }
 
-            var before    = GC.GetAllocatedBytesForCurrentThread();
+            var before = GC.GetAllocatedBytesForCurrentThread();
             for (var i = 0; i < 10_000; i++)
             {
                 engine.Run(input, output);
@@ -110,15 +110,15 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
 
             using var engine = InferenceEngine.FromSequential(model, AvgPoolIn, AvgPoolOut);
 
-            var input    = LoadFloatBin(OnnxPath(AvgPoolInput));
+            var input = LoadFloatBin(OnnxPath(AvgPoolInput));
             var expected = LoadFloatBin(OnnxPath(AvgPoolOutput));
-            var output   = new float[AvgPoolOut];
+            var output = new float[AvgPoolOut];
 
             engine.Run(input, output);
 
             Assert.Equal(
                 Array.IndexOf(expected, expected.Max()),
-                Array.IndexOf(output,   output.Max()));
+                Array.IndexOf(output, output.Max()));
         }
 
         // ─────────────────────────────────────────────────────────────────────
@@ -152,7 +152,7 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
             //  top-right: (3+4+7+8)/4 = 5.5
             //  bot-left:  (9+0+3+4)/4 = 4.0
             //  bot-right: (1+2+5+6)/4 = 3.5
-            var output   = new float[4];
+            var output = new float[4];
             layer.ForwardInference(input, output);
 
             Assert.Equal(3.5f, output[0], precision: 5);
@@ -173,7 +173,7 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
             Assert.Equal(16, layer.InferenceOutputSize); // 1 * 4 * 4
             Assert.Equal(16, layer.InferenceInputSize);
 
-            var input  = Enumerable.Range(1, 16).Select(x => (float)x).ToArray();
+            var input = Enumerable.Range(1, 16).Select(x => (float)x).ToArray();
             var output = new float[16];
 
             // Should not throw and should fill output without NaN
@@ -185,10 +185,10 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
         // ResNetBlock — DAG topology (Add operator = skip connection)
         // ─────────────────────────────────────────────────────────────────────
 
-        private const string ResNetOnnx   = "resnet_block.onnx";
-        private const string ResNetInput  = "resnet_block_input.bin";
+        private const string ResNetOnnx = "resnet_block.onnx";
+        private const string ResNetInput = "resnet_block_input.bin";
         private const string ResNetOutput = "resnet_block_output.bin";
-        private const int    ResNetFlat   = 256;  // 1×4×8×8
+        private const int ResNetFlat = 256;  // 1×4×8×8
 
         [Fact]
         public void ResNetBlock_DAG_Load_Succeeds()
@@ -212,9 +212,9 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
 
             model.Eval();
 
-            var input    = LoadFloatBin(OnnxPath(ResNetInput));
+            var input = LoadFloatBin(OnnxPath(ResNetInput));
             var expected = LoadFloatBin(OnnxPath(ResNetOutput));
-            var output   = new float[ResNetFlat];
+            var output = new float[ResNetFlat];
 
             model.RunInference(input, output);
 
@@ -238,7 +238,7 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
 
             model.Eval();
 
-            var input  = new float[ResNetFlat];
+            var input = new float[ResNetFlat];
             var output = new float[ResNetFlat];
 
             for (var i = 0; i < 256; i++)
@@ -246,7 +246,7 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
                 model.RunInference(input, output);
             }
 
-            var before    = GC.GetAllocatedBytesForCurrentThread();
+            var before = GC.GetAllocatedBytesForCurrentThread();
             for (var i = 0; i < 10_000; i++)
             {
                 model.RunInference(input, output);
@@ -276,7 +276,7 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
 
         private static float[] LoadFloatBin(string path)
         {
-            var bytes  = File.ReadAllBytes(path);
+            var bytes = File.ReadAllBytes(path);
             var result = new float[bytes.Length / sizeof(float)];
 
             for (var i = 0; i < result.Length; i++)

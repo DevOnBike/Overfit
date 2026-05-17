@@ -23,9 +23,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
     [Trait("Category", "Diagnostics")]
     public sealed class RamUsageDiagnosticsTests
     {
-        private static string GgufModelPath   => TestModelPaths.Qwen3B.GgufPath;
+        private static string GgufModelPath => TestModelPaths.Qwen3B.GgufPath;
         private static string BinaryModelPath => TestModelPaths.Qwen3B.BinaryPath;
-        private static string TokenizerDir    => TestModelPaths.Qwen3B.Dir;
+        private static string TokenizerDir => TestModelPaths.Qwen3B.Dir;
 
         private readonly ITestOutputHelper _output;
 

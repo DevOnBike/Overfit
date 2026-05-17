@@ -88,11 +88,11 @@ namespace Benchmarks
             var ffnW2 = new float[DFF * DModel]; FillDeterministic(ffnW2, 701);
 
             _blockWeights = new BlockWeights(
-                heads:    heads,
+                heads: heads,
                 ln1Gamma: ln1Gamma,
                 ln2Gamma: ln2Gamma,
-                ffnW1:    ffnW1,
-                ffnW2:    ffnW2);
+                ffnW1: ffnW1,
+                ffnW2: ffnW2);
 
             FillDeterministic(_input, seed: 101);
 

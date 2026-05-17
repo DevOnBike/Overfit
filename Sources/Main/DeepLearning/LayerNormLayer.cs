@@ -38,7 +38,7 @@ namespace DevOnBike.Overfit.DeepLearning
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(normalizedShape);
 
             _normalizedShape = normalizedShape;
-            _eps             = eps;
+            _eps = eps;
 
             Gamma = new Parameter(new TensorShape(normalizedShape), requiresGrad: true, clearData: false);
             Gamma.DataSpan.Fill(1f);  // scale = 1 by default
@@ -74,7 +74,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
             // Cached view nodes — no using, tape holds references.
             _gammaNode ??= Gamma.AsNode();
-            _betaNode  ??= Beta.AsNode();
+            _betaNode ??= Beta.AsNode();
 
             return TensorMath.LayerNorm(graph, input, _gammaNode, _betaNode, _eps);
         }
@@ -83,12 +83,12 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             // Single-sample inference — reuse Forward logic without tape.
             var shape = new TensorShape(_normalizedShape);
-            var C     = _normalizedShape;
+            var C = _normalizedShape;
             var numRows = input.Length / C;
 
             for (var r = 0; r < numRows; r++)
             {
-                var inRow  = input.Slice(r * C, C);
+                var inRow = input.Slice(r * C, C);
                 var outRow = output.Slice(r * C, C);
                 var mu = 0f;
 
@@ -104,7 +104,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
                 var inv = 1f / MathF.Sqrt(variance + _eps);
                 var gammaS = Gamma.DataReadOnlySpan;
-                var betaS  = Beta.DataReadOnlySpan;
+                var betaS = Beta.DataReadOnlySpan;
 
                 for (var i = 0; i < C; i++)
                 {

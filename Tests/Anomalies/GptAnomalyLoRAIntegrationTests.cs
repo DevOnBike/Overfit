@@ -49,14 +49,14 @@ namespace DevOnBike.Overfit.Tests.Anomalies
 
             using var model = new GPT1Model(new GPT1Config
             {
-                VocabSize     = MetricTokenizer.VocabSize,
+                VocabSize = MetricTokenizer.VocabSize,
                 ContextLength = 16 * tps,
-                DModel        = 32,
-                NHeads        = 2,
-                NLayers       = 1,
-                DFF           = 64,
-                TieWeights    = false,   // LoRA targets the untied LM head
-                PreLayerNorm  = true,
+                DModel = 32,
+                NHeads = 2,
+                NLayers = 1,
+                DFF = 64,
+                TieWeights = false,   // LoRA targets the untied LM head
+                PreLayerNorm = true,
             });
 
             // A stable "production normal" regime — 48 snapshots of the same pod.
@@ -160,19 +160,19 @@ namespace DevOnBike.Overfit.Tests.Anomalies
 
         private static MetricSnapshot MakeNormalSnapshot(string pod) => new()
         {
-            Timestamp             = DateTime.UtcNow,
-            PodName               = pod,
-            CpuUsageRatio         = 0.22f,
-            CpuThrottleRatio      = 0.02f,
+            Timestamp = DateTime.UtcNow,
+            PodName = pod,
+            CpuUsageRatio = 0.22f,
+            CpuThrottleRatio = 0.02f,
             MemoryWorkingSetBytes = 360_000_000f,
-            OomEventsRate         = 0f,
-            LatencyP50Ms          = 13f,
-            LatencyP95Ms          = 38f,
-            LatencyP99Ms          = 78f,
-            RequestsPerSecond     = 270f,
-            ErrorRate             = 0.003f,
-            GcGen2HeapBytes       = 52_000_000f,
-            GcPauseRatio          = 0.004f,
+            OomEventsRate = 0f,
+            LatencyP50Ms = 13f,
+            LatencyP95Ms = 38f,
+            LatencyP99Ms = 78f,
+            RequestsPerSecond = 270f,
+            ErrorRate = 0.003f,
+            GcGen2HeapBytes = 52_000_000f,
+            GcPauseRatio = 0.004f,
             ThreadPoolQueueLength = 9f,
         };
     }

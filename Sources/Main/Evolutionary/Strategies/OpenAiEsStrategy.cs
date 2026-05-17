@@ -471,14 +471,14 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             WriteFloats(writer, _bestParameters);
 
             writer.Write(_noiseOffsets.Length);
-            
+
             for (var i = 0; i < _noiseOffsets.Length; i++)
             {
                 writer.Write(_noiseOffsets[i]);
             }
 
             writer.Write(_useAdam);
-            
+
             if (_useAdam)
             {
                 writer.Write(_adamStep);

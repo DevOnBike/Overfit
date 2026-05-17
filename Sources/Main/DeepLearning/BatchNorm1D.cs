@@ -122,7 +122,7 @@ namespace DevOnBike.Overfit.DeepLearning
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
             _gammaNode ??= Gamma.AsNode();
-            _betaNode  ??= Beta.AsNode();
+            _betaNode ??= Beta.AsNode();
 
             return ComputationGraph.BatchNorm1DOp(
                 graph,
