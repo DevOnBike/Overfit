@@ -1,13 +1,13 @@
 """
-fixture_resnet.py — generuje modele ONNX do testów OnnxGraphImporter i AveragePool.
+fixture_resnet.py — generates ONNX models for the OnnxGraphImporter and AveragePool tests.
 
-Uruchomienie:
+Run:
     python fixture_resnet.py
 
-Wymagania:
+Requirements:
     pip install torch onnx numpy
 
-Generowane pliki (w tests/test_fixtures/):
+Generated files (in tests/test_fixtures/):
     tiny_resnet.onnx / _input.bin / _output.bin
         Linear(8,8) + skip + Linear(8,4)
 

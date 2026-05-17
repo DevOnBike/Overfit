@@ -7,7 +7,9 @@ using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Tensors;
-using DevOnBike.Overfit.Tensors.Core; // Wpinamy Core
+using DevOnBike.Overfit.Tensors.Core;
+
+// Wpinamy Core
 
 namespace DevOnBike.Overfit.Ops
 {
@@ -19,7 +21,14 @@ namespace DevOnBike.Overfit.Ops
 
         private const long ParallelThreshold = 4096;
         private const int StackAllocThreshold = 1024;
-        private const int BatchSequentialThreshold = 128;
+
+        // Was 128. Lowered to 32 after MNIST profiling showed MaxPool2D
+        // dominating epoch time (42 %) for B=64 because 64 < 128 → fell into
+        // sequential branch. With Parallel.For across batch at B=64 on 32-core
+        // Ryzen, per-batch work (~22k ops for MaxPool with 8c×26×26 spatial)
+        // amortizes the ~5 µs Parallel.For overhead. Below 32 still sequential
+        // — overhead would dominate small-batch cases.
+        private const int BatchSequentialThreshold = 32;
 
         // ====================================================================
         // SOFTMAX
@@ -52,7 +61,7 @@ namespace DevOnBike.Overfit.Ops
             {
                 // Route through graph factory so Ownership is set from birth.
                 return requiresGrad
-                    ? graph.CreateTemporary(shape, requiresGrad: true,  clearMemory: clearMemory)
+                    ? graph.CreateTemporary(shape, requiresGrad: true, clearMemory: clearMemory)
                     : graph.CreateAuxiliary(shape, clearMemory: clearMemory);
             }
 

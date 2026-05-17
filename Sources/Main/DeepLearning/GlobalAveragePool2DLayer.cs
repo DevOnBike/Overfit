@@ -27,8 +27,8 @@ namespace DevOnBike.Overfit.DeepLearning
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(inputW);
 
             _channels = channels;
-            _inputH   = inputH;
-            _inputW   = inputW;
+            _inputH = inputH;
+            _inputW = inputW;
         }
 
         public int InferenceInputSize

@@ -3,7 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using DevOnBike.Overfit.Inference.Contracts;
+using DevOnBike.Overfit.Onnx;
 
 namespace DevOnBike.Overfit.Inference
 {
@@ -14,14 +14,14 @@ namespace DevOnBike.Overfit.Inference
     /// </summary>
     public sealed class OnnxGraphInferenceBackend : IInferenceBackend
     {
-        private readonly Onnx.OnnxGraphModel _model;
+        private readonly OnnxGraphModel _model;
 
-        public OnnxGraphInferenceBackend(Onnx.OnnxGraphModel model)
+        public OnnxGraphInferenceBackend(OnnxGraphModel model)
         {
             _model = model ?? throw new ArgumentNullException(nameof(model));
         }
 
-        public int InputSize  => _model.InputSize;
+        public int InputSize => _model.InputSize;
         public int OutputSize => _model.OutputSize;
 
         public void Run(ReadOnlySpan<float> input, Span<float> output)
@@ -29,7 +29,7 @@ namespace DevOnBike.Overfit.Inference
 
         public void Warmup(int iterations)
         {
-            var dummyInput  = new float[InputSize];
+            var dummyInput = new float[InputSize];
             var dummyOutput = new float[OutputSize];
 
             for (var i = 0; i < iterations; i++)

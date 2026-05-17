@@ -25,23 +25,23 @@ namespace DevOnBike.Overfit.UI
         {
             try
             {
-                TxtStatus.Text = "Ładowanie wag GigaBestii...";
+                TxtStatus.Text = "Loading Beast weights...";
 
-                // PODAJ ŚCIEŻKĘ DO SWOJEGO ZAPISANEGO MODELU
-                // Pamiętaj, że prefiks musi zgadzać się z tym, co podałeś w MnistPredictor!
+                // PROVIDE THE PATH TO YOUR SAVED MODEL
+                // Make sure the prefix matches what you passed to MnistPredictor!
                 var modelPrefix = @"d:\ml\bestia.bin";
 
                 _predictor = new MnistPredictor(modelPrefix);
-                TxtStatus.Text = "Bestia gotowa! Rysuj!";
+                TxtStatus.Text = "Beast ready! Draw!";
             }
             catch (Exception ex)
             {
-                TxtStatus.Text = "Błąd: " + ex.Message;
+                TxtStatus.Text = "Error: " + ex.Message;
                 TxtStatus.Foreground = Brushes.Red;
             }
         }
 
-        // Zdarzenie wyzwalane za każdym razem, gdy użytkownik odrywa myszkę/rysik od płótna
+        // Event fired every time the user lifts the mouse button or stylus from the canvas
         private void DrawingCanvas_MouseUp(object sender, MouseButtonEventArgs e)
         {
             if (_predictor == null || DrawingCanvas.Strokes.Count == 0)
@@ -56,7 +56,7 @@ namespace DevOnBike.Overfit.UI
         {
             DrawingCanvas.Strokes.Clear();
             TxtResult.Text = "?";
-            TxtStatus.Text = "Bestia gotowa! Rysuj!";
+            TxtStatus.Text = "Beast ready! Draw!";
         }
 
         private void PredictDigit()
@@ -65,40 +65,40 @@ namespace DevOnBike.Overfit.UI
             {
                 var pixelData = GetMnistPixelsFromCanvas();
 
-                // --- INFERENCJA (Nasza 48-sekundowa bestia w akcji) ---
+                // --- INFERENCE (our 48-second beast in action) ---
                 var stopwatch = ValueStopwatch.StartNew();
                 var prediction = _predictor.Predict(pixelData);
                 var elapsed = stopwatch.GetElapsedTime();
 
                 TxtResult.Text = prediction.ToString();
-                TxtStatus.Text = $"Rozpoznano w {elapsed.TotalMilliseconds} ms!";
+                TxtStatus.Text = $"Recognized in {elapsed.TotalMilliseconds} ms!";
             }
             catch (Exception ex)
             {
-                TxtStatus.Text = "Błąd predykcji: " + ex.Message;
+                TxtStatus.Text = "Prediction error: " + ex.Message;
             }
         }
 
-        // Magia konwersji WPF (280x280 InkCanvas) -> MNIST (28x28 double[])
+        // WPF conversion magic: (280x280 InkCanvas) -> MNIST (28x28 double[])
         private float[] GetMnistPixelsFromCanvas()
         {
-            // 1. Renderujemy Canvas do bitmapy
+            // 1. Render the canvas to a bitmap
             var rtb = new RenderTargetBitmap(
             (int)DrawingCanvas.Width, (int)DrawingCanvas.Height,
             96d, 96d, PixelFormats.Default);
             rtb.Render(DrawingCanvas);
 
-            // 2. Skalujemy w dół do 28x28 używając wbudowanego wysokiej jakości algorytmu
+            // 2. Scale down to 28x28 using the built-in high-quality scaling algorithm
             var scaled = new TransformedBitmap(rtb, new ScaleTransform(
             28.0 / DrawingCanvas.Width,
             28.0 / DrawingCanvas.Height));
 
-            // 3. Pobieramy surowe piksele
-            var stride = 28 * 4; // 4 bajty na piksel (BGRA)
+            // 3. Extract raw pixels
+            var stride = 28 * 4; // 4 bytes per pixel (BGRA)
             var pixels = new byte[28 * stride];
             scaled.CopyPixels(pixels, stride, 0);
 
-            // 4. Konwertujemy na format, który przyjmuje nasza sieć (tablica 784 x double, 0.0 - 1.0)
+            // 4. Convert to the format expected by the network (784-element float array, 0.0 - 1.0)
             var mnistData = new float[784];
             for (var y = 0; y < 28; y++)
             {
@@ -106,10 +106,10 @@ namespace DevOnBike.Overfit.UI
                 {
                     var idx = y * stride + x * 4;
 
-                    // W MNIST interesuje nas tylko jasność (bierzemy kanał Red, bo tło to czarny, a rysik biały)
+                    // In MNIST we only care about brightness (we take the Red channel because background is black and the stylus is white)
                     var brightness = pixels[idx + 2];
 
-                    // Normalizacja do 0.0 - 1.0
+                    // Normalize to 0.0 - 1.0
                     mnistData[y * 28 + x] = brightness / 255.0f;
                 }
             }
@@ -119,7 +119,7 @@ namespace DevOnBike.Overfit.UI
 
         protected override void OnClosed(EventArgs e)
         {
-            _predictor?.Dispose(); // Pamiętaj o sprzątaniu!
+            _predictor?.Dispose(); // Remember to clean up!
             base.OnClosed(e);
         }
     }

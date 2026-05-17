@@ -271,3 +271,9 @@ out_temp/
 
 # Jetbrains Rider
 .idea/
+
+# Claude Code per-user overrides
+.claude/settings.local.json
+
+# models
+*.bin

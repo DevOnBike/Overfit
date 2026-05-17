@@ -6,6 +6,7 @@
 using DevOnBike.Overfit.Evolutionary.Abstractions;
 using DevOnBike.Overfit.Evolutionary.Storage;
 using DevOnBike.Overfit.Maths;
+using DevOnBike.Overfit.Randomization;
 
 namespace DevOnBike.Overfit.Evolutionary.Strategies
 {
@@ -42,7 +43,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
         private readonly IMutationOperator _mutationOperator;
         private readonly ICrossoverOperator? _crossoverOperator;
         private readonly IFitnessShaper? _fitnessShaper;
-        private readonly Random _rng;
+        private readonly IRandom _rng;
         private readonly int _eliteCount;
         private readonly float[] _bestParameters;
         private readonly float[]? _crossoverScratch1;
@@ -55,6 +56,19 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
         /// <summary>
         ///     Creates a generational GA.
         /// </summary>
+        /// <param name="populationSize">Number of genomes per generation. Must be greater than 1.</param>
+        /// <param name="parameterCount">Length of each genome's flat parameter vector. Must be positive.</param>
+        /// <param name="eliteFraction">
+        ///     Fraction of the population carried over verbatim as elites each generation.
+        ///     Must be in (0, 1]; at least one elite is always retained.
+        /// </param>
+        /// <param name="selectionOperator">Strategy that picks a parent index from the elite set.</param>
+        /// <param name="mutationOperator">Strategy that perturbs a parent genome into a child.</param>
+        /// <param name="seed">Seed for the deterministic RNG driving selection, mutation and crossover.</param>
+        /// <param name="fitnessShaper">
+        ///     Optional transform applied to raw fitness before ranking. When null, raw fitness
+        ///     is ranked directly.
+        /// </param>
         /// <param name="crossoverOperator">
         ///     Optional recombination operator. When non-null, each pair of children is
         ///     produced from two elite parents via crossover followed by per-child mutation.
@@ -90,7 +104,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             _mutationOperator = mutationOperator ?? throw new ArgumentNullException(nameof(mutationOperator));
             _crossoverOperator = crossoverOperator;
             _fitnessShaper = fitnessShaper;
-            _rng = new Random(seed);
+            _rng = new SeededXorShiftRandom(seed);
 
             PopulationSize = populationSize;
             ParameterCount = parameterCount;
@@ -221,7 +235,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
             if (!_hasFitness)
             {
-                return ReadOnlySpan<float>.Empty;
+                return [];
             }
 
             return _bestParameters;
@@ -425,23 +439,28 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
         // Checkpoint: IEvolutionCheckpoint.Save / Load
         // Format (little-endian, BinaryWriter defaults):
         //   int32   magic           = 0x47474101 ('G','G','A',0x01)
-        //   int32   schemaVersion   = 1
+        //   int32   schemaVersion   = 2
         //   int32   populationSize
         //   int32   parameterCount
         //   int32   eliteCount
         //   int32   generation
         //   byte    hasFitness
         //   float   bestFitness
+        //   <state> rngState        (schema >= 2, absent in v1; via IRandom.SaveState)
         //   float[] bestParameters  [parameterCount]
         //   float[] population      [populationSize * parameterCount]
         //   float[] fitness         [populationSize]          (only when hasFitness == 1)
         //   float[] shapedFitness   [populationSize]          (only when hasFitness == 1)
         //   int32[] ranking         [populationSize]          (only when hasFitness == 1)
         //   int32[] eliteIndices    [eliteCount]              (only when hasFitness == 1)
+        //
+        // Schema v2 added rngState so a resumed run is bit-identical, not merely
+        // statistically equivalent. v1 streams (no rngState) still load; the RNG then
+        // continues from the constructor seed instead of the saved position.
         // -----------------------------------------------------------------------------
 
         private const int CheckpointMagic = 0x47474101;
-        private const int CheckpointSchemaVersion = 1;
+        private const int CheckpointSchemaVersion = 2;
 
         public void Save(BinaryWriter writer)
         {
@@ -456,6 +475,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             writer.Write(Generation);
             writer.Write(_hasFitness);
             writer.Write(_bestFitness);
+            _rng.SaveState(writer);
 
             WriteFloats(writer, _bestParameters);
             WriteFloats(writer, _workspace.Population.GetView().AsReadOnlySpan());
@@ -484,10 +504,10 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
             var schemaVersion = reader.ReadInt32();
 
-            if (schemaVersion != CheckpointSchemaVersion)
+            if (schemaVersion is not 1 and not 2)
             {
                 throw new InvalidDataException(
-                    $"Unsupported schema version {schemaVersion}; this build supports {CheckpointSchemaVersion}.");
+                    $"Unsupported schema version {schemaVersion}; this build supports 1 and {CheckpointSchemaVersion}.");
             }
 
             var populationSize = reader.ReadInt32();
@@ -504,6 +524,13 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             Generation = reader.ReadInt32();
             _hasFitness = reader.ReadBoolean();
             _bestFitness = reader.ReadSingle();
+
+            // v1 streams have no RNG state; the generator keeps its constructor seed,
+            // so a v1 resume is statistically equivalent but not bit-identical.
+            if (schemaVersion >= 2)
+            {
+                _rng.LoadState(reader);
+            }
 
             ReadFloats(reader, _bestParameters);
             ReadFloats(reader, _workspace.Population.GetView().AsSpan());

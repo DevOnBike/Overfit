@@ -59,10 +59,10 @@ namespace DevOnBike.Overfit.Optimizers
         }
 
         /// <summary>
-        /// Compatibility shim — accepts legacy <see cref="AutogradNode"/> collections.
-        /// Prefer <see cref="Adam(IEnumerable{Parameter}, float)"/> for new code.
+        /// Secondary constructor — accepts raw <see cref="AutogradNode"/> collections,
+        /// e.g. for low-level optimizer tests that build nodes directly.
+        /// Prefer <see cref="Adam(IEnumerable{Parameter}, float)"/> for application code.
         /// </summary>
-        [Obsolete("Pass IEnumerable<Parameter> via module.TrainableParameters() instead.")]
         public Adam(IEnumerable<AutogradNode> parameters, float learningRate = 0.001f)
         {
             _ = OverfitParallel.Options;
@@ -549,20 +549,20 @@ namespace DevOnBike.Overfit.Optimizers
             public ParamState(Parameter param)
             {
                 _param = param;
-                _node  = null;
-                Size   = param.Shape.Size;
-                M      = new FastTensor<float>(Size, clearMemory: true);
-                V      = new FastTensor<float>(Size, clearMemory: true);
+                _node = null;
+                Size = param.Shape.Size;
+                M = new FastTensor<float>(Size, clearMemory: true);
+                V = new FastTensor<float>(Size, clearMemory: true);
             }
 
             // Legacy path: AutogradNode-backed state.
             public ParamState(AutogradNode node)
             {
                 _param = null;
-                _node  = node;
-                Size   = node.DataView.Size;
-                M      = new FastTensor<float>(Size, clearMemory: true);
-                V      = new FastTensor<float>(Size, clearMemory: true);
+                _node = node;
+                Size = node.DataView.Size;
+                M = new FastTensor<float>(Size, clearMemory: true);
+                V = new FastTensor<float>(Size, clearMemory: true);
             }
 
             public Span<float> DataSpan =>

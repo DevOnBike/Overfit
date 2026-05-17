@@ -101,15 +101,9 @@ namespace DevOnBike.Overfit.Evolutionary.Evaluators
         {
             ThrowIfDisposed();
 
-            if (populationSize < 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(populationSize));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegative(populationSize);
 
-            if (parameterCount <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(parameterCount));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(parameterCount);
 
             var expectedPopulation = populationSize * parameterCount;
 

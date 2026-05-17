@@ -3,9 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
-using DevOnBike.Overfit.DeepLearning.Abstractions;
+using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.Onnx
 {
@@ -27,24 +26,24 @@ namespace DevOnBike.Overfit.Onnx
     public sealed class OnnxGraphModel : IDisposable
     {
         private readonly OnnxGraphNode[] _nodes;
-        private readonly float[][] _buffers;
+        private readonly TensorStorage<float>[] _buffers;
         private readonly int _inputSize;
         private readonly int _outputSize;
         private bool _disposed;
 
         internal OnnxGraphModel(
             OnnxGraphNode[] nodes,
-            float[][] buffers,
+            TensorStorage<float>[] buffers,
             int inputSize,
             int outputSize)
         {
-            _nodes      = nodes;
-            _buffers    = buffers;
-            _inputSize  = inputSize;
+            _nodes = nodes;
+            _buffers = buffers;
+            _inputSize = inputSize;
             _outputSize = outputSize;
         }
 
-        public int InputSize  => _inputSize;
+        public int InputSize => _inputSize;
         public int OutputSize => _outputSize;
 
         /// <summary>
@@ -69,16 +68,16 @@ namespace DevOnBike.Overfit.Onnx
             }
 
             // Slot 0 = model input.
-            input.CopyTo(_buffers[0]);
+            input.CopyTo(_buffers[0].AsSpan());
 
             foreach (var node in _nodes)
             {
-                var outBuf = _buffers[node.OutputSlot].AsSpan(0, node.OutputSize);
+                var outBuf = _buffers[node.OutputSlot].AsSpan().Slice(0, node.OutputSize);
 
                 if (node.InputSlots.Length == 2 && node.Module is OnnxAddLayer addLayer)
                 {
                     // Skip connection: Add(left, right) → output.
-                    var left  = _buffers[node.InputSlots[0]].AsSpan();
+                    var left = _buffers[node.InputSlots[0]].AsSpan();
                     var right = _buffers[node.InputSlots[1]].AsSpan();
                     addLayer.ForwardInference(left, right, outBuf);
                 }
@@ -91,7 +90,7 @@ namespace DevOnBike.Overfit.Onnx
 
             // Last node's output slot → caller's output span.
             var lastNode = _nodes[^1];
-            _buffers[lastNode.OutputSlot].AsSpan(0, _outputSize).CopyTo(output);
+            _buffers[lastNode.OutputSlot].AsSpan().Slice(0, _outputSize).CopyTo(output);
         }
 
         /// <summary>
@@ -119,12 +118,20 @@ namespace DevOnBike.Overfit.Onnx
 
         public void Dispose()
         {
-            if (_disposed) return;
+            if (_disposed)
+            {
+                return;
+            }
             _disposed = true;
 
             foreach (var node in _nodes)
             {
                 node.Module.Dispose();
+            }
+
+            foreach (var buf in _buffers)
+            {
+                buf.Dispose();
             }
         }
     }

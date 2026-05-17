@@ -244,6 +244,36 @@ namespace DevOnBike.Overfit.Diagnostics
             unit: "{cell}",
             description: "Number of occupied archive cells.");
 
+        // Pre-rendered OpCode names indexed by (int)code. RecordGraphRecordOp runs once
+        // per recorded tape op on every training forward pass, so calling code.ToString()
+        // there would allocate a string per op (~3-6 MB/epoch on MNIST). The names are
+        // interned once at type init and reused — zero allocation on the hot path,
+        // including while a MeterListener is attached.
+        private static readonly string[] OpCodeNames = BuildOpCodeNames();
+
+        private static string[] BuildOpCodeNames()
+        {
+            var values = Enum.GetValues<OpCode>();
+            var max = 0;
+
+            foreach (var value in values)
+            {
+                if ((int)value > max)
+                {
+                    max = (int)value;
+                }
+            }
+
+            var names = new string[max + 1];
+
+            foreach (var value in values)
+            {
+                names[(int)value] = value.ToString();
+            }
+
+            return names;
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static Activity? StartActivity(string name, ActivityKind kind = ActivityKind.Internal)
         {
@@ -263,8 +293,11 @@ namespace DevOnBike.Overfit.Diagnostics
                 return;
             }
 
+            var index = (int)code;
+            var name = (uint)index < (uint)OpCodeNames.Length ? OpCodeNames[index] : "Unknown";
+
             TagList tags = default;
-            tags.Add("op", code.ToString());
+            tags.Add("op", name);
 
             GraphRecordTotalCount.Add(1, tags);
         }

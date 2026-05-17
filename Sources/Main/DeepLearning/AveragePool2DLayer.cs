@@ -48,12 +48,12 @@ namespace DevOnBike.Overfit.DeepLearning
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(stride);
             ArgumentOutOfRangeException.ThrowIfNegative(padding);
 
-            _channels       = channels;
-            _inputH         = inputH;
-            _inputW         = inputW;
-            _kernelSize     = kernelSize;
-            _padding        = padding;
-            _stride         = stride;
+            _channels = channels;
+            _inputH = inputH;
+            _inputW = inputW;
+            _kernelSize = kernelSize;
+            _padding = padding;
+            _stride = stride;
             CountIncludePad = countIncludePad;
             _outH = (inputH + 2 * padding - kernelSize) / stride + 1;
             _outW = (inputW + 2 * padding - kernelSize) / stride + 1;
@@ -66,8 +66,8 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public bool IsTraining { get; private set; } = true;
 
-        public int InferenceInputSize  => _channels * _inputH * _inputW;
-        public int InferenceOutputSize => _channels * _outH   * _outW;
+        public int InferenceInputSize => _channels * _inputH * _inputW;
+        public int InferenceOutputSize => _channels * _outH * _outW;
 
         public void Train() => IsTraining = true;
 

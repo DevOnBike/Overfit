@@ -321,23 +321,23 @@ namespace Benchmarks
                     onnxPath,
                     sessionOptions);
 
-                _onnxInputValue = OrtValue.CreateTensorValueFromMemory<float>(
+                _onnxInputValue = OrtValue.CreateTensorValueFromMemory(
                     OrtMemoryInfo.DefaultInstance,
                     Input.AsMemory(),
-                    new long[] { 1, inputSize });
+                    [1, inputSize]);
 
-                _onnxOutputValue = OrtValue.CreateTensorValueFromMemory<float>(
+                _onnxOutputValue = OrtValue.CreateTensorValueFromMemory(
                     OrtMemoryInfo.DefaultInstance,
                     OnnxOutput.AsMemory(),
-                    new long[] { 1, outputSize });
+                    [1, outputSize]);
 
                 _onnxRunOptions = new RunOptions();
 
-                _inputNames = new[] { "input" };
-                _outputNames = new[] { "output" };
+                _inputNames = ["input"];
+                _outputNames = ["output"];
 
-                _inputValues = new[] { _onnxInputValue };
-                _outputValues = new[] { _onnxOutputValue };
+                _inputValues = [_onnxInputValue];
+                _outputValues = [_onnxOutputValue];
 
                 RunOverfitOnce();
                 RunOnnxOnce();

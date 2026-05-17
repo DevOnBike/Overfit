@@ -13,6 +13,6 @@ namespace DevOnBike.Overfit.Onnx.Schema
         /// <summary>
         /// Per-dimension sizes. Null entry = dynamic/symbolic dimension.
         /// </summary>
-        public long?[] Shape { get; init; } = Array.Empty<long?>();
+        public long?[] Shape { get; init; } = [];
     }
 }

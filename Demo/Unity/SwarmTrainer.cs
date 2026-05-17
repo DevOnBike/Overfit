@@ -101,10 +101,7 @@ namespace DevOnBike.Overfit.Demo.Unity.Server
         /// </summary>
         public float Train(int generations, CancellationToken cancellation)
         {
-            if (generations <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(generations));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(generations);
 
             ResumeOrInitialize();
 

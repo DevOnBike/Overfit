@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json.schemastore.org/launchsettings.json",
+  "//": "Dev defaults assume GPT-2 fixtures live at C:\\gpt2\\ (gpt2_small.bin + vocab.json + merges.txt). Override OVERFIT_MODEL_DIR or pass explicit --model/--vocab/--merges to retarget.",
+  "profiles": {
+    "default": {
+      "//": "Short generation — quickest path to seeing the demo work.",
+      "commandName": "Project",
+      "commandLineArgs": "--prompt \"The future of software development is\" --tokens 32",
+      "environmentVariables": {
+        "OVERFIT_MODEL_DIR": "C:\\gpt2"
+      }
+    },
+    "long-generation": {
+      "//": "128 tokens — better for eyeballing fluency + stable tokens/sec measurement.",
+      "commandName": "Project",
+      "commandLineArgs": "--prompt \"In C#, the best way to handle memory is\" --tokens 128",
+      "environmentVariables": {
+        "OVERFIT_MODEL_DIR": "C:\\gpt2"
+      }
+    },
+    "kubernetes": {
+      "//": "Reproduces the third example from the README.",
+      "commandName": "Project",
+      "commandLineArgs": "--prompt \"Kubernetes pod anomaly detection works by\" --tokens 64",
+      "environmentVariables": {
+        "OVERFIT_MODEL_DIR": "C:\\gpt2"
+      }
+    },
+    "custom": {
+      "//": "Skeleton with all knobs — override anything from VS launch settings UI or CLI args.",
+      "commandName": "Project",
+      "commandLineArgs": "--size Small --model C:\\gpt2\\gpt2_small.bin --vocab C:\\gpt2\\vocab.json --merges C:\\gpt2\\merges.txt --prompt \"Hello\" --tokens 64",
+      "environmentVariables": {}
+    }
+  }
+}

@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Buffers.Binary;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
 using DevOnBike.Overfit.Onnx.Schema;
@@ -51,7 +52,7 @@ namespace DevOnBike.Overfit.Onnx.Operators
                     axes = new long[count];
                     for (var i = 0; i < count; i++)
                     {
-                        axes[i] = System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(
+                        axes[i] = BinaryPrimitives.ReadInt64LittleEndian(
                             axesTensor.RawData.AsSpan(i * sizeof(long), sizeof(long)));
                     }
                 }
@@ -78,7 +79,7 @@ namespace DevOnBike.Overfit.Onnx.Operators
             if (axes == null || axes.Length != 2)
             {
                 throw new NotSupportedException(
-                    $"ReduceMean: expected axes=[2,3] (GlobalAveragePool pattern), got " +
+                    "ReduceMean: expected axes=[2,3] (GlobalAveragePool pattern), got " +
                     (axes == null ? "no axes" : $"axes=[{string.Join(",", axes)}]") + ". " +
                     "Only spatial reduction over H and W dimensions is supported.");
             }
@@ -94,10 +95,10 @@ namespace DevOnBike.Overfit.Onnx.Operators
                     $"(normalised: [{norm0},{norm1}]). Only GlobalAveragePool pattern is supported.");
             }
 
-            int batch = inputShape[0];
-            int channels = inputShape[1];
-            int h = inputShape[2];
-            int w = inputShape[3];
+            var batch = inputShape[0];
+            var channels = inputShape[1];
+            var h = inputShape[2];
+            var w = inputShape[3];
 
             // ── Output shape ──────────────────────────────────────────────────
             // keepdims=1 → [N, C, 1, 1]  (ONNX spec)

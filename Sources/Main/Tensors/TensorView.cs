@@ -8,9 +8,9 @@ using System.Runtime.CompilerServices;
 namespace DevOnBike.Overfit.Tensors
 {
     /// <summary>
-    /// Ekstremalnie lekki, wszechstronny widok na pamięć tensora. 
-    /// Przejmuje całą logikę wymiarów, kroków (strides) i nawigacji po danych.
-    /// Żyje TYLKO na stosie (zero-allocation).
+    /// Extremely lightweight, versatile view over tensor memory.
+    /// Encapsulates all dimension, stride, and data-navigation logic.
+    /// Lives ONLY on the stack (zero-allocation).
     /// </summary>
     public readonly ref struct TensorView<T> where T : struct
     {
@@ -25,7 +25,7 @@ namespace DevOnBike.Overfit.Tensors
         private readonly int _st0, _st1, _st2, _st3;
 
         // ========================================================================
-        // KONSTRUKTORY DLA WIDOKÓW BAZOWYCH (Ciągłych)
+        // CONSTRUCTORS FOR BASE VIEWS (Contiguous)
         // ========================================================================
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -44,7 +44,7 @@ namespace DevOnBike.Overfit.Tensors
         public TensorView(Span<T> data, int s0, int s1, int s2, int s3)
             : this(data, 4, s0 * s1 * s2 * s3, 0, true, s0, s1, s2, s3, s1 * s2 * s3, s2 * s3, s3, 1) { }
 
-        // Prywatny, główny konstruktor do tworzenia skomplikowanych (np. odwróconych) widoków
+        // Private, primary constructor for creating complex (e.g. transposed) views
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private TensorView(Span<T> data, int rank, int size, int offset, bool isContiguous,
                            int s0, int s1, int s2, int s3,
@@ -56,7 +56,7 @@ namespace DevOnBike.Overfit.Tensors
         }
 
         // ========================================================================
-        // DOSTĘP DO DANYCH
+        // DATA ACCESS
         // ========================================================================
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -83,7 +83,7 @@ namespace DevOnBike.Overfit.Tensors
             return index switch { 0 => _st0, 1 => _st1, 2 => _st2, 3 => _st3, _ => 0 };
         }
 
-        // Indexery przeniesione z FastTensor
+        // Indexers migrated from FastTensor
         public ref T this[int i]
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -112,7 +112,7 @@ namespace DevOnBike.Overfit.Tensors
         }
 
         // ========================================================================
-        // TRANSFORMACJE (ZERO-ALLOCATION)
+        // TRANSFORMATIONS (ZERO-ALLOCATION)
         // ========================================================================
 
         public TensorView<T> Reshape(int newS0, int newS1)
@@ -121,7 +121,7 @@ namespace DevOnBike.Overfit.Tensors
             {
                 throw new InvalidOperationException("Nie można zmienić kształtu nieciągłego widoku.");
             }
-            
+
             if (newS0 * newS1 != Size)
             {
                 throw new ArgumentException($"Nowy rozmiar {newS0 * newS1} nie pasuje do obecnego {Size}");
@@ -137,7 +137,7 @@ namespace DevOnBike.Overfit.Tensors
                 throw new InvalidOperationException("Funkcja dedykowana dla 2D.");
             }
 
-            // Zamieniamy miejscami wymiary (s) i kroki (st). Ustawiamy isContiguous = false.
+            // Swap the dimensions (s) and strides (st). Set isContiguous = false.
             return new TensorView<T>(
                 _data, Rank, Size, Offset, false,
                 _s1, _s0, _s2, _s3,

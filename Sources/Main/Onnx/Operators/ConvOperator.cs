@@ -34,13 +34,13 @@ namespace DevOnBike.Overfit.Onnx.Operators
             var group = node.Attributes.TryGetValue("group", out var g) ? g.IntValue : 1L;
             var dilations = node.Attributes.TryGetValue("dilations", out var d)
                 ? d.IntArray
-                : new long[] { 1, 1 };
+                : [1, 1];
             var strides = node.Attributes.TryGetValue("strides", out var s)
                 ? s.IntArray
-                : new long[] { 1, 1 };
+                : [1, 1];
             var pads = node.Attributes.TryGetValue("pads", out var p)
                 ? p.IntArray
-                : new long[] { 0, 0, 0, 0 };
+                : [0, 0, 0, 0];
 
             if (group != 1)
             {
@@ -78,10 +78,10 @@ namespace DevOnBike.Overfit.Onnx.Operators
                     $"Conv weight '{weightTensor.Name}' rank should be 4, got {weightTensor.Dims.Length}.");
             }
 
-            int outC = (int)weightTensor.Dims[0];
-            int inC = (int)weightTensor.Dims[1];
-            int kH = (int)weightTensor.Dims[2];
-            int kW = (int)weightTensor.Dims[3];
+            var outC = (int)weightTensor.Dims[0];
+            var inC = (int)weightTensor.Dims[1];
+            var kH = (int)weightTensor.Dims[2];
+            var kW = (int)weightTensor.Dims[3];
 
             if (kH != kW)
             {
@@ -105,7 +105,7 @@ namespace DevOnBike.Overfit.Onnx.Operators
             int h = inputShape[2], w = inputShape[3];
 
             var padding = pads.Length >= 1 ? (int)pads[0] : 0;
-            var stride  = strides.Length >= 1 ? (int)strides[0] : 1;
+            var stride = strides.Length >= 1 ? (int)strides[0] : 1;
 
             var layer = new ConvLayer(inC, outC, h, w, kH, padding, stride);
 
@@ -122,8 +122,8 @@ namespace DevOnBike.Overfit.Onnx.Operators
             }
 
             // General output size with padding and stride
-            int outH = (h + 2 * padding - kH) / stride + 1;
-            int outW = (w + 2 * padding - kW) / stride + 1;
+            var outH = (h + 2 * padding - kH) / stride + 1;
+            var outW = (w + 2 * padding - kW) / stride + 1;
             shapes.SetShape(node.Outputs[0], [inputShape[0], outC, outH, outW]);
 
             return layer;

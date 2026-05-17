@@ -33,7 +33,7 @@ namespace DevOnBike.Overfit.Optimizers
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(learningRate);
 
             var list = new List<Parameter>();
-            
+
             foreach (var p in parameters)
             {
                 if (p.RequiresGrad)
@@ -42,14 +42,16 @@ namespace DevOnBike.Overfit.Optimizers
                 }
             }
 
-            _count  = list.Count;
+            _count = list.Count;
             _params = list.ToArray();
-            _nodes  = new AutogradNode?[_count];
+            _nodes = new AutogradNode?[_count];
             LearningRate = learningRate;
         }
 
-        /// <summary>Compatibility shim — prefer the <see cref="Parameter"/> overload.</summary>
-        [Obsolete("Pass IEnumerable<Parameter> via module.TrainableParameters() instead.")]
+        /// <summary>
+        /// Secondary constructor — accepts raw <see cref="AutogradNode"/> collections.
+        /// Prefer the <see cref="Parameter"/> overload for application code.
+        /// </summary>
         public SGD(IEnumerable<AutogradNode> parameters, float learningRate)
         {
             ArgumentNullException.ThrowIfNull(parameters);
@@ -64,10 +66,10 @@ namespace DevOnBike.Overfit.Optimizers
                 }
             }
 
-            _count  = list.Count;
-            _nodes  = list.ToArray();
+            _count = list.Count;
+            _nodes = list.ToArray();
             _params = new Parameter?[_count];
-            
+
             LearningRate = learningRate;
         }
 
@@ -102,7 +104,7 @@ namespace DevOnBike.Overfit.Optimizers
                 if (_params[i] != null)
                 {
                     var p = _params[i]!;
-                    
+
                     ElementwiseKernels.MultiplyAdd(
                         p.Grad!.AsReadOnlySpan(),
                         negativeLearningRate,

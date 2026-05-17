@@ -4,7 +4,6 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Ops;
-using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.Autograd

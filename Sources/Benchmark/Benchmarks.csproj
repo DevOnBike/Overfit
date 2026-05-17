@@ -14,6 +14,7 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <PackageReference Include="Accord.Neuro" />
         <PackageReference Include="BenchmarkDotNet" />
         <PackageReference Include="BenchmarkDotNet.Diagnostics.Windows" />
         <PackageReference Include="MathNet.Numerics" />

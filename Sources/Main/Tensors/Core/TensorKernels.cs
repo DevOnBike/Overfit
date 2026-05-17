@@ -16,16 +16,16 @@ namespace DevOnBike.Overfit.Tensors.Core
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void Add(TensorSpan<float> left, TensorSpan<float> right, TensorSpan<float> destination)
         {
-            // 1. Fail-Fast (Odrzucamy nieciągłą pamięć)
+            // 1. Fail-Fast (Reject non-contiguous memory)
             TensorKernelGuards.ValidateContiguous(left);
             TensorKernelGuards.ValidateContiguous(right);
             TensorKernelGuards.ValidateContiguous(destination);
 
-            // 2. Walidacja Kształtów (Zanim wejdziemy w surowe bajty)
+            // 2. Shape Validation (Before we descend to raw bytes)
             TensorKernelGuards.ValidateSameShape(left, right);
             TensorKernelGuards.ValidateSameShape(left, destination);
 
-            // 3. Zejście do najszybszej ścieżki
+            // 3. Descend to the fastest path
             Add(left.AsReadOnlySpan(), right.AsReadOnlySpan(), destination.AsSpan());
         }
 

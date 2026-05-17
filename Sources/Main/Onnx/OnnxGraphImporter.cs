@@ -3,10 +3,9 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using DevOnBike.Overfit.DeepLearning;
-using DevOnBike.Overfit.DeepLearning.Abstractions;
 using DevOnBike.Overfit.Onnx.Operators;
 using DevOnBike.Overfit.Onnx.Schema;
+using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.Onnx
 {
@@ -121,11 +120,13 @@ namespace DevOnBike.Overfit.Onnx
             }
 
             // ── Allocate buffers ────────────────────────────────────────────
-            var buffers = new float[bufferSizes.Count][];
+            // TensorStorage uses OverfitPool (ArrayPool) — buffers are returned
+            // to pool on OnnxGraphModel.Dispose(), avoiding GC pressure.
+            var buffers = new TensorStorage<float>[bufferSizes.Count];
 
             for (var i = 0; i < bufferSizes.Count; i++)
             {
-                buffers[i] = new float[bufferSizes[i]];
+                buffers[i] = new TensorStorage<float>(bufferSizes[i]);
             }
 
             return new OnnxGraphModel(
@@ -172,8 +173,14 @@ namespace DevOnBike.Overfit.Onnx
             // Find the first non-initializer input (the activation).
             foreach (var inputName in node.Inputs)
             {
-                if (string.IsNullOrEmpty(inputName)) continue;
-                if (initializers.ContainsKey(inputName)) continue;
+                if (string.IsNullOrEmpty(inputName))
+                {
+                    continue;
+                }
+                if (initializers.ContainsKey(inputName))
+                {
+                    continue;
+                }
 
                 if (slotMap.TryGetValue(inputName, out var slot))
                 {
@@ -211,7 +218,10 @@ namespace DevOnBike.Overfit.Onnx
         private static int ComputeSize(int[] shape)
         {
             var size = 1;
-            foreach (var dim in shape) size *= dim;
+            foreach (var dim in shape)
+            {
+                size *= dim;
+            }
             return size;
         }
 
@@ -220,7 +230,9 @@ namespace DevOnBike.Overfit.Onnx
             foreach (var opset in model.OpsetImports)
             {
                 if (!string.IsNullOrEmpty(opset.Domain) && opset.Domain != "ai.onnx")
+                {
                     continue;
+                }
 
                 if (opset.Version < MinSupportedOpset || opset.Version > MaxSupportedOpset)
                 {
@@ -236,14 +248,20 @@ namespace DevOnBike.Overfit.Onnx
             // Delegate to OnnxImporter's implementation (same assembly, internal access).
             // Reflection workaround: call Load which resolves internally, or duplicate.
             // To avoid duplication we just re-implement the minimal version here.
-            if (externalDataDir == null) return;
+            if (externalDataDir == null)
+            {
+                return;
+            }
 
             var fileCache = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
 
             for (var i = 0; i < model.Graph.Initializers.Count; i++)
             {
                 var init = model.Graph.Initializers[i];
-                if (init.ExternalData == null) continue;
+                if (init.ExternalData == null)
+                {
+                    continue;
+                }
 
                 var fullPath = Path.GetFullPath(
                     Path.Combine(externalDataDir, init.ExternalData.Location));
@@ -296,7 +314,10 @@ namespace DevOnBike.Overfit.Onnx
         {
             foreach (var input in model.Graph.Inputs)
             {
-                if (initializers.ContainsKey(input.Name)) continue;
+                if (initializers.ContainsKey(input.Name))
+                {
+                    continue;
+                }
 
                 if (input.Shape.Length > 0)
                 {
@@ -310,7 +331,10 @@ namespace DevOnBike.Overfit.Onnx
                         shape[i] = (int)v.Value;
                     }
 
-                    if (valid) ctx.SetShape(input.Name, shape);
+                    if (valid)
+                    {
+                        ctx.SetShape(input.Name, shape);
+                    }
                 }
             }
         }
@@ -320,7 +344,10 @@ namespace DevOnBike.Overfit.Onnx
             foreach (var init in model.Graph.Initializers)
             {
                 var dims = new int[init.Dims.Length];
-                for (var d = 0; d < init.Dims.Length; d++) dims[d] = (int)init.Dims[d];
+                for (var d = 0; d < init.Dims.Length; d++)
+                {
+                    dims[d] = (int)init.Dims[d];
+                }
                 ctx.SetShape(init.Name, dims);
             }
         }

@@ -32,10 +32,9 @@ namespace DevOnBike.Overfit.Tests.Optimizers
                 ]);
 
             var optimizer = new SGD(
-                new[]
-                {
-                    parameter
-                },
+            [
+                parameter
+            ],
                 learningRate: 0.1f);
 
             optimizer.Step();
@@ -78,10 +77,9 @@ namespace DevOnBike.Overfit.Tests.Optimizers
                 grad);
 
             var optimizer = new SGD(
-                new[]
-                {
-                    parameter
-                },
+            [
+                parameter
+            ],
                 learningRate);
 
             optimizer.Step();
@@ -115,11 +113,10 @@ namespace DevOnBike.Overfit.Tests.Optimizers
                 ]);
 
             var optimizer = new SGD(
-                new[]
-                {
-                    trainable,
+            [
+                trainable,
                     frozen
-                },
+            ],
                 learningRate: 0.5f);
 
             optimizer.Step();
@@ -152,10 +149,9 @@ namespace DevOnBike.Overfit.Tests.Optimizers
                 ]);
 
             var optimizer = new SGD(
-                new[]
-                {
-                    parameter
-                },
+            [
+                parameter
+            ],
                 learningRate: 0.1f);
 
             optimizer.ZeroGrad();
@@ -188,10 +184,9 @@ namespace DevOnBike.Overfit.Tests.Optimizers
                 grad);
 
             var optimizer = new SGD(
-                new[]
-                {
-                    parameter
-                },
+            [
+                parameter
+            ],
                 learningRate: 0.001f);
 
             optimizer.Step();

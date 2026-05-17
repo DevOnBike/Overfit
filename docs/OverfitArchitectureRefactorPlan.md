@@ -1,28 +1,28 @@
 # Overfit Architecture Refactor Plan
 
-## Cel refaktoru
+## Goal of the refactor
 
-Celem refaktoru nie jest jednorazowe przepisanie biblioteki. Celem jest rozdzielenie odpowiedzialności tak, aby dalszy rozwój treningu, inferencji, optymalizatorów i kernelów był prostszy, bezpieczniejszy i łatwiejszy do mierzenia.
+The goal of the refactor is not a one-time rewrite of the library. The goal is to separate concerns so that further development of training, inference, optimizers, and kernels is simpler, safer, and easier to measure.
 
-Najważniejsza decyzja architektoniczna:
+The most important architectural decision:
 
 ```text
-TrainingEngine   = fasada workflow treningu
-ComputationGraph = mózg autograd / training runtime
-Layers           = parametry + kompozycja operacji grafu
-Kernels          = czysta matematyka na Spanach
-InferenceEngine  = osobna fasada inferencji
+TrainingEngine   = training workflow facade
+ComputationGraph = autograd / training runtime brain
+Layers           = parameters + graph operation composition
+Kernels          = pure math on Spans
+InferenceEngine  = separate inference facade
 ```
 
-Obecny największy problem architektoniczny to mieszanie ról:
+The current biggest architectural problem is role mixing:
 
 ```text
-AutogradNode = wartość grafu + parametr + temporary + owner pamięci + owner gradientu
+AutogradNode = graph value + parameter + temporary + memory owner + gradient owner
 ComputationGraph = tape + allocator + backward executor + op facade + workspace manager
-TensorMath = nazwa sugerująca czystą matematykę, ale obecnie zawiera graph-aware operacje
+TensorMath = name suggests pure math, but currently contains graph-aware operations
 ```
 
-Docelowo `ComputationGraph` ma być centralnym API treningowym. Metody, które nagrywają tape, powinny być metodami grafu:
+The target is for `ComputationGraph` to be the central training API. Methods that record the tape should be methods on the graph:
 
 ```csharp
 var prediction = model.Forward(graph, input);
@@ -31,75 +31,75 @@ var loss = graph.SoftmaxCrossEntropy(prediction, target);
 graph.Backward(loss);
 ```
 
-Zamiast obecnego stylu:
+Instead of the current style:
 
 ```csharp
 TensorMath.SoftmaxCrossEntropy(graph, prediction, target);
 ```
 
-`TensorMath` powinno oznaczać czystą matematykę albo zostać zastąpione przez `Kernels`.
+`TensorMath` should mean pure math or be replaced by `Kernels`.
 
 ---
 
-## Docelowy podział odpowiedzialności
+## Target responsibility breakdown
 
 ### 1. `TensorStorage<T>`
 
-**Odpowiedzialność:** fizyczna pamięć.
+**Responsibility:** physical memory.
 
-Robi:
+Does:
 
 ```text
-- posiada bufor
-- zwraca Span<T> / ReadOnlySpan<T>
-- zna Length / Size
+- owns the buffer
+- returns Span<T> / ReadOnlySpan<T>
+- knows Length / Size
 - Dispose / ReturnToPool
 ```
 
-Nie robi:
+Does not:
 
 ```text
-- nie zna shape
-- nie zna gradientów
-- nie zna autograd
-- nie zna graph
-- nie zna layerów
-- nie zna optimizerów
+- does not know shape
+- does not know gradients
+- does not know autograd
+- does not know graph
+- does not know layers
+- does not know optimizers
 ```
 
-To jest najniższy poziom pamięci.
+This is the lowest memory level.
 
 ---
 
 ### 2. `TensorShape`
 
-**Odpowiedzialność:** opis wymiarów tensora.
+**Responsibility:** description of tensor dimensions.
 
-Robi:
+Does:
 
 ```text
 - D0/D1/D2/D3
 - Rank
 - ElementCount
-- walidacja shape
+- shape validation
 ```
 
-Nie robi:
+Does not:
 
 ```text
-- nie zna storage
-- nie zna danych
-- nie zna gradientów
-- nie zna graph
+- does not know storage
+- does not know data
+- does not know gradients
+- does not know graph
 ```
 
 ---
 
 ### 3. `TensorView<T>` / `TensorSpan<T>`
 
-**Odpowiedzialność:** widok na pamięć + shape, bez ownership.
+**Responsibility:** view over memory + shape, without ownership.
 
-Przykładowy kierunek:
+Example direction:
 
 ```csharp
 public readonly struct TensorView<T>
@@ -110,7 +110,7 @@ public readonly struct TensorView<T>
 }
 ```
 
-Albo dla hot path:
+Or for the hot path:
 
 ```csharp
 public readonly ref struct TensorSpan<T>
@@ -120,31 +120,31 @@ public readonly ref struct TensorSpan<T>
 }
 ```
 
-Robi:
+Does:
 
 ```text
-- interpretuje pamięć jako tensor
-- może mieć offset/stride w przyszłości
+- interprets memory as a tensor
+- may have offset/stride in the future
 ```
 
-Nie robi:
+Does not:
 
 ```text
-- nie posiada pamięci
-- nie dispose'uje
-- nie zna gradientów
-- nie zna grafu
+- does not own memory
+- does not dispose
+- does not know gradients
+- does not know the graph
 ```
 
 ---
 
 ### 4. `Parameter`
 
-**Odpowiedzialność:** długowieczny trenowalny tensor modelu.
+**Responsibility:** long-lived trainable model tensor.
 
-Parametr nie powinien być zwykłym `AutogradNode`, bo ma inny lifecycle niż temporary node w grafie.
+A parameter should not be a plain `AutogradNode`, because it has a different lifecycle than a temporary node in the graph.
 
-Przykładowa abstrakcja:
+Example abstraction:
 
 ```csharp
 public sealed class Parameter : IDisposable
@@ -162,38 +162,38 @@ public sealed class Parameter : IDisposable
     public AutogradNode AsNode()
     {
         // Lightweight graph-visible view over parameter.
-        // Na początku może zwracać wrapper zgodny ze starym API.
+        // Initially may return a wrapper compatible with the old API.
     }
 }
 ```
 
-Robi:
+Does:
 
 ```text
-- posiada Data
-- posiada Grad
-- żyje razem z layerem/modellem
-- jest widoczny dla optimizerów
-- umie wyzerować Grad
-- może umieć Save/Load danych
+- owns Data
+- owns Grad
+- lives together with the layer/model
+- is visible to optimizers
+- can zero Grad
+- may be able to Save/Load data
 ```
 
-Nie robi:
+Does not:
 
 ```text
-- nie jest tape op
-- nie jest temporary node
-- nie zna ComputationGraph
-- nie wykonuje backward
+- is not a tape op
+- is not a temporary node
+- does not know ComputationGraph
+- does not execute backward
 ```
 
-Docelowo optymalizatory powinny przyjmować:
+Ultimately, optimizers should accept:
 
 ```csharp
 IEnumerable<Parameter>
 ```
 
-zamiast:
+instead of:
 
 ```csharp
 IEnumerable<AutogradNode>
@@ -203,32 +203,32 @@ IEnumerable<AutogradNode>
 
 ### 5. `AutogradNode`
 
-**Odpowiedzialność:** uchwyt wartości biorącej udział w grafie autograd.
+**Responsibility:** handle for a value participating in the autograd graph.
 
-Docelowo powinien być raczej graph value handle, a nie owner wszystkiego.
+Ultimately it should be a graph value handle rather than an owner of everything.
 
-Robi:
-
-```text
-- wskazuje na DataView
-- wskazuje na GradView, jeśli istnieje
-- ma Shape
-- ma RequiresGrad
-- ma Ownership metadata
-- może mieć NodeId/generation do debugowania
-```
-
-Nie robi:
+Does:
 
 ```text
-- nie powinien sam decydować skąd alokować pamięć
-- nie powinien sam tworzyć grad storage bez kontekstu
-- nie powinien być jednocześnie parametrem i temporary
-- nie zna optimizerów
-- nie wykonuje backward
+- points to DataView
+- points to GradView, if it exists
+- has Shape
+- has RequiresGrad
+- has Ownership metadata
+- may have NodeId/generation for debugging
 ```
 
-Minimalne ownership metadata:
+Does not:
+
+```text
+- should not decide on its own where to allocate memory
+- should not create grad storage on its own without context
+- should not be both a parameter and a temporary simultaneously
+- does not know optimizers
+- does not execute backward
+```
+
+Minimal ownership metadata:
 
 ```csharp
 public enum AutogradNodeOwnership
@@ -242,7 +242,7 @@ public enum AutogradNodeOwnership
 }
 ```
 
-Docelowe właściwości:
+Target properties:
 
 ```csharp
 public AutogradNodeOwnership Ownership { get; }
@@ -251,39 +251,39 @@ public bool OwnsGradStorage { get; }
 public bool IsDisposed { get; }
 ```
 
-To pozwala debugować i egzekwować lifecycle.
+This allows debugging and enforcing the lifecycle.
 
 ---
 
 ### 6. `ComputationGraph`
 
-**Odpowiedzialność:** mózg treningu/autograd.
+**Responsibility:** training/autograd brain.
 
-Graf powinien spinać logikę treningową na poziomie operacji autograd.
+The graph should tie training logic together at the autograd operation level.
 
-Robi:
-
-```text
-- tworzy temporary nodes
-- tworzy external/input nodes
-- tworzy parameter views
-- recorduje TapeOp
-- wykonuje Backward
-- resetuje graph temporaries
-- udostępnia graph-aware ops: Linear, Conv2D, ReLU, Losses
-```
-
-Nie robi:
+Does:
 
 ```text
-- nie jest TrainingEngine
-- nie jest optimizerem
-- nie zawiera ręcznych pętli SIMD
-- nie powinien być storage poole'm ogólnego przeznaczenia
-- nie posiada parametrów modelu
+- creates temporary nodes
+- creates external/input nodes
+- creates parameter views
+- records TapeOp
+- executes Backward
+- resets graph temporaries
+- exposes graph-aware ops: Linear, Conv2D, ReLU, Losses
 ```
 
-Przykładowe API:
+Does not:
+
+```text
+- is not a TrainingEngine
+- is not an optimizer
+- does not contain manual SIMD loops
+- should not be a general-purpose storage pool
+- does not own model parameters
+```
+
+Example API:
 
 ```csharp
 public partial class ComputationGraph
@@ -293,12 +293,12 @@ public partial class ComputationGraph
         AutogradNode weights,
         AutogradNode bias)
     {
-        return TensorMath.Linear(this, input, weights, bias); // etap przejściowy
+        return TensorMath.Linear(this, input, weights, bias); // transitional stage
     }
 
     public AutogradNode Relu(AutogradNode input)
     {
-        return TensorMath.ReLU(this, input); // etap przejściowy
+        return TensorMath.ReLU(this, input); // transitional stage
     }
 
     public AutogradNode SoftmaxCrossEntropy(
@@ -310,7 +310,7 @@ public partial class ComputationGraph
 }
 ```
 
-Docelowo implementacja tych metod powinna wyglądać tak:
+Ultimately, the implementation of these methods should look like this:
 
 ```text
 graph.Linear(...)
@@ -321,9 +321,9 @@ graph.Linear(...)
     -> return output
 ```
 
-Ważne: `ComputationGraph` może mieć operacje jako metody, ale implementacja musi być rozbita przez `partial` pliki, żeby główny plik nie stał się monolitem.
+Important: `ComputationGraph` may have operations as methods, but the implementation must be split across `partial` files so the main file does not become a monolith.
 
-Proponowany folder:
+Proposed folder:
 
 ```text
 Autograd/
@@ -344,11 +344,11 @@ Autograd/
 
 ### 7. Graph allocator
 
-**Odpowiedzialność:** tworzenie node'ów o właściwym lifecycle.
+**Responsibility:** creating nodes with the correct lifecycle.
 
-Może być internal.
+May be internal.
 
-Przykładowa abstrakcja:
+Example abstraction:
 
 ```csharp
 internal interface IGraphTensorAllocator
@@ -370,65 +370,65 @@ internal interface IGraphTensorAllocator
 }
 ```
 
-To zabiera decyzje alokacyjne z `AutogradNode` i przenosi je do grafu.
+This removes allocation decisions from `AutogradNode` and moves them to the graph.
 
 ---
 
 ### 8. `TapeOp`
 
-**Odpowiedzialność:** zapis pojedynczej operacji do backward tape.
+**Responsibility:** recording a single operation to the backward tape.
 
-Robi:
+Does:
 
 ```text
 - OpCode
-- referencje do input/output nodes
-- małe context slots
-- shape/context inty
+- references to input/output nodes
+- small context slots
+- shape/context ints
 ```
 
-Nie robi:
+Does not:
 
 ```text
-- nie wykonuje forward
-- nie alokuje
-- nie dispose'uje sam
+- does not execute forward
+- does not allocate
+- does not dispose itself
 ```
 
-Dla performance lepszy kierunek to:
+For performance, the better direction is:
 
 ```text
-struct TapeOp + enum OpCode + switch w BackwardExecutor
+struct TapeOp + enum OpCode + switch in BackwardExecutor
 ```
 
-Nie polecam robić podstawowego systemu przez `IOpBackward` per op, bo może to dołożyć dispatch i komplikacje. Custom ops można dodać później jako osobną furtkę.
+Using a basic `IOpBackward` per-op system is not recommended, as it may add dispatch overhead and complexity. Custom ops can be added later as a separate extension point.
 
 ---
 
 ### 9. `BackwardExecutor`
 
-**Odpowiedzialność:** wykonanie backward po tape.
+**Responsibility:** executing backward over the tape.
 
-Może być osobną klasą lub częścią `ComputationGraph.Backward.cs`.
+May be a separate class or part of `ComputationGraph.Backward.cs`.
 
-Robi:
-
-```text
-- iteruje tape od końca
-- switch po OpCode
-- wywołuje backward kernels
-- akumuluje gradienty
-```
-
-Nie robi:
+Does:
 
 ```text
-- nie buduje forward graph
-- nie zna optimizerów
-- nie zna layerów
+- iterates the tape from the end
+- switch on OpCode
+- calls backward kernels
+- accumulates gradients
 ```
 
-Przykładowo:
+Does not:
+
+```text
+- does not build the forward graph
+- does not know optimizers
+- does not know layers
+```
+
+Example:
 
 ```csharp
 internal sealed class BackwardExecutor
@@ -458,18 +458,18 @@ internal sealed class BackwardExecutor
 
 ---
 
-### 10. `TensorMath` i `Kernels`
+### 10. `TensorMath` and `Kernels`
 
-Decyzja nazewnicza:
+Naming decision:
 
 ```text
-TensorMath = czysta matematyka albo facade nad kernels
-Kernels    = niskopoziomowe zoptymalizowane implementacje Span-only
+TensorMath = pure math or facade over kernels
+Kernels    = low-level optimized Span-only implementations
 ```
 
-Obecne graph-aware `TensorMath.*` powinno docelowo zniknąć z layerów.
+The current graph-aware `TensorMath.*` should ultimately disappear from layers.
 
-Docelowe czyste API:
+Target clean API:
 
 ```csharp
 TensorMath.LinearForward(...);
@@ -478,7 +478,7 @@ TensorMath.Relu(...);
 TensorMath.SoftmaxCrossEntropyForward(...);
 ```
 
-Albo bez pośrednika:
+Or without the intermediary:
 
 ```csharp
 LinearKernels.Forward(...);
@@ -487,53 +487,53 @@ ActivationKernels.Relu(...);
 LossKernels.SoftmaxCrossEntropyForward(...);
 ```
 
-`Kernels` robią:
+`Kernels` do:
 
 ```text
 - Span<float> in/out
 - int shape params
 - SIMD/scalar dispatch
-- zero wiedzy o AutogradNode
-- zero wiedzy o ComputationGraph
-- brak alokacji
+- zero knowledge of AutogradNode
+- zero knowledge of ComputationGraph
+- no allocations
 ```
 
-Nie robią:
+Do not:
 
 ```text
-- nie recordują tape
-- nie zarządzają ownership
-- nie znają parametrów
+- do not record tape
+- do not manage ownership
+- do not know parameters
 ```
 
 ---
 
 ### 11. Layers
 
-**Odpowiedzialność:** parametry + kompozycja operacji.
+**Responsibility:** parameters + operation composition.
 
-Layer powinien robić:
+A layer should:
 
 ```text
-- posiadać Parameter
-- znać input/output shape
-- Forward training przez graph ops
-- ForwardInference przez Kernels/TensorMath
+- own Parameters
+- know input/output shape
+- Forward for training via graph ops
+- ForwardInference via Kernels/TensorMath
 - Train/Eval
 - PrepareInference cache
-- Save/Load parametrów
+- Save/Load parameters
 ```
 
-Layer nie powinien robić:
+A layer should not:
 
 ```text
-- nie implementować długich SIMD pętli
-- nie recordować TapeOp ręcznie
-- nie zarządzać graph temporary lifecycle
-- nie znać optimizerów
+- implement long SIMD loops
+- record TapeOp manually
+- manage graph temporary lifecycle
+- know optimizers
 ```
 
-Docelowy styl:
+Target style:
 
 ```csharp
 public sealed class LinearLayer : IModule
@@ -574,9 +574,9 @@ public sealed class LinearLayer : IModule
 
 ### 12. Module interfaces
 
-Obecne `IModule` można rozbić na role, a `IModule` zostawić jako zbiorczą fasadę.
+The current `IModule` can be split into roles, with `IModule` kept as a composite facade.
 
-Przykładowe interfejsy:
+Example interfaces:
 
 ```csharp
 public interface IParameterProvider
@@ -619,45 +619,45 @@ public interface IModule :
 }
 ```
 
-W praktyce nie trzeba tego robić od razu. To jest docelowy kierunek, gdy zacznie przeszkadzać wielka powierzchnia `IModule`.
+In practice, this does not need to be done immediately. This is the target direction, for when the large surface area of `IModule` starts to get in the way.
 
 ---
 
 ### 13. `Sequential`
 
-**Odpowiedzialność:** kompozycja modułów.
+**Responsibility:** module composition.
 
-Robi:
+Does:
 
 ```text
-- przechowuje listę IModule
-- Forward przez moduły
-- ForwardInference przez moduły
-- zarządza workspace inference między warstwami
-- propaguje Train/Eval
-- agreguje Parameters()
-- Save/Load przez moduły
+- stores a list of IModule
+- Forward through modules
+- ForwardInference through modules
+- manages inference workspace between layers
+- propagates Train/Eval
+- aggregates Parameters()
+- Save/Load through modules
 ```
 
-Nie robi:
+Does not:
 
 ```text
-- nie zna matematyki Linear/Conv/ReLU
-- nie zna optimizerów
-- nie wykonuje backward
+- does not know Linear/Conv/ReLU math
+- does not know optimizers
+- does not execute backward
 ```
 
 ---
 
 ### 14. Losses
 
-Loss może być częścią graph ops, bo loss nagrywa tape:
+Loss can be part of graph ops, because loss records the tape:
 
 ```csharp
 var loss = graph.SoftmaxCrossEntropy(prediction, target);
 ```
 
-Można mieć też publiczną abstrakcję dla `TrainingEngine`:
+A public abstraction for `TrainingEngine` can also be provided:
 
 ```csharp
 public interface ITrainingLoss
@@ -675,7 +675,7 @@ public interface ITrainingLoss
 }
 ```
 
-Docelowo konkretna implementacja:
+Target concrete implementation:
 
 ```csharp
 public sealed class SoftmaxCrossEntropyLoss : ITrainingLoss
@@ -706,27 +706,27 @@ public sealed class SoftmaxCrossEntropyLoss : ITrainingLoss
 
 ### 15. Optimizers
 
-**Odpowiedzialność:** aktualizacja parametrów.
+**Responsibility:** parameter updates.
 
-Optimizer robi:
+An optimizer does:
 
 ```text
-- trzyma optimizer state
+- holds optimizer state
 - ZeroGrad
 - Step
-- aktualizuje Parameter.Data na podstawie Parameter.Grad
+- updates Parameter.Data based on Parameter.Grad
 ```
 
-Nie robi:
+Does not:
 
 ```text
-- nie zna ComputationGraph
-- nie robi forward
-- nie liczy loss
-- nie zna batcha
+- does not know ComputationGraph
+- does not do forward
+- does not compute loss
+- does not know about the batch
 ```
 
-Docelowo:
+Ultimately:
 
 ```csharp
 public interface IOptimizer
@@ -736,25 +736,25 @@ public interface IOptimizer
 }
 ```
 
-Ale pod spodem powinien być zbudowany z:
+But underneath it should be built from:
 
 ```csharp
 IEnumerable<Parameter>
 ```
 
-nie z temporary autograd nodes.
+not from temporary autograd nodes.
 
 ---
 
 ### 16. `TrainingEngine`
 
-**Odpowiedzialność:** workflow jednego kroku treningowego.
+**Responsibility:** workflow for a single training step.
 
-Robi:
+Does:
 
 ```text
-- przyjmuje batch input/target
-- tworzy/wypełnia input/target nodes
+- accepts batch input/target
+- creates/fills input/target nodes
 - optimizer.ZeroGrad()
 - model.Forward(graph, input)
 - loss.Forward(graph, prediction, target)
@@ -763,53 +763,53 @@ Robi:
 - graph.Reset()
 ```
 
-Nie robi:
+Does not:
 
 ```text
-- nie implementuje matematyki
-- nie zna SIMD
-- nie jest ComputationGraph
-- nie jest optimizerem
+- does not implement math
+- does not know SIMD
+- is not ComputationGraph
+- is not an optimizer
 ```
 
-To już masz jako fasadę. W tym modelu `TrainingEngine` zostaje orkiestratorem, a `ComputationGraph` jest mózgiem autograd.
+You already have this as a facade. In this model, `TrainingEngine` remains the orchestrator and `ComputationGraph` is the autograd brain.
 
 ---
 
 ### 17. `InferenceEngine`
 
-**Odpowiedzialność:** workflow inferencji.
+**Responsibility:** inference workflow.
 
-Robi:
+Does:
 
 ```text
 - model.Eval()
 - model.PrepareInference()
 - warmup
-- walidacja input/output
+- input/output validation
 - preallocated output buffer
 - Run/Predict
 ```
 
-Nie robi:
+Does not:
 
 ```text
-- nie zna AutogradNode
-- nie zna ComputationGraph
-- nie zna gradientów
-- nie zna optimizerów
+- does not know AutogradNode
+- does not know ComputationGraph
+- does not know gradients
+- does not know optimizers
 ```
 
-Inference path powinien być całkowicie oddzielony od autograd.
+The inference path should be completely separated from autograd.
 
 ---
 
-## Docelowy flow treningu
+## Target training flow
 
 ```text
 TrainingEngine.TrainBatch(input, target)
-    -> inputNode = graph.CreateExternalBorrowed(...) albo preallocated input node
-    -> targetNode = graph.CreateExternalBorrowed(...) albo preallocated target node
+    -> inputNode = graph.CreateExternalBorrowed(...) or preallocated input node
+    -> targetNode = graph.CreateExternalBorrowed(...) or preallocated target node
     -> optimizer.ZeroGrad()
     -> prediction = model.Forward(graph, inputNode)
         -> LinearLayer.Forward
@@ -829,7 +829,7 @@ TrainingEngine.TrainBatch(input, target)
 
 ---
 
-## Docelowy flow inferencji
+## Target inference flow
 
 ```text
 InferenceEngine.Predict(input)
@@ -842,7 +842,7 @@ InferenceEngine.Predict(input)
             -> Conv2DKernels.ForwardValidNchw
 ```
 
-Inference nie powinno dotykać:
+Inference should not touch:
 
 ```text
 AutogradNode
@@ -855,41 +855,41 @@ Loss
 
 ---
 
-## Plan refaktoru etapami
+## Refactor plan by stages
 
-### Etap 0 — zamrozić aktualny milestone inference
+### Stage 0 — freeze the current inference milestone
 
 Status:
 
 ```text
-- inference zero-alloc działa
-- MLP/CNN szybsze niż ONNX Runtime w małych workloadach
-- kernels częściowo wyciągnięte z layerów
-- TrainingEngine istnieje jako fasada treningu
+- zero-alloc inference works
+- MLP/CNN faster than ONNX Runtime on small workloads
+- kernels partially extracted from layers
+- TrainingEngine exists as a training facade
 ```
 
-Działanie:
+Action:
 
 ```text
-- commit aktualnego stabilnego stanu
-- nie mieszać kolejnego refaktoru z inference optimization
+- commit the current stable state
+- do not mix the next refactor with inference optimization
 ```
 
 ---
 
-### Etap 1 — Graph operation facade
+### Stage 1 — Graph operation facade
 
-Cel: layer ma wołać `graph.*`, nie `TensorMath.*`.
+Goal: layers should call `graph.*`, not `TensorMath.*`.
 
-Zakres:
+Scope:
 
 ```text
-- dodać partial ComputationGraph.* wrappery
-- nie przenosić jeszcze implementacji TensorMath
-- zmienić layery, żeby wołały graph.Linear / graph.Conv2D / graph.Relu itd.
+- add partial ComputationGraph.* wrappers
+- do not move TensorMath implementations yet
+- change layers to call graph.Linear / graph.Conv2D / graph.Relu etc.
 ```
 
-Pliki:
+Files:
 
 ```text
 Sources/Main/Autograd/ComputationGraph.Linear.cs
@@ -899,7 +899,7 @@ Sources/Main/Autograd/ComputationGraph.Pooling.cs
 Sources/Main/Autograd/ComputationGraph.Losses.cs
 ```
 
-Przykład:
+Example:
 
 ```csharp
 public partial class ComputationGraph
@@ -914,7 +914,7 @@ public partial class ComputationGraph
 }
 ```
 
-Layer po zmianie:
+Layer after the change:
 
 ```csharp
 public AutogradNode Forward(
@@ -925,24 +925,24 @@ public AutogradNode Forward(
 }
 ```
 
-Ryzyko: niskie. To głównie zmiana API/wywołań.
+Risk: low. This is mainly an API/call-site change.
 
 ---
 
-### Etap 2 — `AutogradNodeOwnership`
+### Stage 2 — `AutogradNodeOwnership`
 
-Cel: nazwać lifecycle node'ów bez zmiany zachowania.
+Goal: name node lifecycles without changing behavior.
 
-Zakres:
+Scope:
 
 ```text
-- dodać AutogradNodeOwnership enum
-- dodać Ownership do AutogradNode
-- dodać debug/testy ownership
-- nie zmieniać jeszcze Reset/Dispose semantyki
+- add AutogradNodeOwnership enum
+- add Ownership to AutogradNode
+- add debug/tests for ownership
+- do not change Reset/Dispose semantics yet
 ```
 
-Pliki:
+Files:
 
 ```text
 Sources/Main/Autograd/AutogradNodeOwnership.cs
@@ -950,7 +950,7 @@ Sources/Main/Autograd/AutogradNode.cs
 Tests/AutogradOwnershipTests.cs
 ```
 
-Przykład:
+Example:
 
 ```csharp
 public enum AutogradNodeOwnership
@@ -964,15 +964,15 @@ public enum AutogradNodeOwnership
 }
 ```
 
-Ryzyko: niskie, jeśli tylko dodajemy metadata.
+Risk: low, if we are only adding metadata.
 
 ---
 
-### Etap 3 — Graph factory methods
+### Stage 3 — Graph factory methods
 
-Cel: graf zaczyna jawnie tworzyć node'y według ownership.
+Goal: the graph starts explicitly creating nodes by ownership.
 
-Zakres:
+Scope:
 
 ```text
 - graph.CreateTemporary(...)
@@ -981,7 +981,7 @@ Zakres:
 - graph.CreateParameterView(...)
 ```
 
-Przykład:
+Example:
 
 ```csharp
 public AutogradNode CreateTemporary(
@@ -994,24 +994,24 @@ public AutogradNode CreateTemporary(
 }
 ```
 
-Ryzyko: średnie. Jeszcze bez przepinania całego TensorMath.
+Risk: medium. Not yet rewiring all of TensorMath.
 
 ---
 
-### Etap 4 — `Parameter` jako osobny typ
+### Stage 4 — `Parameter` as a separate type
 
-Cel: oddzielić długowieczne parametry modelu od temporary nodes.
+Goal: separate long-lived model parameters from temporary nodes.
 
-Zakres:
+Scope:
 
 ```text
-- dodać Parameter
-- dodać ParameterCollection
-- dodać ParameterFactory opcjonalnie
-- nie przepinać jeszcze wszystkich layerów naraz
+- add Parameter
+- add ParameterCollection
+- add ParameterFactory optionally
+- do not rewire all layers at once yet
 ```
 
-Pliki:
+Files:
 
 ```text
 Sources/Main/Parameters/Parameter.cs
@@ -1020,7 +1020,7 @@ Sources/Main/Parameters/ParameterFactory.cs
 Tests/ParameterTests.cs
 ```
 
-Przykład:
+Example:
 
 ```csharp
 public sealed class Parameter : IDisposable
@@ -1037,24 +1037,24 @@ public sealed class Parameter : IDisposable
 }
 ```
 
-Ryzyko: niskie, jeśli typ tylko dodajemy.
+Risk: low, if we are only adding the type.
 
 ---
 
-### Etap 5 — przepiąć `LinearLayer` na `Parameter`
+### Stage 5 — rewire `LinearLayer` to `Parameter`
 
-Cel: pierwszy layer używa nowego modelu parametrów.
+Goal: the first layer uses the new parameter model.
 
-Zakres:
+Scope:
 
 ```text
 - LinearLayer.Weights: Parameter
 - LinearLayer.Bias: Parameter
-- graph.Linear overload na Parameter
-- Parameters() zwraca Parameter albo adapter przejściowy
+- graph.Linear overload for Parameter
+- Parameters() returns Parameter or a transitional adapter
 ```
 
-Przykład:
+Example:
 
 ```csharp
 public AutogradNode Forward(
@@ -1065,23 +1065,23 @@ public AutogradNode Forward(
 }
 ```
 
-Ryzyko: średnie. Tylko jeden layer.
+Risk: medium. Only one layer.
 
 ---
 
-### Etap 6 — optimizer adapter / Adam na `Parameter`
+### Stage 6 — optimizer adapter / Adam on `Parameter`
 
-Cel: optimizer nie widzi temporary `AutogradNode`.
+Goal: the optimizer does not see temporary `AutogradNode`.
 
-Zakres:
+Scope:
 
 ```text
 - Adam(IEnumerable<Parameter>)
-- ewentualnie adapter dla starego API
-- ZeroGrad/Step po Parameter.Data/Grad
+- optionally an adapter for the old API
+- ZeroGrad/Step over Parameter.Data/Grad
 ```
 
-Przykład:
+Example:
 
 ```csharp
 public sealed class Adam : IOptimizer
@@ -1108,25 +1108,25 @@ public sealed class Adam : IOptimizer
 }
 ```
 
-Ryzyko: średnie/wysokie, bo dotyka treningu.
+Risk: medium/high, because it touches training.
 
 ---
 
-### Etap 7 — przenieść implementacje graph-aware z `TensorMath` do `ComputationGraph.*`
+### Stage 7 — move graph-aware implementations from `TensorMath` to `ComputationGraph.*`
 
-Cel: `TensorMath` przestaje być graph-aware.
+Goal: `TensorMath` stops being graph-aware.
 
-Zakres:
+Scope:
 
 ```text
-- graph.Linear zawiera autograd wrapper
-- graph.Conv2D zawiera autograd wrapper
-- graph.Relu zawiera autograd wrapper
-- graph.SoftmaxCrossEntropy zawiera autograd wrapper
-- TensorMath zostaje jako pure math albo znika
+- graph.Linear contains the autograd wrapper
+- graph.Conv2D contains the autograd wrapper
+- graph.Relu contains the autograd wrapper
+- graph.SoftmaxCrossEntropy contains the autograd wrapper
+- TensorMath remains as pure math or is removed
 ```
 
-Przykład docelowy:
+Target example:
 
 ```csharp
 public AutogradNode Linear(
@@ -1153,23 +1153,23 @@ public AutogradNode Linear(
 }
 ```
 
-Ryzyko: średnie/wysokie. Robić operacja po operacji.
+Risk: medium/high. Do one operation at a time.
 
 ---
 
-### Etap 8 — Graph Reset cleanup
+### Stage 8 — Graph Reset cleanup
 
-Cel: graf sprząta według ownership, nie według ręcznych wyjątków.
+Goal: the graph cleans up by ownership, not by manual exceptions.
 
-Zakres:
+Scope:
 
 ```text
-- graph.Reset dispose'uje tylko GraphTemporary / GraphAuxiliary
-- nie dotyka Parameter / ExternalBorrowed
-- debug assert: node dispose exactly once
+- graph.Reset disposes only GraphTemporary / GraphAuxiliary
+- does not touch Parameter / ExternalBorrowed
+- debug assert: node disposed exactly once
 ```
 
-Przykład:
+Example:
 
 ```csharp
 private static void DisposeIfGraphOwned(AutogradNode? node)
@@ -1187,15 +1187,15 @@ private static void DisposeIfGraphOwned(AutogradNode? node)
 }
 ```
 
-Ryzyko: wysokie. Robić dopiero gdy ownership jest pewny.
+Risk: high. Only do this once ownership is certain.
 
 ---
 
-### Etap 9 — Backward kernels cleanup
+### Stage 9 — Backward kernels cleanup
 
-Cel: backward używa czystych kernelów, analogicznie do inference forward.
+Goal: backward uses clean kernels, analogously to inference forward.
 
-Zakres:
+Scope:
 
 ```text
 - LinearKernels.BackwardInput
@@ -1205,35 +1205,35 @@ Zakres:
 - LossKernels backward helpers
 ```
 
-Ryzyko: średnie/wysokie. To jest etap performance.
+Risk: medium/high. This is the performance stage.
 
 ---
 
-### Etap 10 — Training performance work
+### Stage 10 — Training performance work
 
-Dopiero po ownership cleanup.
+Only after ownership cleanup.
 
-Zakres:
+Scope:
 
 ```text
-- profilowanie ZeroGrad / Forward / Loss / Backward / Step / Reset
-- redukcja alokacji, jeśli mają znaczenie
+- profiling ZeroGrad / Forward / Loss / Backward / Step / Reset
+- allocation reduction, if it matters
 - optimizer kernels
 - graph arena improvements
-- custom scheduler, jeśli nadal potrzebny
+- custom scheduler, if still needed
 ```
 
-Na tym etapie alokacje treningowe mogą istnieć. Liczy się przede wszystkim performance i poprawny lifecycle.
+At this stage, training allocations may exist. Correctness of the lifecycle and performance are the primary concerns.
 
 ---
 
-## Zasady refaktoru
+## Refactor principles
 
-### 1. Nie mieszać refaktoru architektury z optymalizacją
+### 1. Do not mix architectural refactoring with optimization
 
-Jeden PR = jeden cel.
+One PR = one goal.
 
-Dobre:
+Good:
 
 ```text
 PR: Add graph operation facade
@@ -1241,7 +1241,7 @@ PR: Add AutogradNodeOwnership metadata
 PR: Introduce Parameter type
 ```
 
-Złe:
+Bad:
 
 ```text
 PR: Add Parameter + rewrite Adam + optimize Conv backward + change benchmarks
@@ -1249,35 +1249,35 @@ PR: Add Parameter + rewrite Adam + optimize Conv backward + change benchmarks
 
 ---
 
-### 2. Najpierw adaptery, potem migracja
+### 2. Adapters first, then migration
 
-Najpierw dodać nowe API jako wrapper nad starym.
+Add the new API as a wrapper over the old one first.
 
-Dopiero potem przepinać layery i implementacje.
-
----
-
-### 3. Inference zostawić oddzielone od graph
-
-Inference path jest już dobry i zero-alloc. Nie podłączać inferencji z powrotem pod `ComputationGraph`.
+Only then rewire layers and implementations.
 
 ---
 
-### 4. Kernels nie znają autograd
+### 3. Keep inference separated from the graph
 
-Jeśli metoda przyjmuje `AutogradNode`, to nie jest kernel.
+The inference path is already good and zero-alloc. Do not connect inference back to `ComputationGraph`.
 
 ---
 
-### 5. Metoda z `ComputationGraph` w sygnaturze powinna być metodą grafu
+### 4. Kernels do not know autograd
 
-Docelowo nie chcemy:
+If a method accepts an `AutogradNode`, it is not a kernel.
+
+---
+
+### 5. A method with `ComputationGraph` in its signature should be a method on the graph
+
+Ultimately we do not want:
 
 ```csharp
 TensorMath.Linear(graph, input, weights, bias);
 ```
 
-Chcemy:
+We want:
 
 ```csharp
 graph.Linear(input, weights, bias);
@@ -1285,25 +1285,25 @@ graph.Linear(input, weights, bias);
 
 ---
 
-## Minimalny pierwszy PR
+## Minimal first PR
 
-Najbezpieczniejszy pierwszy krok:
+The safest first step:
 
 ```text
 PR: Add graph operation facade
 ```
 
-Zakres:
+Scope:
 
 ```text
-1. Dodać partial ComputationGraph.* pliki.
-2. Każda metoda deleguje do obecnego TensorMath.
-3. Przepiąć layery na graph.*.
-4. Testy.
-5. Zero zmian w algorytmach.
+1. Add partial ComputationGraph.* files.
+2. Each method delegates to the current TensorMath.
+3. Rewire layers to graph.*.
+4. Tests.
+5. Zero changes to algorithms.
 ```
 
-Przykładowe pliki:
+Example files:
 
 ```text
 Sources/Main/Autograd/ComputationGraph.Linear.cs
@@ -1313,7 +1313,7 @@ Sources/Main/Autograd/ComputationGraph.Pooling.cs
 Sources/Main/Autograd/ComputationGraph.Losses.cs
 ```
 
-Przykładowe wrappery:
+Example wrappers:
 
 ```csharp
 public partial class ComputationGraph
@@ -1360,7 +1360,7 @@ public partial class ComputationGraph
 }
 ```
 
-Potem layer:
+Then the layer:
 
 ```csharp
 public AutogradNode Forward(
@@ -1373,9 +1373,9 @@ public AutogradNode Forward(
 
 ---
 
-## Docelowy stan po refaktorze
+## Target state after the refactor
 
-Po pełnej migracji:
+After full migration:
 
 ```text
 TrainingEngine
@@ -1403,12 +1403,12 @@ InferenceEngine
     separate zero-alloc inference workflow
 ```
 
-Najważniejszy efekt:
+Most important outcome:
 
 ```text
-AutogradNode przestaje być wszystkim naraz.
-ComputationGraph jest mózgiem treningu, ale nie mięśniami matematyki.
-TensorMath/Kernels są czystą matematyką.
-Layer jest prosty i czytelny.
-Optimizer nie widzi temporary graph nodes.
+AutogradNode stops being everything at once.
+ComputationGraph is the training brain, but not the muscle of the math.
+TensorMath/Kernels are pure math.
+Layer is simple and readable.
+Optimizer does not see temporary graph nodes.
 ```

@@ -6,10 +6,11 @@
 using System.Numerics;
 using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.Kernels
 {
-    internal static class LinearKernels
+    internal static unsafe class LinearKernels
     {
         private const int InputMajorVectorizedOutputThreshold = 32;
 
@@ -49,15 +50,8 @@ namespace DevOnBike.Overfit.Kernels
             int inputSize,
             int outputSize)
         {
-            if (inputSize <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(inputSize));
-            }
-
-            if (outputSize <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(outputSize));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(inputSize);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(outputSize);
 
             if (input.Length % inputSize != 0)
             {
@@ -309,6 +303,9 @@ namespace DevOnBike.Overfit.Kernels
         /// Equivalent to: gradInput += gradOutput @ weights^T
         /// Layout: weights[inputSize, outputSize] (input-major, same as training path).
         /// </summary>
+        /// <summary>Parallel threshold for BackwardInput: 512K ops.</summary>
+        internal const long BackwardInputThreshold = 524_288;
+
         public static void BackwardInput(
             ReadOnlySpan<float> gradOutput,    // [batchSize, outputSize]
             ReadOnlySpan<float> weights,        // [inputSize, outputSize]
@@ -317,18 +314,69 @@ namespace DevOnBike.Overfit.Kernels
             int inputSize,
             int outputSize)
         {
-            // Sequential SIMD: Span<T> is a ref struct and cannot be captured in Parallel.For lambdas.
-            // TensorPrimitives.Dot inside BackwardInputRow uses AVX-512 on supported hardware,
-            // so sequential is already highly vectorised. Parallelism could be added via unsafe
-            // fixed pointers if profiling shows sequential to be a bottleneck.
-            for (var b = 0; b < batchSize; b++)
+            // Threshold: 512K ops. Below threshold sequential SIMD is faster.
+            if ((long)batchSize * inputSize * outputSize < BackwardInputThreshold)
             {
-                BackwardInputRow(
-                    gradOutput.Slice(b * outputSize, outputSize),
-                    weights,
-                    gradInput.Slice(b * inputSize, inputSize),
-                    inputSize,
-                    outputSize);
+                for (var b = 0; b < batchSize; b++)
+                {
+                    BackwardInputRow(
+                        gradOutput.Slice(b * outputSize, outputSize),
+                        weights,
+                        gradInput.Slice(b * inputSize, inputSize),
+                        inputSize,
+                        outputSize);
+                }
+                return;
+            }
+
+            // fixed pointer cannot be captured in Parallel.For lambda (CS1764).
+            // OverfitParallelFor takes a static function pointer + void* context,
+            // so closures aren't a concern — but we still want fixed/pinned spans
+            // for the duration of the dispatch.
+            fixed (float* goPtr = gradOutput, wPtr = weights, giPtr = gradInput)
+            {
+                var ctx = new BackwardInputContext(goPtr, wPtr, giPtr, inputSize, outputSize);
+                OverfitParallelFor.For(0, batchSize, &BackwardInputChunkWorker, &ctx);
+            }
+        }
+
+        private static void BackwardInputChunkWorker(
+            int chunkStart,
+            int chunkEnd,
+            void* contextPtr)
+        {
+            ref var ctx = ref Unsafe.AsRef<BackwardInputContext>(contextPtr);
+            for (var b = chunkStart; b < chunkEnd; b++)
+            {
+                BackwardInputWorker(b, ctx);
+            }
+        }
+
+        private readonly struct BackwardInputContext
+        {
+            public readonly float* GradOutput;
+            public readonly float* Weights;
+            public readonly float* GradInput;
+            public readonly int InputSize;
+            public readonly int OutputSize;
+
+            public BackwardInputContext(float* go, float* w, float* gi, int inputSize, int outputSize)
+            {
+                GradOutput = go; Weights = w; GradInput = gi;
+                InputSize = inputSize; OutputSize = outputSize;
+            }
+        }
+
+        private static void BackwardInputWorker(int b, BackwardInputContext ctx)
+        {
+            var goRow = new ReadOnlySpan<float>(ctx.GradOutput + b * ctx.OutputSize, ctx.OutputSize);
+            var giRow = new Span<float>(ctx.GradInput + b * ctx.InputSize, ctx.InputSize);
+
+            for (var i = 0; i < ctx.InputSize; i++)
+            {
+                giRow[i] += TensorPrimitives.Dot(
+                    goRow,
+                    new ReadOnlySpan<float>(ctx.Weights + i * ctx.OutputSize, ctx.OutputSize));
             }
         }
 
@@ -357,6 +405,9 @@ namespace DevOnBike.Overfit.Kernels
         /// Equivalent to: gradWeights += input^T @ gradOutput
         /// Layout: gradWeights[inputSize, outputSize] (input-major).
         /// </summary>
+        /// <summary>Parallel threshold for AccumulateWeightGrad: 1M ops.</summary>
+        internal const long AccumulateWeightGradThreshold = 1_048_576;
+
         public static void AccumulateWeightGrad(
             ReadOnlySpan<float> input,         // [batchSize, inputSize]
             ReadOnlySpan<float> gradOutput,    // [batchSize, outputSize]
@@ -365,13 +416,70 @@ namespace DevOnBike.Overfit.Kernels
             int inputSize,
             int outputSize)
         {
-            // Outer-product accumulation: for each batch element, for each input dim,
-            // add input[b,i] * gradOutput[b,:] to gradWeights[i,:].
-            // Sequential is almost always correct here — parallelising requires per-row
-            // reduction which adds complexity. For the common case (inputSize=1352,
-            // outputSize=64, batchSize=64) the work is 5.5M adds — fast enough sequentially.
-            // Adding a parallel path would require separate partial gradient buffers per thread
-            // (as Conv2DWorkspace does) — out of scope for PERF-1.
+            // Sequential path for small matrices — no overhead.
+            if ((long)batchSize * inputSize * outputSize < AccumulateWeightGradThreshold)
+            {
+                AccumulateWeightGradSeq(input, gradOutput, gradWeights, batchSize, inputSize, outputSize);
+                return;
+            }
+
+            // OverfitParallelFor: static function pointer + void* context, zero
+            // allocation per dispatch. Pin spans for the duration of For().
+            fixed (float* inPtr = input, goPtr = gradOutput, gwPtr = gradWeights)
+            {
+                var ctx = new AccumulateWeightGradContext(inPtr, goPtr, gwPtr, batchSize, inputSize, outputSize);
+                OverfitParallelFor.For(0, inputSize, &AccumulateWeightGradChunkWorker, &ctx);
+            }
+        }
+
+        private static void AccumulateWeightGradChunkWorker(
+            int chunkStart,
+            int chunkEnd,
+            void* contextPtr)
+        {
+            ref var ctx = ref Unsafe.AsRef<AccumulateWeightGradContext>(contextPtr);
+            for (var i = chunkStart; i < chunkEnd; i++)
+            {
+                AccumulateWeightGradWorker(i, ctx);
+            }
+        }
+
+        private readonly struct AccumulateWeightGradContext
+        {
+            public readonly float* Input;
+            public readonly float* GradOutput;
+            public readonly float* GradWeights;
+            public readonly int BatchSize;
+            public readonly int InputSize;
+            public readonly int OutputSize;
+
+            public AccumulateWeightGradContext(float* inp, float* go, float* gw, int b, int n, int m)
+            {
+                Input = inp; GradOutput = go; GradWeights = gw;
+                BatchSize = b; InputSize = n; OutputSize = m;
+            }
+        }
+
+        private static void AccumulateWeightGradWorker(int i, AccumulateWeightGradContext ctx)
+        {
+            var gwRow = new Span<float>(ctx.GradWeights + i * ctx.OutputSize, ctx.OutputSize);
+
+            for (var b = 0; b < ctx.BatchSize; b++)
+            {
+                var xi = ctx.Input[b * ctx.InputSize + i];
+                var goRow = new ReadOnlySpan<float>(ctx.GradOutput + b * ctx.OutputSize, ctx.OutputSize);
+                TensorPrimitives.MultiplyAdd(goRow, xi, gwRow, gwRow);
+            }
+        }
+
+        private static void AccumulateWeightGradSeq(
+            ReadOnlySpan<float> input,
+            ReadOnlySpan<float> gradOutput,
+            Span<float> gradWeights,
+            int batchSize,
+            int inputSize,
+            int outputSize)
+        {
             for (var b = 0; b < batchSize; b++)
             {
                 var inRow = input.Slice(b * inputSize, inputSize);
@@ -381,8 +489,6 @@ namespace DevOnBike.Overfit.Kernels
                 {
                     var xi = inRow[i];
                     var wRow = gradWeights.Slice(i * outputSize, outputSize);
-
-                    // gradWeights[i, :] += xi * gradOutput[b, :]
                     TensorPrimitives.MultiplyAdd(gO, xi, wRow, wRow);
                 }
             }

@@ -6,7 +6,6 @@
 using System.Numerics;
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Autograd;
-using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.Ops
 {
@@ -154,7 +153,7 @@ namespace DevOnBike.Overfit.Ops
                 return output;
             }
 
-            // Mask staje się pełnoprawnym węzłem z własną pamięcią na taśmie
+            // Mask becomes a fully-fledged node with its own memory on the tape
             var mask = AllocateNode(graph, input.Shape, false, clearMemory: false);
             var scale = 1f / (1f - probability);
 

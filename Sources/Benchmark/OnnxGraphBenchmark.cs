@@ -6,6 +6,7 @@
 using BenchmarkDotNet.Attributes;
 using Benchmarks.Helpers;
 using DevOnBike.Overfit.Inference;
+using DevOnBike.Overfit.Inference.Contracts;
 using DevOnBike.Overfit.Onnx;
 
 namespace Benchmarks
@@ -73,7 +74,7 @@ namespace Benchmarks
 
             var backend = new OnnxGraphInferenceBackend(_dagModel);
             _dagEngine = InferenceEngine.FromBackend(backend,
-                new DevOnBike.Overfit.Inference.Contracts.InferenceEngineOptions
+                new InferenceEngineOptions
                 {
                     WarmupIterations = 256,
                 });

@@ -34,6 +34,10 @@ namespace DevOnBike.Overfit.Autograd
         RepeatVector,
         FusedLSTMStep,
         Linear,
-        AddInPlace
+        AddInPlace,
+        LayerNorm,
+        Embedding,
+        ScaledDotProductAttention,
+        Gelu
     }
 }

@@ -10,6 +10,7 @@ using DevOnBike.Overfit.Evolutionary.Fitness;
 using DevOnBike.Overfit.Evolutionary.Mutation;
 using DevOnBike.Overfit.Evolutionary.Selection;
 using DevOnBike.Overfit.Evolutionary.Strategies;
+using DevOnBike.Overfit.Randomization;
 
 namespace Benchmarks
 {
@@ -52,7 +53,7 @@ namespace Benchmarks
             switch (Configuration)
             {
                 case Config.Realistic:
-                    selection = new TruncationSelectionOperator();
+                    selection = new UniformEliteParentSelector();
                     mutation = new GaussianMutationOperator();
                     shaper = new CenteredRankFitnessShaper();
                     break;
@@ -122,12 +123,12 @@ namespace Benchmarks
 
         private sealed class FirstEliteSelectionOperator : ISelectionOperator
         {
-            public int SelectParent(ReadOnlySpan<int> eliteIndices, Random rng) => eliteIndices[0];
+            public int SelectParent(ReadOnlySpan<int> eliteIndices, IRandom rng) => eliteIndices[0];
         }
 
         private sealed class CopyMutationOperator : IMutationOperator
         {
-            public void Mutate(ReadOnlySpan<float> parentGenome, Span<float> childGenome, Random rng)
+            public void Mutate(ReadOnlySpan<float> parentGenome, Span<float> childGenome, IRandom rng)
             {
                 parentGenome.CopyTo(childGenome);
             }

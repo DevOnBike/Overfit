@@ -11,8 +11,8 @@ using System.Runtime.InteropServices;
 namespace DevOnBike.Overfit.Tensors
 {
     /// <summary>
-    /// Klasa zarządzająca wyłącznie cyklem życia pamięci na stercie (Heap).
-    /// Nie wykonuje żadnych operacji logicznych ani matematycznych.
+    /// Manages only the memory lifetime of heap-allocated storage.
+    /// Performs no logical or mathematical operations.
     /// </summary>
     public sealed class FastTensor<T> : IDisposable
         where T : struct
@@ -23,14 +23,14 @@ namespace DevOnBike.Overfit.Tensors
         public readonly int Rank;
         public readonly int Size;
 
-        // Zapamiętujemy tylko bazowy kształt, żeby wiedzieć, jaki widok wydać.
+        // We store only the base shape so we know what view to hand out.
         private readonly int _s0;
         private readonly int _s1;
         private readonly int _s2;
         private readonly int _s3;
 
         // ========================================================================
-        // KONSTRUKTORY ALOKUJĄCE
+        // ALLOCATING CONSTRUCTORS
         // ========================================================================
 
         public FastTensor(
@@ -102,7 +102,7 @@ namespace DevOnBike.Overfit.Tensors
         }
 
         // ========================================================================
-        // BEZPOŚREDNI DOSTĘP DO PAMIĘCI
+        // DIRECT MEMORY ACCESS
         // ========================================================================
 
         /// <summary>
@@ -138,7 +138,7 @@ namespace DevOnBike.Overfit.Tensors
         }
 
         // ========================================================================
-        // WYDAWANIE WIDOKU
+        // GET VIEW
         // ========================================================================
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -178,8 +178,8 @@ namespace DevOnBike.Overfit.Tensors
         }
 
         /// <summary>
-        /// Zwraca widok 2D z nadpisanym kształtem na te same dane.
-        /// Używane przez AutogradNode w trybie aliasowania (Reshape zero-copy).
+        /// Returns a 2D view with an overridden shape over the same data.
+        /// Used by AutogradNode in aliasing mode (zero-copy Reshape).
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public TensorView<T> GetViewAs(
@@ -203,7 +203,7 @@ namespace DevOnBike.Overfit.Tensors
         }
 
         // ========================================================================
-        // ZARZĄDZANIE PAMIĘCIĄ
+        // MEMORY MANAGEMENT
         // ========================================================================
 
         public void Dispose()
@@ -249,11 +249,11 @@ namespace DevOnBike.Overfit.Tensors
         }
 
         // ========================================================================
-        // MATERIALIZACJA WIDOKÓW
+        // VIEW MATERIALIZATION
         // ========================================================================
 
         /// <summary>
-        /// Tworzy nowy, ciągły fizyczny tensor z dowolnego (nawet transponowanego) widoku.
+        /// Creates a new, contiguous physical tensor from any (even transposed) view.
         /// </summary>
         public static FastTensor<T> FromView(
             TensorView<T> view)
@@ -348,8 +348,8 @@ namespace DevOnBike.Overfit.Tensors
             }
             else
             {
-                // Fallback dla innych typów.
-                // Dzisiaj Overfit używa tej ścieżki dla float.
+                // Fallback for other types.
+                // Currently Overfit uses this path for float.
                 for (var i = 0; i < target.Length; i++)
                 {
                     throw new NotSupportedException(

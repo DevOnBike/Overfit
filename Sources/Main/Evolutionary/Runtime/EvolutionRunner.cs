@@ -148,10 +148,7 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
         {
             ThrowIfDisposed();
 
-            if (generations < 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(generations));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegative(generations);
 
             for (var i = 0; i < generations; i++)
             {
@@ -171,15 +168,9 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
         {
             ThrowIfDisposed();
 
-            if (generations < 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(generations));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegative(generations);
 
-            if (checkpointEvery <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(checkpointEvery));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(checkpointEvery);
 
             ArgumentNullException.ThrowIfNull(checkpointPathFactory);
 

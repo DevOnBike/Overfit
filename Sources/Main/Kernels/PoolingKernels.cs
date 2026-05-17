@@ -186,7 +186,10 @@ namespace DevOnBike.Overfit.Kernels
                             for (var pw = 0; pw < pool; pw++)
                             {
                                 var value = input[rowBase + pw];
-                                if (value > max) max = value;
+                                if (value > max)
+                                {
+                                    max = value;
+                                }
                             }
                         }
 
@@ -221,7 +224,7 @@ namespace DevOnBike.Overfit.Kernels
             int outH,
             int outW)
         {
-            Span<float> pairMax = inputW <= 128
+            var pairMax = inputW <= 128
                 ? stackalloc float[inputW]
                 : new float[inputW];
 
@@ -265,7 +268,7 @@ namespace DevOnBike.Overfit.Kernels
             int outW,
             int batchOffset)
         {
-            Span<float> pairMax = inputW <= 128
+            var pairMax = inputW <= 128
                 ? stackalloc float[inputW]
                 : new float[inputW];
 
@@ -288,8 +291,8 @@ namespace DevOnBike.Overfit.Kernels
 
                     for (var ow = 0; ow < outW; ow++)
                     {
-                        float a = pairMax[ow * 2];
-                        float b = pairMax[ow * 2 + 1];
+                        var a = pairMax[ow * 2];
+                        var b = pairMax[ow * 2 + 1];
 
                         float maxVal;
                         int maxIdx;
@@ -405,15 +408,15 @@ namespace DevOnBike.Overfit.Kernels
         {
             var outH = (inputH + 2 * padding - kernelSize) / stride + 1;
             var outW = (inputW + 2 * padding - kernelSize) / stride + 1;
-            var inputPlane  = channels * inputH * inputW;
-            var outputPlane = channels * outH   * outW;
+            var inputPlane = channels * inputH * inputW;
+            var outputPlane = channels * outH * outW;
 
             output.Clear();
 
             for (var n = 0; n < batchSize; n++)
             {
                 AveragePool2DForwardSingleBatchNchw(
-                    input.Slice(n * inputPlane,  inputPlane),
+                    input.Slice(n * inputPlane, inputPlane),
                     output.Slice(n * outputPlane, outputPlane),
                     channels,
                     inputH, inputW,
@@ -439,8 +442,8 @@ namespace DevOnBike.Overfit.Kernels
         {
             for (var c = 0; c < channels; c++)
             {
-                var inputChanBase  = c * inputH * inputW;
-                var outputChanBase = c * outH   * outW;
+                var inputChanBase = c * inputH * inputW;
+                var outputChanBase = c * outH * outW;
 
                 for (var oy = 0; oy < outH; oy++)
                 {
@@ -449,7 +452,7 @@ namespace DevOnBike.Overfit.Kernels
                     for (var ox = 0; ox < outW; ox++)
                     {
                         var inputXBase = ox * stride - padding;
-                        var sum   = 0f;
+                        var sum = 0f;
                         var count = 0;
 
                         for (var ky = 0; ky < kernelSize; ky++)

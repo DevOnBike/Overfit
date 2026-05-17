@@ -14,7 +14,7 @@ namespace DevOnBike.Overfit.Onnx.Schema
         public long IrVersion { get; init; }
         public string ProducerName { get; init; } = "";
         public string ProducerVersion { get; init; } = "";
-        public List<OnnxOpsetImport> OpsetImports { get; init; } = new();
+        public List<OnnxOpsetImport> OpsetImports { get; init; } = [];
         public OnnxGraph Graph { get; init; } = new();
     }
 }

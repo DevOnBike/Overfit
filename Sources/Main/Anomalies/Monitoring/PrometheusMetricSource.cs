@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
@@ -117,7 +118,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             return ParseInstantResponse(body, metricTypeId, dc);
         }
 
-        private static List<RawMetricSeries> ParseInstantResponse(
+        internal static List<RawMetricSeries> ParseInstantResponse(
             string json,
             byte metricTypeId,
             DataCenter dc)
@@ -136,41 +137,45 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
                 return result;
             }
 
-            var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-
             foreach (var series in results.EnumerateArray())
             {
-                /*
-                if (!series.TryGetProperty("metric", out var metric)) continue;
-                if (!metric.TryGetProperty("pod", out var podProp)) continue;
+                if (!series.TryGetProperty("metric", out var metric))
+                {
+                    continue;
+                }
+                if (!metric.TryGetProperty("pod", out var podProp))
+                {
+                    continue;
+                }
 
                 var podName = podProp.GetString() ?? string.Empty;
 
-                if (!series.TryGetProperty("value", out var value)) continue;
+                // Prometheus instant vector: "value" is the 2-tuple
+                // [ unixTimeSeconds, "sampleValue" ]. Indexed JsonElement access
+                // avoids LINQ (.ToArray() is banned in Sources/Main).
+                if (!series.TryGetProperty("value", out var value)
+                    || value.ValueKind != JsonValueKind.Array
+                    || value.GetArrayLength() < 2)
+                {
+                    continue;
+                }
 
-                var arr = value.EnumerateArray().ToArray();
-                if (arr.Length < 2) continue;
+                var tsMs = (long)(value[0].GetDouble() * 1000.0);
+                var valStr = value[1].GetString();
 
-                var tsMs   = (long)(arr[0].GetDouble() * 1000.0);
-                var valStr = arr[1].GetString();
-
-                if (!float.TryParse(valStr,
-                        NumberStyles.Float,
-                        CultureInfo.InvariantCulture,
-                        out var floatValue) || !float.IsFinite(floatValue))
+                if (!float.TryParse(valStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var floatValue)
+                    || !float.IsFinite(floatValue))
                 {
                     floatValue = float.NaN;
                 }
 
                 var rawSeries = new RawMetricSeries
                 {
-                    Pod          = new PodKey { DC = dc, PodName = podName },
+                    Pod = new PodKey { DC = dc, PodName = podName },
                     MetricTypeId = metricTypeId
                 };
                 rawSeries.Samples.Add(new RawSample { Timestamp = tsMs, Value = floatValue });
                 result.Add(rawSeries);
-                */
-
             }
 
             return result;

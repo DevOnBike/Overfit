@@ -123,7 +123,7 @@ namespace DevOnBike.Overfit.Statistical
         private void AdvanceHead()
         {
             _head++;
-            
+
             if (_head >= _windowSize)
             {
                 _head = 0;
@@ -151,7 +151,7 @@ namespace DevOnBike.Overfit.Statistical
                 {
                     return;
                 }
-                
+
                 _disposed = true;
             }
 

@@ -12,9 +12,9 @@ namespace DevOnBike.Overfit.Core
     {
         public static int ArgMax(this TensorView<float> tensor, int row = 0)
         {
-            // Omijamy wywołania metod i alokacje - bierzemy płaski fragment pamięci danego wiersza.
-            // Magia .NET: Sprzętowe SIMD (AVX2/AVX-512) robiące dokładnie to samo,
-            // ale sprawdzające po 4-8 liczb w jednym takcie zegara!
+            // We bypass method calls and allocations — we take the flat memory slice of the given row.
+            // .NET magic: hardware SIMD (AVX2/AVX-512) doing exactly the same thing,
+            // but checking 4-8 values per clock cycle!
             var cols = tensor.GetDim(1);
             var rowSpan = tensor.AsReadOnlySpan().Slice(row * cols, cols);
 

@@ -338,7 +338,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
             if (!_hasFitness)
             {
-                return ReadOnlySpan<float>.Empty;
+                return [];
             }
 
             return _bestParameters;
@@ -471,14 +471,14 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             WriteFloats(writer, _bestParameters);
 
             writer.Write(_noiseOffsets.Length);
-            
+
             for (var i = 0; i < _noiseOffsets.Length; i++)
             {
                 writer.Write(_noiseOffsets[i]);
             }
 
             writer.Write(_useAdam);
-            
+
             if (_useAdam)
             {
                 writer.Write(_adamStep);
@@ -593,10 +593,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
         private int NextNoiseOffset(int sliceLength)
         {
-            if (sliceLength <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(sliceLength));
-            }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(sliceLength);
 
             var exclusiveUpper = _noiseTable.Length - sliceLength + 1;
             if (exclusiveUpper <= 0)
@@ -625,17 +622,14 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
         private uint NextUInt32Below(uint maxExclusive)
         {
-            if (maxExclusive == 0u)
-            {
-                throw new ArgumentOutOfRangeException(nameof(maxExclusive));
-            }
+            ArgumentOutOfRangeException.ThrowIfEqual(maxExclusive, 0u);
 
             var product = (ulong)NextUInt32() * maxExclusive;
             var low = (uint)product;
 
             if (low < maxExclusive)
             {
-                var threshold = unchecked((uint)(0 - maxExclusive)) % maxExclusive;
+                var threshold = unchecked(0 - maxExclusive) % maxExclusive;
                 while (low < threshold)
                 {
                     product = (ulong)NextUInt32() * maxExclusive;

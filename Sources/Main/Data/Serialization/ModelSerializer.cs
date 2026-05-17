@@ -4,7 +4,9 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.DeepLearning;
-using DevOnBike.Overfit.Tensors.Core; // Wpinamy Core!
+using DevOnBike.Overfit.Tensors.Core;
+
+// Wpinamy Core!
 
 namespace DevOnBike.Overfit.Data.Serialization
 {

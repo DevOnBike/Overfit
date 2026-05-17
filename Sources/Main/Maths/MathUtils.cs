@@ -10,6 +10,8 @@ namespace DevOnBike.Overfit.Maths
     /// </summary>
     public static class MathUtils
     {
+        const float twoPi = 2.0f * MathF.PI;
+
         [ThreadStatic]
         private static Random _rng;
 
@@ -25,8 +27,6 @@ namespace DevOnBike.Overfit.Maths
         /// <returns>A random float following the Gaussian distribution.</returns>
         public static float NextGaussian()
         {
-            const float twoPi = 2.0f * MathF.PI;
-
             var u1 = 1.0f - Rng.NextSingle();
             var u2 = 1.0f - Rng.NextSingle();
 

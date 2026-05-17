@@ -62,7 +62,7 @@ namespace DevOnBike.Overfit.Data.Tabular
         {
             var rowCount = data.Count;
 
-            // Alokujemy nowe tensory. clearMemory: false, bo zaraz precyzyjnie nadpiszemy każdy bajt.
+            // Allocate new tensors. clearMemory: false because we are about to overwrite every byte precisely.
             var features = new FastTensor<float>(rowCount, _featureWidth, clearMemory: false);
             var targets = new FastTensor<float>(rowCount, 1, clearMemory: false);
 

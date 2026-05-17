@@ -38,27 +38,27 @@ namespace DevOnBike.Overfit.Demo.Unity.Server
             switch (mode)
             {
                 case "offline":
-                {
-                    var generations = args.Length > 1 && int.TryParse(args[1], out var g) ? g : 200;
-                    OfflineTrainingMode.Run(config, BrainPath, CheckpointPath, generations, cts.Token);
-                    break;
-                }
+                    {
+                        var generations = args.Length > 1 && int.TryParse(args[1], out var g) ? g : 200;
+                        OfflineTrainingMode.Run(config, BrainPath, CheckpointPath, generations, cts.Token);
+                        break;
+                    }
 
                 case "demo":
-                {
-                    DemoMode.Run(config, BrainPath, cts.Token);
-                    break;
-                }
+                    {
+                        DemoMode.Run(config, BrainPath, cts.Token);
+                        break;
+                    }
 
                 default:
-                {
-                    Console.Error.WriteLine($"Unknown mode: {mode}.");
-                    Console.Error.WriteLine("Usage:");
-                    Console.Error.WriteLine("  offline [generations]   Train without Unity (default: 200)");
-                    Console.Error.WriteLine("  demo                    Serve a trained brain to Unity");
-                    Environment.ExitCode = 1;
-                    break;
-                }
+                    {
+                        Console.Error.WriteLine($"Unknown mode: {mode}.");
+                        Console.Error.WriteLine("Usage:");
+                        Console.Error.WriteLine("  offline [generations]   Train without Unity (default: 200)");
+                        Console.Error.WriteLine("  demo                    Serve a trained brain to Unity");
+                        Environment.ExitCode = 1;
+                        break;
+                    }
             }
         }
 

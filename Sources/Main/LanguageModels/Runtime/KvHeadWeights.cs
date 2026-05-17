@@ -1,0 +1,82 @@
+// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
+
+using System.Diagnostics.CodeAnalysis;
+using DevOnBike.Overfit.Tensors.Core;
+
+namespace DevOnBike.Overfit.LanguageModels.Runtime
+{
+    /// <summary>
+    /// Zero-copy weight references for one KV attention head.
+    ///
+    /// In GQA (Grouped Query Attention) a single KvHeadWeights is shared
+    /// by <c>nQHeads / nKvHeads</c> query heads.
+    ///
+    /// For standard MHA (GPT-1, GPT-2) KvHeadWeights are embedded inside
+    /// SingleHeadWeights — this struct is only used when nKvHeads &lt; nQHeads.
+    /// </summary>
+    [SuppressMessage(
+        "IDisposableAnalyzers.Correctness",
+        "IDISP008:Don't assign member with injected and created disposables",
+        Justification = "Borrowed zero-copy weight handles - this struct never owns the referenced TensorStorage (see type docs).")]
+    internal readonly struct KvHeadWeights
+    {
+        private readonly TensorStorage<float> _wk;
+        private readonly TensorStorage<float> _wv;
+        private readonly TensorStorage<float> _bk;
+        private readonly TensorStorage<float> _bv;
+
+        /// <summary>
+        /// Constructs from raw arrays — used for testing and for future Llama model binding.
+        /// Unspecified biases default to empty (Llama has no attention biases).
+        /// </summary>
+        internal KvHeadWeights(
+            float[] wk,
+            float[] wv,
+            float[]? bk = null,
+            float[]? bv = null)
+        {
+            static TensorStorage<float> Store(float[]? a)
+                => CreateStorage(a ?? []);
+
+            _wk = Store(wk);
+            _wv = Store(wv);
+            _bk = Store(bk);
+            _bv = Store(bv);
+        }
+
+        /// <summary>
+        /// Internal constructor — binds directly to externally-owned TensorStorage.
+        /// Used by the Llama model adapter (zero-copy, no data allocation).
+        /// </summary>
+        internal KvHeadWeights(
+            TensorStorage<float> wk,
+            TensorStorage<float> wv,
+            TensorStorage<float> bk,
+            TensorStorage<float> bv)
+        {
+            _wk = wk;
+            _wv = wv;
+            _bk = bk;
+            _bv = bv;
+        }
+
+        public ReadOnlySpan<float> Wk => _wk.AsReadOnlySpan();
+        public ReadOnlySpan<float> Wv => _wv.AsReadOnlySpan();
+        public ReadOnlySpan<float> Bk => _bk.AsReadOnlySpan();
+        public ReadOnlySpan<float> Bv => _bv.AsReadOnlySpan();
+        private static TensorStorage<float> CreateStorage(float[]? source)
+        {
+            if (source is null || source.Length == 0)
+            {
+                return new TensorStorage<float>(0);
+            }
+            var storage = new TensorStorage<float>(source.Length);
+            source.CopyTo(storage.AsSpan());
+            return storage;
+        }
+
+    }
+}

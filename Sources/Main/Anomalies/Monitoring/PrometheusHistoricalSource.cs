@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
@@ -123,7 +124,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             return ParseRangeResponse(body, metricTypeId, dc);
         }
 
-        private static List<RawMetricSeries> ParseRangeResponse(
+        internal static List<RawMetricSeries> ParseRangeResponse(
             string json,
             byte metricTypeId,
             DataCenter dc)
@@ -165,24 +166,23 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
                 foreach (var point in values.EnumerateArray())
                 {
-                    /*
-                    var arr = point.EnumerateArray().ToArray();
+                    // Prometheus matrix point: 2-tuple [ unixTimeSeconds, "sampleValue" ].
+                    // Indexed JsonElement access avoids LINQ (.ToArray() is banned in Sources/Main).
+                    if (point.ValueKind != JsonValueKind.Array || point.GetArrayLength() < 2)
+                    {
+                        continue;
+                    }
 
-                    if (arr.Length < 2) continue;
+                    var tsMs = (long)(point[0].GetDouble() * 1000.0);
+                    var valStr = point[1].GetString();
 
-                    var tsMs  = (long)(arr[0].GetDouble() * 1000.0);
-                    var valStr = arr[1].GetString();
-
-                    if (!float.TryParse(valStr,
-                            NumberStyles.Float,
-                            CultureInfo.InvariantCulture,
-                            out var value) || !float.IsFinite(value))
+                    if (!float.TryParse(valStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
+                        || !float.IsFinite(value))
                     {
                         value = float.NaN;
                     }
 
                     samples.Add(new RawSample { Timestamp = tsMs, Value = value });
-                    */
                 }
 
                 if (samples.Count == 0)

@@ -1,0 +1,36 @@
+{
+  "status": "success",
+  "data": {
+    "resultType": "vector",
+    "result": [
+      {
+        "metric": {
+          "__name__": "container_cpu_usage_seconds_total",
+          "pod": "api-gateway-7d9f",
+          "dc": "west"
+        },
+        "value": [ 1736500000.5, "0.4231" ]
+      },
+      {
+        "metric": {
+          "pod": "worker-processor-abc",
+          "dc": "west"
+        },
+        "value": [ 1736500000.5, "0.81" ]
+      },
+      {
+        "metric": {
+          "dc": "west"
+        },
+        "value": [ 1736500000.5, "0.5" ]
+      },
+      {
+        "metric": {
+          "pod": "db-proxy-xyz",
+          "dc": "west"
+        },
+        "value": [ 1736500000.5, "NaN" ]
+      }
+    ]
+  }
+}

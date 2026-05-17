@@ -43,7 +43,7 @@ jobs:
           echo "Packing with version from .csproj file."
         fi
         
-        # DODANO: ContinuousIntegrationBuild i upewnienie się, że nie budujemy ponownie (--no-build)
+        # ADDED: ContinuousIntegrationBuild and ensure we don't rebuild (--no-build)
         dotnet pack -c Release --no-build -p:RepositoryCommit=${{ github.sha }} -p:ContinuousIntegrationBuild=true --output ./packages $VERSION_ARG
 
     - name: Push to NuGet.org

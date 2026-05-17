@@ -3,13 +3,13 @@ import torch.nn as nn
 import torch.optim as optim
 import time
 
-# 1. Definicja architektury identycznej z Twoim C#
+# 1. Architecture definition — identical to the C# one
 class ResidualBlock(nn.Module):
     def __init__(self, size):
         super().__init__()
         self.linear = nn.Linear(size, size)
     def forward(self, x):
-        # Odwzorowanie Twojej logiki z ResidualBlock.cs
+        # Mirrors the logic from ResidualBlock.cs
         return torch.relu(self.linear(x)) + x
 
 class MNISTResNet(nn.Module):
@@ -30,19 +30,19 @@ class MNISTResNet(nn.Module):
         x = torch.mean(x, dim=(2, 3)) # Global Average Pool
         return self.fcOut(x)                        
 
-# 2. Konfiguracja urządzenia (wymuszamy CPU dla porównania z Twoim silnikiem)
+# 2. Device configuration (force CPU for a fair comparison with the C# engine)
 device = torch.device("cpu")
 model = MNISTResNet().to(device)
 
-# Ustawienie parametrów AdamW zgodnie z Twoją klasą Adam
+# AdamW parameters matching the Adam class
 optimizer = optim.AdamW(model.parameters(), lr=0.001, weight_decay=0.0001)
 criterion = nn.CrossEntropyLoss()
 
-# Symulacja danych: 60 000 próbek, batch 64 => 937 batchy
+# Synthetic data: 60,000 samples, batch 64 => 937 batches
 dummy_x = torch.randn(64, 1, 28, 28).to(device)
 dummy_y = torch.randint(0, 10, (64,)).to(device)
 
-print(f"--- START BENCHMARK: PyTorch na CPU ---")
+print(f"--- START BENCHMARK: PyTorch on CPU ---")
 total_start = time.time()
 
 for epoch in range(5):
@@ -57,8 +57,8 @@ for epoch in range(5):
         optimizer.step()
     
     epoch_end = time.time()
-    print(f"> EPOCH {epoch+1} GOTOWA | Czas: {(epoch_end - epoch_start)*1000:.0f}ms")
+    print(f"> EPOCH {epoch+1} DONE | Time: {(epoch_end - epoch_start)*1000:.0f}ms")
 
 total_end = time.time()
 print(f"---------------------------------------")
-print(f"Benchmark zakończony! Całkowity czas: {total_end - total_start:.2f}s")
+print(f"Benchmark finished! Total time: {total_end - total_start:.2f}s")

@@ -14,7 +14,7 @@ namespace DevOnBike.Overfit.Statistical
         public required float[] InitialProbs { get; init; }
         public required float[] TransitionMatrix { get; init; }
         public required float[] Means { get; init; }
-        public required float[][] Covariances { get; init; } // Tablica tablic dla JSON-a
+        public required float[][] Covariances { get; init; } // Array of arrays for JSON serialization
 
         public void SaveToFile(string path)
         {
@@ -30,8 +30,8 @@ namespace DevOnBike.Overfit.Statistical
         }
 
         /// <summary>
-        /// Konwertuje płaskie tablice z JSON-a na zoptymalizowane FastTensor dla silnika Overfit.
-        /// Zwraca tensory, które po przekazaniu do GaussianHMM zostaną tam zutylizowane (Dispose).
+        /// Converts flat arrays from JSON into optimized FastTensors for the Overfit engine.
+        /// Returns tensors that will be disposed by GaussianHMM after being passed to it.
         /// </summary>
         public FastTensor<float>[] ToFastTensors(int featureCount)
         {

@@ -8,9 +8,9 @@ namespace DevOnBike.Overfit.Onnx.Schema
     public sealed class OnnxGraph
     {
         public string Name { get; init; } = "";
-        public List<OnnxNode> Nodes { get; init; } = new();
-        public List<OnnxValueInfo> Inputs { get; init; } = new();
-        public List<OnnxValueInfo> Outputs { get; init; } = new();
-        public List<OnnxTensor> Initializers { get; init; } = new();
+        public List<OnnxNode> Nodes { get; init; } = [];
+        public List<OnnxValueInfo> Inputs { get; init; } = [];
+        public List<OnnxValueInfo> Outputs { get; init; } = [];
+        public List<OnnxTensor> Initializers { get; init; } = [];
     }
 }

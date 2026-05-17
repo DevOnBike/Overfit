@@ -7,7 +7,6 @@ using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
-using Xunit;
 
 namespace DevOnBike.Overfit.Tests.Optimizers
 {
@@ -22,7 +21,7 @@ namespace DevOnBike.Overfit.Tests.Optimizers
             const float epsilon = 1e-8f;
             const float weightDecay = 0.0001f;
 
-            var initialWeights = new float[]
+            var initialWeights = new[]
             {
                 0.25f,
                 -0.75f,
@@ -30,7 +29,7 @@ namespace DevOnBike.Overfit.Tests.Optimizers
                 -2.0f
             };
 
-            var gradients = new float[]
+            var gradients = new[]
             {
                 0.125f,
                 -0.25f,
@@ -49,11 +48,9 @@ namespace DevOnBike.Overfit.Tests.Optimizers
                 gradients);
 
             using var optimizer = new Adam(
-                new[]
-                {
-                    parameter
-                },
-                learningRate);
+            [
+                parameter
+            ]);
 
             optimizer.Beta1 = beta1;
             optimizer.Beta2 = beta2;
@@ -93,7 +90,7 @@ namespace DevOnBike.Overfit.Tests.Optimizers
             const float epsilon = 1e-8f;
             const float weightDecay = 0.0001f;
 
-            var initialWeights = new float[]
+            var initialWeights = new[]
             {
                 0.25f,
                 -0.75f,
@@ -101,7 +98,7 @@ namespace DevOnBike.Overfit.Tests.Optimizers
                 -2.0f
             };
 
-            var gradients = new float[]
+            var gradients = new[]
             {
                 0.125f,
                 -0.25f,
@@ -120,11 +117,9 @@ namespace DevOnBike.Overfit.Tests.Optimizers
                 gradients);
 
             using var optimizer = new Adam(
-                new[]
-                {
-                    parameter
-                },
-                learningRate);
+            [
+                parameter
+            ]);
 
             optimizer.Beta1 = beta1;
             optimizer.Beta2 = beta2;
@@ -181,11 +176,10 @@ namespace DevOnBike.Overfit.Tests.Optimizers
                 ]);
 
             using var optimizer = new Adam(
-                new[]
-                {
-                    trainable,
+            [
+                trainable,
                     frozen
-                },
+            ],
                 learningRate: 0.001f);
 
             optimizer.Step();
@@ -215,10 +209,9 @@ namespace DevOnBike.Overfit.Tests.Optimizers
                 ]);
 
             using var optimizer = new Adam(
-                new[]
-                {
-                    parameter
-                },
+            [
+                parameter
+            ],
                 learningRate: 0.001f);
 
             optimizer.ZeroGrad();
@@ -233,7 +226,7 @@ namespace DevOnBike.Overfit.Tests.Optimizers
         [Fact]
         public void ResetTime_RestartsBiasCorrectionBehavior()
         {
-            var initialWeights = new float[]
+            var initialWeights = new[]
             {
                 0.5f,
                 -1.25f,
@@ -241,7 +234,7 @@ namespace DevOnBike.Overfit.Tests.Optimizers
                 -3.75f
             };
 
-            var gradients = new float[]
+            var gradients = new[]
             {
                 0.05f,
                 -0.1f,
@@ -295,10 +288,9 @@ namespace DevOnBike.Overfit.Tests.Optimizers
                 grad);
 
             using var optimizer = new Adam(
-                new[]
-                {
-            parameter
-                },
+            [
+                parameter
+            ],
                 learningRate: 0.001f);
 
             optimizer.Step();
@@ -349,10 +341,9 @@ namespace DevOnBike.Overfit.Tests.Optimizers
                 grad);
 
             using var optimizer = new Adam(
-                new[]
-                {
-            parameter
-                },
+            [
+                parameter
+            ],
                 learningRate: 0.001f);
 
             optimizer.Step();
@@ -398,10 +389,9 @@ namespace DevOnBike.Overfit.Tests.Optimizers
                 grad);
 
             using var optimizer = new Adam(
-                new[]
-                {
-            parameter
-                },
+            [
+                parameter
+            ],
                 learningRate: 0.001f);
 
             optimizer.Step();
@@ -428,10 +418,9 @@ namespace DevOnBike.Overfit.Tests.Optimizers
             AutogradNode parameter)
         {
             return new Adam(
-                new[]
-                {
-                    parameter
-                },
+            [
+                parameter
+            ],
                 learningRate: 0.001f)
             {
                 Beta1 = 0.9f,

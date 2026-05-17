@@ -27,7 +27,7 @@ namespace DevOnBike.Overfit.Randomization
     ///
     /// Use <see cref="Shared"/> for a thread-local shared instance.
     /// </summary>
-    public sealed class VectorizedRandom
+    public sealed class VectorizedRandom : IRandom
     {
         private static readonly int UIntLaneCount = Vector256<uint>.Count;
         private static readonly int FloatLaneCount = Vector256<float>.Count;
@@ -166,7 +166,7 @@ namespace DevOnBike.Overfit.Randomization
             var range = (uint)((long)maxValue - minValue);
             var sample = NextUInt32Below(range);
 
-            return (int)(minValue + (long)sample);
+            return (int)(minValue + sample);
         }
 
         /// <summary>
@@ -187,8 +187,11 @@ namespace DevOnBike.Overfit.Randomization
             if (i < destination.Length)
             {
                 Span<float> tail = stackalloc float[8];
+
                 var v = NextSingleVector();
+
                 v.CopyTo(tail);
+
                 tail[..(destination.Length - i)].CopyTo(destination[i..]);
             }
         }
@@ -248,6 +251,64 @@ namespace DevOnBike.Overfit.Randomization
             NextBytes(buffer.AsSpan());
         }
 
+        /// <summary>
+        /// Writes the full generator state — the 256-bit SIMD state, the scalar lane
+        /// cache, and the lane cursor — so <see cref="LoadState"/> can resume the stream
+        /// bit-identically.
+        /// </summary>
+        public void SaveState(BinaryWriter writer)
+        {
+            ArgumentNullException.ThrowIfNull(writer);
+
+            for (var i = 0; i < UIntLaneCount; i++)
+            {
+                writer.Write(_state.GetElement(i));
+            }
+
+            for (var i = 0; i < UIntLaneCount; i++)
+            {
+                writer.Write(_laneBuffer.GetElement(i));
+            }
+
+            writer.Write(_laneIndex);
+        }
+
+        /// <summary>
+        /// Restores generator state previously written by <see cref="SaveState"/>.
+        /// </summary>
+        public void LoadState(BinaryReader reader)
+        {
+            ArgumentNullException.ThrowIfNull(reader);
+
+            Span<uint> state = stackalloc uint[UIntLaneCount];
+
+            for (var i = 0; i < UIntLaneCount; i++)
+            {
+                state[i] = reader.ReadUInt32();
+            }
+
+            _state = Vector256.Create<uint>(state);
+
+            Span<uint> lanes = stackalloc uint[UIntLaneCount];
+
+            for (var i = 0; i < UIntLaneCount; i++)
+            {
+                lanes[i] = reader.ReadUInt32();
+            }
+
+            _laneBuffer = Vector256.Create<uint>(lanes);
+
+            var laneIndex = reader.ReadInt32();
+
+            if ((uint)laneIndex > (uint)UIntLaneCount)
+            {
+                throw new InvalidDataException(
+                    $"Corrupt VectorizedRandom state: lane index {laneIndex} is out of range.");
+            }
+
+            _laneIndex = laneIndex;
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private uint NextUInt32()
         {
@@ -289,7 +350,7 @@ namespace DevOnBike.Overfit.Randomization
 
             if (low < maxExclusive)
             {
-                var threshold = unchecked((uint)(0 - maxExclusive)) % maxExclusive;
+                var threshold = unchecked(0 - maxExclusive) % maxExclusive;
 
                 while (low < threshold)
                 {

@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Numerics.Tensors;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors;
 
@@ -29,14 +30,14 @@ namespace DevOnBike.Overfit.Autograd
             // probsNode: auxiliary tensor needed by backward, not the primary output.
             var probsNode = CreateAuxiliary(new TensorShape(rows, cols), clearMemory: false);
 
-            var inS     = logits.DataView.AsReadOnlySpan();
+            var inS = logits.DataView.AsReadOnlySpan();
             var targetS = target.DataView.AsReadOnlySpan();
-            var probS   = probsNode.DataView.AsSpan();
+            var probS = probsNode.DataView.AsSpan();
 
             for (var r = 0; r < rows; r++)
             {
                 var pR = probS.Slice(r * cols, cols);
-                System.Numerics.Tensors.TensorPrimitives.SoftMax(inS.Slice(r * cols, cols), pR);
+                TensorPrimitives.SoftMax(inS.Slice(r * cols, cols), pR);
 
                 var tR = targetS.Slice(r * cols, cols);
                 for (var c = 0; c < cols; c++)

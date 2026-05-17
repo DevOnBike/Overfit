@@ -48,11 +48,11 @@ namespace Benchmarks
                 gradSeedOffset: 4);
 
             _smallOptimizer = new SGD(
-                new[] { _smallParameter },
+            [_smallParameter],
                 learningRate: 0.001f);
 
             _largeOptimizer = new SGD(
-                new[] { _largeParameter },
+            [_largeParameter],
                 learningRate: 0.001f);
 
             for (var i = 0; i < 128; i++)

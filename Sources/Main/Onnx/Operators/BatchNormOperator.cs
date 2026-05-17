@@ -38,11 +38,11 @@ namespace DevOnBike.Overfit.Onnx.Operators
         {
             // ── Attributes ────────────────────────────────────────────────────
             var eps = node.Attributes.TryGetValue("epsilon", out var epsAttr)
-                ? (float)epsAttr.FloatValue
+                ? epsAttr.FloatValue
                 : 1e-5f;
 
             var onnxMomentum = node.Attributes.TryGetValue("momentum", out var momAttr)
-                ? (float)momAttr.FloatValue
+                ? momAttr.FloatValue
                 : 0.9f;
 
             var trainingMode = node.Attributes.TryGetValue("training_mode", out var tmAttr)
@@ -59,14 +59,14 @@ namespace DevOnBike.Overfit.Onnx.Operators
 
             // ── Initializers (weights) ────────────────────────────────────────
             var scaleTensor = initializers[node.Inputs[1]];
-            var biasTensor  = initializers[node.Inputs[2]];
-            var meanTensor  = initializers[node.Inputs[3]];
-            var varTensor   = initializers[node.Inputs[4]];
+            var biasTensor = initializers[node.Inputs[2]];
+            var meanTensor = initializers[node.Inputs[3]];
+            var varTensor = initializers[node.Inputs[4]];
 
             var scaleData = OnnxImporter.DecodeFloatTensor(scaleTensor);
-            var biasData  = OnnxImporter.DecodeFloatTensor(biasTensor);
-            var meanData  = OnnxImporter.DecodeFloatTensor(meanTensor);
-            var varData   = OnnxImporter.DecodeFloatTensor(varTensor);
+            var biasData = OnnxImporter.DecodeFloatTensor(biasTensor);
+            var meanData = OnnxImporter.DecodeFloatTensor(meanTensor);
+            var varData = OnnxImporter.DecodeFloatTensor(varTensor);
 
             var numFeatures = scaleData.Length;
 

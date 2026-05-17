@@ -60,10 +60,9 @@ namespace DevOnBike.Overfit.Tests.Optimizers
             using var parameter = CreateParameter(data, grad);
 
             using var optimizer = new Adam(
-                new[]
-                {
-                    parameter
-                },
+            [
+                parameter
+            ],
                 learningRate: 0.001f);
 
             optimizer.Step();

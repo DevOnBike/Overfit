@@ -22,7 +22,7 @@ namespace DevOnBike.Overfit.Ops
 
             var output = AllocateNode(graph, input.Shape, input.RequiresGrad, clearMemory: false);
 
-            // KRYTYCZNA POPRAWKA: 'mean' MUSI być czyszczone, ponieważ za chwilę akumulujemy (Add) do niego wartości!
+            // CRITICAL FIX: 'mean' MUST be cleared, because we are about to accumulate (Add) values into it!
             var mean = AllocateNode(graph, new TensorShape(C), false, clearMemory: true);
             var invStd = AllocateNode(graph, new TensorShape(C), false, clearMemory: false);
 

@@ -4,9 +4,10 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Numerics.Tensors;
+using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Autograd;
-using DevOnBike.Overfit.Kernels;
 using DevOnBike.Overfit.Intrinsics;
+using DevOnBike.Overfit.Kernels;
 using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
@@ -24,6 +25,13 @@ namespace DevOnBike.Overfit.Ops
             var requiresGrad = left.RequiresGrad || right.RequiresGrad;
             var output = AllocateNode(graph, left.Shape, requiresGrad, clearMemory: false);
 
+            // Sequential SIMD via TensorPrimitives.Add. Add is MEMORY-BANDWIDTH-BOUND
+            // (read 2 arrays + write 1 = 3× data movement). On a typical desktop
+            // memory subsystem (~50 GB/s) 2-3 cores already saturate the bus, so
+            // dispatching to OverfitParallelFor (32 workers, ~10 µs dispatch) is
+            // pure overhead — measured ~+55% latency vs sequential on GPT-1.
+            // Compute-bound element-wise ops (GELU, LayerNorm) parallelize well;
+            // memcpy-like ops (Add, Subtract, Scale) don't. Keep sequential.
             TensorKernels.Add(left.DataView.AsReadOnlySpan(), right.DataView.AsReadOnlySpan(), output.DataView.AsSpan());
 
             if (output.RequiresGrad)
@@ -36,6 +44,7 @@ namespace DevOnBike.Overfit.Ops
 
         public static void AddBackward(AutogradNode a, AutogradNode b, AutogradNode output)
         {
+            // Sequential — same memory-bandwidth-bound reasoning as Add forward.
             if (a.RequiresGrad)
             {
                 TensorPrimitives.Add(a.GradView.AsSpan(), output.GradView.AsReadOnlySpan(), a.GradView.AsSpan());
@@ -99,13 +108,18 @@ namespace DevOnBike.Overfit.Ops
             }
             else
             {
-                Parallel.For(0, N, OverfitParallel.Options, i =>
+                var inSpan = input.DataView.AsReadOnlySpan();
+                var bSpan = bias.DataView.AsReadOnlySpan();
+                var outSpan = output.DataView.AsSpan();
+
+                unsafe
                 {
-                    Simd.Add(
-                        input.DataView.AsReadOnlySpan().Slice(i * C, C),
-                        bias.DataView.AsReadOnlySpan(),
-                        output.DataView.AsSpan().Slice(i * C, C));
-                });
+                    fixed (float* inPtr = inSpan, bPtr = bSpan, outPtr = outSpan)
+                    {
+                        var ctx = new AddBiasCtx { Input = inPtr, Bias = bPtr, Output = outPtr, C = C };
+                        OverfitParallelFor.For(0, N, &AddBiasChunk, &ctx);
+                    }
+                }
             }
 
             if (output.RequiresGrad)
@@ -113,6 +127,27 @@ namespace DevOnBike.Overfit.Ops
                 graph?.Record(OpCode.AddBias, output, input, bias);
             }
             return output;
+        }
+
+        private unsafe struct AddBiasCtx
+        {
+            public float* Input;
+            public float* Bias;
+            public float* Output;
+            public int C;
+        }
+
+        private static unsafe void AddBiasChunk(int chunkStart, int chunkEnd, void* contextPtr)
+        {
+            ref var ctx = ref Unsafe.AsRef<AddBiasCtx>(contextPtr);
+            var biasSpan = new ReadOnlySpan<float>(ctx.Bias, ctx.C);
+            for (var i = chunkStart; i < chunkEnd; i++)
+            {
+                Simd.Add(
+                    new ReadOnlySpan<float>(ctx.Input + i * ctx.C, ctx.C),
+                    biasSpan,
+                    new Span<float>(ctx.Output + i * ctx.C, ctx.C));
+            }
         }
 
         public static void AddBiasBackward(AutogradNode input, AutogradNode bias, AutogradNode output)
@@ -167,7 +202,7 @@ namespace DevOnBike.Overfit.Ops
         {
             int aR = A.Shape.D0, aC = A.Shape.D1, bC = B.Shape.D1;
 
-            // Konieczne clearMemory: true, bo będziemy akumulować mnożenie (+=)
+            // clearMemory: true required, because we will accumulate multiplication results (+=)
             var C = AllocateNode(graph, new TensorShape(aR, bC), requiresGrad, clearMemory: true);
 
             if ((long)aR * aC * bC < ParallelThreshold)
@@ -176,24 +211,49 @@ namespace DevOnBike.Overfit.Ops
             }
             else
             {
-                Parallel.For(0, aR, OverfitParallel.Options, i =>
-                {
-                    var rC = C.DataView.AsSpan().Slice(i * bC, bC);
-                    var rA = A.DataView.AsReadOnlySpan().Slice(i * aC, aC);
-                    var bS = B.DataView.AsReadOnlySpan();
+                var aSpan = A.DataView.AsReadOnlySpan();
+                var bSpan = B.DataView.AsReadOnlySpan();
+                var cSpan = C.DataView.AsSpan();
 
-                    for (var k = 0; k < aC; k++)
+                unsafe
+                {
+                    fixed (float* aPtr = aSpan, bPtr = bSpan, cPtr = cSpan)
                     {
-                        var aVal = rA[k];
-                        if (aVal != 0f)
-                        {
-                            Simd.MulAdd(bS.Slice(k * bC, bC), aVal, rC);
-                        }
+                        var ctx = new MatMulRawCtx { A = aPtr, B = bPtr, C = cPtr, AC = aC, BC = bC };
+                        OverfitParallelFor.For(0, aR, &MatMulRawChunk, &ctx);
                     }
-                });
+                }
             }
 
             return C;
+        }
+
+        private unsafe struct MatMulRawCtx
+        {
+            public float* A;
+            public float* B;
+            public float* C;
+            public int AC;
+            public int BC;
+        }
+
+        private static unsafe void MatMulRawChunk(int chunkStart, int chunkEnd, void* contextPtr)
+        {
+            ref var ctx = ref Unsafe.AsRef<MatMulRawCtx>(contextPtr);
+            for (var i = chunkStart; i < chunkEnd; i++)
+            {
+                var rC = new Span<float>(ctx.C + i * ctx.BC, ctx.BC);
+                var rA = new ReadOnlySpan<float>(ctx.A + i * ctx.AC, ctx.AC);
+
+                for (var k = 0; k < ctx.AC; k++)
+                {
+                    var aVal = rA[k];
+                    if (aVal != 0f)
+                    {
+                        Simd.MulAdd(new ReadOnlySpan<float>(ctx.B + k * ctx.BC, ctx.BC), aVal, rC);
+                    }
+                }
+            }
         }
 
         public static void MatMulRawSeq(ReadOnlySpan<float> aS, ReadOnlySpan<float> bS, int aR, int aC, int bC, Span<float> cS)
@@ -248,17 +308,42 @@ namespace DevOnBike.Overfit.Ops
             }
             else
             {
-                Parallel.For(0, N, OverfitParallel.Options, i =>
-                {
-                    var aRow = (aGrad ? A.GradView.AsReadOnlySpan() : A.DataView.AsReadOnlySpan()).Slice(i * K, K);
-                    var cRow = C.GradView.AsSpan().Slice(i * M, M);
-                    var bData = bGrad ? B.GradView.AsReadOnlySpan() : B.DataView.AsReadOnlySpan();
+                var aSpan = aGrad ? A.GradView.AsReadOnlySpan() : A.DataView.AsReadOnlySpan();
+                var bSpan = bGrad ? B.GradView.AsReadOnlySpan() : B.DataView.AsReadOnlySpan();
+                var cSpan = C.GradView.AsSpan();
 
-                    for (var j = 0; j < M; j++)
+                unsafe
+                {
+                    fixed (float* aPtr = aSpan, bPtr = bSpan, cPtr = cSpan)
                     {
-                        cRow[j] += Simd.Dot(aRow, bData.Slice(j * K, K));
+                        var ctx = new MatMulAdd_A_BT_Ctx { A = aPtr, B = bPtr, C = cPtr, K = K, M = M };
+                        OverfitParallelFor.For(0, N, &MatMulAdd_A_BT_Chunk, &ctx);
                     }
-                });
+                }
+            }
+        }
+
+        private unsafe struct MatMulAdd_A_BT_Ctx
+        {
+            public float* A;
+            public float* B;
+            public float* C;
+            public int K;
+            public int M;
+        }
+
+        private static unsafe void MatMulAdd_A_BT_Chunk(int chunkStart, int chunkEnd, void* contextPtr)
+        {
+            ref var ctx = ref Unsafe.AsRef<MatMulAdd_A_BT_Ctx>(contextPtr);
+            for (var i = chunkStart; i < chunkEnd; i++)
+            {
+                var aRow = new ReadOnlySpan<float>(ctx.A + i * ctx.K, ctx.K);
+                var cRow = new Span<float>(ctx.C + i * ctx.M, ctx.M);
+
+                for (var j = 0; j < ctx.M; j++)
+                {
+                    cRow[j] += Simd.Dot(aRow, new ReadOnlySpan<float>(ctx.B + j * ctx.K, ctx.K));
+                }
             }
         }
 
@@ -294,21 +379,45 @@ namespace DevOnBike.Overfit.Ops
             }
             else
             {
-                Parallel.For(0, N, OverfitParallel.Options, i =>
-                {
-                    var cRow = C.GradView.AsSpan().Slice(i * M, M);
-                    var aData = aGrad ? A.GradView.AsReadOnlySpan() : A.DataView.AsReadOnlySpan();
-                    var bData = bGrad ? B.GradView.AsReadOnlySpan() : B.DataView.AsReadOnlySpan();
+                var aSpan = aGrad ? A.GradView.AsReadOnlySpan() : A.DataView.AsReadOnlySpan();
+                var bSpan = bGrad ? B.GradView.AsReadOnlySpan() : B.DataView.AsReadOnlySpan();
+                var cSpan = C.GradView.AsSpan();
 
-                    for (var k = 0; k < K; k++)
+                unsafe
+                {
+                    fixed (float* aPtr = aSpan, bPtr = bSpan, cPtr = cSpan)
                     {
-                        var aVal = aData[k * N + i];
-                        if (aVal != 0f)
-                        {
-                            Simd.MulAdd(bData.Slice(k * M, M), aVal, cRow);
-                        }
+                        var ctx = new MatMulAdd_AT_B_Ctx { A = aPtr, B = bPtr, C = cPtr, K = K, N = N, M = M };
+                        OverfitParallelFor.For(0, N, &MatMulAdd_AT_B_Chunk, &ctx);
                     }
-                });
+                }
+            }
+        }
+
+        private unsafe struct MatMulAdd_AT_B_Ctx
+        {
+            public float* A;
+            public float* B;
+            public float* C;
+            public int K;
+            public int N;
+            public int M;
+        }
+
+        private static unsafe void MatMulAdd_AT_B_Chunk(int chunkStart, int chunkEnd, void* contextPtr)
+        {
+            ref var ctx = ref Unsafe.AsRef<MatMulAdd_AT_B_Ctx>(contextPtr);
+            for (var i = chunkStart; i < chunkEnd; i++)
+            {
+                var cRow = new Span<float>(ctx.C + i * ctx.M, ctx.M);
+                for (var k = 0; k < ctx.K; k++)
+                {
+                    var aVal = ctx.A[k * ctx.N + i];
+                    if (aVal != 0f)
+                    {
+                        Simd.MulAdd(new ReadOnlySpan<float>(ctx.B + k * ctx.M, ctx.M), aVal, cRow);
+                    }
+                }
             }
         }
 

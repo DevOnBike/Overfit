@@ -38,8 +38,8 @@ namespace DevOnBike.Overfit.DeepLearning
             }
 
             _channels = channels;
-            _inputH   = inputH;
-            _inputW   = inputW;
+            _inputH = inputH;
+            _inputW = inputW;
             _poolSize = poolSize;
         }
 

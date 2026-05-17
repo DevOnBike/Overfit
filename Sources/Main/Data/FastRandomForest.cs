@@ -30,7 +30,8 @@ namespace DevOnBike.Overfit.Data
 
             var trees = new FastTreeNode[_numTrees][];
 
-            Parallel.For(0, _numTrees, t => {
+            Parallel.For(0, _numTrees, t =>
+            {
                 var localImportance = new float[cols];
                 var nodes = new List<FastTreeNode>();
 

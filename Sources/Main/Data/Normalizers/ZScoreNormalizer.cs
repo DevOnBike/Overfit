@@ -21,7 +21,7 @@ namespace DevOnBike.Overfit.Data.Normalizers
 
         public float Mean => _isFrozen ? _frozenMean : (float)_mean;
 
-        // Wariancja populacyjna. Dla próbkowej zmień na: _count > 1 ? _m2 / (_count - 1) : 0
+        // Population variance. For sample variance change to: _count > 1 ? _m2 / (_count - 1) : 0
         public float StandardDeviation => _count > 0 ? (float)Math.Sqrt(_m2 / _count) : 0f;
 
         public long Count => _count;
@@ -73,7 +73,7 @@ namespace DevOnBike.Overfit.Data.Normalizers
                 var delta = localMean - _mean;
 
                 _mean += delta * n2 / newCount;
-                _m2 += localM2 + delta * delta * (double)_count * n2 / newCount;
+                _m2 += localM2 + delta * delta * _count * n2 / newCount;
                 _count = newCount;
             }
         }

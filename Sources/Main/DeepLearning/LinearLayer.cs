@@ -7,7 +7,6 @@ using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
 using DevOnBike.Overfit.Kernels;
 using DevOnBike.Overfit.Maths;
-using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Parameters;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
@@ -135,7 +134,7 @@ namespace DevOnBike.Overfit.DeepLearning
             // ownsDataStorage=false, ownsGradStorage=false — Parameter owns the storage.
             // Tape holds references to these nodes; they live until layer.Dispose().
             _weightsNode ??= Weights.AsNode();
-            _biasNode    ??= Bias.AsNode();
+            _biasNode ??= Bias.AsNode();
 
             return ComputationGraph.LinearOp(graph, input, _weightsNode, _biasNode);
         }

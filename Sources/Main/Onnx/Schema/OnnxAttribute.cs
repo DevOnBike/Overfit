@@ -16,8 +16,8 @@ namespace DevOnBike.Overfit.Onnx.Schema
         public long IntValue { get; init; }
         public float FloatValue { get; init; }
         public string StringValue { get; init; } = "";
-        public long[] IntArray { get; init; } = Array.Empty<long>();
-        public float[] FloatArray { get; init; } = Array.Empty<float>();
+        public long[] IntArray { get; init; } = [];
+        public float[] FloatArray { get; init; } = [];
         public OnnxTensor? TensorValue { get; init; }
     }
 }

@@ -110,7 +110,7 @@ namespace DevOnBike.Overfit.Tests.Monitoring
         public async Task TryAlert_WhenScoreBetweenThresholds_ThenSeverityIsWarning()
         {
             var sink = new CapturingSink();
-            var config = MakeConfig(0.8f, 0.95f);
+            var config = MakeConfig();
             await using var engine = new AlertEngine(config, sink);
 
             engine.TryAlert("pod-1", 0.85f, 0.02f);
@@ -123,7 +123,7 @@ namespace DevOnBike.Overfit.Tests.Monitoring
         public async Task TryAlert_WhenScoreAtCriticalThreshold_ThenSeverityIsCritical()
         {
             var sink = new CapturingSink();
-            var config = MakeConfig(0.8f, 0.95f);
+            var config = MakeConfig();
             await using var engine = new AlertEngine(config, sink);
 
             engine.TryAlert("pod-1", 0.95f, 0.05f);
@@ -136,7 +136,7 @@ namespace DevOnBike.Overfit.Tests.Monitoring
         public async Task TryAlert_WhenScoreAboveCriticalThreshold_ThenSeverityIsCritical()
         {
             var sink = new CapturingSink();
-            var config = MakeConfig(0.8f, 0.95f);
+            var config = MakeConfig();
             await using var engine = new AlertEngine(config, sink);
 
             engine.TryAlert("pod-1", 1.0f, 0.1f);

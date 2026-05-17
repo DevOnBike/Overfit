@@ -8,13 +8,13 @@ using System.Buffers;
 namespace DevOnBike.Overfit.Tensors
 {
     /// <summary>
-    /// Niezależna, odporna na Garbage Collectora pula pamięci (GC-Immune Pool).
-    /// Zatrzymuje wyrzucanie zbuforowanych tensorów podczas zbiórek pamięci Gen2.
+    /// Independent, GC-immune memory pool.
+    /// Prevents cached tensors from being evicted during Gen2 garbage collections.
     /// </summary>
     internal static class OverfitPool<T> where T : struct
     {
-        // Gigantyczny ArrayPool bez narzutu ConcurrentBag!
-        // Utrzyma 1024 tablice per bucket, rozwiązując problem kradzieży wątków.
+        // Oversized ArrayPool with no ConcurrentBag overhead!
+        // Retains up to 1024 arrays per bucket, eliminating the thread-stealing problem.
         public static readonly ArrayPool<T> Shared = ArrayPool<T>.Create(1024 * 1024 * 64, 1024);
     }
 }

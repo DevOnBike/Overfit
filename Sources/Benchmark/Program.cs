@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 DevOnBike.
+// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -10,34 +10,27 @@ namespace Benchmarks
 {
     internal static class Program
     {
+        /// <summary>
+        /// Entry point uses <see cref="BenchmarkSwitcher"/> so the standard
+        /// BenchmarkDotNet CLI works end-to-end:
+        ///
+        ///   dotnet run -c Release --project Sources/Benchmark --filter "*Gpt2Tokens*"
+        ///   dotnet run -c Release --project Sources/Benchmark --filter "*"
+        ///   dotnet run -c Release --project Sources/Benchmark               # interactive picker
+        ///
+        /// Headline benchmarks for the current GPT-2 showcase week:
+        ///   *Gpt2TokensPerSecond*  — Legacy vs KV-cache vs Prefill-only, tokens/sec + alloc/op
+        ///   *Gpt2KvCache*          — KV-cache memory and decode characteristics
+        ///   *Gpt1Generation*       — GPT-1-scale end-to-end generation
+        /// </summary>
         private static void Main(string[] args)
         {
             OverfitLicense.SuppressNotice = true;
             OverfitLicense.MessageSink = _ => { };
 
-            // BenchmarkRunner.Run<SingleInferenceBenchmark>();
-            // BenchmarkRunner.Run<InferenceBenchmark>();
-            // BenchmarkRunner.Run<MultiLayerInferenceBenchmark>();
-            // BenchmarkRunner.Run<MLNetSingleInferenceBenchmark>();
-            // BenchmarkRunner.Run<TailLatencyBenchmark>();
-            // BenchmarkRunner.Run<ColdStartBenchmark>();
-            // BenchmarkRunner.Run<ConcurrentInferenceBenchmark>();
-            // BenchmarkRunner.Run<ThroughputBenchmark>();
-            // BenchmarkRunner.Run<ScalingBenchmark>();
-
-            // BenchmarkRunner.Run<OverfitKernelBenchmarks>();
-            // BenchmarkRunner.Run<ThreadScalingBenchmarks>();
-            // BenchmarkRunner.Run<MathNetInferenceBattleBenchmark>();
-            // BenchmarkRunner.Run<BatchScalingBenchmark>();
-            //BenchmarkRunner.Run<GenerationalGeneticAlgorithmBenchmarks>();
-            // BenchmarkRunner.Run<EvolutionaryAlgorithmBenchmarks>();
-
-            //BenchmarkRunner.Run<InferenceZeroAllocBenchmarks>();
-            //BenchmarkRunner.Run<OnnxCnnInferenceBenchmarks>();
-            //BenchmarkRunner.Run<OnnxMlpInferenceBenchmarks>();
-
-            //BenchmarkRunner.Run<BatchScalingBenchmark>();
-            BenchmarkRunner.Run<ConcurrentInferenceBenchmark>();
+            BenchmarkSwitcher
+                .FromAssembly(typeof(Program).Assembly)
+                .Run(args);
         }
     }
 }

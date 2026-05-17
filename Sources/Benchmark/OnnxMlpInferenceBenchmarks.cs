@@ -21,9 +21,9 @@ namespace Benchmarks
         private const int HiddenSize = 128;
         private const int OutputSize = 10;
 
-        // 16_384 * ~9us = ~147ms dla ONNX
-        // 16_384 * ~28us = ~459ms dla Overfit
-        // Czyli znika ostrzeżenie BenchmarkDotNet o zbyt krótkiej iteracji.
+        // 16_384 * ~9us = ~147ms for ONNX
+        // 16_384 * ~28us = ~459ms for Overfit
+        // This eliminates the BenchmarkDotNet warning about too-short iterations.
         private const int OperationsPerInvoke = 32_768;
 
         private Sequential _overfit = null!;
@@ -133,12 +133,12 @@ namespace Benchmarks
 
             _onnxRunOptions = new RunOptions();
 
-            _onnxInputOrtValue = OrtValue.CreateTensorValueFromMemory<float>(
+            _onnxInputOrtValue = OrtValue.CreateTensorValueFromMemory(
                 OrtMemoryInfo.DefaultInstance,
                 _input.AsMemory(),
                 [1, InputSize]);
 
-            _onnxOutputOrtValue = OrtValue.CreateTensorValueFromMemory<float>(
+            _onnxOutputOrtValue = OrtValue.CreateTensorValueFromMemory(
                 OrtMemoryInfo.DefaultInstance,
                 _onnxOutput.AsMemory(),
                 [1, OutputSize]);
@@ -159,7 +159,7 @@ namespace Benchmarks
 
             AssertClose(_overfitOutput, _onnxOutput, tolerance: 1e-4f);
 
-            // Dodatkowy warmup poza pomiarem.
+            // Additional warmup outside the measurement window.
             for (var i = 0; i < 256; i++)
             {
                 _overfit.ForwardInference(_input, _overfitOutput);

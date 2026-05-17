@@ -54,7 +54,7 @@ namespace DevOnBike.Overfit.DeepLearning
                 module.Eval();
             }
 
-            PrepareInference(DefaultInferenceBufferSize);
+            PrepareInference();
         }
 
         public void PrepareInference(
@@ -84,7 +84,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
             if (!_inferencePrepared)
             {
-                PrepareInference(DefaultInferenceBufferSize);
+                PrepareInference();
             }
 
             ForwardInferencePrepared(input, output);

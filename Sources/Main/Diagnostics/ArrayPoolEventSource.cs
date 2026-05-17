@@ -16,7 +16,7 @@ namespace DevOnBike.Overfit.Diagnostics
         internal const int NoBucketId = -1;
 
         /// <summary>The reason for a BufferAllocated event.</summary>
-        internal enum BufferAllocatedReason : int
+        internal enum BufferAllocatedReason
         {
             /// <summary>The pool is allocating a buffer to be pooled in a bucket.</summary>
             Pooled,
@@ -27,7 +27,7 @@ namespace DevOnBike.Overfit.Diagnostics
         }
 
         /// <summary>The reason for a BufferDropped event.</summary>
-        internal enum BufferDroppedReason : int
+        internal enum BufferDroppedReason
         {
             /// <summary>The pool is full for buffers of the specified size.</summary>
             Full,

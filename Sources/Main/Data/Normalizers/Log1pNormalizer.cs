@@ -10,34 +10,34 @@ using DevOnBike.Overfit.Tensors;
 namespace DevOnBike.Overfit.Data.Normalizers
 {
     /// <summary>
-    /// Normalizator Log1p → Z-Score dla metryk z rozkładem log-normalnym.
+    /// Log1p → Z-Score normalizer for metrics with a log-normal distribution.
     ///
     /// Pipeline:
-    ///   1. ReLU:    x = max(0, x)              — chroni log przed wartościami ujemnymi
-    ///   2. Log1p:   x = log(1 + x)             — spłaszcza długi ogon rozkładu
-    ///   3. Z-Score: x = (x - mean) / stdDev    — centruje i skaluje
+    ///   1. ReLU:    x = max(0, x)              — protects the log from negative values
+    ///   2. Log1p:   x = log(1 + x)             — compresses the long tail of the distribution
+    ///   3. Z-Score: x = (x - mean) / stdDev    — centers and scales
     ///
-    /// Przeznaczenie (z naszych 12 metryk):
+    /// Intended for (from our 12 metrics):
     ///   MemoryWorkingSetBytes, LatencyP50/95/99Ms, RequestsPerSecond,
     ///   GcGen2HeapBytes, ThreadPoolQueueLength.
     ///
-    /// Użycie:
+    /// Usage:
     ///   // Offline — Golden Window:
     ///   var norm = new Log1pNormalizer();
-    ///   norm.FitBatch(data);         // można wołać wielokrotnie
-    ///   norm.Freeze();               // zamraża parametry
+    ///   norm.FitBatch(data);         // can be called multiple times
+    ///   norm.Freeze();               // freezes the parameters
     ///   norm.Save(bw);
     ///
-    ///   // Online — produkcja:
+    ///   // Online — production:
     ///   var norm = new Log1pNormalizer();
-    ///   norm.Load(br);               // wczytuje zamrożone parametry
-    ///   norm.TransformInPlace(data); // tylko transform, bez fit
+    ///   norm.Load(br);               // loads frozen parameters
+    ///   norm.TransformInPlace(data); // transform only, no fit
     /// </summary>
     public sealed class Log1pNormalizer : IFeatureNormalizer
     {
         private readonly ZScoreNormalizer _zscore = new();
 
-        // Zamrożone parametry — aktywne po Freeze() lub Load()
+        // Frozen parameters — active after Freeze() or Load()
         private float _frozenMean;
         private float _frozenInvStdDev;
         private bool _frozen;
@@ -46,7 +46,7 @@ namespace DevOnBike.Overfit.Data.Normalizers
         public bool IsFrozen => _frozen;
         public float Mean => _frozen ? _frozenMean : _zscore.Mean;
 
-        // Bezpieczne — zwraca 0 gdy nie zamrożone i nie fittowane
+        // Safe — returns 0 when not frozen and not yet fitted
         public float StdDev => _frozen ? _frozenInvStdDev > 0f ? 1f / _frozenInvStdDev : 0f : _zscore.StandardDeviation;
 
         public long Count => _zscore.Count;
@@ -56,8 +56,8 @@ namespace DevOnBike.Overfit.Data.Normalizers
         // ---------------------------------------------------------------------------
 
         /// <summary>
-        /// Wsadowe fitowanie: ReLU → Log1p → akumulacja w ZScoreNormalizer.
-        /// Można wołać wielokrotnie — stan akumulowany przez algorytm Chana.
+        /// Batch fitting: ReLU → Log1p → accumulation in ZScoreNormalizer.
+        /// Can be called multiple times — state is accumulated via Chan's algorithm.
         /// </summary>
         public void FitBatch(ReadOnlySpan<float> data)
         {
@@ -86,8 +86,8 @@ namespace DevOnBike.Overfit.Data.Normalizers
         }
 
         /// <summary>
-        /// Zamraża parametry Z-Score po zakończeniu fitu na Golden Window.
-        /// Po Freeze() FitBatch/FitIncremental rzucają wyjątek.
+        /// Freezes the Z-Score parameters after fitting on the Golden Window.
+        /// After Freeze(), FitBatch/FitIncremental throw an exception.
         /// </summary>
         public void Freeze()
         {
@@ -108,8 +108,8 @@ namespace DevOnBike.Overfit.Data.Normalizers
         // ---------------------------------------------------------------------------
 
         /// <summary>
-        /// Aplikuje pełny pipeline in-place: ReLU → Log1p → Z-Score.
-        /// Wymaga wcześniejszego Freeze() lub Load().
+        /// Applies the full pipeline in-place: ReLU → Log1p → Z-Score.
+        /// Requires a prior call to Freeze() or Load().
         /// </summary>
         public void TransformInPlace(Span<float> data)
         {
@@ -162,7 +162,7 @@ namespace DevOnBike.Overfit.Data.Normalizers
             // ReLU — SIMD: x = max(0, x)
             TensorPrimitives.Max(src, 0f, dst);
 
-            // Log1p przez dwa przejścia SIMD — TensorPrimitives nie ma Log1P dla float span w .NET 10
+            // Log1p via two SIMD passes — TensorPrimitives has no Log1P for float span in .NET 10
             TensorPrimitives.Add(dst, 1f, dst);   // dst = x + 1
             TensorPrimitives.Log(dst, dst);        // dst = log(x + 1)
         }

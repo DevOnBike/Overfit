@@ -6,39 +6,39 @@
 namespace DevOnBike.Overfit.Data.Abstractions
 {
     /// <summary>
-    /// Ujednolicony interfejs dla algorytmów normalizacji (np. Z-Score, Min-Max, Log1p).
+    /// Unified interface for normalization algorithms (e.g. Z-Score, Min-Max, Log1p).
     /// </summary>
     public interface IFeatureNormalizer
     {
         bool IsFrozen { get; }
 
         /// <summary>
-        /// Uczy normalizator na podstawie danych historycznych (Offline).
+        /// Trains the normalizer on historical data (Offline).
         /// </summary>
         void FitBatch(ReadOnlySpan<float> data);
 
         /// <summary>
-        /// Zamraża wyliczone parametry (np. średnią, wariancję, min/max) do użycia na produkcji.
+        /// Freezes the computed parameters (e.g. mean, variance, min/max) for use in production.
         /// </summary>
         void Freeze();
 
         /// <summary>
-        /// Normalizuje dane w miejscu. Wymaga wcześniejszego zamrożenia (Freeze).
+        /// Normalizes data in place. Requires a prior call to Freeze().
         /// </summary>
         void TransformInPlace(Span<float> data);
 
         /// <summary>
-        /// Czeruje stan algorytmu.
+        /// Resets the algorithm state.
         /// </summary>
         void Reset();
 
         /// <summary>
-        /// Zapisuje zamrożone parametry do strumienia binarnego.
+        /// Saves the frozen parameters to a binary stream.
         /// </summary>
         void Save(BinaryWriter bw);
 
         /// <summary>
-        /// Wczytuje zamrożone parametry ze strumienia binarnego.
+        /// Loads frozen parameters from a binary stream.
         /// </summary>
         void Load(BinaryReader br);
     }
