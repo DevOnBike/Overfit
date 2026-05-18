@@ -160,6 +160,43 @@ These are working in the codebase but **outside the current GPT-2 focus week.** 
 
 Estimated effort: 1-2 days. Largest single architectural change since KV-cache runtime.
 
+### Slot 2c — FP16 / BF16-resident weights (cheap precursor to 2b)
+
+**Evidence — May 2026 benchmark vs LLamaSharp**, same Qwen2.5-3B `qwen.gguf`
+(FP16), single-stream CPU decode:
+
+| Metric | Overfit | LLamaSharp (native llama.cpp) |
+|--------|--------:|------------------------------:|
+| In-memory precision | F32 (up-cast) | FP16 (native) |
+| Decode throughput | 2.59 tok/s | 9.67 tok/s |
+| Peak working set | 14.4 GB | 6.0 GB |
+| Managed alloc / token | 2 B | 21 KB |
+
+**The gap:** `GgufLlamaLoader` up-casts *every* source precision to F32 —
+including FP16/BF16 files, which need no dequantization at all. Decode is
+memory-bandwidth-bound (each token streams all weights once), so F32-resident
+weights are gratuitously 2× the bytes moved per token. Roughly half the 3.7×
+throughput gap above — and *all* the RAM gap — is this self-inflicted up-cast,
+not a kernel-quality deficit.
+
+**Work** (simpler than Slot 2b — no block dequant):
+- [ ] Store FP16 weights as `Half` / raw `ushort` instead of up-casting at load.
+- [ ] Widen FP16→F32 in-kernel via hardware F16C (`Avx.ConvertToVector256Single`,
+  `vcvtph2ps`) inside the matmul inner loop — compute stays F32, only the weight
+  *load* halves.
+- [ ] BF16 variant — widen is a 16-bit left shift.
+- [ ] Parity: greedy top-1 bit-identical to the current F32 path; logits within
+  FP16 noise.
+
+**Expected payoff:** up to ~2× decode throughput (≈5 tok/s on 3B) and ~2× lower
+RAM (≈7 GB) — narrowing the LLamaSharp gap from 3.7× to ~1.9×. Being ~2× slower
+than hand-tuned native *while staying pure-managed, zero-alloc and AOT-clean* is
+a defensible position; 3.7× slower at 14 GB is not. Also a **launch-credibility**
+item — external reviewers will benchmark against LLamaSharp.
+
+Estimated effort: ~1-2 days. Lower-risk, higher immediate value than full Q4/Q6
+Slot 2b — **do this first.**
+
 ### Q4_K_M integration parity test
 
 - [ ] Download `qwen2.5-3b-instruct-q4_k_m.gguf` (Ollama or HF) to `c:\qwen3b\qwen.q4km.gguf`.
@@ -372,7 +409,7 @@ What the market actually validates for Overfit's niche, ranked:
 |---|----------|---------------|-----------------|
 | 1 | **Embedding model support** (BGE / E5 / multilingual-e5) | Vector-DB market $2.46B (2024) → $10.6B (2032), 27.5 % CAGR; Gartner: 30 %+ of enterprises on vector DBs by 2026; enterprise hybrid-retrieval intent tripled in one quarter. RAG is *the* enterprise LLM pattern. Embedding models are encoder transformers — single forward pass, no KV-cache — **CPU-friendly**: the one mainstream workload squarely in Overfit's wheelhouse. | ~1-2 weeks. New work: encoder runtime path (bidirectional attention — `MultiHeadAttentionLayer` already has the `causalMask` toggle), WordPiece / SentencePiece tokenizer, mean/CLS pooling, HuggingFace→Overfit weight converter. (An earlier "1-2 days" estimate was wrong — different model family + tokenizer.) |
 | 2 | **Deepen regulated / private-inference positioning** | EU AI Act reaches full enforcement Aug 2026 (high-risk AI requires audit trails, explainability, human oversight). Self-hosted deployments report −75 % data-breach incidents — but 175k exposed Ollama servers are actively exploited ("LLMjacking"): self-hosted-*as-a-server* is itself a risk. Overfit-as-a-library-in-process (no exposed endpoint) is structurally safer. | Mostly copy. Started: `docs/scenarios/regulated-industries.md` + README "What Overfit is not". Add the "library-in-process > exposed server" security argument. |
-| 3 | **In-memory quantization** (Q4_K / Q6_K dequant-fused matmul) | Every inference-engine comparison lists quantization as core (llama.cpp = "CPU-first + quantization"). It is the path to running *larger* models on CPU / edge. | Already specified — see **Slot 2b** above. This research promotes it from "deferred" to a named priority. |
+| 3 | **In-memory quantization** (Q4_K / Q6_K dequant-fused matmul) | Every inference-engine comparison lists quantization as core (llama.cpp = "CPU-first + quantization"). It is the path to running *larger* models on CPU / edge. | Already specified — see **Slot 2b / 2c** above. This research promotes it from "deferred" to a named priority; **Slot 2c (FP16-resident) is the cheap first step**, benchmark-backed. |
 | 4 | **Audit / inference-record primitives** | EU AI Act mandates reproducible audit trails + explainability for high-risk AI. Overfit already has deterministic greedy decode and file-versioned weights — the missing piece is a first-class, opt-in decision record (input + model hash + output + timestamp). | ~few days. Grounds the prior generic "telemetry" idea in an actual regulation. |
 | 5 | **Microsoft Agent Framework / Semantic Kernel adapter** | Microsoft consolidated Semantic Kernel + AutoGen into "Microsoft Agent Framework" (Oct 2025); SK is in maintenance mode. Do **not** build a competing agent framework — be the inference + embedding *backend* it calls. Distribution via Microsoft's own ecosystem. | ~2 days, once embeddings (item 1) land. |
 

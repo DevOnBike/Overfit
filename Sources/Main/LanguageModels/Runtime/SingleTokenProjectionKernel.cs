@@ -94,6 +94,29 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 outputSize);
         }
 
+        /// <summary>
+        /// Precision-dispatching projection (Slot 2c): routes to <see cref="ProjectHalf"/>
+        /// for FP16-resident weights, otherwise the F32 <see cref="Project"/>. Lets the
+        /// shared single-token decode path stay precision-agnostic.
+        /// </summary>
+        public static void Project(
+            ReadOnlySpan<float> input,
+            MatrixWeight weights,
+            ReadOnlySpan<float> bias,
+            Span<float> output,
+            int inputSize,
+            int outputSize)
+        {
+            if (weights.IsHalf)
+            {
+                ProjectHalf(input, weights.F16, bias, output, inputSize, outputSize);
+            }
+            else
+            {
+                Project(input, weights.F32, bias, output, inputSize, outputSize);
+            }
+        }
+
         public static void Accumulate(
             ReadOnlySpan<float> input,
             ReadOnlySpan<float> weightsInputOutput,
@@ -128,6 +151,92 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     x,
                     outputSlice,
                     outputSlice);
+            }
+        }
+
+        /// <summary>
+        /// FP16-resident projection (Slot 2c). Identical math to <see cref="Project"/>,
+        /// but the weight matrix stays in memory as 16-bit <see cref="Half"/> — halving
+        /// the DRAM traffic of the memory-bandwidth-bound decode matmul. Each weight
+        /// row is widened to F32 one L1-resident tile at a time.
+        /// </summary>
+        public static void ProjectHalf(
+            ReadOnlySpan<float> input,
+            ReadOnlySpan<Half> weightsInputOutput,
+            ReadOnlySpan<float> bias,
+            Span<float> output,
+            int inputSize,
+            int outputSize)
+        {
+            ValidateHalfArguments(input, weightsInputOutput, output, inputSize, outputSize);
+
+            if (!bias.IsEmpty && bias.Length < outputSize)
+            {
+                throw new ArgumentException("Bias span is smaller than outputSize.", nameof(bias));
+            }
+
+            if (bias.IsEmpty)
+            {
+                output.Slice(0, outputSize).Clear();
+            }
+            else
+            {
+                bias.Slice(0, outputSize).CopyTo(output);
+            }
+
+            AccumulateHalf(input, weightsInputOutput, output, inputSize, outputSize);
+        }
+
+        /// <summary>
+        /// Tile width (in floats) of the FP16 → F32 widen scratch — 32 KB. Wide
+        /// enough that most decode weight rows (attention head, dModel, dFF) take
+        /// one or two tiles, keeping the per-row TensorPrimitives call count near
+        /// the F32 path's.
+        /// </summary>
+        private const int HalfWidenTile = 8192;
+
+        /// <summary>
+        /// FP16-resident accumulate: <c>output[:] += input[i] * (float)weights[i, :]</c>.
+        /// The weight row streams in as <see cref="Half"/> (2 bytes/element) and is
+        /// widened tile-by-tile into stack scratch before the vectorized multiply-add.
+        /// Bit-identical to <see cref="Accumulate"/> fed the same values widened to F32.
+        /// </summary>
+        public static void AccumulateHalf(
+            ReadOnlySpan<float> input,
+            ReadOnlySpan<Half> weightsInputOutput,
+            Span<float> output,
+            int inputSize,
+            int outputSize)
+        {
+            ValidateHalfArguments(input, weightsInputOutput, output, inputSize, outputSize);
+
+            var outputSlice = output.Slice(0, outputSize);
+
+            // Fully overwritten by ConvertToSingle before every read, so the
+            // module-wide [SkipLocalsInit] leaving it uninitialized is safe.
+            Span<float> widenScratch = stackalloc float[HalfWidenTile];
+
+            for (var i = 0; i < inputSize; i++)
+            {
+                var x = input[i];
+
+                if (x == 0f)
+                {
+                    continue;
+                }
+
+                var weightRow = weightsInputOutput.Slice(i * outputSize, outputSize);
+
+                for (var tile = 0; tile < outputSize; tile += HalfWidenTile)
+                {
+                    var len = Math.Min(HalfWidenTile, outputSize - tile);
+                    var widened = widenScratch.Slice(0, len);
+
+                    TensorPrimitives.ConvertToSingle(weightRow.Slice(tile, len), widened);
+
+                    var outTile = outputSlice.Slice(tile, len);
+                    TensorPrimitives.MultiplyAdd(widened, x, outTile, outTile);
+                }
             }
         }
 
@@ -341,6 +450,33 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             if (weightsInputOutput.Length < inputSize * outputSize)
+            {
+                throw new ArgumentException("Weights span is smaller than inputSize * outputSize.", nameof(weightsInputOutput));
+            }
+
+            if (output.Length < outputSize)
+            {
+                throw new ArgumentException("Output span is smaller than outputSize.", nameof(output));
+            }
+        }
+
+        private static void ValidateHalfArguments(
+            ReadOnlySpan<float> input,
+            ReadOnlySpan<Half> weightsInputOutput,
+            Span<float> output,
+            int inputSize,
+            int outputSize)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(inputSize);
+
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(outputSize);
+
+            if (input.Length < inputSize)
+            {
+                throw new ArgumentException("Input span is smaller than inputSize.", nameof(input));
+            }
+
+            if (weightsInputOutput.Length < (long)inputSize * outputSize)
             {
                 throw new ArgumentException("Weights span is smaller than inputSize * outputSize.", nameof(weightsInputOutput));
             }

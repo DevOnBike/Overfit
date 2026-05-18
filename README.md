@@ -266,6 +266,21 @@ ONNX Runtime allocates 117 MB of managed memory under concurrent load (Gen0 GC p
 
 ---
 
+## Why not just use…?
+
+Overfit isn't trying to be everything. The honest map of where it fits — and where it doesn't:
+
+| Tool | The right choice when… | Reach for Overfit when… |
+|------|------------------------|--------------------------|
+| **ML.NET** | Classical ML on tabular data — regression, classification, forecasting. | You need transformer / LLM inference or deep networks, not classical tabular models. |
+| **ONNX Runtime** | You already have ONNX models and accept a native dependency. | You want pure-managed, zero-allocation inference — no native binary, no GC pauses at the tail latency. *(Overfit imports ONNX models too.)* |
+| **llama.cpp / Ollama** | A standalone, language-agnostic CPU LLM server, run as a separate process. | You want the model running **inside** your .NET process — no sidecar, no IPC, no exposed server to secure. |
+| **LLamaSharp** | The mature, GPU-capable default for running LLMs in .NET — bundling a native llama.cpp binary is fine for your deployment. | You can't ship a native binary: Native-AOT-strict builds, locked-down or regulated environments where an opaque native dependency is an audit / supply-chain problem, or zero-allocation hot paths. |
+| **PyTorch** | Training and research; large models; GPU. | Deploying inference into a .NET production app without dragging in the Python stack. |
+| **OpenAI / Anthropic APIs** | Best model quality, zero infrastructure, and data egress is acceptable. | Data egress is **not** acceptable — regulated data, on-prem, no third-party calls. |
+
+---
+
 ## GPT-2 import
 
 ```
@@ -517,3 +532,14 @@ Not a PyTorch/TensorFlow replacement. Not GPU-first. Not transformer-scale first
 **Not a hosted SaaS, and not an API.** Overfit runs as a library inside your own process — there is no Overfit service to call, no API key to manage, and nothing is sent anywhere during inference. If you need a managed cloud endpoint, this isn't it. If you need the opposite — AI inference where data never leaves your boundary, by construction — that is exactly the point. See [Overfit for regulated industries](docs/scenarios/regulated-industries.md).
 
 The differentiator: pure C#, predictable allocation behaviour, competitive CPU inference for small/medium models — including language models — where managed zero-allocation matters.
+
+---
+
+## Licensing
+
+Overfit is dual-licensed.
+
+- **Open source — GNU AGPLv3.** Free to use, including in production, **provided your own project is released under a compatible open-source licence.** Overfit is linked as a library, so AGPL's copyleft extends to the application that uses it.
+- **Commercial licence.** Building a **closed-source product**? AGPL will not work for you — a commercial licence removes the copyleft obligation. See [`COMMERCIAL.md`](COMMERCIAL.md) for tiers and how to obtain one, or contact **devonbike@gmail.com**.
+
+The simple test: if you cannot — or do not want to — release your application's source code under AGPLv3, you need the commercial licence.

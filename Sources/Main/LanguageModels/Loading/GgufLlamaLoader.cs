@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Buffers;
+using System.Numerics.Tensors;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.Tensors.Core;
@@ -24,15 +25,24 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
     /// </summary>
     public static class GgufLlamaLoader
     {
-        public static CachedLlamaInferenceEngine Load(string path)
+        public static CachedLlamaInferenceEngine Load(string path, bool? fp16Resident = null)
         {
             using var reader = new GgufReader(path);
-            return LoadFromReader(reader);
+            return LoadFromReader(reader, fp16Resident);
         }
 
-        internal static CachedLlamaInferenceEngine LoadFromReader(GgufReader reader)
+        internal static CachedLlamaInferenceEngine LoadFromReader(GgufReader reader, bool? fp16ResidentOverride = null)
         {
             var arch = reader.GetMeta("general.architecture", "qwen2");
+
+            // Slot 2c: FP16-resident keeps F16 weights as Half. Measured slower
+            // than F32 decode (decode is compute-bound, not bandwidth-bound — the
+            // F16->F32 widen is pure added cost), so it is an explicit opt-in for
+            // RAM-constrained hosts only. Default (null) keeps the faster F32 path.
+            // Valid only when the source tensors are F16.
+            var sourceIsF16 = reader.Tensors.TryGetValue("blk.0.attn_q.weight", out var probeTensor)
+                              && probeTensor.Type == GgmlType.F16;
+            var fp16Resident = (fp16ResidentOverride ?? false) && sourceIsF16;
 
             // ─── Config from metadata ─────────────────────────────────────
             var nLayers = reader.GetMeta($"{arch}.block_count", 24);
@@ -140,19 +150,19 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     {
                         AttnNormGamma = attnNormGamma,
                         AttnNormBeta = attnNormBeta,
-                        Wq = wq,
+                        Wq = ToResident(wq, fp16Resident),
                         Bq = bq,
-                        Wk = wk,
+                        Wk = ToResident(wk, fp16Resident),
                         Bk = bk,
-                        Wv = wv,
+                        Wv = ToResident(wv, fp16Resident),
                         Bv = bv,
-                        Wo = wo,
+                        Wo = ToResident(wo, fp16Resident),
                         Bo = bo,
                         FfnNormGamma = ffnNormGamma,
                         FfnNormBeta = ffnNormBeta,
-                        FfnGate = ffnGate,
-                        FfnUp = ffnUp,
-                        FfnDown = ffnDown,
+                        FfnGate = ToResident(ffnGate, fp16Resident),
+                        FfnUp = ToResident(ffnUp, fp16Resident),
+                        FfnDown = ToResident(ffnDown, fp16Resident),
                     };
                 }
             }
@@ -211,7 +221,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
 
             return CachedLlamaInferenceEngine.CreateFromBuffers(
-                config, embedWeights, finalNormGamma, finalNormBeta, lmHead, layers);
+                config, embedWeights, finalNormGamma, finalNormBeta,
+                ToResident(lmHead, fp16Resident), layers);
         }
 
         // ─── Helpers ────────────────────────────────────────────────────────
@@ -372,6 +383,36 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 }
             }
             return bias;
+        }
+
+        /// <summary>
+        /// Wraps a freshly-loaded F32 weight as a <see cref="MatrixWeight"/>. When
+        /// <paramref name="fp16"/>, narrows it to FP16-resident storage (Slot 2c)
+        /// and disposes the F32 buffer. F16 → F32 → F16 round-trips exactly for an
+        /// F16-source GGUF, so this is lossless; the transient load peak is ~1.5×
+        /// one tensor (the F32 buffer is freed immediately after each conversion).
+        /// </summary>
+        private static MatrixWeight ToResident(TensorStorage<float> f32, bool fp16)
+        {
+            if (!fp16)
+            {
+                return f32;
+            }
+
+            var half = TensorStorage<Half>.Unpooled(f32.Length);
+            TensorPrimitives.ConvertToHalf(f32.AsReadOnlySpan(), half.AsSpan());
+            f32.Dispose();
+            return half;
+        }
+
+        private static MatrixWeight[] ToResident(TensorStorage<float>[] f32s, bool fp16)
+        {
+            var result = new MatrixWeight[f32s.Length];
+            for (var i = 0; i < f32s.Length; i++)
+            {
+                result[i] = ToResident(f32s[i], fp16);
+            }
+            return result;
         }
     }
 }

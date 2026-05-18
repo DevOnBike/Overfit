@@ -23,8 +23,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         Justification = "Borrowed zero-copy weight handles - this struct never owns the referenced TensorStorage (see type docs).")]
     internal readonly struct KvHeadWeights
     {
-        private readonly TensorStorage<float> _wk;
-        private readonly TensorStorage<float> _wv;
+        private readonly MatrixWeight _wk;
+        private readonly MatrixWeight _wv;
         private readonly TensorStorage<float> _bk;
         private readonly TensorStorage<float> _bv;
 
@@ -52,8 +52,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// Used by the Llama model adapter (zero-copy, no data allocation).
         /// </summary>
         internal KvHeadWeights(
-            TensorStorage<float> wk,
-            TensorStorage<float> wv,
+            MatrixWeight wk,
+            MatrixWeight wv,
             TensorStorage<float> bk,
             TensorStorage<float> bv)
         {
@@ -63,8 +63,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _bv = bv;
         }
 
-        public ReadOnlySpan<float> Wk => _wk.AsReadOnlySpan();
-        public ReadOnlySpan<float> Wv => _wv.AsReadOnlySpan();
+        public MatrixWeight Wk => _wk;
+        public MatrixWeight Wv => _wv;
         public ReadOnlySpan<float> Bk => _bk.AsReadOnlySpan();
         public ReadOnlySpan<float> Bv => _bv.AsReadOnlySpan();
         private static TensorStorage<float> CreateStorage(float[]? source)

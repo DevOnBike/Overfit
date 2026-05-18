@@ -115,7 +115,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 ref readonly var hw = ref weights.Head(h);
 
-                ReadOnlySpan<float> wk, wv, bk, bv;
+                MatrixWeight wk, wv;
+                ReadOnlySpan<float> bk, bv;
                 if (useGqa)
                 {
                     // GQA: multiple Q heads share one KV head

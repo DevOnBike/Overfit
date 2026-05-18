@@ -42,7 +42,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly TensorStorage<float> _embedWeights;
         private readonly TensorStorage<float> _finalNormGamma;
         private readonly TensorStorage<float> _finalNormBeta;
-        private readonly TensorStorage<float> _lmHead;
+        private readonly MatrixWeight _lmHead;
         private readonly LayerWeightBuffers[] _layers;
         private readonly StackWeights _stackWeights;
 
@@ -54,19 +54,19 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             public required TensorStorage<float> AttnNormGamma;
             public required TensorStorage<float> AttnNormBeta;
-            public required TensorStorage<float>[] Wq;
+            public required MatrixWeight[] Wq;
             public required TensorStorage<float>[] Bq;
-            public required TensorStorage<float>[] Wk;
+            public required MatrixWeight[] Wk;
             public required TensorStorage<float>[] Bk;
-            public required TensorStorage<float>[] Wv;
+            public required MatrixWeight[] Wv;
             public required TensorStorage<float>[] Bv;
-            public required TensorStorage<float>[] Wo;
+            public required MatrixWeight[] Wo;
             public required TensorStorage<float>[] Bo;
             public required TensorStorage<float> FfnNormGamma;
             public required TensorStorage<float> FfnNormBeta;
-            public required TensorStorage<float> FfnGate;
-            public required TensorStorage<float> FfnUp;
-            public required TensorStorage<float> FfnDown;
+            public required MatrixWeight FfnGate;
+            public required MatrixWeight FfnUp;
+            public required MatrixWeight FfnDown;
         }
 
         // ── Constructor ───────────────────────────────────────────────────────
@@ -76,7 +76,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             TensorStorage<float> embedWeights,
             TensorStorage<float> finalNormGamma,
             TensorStorage<float> finalNormBeta,
-            TensorStorage<float> lmHead,
+            MatrixWeight lmHead,
             LayerWeightBuffers[] layers)
         {
             _config = config;
@@ -118,7 +118,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             TensorStorage<float> embedWeights,
             TensorStorage<float> finalNormGamma,
             TensorStorage<float> finalNormBeta,
-            TensorStorage<float> lmHead,
+            MatrixWeight lmHead,
             LayerWeightBuffers[] layers)
         {
             return new CachedLlamaInferenceEngine(
@@ -129,9 +129,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// Loads a model directly from a GGUF file (no Python conversion needed).
         /// Supports F32, F16, BF16 tensors. Quantized formats (Q4_K_M etc.) throw NotSupportedException.
         /// </summary>
-        public static CachedLlamaInferenceEngine LoadGguf(string path)
+        public static CachedLlamaInferenceEngine LoadGguf(string path, bool? fp16Resident = null)
         {
-            return GgufLlamaLoader.Load(path);
+            return GgufLlamaLoader.Load(path, fp16Resident);
         }
 
         public GPT1Config Config => _config;
@@ -199,7 +199,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 var attnNormGamma = ReadTensor(reader, dModel);
                 var attnNormBeta = ReadTensor(reader, dModel);
 
-                var wq = new TensorStorage<float>[nHeads];
+                var wq = new MatrixWeight[nHeads];
                 var bq = new TensorStorage<float>[nHeads];
                 for (var h = 0; h < nHeads; h++)
                 {
@@ -207,9 +207,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     bq[h] = ReadTensor(reader, headDim);
                 }
 
-                var wk = new TensorStorage<float>[nKvHeads];
+                var wk = new MatrixWeight[nKvHeads];
                 var bk = new TensorStorage<float>[nKvHeads];
-                var wv = new TensorStorage<float>[nKvHeads];
+                var wv = new MatrixWeight[nKvHeads];
                 var bv = new TensorStorage<float>[nKvHeads];
                 for (var kv = 0; kv < nKvHeads; kv++)
                 {
@@ -219,7 +219,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     bv[kv] = ReadTensor(reader, headDim);
                 }
 
-                var wo = new TensorStorage<float>[nHeads];
+                var wo = new MatrixWeight[nHeads];
                 var bo = new TensorStorage<float>[nHeads];
                 for (var h = 0; h < nHeads; h++)
                 {
@@ -469,7 +469,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             ThrowIfDisposed();
             var hw = _stackWeights.Block(layer).Head(head);
-            var span = hw.Wq;
+            var span = hw.Wq.F32;
             var sumSq = 0f;
             foreach (var v in span)
             {
@@ -491,7 +491,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // Get mutable span via the underlying TensorStorage
             // Since hw.Wq returns ReadOnlySpan, we need to access _wq directly.
             // _layers[l].Wq[h] is the SAME TensorStorage as hw._wq (zero-copy).
-            var span = _layers[layer].Wq[head].AsSpan();
+            var span = _layers[layer].Wq[head].F32Storage!.AsSpan();
             if (index >= 0 && index < span.Length)
             {
                 span[index] = value;
@@ -502,7 +502,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         public float ReadLayerWeight(int layer, int head, int index)
         {
             ThrowIfDisposed();
-            var span = _layers[layer].Wq[head].AsSpan();
+            var span = _layers[layer].Wq[head].F32Storage!.AsSpan();
             if (index < 0 || index >= span.Length)
             {
                 return float.NaN;
@@ -519,7 +519,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var hw = _stackWeights.Block(layer).Head(head);
             // We can't compare _wq directly (private) but we can use a trick:
             // write a unique value to fromLayers, read via inference path, and check
-            var span = fromLayers.AsSpan();
+            var span = fromLayers.F32Storage!.AsSpan();
             var saved = span[0];
             span[0] = 12345.6789f;
             var infValue = ReadInferenceWeightAt(layer, head, 0);
@@ -532,7 +532,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             ThrowIfDisposed();
             var hw = _stackWeights.Block(layer).Head(head);
-            var span = hw.Wq;
+            var span = hw.Wq.F32;
             return index < 0 || index >= span.Length ? float.NaN : span[index];
         }
 
@@ -568,18 +568,18 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
                 for (var h = 0; h < _config.NHeads; h++)
                 {
-                    refs[(l, LoRATargetModules.Query, h)] = layer.Wq[h];
-                    refs[(l, LoRATargetModules.OutputProjection, h)] = layer.Wo[h];
+                    refs[(l, LoRATargetModules.Query, h)] = RequireF32(layer.Wq[h]);
+                    refs[(l, LoRATargetModules.OutputProjection, h)] = RequireF32(layer.Wo[h]);
                 }
 
                 for (var kv = 0; kv < _config.KvHeads; kv++)
                 {
-                    refs[(l, LoRATargetModules.Key, kv)] = layer.Wk[kv];
-                    refs[(l, LoRATargetModules.Value, kv)] = layer.Wv[kv];
+                    refs[(l, LoRATargetModules.Key, kv)] = RequireF32(layer.Wk[kv]);
+                    refs[(l, LoRATargetModules.Value, kv)] = RequireF32(layer.Wv[kv]);
                 }
 
-                refs[(l, LoRATargetModules.FeedForwardUp, 0)] = layer.FfnUp;
-                refs[(l, LoRATargetModules.FeedForwardDown, 0)] = layer.FfnDown;
+                refs[(l, LoRATargetModules.FeedForwardUp, 0)] = RequireF32(layer.FfnUp);
+                refs[(l, LoRATargetModules.FeedForwardDown, 0)] = RequireF32(layer.FfnDown);
             }
 
             return new LlamaLoRAAdapter(
@@ -595,6 +595,18 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 throw new ObjectDisposedException(nameof(CachedLlamaInferenceEngine));
             }
+        }
+
+        /// <summary>
+        /// Extracts the F32 storage backing a weight, or throws when the model is
+        /// FP16-resident (Slot 2c). The LoRA merge path needs in-place F32 weights.
+        /// </summary>
+        private static TensorStorage<float> RequireF32(MatrixWeight weight)
+        {
+            return weight.F32Storage
+                ?? throw new NotSupportedException(
+                    "LoRA requires F32-resident weights; this model is FP16-resident (Slot 2c). "
+                    + "Load it without the FP16 path to fine-tune with LoRA.");
         }
     }
 }

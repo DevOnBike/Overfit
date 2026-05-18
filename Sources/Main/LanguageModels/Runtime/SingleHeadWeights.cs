@@ -32,10 +32,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             return s;
         }
 
-        private readonly TensorStorage<float> _wq;
-        private readonly TensorStorage<float> _wk;
-        private readonly TensorStorage<float> _wv;
-        private readonly TensorStorage<float> _wo;
+        private readonly MatrixWeight _wq;
+        private readonly MatrixWeight _wk;
+        private readonly MatrixWeight _wv;
+        private readonly MatrixWeight _wo;
         private readonly TensorStorage<float> _bq;
         private readonly TensorStorage<float> _bk;
         private readonly TensorStorage<float> _bv;
@@ -79,12 +79,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// In GQA mode wk/wv/bk/bv are ignored (supplied via KvHeadWeights instead).
         /// </summary>
         internal SingleHeadWeights(
-            TensorStorage<float> wq,
+            MatrixWeight wq,
             TensorStorage<float> bq,
-            TensorStorage<float> wo,
-            TensorStorage<float>? wk = null,
+            MatrixWeight wo,
+            MatrixWeight? wk = null,
             TensorStorage<float>? bk = null,
-            TensorStorage<float>? wv = null,
+            MatrixWeight? wv = null,
             TensorStorage<float>? bv = null)
         {
             static TensorStorage<float> Empty() => new(0);
@@ -95,10 +95,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _bv = bv ?? Empty();
         }
 
-        public ReadOnlySpan<float> Wq => _wq.AsReadOnlySpan();
-        public ReadOnlySpan<float> Wk => _wk.AsReadOnlySpan();
-        public ReadOnlySpan<float> Wv => _wv.AsReadOnlySpan();
-        public ReadOnlySpan<float> Wo => _wo.AsReadOnlySpan();
+        public MatrixWeight Wq => _wq;
+        public MatrixWeight Wk => _wk;
+        public MatrixWeight Wv => _wv;
+        public MatrixWeight Wo => _wo;
         public ReadOnlySpan<float> Bq => _bq.AsReadOnlySpan();
         public ReadOnlySpan<float> Bk => _bk.AsReadOnlySpan();
         public ReadOnlySpan<float> Bv => _bv.AsReadOnlySpan();
