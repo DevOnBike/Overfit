@@ -514,4 +514,6 @@ Use cases: Kubernetes tuning, game AI, industrial process search, pricing strate
 
 Not a PyTorch/TensorFlow replacement. Not GPU-first. Not transformer-scale first.
 
+**Not a hosted SaaS, and not an API.** Overfit runs as a library inside your own process — there is no Overfit service to call, no API key to manage, and nothing is sent anywhere during inference. If you need a managed cloud endpoint, this isn't it. If you need the opposite — AI inference where data never leaves your boundary, by construction — that is exactly the point. See [Overfit for regulated industries](docs/scenarios/regulated-industries.md).
+
 The differentiator: pure C#, predictable allocation behaviour, competitive CPU inference for small/medium models — including language models — where managed zero-allocation matters.
