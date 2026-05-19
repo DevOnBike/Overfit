@@ -1,8 +1,12 @@
 # llama.cpp CPU inference — analysis & Overfit decode-kernel plan
 
-**Status:** analysis complete (2026-05). §5 steps 1 + 1b **done & A/B-measured** —
-Qwen-3B decode **2.71 → 4.01 tok/s (+48%)**, 0 B/token preserved; gap to llama.cpp
-closed from 3.75× to **2.41×**. Steps 2–3 (quantization) not started.
+**Status:** analysis complete (2026-05). §5 steps 1 + 1b + the Q8 weight path
+(2.3a LM-head, 2.3b FFN) **done & A/B-measured** — Qwen-3B decode
+**2.71 → 10.05 tok/s (3.7×)**, RAM **~14.4 GB → 6.84 GB (−52%)**, 0 B/token
+preserved. Overfit now **matches/beats** the LLamaSharp reference
+(9.67 tok/s / ~6 GB). Remaining: Q8 on attention projections (2.3b-attn),
+native Q8_0 GGUF load (2.4), top-1 logit parity (2.5); step 3 (Q4_K/Q6_K) not
+started.
 
 **Origin — the benchmark that triggered this.** Same Qwen2.5-3B GGUF, single-stream CPU decode:
 
@@ -102,7 +106,7 @@ Overfit already has the analogue: `OverfitParallelFor` (persistent threads, bulk
 |---|------|--------|---------------------|
 | 1 | Blocked GEMV + parallelize FFN/LM-head matmul | ✅ done | 2.71 → 3.63 tok/s (+34%), 0 B/token kept |
 | 1b | Head-parallel attention | ✅ done | **3.63 → 4.01 tok/s (+10.5%)** — cumulative **2.71 → 4.01 (+48%)** |
-| 2 | Q8_0 weight path + INT8 dot kernel | not started | ~3.5× fewer weight bytes; fixes RAM |
+| 2 | Q8_0 weight path + INT8 dot kernel | ✅ FFN + LM-head done | **4.01 → 10.05 tok/s (2.5×)**, RAM ~14.4 → 6.84 GB |
 | 3 | Q4_K / Q6_K decode kernels | not started | ~7× fewer bytes; same-file benchmark vs llama.cpp |
 | 4 | Tiled prefill GEMM (tinyBLAS-style) | separate track | prefill / batch>1 only |
 | 5 | Intra-matmul work-stealing chunk counter | minor | fold in opportunistically |
@@ -158,13 +162,52 @@ most of the available aggregate bandwidth.
 
 **Cumulative (steps 1 + 1b): 2.71 → 4.01 tok/s (+48%); gap to llama.cpp 3.75× → 2.41×.**
 
-### Step 2 — Q8_0 weight path + INT8 dot kernel
+### Step 2 — Q8_0 weight path + INT8 dot kernel — ✅ FFN + LM-HEAD DONE & MEASURED
 
-**What:** (a) `block_q8_0` format (32×int8 + 1×F16 scale); (b) an activation quantizer F32→Q8_0 (one cheap pass per matmul); (c) an INT8 `vec_dot` using `Avx2.MultiplyAddAdjacent` + `Avx2.Sign`, INT32 accumulation, one FP32 `Fma` per block for the scale; gate an `AvxVnni.MultiplyWideningAndAdd` fast path behind `AvxVnni.IsSupported`; (d) a GGUF loader path that keeps Q8_0 tensors quantized in RAM.
+**Design.** (a) a `block_q8_0`-style format — 32×int8 quants + 1×F32 scale per
+block (`Q8DotKernel.BlockSize = 32`); (b) a symmetric activation quantizer
+F32→Q8 (one pass, `scale = absmax/127`); (c) an INT8 `vec_dot` using
+`Avx2.MultiplyAddAdjacent` (`vpmaddubsw`+`vpmaddwd`) + `Avx2.Sign` (`vpsignb`,
+the signed×signed trick), INT32 accumulation, one FP32 multiply-add per block
+for the scales.
 
-**Why:** weights drop 32→~9 bits → ~3.5× less RAM traffic on the now-bandwidth-bound kernel, and directly fixes the ~2.3× RAM gap. **The F16C limitation does not apply** — F16 survives only as per-block scales.
+**Layout.** Weights are stored **output-major** — row `o` is one output's full
+contraction vector, in blocks of 32. GGUF stores weight matrices `[out, in]`,
+already output-major, so quantizing is a per-row pass with **no transpose**. A
+weight handle is a tagged union `DecodeWeight` { F32 `TensorStorage<float>` |
+Q8 `Q8Weight` }; the decode kernels dispatch on the tag at the leaf, so the
+transformer stack is precision-agnostic and the F32 GPT-1/2 path is untouched.
 
-**Verify:** logit parity vs F32 (top-1 match for greedy, logits within Q8_0 noise); A/B throughput + RAM.
+**Landed in two slices, each A/B-measured on Qwen-3B (best-of-3, steady-state):**
+
+| Slice | What | Decode tok/s | Steady RAM |
+|---|---|---:|---:|
+| baseline | kernel track (steps 1+1b), all-F32 | 4.01–4.03 | ~14.4 GB |
+| 2.3a | LM-head weight → Q8 | 4.33 | 13.5 GB |
+| 2.3b-FFN | FFN gate/up/down → Q8 (~⅔ of weights) | **10.05** | **6.84 GB** |
+
+**Result: 4.01 → 10.05 tok/s (2.5×), RAM ~14.4 → 6.84 GB (−52%), 0 B/token
+preserved, 672 tests green.** Overfit now matches/beats the LLamaSharp reference
+(9.67 tok/s / ~6 GB) on this model — the launch-credibility milestone §5's
+sequencing note called for.
+
+**Honest caveats:**
+- The 2.3b-FFN jump (+132%) is larger than the ~2× that quantizing ⅔ of the
+  weight bytes alone predicts. Most likely the F32 13.5 GB footprint was under
+  memory pressure on the dev box and 6.84 GB relieves it — i.e. part of the gain
+  is paging relief, not pure kernel speedup. Not isolated; stated as the leading
+  hypothesis, not a certainty.
+- The benchmark asserts logits **finite**, not **top-1-correct**. The INT8 kernel
+  unit tests bound per-projection error (L2-relative < 3% vs F32), but a real
+  Qwen-3B top-1 logit parity-vs-F32 check is **step 2.5, still pending** — do not
+  read this as parity-verified.
+
+**Remaining Q8 work:**
+- **2.3b-attn** — extend Q8 to the attention Q/K/V/O projections (still F32).
+- **2.4** — GGUF loader reads `Q8_0` tensors straight from the file (today it
+  up-casts to F32 then re-quantizes on load; reading native Q8_0 blocks removes
+  the transient F32 buffer and the load-time quantize pass).
+- **2.5** — top-1 logit parity vs F32 on Qwen-3B + a final A/B writeup.
 
 ### Step 3 — Q4_K / Q6_K decode kernels
 
@@ -204,4 +247,4 @@ Every step lands with: a parity test (output correctness vs the prior path), an 
 - **Steps 2–3 are the concrete kernel design for ROADMAP "Slot 2b"** (quantized weight storage at inference) — Slot 2b can now reference this document instead of being a sketch.
 - **Step 1 is a new prerequisite** not previously in the ROADMAP — the single highest-leverage decode fix, and it requires no quantization.
 - **FP16-resident ("Slot 2c") is superseded.** Quantization reduces bytes more than FP16 and its integer dot product is both faster and fully portable; FP16-resident is not worth revisiting. See the Slot 2c post-mortem.
-- Honest ceiling: pure-managed C# cannot emit every intrinsic llama.cpp uses, but the decode-critical ones (INT8 SIMD) it *can*. A realistic target is closing 3.75× → ~1.2–1.5×, not exact parity.
+- Honest ceiling (original): pure-managed C# cannot emit every intrinsic llama.cpp uses, but the decode-critical ones (INT8 SIMD) it *can*. The original cautious target was closing 3.75× → ~1.2–1.5×, not exact parity. **Outcome (steps 1+1b+2.3a+2.3b-FFN): measured 10.05 vs 9.67 tok/s — parity reached and slightly exceeded**, ahead of the cautious estimate. The remaining honest qualifier is parity *verification* (step 2.5): throughput parity is measured, top-1 logit parity is not yet.

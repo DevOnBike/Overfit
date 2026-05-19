@@ -46,7 +46,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         public bool IsQuantized => _q8 is not null;
 
         /// <summary>True when neither backing is set (default value).</summary>
-        public bool IsEmpty => _f32 is null && _q8 is null;
+        public bool IsEmpty => _q8 is null && (_f32 is null || _f32.Length == 0);
+
+        /// <summary>Total weight element count, regardless of backing.</summary>
+        public long ElementCount => _q8 is not null
+            ? (long)_q8.OutputSize * _q8.InputSize
+            : _f32?.Length ?? 0;
 
         /// <summary>F32 weight span. Valid only when <see cref="IsQuantized"/> is false.</summary>
         public ReadOnlySpan<float> F32 => _f32!.AsReadOnlySpan();

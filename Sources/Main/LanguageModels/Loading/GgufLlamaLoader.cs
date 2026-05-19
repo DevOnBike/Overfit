@@ -132,9 +132,21 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     // FFN
                     var ffnNormGamma = AllocAndLoad(reader, $"blk.{l}.ffn_norm.weight", dModel);
                     var ffnNormBeta = TensorStorage<float>.Unpooled(0);
-                    var ffnGate = AllocAndLoadTransposed(reader, $"blk.{l}.ffn_gate.weight", dModel, dFF);
-                    var ffnUp = AllocAndLoadTransposed(reader, $"blk.{l}.ffn_up.weight", dModel, dFF);
-                    var ffnDown = AllocAndLoadTransposed(reader, $"blk.{l}.ffn_down.weight", dFF, dModel);
+                    // FFN weights — step 2.3b: resident as Q8_0 (output-major)
+                    // when both dims are block-aligned; F32 transposed otherwise.
+                    DecodeWeight ffnGate, ffnUp, ffnDown;
+                    if (dModel % Q8DotKernel.BlockSize == 0 && dFF % Q8DotKernel.BlockSize == 0)
+                    {
+                        ffnGate = AllocAndLoadQ8(reader, $"blk.{l}.ffn_gate.weight", dModel, dFF);
+                        ffnUp = AllocAndLoadQ8(reader, $"blk.{l}.ffn_up.weight", dModel, dFF);
+                        ffnDown = AllocAndLoadQ8(reader, $"blk.{l}.ffn_down.weight", dFF, dModel);
+                    }
+                    else
+                    {
+                        ffnGate = AllocAndLoadTransposed(reader, $"blk.{l}.ffn_gate.weight", dModel, dFF);
+                        ffnUp = AllocAndLoadTransposed(reader, $"blk.{l}.ffn_up.weight", dModel, dFF);
+                        ffnDown = AllocAndLoadTransposed(reader, $"blk.{l}.ffn_down.weight", dFF, dModel);
+                    }
 
                     layers[l] = new LayerWeightBuffers
                     {
@@ -292,6 +304,32 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     }
                 }
                 return storage;
+            }
+            finally
+            {
+                ArrayPool<float>.Shared.Return(raw);
+            }
+        }
+
+        /// <summary>
+        /// Loads an FFN weight directly into a Q8_0 <see cref="Q8Weight"/>. The
+        /// GGUF file stores it [outDim, inDim] — row = output = one output's
+        /// contraction vector — exactly Q8Weight's output-major layout, so each
+        /// row is quantized in place with no transpose.
+        /// </summary>
+        private static Q8Weight AllocAndLoadQ8(GgufReader reader, string name, int inDim, int outDim)
+        {
+            if (!reader.Tensors.TryGetValue(name, out var info))
+            {
+                throw new InvalidDataException($"Required tensor '{name}' missing from GGUF.");
+            }
+
+            var elementCount = checked((int)((long)inDim * outDim));
+            var raw = ArrayPool<float>.Shared.Rent(elementCount);
+            try
+            {
+                reader.LoadTensorAsF32(info, raw.AsSpan(0, elementCount));
+                return Q8Weight.QuantizeRows(raw.AsSpan(0, elementCount), outDim, inDim);
             }
             finally
             {

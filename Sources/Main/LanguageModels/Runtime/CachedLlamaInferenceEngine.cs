@@ -64,9 +64,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             public required TensorStorage<float>[] Bo;
             public required TensorStorage<float> FfnNormGamma;
             public required TensorStorage<float> FfnNormBeta;
-            public required TensorStorage<float> FfnGate;
-            public required TensorStorage<float> FfnUp;
-            public required TensorStorage<float> FfnDown;
+            public required DecodeWeight FfnGate;
+            public required DecodeWeight FfnUp;
+            public required DecodeWeight FfnDown;
         }
 
         // ── Constructor ───────────────────────────────────────────────────────
@@ -578,8 +578,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     refs[(l, LoRATargetModules.Value, kv)] = layer.Wv[kv];
                 }
 
-                refs[(l, LoRATargetModules.FeedForwardUp, 0)] = layer.FfnUp;
-                refs[(l, LoRATargetModules.FeedForwardDown, 0)] = layer.FfnDown;
+                refs[(l, LoRATargetModules.FeedForwardUp, 0)] = layer.FfnUp.F32Storage
+                    ?? throw new NotSupportedException(
+                        "LoRA on FeedForward requires F32-resident weights; this model loaded FFN as Q8_0. " +
+                        "LoRA on quantized weights is not supported.");
+                refs[(l, LoRATargetModules.FeedForwardDown, 0)] = layer.FfnDown.F32Storage
+                    ?? throw new NotSupportedException(
+                        "LoRA on FeedForward requires F32-resident weights; this model loaded FFN as Q8_0. " +
+                        "LoRA on quantized weights is not supported.");
             }
 
             return new LlamaLoRAAdapter(

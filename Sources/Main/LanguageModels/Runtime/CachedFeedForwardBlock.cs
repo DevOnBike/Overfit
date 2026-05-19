@@ -33,6 +33,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     {
         private readonly float[] _intermediate;
         private readonly float[] _gate;  // SwiGLU gate buffer (empty for GeLU)
+        private readonly sbyte[] _q8InputQuants;   // Q8 activation scratch (SwiGLU Q8 path)
+        private readonly float[] _q8InputScales;
 
         public CachedFeedForwardBlock(
             int dModel,
@@ -51,6 +53,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _gate = activation == FeedForwardActivation.SwiGLU
                               ? new float[dFF]
                               : [];
+
+            // Q8 activation scratch — sized for the largest projection input (dFF).
+            _q8InputQuants = new sbyte[dFF];
+            _q8InputScales = new float[(dFF + Q8DotKernel.BlockSize - 1) / Q8DotKernel.BlockSize];
         }
 
         public int DModel { get; }
@@ -150,6 +156,33 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             // output = intermediate @ Wdown
             SingleTokenProjectionKernel.ProjectParallel(_intermediate, wDown, [], output, DFF, DModel);
+        }
+
+        /// <summary>
+        /// SwiGLU decode with Q8_0-resident weights — the quantized counterpart
+        /// of <see cref="DecodeSwiGlu"/>. Same math; each projection runs through
+        /// <see cref="Q8DotKernel.ProjectParallel"/>. Used by the GGUF/Qwen
+        /// decode path once weights are quantized (step 2.3b).
+        /// </summary>
+        public void DecodeSwiGluQuantized(
+            ReadOnlySpan<float> hidden,
+            Q8Weight wGate,
+            Q8Weight wUp,
+            Q8Weight wDown,
+            Span<float> output)
+        {
+            // gate = SiLU(hidden @ Wgate)
+            Q8DotKernel.ProjectParallel(hidden, wGate, [], _gate, _q8InputQuants, _q8InputScales);
+            ApplySiLU(_gate);
+
+            // up = hidden @ Wup
+            Q8DotKernel.ProjectParallel(hidden, wUp, [], _intermediate, _q8InputQuants, _q8InputScales);
+
+            // intermediate = gate * up (element-wise)
+            TensorPrimitives.Multiply(_gate, _intermediate, _intermediate);
+
+            // output = intermediate @ Wdown
+            Q8DotKernel.ProjectParallel(_intermediate, wDown, [], output, _q8InputQuants, _q8InputScales);
         }
 
         public void GetLastIntermediate(Span<float> destination)
