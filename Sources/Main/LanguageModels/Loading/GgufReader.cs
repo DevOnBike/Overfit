@@ -146,6 +146,82 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
         }
 
+        /// <summary>
+        /// Loads a Q8_0 tensor's blocks WITHOUT dequantizing — de-interleaves the
+        /// on-disk <c>block_q8_0</c> layout (per 32 elements: one F16 scale + 32
+        /// int8 quants) into a flat <paramref name="quants"/> array and a
+        /// per-block <paramref name="scales"/> array (each F16 scale widened to
+        /// F32).
+        ///
+        /// Q8_0's scheme — symmetric, <c>scale = absmax/127</c> — is identical to
+        /// <c>Q8DotKernel</c>'s, so the de-interleaved result is a ready Q8
+        /// weight: no F32 round-trip, no re-quantization (decode-kernel plan
+        /// step 2.4). Throws if the tensor is not Q8_0.
+        /// </summary>
+        public void LoadTensorQ8_0Raw(GgufTensorInfo info, Span<sbyte> quants, Span<float> scales)
+        {
+            if (info is null) { throw new ArgumentNullException(nameof(info)); }
+            if (info.Type != GgmlType.Q8_0)
+            {
+                throw new InvalidOperationException(
+                    $"Tensor '{info.Name}' is {info.Type}, not Q8_0 — use LoadTensorAsF32.");
+            }
+
+            const int BlockElements = 32;
+            const int BlockBytes = 2 + 32;   // F16 scale + 32 int8 quants
+
+            var elementCount = info.ElementCount;
+            if (elementCount % BlockElements != 0)
+            {
+                throw new InvalidDataException(
+                    $"Q8_0 tensor '{info.Name}' element count {elementCount} is not divisible by {BlockElements}.");
+            }
+
+            var nBlocks = (int)(elementCount / BlockElements);
+            if (quants.Length < elementCount)
+            {
+                throw new ArgumentException(
+                    $"Quants span too small: {quants.Length} < {elementCount}.", nameof(quants));
+            }
+            if (scales.Length < nBlocks)
+            {
+                throw new ArgumentException(
+                    $"Scales span too small: {scales.Length} < {nBlocks}.", nameof(scales));
+            }
+
+            _stream.Seek(_dataStart + (long)info.Offset, SeekOrigin.Begin);
+
+            // Batched read — one syscall per ~278 KB, not per 34-byte block.
+            const int BatchBlocks = 8192;
+            var buf = new byte[BatchBlocks * BlockBytes];
+
+            var blocksDone = 0;
+            while (blocksDone < nBlocks)
+            {
+                var take = Math.Min(BatchBlocks, nBlocks - blocksDone);
+                var bytesToRead = take * BlockBytes;
+                var read = 0;
+                while (read < bytesToRead)
+                {
+                    var n = _stream.Read(buf, read, bytesToRead - read);
+                    if (n == 0) { throw new EndOfStreamException("Unexpected EOF reading Q8_0 tensor."); }
+                    read += n;
+                }
+
+                for (var k = 0; k < take; k++)
+                {
+                    var blk = blocksDone + k;
+                    var off = k * BlockBytes;
+                    var scaleU16 = BinaryPrimitives.ReadUInt16LittleEndian(buf.AsSpan(off, 2));
+                    scales[blk] = (float)BitConverter.UInt16BitsToHalf(scaleU16);
+                    MemoryMarshal.Cast<byte, sbyte>(buf.AsSpan(off + 2, BlockElements))
+                        .CopyTo(quants.Slice(blk * BlockElements, BlockElements));
+                }
+
+                blocksDone += take;
+            }
+        }
+
         /// <summary>Reads a metadata value or returns the default if the key is absent.</summary>
         public T GetMeta<T>(string key, T defaultValue)
         {

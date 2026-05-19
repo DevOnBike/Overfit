@@ -3,6 +3,9 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Runtime.CompilerServices;
+using DevOnBike.Overfit.Runtime;
+
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
     /// <summary>
@@ -65,7 +68,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// output's contraction vector. <paramref name="rowLength"/> must be a
         /// multiple of <see cref="Q8DotKernel.BlockSize"/>.
         /// </summary>
-        public static Q8Weight QuantizeRows(ReadOnlySpan<float> rowMajor, int rowCount, int rowLength)
+        public static unsafe Q8Weight QuantizeRows(ReadOnlySpan<float> rowMajor, int rowCount, int rowLength)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rowCount);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rowLength);
@@ -86,15 +89,53 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var quants = new sbyte[checked((int)total)];
             var scales = new float[checked((int)((long)rowCount * blocksPerRow))];
 
-            for (var r = 0; r < rowCount; r++)
+            // Per-row quantization is independent (disjoint reads + writes) —
+            // split the row range across the zero-allocation worker pool. This
+            // is a model-load hot path: ~⅓ of GGUF load time before this change
+            // (see docs/llamacpp-cpu-analysis.md §5). Bit-identical to the
+            // sequential row loop — each row's output depends only on that row.
+            fixed (float* src = rowMajor)
+            fixed (sbyte* quantsPtr = quants)
+            fixed (float* scalesPtr = scales)
             {
-                Q8DotKernel.Quantize(
-                    rowMajor.Slice(r * rowLength, rowLength),
-                    quants.AsSpan(r * rowLength, rowLength),
-                    scales.AsSpan(r * blocksPerRow, blocksPerRow));
+                var context = new QuantizeRowsContext
+                {
+                    Source = src,
+                    Quants = quantsPtr,
+                    Scales = scalesPtr,
+                    RowLength = rowLength,
+                    BlocksPerRow = blocksPerRow,
+                };
+
+                OverfitParallelFor.For(0, rowCount, &QuantizeRowChunk, &context);
             }
 
             return new Q8Weight(quants, scales, rowLength, rowCount);
+        }
+
+        /// <summary>Worker body for <see cref="QuantizeRows"/> — one disjoint band of rows.</summary>
+        private static unsafe void QuantizeRowChunk(int rowStart, int rowEnd, void* context)
+        {
+            ref var ctx = ref Unsafe.AsRef<QuantizeRowsContext>(context);
+            var rowLength = ctx.RowLength;
+            var blocksPerRow = ctx.BlocksPerRow;
+
+            for (var r = rowStart; r < rowEnd; r++)
+            {
+                Q8DotKernel.Quantize(
+                    new ReadOnlySpan<float>(ctx.Source + (long)r * rowLength, rowLength),
+                    new Span<sbyte>(ctx.Quants + (long)r * rowLength, rowLength),
+                    new Span<float>(ctx.Scales + (long)r * blocksPerRow, blocksPerRow));
+            }
+        }
+
+        private unsafe struct QuantizeRowsContext
+        {
+            public float* Source;
+            public sbyte* Quants;
+            public float* Scales;
+            public int RowLength;
+            public int BlocksPerRow;
         }
     }
 }

@@ -224,10 +224,37 @@ added in 2.5 that loads every weight as F32 (the pre-quantization decode path).
 Result: 28/32 greedy top-1 match, all mismatches at genuine near-ties — see the
 caveat above.
 
-**Remaining Q8 work:**
-- **2.4** — GGUF loader reads `Q8_0` tensors straight from the file (today it
-  up-casts to F32 then re-quantizes on load; reading native Q8_0 blocks removes
-  the transient F32 buffer and the load-time quantize pass).
+**Load performance.** Model load was profiled (Qwen-3B, FP16 GGUF, 15.4 s):
+**read 65%** (disk + FP16→F32 widen), **quantize 34%** (F32→Q8), layout 1%.
+Three load optimisations landed:
+
+- **Parallel quantize** — the F32→Q8 pass (`Q8Weight.QuantizeRows`) split over
+  `OverfitParallelFor` (per-row independent, bit-identical). Load 15.4 s → 12.0 s.
+- **2.4 — native Q8_0 read (FFN + LM-head)** — when a GGUF tensor is already
+  `Q8_0`, its blocks are read straight in: `GgufReader.LoadTensorQ8_0Raw`
+  de-interleaves the `block_q8_0` layout (int8 quants + F16→F32 scale) — no
+  dequant, no re-quantize.
+- **2.4b — native Q8_0 read (attention)** — extends it to the per-head Q/K/V/O
+  projections (Q/K/V = contiguous block slices; the output projection = a
+  strided per-head block gather).
+
+The whole decode-weight set now loads straight from a Q8_0 GGUF with no F32
+round-trip. Measured on Qwen-3B (`qwen.q8_0.gguf`, 3.37 GB; warm cache, same
+file): **load 2.9 s (2.4) → 1.6 s (2.4b)** — the eliminated attention
+Q8_0→F32→Q8 round-trip. Decode unchanged; **32/32** greedy top-1 parity vs the
+FP16-quantized engine (`Q8DecodeParityTests`).
+
+End-to-end on the dev box, loading the Q8_0 model vs the FP16 model:
+**~12 s → ~1.6 s**. That ~7× is three effects stacked — the native read (no
+dequant / quantize), the Q8_0 file being ~60% of the FP16 bytes, and
+(box-specific) the 3.37 GB Q8_0 file fitting in the OS page cache where the
+5.75 GB FP16 file does not on this box's RAM. Load time is genuinely
+page-cache-sensitive — treat the absolute figures as dev-box measurements, not
+portable constants.
+
+**Remaining:**
+- Sub-second *cold* load needs memory-mapping (zero-copy, lazy page-in) — a
+  separate, larger change; the read is otherwise floored by disk I/O.
 
 ### Step 3 — Q4_K / Q6_K decode kernels
 

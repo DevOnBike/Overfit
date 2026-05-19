@@ -162,9 +162,14 @@ Q8-resident — the full decode matmul path. **Measured on Qwen-3B: decode
 672 tests green** — Overfit now runs 1.38× faster than LLamaSharp (9.67 tok/s /
 ~6 GB) at slightly less RAM. Parity verified (2.5): `Q8DecodeParityTests`
 teacher-forces 32 decode steps F32-vs-Q8 on the real model — 28/32 greedy top-1
-match, all flips at genuine near-ties. Remaining: native Q8_0 GGUF load (no
-load-time F32 round-trip). Q4_K/Q6_K (below) reuse the same `Q8DotKernel` INT8
-machinery.
+match, all flips at genuine near-ties. Model load was profiled (15.4 s: read
+65%, quantize 34%); the quantize pass was parallelised over `OverfitParallelFor`
+(load 15.4 s → 12.0 s), and the loader now reads native `Q8_0` blocks straight
+from a Q8_0 GGUF for the whole decode-weight set — FFN + LM-head (2.4) and the
+per-head attention Q/K/V/O (2.4b), no dequant / re-quantize. Q8_0 model load
+**2.9 s → 1.6 s** across 2.4→2.4b; end-to-end vs the FP16 model ~12 s → ~1.6 s
+on the dev box, 32/32 greedy parity. Q4_K/Q6_K (below) reuse the same
+`Q8DotKernel` INT8 machinery.
 
 **Work:**
 - [ ] `TensorStorage<TBlock>` or parallel `QuantizedTensorStorage` abstraction (Q4_K and Q6_K block shapes).
