@@ -171,43 +171,72 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var finalNormGamma = AllocAndLoad(reader, "output_norm.weight", dModel);
             var finalNormBeta = TensorStorage<float>.Unpooled(0);
 
-            // LM head: tied embeddings use token_embd transposed; untied uses output.weight transposed
-            // Kernel expects [dModel, vocab] (input-major), but file stores [vocab, dModel].
-            var lmHead = TensorStorage<float>.Unpooled(checked((int)((long)vocab * dModel)));
-            var lmHeadSpan = lmHead.AsSpan();
-            var embSpan = embedWeights.AsSpan();
-
-            if (tieWeights)
+            // LM head — step 2.3a: resident as Q8_0 (output-major). The file
+            // stores it [vocab, dModel] — row = token = one output's contraction
+            // vector — which is exactly Q8Weight's layout, so no transpose.
+            // tied → token_embd; untied → output.weight. When dModel is not a
+            // multiple of the Q8 block size, fall back to an F32 transposed
+            // LM head (the kernel's input-major layout).
+            DecodeWeight lmHead;
+            if (dModel % Q8DotKernel.BlockSize == 0)
             {
-                // Use token_embd, transpose to [dModel, vocab]
-                for (var d = 0; d < dModel; d++)
+                if (tieWeights)
                 {
-                    for (var t = 0; t < vocab; t++)
+                    lmHead = Q8Weight.QuantizeRows(embedWeights.AsReadOnlySpan(), vocab, dModel);
+                }
+                else
+                {
+                    var outElems = checked((int)((long)vocab * dModel));
+                    var outputRaw = ArrayPool<float>.Shared.Rent(outElems);
+                    try
                     {
-                        lmHeadSpan[d * vocab + t] = embSpan[t * dModel + d];
+                        LoadTensor(reader, "output.weight", outputRaw.AsSpan(0, outElems));
+                        lmHead = Q8Weight.QuantizeRows(outputRaw.AsSpan(0, outElems), vocab, dModel);
+                    }
+                    finally
+                    {
+                        ArrayPool<float>.Shared.Return(outputRaw);
                     }
                 }
             }
             else
             {
-                // Read output.weight and transpose — use pool for the ~1.2 GB transient at 3B
-                var outElems = checked((int)((long)vocab * dModel));
-                var outputRaw = ArrayPool<float>.Shared.Rent(outElems);
-                try
+                // F32 fallback — transpose [vocab, dModel] → [dModel, vocab].
+                var f32LmHead = TensorStorage<float>.Unpooled(checked((int)((long)vocab * dModel)));
+                var lmHeadSpan = f32LmHead.AsSpan();
+                if (tieWeights)
                 {
-                    LoadTensor(reader, "output.weight", outputRaw.AsSpan(0, outElems));
+                    var embSpan = embedWeights.AsReadOnlySpan();
                     for (var d = 0; d < dModel; d++)
                     {
                         for (var t = 0; t < vocab; t++)
                         {
-                            lmHeadSpan[d * vocab + t] = outputRaw[t * dModel + d];
+                            lmHeadSpan[d * vocab + t] = embSpan[t * dModel + d];
                         }
                     }
                 }
-                finally
+                else
                 {
-                    ArrayPool<float>.Shared.Return(outputRaw);
+                    var outElems = checked((int)((long)vocab * dModel));
+                    var outputRaw = ArrayPool<float>.Shared.Rent(outElems);
+                    try
+                    {
+                        LoadTensor(reader, "output.weight", outputRaw.AsSpan(0, outElems));
+                        for (var d = 0; d < dModel; d++)
+                        {
+                            for (var t = 0; t < vocab; t++)
+                            {
+                                lmHeadSpan[d * vocab + t] = outputRaw[t * dModel + d];
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        ArrayPool<float>.Shared.Return(outputRaw);
+                    }
                 }
+
+                lmHead = f32LmHead;
             }
 
             return CachedLlamaInferenceEngine.CreateFromBuffers(

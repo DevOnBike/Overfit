@@ -42,7 +42,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly TensorStorage<float> _embedWeights;
         private readonly TensorStorage<float> _finalNormGamma;
         private readonly TensorStorage<float> _finalNormBeta;
-        private readonly TensorStorage<float> _lmHead;
+        private readonly DecodeWeight _lmHead;
         private readonly LayerWeightBuffers[] _layers;
         private readonly StackWeights _stackWeights;
 
@@ -76,7 +76,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             TensorStorage<float> embedWeights,
             TensorStorage<float> finalNormGamma,
             TensorStorage<float> finalNormBeta,
-            TensorStorage<float> lmHead,
+            DecodeWeight lmHead,
             LayerWeightBuffers[] layers)
         {
             _config = config;
@@ -118,7 +118,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             TensorStorage<float> embedWeights,
             TensorStorage<float> finalNormGamma,
             TensorStorage<float> finalNormBeta,
-            TensorStorage<float> lmHead,
+            DecodeWeight lmHead,
             LayerWeightBuffers[] layers)
         {
             return new CachedLlamaInferenceEngine(
