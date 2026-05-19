@@ -83,13 +83,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// </param>
         public void Decode(
             ReadOnlySpan<float> hidden,
-            MatrixWeight wq,
-            MatrixWeight wk,
-            MatrixWeight wv,
+            ReadOnlySpan<float> wq,
+            ReadOnlySpan<float> wk,
+            ReadOnlySpan<float> wv,
             ReadOnlySpan<float> bq,
             ReadOnlySpan<float> bk,
             ReadOnlySpan<float> bv,
-            MatrixWeight wo,
+            ReadOnlySpan<float> wo,
             KeyValueCache cache,
             int layerIndex,
             int headIndex,

@@ -160,42 +160,67 @@ These are working in the codebase but **outside the current GPT-2 focus week.** 
 
 Estimated effort: 1-2 days. Largest single architectural change since KV-cache runtime.
 
-### Slot 2c — FP16 / BF16-resident weights (cheap precursor to 2b)
+### Slot 2c — FP16-resident weights — ATTEMPTED & REVERTED (May 2026)
 
-**Evidence — May 2026 benchmark vs LLamaSharp**, same Qwen2.5-3B `qwen.gguf`
-(FP16), single-stream CPU decode:
+Post-mortem of a refuted experiment. Kept as a record so the idea is not retried.
 
-| Metric | Overfit | LLamaSharp (native llama.cpp) |
-|--------|--------:|------------------------------:|
-| In-memory precision | F32 (up-cast) | FP16 (native) |
-| Decode throughput | 2.59 tok/s | 9.67 tok/s |
+**Hypothesis:** `GgufLlamaLoader` up-casts FP16 GGUF weights to F32 at load, so
+decode streams 2× the bytes. Keeping weights FP16-resident (`Half`) and widening
+F16→F32 in the matmul should give ~2× throughput + ~½ RAM — premised on decode
+being memory-bandwidth-bound.
+
+**Benchmark that motivated it** — same Qwen2.5-3B `qwen.gguf` (FP16),
+single-stream CPU decode:
+
+| Metric | Overfit (F32 up-cast) | LLamaSharp (native llama.cpp) |
+|--------|----------------------:|------------------------------:|
+| Decode throughput | 2.58 tok/s | 9.67 tok/s |
 | Peak working set | 14.4 GB | 6.0 GB |
-| Managed alloc / token | 2 B | 21 KB |
 
-**The gap:** `GgufLlamaLoader` up-casts *every* source precision to F32 —
-including FP16/BF16 files, which need no dequantization at all. Decode is
-memory-bandwidth-bound (each token streams all weights once), so F32-resident
-weights are gratuitously 2× the bytes moved per token. Roughly half the 3.7×
-throughput gap above — and *all* the RAM gap — is this self-inflicted up-cast,
-not a kernel-quality deficit.
+**Built:** full FP16-resident path — a `MatrixWeight` precision-carrier union
+threaded through the decode weight structs, `ProjectHalf` / `AccumulateHalf`
+kernels, `GgufReader.LoadTensorAsF16`, an `fp16Resident` A/B toggle. Kernel parity
+bit-identical to F32; 666 tests green.
 
-**Work** (simpler than Slot 2b — no block dequant):
-- [ ] Store FP16 weights as `Half` / raw `ushort` instead of up-casting at load.
-- [ ] Widen FP16→F32 in-kernel via hardware F16C (`Avx.ConvertToVector256Single`,
-  `vcvtph2ps`) inside the matmul inner loop — compute stays F32, only the weight
-  *load* halves.
-- [ ] BF16 variant — widen is a 16-bit left shift.
-- [ ] Parity: greedy top-1 bit-identical to the current F32 path; logits within
-  FP16 noise.
+**Measured — hypothesis REFUTED.** Rigorous A/B, best-of-3, same model:
 
-**Expected payoff:** up to ~2× decode throughput (≈5 tok/s on 3B) and ~2× lower
-RAM (≈7 GB) — narrowing the LLamaSharp gap from 3.7× to ~1.9×. Being ~2× slower
-than hand-tuned native *while staying pure-managed, zero-alloc and AOT-clean* is
-a defensible position; 3.7× slower at 14 GB is not. Also a **launch-credibility**
-item — external reviewers will benchmark against LLamaSharp.
+| Metric | F32 (baseline) | FP16-resident |
+|--------|---------------:|--------------:|
+| Throughput | 2.58 tok/s | 1.68 tok/s — **−35%** |
+| Steady RAM | 14.36 GB | 15.85 GB — regressed |
 
-Estimated effort: ~1-2 days. Lower-risk, higher immediate value than full Q4/Q6
-Slot 2b — **do this first.**
+**Why it failed:**
+
+1. **Decode is compute-bound, not bandwidth-bound.** Overfit F32 decode reads only
+   ~31 GB/s — far under the ~50–80 GB/s DRAM ceiling. DRAM was never the
+   bottleneck, so halving weight bytes unblocks nothing and the F16→F32 widen is
+   pure added cost.
+2. **No fused widen is possible in managed .NET.** A register-fused single-pass
+   kernel needs a per-vector F16→F32 intrinsic. .NET 10 exposes none — no `F16C`
+   class, no `Half` overload on `Vector256.ConvertToSingle` / `WidenLower`. The
+   hardware `vcvtph2ps` is reachable only via whole-span `TensorPrimitives`
+   (forcing a scratch round-trip). A hand-rolled SIMD bit-twiddle widen costs
+   ~9 ops per 8 elements vs the 1-op hardware convert → fusing would be *slower*.
+   So **−35% is irreducible** for FP16-resident decode in managed C#.
+3. **RAM regressed** — the F32→F16 load conversion churns multi-GB F32 buffers on
+   the Large Object Heap; the GC retains those segments.
+
+**Outcome:** the entire FP16-resident path was reverted (`MatrixWeight`,
+`ProjectHalf`, the loader F16 path, the toggle) — this post-mortem is all that
+remains. Durable takeaway: **Overfit decode is compute-bound** — decode-speed
+work must target compute, not memory bandwidth.
+
+**What this means for the LLamaSharp gap.** The 3.75× gap is kernel quality, not
+weight precision. Overfit F32 at 2.58 tok/s ≈ 31 GB/s — *under* the DRAM ceiling;
+a bandwidth-saturating F32 kernel alone reaches ~4 tok/s (12 GB/token ÷ ~50 GB/s),
+≈1.5× of measured headroom. The next decode-perf lever is therefore kernel-side —
+blocked GEMV (`SingleTokenProjectionKernel.Accumulate` re-streams the whole output
+vector for *every* input element → ~2× redundant memory traffic on FFN / LM-head),
+parallelizing the small per-head matmuls, tighter SIMD — **not** precision tricks.
+Structural follow-on is quantized storage (**Slot 2b**): Q4/Q8 cut bytes more than
+FP16 and integer-SIMD is llama.cpp's actual weapon. Honest ceiling: pure-managed
+C# cannot emit every intrinsic llama.cpp uses (F16C proved that) — a realistic
+target is closing 3.75× → ~2–2.5×, not parity.
 
 ### Q4_K_M integration parity test
 
@@ -409,7 +434,7 @@ What the market actually validates for Overfit's niche, ranked:
 |---|----------|---------------|-----------------|
 | 1 | **Embedding model support** (BGE / E5 / multilingual-e5) | Vector-DB market $2.46B (2024) → $10.6B (2032), 27.5 % CAGR; Gartner: 30 %+ of enterprises on vector DBs by 2026; enterprise hybrid-retrieval intent tripled in one quarter. RAG is *the* enterprise LLM pattern. Embedding models are encoder transformers — single forward pass, no KV-cache — **CPU-friendly**: the one mainstream workload squarely in Overfit's wheelhouse. | ~1-2 weeks. New work: encoder runtime path (bidirectional attention — `MultiHeadAttentionLayer` already has the `causalMask` toggle), WordPiece / SentencePiece tokenizer, mean/CLS pooling, HuggingFace→Overfit weight converter. (An earlier "1-2 days" estimate was wrong — different model family + tokenizer.) |
 | 2 | **Deepen regulated / private-inference positioning** | EU AI Act reaches full enforcement Aug 2026 (high-risk AI requires audit trails, explainability, human oversight). Self-hosted deployments report −75 % data-breach incidents — but 175k exposed Ollama servers are actively exploited ("LLMjacking"): self-hosted-*as-a-server* is itself a risk. Overfit-as-a-library-in-process (no exposed endpoint) is structurally safer. | Mostly copy. Started: `docs/scenarios/regulated-industries.md` + README "What Overfit is not". Add the "library-in-process > exposed server" security argument. |
-| 3 | **In-memory quantization** (Q4_K / Q6_K dequant-fused matmul) | Every inference-engine comparison lists quantization as core (llama.cpp = "CPU-first + quantization"). It is the path to running *larger* models on CPU / edge. | Already specified — see **Slot 2b / 2c** above. This research promotes it from "deferred" to a named priority; **Slot 2c (FP16-resident) is the cheap first step**, benchmark-backed. |
+| 3 | **In-memory quantization** (Q4_K / Q6_K dequant-fused matmul) | Every inference-engine comparison lists quantization as core (llama.cpp = "CPU-first + quantization"). It is the path to running *larger* models on CPU / edge. | Already specified — see **Slot 2b** above. This research promotes it from "deferred" to a named priority. (The FP16-resident shortcut, Slot 2c, was tried and reverted — see its post-mortem; quantization is the real lever.) |
 | 4 | **Audit / inference-record primitives** | EU AI Act mandates reproducible audit trails + explainability for high-risk AI. Overfit already has deterministic greedy decode and file-versioned weights — the missing piece is a first-class, opt-in decision record (input + model hash + output + timestamp). | ~few days. Grounds the prior generic "telemetry" idea in an actual regulation. |
 | 5 | **Microsoft Agent Framework / Semantic Kernel adapter** | Microsoft consolidated Semantic Kernel + AutoGen into "Microsoft Agent Framework" (Oct 2025); SK is in maintenance mode. Do **not** build a competing agent framework — be the inference + embedding *backend* it calls. Distribution via Microsoft's own ecosystem. | ~2 days, once embeddings (item 1) land. |
 

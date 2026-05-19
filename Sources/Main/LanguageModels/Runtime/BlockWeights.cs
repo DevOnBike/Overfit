@@ -29,11 +29,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly TensorStorage<float> _attentionBias;
         private readonly TensorStorage<float> _ln2Gamma;
         private readonly TensorStorage<float> _ln2Beta;
-        private readonly MatrixWeight _ffnW1;
+        private readonly TensorStorage<float> _ffnW1;
         private readonly TensorStorage<float> _ffnB1;
-        private readonly MatrixWeight _ffnW2;
+        private readonly TensorStorage<float> _ffnW2;
         private readonly TensorStorage<float> _ffnB2;
-        private readonly MatrixWeight _ffnGate;   // SwiGLU Wgate (empty for GeLU)
+        private readonly TensorStorage<float> _ffnGate;   // SwiGLU Wgate (empty for GeLU)
 
         /// <summary>Production constructor — zero-copy references from a real model block.</summary>
         internal BlockWeights(TransformerBlock block, int headCount)
@@ -107,11 +107,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             TensorStorage<float>? attentionBias,
             TensorStorage<float> ln2Gamma,
             TensorStorage<float>? ln2Beta,
-            MatrixWeight ffnW1,
+            TensorStorage<float> ffnW1,
             TensorStorage<float>? ffnB1,
-            MatrixWeight ffnW2,
+            TensorStorage<float> ffnW2,
             TensorStorage<float>? ffnB2,
-            MatrixWeight? ffnGate)
+            TensorStorage<float>? ffnGate)
         {
             static TensorStorage<float> Empty() => TensorStorage<float>.Unpooled(0);
 
@@ -134,9 +134,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         public ReadOnlySpan<float> AttentionBias => _attentionBias.AsReadOnlySpan();
         public ReadOnlySpan<float> Ln2Gamma => _ln2Gamma.AsReadOnlySpan();
         public ReadOnlySpan<float> Ln2Beta => _ln2Beta.AsReadOnlySpan();
-        public MatrixWeight FfnW1 => _ffnW1;
+        public ReadOnlySpan<float> FfnW1 => _ffnW1.AsReadOnlySpan();
         public ReadOnlySpan<float> FfnB1 => _ffnB1.AsReadOnlySpan();
-        public MatrixWeight FfnW2 => _ffnW2;
+        public ReadOnlySpan<float> FfnW2 => _ffnW2.AsReadOnlySpan();
         public ReadOnlySpan<float> FfnB2 => _ffnB2.AsReadOnlySpan();
 
         public ref readonly SingleHeadWeights Head(int h) => ref _heads[h];
@@ -148,7 +148,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         public ref readonly KvHeadWeights KvHead(int kvH) => ref _kvHeads![kvH];
 
         /// <summary>SwiGLU gate weight. Empty for GeLU/ReLU FFN.</summary>
-        public MatrixWeight FfnGate => _ffnGate;
+        public ReadOnlySpan<float> FfnGate => _ffnGate.AsReadOnlySpan();
 
         private static TensorStorage<float> CreateStorage(float[]? source)
         {

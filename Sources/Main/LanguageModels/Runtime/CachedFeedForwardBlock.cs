@@ -61,9 +61,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         public void Decode(
             ReadOnlySpan<float> hidden,
-            MatrixWeight w1,
+            ReadOnlySpan<float> w1,
             ReadOnlySpan<float> b1,
-            MatrixWeight w2,
+            ReadOnlySpan<float> w2,
             ReadOnlySpan<float> b2,
             Span<float> output)
         {
@@ -96,8 +96,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         public void DecodeWithoutBias(
             ReadOnlySpan<float> hidden,
-            MatrixWeight w1,
-            MatrixWeight w2,
+            ReadOnlySpan<float> w1,
+            ReadOnlySpan<float> w2,
             Span<float> output)
         {
             Decode(hidden, w1, [], w2, [], output);
@@ -112,9 +112,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// </summary>
         public void DecodeSwiGlu(
             ReadOnlySpan<float> hidden,
-            MatrixWeight wGate,
-            MatrixWeight wUp,
-            MatrixWeight wDown,
+            ReadOnlySpan<float> wGate,
+            ReadOnlySpan<float> wUp,
+            ReadOnlySpan<float> wDown,
             Span<float> output)
         {
             if (hidden.Length < DModel)
@@ -164,9 +164,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         private void ValidateDecodeArguments(
             ReadOnlySpan<float> hidden,
-            MatrixWeight w1,
+            ReadOnlySpan<float> w1,
             ReadOnlySpan<float> b1,
-            MatrixWeight w2,
+            ReadOnlySpan<float> w2,
             ReadOnlySpan<float> b2,
             Span<float> output)
         {

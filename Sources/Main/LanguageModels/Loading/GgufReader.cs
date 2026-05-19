@@ -146,34 +146,6 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
         }
 
-        /// <summary>
-        /// Loads an F16 tensor's raw 16-bit half-precision values directly into
-        /// <paramref name="destination"/> with no F32 up-cast (Slot 2c: FP16-resident
-        /// weights). Only valid for F16 source tensors — other types throw.
-        /// </summary>
-        public void LoadTensorAsF16(GgufTensorInfo info, Span<Half> destination)
-        {
-            if (info is null) { throw new ArgumentNullException(nameof(info)); }
-
-            if (info.Type != GgmlType.F16)
-            {
-                throw new NotSupportedException(
-                    $"LoadTensorAsF16 only supports F16 source tensors; '{info.Name}' is {info.Type}. " +
-                    "Use LoadTensorAsF32 for other types.");
-            }
-
-            var elementCount = info.ElementCount;
-            if (destination.Length < elementCount)
-            {
-                throw new ArgumentException(
-                    $"Destination span too small: {destination.Length} < {elementCount}.",
-                    nameof(destination));
-            }
-
-            _stream.Seek(_dataStart + (long)info.Offset, SeekOrigin.Begin);
-            ReadRawHalf(destination[..(int)elementCount]);
-        }
-
         /// <summary>Reads a metadata value or returns the default if the key is absent.</summary>
         public T GetMeta<T>(string key, T defaultValue)
         {
@@ -240,20 +212,6 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             {
                 var n = _stream.Read(bytes[read..]);
                 if (n == 0) { throw new EndOfStreamException("Unexpected EOF reading tensor data."); }
-                read += n;
-            }
-        }
-
-        private void ReadRawHalf(Span<Half> dst)
-        {
-            // GGUF F16 is IEEE-754 half, little-endian — the in-memory layout of
-            // System.Half on LE hosts. Bulk raw copy, same strategy as ReadF32.
-            var bytes = MemoryMarshal.AsBytes(dst);
-            var read = 0;
-            while (read < bytes.Length)
-            {
-                var n = _stream.Read(bytes[read..]);
-                if (n == 0) { throw new EndOfStreamException("Unexpected EOF reading F16 tensor."); }
                 read += n;
             }
         }

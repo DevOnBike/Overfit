@@ -33,7 +33,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private BlockWeights[] _blocks = null!;
         private TensorStorage<float> _finalNormGamma = null!;
         private TensorStorage<float> _finalNormBeta = null!;
-        private MatrixWeight? _lmHead;
+        private TensorStorage<float>? _lmHead;
+        private float[]? _lmHeadTransposed;
 
         private StackWeights() { }
 
@@ -45,7 +46,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             BlockWeights[] blocks,
             TensorStorage<float> finalNormGamma,
             TensorStorage<float> finalNormBeta,
-            MatrixWeight lmHead)
+            TensorStorage<float> lmHead)
         {
             _blocks = blocks;
             _finalNormGamma = finalNormGamma;
@@ -70,7 +71,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 // Transpose once at construction — only for tied weights (GPT-1).
                 // GPT-2 uses TieWeights=false — this path is not taken for GPT-2.
-                _lmHead = BuildTransposedEmbedding(
+                _lmHeadTransposed = BuildTransposedEmbedding(
                     model.TokenEmbedding.Weight.Data.AsReadOnlySpan(),
                     cfg.VocabSize,
                     cfg.DModel);
@@ -95,6 +96,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 _blocks = new BlockWeights[layerCount],
                 _finalNormGamma = CreateStorage(finalNormGamma),
                 _finalNormBeta = CreateStorage(finalNormBeta),
+                _lmHeadTransposed = null,
                 _lmHead = CreateStorage(lmHead),
             };
 
@@ -111,13 +113,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         public ReadOnlySpan<float> FinalNormGamma => _finalNormGamma.AsReadOnlySpan();
         public ReadOnlySpan<float> FinalNormBeta => _finalNormBeta.AsReadOnlySpan();
 
-        public MatrixWeight LmHeadWeights => _lmHead!.Value;
+        public ReadOnlySpan<float> LmHeadWeights =>
+            _lmHeadTransposed is not null
+                ? _lmHeadTransposed.AsSpan()
+                : _lmHead!.AsReadOnlySpan();
 
-        private static TensorStorage<float> BuildTransposedEmbedding(
+        private static float[] BuildTransposedEmbedding(
             ReadOnlySpan<float> source, int vocabSize, int dModel)
         {
-            var storage = TensorStorage<float>.Unpooled(dModel * vocabSize);
-            var buf = storage.AsSpan();
+            var buf = new float[dModel * vocabSize];
             for (var t = 0; t < vocabSize; t++)
             {
                 for (var d = 0; d < dModel; d++)
@@ -126,7 +130,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 }
             }
 
-            return storage;
+            return buf;
         }
     }
 }
