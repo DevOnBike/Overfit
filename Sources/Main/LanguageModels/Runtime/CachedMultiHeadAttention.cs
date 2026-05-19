@@ -177,7 +177,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     var h = group * groupSize + headInGroup;
                     ref readonly var hw = ref ctx.Weights.Head(h);
 
-                    ReadOnlySpan<float> wk, wv, bk, bv;
+                    DecodeWeight wk, wv;
+                    ReadOnlySpan<float> bk, bv;
                     if (ctx.UseGqa)
                     {
                         // GQA: every Q head in the group shares one KV head.
@@ -192,17 +193,39 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         bk = hw.Bk; bv = hw.Bv;
                     }
 
-                    ctx.Heads[h].Decode(
-                        hidden,
-                        hw.Wq, wk, wv,
-                        hw.Bq, bk, bv,
-                        hw.Wo,
-                        ctx.Cache,
-                        ctx.LayerIndex,
-                        group,            // KV-cache slot for this group
-                        ctx.Position,
-                        ctx.HeadOutputs.AsSpan(h * dModel, dModel),
-                        ctx.Rope);
+                    var headOutput = ctx.HeadOutputs.AsSpan(h * dModel, dModel);
+
+                    // Q8-resident attention weights (the GGUF path, step 2.3b-attn)
+                    // dispatch to the quantized projection kernel; F32 otherwise.
+                    // The loader quantizes Q/K/V/O together, so Wq's tag decides all four.
+                    if (hw.Wq.IsQuantized)
+                    {
+                        ctx.Heads[h].DecodeQuantized(
+                            hidden,
+                            hw.Wq.Quantized, wk.Quantized, wv.Quantized,
+                            hw.Bq, bk, bv,
+                            hw.Wo.Quantized,
+                            ctx.Cache,
+                            ctx.LayerIndex,
+                            group,            // KV-cache slot for this group
+                            ctx.Position,
+                            headOutput,
+                            ctx.Rope);
+                    }
+                    else
+                    {
+                        ctx.Heads[h].Decode(
+                            hidden,
+                            hw.Wq.F32, wk.F32, wv.F32,
+                            hw.Bq, bk, bv,
+                            hw.Wo.F32,
+                            ctx.Cache,
+                            ctx.LayerIndex,
+                            group,            // KV-cache slot for this group
+                            ctx.Position,
+                            headOutput,
+                            ctx.Rope);
+                    }
                 }
             }
         }

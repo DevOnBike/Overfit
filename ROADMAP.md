@@ -23,7 +23,7 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 | Native C# GGUF loader (F32/F16/BF16/Q8_0/Q4_K/Q6_K) | ✅ Loads `*.gguf` from Ollama/HF directly |
 | Streaming token generation (`IAsyncEnumerable`) | ✅ Stable, with stop-tokens + cancellation |
 | LoRA adapter (Enable/Disable, Save/Load) | ✅ Stable, zero-copy weight refs |
-| **Quantized weight storage at inference time** | 🟡 **Q8 in flight — FFN + LM-head Q8-resident, decode 2.5×, RAM −52% (see "Slot 2b")** |
+| **Quantized weight storage at inference time** | 🟢 **Q8 decode path done — FFN + LM-head + attention Q8-resident, decode 3.3×, RAM −59% (see "Slot 2b")** |
 | GPU backend | ❌ Not started |
 
 ---
@@ -151,16 +151,18 @@ These are working in the codebase but **outside the current GPT-2 focus week.** 
 **The gap:** Q4_K_M loader exists (decodes from disk) but currently dequantizes everything to FP32 on load. A 2 GB Q4_K_M file produces ~14 GB FP32 weights in RAM. The "3B in 4 GB RAM" payoff requires keeping weights quantized in RAM and dequantizing per-block during matmul.
 
 **Q8_0 progress (this session) — `docs/llamacpp-cpu-analysis.md` step 2.**
-The kernel design + measurements live in that doc. Shipped so far: `Q8DotKernel`
-(symmetric F32→Q8 quantizer + INT8 `vpmaddubsw` SIMD dot + parallel GEMV),
-`Q8Weight` (output-major Q8 weight storage), `DecodeWeight` (tagged F32|Q8 weight
-handle — the precision-agnostic replacement for the raw `TensorStorage<float>`
-refs in `BlockWeights`/`StackWeights`). LM-head (2.3a) and FFN gate/up/down
-(2.3b) are Q8-resident. **Measured on Qwen-3B: decode 4.01 → 10.05 tok/s (2.5×),
-steady RAM ~14.4 → 6.84 GB (−52%), 0 B/token kept, 672 tests green** — Overfit
-now matches/beats LLamaSharp (9.67 tok/s / ~6 GB). Remaining: attention Q/K/V/O
-→ Q8, native Q8_0 GGUF load, top-1 logit parity. Q4_K/Q6_K (below) reuse the
-same `Q8DotKernel` INT8 machinery.
+The kernel design + measurements live in that doc. Shipped: `Q8DotKernel`
+(symmetric F32→Q8 quantizer + INT8 `vpmaddubsw` SIMD dot + sequential & parallel
+GEMV), `Q8Weight` (output-major Q8 weight storage), `DecodeWeight` (tagged F32|Q8
+weight handle — the precision-agnostic replacement for the raw
+`TensorStorage<float>` refs in `BlockWeights`/`StackWeights`). LM-head (2.3a),
+FFN gate/up/down (2.3b-FFN) and per-head attention Q/K/V/O (2.3b-attn) are all
+Q8-resident — the full decode matmul path. **Measured on Qwen-3B: decode
+4.01 → 13.38 tok/s (3.3×), steady RAM ~14.4 → 5.90 GB (−59%), 0 B/token kept,
+672 tests green** — Overfit now runs 1.38× faster than LLamaSharp (9.67 tok/s /
+~6 GB) at slightly less RAM. Remaining: native Q8_0 GGUF load (no load-time F32
+round-trip), top-1 logit parity vs F32. Q4_K/Q6_K (below) reuse the same
+`Q8DotKernel` INT8 machinery.
 
 **Work:**
 - [ ] `TensorStorage<TBlock>` or parallel `QuantizedTensorStorage` abstraction (Q4_K and Q6_K block shapes).

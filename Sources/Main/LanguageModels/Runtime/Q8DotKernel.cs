@@ -215,6 +215,33 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         }
 
         /// <summary>
+        /// <see cref="Project"/> overload taking a resident <see cref="Q8Weight"/>
+        /// — the sequential quantized projection used by per-head attention decode
+        /// (each head already runs on its own <c>OverfitParallelFor</c> worker, so
+        /// the projection itself stays sequential — no nested parallelism).
+        /// </summary>
+        public static void Project(
+            ReadOnlySpan<float> input,
+            Q8Weight weight,
+            ReadOnlySpan<float> bias,
+            Span<float> output,
+            Span<sbyte> inputQuants,
+            Span<float> inputScales)
+        {
+            ArgumentNullException.ThrowIfNull(weight);
+            Project(
+                input,
+                weight.Quants,
+                weight.Scales,
+                bias,
+                output,
+                weight.InputSize,
+                weight.OutputSize,
+                inputQuants,
+                inputScales);
+        }
+
+        /// <summary>
         /// Parallel quantized projection — <see cref="Project"/> with the output
         /// loop split across the zero-allocation <c>OverfitParallelFor</c> worker
         /// pool. The activation is quantized once (sequentially) into the

@@ -118,14 +118,18 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     LoadTensorOrZeros(reader, $"blk.{l}.attn_k.bias", kBiasFull.AsSpan(0, nKvHeads * headDim));
                     LoadTensorOrZeros(reader, $"blk.{l}.attn_v.bias", vBiasFull.AsSpan(0, nKvHeads * headDim));
 
-                    // Split into per-head storages (with transposition)
-                    var wq = SplitQuery(qFull, nHeads, dModel, headDim);
+                    // Split into per-head weights — step 2.3b-attn: per-head Q8_0
+                    // (output-major) when both dims are block-aligned; F32
+                    // transposed otherwise.
+                    var attnQuantizable =
+                        dModel % Q8DotKernel.BlockSize == 0 && headDim % Q8DotKernel.BlockSize == 0;
+                    var wq = SplitQuery(qFull, nHeads, dModel, headDim, attnQuantizable);
                     var bq = SplitBias(qBiasFull, nHeads, headDim);
-                    var wk = SplitKeyValue(kFull, nKvHeads, dModel, headDim);
+                    var wk = SplitKeyValue(kFull, nKvHeads, dModel, headDim, attnQuantizable);
                     var bk = SplitBias(kBiasFull, nKvHeads, headDim);
-                    var wv = SplitKeyValue(vFull, nKvHeads, dModel, headDim);
+                    var wv = SplitKeyValue(vFull, nKvHeads, dModel, headDim, attnQuantizable);
                     var bv = SplitBias(vBiasFull, nKvHeads, headDim);
-                    var wo = SplitOutput(oFull, nHeads, dModel, headDim);
+                    var wo = SplitOutput(oFull, nHeads, dModel, headDim, attnQuantizable);
                     var bo = new TensorStorage<float>[nHeads];
                     for (var h = 0; h < nHeads; h++) { bo[h] = TensorStorage<float>.Unpooled(dModel); }
 
@@ -364,38 +368,61 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// Per-head kernel layout: Wq_h[i, j] at flat (i*headDim + j) where i in [0, dModel), j in [0, headDim).
         /// Mapping: Wq_h[i, j] = Q[h*headDim + j, i] = file[(h*headDim + j)*dModel + i].
         /// </summary>
-        private static TensorStorage<float>[] SplitQuery(float[] qFull, int nHeads, int dModel, int headDim)
+        private static DecodeWeight[] SplitQuery(
+            float[] qFull, int nHeads, int dModel, int headDim, bool quantize)
         {
-            var wq = new TensorStorage<float>[nHeads];
+            var wq = new DecodeWeight[nHeads];
             for (var h = 0; h < nHeads; h++)
             {
-                wq[h] = TensorStorage<float>.Unpooled(checked((int)((long)dModel * headDim)));
-                var dst = wq[h].AsSpan();
-                for (var i = 0; i < dModel; i++)
+                if (quantize)
                 {
-                    for (var j = 0; j < headDim; j++)
+                    // File rows [h*headDim, (h+1)*headDim) are head h's outputs;
+                    // each row is that output's contiguous dModel contraction
+                    // vector — exactly Q8Weight's output-major layout, no transpose.
+                    wq[h] = Q8Weight.QuantizeRows(
+                        qFull.AsSpan(h * headDim * dModel, headDim * dModel), headDim, dModel);
+                }
+                else
+                {
+                    var storage = TensorStorage<float>.Unpooled(checked((int)((long)dModel * headDim)));
+                    var dst = storage.AsSpan();
+                    for (var i = 0; i < dModel; i++)
                     {
-                        dst[i * headDim + j] = qFull[(h * headDim + j) * dModel + i];
+                        for (var j = 0; j < headDim; j++)
+                        {
+                            dst[i * headDim + j] = qFull[(h * headDim + j) * dModel + i];
+                        }
                     }
+                    wq[h] = storage;
                 }
             }
             return wq;
         }
 
-        /// <summary>Same transposition as SplitQuery but iterates over nKvHeads.</summary>
-        private static TensorStorage<float>[] SplitKeyValue(float[] kvFull, int nKvHeads, int dModel, int headDim)
+        /// <summary>Same per-head split as SplitQuery but iterates over nKvHeads.</summary>
+        private static DecodeWeight[] SplitKeyValue(
+            float[] kvFull, int nKvHeads, int dModel, int headDim, bool quantize)
         {
-            var wkv = new TensorStorage<float>[nKvHeads];
+            var wkv = new DecodeWeight[nKvHeads];
             for (var kv = 0; kv < nKvHeads; kv++)
             {
-                wkv[kv] = TensorStorage<float>.Unpooled(checked((int)((long)dModel * headDim)));
-                var dst = wkv[kv].AsSpan();
-                for (var i = 0; i < dModel; i++)
+                if (quantize)
                 {
-                    for (var j = 0; j < headDim; j++)
+                    wkv[kv] = Q8Weight.QuantizeRows(
+                        kvFull.AsSpan(kv * headDim * dModel, headDim * dModel), headDim, dModel);
+                }
+                else
+                {
+                    var storage = TensorStorage<float>.Unpooled(checked((int)((long)dModel * headDim)));
+                    var dst = storage.AsSpan();
+                    for (var i = 0; i < dModel; i++)
                     {
-                        dst[i * headDim + j] = kvFull[(kv * headDim + j) * dModel + i];
+                        for (var j = 0; j < headDim; j++)
+                        {
+                            dst[i * headDim + j] = kvFull[(kv * headDim + j) * dModel + i];
+                        }
                     }
+                    wkv[kv] = storage;
                 }
             }
             return wkv;
@@ -407,20 +434,48 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// Per-head kernel: Wo_h[i, j] at flat (i*dModel + j) where i in [0, headDim), j in [0, dModel).
         /// Mapping: Wo_h[i, j] = O[j, h*headDim + i] = file[j*nHeadsHeadDim + h*headDim + i].
         /// </summary>
-        private static TensorStorage<float>[] SplitOutput(float[] oFull, int nHeads, int dModel, int headDim)
+        private static DecodeWeight[] SplitOutput(
+            float[] oFull, int nHeads, int dModel, int headDim, bool quantize)
         {
-            var wo = new TensorStorage<float>[nHeads];
+            var wo = new DecodeWeight[nHeads];
             var nHeadsHeadDim = nHeads * headDim;
             for (var h = 0; h < nHeads; h++)
             {
-                wo[h] = TensorStorage<float>.Unpooled(checked((int)((long)headDim * dModel)));
-                var dst = wo[h].AsSpan();
-                for (var i = 0; i < headDim; i++)
+                if (quantize)
                 {
-                    for (var j = 0; j < dModel; j++)
+                    // Output o's headDim contraction vector for head h is the run
+                    // oFull[o*nHeadsHeadDim + h*headDim ..]; gather the dModel rows
+                    // contiguously into output-major order, then quantize.
+                    var gatherElems = checked((int)((long)dModel * headDim));
+                    var gather = ArrayPool<float>.Shared.Rent(gatherElems);
+                    try
                     {
-                        dst[i * dModel + j] = oFull[j * nHeadsHeadDim + h * headDim + i];
+                        for (var o = 0; o < dModel; o++)
+                        {
+                            for (var i = 0; i < headDim; i++)
+                            {
+                                gather[o * headDim + i] = oFull[o * nHeadsHeadDim + h * headDim + i];
+                            }
+                        }
+                        wo[h] = Q8Weight.QuantizeRows(gather.AsSpan(0, gatherElems), dModel, headDim);
                     }
+                    finally
+                    {
+                        ArrayPool<float>.Shared.Return(gather);
+                    }
+                }
+                else
+                {
+                    var storage = TensorStorage<float>.Unpooled(checked((int)((long)headDim * dModel)));
+                    var dst = storage.AsSpan();
+                    for (var i = 0; i < headDim; i++)
+                    {
+                        for (var j = 0; j < dModel; j++)
+                        {
+                            dst[i * dModel + j] = oFull[j * nHeadsHeadDim + h * headDim + i];
+                        }
+                    }
+                    wo[h] = storage;
                 }
             }
             return wo;

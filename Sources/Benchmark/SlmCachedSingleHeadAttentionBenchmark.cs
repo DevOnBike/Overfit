@@ -81,9 +81,9 @@ namespace Benchmarks
 
             _decoder.Decode(
                     _hidden,
-                    _headWeights.Wq, _headWeights.Wk, _headWeights.Wv,
+                    _headWeights.Wq.F32, _headWeights.Wk.F32, _headWeights.Wv.F32,
                     ReadOnlySpan<float>.Empty, ReadOnlySpan<float>.Empty, ReadOnlySpan<float>.Empty,
-                    _headWeights.Wo,
+                    _headWeights.Wo.F32,
                     _cache, 0, 0, _position, _output);
         }
 
@@ -96,9 +96,9 @@ namespace Benchmarks
             {
                 _decoder.Decode(
                     _hidden,
-                    _headWeights.Wq, _headWeights.Wk, _headWeights.Wv,
+                    _headWeights.Wq.F32, _headWeights.Wk.F32, _headWeights.Wv.F32,
                     ReadOnlySpan<float>.Empty, ReadOnlySpan<float>.Empty, ReadOnlySpan<float>.Empty,
-                    _headWeights.Wo,
+                    _headWeights.Wo.F32,
                     _cache, 0, 0, _position, _output);
 
                 checksum += _output[i % _output.Length];

@@ -45,6 +45,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly float[] _value;
         private readonly float[] _attentionOutput;
         private readonly float[] _scoreScratch;
+        private readonly sbyte[] _q8InputQuants;   // Q8 activation scratch (quantized projection path)
+        private readonly float[] _q8InputScales;
         private readonly float _scale;
 
         public CachedSingleHeadAttention(
@@ -67,6 +69,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _value = new float[headDimension];
             _attentionOutput = new float[headDimension];
             _scoreScratch = new float[maxSequenceLength];
+
+            // Q8 activation scratch — sized for the largest projection input
+            // (dModel for Q/K/V; headDim ≤ dModel for the output projection).
+            _q8InputQuants = new sbyte[dModel];
+            _q8InputScales = new float[(dModel + Q8DotKernel.BlockSize - 1) / Q8DotKernel.BlockSize];
+
             _scale = 1f / MathF.Sqrt(headDimension);
         }
 
@@ -97,30 +105,60 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Span<float> output,
             RopeTable? rope = null)
         {
-            SingleTokenProjectionKernel.Project(
-                hidden,
-                wq,
-                bq,
-                _query,
-                DModel,
-                HeadDimension);
+            SingleTokenProjectionKernel.Project(hidden, wq, bq, _query, DModel, HeadDimension);
+            SingleTokenProjectionKernel.Project(hidden, wk, bk, _key, DModel, HeadDimension);
+            SingleTokenProjectionKernel.Project(hidden, wv, bv, _value, DModel, HeadDimension);
+
+            AttendCore(cache, layerIndex, headIndex, position, rope);
 
             SingleTokenProjectionKernel.Project(
-                hidden,
-                wk,
-                bk,
-                _key,
-                DModel,
-                HeadDimension);
+                _attentionOutput, wo, ReadOnlySpan<float>.Empty, output, HeadDimension, DModel);
+        }
 
-            SingleTokenProjectionKernel.Project(
-                hidden,
-                wv,
-                bv,
-                _value,
-                DModel,
-                HeadDimension);
+        /// <summary>
+        /// Q8_0-resident counterpart of <see cref="Decode"/> — the GGUF/Qwen
+        /// decode path once attention weights are quantized (step 2.3b-attn).
+        /// Same math; the four projections run through <see cref="Q8DotKernel"/>.
+        /// </summary>
+        public void DecodeQuantized(
+            ReadOnlySpan<float> hidden,
+            Q8Weight wq,
+            Q8Weight wk,
+            Q8Weight wv,
+            ReadOnlySpan<float> bq,
+            ReadOnlySpan<float> bk,
+            ReadOnlySpan<float> bv,
+            Q8Weight wo,
+            KeyValueCache cache,
+            int layerIndex,
+            int headIndex,
+            int position,
+            Span<float> output,
+            RopeTable? rope = null)
+        {
+            Q8DotKernel.Project(hidden, wq, bq, _query, _q8InputQuants, _q8InputScales);
+            Q8DotKernel.Project(hidden, wk, bk, _key, _q8InputQuants, _q8InputScales);
+            Q8DotKernel.Project(hidden, wv, bv, _value, _q8InputQuants, _q8InputScales);
 
+            AttendCore(cache, layerIndex, headIndex, position, rope);
+
+            Q8DotKernel.Project(
+                _attentionOutput, wo, ReadOnlySpan<float>.Empty, output, _q8InputQuants, _q8InputScales);
+        }
+
+        /// <summary>
+        /// Shared decode middle — RoPE on Q/K, K/V cache write, cached attention
+        /// into <see cref="_attentionOutput"/>. Weight-independent: it operates
+        /// only on the per-head Q/K/V buffers, so the F32 and Q8 projection paths
+        /// (<see cref="Decode"/> / <see cref="DecodeQuantized"/>) share it verbatim.
+        /// </summary>
+        private void AttendCore(
+            KeyValueCache cache,
+            int layerIndex,
+            int headIndex,
+            int position,
+            RopeTable? rope)
+        {
             // Apply RoPE to Q and K at the current position before attention and cache write.
             // Q is rotated for the current step. K is rotated and stored — cached K vectors
             // are permanently rotated, so no re-rotation is needed at read time.
@@ -161,14 +199,6 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 sequenceLength,
                 HeadDimension,
                 _scale);
-
-            SingleTokenProjectionKernel.Project(
-                _attentionOutput,
-                wo,
-                ReadOnlySpan<float>.Empty,
-                output,
-                HeadDimension,
-                DModel);
         }
 
 

@@ -32,10 +32,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             return s;
         }
 
-        private readonly TensorStorage<float> _wq;
-        private readonly TensorStorage<float> _wk;
-        private readonly TensorStorage<float> _wv;
-        private readonly TensorStorage<float> _wo;
+        private readonly DecodeWeight _wq;
+        private readonly DecodeWeight _wk;
+        private readonly DecodeWeight _wv;
+        private readonly DecodeWeight _wo;
         private readonly TensorStorage<float> _bq;
         private readonly TensorStorage<float> _bk;
         private readonly TensorStorage<float> _bv;
@@ -79,26 +79,27 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// In GQA mode wk/wv/bk/bv are ignored (supplied via KvHeadWeights instead).
         /// </summary>
         internal SingleHeadWeights(
-            TensorStorage<float> wq,
+            DecodeWeight wq,
             TensorStorage<float> bq,
-            TensorStorage<float> wo,
-            TensorStorage<float>? wk = null,
+            DecodeWeight wo,
+            DecodeWeight? wk = null,
             TensorStorage<float>? bk = null,
-            TensorStorage<float>? wv = null,
+            DecodeWeight? wv = null,
             TensorStorage<float>? bv = null)
         {
             static TensorStorage<float> Empty() => new(0);
+            static DecodeWeight EmptyWeight() => new TensorStorage<float>(0);
             _wq = wq; _bq = bq; _wo = wo;
-            _wk = wk ?? Empty();
+            _wk = wk ?? EmptyWeight();
             _bk = bk ?? Empty();
-            _wv = wv ?? Empty();
+            _wv = wv ?? EmptyWeight();
             _bv = bv ?? Empty();
         }
 
-        public ReadOnlySpan<float> Wq => _wq.AsReadOnlySpan();
-        public ReadOnlySpan<float> Wk => _wk.AsReadOnlySpan();
-        public ReadOnlySpan<float> Wv => _wv.AsReadOnlySpan();
-        public ReadOnlySpan<float> Wo => _wo.AsReadOnlySpan();
+        public DecodeWeight Wq => _wq;
+        public DecodeWeight Wk => _wk;
+        public DecodeWeight Wv => _wv;
+        public DecodeWeight Wo => _wo;
         public ReadOnlySpan<float> Bq => _bq.AsReadOnlySpan();
         public ReadOnlySpan<float> Bk => _bk.AsReadOnlySpan();
         public ReadOnlySpan<float> Bv => _bv.AsReadOnlySpan();
