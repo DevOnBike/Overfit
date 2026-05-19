@@ -188,25 +188,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // GeLU/ReLU (GPT-1/GPT-2): FfnGate is empty.
             if (!weights.FfnGate.IsEmpty)
             {
-                if (weights.FfnGate.IsQuantized)
-                {
-                    // Q8_0-resident FFN weights (the GGUF path, step 2.3b).
-                    _feedForward.DecodeSwiGluQuantized(
-                        _ln2Output,
-                        weights.FfnGate.Quantized,
-                        weights.FfnW1.Quantized,
-                        weights.FfnW2.Quantized,
-                        _feedForwardOutput);
-                }
-                else
-                {
-                    _feedForward.DecodeSwiGlu(
-                        _ln2Output,
-                        weights.FfnGate.F32,
-                        weights.FfnW1.F32,
-                        weights.FfnW2.F32,
-                        _feedForwardOutput);
-                }
+                // SwiGLU (Llama/Mistral/Qwen): per-weight dispatch — each of
+                // gate/up/down picks its kernel from its resident format
+                // (F32 / Q8_0 / Q4_K), handling heterogeneous K-quant files.
+                _feedForward.DecodeSwiGluDispatched(
+                    _ln2Output,
+                    weights.FfnGate,
+                    weights.FfnW1,
+                    weights.FfnW2,
+                    _feedForwardOutput);
             }
             else
             {

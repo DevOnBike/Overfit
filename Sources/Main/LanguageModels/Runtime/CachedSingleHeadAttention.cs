@@ -47,6 +47,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly float[] _scoreScratch;
         private readonly sbyte[] _q8InputQuants;   // Q8 activation scratch (quantized projection path)
         private readonly float[] _q8InputScales;
+        private readonly sbyte[] _q8kInputQuants;  // Q4_K activation scratch (Q8_K-quantized)
+        private readonly float[] _q8kInputScales;
+        private readonly short[] _q8kInputBsums;
         private readonly float _scale;
 
         public CachedSingleHeadAttention(
@@ -70,10 +73,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _attentionOutput = new float[headDimension];
             _scoreScratch = new float[maxSequenceLength];
 
-            // Q8 activation scratch — sized for the largest projection input
-            // (dModel for Q/K/V; headDim ≤ dModel for the output projection).
+            // Q8 / Q4_K activation scratch — sized for the largest projection
+            // input (dModel for Q/K/V; the O projection's input is headDim, and
+            // per-head Wo can't be K-quant anyway — headDim < the 256-element
+            // super-block — so the dModel size covers every K-quant projection).
             _q8InputQuants = new sbyte[dModel];
             _q8InputScales = new float[(dModel + Q8DotKernel.BlockSize - 1) / Q8DotKernel.BlockSize];
+            _q8kInputQuants = new sbyte[dModel];
+            _q8kInputScales = new float[(dModel + Q4KDotKernel.SuperBlockElements - 1) / Q4KDotKernel.SuperBlockElements];
+            _q8kInputBsums = new short[(dModel + Q4KDotKernel.GroupSize - 1) / Q4KDotKernel.GroupSize];
 
             _scale = 1f / MathF.Sqrt(headDimension);
         }
@@ -144,6 +152,79 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             Q8DotKernel.Project(
                 _attentionOutput, wo, ReadOnlySpan<float>.Empty, output, _q8InputQuants, _q8InputScales);
+        }
+
+        /// <summary>
+        /// Single-head decode with **per-projection dispatch** — each of Q/K/V/O
+        /// picks its kernel from the weight's resident format (F32 / Q8_0 /
+        /// Q4_K). The runtime calls this; a heterogeneous K-quant file (e.g.
+        /// Q4_K_M with Q/K Q4_K and V Q6_K-then-Q8) is handled per projection.
+        /// The older all-same-type <see cref="Decode"/> / <see cref="DecodeQuantized"/>
+        /// entry points are kept for tests.
+        /// </summary>
+        internal void DecodeDispatched(
+            ReadOnlySpan<float> hidden,
+            in DecodeWeight wq,
+            in DecodeWeight wk,
+            in DecodeWeight wv,
+            ReadOnlySpan<float> bq,
+            ReadOnlySpan<float> bk,
+            ReadOnlySpan<float> bv,
+            in DecodeWeight wo,
+            KeyValueCache cache,
+            int layerIndex,
+            int headIndex,
+            int position,
+            Span<float> output,
+            RopeTable? rope = null)
+        {
+            ProjectSequentialDispatched(hidden, in wq, bq, _query, DModel, HeadDimension);
+            ProjectSequentialDispatched(hidden, in wk, bk, _key, DModel, HeadDimension);
+            ProjectSequentialDispatched(hidden, in wv, bv, _value, DModel, HeadDimension);
+
+            AttendCore(cache, layerIndex, headIndex, position, rope);
+
+            ProjectSequentialDispatched(
+                _attentionOutput, in wo, ReadOnlySpan<float>.Empty, output, HeadDimension, DModel);
+        }
+
+        /// <summary>
+        /// Per-weight projection dispatch (sequential — we are already inside
+        /// the head-parallel <c>OverfitParallelFor</c>, so nested parallelism
+        /// would be wrong). Picks the kernel matching the weight's resident
+        /// format; Q-paths use the head's owned activation scratch.
+        /// </summary>
+        private void ProjectSequentialDispatched(
+            ReadOnlySpan<float> input,
+            in DecodeWeight weight,
+            ReadOnlySpan<float> bias,
+            Span<float> output,
+            int inputSize,
+            int outputSize)
+        {
+            if (weight.IsQ6K)
+            {
+                Q6KDotKernel.Project(
+                    input, weight.Quantized6K, bias, output,
+                    _q8kInputQuants, _q8kInputScales, _q8kInputBsums);
+            }
+            else if (weight.IsQ4K)
+            {
+                Q4KDotKernel.Project(
+                    input, weight.Quantized4K, bias, output,
+                    _q8kInputQuants, _q8kInputScales, _q8kInputBsums);
+            }
+            else if (weight.IsQuantized)
+            {
+                Q8DotKernel.Project(
+                    input, weight.Quantized, bias, output,
+                    _q8InputQuants, _q8InputScales);
+            }
+            else
+            {
+                SingleTokenProjectionKernel.Project(
+                    input, weight.F32, bias, output, inputSize, outputSize);
+            }
         }
 
         /// <summary>

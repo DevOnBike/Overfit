@@ -222,6 +222,78 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
         }
 
+        /// <summary>
+        /// Loads a Q4_K tensor's bytes verbatim — the on-disk <c>block_q4_K</c>
+        /// layout (144 bytes per 256 elements: 2 B FP16 d + 2 B FP16 dmin + 12 B
+        /// of packed 6-bit scales/mins + 128 B of 4-bit quants) is exactly
+        /// <c>Q4KWeight</c>'s resident format, so no de-interleave is needed
+        /// (unlike Q8_0's [F16 scale][int8 quants] interleave). Step 3.2b.
+        /// Throws if the tensor is not Q4_K.
+        /// </summary>
+        public void LoadTensorQ4_KRaw(GgufTensorInfo info, Span<byte> destination)
+        {
+            if (info is null) { throw new ArgumentNullException(nameof(info)); }
+            if (info.Type != GgmlType.Q4_K)
+            {
+                throw new InvalidOperationException(
+                    $"Tensor '{info.Name}' is {info.Type}, not Q4_K — use LoadTensorAsF32.");
+            }
+
+            var elementCount = info.ElementCount;
+            if (elementCount % GgmlDequant.SuperBlockElements != 0)
+            {
+                throw new InvalidDataException(
+                    $"Q4_K tensor '{info.Name}' element count {elementCount} is not divisible by {GgmlDequant.SuperBlockElements}.");
+            }
+
+            var nBlocks = elementCount / GgmlDequant.SuperBlockElements;
+            var byteCount = checked((int)(nBlocks * GgmlDequant.Q4_K_BlockBytes));
+            if (destination.Length < byteCount)
+            {
+                throw new ArgumentException(
+                    $"Destination span too small: {destination.Length} < {byteCount}.", nameof(destination));
+            }
+
+            _stream.Seek(_dataStart + (long)info.Offset, SeekOrigin.Begin);
+            _stream.ReadExactly(destination[..byteCount]);
+        }
+
+        /// <summary>
+        /// Loads a Q6_K tensor's bytes verbatim — the on-disk <c>block_q6_K</c>
+        /// layout (210 bytes per 256 elements: 128 B <c>ql</c> + 64 B <c>qh</c>
+        /// + 16 B int8 sub-block scales + 2 B FP16 <c>d</c>) is exactly
+        /// <c>Q6KWeight</c>'s resident format, so no de-interleave is needed
+        /// (like Q4_K, unlike Q8_0's [F16 scale][int8 quants] interleave).
+        /// Step 3.3c. Throws if the tensor is not Q6_K.
+        /// </summary>
+        public void LoadTensorQ6_KRaw(GgufTensorInfo info, Span<byte> destination)
+        {
+            if (info is null) { throw new ArgumentNullException(nameof(info)); }
+            if (info.Type != GgmlType.Q6_K)
+            {
+                throw new InvalidOperationException(
+                    $"Tensor '{info.Name}' is {info.Type}, not Q6_K — use LoadTensorAsF32.");
+            }
+
+            var elementCount = info.ElementCount;
+            if (elementCount % GgmlDequant.SuperBlockElements != 0)
+            {
+                throw new InvalidDataException(
+                    $"Q6_K tensor '{info.Name}' element count {elementCount} is not divisible by {GgmlDequant.SuperBlockElements}.");
+            }
+
+            var nBlocks = elementCount / GgmlDequant.SuperBlockElements;
+            var byteCount = checked((int)(nBlocks * GgmlDequant.Q6_K_BlockBytes));
+            if (destination.Length < byteCount)
+            {
+                throw new ArgumentException(
+                    $"Destination span too small: {destination.Length} < {byteCount}.", nameof(destination));
+            }
+
+            _stream.Seek(_dataStart + (long)info.Offset, SeekOrigin.Begin);
+            _stream.ReadExactly(destination[..byteCount]);
+        }
+
         /// <summary>Reads a metadata value or returns the default if the key is absent.</summary>
         public T GetMeta<T>(string key, T defaultValue)
         {

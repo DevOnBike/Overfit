@@ -35,6 +35,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly float[] _gate;  // SwiGLU gate buffer (empty for GeLU)
         private readonly sbyte[] _q8InputQuants;   // Q8 activation scratch (SwiGLU Q8 path)
         private readonly float[] _q8InputScales;
+        private readonly sbyte[] _q8kInputQuants;  // Q4_K activation scratch (SwiGLU Q4_K path — Q8_K)
+        private readonly float[] _q8kInputScales;
+        private readonly short[] _q8kInputBsums;
 
         public CachedFeedForwardBlock(
             int dModel,
@@ -54,9 +57,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                               ? new float[dFF]
                               : [];
 
-            // Q8 activation scratch — sized for the largest projection input (dFF).
+            // Q8 / Q4_K activation scratch — sized for the largest projection
+            // input (dFF for the down projection; dModel ≤ dFF for gate/up).
             _q8InputQuants = new sbyte[dFF];
             _q8InputScales = new float[(dFF + Q8DotKernel.BlockSize - 1) / Q8DotKernel.BlockSize];
+            _q8kInputQuants = new sbyte[dFF];
+            _q8kInputScales = new float[(dFF + Q4KDotKernel.SuperBlockElements - 1) / Q4KDotKernel.SuperBlockElements];
+            _q8kInputBsums = new short[(dFF + Q4KDotKernel.GroupSize - 1) / Q4KDotKernel.GroupSize];
         }
 
         public int DModel { get; }
@@ -183,6 +190,74 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             // output = intermediate @ Wdown
             Q8DotKernel.ProjectParallel(_intermediate, wDown, [], output, _q8InputQuants, _q8InputScales);
+        }
+
+        /// <summary>
+        /// SwiGLU feed-forward decode with **per-weight dispatch** — each of the
+        /// three projections picks its kernel from the weight's resident format
+        /// (F32 / Q8_0 / Q4_K). The runtime calls this; a heterogeneous K-quant
+        /// file (e.g. Q4_K_M with `ffn_gate`/`ffn_up` as Q4_K and `ffn_down` as
+        /// Q6_K-then-Q8) is dispatched correctly on a per-projection basis. The
+        /// older all-same-type <see cref="DecodeSwiGlu"/> /
+        /// <see cref="DecodeSwiGluQuantized"/> entry points are kept for tests.
+        /// </summary>
+        internal void DecodeSwiGluDispatched(
+            ReadOnlySpan<float> hidden,
+            in DecodeWeight wGate,
+            in DecodeWeight wUp,
+            in DecodeWeight wDown,
+            Span<float> output)
+        {
+            // gate = SiLU(hidden @ Wgate)
+            ProjectParallelDispatched(hidden, in wGate, [], _gate, DModel, DFF);
+            ApplySiLU(_gate);
+
+            // up = hidden @ Wup
+            ProjectParallelDispatched(hidden, in wUp, [], _intermediate, DModel, DFF);
+
+            // intermediate = gate * up (element-wise)
+            TensorPrimitives.Multiply(_gate, _intermediate, _intermediate);
+
+            // output = intermediate @ Wdown
+            ProjectParallelDispatched(_intermediate, in wDown, [], output, DFF, DModel);
+        }
+
+        /// <summary>
+        /// Per-weight projection dispatch — picks the parallel kernel matching
+        /// the weight's resident format. Q-paths use the block's owned activation
+        /// scratch; F32 uses the F32 input-major kernel.
+        /// </summary>
+        private void ProjectParallelDispatched(
+            ReadOnlySpan<float> input,
+            in DecodeWeight weight,
+            ReadOnlySpan<float> bias,
+            Span<float> output,
+            int inputSize,
+            int outputSize)
+        {
+            if (weight.IsQ6K)
+            {
+                Q6KDotKernel.ProjectParallel(
+                    input, weight.Quantized6K, bias, output,
+                    _q8kInputQuants, _q8kInputScales, _q8kInputBsums);
+            }
+            else if (weight.IsQ4K)
+            {
+                Q4KDotKernel.ProjectParallel(
+                    input, weight.Quantized4K, bias, output,
+                    _q8kInputQuants, _q8kInputScales, _q8kInputBsums);
+            }
+            else if (weight.IsQuantized)
+            {
+                Q8DotKernel.ProjectParallel(
+                    input, weight.Quantized, bias, output,
+                    _q8InputQuants, _q8InputScales);
+            }
+            else
+            {
+                SingleTokenProjectionKernel.ProjectParallel(
+                    input, weight.F32, bias, output, inputSize, outputSize);
+            }
         }
 
         public void GetLastIntermediate(Span<float> destination)

@@ -1,11 +1,14 @@
 # llama.cpp CPU inference — analysis & Overfit decode-kernel plan
 
-**Status:** analysis complete (2026-05). §5 steps 1 + 1b + the Q8 weight path
-(2.3a LM-head, 2.3b FFN + attention) **done & A/B-measured** — Qwen-3B decode
-**2.71 → 13.38 tok/s (4.9×)**, RAM **~14.4 GB → 5.90 GB (−59%)**, 0 B/token
-preserved. Overfit now runs **1.38× faster than** the LLamaSharp reference
-(9.67 tok/s / ~6 GB) at slightly less RAM. Q8 parity verified vs F32 (2.5).
-Remaining: native Q8_0 GGUF load (2.4); step 3 (Q4_K/Q6_K) not started.
+**Status:** analysis complete (2026-05). §5 **steps 1, 2 and 3 all done &
+A/B-measured.** Qwen-3B decode on this dev box: **2.71 → 14.56 tok/s (5.4×)**,
+RAM **~14.4 GB → 4.40 GB (−69 %)**, 0 B/token preserved. Overfit Q4_K_M now
+runs **1.51× faster than** the LLamaSharp reference (9.67 tok/s / ~6 GB) at
+27 % less committed RAM (caveat: Overfit Q4_K_M vs LLamaSharp FP16-mmap — see
+§5 step 3 for the apples-to-apples to-do). Parity verified vs F32 for both
+Q8 (2.5: 32/32) and Q4_K_M (3.4: 29/32 with worst swing 2.16, every mismatch a
+near-tie). Native loads: Q8_0 (2.4/2.4b), Q4_K (3.2b), Q6_K (3.3c). Step 4
+(tiled prefill GEMM) and step 5 (work-stealing) remain — separate tracks.
 
 **Origin — the benchmark that triggered this.** Same Qwen2.5-3B GGUF, single-stream CPU decode:
 
@@ -106,7 +109,7 @@ Overfit already has the analogue: `OverfitParallelFor` (persistent threads, bulk
 | 1 | Blocked GEMV + parallelize FFN/LM-head matmul | ✅ done | 2.71 → 3.63 tok/s (+34%), 0 B/token kept |
 | 1b | Head-parallel attention | ✅ done | **3.63 → 4.01 tok/s (+10.5%)** — cumulative **2.71 → 4.01 (+48%)** |
 | 2 | Q8_0 weight path + INT8 dot kernel | ✅ done (FFN + LM-head + attention) | **4.01 → 13.38 tok/s (3.3×)**, RAM ~14.4 → 5.90 GB |
-| 3 | Q4_K / Q6_K decode kernels | not started | ~7× fewer bytes; same-file benchmark vs llama.cpp |
+| 3 | Q4_K / Q6_K decode kernels | ✅ done (3.1 kernel, 3.2 dispatch+loader, 3.3 Q6_K, 3.4 parity+A/B) | **13.28 → 14.56 tok/s (+9.6 %)**, RAM 5.85 → **4.40 GB** (−25 %); 29/32 parity |
 | 4 | Tiled prefill GEMM (tinyBLAS-style) | separate track | prefill / batch>1 only |
 | 5 | Intra-matmul work-stealing chunk counter | minor | fold in opportunistically |
 
@@ -256,13 +259,72 @@ portable constants.
 - Sub-second *cold* load needs memory-mapping (zero-copy, lazy page-in) — a
   separate, larger change; the read is otherwise floored by disk I/O.
 
-### Step 3 — Q4_K / Q6_K decode kernels
+### Step 3 — Q4_K / Q6_K decode kernels — ✅ DONE & MEASURED
 
-**What:** same INT8 machinery as step 2, plus nibble unpacking (`Vector256<byte>` and/shift) and 6-bit sub-scale decode. Port the structure of `ggml_vec_dot_q4_K_q8_K` / `q6_K_q8_K`: INT32 accumulation within the 256-element super-block, `bsums`-based min correction, one FP32 fma per super-block.
+**3.1 + 3.1b — the Q4_K × Q8_K kernel.** `Q4KWeight` (Q4_K-resident,
+output-major 144-byte super-blocks) + `Q4KDotKernel` — `QuantizeActivationQ8K`
+(F32→Q8_K: per-block F32 scale + 256 int8 + 16 group sums), `Dot` (the
+`ggml_vec_dot_q4_K_q8_K` identity `q8d·(d·Σ scale[s]·intdot[s] −
+dmin·Σ min[s]·bsumpair[s])`), `Project` / `ProjectParallel`. The AVX2 path feeds
+the unsigned 4-bit nibbles straight into `vpmaddubsw` (no `vpsignb` sign trick —
+they *are* the unsigned operand, unlike signed Q8×Q8) + `vpmaddwd`; scalar
+fallback bit-identical.
 
-**Why:** Q4_K_M is what real Qwen-3B GGUFs ship as. Full ~7× byte reduction → best RAM, and lets Overfit benchmark the *same file* llama.cpp uses — removing the F32-vs-quant apples-to-oranges from the headline comparison.
+**3.2a/3.2b — per-weight dispatch + native Q4_K loader.** `DecodeWeight` became a
+4-way tagged union `{F32 | Q8 | Q4_K | Q6_K}`. Each projection in
+`CachedFeedForwardBlock` / `CachedSingleHeadAttention` /
+`CachedGptStack.ProjectLogits` picks its kernel from the weight's resident
+format — heterogeneous K-quant files are handled per-tensor, not all-or-nothing.
+`GgufReader.LoadTensorQ4_KRaw` reads native Q4_K blocks straight through; the
+loader peeks layer-0 type per tensor to decide whether scratch F32 needs to be
+rented. Per-head `Wo` keeps the Q8 path — its headDim=128 contraction is below
+the 256-element K-quant super-block, so per-head Wo can't be K-quant
+(`attn_v`'s per-head contraction is dModel=2048, so it *is* K-quant-able like
+Q/K — earlier scoping that lumped Wo and V together was wrong about V).
 
-**Verify:** top-1 logit match vs the F16 baseline on a canonical prompt; max abs logit diff within the Q4_K expected range.
+**3.3a/b/c — Q6_K kernel + AVX2 + wiring.** `Q6KWeight` (210 B/256 elements:
+128 B ql + 64 B qh + 16 B signed int8 sub-block scales + 2 B FP16 d, no dmin) +
+`Q6KDotKernel` — `Dot` rewrites `d·q8d·Σₛ scales[s]·Σ_{i∈s}(q[i]−32)·q8[i]` as
+`unsignedDot − 32·bsumTerm` for AVX2 (`vpmaddubsw` again, on reassembled 6-bit
+quants from `ql|qh<<4`). Q6_K's 16-element sub-blocks within 32-element AVX2
+groups required `Vector256<int>.GetLower()/GetUpper() + Vector128.Sum` to apply
+two different sub-block scales per AVX2 group. Loader adds
+`LoadTensorQ6_KRaw` + `LoadQ6KNative` + per-head `LoadQkvHeadsQ6K`; LM-head
+dispatch and the decode blocks gained Q6_K branches.
+
+**3.4 — parity + A/B on a real `qwen.q4km.gguf`.** 32-step teacher-forced
+top-1 parity test against an F32-from-the-same-Q4_K_M-file baseline: **29/32**
+match, worst mismatch swing **2.16** (every mismatch is a near-tie). Test
+ships as `[LongFact]`.
+
+**Three-way A/B on the same Qwen2.5-3B-Instruct base** (best-of-3, 24 timed
+tokens after 4 warm-up, single stream, dev box):
+
+| Format    | Load   | Decode      | Steady RAM | Notes                                |
+|-----------|--------|-------------|-----------:|--------------------------------------|
+| FP16-src  |  7.1 s | 13.29 tok/s |   5 902 MB | baseline (dequant FP16 → F32 in RAM) |
+| Q8_0      |  1.7 s | 13.28 tok/s |   5 847 MB | step 2 result                        |
+| **Q4_K_M**| **1.4 s** | **14.56 tok/s** | **4 396 MB** | step 3 result — wins every axis |
+
+Q4_K_M is **faster** than the FP16-source path (not just RAM-cheaper) because
+decode is bandwidth-bound matmul and Q4_K reads half the bytes per row — the
+extra arithmetic to unpack nibbles is dwarfed by the saved cache misses. RAM is
+25 % lower than Q8 (4.40 vs 5.85 GB).
+
+**vs LLamaSharp.** The original LLamaSharp baseline (`qwen.gguf` FP16-mmap):
+9.67 tok/s @ ~6 GB. Overfit Q4_K_M now decodes at **1.51× LLamaSharp** with
+**27 % less committed RAM**. *Caveat:* this is Overfit's Q4_K_M vs LLamaSharp's
+FP16-mmap (different file). A Q4_K_M-vs-Q4_K_M re-measurement would be cleaner
+— LLamaSharp on the same Q4_K_M would use far less RAM (~2 GB mmap) and is
+likely similar or marginally faster on decode; that A/B is on the to-do list.
+What the numbers do show unambiguously: the pure-managed, zero-alloc,
+AOT-compatible path is no longer the "credibly competitive" position from
+launch — on this hardware it is now the *faster* engine on absolute throughput
+versus the original baseline.
+
+**Verified:** 680 / 0 / 68 (`-c Release`); zero allocations per decoded token
+(`Gpt2GenerationDemoTests.Demo_Gpt2Small_KvCacheDecode_AllocatesZeroBytesPerToken`
+contract held throughout); finite logits on the Q4_K_M decode end-to-end.
 
 ### Step 4 — Tiled prefill GEMM *(separate track)*
 

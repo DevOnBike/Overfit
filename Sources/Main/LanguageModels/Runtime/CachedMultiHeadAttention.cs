@@ -195,37 +195,21 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
                     var headOutput = ctx.HeadOutputs.AsSpan(h * dModel, dModel);
 
-                    // Q8-resident attention weights (the GGUF path, step 2.3b-attn)
-                    // dispatch to the quantized projection kernel; F32 otherwise.
-                    // The loader quantizes Q/K/V/O together, so Wq's tag decides all four.
-                    if (hw.Wq.IsQuantized)
-                    {
-                        ctx.Heads[h].DecodeQuantized(
-                            hidden,
-                            hw.Wq.Quantized, wk.Quantized, wv.Quantized,
-                            hw.Bq, bk, bv,
-                            hw.Wo.Quantized,
-                            ctx.Cache,
-                            ctx.LayerIndex,
-                            group,            // KV-cache slot for this group
-                            ctx.Position,
-                            headOutput,
-                            ctx.Rope);
-                    }
-                    else
-                    {
-                        ctx.Heads[h].Decode(
-                            hidden,
-                            hw.Wq.F32, wk.F32, wv.F32,
-                            hw.Bq, bk, bv,
-                            hw.Wo.F32,
-                            ctx.Cache,
-                            ctx.LayerIndex,
-                            group,            // KV-cache slot for this group
-                            ctx.Position,
-                            headOutput,
-                            ctx.Rope);
-                    }
+                    // Per-projection dispatch (step 3.2a) — each of Q/K/V/O picks
+                    // its kernel from its resident format inside DecodeDispatched.
+                    // Handles heterogeneous K-quant files where Q/K/V/O may mix
+                    // F32 / Q8_0 / Q4_K (and Q6_K once 3.3 lands).
+                    ctx.Heads[h].DecodeDispatched(
+                        hidden,
+                        hw.Wq, wk, wv,
+                        hw.Bq, bk, bv,
+                        hw.Wo,
+                        ctx.Cache,
+                        ctx.LayerIndex,
+                        group,            // KV-cache slot for this group
+                        ctx.Position,
+                        headOutput,
+                        ctx.Rope);
                 }
             }
         }

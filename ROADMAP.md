@@ -23,13 +23,15 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 | Native C# GGUF loader (F32/F16/BF16/Q8_0/Q4_K/Q6_K) | ✅ Loads `*.gguf` from Ollama/HF directly |
 | Streaming token generation (`IAsyncEnumerable`) | ✅ Stable, with stop-tokens + cancellation |
 | LoRA adapter (Enable/Disable, Save/Load) | ✅ Stable, zero-copy weight refs |
-| **Quantized weight storage at inference time** | 🟢 **Q8 decode path done & parity-verified — decode 3.3×, RAM −59% (see "Slot 2b")** |
+| **Quantized weight storage at inference time** | ✅ **Q8_0 + Q4_K_M decode paths done & parity-verified — Q4_K_M decodes 14.56 tok/s @ 4.40 GB RAM (1.51× faster than LLamaSharp baseline, 27 % less RAM); see "Slot 2b"** |
 | GPU backend | ❌ Not started |
 
 ---
 
 ## Recently completed (chronological, newest first)
 
+- **Q4_K_M in-RAM decode path** (`docs/llamacpp-cpu-analysis.md` §5 step 3, sub-steps 3.1 → 3.4). `Q4KDotKernel` + `Q6KDotKernel` (AVX2 `vpmaddubsw` on the 4-bit nibbles / reassembled 6-bit quants + scalar fallbacks); `Q4KWeight` + `Q6KWeight` (output-major super-blocks); `DecodeWeight` widened to a 4-way tagged union `{F32 | Q8 | Q4_K | Q6_K}`; **per-weight dispatch** in `CachedFeedForwardBlock` / `CachedSingleHeadAttention` / `CachedGptStack.ProjectLogits` so a heterogeneous Q4_K_M file (Q4_K attn-Q/K/O + FFN gate/up, Q6_K FFN-down + attn-V + token-embd + output, Q8 per-head Wo) picks the right kernel per projection; native Q4_K + Q6_K loader reads. **Qwen2.5-3B-Instruct: load 1.4 s, decode 14.56 tok/s, steady RAM 4.40 GB** (vs Q8: 1.7 s / 13.28 tok/s / 5.85 GB; vs FP16-src: 7.1 s / 13.29 tok/s / 5.90 GB). 0 B/token preserved. Parity vs same-file F32 baseline: 29/32 top-1 match teacher-forced, worst swing 2.16 (every mismatch a near-tie). 680 / 0 / 68 `-c Release`.
+- **Q8_0 in-RAM decode path** (`docs/llamacpp-cpu-analysis.md` §5 step 2). `Q8DotKernel` INT8 `vpmaddubsw` SIMD GEMV + `Q8Weight` output-major storage + `DecodeWeight` tagged handle. LM-head + FFN + per-head Q/K/V/O all Q8-resident. Native Q8_0 GGUF load (no dequant/re-quantize). Qwen-3B decode 4.01 → 13.38 tok/s (3.3×), steady RAM ~14.4 → 5.90 GB (−59 %), 32/32 greedy parity vs F32.
 - **GGUF Q4_K + Q6_K dequantization** — `GgmlDequant` pure decoders + `GgufReader` streaming wrappers (stackalloc, zero managed allocations per call). 13 unit tests on synthetic blocks. Loader can now consume any `*.Q4_K_M.gguf` from Ollama/HuggingFace.
 - **`[LongFact]` test convention** — 53 integration/diagnostic/training tests gated behind a custom xUnit attribute that skips by default. `dotnet test -c Release` now runs ~15 s instead of multi-minute.
 - **`CachedTransformerBlock.Decode` argument validation** — explicit guards for input/output/FfnW1/FfnW2 lengths; surfaces caller bugs as `ArgumentException` instead of `IndexOutOfRangeException` mid-block.
@@ -146,40 +148,62 @@ it on real production metrics. Plan: synthetic base → pull real metrics → Lo
 
 These are working in the codebase but **outside the current GPT-2 focus week.** Listed for visibility, not for prioritization.
 
-### Slot 2b — quantized weight storage at inference
+### Slot 2b — quantized weight storage at inference — ✅ DONE (Q8_0 + Q4_K_M)
 
-**The gap:** Q4_K_M loader exists (decodes from disk) but currently dequantizes everything to FP32 on load. A 2 GB Q4_K_M file produces ~14 GB FP32 weights in RAM. The "3B in 4 GB RAM" payoff requires keeping weights quantized in RAM and dequantizing per-block during matmul.
+**Original gap:** Q4_K_M loader existed (decodes from disk) but dequantized
+everything to FP32 on load — a 2 GB Q4_K_M file produced ~14 GB FP32 weights in
+RAM. The "3B in 4 GB RAM" payoff required keeping weights quantized in RAM and
+dequantizing per-block during matmul.
 
-**Q8_0 progress (this session) — `docs/llamacpp-cpu-analysis.md` step 2.**
-The kernel design + measurements live in that doc. Shipped: `Q8DotKernel`
-(symmetric F32→Q8 quantizer + INT8 `vpmaddubsw` SIMD dot + sequential & parallel
-GEMV), `Q8Weight` (output-major Q8 weight storage), `DecodeWeight` (tagged F32|Q8
-weight handle — the precision-agnostic replacement for the raw
-`TensorStorage<float>` refs in `BlockWeights`/`StackWeights`). LM-head (2.3a),
-FFN gate/up/down (2.3b-FFN) and per-head attention Q/K/V/O (2.3b-attn) are all
-Q8-resident — the full decode matmul path. **Measured on Qwen-3B: decode
-4.01 → 13.38 tok/s (3.3×), steady RAM ~14.4 → 5.90 GB (−59%), 0 B/token kept,
-672 tests green** — Overfit now runs 1.38× faster than LLamaSharp (9.67 tok/s /
-~6 GB) at slightly less RAM. Parity verified (2.5): `Q8DecodeParityTests`
-teacher-forces 32 decode steps F32-vs-Q8 on the real model — 28/32 greedy top-1
-match, all flips at genuine near-ties. Model load was profiled (15.4 s: read
-65%, quantize 34%); the quantize pass was parallelised over `OverfitParallelFor`
-(load 15.4 s → 12.0 s), and the loader now reads native `Q8_0` blocks straight
-from a Q8_0 GGUF for the whole decode-weight set — FFN + LM-head (2.4) and the
-per-head attention Q/K/V/O (2.4b), no dequant / re-quantize. Q8_0 model load
-**2.9 s → 1.6 s** across 2.4→2.4b; end-to-end vs the FP16 model ~12 s → ~1.6 s
-on the dev box, 32/32 greedy parity. Q4_K/Q6_K (below) reuse the same
-`Q8DotKernel` INT8 machinery.
+**Closed.** Two complementary in-RAM quant paths now ship — full design and
+sub-step record in `docs/llamacpp-cpu-analysis.md` §5 steps 2 + 3:
 
-**Work:**
-- [ ] `TensorStorage<TBlock>` or parallel `QuantizedTensorStorage` abstraction (Q4_K and Q6_K block shapes).
-- [ ] Quantized variants of `SingleHeadWeights` / `BlockWeights` / `StackWeights` (or polymorphism via interface).
-- [ ] Dequant-fused matmul kernels (one block at a time, scratch FP32 row in stackalloc).
-- [ ] `CachedLlamaInferenceEngine.LoadGgufQuantized(path)` factory.
-- [ ] RAM diagnostic: `Diagnose_GgufQ4KM_3B_RamFootprint` showing ~2-3 GB managed.
-- [ ] Logit parity vs FP32 (top-1 must match for greedy; top-10 within tolerance).
+- **Q8_0** (step 2): `Q8DotKernel` (symmetric F32→Q8 quantizer + INT8
+  `vpmaddubsw` SIMD dot + sequential & parallel GEMV), `Q8Weight` (output-major
+  Q8 weight storage), `DecodeWeight` (tagged precision-agnostic weight handle).
+  LM-head + FFN gate/up/down + per-head attention Q/K/V/O all Q8-resident — the
+  full decode matmul path. Loader reads native `Q8_0` blocks straight from a
+  Q8_0 GGUF — no dequant/re-quantize on the loaded path.
+- **Q4_K_M** (step 3): `Q4KDotKernel` + `Q6KDotKernel` (Q4_K × Q8_K and
+  Q6_K × Q8_K AVX2 kernels with scalar fallbacks), `Q4KWeight` + `Q6KWeight`
+  (output-major super-blocks). `DecodeWeight` widened to a 4-way tagged union
+  `{F32 | Q8 | Q4_K | Q6_K}`; the decode blocks (FFN, single-head attention,
+  LM-head) refactored to **per-weight dispatch** so a heterogeneous Q4_K_M file
+  (`attn_q/k/o` + `ffn_gate/up` Q4_K, `ffn_down` + `attn_v` + `token_embd` +
+  `output` Q6_K, per-head `Wo` Q8 — its headDim=128 contraction is below the
+  256-element K-quant super-block) picks the right kernel per projection.
+  Loader: native Q4_K + Q6_K reads + per-head contiguous byte slices.
 
-Estimated effort: 1-2 days. Largest single architectural change since KV-cache runtime.
+**Three-way A/B on the same Qwen2.5-3B-Instruct base** (dev box, best-of-3,
+24 timed tokens after 4 warm-up, single stream):
+
+| Format    | Load   | Decode      | Steady RAM | vs LLamaSharp baseline (9.67 tok/s @ ~6 GB) |
+|-----------|--------|-------------|-----------:|---------------------------------------------|
+| FP16-src  |  7.1 s | 13.29 tok/s |   5 902 MB | 1.37× faster, ~same RAM                     |
+| Q8_0      |  1.7 s | 13.28 tok/s |   5 847 MB | 1.37× faster, ~same RAM                     |
+| **Q4_K_M**| **1.4 s** | **14.56 tok/s** | **4 396 MB** | **1.51× faster, 27 % less RAM**          |
+
+Q4_K_M is faster than FP16-source decode (not just RAM-cheaper) — bandwidth-bound
+matmul reads half the bytes per row, and the nibble-unpack arithmetic is dwarfed
+by the saved cache misses. Parity: Q8 32/32 (2.5); Q4_K_M 29/32 with worst
+swing 2.16 — every mismatch a near-tie (3.4, teacher-forced vs F32 baseline
+loaded from the same Q4_K_M file). Zero allocations per decoded token preserved
+throughout (`Demo_Gpt2Small_KvCacheDecode_AllocatesZeroBytesPerToken`). Tests:
+680 / 0 / 68 `-c Release`.
+
+**Caveat for the LLamaSharp comparison:** the baseline is LLamaSharp on the
+FP16 `qwen.gguf` (mmap), not on a Q4_K_M file. A clean Q4_K_M-vs-Q4_K_M
+re-measurement would show LLamaSharp at far lower RAM (~2 GB mmap) and likely
+similar/marginally faster decode — listed as the remaining cleanup in
+`docs/llamacpp-cpu-analysis.md` §5 step 3.
+
+**Remaining (separate tracks, not gated on this):**
+- Step 4 — tiled prefill GEMM (`batch > 1` register-tiled `Vector256<float>`
+  GEMM, L2 block on N). Helps TTFT and batched training, **not** decode.
+- Step 5 — work-stealing chunk counter (`Interlocked.Add`). Marginal for
+  uniform GEMV; fold in opportunistically.
+- LLamaSharp re-bench on Q4_K_M for an apples-to-apples Overfit-vs-llama.cpp
+  number.
 
 ### Slot 2c — FP16-resident weights — ATTEMPTED & REVERTED (May 2026)
 

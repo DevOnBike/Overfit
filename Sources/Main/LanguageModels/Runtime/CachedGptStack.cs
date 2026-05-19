@@ -20,6 +20,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly float[] _lastLogits;
         private readonly sbyte[] _lmHeadInputQuants;   // Q8 LM-head activation scratch
         private readonly float[] _lmHeadInputScales;
+        private readonly sbyte[] _lmHeadQ8KQuants;     // Q4_K LM-head activation scratch (Q8_K-quantized)
+        private readonly float[] _lmHeadQ8KScales;
+        private readonly short[] _lmHeadQ8KBsums;
 
         public CachedGptStack(
             int layerCount,
@@ -84,6 +87,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _lastLogits = new float[vocabSize];
             _lmHeadInputQuants = new sbyte[dModel];
             _lmHeadInputScales = new float[(dModel + Q8DotKernel.BlockSize - 1) / Q8DotKernel.BlockSize];
+            _lmHeadQ8KQuants = new sbyte[dModel];
+            _lmHeadQ8KScales = new float[(dModel + Q4KDotKernel.SuperBlockElements - 1) / Q4KDotKernel.SuperBlockElements];
+            _lmHeadQ8KBsums = new short[(dModel + Q4KDotKernel.GroupSize - 1) / Q4KDotKernel.GroupSize];
         }
 
         public int LayerCount { get; }
@@ -216,7 +222,31 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // Gpt2GenerationDemoTests.Demo_Gpt2Small_KvCacheDecode_AllocatesZeroBytesPerToken)
             // still holds.
             var lmHead = weights.LmHeadWeights;
-            if (lmHead.IsQuantized)
+            if (lmHead.IsQ6K)
+            {
+                // Q6_K-resident LM head (step 3.3c — wires the Q6_K kernel).
+                Q6KDotKernel.ProjectParallel(
+                    _finalHidden,
+                    lmHead.Quantized6K,
+                    ReadOnlySpan<float>.Empty,
+                    logits,
+                    _lmHeadQ8KQuants,
+                    _lmHeadQ8KScales,
+                    _lmHeadQ8KBsums);
+            }
+            else if (lmHead.IsQ4K)
+            {
+                // Q4_K-resident LM head (step 3.2a — wires the Q4_K kernel).
+                Q4KDotKernel.ProjectParallel(
+                    _finalHidden,
+                    lmHead.Quantized4K,
+                    ReadOnlySpan<float>.Empty,
+                    logits,
+                    _lmHeadQ8KQuants,
+                    _lmHeadQ8KScales,
+                    _lmHeadQ8KBsums);
+            }
+            else if (lmHead.IsQuantized)
             {
                 Q8DotKernel.ProjectParallel(
                     _finalHidden,
