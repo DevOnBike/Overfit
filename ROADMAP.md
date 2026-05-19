@@ -28,6 +28,37 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 
 ---
 
+## Last session — resume point (2026-05-20)
+
+**Just closed: the decode-track sprint (`docs/llamacpp-cpu-analysis.md` §5 steps 1+2+3).**
+
+Three-stage cumulative result on Qwen2.5-3B-Instruct (dev box, best-of-3, single-stream CPU decode):
+
+| Stage | Decode | Steady RAM | Load |
+|-------|-------:|-----------:|-----:|
+| start (F32-upcast)             | 2.58 tok/s  | ~14 GB   | ~28 s |
+| +parallel (step 1)             | 4.01 tok/s  | ~14 GB   | —    |
+| +Q8_0 in-RAM (step 2)          | 13.28 tok/s | 5.85 GB  | 1.7 s |
+| **+Q4_K_M in-RAM (step 3)**    | **14.56 tok/s** | **4.40 GB** | **1.4 s** |
+
+End-to-end: **5.6× decode, −69 % RAM, 20× faster load**, zero allocations per token preserved. Parity verified at both Q8 (32/32) and Q4_K_M (29/32, worst swing 2.16). 680 / 0 / 68 `-c Release`.
+
+**vs LLamaSharp baseline** (FP16-mmap, 9.67 tok/s @ ~6 GB): Overfit Q4_K_M now decodes at **1.51×** with **27 % less committed RAM**. Caveat — not same-file (LLamaSharp baseline was FP16, not Q4_K_M); LLamaSharp on Q4_K_M would consume far less RAM (~2 GB mmap) and likely decode similarly fast. Listed as cleanup below.
+
+**Working-tree state at session end** — all changes staged-but-uncommitted (per the standing "no commits from Claude" rule):
+- New files: `Sources/Main/LanguageModels/Runtime/Q6KDotKernel.cs`, `Q6KWeight.cs`, `Tests/LanguageModels/Runtime/Q6KDotKernelTests.cs`, `Tests/LanguageModels/Runtime/Parity/Q4KMDecodeParityTests.cs`.
+- Modified: `DecodeWeight.cs` (4-way tagged union `{F32|Q8|Q4_K|Q6_K}`), `CachedFeedForwardBlock.cs`, `CachedSingleHeadAttention.cs`, `CachedMultiHeadAttention.cs`, `CachedTransformerBlock.cs`, `CachedGptStack.cs` (per-weight dispatch), `GgufLlamaLoader.cs`, `GgufReader.cs` (native Q4_K + Q6_K reads), `docs/llamacpp-cpu-analysis.md`, `ROADMAP.md`.
+
+### NEXT — resume here (pick one)
+
+- **(A) LLamaSharp re-bench on Q4_K_M** *(small, 1 day)* — restore the LLamaSharp mode to `D:\overfit-bench` (it was removed) and re-run on the same `qwen.q4km.gguf` we use. Outcome: an honest apples-to-apples Overfit-vs-llama.cpp headline number for launch copy. Risk: LLamaSharp may turn out slightly faster on Q4_K_M — but the position is still defensible (pure-managed, zero-alloc, AOT, no native deps, similar perf).
+- **(B) Prefill GEMM (B>1 batched matmul)** *(several days)* — the identified strategic next lever from the perf-sprint memory. Phase 1 `BatchedProjectionKernel` ([N×D]×[D×O]→[N×O] allocation-free GEMM) → Phase 2 batched causal-mask attention → Phase 3 `CachedGptStack.PrefillBatched`. Unlocks 5-10× TTFT speedup for long prompts and B>1 training. Plan already drafted in "Next (after the GPT-2 week)" section below. Helps **prefill + training**, not single-stream decode.
+- **(C) Continue Active track — anomaly + LoRA** — pick one of the four options listed in the Active-track "NEXT" section: end-to-end integration test / Stage-2 LoRA on FFN / Production base training / deployment-architecture decision. This is the live product track; decode work was a parallel sprint.
+
+Recommendation if unsure: **(A) first** (1 day, gives launch-ready headline), **then (B)** (the highest-impact remaining perf lever for use cases beyond decode).
+
+---
+
 ## Recently completed (chronological, newest first)
 
 - **Q4_K_M in-RAM decode path** (`docs/llamacpp-cpu-analysis.md` §5 step 3, sub-steps 3.1 → 3.4). `Q4KDotKernel` + `Q6KDotKernel` (AVX2 `vpmaddubsw` on the 4-bit nibbles / reassembled 6-bit quants + scalar fallbacks); `Q4KWeight` + `Q6KWeight` (output-major super-blocks); `DecodeWeight` widened to a 4-way tagged union `{F32 | Q8 | Q4_K | Q6_K}`; **per-weight dispatch** in `CachedFeedForwardBlock` / `CachedSingleHeadAttention` / `CachedGptStack.ProjectLogits` so a heterogeneous Q4_K_M file (Q4_K attn-Q/K/O + FFN gate/up, Q6_K FFN-down + attn-V + token-embd + output, Q8 per-head Wo) picks the right kernel per projection; native Q4_K + Q6_K loader reads. **Qwen2.5-3B-Instruct: load 1.4 s, decode 14.56 tok/s, steady RAM 4.40 GB** (vs Q8: 1.7 s / 13.28 tok/s / 5.85 GB; vs FP16-src: 7.1 s / 13.29 tok/s / 5.90 GB). 0 B/token preserved. Parity vs same-file F32 baseline: 29/32 top-1 match teacher-forced, worst swing 2.16 (every mismatch a near-tie). 680 / 0 / 68 `-c Release`.
