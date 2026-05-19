@@ -4,6 +4,8 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Numerics.Tensors;
+using System.Runtime.CompilerServices;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
@@ -94,6 +96,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 outputSize);
         }
 
+        /// <summary>
+        /// Output-tile width (in floats) for the blocked accumulate. Large output
+        /// dimensions (FFN, LM head) are processed one L1-resident tile at a time so
+        /// the tile stays hot across the whole input loop — instead of the entire
+        /// output vector being streamed through L2/L3 once per input element.
+        /// Outputs at or below this size take a single tile, identical to an
+        /// unblocked accumulate. 2048 floats = 8 KB; tunable.
+        /// </summary>
+        private const int AccumulateOutputTile = 2048;
+
         public static void Accumulate(
             ReadOnlySpan<float> input,
             ReadOnlySpan<float> weightsInputOutput,
@@ -108,47 +120,63 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 inputSize,
                 outputSize);
 
-            var outputSlice = output.Slice(0, outputSize);
-
-            for (var i = 0; i < inputSize; i++)
+            // Blocked over the output dimension: for each output tile, run the full
+            // input loop while the tile stays resident in L1. The per-element
+            // accumulation order (input ascending) is unchanged, so the result is
+            // bit-identical to an unblocked accumulate.
+            for (var tile = 0; tile < outputSize; tile += AccumulateOutputTile)
             {
-                var x = input[i];
+                var tileLength = Math.Min(AccumulateOutputTile, outputSize - tile);
+                var outputTile = output.Slice(tile, tileLength);
 
-                if (x == 0f)
+                for (var i = 0; i < inputSize; i++)
                 {
-                    continue;
+                    var x = input[i];
+
+                    if (x == 0f)
+                    {
+                        continue;
+                    }
+
+                    var weightTile = weightsInputOutput.Slice(
+                        i * outputSize + tile,
+                        tileLength);
+
+                    TensorPrimitives.MultiplyAdd(
+                        weightTile,
+                        x,
+                        outputTile,
+                        outputTile);
                 }
-
-                var weightRow = weightsInputOutput.Slice(
-                    i * outputSize,
-                    outputSize);
-
-                TensorPrimitives.MultiplyAdd(
-                    weightRow,
-                    x,
-                    outputSlice,
-                    outputSlice);
             }
         }
 
         /// <summary>
-        /// Parallel projection for large output dimensions (LM head, FFN W1).
-        ///
-        /// Splits the output dimension into chunks and runs each chunk on a
-        /// separate thread via <see cref="Parallel.For"/>. Uses <c>unsafe</c>
-        /// MemoryMarshal.GetReference + Unsafe.Add to cross the managed/Parallel boundary without
-        /// allocating delegates or closures per call.
-        ///
-        /// Threshold: only parallelises when <c>outputSize</c> exceeds
-        /// <see cref="ParallelThreshold"/>. Below the threshold falls back
-        /// to the sequential <see cref="Project"/> path.
-        ///
-        /// Access pattern: each thread reads ALL input values (small — fits
-        /// in L1) and a contiguous slice of each weight row (cache-friendly
-        /// within the slice). No output sharing between threads.
+        /// Minimum matmul work (<c>inputSize × outputSize</c>) for the parallel
+        /// path to pay off. Below this the <see cref="OverfitParallelFor"/>
+        /// dispatch (~5 µs) outweighs the gain and the sequential
+        /// <see cref="Project"/> runs instead. Tuned so FFN / LM-head matmuls
+        /// parallelise while the small per-head attention projections stay
+        /// sequential (they are better parallelised head-wise, one level up).
         /// </summary>
-        public const int ParallelThreshold = 10_000;
+        public const long ParallelWorkThreshold = 1_000_000;
 
+        /// <summary>
+        /// Parallel projection for large matmuls (FFN, LM head). Splits the
+        /// output dimension into one contiguous band per worker via the
+        /// zero-allocation <see cref="OverfitParallelFor"/> dispatcher — each
+        /// worker streams its own slice of the weight matrix from DRAM, so the
+        /// decode matmul uses aggregate multi-core memory bandwidth instead of a
+        /// single core. Output bands are disjoint: no reduction, no false
+        /// sharing.
+        ///
+        /// Bit-identical to <see cref="Project"/>: every output element is
+        /// accumulated by exactly one worker in input-ascending order.
+        ///
+        /// Below <see cref="ParallelWorkThreshold"/> (or with a single worker)
+        /// it falls back to the sequential <see cref="Project"/> path. The happy
+        /// path allocates 0 managed bytes.
+        /// </summary>
         public static void ProjectParallel(
             ReadOnlySpan<float> input,
             ReadOnlySpan<float> weightsInputOutput,
@@ -157,12 +185,6 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int inputSize,
             int outputSize)
         {
-            if (outputSize < ParallelThreshold)
-            {
-                Project(input, weightsInputOutput, bias, output, inputSize, outputSize);
-                return;
-            }
-
             ValidateArguments(input, weightsInputOutput, output, inputSize, outputSize);
 
             if (!bias.IsEmpty && bias.Length < outputSize)
@@ -170,61 +192,92 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 throw new ArgumentException("Bias span is smaller than outputSize.", nameof(bias));
             }
 
-            // Sequential init: fill output with bias or zero.
-            // Cheaper than parallelising (one pass, no synchronisation).
-            if (!bias.IsEmpty)
+            if ((long)inputSize * outputSize < ParallelWorkThreshold
+                || OverfitParallelFor.WorkerCount <= 1)
             {
-                bias.Slice(0, outputSize).CopyTo(output);
+                Project(input, weightsInputOutput, bias, output, inputSize, outputSize);
+                return;
+            }
+
+            fixed (float* pInput = input)
+            fixed (float* pWeights = weightsInputOutput)
+            fixed (float* pBias = bias)
+            fixed (float* pOutput = output)
+            {
+                var context = new ProjectChunkContext
+                {
+                    Input = pInput,
+                    Weights = pWeights,
+                    Bias = pBias,
+                    BiasLength = bias.Length,
+                    Output = pOutput,
+                    InputSize = inputSize,
+                    OutputSize = outputSize,
+                };
+
+                // For() is synchronous — it blocks until every band completes,
+                // so the fixed pointers stay valid for the whole dispatch.
+                OverfitParallelFor.For(0, outputSize, &ProjectChunk, &context);
+            }
+        }
+
+        /// <summary>
+        /// Worker body for <see cref="ProjectParallel"/>: computes the output
+        /// band <c>[chunkStart, chunkEnd)</c> — bias/zero init then a blocked
+        /// accumulate over the band, mirroring <see cref="Accumulate"/>.
+        /// </summary>
+        private static void ProjectChunk(int chunkStart, int chunkEnd, void* context)
+        {
+            ref var ctx = ref Unsafe.AsRef<ProjectChunkContext>(context);
+
+            var count = chunkEnd - chunkStart;
+            var inputSize = ctx.InputSize;
+            var outputSize = ctx.OutputSize;
+
+            var outputBand = new Span<float>(ctx.Output + chunkStart, count);
+
+            if (ctx.BiasLength == 0)
+            {
+                outputBand.Clear();
             }
             else
             {
-                output.Slice(0, outputSize).Clear();
+                new ReadOnlySpan<float>(ctx.Bias + chunkStart, count).CopyTo(outputBand);
             }
 
-            var processorCount = Environment.ProcessorCount;
-            var chunkSize = Math.Max(512, (outputSize + processorCount - 1) / processorCount);
-            var chunkCount = (outputSize + chunkSize - 1) / chunkSize;
-
-            // CS1764/CS8175: fixed and ref locals cannot be captured in lambdas.
-            // Safe workaround: convert to nint (value type) before Parallel.For.
-            // Parallel.For is synchronous — it blocks until ALL worker threads finish,
-            // so the fixed block is guaranteed to be active for the entire duration.
-            // The nint values are addresses captured by value in the lambda closure.
-            fixed (float* pInput = input)
-            fixed (float* pWeights = weightsInputOutput)
-            fixed (float* pOutput = output)
+            for (var tile = 0; tile < count; tile += AccumulateOutputTile)
             {
-                var ip = (nint)pInput;
-                var wp = (nint)pWeights;
-                var op = (nint)pOutput;
+                var tileLength = Math.Min(AccumulateOutputTile, count - tile);
+                var outputTile = outputBand.Slice(tile, tileLength);
 
-                Parallel.For(0, chunkCount, chunk =>
+                for (var i = 0; i < inputSize; i++)
                 {
-                    var start = chunk * chunkSize;
-                    var count = Math.Min(chunkSize, outputSize - start);
+                    var x = ctx.Input[i];
 
-                    // Cast nint back to pointer — safe because Parallel.For is
-                    // synchronous and the fixed block is still active.
-                    var outputChunk = new Span<float>((float*)op + start, count);
-
-                    // Accumulate: output[start:start+count] += input[i] * W[i, start:start+count]
-                    // output was already initialised with bias (or zero) above.
-                    for (var i = 0; i < inputSize; i++)
+                    if (x == 0f)
                     {
-                        var x = ((float*)ip)[i];
-                        if (x == 0f)
-                        {
-                            continue;
-                        }
-
-                        var weightSlice = new ReadOnlySpan<float>(
-                            (float*)wp + (long)i * outputSize + start,
-                            count);
-
-                        TensorPrimitives.MultiplyAdd(weightSlice, x, outputChunk, outputChunk);
+                        continue;
                     }
-                });
+
+                    var weightTile = new ReadOnlySpan<float>(
+                        ctx.Weights + (long)i * outputSize + chunkStart + tile,
+                        tileLength);
+
+                    TensorPrimitives.MultiplyAdd(weightTile, x, outputTile, outputTile);
+                }
             }
+        }
+
+        /// <summary>Pinned-pointer state passed to <see cref="ProjectChunk"/> workers.</summary>
+        private struct ProjectChunkContext
+        {
+            public float* Input;
+            public float* Weights;
+            public float* Bias;
+            public int BiasLength;
+            public float* Output;
+            public int InputSize;
+            public int OutputSize;
         }
 
         public static void ProjectSlice(

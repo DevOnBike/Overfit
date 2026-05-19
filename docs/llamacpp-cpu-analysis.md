@@ -1,6 +1,8 @@
 # llama.cpp CPU inference — analysis & Overfit decode-kernel plan
 
-**Status:** analysis complete (2026-05). The plan in §5 is not yet started.
+**Status:** analysis complete (2026-05). §5 steps 1 + 1b **done & A/B-measured** —
+Qwen-3B decode **2.71 → 4.01 tok/s (+48%)**, 0 B/token preserved; gap to llama.cpp
+closed from 3.75× to **2.41×**. Steps 2–3 (quantization) not started.
 
 **Origin — the benchmark that triggered this.** Same Qwen2.5-3B GGUF, single-stream CPU decode:
 
@@ -96,23 +98,65 @@ Overfit already has the analogue: `OverfitParallelFor` (persistent threads, bulk
 
 ## 5. Plan — what to do, in what order, when
 
-| # | Step | Effort | Depends on | Expected impact |
-|---|------|-------:|-----------|-----------------|
-| 1 | Dot-product GEMV (fix the outer-product) | ~0.5 day | — | ~2–3× F32 decode (2.58 → ~6–7 tok/s) |
-| 2 | Q8_0 weight path + INT8 dot kernel | ~1–2 days | 1 | near-parity throughput; fixes RAM |
-| 3 | Q4_K / Q6_K decode kernels | ~2–3 days | 2 | ~7× fewer weight bytes; same-file benchmark vs llama.cpp |
-| 4 | Tiled prefill GEMM (tinyBLAS-style) | ~2–3 days | — (own track) | prefill / batch>1 only |
-| 5 | Intra-matmul work-stealing chunk counter | ~few hours | — | small; fold in opportunistically |
+| # | Step | Status | Measured / expected |
+|---|------|--------|---------------------|
+| 1 | Blocked GEMV + parallelize FFN/LM-head matmul | ✅ done | 2.71 → 3.63 tok/s (+34%), 0 B/token kept |
+| 1b | Head-parallel attention | ✅ done | **3.63 → 4.01 tok/s (+10.5%)** — cumulative **2.71 → 4.01 (+48%)** |
+| 2 | Q8_0 weight path + INT8 dot kernel | not started | ~3.5× fewer weight bytes; fixes RAM |
+| 3 | Q4_K / Q6_K decode kernels | not started | ~7× fewer bytes; same-file benchmark vs llama.cpp |
+| 4 | Tiled prefill GEMM (tinyBLAS-style) | separate track | prefill / batch>1 only |
+| 5 | Intra-matmul work-stealing chunk counter | minor | fold in opportunistically |
 
-### Step 1 — Dot-product GEMV *(do first; prerequisite for everything)*
+### Step 1 — Parallelize the decode matmul — ✅ DONE & MEASURED
 
-**Problem.** `SingleTokenProjectionKernel.Accumulate` is an **outer-product**: `for i: TensorPrimitives.MultiplyAdd(weightRow_i, x_i, output, output)`. The whole output vector is read+written **once per input element** (K times). For a 3B layer the output vector (~14 KB) does not stay in L1 across the K loop → L2/L3 bandwidth paid K times. (The weight access itself is fine — input-major layout makes it sequential.)
+This doc originally proposed a "dot-product GEMV" here, on the theory that the
+outer-product `Accumulate` re-streams the output vector through L2/L3. Two
+sub-changes were implemented and **A/B-measured on Qwen-3B**; the theory was only
+partly right.
 
-**Fix.** Compute each output as a dot product: `output[o] = dot(weightColumn_o, x)`. Output written once; `x` (~10–14 KB) stays hot in L1/L2 across all rows. This requires storing projection weights **output-major** (`W'[o*inputSize + i]`) so each output's weight vector is contiguous — a load-time transpose in `GgufLlamaLoader` (the loader already transposes per-head; this changes the target layout). The kernel can use `TensorPrimitives.Dot` per row, or a hand-rolled `Vector256<float>` loop with 4 accumulators.
+- **Blocked-output `Accumulate`** — process the output in L1-resident tiles so it
+  is not re-streamed. Bit-identical. **Measured +2.2%** (2.71 → 2.77 tok/s). The
+  output re-streaming was a near-non-issue: the dev CPU (Ryzen 9 9950X3D) has a
+  huge L2 + 3D V-cache, so the "re-streamed" output was always cache-resident.
+  The earlier "~2–3×" estimate for this was simply wrong.
+- **Parallelize FFN + LM-head matmul** — `SingleTokenProjectionKernel.ProjectParallel`
+  rewritten on the zero-alloc `OverfitParallelFor` dispatcher (splits the output
+  dimension into one band per worker), wired into `CachedFeedForwardBlock` and
+  `CachedGptStack.ProjectLogits`. **Measured +31%** (2.77 → 3.63 tok/s). This was
+  the real lever: the decode matmul was single-threaded, so ~33 GB/s ≈ a
+  single-core DRAM ceiling; threading FFN/LM-head pulls weights from DRAM on
+  multiple cores toward the aggregate ceiling.
 
-**Why first:** highest leverage, lowest effort, no dependencies, and it makes the kernel tileable — a prerequisite for steps 2–3.
+The full output-major **layout flip was not done** — it has real blast radius
+(the kernel is shared with the GPT-1/2 path, whose weights are the trainable
+model's `TensorStorage`; flipping it breaks zero-copy + LoRA weight-visibility).
+Blocked GEMV captured the cache angle for +2% without it; the structural win came
+from threading, which needs no layout change.
 
-**Verify:** parity (greedy output bit-/noise-identical to current); A/B decode tok/s on Qwen-3B; confirm 0 B/token preserved.
+**Result: 2.71 → 3.63 tok/s (+34%), 0 B/token preserved, 659 tests green.** Gap to
+llama.cpp: 3.75× → 2.66×.
+
+**Why not ~2×:** the attention Q/K/V/O projections are below the parallel
+work threshold (each per-head matmul is too small to split per-projection) and
+stay single-threaded — attention is ~⅓ of the per-token weight streaming.
+
+### Step 1b — Head-parallel attention — ✅ DONE & MEASURED
+
+`CachedMultiHeadAttention.Decode` parallelised across **KV groups** via
+`OverfitParallelFor` — one worker per KV head, each owning a disjoint KV-cache
+slot and a contiguous run of Q heads. Splitting by KV group (not by Q head)
+keeps every cache write owned by exactly one worker → no write race, and needs
+no split of `CachedSingleHeadAttention`. Each head writes its own band of
+`_headOutputs`; a sequential reduction sums them (ascending → bit-identical to
+the old per-head loop).
+
+For GQA models (Qwen-3B: 2 KV heads) this is 2-way parallel; for MHA (GPT-2) it
+is one worker per head. Attention decode is memory-bound, so even 2-way pulls
+most of the available aggregate bandwidth.
+
+**Measured: 3.63 → 4.01 tok/s (+10.5%).** 0 B/token preserved, 659 tests green.
+
+**Cumulative (steps 1 + 1b): 2.71 → 4.01 tok/s (+48%); gap to llama.cpp 3.75× → 2.41×.**
 
 ### Step 2 — Q8_0 weight path + INT8 dot kernel
 

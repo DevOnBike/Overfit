@@ -34,17 +34,19 @@ namespace DevOnBike.Overfit.Runtime
     ///         <see cref="CountdownEvent"/> to <c>chunkCount</c>.</item>
     ///   <item>Fill <c>chunkCount</c> entries of the per-chunk descriptor
     ///         array <c>_chunks[]</c> with <c>(start, end, body, ctx)</c>.</item>
-    ///   <item><see cref="SemaphoreSlim.Release(int)"/><c>(chunkCount)</c>
+    ///   <item><see cref="SemaphoreSlim.Release(int)"/><c>(chunkCount - 1)</c>
     ///         — <b>one</b> bulk-wake call publishes the slot writes and
-    ///         signals up to <c>chunkCount</c> waiters; the kernel scheduler
-    ///         resumes them roughly in parallel, NOT serially the way
-    ///         <c>N × AutoResetEvent.Set</c> would.</item>
+    ///         signals up to <c>chunkCount - 1</c> waiters; the kernel
+    ///         scheduler resumes them roughly in parallel, NOT serially the
+    ///         way <c>N × AutoResetEvent.Set</c> would.</item>
     ///   <item>Each woken worker
     ///         <see cref="Interlocked.Increment(ref int)"/>s the shared
     ///         claim counter to grab a unique chunk index, reads its
     ///         descriptor, runs the body, and signals
     ///         <see cref="CountdownEvent"/>.</item>
-    ///   <item>Caller <see cref="CountdownEvent.Wait()"/>s, then propagates
+    ///   <item>The calling thread runs the final chunk itself (caller
+    ///         participation — one fewer wakeup, the caller's core stays
+    ///         hot), then <see cref="CountdownEvent.Wait()"/>s and propagates
     ///         the first captured exception (if any) preserving its stack
     ///         trace via <see cref="ExceptionDispatchInfo"/>.</item>
     /// </list>
@@ -198,14 +200,41 @@ namespace DevOnBike.Overfit.Runtime
 
         /// <summary>
         /// Executes <paramref name="body"/> over chunks of
-        /// <c>[rangeStart, rangeEnd)</c> across the worker pool. Blocks until
-        /// every chunk completes. Allocates 0 managed bytes per call on the
-        /// happy path; the exception path allocates one
-        /// <see cref="ExceptionDispatchInfo"/> per failing chunk.
+        /// <c>[rangeStart, rangeEnd)</c> across the worker pool. Equivalent to
+        /// the grained overload with <c>minItemsPerWorker = 1</c>.
         /// </summary>
         public static void For(
             int rangeStart,
             int rangeEnd,
+            delegate*<int, int, void*, void> body,
+            void* context)
+            => For(rangeStart, rangeEnd, 1, body, context);
+
+        /// <summary>
+        /// Executes <paramref name="body"/> over chunks of
+        /// <c>[rangeStart, rangeEnd)</c> across the worker pool. Blocks until
+        /// every chunk completes. Allocates 0 managed bytes per call on the
+        /// happy path; the exception path allocates one
+        /// <see cref="ExceptionDispatchInfo"/> per failing chunk.
+        ///
+        /// <para>
+        /// When the total work is below <c>2 × minItemsPerWorker</c> — or there
+        /// is only one worker — the body runs inline on the calling thread: no
+        /// dispatch, no lock (also making the call reentrancy-safe in that
+        /// case). The right grain differs per kernel, so it is a per-call
+        /// argument rather than a global constant.
+        /// </para>
+        ///
+        /// <para>
+        /// The calling thread participates — it runs one chunk itself rather
+        /// than only waiting — so a dispatch wakes at most
+        /// <c>WorkerCount − 1</c> background workers.
+        /// </para>
+        /// </summary>
+        public static void For(
+            int rangeStart,
+            int rangeEnd,
+            int minItemsPerWorker,
             delegate*<int, int, void*, void> body,
             void* context)
         {
@@ -214,10 +243,28 @@ namespace DevOnBike.Overfit.Runtime
                 throw new ArgumentNullException(nameof(body));
             }
 
-            var totalWork = rangeEnd - rangeStart;
-            if (totalWork <= 0) { return; }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(minItemsPerWorker);
 
-            if (totalWork == 1)
+            // Empty / inverted range. Computed in Int64 so a pathological
+            // rangeEnd - rangeStart cannot overflow Int32 and silently skip work.
+            if (rangeEnd <= rangeStart)
+            {
+                return;
+            }
+
+            var totalWorkLong = (long)rangeEnd - rangeStart;
+            if (totalWorkLong > int.MaxValue)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(rangeEnd), "Range size exceeds Int32.MaxValue.");
+            }
+
+            var totalWork = (int)totalWorkLong;
+
+            // Inline fast-path: nothing to gain from dispatch when there is a
+            // single worker, or the work is below the caller's profitability
+            // grain. Skips the lock and the worker handoff entirely.
+            if (_workerCount <= 1 || totalWork < 2L * minItemsPerWorker)
             {
                 body(rangeStart, rangeEnd, context);
                 return;
@@ -235,7 +282,7 @@ namespace DevOnBike.Overfit.Runtime
                 for (var i = 0; i < chunkCount; i++)
                 {
                     var chunkStart = rangeStart + i * perChunk;
-                    var chunkEnd = Math.Min(chunkStart + perChunk, rangeEnd);
+                    var chunkEnd = (int)Math.Min((long)chunkStart + perChunk, rangeEnd);
 
                     _chunks[i].Start = chunkStart;
                     _chunks[i].End = chunkEnd;
@@ -244,10 +291,17 @@ namespace DevOnBike.Overfit.Runtime
                     _chunks[i].Error = null;
                 }
 
-                // Bulk wake. One syscall releases chunkCount tokens; the
-                // semaphore's internal lock provides the release-fence so
-                // the descriptor writes above are visible to workers.
-                _startSemaphore.Release(chunkCount);
+                // Bulk wake — one syscall releases chunkCount - 1 tokens; the
+                // semaphore's internal lock provides the release-fence so the
+                // descriptor writes above are visible to workers. The calling
+                // thread runs the final chunk itself (caller participation).
+                var workerChunks = chunkCount - 1;
+                if (workerChunks > 0)
+                {
+                    _startSemaphore.Release(workerChunks);
+                }
+
+                ExecuteChunk(chunkCount - 1);
 
                 _completion.Wait();
 
@@ -264,6 +318,31 @@ namespace DevOnBike.Overfit.Runtime
             }
         }
 
+        /// <summary>
+        /// Runs one chunk's body, capturing any thrown exception into the chunk
+        /// descriptor and signalling completion. Shared by the background
+        /// workers and the calling thread (caller participation).
+        /// </summary>
+        private static void ExecuteChunk(int index)
+        {
+            try
+            {
+                _chunks[index].Body(
+                    _chunks[index].Start, _chunks[index].End, _chunks[index].Context);
+            }
+            catch (Exception ex)
+            {
+                // Capture preserves stack trace; re-thrown on the caller in For().
+                // ExceptionDispatchInfo.Capture allocates, but only on the
+                // exception path — happy path stays 0 B.
+                _chunks[index].Error = ExceptionDispatchInfo.Capture(ex);
+            }
+            finally
+            {
+                _completion.Signal();
+            }
+        }
+
         private static void WorkerLoop()
         {
             while (true)
@@ -277,27 +356,14 @@ namespace DevOnBike.Overfit.Runtime
 
                 if (index < _chunkCount)
                 {
-                    try
-                    {
-                        _chunks[index].Body(_chunks[index].Start, _chunks[index].End, _chunks[index].Context);
-                    }
-                    catch (Exception ex)
-                    {
-                        // Capture preserves stack trace; re-thrown on caller in For().
-                        // ExceptionDispatchInfo.Capture allocates, but only on the
-                        // exception path — happy path stays 0 B.
-                        _chunks[index].Error = ExceptionDispatchInfo.Capture(ex);
-                    }
-                    finally
-                    {
-                        _completion.Signal();
-                    }
+                    ExecuteChunk(index);
                 }
                 else
                 {
                     // UNREACHABLE under correct SemaphoreSlim semantics:
-                    // Release(chunkCount) yields exactly chunkCount successful
-                    // Waits, so claim indices are always in [0, chunkCount).
+                    // Release(chunkCount - 1) yields exactly chunkCount - 1
+                    // successful Waits, so worker claim indices are always in
+                    // [0, chunkCount - 1); the caller runs the final chunk.
                     //
                     // We intentionally do NOT call _completion.Signal() here.
                     // Reset(chunkCount) sized the countdown to exactly chunkCount;

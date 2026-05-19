@@ -207,17 +207,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             // LM head: [DModel] × [DModel × VocabSize] → [VocabSize].
             //
-            // Stays sequential by design — ProjectParallel exists but allocates
-            // ~3 KB per call from Parallel.For task scheduling, which breaks the
-            // 0 B / generated token contract validated by
-            // Gpt2GenerationDemoTests.Demo_Gpt2Small_KvCacheDecode_AllocatesZeroBytesPerToken.
-            // Speedup on GPT-2 Small was only ~3 % at the per-token level (Parallel.For
-            // overhead dominates vs the ~3.8 ms LM-head matmul), nowhere near the
-            // ~10× implied by the steady-state LmHeadParallelBenchmark.
-            //
-            // A true win here needs an allocation-free worker pool — tracked in
-            // ROADMAP under "LM head hot-path: allocation-free parallel matmul".
-            SingleTokenProjectionKernel.Project(
+            // Parallelised via ProjectParallel, which splits the output (vocab)
+            // dimension across the OverfitParallelFor worker pool. That
+            // dispatcher is allocation-free, so the 0 B / generated token
+            // contract (validated by
+            // Gpt2GenerationDemoTests.Demo_Gpt2Small_KvCacheDecode_AllocatesZeroBytesPerToken)
+            // still holds. Below the work threshold ProjectParallel falls back
+            // to the sequential path automatically.
+            SingleTokenProjectionKernel.ProjectParallel(
                 _finalHidden,
                 weights.LmHeadWeights,
                 ReadOnlySpan<float>.Empty,

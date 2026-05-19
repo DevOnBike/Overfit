@@ -3,7 +3,9 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.LanguageModels.Rope;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
@@ -32,10 +34,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     /// The caller must call cache.Advance() before decoding the new position.
     /// The cache length must already include the position being decoded.
     /// </summary>
-    public sealed class CachedMultiHeadAttention
+    public sealed unsafe class CachedMultiHeadAttention
     {
         private readonly CachedSingleHeadAttention[] _heads;
-        private readonly float[] _headOutput;
+        private readonly float[] _headOutputs;
 
         /// <param name="kvHeadCount">
         /// Number of KV heads for GQA. 0 or equal to headCount = standard MHA.
@@ -70,7 +72,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             MaxSequenceLength = maxSequenceLength;
 
             _heads = new CachedSingleHeadAttention[headCount];
-            _headOutput = new float[dModel];
+            _headOutputs = new float[headCount * dModel];
 
             for (var h = 0; h < headCount; h++)
             {
@@ -99,6 +101,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Span<float> output,
             RopeTable? rope = null)
         {
+            // Output starts as the attention bias (or zero); each head's
+            // projected contribution is summed in afterwards.
             var bo = weights.AttentionBias;
             if (bo.IsEmpty)
             {
@@ -109,48 +113,115 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 bo.Slice(0, DModel).CopyTo(output);
             }
 
-            var useGqa = weights.HasGqa;
-
-            for (var h = 0; h < HeadCount; h++)
+            // Heads are parallelised across KV groups via OverfitParallelFor:
+            // one worker per KV head, each owning a disjoint KV-cache slot and a
+            // disjoint contiguous run of Q heads. No cross-worker writes — the
+            // result is bit-identical to the sequential head loop. Each head
+            // writes its own band of _headOutputs; the reduction runs after.
+            fixed (float* hiddenPtr = hidden)
             {
-                ref readonly var hw = ref weights.Head(h);
-
-                ReadOnlySpan<float> wk, wv, bk, bv;
-                if (useGqa)
+                var context = new HeadDecodeContext
                 {
-                    // GQA: multiple Q heads share one KV head
-                    // GQA grouped mapping: Q head h uses KV head h // (nHeads/nKvHeads)
-                    // (matches HuggingFace transformers repeat_kv convention)
-                    var groupSize = HeadCount / KvHeadCount;
-                    var kvH = h / groupSize;
-                    ref readonly var kv = ref weights.KvHead(kvH);
-                    wk = kv.Wk; wv = kv.Wv;
-                    bk = kv.Bk; bv = kv.Bv;
+                    Heads = _heads,
+                    Weights = weights,
+                    Cache = cache,
+                    Rope = rope,
+                    HeadOutputs = _headOutputs,
+                    Hidden = hiddenPtr,
+                    LayerIndex = layerIndex,
+                    Position = position,
+                    DModel = DModel,
+                    HeadCount = HeadCount,
+                    KvHeadCount = KvHeadCount,
+                    UseGqa = weights.HasGqa,
+                };
+
+                var contextPtr = Unsafe.AsPointer(ref context);
+
+                if (KvHeadCount > 1 && OverfitParallelFor.WorkerCount > 1)
+                {
+                    OverfitParallelFor.For(0, KvHeadCount, &DecodeKvGroup, contextPtr);
                 }
                 else
                 {
-                    // Standard MHA: each Q head has its own K/V weights
-                    wk = hw.Wk; wv = hw.Wv;
-                    bk = hw.Bk; bv = hw.Bv;
+                    DecodeKvGroup(0, KvHeadCount, contextPtr);
                 }
-
-                // Map Q head index to KV cache slot (GQA: multiple Q map to same slot)
-                var kvCacheHead = useGqa ? h / (HeadCount / KvHeadCount) : h;
-
-                _heads[h].Decode(
-                    hidden,
-                    hw.Wq, wk, wv,
-                    hw.Bq, bk, bv,
-                    hw.Wo,
-                    cache,
-                    layerIndex,
-                    kvCacheHead,
-                    position,
-                    _headOutput,
-                    rope);
-
-                AddInPlace(_headOutput, output, DModel);
             }
+
+            // Reduce: output += Σ head outputs, ascending — matches the
+            // sequential accumulation order exactly.
+            for (var h = 0; h < HeadCount; h++)
+            {
+                AddInPlace(_headOutputs.AsSpan(h * DModel, DModel), output, DModel);
+            }
+        }
+
+        /// <summary>
+        /// Worker body: decodes every Q head in KV groups
+        /// <c>[groupStart, groupEnd)</c> into its <c>_headOutputs</c> band. Each
+        /// group owns exactly one KV-cache head — disjoint across workers, so
+        /// there is no cross-worker cache write.
+        /// </summary>
+        private static void DecodeKvGroup(int groupStart, int groupEnd, void* context)
+        {
+            ref var ctx = ref Unsafe.AsRef<HeadDecodeContext>(context);
+
+            var dModel = ctx.DModel;
+            var groupSize = ctx.HeadCount / ctx.KvHeadCount;
+            var hidden = new ReadOnlySpan<float>(ctx.Hidden, dModel);
+
+            for (var group = groupStart; group < groupEnd; group++)
+            {
+                for (var headInGroup = 0; headInGroup < groupSize; headInGroup++)
+                {
+                    var h = group * groupSize + headInGroup;
+                    ref readonly var hw = ref ctx.Weights.Head(h);
+
+                    ReadOnlySpan<float> wk, wv, bk, bv;
+                    if (ctx.UseGqa)
+                    {
+                        // GQA: every Q head in the group shares one KV head.
+                        ref readonly var kv = ref ctx.Weights.KvHead(group);
+                        wk = kv.Wk; wv = kv.Wv;
+                        bk = kv.Bk; bv = kv.Bv;
+                    }
+                    else
+                    {
+                        // Standard MHA: each Q head has its own K/V weights.
+                        wk = hw.Wk; wv = hw.Wv;
+                        bk = hw.Bk; bv = hw.Bv;
+                    }
+
+                    ctx.Heads[h].Decode(
+                        hidden,
+                        hw.Wq, wk, wv,
+                        hw.Bq, bk, bv,
+                        hw.Wo,
+                        ctx.Cache,
+                        ctx.LayerIndex,
+                        group,            // KV-cache slot for this group
+                        ctx.Position,
+                        ctx.HeadOutputs.AsSpan(h * dModel, dModel),
+                        ctx.Rope);
+                }
+            }
+        }
+
+        /// <summary>State handed to <see cref="DecodeKvGroup"/> workers via a stack pointer.</summary>
+        private struct HeadDecodeContext
+        {
+            public CachedSingleHeadAttention[] Heads;
+            public BlockWeights Weights;
+            public KeyValueCache Cache;
+            public RopeTable? Rope;
+            public float[] HeadOutputs;
+            public float* Hidden;
+            public int LayerIndex;
+            public int Position;
+            public int DModel;
+            public int HeadCount;
+            public int KvHeadCount;
+            public bool UseGqa;
         }
 
 

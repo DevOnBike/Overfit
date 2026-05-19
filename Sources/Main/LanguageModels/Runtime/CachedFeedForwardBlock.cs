@@ -75,7 +75,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 b2,
                 output);
 
-            SingleTokenProjectionKernel.Project(
+            SingleTokenProjectionKernel.ProjectParallel(
                 hidden,
                 w1,
                 b1,
@@ -85,7 +85,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             ApplyActivation(_intermediate, Activation);
 
-            SingleTokenProjectionKernel.Project(
+            SingleTokenProjectionKernel.ProjectParallel(
                 _intermediate,
                 w2,
                 b2,
@@ -139,17 +139,17 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             // gate = SiLU(hidden @ Wgate)
-            SingleTokenProjectionKernel.Project(hidden, wGate, [], _gate, DModel, DFF);
+            SingleTokenProjectionKernel.ProjectParallel(hidden, wGate, [], _gate, DModel, DFF);
             ApplySiLU(_gate);
 
             // up = hidden @ Wup
-            SingleTokenProjectionKernel.Project(hidden, wUp, [], _intermediate, DModel, DFF);
+            SingleTokenProjectionKernel.ProjectParallel(hidden, wUp, [], _intermediate, DModel, DFF);
 
             // intermediate = gate * up (element-wise)
             TensorPrimitives.Multiply(_gate, _intermediate, _intermediate);
 
             // output = intermediate @ Wdown
-            SingleTokenProjectionKernel.Project(_intermediate, wDown, [], output, DFF, DModel);
+            SingleTokenProjectionKernel.ProjectParallel(_intermediate, wDown, [], output, DFF, DModel);
         }
 
         public void GetLastIntermediate(Span<float> destination)
