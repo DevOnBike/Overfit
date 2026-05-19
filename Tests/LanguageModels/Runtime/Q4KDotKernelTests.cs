@@ -65,6 +65,35 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         }
 
         [Fact]
+        public void ProjectParallel_IsBitIdenticalToProject()
+        {
+            const int inputSize = 512;
+            const int outputSize = 96;
+            var rng = new Random(424242);
+
+            var blocks = BuildRandomBlocks(rng, outputSize, inputSize);
+            var input = RandomVector(rng, inputSize);
+            var bias = RandomVector(rng, outputSize);
+            var weight = new Q4KWeight(blocks, inputSize, outputSize);
+            var superBlocksPerRow = inputSize / SuperBlockElements;
+
+            var sequential = new float[outputSize];
+            var parallel = new float[outputSize];
+            var actQuants = new sbyte[inputSize];
+            var actScales = new float[superBlocksPerRow];
+            var actBsums = new short[superBlocksPerRow * Q4KDotKernel.GroupsPerSuperBlock];
+
+            Q4KDotKernel.Project(input, weight, bias, sequential, actQuants, actScales, actBsums);
+            Q4KDotKernel.ProjectParallel(input, weight, bias, parallel, actQuants, actScales, actBsums);
+
+            // Each output is an independent Dot — parallel must match exactly.
+            for (var o = 0; o < outputSize; o++)
+            {
+                Assert.Equal(sequential[o], parallel[o]);
+            }
+        }
+
+        [Fact]
         public void Project_AppliesBias()
         {
             const int inputSize = 256;

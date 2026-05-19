@@ -4,7 +4,12 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Buffers.Binary;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 using DevOnBike.Overfit.LanguageModels.Loading;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
@@ -23,11 +28,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     /// Q8_K group sums). This identity is exact given the Q8_K activation — the
     /// only approximation is the activation quantization itself.
     ///
-    /// This is the scalar reference shape; an AVX2 INT8-SIMD path is a later
-    /// sub-step (3.1b). Standalone and parity-tested against the F32 decode of
-    /// <see cref="GgmlDequant.DecodeQ4_KBlock"/>.
+    /// <para>The AVX2 path feeds the Q4 nibbles straight into <c>vpmaddubsw</c>:
+    /// they are unsigned [0,15] by construction, so they <i>are</i> the unsigned
+    /// operand — no <c>vpsignb</c> trick needed (unlike the signed×signed Q8_0
+    /// dot). The scalar fallback is bit-identical (pure INT32 arithmetic).</para>
+    ///
+    /// Parity-tested against the F32 decode of <see cref="GgmlDequant.DecodeQ4_KBlock"/>.
     /// </summary>
-    public static class Q4KDotKernel
+    public static unsafe class Q4KDotKernel
     {
         /// <summary>Elements per Q4_K / Q8_K super-block.</summary>
         public const int SuperBlockElements = 256;
@@ -139,28 +147,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Span<byte> mins = stackalloc byte[8];
             GgmlDequant.UnpackQ4_KScalesMins(q4kBlock.Slice(4, 12), scales, mins);
 
-            var qs = q4kBlock.Slice(16, 128);   // 256 nibbles
+            // Main term: Σₛ scale[s]·intdotₛ over the 256 nibbles.
+            var mainAcc = MainDot(q4kBlock.Slice(16, 128), q8Block, scales);
 
-            // mainAcc = Σₛ scale[s]·intdotₛ ; minAcc = Σₛ min[s]·(bsum of sub-block s).
-            // Both stay INT32: scale,min ≤ 63; intdotₛ ≤ 32·15·127; the 8-term
-            // sums are well under 2³¹.
-            var mainAcc = 0;
+            // Min-correction: Σₛ min[s]·(sum of q8 over sub-block s). Each
+            // sub-block spans two 16-element bsum groups. Tiny — kept scalar.
             var minAcc = 0;
             for (var s = 0; s < 8; s++)
             {
-                var qsBase = 32 * (s >> 1);       // two sub-blocks share a 32-byte nibble run
-                var high = (s & 1) == 1;          // even s → low nibbles, odd s → high nibbles
-                var q8Base = 32 * s;
-
-                var dot = 0;
-                for (var e = 0; e < 32; e++)
-                {
-                    var packed = qs[qsBase + e];
-                    var nibble = high ? (packed >> 4) : (packed & 0x0F);
-                    dot += nibble * q8Block[q8Base + e];
-                }
-
-                mainAcc += scales[s] * dot;
                 minAcc += mins[s] * (bsums[2 * s] + bsums[2 * s + 1]);
             }
 
@@ -168,11 +162,75 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         }
 
         /// <summary>
+        /// <c>Σₛ scale[s]·intdotₛ</c> — the main accumulator. AVX2 unpacks the
+        /// 4-bit nibbles and feeds them straight into <c>vpmaddubsw</c>; the
+        /// scalar fallback is bit-identical (INT32 arithmetic throughout).
+        /// </summary>
+        private static int MainDot(ReadOnlySpan<byte> qs, ReadOnlySpan<sbyte> q8, ReadOnlySpan<byte> scales)
+        {
+            if (Avx2.IsSupported)
+            {
+                ref var qsRef = ref MemoryMarshal.GetReference(qs);
+                ref var q8Ref = ref MemoryMarshal.GetReference(q8);
+                var maskLow = Vector256.Create((byte)0x0F);
+
+                var acc = 0;
+                // Four 32-byte nibble runs; each carries two sub-blocks — the
+                // low nibbles (even s) and the high nibbles (odd s).
+                for (var p = 0; p < 4; p++)
+                {
+                    var packed = Vector256.LoadUnsafe(ref Unsafe.Add(ref qsRef, 32 * p));
+                    var lowNibbles = Avx2.And(packed, maskLow);
+                    var highNibbles = Avx2.And(
+                        Avx2.ShiftRightLogical(packed.AsUInt16(), 4).AsByte(), maskLow);
+
+                    var q8Even = Vector256.LoadUnsafe(ref Unsafe.Add(ref q8Ref, 64 * p));
+                    var q8Odd = Vector256.LoadUnsafe(ref Unsafe.Add(ref q8Ref, 64 * p + 32));
+
+                    acc += scales[2 * p] * Int8BlockDot(lowNibbles, q8Even)
+                         + scales[2 * p + 1] * Int8BlockDot(highNibbles, q8Odd);
+                }
+                return acc;
+            }
+
+            var sum = 0;
+            for (var s = 0; s < 8; s++)
+            {
+                var qsBase = 32 * (s >> 1);
+                var high = (s & 1) == 1;
+                var q8Base = 32 * s;
+
+                var dot = 0;
+                for (var e = 0; e < 32; e++)
+                {
+                    var packed = qs[qsBase + e];
+                    var nibble = high ? (packed >> 4) : (packed & 0x0F);
+                    dot += nibble * q8[q8Base + e];
+                }
+                sum += scales[s] * dot;
+            }
+            return sum;
+        }
+
+        /// <summary>
+        /// <c>Σ nibᵢ·q8ᵢ</c> over one 32-lane block as INT32. <c>vpmaddubsw</c>
+        /// takes the unsigned nibbles × signed q8 directly — nibbles ∈ [0,15],
+        /// q8 ∈ [-128,127], so the 16-bit pair sums (≤ 2·15·128 = 3840) never
+        /// saturate; <c>vpmaddwd</c> then widens to INT32.
+        /// </summary>
+        private static int Int8BlockDot(Vector256<byte> nibbles, Vector256<sbyte> q8)
+        {
+            var pairs16 = Avx2.MultiplyAddAdjacent(nibbles, q8);
+            var pairs32 = Avx2.MultiplyAddAdjacent(pairs16, Vector256.Create((short)1));
+            return Vector256.Sum(pairs32);
+        }
+
+        /// <summary>
         /// Quantized single-token projection: <c>output = bias + input @ W</c>,
         /// W resident as Q4_K (output-major). The F32 <paramref name="input"/> is
         /// quantized once to Q8_K into the caller-owned scratch, then each output
         /// is the sum of <see cref="Dot"/> over its super-blocks. Sequential
-        /// reference shape; a parallel path follows with the AVX2 kernel.
+        /// reference shape; the decode path uses <see cref="ProjectParallel"/>.
         /// </summary>
         public static void Project(
             ReadOnlySpan<float> input,
@@ -189,18 +247,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var outputSize = weight.OutputSize;
             var superBlocksPerRow = weight.SuperBlocksPerRow;
 
-            if (input.Length < inputSize)
-            {
-                throw new ArgumentException("Input span is smaller than the weight's input size.", nameof(input));
-            }
-            if (output.Length < outputSize)
-            {
-                throw new ArgumentException("Output span is smaller than the weight's output size.", nameof(output));
-            }
-            if (!bias.IsEmpty && bias.Length < outputSize)
-            {
-                throw new ArgumentException("Bias span is smaller than outputSize.", nameof(bias));
-            }
+            ValidateProjectArguments(input, bias, output, inputSize, outputSize);
 
             QuantizeActivationQ8K(
                 input.Slice(0, inputSize), activationQuants, activationScales, activationBsums);
@@ -222,6 +269,115 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 }
 
                 output[o] = bias.IsEmpty ? sum : bias[o] + sum;
+            }
+        }
+
+        /// <summary>
+        /// Parallel quantized projection — <see cref="Project"/> with the output
+        /// loop split across the zero-allocation <c>OverfitParallelFor</c> worker
+        /// pool. The activation is quantized once (sequentially) into the
+        /// caller-owned scratch, then each worker computes a disjoint band of
+        /// output dots. Bit-identical to <see cref="Project"/>.
+        /// </summary>
+        public static void ProjectParallel(
+            ReadOnlySpan<float> input,
+            Q4KWeight weight,
+            ReadOnlySpan<float> bias,
+            Span<float> output,
+            Span<sbyte> activationQuants,
+            Span<float> activationScales,
+            Span<short> activationBsums)
+        {
+            ArgumentNullException.ThrowIfNull(weight);
+
+            var inputSize = weight.InputSize;
+            var outputSize = weight.OutputSize;
+
+            ValidateProjectArguments(input, bias, output, inputSize, outputSize);
+
+            QuantizeActivationQ8K(
+                input.Slice(0, inputSize), activationQuants, activationScales, activationBsums);
+
+            fixed (byte* blocksPtr = weight.Blocks)
+            fixed (sbyte* actQuants = activationQuants)
+            fixed (float* actScales = activationScales)
+            fixed (short* actBsums = activationBsums)
+            fixed (float* biasPtr = bias)
+            fixed (float* outputPtr = output)
+            {
+                var context = new Q4KProjectContext
+                {
+                    Blocks = blocksPtr,
+                    ActivationQuants = actQuants,
+                    ActivationScales = actScales,
+                    ActivationBsums = actBsums,
+                    Bias = biasPtr,
+                    BiasLength = bias.Length,
+                    Output = outputPtr,
+                    SuperBlocksPerRow = weight.SuperBlocksPerRow,
+                };
+
+                OverfitParallelFor.For(0, outputSize, &ProjectChunk, &context);
+            }
+        }
+
+        /// <summary>Worker body for <see cref="ProjectParallel"/> — one disjoint band of output rows.</summary>
+        private static void ProjectChunk(int chunkStart, int chunkEnd, void* context)
+        {
+            ref var ctx = ref Unsafe.AsRef<Q4KProjectContext>(context);
+            var superBlocksPerRow = ctx.SuperBlocksPerRow;
+
+            for (var o = chunkStart; o < chunkEnd; o++)
+            {
+                var rowBase = (long)o * superBlocksPerRow * Q4KWeight.SuperBlockBytes;
+                var sum = 0f;
+                for (var sb = 0; sb < superBlocksPerRow; sb++)
+                {
+                    var block = new ReadOnlySpan<byte>(
+                        ctx.Blocks + rowBase + (long)sb * Q4KWeight.SuperBlockBytes,
+                        Q4KWeight.SuperBlockBytes);
+                    var q8 = new ReadOnlySpan<sbyte>(
+                        ctx.ActivationQuants + sb * SuperBlockElements, SuperBlockElements);
+                    var bsums = new ReadOnlySpan<short>(
+                        ctx.ActivationBsums + sb * GroupsPerSuperBlock, GroupsPerSuperBlock);
+
+                    sum += Dot(block, q8, ctx.ActivationScales[sb], bsums);
+                }
+
+                ctx.Output[o] = ctx.BiasLength == 0 ? sum : ctx.Bias[o] + sum;
+            }
+        }
+
+        private struct Q4KProjectContext
+        {
+            public byte* Blocks;
+            public sbyte* ActivationQuants;
+            public float* ActivationScales;
+            public short* ActivationBsums;
+            public float* Bias;
+            public int BiasLength;
+            public float* Output;
+            public int SuperBlocksPerRow;
+        }
+
+        private static void ValidateProjectArguments(
+            ReadOnlySpan<float> input,
+            ReadOnlySpan<float> bias,
+            Span<float> output,
+            int inputSize,
+            int outputSize)
+        {
+            if (input.Length < inputSize)
+            {
+                throw new ArgumentException("Input span is smaller than the weight's input size.", nameof(input));
+            }
+            if (output.Length < outputSize)
+            {
+                throw new ArgumentException("Output span is smaller than the weight's output size.", nameof(output));
+            }
+            if (!bias.IsEmpty && bias.Length < outputSize)
+            {
+                throw new ArgumentException("Bias span is smaller than outputSize.", nameof(bias));
             }
         }
     }
