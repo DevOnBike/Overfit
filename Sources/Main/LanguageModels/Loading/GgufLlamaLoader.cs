@@ -24,13 +24,18 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
     /// </summary>
     public static class GgufLlamaLoader
     {
-        public static CachedLlamaInferenceEngine Load(string path)
+        /// <param name="quantize">
+        /// When true (default) FFN / LM-head / attention weights become Q8_0-resident
+        /// where dimensions allow. When false every weight loads as F32 — the
+        /// pre-quantization decode path, used as the parity reference (step 2.5).
+        /// </param>
+        public static CachedLlamaInferenceEngine Load(string path, bool quantize = true)
         {
             using var reader = new GgufReader(path);
-            return LoadFromReader(reader);
+            return LoadFromReader(reader, quantize);
         }
 
-        internal static CachedLlamaInferenceEngine LoadFromReader(GgufReader reader)
+        internal static CachedLlamaInferenceEngine LoadFromReader(GgufReader reader, bool quantize = true)
         {
             var arch = reader.GetMeta("general.architecture", "qwen2");
 
@@ -119,10 +124,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     LoadTensorOrZeros(reader, $"blk.{l}.attn_v.bias", vBiasFull.AsSpan(0, nKvHeads * headDim));
 
                     // Split into per-head weights — step 2.3b-attn: per-head Q8_0
-                    // (output-major) when both dims are block-aligned; F32
-                    // transposed otherwise.
-                    var attnQuantizable =
-                        dModel % Q8DotKernel.BlockSize == 0 && headDim % Q8DotKernel.BlockSize == 0;
+                    // (output-major) when quantization is enabled and both dims
+                    // are block-aligned; F32 transposed otherwise.
+                    var attnQuantizable = quantize
+                        && dModel % Q8DotKernel.BlockSize == 0 && headDim % Q8DotKernel.BlockSize == 0;
                     var wq = SplitQuery(qFull, nHeads, dModel, headDim, attnQuantizable);
                     var bq = SplitBias(qBiasFull, nHeads, headDim);
                     var wk = SplitKeyValue(kFull, nKvHeads, dModel, headDim, attnQuantizable);
@@ -137,9 +142,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     var ffnNormGamma = AllocAndLoad(reader, $"blk.{l}.ffn_norm.weight", dModel);
                     var ffnNormBeta = TensorStorage<float>.Unpooled(0);
                     // FFN weights — step 2.3b: resident as Q8_0 (output-major)
-                    // when both dims are block-aligned; F32 transposed otherwise.
+                    // when quantization is enabled and both dims are block-aligned;
+                    // F32 transposed otherwise.
                     DecodeWeight ffnGate, ffnUp, ffnDown;
-                    if (dModel % Q8DotKernel.BlockSize == 0 && dFF % Q8DotKernel.BlockSize == 0)
+                    if (quantize && dModel % Q8DotKernel.BlockSize == 0 && dFF % Q8DotKernel.BlockSize == 0)
                     {
                         ffnGate = AllocAndLoadQ8(reader, $"blk.{l}.ffn_gate.weight", dModel, dFF);
                         ffnUp = AllocAndLoadQ8(reader, $"blk.{l}.ffn_up.weight", dModel, dFF);
@@ -190,11 +196,11 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             // LM head — step 2.3a: resident as Q8_0 (output-major). The file
             // stores it [vocab, dModel] — row = token = one output's contraction
             // vector — which is exactly Q8Weight's layout, so no transpose.
-            // tied → token_embd; untied → output.weight. When dModel is not a
-            // multiple of the Q8 block size, fall back to an F32 transposed
-            // LM head (the kernel's input-major layout).
+            // tied → token_embd; untied → output.weight. When quantization is
+            // disabled, or dModel is not a multiple of the Q8 block size, fall
+            // back to an F32 transposed LM head (the kernel's input-major layout).
             DecodeWeight lmHead;
-            if (dModel % Q8DotKernel.BlockSize == 0)
+            if (quantize && dModel % Q8DotKernel.BlockSize == 0)
             {
                 if (tieWeights)
                 {

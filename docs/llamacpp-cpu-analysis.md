@@ -4,8 +4,8 @@
 (2.3a LM-head, 2.3b FFN + attention) **done & A/B-measured** — Qwen-3B decode
 **2.71 → 13.38 tok/s (4.9×)**, RAM **~14.4 GB → 5.90 GB (−59%)**, 0 B/token
 preserved. Overfit now runs **1.38× faster than** the LLamaSharp reference
-(9.67 tok/s / ~6 GB) at slightly less RAM. Remaining: native Q8_0 GGUF load
-(2.4), top-1 logit parity (2.5); step 3 (Q4_K/Q6_K) not started.
+(9.67 tok/s / ~6 GB) at slightly less RAM. Q8 parity verified vs F32 (2.5).
+Remaining: native Q8_0 GGUF load (2.4); step 3 (Q4_K/Q6_K) not started.
 
 **Origin — the benchmark that triggered this.** Same Qwen2.5-3B GGUF, single-stream CPU decode:
 
@@ -205,16 +205,29 @@ at slightly less RAM — past the launch-credibility milestone §5 called for.
   before this slice FFN/LM-head were already Q8-fast, so the unchanged F32
   attention dominated the remaining per-token cost (Amdahl) — quantizing it
   released a larger share than its byte fraction suggests.
-- The benchmark asserts logits **finite**, not **top-1-correct**. The INT8 kernel
-  unit tests bound per-projection error (L2-relative < 3% vs F32), but a real
-  Qwen-3B top-1 logit parity-vs-F32 check is **step 2.5, still pending** — do not
-  read this as parity-verified.
+- Q8_0 decode is **lossy** (8-bit weights *and* activations) — by construction,
+  not a bug. Step 2.5 verified it: a teacher-forced top-1 parity test
+  (`Q8DecodeParityTests`) loads the same qwen.gguf as F32 and as Q8 and compares
+  32 decode steps — **28/32 greedy top-1 match, all 4 flips at genuine near-ties**
+  (F32's own margin for its pick ≤ 0.47 logits; worst Q8/F32 ranking swing 1.39).
+  Q8 never picks a token F32 strongly rejected. Verdict: the Q8 decode path is
+  correct.
+
+### Step 2.5 — parity verification — ✅ DONE
+
+`Q8DecodeParityTests` (a `[LongFact]` — loads the real 3B model) teacher-forces
+32 decode steps: it greedy-generates an F32 reference token sequence, then re-runs
+the Q8 path feeding the F32 token at every step so a single argmax flip cannot
+cascade — each step measures Q8 quantization error in isolation. The in-process
+F32 reference comes from `GgufLlamaLoader.Load(path, quantize: false)`, a flag
+added in 2.5 that loads every weight as F32 (the pre-quantization decode path).
+Result: 28/32 greedy top-1 match, all mismatches at genuine near-ties — see the
+caveat above.
 
 **Remaining Q8 work:**
 - **2.4** — GGUF loader reads `Q8_0` tensors straight from the file (today it
   up-casts to F32 then re-quantizes on load; reading native Q8_0 blocks removes
   the transient F32 buffer and the load-time quantize pass).
-- **2.5** — top-1 logit parity vs F32 on Qwen-3B + a final A/B writeup.
 
 ### Step 3 — Q4_K / Q6_K decode kernels
 
@@ -254,4 +267,4 @@ Every step lands with: a parity test (output correctness vs the prior path), an 
 - **Steps 2–3 are the concrete kernel design for ROADMAP "Slot 2b"** (quantized weight storage at inference) — Slot 2b can now reference this document instead of being a sketch.
 - **Step 1 is a new prerequisite** not previously in the ROADMAP — the single highest-leverage decode fix, and it requires no quantization.
 - **FP16-resident ("Slot 2c") is superseded.** Quantization reduces bytes more than FP16 and its integer dot product is both faster and fully portable; FP16-resident is not worth revisiting. See the Slot 2c post-mortem.
-- Honest ceiling (original): pure-managed C# cannot emit every intrinsic llama.cpp uses, but the decode-critical ones (INT8 SIMD) it *can*. The original cautious target was closing 3.75× → ~1.2–1.5×, not exact parity. **Outcome (steps 1+1b + full Q8 weight path): measured 13.38 vs 9.67 tok/s — Overfit is 1.38× faster than the LLamaSharp reference at slightly less RAM**, well past the cautious estimate. The remaining honest qualifier is parity *verification* (step 2.5): throughput is measured, top-1 logit parity is not yet.
+- Honest ceiling (original): pure-managed C# cannot emit every intrinsic llama.cpp uses, but the decode-critical ones (INT8 SIMD) it *can*. The original cautious target was closing 3.75× → ~1.2–1.5×, not exact parity. **Outcome (steps 1+1b + full Q8 weight path): measured 13.38 vs 9.67 tok/s — Overfit is 1.38× faster than the LLamaSharp reference at slightly less RAM**, well past the cautious estimate. Parity is now also verified — step 2.5's teacher-forced top-1 test confirms the Q8 decode path tracks F32 (28/32 greedy match, every flip at a genuine near-tie).

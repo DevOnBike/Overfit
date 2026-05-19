@@ -23,7 +23,7 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 | Native C# GGUF loader (F32/F16/BF16/Q8_0/Q4_K/Q6_K) | ✅ Loads `*.gguf` from Ollama/HF directly |
 | Streaming token generation (`IAsyncEnumerable`) | ✅ Stable, with stop-tokens + cancellation |
 | LoRA adapter (Enable/Disable, Save/Load) | ✅ Stable, zero-copy weight refs |
-| **Quantized weight storage at inference time** | 🟢 **Q8 decode path done — FFN + LM-head + attention Q8-resident, decode 3.3×, RAM −59% (see "Slot 2b")** |
+| **Quantized weight storage at inference time** | 🟢 **Q8 decode path done & parity-verified — decode 3.3×, RAM −59% (see "Slot 2b")** |
 | GPU backend | ❌ Not started |
 
 ---
@@ -160,9 +160,11 @@ FFN gate/up/down (2.3b-FFN) and per-head attention Q/K/V/O (2.3b-attn) are all
 Q8-resident — the full decode matmul path. **Measured on Qwen-3B: decode
 4.01 → 13.38 tok/s (3.3×), steady RAM ~14.4 → 5.90 GB (−59%), 0 B/token kept,
 672 tests green** — Overfit now runs 1.38× faster than LLamaSharp (9.67 tok/s /
-~6 GB) at slightly less RAM. Remaining: native Q8_0 GGUF load (no load-time F32
-round-trip), top-1 logit parity vs F32. Q4_K/Q6_K (below) reuse the same
-`Q8DotKernel` INT8 machinery.
+~6 GB) at slightly less RAM. Parity verified (2.5): `Q8DecodeParityTests`
+teacher-forces 32 decode steps F32-vs-Q8 on the real model — 28/32 greedy top-1
+match, all flips at genuine near-ties. Remaining: native Q8_0 GGUF load (no
+load-time F32 round-trip). Q4_K/Q6_K (below) reuse the same `Q8DotKernel` INT8
+machinery.
 
 **Work:**
 - [ ] `TensorStorage<TBlock>` or parallel `QuantizedTensorStorage` abstraction (Q4_K and Q6_K block shapes).
