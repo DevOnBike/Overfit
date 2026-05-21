@@ -228,7 +228,11 @@ namespace DevOnBike.Overfit.Anomalies.Training
             ct.ThrowIfCancellationRequested();
 
             // 5. Save checkpoint
-            Directory.CreateDirectory(Path.GetDirectoryName(checkpointPath) ?? ".");
+            var checkpointDir = Path.GetDirectoryName(checkpointPath);
+            if (!string.IsNullOrEmpty(checkpointDir))
+            {
+                Directory.CreateDirectory(checkpointDir);
+            }
             await using var fs = File.Create(checkpointPath);
             using var bw = new BinaryWriter(fs);
             model.Save(bw);
