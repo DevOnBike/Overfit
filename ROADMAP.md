@@ -142,10 +142,25 @@ it on real production metrics. Plan: synthetic base → pull real metrics → Lo
   ≈ 0.007 nats/token) an OOD injected snapshot still scores ≈ 20.4 (~2800× separation),
   proving adaptation lowers false positives without blinding the detector. Uses a
   random-init tiny model (no heavy base training — that's the separate item below).
-- **Stage 2 — LoRA on FFN (W1/W2)** — DONE earlier (`Gpt1LoRAFfnTests.cs`); Stage 3
-  = attention Q/K/V/O per-head still open.
-- **Production base training** — `TrainProduction` (10K steps, ~2 h) on the lifted
-  synthetic data → real deployable base model.
+- **Stage 2 — LoRA on FFN (W1/W2)** — DONE earlier (`Gpt1LoRAFfnTests.cs`).
+- **Stage 3 — LoRA on attention Q/K/V/O per-head — ✅ DONE 2026-05-20.**
+  `MultiHeadAttentionLayer` got per-head Q/K/V/O weight-provider hooks (mirroring
+  the LM-head / FFN providers); `Gpt1LoRAFineTuner` fans out one A/B pair per head
+  per targeted module per block; the `.bin` carries the per-entry head index;
+  `Gpt1LoRAMergeAdapter` merges each delta into the matching per-head weight.
+  `Gpt1LoRAAttentionTests.cs` (2 `[Fact]`): full `Attention` target = 16 adapters
+  (2 blocks × 2 heads × Q/K/V/O), cached decode loss 2.97 → 0.02, exactly reversible;
+  `Query`-only = 4 adapters (proves single-module per-head fan-out). All `LoRATargetModules`
+  now supported by the fine-tuner.
+- **Production base training — ✅ DONE 2026-05-21.** `OfflineTrainingJob` with
+  `GptTrainingConfig.Production` (256d / 8 heads / 6 L, 10K steps, 8 data-parallel
+  workers) on the 201 600-snapshot synthetic CSV → `k8s_anomaly_production.bin`
+  (~19.8 MB). **Val loss 0.856** (~87 % below init), 1 h 03 m wall. Verified
+  deployable: loads into `GptAnomalyDetector` (256d auto-detected) and discriminates
+  — normal 6.02 vs anomaly 13.77, OOM anomaly correctly attributed to memory. The
+  base's per-pod "normal" still carries residual surprise (6.02) because it's
+  trained across all pods; that's exactly what per-regime LoRA (Stage 1/2/3) drives
+  down for a specific deployment.
 - **Decision pending:** deployment base architecture — Medium (128d/4L, converges
   fast, ~1.0 loss) vs Production (256d/6L). LoRA targets a fixed architecture, so
   this gates Stage 2/3.

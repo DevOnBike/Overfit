@@ -6,10 +6,13 @@
 namespace DevOnBike.Overfit.LanguageModels.LoRA
 {
     /// <summary>
-    /// One LoRA adapter entry: which weight matrix it adapts (module + layer) and
-    /// the trained low-rank factors. <see cref="Layer"/> is -1 for the LM head.
+    /// One LoRA adapter entry: which weight matrix it adapts (module + layer +
+    /// head) and the trained low-rank factors. <see cref="Layer"/> is -1 for the
+    /// LM head. <see cref="HeadIndex"/> is 0 for whole-matrix targets (LM head,
+    /// FFN) and the per-head index for the per-head attention Q/K/V/O weights
+    /// (Stage 3).
     /// </summary>
-    internal readonly record struct Gpt1LoRAEntry(int Layer, LoRATargetModules Module, LoRAWeight Weight);
+    internal readonly record struct Gpt1LoRAEntry(int Layer, LoRATargetModules Module, int HeadIndex, LoRAWeight Weight);
 
     /// <summary>
     /// Binary .bin format for a GPT1 LoRA adapter — the contract shared between
@@ -48,7 +51,7 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             {
                 bw.Write(entry.Layer);
                 bw.Write((int)entry.Module);
-                bw.Write(0);                       // head index — unused for GPT1
+                bw.Write(entry.HeadIndex);         // 0 for LM head / FFN; per-head for attention
                 entry.Weight.Save(bw);
             }
         }
@@ -83,8 +86,8 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             {
                 var layer = br.ReadInt32();
                 var module = (LoRATargetModules)br.ReadInt32();
-                _ = br.ReadInt32();                // head index — unused for GPT1
-                entries[i] = new Gpt1LoRAEntry(layer, module, LoRAWeight.Load(br));
+                var headIndex = br.ReadInt32();
+                entries[i] = new Gpt1LoRAEntry(layer, module, headIndex, LoRAWeight.Load(br));
             }
 
             return entries;
