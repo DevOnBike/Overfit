@@ -56,6 +56,36 @@ End-to-end vs Overfit's own starting point: **5.6× decode, −69 % RAM, 20× fa
 - **(B) — after C — Prefill GEMM (B>1 batched matmul)** *(several days)*. Phase 1 `BatchedProjectionKernel` ([N×D]×[D×O]→[N×O] allocation-free GEMM) → Phase 2 batched causal-mask attention → Phase 3 `CachedGptStack.PrefillBatched`. 5–10× TTFT for long prompts + B>1 training. Plan in "Next (after the GPT-2 week)" below. Helps **prefill + training**, not single-stream decode.
 - **(D) — surfaced by (A), 2 levers DONE — make decode bandwidth-bound.** llama.cpp got 2.85× from FP16→Q4 (bandwidth-bound); Overfit got ~1.0× (overhead-bound). **Done #1: GQA K/V-once** — K/V projection was recomputed once per Q head (8× for Qwen 16Q/2KV) instead of once per KV group; +24 % (13.85 → 17.2 tok/s), cut wasted K/V weight-read bandwidth 8×. **Done #2: fuse-quantize** — `hidden` was re-quantized to Q8_K per head per projection (~20×/layer); now quantized once per layer in `CachedMultiHeadAttention`, shared read-only across heads via `Q4K/Q6KDotKernel.ProjectPreQuantized`; **+~1.5 % (17.2 → 17.5 tok/s)** — small, as predicted (quantize is ~0.04 % of matmul arithmetic), but consistent. Both bit-identical (same 24-token greedy sequence before/after) + 680/0/68. Gap to llama.cpp now ~1.6× (was ~2.0×). **Tried #3: VNNI `vpdpbusd` — REVERTED 2026-05-21.** Replaced the AVX2 `vpmaddubsw`+`vpmaddwd` dot with one `vpdpbusd` (`AvxVnni.MultiplyWideningAndAdd`) in both Q4_K/Q6_K kernels + deferred-horizontal-sum; box has `AvxVnni`/`AVX512BW` (verified via bench `caps` mode). Parity 8/8 green. **Same-state A/B: AVX2 ≈ VNNI ≈ 19.1 tok/s — ~0 gain, reverted.** Lesson: after #1+#2 the decode is **memory-bandwidth-bound, not ALU-bound** — fusing the dot saves cycles already hidden behind weight-read latency. (The earlier "17.5 baseline" was a slower thermal state; same-state both ~19.) **The real remaining lever is MEMORY, not ALU:** llama.cpp reads 3.2 GB (mmap), Overfit 4.4 GB committed — the ~1.2 GB extra read per token *is* the speed gap. Levers: mmap-style weight loading instead of committed heap, drop F32 duplication (embeddings/norms), tighter weight layout. GEMV-unroll / core-util profiling are secondary now (ALU isn't the bottleneck). This redirects D from kernel-ALU to memory-bytes-per-token.
 
+  **Profiled 2026-05-21 (thread-scaling + effective-BW).** Decode tok/s vs workers
+  (`OVERFIT_PARALLEL_WORKERS`): 1→4.14, 2→8.04, 4→13.86, 8→**19.52**, 16→19.53,
+  32→18.90. **Plateaus hard at 8 threads** → memory-bandwidth-bound confirmed
+  (more cores starve on RAM). Effective BW: ~2.0 GB streamed/token × 19.5 ≈
+  **~39 GB/s (~55 % of DDR5 peak); llama.cpp ~55 GB/s (~80 %)**. Same bytes, same
+  RAM ceiling — llama.cpp just extracts more effective bandwidth. **Root cause
+  (confirmed by reading llama.cpp `llama-model`): attention weight layout.**
+  llama.cpp keeps `attn_q/k/v/o.weight` as full per-projection matrices and does
+  ONE big contiguous `mul_mat` per projection (all heads), reshaping to heads only
+  inside SDPA. Overfit splits per head (`WqHeads[h]` etc.) → nHeads small
+  fragmented GEMVs → prefetcher starved → ~55 % BW. **THE decode lever now:
+  fuse per-head attention into full-matrix contiguous matmuls** (Wq/Wk/Wv/Wo as
+  full tensors, one streaming K-quant GEMV each, reshape to heads only for SDPA).
+  Bonus: full Wo becomes Q6_K-able (contraction dModel, vs per-head headDim<256
+  forcing Q8). Est. 55 %→~75 % BW ≈ ~26 tok/s (near llama.cpp's 27.5). **Big
+  refactor** — the per-head structure is baked into K/V-once AND Stage-3 per-head
+  LoRA, so fusion ripples into the LoRA target design. Deliberate sprint, not a
+  tail-end change. (token_embd-as-F32 = the 1.2 GB RAM gap, but it's a per-token
+  lookup not streamed → RAM-axis only, does NOT help decode speed.)
+
+  **RAM AXIS CLOSED 2026-05-21.** Investigating token_embd found the embedding was
+  held **twice** — engine-owned `TensorStorage` + a per-session `ToArray()` F32
+  copy in `CachedLlamaSession`. Dropped the copy (session now references the
+  engine storage, sliced per-token; consistent with the zero-copy weight design).
+  **RAM 4.39 → 3.21 GB (−1.18 GB) = parity with LLamaSharp's 3.20 GB.** Decode
+  unchanged (17.6, as expected — embedding is a lookup, not streamed); bit-identical
+  (same 24-token greedy seq); 683/0/68. token_embd→Q6_K could shave another ~1 GB
+  (3.2→~2.2) but parity is the milestone and it needs a dequant-row lookup path —
+  deferred. **Only the decode-SPEED axis remains** (the attention-fusion lever above).
+
 ---
 
 ## Recently completed (chronological, newest first)

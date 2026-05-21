@@ -288,7 +288,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 _stackWeights,
                 cache,
                 _rope,
-                _embedWeights.AsReadOnlySpan());
+                _embedWeights);
         }
 
         public void Dispose()
