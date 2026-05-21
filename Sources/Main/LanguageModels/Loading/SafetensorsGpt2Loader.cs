@@ -37,11 +37,11 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// </summary>
         public static GPT1Model Load(string safetensorsPath, GPT1Config config)
         {
-            using var reader = new SafetensorsReader(safetensorsPath);
+            using var reader = SafetensorsSource.Open(safetensorsPath);
             return Load(reader, config);
         }
 
-        public static GPT1Model Load(SafetensorsReader reader, GPT1Config config)
+        public static GPT1Model Load(ISafetensorsSource reader, GPT1Config config)
         {
             if (reader is null) { throw new ArgumentNullException(nameof(reader)); }
             if (config is null) { throw new ArgumentNullException(nameof(config)); }
@@ -62,7 +62,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         }
 
         // Serialises the mapped GPT-2 weights in GPT1Model.Load order.
-        internal static void WriteBinStream(SafetensorsReader reader, GPT1Config cfg, BinaryWriter w)
+        internal static void WriteBinStream(ISafetensorsSource reader, GPT1Config cfg, BinaryWriter w)
         {
             int d = cfg.DModel, heads = cfg.NHeads, layers = cfg.NLayers;
             int vocab = cfg.VocabSize, ctx = cfg.ContextLength, dff = cfg.DFF;
@@ -129,7 +129,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         }
 
         // ── tensor IO + slicing helpers ─────────────────────────────────────
-        private static float[] LoadTensor(SafetensorsReader reader, GPT1Config cfg, string suffix, long expected)
+        private static float[] LoadTensor(ISafetensorsSource reader, GPT1Config cfg, string suffix, long expected)
         {
             var name = Resolve(reader, suffix);
             var count = reader.ElementCount(name);
@@ -144,7 +144,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         }
 
         // HF GPT-2 ships these with or without the "transformer." prefix.
-        private static string Resolve(SafetensorsReader reader, string suffix)
+        private static string Resolve(ISafetensorsSource reader, string suffix)
         {
             if (reader.Tensors.ContainsKey(suffix)) { return suffix; }
             var prefixed = "transformer." + suffix;

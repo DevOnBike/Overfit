@@ -31,7 +31,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
     /// (<c>model-00001-of-0000N.safetensors</c> + <c>model.safetensors.index.json</c>)
     /// are a follow-on — this reads one file.
     /// </summary>
-    public sealed class SafetensorsReader : IDisposable
+    public sealed class SafetensorsReader : ISafetensorsSource
     {
         private readonly Stream _stream;
         private readonly bool _ownsStream;
