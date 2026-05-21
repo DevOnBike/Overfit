@@ -125,13 +125,29 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
         /// <summary>
         /// Fine-tunes every LoRA factor on a flat token corpus (next-token loss).
         /// Returns the per-step training loss for inspection.
+        ///
+        /// <para>
+        /// <b>Rehearsal-lite (optional).</b> When <paramref name="rehearsalCorpus"/>
+        /// is supplied, a <paramref name="rehearsalFraction"/> of training windows
+        /// are drawn from it instead of the new-task <paramref name="corpus"/>. This
+        /// is the cheapest form of replay: mixing a little of the base regime's data
+        /// into the adapter's training keeps it from over-forgetting the general
+        /// "normal" while it specialises to the new one. Rehearsal-free continual
+        /// learning research (arXiv:2406.09384; NeurIPS 2024 "Continual Multimodal
+        /// Pretraining") finds that for practical per-deployment adaptation, simple
+        /// LoRA fine-tuning with a sane data mixture is competitive with far more
+        /// complex continual-learning machinery — so a single mixing fraction is the
+        /// right-sized lever here, not a new algorithm.
+        /// </para>
         /// </summary>
         public IReadOnlyList<float> FineTune(
             int[] corpus,
             int steps,
             int contextLength,
             float learningRate,
-            int seed = 1234)
+            int seed = 1234,
+            int[]? rehearsalCorpus = null,
+            float rehearsalFraction = 0f)
         {
             ThrowIfDisposed();
             ArgumentNullException.ThrowIfNull(corpus);
@@ -143,6 +159,23 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                 throw new ArgumentException(
                     $"Corpus length {corpus.Length} is too short for contextLength {contextLength}.",
                     nameof(corpus));
+            }
+
+            if (rehearsalCorpus is not null)
+            {
+                if (rehearsalFraction is < 0f or >= 1f)
+                {
+                    throw new ArgumentOutOfRangeException(
+                        nameof(rehearsalFraction), rehearsalFraction,
+                        "Rehearsal fraction must be in [0, 1).");
+                }
+
+                if (rehearsalCorpus.Length < contextLength + 1)
+                {
+                    throw new ArgumentException(
+                        $"Rehearsal corpus length {rehearsalCorpus.Length} is too short for contextLength {contextLength}.",
+                        nameof(rehearsalCorpus));
+                }
             }
 
             _model.Eval(); // base is frozen — no dropout / train-mode behaviour wanted
@@ -157,9 +190,15 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
 
             for (var step = 0; step < steps; step++)
             {
-                var start = rng.Next(0, corpus.Length - contextLength - 1);
-                corpus.AsSpan(start, contextLength).CopyTo(input);
-                corpus.AsSpan(start + 1, contextLength).CopyTo(target);
+                // Rehearsal-lite: a fraction of windows come from the base regime so
+                // the adapter doesn't forget the general "normal" while specialising.
+                var src = (rehearsalCorpus is not null && rng.NextDouble() < rehearsalFraction)
+                    ? rehearsalCorpus
+                    : corpus;
+
+                var start = rng.Next(0, src.Length - contextLength - 1);
+                src.AsSpan(start, contextLength).CopyTo(input);
+                src.AsSpan(start + 1, contextLength).CopyTo(target);
 
                 graph.Reset();
                 _model.InvalidateAllCaches();

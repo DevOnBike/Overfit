@@ -88,6 +88,31 @@ End-to-end vs Overfit's own starting point: **5.6× decode, −69 % RAM, 20× fa
 
 ---
 
+## Research inputs (papers reviewed 2026-05-21)
+
+Four external papers assessed for transfer into Overfit. Verdicts honest — most
+value was validation/guidance, not drop-in algorithms.
+
+- **arXiv:2406.09384 — *Rehearsal-free Continual Learning with Pretrained Models*** &
+  **NeurIPS 2024 — *A Practitioner's Guide to Continual Multimodal Pretraining* (FoMo-in-Flux)**.
+  Both: adapt a frozen base over time with PEFT (LoRA) without catastrophic
+  forgetting; finding — simple LoRA + a sane data mixture is competitive with
+  complex continual-learning machinery. **Used:** validates the per-deployment LoRA
+  track (don't over-engineer) + motivated **rehearsal-lite** (`Gpt1LoRAFineTuner`
+  `rehearsalCorpus`/`rehearsalFraction`, shipped — base-regime forgetting 9.09 → 0.012
+  in a test). *Caveat:* both are vision/multimodal; transfer to GPT-on-metrics is
+  conceptual, not literal.
+- **MASCOTS'16 — *Gaussian Process for Urban Environmental Sensor Networks***.
+  Correlated, diurnally-periodic multi-sensor data = our K8s metrics. **Used:**
+  motivates a **GP (or cheaper EWMA/z-score) baseline** to rigorously benchmark the
+  GPT anomaly detector — design sketch in `docs/gp-anomaly-baseline.md`. Deferred
+  (separate experiment, not a product feature).
+- **LinkedIn PDF — *Maximum Accuracy Computing* (Fourier, self-published)**. Claims
+  "40× more accurate than deep learning"; grandiose framing, no peer review, demo on
+  a personal site. **Rejected** — extraordinary claims without evidence; building on
+  it risks credibility. The neutral kernel (real-FFT features for periodic signals)
+  is standard DSP we don't need from this source.
+
 ## Recently completed (chronological, newest first)
 
 - **Fuse-quantize decode optimization** (2026-05-20). The attention `hidden` row was re-quantized to Q8_K once per head per Q/K/V projection (~20×/layer for Qwen). Now `CachedMultiHeadAttention` quantizes it once per layer (when attention is K-quant) into a shared read-only buffer; heads' Q/K/V projections consume it via new `Q4KDotKernel`/`Q6KDotKernel.ProjectPreQuantized` (the `Project` core minus the quantize pass). Wo keeps self-quantizing (its input is the per-head attention output, not `hidden`). **Qwen2.5-3B Q4_K_M 17.2 → 17.5 tok/s (+~1.5 %)** — small as predicted (quantize is ~0.04 % of matmul arithmetic) but consistent across runs. Bit-identical (same 24-token greedy sequence) + 680/0/68 `-c Release`.
