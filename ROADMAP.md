@@ -28,35 +28,53 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 
 ---
 
-## Last session — resume point (2026-05-21)
+## Last session — resume point (2026-05-22)
 
-**Just closed: Prefill GEMM B>1 — batched multi-token prefill, SHIPPED at ~3.5× TTFT.**
+**Two tracks advanced and largely closed: zero-Python loading + a usable chat runtime.**
+Strategic frame (set 2026-05-21, still holds): NOT chasing llama.cpp on decode speed;
+building the embeddability / training / product moat. See [[project-perf-sprint]],
+[[project-loading-story]], [[project-chat-runtime]] memories.
 
-Phases 1–3 complete and wired into `CachedSlmSession.Prefill` for GPT-2-class
-models (prompts ≥ 16 tokens; single-token loop below that and for RoPE/GQA/SwiGLU
-stacks). **TTFT on GPT-2-Small dims, 64-token prompt: 567 ms → 163 ms = 3.48× faster.**
-Bit-identical to the single-token loop at every layer (`BatchedProjectionKernel`,
-`BatchedAttentionKernel`, `CachedFeedForwardBlock.DecodeBatched`,
-`CachedMultiHeadAttention.DecodeBatched`, `CachedGptStack.PrefillBatched`,
-`CachedGpt1ModelAdapter.PrefillBatched` — all parity-tested).
+**Zero-Python model loading (committed in the `lora` commits):**
+- `SafetensorsReader` — native HF safetensors (8-byte header + `Utf8JsonReader`, AOT-clean;
+  F32/F16/BF16 → F32). `SafetensorsGpt2Loader.Load(path, Gpt2Config.Small)` → `GPT1Model`,
+  no Python (C# port of `convert_gpt2.py`: conv1d, per-head Q/K/V/O split, `wte.T`; emits the
+  exact `GPT1Model.Load` byte stream). Sharded repos via `ISafetensorsSource` /
+  `ShardedSafetensorsReader` / `SafetensorsSource.Open(dir)` (parses `model.safetensors.index.json`).
+  Placement unit-proven; **real GPT-2 end-to-end bit-parity is UNVALIDATED** — needs a
+  `model.safetensors` dropped at `C:\gpt2\` (only `gpt2_small.bin` + torch checkpoint there).
+  `SafetensorsGpt2LoaderTests` has the `[LongFact]` ready to flip.
 
-**The result that matters:** the first session-delegation wiring measured **0.26×
-(3.8× SLOWER)** because batched MHA fanned per-head Q/K/V/O projections out as ~60
-tiny `OverfitParallelFor` dispatches/layer. Restructuring `DecodeBatched` to
-parallelise **over heads** (one dispatch/layer, each head sequential into a scratch
-band, reduced in head order) flipped it to **3.48×** — a ~13× swing from dispatch
-granularity alone, same kernels, same math. Lesson: batched-prefill parallelism must
-be coarse (over heads / big matmuls), never per-head. Full suite **709 / 0 / 69 green**.
+**Chat runtime — all four gaps closed (committed in `lora` commits, except sliding window):**
+- `ChatTemplate` (ChatML/Llama-3/Mistral + `Detect` from GGUF `chat_template`), `StopSequenceDetector`
+  (streaming string stops), turnkey `ChatSession` (history + render + generate + stops).
+  Validated end-to-end on real Qwen Q4_K_M.
+- **Sliding-window KV eviction (TODAY, UNCOMMITTED):** `KeyValueCache.Evict` + `BasePosition`,
+  RoPE rotates at `slot + BasePosition` (relative-offset-preserving, no re-rotation), opt-in
+  `CachedLlamaSession.EnableSlidingWindow(evictBlock)` (RoPE-only). Tests: `KeyValueCacheEvictTests`
+  (5 fast) + `SlidingWindowTests` ([LongFact], real Qwen). **CAVEAT:** sliding ≠ truncated-recompute
+  (StreamingLLM) — do not write an equivalence test (it correctly diverges ~77%).
 
-**Git state:** all Phase 1–3 prefill code + tests staged/uncommitted on `next`
-(`Batched*Kernel.cs`, `*.DecodeBatched`, `CachedGptStack.PrefillBatched`,
-`CachedGpt1ModelAdapter.PrefillBatched`, `CachedSlmSession` delegation + threshold,
-the batched test files). Awaiting user commit.
+**Also (committed):** one-top-level-type-per-file across the whole solution (split 12 files).
 
-**Next levers** (decode track, not prefill): LM-head allocation-free parallel matmul
-(largest remaining decode lever, needs a no-alloc worker pool — see below); batched
-quant K-projection to extend prefill to the Q4_K_M path (Phase 1 is F32 only); or
-return to the Active anomaly+LoRA track.
+**Full suite: 745 / 0 / 74 green.**
+
+**Git state — UNCOMMITTED on `next` (awaiting user commit):** the sliding-window batch only —
+`M KeyValueCache.cs`, `M CachedSingleHeadAttention.cs` (RoPE `+ BasePosition`), `M CachedLlamaSession.cs`
+(EnableSlidingWindow), `M ROADMAP.md`, and new `KeyValueCacheEvictTests.cs` + `SlidingWindowTests.cs`.
+Suggested message: `feat: sliding-window KV eviction (RoPE, opt-in CachedLlamaSession)`.
+(Pre-existing staged `docs/marketing/*` unrelated.)
+
+**Resume tomorrow — pick one:**
+1. **Native Llama/Qwen safetensors loader** (port `convert_llama.py`: RoPE/GQA/SwiGLU → a
+   `CachedLlamaInferenceEngine`-shaped model) AND fix the GPT-2 loader's ~2× peak-RAM (it
+   round-trips all weights through an in-memory `.bin` stream — stream into params instead).
+2. **Validate the GPT-2 safetensors loader end-to-end** — drop a real `model.safetensors` at
+   `C:\gpt2\`, flip `Load_RealGpt2Safetensors_BitParity_WithBinFixture` to `[Fact]`.
+3. **Back to the product moat** — anomaly+LoRA operator workflow (real metrics → per-pod adapter),
+   or Stage 2/3 LoRA on the production base.
+4. **Decode lever** — LM-head allocation-free parallel matmul (largest remaining decode lever;
+   honestly low strategic ROI per the pivot).
 
 ---
 
