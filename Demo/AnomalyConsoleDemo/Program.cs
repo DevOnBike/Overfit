@@ -43,8 +43,9 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
             {
                 var csv = ResolveCsv(GetArg(args, "--csv"));
                 var checkpoint = GetArg(args, "--checkpoint") ?? "anomaly_demo.bin";
+                var preset = ResolvePreset(GetArg(args, "--preset"));
 
-                var (model, config) = await GetModelAsync(csv, checkpoint);
+                var (model, config) = await GetModelAsync(csv, checkpoint, preset);
                 using (model)
                 {
                     RunScenario(model, config);
@@ -59,12 +60,10 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
             }
         }
 
-        // ── Model: load a checkpoint if present, else train a Quick base ─────────
+        // ── Model: load a checkpoint if present, else train a base of the preset ─
         private static async Task<(GPT1Model model, GptTrainingConfig config)> GetModelAsync(
-            string? csv, string checkpoint)
+            string? csv, string checkpoint, GptTrainingConfig config)
         {
-            var config = GptTrainingConfig.Quick;
-
             if (!File.Exists(checkpoint))
             {
                 if (csv is null || !File.Exists(csv))
@@ -74,7 +73,7 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
                         "(e.g. Tests/test_fixtures/k8s_metrics.csv) or --checkpoint <path>.");
                 }
 
-                Console.WriteLine($"No checkpoint — training a Quick base on {csv} ...");
+                Console.WriteLine($"No checkpoint — training a {config.DModel}d/{config.NLayers}L base on {csv} ...");
                 var job = new OfflineTrainingJob(config);
                 var progress = new Progress<TrainingProgress>(p =>
                 {
@@ -89,7 +88,7 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
             }
             else
             {
-                Console.WriteLine($"Loading checkpoint {checkpoint} ...");
+                Console.WriteLine($"Loading {config.DModel}d/{config.NLayers}L checkpoint {checkpoint} ...");
             }
 
             var model = new GPT1Model(new GPT1Config
@@ -270,6 +269,16 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
             }
             return null;
         }
+
+        // Base architecture preset — must match the checkpoint's dims when loading
+        // an existing base (e.g. the 256d/6L Production base). Default: Quick.
+        private static GptTrainingConfig ResolvePreset(string? name) => name?.ToLowerInvariant() switch
+        {
+            "production" => GptTrainingConfig.Production,
+            "medium" => GptTrainingConfig.Medium,
+            "quick" or null or "" => GptTrainingConfig.Quick,
+            _ => throw new ArgumentException($"Unknown --preset '{name}' (expected quick|medium|production)."),
+        };
 
         private static string? ResolveCsv(string? explicitPath)
         {

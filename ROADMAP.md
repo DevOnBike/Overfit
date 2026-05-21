@@ -155,6 +155,7 @@ value was validation/guidance, not drop-in algorithms.
 - **Binary loader RAM optimization** — `Unpooled` `TensorStorage` for model weights + direct `ReadExactly` into destination span. Removes pool pow2-rounding overhead and intermediate scratch `byte[]`. **3B FP32: ~30 GB → ~14 GB peak load; matches file size exactly.**
 - **Token-by-token streaming** — `CachedLlamaSession.StreamGenerate(StreamingOptions, CancellationToken)` returns `IAsyncEnumerable<int>` with stop-token / cache-full / cancellation termination.
 - **GGUF native loader** — `GgufLlamaLoader` reads GGUF files end-to-end without Python tooling. Supports F32/F16/BF16/Q8_0/Q4_K/Q6_K tensors, hand-rolled protobuf-free parser.
+- **Native safetensors reader (2026-05-21)** — `SafetensorsReader` reads the HuggingFace `safetensors` format directly: 8-byte header length + `Utf8JsonReader`-parsed JSON header (reflection-free, AOT-clean — no `JsonSerializer`) + F32/F16/BF16 → F32 streaming dequant via `LoadF32`. Closes the last Python-dependent path (a raw HF repo with no GGUF variant). 7 unit tests over synthetic files (header parse, shape/dtype, F32/F16/BF16 round-trip, error paths). **Next: `SafetensorsGpt2Loader` wiring** (port `convert_gpt2.py`'s conv1d-transpose + per-head Q/K/V/O split → `GPT1Model`, validate bit-parity vs the existing `.bin` fixture), then sharded-repo support (`model.safetensors.index.json` weight_map).
 - **LoRA adapter** — `LlamaLoRAAdapter` with Enable/Disable in-place weight injection. Zero-copy `TensorStorage` references — adapter updates visible to inference without re-binding.
 - **GPT-2 Small inference + parity** — 124M params, KV-cache decode 0 B/token, 6.4× faster than naive O(N²). Top-10 logit overlap 10/10 vs PyTorch, maxAbsDiff 0.000107.
 - **KV-cache runtime** — `CachedSlmInferenceEngine` + `CachedSlmSession`. `SingleHeadWeights` / `BlockWeights` / `StackWeights` hold zero-copy `TensorStorage` refs.
@@ -256,9 +257,21 @@ it on real production metrics. Plan: synthetic base → pull real metrics → Lo
   **11.78 → 24.38** (detection preserved and sharpened). This is the "adaptive
   per-deployment learning an inference-only engine can't do" story, shown not just
   described. Closes the "demoable in one command, documented honestly" goal below.
-- **Decision pending:** deployment base architecture — Medium (128d/4L, converges
-  fast, ~1.0 loss) vs Production (256d/6L). LoRA targets a fixed architecture, so
-  this gates Stage 2/3.
+- **Production base validated end-to-end with per-pod LoRA — ✅ 2026-05-21, decision
+  RESOLVED → Production.** Ran the demo's full before/after loop on the real
+  `k8s_anomaly_production.bin` (256d/6L, via `--preset production --checkpoint`):
+  the un-adapted base **scores the benign regime 5.68 — a false positive** (> the
+  ⚠ 5.0 threshold), exactly because it's trained across all pods; a per-pod LM-head
+  LoRA (rank 16, 300 steps) drives it to **0.00** while sharpening the injected
+  incident **12.07 → 34.14**. This both (a) resolves the Medium-vs-Production base
+  decision in Production's favour — it carries the cross-pod residual surprise that
+  per-deployment LoRA is designed to remove — and (b) proves the moat on the actual
+  deployable artifact, not a toy. Demo gained a `--preset quick|medium|production`
+  flag so the loaded model's dims match the checkpoint. **Now regression-defended:**
+  `GptAnomalyProductionLoRATests.ProductionBase_PerPodLoRA_FlattensBenignRegime_StillFlagsIncident`
+  ([LongFact], auto-detects 256d, resolves the base from $OVERFIT_MODEL_DIR /
+  test_fixtures / D:\, no-ops if absent) asserts benign < base & < 1.0 and incident
+  > 5.0 with clear separation — bit-reproducible (5.68→0.00, 12.07→34.14, 13 s).
 
 ---
 
