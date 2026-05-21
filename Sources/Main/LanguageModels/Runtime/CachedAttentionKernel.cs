@@ -195,29 +195,4 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         }
     }
 
-    /// <summary>
-    /// Small read-only cache view used by CachedAttentionKernel.
-    ///
-    /// KeyValueCache implements the same methods through IKeyValueCache already.
-    /// This interface exists to keep cached attention decoupled from the full
-    /// mutable cache contract and make future specialized cache views possible.
-    /// </summary>
-    public interface IKeyValueCacheReader
-    {
-        int CurrentLength { get; }
-
-        int HeadDimension { get; }
-
-        ReadOnlySpan<float> GetKeyReadSpan(
-            int layerIndex,
-            int headIndex,
-            int fromPosition,
-            int length);
-
-        ReadOnlySpan<float> GetValueReadSpan(
-            int layerIndex,
-            int headIndex,
-            int fromPosition,
-            int length);
-    }
 }

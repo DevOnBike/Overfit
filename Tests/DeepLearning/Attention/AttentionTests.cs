@@ -335,25 +335,4 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Attention
             }
         }
     }
-
-    // ── Extension for test random fill ───────────────────────────────────────
-    internal static class RandomExtensions
-    {
-        public static float[] NextFloats(this Random rng, float[] arr)
-        {
-            for (var i = 0; i < arr.Length; i++)
-            {
-                arr[i] = (float)(rng.NextDouble() * 2 - 1) * 0.5f;
-            }
-            return arr;
-        }
-
-        public static void NextFloats(this Random rng, Span<float> span)
-        {
-            for (var i = 0; i < span.Length; i++)
-            {
-                span[i] = (float)(rng.NextDouble() * 2 - 1) * 0.5f;
-            }
-        }
-    }
 }

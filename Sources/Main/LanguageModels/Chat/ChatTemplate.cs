@@ -8,36 +8,6 @@ using System.Text;
 
 namespace DevOnBike.Overfit.LanguageModels.Chat
 {
-    /// <summary>One chat turn. Role is "system", "user" or "assistant".</summary>
-    public readonly struct ChatMessage
-    {
-        public ChatMessage(string role, string content)
-        {
-            Role = role ?? throw new ArgumentNullException(nameof(role));
-            Content = content ?? throw new ArgumentNullException(nameof(content));
-        }
-
-        public string Role { get; }
-        public string Content { get; }
-
-        public static ChatMessage System(string content) => new("system", content);
-        public static ChatMessage User(string content) => new("user", content);
-        public static ChatMessage Assistant(string content) => new("assistant", content);
-    }
-
-    /// <summary>The prompt formats Overfit can render without a Jinja engine.</summary>
-    public enum ChatTemplateFormat
-    {
-        /// <summary>ChatML — Qwen, Yi, many others: <c>&lt;|im_start|&gt;role\n…&lt;|im_end|&gt;</c>.</summary>
-        ChatML,
-
-        /// <summary>Llama-3: <c>&lt;|start_header_id|&gt;role&lt;|end_header_id|&gt;…&lt;|eot_id|&gt;</c>.</summary>
-        Llama3,
-
-        /// <summary>Mistral / Llama-2 instruct: <c>[INST] … [/INST]</c>.</summary>
-        Mistral,
-    }
-
     /// <summary>
     /// Renders a multi-turn chat into a model's prompt string. GGUF files ship the real
     /// template as a Jinja string under <c>tokenizer.chat_template</c>; running Jinja is
