@@ -23,13 +23,102 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 | Native C# GGUF loader (F32/F16/BF16/Q8_0/Q4_K/Q6_K) | ✅ Loads `*.gguf` from Ollama/HF directly |
 | Streaming token generation (`IAsyncEnumerable`) | ✅ Stable, with stop-tokens + cancellation |
 | LoRA adapter (Enable/Disable, Save/Load) | ✅ Stable, zero-copy weight refs |
-| **Quantized weight storage at inference time** | ❌ **In flight — see "Slot 2b" below** |
+| **Quantized weight storage at inference time** | ✅ **Q8_0 + Q4_K_M decode paths done & parity-verified — Q4_K_M decodes 17.2 tok/s @ 4.40 GB RAM, 1 B/token (after GQA K/V-once, +24 %). Same-file A/B: LLamaSharp ~1.6× faster @ 27 % less RAM; see "Slot 2b".** |
 | GPU backend | ❌ Not started |
 
 ---
 
+## Last session — resume point (2026-05-20)
+
+**Just closed: the decode-track sprint (`docs/llamacpp-cpu-analysis.md` §5 steps 1+2+3).**
+
+Three-stage cumulative result on Qwen2.5-3B-Instruct (dev box, best-of-3, single-stream CPU decode):
+
+| Stage | Decode | Steady RAM | Load |
+|-------|-------:|-----------:|-----:|
+| start (F32-upcast)             | 2.58 tok/s  | ~14 GB   | ~28 s |
+| +parallel (step 1)             | 4.01 tok/s  | ~14 GB   | —    |
+| +Q8_0 in-RAM (step 2)          | 13.28 tok/s | 5.85 GB  | 1.7 s |
+| **+Q4_K_M in-RAM (step 3)**    | **14.56 tok/s** | **4.40 GB** | **1.4 s** |
+
+End-to-end vs Overfit's own starting point: **5.6× decode, −69 % RAM, 20× faster load**, zero allocations per token preserved. Parity verified at both Q8 (32/32) and Q4_K_M (29/32, worst swing 2.16). 680 / 0 / 68 `-c Release`.
+
+**Same-file A/B vs LLamaSharp (2026-05-20, option A done — corrected).** Re-benchmarked LLamaSharp 0.27.0 on the *same* `qwen.q4km.gguf`: **27.5 tok/s @ 3.2 GB**. The earlier "1.51× faster than LLamaSharp" line was wrong — it compared Overfit-Q4_K_M against LLamaSharp's *FP16* number (9.67). Diagnostic that came out of it: FP16→Q4_K_M sped llama.cpp 2.85× but Overfit only ~1.0× → **Overfit decode was overhead-bound, not bandwidth-bound.** First lever acted on (option D below): **GQA K/V-once took Overfit 13.85 → 17.2 tok/s (+24 %)**, narrowing the same-file gap from ~2.0× to **~1.6×** (still llama.cpp's favour, still 27 % more RAM committed). Defensible edge stays allocation (1 B vs 21 KB/token), pure-managed, AOT-clean, no native dep. Full numbers in `overfit-bench/RESULTS.md`.
+
+**Git state at session end:**
+- **Committed** (in the `llama` commits on `next`): all Q4_K_M code + tests + `docs/llamacpp-cpu-analysis.md` — `Q6KDotKernel.cs`, `Q6KWeight.cs`, `Q6KDotKernelTests.cs`, `Q4KMDecodeParityTests.cs`, `DecodeWeight.cs` (4-way tagged union `{F32|Q8|Q4_K|Q6_K}`), the per-weight-dispatch decode blocks (`CachedFeedForwardBlock` / `CachedSingleHeadAttention` / `CachedMultiHeadAttention` / `CachedTransformerBlock` / `CachedGptStack`), and the native Q4_K + Q6_K loader reads (`GgufLlamaLoader.cs` / `GgufReader.cs`).
+- **Uncommitted at handoff:** this `ROADMAP.md` (the resume-point + Slot 2b update). Pre-existing staged files unrelated to this work: `index.html`, `launch-copy.md`, `linkedin-*.md`, `docs/parallel_opts.txt`.
+
+### NEXT — order set by user: C → B
+
+- **(A) LLamaSharp re-bench on Q4_K_M — ✅ DONE 2026-05-20.** Restored the `llama` mode in `D:\overfit-bench` (LLamaSharp 0.27.0, `dotnet run -- llama qwen.q4km.gguf`). Result above: llama.cpp ~2× faster + 27 % less RAM on the same file; "1.51× faster" claim retracted everywhere. Surfaced a new lever (D).
+- **(C) — NEXT NOW — Active track: anomaly + LoRA.** Pick one of the four options in the Active-track "NEXT" section below: end-to-end integration test / Stage-2 LoRA on FFN / Production base training / deployment-architecture decision. The live product track.
+- **(B) — after C — Prefill GEMM (B>1 batched matmul)** *(several days)*. Phase 1 `BatchedProjectionKernel` ([N×D]×[D×O]→[N×O] allocation-free GEMM) → Phase 2 batched causal-mask attention → Phase 3 `CachedGptStack.PrefillBatched`. 5–10× TTFT for long prompts + B>1 training. Plan in "Next (after the GPT-2 week)" below. Helps **prefill + training**, not single-stream decode.
+- **(D) — surfaced by (A), 2 levers DONE — make decode bandwidth-bound.** llama.cpp got 2.85× from FP16→Q4 (bandwidth-bound); Overfit got ~1.0× (overhead-bound). **Done #1: GQA K/V-once** — K/V projection was recomputed once per Q head (8× for Qwen 16Q/2KV) instead of once per KV group; +24 % (13.85 → 17.2 tok/s), cut wasted K/V weight-read bandwidth 8×. **Done #2: fuse-quantize** — `hidden` was re-quantized to Q8_K per head per projection (~20×/layer); now quantized once per layer in `CachedMultiHeadAttention`, shared read-only across heads via `Q4K/Q6KDotKernel.ProjectPreQuantized`; **+~1.5 % (17.2 → 17.5 tok/s)** — small, as predicted (quantize is ~0.04 % of matmul arithmetic), but consistent. Both bit-identical (same 24-token greedy sequence before/after) + 680/0/68. Gap to llama.cpp now ~1.6× (was ~2.0×). **Tried #3: VNNI `vpdpbusd` — REVERTED 2026-05-21.** Replaced the AVX2 `vpmaddubsw`+`vpmaddwd` dot with one `vpdpbusd` (`AvxVnni.MultiplyWideningAndAdd`) in both Q4_K/Q6_K kernels + deferred-horizontal-sum; box has `AvxVnni`/`AVX512BW` (verified via bench `caps` mode). Parity 8/8 green. **Same-state A/B: AVX2 ≈ VNNI ≈ 19.1 tok/s — ~0 gain, reverted.** Lesson: after #1+#2 the decode is **memory-bandwidth-bound, not ALU-bound** — fusing the dot saves cycles already hidden behind weight-read latency. (The earlier "17.5 baseline" was a slower thermal state; same-state both ~19.) **The real remaining lever is MEMORY, not ALU:** llama.cpp reads 3.2 GB (mmap), Overfit 4.4 GB committed — the ~1.2 GB extra read per token *is* the speed gap. Levers: mmap-style weight loading instead of committed heap, drop F32 duplication (embeddings/norms), tighter weight layout. GEMV-unroll / core-util profiling are secondary now (ALU isn't the bottleneck). This redirects D from kernel-ALU to memory-bytes-per-token.
+
+  **Profiled 2026-05-21 (thread-scaling + effective-BW).** Decode tok/s vs workers
+  (`OVERFIT_PARALLEL_WORKERS`): 1→4.14, 2→8.04, 4→13.86, 8→**19.52**, 16→19.53,
+  32→18.90. **Plateaus hard at 8 threads** → memory-bandwidth-bound confirmed
+  (more cores starve on RAM). Effective BW: ~2.0 GB streamed/token × 19.5 ≈
+  **~39 GB/s (~55 % of DDR5 peak); llama.cpp ~55 GB/s (~80 %)**. Same bytes, same
+  RAM ceiling — llama.cpp just extracts more effective bandwidth. **Root cause
+  (confirmed by reading llama.cpp `llama-model`): attention weight layout.**
+  llama.cpp keeps `attn_q/k/v/o.weight` as full per-projection matrices and does
+  ONE big contiguous `mul_mat` per projection (all heads), reshaping to heads only
+  inside SDPA. Overfit splits per head (`WqHeads[h]` etc.) → nHeads small
+  fragmented GEMVs → prefetcher starved → ~55 % BW. **THE decode lever now:
+  fuse per-head attention into full-matrix contiguous matmuls** (Wq/Wk/Wv/Wo as
+  full tensors, one streaming K-quant GEMV each, reshape to heads only for SDPA).
+  Bonus: full Wo becomes Q6_K-able (contraction dModel, vs per-head headDim<256
+  forcing Q8). Est. 55 %→~75 % BW ≈ ~26 tok/s (near llama.cpp's 27.5). **Big
+  refactor** — the per-head structure is baked into K/V-once AND Stage-3 per-head
+  LoRA, so fusion ripples into the LoRA target design. Deliberate sprint, not a
+  tail-end change. (token_embd-as-F32 = the 1.2 GB RAM gap, but it's a per-token
+  lookup not streamed → RAM-axis only, does NOT help decode speed.)
+
+  **RAM AXIS CLOSED 2026-05-21.** Investigating token_embd found the embedding was
+  held **twice** — engine-owned `TensorStorage` + a per-session `ToArray()` F32
+  copy in `CachedLlamaSession`. Dropped the copy (session now references the
+  engine storage, sliced per-token; consistent with the zero-copy weight design).
+  **RAM 4.39 → 3.21 GB (−1.18 GB) = parity with LLamaSharp's 3.20 GB.** Decode
+  unchanged (17.6, as expected — embedding is a lookup, not streamed); bit-identical
+  (same 24-token greedy seq); 683/0/68. token_embd→Q6_K could shave another ~1 GB
+  (3.2→~2.2) but parity is the milestone and it needs a dequant-row lookup path —
+  deferred. **Only the decode-SPEED axis remains** (the attention-fusion lever above).
+
+---
+
+## Research inputs (papers reviewed 2026-05-21)
+
+Four external papers assessed for transfer into Overfit. Verdicts honest — most
+value was validation/guidance, not drop-in algorithms.
+
+- **arXiv:2406.09384 — *Rehearsal-free Continual Learning with Pretrained Models*** &
+  **NeurIPS 2024 — *A Practitioner's Guide to Continual Multimodal Pretraining* (FoMo-in-Flux)**.
+  Both: adapt a frozen base over time with PEFT (LoRA) without catastrophic
+  forgetting; finding — simple LoRA + a sane data mixture is competitive with
+  complex continual-learning machinery. **Used:** validates the per-deployment LoRA
+  track (don't over-engineer) + motivated **rehearsal-lite** (`Gpt1LoRAFineTuner`
+  `rehearsalCorpus`/`rehearsalFraction`, shipped — base-regime forgetting 9.09 → 0.012
+  in a test). *Caveat:* both are vision/multimodal; transfer to GPT-on-metrics is
+  conceptual, not literal.
+- **MASCOTS'16 — *Gaussian Process for Urban Environmental Sensor Networks***.
+  Correlated, diurnally-periodic multi-sensor data = our K8s metrics. **Used:**
+  motivates a **GP (or cheaper EWMA/z-score) baseline** to rigorously benchmark the
+  GPT anomaly detector — design sketch in `docs/gp-anomaly-baseline.md`. Deferred
+  (separate experiment, not a product feature).
+- **LinkedIn PDF — *Maximum Accuracy Computing* (Fourier, self-published)**. Claims
+  "40× more accurate than deep learning"; grandiose framing, no peer review, demo on
+  a personal site. **Rejected** — extraordinary claims without evidence; building on
+  it risks credibility. The neutral kernel (real-FFT features for periodic signals)
+  is standard DSP we don't need from this source.
+
 ## Recently completed (chronological, newest first)
 
+- **Fuse-quantize decode optimization** (2026-05-20). The attention `hidden` row was re-quantized to Q8_K once per head per Q/K/V projection (~20×/layer for Qwen). Now `CachedMultiHeadAttention` quantizes it once per layer (when attention is K-quant) into a shared read-only buffer; heads' Q/K/V projections consume it via new `Q4KDotKernel`/`Q6KDotKernel.ProjectPreQuantized` (the `Project` core minus the quantize pass). Wo keeps self-quantizing (its input is the per-head attention output, not `hidden`). **Qwen2.5-3B Q4_K_M 17.2 → 17.5 tok/s (+~1.5 %)** — small as predicted (quantize is ~0.04 % of matmul arithmetic) but consistent across runs. Bit-identical (same 24-token greedy sequence) + 680/0/68 `-c Release`.
+- **GQA K/V-once decode optimization** (2026-05-20). Under grouped-query attention every Q head in a KV group shares one K/V weight set and one cache slot, but `CachedMultiHeadAttention.DecodeKvGroup` was recomputing the K and V projection (+ RoPE + cache write) once per Q head — 8× redundant for Qwen2.5-3B (16 Q / 2 KV). Added a `projectKv` flag to `CachedSingleHeadAttention.DecodeDispatched` so only each group's first head projects K/V; the rest read what it wrote. **Qwen2.5-3B Q4_K_M decode 13.85 → 17.2 tok/s (+24 %)** (also cuts wasted K/V weight-read bandwidth 8×). Bit-identical: same 24-token greedy sequence before/after on the real model (git before/after). 680 / 0 / 68 `-c Release`. Narrows the same-file gap to LLamaSharp from ~2.0× to ~1.6×.
+- **Q4_K_M in-RAM decode path** (`docs/llamacpp-cpu-analysis.md` §5 step 3, sub-steps 3.1 → 3.4). `Q4KDotKernel` + `Q6KDotKernel` (AVX2 `vpmaddubsw` on the 4-bit nibbles / reassembled 6-bit quants + scalar fallbacks); `Q4KWeight` + `Q6KWeight` (output-major super-blocks); `DecodeWeight` widened to a 4-way tagged union `{F32 | Q8 | Q4_K | Q6_K}`; **per-weight dispatch** in `CachedFeedForwardBlock` / `CachedSingleHeadAttention` / `CachedGptStack.ProjectLogits` so a heterogeneous Q4_K_M file (Q4_K attn-Q/K/O + FFN gate/up, Q6_K FFN-down + attn-V + token-embd + output, Q8 per-head Wo) picks the right kernel per projection; native Q4_K + Q6_K loader reads. **Qwen2.5-3B-Instruct: load 1.4 s, decode 14.56 tok/s, steady RAM 4.40 GB** (vs Q8: 1.7 s / 13.28 tok/s / 5.85 GB; vs FP16-src: 7.1 s / 13.29 tok/s / 5.90 GB). 0 B/token preserved. Parity vs same-file F32 baseline: 29/32 top-1 match teacher-forced, worst swing 2.16 (every mismatch a near-tie). 680 / 0 / 68 `-c Release`.
+- **Q8_0 in-RAM decode path** (`docs/llamacpp-cpu-analysis.md` §5 step 2). `Q8DotKernel` INT8 `vpmaddubsw` SIMD GEMV + `Q8Weight` output-major storage + `DecodeWeight` tagged handle. LM-head + FFN + per-head Q/K/V/O all Q8-resident. Native Q8_0 GGUF load (no dequant/re-quantize). Qwen-3B decode 4.01 → 13.38 tok/s (3.3×), steady RAM ~14.4 → 5.90 GB (−59 %), 32/32 greedy parity vs F32.
 - **GGUF Q4_K + Q6_K dequantization** — `GgmlDequant` pure decoders + `GgufReader` streaming wrappers (stackalloc, zero managed allocations per call). 13 unit tests on synthetic blocks. Loader can now consume any `*.Q4_K_M.gguf` from Ollama/HuggingFace.
 - **`[LongFact]` test convention** — 53 integration/diagnostic/training tests gated behind a custom xUnit attribute that skips by default. `dotnet test -c Release` now runs ~15 s instead of multi-minute.
 - **`CachedTransformerBlock.Decode` argument validation** — explicit guards for input/output/FfnW1/FfnW2 lengths; surfaces caller bugs as `ArgumentException` instead of `IndexOutOfRangeException` mid-block.
@@ -101,13 +190,32 @@ it on real production metrics. Plan: synthetic base → pull real metrics → Lo
 
 ### NEXT — resume here (pick one)
 
-- **End-to-end integration test** — one test spanning the whole plan: train base
-  on synthetic → LoRA fine-tune on shifted "production" data → `GptAnomalyDetector`
-  scores with the merged LoRA and flags an injected anomaly.
-- **Stage 2 — LoRA on FFN (W1/W2)** — needs a `TransformerBlock`/FFN hook analogous
-  to `LMHeadWeightProvider`. Stage 3 = attention Q/K/V/O per-head.
-- **Production base training** — `TrainProduction` (10K steps, ~2 h) on the lifted
-  synthetic data → real deployable base model.
+- **End-to-end integration test — ✅ DONE.** `Tests/Anomalies/GptAnomalyLoRAIntegrationTests.cs`,
+  2 `[Fact]`s (green, ~1 s each): (1) LoRA trained on a regime lowers that regime's
+  anomaly score through the detector, reversibly; (2) **`LoRA_AdaptedToRegime_StillFlagsInjectedAnomaly`**
+  (added 2026-05-20) — after the adapter flattens the benign regime (adapted-normal
+  ≈ 0.007 nats/token) an OOD injected snapshot still scores ≈ 20.4 (~2800× separation),
+  proving adaptation lowers false positives without blinding the detector. Uses a
+  random-init tiny model (no heavy base training — that's the separate item below).
+- **Stage 2 — LoRA on FFN (W1/W2)** — DONE earlier (`Gpt1LoRAFfnTests.cs`).
+- **Stage 3 — LoRA on attention Q/K/V/O per-head — ✅ DONE 2026-05-20.**
+  `MultiHeadAttentionLayer` got per-head Q/K/V/O weight-provider hooks (mirroring
+  the LM-head / FFN providers); `Gpt1LoRAFineTuner` fans out one A/B pair per head
+  per targeted module per block; the `.bin` carries the per-entry head index;
+  `Gpt1LoRAMergeAdapter` merges each delta into the matching per-head weight.
+  `Gpt1LoRAAttentionTests.cs` (2 `[Fact]`): full `Attention` target = 16 adapters
+  (2 blocks × 2 heads × Q/K/V/O), cached decode loss 2.97 → 0.02, exactly reversible;
+  `Query`-only = 4 adapters (proves single-module per-head fan-out). All `LoRATargetModules`
+  now supported by the fine-tuner.
+- **Production base training — ✅ DONE 2026-05-21.** `OfflineTrainingJob` with
+  `GptTrainingConfig.Production` (256d / 8 heads / 6 L, 10K steps, 8 data-parallel
+  workers) on the 201 600-snapshot synthetic CSV → `k8s_anomaly_production.bin`
+  (~19.8 MB). **Val loss 0.856** (~87 % below init), 1 h 03 m wall. Verified
+  deployable: loads into `GptAnomalyDetector` (256d auto-detected) and discriminates
+  — normal 6.02 vs anomaly 13.77, OOM anomaly correctly attributed to memory. The
+  base's per-pod "normal" still carries residual surprise (6.02) because it's
+  trained across all pods; that's exactly what per-regime LoRA (Stage 1/2/3) drives
+  down for a specific deployment.
 - **Decision pending:** deployment base architecture — Medium (128d/4L, converges
   fast, ~1.0 loss) vs Production (256d/6L). LoRA targets a fixed architecture, so
   this gates Stage 2/3.
@@ -146,19 +254,125 @@ it on real production metrics. Plan: synthetic base → pull real metrics → Lo
 
 These are working in the codebase but **outside the current GPT-2 focus week.** Listed for visibility, not for prioritization.
 
-### Slot 2b — quantized weight storage at inference
+### Slot 2b — quantized weight storage at inference — ✅ DONE (Q8_0 + Q4_K_M)
 
-**The gap:** Q4_K_M loader exists (decodes from disk) but currently dequantizes everything to FP32 on load. A 2 GB Q4_K_M file produces ~14 GB FP32 weights in RAM. The "3B in 4 GB RAM" payoff requires keeping weights quantized in RAM and dequantizing per-block during matmul.
+**Original gap:** Q4_K_M loader existed (decodes from disk) but dequantized
+everything to FP32 on load — a 2 GB Q4_K_M file produced ~14 GB FP32 weights in
+RAM. The "3B in 4 GB RAM" payoff required keeping weights quantized in RAM and
+dequantizing per-block during matmul.
 
-**Work:**
-- [ ] `TensorStorage<TBlock>` or parallel `QuantizedTensorStorage` abstraction (Q4_K and Q6_K block shapes).
-- [ ] Quantized variants of `SingleHeadWeights` / `BlockWeights` / `StackWeights` (or polymorphism via interface).
-- [ ] Dequant-fused matmul kernels (one block at a time, scratch FP32 row in stackalloc).
-- [ ] `CachedLlamaInferenceEngine.LoadGgufQuantized(path)` factory.
-- [ ] RAM diagnostic: `Diagnose_GgufQ4KM_3B_RamFootprint` showing ~2-3 GB managed.
-- [ ] Logit parity vs FP32 (top-1 must match for greedy; top-10 within tolerance).
+**Closed.** Two complementary in-RAM quant paths now ship — full design and
+sub-step record in `docs/llamacpp-cpu-analysis.md` §5 steps 2 + 3:
 
-Estimated effort: 1-2 days. Largest single architectural change since KV-cache runtime.
+- **Q8_0** (step 2): `Q8DotKernel` (symmetric F32→Q8 quantizer + INT8
+  `vpmaddubsw` SIMD dot + sequential & parallel GEMV), `Q8Weight` (output-major
+  Q8 weight storage), `DecodeWeight` (tagged precision-agnostic weight handle).
+  LM-head + FFN gate/up/down + per-head attention Q/K/V/O all Q8-resident — the
+  full decode matmul path. Loader reads native `Q8_0` blocks straight from a
+  Q8_0 GGUF — no dequant/re-quantize on the loaded path.
+- **Q4_K_M** (step 3): `Q4KDotKernel` + `Q6KDotKernel` (Q4_K × Q8_K and
+  Q6_K × Q8_K AVX2 kernels with scalar fallbacks), `Q4KWeight` + `Q6KWeight`
+  (output-major super-blocks). `DecodeWeight` widened to a 4-way tagged union
+  `{F32 | Q8 | Q4_K | Q6_K}`; the decode blocks (FFN, single-head attention,
+  LM-head) refactored to **per-weight dispatch** so a heterogeneous Q4_K_M file
+  (`attn_q/k/o` + `ffn_gate/up` Q4_K, `ffn_down` + `attn_v` + `token_embd` +
+  `output` Q6_K, per-head `Wo` Q8 — its headDim=128 contraction is below the
+  256-element K-quant super-block) picks the right kernel per projection.
+  Loader: native Q4_K + Q6_K reads + per-head contiguous byte slices.
+
+**Three-way A/B across Overfit's own formats** (dev box, best-of-3, 24 timed
+tokens after 4 warm-up, single stream):
+
+| Format    | Load   | Decode      | Steady RAM |
+|-----------|--------|-------------|-----------:|
+| FP16-src  |  7.1 s | 13.29 tok/s |   5 902 MB |
+| Q8_0      |  1.7 s | 13.28 tok/s |   5 847 MB |
+| **Q4_K_M**| **1.4 s** | **14.56 tok/s** | **4 396 MB** |
+
+Within Overfit, Q4_K_M is the best format — RAM + load win. *(Table is pre-fix;
+the GQA K/V-once fix below lifts Q4_K_M decode to **17.2 tok/s** and would lift
+Q8 similarly — not re-measured.)* Parity: Q8 32/32 (2.5); Q4_K_M 29/32, worst
+swing 2.16 (3.4, teacher-forced vs same-file F32 baseline). Zero allocations per
+decoded token preserved (`Demo_Gpt2Small_KvCacheDecode_AllocatesZeroBytesPerToken`).
+680 / 0 / 68 `-c Release`.
+
+**Same-file A/B vs LLamaSharp (2026-05-20).** LLamaSharp 0.27.0 on the *same*
+`qwen.q4km.gguf`: **27.5 tok/s @ 3.2 GB** vs Overfit **17.2 tok/s** @ 4.4 GB
+(after GQA K/V-once) — **llama.cpp ~1.6× faster, 27 % less RAM on equal footing**
+(was ~2.0× before the fix). (Earlier "1.51× faster" was Overfit-Q4_K_M vs
+LLamaSharp-FP16 — retracted.) Diagnostic: FP16→Q4_K_M sped llama.cpp 2.85×,
+Overfit only ~1.0× → Overfit decode was overhead-bound, not bandwidth-bound.
+First lever (GQA K/V-once: project K/V once per KV group, not per Q head) gave
++24 %, bit-identical. Defensible edge: 1 B vs 21 KB/token alloc, pure-managed,
+AOT-clean, no native dep. Numbers: `overfit-bench/RESULTS.md`.
+
+**Remaining (separate tracks, not gated on this):**
+- Make decode further bandwidth-bound (resume-point option D, 1st lever done):
+  fuse activation-quantize per-group, tighter GEMV unrolling, core-util profiling.
+- Step 4 — tiled prefill GEMM (`batch > 1`). Helps TTFT + batched training, not decode.
+- Step 5 — work-stealing chunk counter. Marginal for uniform GEMV; opportunistic.
+
+### Slot 2c — FP16-resident weights — ATTEMPTED & REVERTED (May 2026)
+
+Post-mortem of a refuted experiment. Kept as a record so the idea is not retried.
+
+**Hypothesis:** `GgufLlamaLoader` up-casts FP16 GGUF weights to F32 at load, so
+decode streams 2× the bytes. Keeping weights FP16-resident (`Half`) and widening
+F16→F32 in the matmul should give ~2× throughput + ~½ RAM — premised on decode
+being memory-bandwidth-bound.
+
+**Benchmark that motivated it** — same Qwen2.5-3B `qwen.gguf` (FP16),
+single-stream CPU decode:
+
+| Metric | Overfit (F32 up-cast) | LLamaSharp (native llama.cpp) |
+|--------|----------------------:|------------------------------:|
+| Decode throughput | 2.58 tok/s | 9.67 tok/s |
+| Peak working set | 14.4 GB | 6.0 GB |
+
+**Built:** full FP16-resident path — a `MatrixWeight` precision-carrier union
+threaded through the decode weight structs, `ProjectHalf` / `AccumulateHalf`
+kernels, `GgufReader.LoadTensorAsF16`, an `fp16Resident` A/B toggle. Kernel parity
+bit-identical to F32; 666 tests green.
+
+**Measured — hypothesis REFUTED.** Rigorous A/B, best-of-3, same model:
+
+| Metric | F32 (baseline) | FP16-resident |
+|--------|---------------:|--------------:|
+| Throughput | 2.58 tok/s | 1.68 tok/s — **−35%** |
+| Steady RAM | 14.36 GB | 15.85 GB — regressed |
+
+**Why it failed:**
+
+1. **Decode is compute-bound, not bandwidth-bound.** Overfit F32 decode reads only
+   ~31 GB/s — far under the ~50–80 GB/s DRAM ceiling. DRAM was never the
+   bottleneck, so halving weight bytes unblocks nothing and the F16→F32 widen is
+   pure added cost.
+2. **No fused widen is possible in managed .NET.** A register-fused single-pass
+   kernel needs a per-vector F16→F32 intrinsic. .NET 10 exposes none — no `F16C`
+   class, no `Half` overload on `Vector256.ConvertToSingle` / `WidenLower`. The
+   hardware `vcvtph2ps` is reachable only via whole-span `TensorPrimitives`
+   (forcing a scratch round-trip). A hand-rolled SIMD bit-twiddle widen costs
+   ~9 ops per 8 elements vs the 1-op hardware convert → fusing would be *slower*.
+   So **−35% is irreducible** for FP16-resident decode in managed C#.
+3. **RAM regressed** — the F32→F16 load conversion churns multi-GB F32 buffers on
+   the Large Object Heap; the GC retains those segments.
+
+**Outcome:** the entire FP16-resident path was reverted (`MatrixWeight`,
+`ProjectHalf`, the loader F16 path, the toggle) — this post-mortem is all that
+remains. Durable takeaway: **Overfit decode is compute-bound** — decode-speed
+work must target compute, not memory bandwidth.
+
+**What this means for the LLamaSharp gap.** The 3.75× gap is kernel quality, not
+weight precision. Overfit F32 at 2.58 tok/s ≈ 31 GB/s — *under* the DRAM ceiling;
+a bandwidth-saturating F32 kernel alone reaches ~4 tok/s (12 GB/token ÷ ~50 GB/s),
+≈1.5× of measured headroom. The next decode-perf lever is therefore kernel-side —
+blocked GEMV (`SingleTokenProjectionKernel.Accumulate` re-streams the whole output
+vector for *every* input element → ~2× redundant memory traffic on FFN / LM-head),
+parallelizing the small per-head matmuls, tighter SIMD — **not** precision tricks.
+Structural follow-on is quantized storage (**Slot 2b**): Q4/Q8 cut bytes more than
+FP16 and integer-SIMD is llama.cpp's actual weapon. Honest ceiling: pure-managed
+C# cannot emit every intrinsic llama.cpp uses (F16C proved that) — a realistic
+target is closing 3.75× → ~2–2.5×, not parity.
 
 ### Q4_K_M integration parity test
 
@@ -360,6 +574,28 @@ Attempted parallelizing `TensorMath.Add` (residual add) and **measured a regress
 
 ---
 
+## Market-driven priorities (2026 external research)
+
+External scan (May 2026): the LLM-inference job market, RAG / vector-DB adoption, the self-hosted-LLM trend, and the .NET AI ecosystem. Honest top-line:
+
+**Job postings from the highest-paying companies are a trap, not a map.** They converge on Python + CUDA + vLLM/TGI/Triton + Kubernetes + GPU clusters + distributed training (AI-infra postings grew +47 % YoY). None of it is addressable by a pure-C#, CPU-first, zero-native-dependency engine — chasing it means losing to vLLM/TensorRT on their own ground. The opportunity is the *adjacent, underserved* space.
+
+What the market actually validates for Overfit's niche, ranked:
+
+| # | Priority | Market signal | Effort / status |
+|---|----------|---------------|-----------------|
+| 1 | **Embedding model support** (BGE / E5 / multilingual-e5) | Vector-DB market $2.46B (2024) → $10.6B (2032), 27.5 % CAGR; Gartner: 30 %+ of enterprises on vector DBs by 2026; enterprise hybrid-retrieval intent tripled in one quarter. RAG is *the* enterprise LLM pattern. Embedding models are encoder transformers — single forward pass, no KV-cache — **CPU-friendly**: the one mainstream workload squarely in Overfit's wheelhouse. | ~1-2 weeks. New work: encoder runtime path (bidirectional attention — `MultiHeadAttentionLayer` already has the `causalMask` toggle), WordPiece / SentencePiece tokenizer, mean/CLS pooling, HuggingFace→Overfit weight converter. (An earlier "1-2 days" estimate was wrong — different model family + tokenizer.) |
+| 2 | **Deepen regulated / private-inference positioning** | EU AI Act reaches full enforcement Aug 2026 (high-risk AI requires audit trails, explainability, human oversight). Self-hosted deployments report −75 % data-breach incidents — but 175k exposed Ollama servers are actively exploited ("LLMjacking"): self-hosted-*as-a-server* is itself a risk. Overfit-as-a-library-in-process (no exposed endpoint) is structurally safer. | Mostly copy. Started: `docs/scenarios/regulated-industries.md` + README "What Overfit is not". Add the "library-in-process > exposed server" security argument. |
+| 3 | **In-memory quantization** (Q4_K / Q6_K dequant-fused matmul) | Every inference-engine comparison lists quantization as core (llama.cpp = "CPU-first + quantization"). It is the path to running *larger* models on CPU / edge. | Already specified — see **Slot 2b** above. This research promotes it from "deferred" to a named priority. (The FP16-resident shortcut, Slot 2c, was tried and reverted — see its post-mortem; quantization is the real lever.) |
+| 4 | **Audit / inference-record primitives** | EU AI Act mandates reproducible audit trails + explainability for high-risk AI. Overfit already has deterministic greedy decode and file-versioned weights — the missing piece is a first-class, opt-in decision record (input + model hash + output + timestamp). | ~few days. Grounds the prior generic "telemetry" idea in an actual regulation. |
+| 5 | **Microsoft Agent Framework / Semantic Kernel adapter** | Microsoft consolidated Semantic Kernel + AutoGen into "Microsoft Agent Framework" (Oct 2025); SK is in maintenance mode. Do **not** build a competing agent framework — be the inference + embedding *backend* it calls. Distribution via Microsoft's own ecosystem. | ~2 days, once embeddings (item 1) land. |
+
+**Explicitly out of scope** — the market confirms these are GPU + Python territory; competing there loses: GPU-throughput serving (vLLM / TGI / TensorRT), distributed / multi-node training, multi-cloud orchestration, a homegrown agent / LangChain framework, multimodal (vision + text).
+
+This section is a strategic overlay — it ranks and justifies; the tactical breakdowns live in "Slot 2b" (quantization), the "Active track" (LoRA), and "Medium-term / Features" below.
+
+---
+
 ## Medium-term
 
 ### Features
@@ -375,7 +611,7 @@ Attempted parallelizing `TensorMath.Add` (residual add) and **measured a regress
 
 - [ ] NuGet package metadata polish.
 - [ ] Sample Blazor app showing streaming generation in browser via Rx/IAsyncEnumerable adapter.
-- [ ] Benchmark page: tabela Format × Model × RAM × tokens/s.
+- [ ] Benchmark page: a Format × Model × RAM × tokens/s table.
 
 ---
 

@@ -18,6 +18,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly float[] _finalHidden;
         private readonly float[] _lastFinalHidden;  // hidden BEFORE final norm
         private readonly float[] _lastLogits;
+        private readonly sbyte[] _lmHeadInputQuants;   // Q8 LM-head activation scratch
+        private readonly float[] _lmHeadInputScales;
+        private readonly sbyte[] _lmHeadQ8KQuants;     // Q4_K LM-head activation scratch (Q8_K-quantized)
+        private readonly float[] _lmHeadQ8KScales;
+        private readonly short[] _lmHeadQ8KBsums;
 
         public CachedGptStack(
             int layerCount,
@@ -80,6 +85,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _finalHidden = new float[dModel];
             _lastFinalHidden = new float[dModel];
             _lastLogits = new float[vocabSize];
+            _lmHeadInputQuants = new sbyte[dModel];
+            _lmHeadInputScales = new float[(dModel + Q8DotKernel.BlockSize - 1) / Q8DotKernel.BlockSize];
+            _lmHeadQ8KQuants = new sbyte[dModel];
+            _lmHeadQ8KScales = new float[(dModel + Q4KDotKernel.SuperBlockElements - 1) / Q4KDotKernel.SuperBlockElements];
+            _lmHeadQ8KBsums = new short[(dModel + Q4KDotKernel.GroupSize - 1) / Q4KDotKernel.GroupSize];
         }
 
         public int LayerCount { get; }
@@ -205,25 +215,57 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// </summary>
         private void ProjectLogits(StackWeights weights, Span<float> logits)
         {
-            // LM head: [DModel] × [DModel × VocabSize] → [VocabSize].
-            //
-            // Stays sequential by design — ProjectParallel exists but allocates
-            // ~3 KB per call from Parallel.For task scheduling, which breaks the
-            // 0 B / generated token contract validated by
-            // Gpt2GenerationDemoTests.Demo_Gpt2Small_KvCacheDecode_AllocatesZeroBytesPerToken.
-            // Speedup on GPT-2 Small was only ~3 % at the per-token level (Parallel.For
-            // overhead dominates vs the ~3.8 ms LM-head matmul), nowhere near the
-            // ~10× implied by the steady-state LmHeadParallelBenchmark.
-            //
-            // A true win here needs an allocation-free worker pool — tracked in
-            // ROADMAP under "LM head hot-path: allocation-free parallel matmul".
-            SingleTokenProjectionKernel.Project(
-                _finalHidden,
-                weights.LmHeadWeights,
-                ReadOnlySpan<float>.Empty,
-                logits,
-                DModel,
-                VocabSize);
+            // LM head: [DModel] → [VocabSize]. Dispatches on the weight's
+            // residency — Q8_0-quantized (the GGUF/Qwen path, step 2.3a) or F32.
+            // Both projection paths run on the allocation-free OverfitParallelFor
+            // pool, so the 0 B / generated token contract (validated by
+            // Gpt2GenerationDemoTests.Demo_Gpt2Small_KvCacheDecode_AllocatesZeroBytesPerToken)
+            // still holds.
+            var lmHead = weights.LmHeadWeights;
+            if (lmHead.IsQ6K)
+            {
+                // Q6_K-resident LM head (step 3.3c — wires the Q6_K kernel).
+                Q6KDotKernel.ProjectParallel(
+                    _finalHidden,
+                    lmHead.Quantized6K,
+                    ReadOnlySpan<float>.Empty,
+                    logits,
+                    _lmHeadQ8KQuants,
+                    _lmHeadQ8KScales,
+                    _lmHeadQ8KBsums);
+            }
+            else if (lmHead.IsQ4K)
+            {
+                // Q4_K-resident LM head (step 3.2a — wires the Q4_K kernel).
+                Q4KDotKernel.ProjectParallel(
+                    _finalHidden,
+                    lmHead.Quantized4K,
+                    ReadOnlySpan<float>.Empty,
+                    logits,
+                    _lmHeadQ8KQuants,
+                    _lmHeadQ8KScales,
+                    _lmHeadQ8KBsums);
+            }
+            else if (lmHead.IsQuantized)
+            {
+                Q8DotKernel.ProjectParallel(
+                    _finalHidden,
+                    lmHead.Quantized,
+                    ReadOnlySpan<float>.Empty,
+                    logits,
+                    _lmHeadInputQuants,
+                    _lmHeadInputScales);
+            }
+            else
+            {
+                SingleTokenProjectionKernel.ProjectParallel(
+                    _finalHidden,
+                    lmHead.F32,
+                    ReadOnlySpan<float>.Empty,
+                    logits,
+                    DModel,
+                    VocabSize);
+            }
 
             logits.Slice(0, VocabSize).CopyTo(_lastLogits);
         }

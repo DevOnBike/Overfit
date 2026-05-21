@@ -18,13 +18,18 @@ ONNX: PyTorch-exported model import into Sequential for inference
 
 ## Recommended reading order
 
-1. `../README.md` — project overview and current benchmark snapshot.
-2. `InferenceBenchmarkSummary.md` — detailed inference benchmark summary.
-3. `../ONNX_IMPLEMENTATION_PLAN.md` — ONNX import MVP scope and implementation notes.
-4. `OverfitArchitectureRefactorPlan.md` — planned autograd/graph ownership cleanup.
-5. `TrainingEngineFacade.md` — current training facade design.
-6. `scenarios/` — role-specific usage guides.
-7. `../ROADMAP.md` — planned work and priorities.
+1. `../README.md` — short project overview and headline benchmarks.
+2. `TECHNICAL.md` — full quick-start, benchmark tables, import pipelines, architecture (the deep dive).
+3. `InferenceBenchmarkSummary.md` — detailed inference benchmark summary.
+4. `ONNX_IMPLEMENTATION_PLAN.md` — ONNX import MVP scope and implementation notes.
+5. `OverfitArchitectureRefactorPlan.md` — planned autograd/graph ownership cleanup.
+6. `TrainingEngineFacade.md` — current training facade design.
+7. `llamacpp-cpu-analysis.md` — CPU LLM decode-kernel analysis + same-file A/B vs llama.cpp.
+8. `performance-patterns.md` — CPU/SIMD performance pattern catalog.
+9. `gp-anomaly-baseline.md` — proposed GP/EWMA baseline for the metric anomaly detector.
+10. `scenarios/` — role-specific usage guides.
+11. `marketing/` — go-to-market plan, launch copy, LinkedIn drafts (non-engineering collateral).
+12. `../ROADMAP.md` — planned work and priorities.
 
 ## Benchmark policy
 

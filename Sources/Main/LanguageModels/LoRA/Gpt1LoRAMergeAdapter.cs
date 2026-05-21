@@ -114,6 +114,54 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                         expectedOut = dModel;
                         break;
 
+                    case LoRATargetModules.Query:
+                        ValidateLayer(entry.Layer, nLayers, entry.Module);
+                        {
+                            var attn = model.Blocks[entry.Layer].Attention;
+                            ValidateHead(entry.HeadIndex, attn.NHeads, entry.Module, entry.Layer);
+                            storage = attn.WqHeads[entry.HeadIndex].Data;
+                            expectedIn = dModel;
+                            expectedOut = attn.DHead;
+                        }
+
+                        break;
+
+                    case LoRATargetModules.Key:
+                        ValidateLayer(entry.Layer, nLayers, entry.Module);
+                        {
+                            var attn = model.Blocks[entry.Layer].Attention;
+                            ValidateHead(entry.HeadIndex, attn.NHeads, entry.Module, entry.Layer);
+                            storage = attn.WkHeads[entry.HeadIndex].Data;
+                            expectedIn = dModel;
+                            expectedOut = attn.DHead;
+                        }
+
+                        break;
+
+                    case LoRATargetModules.Value:
+                        ValidateLayer(entry.Layer, nLayers, entry.Module);
+                        {
+                            var attn = model.Blocks[entry.Layer].Attention;
+                            ValidateHead(entry.HeadIndex, attn.NHeads, entry.Module, entry.Layer);
+                            storage = attn.WvHeads[entry.HeadIndex].Data;
+                            expectedIn = dModel;
+                            expectedOut = attn.DHead;
+                        }
+
+                        break;
+
+                    case LoRATargetModules.OutputProjection:
+                        ValidateLayer(entry.Layer, nLayers, entry.Module);
+                        {
+                            var attn = model.Blocks[entry.Layer].Attention;
+                            ValidateHead(entry.HeadIndex, attn.NHeads, entry.Module, entry.Layer);
+                            storage = attn.WoHeads[entry.HeadIndex].Data;
+                            expectedIn = attn.DHead;
+                            expectedOut = dModel;
+                        }
+
+                        break;
+
                     default:
                         throw new NotSupportedException(
                             $"Gpt1LoRAMergeAdapter cannot merge module {entry.Module}.");
@@ -217,6 +265,15 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             {
                 throw new InvalidDataException(
                     $"LoRA entry for {module} references layer {layer}; the model has {nLayers} layers.");
+            }
+        }
+
+        private static void ValidateHead(int head, int nHeads, LoRATargetModules module, int layer)
+        {
+            if (head < 0 || head >= nHeads)
+            {
+                throw new InvalidDataException(
+                    $"LoRA entry for {module} layer {layer} references head {head}; the layer has {nHeads} heads.");
             }
         }
 

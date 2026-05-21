@@ -7,6 +7,7 @@ using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Rope;
+using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
@@ -28,7 +29,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly StackWeights _weights;
         private readonly KeyValueCache _cache;
         private readonly RopeTable? _rope;
-        private readonly ReadOnlyMemory<float> _embedWeights;
+
+        // Engine-owned embedding matrix [vocab × dModel], referenced (NOT copied):
+        // the engine outlives every session it creates and disposes this storage.
+        // The row for the current token is sliced on demand at lookup. Previously
+        // this was a per-session ToArray() copy — 1.24 GB duplicated for a 3B model.
+        private readonly TensorStorage<float> _embedWeights;
 
         // Per-token working buffers (allocated once)
         private readonly float[] _hidden;
@@ -45,7 +51,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             StackWeights weights,
             KeyValueCache cache,
             RopeTable? rope,
-            ReadOnlySpan<float> embedWeights)
+            TensorStorage<float> embedWeights)
         {
             _config = config;
             _stack = stack;
@@ -53,8 +59,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _cache = cache;
             _rope = rope;
 
-            // Copy embed weights reference — this points to engine-owned TensorStorage.
-            _embedWeights = embedWeights.ToArray().AsMemory();
+            // Reference the engine-owned embedding storage — no copy. The engine
+            // owns its lifetime (disposes it); sessions never outlive their engine.
+            _embedWeights = embedWeights;
 
             _hidden = new float[config.DModel];
             _logits = new float[config.VocabSize];
@@ -302,9 +309,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         private int EmbedAndAdvance(int tokenId)
         {
-            // Token embedding lookup: row tokenId of embed_weights [vocab × dModel]
-            var embedSpan = _embedWeights.Span;
-            var row = embedSpan.Slice(tokenId * _config.DModel, _config.DModel);
+            // Token embedding lookup: row tokenId of embed_weights [vocab × dModel],
+            // sliced directly from the engine-owned storage (no per-session copy).
+            var row = _embedWeights.AsReadOnlySpan().Slice(tokenId * _config.DModel, _config.DModel);
             row.CopyTo(_hidden);
 
             // No additive positional embedding — RoPE handles positions inside attention.

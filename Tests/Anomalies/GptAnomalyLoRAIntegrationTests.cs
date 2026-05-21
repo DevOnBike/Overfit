@@ -134,6 +134,107 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         }
 
         /// <summary>
+        /// The discrimination guarantee: after a LoRA adapter teaches the detector
+        /// to treat a (benign) production regime as normal — driving that regime's
+        /// score down (proved above) — a genuinely anomalous snapshot fed against
+        /// the same adapted context must STILL score far higher. I.e. adapting to
+        /// benign drift lowers false positives without blinding the detector to
+        /// real anomalies. This is the property that makes per-regime LoRA
+        /// adaptation safe to deploy.
+        /// </summary>
+        [Fact]
+        [Trait("Category", "Integration")]
+        public void LoRA_AdaptedToRegime_StillFlagsInjectedAnomaly()
+        {
+            const int contextSnapshots = 6;
+            var tps = MetricTokenizer.TokensPerSnapshot;
+
+            using var model = new GPT1Model(new GPT1Config
+            {
+                VocabSize = MetricTokenizer.VocabSize,
+                ContextLength = 16 * tps,
+                DModel = 32,
+                NHeads = 2,
+                NLayers = 1,
+                DFF = 64,
+                TieWeights = false,
+                PreLayerNorm = true,
+            });
+
+            var regime = new MetricSnapshot[48];
+            for (var i = 0; i < regime.Length; i++)
+            {
+                regime[i] = MakeNormalSnapshot("payments-api");
+            }
+
+            var corpus = new MetricTokenizer().EncodeSequence(regime);
+            var loraPath = Path.Combine(
+                Path.GetTempPath(), $"overfit_anomaly_lora_{Guid.NewGuid():N}.bin");
+
+            try
+            {
+                using (var tuner = new Gpt1LoRAFineTuner(model, rank: 16))
+                {
+                    tuner.FineTune(
+                        corpus, steps: 300, contextLength: contextSnapshots * tps, learningRate: 1e-2f);
+                    tuner.Save(loraPath);
+                }
+
+                using var merge = Gpt1LoRAMergeAdapter.Load(model, loraPath);
+                merge.Enable();
+
+                // One adapted detector: warm up on the normal regime, capture the
+                // steady normal score, then inject a single anomalous snapshot
+                // against that same normal-primed context.
+                using var handle = SlmRuntimeFactory.CreateGpt1(model);
+                using var detector = new GptAnomalyDetector(handle, contextSnapshots);
+
+                var normalScore = 0f;
+                var warm = contextSnapshots * 2;
+                for (var i = 0; i < warm; i++)
+                {
+                    var r = detector.Score(regime[i]);
+                    if (!r.IsWarmup)
+                    {
+                        normalScore = r.Score;
+                    }
+                }
+
+                var anomalyResult = detector.Score(MakeAnomalySnapshot("payments-api"));
+
+                _output.WriteLine($"adapted-normal score: {normalScore:F4}");
+                _output.WriteLine($"injected-anomaly score: {anomalyResult.Score:F4}  worst={anomalyResult.WorstMetric}");
+
+                Assert.False(anomalyResult.IsWarmup, "Anomaly snapshot scored during warmup.");
+                Assert.False(
+                    float.IsNaN(anomalyResult.Score) || float.IsInfinity(anomalyResult.Score),
+                    "Injected-anomaly score is not finite.");
+
+                // Measured (this tiny model, 300-step LoRA): the adapter drives the
+                // normal regime to ~0.007 nats/token while the injected anomaly
+                // scores ~20 — a ~2800× separation. Bars are absolute (robust to the
+                // near-zero normal baseline, where a multiplicative bar is fragile):
+                //   (a) adaptation actually flattened normal, and
+                //   (b) the anomaly still fires far above any normal noise floor.
+                Assert.True(
+                    normalScore < 1.0f,
+                    $"LoRA did not flatten the adapted normal regime: normal={normalScore:F4}.");
+                Assert.True(
+                    anomalyResult.Score > 5.0f,
+                    "LoRA adaptation blinded the detector to a real anomaly: "
+                    + $"adapted-normal={normalScore:F4}, injected-anomaly={anomalyResult.Score:F4} "
+                    + "(measured ~20.4).");
+            }
+            finally
+            {
+                if (File.Exists(loraPath))
+                {
+                    File.Delete(loraPath);
+                }
+            }
+        }
+
+        /// <summary>
         /// Builds a fresh detector over the model's current weights, feeds the
         /// steady regime through it, and returns the last post-warmup score.
         /// </summary>
@@ -174,6 +275,28 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             GcGen2HeapBytes = 52_000_000f,
             GcPauseRatio = 0.004f,
             ThreadPoolQueueLength = 9f,
+        };
+
+        // A clearly out-of-distribution snapshot: CPU saturated + throttled, tail
+        // latency and error rate blown out, request queue backed up — many metrics
+        // land in bins the normal regime never visits, so most tokens are
+        // unpredictable given a normal-primed context.
+        private static MetricSnapshot MakeAnomalySnapshot(string pod) => new()
+        {
+            Timestamp = DateTime.UtcNow,
+            PodName = pod,
+            CpuUsageRatio = 0.99f,
+            CpuThrottleRatio = 0.65f,
+            MemoryWorkingSetBytes = 1_900_000_000f,
+            OomEventsRate = 3f,
+            LatencyP50Ms = 220f,
+            LatencyP95Ms = 1_400f,
+            LatencyP99Ms = 2_900f,
+            RequestsPerSecond = 12f,
+            ErrorRate = 0.42f,
+            GcGen2HeapBytes = 1_400_000_000f,
+            GcPauseRatio = 0.38f,
+            ThreadPoolQueueLength = 240f,
         };
     }
 }

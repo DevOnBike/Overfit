@@ -5,68 +5,61 @@
 
 using System.Runtime.CompilerServices;
 using BenchmarkDotNet.Attributes;
-using Benchmarks.Helpers;
+using BenchmarkDotNet.Columns;
+using BenchmarkDotNet.Configs;
+using BenchmarkDotNet.Diagnosers;
+using BenchmarkDotNet.Jobs;
+using BenchmarkDotNet.Order;
 using DevOnBike.Overfit.Runtime;
 
 namespace Benchmarks
 {
     /// <summary>
-    /// Head-to-head benchmark of <see cref="OverfitParallelFor"/> (bulk-wake
-    /// dispatcher via <see cref="SemaphoreSlim.Release(int)"/>) vs
-    /// <see cref="Parallel.For(int,int,System.Action{int})"/> vs a sequential
-    /// baseline, parameterized by per-worker body work.
+    /// Old-vs-new comparison of the <see cref="OverfitParallelFor"/> bulk-wake
+    /// dispatcher: the current implementation (with the P1/P2/P5 tuning —
+    /// workerCount fast-path, caller-participation, grain overload) against the
+    /// frozen pre-tuning <see cref="OverfitParallelForLegacy"/>, plus a
+    /// sequential baseline.
     ///
     /// <para>
-    /// All three dispatchers do the SAME total work: <c>WorkerCount</c>
-    /// independent chunks, each performing <see cref="InnerIters"/> inner
-    /// loop iterations. <see cref="InnerIters"/> is swept across regimes so
-    /// the cross-over point can be read directly from the table:
-    /// </para>
-    /// <list type="bullet">
-    ///   <item><c>0</c> — pure dispatch overhead.</item>
-    ///   <item><c>1_000</c> — ~1 µs body (dispatch ≫ body).</item>
-    ///   <item><c>100_000</c> — ~100 µs body (dispatch ≈ body).</item>
-    ///   <item><c>10_000_000</c> — ~10 ms body (dispatch ≪ body).</item>
-    /// </list>
-    ///
-    /// <para>
-    /// The <see cref="MemoryDiagnoser"/> from the config attaches automatically,
-    /// so the Allocated column will show the headline number: 0 B/op for
-    /// <c>OverfitParallelFor</c>, ~3 KB/op for <c>Parallel.For</c>.
+    /// All parallel methods do the SAME total work: <c>WorkerCount</c>
+    /// independent chunks of <see cref="InnerIters"/> inner iterations each.
+    /// <see cref="InnerIters"/> sweeps the regimes so the dispatch-overhead vs
+    /// body-work cross-over is read directly from the table:
+    /// <c>0</c> = pure dispatch, <c>1_000_000</c> = dispatch ≪ body.
     /// </para>
     ///
     /// <para>
-    /// History: earlier prototypes (per-worker <c>AutoResetEvent.Set</c> /
-    /// hybrid spin-then-park) hit a ~32-47 µs dispatch floor on
-    /// 32-fanout because the N × Set calls serialize at the kernel. The
-    /// current bulk-wake design drops dispatch to ~5-7 µs — competitive
-    /// with <see cref="Parallel.For"/> in raw time and 3000× cheaper on
-    /// allocations. See <see cref="OverfitParallelFor"/> XML doc for the
-    /// algorithmic detail.
+    /// The config (<see cref="DispatcherBenchmarkConfig"/>) deliberately does
+    /// NOT pin <c>InvocationCount=1</c>: a single µs-scale dispatch call is far
+    /// too small for BenchmarkDotNet to time without timer/scheduler noise.
+    /// Letting BDN auto-scale the invocation count makes each measured block
+    /// long enough — which is what the prior "minimum observed iteration time
+    /// is very small" warnings were asking for.
     /// </para>
     /// </summary>
-    [Config(typeof(BenchmarkConfig))]
+    [Config(typeof(DispatcherBenchmarkConfig))]
     public unsafe class OverfitParallelForBenchmark
     {
         [Params(0, 10, 1000, 100_000, 1_000_000)]
         public int InnerIters { get; set; }
 
         private int _workerCount;
-        private double _sink;
 
         [GlobalSetup]
         public void Setup()
         {
+            // Touch both dispatchers so their persistent thread pools spawn
+            // before measurement starts. Both read OVERFIT_PARALLEL_WORKERS, so
+            // they run with an identical worker count — a fair comparison.
             _workerCount = OverfitParallelFor.WorkerCount;
+            _ = OverfitParallelForLegacy.WorkerCount;
         }
 
         // ─── Body ──────────────────────────────────────────────────────────
-        // The chunk body does a fixed amount of work proportional to
-        // (chunkEnd - chunkStart) * InnerIters. Since the outer range is
-        // [0, workerCount) and each chunk is exactly 1 element, the per-chunk
-        // body runs InnerIters inner iterations once. The accumulator is
-        // written back into the caller-owned context so the JIT cannot elide
-        // the loop.
+        // Per-chunk work proportional to (chunkEnd - chunkStart) * InnerIters.
+        // The outer range is [0, workerCount) with one element per chunk, so
+        // each body runs InnerIters inner iterations once.
 
         private struct WorkContext
         {
@@ -83,7 +76,6 @@ namespace Benchmarks
 
             for (var c = chunkStart; c < chunkEnd; c++)
             {
-                // Per-element work: tight FP loop that the JIT cannot fold.
                 var x = (double)(c + 1);
                 for (var k = 0; k < inner; k++)
                 {
@@ -92,7 +84,6 @@ namespace Benchmarks
                 local += x;
             }
 
-            // Only chunk 0 writes back — avoids false sharing between workers.
             if (chunkStart == 0)
             {
                 ctx.Accumulator = local;
@@ -124,47 +115,44 @@ namespace Benchmarks
             {
                 acc += SequentialChunk(w, w + 1, InnerIters);
             }
-            _sink = acc;
             return acc;
         }
 
-        [Benchmark(Description = "Parallel.For (TPL)")]
-        public double ParallelFor()
+        [Benchmark(Description = "OverfitParallelFor (legacy, pre-P1/P2)")]
+        public double OverfitParallelLegacy()
         {
-            double acc = 0.0;
-            var iters = InnerIters;
-
-            Parallel.For(0, _workerCount, w =>
-            {
-                // Same work as ChunkBody for chunk size = 1.
-                var x = (double)(w + 1);
-                for (var k = 0; k < iters; k++)
-                {
-                    x = x * 1.0000001 + 1e-9;
-                }
-                if (w == 0)
-                {
-                    Volatile.Write(ref acc, x);
-                }
-            });
-
-            _sink = acc;
-            return acc;
+            var ctx = new WorkContext { InnerIters = InnerIters, Accumulator = 0.0 };
+            OverfitParallelForLegacy.For(0, _workerCount, &ChunkBody, &ctx);
+            return ctx.Accumulator;
         }
 
-        [Benchmark(Description = "OverfitParallelFor")]
+        [Benchmark(Description = "OverfitParallelFor (current, P1/P2/P5)")]
         public double OverfitParallel()
         {
-            var ctx = new WorkContext
-            {
-                InnerIters = InnerIters,
-                Accumulator = 0.0,
-            };
-
+            var ctx = new WorkContext { InnerIters = InnerIters, Accumulator = 0.0 };
             OverfitParallelFor.For(0, _workerCount, &ChunkBody, &ctx);
-
-            _sink = ctx.Accumulator;
             return ctx.Accumulator;
+        }
+    }
+
+    /// <summary>
+    /// Config for <see cref="OverfitParallelForBenchmark"/>. Mirrors the shared
+    /// <c>BenchmarkConfig</c> but omits the <c>WithInvocationCount(1)</c> /
+    /// <c>WithUnrollFactor(1)</c> pin so BDN auto-scales the invocation count —
+    /// required to time a µs-scale dispatch call without noise.
+    /// </summary>
+    internal sealed class DispatcherBenchmarkConfig : ManualConfig
+    {
+        public DispatcherBenchmarkConfig()
+        {
+            AddJob(Job.Default
+                .WithWarmupCount(5)
+                .WithIterationCount(20));
+
+            AddDiagnoser(MemoryDiagnoser.Default);
+            AddColumn(RankColumn.Arabic);
+
+            WithOrderer(new DefaultOrderer(SummaryOrderPolicy.FastestToSlowest));
         }
     }
 }

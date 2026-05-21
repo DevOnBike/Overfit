@@ -54,6 +54,17 @@ namespace DevOnBike.Overfit.DeepLearning
         private readonly AutogradNode?[] _bkNodes;
         private readonly AutogradNode?[] _bvNodes;
 
+        // Optional per-forward, per-head overrides for the Q/K/V/O weight nodes —
+        // the Stage-3 LoRA fine-tune hook (see Gpt1LoRAFineTuner), mirroring
+        // GPT1Model.LMHeadWeightProvider and FeedForwardLayer.W1/W2WeightProvider.
+        // When an element is set, Forward uses W_eff = W(frozen) + A@B for that
+        // head's projection instead of the plain parameter node. All-null on the
+        // production path — plain weights, zero overhead.
+        private readonly Func<ComputationGraph, AutogradNode>?[] _wqProviders;
+        private readonly Func<ComputationGraph, AutogradNode>?[] _wkProviders;
+        private readonly Func<ComputationGraph, AutogradNode>?[] _wvProviders;
+        private readonly Func<ComputationGraph, AutogradNode>?[] _woProviders;
+
         public MultiHeadAttentionLayer(
             int dModel,
             int nHeads,
@@ -90,6 +101,11 @@ namespace DevOnBike.Overfit.DeepLearning
             _bqNodes = new AutogradNode?[nHeads];
             _bkNodes = new AutogradNode?[nHeads];
             _bvNodes = new AutogradNode?[nHeads];
+
+            _wqProviders = new Func<ComputationGraph, AutogradNode>?[nHeads];
+            _wkProviders = new Func<ComputationGraph, AutogradNode>?[nHeads];
+            _wvProviders = new Func<ComputationGraph, AutogradNode>?[nHeads];
+            _woProviders = new Func<ComputationGraph, AutogradNode>?[nHeads];
 
             for (var h = 0; h < nHeads; h++)
             {
@@ -132,6 +148,19 @@ namespace DevOnBike.Overfit.DeepLearning
         public int DModel => _dModel;
         public int NHeads => _nHeads;
         public int DHead => _dHead;
+
+        // Stage-3 LoRA hook accessors. The fine-tuner installs a per-head weight
+        // provider for whichever of Q/K/V/O it targets; getters let it detach
+        // exactly its own hook (ReferenceEquals) without clobbering another's.
+        internal void SetQueryProvider(int head, Func<ComputationGraph, AutogradNode>? provider) => _wqProviders[head] = provider;
+        internal void SetKeyProvider(int head, Func<ComputationGraph, AutogradNode>? provider) => _wkProviders[head] = provider;
+        internal void SetValueProvider(int head, Func<ComputationGraph, AutogradNode>? provider) => _wvProviders[head] = provider;
+        internal void SetOutputProvider(int head, Func<ComputationGraph, AutogradNode>? provider) => _woProviders[head] = provider;
+
+        internal Func<ComputationGraph, AutogradNode>? GetQueryProvider(int head) => _wqProviders[head];
+        internal Func<ComputationGraph, AutogradNode>? GetKeyProvider(int head) => _wkProviders[head];
+        internal Func<ComputationGraph, AutogradNode>? GetValueProvider(int head) => _wvProviders[head];
+        internal Func<ComputationGraph, AutogradNode>? GetOutputProvider(int head) => _woProviders[head];
 
         public bool IsTraining { get; private set; } = true;
 
@@ -179,18 +208,21 @@ namespace DevOnBike.Overfit.DeepLearning
 
             for (var h = 0; h < _nHeads; h++)
             {
-                _wqNodes[h] ??= _wqHeads[h].AsNode();
-                _wkNodes[h] ??= _wkHeads[h].AsNode();
-                _wvNodes[h] ??= _wvHeads[h].AsNode();
-                _woNodes[h] ??= _woHeads[h].AsNode();
+                // Q/K/V/O weight nodes: a Stage-3 LoRA fine-tuner can override each
+                // per head with W_eff = W(frozen) + A@B via the providers; the
+                // production path uses the plain cached parameter node, zero overhead.
+                var wqNode = ResolveWeightNode(graph, _wqProviders[h], _wqNodes, _wqHeads, h);
+                var wkNode = ResolveWeightNode(graph, _wkProviders[h], _wkNodes, _wkHeads, h);
+                var wvNode = ResolveWeightNode(graph, _wvProviders[h], _wvNodes, _wvHeads, h);
+                var woNode = ResolveWeightNode(graph, _woProviders[h], _woNodes, _woHeads, h);
 
                 _bqNodes[h] ??= _bqHeads[h].AsNode();
                 _bkNodes[h] ??= _bkHeads[h].AsNode();
                 _bvNodes[h] ??= _bvHeads[h].AsNode();
 
-                var qFlat = graph.Linear(flat, _wqNodes[h]!, _bqNodes[h]!);
-                var kFlat = graph.Linear(flat, _wkNodes[h]!, _bkNodes[h]!);
-                var vFlat = graph.Linear(flat, _wvNodes[h]!, _bvNodes[h]!);
+                var qFlat = graph.Linear(flat, wqNode, _bqNodes[h]!);
+                var kFlat = graph.Linear(flat, wkNode, _bkNodes[h]!);
+                var vFlat = graph.Linear(flat, wvNode, _bvNodes[h]!);
 
                 // SDPA on the flattened [B*T, dHead] projections directly. The
                 // 2-D overload skips the [B*T,d] <-> [B,T,d] reshape round-trip
@@ -208,7 +240,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
                 var proj = graph.Linear(
                 attn,
-                _woNodes[h]!,
+                woNode,
                 zeroBiasO);
 
                 accum = accum == null
@@ -449,6 +481,24 @@ namespace DevOnBike.Overfit.DeepLearning
             _bqHeads[head].DataSpan.Clear();
             _bkHeads[head].DataSpan.Clear();
             _bvHeads[head].DataSpan.Clear();
+        }
+
+        private static AutogradNode ResolveWeightNode(
+            ComputationGraph graph,
+            Func<ComputationGraph, AutogradNode>? provider,
+            AutogradNode?[] cache,
+            Parameter[] heads,
+            int head)
+        {
+            // LoRA hook present: build W_eff = W(frozen) + A@B fresh on this graph
+            // (never cached — it lives only for this forward). Otherwise use the
+            // cached plain parameter node.
+            if (provider is not null)
+            {
+                return provider(graph);
+            }
+
+            return cache[head] ??= heads[head].AsNode();
         }
 
         private static AutogradNode ZeroBias(

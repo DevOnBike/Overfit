@@ -24,13 +24,18 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
     /// </summary>
     public static class GgufLlamaLoader
     {
-        public static CachedLlamaInferenceEngine Load(string path)
+        /// <param name="quantize">
+        /// When true (default) FFN / LM-head / attention weights become Q8_0-resident
+        /// where dimensions allow. When false every weight loads as F32 — the
+        /// pre-quantization decode path, used as the parity reference (step 2.5).
+        /// </param>
+        public static CachedLlamaInferenceEngine Load(string path, bool quantize = true)
         {
             using var reader = new GgufReader(path);
-            return LoadFromReader(reader);
+            return LoadFromReader(reader, quantize);
         }
 
-        internal static CachedLlamaInferenceEngine LoadFromReader(GgufReader reader)
+        internal static CachedLlamaInferenceEngine LoadFromReader(GgufReader reader, bool quantize = true)
         {
             var arch = reader.GetMeta("general.architecture", "qwen2");
 
@@ -87,15 +92,38 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
             // ─── Layer weights ────────────────────────────────────────────
             var layers = new LayerWeightBuffers[nLayers];
-            // Scratch for full attn_q/k/v/o weight matrices.
-            // Pool them so they're returned for reuse rather than waiting for Gen2 GC.
+
+            // Per-tensor dispatch (step 3.2b) — a Q4_K_M file is heterogeneous
+            // (typically Q/K/O = Q4_K, V = Q6_K), so attn_q/k/v each pick
+            // Q4_K-native / Q8_0-native / F32-fallback independently from the
+            // file's tensor type. Wo can't be K-quant per-head (headDim < the
+            // 256-element K-quant super-block) but CAN be Q8_0 per-head — its
+            // dispatcher (`LoadOutputHeads`) handles that.
             var qFullElems = checked((int)((long)dModel * nHeads * headDim));
             var kFullElems = checked((int)((long)dModel * nKvHeads * headDim));
             var oFullElems = checked((int)((long)nHeads * headDim * dModel));
-            var qFull = ArrayPool<float>.Shared.Rent(qFullElems);
-            var kFull = ArrayPool<float>.Shared.Rent(kFullElems);
-            var vFull = ArrayPool<float>.Shared.Rent(kFullElems);
-            var oFull = ArrayPool<float>.Shared.Rent(oFullElems);
+
+            var attnQuantizable = quantize
+                && dModel % Q8DotKernel.BlockSize == 0 && headDim % Q8DotKernel.BlockSize == 0;
+
+            // F32 scratch is needed for any tensor that isn't K-quant-native on
+            // disk (the F32-fallback path). Peek layer 0's types — quant files
+            // are uniform across layers — to decide per tensor.
+            var qNeedsF32 = !attnQuantizable
+                || !IsKQuantNative(reader.Tensors["blk.0.attn_q.weight"], dModel);
+            var kNeedsF32 = !attnQuantizable
+                || !IsKQuantNative(reader.Tensors["blk.0.attn_k.weight"], dModel);
+            var vNeedsF32 = !attnQuantizable
+                || !IsKQuantNative(reader.Tensors["blk.0.attn_v.weight"], dModel);
+            // Wo: K-quant per-head is blocked by headDim < 256, but Q8_0 per-head works.
+            var oNeedsF32 = !attnQuantizable
+                || reader.Tensors["blk.0.attn_output.weight"].Type != GgmlType.Q8_0;
+
+            float[] qFull = qNeedsF32 ? ArrayPool<float>.Shared.Rent(qFullElems) : [];
+            float[] kFull = kNeedsF32 ? ArrayPool<float>.Shared.Rent(kFullElems) : [];
+            float[] vFull = vNeedsF32 ? ArrayPool<float>.Shared.Rent(kFullElems) : [];
+            float[] oFull = oNeedsF32 ? ArrayPool<float>.Shared.Rent(oFullElems) : [];
+            // Attention biases are always F32 in GGUF — bias scratch always needed.
             var qBiasFull = ArrayPool<float>.Shared.Rent(nHeads * headDim);
             var kBiasFull = ArrayPool<float>.Shared.Rent(nKvHeads * headDim);
             var vBiasFull = ArrayPool<float>.Shared.Rent(nKvHeads * headDim);
@@ -107,34 +135,45 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     var attnNormGamma = AllocAndLoad(reader, $"blk.{l}.attn_norm.weight", dModel);
                     var attnNormBeta = TensorStorage<float>.Unpooled(0);
 
-                    // Q, K, V, O full matrices
-                    LoadTensor(reader, $"blk.{l}.attn_q.weight", qFull.AsSpan(0, qFullElems));
-                    LoadTensor(reader, $"blk.{l}.attn_k.weight", kFull.AsSpan(0, kFullElems));
-                    LoadTensor(reader, $"blk.{l}.attn_v.weight", vFull.AsSpan(0, kFullElems));
-                    LoadTensor(reader, $"blk.{l}.attn_output.weight", oFull.AsSpan(0, oFullElems));
+                    // Per-tensor dispatch (step 3.2b) — each of attn_q/k/v picks
+                    // Q4_K-native / Q8_0-native / F32-fallback independently from
+                    // its file format. Wo dispatches separately (Q8_0 OK per-head;
+                    // K-quant not — headDim < the 256-element super-block).
+                    var wq = LoadQkvHeads(reader, $"blk.{l}.attn_q.weight", nHeads, dModel, headDim, qFull, attnQuantizable);
+                    var wk = LoadQkvHeads(reader, $"blk.{l}.attn_k.weight", nKvHeads, dModel, headDim, kFull, attnQuantizable);
+                    var wv = LoadQkvHeads(reader, $"blk.{l}.attn_v.weight", nKvHeads, dModel, headDim, vFull, attnQuantizable);
+                    var wo = LoadOutputHeads(reader, $"blk.{l}.attn_output.weight", nHeads, dModel, headDim, oFull, attnQuantizable);
 
-                    // Biases (optional — Qwen has them, Llama doesn't)
+                    // Attention biases (optional — Qwen has them, Llama doesn't);
+                    // always F32 in GGUF, never quantized.
                     LoadTensorOrZeros(reader, $"blk.{l}.attn_q.bias", qBiasFull.AsSpan(0, nHeads * headDim));
                     LoadTensorOrZeros(reader, $"blk.{l}.attn_k.bias", kBiasFull.AsSpan(0, nKvHeads * headDim));
                     LoadTensorOrZeros(reader, $"blk.{l}.attn_v.bias", vBiasFull.AsSpan(0, nKvHeads * headDim));
-
-                    // Split into per-head storages (with transposition)
-                    var wq = SplitQuery(qFull, nHeads, dModel, headDim);
                     var bq = SplitBias(qBiasFull, nHeads, headDim);
-                    var wk = SplitKeyValue(kFull, nKvHeads, dModel, headDim);
                     var bk = SplitBias(kBiasFull, nKvHeads, headDim);
-                    var wv = SplitKeyValue(vFull, nKvHeads, dModel, headDim);
                     var bv = SplitBias(vBiasFull, nKvHeads, headDim);
-                    var wo = SplitOutput(oFull, nHeads, dModel, headDim);
                     var bo = new TensorStorage<float>[nHeads];
                     for (var h = 0; h < nHeads; h++) { bo[h] = TensorStorage<float>.Unpooled(dModel); }
 
                     // FFN
                     var ffnNormGamma = AllocAndLoad(reader, $"blk.{l}.ffn_norm.weight", dModel);
                     var ffnNormBeta = TensorStorage<float>.Unpooled(0);
-                    var ffnGate = AllocAndLoadTransposed(reader, $"blk.{l}.ffn_gate.weight", dModel, dFF);
-                    var ffnUp = AllocAndLoadTransposed(reader, $"blk.{l}.ffn_up.weight", dModel, dFF);
-                    var ffnDown = AllocAndLoadTransposed(reader, $"blk.{l}.ffn_down.weight", dFF, dModel);
+                    // FFN weights — step 2.3b: resident as Q8_0 (output-major)
+                    // when quantization is enabled and both dims are block-aligned;
+                    // F32 transposed otherwise.
+                    DecodeWeight ffnGate, ffnUp, ffnDown;
+                    if (quantize && dModel % Q8DotKernel.BlockSize == 0 && dFF % Q8DotKernel.BlockSize == 0)
+                    {
+                        ffnGate = AllocAndLoadResident(reader, $"blk.{l}.ffn_gate.weight", dModel, dFF);
+                        ffnUp = AllocAndLoadResident(reader, $"blk.{l}.ffn_up.weight", dModel, dFF);
+                        ffnDown = AllocAndLoadResident(reader, $"blk.{l}.ffn_down.weight", dFF, dModel);
+                    }
+                    else
+                    {
+                        ffnGate = AllocAndLoadTransposed(reader, $"blk.{l}.ffn_gate.weight", dModel, dFF);
+                        ffnUp = AllocAndLoadTransposed(reader, $"blk.{l}.ffn_up.weight", dModel, dFF);
+                        ffnDown = AllocAndLoadTransposed(reader, $"blk.{l}.ffn_down.weight", dFF, dModel);
+                    }
 
                     layers[l] = new LayerWeightBuffers
                     {
@@ -158,10 +197,11 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
             finally
             {
-                ArrayPool<float>.Shared.Return(qFull);
-                ArrayPool<float>.Shared.Return(kFull);
-                ArrayPool<float>.Shared.Return(vFull);
-                ArrayPool<float>.Shared.Return(oFull);
+                // qFull..oFull are empty sentinels on the native Q8_0 path.
+                if (qFull.Length > 0) { ArrayPool<float>.Shared.Return(qFull); }
+                if (kFull.Length > 0) { ArrayPool<float>.Shared.Return(kFull); }
+                if (vFull.Length > 0) { ArrayPool<float>.Shared.Return(vFull); }
+                if (oFull.Length > 0) { ArrayPool<float>.Shared.Return(oFull); }
                 ArrayPool<float>.Shared.Return(qBiasFull);
                 ArrayPool<float>.Shared.Return(kBiasFull);
                 ArrayPool<float>.Shared.Return(vBiasFull);
@@ -171,43 +211,88 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var finalNormGamma = AllocAndLoad(reader, "output_norm.weight", dModel);
             var finalNormBeta = TensorStorage<float>.Unpooled(0);
 
-            // LM head: tied embeddings use token_embd transposed; untied uses output.weight transposed
-            // Kernel expects [dModel, vocab] (input-major), but file stores [vocab, dModel].
-            var lmHead = TensorStorage<float>.Unpooled(checked((int)((long)vocab * dModel)));
-            var lmHeadSpan = lmHead.AsSpan();
-            var embSpan = embedWeights.AsSpan();
-
-            if (tieWeights)
+            // LM head — step 2.3a: resident as Q8_0 (output-major). The file
+            // stores it [vocab, dModel] — row = token = one output's contraction
+            // vector — which is exactly Q8Weight's layout, so no transpose.
+            // tied → token_embd; untied → output.weight. When quantization is
+            // disabled, or dModel is not a multiple of the Q8 block size, fall
+            // back to an F32 transposed LM head (the kernel's input-major layout).
+            DecodeWeight lmHead;
+            if (quantize && dModel % Q8DotKernel.BlockSize == 0)
             {
-                // Use token_embd, transpose to [dModel, vocab]
-                for (var d = 0; d < dModel; d++)
+                var lmHeadInfo = reader.Tensors[tieWeights ? "token_embd.weight" : "output.weight"];
+                if (lmHeadInfo.Type == GgmlType.Q4_K && dModel % Q4KWeight.SuperBlockElements == 0)
                 {
-                    for (var t = 0; t < vocab; t++)
+                    // Native Q4_K — read the file's blocks straight in (step 3.2b).
+                    lmHead = LoadQ4KNative(reader, lmHeadInfo, dModel, vocab);
+                }
+                else if (lmHeadInfo.Type == GgmlType.Q6_K && dModel % Q6KWeight.SuperBlockElements == 0)
+                {
+                    // Native Q6_K — read the file's blocks straight in (step 3.3c).
+                    lmHead = LoadQ6KNative(reader, lmHeadInfo, dModel, vocab);
+                }
+                else if (lmHeadInfo.Type == GgmlType.Q8_0)
+                {
+                    // Native Q8_0 — read the file's blocks straight in (step 2.4).
+                    lmHead = LoadQ8Native(reader, lmHeadInfo, dModel, vocab);
+                }
+                else if (tieWeights)
+                {
+                    lmHead = Q8Weight.QuantizeRows(embedWeights.AsReadOnlySpan(), vocab, dModel);
+                }
+                else
+                {
+                    var outElems = checked((int)((long)vocab * dModel));
+                    var outputRaw = ArrayPool<float>.Shared.Rent(outElems);
+                    try
                     {
-                        lmHeadSpan[d * vocab + t] = embSpan[t * dModel + d];
+                        LoadTensor(reader, "output.weight", outputRaw.AsSpan(0, outElems));
+                        lmHead = Q8Weight.QuantizeRows(outputRaw.AsSpan(0, outElems), vocab, dModel);
+                    }
+                    finally
+                    {
+                        ArrayPool<float>.Shared.Return(outputRaw);
                     }
                 }
             }
             else
             {
-                // Read output.weight and transpose — use pool for the ~1.2 GB transient at 3B
-                var outElems = checked((int)((long)vocab * dModel));
-                var outputRaw = ArrayPool<float>.Shared.Rent(outElems);
-                try
+                // F32 fallback — transpose [vocab, dModel] → [dModel, vocab].
+                var f32LmHead = TensorStorage<float>.Unpooled(checked((int)((long)vocab * dModel)));
+                var lmHeadSpan = f32LmHead.AsSpan();
+                if (tieWeights)
                 {
-                    LoadTensor(reader, "output.weight", outputRaw.AsSpan(0, outElems));
+                    var embSpan = embedWeights.AsReadOnlySpan();
                     for (var d = 0; d < dModel; d++)
                     {
                         for (var t = 0; t < vocab; t++)
                         {
-                            lmHeadSpan[d * vocab + t] = outputRaw[t * dModel + d];
+                            lmHeadSpan[d * vocab + t] = embSpan[t * dModel + d];
                         }
                     }
                 }
-                finally
+                else
                 {
-                    ArrayPool<float>.Shared.Return(outputRaw);
+                    var outElems = checked((int)((long)vocab * dModel));
+                    var outputRaw = ArrayPool<float>.Shared.Rent(outElems);
+                    try
+                    {
+                        LoadTensor(reader, "output.weight", outputRaw.AsSpan(0, outElems));
+                        for (var d = 0; d < dModel; d++)
+                        {
+                            for (var t = 0; t < vocab; t++)
+                            {
+                                lmHeadSpan[d * vocab + t] = outputRaw[t * dModel + d];
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        ArrayPool<float>.Shared.Return(outputRaw);
+                    }
                 }
+
+                lmHead = f32LmHead;
             }
 
             return CachedLlamaInferenceEngine.CreateFromBuffers(
@@ -270,6 +355,323 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
         }
 
+        /// <summary>
+        /// Loads a weight in the best-fit resident format. If the GGUF tensor is
+        /// already Q4_K on disk (and dims align), its bytes are kept verbatim
+        /// (step 3.2b). Q8_0 → kept as <see cref="Q8Weight"/> (step 2.4). Any
+        /// other source (F32 / F16 / BF16, also Q6_K until 3.3 lands its native
+        /// kernel) is dequantized to F32 and re-quantized to Q8. The file stores
+        /// it [outDim, inDim] — row = one output's contraction vector —
+        /// matching both Q4KWeight's and Q8Weight's output-major layout, so no
+        /// transpose any path.
+        /// </summary>
+        private static DecodeWeight AllocAndLoadResident(GgufReader reader, string name, int inDim, int outDim)
+        {
+            if (!reader.Tensors.TryGetValue(name, out var info))
+            {
+                throw new InvalidDataException($"Required tensor '{name}' missing from GGUF.");
+            }
+
+            if (info.Type == GgmlType.Q4_K && inDim % Q4KWeight.SuperBlockElements == 0)
+            {
+                return LoadQ4KNative(reader, info, inDim, outDim);
+            }
+            if (info.Type == GgmlType.Q6_K && inDim % Q6KWeight.SuperBlockElements == 0)
+            {
+                return LoadQ6KNative(reader, info, inDim, outDim);
+            }
+            if (info.Type == GgmlType.Q8_0)
+            {
+                return LoadQ8Native(reader, info, inDim, outDim);
+            }
+
+            var elementCount = checked((int)((long)inDim * outDim));
+            var raw = ArrayPool<float>.Shared.Rent(elementCount);
+            try
+            {
+                reader.LoadTensorAsF32(info, raw.AsSpan(0, elementCount));
+                return Q8Weight.QuantizeRows(raw.AsSpan(0, elementCount), outDim, inDim);
+            }
+            finally
+            {
+                ArrayPool<float>.Shared.Return(raw);
+            }
+        }
+
+        /// <summary>
+        /// Reads an already-Q8_0 GGUF tensor straight into a <see cref="Q8Weight"/>
+        /// — the native step-2.4 path. GGUF's <c>block_q8_0</c> layout is
+        /// output-major with blocks along the contraction dim, exactly matching
+        /// <see cref="Q8Weight"/>; the read just de-interleaves (no dequant).
+        /// </summary>
+        private static Q8Weight LoadQ8Native(GgufReader reader, GgufTensorInfo info, int inDim, int outDim)
+        {
+            var quants = new sbyte[checked((int)((long)inDim * outDim))];
+            var scales = new float[checked((int)((long)outDim * (inDim / Q8DotKernel.BlockSize)))];
+            reader.LoadTensorQ8_0Raw(info, quants, scales);
+            return new Q8Weight(quants, scales, inDim, outDim);
+        }
+
+        /// <summary>
+        /// True when the tensor is in a K-quant format we can load natively
+        /// (Q4_K, Q6_K, Q8_0) with the given contraction dim. Used by the
+        /// per-tensor dispatch (steps 3.2b / 3.3c) to decide whether to rent
+        /// F32 scratch.
+        /// </summary>
+        private static bool IsKQuantNative(GgufTensorInfo info, int dModel)
+            => (info.Type == GgmlType.Q4_K && dModel % Q4KWeight.SuperBlockElements == 0)
+            || (info.Type == GgmlType.Q6_K && dModel % Q6KWeight.SuperBlockElements == 0)
+            || (info.Type == GgmlType.Q8_0 && dModel % Q8DotKernel.BlockSize == 0);
+
+        /// <summary>
+        /// Loads a weight as Q4_K-resident — the file's <c>block_q4_K</c> bytes
+        /// are kept verbatim (no de-interleave; Q4_K's layout matches
+        /// <see cref="Q4KWeight"/>'s exactly). The file stores it [outDim, inDim]
+        /// with Q4_K super-blocks along the contraction dim, exactly matching
+        /// Q4KWeight's output-major layout (step 3.2b).
+        /// </summary>
+        private static Q4KWeight LoadQ4KNative(GgufReader reader, GgufTensorInfo info, int inDim, int outDim)
+        {
+            var blocksPerRow = inDim / Q4KWeight.SuperBlockElements;
+            var totalBytes = checked((int)((long)outDim * blocksPerRow * Q4KWeight.SuperBlockBytes));
+            var bytes = new byte[totalBytes];
+            reader.LoadTensorQ4_KRaw(info, bytes);
+            return new Q4KWeight(bytes, inDim, outDim);
+        }
+
+        /// <summary>
+        /// Per-tensor dispatch for an attention Q/K/V weight: native Q4_K /
+        /// native Q8_0 / F32-fallback (dequantize-then-split-then-Q8). The F32
+        /// fallback uses <paramref name="f32Scratch"/>, which must be rented
+        /// when that path can fire. Wo uses <see cref="LoadOutputHeads"/>.
+        /// </summary>
+        private static DecodeWeight[] LoadQkvHeads(
+            GgufReader reader, string name, int headCount, int dModel, int headDim,
+            float[] f32Scratch, bool quantizable)
+        {
+            if (!reader.Tensors.TryGetValue(name, out var info))
+            {
+                throw new InvalidDataException($"Required tensor '{name}' missing from GGUF.");
+            }
+
+            if (quantizable && info.Type == GgmlType.Q4_K && dModel % Q4KWeight.SuperBlockElements == 0)
+            {
+                return LoadQkvHeadsQ4K(reader, info, headCount, dModel, headDim);
+            }
+            if (quantizable && info.Type == GgmlType.Q6_K && dModel % Q6KWeight.SuperBlockElements == 0)
+            {
+                return LoadQkvHeadsQ6K(reader, info, headCount, dModel, headDim);
+            }
+            if (quantizable && info.Type == GgmlType.Q8_0)
+            {
+                return LoadQkvHeadsQ8(reader, info, headCount, dModel, headDim);
+            }
+
+            // F32 fallback — dequant whole tensor into scratch, per-head split.
+            // SplitQuery and SplitKeyValue have identical bodies (differ only in
+            // the head-count parameter name) — SplitQuery serves both here.
+            var elems = checked((int)((long)headCount * dModel * headDim));
+            LoadTensor(reader, name, f32Scratch.AsSpan(0, elems));
+            return SplitQuery(f32Scratch, headCount, dModel, headDim, quantizable);
+        }
+
+        /// <summary>
+        /// Per-tensor dispatch for the attention output projection. Wo can't be
+        /// K-quant per-head (headDim &lt; the 256-element super-block) but it
+        /// CAN be Q8_0 per-head — headDim has integer Q8 blocks of 32. Anything
+        /// else falls back to F32 dequant + per-head split (+ Q8 re-quantize).
+        /// </summary>
+        private static DecodeWeight[] LoadOutputHeads(
+            GgufReader reader, string name, int nHeads, int dModel, int headDim,
+            float[] oFullScratch, bool quantizable)
+        {
+            if (!reader.Tensors.TryGetValue(name, out var info))
+            {
+                throw new InvalidDataException($"Required tensor '{name}' missing from GGUF.");
+            }
+
+            if (quantizable && info.Type == GgmlType.Q8_0)
+            {
+                return LoadOutputHeadsQ8(reader, info, nHeads, dModel, headDim);
+            }
+
+            // F32 fallback (F16 / F32 / BF16 / Q4_K / Q6_K → LoadTensorAsF32 dequantizes).
+            var elems = checked((int)((long)dModel * nHeads * headDim));
+            LoadTensor(reader, name, oFullScratch.AsSpan(0, elems));
+            return SplitOutput(oFullScratch, nHeads, dModel, headDim, quantizable);
+        }
+
+        /// <summary>
+        /// Loads an attention Q/K/V weight from an already-Q4_K GGUF tensor and
+        /// splits it per head — the native step-3.2b path. The file stores it
+        /// [headCount*headDim, dModel] row-major with Q4_K super-blocks along
+        /// dModel, so head h is a contiguous output-row range = a contiguous
+        /// byte slice of Q4_K super-blocks. Copy that slice into a per-head
+        /// <see cref="Q4KWeight"/> — no de-interleave (unlike Q8_0).
+        /// </summary>
+        private static DecodeWeight[] LoadQkvHeadsQ4K(
+            GgufReader reader, GgufTensorInfo info, int headCount, int dModel, int headDim)
+        {
+            var blocksPerRow = dModel / Q4KWeight.SuperBlockElements;
+            var bytesPerRow = blocksPerRow * Q4KWeight.SuperBlockBytes;
+            var totalBytes = checked((int)((long)headCount * headDim * bytesPerRow));
+
+            var raw = ArrayPool<byte>.Shared.Rent(totalBytes);
+            try
+            {
+                reader.LoadTensorQ4_KRaw(info, raw.AsSpan(0, totalBytes));
+
+                var heads = new DecodeWeight[headCount];
+                var headBytes = headDim * bytesPerRow;
+                for (var h = 0; h < headCount; h++)
+                {
+                    var bytes = new byte[headBytes];
+                    raw.AsSpan(h * headBytes, headBytes).CopyTo(bytes);
+                    heads[h] = new Q4KWeight(bytes, dModel, headDim);
+                }
+                return heads;
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(raw);
+            }
+        }
+
+        /// <summary>
+        /// Loads a weight as Q6_K-resident — the file's <c>block_q6_K</c> bytes
+        /// are kept verbatim (no de-interleave; Q6_K's layout matches
+        /// <see cref="Q6KWeight"/>'s exactly, like Q4_K). The file stores it
+        /// [outDim, inDim] with Q6_K super-blocks along the contraction dim,
+        /// exactly matching Q6KWeight's output-major layout (step 3.3c).
+        /// </summary>
+        private static Q6KWeight LoadQ6KNative(GgufReader reader, GgufTensorInfo info, int inDim, int outDim)
+        {
+            var blocksPerRow = inDim / Q6KWeight.SuperBlockElements;
+            var totalBytes = checked((int)((long)outDim * blocksPerRow * Q6KWeight.SuperBlockBytes));
+            var bytes = new byte[totalBytes];
+            reader.LoadTensorQ6_KRaw(info, bytes);
+            return new Q6KWeight(bytes, inDim, outDim);
+        }
+
+        /// <summary>
+        /// Loads an attention Q/K/V weight from an already-Q6_K GGUF tensor and
+        /// splits it per head — the native step-3.3c path. Mirrors
+        /// <see cref="LoadQkvHeadsQ4K"/> exactly (same layout shape, different
+        /// super-block size of 210 B vs 144 B): head h's rows are a contiguous
+        /// byte slice of Q6_K super-blocks, copied straight into a per-head
+        /// <see cref="Q6KWeight"/>.
+        /// </summary>
+        private static DecodeWeight[] LoadQkvHeadsQ6K(
+            GgufReader reader, GgufTensorInfo info, int headCount, int dModel, int headDim)
+        {
+            var blocksPerRow = dModel / Q6KWeight.SuperBlockElements;
+            var bytesPerRow = blocksPerRow * Q6KWeight.SuperBlockBytes;
+            var totalBytes = checked((int)((long)headCount * headDim * bytesPerRow));
+
+            var raw = ArrayPool<byte>.Shared.Rent(totalBytes);
+            try
+            {
+                reader.LoadTensorQ6_KRaw(info, raw.AsSpan(0, totalBytes));
+
+                var heads = new DecodeWeight[headCount];
+                var headBytes = headDim * bytesPerRow;
+                for (var h = 0; h < headCount; h++)
+                {
+                    var bytes = new byte[headBytes];
+                    raw.AsSpan(h * headBytes, headBytes).CopyTo(bytes);
+                    heads[h] = new Q6KWeight(bytes, dModel, headDim);
+                }
+                return heads;
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(raw);
+            }
+        }
+
+        /// <summary>
+        /// Loads an attention Q/K/V weight from an already-Q8_0 GGUF tensor and
+        /// splits it per head — the native step-2.4b path. The file stores it
+        /// [nHeads*headDim, dModel]; head h is a contiguous output-row range,
+        /// hence a contiguous slice of Q8_0 blocks — copied straight into a
+        /// per-head <see cref="Q8Weight"/> with no F32 round-trip.
+        /// </summary>
+        private static DecodeWeight[] LoadQkvHeadsQ8(
+            GgufReader reader, GgufTensorInfo info, int nHeads, int dModel, int headDim)
+        {
+            var blocksPerRow = dModel / Q8DotKernel.BlockSize;
+            var elems = checked((int)((long)nHeads * headDim * dModel));
+            var totalBlocks = checked((int)((long)nHeads * headDim * blocksPerRow));
+
+            var quants = ArrayPool<sbyte>.Shared.Rent(elems);
+            var scales = ArrayPool<float>.Shared.Rent(totalBlocks);
+            try
+            {
+                reader.LoadTensorQ8_0Raw(info, quants.AsSpan(0, elems), scales.AsSpan(0, totalBlocks));
+
+                var heads = new DecodeWeight[nHeads];
+                for (var h = 0; h < nHeads; h++)
+                {
+                    var headQuants = new sbyte[headDim * dModel];
+                    var headScales = new float[headDim * blocksPerRow];
+                    quants.AsSpan(h * headDim * dModel, headDim * dModel).CopyTo(headQuants);
+                    scales.AsSpan(h * headDim * blocksPerRow, headDim * blocksPerRow).CopyTo(headScales);
+                    heads[h] = new Q8Weight(headQuants, headScales, dModel, headDim);
+                }
+                return heads;
+            }
+            finally
+            {
+                ArrayPool<sbyte>.Shared.Return(quants);
+                ArrayPool<float>.Shared.Return(scales);
+            }
+        }
+
+        /// <summary>
+        /// Loads the attention output projection from an already-Q8_0 GGUF
+        /// tensor and splits it per head — the native step-2.4b path. The file
+        /// stores it [dModel, nHeads*headDim]; head h owns a headDim-wide column
+        /// band, so each of the dModel output rows contributes a contiguous
+        /// block run, gathered (strided across rows) into a per-head Q8Weight.
+        /// </summary>
+        private static DecodeWeight[] LoadOutputHeadsQ8(
+            GgufReader reader, GgufTensorInfo info, int nHeads, int dModel, int headDim)
+        {
+            var nHeadsHeadDim = nHeads * headDim;
+            var rowBlocks = nHeadsHeadDim / Q8DotKernel.BlockSize;   // blocks per output row
+            var headBlocks = headDim / Q8DotKernel.BlockSize;        // blocks per head, per row
+            var elems = checked((int)((long)dModel * nHeadsHeadDim));
+            var totalBlocks = checked((int)((long)dModel * rowBlocks));
+
+            var quants = ArrayPool<sbyte>.Shared.Rent(elems);
+            var scales = ArrayPool<float>.Shared.Rent(totalBlocks);
+            try
+            {
+                reader.LoadTensorQ8_0Raw(info, quants.AsSpan(0, elems), scales.AsSpan(0, totalBlocks));
+
+                var heads = new DecodeWeight[nHeads];
+                for (var h = 0; h < nHeads; h++)
+                {
+                    var headQuants = new sbyte[dModel * headDim];
+                    var headScales = new float[dModel * headBlocks];
+                    for (var o = 0; o < dModel; o++)
+                    {
+                        quants.AsSpan(o * nHeadsHeadDim + h * headDim, headDim)
+                            .CopyTo(headQuants.AsSpan(o * headDim, headDim));
+                        scales.AsSpan(o * rowBlocks + h * headBlocks, headBlocks)
+                            .CopyTo(headScales.AsSpan(o * headBlocks, headBlocks));
+                    }
+                    heads[h] = new Q8Weight(headQuants, headScales, headDim, dModel);
+                }
+                return heads;
+            }
+            finally
+            {
+                ArrayPool<sbyte>.Shared.Return(quants);
+                ArrayPool<float>.Shared.Return(scales);
+            }
+        }
+
         private static void LoadTensor(GgufReader reader, string name, Span<float> dst)
         {
             if (!reader.Tensors.TryGetValue(name, out var info))
@@ -297,38 +699,61 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// Per-head kernel layout: Wq_h[i, j] at flat (i*headDim + j) where i in [0, dModel), j in [0, headDim).
         /// Mapping: Wq_h[i, j] = Q[h*headDim + j, i] = file[(h*headDim + j)*dModel + i].
         /// </summary>
-        private static TensorStorage<float>[] SplitQuery(float[] qFull, int nHeads, int dModel, int headDim)
+        private static DecodeWeight[] SplitQuery(
+            float[] qFull, int nHeads, int dModel, int headDim, bool quantize)
         {
-            var wq = new TensorStorage<float>[nHeads];
+            var wq = new DecodeWeight[nHeads];
             for (var h = 0; h < nHeads; h++)
             {
-                wq[h] = TensorStorage<float>.Unpooled(checked((int)((long)dModel * headDim)));
-                var dst = wq[h].AsSpan();
-                for (var i = 0; i < dModel; i++)
+                if (quantize)
                 {
-                    for (var j = 0; j < headDim; j++)
+                    // File rows [h*headDim, (h+1)*headDim) are head h's outputs;
+                    // each row is that output's contiguous dModel contraction
+                    // vector — exactly Q8Weight's output-major layout, no transpose.
+                    wq[h] = Q8Weight.QuantizeRows(
+                        qFull.AsSpan(h * headDim * dModel, headDim * dModel), headDim, dModel);
+                }
+                else
+                {
+                    var storage = TensorStorage<float>.Unpooled(checked((int)((long)dModel * headDim)));
+                    var dst = storage.AsSpan();
+                    for (var i = 0; i < dModel; i++)
                     {
-                        dst[i * headDim + j] = qFull[(h * headDim + j) * dModel + i];
+                        for (var j = 0; j < headDim; j++)
+                        {
+                            dst[i * headDim + j] = qFull[(h * headDim + j) * dModel + i];
+                        }
                     }
+                    wq[h] = storage;
                 }
             }
             return wq;
         }
 
-        /// <summary>Same transposition as SplitQuery but iterates over nKvHeads.</summary>
-        private static TensorStorage<float>[] SplitKeyValue(float[] kvFull, int nKvHeads, int dModel, int headDim)
+        /// <summary>Same per-head split as SplitQuery but iterates over nKvHeads.</summary>
+        private static DecodeWeight[] SplitKeyValue(
+            float[] kvFull, int nKvHeads, int dModel, int headDim, bool quantize)
         {
-            var wkv = new TensorStorage<float>[nKvHeads];
+            var wkv = new DecodeWeight[nKvHeads];
             for (var kv = 0; kv < nKvHeads; kv++)
             {
-                wkv[kv] = TensorStorage<float>.Unpooled(checked((int)((long)dModel * headDim)));
-                var dst = wkv[kv].AsSpan();
-                for (var i = 0; i < dModel; i++)
+                if (quantize)
                 {
-                    for (var j = 0; j < headDim; j++)
+                    wkv[kv] = Q8Weight.QuantizeRows(
+                        kvFull.AsSpan(kv * headDim * dModel, headDim * dModel), headDim, dModel);
+                }
+                else
+                {
+                    var storage = TensorStorage<float>.Unpooled(checked((int)((long)dModel * headDim)));
+                    var dst = storage.AsSpan();
+                    for (var i = 0; i < dModel; i++)
                     {
-                        dst[i * headDim + j] = kvFull[(kv * headDim + j) * dModel + i];
+                        for (var j = 0; j < headDim; j++)
+                        {
+                            dst[i * headDim + j] = kvFull[(kv * headDim + j) * dModel + i];
+                        }
                     }
+                    wkv[kv] = storage;
                 }
             }
             return wkv;
@@ -340,20 +765,48 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// Per-head kernel: Wo_h[i, j] at flat (i*dModel + j) where i in [0, headDim), j in [0, dModel).
         /// Mapping: Wo_h[i, j] = O[j, h*headDim + i] = file[j*nHeadsHeadDim + h*headDim + i].
         /// </summary>
-        private static TensorStorage<float>[] SplitOutput(float[] oFull, int nHeads, int dModel, int headDim)
+        private static DecodeWeight[] SplitOutput(
+            float[] oFull, int nHeads, int dModel, int headDim, bool quantize)
         {
-            var wo = new TensorStorage<float>[nHeads];
+            var wo = new DecodeWeight[nHeads];
             var nHeadsHeadDim = nHeads * headDim;
             for (var h = 0; h < nHeads; h++)
             {
-                wo[h] = TensorStorage<float>.Unpooled(checked((int)((long)headDim * dModel)));
-                var dst = wo[h].AsSpan();
-                for (var i = 0; i < headDim; i++)
+                if (quantize)
                 {
-                    for (var j = 0; j < dModel; j++)
+                    // Output o's headDim contraction vector for head h is the run
+                    // oFull[o*nHeadsHeadDim + h*headDim ..]; gather the dModel rows
+                    // contiguously into output-major order, then quantize.
+                    var gatherElems = checked((int)((long)dModel * headDim));
+                    var gather = ArrayPool<float>.Shared.Rent(gatherElems);
+                    try
                     {
-                        dst[i * dModel + j] = oFull[j * nHeadsHeadDim + h * headDim + i];
+                        for (var o = 0; o < dModel; o++)
+                        {
+                            for (var i = 0; i < headDim; i++)
+                            {
+                                gather[o * headDim + i] = oFull[o * nHeadsHeadDim + h * headDim + i];
+                            }
+                        }
+                        wo[h] = Q8Weight.QuantizeRows(gather.AsSpan(0, gatherElems), dModel, headDim);
                     }
+                    finally
+                    {
+                        ArrayPool<float>.Shared.Return(gather);
+                    }
+                }
+                else
+                {
+                    var storage = TensorStorage<float>.Unpooled(checked((int)((long)headDim * dModel)));
+                    var dst = storage.AsSpan();
+                    for (var i = 0; i < headDim; i++)
+                    {
+                        for (var j = 0; j < dModel; j++)
+                        {
+                            dst[i * dModel + j] = oFull[j * nHeadsHeadDim + h * headDim + i];
+                        }
+                    }
+                    wo[h] = storage;
                 }
             }
             return wo;

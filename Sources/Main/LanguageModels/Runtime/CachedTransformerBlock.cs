@@ -135,16 +135,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     $"output.Length must equal DModel ({DModel}), got {output.Length}.",
                     nameof(output));
             }
-            if (weights.FfnW1.Length != DModel * DFF)
+            if (weights.FfnW1.ElementCount != (long)DModel * DFF)
             {
                 throw new ArgumentException(
-                    $"weights.FfnW1.Length must equal DModel*DFF ({DModel * DFF}), got {weights.FfnW1.Length}.",
+                    $"weights.FfnW1 must hold DModel*DFF ({DModel * DFF}) elements, got {weights.FfnW1.ElementCount}.",
                     nameof(weights));
             }
-            if (weights.FfnW2.Length != DFF * DModel)
+            if (weights.FfnW2.ElementCount != (long)DFF * DModel)
             {
                 throw new ArgumentException(
-                    $"weights.FfnW2.Length must equal DFF*DModel ({DFF * DModel}), got {weights.FfnW2.Length}.",
+                    $"weights.FfnW2 must hold DFF*DModel ({DFF * DModel}) elements, got {weights.FfnW2.ElementCount}.",
                     nameof(weights));
             }
 
@@ -188,7 +188,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // GeLU/ReLU (GPT-1/GPT-2): FfnGate is empty.
             if (!weights.FfnGate.IsEmpty)
             {
-                _feedForward.DecodeSwiGlu(
+                // SwiGLU (Llama/Mistral/Qwen): per-weight dispatch — each of
+                // gate/up/down picks its kernel from its resident format
+                // (F32 / Q8_0 / Q4_K), handling heterogeneous K-quant files.
+                _feedForward.DecodeSwiGluDispatched(
                     _ln2Output,
                     weights.FfnGate,
                     weights.FfnW1,
@@ -199,9 +202,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 _feedForward.Decode(
                     _ln2Output,
-                    weights.FfnW1,
+                    weights.FfnW1.F32,
                     weights.FfnB1,
-                    weights.FfnW2,
+                    weights.FfnW2.F32,
                     weights.FfnB2,
                     _feedForwardOutput);
             }

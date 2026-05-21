@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:learn.microsoft.com)",
+      "WebFetch(domain:nuget.org)",
+
+      "Bash(dotnet *)",
+      "PowerShell(dotnet *)",
+
+      "Bash(git *)",
+      "PowerShell(git *)",
+
+      "Bash(python Scripts/*)",
+      "PowerShell(python Scripts/*)",
+
+      "Bash(./update-code-headers.cmd*)",
+      "Bash(./cleanup.cmd*)",
+      "Bash(./Sources/Benchmark/run.cmd*)",
+      "PowerShell(.\\update-code-headers.cmd*)",
+      "PowerShell(.\\cleanup.cmd*)",
+      "PowerShell(.\\Sources\\Benchmark\\run.cmd*)",
+
+      "PowerShell(taskkill /F /IM dotnet.exe)"
+    ],
+    "deny": [
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(git reset --hard *)",
+      "Bash(git clean *)",
+      "PowerShell(git commit *)",
+      "PowerShell(git push *)",
+      "PowerShell(git reset --hard *)",
+      "PowerShell(git clean *)"
+    ]
+  }
+}

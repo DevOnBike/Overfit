@@ -70,6 +70,7 @@ namespace DevOnBike.Overfit.Tests.TestSupport
             public static string BinaryPath => Path.Combine(Dir, "qwen.bin");
             public static string GgufPath => Path.Combine(Dir, "qwen.gguf");
             public static string Q4KmGgufPath => Path.Combine(Dir, "qwen.q4km.gguf");
+            public static string Q8GgufPath => Path.Combine(Dir, "qwen.q8_0.gguf");
             public static string VocabPath => Path.Combine(Dir, "vocab.json");
             public static string MergesPath => Path.Combine(Dir, "merges.txt");
             public static string TokenizerJsonPath => Path.Combine(Dir, "tokenizer.json");
@@ -77,6 +78,7 @@ namespace DevOnBike.Overfit.Tests.TestSupport
             public static string RequireBinaryPath() => Require(BinaryPath, EnvVar, "Qwen3B Overfit binary weights");
             public static string RequireGgufPath() => Require(GgufPath, EnvVar, "Qwen3B FP16 GGUF");
             public static string RequireQ4KmGgufPath() => Require(Q4KmGgufPath, EnvVar, "Qwen3B Q4_K_M GGUF");
+            public static string RequireQ8GgufPath() => Require(Q8GgufPath, EnvVar, "Qwen3B Q8_0 GGUF");
             public static string RequireTokenizerJsonPath() => Require(TokenizerJsonPath, EnvVar, "Qwen3B tokenizer.json");
             public static string RequireDir()
             {

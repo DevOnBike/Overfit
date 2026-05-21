@@ -87,7 +87,13 @@ namespace DevOnBike.Overfit.Anomalies.Training
             var trainSize = (int)(allTokens.Length * 0.9);
             var trainIds = allTokens.AsSpan(0, trainSize).ToArray();
             var valIds = allTokens.AsSpan(trainSize).ToArray();
-            var rng = new Random(_cfg.Seed);
+
+            // Validation sampling runs sequentially (single thread), so one RNG is
+            // safe here. Training sampling runs inside Parallel.For across workers,
+            // so each worker gets its OWN deterministic RNG below — a single shared
+            // System.Random is not thread-safe (concurrent Next() races corrupt its
+            // internal state and can return 0 / skew the sample distribution).
+            var evalRng = new Random(_cfg.Seed);
             var sw = Stopwatch.StartNew();
 
             var initialLoss = 0f;
@@ -121,12 +127,22 @@ namespace DevOnBike.Overfit.Anomalies.Training
             var lossScratch = new float[workerCount][];
             var losses = new float[workerCount];
 
+            // One RNG per worker, deterministically seeded — makes the parallel
+            // training SAMPLER thread-safe and deterministic (a single shared
+            // System.Random raced under Parallel.For). NB: the whole run is still
+            // not bit-reproducible — model weight init goes through
+            // MathUtils.NextGaussian, whose [ThreadStatic] Random is seeded from
+            // Guid.NewGuid() with no seed hook; making that deterministic is a
+            // separate, codebase-wide change.
+            var workerRngs = new Random[workerCount];
+
             for (var w = 0; w < workerCount; w++)
             {
                 workerGraphs[w] = new ComputationGraph(_cfg.ArenaSize / workerCount);
                 sampleInputs[w] = new int[_cfg.ContextLength];
                 sampleTargets[w] = new int[_cfg.ContextLength];
                 lossScratch[w] = new float[_cfg.ContextLength];
+                workerRngs[w] = new Random(_cfg.Seed + 1 + w);
             }
 
             // 4. Train
@@ -138,7 +154,7 @@ namespace DevOnBike.Overfit.Anomalies.Training
                 // Parallel forward+backward across workers — reusing the per-worker graphs.
                 Parallel.For(0, workerCount, w =>
                 {
-                    Sample(trainIds, _cfg.ContextLength, rng, sampleInputs[w], sampleTargets[w]);
+                    Sample(trainIds, _cfg.ContextLength, workerRngs[w], sampleInputs[w], sampleTargets[w]);
                     workerGraphs[w].Reset();
                     workers[w].InvalidateAllCaches();
 
@@ -185,7 +201,7 @@ namespace DevOnBike.Overfit.Anomalies.Training
                 {
                     var avg = windowLoss / _cfg.ReportEvery;
                     windowLoss = 0f;
-                    var valLoss = Evaluate(model, graph, gptConfig, valIds, rng);
+                    var valLoss = Evaluate(model, graph, gptConfig, valIds, evalRng);
                     finalValLoss = valLoss;
 
                     progress?.Report(new TrainingProgress
@@ -212,7 +228,11 @@ namespace DevOnBike.Overfit.Anomalies.Training
             ct.ThrowIfCancellationRequested();
 
             // 5. Save checkpoint
-            Directory.CreateDirectory(Path.GetDirectoryName(checkpointPath) ?? ".");
+            var checkpointDir = Path.GetDirectoryName(checkpointPath);
+            if (!string.IsNullOrEmpty(checkpointDir))
+            {
+                Directory.CreateDirectory(checkpointDir);
+            }
             await using var fs = File.Create(checkpointPath);
             using var bw = new BinaryWriter(fs);
             model.Save(bw);

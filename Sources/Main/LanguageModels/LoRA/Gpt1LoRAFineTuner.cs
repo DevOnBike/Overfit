@@ -23,7 +23,11 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
     ///   <see cref="LoRATargetModules.FeedForwardUp"/>      — each block's FFN W1 [dModel x dFF]  (Stage 2)
     ///   <see cref="LoRATargetModules.FeedForwardDown"/>    — each block's FFN W2 [dFF x dModel]  (Stage 2)
     ///   <see cref="LoRATargetModules.FeedForward"/>        — both FFN matrices, every block
-    /// Attention modules are not supported.
+    ///   <see cref="LoRATargetModules.Query"/> / Key / Value — per-head attention W [dModel x dHead]  (Stage 3)
+    ///   <see cref="LoRATargetModules.OutputProjection"/>    — per-head attention Wo [dHead x dModel]  (Stage 3)
+    ///   <see cref="LoRATargetModules.Attention"/>           — all four, every head, every block
+    /// Per-head attention targets create one A/B pair per head per block (the
+    /// GPT1 attention layer stores Q/K/V/O as separate per-head matrices).
     ///
     /// A and B become <see cref="Parameter"/>s on the autograd graph, so
     /// <c>ComputationGraph.Backward</c> produces their gradients automatically; the
@@ -40,7 +44,11 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
         private const LoRATargetModules SupportedTargets =
             LoRATargetModules.LanguageModelHead
             | LoRATargetModules.FeedForwardUp
-            | LoRATargetModules.FeedForwardDown;
+            | LoRATargetModules.FeedForwardDown
+            | LoRATargetModules.Query
+            | LoRATargetModules.Key
+            | LoRATargetModules.Value
+            | LoRATargetModules.OutputProjection;
 
         private const int LMHeadLayer = -1;
 
@@ -117,13 +125,29 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
         /// <summary>
         /// Fine-tunes every LoRA factor on a flat token corpus (next-token loss).
         /// Returns the per-step training loss for inspection.
+        ///
+        /// <para>
+        /// <b>Rehearsal-lite (optional).</b> When <paramref name="rehearsalCorpus"/>
+        /// is supplied, a <paramref name="rehearsalFraction"/> of training windows
+        /// are drawn from it instead of the new-task <paramref name="corpus"/>. This
+        /// is the cheapest form of replay: mixing a little of the base regime's data
+        /// into the adapter's training keeps it from over-forgetting the general
+        /// "normal" while it specialises to the new one. Rehearsal-free continual
+        /// learning research (arXiv:2406.09384; NeurIPS 2024 "Continual Multimodal
+        /// Pretraining") finds that for practical per-deployment adaptation, simple
+        /// LoRA fine-tuning with a sane data mixture is competitive with far more
+        /// complex continual-learning machinery — so a single mixing fraction is the
+        /// right-sized lever here, not a new algorithm.
+        /// </para>
         /// </summary>
         public IReadOnlyList<float> FineTune(
             int[] corpus,
             int steps,
             int contextLength,
             float learningRate,
-            int seed = 1234)
+            int seed = 1234,
+            int[]? rehearsalCorpus = null,
+            float rehearsalFraction = 0f)
         {
             ThrowIfDisposed();
             ArgumentNullException.ThrowIfNull(corpus);
@@ -135,6 +159,23 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                 throw new ArgumentException(
                     $"Corpus length {corpus.Length} is too short for contextLength {contextLength}.",
                     nameof(corpus));
+            }
+
+            if (rehearsalCorpus is not null)
+            {
+                if (rehearsalFraction is < 0f or >= 1f)
+                {
+                    throw new ArgumentOutOfRangeException(
+                        nameof(rehearsalFraction), rehearsalFraction,
+                        "Rehearsal fraction must be in [0, 1).");
+                }
+
+                if (rehearsalCorpus.Length < contextLength + 1)
+                {
+                    throw new ArgumentException(
+                        $"Rehearsal corpus length {rehearsalCorpus.Length} is too short for contextLength {contextLength}.",
+                        nameof(rehearsalCorpus));
+                }
             }
 
             _model.Eval(); // base is frozen — no dropout / train-mode behaviour wanted
@@ -149,9 +190,15 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
 
             for (var step = 0; step < steps; step++)
             {
-                var start = rng.Next(0, corpus.Length - contextLength - 1);
-                corpus.AsSpan(start, contextLength).CopyTo(input);
-                corpus.AsSpan(start + 1, contextLength).CopyTo(target);
+                // Rehearsal-lite: a fraction of windows come from the base regime so
+                // the adapter doesn't forget the general "normal" while specialising.
+                var src = (rehearsalCorpus is not null && rng.NextDouble() < rehearsalFraction)
+                    ? rehearsalCorpus
+                    : corpus;
+
+                var start = rng.Next(0, src.Length - contextLength - 1);
+                src.AsSpan(start, contextLength).CopyTo(input);
+                src.AsSpan(start + 1, contextLength).CopyTo(target);
 
                 graph.Reset();
                 _model.InvalidateAllCaches();
@@ -219,7 +266,7 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                 adapter.A.DataReadOnlySpan.CopyTo(weight.AMutable);
                 adapter.B.DataReadOnlySpan.CopyTo(weight.BMutable);
 
-                entries[i] = new Gpt1LoRAEntry(adapter.Layer, adapter.Module, weight);
+                entries[i] = new Gpt1LoRAEntry(adapter.Layer, adapter.Module, adapter.HeadIndex, weight);
             }
 
             Gpt1LoRAFile.Save(path, entries);
@@ -238,7 +285,9 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
 
                 foreach (var entry in entries)
                 {
-                    if (entry.Layer != adapter.Layer || entry.Module != adapter.Module)
+                    if (entry.Layer != adapter.Layer
+                        || entry.Module != adapter.Module
+                        || entry.HeadIndex != adapter.HeadIndex)
                     {
                         continue;
                     }
@@ -247,7 +296,7 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                     if (weight.InDim != adapter.InDim || weight.OutDim != adapter.OutDim || weight.Rank != _rank)
                     {
                         throw new InvalidDataException(
-                            $"LoRA entry [{adapter.Module} layer {adapter.Layer}] dimensions " +
+                            $"LoRA entry [{adapter.Module} layer {adapter.Layer} head {adapter.HeadIndex}] dimensions " +
                             $"[{weight.InDim}x{weight.OutDim} r={weight.Rank}] do not match this fine-tuner " +
                             $"[{adapter.InDim}x{adapter.OutDim} r={_rank}].");
                     }
@@ -261,7 +310,7 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                 if (!matched)
                 {
                     throw new InvalidDataException(
-                        $"LoRA file has no entry for [{adapter.Module} layer {adapter.Layer}].");
+                        $"LoRA file has no entry for [{adapter.Module} layer {adapter.Layer} head {adapter.HeadIndex}].");
                 }
             }
         }
@@ -319,6 +368,47 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                 }
             }
 
+            // Stage 3 — per-head attention Q/K/V/O. GPT1 stores each head's weights
+            // separately, so one A/B pair per head per targeted module per block.
+            // Q/K/V are [dModel x dHead]; the output projection Wo is [dHead x dModel].
+            var attnSeed = seed + 1000;
+            for (var layer = 0; layer < _nLayers; layer++)
+            {
+                var attn = _model.Blocks[layer].Attention;
+                var dHead = attn.DHead;
+
+                for (var h = 0; h < attn.NHeads; h++)
+                {
+                    if (_targets.HasFlag(LoRATargetModules.Query))
+                    {
+                        list.Add(CreateAdapter(
+                            layer, LoRATargetModules.Query, _dModel, dHead,
+                            attn.WqHeads[h], attnSeed++, headIndex: h));
+                    }
+
+                    if (_targets.HasFlag(LoRATargetModules.Key))
+                    {
+                        list.Add(CreateAdapter(
+                            layer, LoRATargetModules.Key, _dModel, dHead,
+                            attn.WkHeads[h], attnSeed++, headIndex: h));
+                    }
+
+                    if (_targets.HasFlag(LoRATargetModules.Value))
+                    {
+                        list.Add(CreateAdapter(
+                            layer, LoRATargetModules.Value, _dModel, dHead,
+                            attn.WvHeads[h], attnSeed++, headIndex: h));
+                    }
+
+                    if (_targets.HasFlag(LoRATargetModules.OutputProjection))
+                    {
+                        list.Add(CreateAdapter(
+                            layer, LoRATargetModules.OutputProjection, dHead, _dModel,
+                            attn.WoHeads[h], attnSeed++, headIndex: h));
+                    }
+                }
+            }
+
             return list.ToArray();
         }
 
@@ -328,7 +418,8 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             int inDim,
             int outDim,
             Parameter wBase,
-            int seed)
+            int seed,
+            int headIndex = 0)
         {
             var a = new Parameter(new TensorShape(inDim, _rank), requiresGrad: true, clearData: true);
             var b = new Parameter(new TensorShape(_rank, outDim), requiresGrad: true, clearData: true);
@@ -340,6 +431,7 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             {
                 Layer = layer,
                 Module = module,
+                HeadIndex = headIndex,
                 InDim = inDim,
                 OutDim = outDim,
                 A = a,
@@ -369,6 +461,22 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
 
                     case LoRATargetModules.FeedForwardDown:
                         _model.Blocks[adapter.Layer].FFN.W2WeightProvider = adapter.Provider;
+                        break;
+
+                    case LoRATargetModules.Query:
+                        _model.Blocks[adapter.Layer].Attention.SetQueryProvider(adapter.HeadIndex, adapter.Provider);
+                        break;
+
+                    case LoRATargetModules.Key:
+                        _model.Blocks[adapter.Layer].Attention.SetKeyProvider(adapter.HeadIndex, adapter.Provider);
+                        break;
+
+                    case LoRATargetModules.Value:
+                        _model.Blocks[adapter.Layer].Attention.SetValueProvider(adapter.HeadIndex, adapter.Provider);
+                        break;
+
+                    case LoRATargetModules.OutputProjection:
+                        _model.Blocks[adapter.Layer].Attention.SetOutputProvider(adapter.HeadIndex, adapter.Provider);
                         break;
                 }
             }
@@ -403,6 +511,50 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                         if (ReferenceEquals(ffn.W2WeightProvider, adapter.Provider))
                         {
                             ffn.W2WeightProvider = null;
+                        }
+
+                        break;
+                    }
+
+                case LoRATargetModules.Query:
+                    {
+                        var attn = _model.Blocks[adapter.Layer].Attention;
+                        if (ReferenceEquals(attn.GetQueryProvider(adapter.HeadIndex), adapter.Provider))
+                        {
+                            attn.SetQueryProvider(adapter.HeadIndex, null);
+                        }
+
+                        break;
+                    }
+
+                case LoRATargetModules.Key:
+                    {
+                        var attn = _model.Blocks[adapter.Layer].Attention;
+                        if (ReferenceEquals(attn.GetKeyProvider(adapter.HeadIndex), adapter.Provider))
+                        {
+                            attn.SetKeyProvider(adapter.HeadIndex, null);
+                        }
+
+                        break;
+                    }
+
+                case LoRATargetModules.Value:
+                    {
+                        var attn = _model.Blocks[adapter.Layer].Attention;
+                        if (ReferenceEquals(attn.GetValueProvider(adapter.HeadIndex), adapter.Provider))
+                        {
+                            attn.SetValueProvider(adapter.HeadIndex, null);
+                        }
+
+                        break;
+                    }
+
+                case LoRATargetModules.OutputProjection:
+                    {
+                        var attn = _model.Blocks[adapter.Layer].Attention;
+                        if (ReferenceEquals(attn.GetOutputProvider(adapter.HeadIndex), adapter.Provider))
+                        {
+                            attn.SetOutputProvider(adapter.HeadIndex, null);
                         }
 
                         break;
@@ -513,6 +665,7 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
         {
             public int Layer;
             public LoRATargetModules Module;
+            public int HeadIndex;
             public int InDim;
             public int OutDim;
             public Parameter A = null!;
