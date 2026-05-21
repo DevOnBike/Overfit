@@ -44,6 +44,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly Random _random;
 
         private bool _disposed;
+        private bool _slidingWindow;
+        private int _evictBlock;
 
         internal CachedLlamaSession(
             GPT1Config config,
@@ -72,6 +74,45 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         public int Position => _cache.CurrentLength;
         public bool IsFull => _cache.IsFull;
+
+        /// <summary>Tokens evicted so far by the sliding window (0 until the cache first fills).</summary>
+        public int BasePosition => _cache.BasePosition;
+
+        /// <summary>True when sliding-window eviction is enabled (see <see cref="EnableSlidingWindow"/>).</summary>
+        public bool SlidingWindowEnabled => _slidingWindow;
+
+        /// <summary>
+        /// Enables sliding-window KV eviction (RoPE models only): once the cache fills,
+        /// the oldest <paramref name="evictBlock"/> tokens are dropped instead of throwing,
+        /// so generation/prefill can continue indefinitely over a rolling context. Retained
+        /// K/V are not re-rotated — <see cref="KeyValueCache.BasePosition"/> keeps RoPE's
+        /// relative offsets correct. Default block = ¼ of the cache. Requires a RoPE config
+        /// (learned absolute-position models cannot slide). No-op effect until the cache fills.
+        /// </summary>
+        public void EnableSlidingWindow(int evictBlock = 0)
+        {
+            ThrowIfDisposed();
+            if (_rope is null)
+            {
+                throw new NotSupportedException(
+                    "Sliding-window eviction requires a RoPE model; learned absolute-position models cannot slide without re-embedding.");
+            }
+            _slidingWindow = true;
+            _evictBlock = evictBlock > 0 ? evictBlock : Math.Max(1, _cache.MaxLength / 4);
+        }
+
+        private void MakeRoomIfSliding()
+        {
+            if (!_slidingWindow || !_cache.IsFull)
+            {
+                return;
+            }
+            var count = Math.Min(_evictBlock, _cache.CurrentLength - 1);
+            if (count > 0)
+            {
+                _cache.Evict(count);
+            }
+        }
 
         // ── Session lifecycle ─────────────────────────────────────────────────
 
@@ -117,7 +158,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             for (var i = 0; i < promptTokens.Length; i++)
             {
-                if (_cache.IsFull)
+                if (_cache.IsFull && !_slidingWindow)
                 {
                     throw new InvalidOperationException(
                         $"Prefill of {promptTokens.Length} tokens would exceed ContextLength {_config.ContextLength} " +
@@ -155,7 +196,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             ThrowIfDisposed();
 
-            if (_cache.IsFull)
+            if (_cache.IsFull && !_slidingWindow)
             {
                 throw new InvalidOperationException(
                     $"KV cache is full (ContextLength={_config.ContextLength}). Start a new session.");
@@ -215,7 +256,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                if (_cache.IsFull)
+                if (_cache.IsFull && !_slidingWindow)
                 {
                     // KV cache exhausted — graceful stop
                     yield break;
@@ -309,6 +350,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         private int EmbedAndAdvance(int tokenId)
         {
+            // Sliding window: free a block of oldest tokens before writing a new one
+            // when the cache is full (RoPE-only; no-op otherwise).
+            MakeRoomIfSliding();
+
             // Token embedding lookup: row tokenId of embed_weights [vocab × dModel],
             // sliced directly from the engine-owned storage (no per-session copy).
             var row = _embedWeights.AsReadOnlySpan().Slice(tokenId * _config.DModel, _config.DModel);
