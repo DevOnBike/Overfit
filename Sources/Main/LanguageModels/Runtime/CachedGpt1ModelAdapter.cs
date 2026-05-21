@@ -181,6 +181,65 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 position);
         }
 
+        /// <summary>
+        /// True when the wrapped model's stack is on the batched-prefill fast path
+        /// (standard LayerNorm, GeLU/ReLU FFN, MHA — not GQA, no RoPE). Always true
+        /// for the GPT-1 / GPT-2 architecture this adapter wraps.
+        /// </summary>
+        public bool SupportsBatchedPrefill
+        {
+            get
+            {
+                ref readonly var b0 = ref _weights.Block(0);
+                return !b0.Ln1Beta.IsEmpty && !b0.Ln2Beta.IsEmpty && b0.FfnGate.IsEmpty && !b0.HasGqa;
+            }
+        }
+
+        /// <summary>
+        /// Batched prefill (Phase 3): embeds all <paramref name="tokens"/>, advances
+        /// the cache, runs the whole prompt through the stack in one batched pass
+        /// (<see cref="CachedGptStack.PrefillBatched"/>), and projects the LAST
+        /// token's logits into <paramref name="lastLogits"/> — leaving the session
+        /// in exactly the state the single-token prefill loop would, but reading the
+        /// weight set once per layer instead of once per token. Caller must check
+        /// <see cref="SupportsBatchedPrefill"/> first.
+        /// </summary>
+        public void PrefillBatched(ReadOnlySpan<int> tokens, Span<float> lastLogits)
+        {
+            ThrowIfDisposed();
+
+            var n = tokens.Length;
+            if (n == 0)
+            {
+                return;
+            }
+            if (_cache.CurrentLength + n > MaxContextLength)
+            {
+                throw new InvalidOperationException(
+                    $"Batched prefill of {n} tokens would exceed MaxContextLength {MaxContextLength}.");
+            }
+
+            var basePos = _cache.CurrentLength;
+            var batch = new float[n * DModel];
+
+            for (var i = 0; i < n; i++)
+            {
+                _model.TokenEmbedding.LookupInference(tokens[i], _tokenEmbeddingBuffer);
+                _model.PositionEmbedding.LookupInference(basePos + i, _positionEmbeddingBuffer);
+
+                var dst = batch.AsSpan(i * DModel, DModel);
+                for (var d = 0; d < DModel; d++)
+                {
+                    dst[d] = _tokenEmbeddingBuffer[d] + _positionEmbeddingBuffer[d];
+                }
+
+                _cache.Advance();
+            }
+
+            _stack.PrefillBatched(batch, n, _weights, _cache, basePos, rope: null);
+            _stack.ProjectLogits(_weights, lastLogits);
+        }
+
         private int AdvanceAndEmbed(int tokenId)
         {
             if (_cache.IsFull)

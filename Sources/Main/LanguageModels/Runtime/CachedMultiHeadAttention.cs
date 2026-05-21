@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.LanguageModels.Rope;
 using DevOnBike.Overfit.Runtime;
@@ -188,6 +189,199 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 AddInPlace(_headOutputs.AsSpan(h * DModel, DModel), output, DModel);
             }
+        }
+
+        /// <summary>
+        /// Batched (prefill) multi-head attention — scores <paramref name="rows"/>
+        /// query positions (the prompt tokens at cache positions
+        /// <c>basePosition .. basePosition+rows-1</c>) through every head in one pass,
+        /// the multi-row counterpart of <see cref="Decode"/>.
+        ///
+        /// <para>
+        /// Per head: batched Q/K/V projection (<see cref="BatchedProjectionKernel"/>),
+        /// per-position cache writes, batched causal attention
+        /// (<see cref="BatchedAttentionKernel"/> — query <c>n</c> attends
+        /// <c>[0..basePosition+n]</c>), batched O projection accumulated into
+        /// <paramref name="output"/> in head order — so the result is
+        /// <b>bit-identical</b> to running <see cref="Decode"/> per token. Scoped to
+        /// the F32 / GPT-2 path (no RoPE, standard MHA — not GQA, F32 weights);
+        /// throws for the quantized / RoPE / GQA cases (the follow-on quant path).
+        /// The cache must already be advanced to length <c>basePosition+rows</c>.
+        /// </para>
+        /// </summary>
+        internal void DecodeBatched(
+            ReadOnlySpan<float> hidden,
+            int rows,
+            in BlockWeights weights,
+            KeyValueCache cache,
+            int layerIndex,
+            int basePosition,
+            Span<float> output,
+            RopeTable? rope = null)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rows);
+
+            if (rope is not null)
+            {
+                throw new NotSupportedException("Batched prefill does not support RoPE yet (F32/GPT-2 path only).");
+            }
+            if (weights.HasGqa)
+            {
+                throw new NotSupportedException("Batched prefill does not support GQA yet (standard MHA only).");
+            }
+
+            var dModel = DModel;
+            var headDim = HeadDimension;
+            var cacheLength = basePosition + rows;
+            var scale = 1f / MathF.Sqrt(headDim);
+
+            // Output starts as the attention bias (or zero) per row; each head's
+            // projected contribution is summed in afterwards (ascending head order,
+            // matching the single-token reduction).
+            var bias = weights.AttentionBias;
+            for (var n = 0; n < rows; n++)
+            {
+                var outRow = output.Slice(n * dModel, dModel);
+                if (bias.IsEmpty)
+                {
+                    outRow.Clear();
+                }
+                else
+                {
+                    bias.Slice(0, dModel).CopyTo(outRow);
+                }
+            }
+
+            ref readonly var head0 = ref weights.Head(0);
+            if (head0.Wq.IsQuantized || head0.Wq.IsQ4K || head0.Wq.IsQ6K)
+            {
+                throw new NotSupportedException("Batched prefill supports F32 attention weights only (quantized path is a follow-on).");
+            }
+
+            // Parallelise OVER HEADS (one dispatch for the whole layer), each head
+            // sequential internally — mirrors the single-token head-parallel path.
+            // Per-head scratch + output bands keep heads disjoint (no cross-head
+            // write race), then the bands are reduced into output in ascending head
+            // order. (The earlier per-head ProjectParallel fan-out — ~60 tiny
+            // dispatches/layer — measured 3.8× SLOWER; this restructure removes it.)
+            var q = new float[HeadCount * rows * headDim];
+            var k = new float[HeadCount * rows * headDim];
+            var v = new float[HeadCount * rows * headDim];
+            var attn = new float[HeadCount * rows * headDim];
+            var bands = new float[HeadCount * rows * dModel];
+            var scoreScratch = new float[HeadCount * rows * cacheLength];
+
+            fixed (float* hiddenPtr = hidden)
+            {
+                var context = new BatchedHeadContext
+                {
+                    Weights = weights,
+                    Cache = cache,
+                    Hidden = hiddenPtr,
+                    Q = q,
+                    K = k,
+                    V = v,
+                    Attn = attn,
+                    Bands = bands,
+                    ScoreScratch = scoreScratch,
+                    Rows = rows,
+                    DModel = dModel,
+                    HeadDim = headDim,
+                    CacheLength = cacheLength,
+                    LayerIndex = layerIndex,
+                    BasePos = basePosition,
+                    Scale = scale,
+                };
+
+                var contextPtr = Unsafe.AsPointer(ref context);
+
+                if (HeadCount > 1 && OverfitParallelFor.WorkerCount > 1)
+                {
+                    OverfitParallelFor.For(0, HeadCount, &ProcessHeadRangeBatched, contextPtr);
+                }
+                else
+                {
+                    ProcessHeadRangeBatched(0, HeadCount, contextPtr);
+                }
+            }
+
+            // Reduce: output += Σ head bands, ascending head order — matches the
+            // single-token reduction exactly.
+            for (var h = 0; h < HeadCount; h++)
+            {
+                for (var n = 0; n < rows; n++)
+                {
+                    var outRow = output.Slice(n * dModel, dModel);
+                    TensorPrimitives.Add(outRow, bands.AsSpan((h * rows + n) * dModel, dModel), outRow);
+                }
+            }
+        }
+
+        /// <summary>Worker for <see cref="DecodeBatched"/> — one disjoint range of heads.</summary>
+        private static void ProcessHeadRangeBatched(int headStart, int headEnd, void* context)
+        {
+            ref var ctx = ref Unsafe.AsRef<BatchedHeadContext>(context);
+
+            var rows = ctx.Rows;
+            var dModel = ctx.DModel;
+            var headDim = ctx.HeadDim;
+            var cacheLength = ctx.CacheLength;
+            var layer = ctx.LayerIndex;
+            var basePos = ctx.BasePos;
+            var scale = ctx.Scale;
+
+            var hidden = new ReadOnlySpan<float>(ctx.Hidden, rows * dModel);
+
+            for (var h = headStart; h < headEnd; h++)
+            {
+                ref readonly var hw = ref ctx.Weights.Head(h);
+
+                var qh = ctx.Q.AsSpan(h * rows * headDim, rows * headDim);
+                var kh = ctx.K.AsSpan(h * rows * headDim, rows * headDim);
+                var vh = ctx.V.AsSpan(h * rows * headDim, rows * headDim);
+                var attnh = ctx.Attn.AsSpan(h * rows * headDim, rows * headDim);
+                var scoreh = ctx.ScoreScratch.AsSpan(h * rows * cacheLength, rows * cacheLength);
+                var bandh = ctx.Bands.AsSpan(h * rows * dModel, rows * dModel);
+
+                // Sequential per-head projections (parallelism is across heads above).
+                BatchedProjectionKernel.Project(hidden, rows, hw.Wq.F32, hw.Bq, qh, dModel, headDim);
+                BatchedProjectionKernel.Project(hidden, rows, hw.Wk.F32, hw.Bk, kh, dModel, headDim);
+                BatchedProjectionKernel.Project(hidden, rows, hw.Wv.F32, hw.Bv, vh, dModel, headDim);
+
+                for (var n = 0; n < rows; n++)
+                {
+                    kh.Slice(n * headDim, headDim).CopyTo(ctx.Cache.GetKeyWriteSpan(layer, h, basePos + n));
+                    vh.Slice(n * headDim, headDim).CopyTo(ctx.Cache.GetValueWriteSpan(layer, h, basePos + n));
+                }
+
+                var keys = ctx.Cache.GetKeyReadSpan(layer, h, fromPosition: 0, length: cacheLength);
+                var values = ctx.Cache.GetValueReadSpan(layer, h, fromPosition: 0, length: cacheLength);
+
+                BatchedAttentionKernel.Compute(qh, keys, values, attnh, scoreh, rows, cacheLength, headDim, scale);
+
+                BatchedProjectionKernel.Project(attnh, rows, hw.Wo.F32, [], bandh, headDim, dModel);
+            }
+        }
+
+        /// <summary>State for <see cref="ProcessHeadRangeBatched"/> via a stack pointer.</summary>
+        private struct BatchedHeadContext
+        {
+            public BlockWeights Weights;
+            public KeyValueCache Cache;
+            public float* Hidden;
+            public float[] Q;
+            public float[] K;
+            public float[] V;
+            public float[] Attn;
+            public float[] Bands;
+            public float[] ScoreScratch;
+            public int Rows;
+            public int DModel;
+            public int HeadDim;
+            public int CacheLength;
+            public int LayerIndex;
+            public int BasePos;
+            public float Scale;
         }
 
         /// <summary>

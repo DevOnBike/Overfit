@@ -117,6 +117,51 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         }
 
         /// <summary>
+        /// Batched (prefill) GeLU/ReLU feed-forward — the multi-row counterpart of
+        /// <see cref="Decode"/>. <paramref name="hidden"/> is row-major
+        /// <c>[rows × dModel]</c>, <paramref name="output"/> <c>[rows × dModel]</c>.
+        /// Both projections run through <see cref="BatchedProjectionKernel"/> (each
+        /// weight tile read once and reused across all rows), and the activation is
+        /// the SAME element-wise <c>ApplyActivation</c> the single-token path uses —
+        /// applied across the whole <c>[rows × dFF]</c> intermediate — so the result
+        /// is <b>bit-identical</b> to running <see cref="Decode"/> on each row.
+        /// (Verified by <c>CachedFeedForwardBlockBatchedTests</c>.) Intended for the
+        /// one-time prefill pass, so it allocates its <c>[rows × dFF]</c> scratch.
+        /// </summary>
+        public void DecodeBatched(
+            ReadOnlySpan<float> hidden,
+            int rows,
+            ReadOnlySpan<float> w1,
+            ReadOnlySpan<float> b1,
+            ReadOnlySpan<float> w2,
+            ReadOnlySpan<float> b2,
+            Span<float> output)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rows);
+
+            if (Activation == FeedForwardActivation.SwiGLU)
+            {
+                throw new InvalidOperationException("SwiGLU must use the SwiGLU batched path, not DecodeBatched.");
+            }
+            if (hidden.Length < (long)rows * DModel)
+            {
+                throw new ArgumentException("Hidden span < rows*dModel.", nameof(hidden));
+            }
+            if (output.Length < (long)rows * DModel)
+            {
+                throw new ArgumentException("Output span < rows*dModel.", nameof(output));
+            }
+
+            var intermediate = new float[(long)rows * DFF <= int.MaxValue ? rows * DFF : throw new ArgumentException("rows*dFF overflow.", nameof(rows))];
+
+            BatchedProjectionKernel.ProjectParallel(hidden, rows, w1, b1, intermediate, DModel, DFF);
+
+            ApplyActivation(intermediate.AsSpan(0, rows * DFF), Activation);
+
+            BatchedProjectionKernel.ProjectParallel(intermediate, rows, w2, b2, output, DFF, DModel);
+        }
+
+        /// <summary>
         /// SwiGLU feed-forward decode:
         ///   FFN(x) = (SiLU(x @ Wgate) * (x @ Wup)) @ Wdown
         ///

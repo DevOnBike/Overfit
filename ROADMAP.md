@@ -28,9 +28,39 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 
 ---
 
-## Last session — resume point (2026-05-20)
+## Last session — resume point (2026-05-21)
 
-**Just closed: the decode-track sprint (`docs/llamacpp-cpu-analysis.md` §5 steps 1+2+3).**
+**Just closed: Prefill GEMM B>1 — batched multi-token prefill, SHIPPED at ~3.5× TTFT.**
+
+Phases 1–3 complete and wired into `CachedSlmSession.Prefill` for GPT-2-class
+models (prompts ≥ 16 tokens; single-token loop below that and for RoPE/GQA/SwiGLU
+stacks). **TTFT on GPT-2-Small dims, 64-token prompt: 567 ms → 163 ms = 3.48× faster.**
+Bit-identical to the single-token loop at every layer (`BatchedProjectionKernel`,
+`BatchedAttentionKernel`, `CachedFeedForwardBlock.DecodeBatched`,
+`CachedMultiHeadAttention.DecodeBatched`, `CachedGptStack.PrefillBatched`,
+`CachedGpt1ModelAdapter.PrefillBatched` — all parity-tested).
+
+**The result that matters:** the first session-delegation wiring measured **0.26×
+(3.8× SLOWER)** because batched MHA fanned per-head Q/K/V/O projections out as ~60
+tiny `OverfitParallelFor` dispatches/layer. Restructuring `DecodeBatched` to
+parallelise **over heads** (one dispatch/layer, each head sequential into a scratch
+band, reduced in head order) flipped it to **3.48×** — a ~13× swing from dispatch
+granularity alone, same kernels, same math. Lesson: batched-prefill parallelism must
+be coarse (over heads / big matmuls), never per-head. Full suite **709 / 0 / 69 green**.
+
+**Git state:** all Phase 1–3 prefill code + tests staged/uncommitted on `next`
+(`Batched*Kernel.cs`, `*.DecodeBatched`, `CachedGptStack.PrefillBatched`,
+`CachedGpt1ModelAdapter.PrefillBatched`, `CachedSlmSession` delegation + threshold,
+the batched test files). Awaiting user commit.
+
+**Next levers** (decode track, not prefill): LM-head allocation-free parallel matmul
+(largest remaining decode lever, needs a no-alloc worker pool — see below); batched
+quant K-projection to extend prefill to the Q4_K_M path (Phase 1 is F32 only); or
+return to the Active anomaly+LoRA track.
+
+---
+
+**Earlier (2026-05-20): the decode-track sprint (`docs/llamacpp-cpu-analysis.md` §5 steps 1+2+3).**
 
 Three-stage cumulative result on Qwen2.5-3B-Instruct (dev box, best-of-3, single-stream CPU decode):
 
@@ -53,7 +83,7 @@ End-to-end vs Overfit's own starting point: **5.6× decode, −69 % RAM, 20× fa
 
 - **(A) LLamaSharp re-bench on Q4_K_M — ✅ DONE 2026-05-20.** Restored the `llama` mode in `D:\overfit-bench` (LLamaSharp 0.27.0, `dotnet run -- llama qwen.q4km.gguf`). Result above: llama.cpp ~2× faster + 27 % less RAM on the same file; "1.51× faster" claim retracted everywhere. Surfaced a new lever (D).
 - **(C) — NEXT NOW — Active track: anomaly + LoRA.** Pick one of the four options in the Active-track "NEXT" section below: end-to-end integration test / Stage-2 LoRA on FFN / Production base training / deployment-architecture decision. The live product track.
-- **(B) — after C — Prefill GEMM (B>1 batched matmul)** *(several days)*. Phase 1 `BatchedProjectionKernel` ([N×D]×[D×O]→[N×O] allocation-free GEMM) → Phase 2 batched causal-mask attention → Phase 3 `CachedGptStack.PrefillBatched`. 5–10× TTFT for long prompts + B>1 training. Plan in "Next (after the GPT-2 week)" below. Helps **prefill + training**, not single-stream decode.
+- **(B) Prefill GEMM (B>1 batched matmul) — ✅ DONE 2026-05-21, 3.48× TTFT.** Phase 1 `BatchedProjectionKernel` → Phase 2 `BatchedAttentionKernel` → Phase 3 `CachedGptStack.PrefillBatched`, wired into `CachedSlmSession.Prefill` (≥16-token GPT-2 prompts). The win came from head-coarse parallelism (the per-head wiring was 3.8× slower). Quant (Q4_K_M) batched prefill is the follow-on — Phase 1 is F32 only. Details in the Prefill section below.
 - **(D) — surfaced by (A), 2 levers DONE — make decode bandwidth-bound.** llama.cpp got 2.85× from FP16→Q4 (bandwidth-bound); Overfit got ~1.0× (overhead-bound). **Done #1: GQA K/V-once** — K/V projection was recomputed once per Q head (8× for Qwen 16Q/2KV) instead of once per KV group; +24 % (13.85 → 17.2 tok/s), cut wasted K/V weight-read bandwidth 8×. **Done #2: fuse-quantize** — `hidden` was re-quantized to Q8_K per head per projection (~20×/layer); now quantized once per layer in `CachedMultiHeadAttention`, shared read-only across heads via `Q4K/Q6KDotKernel.ProjectPreQuantized`; **+~1.5 % (17.2 → 17.5 tok/s)** — small, as predicted (quantize is ~0.04 % of matmul arithmetic), but consistent. Both bit-identical (same 24-token greedy sequence before/after) + 680/0/68. Gap to llama.cpp now ~1.6× (was ~2.0×). **Tried #3: VNNI `vpdpbusd` — REVERTED 2026-05-21.** Replaced the AVX2 `vpmaddubsw`+`vpmaddwd` dot with one `vpdpbusd` (`AvxVnni.MultiplyWideningAndAdd`) in both Q4_K/Q6_K kernels + deferred-horizontal-sum; box has `AvxVnni`/`AVX512BW` (verified via bench `caps` mode). Parity 8/8 green. **Same-state A/B: AVX2 ≈ VNNI ≈ 19.1 tok/s — ~0 gain, reverted.** Lesson: after #1+#2 the decode is **memory-bandwidth-bound, not ALU-bound** — fusing the dot saves cycles already hidden behind weight-read latency. (The earlier "17.5 baseline" was a slower thermal state; same-state both ~19.) **The real remaining lever is MEMORY, not ALU:** llama.cpp reads 3.2 GB (mmap), Overfit 4.4 GB committed — the ~1.2 GB extra read per token *is* the speed gap. Levers: mmap-style weight loading instead of committed heap, drop F32 duplication (embeddings/norms), tighter weight layout. GEMV-unroll / core-util profiling are secondary now (ALU isn't the bottleneck). This redirects D from kernel-ALU to memory-bytes-per-token.
 
   **Profiled 2026-05-21 (thread-scaling + effective-BW).** Decode tok/s vs workers
@@ -241,7 +271,29 @@ it on real production metrics. Plan: synthetic base → pull real metrics → Lo
   - [x] **Phase 0 — skip LM-head for non-final prompt tokens.** Split `CachedGptStack.Decode` into `DecodeWithoutLogits` (transformer blocks + final norm) + `ProjectLogits` (LM head). `Prefill` in both `CachedSlmSession` and `CachedLlamaSession` now calls `DecodeWithoutLogits` for tokens `0..N-2` and full `Decode` only for the last token. Saves ~27 % per-token cost on GPT-2 Small for N-1 of N tokens → ~25 % overall prefill speedup. Parity preserved (greedy output bit-identical to pre-split, demo test still 0 B / generated token).
   - [x] **Phase 1 — `BatchedProjectionKernel` (2026-05-21).** `[N×I] × [I×O] → [N×O]` allocation-free F32 GEMM, `Project` (sequential) + `ProjectParallel` (over output columns). Loop order output-tile → input → row: each weight tile loaded once and reused across all N rows → weight-read bandwidth amortised N×. Per-output-element accumulation order (input-ascending, `TensorPrimitives.MultiplyAdd`, `x==0` skip) identical to the single-token kernel, so **bit-identical to N× `SingleTokenProjectionKernel.Project`** — verified by `BatchedProjectionKernelTests` (6 cases: N=1/N>1, ±bias, outputSize>tile, GPT-2-scale, input zeros; both seq + parallel exact). Foundation for Q/K/V/O + FFN-W1/W2 batched prefill.
   - [x] **Phase 2 — `BatchedAttentionKernel` with causal mask (2026-05-21).** Scores N query positions against a shared K/V cache in one call; query `i` (absolute pos `basePos+i`, `basePos = cacheLength-rows`) attends `[0..basePos+i]` under the causal mask → reduces to one `ComputeSingleHead` with `sequenceLength = basePos+i+1`, so **bit-identical to per-query single-head**. `Compute` (sequential) + `ComputeParallel` (queries fan out over `OverfitParallelFor` — independent, disjoint output + per-query score-scratch rows, read-only shared K/V; not weight-bound so the win is core-parallelism, not bandwidth). `BatchedAttentionKernelTests`: 5 cases (fresh prefill basePos=0, prefix basePos>0, Qwen-scale head; seq + parallel exact).
-  - [ ] **Phase 3 — top-level batched stack pass.** New `CachedGptStack.PrefillBatched(promptTokens, weights, cache, ...)` wires Phase 1+2 through `CachedTransformerBlock` and `CachedFeedForwardBlock` batched paths. `Prefill` in both sessions delegates to this for prompts above some small threshold (e.g. ≥ 4 tokens; below that single-token loop wins on overhead).
+  - [x] **Phase 3 — top-level batched stack pass** *(DONE 2026-05-21, ~3.5× TTFT)*. New `CachedGptStack.PrefillBatched(promptTokens, weights, cache, ...)` wires Phase 1+2 through the block batched paths. Scoped first to the F32 / GPT-2 path (standard LayerNorm, GeLU FFN, MHA, no RoPE); SwiGLU/RoPE/GQA/quantized are the follow-on (the quant path also needs a batched K-quant projection — Phase 1 is F32 only).
+    - [x] **FFN slice — `CachedFeedForwardBlock.DecodeBatched` (2026-05-21).** Both projections via `BatchedProjectionKernel`, the SAME element-wise `ApplyActivation` across the whole `[N×dFF]` intermediate → bit-identical to N× `Decode`. `CachedFeedForwardBlockBatchedTests` (4 cases: GeLU + ReLU, N=1/N>1). FFN is ~⅔ of layer FLOPs — the biggest single batched win.
+    - [x] **Attention slice — `CachedMultiHeadAttention.DecodeBatched` (2026-05-21).** Per head: batched Q/K/V projection (`BatchedProjectionKernel`), per-position cache writes, batched causal attention (`BatchedAttentionKernel` — query n attends `[0..basePos+n]`), batched O projection accumulated into output in head order. Bit-identical to N× `Decode` — `CachedMultiHeadAttentionBatchedTests` (4 cases, with attention bias, N=1/N>1). Scoped F32/MHA/no-RoPE (throws for quant/GQA/RoPE).
+    - [x] **Stack orchestration (2026-05-21).** `CachedTransformerBlock.DecodeBatched` (per-row LN → batched MHA → residual → LN → batched FFN → residual, reusing the two verified batched blocks + `SingleTokenLayerNormKernel`) + `CachedGptStack.PrefillBatched` (layer loop + last-token final norm, mirroring `DecodeWithoutLogits`). **Stack-level parity: `PrefillBatched` last-token final-hidden bit-identical to the single-token `DecodeWithoutLogits` loop** — `CachedGptStackTests.PrefillBatched_LastToken_IsBitIdentical_To_SingleTokenLoop` (3 cases, 2 layers, random weights). Scoped F32/GPT-2.
+    - [x] **Session delegation — SHIPPED (2026-05-21, after head-parallel fix).** Wired
+      `CachedGpt1ModelAdapter.PrefillBatched` (embed N + advance cache + `PrefillBatched`
+      + project last-token logits) and delegated from `CachedSlmSession.Prefill` for
+      prompts ≥ `BatchedPrefillThreshold` (16; falls back to the single-token loop below
+      that and for non-GPT-2 stacks via `SupportsBatchedPrefill`). Correctness: batched
+      last-token logits bit-identical to the single-token loop (`CachedSlmPrefillBatchedTests`,
+      3 cases). **TTFT on GPT-2-Small dims, 64-token prompt: 567 ms single-token vs 163 ms
+      batched = 3.48× faster** (`Ttft_BatchedVsSingleToken_Gpt2SmallDims`, [LongFact]).
+    - **The fix that flipped it (the key result).** First wiring measured **0.26×
+      (≈3.8× SLOWER)**: the batched MHA fanned the per-head Q/K/V/O projections out as
+      ~60 tiny `OverfitParallelFor` dispatches per layer (~720 for 12 layers), whose
+      wake/sync overhead swamped the weight-reuse win. Restructured `DecodeBatched` to
+      parallelise **over heads** — one `OverfitParallelFor.For(0, HeadCount, …)` dispatch
+      per layer, each head doing its Q/K/V projection + attention + O projection
+      sequentially into a per-head scratch band, then bands reduced into the output in
+      head order (bit-identical). One dispatch/layer instead of ~60 → **0.26× → 3.48×, a
+      ~13× swing**, same kernels, same math. **Lesson (carry forward):** batched prefill's
+      win is real only when the parallelism granularity is coarse (over heads / big
+      matmuls), never per-head — dispatch overhead dominates at fine granularity.
   - [ ] **Parity tests** for each phase: batched output ≡ N × single-token output for any prompt up to ContextLength. Final assertion: `Gpt2ImportParityDiagnostics` still green (full PyTorch parity through the batched path).
 - [x] **LM-head hot-path audit (initial)** — confirmed `ProjectParallel` exists but is **dead code** (no call site); `Project` is what GPT-2/Qwen actually use. Wiring `ProjectParallel` into `CachedGptStack.Decode` was tested and reverted: `Parallel.For` allocates ~3 KB / call from task scheduling, which breaks the 0 B / generated token contract for only ~3 % per-token speedup at the GPT-2 Small scale. The 10× speedup in `LmHeadParallelBenchmark` is steady-state; per-token decode is dominated by the `Parallel.For` overhead.
 - [ ] **LM head: allocation-free parallel matmul** — wire-up depends on a worker pool that does NOT allocate per call. Candidates: pre-spawned threads with lock-free queue / semaphore signaling, or unsafe manual partitioning over a fixed thread set. Constraint: ≤ 0 B / call. Payoff: most of the ~3.8 ms LM-head matmul on a 32-core box. Single largest remaining lever for GPT-2 tokens/sec.

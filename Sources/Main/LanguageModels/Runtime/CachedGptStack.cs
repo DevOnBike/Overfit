@@ -208,12 +208,86 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         }
 
         /// <summary>
+        /// Batched prefill (Phase 3): runs <paramref name="rows"/> prompt tokens
+        /// through all transformer layers + final norm in one pass — the multi-token
+        /// counterpart of looping <see cref="DecodeWithoutLogits"/>. Each layer uses
+        /// <see cref="CachedTransformerBlock.DecodeBatched"/> (batched MHA + FFN), so
+        /// the result is <b>bit-identical</b> to the single-token loop. After the call
+        /// <see cref="LastFinalHidden"/> and the final-norm output hold the LAST
+        /// token's state, ready for <see cref="ProjectLogits"/> (the only token whose
+        /// logits a prefill needs). Scoped to the F32 / GPT-2 path (standard LayerNorm,
+        /// GeLU/ReLU FFN, MHA, no RoPE — the blocks throw otherwise). The caller must
+        /// advance the cache to length <c>basePosition + rows</c> before calling.
+        /// </summary>
+        internal void PrefillBatched(
+            ReadOnlySpan<float> inputHidden,
+            int rows,
+            StackWeights weights,
+            KeyValueCache cache,
+            int basePosition,
+            RopeTable? rope = null)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rows);
+
+            if (inputHidden.Length < (long)rows * DModel)
+            {
+                throw new ArgumentException(
+                    $"inputHidden length {inputHidden.Length} < rows*DModel {(long)rows * DModel}.", nameof(inputHidden));
+            }
+
+            var cur = new float[rows * DModel];
+            inputHidden.Slice(0, rows * DModel).CopyTo(cur);
+            var next = new float[rows * DModel];
+
+            for (var layer = 0; layer < LayerCount; layer++)
+            {
+                _blocks[layer].DecodeBatched(
+                    cur, rows, in weights.Block(layer), cache, layer, basePosition, next, rope);
+
+                (cur, next) = (next, cur);
+            }
+
+            // Last token's hidden BEFORE final norm (matches DecodeWithoutLogits).
+            var lastRow = cur.AsSpan((rows - 1) * DModel, DModel);
+            lastRow.CopyTo(_lastFinalHidden);
+
+            if (weights.FinalNormBeta.IsEmpty)
+            {
+                var sumSq = 0f;
+                for (var i = 0; i < DModel; i++)
+                {
+                    sumSq += lastRow[i] * lastRow[i];
+                }
+                var scale = 1f / MathF.Sqrt(sumSq / DModel + LayerNormEpsilon);
+                if (weights.FinalNormGamma.IsEmpty)
+                {
+                    for (var i = 0; i < DModel; i++)
+                    {
+                        _finalHidden[i] = lastRow[i] * scale;
+                    }
+                }
+                else
+                {
+                    for (var i = 0; i < DModel; i++)
+                    {
+                        _finalHidden[i] = lastRow[i] * scale * weights.FinalNormGamma[i];
+                    }
+                }
+            }
+            else
+            {
+                SingleTokenLayerNormKernel.Normalize(
+                    lastRow, weights.FinalNormGamma, weights.FinalNormBeta, _finalHidden, DModel, LayerNormEpsilon);
+            }
+        }
+
+        /// <summary>
         /// Projects the saved <see cref="LastFinalHidden"/>-norm output into
         /// vocabulary logits. Call this once per token-of-interest after one
         /// or more <see cref="DecodeWithoutLogits"/> calls. The standard
         /// <see cref="Decode"/> entry point does this automatically.
         /// </summary>
-        private void ProjectLogits(StackWeights weights, Span<float> logits)
+        internal void ProjectLogits(StackWeights weights, Span<float> logits)
         {
             // LM head: [DModel] → [VocabSize]. Dispatches on the weight's
             // residency — Q8_0-quantized (the GGUF/Qwen path, step 2.3a) or F32.
