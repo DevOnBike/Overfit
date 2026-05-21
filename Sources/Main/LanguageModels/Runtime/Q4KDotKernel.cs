@@ -252,6 +252,30 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             QuantizeActivationQ8K(
                 input.Slice(0, inputSize), activationQuants, activationScales, activationBsums);
 
+            ProjectPreQuantized(weight, bias, output, activationQuants, activationScales, activationBsums);
+        }
+
+        /// <summary>
+        /// Sequential projection from an **already-quantized** Q8_K activation —
+        /// <see cref="Project"/> minus the quantize pass. Lets a caller quantize a
+        /// shared input once (e.g. the attention <c>hidden</c> row, reused across
+        /// every head's Q/K/V) and run several projections against it without
+        /// re-quantizing. The scratch must already hold the Q8_K form of the
+        /// projection's input (same layout <see cref="QuantizeActivationQ8K"/> writes).
+        /// </summary>
+        public static void ProjectPreQuantized(
+            Q4KWeight weight,
+            ReadOnlySpan<float> bias,
+            Span<float> output,
+            ReadOnlySpan<sbyte> activationQuants,
+            ReadOnlySpan<float> activationScales,
+            ReadOnlySpan<short> activationBsums)
+        {
+            ArgumentNullException.ThrowIfNull(weight);
+
+            var outputSize = weight.OutputSize;
+            var superBlocksPerRow = weight.SuperBlocksPerRow;
+
             var blocks = weight.Blocks;
             for (var o = 0; o < outputSize; o++)
             {

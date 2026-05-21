@@ -1,13 +1,23 @@
 # llama.cpp CPU inference — analysis & Overfit decode-kernel plan
 
 **Status:** analysis complete (2026-05). §5 **steps 1, 2 and 3 all done &
-A/B-measured.** Qwen-3B decode on this dev box: **2.71 → 14.56 tok/s (5.4×)**,
-RAM **~14.4 GB → 4.40 GB (−69 %)**, 0 B/token preserved. Overfit Q4_K_M now
-runs **1.51× faster than** the LLamaSharp reference (9.67 tok/s / ~6 GB) at
-27 % less committed RAM (caveat: Overfit Q4_K_M vs LLamaSharp FP16-mmap — see
-§5 step 3 for the apples-to-apples to-do). Parity verified vs F32 for both
-Q8 (2.5: 32/32) and Q4_K_M (3.4: 29/32 with worst swing 2.16, every mismatch a
-near-tie). Native loads: Q8_0 (2.4/2.4b), Q4_K (3.2b), Q6_K (3.3c). Step 4
+A/B-measured.** Qwen-3B decode on this dev box improved **2.71 → 14.56 tok/s
+(5.4×)** over Overfit's own starting point, RAM **~14.4 GB → 4.40 GB (−69 %)**,
+0 B/token preserved. Parity verified vs F32 for both Q8 (2.5: 32/32) and Q4_K_M
+(3.4: 29/32, worst swing 2.16). Native loads: Q8_0 (2.4/2.4b), Q4_K (3.2b),
+Q6_K (3.3c).
+
+⚠️ **Same-file A/B correction (2026-05-20).** Re-benchmarked LLamaSharp 0.27.0
+on the *same* `qwen.q4km.gguf`: **27.5 tok/s @ 3.2 GB**. The earlier "Overfit
+1.51× faster than LLamaSharp" line was wrong (it compared Overfit-Q4_K_M against
+LLamaSharp's *FP16* number, 9.67 tok/s). Key diagnostic: FP16→Q4_K_M sped
+llama.cpp up **2.85×** but Overfit only **~1.0×** → Overfit decode was *not*
+bandwidth-bound (overhead-bound). **First lever acted on — GQA K/V-once**
+(project each KV group's K/V once, not once per Q head; 8× redundant for Qwen):
+Overfit decode **13.85 → 17.2 tok/s (+24 %)**, bit-identical, narrowing the
+same-file gap from ~2.0× to **~1.6×** (llama.cpp still ahead + 27 % less RAM).
+Overfit's defensible edge stays allocation (1 B vs 21 KB/token), pure-managed,
+AOT-clean, no native dep. Full numbers in `overfit-bench/RESULTS.md`. Step 4
 (tiled prefill GEMM) and step 5 (work-stealing) remain — separate tracks.
 
 **Origin — the benchmark that triggered this.** Same Qwen2.5-3B GGUF, single-stream CPU decode:
@@ -194,8 +204,11 @@ transformer stack is precision-agnostic and the F32 GPT-1/2 path is untouched.
 **Result: 4.01 → 13.38 tok/s (3.3×), RAM ~14.4 → 5.90 GB (−59%), 0 B/token
 preserved, 672 tests green.** The full decode matmul path (FFN, LM-head,
 attention) is now Q8-resident; only embeddings, norms and biases stay F32.
-Overfit runs **1.38× faster than** the LLamaSharp reference (9.67 tok/s / ~6 GB)
-at slightly less RAM — past the launch-credibility milestone §5 called for.
+At Q8 Overfit ran 13.38 tok/s vs the LLamaSharp **FP16** reference (9.67 tok/s /
+~6 GB). ⚠️ That FP16-vs-Q8 comparison flattered Overfit — the same-file A/B
+(step 3 status block) shows LLamaSharp on Q4_K_M at 27.5 tok/s, ~2× faster than
+Overfit's best. Decode-speed parity with llama.cpp is **not** reached; see the
+step 3 "instructive finding".
 
 **Honest caveats:**
 - The 2.3b-FFN jump (+132%) is larger than the ~2× that quantizing ⅔ of the
@@ -304,23 +317,44 @@ tokens after 4 warm-up, single stream, dev box):
 |-----------|--------|-------------|-----------:|--------------------------------------|
 | FP16-src  |  7.1 s | 13.29 tok/s |   5 902 MB | baseline (dequant FP16 → F32 in RAM) |
 | Q8_0      |  1.7 s | 13.28 tok/s |   5 847 MB | step 2 result                        |
-| **Q4_K_M**| **1.4 s** | **14.56 tok/s** | **4 396 MB** | step 3 result — wins every axis |
+| **Q4_K_M**| **1.4 s** | **14.56 tok/s** | **4 396 MB** | step 3 result — best Overfit format |
 
-Q4_K_M is **faster** than the FP16-source path (not just RAM-cheaper) because
-decode is bandwidth-bound matmul and Q4_K reads half the bytes per row — the
-extra arithmetic to unpack nibbles is dwarfed by the saved cache misses. RAM is
-25 % lower than Q8 (4.40 vs 5.85 GB).
+Within Overfit's own formats, Q4_K_M is marginally faster than the FP16-source
+path *and* 25 % leaner on RAM than Q8 (4.40 vs 5.85 GB) — the win is mostly the
+RAM and load time, not throughput (FP16-src 13.29 → Q4_K_M 14.56 is only +9.6 %).
+That small decode delta is itself the tell: see below.
 
-**vs LLamaSharp.** The original LLamaSharp baseline (`qwen.gguf` FP16-mmap):
-9.67 tok/s @ ~6 GB. Overfit Q4_K_M now decodes at **1.51× LLamaSharp** with
-**27 % less committed RAM**. *Caveat:* this is Overfit's Q4_K_M vs LLamaSharp's
-FP16-mmap (different file). A Q4_K_M-vs-Q4_K_M re-measurement would be cleaner
-— LLamaSharp on the same Q4_K_M would use far less RAM (~2 GB mmap) and is
-likely similar or marginally faster on decode; that A/B is on the to-do list.
-What the numbers do show unambiguously: the pure-managed, zero-alloc,
-AOT-compatible path is no longer the "credibly competitive" position from
-launch — on this hardware it is now the *faster* engine on absolute throughput
-versus the original baseline.
+**vs LLamaSharp — same Q4_K_M file (2026-05-20, corrected).** Re-benchmarked
+LLamaSharp 0.27.0 (`LLamaSharp.Backend.Cpu`, native llama.cpp, `GpuLayerCount=0`)
+on the **same** `qwen.q4km.gguf`:
+
+| Engine | Decode | Working set | alloc/token |
+|--------|-------:|------------:|------------:|
+| Overfit (Q4_K + Q6_K), pre-fix  | 13.85 tok/s | 4 389 MB (committed) | **1 B** |
+| Overfit, K/V-once + fuse-quantize | **17.5 tok/s** | 4 389 MB (committed) | **1 B** |
+| LLamaSharp (llama.cpp)          | **27.5 tok/s** (steady) | **3 205 MB** (peak, mmap) | 21 221 B |
+
+**On equal footing llama.cpp decodes ~1.6× faster (was ~2.0× before the K/V-once
+fix) and uses ~27 % less RAM.** The previous "Overfit 1.51× faster than
+LLamaSharp" claim was an artifact of comparing Overfit-Q4_K_M against LLamaSharp's
+*FP16* number (9.67 tok/s); corrected, llama.cpp wins decode and RAM on the same
+file.
+
+**The instructive finding — Overfit decode was not bandwidth-bound.**
+FP16 → Q4_K_M sped llama.cpp up **2.85×** (9.67 → 27.5) but Overfit only
+**~1.0×** (13.3 → 13.85). llama.cpp converts the ~3.5× byte reduction almost
+linearly into speed — bandwidth-bound, as §3.2 predicted. Overfit gained almost
+nothing from fewer bytes → per-token overhead dominated. **First lever acted on:
+GQA K/V-once.** Under grouped-query attention every Q head in a KV group shares
+one K/V weight set + cache slot, but the decode recomputed the K/V projection
+once per Q head (8× for Qwen 16Q/2KV). Projecting it once per group reclaimed
+**+24 % (13.85 → 17.2 tok/s)** — and cut the wasted K/V weight-read bandwidth 8×,
+confirming the redundancy was partly bandwidth after all. Bit-identical (same
+24-token greedy sequence before/after). **Remaining levers:** fuse
+activation-quantize per-group, tighter Q4_K/Q6_K GEMV unroll + more accumulators,
+core-utilisation profiling. Overfit's defensible edge stays allocation (1 B vs
+21 KB/token), pure-managed, AOT-clean, no native binary. Numbers in
+`overfit-bench/RESULTS.md`.
 
 **Verified:** 680 / 0 / 68 (`-c Release`); zero allocations per decoded token
 (`Gpt2GenerationDemoTests.Demo_Gpt2Small_KvCacheDecode_AllocatesZeroBytesPerToken`

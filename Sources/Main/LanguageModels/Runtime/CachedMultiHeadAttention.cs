@@ -39,6 +39,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly CachedSingleHeadAttention[] _heads;
         private readonly float[] _headOutputs;
 
+        // Shared Q8_K quantization of the layer's `hidden` row. Q/K/V across every
+        // head project the same `hidden`, so under a K-quant attention path it is
+        // quantized once here (before the head-parallel loop) and only read by all
+        // heads — removing the per-head, per-projection re-quantize.
+        private readonly sbyte[] _hiddenQuants;
+        private readonly float[] _hiddenScales;
+        private readonly short[] _hiddenBsums;
+
         /// <param name="kvHeadCount">
         /// Number of KV heads for GQA. 0 or equal to headCount = standard MHA.
         /// </param>
@@ -73,6 +81,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             _heads = new CachedSingleHeadAttention[headCount];
             _headOutputs = new float[headCount * dModel];
+
+            _hiddenQuants = new sbyte[dModel];
+            _hiddenScales = new float[(dModel + Q4KDotKernel.SuperBlockElements - 1) / Q4KDotKernel.SuperBlockElements];
+            _hiddenBsums = new short[(dModel + Q4KDotKernel.GroupSize - 1) / Q4KDotKernel.GroupSize];
 
             for (var h = 0; h < headCount; h++)
             {
@@ -113,12 +125,28 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 bo.Slice(0, DModel).CopyTo(output);
             }
 
+            // Q/K/V across every head project the same `hidden` row. When the
+            // attention weights are K-quant (Q4_K / Q6_K both consume the Q8_K
+            // activation form), quantize `hidden` once here and let every head
+            // reuse it — instead of re-quantizing per head, per projection. Peek
+            // head 0's Wq: a layer's Q/K/V share a residency.
+            ref readonly var head0 = ref weights.Head(0);
+            var hiddenQ8kValid = head0.Wq.IsQ4K || head0.Wq.IsQ6K;
+            if (hiddenQ8kValid)
+            {
+                Q4KDotKernel.QuantizeActivationQ8K(
+                    hidden.Slice(0, DModel), _hiddenQuants, _hiddenScales, _hiddenBsums);
+            }
+
             // Heads are parallelised across KV groups via OverfitParallelFor:
             // one worker per KV head, each owning a disjoint KV-cache slot and a
             // disjoint contiguous run of Q heads. No cross-worker writes — the
             // result is bit-identical to the sequential head loop. Each head
             // writes its own band of _headOutputs; the reduction runs after.
             fixed (float* hiddenPtr = hidden)
+            fixed (sbyte* hiddenQuantsPtr = _hiddenQuants)
+            fixed (float* hiddenScalesPtr = _hiddenScales)
+            fixed (short* hiddenBsumsPtr = _hiddenBsums)
             {
                 var context = new HeadDecodeContext
                 {
@@ -128,6 +156,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     Rope = rope,
                     HeadOutputs = _headOutputs,
                     Hidden = hiddenPtr,
+                    HiddenQuants = hiddenQuantsPtr,
+                    HiddenScales = hiddenScalesPtr,
+                    HiddenBsums = hiddenBsumsPtr,
+                    HiddenScalesLength = _hiddenScales.Length,
+                    HiddenBsumsLength = _hiddenBsums.Length,
+                    HiddenQ8kValid = hiddenQ8kValid,
                     LayerIndex = layerIndex,
                     Position = position,
                     DModel = DModel,
@@ -170,6 +204,17 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var groupSize = ctx.HeadCount / ctx.KvHeadCount;
             var hidden = new ReadOnlySpan<float>(ctx.Hidden, dModel);
 
+            // Shared pre-quantized `hidden` (Q8_K) — read-only across all heads.
+            var hQuants = ctx.HiddenQ8kValid
+                ? new ReadOnlySpan<sbyte>(ctx.HiddenQuants, dModel)
+                : default;
+            var hScales = ctx.HiddenQ8kValid
+                ? new ReadOnlySpan<float>(ctx.HiddenScales, ctx.HiddenScalesLength)
+                : default;
+            var hBsums = ctx.HiddenQ8kValid
+                ? new ReadOnlySpan<short>(ctx.HiddenBsums, ctx.HiddenBsumsLength)
+                : default;
+
             for (var group = groupStart; group < groupEnd; group++)
             {
                 for (var headInGroup = 0; headInGroup < groupSize; headInGroup++)
@@ -195,10 +240,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
                     var headOutput = ctx.HeadOutputs.AsSpan(h * dModel, dModel);
 
+                    // Under GQA every Q head in the group shares one K/V weight set
+                    // and one cache slot, so only the group's first head projects +
+                    // writes K/V; the rest read what it wrote (bit-identical). Under
+                    // standard MHA each head owns its K/V, so all project.
+                    var projectKv = !ctx.UseGqa || headInGroup == 0;
+
                     // Per-projection dispatch (step 3.2a) — each of Q/K/V/O picks
                     // its kernel from its resident format inside DecodeDispatched.
                     // Handles heterogeneous K-quant files where Q/K/V/O may mix
-                    // F32 / Q8_0 / Q4_K (and Q6_K once 3.3 lands).
+                    // F32 / Q8_0 / Q4_K / Q6_K.
                     ctx.Heads[h].DecodeDispatched(
                         hidden,
                         hw.Wq, wk, wv,
@@ -209,7 +260,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         group,            // KV-cache slot for this group
                         ctx.Position,
                         headOutput,
-                        ctx.Rope);
+                        ctx.Rope,
+                        projectKv,
+                        hQuants,
+                        hScales,
+                        hBsums,
+                        ctx.HiddenQ8kValid);
                 }
             }
         }
@@ -223,6 +279,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             public RopeTable? Rope;
             public float[] HeadOutputs;
             public float* Hidden;
+            public sbyte* HiddenQuants;
+            public float* HiddenScales;
+            public short* HiddenBsums;
+            public int HiddenScalesLength;
+            public int HiddenBsumsLength;
+            public bool HiddenQ8kValid;
             public int LayerIndex;
             public int Position;
             public int DModel;

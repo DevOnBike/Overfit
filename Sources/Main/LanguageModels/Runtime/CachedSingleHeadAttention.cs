@@ -161,6 +161,17 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// Q4_K_M with Q/K Q4_K and V Q6_K-then-Q8) is handled per projection.
         /// The older all-same-type <see cref="Decode"/> / <see cref="DecodeQuantized"/>
         /// entry points are kept for tests.
+        ///
+        /// <para>
+        /// <paramref name="projectKv"/> lets a GQA group skip the redundant K/V
+        /// projection: every Q head in a KV group shares one K/V weight set and one
+        /// cache slot, so the K/V matmul + RoPE + cache write only need to run for
+        /// the group's first head. The remaining heads pass <c>false</c> and read
+        /// the K/V the first head already wrote — bit-identical, but the K and V
+        /// projections (≈ groupSize× redundant for Qwen-style 16Q/2KV) run once per
+        /// group instead of once per Q head. The first head per group (and every
+        /// head under standard MHA) passes <c>true</c>.
+        /// </para>
         /// </summary>
         internal void DecodeDispatched(
             ReadOnlySpan<float> hidden,
@@ -176,16 +187,101 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int headIndex,
             int position,
             Span<float> output,
-            RopeTable? rope = null)
+            RopeTable? rope = null,
+            bool projectKv = true,
+            ReadOnlySpan<sbyte> hiddenQuants = default,
+            ReadOnlySpan<float> hiddenScales = default,
+            ReadOnlySpan<short> hiddenBsums = default,
+            bool hiddenQ8kValid = false)
         {
-            ProjectSequentialDispatched(hidden, in wq, bq, _query, DModel, HeadDimension);
-            ProjectSequentialDispatched(hidden, in wk, bk, _key, DModel, HeadDimension);
-            ProjectSequentialDispatched(hidden, in wv, bv, _value, DModel, HeadDimension);
+            // Q/K/V all project the SAME `hidden` row. When the caller has already
+            // quantized it to Q8_K once (shared across every head in the layer),
+            // K-quant projections reuse that instead of re-quantizing per call.
+            ProjectHiddenDispatched(hidden, in wq, bq, _query, hiddenQuants, hiddenScales, hiddenBsums, hiddenQ8kValid);
+            if (rope is not null)
+            {
+                RopeKernel.Apply(_query, rope, position);
+            }
 
-            AttendCore(cache, layerIndex, headIndex, position, rope);
+            if (projectKv)
+            {
+                ProjectHiddenDispatched(hidden, in wk, bk, _key, hiddenQuants, hiddenScales, hiddenBsums, hiddenQ8kValid);
+                ProjectHiddenDispatched(hidden, in wv, bv, _value, hiddenQuants, hiddenScales, hiddenBsums, hiddenQ8kValid);
 
+                // K is rotated and stored — cached K vectors stay permanently
+                // rotated, so no re-rotation at read time. (Q was rotated above.)
+                if (rope is not null)
+                {
+                    RopeKernel.Apply(_key, rope, position);
+                }
+
+                _key.AsSpan().CopyTo(cache.GetKeyWriteSpan(layerIndex, headIndex, position));
+                _value.AsSpan().CopyTo(cache.GetValueWriteSpan(layerIndex, headIndex, position));
+            }
+
+            AttendFromCache(cache, layerIndex, headIndex, position);
+
+            // Wo's input is the per-head attention output, not `hidden`, so it
+            // always quantizes its own activation.
             ProjectSequentialDispatched(
                 _attentionOutput, in wo, ReadOnlySpan<float>.Empty, output, HeadDimension, DModel);
+        }
+
+        /// <summary>
+        /// Q/K/V projection from <paramref name="hidden"/> with optional reuse of a
+        /// pre-quantized shared Q8_K activation. When <paramref name="sharedValid"/>
+        /// is set and the weight is K-quant (Q4_K / Q6_K), the shared Q8_K scratch
+        /// is used directly — no per-call quantize. Q8_0 (different activation
+        /// format) and F32 always read/quantize their own input.
+        /// </summary>
+        private void ProjectHiddenDispatched(
+            ReadOnlySpan<float> hidden,
+            in DecodeWeight weight,
+            ReadOnlySpan<float> bias,
+            Span<float> output,
+            ReadOnlySpan<sbyte> sharedQuants,
+            ReadOnlySpan<float> sharedScales,
+            ReadOnlySpan<short> sharedBsums,
+            bool sharedValid)
+        {
+            if (weight.IsQ6K)
+            {
+                if (sharedValid)
+                {
+                    Q6KDotKernel.ProjectPreQuantized(
+                        weight.Quantized6K, bias, output, sharedQuants, sharedScales, sharedBsums);
+                }
+                else
+                {
+                    Q6KDotKernel.Project(
+                        hidden, weight.Quantized6K, bias, output,
+                        _q8kInputQuants, _q8kInputScales, _q8kInputBsums);
+                }
+            }
+            else if (weight.IsQ4K)
+            {
+                if (sharedValid)
+                {
+                    Q4KDotKernel.ProjectPreQuantized(
+                        weight.Quantized4K, bias, output, sharedQuants, sharedScales, sharedBsums);
+                }
+                else
+                {
+                    Q4KDotKernel.Project(
+                        hidden, weight.Quantized4K, bias, output,
+                        _q8kInputQuants, _q8kInputScales, _q8kInputBsums);
+                }
+            }
+            else if (weight.IsQuantized)
+            {
+                Q8DotKernel.Project(
+                    hidden, weight.Quantized, bias, output, _q8InputQuants, _q8InputScales);
+            }
+            else
+            {
+                SingleTokenProjectionKernel.Project(
+                    hidden, weight.F32, bias, output, DModel, HeadDimension);
+            }
         }
 
         /// <summary>
@@ -257,6 +353,22 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 .AsSpan()
                 .CopyTo(cache.GetValueWriteSpan(layerIndex, headIndex, position));
 
+            AttendFromCache(cache, layerIndex, headIndex, position);
+        }
+
+        /// <summary>
+        /// Reads the cached K/V range <c>[0..position]</c> and computes this head's
+        /// attention into <see cref="_attentionOutput"/>. Assumes the current
+        /// position's K/V are already written to the cache slot (by this head, or
+        /// — under GQA — by the group's first head) and that <see cref="_query"/>
+        /// is already RoPE-rotated.
+        /// </summary>
+        private void AttendFromCache(
+            KeyValueCache cache,
+            int layerIndex,
+            int headIndex,
+            int position)
+        {
             var sequenceLength = position + 1;
 
             var keys = cache.GetKeyReadSpan(
