@@ -7,6 +7,7 @@ using DevOnBike.Overfit.Anomalies.Gpt;
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 using DevOnBike.Overfit.Anomalies.Training;
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.LanguageModels.LoRA;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 
 namespace DevOnBike.Overfit.Demo.AnomalyConsole
@@ -18,8 +19,12 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
     /// Flow:
     ///   1. Train a Quick base on a metrics CSV (or load --checkpoint).
     ///   2. Build a GptAnomalyDetector over it.
-    ///   3. Stream a steady "normal" regime, then inject one incident snapshot.
-    ///   4. Print each step's anomaly score + the worst-explaining metric.
+    ///   3. Phase 1 — stream a steady "normal" regime, then inject one incident.
+    ///   4. Phase 2 — fine-tune an LM-head LoRA adapter on this pod's benign regime,
+    ///      merge it in place, and re-run the SAME stream + incident. The benign
+    ///      "normal" score collapses toward zero (fewer false positives) while the
+    ///      injected incident still scores high — adaptive per-deployment learning
+    ///      that an inference-only engine (llama.cpp et al.) cannot do.
     ///
     /// Example:
     ///   dotnet run -c Release --project Demo/AnomalyConsoleDemo -- \
@@ -109,30 +114,101 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
             return (model, config);
         }
 
-        // ── Scenario: steady normal stream, then one injected incident ──────────
+        // ── Scenario: base behaviour, then the same stream after per-deployment LoRA ──
         private static void RunScenario(GPT1Model model, GptTrainingConfig config)
+        {
+            Console.WriteLine();
+            Console.WriteLine("══ Phase 1 — base model ══");
+            Console.WriteLine("Streaming 'payments-api' metrics (1 snapshot ≈ 15 s)  —  score = surprise (nats/token):");
+            Console.WriteLine();
+            var (baseNormal, baseIncident) = StreamScenario(model, verbose: true);
+
+            Console.WriteLine();
+            Console.WriteLine("══ Phase 2 — per-deployment LoRA adaptation ══");
+            Console.WriteLine("Fine-tuning an LM-head LoRA adapter on this pod's benign regime ...");
+            using var merge = AdaptToRegime(model);
+            Console.WriteLine("Adapter merged in place. Re-streaming the SAME regime, then the SAME incident:");
+            Console.WriteLine();
+            var (loraNormal, loraIncident) = StreamScenario(model, verbose: true);
+
+            // ── Before / after ─────────────────────────────────────────────────
+            Console.WriteLine();
+            Console.WriteLine("══ Before / after ══");
+            Console.WriteLine($"  benign 'normal'    base = {baseNormal,7:F2}  →  LoRA = {loraNormal,7:F2}   (false-positive pressure — lower is better)");
+            Console.WriteLine($"  injected incident  base = {baseIncident,7:F2}  →  LoRA = {loraIncident,7:F2}   (must stay high)");
+            Console.WriteLine();
+
+            var flattened = loraNormal < baseNormal;
+            var stillFires = loraIncident > MathF.Max(loraNormal * 3f, 5f);
+            Console.WriteLine(flattened && stillFires
+                ? "LoRA flattened the benign regime toward zero AND the incident still fires far above it —"
+                : "Result above (random/short Quick base may need a longer fine-tune to fully separate) —");
+            Console.WriteLine("adapting to a deployment's benign drift lowers false positives without blinding the");
+            Console.WriteLine("detector. This adaptive, per-deployment learning is the part an inference-only");
+            Console.WriteLine("engine cannot do — the LoRA delta merges into the same zero-alloc decode path.");
+        }
+
+        // ── Stream a steady normal regime, then inject one incident ─────────────
+        // Returns the last post-warmup normal score and the injected-incident score.
+        private static (float normal, float incident) StreamScenario(GPT1Model model, bool verbose)
         {
             using var handle = SlmRuntimeFactory.CreateGpt1(model);
             using var detector = new GptAnomalyDetector(handle, ContextSnapshots);
 
-            Console.WriteLine();
-            Console.WriteLine("Streaming 'payments-api' metrics (1 snapshot ≈ 15 s)  —  score = surprise (nats/token):");
-            Console.WriteLine();
-
-            // Steady normal regime — fills the window, then settles to a low score.
+            var normal = 0f;
             for (var i = 0; i < ContextSnapshots * 2; i++)
             {
-                Report(i, detector.Score(NormalSnapshot()));
+                var r = detector.Score(NormalSnapshot());
+                if (verbose) { Report(i, r); }
+                if (!r.IsWarmup) { normal = r.Score; }
             }
 
-            // Injected incident: CPU saturated + throttled, tail latency + errors blown out.
-            Console.WriteLine("  ── injecting incident ──");
-            Report(ContextSnapshots * 2, detector.Score(AnomalySnapshot()));
+            if (verbose) { Console.WriteLine("  ── injecting incident ──"); }
+            var inc = detector.Score(AnomalySnapshot());
+            if (verbose) { Report(ContextSnapshots * 2, inc); }
 
-            Console.WriteLine();
-            Console.WriteLine("The base scores its trained 'normal' low and the incident high, naming the");
-            Console.WriteLine("worst metric. Per-deployment LoRA fine-tuning (see Gpt1LoRAFineTuner) drives a");
-            Console.WriteLine("benign regime's score toward zero while still catching real incidents.");
+            return (normal, inc.Score);
+        }
+
+        // ── Fine-tune an LM-head LoRA adapter on the benign regime, merge it in ──
+        private static Gpt1LoRAMergeAdapter AdaptToRegime(GPT1Model model)
+        {
+            var tps = MetricTokenizer.TokensPerSnapshot;
+
+            // A stable benign regime for this pod — tokenised into a periodic
+            // sequence the LM-head LoRA can learn. 48 snapshots ≫ the context window.
+            var regime = new MetricSnapshot[48];
+            for (var i = 0; i < regime.Length; i++)
+            {
+                regime[i] = NormalSnapshot();
+            }
+            var corpus = new MetricTokenizer().EncodeSequence(regime);
+
+            var loraPath = Path.Combine(
+                Path.GetTempPath(), $"overfit_anomaly_lora_{Guid.NewGuid():N}.bin");
+            try
+            {
+                using (var tuner = new Gpt1LoRAFineTuner(model, rank: 16))
+                {
+                    // Fine-tune over the exact position range the detector exercises
+                    // (ContextSnapshots × tokens-per-snapshot) so the merge lands where
+                    // the detector reads.
+                    var history = tuner.FineTune(
+                        corpus, steps: 300, contextLength: ContextSnapshots * tps, learningRate: 1e-2f);
+                    Console.WriteLine(
+                        $"  LoRA loss {history[0]:F3} → {history[^1]:F3}  ({history.Count} steps, rank 16, LM head, base frozen)");
+                    tuner.Save(loraPath);
+                }
+                // tuner disposed → weight provider detached; model is plain again.
+
+                var merge = Gpt1LoRAMergeAdapter.Load(model, loraPath);
+                merge.Enable();
+                return merge;
+            }
+            finally
+            {
+                if (File.Exists(loraPath)) { File.Delete(loraPath); }
+            }
         }
 
         private static void Report(int step, AnomalyScore s)

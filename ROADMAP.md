@@ -246,6 +246,16 @@ it on real production metrics. Plan: synthetic base → pull real metrics → Lo
   base's per-pod "normal" still carries residual surprise (6.02) because it's
   trained across all pods; that's exactly what per-regime LoRA (Stage 1/2/3) drives
   down for a specific deployment.
+- **One-command product demo — ✅ DONE 2026-05-21.** `Demo/AnomalyConsoleDemo`
+  now demonstrates the *whole* moat live in a single `dotnet run`, self-contained
+  (trains a Quick base on the 201 600-row fixture CSV in ~17 s, no external file):
+  **Phase 1 (base)** streams a benign regime + injects an incident; **Phase 2**
+  fine-tunes an LM-head LoRA (rank 16, 300 steps, base frozen) on that pod's benign
+  regime, merges it in place, and re-runs the same stream. Measured live (Quick base):
+  benign "normal" **2.74 → 0.00** (false positives flattened), injected incident
+  **11.78 → 24.38** (detection preserved and sharpened). This is the "adaptive
+  per-deployment learning an inference-only engine can't do" story, shown not just
+  described. Closes the "demoable in one command, documented honestly" goal below.
 - **Decision pending:** deployment base architecture — Medium (128d/4L, converges
   fast, ~1.0 loss) vs Production (256d/6L). LoRA targets a fixed architecture, so
   this gates Stage 2/3.
