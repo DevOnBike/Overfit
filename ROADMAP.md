@@ -28,7 +28,7 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 
 ---
 
-## Last session — resume point (2026-05-22)
+## Last session — resume point (2026-05-22 → 23)
 
 **Big session — zero-Python loading completed, chat turnkey, and the anomaly+LoRA product
 track closed with an empirically-corrected verdict.** Strategic frame (still holds): NOT chasing
@@ -67,20 +67,35 @@ llama.cpp on decode; embeddability / training / product moat. See [[project-load
   `docs/gp-anomaly-baseline.md`; GP escalation NOT warranted.
 - Production base regenerated at `D:\k8s_anomaly_production.bin` (20.8 MB, out of repo).
 
-**Full suite: 759 / 0 / 80 green. Everything COMMITTED (the `llama` commits) — working tree clean
-except pre-existing staged `index.html` / `linkedin-*` / `launch-copy.md` / `docs/parallel_opts.txt`
-(marketing, not mine).**
+**Continued 2026-05-23 — family-generic tokenizer/chat, llama3 RoPE scaling, GPT-2 bit-parity:**
+- **Generic HF BPE tokenizer** `HuggingFaceBpeTokenizer : ITokenizer` — reads the pre-tokenizer Split
+  regex + merges (both `"a b"` and `["a","b"]` shapes) + EOS from `tokenizer.json`/`tokenizer_config.json`,
+  no per-model hard-coding. **VALIDATED bit-exact vs `QwenTokenizer`** (incl. digits) AND **round-trips on
+  real Llama-3.2-1B** (vocab 128256). `HuggingFaceChatModel.LoadFromDirectory(dir)` = family-generic turnkey
+  (stops per `ChatTemplateFormat`). **Llama-3.2-1B VALIDATED end-to-end**: raw completion "The capital of
+  France is" → " Paris. The capital of Germany" (loader correct on Llama dims: 2048d/32h/8kv GQA/16L/tied;
+  base model so chat echoes — completion is the right loader check for a base).
+- **llama3 RoPE scaling DONE** — `RopeScaling` (NTK-by-parts, port of HF `_compute_llama3_parameters`)
+  applied in `RopeTable`, parsed from `config.json rope_scaling` (only `rope_type:"llama3"`). Validated
+  (`RopeScalingTests` + real Llama still " Paris" with scaling active). Closes the long-context limitation.
+- **GPT-2 safetensors bit-parity VALIDATED** — downloaded `openai-community/gpt2` `model.safetensors`
+  (548 MB → `C:\gpt2\`), `Load_RealGpt2Safetensors_BitParity_WithBinFixture` PASSES: loader output is
+  **byte-for-byte identical** to `gpt2_small.bin`. **ALL loaders now validated on real models.**
 
-**Resume — pick one:**
-1. **Generic HF tokenizer (Llama-3 / Mistral)** — generalise beyond `QwenTokenizer` (its own
-   pre-tokenizer) to unlock `QwenChatModel`-style turnkey for the whole family. Validation limited
-   (only Qwen on the dev box).
-2. **Validate GPT-2 safetensors loader end-to-end** — drop a real GPT-2 `model.safetensors` at `C:\gpt2\`,
-   flip `Load_RealGpt2Safetensors_BitParity_WithBinFixture` to `[Fact]` (the last unvalidated loader).
-3. **Anomaly operator workflow / productization** — real Prometheus metrics → per-pod LM-head adapter
-   lifecycle (the deployment story now that the ML verdicts are settled).
-4. **Fix `convert_llama.py` RoPE permute** (legacy; needs Python to test, low ROI) or the **decode lever**
-   (LM-head alloc-free parallel matmul; low strategic ROI per the pivot).
+**Out-of-repo dev artifacts (re-runs):** `C:\gpt2\model.safetensors`, `C:\llama3\{config,tokenizer,tokenizer_config}.json + model.safetensors`,
+`C:\qwen3b\model.safetensors`, `D:\k8s_anomaly_production.bin`. Real-model tests are `[LongFact]` (flip to `[Fact]` to run).
+
+**Full suite: 765 / 0 / 90 green. The 2026-05-22 batch is COMMITTED (`llama` commits); the 2026-05-23
+work (generic tokenizer + chat + rope_scaling + tests) — CHECK `git status`, commit if not yet done.
+Working tree was clean at session end except pre-existing staged marketing files (not mine).**
+
+**Resume — pick one (loading + chat tracks are now fully closed & validated):**
+1. **Anomaly operator workflow / productization** — real Prometheus metrics → per-pod LM-head adapter
+   lifecycle (deployment story; ML verdicts settled — LM-head LoRA on a trained base is the recommendation).
+2. **Mistral / non-ByteLevel tokenizers** — extend the generic tokenizer if a SentencePiece/Unigram model
+   matters (currently BPE-only; Mistral pre-tokenizer untested — drop a Mistral dir to validate).
+3. **Fix `Scripts/convert_llama.py` RoPE permute** (legacy; needs Python to test, low ROI) or the
+   **decode lever** (LM-head alloc-free parallel matmul; low strategic ROI per the pivot).
 
 ---
 
