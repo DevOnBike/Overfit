@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Anomalies.Baseline;
 using DevOnBike.Overfit.Anomalies.Gpt;
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 using DevOnBike.Overfit.Anomalies.Training;
@@ -130,11 +131,14 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
             Console.WriteLine();
             var (loraNormal, loraIncident) = StreamScenario(model, verbose: true);
 
-            // ── Before / after ─────────────────────────────────────────────────
+            // ── Three-way: classical floor vs GPT base vs GPT+LoRA ──────────────
+            var (ewmaNormal, ewmaIncident) = EwmaFloor();
+
             Console.WriteLine();
-            Console.WriteLine("══ Before / after ══");
-            Console.WriteLine($"  benign 'normal'    base = {baseNormal,7:F2}  →  LoRA = {loraNormal,7:F2}   (false-positive pressure — lower is better)");
-            Console.WriteLine($"  injected incident  base = {baseIncident,7:F2}  →  LoRA = {loraIncident,7:F2}   (must stay high)");
+            Console.WriteLine("══ Three-way — benign 'normal' (lower = fewer false positives) / injected incident (must stay high) ══");
+            Console.WriteLine($"  EWMA floor (classical, model-free)   normal = {ewmaNormal,7:F2}   incident = {ewmaIncident,7:F2}");
+            Console.WriteLine($"  GPT base                             normal = {baseNormal,7:F2}   incident = {baseIncident,7:F2}");
+            Console.WriteLine($"  GPT + per-deployment LoRA            normal = {loraNormal,7:F2}   incident = {loraIncident,7:F2}");
             Console.WriteLine();
 
             var flattened = loraNormal < baseNormal;
@@ -142,9 +146,12 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
             Console.WriteLine(flattened && stillFires
                 ? "LoRA flattened the benign regime toward zero AND the incident still fires far above it —"
                 : "Result above (random/short Quick base may need a longer fine-tune to fully separate) —");
-            Console.WriteLine("adapting to a deployment's benign drift lowers false positives without blinding the");
-            Console.WriteLine("detector. This adaptive, per-deployment learning is the part an inference-only");
-            Console.WriteLine("engine cannot do — the LoRA delta merges into the same zero-alloc decode path.");
+            Console.WriteLine("note the EWMA floor: a trivial classical baseline already separates this clean regime,");
+            Console.WriteLine("and the un-adapted GPT base does NOT clearly beat it (cross-pod residual surprise = a");
+            Console.WriteLine("higher 'normal' floor). The transformer's real edge is the per-deployment LoRA");
+            Console.WriteLine("adaptation — lowering false positives without blinding the detector — the adaptive");
+            Console.WriteLine("learning an inference-only engine cannot do; the LoRA delta merges into the same");
+            Console.WriteLine("zero-alloc decode path.");
         }
 
         // ── Stream a steady normal regime, then inject one incident ─────────────
@@ -214,6 +221,19 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
             {
                 if (File.Exists(loraPath)) { File.Delete(loraPath); }
             }
+        }
+
+        // ── Classical EWMA floor over the SAME stream (model-free reference) ────
+        private static (float normal, float incident) EwmaFloor()
+        {
+            var detector = new EwmaAnomalyDetector(warmupSnapshots: ContextSnapshots);
+            var normal = 0f;
+            for (var i = 0; i < ContextSnapshots * 2; i++)
+            {
+                var r = detector.Score(NormalSnapshot());
+                if (!r.IsWarmup) { normal = r.Score; }
+            }
+            return (normal, detector.Score(AnomalySnapshot()).Score);
         }
 
         private static void Report(int step, AnomalyScore s)

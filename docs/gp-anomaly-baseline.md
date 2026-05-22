@@ -60,3 +60,32 @@ surprise score.
 Deferred — it's a credibility/rigor experiment, not a product feature. Pick it up
 when we want a defensible "transformer vs classical" claim for the blog/launch.
 Lead with the EWMA/z-score floor (hours), escalate to the GP (days) only if warranted.
+
+## Results — EWMA floor implemented + benchmarked (2026-05-22)
+
+`EwmaAnomalyDetector` (per-metric EWMA mean/variance, RiskMetrics form; score = mean
+`½·z²`; same `AnomalyScore` shape, named worst-metric) + fast unit tests
+(`EwmaAnomalyDetectorTests`) + a head-to-head `[LongFact]`
+(`GptVsEwmaBaselineComparisonTests`): train a Quick GPT base on the fixture CSV, score
+one pod's real stream + 3 injected anomalies (OOM / latency / CPU) with both detectors.
+
+**Verdict (honest, mildly unflattering — exactly the point):** on the **un-adapted**
+Quick base the EWMA floor **out-separates** the GPT detector. Representative run:
+
+```
+detector  mean-normal   OOM                    LATENCY            CPU
+GPT       ~2.7          4.5 [oom_events_rate]   3.1 [latency_p99]  4.8 [cpu_throttle]   ~1.6× sep
+EWMA      0.66          5.65 [memory]           2.85 [latency_p99] 5.45 [cpu_usage]     ~8×   sep
+```
+
+The cross-pod GPT base carries a high *normal* floor (~2.7, the same residual surprise
+that read 5.68 on the 256d production base), so its per-anomaly margins are thin; the
+EWMA's per-pod adaptive baseline sits near zero, giving far stronger separation. GPT's
+edge shows in attribution (it nailed `oom_events_rate`; EWMA flagged the correlated
+`memory`). **Conclusion:** the GPT detector's real advantage is **per-pod LoRA
+adaptation** (which drives normal → ~0 and separation → thousands×, see
+`GptAnomalyLoRA*` tests), NOT the raw base — against the EWMA floor the un-adapted base
+barely competes. **GP escalation is therefore NOT warranted now**: the LoRA-adapted GPT
+already beats the floor decisively; a GP would only matter if we needed to beat EWMA
+*without* adaptation, which isn't the product. EWMA stays as the cheap deployable
+sanity floor + the honest comparison baseline.
