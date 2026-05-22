@@ -3,8 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.IO;
-
 namespace DevOnBike.Overfit.LanguageModels.Loading
 {
     /// <summary>Factory: open a single-file or sharded safetensors source from a path or directory.</summary>

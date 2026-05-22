@@ -4,8 +4,6 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Buffers.Binary;
-using System.Collections.Generic;
-using System.IO;
 using System.Text.Json;
 
 namespace DevOnBike.Overfit.LanguageModels.Loading

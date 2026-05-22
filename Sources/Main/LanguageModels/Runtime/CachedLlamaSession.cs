@@ -22,7 +22,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     ///
     /// Thread-safety: one session per thread.
     /// </summary>
-    public sealed class CachedLlamaSession : IDisposable
+    public sealed class CachedLlamaSession : ISlmSession
     {
         private readonly GPT1Config _config;
         private readonly CachedGptStack _stack;
@@ -74,6 +74,20 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         public int Position => _cache.CurrentLength;
         public bool IsFull => _cache.IsFull;
+
+        // ── ISlmSession surface (wires this engine into ChatSession + the SLM contract) ──
+
+        /// <summary>Live token count in the KV cache (alias of <see cref="Position"/>).</summary>
+        public int CurrentPosition => _cache.CurrentLength;
+
+        /// <summary>Maximum context the cache can hold this session.</summary>
+        public int MaxContextLength => _cache.MaxLength;
+
+        /// <summary>Vocabulary size (logits width).</summary>
+        public int VocabularySize => _config.VocabSize;
+
+        /// <summary>This runtime always decodes through a KV cache.</summary>
+        public bool HasKeyValueCache => true;
 
         /// <summary>Tokens evicted so far by the sliding window (0 until the cache first fills).</summary>
         public int BasePosition => _cache.BasePosition;
@@ -212,6 +226,50 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 _logits, in sampling, _random, _indexScratch, _scoreScratch);
             DecodeToken(token);
             return token;
+        }
+
+        /// <summary>
+        /// Prefills <paramref name="promptTokens"/> then greedily fills
+        /// <paramref name="outputTokens"/> (bounded by <see cref="GenerationOptions.MaxNewTokens"/>),
+        /// stopping early on the configured end-of-text token. Returns the number of
+        /// tokens written. Mirrors <see cref="CachedSlmSession.Generate"/>.
+        /// </summary>
+        public int Generate(
+            ReadOnlySpan<int> promptTokens,
+            Span<int> outputTokens,
+            in GenerationOptions options)
+        {
+            ThrowIfDisposed();
+
+            Reset(promptTokens);
+
+            var sampling = options.Sampling;
+            var generated = 0;
+            while (generated < outputTokens.Length && generated < options.MaxNewTokens)
+            {
+                var token = GenerateNextToken(in sampling);
+                outputTokens[generated] = token;
+                generated++;
+
+                if (options.StopOnEndOfTextToken &&
+                    options.EndOfTextTokenId >= 0 &&
+                    token == options.EndOfTextTokenId)
+                {
+                    break;
+                }
+            }
+            return generated;
+        }
+
+        /// <summary>Copies the end-of-prompt / last-decode logits into <paramref name="destination"/>.</summary>
+        public void GetLastLogits(Span<float> destination)
+        {
+            ThrowIfDisposed();
+            if (destination.Length < VocabularySize)
+            {
+                throw new ArgumentException("Destination span is too small for logits.", nameof(destination));
+            }
+            _logits.AsSpan().CopyTo(destination);
         }
 
         /// <summary>

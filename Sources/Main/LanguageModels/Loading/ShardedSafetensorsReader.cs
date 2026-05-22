@@ -3,8 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Collections.Generic;
-using System.IO;
 using System.Text.Json;
 
 namespace DevOnBike.Overfit.LanguageModels.Loading

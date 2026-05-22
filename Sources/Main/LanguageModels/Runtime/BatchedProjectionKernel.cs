@@ -5,7 +5,6 @@
 
 using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.LanguageModels.Runtime

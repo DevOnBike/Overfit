@@ -3,7 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.IO;
+using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using System.Text;
 using DevOnBike.Overfit.DeepLearning;
@@ -22,11 +22,14 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
     ///   <item>the LM head is <c>wte.T → [d, vocab]</c> (Overfit's GPT-2 configs are untied).</item>
     /// </list>
     ///
-    /// Rather than re-implement the parameter layout, the loader serialises the mapped
-    /// weights into the exact byte stream <see cref="GPT1Model.Load"/> already reads
-    /// (the order is identical to <c>convert_gpt2.py</c> / <see cref="GPT1Model.Save"/>),
-    /// then loads it — so ordering and shapes are guaranteed by the validated load path.
-    /// Tensor names are resolved with or without the <c>transformer.</c> prefix.
+    /// Rather than re-implement the parameter layout, the loader produces the exact
+    /// byte sequence <see cref="GPT1Model.Load"/> already reads (identical order to
+    /// <c>convert_gpt2.py</c> / <see cref="GPT1Model.Save"/>) and feeds it through a
+    /// <see cref="SequentialChunkReadStream"/> — one mapped parameter block at a time.
+    /// Because the whole <c>.bin</c> is never buffered, peak load RAM is
+    /// <c>model + one parameter block</c> rather than <c>model + full serialized copy</c>
+    /// (the earlier <see cref="MemoryStream"/> round-trip's ~2× peak). Tensor names are
+    /// resolved with or without the <c>transformer.</c> prefix.
     /// </summary>
     public static class SafetensorsGpt2Loader
     {
@@ -46,23 +49,20 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             if (reader is null) { throw new ArgumentNullException(nameof(reader)); }
             if (config is null) { throw new ArgumentNullException(nameof(config)); }
 
-            using var ms = new MemoryStream();
-            using (var writer = new BinaryWriter(ms, Encoding.UTF8, leaveOpen: true))
-            {
-                WriteBinStream(reader, config, writer);
-            }
-
-            ms.Position = 0;
             var model = new GPT1Model(config);
-            using (var binReader = new BinaryReader(ms, Encoding.UTF8, leaveOpen: true))
-            {
-                model.Load(binReader);
-            }
+            // Stream the mapped weights through GPT1Model.Load one block at a time —
+            // no full-model MemoryStream, so only the current block's scratch lives
+            // alongside the (already-allocated) model parameters.
+            using var stream = new SequentialChunkReadStream(EnumerateBlocks(reader, config));
+            using var binReader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
+            model.Load(binReader);
             return model;
         }
 
-        // Serialises the mapped GPT-2 weights in GPT1Model.Load order.
-        internal static void WriteBinStream(ISafetensorsSource reader, GPT1Config cfg, BinaryWriter w)
+        // Yields the mapped GPT-2 weights as length-prefixed param blocks, in
+        // GPT1Model.Load order. Each yielded byte[] is one Parameter.Load record
+        // (int32 element count + little-endian float payload).
+        internal static IEnumerable<byte[]> EnumerateBlocks(ISafetensorsSource reader, GPT1Config cfg)
         {
             int d = cfg.DModel, heads = cfg.NHeads, layers = cfg.NLayers;
             int vocab = cfg.VocabSize, ctx = cfg.ContextLength, dff = cfg.DFF;
@@ -72,18 +72,18 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 throw new InvalidDataException($"DModel ({d}) is not divisible by NHeads ({heads}).");
             }
 
-            // 1–2. token + position embeddings.
-            var wte = LoadTensor(reader, cfg, "wte.weight", (long)vocab * d);
-            WriteParam(w, wte);
-            WriteParam(w, LoadTensor(reader, cfg, "wpe.weight", (long)ctx * d));
+            // 1–2. token + position embeddings. (wte is re-read for the LM head at the
+            // end rather than retained, so it does not pin ~vocab*d floats across the load.)
+            yield return BuildParam(LoadTensor(reader, cfg, "wte.weight", (long)vocab * d));
+            yield return BuildParam(LoadTensor(reader, cfg, "wpe.weight", (long)ctx * d));
 
             // 3. transformer blocks.
             for (var layer = 0; layer < layers; layer++)
             {
                 var p = $"h.{layer}";
 
-                WriteParam(w, LoadTensor(reader, cfg, $"{p}.ln_1.weight", d));
-                WriteParam(w, LoadTensor(reader, cfg, $"{p}.ln_1.bias", d));
+                yield return BuildParam(LoadTensor(reader, cfg, $"{p}.ln_1.weight", d));
+                yield return BuildParam(LoadTensor(reader, cfg, $"{p}.ln_1.bias", d));
 
                 var cAttn = LoadTensor(reader, cfg, $"{p}.attn.c_attn.weight", (long)d * 3 * d); // [d, 3d]
                 var cAttnB = LoadTensor(reader, cfg, $"{p}.attn.c_attn.bias", 3L * d);           // [3d]
@@ -92,40 +92,37 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 // Per head: Wq, Bq, Wk, Bk, Wv, Bv, Wo  (Q/K/V cols at offset {0,1,2}*d).
                 for (var h = 0; h < heads; h++)
                 {
-                    WriteColBlock(w, cAttn, d, 3 * d, 0 * d + h * dHead, dHead); // Wq [d, dHead]
-                    WriteRange(w, cAttnB, 0 * d + h * dHead, dHead);            // Bq [dHead]
-                    WriteColBlock(w, cAttn, d, 3 * d, 1 * d + h * dHead, dHead); // Wk
-                    WriteRange(w, cAttnB, 1 * d + h * dHead, dHead);            // Bk
-                    WriteColBlock(w, cAttn, d, 3 * d, 2 * d + h * dHead, dHead); // Wv
-                    WriteRange(w, cAttnB, 2 * d + h * dHead, dHead);            // Bv
-                    WriteRowBlock(w, cProj, d, h * dHead, dHead);              // Wo [dHead, d]
+                    yield return BuildParam(ColBlock(cAttn, d, 3 * d, 0 * d + h * dHead, dHead)); // Wq [d, dHead]
+                    yield return BuildParam(Range(cAttnB, 0 * d + h * dHead, dHead));             // Bq [dHead]
+                    yield return BuildParam(ColBlock(cAttn, d, 3 * d, 1 * d + h * dHead, dHead)); // Wk
+                    yield return BuildParam(Range(cAttnB, 1 * d + h * dHead, dHead));             // Bk
+                    yield return BuildParam(ColBlock(cAttn, d, 3 * d, 2 * d + h * dHead, dHead)); // Wv
+                    yield return BuildParam(Range(cAttnB, 2 * d + h * dHead, dHead));             // Bv
+                    yield return BuildParam(RowBlock(cProj, d, h * dHead, dHead));                // Wo [dHead, d]
                 }
-                WriteParam(w, LoadTensor(reader, cfg, $"{p}.attn.c_proj.bias", d));
+                yield return BuildParam(LoadTensor(reader, cfg, $"{p}.attn.c_proj.bias", d));
 
-                WriteParam(w, LoadTensor(reader, cfg, $"{p}.ln_2.weight", d));
-                WriteParam(w, LoadTensor(reader, cfg, $"{p}.ln_2.bias", d));
+                yield return BuildParam(LoadTensor(reader, cfg, $"{p}.ln_2.weight", d));
+                yield return BuildParam(LoadTensor(reader, cfg, $"{p}.ln_2.bias", d));
 
-                WriteParam(w, LoadTensor(reader, cfg, $"{p}.mlp.c_fc.weight", (long)d * dff));   // [d, dff]
-                WriteParam(w, LoadTensor(reader, cfg, $"{p}.mlp.c_fc.bias", dff));
-                WriteParam(w, LoadTensor(reader, cfg, $"{p}.mlp.c_proj.weight", (long)dff * d)); // [dff, d]
-                WriteParam(w, LoadTensor(reader, cfg, $"{p}.mlp.c_proj.bias", d));
+                yield return BuildParam(LoadTensor(reader, cfg, $"{p}.mlp.c_fc.weight", (long)d * dff));   // [d, dff]
+                yield return BuildParam(LoadTensor(reader, cfg, $"{p}.mlp.c_fc.bias", dff));
+                yield return BuildParam(LoadTensor(reader, cfg, $"{p}.mlp.c_proj.weight", (long)dff * d)); // [dff, d]
+                yield return BuildParam(LoadTensor(reader, cfg, $"{p}.mlp.c_proj.bias", d));
             }
 
             // 4. final norm.
-            WriteParam(w, LoadTensor(reader, cfg, "ln_f.weight", d));
-            WriteParam(w, LoadTensor(reader, cfg, "ln_f.bias", d));
+            yield return BuildParam(LoadTensor(reader, cfg, "ln_f.weight", d));
+            yield return BuildParam(LoadTensor(reader, cfg, "ln_f.bias", d));
 
-            // 5. LM head = wte transposed to [d, vocab].
-            var lmHead = new float[(long)d * vocab];
-            for (var i = 0; i < d; i++)
+            // 5. LM head = wte transposed to [d, vocab]. Only untied models read it;
+            // GPT-2 configs are untied. Building the block in place (transpose written
+            // straight into the output bytes) avoids a second ~vocab*d float scratch.
+            if (!cfg.TieWeights)
             {
-                var row = i * vocab;
-                for (var v = 0; v < vocab; v++)
-                {
-                    lmHead[row + v] = wte[v * d + i];
-                }
+                var wte = LoadTensor(reader, cfg, "wte.weight", (long)vocab * d);
+                yield return BuildTransposedLmHead(wte, vocab, d);
             }
-            WriteParam(w, lmHead);
         }
 
         // ── tensor IO + slicing helpers ─────────────────────────────────────
@@ -153,20 +150,43 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 $"GPT-2 tensor '{suffix}' (or 'transformer.{suffix}') not found in safetensors header.");
         }
 
-        private static void WriteParam(BinaryWriter w, float[] data)
+        // A length-prefixed Parameter.Load record: int32 element count + LE float payload.
+        private static byte[] BuildParam(float[] data)
         {
-            w.Write(data.Length);
-            w.Write(MemoryMarshal.AsBytes<float>(data));
+            var bytes = new byte[sizeof(int) + (long)data.Length * sizeof(float)];
+            BinaryPrimitives.WriteInt32LittleEndian(bytes, data.Length);
+            MemoryMarshal.AsBytes<float>(data).CopyTo(bytes.AsSpan(sizeof(int)));
+            return bytes;
         }
 
-        private static void WriteRange(BinaryWriter w, float[] src, int offset, int len)
+        // wte [vocab, d] → LM head [d, vocab], transposed straight into the record bytes.
+        private static byte[] BuildTransposedLmHead(float[] wte, int vocab, int d)
         {
-            w.Write(len);
-            w.Write(MemoryMarshal.AsBytes(src.AsSpan(offset, len)));
+            var count = (long)d * vocab;
+            var bytes = new byte[sizeof(int) + count * sizeof(float)];
+            BinaryPrimitives.WriteInt32LittleEndian(bytes, checked((int)count));
+            var payload = bytes.AsSpan(sizeof(int));
+            // dst[i*vocab + v] = wte[v*d + i]
+            for (var i = 0; i < d; i++)
+            {
+                var dstRow = i * vocab;
+                for (var v = 0; v < vocab; v++)
+                {
+                    BinaryPrimitives.WriteSingleLittleEndian(payload.Slice((dstRow + v) * sizeof(float), sizeof(float)), wte[v * d + i]);
+                }
+            }
+            return bytes;
+        }
+
+        private static float[] Range(float[] src, int offset, int len)
+        {
+            var outBuf = new float[len];
+            src.AsSpan(offset, len).CopyTo(outBuf);
+            return outBuf;
         }
 
         // Extracts a [rows, colLen] column block from a row-major [rows, srcCols] matrix.
-        private static void WriteColBlock(BinaryWriter w, float[] src, int rows, int srcCols, int colOffset, int colLen)
+        private static float[] ColBlock(float[] src, int rows, int srcCols, int colOffset, int colLen)
         {
             var outBuf = new float[rows * colLen];
             for (var i = 0; i < rows; i++)
@@ -178,15 +198,15 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     outBuf[dstRow + c] = src[srcRow + c];
                 }
             }
-            WriteParam(w, outBuf);
+            return outBuf;
         }
 
         // Extracts a [rowLen, cols] row block from a row-major [rows, cols] matrix.
-        private static void WriteRowBlock(BinaryWriter w, float[] src, int cols, int rowOffset, int rowLen)
+        private static float[] RowBlock(float[] src, int cols, int rowOffset, int rowLen)
         {
             var outBuf = new float[rowLen * cols];
             src.AsSpan(rowOffset * cols, rowLen * cols).CopyTo(outBuf);
-            WriteParam(w, outBuf);
+            return outBuf;
         }
     }
 }
