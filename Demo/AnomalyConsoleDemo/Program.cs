@@ -124,7 +124,7 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
 
             Console.WriteLine();
             Console.WriteLine("══ Phase 2 — per-deployment LoRA adaptation ══");
-            Console.WriteLine("Fine-tuning an LM-head LoRA adapter on this pod's benign regime ...");
+            Console.WriteLine("Fine-tuning an all-linear LoRA adapter (LM-head + FFN + attention) on this pod's benign regime ...");
             using var merge = AdaptToRegime(model);
             Console.WriteLine("Adapter merged in place. Re-streaming the SAME regime, then the SAME incident:");
             Console.WriteLine();
@@ -169,13 +169,13 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
             return (normal, inc.Score);
         }
 
-        // ── Fine-tune an LM-head LoRA adapter on the benign regime, merge it in ──
+        // ── Fine-tune an all-linear LoRA adapter on the benign regime, merge it in ──
         private static Gpt1LoRAMergeAdapter AdaptToRegime(GPT1Model model)
         {
             var tps = MetricTokenizer.TokensPerSnapshot;
 
-            // A stable benign regime for this pod — tokenised into a periodic
-            // sequence the LM-head LoRA can learn. 48 snapshots ≫ the context window.
+            // A stable benign regime for this pod — tokenised into a periodic sequence
+            // the LoRA can learn. 48 snapshots ≫ the context window.
             var regime = new MetricSnapshot[48];
             for (var i = 0; i < regime.Length; i++)
             {
@@ -187,7 +187,12 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
                 Path.GetTempPath(), $"overfit_anomaly_lora_{Guid.NewGuid():N}.bin");
             try
             {
-                using (var tuner = new Gpt1LoRAFineTuner(model, rank: 16))
+                // Target ALL linear weights (LM-head + FFN + per-head attention Q/K/V/O).
+                // The target A/B (GptAnomalyLoRATargetComparisonTests) showed single-stage
+                // adaptation is base-dependent and high-variance on a small base — the
+                // union flattens the benign regime reliably (≈0.003 vs LM-head-only's
+                // 0.07–6.9 swing) while keeping the incident firing.
+                using (var tuner = new Gpt1LoRAFineTuner(model, rank: 16, LoRATargetModules.AllLinear))
                 {
                     // Fine-tune over the exact position range the detector exercises
                     // (ContextSnapshots × tokens-per-snapshot) so the merge lands where
@@ -195,7 +200,8 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
                     var history = tuner.FineTune(
                         corpus, steps: 300, contextLength: ContextSnapshots * tps, learningRate: 1e-2f);
                     Console.WriteLine(
-                        $"  LoRA loss {history[0]:F3} → {history[^1]:F3}  ({history.Count} steps, rank 16, LM head, base frozen)");
+                        $"  LoRA loss {history[0]:F3} → {history[^1]:F3}  ({history.Count} steps, rank 16, "
+                        + $"all-linear: {tuner.AdapterCount} adapters / {tuner.TrainableParameterCount} params, base frozen)");
                     tuner.Save(loraPath);
                 }
                 // tuner disposed → weight provider detached; model is plain again.
