@@ -30,51 +30,57 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 
 ## Last session — resume point (2026-05-22)
 
-**Two tracks advanced and largely closed: zero-Python loading + a usable chat runtime.**
-Strategic frame (set 2026-05-21, still holds): NOT chasing llama.cpp on decode speed;
-building the embeddability / training / product moat. See [[project-perf-sprint]],
-[[project-loading-story]], [[project-chat-runtime]] memories.
+**Big session — zero-Python loading completed, chat turnkey, and the anomaly+LoRA product
+track closed with an empirically-corrected verdict.** Strategic frame (still holds): NOT chasing
+llama.cpp on decode; embeddability / training / product moat. See [[project-loading-story]],
+[[project-loading-direction]], [[project-chat-runtime]], [[project-anomaly-lora]], [[project-perf-sprint]].
 
-**Zero-Python model loading (committed in the `lora` commits):**
-- `SafetensorsReader` — native HF safetensors (8-byte header + `Utf8JsonReader`, AOT-clean;
-  F32/F16/BF16 → F32). `SafetensorsGpt2Loader.Load(path, Gpt2Config.Small)` → `GPT1Model`,
-  no Python (C# port of `convert_gpt2.py`: conv1d, per-head Q/K/V/O split, `wte.T`; emits the
-  exact `GPT1Model.Load` byte stream). Sharded repos via `ISafetensorsSource` /
-  `ShardedSafetensorsReader` / `SafetensorsSource.Open(dir)` (parses `model.safetensors.index.json`).
-  Placement unit-proven; **real GPT-2 end-to-end bit-parity is UNVALIDATED** — needs a
-  `model.safetensors` dropped at `C:\gpt2\` (only `gpt2_small.bin` + torch checkpoint there).
-  `SafetensorsGpt2LoaderTests` has the `[LongFact]` ready to flip.
+**Zero-Python loading — DONE (all inbound formats native; one-directional, NO exporters — see
+[[project-loading-direction]]):**
+- **Native Llama/Qwen safetensors loader** `SafetensorsLlamaLoader.Load(dir, quantize)` →
+  `CachedLlamaInferenceEngine` + `LlamaConfigReader` (config.json via `Utf8JsonReader`). **VALIDATED
+  coherent on real Qwen2.5-0.5B** ("The capital of France is" → " Paris..."). Found+fixed a **RoPE
+  row-permute** bug (HF rotate-half → GGUF adjacent-pair on q/k weights+biases; `RopeKernel` is NEOX/
+  adjacent-pair so HF weights need the llama.cpp permute). NOTE: `Scripts/convert_llama.py` has the SAME
+  bug (unpermuted) — its `.bin` for RoPE models is suspect; not fixed (no Python here).
+- **GPT-2 loader peak-RAM 2×→~1×** — `SequentialChunkReadStream` streams one param block at a time into
+  `GPT1Model.Load` (bounded backward seek for the MHA legacy-peek); no full in-RAM `.bin` copy.
+- Parity test (`SafetensorsLlamaLoaderTests`) bit-identical vs `.bin` (GQA + permute); the loader-vs-.bin
+  test CANNOT catch RoPE-permute (cancels) — only the real-model run does.
 
-**Chat runtime — all four gaps closed (committed in `lora` commits, except sliding window):**
-- `ChatTemplate` (ChatML/Llama-3/Mistral + `Detect` from GGUF `chat_template`), `StopSequenceDetector`
-  (streaming string stops), turnkey `ChatSession` (history + render + generate + stops).
-  Validated end-to-end on real Qwen Q4_K_M.
-- **Sliding-window KV eviction (TODAY, UNCOMMITTED):** `KeyValueCache.Evict` + `BasePosition`,
-  RoPE rotates at `slot + BasePosition` (relative-offset-preserving, no re-rotation), opt-in
-  `CachedLlamaSession.EnableSlidingWindow(evictBlock)` (RoPE-only). Tests: `KeyValueCacheEvictTests`
-  (5 fast) + `SlidingWindowTests` ([LongFact], real Qwen). **CAVEAT:** sliding ≠ truncated-recompute
-  (StreamingLLM) — do not write an equivalence test (it correctly diverges ~77%).
+**Chat runtime — `ChatSession` now actually drives Llama/Qwen + turnkey:**
+- `CachedLlamaSession` now implements `ISlmSession` (was IDisposable-only — the GGUF/safetensors path
+  couldn't feed `ChatSession`). `HuggingFaceChatTemplate` reads `tokenizer_config.json` chat_template.
+- **`QwenChatModel.LoadFromDirectory(dir)`** — turnkey zero-Python HF dir → `ChatSession`
+  (`QwenChatTokenizer` adapts `QwenTokenizer`→`ITokenizer`). **VALIDATED on real Qwen2.5-0.5B**:
+  `Send("What is the capital of France?")` → "France's capital is Paris." (Qwen-only; cl100k pre-tokenizer.)
 
-**Also (committed):** one-top-level-type-per-file across the whole solution (split 12 files).
+**Anomaly + LoRA product track — closed with measured verdicts:**
+- **LoRA target A/B** on the anomaly task (Stage 1/2/3/All): tiny-RANDOM base → single-stage unstable,
+  union wins. **TRAINED 256d production base (retrained this session, val 7.70→0.86 in 4m23s) → LM-head
+  ALONE is best AND cheapest** (benign 6.45 false-positive → 0.0000, 31694× sep, 1 adapter / 8 KB; union
+  needs 205 adapters for worse sep). Cross-pod residual lives in OUTPUT calibration = LM head. **Demo
+  reverted to LM-head** (I'd wrongly switched to AllLinear on the misleading tiny-base result).
+- **EWMA classical baseline** (`EwmaAnomalyDetector`) + head-to-head: the un-adapted GPT base does NOT
+  beat a trivial EWMA floor (base normal 6.45 vs EWMA 0.00) — **the per-pod LoRA adaptation is the edge**,
+  not the raw transformer. Demo shows it three-way (EWMA / GPT base / GPT+LoRA). Verdict in
+  `docs/gp-anomaly-baseline.md`; GP escalation NOT warranted.
+- Production base regenerated at `D:\k8s_anomaly_production.bin` (20.8 MB, out of repo).
 
-**Full suite: 745 / 0 / 74 green.**
+**Full suite: 759 / 0 / 80 green. Everything COMMITTED (the `llama` commits) — working tree clean
+except pre-existing staged `index.html` / `linkedin-*` / `launch-copy.md` / `docs/parallel_opts.txt`
+(marketing, not mine).**
 
-**Git state — UNCOMMITTED on `next` (awaiting user commit):** the sliding-window batch only —
-`M KeyValueCache.cs`, `M CachedSingleHeadAttention.cs` (RoPE `+ BasePosition`), `M CachedLlamaSession.cs`
-(EnableSlidingWindow), `M ROADMAP.md`, and new `KeyValueCacheEvictTests.cs` + `SlidingWindowTests.cs`.
-Suggested message: `feat: sliding-window KV eviction (RoPE, opt-in CachedLlamaSession)`.
-(Pre-existing staged `docs/marketing/*` unrelated.)
-
-**Resume tomorrow — pick one:**
-1. **Native Llama/Qwen safetensors loader** (port `convert_llama.py`: RoPE/GQA/SwiGLU → a
-   `CachedLlamaInferenceEngine`-shaped model) AND fix the GPT-2 loader's ~2× peak-RAM (it
-   round-trips all weights through an in-memory `.bin` stream — stream into params instead).
-2. **Validate the GPT-2 safetensors loader end-to-end** — drop a real `model.safetensors` at
-   `C:\gpt2\`, flip `Load_RealGpt2Safetensors_BitParity_WithBinFixture` to `[Fact]`.
-3. **Back to the product moat** — anomaly+LoRA operator workflow (real metrics → per-pod adapter),
-   or Stage 2/3 LoRA on the production base.
-4. **Decode lever** — LM-head allocation-free parallel matmul (largest remaining decode lever;
-   honestly low strategic ROI per the pivot).
+**Resume — pick one:**
+1. **Generic HF tokenizer (Llama-3 / Mistral)** — generalise beyond `QwenTokenizer` (its own
+   pre-tokenizer) to unlock `QwenChatModel`-style turnkey for the whole family. Validation limited
+   (only Qwen on the dev box).
+2. **Validate GPT-2 safetensors loader end-to-end** — drop a real GPT-2 `model.safetensors` at `C:\gpt2\`,
+   flip `Load_RealGpt2Safetensors_BitParity_WithBinFixture` to `[Fact]` (the last unvalidated loader).
+3. **Anomaly operator workflow / productization** — real Prometheus metrics → per-pod LM-head adapter
+   lifecycle (the deployment story now that the ML verdicts are settled).
+4. **Fix `convert_llama.py` RoPE permute** (legacy; needs Python to test, low ROI) or the **decode lever**
+   (LM-head alloc-free parallel matmul; low strategic ROI per the pivot).
 
 ---
 

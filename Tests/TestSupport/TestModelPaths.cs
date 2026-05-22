@@ -92,6 +92,21 @@ namespace DevOnBike.Overfit.Tests.TestSupport
             }
         }
 
+        /// <summary>
+        /// A Llama-3 / Mistral-family HuggingFace directory (config.json + tokenizer.json +
+        /// tokenizer_config.json + model.safetensors), e.g. Llama-3.2-1B. Used to validate the
+        /// family-generic loader/tokenizer/chat path beyond Qwen. Default <c>C:\llama3</c>;
+        /// override with <c>OVERFIT_LLAMA_DIR</c>.
+        /// </summary>
+        public static class Llama
+        {
+            private const string EnvVar = "OVERFIT_LLAMA_DIR";
+            public static string Dir => Resolve(EnvVar, @"c:\llama3");
+            public static string SafetensorsPath => Path.Combine(Dir, "model.safetensors");
+            public static string TokenizerJsonPath => Path.Combine(Dir, "tokenizer.json");
+            public static string ConfigJsonPath => Path.Combine(Dir, "config.json");
+        }
+
         public static class Mnist
         {
             private const string EnvVar = "OVERFIT_MNIST_DIR";

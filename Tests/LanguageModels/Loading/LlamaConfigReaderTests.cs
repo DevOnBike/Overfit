@@ -78,5 +78,34 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             const string json = "{\"hidden_size\":64,\"num_attention_heads\":4}";  // no layers/vocab
             Assert.Throws<InvalidDataException>(() => LlamaConfigReader.Parse(Encoding.UTF8.GetBytes(json)));
         }
+
+        [Fact]
+        public void Parse_Llama3RopeScaling_Populated()
+        {
+            const string json =
+                "{\"hidden_size\":64,\"num_attention_heads\":4,\"num_hidden_layers\":2,\"vocab_size\":100," +
+                "\"rope_scaling\":{\"factor\":32.0,\"high_freq_factor\":4.0,\"low_freq_factor\":1.0," +
+                "\"original_max_position_embeddings\":8192,\"rope_type\":\"llama3\"}}";
+            var cfg = LlamaConfigReader.Parse(Encoding.UTF8.GetBytes(json));
+
+            Assert.NotNull(cfg.RopeScaling);
+            Assert.Equal(32f, cfg.RopeScaling!.Factor);
+            Assert.Equal(1f, cfg.RopeScaling.LowFreqFactor);
+            Assert.Equal(4f, cfg.RopeScaling.HighFreqFactor);
+            Assert.Equal(8192, cfg.RopeScaling.OriginalContextLength);
+        }
+
+        [Fact]
+        public void Parse_NonLlama3RopeScaling_Ignored()
+        {
+            // "linear"/"dynamic"/"yarn" aren't implemented → fall back to plain RoPE (null).
+            const string json =
+                "{\"hidden_size\":64,\"num_attention_heads\":4,\"num_hidden_layers\":2,\"vocab_size\":100," +
+                "\"rope_scaling\":{\"type\":\"linear\",\"factor\":4.0}}";
+            var cfg = LlamaConfigReader.Parse(Encoding.UTF8.GetBytes(json));
+
+            Assert.Null(cfg.RopeScaling);
+            Assert.Equal(2, cfg.NLayers);   // rest of the config still parsed (object skipped cleanly)
+        }
     }
 }

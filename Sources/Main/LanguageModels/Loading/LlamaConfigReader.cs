@@ -5,6 +5,7 @@
 
 using System.Text.Json;
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.LanguageModels.Rope;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 
 namespace DevOnBike.Overfit.LanguageModels.Loading
@@ -58,6 +59,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             int vocab = -1, maxPos = -1, headDim = -1;
             var ropeTheta = 10_000.0f;
             var tie = true;
+            RopeScaling? scaling = null;
 
             var reader = new Utf8JsonReader(json, isFinalBlock: true, state: default);
             if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
@@ -95,6 +97,11 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 {
                     reader.Read();
                     tie = reader.TokenType == JsonTokenType.True;
+                }
+                else if (reader.ValueTextEquals("rope_scaling"))
+                {
+                    reader.Read();
+                    scaling = ReadRopeScaling(ref reader);
                 }
                 else
                 {
@@ -144,7 +151,46 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 RoPETheta = ropeTheta,
                 FfnActivation = FeedForwardActivation.SwiGLU,
                 TieWeights = tie,
+                RopeScaling = scaling,
             };
+        }
+
+        // Parses the rope_scaling object (reader is on its StartObject). Returns a
+        // RopeScaling only for the Llama-3 "llama3" type; other types (linear/dynamic/yarn)
+        // or a null block fall back to plain RoPE.
+        private static RopeScaling? ReadRopeScaling(ref Utf8JsonReader reader)
+        {
+            if (reader.TokenType != JsonTokenType.StartObject)
+            {
+                if (reader.TokenType is JsonTokenType.StartArray) { reader.Skip(); }
+                return null;
+            }
+
+            string? type = null;
+            float factor = 0f, lowFreq = 1f, highFreq = 4f;
+            var origCtx = 0;
+            var depth = reader.CurrentDepth;
+
+            while (reader.Read())
+            {
+                if (reader.TokenType == JsonTokenType.EndObject && reader.CurrentDepth == depth) { break; }
+                if (reader.TokenType != JsonTokenType.PropertyName) { continue; }
+
+                if (reader.ValueTextEquals("rope_type") || reader.ValueTextEquals("type")) { reader.Read(); type = reader.GetString(); }
+                else if (reader.ValueTextEquals("factor")) { reader.Read(); factor = (float)reader.GetDouble(); }
+                else if (reader.ValueTextEquals("low_freq_factor")) { reader.Read(); lowFreq = (float)reader.GetDouble(); }
+                else if (reader.ValueTextEquals("high_freq_factor")) { reader.Read(); highFreq = (float)reader.GetDouble(); }
+                else if (reader.ValueTextEquals("original_max_position_embeddings")) { reader.Read(); origCtx = reader.GetInt32(); }
+                else
+                {
+                    reader.Read();
+                    if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray) { reader.Skip(); }
+                }
+            }
+
+            return type == "llama3" && factor > 0f && origCtx > 0
+                ? new RopeScaling(factor, lowFreq, highFreq, origCtx)
+                : null;
         }
     }
 }
