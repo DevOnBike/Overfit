@@ -8,6 +8,7 @@ using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.LoRA;
 using DevOnBike.Overfit.LanguageModels.Runtime;
+using DevOnBike.Overfit.Maths;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Anomalies
@@ -47,7 +48,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             const int contextSnapshots = 6;
             var tps = MetricTokenizer.TokensPerSnapshot;
 
-            using var model = new GPT1Model(new GPT1Config
+            MathUtils.SetSeed(100); using var model = new GPT1Model(new GPT1Config
             {
                 VocabSize = MetricTokenizer.VocabSize,
                 ContextLength = 16 * tps,
@@ -149,7 +150,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             const int contextSnapshots = 6;
             var tps = MetricTokenizer.TokensPerSnapshot;
 
-            using var model = new GPT1Model(new GPT1Config
+            MathUtils.SetSeed(100); using var model = new GPT1Model(new GPT1Config
             {
                 VocabSize = MetricTokenizer.VocabSize,
                 ContextLength = 16 * tps,

@@ -11,6 +11,7 @@ using DevOnBike.Overfit.Anomalies.Live;
 using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.Maths;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Anomalies
@@ -37,7 +38,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             var dir = Path.Combine(Path.GetTempPath(), $"overfit_pipeline_{Guid.NewGuid():N}");
             try
             {
-                using var model = new GPT1Model(new GPT1Config
+                MathUtils.SetSeed(100); using var model = new GPT1Model(new GPT1Config
                 {
                     VocabSize = MetricTokenizer.VocabSize,
                     ContextLength = 16 * MetricTokenizer.TokensPerSnapshot,

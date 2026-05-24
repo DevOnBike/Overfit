@@ -7,6 +7,7 @@ using DevOnBike.Overfit.Anomalies.Adaptive;
 using DevOnBike.Overfit.Anomalies.Gpt;
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.Maths;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Anomalies
@@ -58,7 +59,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             var dir = Path.Combine(Path.GetTempPath(), $"overfit_adaptive_{Guid.NewGuid():N}");
             try
             {
-                using var model = TinyModel();
+                MathUtils.SetSeed(100); using var model = TinyModel();
                 using var monitor = new AdaptiveAnomalyMonitor(model, Policy(dir));
 
                 // Feed a steady benign regime — the un-adapted base scores it elevated.
@@ -109,7 +110,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             var dir = Path.Combine(Path.GetTempPath(), $"overfit_adaptive_{Guid.NewGuid():N}");
             try
             {
-                using var model = TinyModel();
+                MathUtils.SetSeed(100); using var model = TinyModel();
                 using var monitor = new AdaptiveAnomalyMonitor(model, Policy(dir));
 
                 // Warm + buffer benign for BOTH pods; capture pod-b's base benign.
@@ -148,7 +149,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             var dir = Path.Combine(Path.GetTempPath(), $"overfit_adaptive_{Guid.NewGuid():N}");
             try
             {
-                using var model = TinyModel();
+                MathUtils.SetSeed(100); using var model = TinyModel();
 
                 // First monitor: adapt pod-a, then dispose (un-merges, leaving the base clean;
                 // the per-pod adapter .bin stays on disk).

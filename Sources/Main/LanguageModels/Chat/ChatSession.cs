@@ -56,6 +56,13 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
         /// <summary>The conversation so far (system / user / assistant turns).</summary>
         public IReadOnlyList<ChatMessage> History => _history;
 
+        /// <summary>
+        /// Stats for the most recent <see cref="Send"/> — prompt/generated token counts and the
+        /// decode time, exposing <see cref="GenerationStats.TokensPerSecond"/>. Timed over the
+        /// decode loop only (prompt prefill excluded), so it reflects steady-state throughput.
+        /// </summary>
+        public GenerationStats LastStats { get; private set; }
+
         public void AddSystem(string content) => _history.Add(ChatMessage.System(content));
 
         /// <summary>Clears the conversation history.</summary>
@@ -79,12 +86,21 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             var written = _tokenizer.Encode(promptText, promptTokens);
             _session.Reset(promptTokens.AsSpan(0, written));
 
-            var reply = Generate(in options, onText);
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var reply = Generate(in options, onText, out var generatedTokens);
+            stopwatch.Stop();
+            LastStats = new GenerationStats(
+                promptTokens: written,
+                generatedTokens: generatedTokens,
+                elapsedNanoseconds: stopwatch.Elapsed.Ticks * 100,   // 1 tick = 100 ns
+                allocatedBytes: 0,
+                usedKeyValueCache: true);
+
             _history.Add(ChatMessage.Assistant(reply));
             return reply;
         }
 
-        private string Generate(in GenerationOptions options, Action<string>? onText)
+        private string Generate(in GenerationOptions options, Action<string>? onText, out int generatedTokens)
         {
             var stops = new StopSequenceDetector(_stopSequences);
             var generated = new List<int>();
@@ -134,6 +150,7 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
                 reply.Append(tail);
                 onText?.Invoke(tail);
             }
+            generatedTokens = generated.Count;
             return reply.ToString();
         }
     }

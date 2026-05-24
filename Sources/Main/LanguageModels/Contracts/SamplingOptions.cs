@@ -34,6 +34,22 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
                 repetitionPenaltyContextSize: contextSize);
         }
 
+        /// <summary>
+        /// Min-P sampling (default minP 0.05): keep tokens with probability ≥ minP × P(top),
+        /// sample with <paramref name="temperature"/> from survivors. minP &gt; 0 selects the
+        /// <see cref="SamplingStrategy.MinP"/> strategy.
+        /// </summary>
+        public static SamplingOptions WithMinP(float minP = 0.05f, float temperature = 1.0f, int seed = 0)
+        {
+            return new SamplingOptions(
+                strategy: SamplingStrategy.MinP,
+                temperature: temperature,
+                topK: 0,
+                topP: 1.0f,
+                seed: seed,
+                minP: minP);
+        }
+
         public SamplingOptions(
             SamplingStrategy strategy,
             float temperature,
@@ -41,7 +57,8 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
             float topP,
             int seed,
             float repetitionPenalty = 1.0f,
-            int repetitionPenaltyContextSize = 0)
+            int repetitionPenaltyContextSize = 0,
+            float minP = 0f)
         {
             Strategy = strategy;
             Temperature = temperature;
@@ -50,6 +67,7 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
             Seed = seed;
             RepetitionPenalty = repetitionPenalty;
             RepetitionPenaltyContextSize = repetitionPenaltyContextSize;
+            MinP = minP;
         }
 
         public SamplingStrategy Strategy { get; }
@@ -78,5 +96,11 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
         /// Smaller windows let the model repeat tokens after some distance.
         /// </summary>
         public int RepetitionPenaltyContextSize { get; }
+
+        /// <summary>
+        /// Min-P threshold ∈ (0, 1): a token survives if its probability ≥ <c>MinP × P(top)</c>.
+        /// Used by <see cref="SamplingStrategy.MinP"/>. 0 = disabled. Typical: 0.05–0.1.
+        /// </summary>
+        public float MinP { get; }
     }
 }

@@ -360,6 +360,80 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// </summary>
         public ReadOnlySpan<float> LastHiddenState => _stack.LastFinalHidden;
 
+        /// <summary>Embedding vector length (model dimension).</summary>
+        public int EmbeddingDimension => _config.DModel;
+
+        /// <summary>
+        /// Encodes <paramref name="tokens"/> into a single embedding vector by pooling the
+        /// per-token final hidden states — the in-process embeddings primitive for RAG /
+        /// vector-store use. RESETS the session (it's a fresh encode pass, not generation;
+        /// the KV cache ends filled with these tokens). <paramref name="destination"/> must be
+        /// at least <see cref="EmbeddingDimension"/> long. L2-normalised by default (cosine-ready).
+        /// </summary>
+        public void Embed(
+            ReadOnlySpan<int> tokens,
+            Span<float> destination,
+            EmbeddingPooling pooling = EmbeddingPooling.Mean,
+            bool normalize = true)
+        {
+            ThrowIfDisposed();
+            if (tokens.IsEmpty) { throw new ArgumentException("Cannot embed an empty token sequence.", nameof(tokens)); }
+            var d = _config.DModel;
+            if (destination.Length < d)
+            {
+                throw new ArgumentException($"Destination ({destination.Length}) is smaller than embedding dimension ({d}).", nameof(destination));
+            }
+            if (tokens.Length > _cache.MaxLength)
+            {
+                throw new ArgumentException(
+                    $"Embedding input ({tokens.Length} tokens) exceeds context length {_cache.MaxLength}.", nameof(tokens));
+            }
+
+            Reset();
+            var dst = destination[..d];
+            dst.Clear();
+
+            for (var i = 0; i < tokens.Length; i++)
+            {
+                DecodeTokenWithoutLogits(tokens[i]);   // updates _stack.LastFinalHidden
+                var h = _stack.LastFinalHidden;
+                if (pooling == EmbeddingPooling.Mean)
+                {
+                    for (var j = 0; j < d; j++) { dst[j] += h[j]; }
+                }
+                else if (i == tokens.Length - 1)
+                {
+                    h[..d].CopyTo(dst);
+                }
+            }
+
+            if (pooling == EmbeddingPooling.Mean)
+            {
+                var inv = 1f / tokens.Length;
+                for (var j = 0; j < d; j++) { dst[j] *= inv; }
+            }
+
+            if (normalize)
+            {
+                var norm = 0f;
+                for (var j = 0; j < d; j++) { norm += dst[j] * dst[j]; }
+                norm = MathF.Sqrt(norm);
+                if (norm > 1e-12f)
+                {
+                    var inv = 1f / norm;
+                    for (var j = 0; j < d; j++) { dst[j] *= inv; }
+                }
+            }
+        }
+
+        /// <summary>Convenience overload: allocates and returns the embedding vector.</summary>
+        public float[] Embed(ReadOnlySpan<int> tokens, EmbeddingPooling pooling = EmbeddingPooling.Mean, bool normalize = true)
+        {
+            var result = new float[_config.DModel];
+            Embed(tokens, result, pooling, normalize);
+            return result;
+        }
+
         public void Dispose()
         {
             if (_disposed)
