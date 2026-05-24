@@ -37,15 +37,20 @@ path; **no mmap** — `GgufReader` = `File.OpenRead` and the resident weights (`
 copy ALL bytes into managed arrays (4 GB Q4_K_M ⇒ ~4 GB managed RAM).
 
 **🟢 On-moat (do these):**
-1. **mmap GGUF resident weights** — NOT a speed feature; it's *loadability on low-end hardware* (the core
-   moat: a 7B Q4_K_M runs on an 8 GB laptop at working-set RAM, not full-model RAM). **STILL TODO — sized as
-   its own focused sprint (NOT safely completable alongside opts 1/3 this session).** Concrete plan:
-   `GgufReader` opens a `MemoryMappedFile` + view; the verbatim-layout resident types (`Q4KWeight`/`Q6KWeight`)
-   change their backing from `byte[] Blocks` to a `ReadOnlyMemory<byte>`/pointer over the mapped view (a
-   `MappedBlob` owner the engine holds for lifetime); the decode kernels read the span (math unchanged).
-   Q4_K/Q6_K are kept verbatim so they're direct views (zero-copy); Q8_0 de-interleaves on load so it still
-   copies (or read interleaved blocks directly — follow-on). Touches ~6-8 files incl. the hot decode path;
-   validate RAM (working-set, not full-model) + bit-parity. AOT-fine (`System.IO.MemoryMappedFiles`).
+1. **mmap GGUF resident weights** — **DONE 2026-05-25.** Loadability on low-end hardware (the core moat:
+   working-set RAM, not full-model RAM). `MemoryMappedModelFile` maps the whole file read-only and hands out
+   zero-copy `ReadOnlyMemory<byte>` slices (a nested `MemoryManager<byte>` over the mapped pages; the parent
+   owns the mapping). `Q4KWeight`/`Q6KWeight.Blocks` changed `byte[]`→`ReadOnlyMemory<byte>` (kept the `byte[]`
+   ctor delegating; added `BlockSpan`); kernels read `BlockSpan` / `fixed (byte* = w.BlockSpan)` (math
+   unchanged). `GgufLlamaLoader.Load(path, quantize, mmap: true)` slices verbatim-layout Q4_K/Q6_K weights
+   (FFN, LM head, per-head attention Q/K/V — each head a contiguous file run) straight from the map; the engine
+   holds the map and disposes it LAST. **Opt-in (`mmap: false` default) — flip default after broader soak.**
+   Q8_0 (de-interleaved) + F32-fallback still copy. **Measured on real Qwen2.5-3B Q4_K_M (2007 MB file):
+   managed-heap alloc 3202 → 1427 MB (−1776 MB, ~55 %), working-set delta 3167 → 1533 MB (~52 %).** The 1427 MB
+   residual is the F32 embedding table (dequantized for lookup) — the next RAM lever (quantized embedding
+   lookup), out of scope here. Bit-PARITY validated: mmap vs copy logits identical (maxDiff = 0). Tests:
+   `MemoryMappedModelFileTests` (4 fast), `GgufMmapParityTests` (2 `[LongFact]` — parity + RAM measurement).
+   AOT-clean (`System.IO.MemoryMappedFiles`).
 2. **Embeddings API** — **DONE 2026-05-25.** `CachedLlamaSession.Embed(tokens, pooling, normalize)` +
    `EmbeddingDimension` + `EmbeddingPooling` (Mean/LastToken), L2-normalised, pools per-token final hidden
    states. Validated on real Qwen (`EmbeddingsTests`): unit-norm, deterministic, semantic ordering holds
@@ -66,9 +71,10 @@ copy ALL bytes into managed arrays (4 GB Q4_K_M ⇒ ~4 GB managed RAM).
 6. **Function calling** — mostly a prompt + parse convention on top of constrained generation (after #3).
 7. **Vector store** — bigger; embeddings API (#2) is the prerequisite and the higher-value first step.
 
-**Session 2026-05-25 delivered: opt 1 (tokens/sec + Min-P; Mirostat deferred — stateful), opt 3 (embeddings).
-opt 2 (mmap) remains as the next focused sprint (plan above). Constrained generation + function calling +
-vector store stay queued.** Also fixed a recurring flaky-suite issue: added `MathUtils.SetSeed(int)` (per-thread
+**Session 2026-05-25 delivered: opt 1 (tokens/sec + Min-P; Mirostat deferred — stateful), opt 2 (mmap GGUF —
+~55 % less managed RAM, bit-identical, opt-in), opt 3 (embeddings). Next: flip mmap default after soak, then
+constrained generation (opt 3/JSON-Schema) + function calling + vector store (queued); quantized embedding
+lookup is the next RAM lever.** Also fixed a recurring flaky-suite issue: added `MathUtils.SetSeed(int)` (per-thread
 repro hook) and seeded the random-tiny-base anomaly `[Fact]` tests — which surfaced that **tiny-base LoRA
 convergence is init-sensitive** (some seeds diverge at lr 1e-2 / 300 steps; the seed pins a representative
 converging init — the rigorous validation remains the TRAINED production base in `[LongFact]`).

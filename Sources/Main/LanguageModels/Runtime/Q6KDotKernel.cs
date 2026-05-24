@@ -282,14 +282,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var outputSize = weight.OutputSize;
             var superBlocksPerRow = weight.SuperBlocksPerRow;
 
-            var blocks = weight.Blocks;
+            var blocks = weight.BlockSpan;
             for (var o = 0; o < outputSize; o++)
             {
                 var rowBase = (long)o * superBlocksPerRow * Q6KWeight.SuperBlockBytes;
                 var sum = 0f;
                 for (var sb = 0; sb < superBlocksPerRow; sb++)
                 {
-                    var block = blocks.AsSpan(
+                    var block = blocks.Slice(
                         (int)(rowBase + (long)sb * Q6KWeight.SuperBlockBytes), Q6KWeight.SuperBlockBytes);
                     sum += Dot(
                         block,
@@ -328,7 +328,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             QuantizeActivationQ8K(
                 input.Slice(0, inputSize), activationQuants, activationScales, activationBsums);
 
-            fixed (byte* blocksPtr = weight.Blocks)
+            fixed (byte* blocksPtr = weight.BlockSpan)
             fixed (sbyte* actQuants = activationQuants)
             fixed (float* actScales = activationScales)
             fixed (short* actBsums = activationBsums)

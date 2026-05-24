@@ -24,18 +24,45 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
     /// </summary>
     public static class GgufLlamaLoader
     {
+        /// <param name="path">Path to the GGUF model file.</param>
         /// <param name="quantize">
         /// When true (default) FFN / LM-head / attention weights become Q8_0-resident
         /// where dimensions allow. When false every weight loads as F32 — the
         /// pre-quantization decode path, used as the parity reference (step 2.5).
         /// </param>
-        public static CachedLlamaInferenceEngine Load(string path, bool quantize = true)
+        /// <param name="mmap">
+        /// When true the verbatim-layout K-quant weights (Q4_K / Q6_K — FFN, LM head, and
+        /// per-head attention Q/K/V) are backed by zero-copy slices of a read-only memory map
+        /// of the file instead of managed <c>byte[]</c> copies. The map's lifetime is handed
+        /// to the returned engine, which disposes it last. Cuts committed RAM for those
+        /// weights to zero (the OS pages them in as shared/clean working set). No effect on
+        /// Q8_0 (de-interleaved) or F32-fallback weights, which still copy.
+        /// </param>
+        public static CachedLlamaInferenceEngine Load(string path, bool quantize = true, bool mmap = false)
         {
             using var reader = new GgufReader(path);
-            return LoadFromReader(reader, quantize);
+            if (!mmap)
+            {
+                return LoadFromReader(reader, quantize);
+            }
+
+            // The map must outlive the reader (its FileStream closes when `using` exits) —
+            // weights hold slices into the map, not the reader. On any failure during build
+            // we own the map and must dispose it; on success ownership transfers to the engine.
+            var blob = new MemoryMappedModelFile(path);
+            try
+            {
+                return LoadFromReader(reader, quantize, blob);
+            }
+            catch
+            {
+                blob.Dispose();
+                throw;
+            }
         }
 
-        internal static CachedLlamaInferenceEngine LoadFromReader(GgufReader reader, bool quantize = true)
+        internal static CachedLlamaInferenceEngine LoadFromReader(
+            GgufReader reader, bool quantize = true, MemoryMappedModelFile? mmap = null)
         {
             var arch = reader.GetMeta("general.architecture", "qwen2");
 
@@ -139,9 +166,9 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     // Q4_K-native / Q8_0-native / F32-fallback independently from
                     // its file format. Wo dispatches separately (Q8_0 OK per-head;
                     // K-quant not — headDim < the 256-element super-block).
-                    var wq = LoadQkvHeads(reader, $"blk.{l}.attn_q.weight", nHeads, dModel, headDim, qFull, attnQuantizable);
-                    var wk = LoadQkvHeads(reader, $"blk.{l}.attn_k.weight", nKvHeads, dModel, headDim, kFull, attnQuantizable);
-                    var wv = LoadQkvHeads(reader, $"blk.{l}.attn_v.weight", nKvHeads, dModel, headDim, vFull, attnQuantizable);
+                    var wq = LoadQkvHeads(reader, $"blk.{l}.attn_q.weight", nHeads, dModel, headDim, qFull, attnQuantizable, mmap);
+                    var wk = LoadQkvHeads(reader, $"blk.{l}.attn_k.weight", nKvHeads, dModel, headDim, kFull, attnQuantizable, mmap);
+                    var wv = LoadQkvHeads(reader, $"blk.{l}.attn_v.weight", nKvHeads, dModel, headDim, vFull, attnQuantizable, mmap);
                     var wo = LoadOutputHeads(reader, $"blk.{l}.attn_output.weight", nHeads, dModel, headDim, oFull, attnQuantizable);
 
                     // Attention biases (optional — Qwen has them, Llama doesn't);
@@ -164,9 +191,9 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     DecodeWeight ffnGate, ffnUp, ffnDown;
                     if (quantize && dModel % Q8DotKernel.BlockSize == 0 && dFF % Q8DotKernel.BlockSize == 0)
                     {
-                        ffnGate = AllocAndLoadResident(reader, $"blk.{l}.ffn_gate.weight", dModel, dFF);
-                        ffnUp = AllocAndLoadResident(reader, $"blk.{l}.ffn_up.weight", dModel, dFF);
-                        ffnDown = AllocAndLoadResident(reader, $"blk.{l}.ffn_down.weight", dFF, dModel);
+                        ffnGate = AllocAndLoadResident(reader, $"blk.{l}.ffn_gate.weight", dModel, dFF, mmap);
+                        ffnUp = AllocAndLoadResident(reader, $"blk.{l}.ffn_up.weight", dModel, dFF, mmap);
+                        ffnDown = AllocAndLoadResident(reader, $"blk.{l}.ffn_down.weight", dFF, dModel, mmap);
                     }
                     else
                     {
@@ -224,12 +251,12 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 if (lmHeadInfo.Type == GgmlType.Q4_K && dModel % Q4KWeight.SuperBlockElements == 0)
                 {
                     // Native Q4_K — read the file's blocks straight in (step 3.2b).
-                    lmHead = LoadQ4KNative(reader, lmHeadInfo, dModel, vocab);
+                    lmHead = LoadQ4KNative(reader, lmHeadInfo, dModel, vocab, mmap);
                 }
                 else if (lmHeadInfo.Type == GgmlType.Q6_K && dModel % Q6KWeight.SuperBlockElements == 0)
                 {
                     // Native Q6_K — read the file's blocks straight in (step 3.3c).
-                    lmHead = LoadQ6KNative(reader, lmHeadInfo, dModel, vocab);
+                    lmHead = LoadQ6KNative(reader, lmHeadInfo, dModel, vocab, mmap);
                 }
                 else if (lmHeadInfo.Type == GgmlType.Q8_0)
                 {
@@ -296,7 +323,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
 
             return CachedLlamaInferenceEngine.CreateFromBuffers(
-                config, embedWeights, finalNormGamma, finalNormBeta, lmHead, layers);
+                config, embedWeights, finalNormGamma, finalNormBeta, lmHead, layers, mmap);
         }
 
         // ─── Helpers ────────────────────────────────────────────────────────
@@ -365,7 +392,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// matching both Q4KWeight's and Q8Weight's output-major layout, so no
         /// transpose any path.
         /// </summary>
-        private static DecodeWeight AllocAndLoadResident(GgufReader reader, string name, int inDim, int outDim)
+        private static DecodeWeight AllocAndLoadResident(
+            GgufReader reader, string name, int inDim, int outDim, MemoryMappedModelFile? mmap)
         {
             if (!reader.Tensors.TryGetValue(name, out var info))
             {
@@ -374,11 +402,11 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
             if (info.Type == GgmlType.Q4_K && inDim % Q4KWeight.SuperBlockElements == 0)
             {
-                return LoadQ4KNative(reader, info, inDim, outDim);
+                return LoadQ4KNative(reader, info, inDim, outDim, mmap);
             }
             if (info.Type == GgmlType.Q6_K && inDim % Q6KWeight.SuperBlockElements == 0)
             {
-                return LoadQ6KNative(reader, info, inDim, outDim);
+                return LoadQ6KNative(reader, info, inDim, outDim, mmap);
             }
             if (info.Type == GgmlType.Q8_0)
             {
@@ -430,10 +458,19 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// with Q4_K super-blocks along the contraction dim, exactly matching
         /// Q4KWeight's output-major layout (step 3.2b).
         /// </summary>
-        private static Q4KWeight LoadQ4KNative(GgufReader reader, GgufTensorInfo info, int inDim, int outDim)
+        private static Q4KWeight LoadQ4KNative(
+            GgufReader reader, GgufTensorInfo info, int inDim, int outDim, MemoryMappedModelFile? mmap)
         {
             var blocksPerRow = inDim / Q4KWeight.SuperBlockElements;
             var totalBytes = checked((int)((long)outDim * blocksPerRow * Q4KWeight.SuperBlockBytes));
+
+            if (mmap is not null)
+            {
+                // Zero-copy: the file's block bytes ARE Q4KWeight's layout, verbatim.
+                var slice = mmap.Slice(reader.DataStart + (long)info.Offset, totalBytes);
+                return new Q4KWeight(slice, inDim, outDim);
+            }
+
             var bytes = new byte[totalBytes];
             reader.LoadTensorQ4_KRaw(info, bytes);
             return new Q4KWeight(bytes, inDim, outDim);
@@ -447,7 +484,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// </summary>
         private static DecodeWeight[] LoadQkvHeads(
             GgufReader reader, string name, int headCount, int dModel, int headDim,
-            float[] f32Scratch, bool quantizable)
+            float[] f32Scratch, bool quantizable, MemoryMappedModelFile? mmap)
         {
             if (!reader.Tensors.TryGetValue(name, out var info))
             {
@@ -456,11 +493,11 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
             if (quantizable && info.Type == GgmlType.Q4_K && dModel % Q4KWeight.SuperBlockElements == 0)
             {
-                return LoadQkvHeadsQ4K(reader, info, headCount, dModel, headDim);
+                return LoadQkvHeadsQ4K(reader, info, headCount, dModel, headDim, mmap);
             }
             if (quantizable && info.Type == GgmlType.Q6_K && dModel % Q6KWeight.SuperBlockElements == 0)
             {
-                return LoadQkvHeadsQ6K(reader, info, headCount, dModel, headDim);
+                return LoadQkvHeadsQ6K(reader, info, headCount, dModel, headDim, mmap);
             }
             if (quantizable && info.Type == GgmlType.Q8_0)
             {
@@ -510,19 +547,34 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// <see cref="Q4KWeight"/> — no de-interleave (unlike Q8_0).
         /// </summary>
         private static DecodeWeight[] LoadQkvHeadsQ4K(
-            GgufReader reader, GgufTensorInfo info, int headCount, int dModel, int headDim)
+            GgufReader reader, GgufTensorInfo info, int headCount, int dModel, int headDim,
+            MemoryMappedModelFile? mmap)
         {
             var blocksPerRow = dModel / Q4KWeight.SuperBlockElements;
             var bytesPerRow = blocksPerRow * Q4KWeight.SuperBlockBytes;
-            var totalBytes = checked((int)((long)headCount * headDim * bytesPerRow));
+            var headBytes = headDim * bytesPerRow;
 
+            if (mmap is not null)
+            {
+                // Zero-copy: head h's output rows are a contiguous byte run in the file,
+                // and the run IS Q4KWeight's layout verbatim — slice it straight in.
+                var baseOffset = reader.DataStart + (long)info.Offset;
+                var heads = new DecodeWeight[headCount];
+                for (var h = 0; h < headCount; h++)
+                {
+                    var slice = mmap.Slice(baseOffset + (long)h * headBytes, headBytes);
+                    heads[h] = new Q4KWeight(slice, dModel, headDim);
+                }
+                return heads;
+            }
+
+            var totalBytes = checked((int)((long)headCount * headBytes));
             var raw = ArrayPool<byte>.Shared.Rent(totalBytes);
             try
             {
                 reader.LoadTensorQ4_KRaw(info, raw.AsSpan(0, totalBytes));
 
                 var heads = new DecodeWeight[headCount];
-                var headBytes = headDim * bytesPerRow;
                 for (var h = 0; h < headCount; h++)
                 {
                     var bytes = new byte[headBytes];
@@ -544,10 +596,19 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// [outDim, inDim] with Q6_K super-blocks along the contraction dim,
         /// exactly matching Q6KWeight's output-major layout (step 3.3c).
         /// </summary>
-        private static Q6KWeight LoadQ6KNative(GgufReader reader, GgufTensorInfo info, int inDim, int outDim)
+        private static Q6KWeight LoadQ6KNative(
+            GgufReader reader, GgufTensorInfo info, int inDim, int outDim, MemoryMappedModelFile? mmap)
         {
             var blocksPerRow = inDim / Q6KWeight.SuperBlockElements;
             var totalBytes = checked((int)((long)outDim * blocksPerRow * Q6KWeight.SuperBlockBytes));
+
+            if (mmap is not null)
+            {
+                // Zero-copy: the file's block bytes ARE Q6KWeight's layout, verbatim.
+                var slice = mmap.Slice(reader.DataStart + (long)info.Offset, totalBytes);
+                return new Q6KWeight(slice, inDim, outDim);
+            }
+
             var bytes = new byte[totalBytes];
             reader.LoadTensorQ6_KRaw(info, bytes);
             return new Q6KWeight(bytes, inDim, outDim);
@@ -562,19 +623,34 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// <see cref="Q6KWeight"/>.
         /// </summary>
         private static DecodeWeight[] LoadQkvHeadsQ6K(
-            GgufReader reader, GgufTensorInfo info, int headCount, int dModel, int headDim)
+            GgufReader reader, GgufTensorInfo info, int headCount, int dModel, int headDim,
+            MemoryMappedModelFile? mmap)
         {
             var blocksPerRow = dModel / Q6KWeight.SuperBlockElements;
             var bytesPerRow = blocksPerRow * Q6KWeight.SuperBlockBytes;
-            var totalBytes = checked((int)((long)headCount * headDim * bytesPerRow));
+            var headBytes = headDim * bytesPerRow;
 
+            if (mmap is not null)
+            {
+                // Zero-copy: head h's output rows are a contiguous byte run in the file,
+                // and the run IS Q6KWeight's layout verbatim — slice it straight in.
+                var baseOffset = reader.DataStart + (long)info.Offset;
+                var heads = new DecodeWeight[headCount];
+                for (var h = 0; h < headCount; h++)
+                {
+                    var slice = mmap.Slice(baseOffset + (long)h * headBytes, headBytes);
+                    heads[h] = new Q6KWeight(slice, dModel, headDim);
+                }
+                return heads;
+            }
+
+            var totalBytes = checked((int)((long)headCount * headBytes));
             var raw = ArrayPool<byte>.Shared.Rent(totalBytes);
             try
             {
                 reader.LoadTensorQ6_KRaw(info, raw.AsSpan(0, totalBytes));
 
                 var heads = new DecodeWeight[headCount];
-                var headBytes = headDim * bytesPerRow;
                 for (var h = 0; h < headCount; h++)
                 {
                     var bytes = new byte[headBytes];

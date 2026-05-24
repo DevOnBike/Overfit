@@ -46,6 +46,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly LayerWeightBuffers[] _layers;
         private readonly StackWeights _stackWeights;
 
+        // Memory map backing zero-copy mmap-resident weights, if any. Owned by this
+        // engine and disposed LAST (after the weights that slice into it) — see Dispose().
+        private readonly IDisposable? _backingFile;
+
         private bool _disposed;
 
         // ── Internal weight container per layer ───────────────────────────────
@@ -77,7 +81,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             TensorStorage<float> finalNormGamma,
             TensorStorage<float> finalNormBeta,
             DecodeWeight lmHead,
-            LayerWeightBuffers[] layers)
+            LayerWeightBuffers[] layers,
+            IDisposable? backingFile = null)
         {
             _config = config;
             _embedWeights = embedWeights;
@@ -85,6 +90,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _finalNormBeta = finalNormBeta;
             _lmHead = lmHead;
             _layers = layers;
+            _backingFile = backingFile;
 
             // Build RoPE table if required
             _rope = config.UseRoPE
@@ -119,19 +125,20 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             TensorStorage<float> finalNormGamma,
             TensorStorage<float> finalNormBeta,
             DecodeWeight lmHead,
-            LayerWeightBuffers[] layers)
+            LayerWeightBuffers[] layers,
+            IDisposable? backingFile = null)
         {
             return new CachedLlamaInferenceEngine(
-                config, embedWeights, finalNormGamma, finalNormBeta, lmHead, layers);
+                config, embedWeights, finalNormGamma, finalNormBeta, lmHead, layers, backingFile);
         }
 
         /// <summary>
         /// Loads a model directly from a GGUF file (no Python conversion needed).
         /// Supports F32, F16, BF16 tensors. Quantized formats (Q4_K_M etc.) throw NotSupportedException.
         /// </summary>
-        public static CachedLlamaInferenceEngine LoadGguf(string path)
+        public static CachedLlamaInferenceEngine LoadGguf(string path, bool mmap = false)
         {
-            return GgufLlamaLoader.Load(path);
+            return GgufLlamaLoader.Load(path, quantize: true, mmap: mmap);
         }
 
         public GPT1Config Config => _config;
@@ -347,6 +354,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     t.Dispose();
                 }
             }
+
+            // Dispose the memory map LAST: every mmap-resident weight above holds a
+            // ReadOnlyMemory slice into it, so the pages must stay valid until they're gone.
+            _backingFile?.Dispose();
         }
 
         // ── Private helpers ───────────────────────────────────────────────────

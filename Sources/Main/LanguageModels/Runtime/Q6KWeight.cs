@@ -31,9 +31,19 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// <summary>Bytes per Q6_K super-block: 128 ql + 64 qh + 16 scales + 2 d.</summary>
         public const int SuperBlockBytes = 210;
 
+        /// <summary>Backs the weight with a managed <c>byte[]</c> (the copy path).</summary>
         public Q6KWeight(byte[] blocks, int inputSize, int outputSize)
+            : this((ReadOnlyMemory<byte>)(blocks ?? throw new ArgumentNullException(nameof(blocks))), inputSize, outputSize)
         {
-            ArgumentNullException.ThrowIfNull(blocks);
+        }
+
+        /// <summary>
+        /// Backs the weight with an arbitrary memory region — a managed array OR a slice of a
+        /// memory-mapped GGUF file (zero-copy; Q6_K's layout is kept verbatim). The region's
+        /// owner must outlive this weight.
+        /// </summary>
+        public Q6KWeight(ReadOnlyMemory<byte> blocks, int inputSize, int outputSize)
+        {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(inputSize);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(outputSize);
 
@@ -47,7 +57,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             if (blocks.Length < expected)
             {
                 throw new ArgumentException(
-                    $"blocks array ({blocks.Length} B) is smaller than " +
+                    $"blocks region ({blocks.Length} B) is smaller than " +
                     $"outputSize * superBlocksPerRow * {SuperBlockBytes} ({expected} B).",
                     nameof(blocks));
             }
@@ -57,9 +67,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             OutputSize = outputSize;
         }
 
-        /// <summary>Raw Q6_K super-block bytes, output-major: <c>OutputSize</c> rows
-        /// of <see cref="SuperBlocksPerRow"/> × <see cref="SuperBlockBytes"/>.</summary>
-        public byte[] Blocks { get; }
+        /// <summary>Raw Q6_K super-block bytes, output-major; read via <see cref="BlockSpan"/>.</summary>
+        public ReadOnlyMemory<byte> Blocks { get; }
+
+        /// <summary>The block bytes as a span (managed array or memory-mapped region).</summary>
+        public ReadOnlySpan<byte> BlockSpan => Blocks.Span;
 
         /// <summary>Contraction-dimension length (a multiple of <see cref="SuperBlockElements"/>).</summary>
         public int InputSize { get; }

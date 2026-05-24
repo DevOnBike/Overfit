@@ -31,6 +31,14 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         public IReadOnlyDictionary<string, object> Metadata { get; }
         public IReadOnlyDictionary<string, GgufTensorInfo> Tensors { get; }
 
+        /// <summary>
+        /// Byte offset (from the start of the file) of the 32-byte-aligned tensor data
+        /// section. A tensor's bytes begin at <c>DataStart + info.Offset</c> — used by the
+        /// mmap path (<see cref="MemoryMappedModelFile"/>) to slice verbatim-layout weights
+        /// straight from the file without a copy.
+        /// </summary>
+        public long DataStart => _dataStart;
+
         public GgufReader(string path)
             : this(File.OpenRead(path))
         {
