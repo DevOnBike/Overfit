@@ -3,55 +3,65 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using DevOnBike.Overfit.Anomalies.Alerting;
+using System.Collections.Generic;
+using DevOnBike.Overfit.Anomalies.Adaptive;
 using DevOnBike.Overfit.Anomalies.Alerting.Abstractions;
 using DevOnBike.Overfit.Anomalies.Alerting.Contracts;
 using DevOnBike.Overfit.Anomalies.Gpt;
 using DevOnBike.Overfit.Anomalies.Monitoring;
+using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 using DevOnBike.Overfit.DeepLearning;
-using DevOnBike.Overfit.LanguageModels.Runtime;
 using GptTrainingConfig = DevOnBike.Overfit.Anomalies.Training.GptTrainingConfig;
 
 namespace DevOnBike.Overfit.Anomalies.Live
 {
     /// <summary>
-    /// Production live monitoring pipeline.
+    /// Production live monitoring pipeline with per-pod adaptive learning.
     ///
     /// Flow (every ScrapeInterval):
-    ///   Prometheus → MetricSnapshot per pod → GptAnomalyDetector.Score → AlertEngine
+    ///   Prometheus → MetricSnapshot per pod → AdaptiveAnomalyMonitor.Observe (scores with the
+    ///   pod's adapter active) → raw-score alerting (sinks) + adaptation. After each scrape, pods
+    ///   showing sustained false-positive pressure are surfaced via OnAdaptationRecommended (or
+    ///   auto-adapted when AutoAdapt is set). Per-pod adapters persist as &lt;pod&gt;.lora.bin and
+    ///   reload on pod restart, so adaptation survives process/pod churn.
+    ///
+    /// Alerting is on the RAW GPT surprise score (nats/token) against
+    /// <see cref="LiveMonitoringOptions.AlertThreshold"/> / <see cref="LiveMonitoringOptions.CriticalThreshold"/>,
+    /// with a per-pod cooldown — the legacy [0,1]-normalised <c>AlertEngine</c> (autoencoder era)
+    /// is not used here, since the GPT score is unbounded nats, not a normalised reconstruction error.
     ///
     /// Usage:
     ///   await using var pipeline = LiveMonitoringPipeline.Create(
-    ///       config: new LiveMonitoringOptions { ... },
-    ///       checkpointPath: "checkpoint.bin",
-    ///       trainingConfig: OfflineTrainingConfig.Quick,
+    ///       options: new LiveMonitoringOptions { …, Adaptation = new AdaptivePolicy { AdapterDirectory = "/var/overfit/adapters" } },
+    ///       trainingConfig: GptTrainingConfig.Production,
+    ///       checkpointPath: "k8s_anomaly_production.bin",
     ///       new TeamsAlertSink(webhookUrl));
-    ///
     ///   await pipeline.RunAsync(cancellationToken);
     /// </summary>
     public sealed class LiveMonitoringPipeline : IAsyncDisposable
     {
-        private readonly PrometheusMetricSource _source;
-        private readonly AlertEngine _alertEngine;
+        private readonly IRawMetricSource _source;
         private readonly GPT1Model _model;
-        private readonly Dictionary<string, GptAnomalyDetector> _detectors = new();
+        private readonly AdaptiveAnomalyMonitor _monitor;
         private readonly LiveMonitoringOptions _options;
-        private readonly GptTrainingConfig _trainingConfig;
+        private readonly IAlertSink[] _sinks;
+        private readonly HashSet<string> _recommended = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, DateTime> _lastAlert = new(StringComparer.Ordinal);
         private bool _disposed;
 
         private LiveMonitoringPipeline(
-            PrometheusMetricSource source,
+            IRawMetricSource source,
             GPT1Model model,
-            AlertEngine alertEngine,
+            AdaptiveAnomalyMonitor monitor,
             LiveMonitoringOptions options,
-            GptTrainingConfig trainingConfig)
+            IAlertSink[] sinks)
         {
             _source = source;
             _model = model;
-            _alertEngine = alertEngine;
+            _monitor = monitor;
             _options = options;
-            _trainingConfig = trainingConfig;
+            _sinks = sinks;
         }
 
         /// <summary>Creates a live monitoring pipeline from a trained checkpoint.</summary>
@@ -62,6 +72,7 @@ namespace DevOnBike.Overfit.Anomalies.Live
             params IAlertSink[] sinks)
         {
             ArgumentNullException.ThrowIfNull(options);
+            ArgumentNullException.ThrowIfNull(options.Adaptation);
             ArgumentNullException.ThrowIfNull(trainingConfig);
             ArgumentNullException.ThrowIfNull(checkpointPath);
 
@@ -70,7 +81,6 @@ namespace DevOnBike.Overfit.Anomalies.Live
                 throw new FileNotFoundException($"GPT checkpoint not found: {checkpointPath}");
             }
 
-            // Load GPT model from checkpoint
             var gptConfig = new GPT1Config
             {
                 VocabSize = MetricTokenizer.VocabSize,
@@ -85,12 +95,14 @@ namespace DevOnBike.Overfit.Anomalies.Live
 
             var model = new GPT1Model(gptConfig);
             model.Eval();
+            using (var fs = File.OpenRead(checkpointPath))
+            using (var br = new BinaryReader(fs))
+            {
+                model.Load(br);
+            }
 
-            using var fs = File.OpenRead(checkpointPath);
-            using var br = new BinaryReader(fs);
-            model.Load(br);
+            var monitor = new AdaptiveAnomalyMonitor(model, options.Adaptation);
 
-            // Prometheus source
             var sourceConfig = new PrometheusMetricSourceConfig
             {
                 PrometheusBaseUrl = options.PrometheusBaseUrl,
@@ -99,21 +111,44 @@ namespace DevOnBike.Overfit.Anomalies.Live
             };
             var source = new PrometheusMetricSource(sourceConfig);
 
-            // Alert engine
-            var alertConfig = new AlertEngineConfig
-            {
-                AlertThreshold = options.AlertThreshold,
-                CriticalThreshold = options.CriticalThreshold,
-                CooldownDuration = options.CooldownDuration,
-            };
-            var alertEngine = new AlertEngine(alertConfig, sinks);
-
-            return new LiveMonitoringPipeline(source, model, alertEngine, options, trainingConfig);
+            return new LiveMonitoringPipeline(source, model, monitor, options, sinks);
         }
 
         /// <summary>
-        /// Runs the monitoring loop until cancellation.
-        /// Scrapes Prometheus every ScrapeInterval, scores each pod, fires alerts.
+        /// Test seam: builds the pipeline over an already-loaded model and an injected
+        /// <see cref="IRawMetricSource"/> (e.g. a scripted/in-memory source), so the full
+        /// scrape → score → alert → adaptive lifecycle can run without a live Prometheus
+        /// instance or a checkpoint file. The pipeline takes ownership of <paramref name="model"/>
+        /// and <paramref name="source"/> (disposed in <see cref="DisposeAsync"/>).
+        /// </summary>
+        internal static LiveMonitoringPipeline CreateForTest(
+            GPT1Model model,
+            IRawMetricSource source,
+            LiveMonitoringOptions options,
+            params IAlertSink[] sinks)
+        {
+            ArgumentNullException.ThrowIfNull(model);
+            ArgumentNullException.ThrowIfNull(source);
+            ArgumentNullException.ThrowIfNull(options);
+            ArgumentNullException.ThrowIfNull(options.Adaptation);
+
+            var monitor = new AdaptiveAnomalyMonitor(model, options.Adaptation);
+            return new LiveMonitoringPipeline(source, model, monitor, options, sinks);
+        }
+
+        /// <summary>Pods the monitor currently recommends adapting (sustained false-positive pressure).</summary>
+        public IReadOnlyList<string> PodsNeedingAdaptation() => _monitor.PodsNeedingAdaptation();
+
+        /// <summary>Adapts a pod on its buffered benign window (operator action). Returns the adapter path.</summary>
+        public string Adapt(string podName) => _monitor.Adapt(podName);
+
+        /// <summary>True if the pod currently has a per-pod adapter loaded.</summary>
+        public bool IsAdapted(string podName) => _monitor.IsAdapted(podName);
+
+        /// <summary>
+        /// Runs the monitoring loop until cancellation. Scrapes every ScrapeInterval, scores each
+        /// pod through the adaptive monitor, raises alerts on the raw score, and surfaces/auto-applies
+        /// per-pod adaptation.
         /// </summary>
         public async Task RunAsync(CancellationToken ct = default)
         {
@@ -127,21 +162,19 @@ namespace DevOnBike.Overfit.Anomalies.Live
 
                     foreach (var snapshot in snapshots)
                     {
-                        var detector = GetOrCreateDetector(snapshot.PodName);
-                        var result = detector.Score(snapshot);
-
+                        var result = _monitor.Observe(snapshot);
                         if (result.IsWarmup)
                         {
                             continue;
                         }
 
-                        _alertEngine.TryAlert(
-                            result.PodName,
-                            anomalyScore: result.Score,
-                            reconstructionMse: result.Score);
-
                         _options.OnScore?.Invoke(result);
+                        await MaybeAlertAsync(result, scrapeTime, ct).ConfigureAwait(false);
                     }
+
+                    HandleAdaptation();
+
+                    await Task.Delay(_options.ScrapeInterval, ct).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
@@ -151,8 +184,6 @@ namespace DevOnBike.Overfit.Anomalies.Live
                 {
                     _options.OnError?.Invoke(ex);
                 }
-
-                await Task.Delay(_options.ScrapeInterval, ct).ConfigureAwait(false);
             }
         }
 
@@ -163,34 +194,68 @@ namespace DevOnBike.Overfit.Anomalies.Live
                 return;
             }
             _disposed = true;
-            foreach (var d in _detectors.Values)
-            {
-                d.Dispose();
-            }
-            _detectors.Clear();
+
+            _monitor.Dispose();   // un-merges adapters + disposes detectors, leaving the model clean
             _source.Dispose();
             _model.Dispose();
-            await _alertEngine.DisposeAsync().ConfigureAwait(false);
+            await ValueTask.CompletedTask.ConfigureAwait(false);
         }
 
         // ── Private ──────────────────────────────────────────────────────────
 
-        private GptAnomalyDetector GetOrCreateDetector(string podName)
+        // Raw-score alerting with a per-pod cooldown — dispatches to every sink.
+        private async Task MaybeAlertAsync(AnomalyScore result, DateTime now, CancellationToken ct)
         {
-            if (_detectors.TryGetValue(podName, out var existing))
+            if (_sinks.Length == 0 || result.Score < _options.AlertThreshold)
             {
-                return existing;
+                return;
             }
-            var handle = SlmRuntimeFactory.CreateGpt1(_model);
-            var detector = new GptAnomalyDetector(handle, _options.ContextSnapshots);
-            _detectors[podName] = detector;
-            return detector;
+            if (_lastAlert.TryGetValue(result.PodName, out var last) && now - last < _options.CooldownDuration)
+            {
+                return;
+            }
+            _lastAlert[result.PodName] = now;
+
+            var evt = new AlertEvent
+            {
+                PodName = result.PodName,
+                AnomalyScore = result.Score,
+                ReconstructionMse = result.Score,
+                DetectedAt = now,
+                Severity = result.Score >= _options.CriticalThreshold ? AlertSeverity.Critical : AlertSeverity.Warning,
+            };
+            foreach (var sink in _sinks)
+            {
+                await sink.SendAsync(evt, ct).ConfigureAwait(false);
+            }
+        }
+
+        // Auto-adapt recommended pods (unattended), else notify the operator once per pod.
+        private void HandleAdaptation()
+        {
+            foreach (var pod in _monitor.PodsNeedingAdaptation())
+            {
+                if (_options.AutoAdapt)
+                {
+                    try
+                    {
+                        _monitor.Adapt(pod);
+                    }
+                    catch (Exception ex)
+                    {
+                        _options.OnError?.Invoke(ex);
+                    }
+                }
+                else if (_recommended.Add(pod))
+                {
+                    _options.OnAdaptationRecommended?.Invoke(pod);
+                }
+            }
         }
 
         private static List<MetricSnapshot> ConvertToSnapshots(
             IReadOnlyList<RawMetricSeries> series, DateTime timestamp)
         {
-            // Group by pod name, accumulate feature values
             var podFeatures = new Dictionary<string, float[]>();
 
             foreach (var s in series)
@@ -233,22 +298,20 @@ namespace DevOnBike.Overfit.Anomalies.Live
             return result;
         }
 
-        // Maps PrometheusMetricSource MetricTypeId → MetricSnapshot feature index
-        // MetricTypeId values must match what PrometheusMetricSource assigns.
         private static int MetricTypeIdToFeatureIndex(byte id) => id switch
         {
-            0 => 0,  // CpuUsageRatio
-            1 => 1,  // CpuThrottleRatio
-            2 => 2,  // MemoryWorkingSetBytes
-            3 => 3,  // OomEventsRate
-            4 => 4,  // LatencyP50Ms
-            5 => 5,  // LatencyP95Ms
-            6 => 6,  // LatencyP99Ms
-            7 => 7,  // RequestsPerSecond
-            8 => 8,  // ErrorRate
-            9 => 9,  // GcGen2HeapBytes
-            10 => 10, // GcPauseRatio
-            11 => 11, // ThreadPoolQueueLength
+            0 => 0,
+            1 => 1,
+            2 => 2,
+            3 => 3,
+            4 => 4,
+            5 => 5,
+            6 => 6,
+            7 => 7,
+            8 => 8,
+            9 => 9,
+            10 => 10,
+            11 => 11,
             _ => -1
         };
     }

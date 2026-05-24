@@ -6,6 +6,7 @@
 using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using DevOnBike.Overfit.Anomalies.Monitoring.Abstractions;
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 
 namespace DevOnBike.Overfit.Anomalies.Monitoring
@@ -28,7 +29,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
     ///   }
     /// </code>
     /// </summary>
-    public sealed class PrometheusMetricSource : IDisposable
+    public sealed class PrometheusMetricSource : IDisposable, IRawMetricSource
     {
 
         private static readonly JsonSerializerOptions _jsonOptions = new()

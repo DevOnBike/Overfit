@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Anomalies.Adaptive;
 using DevOnBike.Overfit.Anomalies.Baseline;
 using DevOnBike.Overfit.Anomalies.Gpt;
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
@@ -49,7 +50,14 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
                 var (model, config) = await GetModelAsync(csv, checkpoint, preset);
                 using (model)
                 {
-                    RunScenario(model, config);
+                    if (HasFlag(args, "--multipod"))
+                    {
+                        RunMultiPodAdaptiveScenario(model);
+                    }
+                    else
+                    {
+                        RunScenario(model, config);
+                    }
                 }
 
                 return 0;
@@ -152,6 +160,92 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
             Console.WriteLine("adaptation — lowering false positives without blinding the detector — the adaptive");
             Console.WriteLine("learning an inference-only engine cannot do; the LoRA delta merges into the same");
             Console.WriteLine("zero-alloc decode path.");
+        }
+
+        // ── Multi-pod adaptive lifecycle (--multipod) ──────────────────────────
+        private static void RunMultiPodAdaptiveScenario(GPT1Model model)
+        {
+            Console.WriteLine();
+            Console.WriteLine("══ Multi-pod adaptive lifecycle ══");
+            Console.WriteLine("Two pods on one shared cross-pod base. Watch: false-positive pressure → recommend →");
+            Console.WriteLine("adapt ONE pod → per-pod isolation, while the incident still fires.");
+            Console.WriteLine();
+
+            var dir = Path.Combine(Path.GetTempPath(), $"overfit_multipod_{Guid.NewGuid():N}");
+            try
+            {
+                using var monitor = new AdaptiveAnomalyMonitor(model, new AdaptivePolicy
+                {
+                    AdapterDirectory = dir,
+                    ContextSnapshots = ContextSnapshots,
+                    // Quick base scores this benign regime ~1.9 — set the FP-pressure band so
+                    // that registers as elevated (a trained cross-pod base; the 256d production
+                    // base sits higher ~6.5, same idea). Critical (real incident) is well above.
+                    AlertThreshold = 1f,
+                    CriticalThreshold = 15f,
+                    AdaptAfterStreak = 3,
+                    MinBenignWindow = 24,
+                    BenignWindow = 48,
+                    LoRARank = 16,
+                    LoRASteps = 300,
+                    LoRALearningRate = 1e-2f,
+                });
+
+                string[] pods = ["checkout-api", "payments-api"];
+
+                // Phase A — stream benign for both; the cross-pod base scores them elevated.
+                Console.WriteLine("Phase A — streaming benign traffic for both pods (un-adapted base = false positives):");
+                var baseScore = new Dictionary<string, float>();
+                for (var i = 0; i < ContextSnapshots * 2 + 30; i++)
+                {
+                    foreach (var pod in pods)
+                    {
+                        var r = monitor.Observe(NormalSnapshot() with { PodName = pod });
+                        if (!r.IsWarmup) { baseScore[pod] = r.Score; }
+                    }
+                }
+                foreach (var pod in pods) { Console.WriteLine($"  {pod,-14} benign = {baseScore[pod],6:F2}"); }
+                Console.WriteLine($"  monitor recommends adapting: [{string.Join(", ", monitor.PodsNeedingAdaptation())}]");
+
+                // Phase B — operator adapts ONE pod.
+                var target = pods[0];
+                Console.WriteLine();
+                Console.WriteLine($"Phase B — operator adapts '{target}' only (LM-head LoRA on its benign window)...");
+                monitor.Adapt(target);
+
+                // Phase C — re-stream; adapted pod flattens, the other stays on the base.
+                Console.WriteLine();
+                Console.WriteLine("Phase C — re-streaming benign, then injecting an incident on the adapted pod:");
+                var afterScore = new Dictionary<string, float>();
+                for (var i = 0; i < ContextSnapshots * 2; i++)
+                {
+                    foreach (var pod in pods)
+                    {
+                        var r = monitor.Observe(NormalSnapshot() with { PodName = pod });
+                        if (!r.IsWarmup) { afterScore[pod] = r.Score; }
+                    }
+                }
+                var incident = monitor.Observe(AnomalySnapshot() with { PodName = target });
+
+                Console.WriteLine();
+                Console.WriteLine($"  {"pod",-14} {"benign base",11}  {"benign after",12}  {"adapted",7}");
+                foreach (var pod in pods)
+                {
+                    Console.WriteLine(
+                        $"  {pod,-14} {baseScore[pod],11:F2}  {afterScore[pod],12:F2}  {(monitor.IsAdapted(pod) ? "yes" : "no"),7}");
+                }
+                Console.WriteLine();
+                Console.WriteLine($"  injected incident on '{target}': {incident.Score:F2}  worst={incident.WorstMetric}");
+                Console.WriteLine();
+                Console.WriteLine($"'{target}' false positives flattened toward zero; '{pods[1]}' untouched (per-pod");
+                Console.WriteLine("isolation — its adapter never merged); the incident still fires far above the adapted");
+                Console.WriteLine("baseline. Per-pod adapters persist as .lora.bin and reload on pod restart — the adaptive,");
+                Console.WriteLine("per-deployment learning an inference-only engine (llama.cpp et al.) cannot do.");
+            }
+            finally
+            {
+                if (Directory.Exists(dir)) { Directory.Delete(dir, recursive: true); }
+            }
         }
 
         // ── Stream a steady normal regime, then inject one incident ─────────────
@@ -296,6 +390,15 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
                 if (args[i] == name) { return args[i + 1]; }
             }
             return null;
+        }
+
+        private static bool HasFlag(string[] args, string name)
+        {
+            foreach (var a in args)
+            {
+                if (a == name) { return true; }
+            }
+            return false;
         }
 
         // Base architecture preset — must match the checkpoint's dims when loading
