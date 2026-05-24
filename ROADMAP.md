@@ -28,6 +28,37 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 
 ---
 
+## Nearest plan — llama.cpp competitive gaps (2026-05-25)
+
+Gap analysis vs llama.cpp, ranked through the strategic frame (NOT chasing decode speed; build the
+embeddability / low-end-hardware / in-process-agentic moat). Verified facts: `GenerationStats.TokensPerSecond`
+EXISTS (produced by `SlmInferenceEngine`) but is NOT surfaced on the modern `CachedLlamaSession`/`ChatSession`
+path; **no mmap** — `GgufReader` = `File.OpenRead` and the resident weights (`Q4KWeight`/`Q6KWeight`/`Q8Weight`)
+copy ALL bytes into managed arrays (4 GB Q4_K_M ⇒ ~4 GB managed RAM).
+
+**🟢 On-moat (do these):**
+1. **mmap GGUF resident weights** — NOT a speed feature; it's *loadability on low-end hardware* (the core
+   moat: a 7B Q4_K_M runs on an 8 GB laptop at working-set RAM, not full-model RAM). Refactor the resident
+   weight types + `GgufReader` to reference a `MemoryMappedFile` (spans/pointers) instead of copying into
+   managed `byte[]`/`sbyte[]`. AOT-friendly. The big "must-have to compete". **(EXECUTING — opt 2)**
+2. **Embeddings API** — expose mean-pooled (and last-token) embedding from hidden states (already computed) →
+   in-process RAG / vector-store story. Cheap, strong embeddability fit. **(EXECUTING — opt 3)**
+3. **Constrained generation (JSON-Schema / GBNF)** — logit-masking to a grammar/schema = guaranteed-valid
+   structured output for in-process agentic .NET. Medium cost, high product value. *(roadmap — opt 4, later.)*
+
+**🟡 Cheap polish:**
+4. **tokens/sec on the modern path** — surface the existing `TokensPerSecond` on `CachedLlamaSession`/
+   `ChatSession`. Trivial, credibility. **(EXECUTING — opt 1)**
+5. **Min-P / Mirostat / XTC sampling** — additive to `TokenSampler`/`SamplingOptions`; Min-P a sane modern
+   default, Mirostat for perplexity-targeted decoding. Cheap chat-quality win. **(EXECUTING — opt 1; XTC later.)**
+
+**🔴 Later / off-moat:**
+6. **Function calling** — mostly a prompt + parse convention on top of constrained generation (after #3).
+7. **Vector store** — bigger; embeddings API (#2) is the prerequisite and the higher-value first step.
+
+**This session executes 1+2+3 above as: opt 1 (tokens/sec + Min-P/Mirostat), opt 2 (mmap), opt 3 (embeddings).**
+Constrained generation + function calling + vector store stay queued.
+
 ## Last session — resume point (2026-05-22 → 23)
 
 **Big session — zero-Python loading completed, chat turnkey, and the anomaly+LoRA product
