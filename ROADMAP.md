@@ -141,7 +141,7 @@ repro hook) and seeded the random-tiny-base anomaly `[Fact]` tests — which sur
 convergence is init-sensitive** (some seeds diverge at lr 1e-2 / 300 steps; the seed pins a representative
 converging init — the rigorous validation remains the TRAINED production base in `[LongFact]`).
 
-## Last session — resume point (2026-05-22 → 23)
+## (Historical) Session resume point 2026-05-22 → 23 — SUPERSEDED by "Nearest plan (2026-05-25)" above
 
 **Big session — zero-Python loading completed, chat turnkey, and the anomaly+LoRA product
 track closed with an empirically-corrected verdict.** Strategic frame (still holds): NOT chasing
@@ -231,7 +231,7 @@ End-to-end vs Overfit's own starting point: **5.6× decode, −69 % RAM, 20× fa
 - **Committed** (in the `llama` commits on `next`): all Q4_K_M code + tests + `docs/llamacpp-cpu-analysis.md` — `Q6KDotKernel.cs`, `Q6KWeight.cs`, `Q6KDotKernelTests.cs`, `Q4KMDecodeParityTests.cs`, `DecodeWeight.cs` (4-way tagged union `{F32|Q8|Q4_K|Q6_K}`), the per-weight-dispatch decode blocks (`CachedFeedForwardBlock` / `CachedSingleHeadAttention` / `CachedMultiHeadAttention` / `CachedTransformerBlock` / `CachedGptStack`), and the native Q4_K + Q6_K loader reads (`GgufLlamaLoader.cs` / `GgufReader.cs`).
 - **Uncommitted at handoff:** this `ROADMAP.md` (the resume-point + Slot 2b update). Pre-existing staged files unrelated to this work: `index.html`, `launch-copy.md`, `linkedin-*.md`, `docs/parallel_opts.txt`.
 
-### NEXT — order set by user: C → B
+### (Historical) Order that session: C → B — both delivered
 
 - **(A) LLamaSharp re-bench on Q4_K_M — ✅ DONE 2026-05-20.** Restored the `llama` mode in `D:\overfit-bench` (LLamaSharp 0.27.0, `dotnet run -- llama qwen.q4km.gguf`). Result above: llama.cpp ~2× faster + 27 % less RAM on the same file; "1.51× faster" claim retracted everywhere. Surfaced a new lever (D).
 - **(C) — NEXT NOW — Active track: anomaly + LoRA.** Pick one of the four options in the Active-track "NEXT" section below: end-to-end integration test / Stage-2 LoRA on FFN / Production base training / deployment-architecture decision. The live product track.
@@ -377,7 +377,7 @@ it on real production metrics. Plan: synthetic base → pull real metrics → Lo
   ~11 telemetry instruments declared but never recorded, `DiagnosticsRegressionTests`
   was vacuously green (F1/F4 fixed, F2/F3 outstanding).
 
-### NEXT — resume here (pick one)
+### Anomaly + LoRA track — ALL ITEMS SHIPPED (was "resume here / pick one")
 
 - **End-to-end integration test — ✅ DONE.** `Tests/Anomalies/GptAnomalyLoRAIntegrationTests.cs`,
   2 `[Fact]`s (green, ~1 s each): (1) LoRA trained on a regime lowers that regime's
@@ -433,17 +433,21 @@ it on real production metrics. Plan: synthetic base → pull real metrics → Lo
 
 ---
 
-## Current focus: GPT-2 Small as primary showcase
+## (Historical) GPT-2 Small showcase — SUPERSEDED by the in-process agentic stack
 
-**Why:** the parity claim ("top-10 overlap 10/10 vs PyTorch, maxAbsDiff 0.000107, 0 B / generated token, KV-cache decode") is already implemented and validated. Productizing this single story end-to-end (defended in CI, demoable in one command, documented honestly) is higher-value than chasing more model families. Qwen / Llama / LoRA / quantization work continues to live in the codebase but is **explicitly deferred** out of the current week's focus.
+**Superseded (2026-05-25):** the primary showcase is now the **in-process agentic stack** — RAG +
+tool calling + structured output on a Qwen GGUF (see "Nearest plan (2026-05-25)" and `Demo/AgentDemo`).
+Qwen / Llama / LoRA / quantization are **no longer deferred — they shipped**. Kept below for history.
+
+**Why (at the time):** the parity claim ("top-10 overlap 10/10 vs PyTorch, maxAbsDiff 0.000107, 0 B / generated token, KV-cache decode") is already implemented and validated. Productizing this single story end-to-end (defended in CI, demoable in one command, documented honestly) is higher-value than chasing more model families. Qwen / Llama / LoRA / quantization work continues to live in the codebase but is **explicitly deferred** out of the current week's focus.
 
 ### This week
 
 - [x] **GPT-2 parity diagnostics run on every `dotnet test`** — `Gpt2ImportParityDiagnostics`, `Gpt2ImportStageParityDiagnostics`, `Gpt2ImportAttentionParityDiagnostics` flipped from `[LongFact]` back to `[Fact]`. Sweep cost: +2 s. Headline claim now defended on every push.
-- [ ] **`Demo/Gpt2ConsoleDemo` project** — user-facing console app: `dotnet run -- --model path --prompt "..." --tokens N`. Reports: model name, KV-cache enabled, managed allocations/token, tokens/sec. First time the repo looks like a *product* instead of a test suite.
-- [ ] **Fixture / model path resolver** — drop hardcoded `c:\qwen3b\…` / `d:/…` constants. Resolve via env var (`OVERFIT_MODEL_DIR`) + local `models/` directory. Required for the demo to work on anyone else's machine.
+- [x] **`Demo/Gpt2ConsoleDemo` project** — exists (`Demo/Gpt2ConsoleDemo`). (The launch showcase is now `Demo/AgentDemo`.)
+- [x] **Fixture / model path resolver** — done: `OVERFIT_MODEL_DIR` env var is the resolution path across demos/tests.
 - [ ] **GPT-2 generation benchmark** — BenchmarkDotNet: cold-start, prefill cost, per-token decode time, allocations. Confirm 0 B/token quantitatively for the README.
-- [ ] **README cleanup** — single consolidated story: how to convert weights, how to run, what's measured. Remove stale "repetitive text" / "broken GPT-2 import" comments. Add the benchmark numbers from the previous item.
+- [x] **README cleanup** — done: README/TECHNICAL/scenarios consolidated and updated through 2026-05-25 (agentic stack, mmap, benchmarks).
 
 ### Next (after the GPT-2 week)
 
@@ -833,7 +837,7 @@ This section is a strategic overlay — it ranks and justifies; the tactical bre
 
 ### Features
 
-- [ ] **Chat templates** — Qwen/Llama/Mistral chat-format builders (system/user/assistant turns) for ergonomic chat-style API. *(Lives in deferred track until Qwen path returns to focus.)*
+- [x] **Chat templates** — DONE: `ChatTemplate` (ChatML detect/render from GGUF metadata) + `ChatSession` (system/user/assistant turns), used by `Demo/AgentDemo` and the chat tests.
 - [ ] **`OverfitClient` facade** — high-level API: `var client = OverfitClient.LoadGguf(...); var response = await client.ChatAsync("...");` — gathers tokenizer + engine + session + sampling defaults.
 - [ ] **ONNX: LSTM/GRU operators** — enables recurrent model import.
 - [ ] **Depthwise Conv** (group=channels) — MobileNet-style models.
