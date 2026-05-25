@@ -21,6 +21,18 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
 
         int GenerateNextToken(in SamplingOptions sampling);
 
+        /// <summary>
+        /// Generates the next token under a decode-time <paramref name="constraint"/> (e.g. JSON-mode):
+        /// the constraint masks the logits before sampling and is advanced by the chosen token.
+        /// Sessions that don't support constrained generation throw <see cref="NotSupportedException"/>
+        /// when a non-null constraint is supplied (a null constraint always defers to the plain path).
+        /// </summary>
+        int GenerateNextToken(in SamplingOptions sampling, ITokenConstraint? constraint)
+            => constraint is null
+                ? GenerateNextToken(in sampling)
+                : throw new NotSupportedException(
+                    $"{GetType().Name} does not support constrained generation.");
+
         int Generate(
             ReadOnlySpan<int> promptTokens,
             Span<int> outputTokens,

@@ -78,8 +78,22 @@ copy ALL bytes into managed arrays (4 GB Q4_K_M ⇒ ~4 GB managed RAM).
    `EmbeddingDimension` + `EmbeddingPooling` (Mean/LastToken), L2-normalised, pools per-token final hidden
    states. Validated on real Qwen (`EmbeddingsTests`): unit-norm, deterministic, semantic ordering holds
    (cos(cat,kitten)=0.94 > cos(cat,physics)=0.88). Unlocks in-process RAG / vector-store.
-3. **Constrained generation (JSON-Schema / GBNF)** — logit-masking to a grammar/schema = guaranteed-valid
-   structured output for in-process agentic .NET. Medium cost, high product value. *(roadmap — opt 4, later.)*
+3. **Constrained generation** — logit-masking to a grammar = guaranteed-valid structured output for
+   in-process agentic .NET. **JSON-mode DONE 2026-05-25.** `ITokenConstraint` (Contracts: `ApplyMask` /
+   `Accept` / `IsComplete`) → `JsonStateMachine` (value-type char-level RFC-8259 acceptor: 64-level bit-stack
+   for nesting, number/string/escape sub-DFAs, `IsComplete` gates EOS) → `JsonGrammarConstraint` (builds the
+   per-token text table from `ITokenizer.DecodeToString`, masks the vocab each step, EOS only when complete).
+   Wired through `ISlmSession.GenerateNextToken(in sampling, ITokenConstraint?)` (default interface method →
+   `NotSupportedException` for non-supporting sessions like GPT-1/2; real override on `CachedLlamaSession`,
+   masks `_logits` in place pre-sample) and `ChatSession.Send(..., constraint)`. **Validated end-to-end on
+   real Qwen-3B Q4_K_M** (`JsonConstrainedChatTests` `[LongFact]`): reply parses via `JsonDocument.Parse` even
+   when the small model would ramble. Fast tests: `JsonStateMachineTests` (accept/reject/complete cases),
+   `JsonGrammarConstraintTests` (mask behaviour on a fake vocab). **Finding (handled):** GGUF pads the vocab
+   (Qwen 151936 logits vs 151665 tokenizer tokens) — `ApplyMask` accepts `logits.Length ≥ tableSize` and masks
+   the padding slots. **Perf note:** mask is O(vocab × token-len)/step — fine for short structured outputs; a
+   per-state cache / token prefix-trie is the documented follow-on. Next: **JSON-Schema** (typed: fields /
+   enum / required → deserializable to a C# record) then **GBNF** (generic grammars) — opt 6 function calling
+   sits on top.
 
 **🟡 Cheap polish:**
 4. **tokens/sec on the modern path** — **DONE 2026-05-25.** `ChatSession.LastStats` (GenerationStats,
@@ -90,16 +104,34 @@ copy ALL bytes into managed arrays (4 GB Q4_K_M ⇒ ~4 GB managed RAM).
    token) and doesn't fit the static `TokenSampler` / readonly `SamplingOptions` — needs a stateful sampler
    threaded through the sessions; queued. XTC later.) `ChatSession.LastStats` now exposes TokensPerSecond.**
 
+**🟢 On-moat / done:**
+6. **Function calling** — **DONE 2026-05-25 (the in-process-agentic-.NET headline).** `ToolDefinition`
+   (name + description) → `ToolCallConstraint : ITokenConstraint` forces the canonical envelope
+   `{"name": "<tool>", "arguments": <json>}`: fixed punctuation, the `name` value constrained to an enum
+   DFA over the registered tool names (≤64, viability bit-mask), the `arguments` value delegated to
+   `JsonStateMachine` (well-formed JSON). `ToolCall.TryParse` (System.Text.Json) extracts name + raw
+   arguments; the caller dispatches by name to a `Func<JsonElement,string>`. Reuses the JSON-mode seam
+   (`ChatSession.Send(..., constraint)`). **Validated end-to-end on real Qwen-3B Q4_K_M**
+   (`ToolCallingChatTests` `[LongFact]`): model emitted `{"name": "get_weather", "arguments": {"city":"Paris"}}`,
+   parsed, dispatched → `weather({"city":"Paris"})`. Fast tests: `ToolCallConstraintTests` (envelope / enum /
+   bad-args rejection), `ToolCallTests` (TryParse). Argument *typing* (per-tool JSON-Schema) is the follow-on;
+   the handler validates args meanwhile.
+
 **🔴 Later / off-moat:**
-6. **Function calling** — mostly a prompt + parse convention on top of constrained generation (after #3).
 7. **Vector store** — bigger; embeddings API (#2) is the prerequisite and the higher-value first step.
 
 **Session 2026-05-25 delivered: opt 1 (tokens/sec + Min-P; Mirostat deferred — stateful), opt 2 (mmap GGUF —
 ~55 % less managed RAM, bit-identical; NOW DEFAULT with smart-skip, soak-validated on Q4_K_M/Q8_0/FP16),
 opt 3 (embeddings), quantized token-embedding lookup (live managed heap for a 3B Q4_K_M model now 238 MB,
-down from 1427 MB — the F32 embedding eliminated; decode bit-identical). Next: constrained generation
-(JSON-Schema) + function calling + vector store (queued). Also queued: relax the over-strict pre-existing
-`GgufQ4KMParityTests` FP16 assertion (see opt 1 note — not a decode bug).**
+down from 1427 MB — the F32 embedding eliminated; decode bit-identical), and constrained generation
+**JSON-mode** (well-formed JSON enforced at decode via `ITokenConstraint`/`JsonGrammarConstraint`, validated
+on real Qwen), **function calling** (`ToolCallConstraint`/`ToolCall` → dispatch to a C# delegate, validated
+on real Qwen), and a consolidated **agent demo** (`Demo/AgentDemo`: mmap load → RAG → tool call → JSON in one
+process; ran on real Qwen-3B — 222 MB live heap, RAG ranks correctly, tool call dispatches, JSON parses) +
+README/demo-README surfacing the in-process-agentic-.NET story for launch. Next: JSON-Schema (typed args) →
+vector store (queued); then GBNF (generic grammars). Also queued: relax the over-strict pre-existing
+`GgufQ4KMParityTests` FP16 assertion (see opt 1 note — not a decode bug); per-state mask cache if the
+O(vocab×len) mask shows up in profiles.**
 Also fixed a recurring flaky-suite issue: added `MathUtils.SetSeed(int)` (per-thread
 repro hook) and seeded the random-tiny-base anomaly `[Fact]` tests — which surfaced that **tiny-base LoRA
 convergence is init-sensitive** (some seeds diverge at lr 1e-2 / 300 steps; the seed pins a representative

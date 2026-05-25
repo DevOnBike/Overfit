@@ -73,7 +73,20 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
         /// reply, appends it to the history, and returns it. <paramref name="onText"/>, if
         /// supplied, receives the reply incrementally as it streams.
         /// </summary>
-        public string Send(string userMessage, in GenerationOptions options, Action<string>? onText = null)
+        /// <param name="userMessage">The user turn to append and respond to.</param>
+        /// <param name="options">Generation options (sampling, max tokens, stop handling).</param>
+        /// <param name="onText">Optional streaming callback receiving reply text incrementally.</param>
+        /// <param name="constraint">
+        /// Optional decode-time constraint (e.g. <c>JsonGrammarConstraint</c> for guaranteed
+        /// well-formed JSON). When supplied, every generated token is masked to the constraint and
+        /// the reply is structurally valid by construction. Create a fresh constraint per call —
+        /// it is stateful. The underlying session must support constrained generation.
+        /// </param>
+        public string Send(
+            string userMessage,
+            in GenerationOptions options,
+            Action<string>? onText = null,
+            ITokenConstraint? constraint = null)
         {
             if (userMessage is null) { throw new ArgumentNullException(nameof(userMessage)); }
 
@@ -87,7 +100,7 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             _session.Reset(promptTokens.AsSpan(0, written));
 
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-            var reply = Generate(in options, onText, out var generatedTokens);
+            var reply = Generate(in options, onText, constraint, out var generatedTokens);
             stopwatch.Stop();
             LastStats = new GenerationStats(
                 promptTokens: written,
@@ -100,7 +113,11 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             return reply;
         }
 
-        private string Generate(in GenerationOptions options, Action<string>? onText, out int generatedTokens)
+        private string Generate(
+            in GenerationOptions options,
+            Action<string>? onText,
+            ITokenConstraint? constraint,
+            out int generatedTokens)
         {
             var stops = new StopSequenceDetector(_stopSequences);
             var generated = new List<int>();
@@ -111,7 +128,7 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
 
             for (var i = 0; i < maxNew && _session.CurrentPosition < _session.MaxContextLength; i++)
             {
-                var token = _session.GenerateNextToken(in sampling);
+                var token = _session.GenerateNextToken(in sampling, constraint);
 
                 if (token == _tokenizer.EndOfTextTokenId ||
                     (options.StopOnEndOfTextToken && options.EndOfTextTokenId >= 0 && token == options.EndOfTextTokenId))

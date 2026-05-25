@@ -147,7 +147,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// <summary>
         /// Feeds prompt tokens into the KV cache one at a time. Each token goes
         /// through embedding → transformer stack → cache write, leaving the
-        /// session ready for <see cref="GenerateNextToken"/>.
+        /// session ready for <see cref="GenerateNextToken(in SamplingOptions)"/>.
         ///
         /// Can be called multiple times to append context incrementally
         /// (e.g. chat history: system → user → assistant → user → …) without
@@ -208,6 +208,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// Returns the token ID.
         /// </summary>
         public int GenerateNextToken(in SamplingOptions sampling)
+            => GenerateNextToken(in sampling, constraint: null);
+
+        /// <summary>
+        /// Generates the next token, optionally under a decode-time <paramref name="constraint"/>
+        /// (e.g. <c>JsonGrammarConstraint</c> for guaranteed well-formed JSON). The constraint masks
+        /// the logits in place before sampling — disallowed tokens become <c>-inf</c>, so they cannot
+        /// be drawn — and is then advanced by the chosen token. The masked buffer is the per-decode
+        /// logits, overwritten by the next decode, so masking in place is safe.
+        /// </summary>
+        public int GenerateNextToken(in SamplingOptions sampling, ITokenConstraint? constraint)
         {
             ThrowIfDisposed();
 
@@ -223,8 +233,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     "Session is empty. Call Reset with at least one prompt token first.");
             }
 
+            constraint?.ApplyMask(_logits.AsSpan(0, VocabularySize));
+
             var token = TokenSampler.Sample(
                 _logits, in sampling, _random, _indexScratch, _scoreScratch);
+            constraint?.Accept(token);
             DecodeToken(token);
             return token;
         }
