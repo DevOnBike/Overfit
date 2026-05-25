@@ -137,6 +137,12 @@ namespace DevOnBike.Overfit.DeepLearning
         /// <summary>Experts activated per token (top-k). 0 ⇒ dense; otherwise ≤ <see cref="ExpertCount"/>.</summary>
         public int ExpertUsedCount { get; init; }
 
+        /// <summary>
+        /// FFN length of each routed expert (Qwen-MoE: smaller than <see cref="DFF"/>, which is the
+        /// shared expert's length). 0 ⇒ fall back to <see cref="DFF"/>.
+        /// </summary>
+        public int ExpertFeedForwardLength { get; init; }
+
         /// <summary>True when this model uses a Mixture-of-Experts FFN.</summary>
         public bool IsMixtureOfExperts => ExpertCount > 0 && ExpertUsedCount > 0;
 

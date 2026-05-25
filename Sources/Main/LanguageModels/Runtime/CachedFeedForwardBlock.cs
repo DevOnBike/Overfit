@@ -57,13 +57,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                               ? new float[dFF]
                               : [];
 
-            // Q8 / Q4_K activation scratch — sized for the largest projection
-            // input (dFF for the down projection; dModel ≤ dFF for gate/up).
-            _q8InputQuants = new sbyte[dFF];
-            _q8InputScales = new float[(dFF + Q8DotKernel.BlockSize - 1) / Q8DotKernel.BlockSize];
-            _q8kInputQuants = new sbyte[dFF];
-            _q8kInputScales = new float[(dFF + Q4KDotKernel.SuperBlockElements - 1) / Q4KDotKernel.SuperBlockElements];
-            _q8kInputBsums = new short[(dFF + Q4KDotKernel.GroupSize - 1) / Q4KDotKernel.GroupSize];
+            // Q8 / Q4_K activation scratch — sized for the largest projection input. Gate/up
+            // quantize the dModel-long hidden; down quantizes the dFF-long intermediate. For a dense
+            // FFN dFF ≥ dModel, but a MoE expert can have dFF < dModel, so size to the max of the two.
+            var scratch = Math.Max(dModel, dFF);
+            _q8InputQuants = new sbyte[scratch];
+            _q8InputScales = new float[(scratch + Q8DotKernel.BlockSize - 1) / Q8DotKernel.BlockSize];
+            _q8kInputQuants = new sbyte[scratch];
+            _q8kInputScales = new float[(scratch + Q4KDotKernel.SuperBlockElements - 1) / Q4KDotKernel.SuperBlockElements];
+            _q8kInputBsums = new short[(scratch + Q4KDotKernel.GroupSize - 1) / Q4KDotKernel.GroupSize];
         }
 
         public int DModel { get; }

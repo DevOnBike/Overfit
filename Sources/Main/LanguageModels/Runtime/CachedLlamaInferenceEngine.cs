@@ -73,6 +73,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             public required DecodeWeight FfnGate;
             public required DecodeWeight FfnUp;
             public required DecodeWeight FfnDown;
+
+            // Mixture of Experts (qwen2moe) — null/default for a dense FFN layer.
+            public float[]? MoeRouter;
+            public DecodeWeight[]? MoeGate;
+            public DecodeWeight[]? MoeUp;
+            public DecodeWeight[]? MoeDown;
+            public DecodeWeight MoeSharedGate;
+            public DecodeWeight MoeSharedUp;
+            public DecodeWeight MoeSharedDown;
+            public float[]? MoeSharedGateInp;
         }
 
         // ── Constructor ───────────────────────────────────────────────────────
@@ -110,7 +120,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 config.ContextLength,
                 layerNormEpsilon: 1e-6f,
                 FeedForwardActivation.SwiGLU,
-                config.KvHeads);
+                config.KvHeads,
+                config.ExpertCount,
+                config.ExpertUsedCount,
+                config.ExpertFeedForwardLength);
 
             _stackWeights = BuildStackWeights();
         }
@@ -323,6 +336,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 layer.FfnUp.Dispose();
                 layer.FfnDown.Dispose();
 
+                if (layer.MoeGate is not null)
+                {
+                    foreach (var w in layer.MoeGate) { w.Dispose(); }
+                    foreach (var w in layer.MoeUp!) { w.Dispose(); }
+                    foreach (var w in layer.MoeDown!) { w.Dispose(); }
+                    layer.MoeSharedGate.Dispose();
+                    layer.MoeSharedUp.Dispose();
+                    layer.MoeSharedDown.Dispose();
+                }
+
                 foreach (var t in layer.Wq)
                 {
                     t.Dispose();
@@ -422,7 +445,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     ffnB1: null,
                     ffnW2: layer.FfnDown,
                     ffnB2: null,
-                    ffnGate: layer.FfnGate);
+                    ffnGate: layer.FfnGate,
+                    moeRouter: layer.MoeRouter,
+                    moeGate: layer.MoeGate,
+                    moeUp: layer.MoeUp,
+                    moeDown: layer.MoeDown,
+                    moeSharedGate: layer.MoeSharedGate,
+                    moeSharedUp: layer.MoeSharedUp,
+                    moeSharedDown: layer.MoeSharedDown,
+                    moeSharedGateInp: layer.MoeSharedGateInp);
             }
 
             return new StackWeights(

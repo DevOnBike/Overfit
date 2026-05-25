@@ -156,20 +156,70 @@ hardware). See the 2026-05-25 analysis.
   over the k selected logits (== Mixtral's softmax-all → top-k → renormalize; mathematically identical).
   Zero-alloc, caller-owned spans. Tests: `MoeRouterTests`.
 
-**Increment 2 — POST-LAUNCH (hot-path; needs a real MoE GGUF to validate):**
-- **Loader:** `GgufLlamaLoader` reads GGUF MoE metadata (`{arch}.expert_count`,
-  `{arch}.expert_used_count`) and the 3-D expert tensors (`ffn_gate_exps` / `ffn_up_exps` /
-  `ffn_down_exps`, shape `[n_expert, dff, dmodel]`) + the router `ffn_gate_inp` `[dmodel, n_expert]`.
-  Per-expert weights slice into the existing `DecodeWeight` (Q4_K/Q6_K/Q8_0 — mmap-able like the dense
-  FFN).
-- **Block:** `MoeFeedForwardBlock` — router projection → `MoeRouter.SelectTopK` → run only the selected
-  experts' SwiGLU FFN (reusing `CachedFeedForwardBlock` / `SingleTokenProjectionKernel`) → weighted
-  sum into the output. Zero-alloc; cost ≈ k dense FFNs, not n.
-- **Wiring:** `BlockWeights`/`CachedTransformerBlock`/`CachedGptStack` dispatch to the MoE block when
-  `config.IsMixtureOfExperts`; dense path unchanged when not.
-- **Validate:** load a real MoE GGUF (e.g. Qwen-MoE / Mixtral Q4_K_M), decode-parity vs an F32 baseline
-  of the same file (mirroring `Q4KMDecodeParityTests`), coherent generation. Requires dropping an MoE
-  GGUF on the dev box.
+**Increment 2a — DONE 2026-05-25 (compute block, additive — not yet wired into the live stack):**
+- `MoeFeedForwardBlock` — router projection (`ffn_gate_inp`, F32) → `MoeRouter.SelectTopK` → runs only
+  the selected experts' SwiGLU FFN via the existing `CachedFeedForwardBlock.DecodeSwiGluDispatched`
+  (F32 / Q8_0 / Q4_K / Q6_K — so experts are mmap-able like the dense FFN) → weighted-sum combine.
+  Zero-alloc; per-token cost ≈ `ExpertUsedCount` dense FFNs. Synthetic parity test
+  (`MoeFeedForwardBlockTests`): routed output == reference (selected experts' `DecodeSwiGlu` combined
+  by the router weights), for top-1 (== that expert) and top-2 (weighted sum).
+
+**Increment 2b — loader + stack wiring (needs the real MoE GGUF — now on the dev box at
+`C:\qwen-moe\Qwen1.5-MoE-A2.7B-Chat.Q4_K_M.gguf`).**
+
+**REAL structure inspected 2026-05-25 — Qwen2-MoE is NOT plain Mixtral** (`arch=qwen2moe`, 24 layers,
+dModel 2048, MHA 16/16, RMSNorm ε1e-6, RoPE θ1e6, vocab 151936):
+- **Routed experts:** `qwen2moe.expert_count=60`, `expert_used_count=4`. Expert FFN dFF = **1408**
+  (≠ the dense `feed_forward_length=5632`) — derive from the tensor, not metadata:
+  - `blk.L.ffn_gate_exps.weight` Q4_K `[2048, 1408, 60]` = `[dModel, expertDff, nExpert]`
+  - `blk.L.ffn_up_exps.weight`   Q4_K `[2048, 1408, 60]`
+  - `blk.L.ffn_down_exps.weight` **Q8_0** `[1408, 2048, 60]` = `[expertDff, dModel, nExpert]`
+  - router `blk.L.ffn_gate_inp.weight` **F32** `[2048, 60]`
+- **Shared expert (Mixtral has none):** a full SwiGLU FFN, dFF=**5632**, sigmoid-gated:
+  - `ffn_gate_shexp` Q4_K `[2048,5632]`, `ffn_up_shexp` Q4_K, `ffn_down_shexp` Q6_K `[5632,2048]`
+  - `ffn_gate_inp_shexp.weight` F32 `[2048]` (the 1-d shared gate)
+  - **Forward:** `FFN(x) = σ(w_sh·x)·shared(x) + Σ_{i∈top4} wᵢ·expertᵢ(x)` (top-k probs renormalised
+    = `MoeRouter`; shared scaled by `sigmoid` of a dot, NOT softmax).
+- All tensor types (Q4_K / Q6_K / Q8_0 / F32) are already supported → mmap-able.
+
+Steps: (1) ✅ `MoeFeedForwardBlock` — routed Σ (2a). (2) ✅ `Qwen2MoeFeedForwardBlock` — gated shared
+expert + routed (`σ(w·x)·shared(x) + routed(x)`), `Qwen2MoeFeedForwardBlockTests`. **The full Qwen2-MoE
+compute is implemented + synthetically validated.** (3) ✅ **Loader slicing — DONE 2026-05-25, validated on the REAL file.** `GgufLlamaLoader.LoadExperts`
+(3-D expert tensor → 60 per-expert `DecodeWeight`; Q4_K/Q6_K verbatim, Q8_0 per-expert de-interleave) +
+`LoadRouter` (transpose `ffn_gate_inp` to input-major). `Qwen2MoeLoaderTests` `[LongFact]` loads layer-0
+of `Qwen1.5-MoE-A2.7B-Chat.Q4_K_M.gguf` (gate/up Q4_K, down Q8_0, σ-gated shared) through
+`Qwen2MoeFeedForwardBlock` → finite full-density output (2048/2048, maxAbs 0.064). Also fixed a latent
+bug: `CachedFeedForwardBlock` activation scratch assumed `dFF ≥ dModel` (false for a MoE expert,
+1408 < 2048) → now sized `max(dModel, dFF)` (dense path unchanged). (4) ✅ **End-to-end wiring — DONE 2026-05-25 (additive, dense path strictly untouched).**
+`GPT1Config.ExpertFeedForwardLength`; `BlockWeights` optional MoE fields (router + 3 expert arrays +
+shared + gate); `CachedTransformerBlock` builds a `Qwen2MoeFeedForwardBlock` and dispatches on
+`weights.IsMoe`; `CachedGptStack` threads the expert dims; `CachedLlamaInferenceEngine.LayerWeightBuffers`
+carry the MoE weights, `BuildStackWeights` wires them, `Dispose` releases them; `GgufLlamaLoader`
+recognises `qwen2moe` (reads `expert_count`/`expert_used_count` + expert dFF from the tensor) and the
+layer loop branches the FFN to MoE. Fixed a latent `CachedFeedForwardBlock` scratch-sizing bug
+(`max(dModel,dFF)`). **Proven correct on the real file:** `Qwen2MoeLoaderTests` decodes layer-0
+end-to-end; the full-model load reaches layer 3 before hitting an unsupported quant (below).
+⚠ **Real-file finding (NOT a MoE bug):** the `Qwen1.5-MoE-A2.7B-Chat.Q4_K_M.gguf` mixes **Q5_0** on
+some layers' `ffn_down_exps` (llama.cpp's heterogeneous "_M" strategy). Q5_0 is outside our supported
+set (F32/F16/BF16/Q8_0/Q4_K/Q6_K) → load throws a clear `NotSupportedException`. This is a
+**quant-coverage** gap, orthogonal to MoE. To finish: grab the **Q8_0** Qwen-MoE (uniform Q8_0, all
+supported) for full end-to-end + parity, OR add Q5_0 (+ likely Q5_K) dequant coverage.
+(5) ⏳ **Coherence — IN PROGRESS.** Got the Q8_0 variant (uniform Q8_0, 14.18 GB). The **full model
+now loads and the forward runs end-to-end** (`Qwen2MoeEndToEndTests`: embed → 24 MoE layers → final
+norm → LM head, finite in-range logits, no crash) — the integration is mechanically complete. **BUT
+generation is not yet coherent** (collapses to repetition; decoded text empty). Fixed one integration
+guard (dense `FfnW1`/`FfnW2` shape-check skipped for MoE). Open correctness bug — ranked suspects:
+(a) **top-k weight normalisation** — Qwen1.5-MoE likely uses `norm_topk_prob=false` (raw softmax probs,
+NOT renormalised over the top-k), while `MoeRouter` renormalises (Mixtral-style); (b) tokenizer match
+(used a Qwen2.5 `tokenizer.json` against a Qwen1.5 model — confounds the eyeball); (c) expert-tensor /
+router orientation. Needs a **llama.cpp reference** (first-token logits for the same tokens) to bisect —
+a focused debug session, NOT a guess-and-check on a 14 GB model. The mechanical integration (load,
+forward, dispatch, dense-path-untouched) is banked; correctness is the remaining work.
+
+**Scope note:** the routed math (the genuinely novel part) is done + tested. The remaining 2b is a
+real integration chunk (3-D expert slicing incl. per-expert Q8_0 de-interleave, shared-expert gate,
+stack wiring, real-file parity) — strictly additive (only fires for `qwen2moe`/MoE; the launched dense
+path is unaffected), best done as a focused session, not rushed pre-launch.
 
 ## (Historical) Session resume point 2026-05-22 → 23 — SUPERSEDED by "Nearest plan (2026-05-25)" above
 

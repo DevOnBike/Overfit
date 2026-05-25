@@ -38,6 +38,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     {
         private readonly CachedMultiHeadAttention _attention;
         private readonly CachedFeedForwardBlock _feedForward;
+        private readonly Qwen2MoeFeedForwardBlock? _moe;   // non-null only for MoE blocks
 
         private readonly float[] _ln1Output;
         private readonly float[] _attentionOutput;
@@ -52,7 +53,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int maxSequenceLength,
             float layerNormEpsilon = 1e-5f,
             FeedForwardActivation feedForwardActivation = FeedForwardActivation.GeLU,
-            int kvHeadCount = 0)
+            int kvHeadCount = 0,
+            int expertCount = 0,
+            int expertUsedCount = 0,
+            int expertFeedForwardLength = 0)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(dModel);
 
@@ -89,6 +93,17 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 dModel,
                 dFF,
                 feedForwardActivation);
+
+            // MoE (qwen2moe): routed experts (expertFeedForwardLength) + sigmoid-gated shared
+            // expert (dFF). Replaces the dense FFN at decode when the block's weights are MoE.
+            _moe = expertCount > 0
+                ? new Qwen2MoeFeedForwardBlock(
+                    dModel,
+                    expertFeedForwardLength > 0 ? expertFeedForwardLength : dFF,
+                    dFF,
+                    expertCount,
+                    expertUsedCount)
+                : null;
 
             _ln1Output = new float[dModel];
             _attentionOutput = new float[dModel];
@@ -135,17 +150,22 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     $"output.Length must equal DModel ({DModel}), got {output.Length}.",
                     nameof(output));
             }
-            if (weights.FfnW1.ElementCount != (long)DModel * DFF)
+            // Dense-FFN shape guards — skipped for MoE blocks (their FFN weights live in the
+            // expert arrays + shared expert, not FfnW1/FfnW2, which are intentionally empty).
+            if (!weights.IsMoe)
             {
-                throw new ArgumentException(
-                    $"weights.FfnW1 must hold DModel*DFF ({DModel * DFF}) elements, got {weights.FfnW1.ElementCount}.",
-                    nameof(weights));
-            }
-            if (weights.FfnW2.ElementCount != (long)DFF * DModel)
-            {
-                throw new ArgumentException(
-                    $"weights.FfnW2 must hold DFF*DModel ({DFF * DModel}) elements, got {weights.FfnW2.ElementCount}.",
-                    nameof(weights));
+                if (weights.FfnW1.ElementCount != (long)DModel * DFF)
+                {
+                    throw new ArgumentException(
+                        $"weights.FfnW1 must hold DModel*DFF ({DModel * DFF}) elements, got {weights.FfnW1.ElementCount}.",
+                        nameof(weights));
+                }
+                if (weights.FfnW2.ElementCount != (long)DFF * DModel)
+                {
+                    throw new ArgumentException(
+                        $"weights.FfnW2 must hold DFF*DModel ({DFF * DModel}) elements, got {weights.FfnW2.ElementCount}.",
+                        nameof(weights));
+                }
             }
 
             // Llama/Qwen: RMSNorm when beta is empty; GPT-2: standard LayerNorm
@@ -184,9 +204,24 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 _afterAttentionResidual, weights.Ln2Gamma, weights.Ln2Beta, _ln2Output, DModel, LayerNormEpsilon);
             }
 
+            // MoE (qwen2moe): routed experts + sigmoid-gated shared expert.
+            if (weights.IsMoe)
+            {
+                _moe!.Decode(
+                    _ln2Output,
+                    weights.MoeRouter,
+                    weights.MoeGate,
+                    weights.MoeUp,
+                    weights.MoeDown,
+                    weights.MoeSharedGateInp,
+                    weights.MoeSharedGate,
+                    weights.MoeSharedUp,
+                    weights.MoeSharedDown,
+                    _feedForwardOutput);
+            }
             // SwiGLU (Llama/Mistral/Qwen): FfnGate is present.
             // GeLU/ReLU (GPT-1/GPT-2): FfnGate is empty.
-            if (!weights.FfnGate.IsEmpty)
+            else if (!weights.FfnGate.IsEmpty)
             {
                 // SwiGLU (Llama/Mistral/Qwen): per-weight dispatch — each of
                 // gate/up/down picks its kernel from its resident format

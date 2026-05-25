@@ -33,7 +33,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int maxSequenceLength,
             float layerNormEpsilon = 1e-5f,
             FeedForwardActivation feedForwardActivation = FeedForwardActivation.GeLU,
-            int kvHeadCount = 0)
+            int kvHeadCount = 0,
+            int expertCount = 0,
+            int expertUsedCount = 0,
+            int expertFeedForwardLength = 0)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(layerCount);
 
@@ -77,7 +80,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     maxSequenceLength,
                     layerNormEpsilon,
                     feedForwardActivation,
-                    kvHeadCount > 0 ? kvHeadCount : headCount);
+                    kvHeadCount > 0 ? kvHeadCount : headCount,
+                    expertCount,
+                    expertUsedCount,
+                    expertFeedForwardLength);
             }
 
             _currentHidden = new float[dModel];

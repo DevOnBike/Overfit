@@ -120,6 +120,14 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             // Tied embeddings: if no separate output.weight, lm_head reuses token_embd.
             var tieWeights = !reader.Tensors.ContainsKey("output.weight");
 
+            // Mixture of Experts (qwen2moe): the FFN is replaced by a router + routed experts +
+            // a sigmoid-gated shared expert. The routed-expert FFN length differs from the shared
+            // expert's (= feed_forward_length), so it's read from the 3-D expert tensor shape.
+            var expertCount = reader.GetMeta($"{arch}.expert_count", 0);
+            var expertUsedCount = reader.GetMeta($"{arch}.expert_used_count", 0);
+            var isMoe = expertCount > 0 && expertUsedCount > 0;
+            var expertDff = isMoe ? (int)reader.Tensors["blk.0.ffn_gate_exps.weight"].Dims[1] : 0;
+
             var config = new GPT1Config
             {
                 NLayers = nLayers,
@@ -133,6 +141,9 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 RoPETheta = ropeTheta,
                 FfnActivation = FeedForwardActivation.SwiGLU,
                 TieWeights = tieWeights,
+                ExpertCount = expertCount,
+                ExpertUsedCount = expertUsedCount,
+                ExpertFeedForwardLength = expertDff,
             };
 
             // ─── Embeddings ───────────────────────────────────────────────
@@ -210,11 +221,25 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     // FFN
                     var ffnNormGamma = AllocAndLoad(reader, $"blk.{l}.ffn_norm.weight", dModel);
                     var ffnNormBeta = TensorStorage<float>.Unpooled(0);
-                    // FFN weights — step 2.3b: resident as Q8_0 (output-major)
-                    // when quantization is enabled and both dims are block-aligned;
-                    // F32 transposed otherwise.
-                    DecodeWeight ffnGate, ffnUp, ffnDown;
-                    if (quantize && dModel % Q8DotKernel.BlockSize == 0 && dFF % Q8DotKernel.BlockSize == 0)
+
+                    DecodeWeight ffnGate = default, ffnUp = default, ffnDown = default;
+                    float[]? moeRouter = null, moeSharedGateInp = null;
+                    DecodeWeight[]? moeGate = null, moeUp = null, moeDown = null;
+                    DecodeWeight moeShGate = default, moeShUp = default, moeShDown = default;
+
+                    if (isMoe)
+                    {
+                        // Router + routed experts (3-D tensors) + sigmoid-gated shared expert.
+                        moeRouter = LoadRouter(reader, reader.Tensors[$"blk.{l}.ffn_gate_inp.weight"], dModel, expertCount);
+                        moeGate = LoadExperts(reader, reader.Tensors[$"blk.{l}.ffn_gate_exps.weight"]);
+                        moeUp = LoadExperts(reader, reader.Tensors[$"blk.{l}.ffn_up_exps.weight"]);
+                        moeDown = LoadExperts(reader, reader.Tensors[$"blk.{l}.ffn_down_exps.weight"]);
+                        moeShGate = AllocAndLoadResident(reader, $"blk.{l}.ffn_gate_shexp.weight", dModel, dFF, mmap);
+                        moeShUp = AllocAndLoadResident(reader, $"blk.{l}.ffn_up_shexp.weight", dModel, dFF, mmap);
+                        moeShDown = AllocAndLoadResident(reader, $"blk.{l}.ffn_down_shexp.weight", dFF, dModel, mmap);
+                        moeSharedGateInp = LoadF32Vector(reader, $"blk.{l}.ffn_gate_inp_shexp.weight", dModel);
+                    }
+                    else if (quantize && dModel % Q8DotKernel.BlockSize == 0 && dFF % Q8DotKernel.BlockSize == 0)
                     {
                         ffnGate = AllocAndLoadResident(reader, $"blk.{l}.ffn_gate.weight", dModel, dFF, mmap);
                         ffnUp = AllocAndLoadResident(reader, $"blk.{l}.ffn_up.weight", dModel, dFF, mmap);
@@ -244,6 +269,14 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                         FfnGate = ffnGate,
                         FfnUp = ffnUp,
                         FfnDown = ffnDown,
+                        MoeRouter = moeRouter,
+                        MoeGate = moeGate,
+                        MoeUp = moeUp,
+                        MoeDown = moeDown,
+                        MoeSharedGate = moeShGate,
+                        MoeSharedUp = moeShUp,
+                        MoeSharedDown = moeShDown,
+                        MoeSharedGateInp = moeSharedGateInp,
                     };
                 }
             }
@@ -395,7 +428,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             return storage;
         }
 
-        private static TensorStorage<float> AllocAndLoad(GgufReader reader, string name, long elementCount)
+        internal static TensorStorage<float> AllocAndLoad(GgufReader reader, string name, long elementCount)
         {
             if (!reader.Tensors.TryGetValue(name, out var info))
             {
@@ -409,6 +442,137 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var storage = TensorStorage<float>.Unpooled(checked((int)elementCount));
             reader.LoadTensorAsF32(info, storage.AsSpan());
             return storage;
+        }
+
+        // ── Mixture of Experts (qwen2moe) ─────────────────────────────────────
+
+        /// <summary>
+        /// Splits a 3-D GGUF expert tensor <c>[ne0, ne1, n_expert]</c> into one
+        /// <see cref="DecodeWeight"/> per expert (input dim = <c>ne0</c>, output dim = <c>ne1</c>) —
+        /// e.g. <c>ffn_gate_exps</c> / <c>ffn_up_exps</c> / <c>ffn_down_exps</c>. Each expert is a
+        /// contiguous slice (the expert axis <c>ne2</c> is slowest), so Q4_K/Q6_K experts keep their
+        /// bytes verbatim and Q8_0 experts de-interleave per expert. Managed copies for now (mmap
+        /// per-expert slicing is a follow-on).
+        /// </summary>
+        internal static DecodeWeight[] LoadExperts(GgufReader reader, GgufTensorInfo info)
+        {
+            if (info.Dims.Length != 3)
+            {
+                throw new InvalidDataException(
+                    $"Expert tensor '{info.Name}' must be 3-D [ne0, ne1, n_expert], got {info.Dims.Length} dims.");
+            }
+
+            var inDim = checked((int)info.Dims[0]);
+            var outDim = checked((int)info.Dims[1]);
+            var expertCount = checked((int)info.Dims[2]);
+            var perExpert = (long)inDim * outDim;
+            var experts = new DecodeWeight[expertCount];
+
+            switch (info.Type)
+            {
+                case GgmlType.Q4_K:
+                case GgmlType.Q6_K:
+                {
+                    var superBytes = info.Type == GgmlType.Q4_K
+                        ? Q4KWeight.SuperBlockBytes : Q6KWeight.SuperBlockBytes;
+                    var expertBytes = checked((int)(perExpert / GgmlDequant.SuperBlockElements * superBytes));
+                    var total = checked((int)((long)expertBytes * expertCount));
+                    var whole = ArrayPool<byte>.Shared.Rent(total);
+                    try
+                    {
+                        if (info.Type == GgmlType.Q4_K) { reader.LoadTensorQ4_KRaw(info, whole.AsSpan(0, total)); }
+                        else { reader.LoadTensorQ6_KRaw(info, whole.AsSpan(0, total)); }
+
+                        for (var e = 0; e < expertCount; e++)
+                        {
+                            var bytes = new byte[expertBytes];
+                            whole.AsSpan(e * expertBytes, expertBytes).CopyTo(bytes);
+                            experts[e] = info.Type == GgmlType.Q4_K
+                                ? new Q4KWeight(bytes, inDim, outDim)
+                                : new Q6KWeight(bytes, inDim, outDim);
+                        }
+                    }
+                    finally
+                    {
+                        ArrayPool<byte>.Shared.Return(whole);
+                    }
+                    break;
+                }
+
+                case GgmlType.Q8_0:
+                {
+                    var elems = checked((int)(perExpert * expertCount));
+                    var blocksPerExpert = checked((int)(perExpert / Q8DotKernel.BlockSize));
+                    var quants = ArrayPool<sbyte>.Shared.Rent(elems);
+                    var scales = ArrayPool<float>.Shared.Rent(blocksPerExpert * expertCount);
+                    try
+                    {
+                        reader.LoadTensorQ8_0Raw(info, quants.AsSpan(0, elems), scales.AsSpan(0, blocksPerExpert * expertCount));
+
+                        var perElems = checked((int)perExpert);
+                        for (var e = 0; e < expertCount; e++)
+                        {
+                            var q = new sbyte[perElems];
+                            var s = new float[blocksPerExpert];
+                            quants.AsSpan(e * perElems, perElems).CopyTo(q);
+                            scales.AsSpan(e * blocksPerExpert, blocksPerExpert).CopyTo(s);
+                            experts[e] = new Q8Weight(q, s, inDim, outDim);
+                        }
+                    }
+                    finally
+                    {
+                        ArrayPool<sbyte>.Shared.Return(quants);
+                        ArrayPool<float>.Shared.Return(scales);
+                    }
+                    break;
+                }
+
+                default:
+                    throw new NotSupportedException(
+                        $"Expert tensor '{info.Name}' type {info.Type} is not supported (expected Q4_K / Q6_K / Q8_0).");
+            }
+
+            return experts;
+        }
+
+        /// <summary>
+        /// Loads the MoE router <c>ffn_gate_inp</c> (<c>[ne0=dModel, ne1=expertCount]</c>, F32) and
+        /// transposes GGUF's output-major layout to the input-major <c>[dModel × expertCount]</c> the
+        /// single-token projection kernel expects (mirrors the F32 FFN transpose).
+        /// </summary>
+        /// <summary>Loads a small F32 vector tensor (e.g. the shared-expert gate <c>ffn_gate_inp_shexp</c>).</summary>
+        internal static float[] LoadF32Vector(GgufReader reader, string name, int count)
+        {
+            if (!reader.Tensors.TryGetValue(name, out var info))
+            {
+                throw new InvalidDataException($"Required tensor '{name}' missing from GGUF.");
+            }
+            var arr = new float[count];
+            reader.LoadTensorAsF32(info, arr);
+            return arr;
+        }
+
+        internal static float[] LoadRouter(GgufReader reader, GgufTensorInfo info, int dModel, int expertCount)
+        {
+            var n = checked(dModel * expertCount);
+            var raw = ArrayPool<float>.Shared.Rent(n);
+            try
+            {
+                reader.LoadTensorAsF32(info, raw.AsSpan(0, n));
+                var w = new float[n];
+                for (var e = 0; e < expertCount; e++)
+                {
+                    for (var d = 0; d < dModel; d++)
+                    {
+                        w[d * expertCount + e] = raw[e * dModel + d];   // [expert,dModel] → [dModel,expert]
+                    }
+                }
+                return w;
+            }
+            finally
+            {
+                ArrayPool<float>.Shared.Return(raw);
+            }
         }
 
         /// <summary>
@@ -459,7 +623,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// matching both Q4KWeight's and Q8Weight's output-major layout, so no
         /// transpose any path.
         /// </summary>
-        private static DecodeWeight AllocAndLoadResident(
+        internal static DecodeWeight AllocAndLoadResident(
             GgufReader reader, string name, int inDim, int outDim, MemoryMappedModelFile? mmap)
         {
             if (!reader.Tensors.TryGetValue(name, out var info))
