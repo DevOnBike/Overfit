@@ -35,7 +35,7 @@ ONNX: PyTorch-exported model import into Sequential for inference
 8. `performance-patterns.md` — CPU/SIMD performance pattern catalog.
 9. `gp-anomaly-baseline.md` — proposed GP/EWMA baseline for the metric anomaly detector.
 10. `scenarios/` — role-specific usage guides (start with [`in-process-agents.md`](scenarios/in-process-agents.md) for the RAG + tool-calling + structured-output story).
-11. `marketing/` — go-to-market plan, launch copy, LinkedIn drafts (non-engineering collateral).
+11. `marketing/` — non-engineering collateral (e.g. `feature-blocks.md`, the infographic source). Launch copy and LinkedIn drafts live at the repo root.
 12. `../ROADMAP.md` — planned work and priorities.
 
 ## Benchmark policy
