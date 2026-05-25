@@ -98,6 +98,65 @@ session.Reset(promptTokens);
 var token = session.GenerateNextToken(in SamplingOptions.Greedy); // 0 B / token
 ```
 
+Weights are **memory-mapped by default** (`mmap: true`): the verbatim K-quant weights and the
+quantized token-embedding table are file-backed (shared/clean pages), so a 3B `Q4_K_M` model loads
+with a **~220 MB live managed heap** instead of copying the whole model onto it. Pass `mmap: false`
+to force the managed-copy path (e.g. when the file must not stay open).
+
+### Embeddings + in-process vector store (RAG)
+
+```csharp
+using DevOnBike.Overfit.LanguageModels.Retrieval;
+
+// Pooled, L2-normalised sentence embedding from the same model (Mean or LastToken pooling).
+float[] vec = session.Embed(tokenizer.Encode("the cat sat on the mat"));
+
+var store = new VectorStore(session.EmbeddingDimension);
+store.Add("doc1", session.Embed(tokenizer.Encode(doc1Text)), payload: doc1Text);
+store.Add("doc2", session.Embed(tokenizer.Encode(doc2Text)), payload: doc2Text);
+
+VectorMatch[] hits = store.Search(session.Embed(tokenizer.Encode(query)), topK: 3); // cosine
+var best = hits[0].Payload;   // hits[i].Score is the true cosine similarity
+```
+
+`VectorStore` is in-process and dependency-free — a flat dot-product scan with top-K insertion
+(no external vector DB). Sized for app/document-set scale, not billion-scale ANN.
+
+### Structured output — guaranteed well-formed JSON
+
+```csharp
+using DevOnBike.Overfit.LanguageModels.Constraints;
+using DevOnBike.Overfit.LanguageModels.Chat;
+
+var chat = new ChatSession(session, tokenizer, template);
+var reply = chat.Send("Return a person object with name and age.", in options,
+                      constraint: new JsonGrammarConstraint(tokenizer));
+
+using var doc = JsonDocument.Parse(reply);   // never throws — grammar enforced at the logit level
+```
+
+The constraint (`ITokenConstraint`) masks every token that would break well-formed JSON to `-∞`
+before sampling, so the model cannot emit invalid output — no prompt-engineering, no retry/repair.
+
+### Function / tool calling
+
+```csharp
+using DevOnBike.Overfit.LanguageModels.Tools;
+
+var tools = new[] { new ToolDefinition("get_weather", "Weather for a city.") };
+var reply = chat.Send("Weather in Paris?", in options,
+                      constraint: new ToolCallConstraint(tools, tokenizer));
+
+if (ToolCall.TryParse(reply, out var call))      // always a valid {"name","arguments"} envelope
+{
+    using var args = JsonDocument.Parse(call.Arguments);
+    var result = myHandlers[call.Name](args.RootElement);  // dispatch to your C# delegate
+}
+```
+
+The tool name is constrained to the registered set and the arguments to well-formed JSON. End-to-end
+runnable example (load → RAG → tool call → JSON in one process): [`Demo/AgentDemo`](../Demo/AgentDemo/README.md).
+
 ### Inference — ONNX import (linear topology)
 
 ```csharp
