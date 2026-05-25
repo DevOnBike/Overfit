@@ -57,7 +57,7 @@ Parsed OK → root is Array.
 | Step | Type |
 |------|------|
 | load | `CachedLlamaInferenceEngine.LoadGguf(path)` (mmap default) |
-| RAG | `CachedLlamaSession.Embed(tokens, pooling, normalize)` |
+| RAG | `CachedLlamaSession.Embed(...)` → `VectorStore.Add` / `Search` (in-process cosine top-K) |
 | tool calling | `ToolCallConstraint` + `ToolCall.TryParse` → your `Func<JsonElement,string>` |
 | JSON mode | `JsonGrammarConstraint` passed to `ChatSession.Send(…, constraint)` |
 

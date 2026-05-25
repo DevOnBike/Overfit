@@ -117,8 +117,13 @@ copy ALL bytes into managed arrays (4 GB Q4_K_M ⇒ ~4 GB managed RAM).
    bad-args rejection), `ToolCallTests` (TryParse). Argument *typing* (per-tool JSON-Schema) is the follow-on;
    the handler validates args meanwhile.
 
-**🔴 Later / off-moat:**
-7. **Vector store** — bigger; embeddings API (#2) is the prerequisite and the higher-value first step.
+**🟢 On-moat / done:**
+7. **Vector store** — **DONE 2026-05-25.** `VectorStore` (in-process, zero-dependency) + `VectorMatch`:
+   `Add(id, vector, payload)` stores unit-normalised in one contiguous backing array; `Search` is a flat
+   dot-product scan + top-K insertion (no full sort; span overload allocates nothing). Cosine reported is
+   magnitude-invariant. Linear scan — sized for app/document-set scale, not billion-scale ANN. Closes the RAG
+   loop (embeddings → store → retrieve), all in-process. Tests: `VectorStoreTests` (ranking / true-cosine /
+   top-K / growth / guards). Wired into `Demo/AgentDemo` RAG step.
 
 **Session 2026-05-25 delivered: opt 1 (tokens/sec + Min-P; Mirostat deferred — stateful), opt 2 (mmap GGUF —
 ~55 % less managed RAM, bit-identical; NOW DEFAULT with smart-skip, soak-validated on Q4_K_M/Q8_0/FP16),

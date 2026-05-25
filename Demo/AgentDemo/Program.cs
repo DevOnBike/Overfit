@@ -8,6 +8,7 @@ using DevOnBike.Overfit.LanguageModels.Chat;
 using DevOnBike.Overfit.LanguageModels.Constraints;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Loading;
+using DevOnBike.Overfit.LanguageModels.Retrieval;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
 using DevOnBike.Overfit.LanguageModels.Tools;
@@ -90,23 +91,20 @@ namespace DevOnBike.Overfit.Demo.Agent
             ];
             const string query = "Which landmark is in France?";
 
-            var docVectors = new float[docs.Length][];
+            // Index the documents in an in-process vector store, then retrieve by cosine.
+            var store = new VectorStore(session.EmbeddingDimension);
             for (var i = 0; i < docs.Length; i++)
             {
-                docVectors[i] = session.Embed(inner.Encode(docs[i]));   // L2-normalised
+                store.Add($"doc{i}", session.Embed(inner.Encode(docs[i])), docs[i]);
             }
-            var queryVector = session.Embed(inner.Encode(query));
 
             Console.WriteLine($"Query: \"{query}\"\n");
-            var best = -1;
-            var bestScore = float.NegativeInfinity;
-            for (var i = 0; i < docs.Length; i++)
+            var hits = store.Search(session.Embed(inner.Encode(query)), topK: docs.Length);
+            foreach (var hit in hits)
             {
-                var score = Dot(queryVector, docVectors[i]);   // cosine (vectors are unit-norm)
-                Console.WriteLine($"  cos={score:F3}  {docs[i]}");
-                if (score > bestScore) { bestScore = score; best = i; }
+                Console.WriteLine($"  cos={hit.Score:F3}  {hit.Payload}");
             }
-            Console.WriteLine($"\nTop match → {docs[best]}\n");
+            Console.WriteLine($"\nTop match → {hits[0].Payload}\n");
         }
 
         // ── 2. Tool calling (constrained → parse → dispatch to C#) ─────────────
@@ -168,13 +166,6 @@ namespace DevOnBike.Overfit.Demo.Agent
             Console.WriteLine($"Model emits: {reply.Trim()}");
             using var doc = JsonDocument.Parse(reply);   // always parses — enforced at decode
             Console.WriteLine($"Parsed OK → root is {doc.RootElement.ValueKind}.\n");
-        }
-
-        private static float Dot(float[] a, float[] b)
-        {
-            var sum = 0f;
-            for (var i = 0; i < a.Length; i++) { sum += a[i] * b[i]; }
-            return sum;
         }
 
         private static string? ResolveGguf(string dir)
