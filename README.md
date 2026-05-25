@@ -6,7 +6,7 @@ explicit memory ownership, zero-allocation inference hot paths.
 **No native binaries. No Python runtime. No ONNX Runtime dependency.** Native-AOT compatible.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/DevOnBike/Overfit/main/docs/assets/overfit-features.png"
+  <img src="docs/assets/overfit-features.png"
        alt="Overfit at a glance — pure-C#/.NET LLM engine: load any GGUF (Q4_K/Q6_K), run and fine-tune LLMs (LoRA), in-process agentic stack (RAG, tool calling, guaranteed JSON), adaptive anomaly detection, zero-allocation, Native-AOT — no Python, no native binary, no server."
        width="520">
 </p>
