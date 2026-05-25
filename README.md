@@ -98,7 +98,7 @@ execution — *not* raw matmul throughput. It matches llama.cpp on RAM and wins
 
 LoRA Stage 1/2/3 ✅ · GGUF Q4_K/Q6_K in-RAM decode ✅ · GPT-2 / Qwen / Llama / Mistral
 inference ✅ · anomaly-detection + production base ✅. Open: closing the decode gap to
-llama.cpp (full-matrix attention), batched prefill (B>1), ONNX export. Full
+llama.cpp (full-matrix attention), batched prefill (B>1). Full
 priorities and the live resume-point: [`ROADMAP.md`](ROADMAP.md).
 
 ---

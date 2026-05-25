@@ -173,7 +173,7 @@ Stuff you might not realize matters until you hit it:
 
 ### Deployment is trivial
 
-A trained Overfit model is just a binary file and some C# code. No Python environment, no ONNX export, no TorchScript compilation issues, no "it works in Jupyter but not in production" surprises.
+A trained Overfit model is just a binary file and some C# code. No Python environment, no TorchScript compilation issues, no "it works in Jupyter but not in production" surprises.
 
 ```bash
 dotnet publish -c Release -r linux-x64 /p:PublishAot=true

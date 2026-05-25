@@ -17,7 +17,6 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 | Evolutionary: GA + OpenAI-ES, parallel fitness | ✅ Stable, 0 B/op Ask/AskThenTell |
 | ONNX import (linear topology, 14 ops) | ✅ Stable |
 | ONNX import (DAG / ResNet skip connections) | ✅ Stable |
-| ONNX export | ❌ Not started |
 | GPT-2 inference (124M, KV-cache, 0 B/token) | ✅ Stable, parity vs PyTorch verified |
 | Qwen2.5 / Llama / Mistral inference (GQA, RoPE, SwiGLU) | ✅ Stable for 0.5B/3B FP32/F16 |
 | Native C# GGUF loader (F32/F16/BF16/Q8_0/Q4_K/Q6_K) | ✅ Loads `*.gguf` from Ollama/HF directly |
@@ -836,7 +835,6 @@ This section is a strategic overlay — it ranks and justifies; the tactical bre
 
 - [ ] **Chat templates** — Qwen/Llama/Mistral chat-format builders (system/user/assistant turns) for ergonomic chat-style API. *(Lives in deferred track until Qwen path returns to focus.)*
 - [ ] **`OverfitClient` facade** — high-level API: `var client = OverfitClient.LoadGguf(...); var response = await client.ChatAsync("...");` — gathers tokenizer + engine + session + sampling defaults.
-- [ ] **ONNX export** — Overfit → ONNX for interop with other runtimes.
 - [ ] **ONNX: LSTM/GRU operators** — enables recurrent model import.
 - [ ] **Depthwise Conv** (group=channels) — MobileNet-style models.
 - [ ] Standalone Softmax and CrossEntropy in addition to fused loss.
