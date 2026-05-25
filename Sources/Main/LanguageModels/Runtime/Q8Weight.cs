@@ -71,7 +71,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             ArgumentOutOfRangeException.ThrowIfNegative(row);
             ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(row, OutputSize);
-            
+
             if (dst.Length < InputSize)
             {
                 throw new ArgumentException(
@@ -81,7 +81,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var blocksPerRow = InputSize / Q8DotKernel.BlockSize;
             var qBase = (long)row * InputSize;
             var sBase = (long)row * blocksPerRow;
-            
+
             for (var b = 0; b < blocksPerRow; b++)
             {
                 var scale = Scales[sBase + b];

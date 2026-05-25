@@ -63,7 +63,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         }
 
 
-        
+
         // ── Default-flip soak: mmap is now the default. These guard that the two
         //    non-K-quant precisions are untouched by the flip. The loader skips the
         //    map entirely when the file has no Q4_K/Q6_K tensors (pure-Q8_0 / pure-FP16),
