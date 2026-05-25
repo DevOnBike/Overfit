@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.LanguageModels.Loading;
+
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
     /// <summary>
@@ -84,5 +86,32 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         /// <summary>Resident size in bytes.</summary>
         public long ByteCount => Blocks.Length;
+
+        /// <summary>
+        /// Dequantizes output row <paramref name="row"/> — one output's <see cref="InputSize"/>-long
+        /// contraction vector, i.e. one token's embedding when this matrix is a token-embedding table —
+        /// into <paramref name="dst"/> as F32. Decodes only that row's super-blocks straight from
+        /// <see cref="BlockSpan"/> (no full-tensor dequant, no allocation), so it is cheap enough for
+        /// the per-token lookup hot path.
+        /// </summary>
+        public void DecodeRow(int row, Span<float> dst)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(row);
+            ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(row, OutputSize);
+            if (dst.Length < InputSize)
+            {
+                throw new ArgumentException(
+                    $"Destination span too small: {dst.Length} < {InputSize}.", nameof(dst));
+            }
+
+            var blocksPerRow = SuperBlocksPerRow;
+            var blocks = BlockSpan;
+            var rowBase = (long)row * blocksPerRow * SuperBlockBytes;
+            for (var sb = 0; sb < blocksPerRow; sb++)
+            {
+                var block = blocks.Slice((int)(rowBase + (long)sb * SuperBlockBytes), SuperBlockBytes);
+                GgmlDequant.DecodeQ6_KBlock(block, dst.Slice(sb * SuperBlockElements, SuperBlockElements));
+            }
+        }
     }
 }

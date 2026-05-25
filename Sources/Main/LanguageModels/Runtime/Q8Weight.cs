@@ -63,6 +63,37 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         public long ByteCount => Quants.Length + (long)Scales.Length * sizeof(float);
 
         /// <summary>
+        /// Dequantizes output row <paramref name="row"/> — one output's <see cref="InputSize"/>-long
+        /// contraction vector — into <paramref name="dst"/> as F32: <c>dst[i] = scale[block] * quant[i]</c>.
+        /// Zero-allocation; the per-token embedding-lookup primitive for a Q8-resident table.
+        /// </summary>
+        public void DecodeRow(int row, Span<float> dst)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(row);
+            ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(row, OutputSize);
+            
+            if (dst.Length < InputSize)
+            {
+                throw new ArgumentException(
+                    $"Destination span too small: {dst.Length} < {InputSize}.", nameof(dst));
+            }
+
+            var blocksPerRow = InputSize / Q8DotKernel.BlockSize;
+            var qBase = (long)row * InputSize;
+            var sBase = (long)row * blocksPerRow;
+            
+            for (var b = 0; b < blocksPerRow; b++)
+            {
+                var scale = Scales[sBase + b];
+                var off = b * Q8DotKernel.BlockSize;
+                for (var i = 0; i < Q8DotKernel.BlockSize; i++)
+                {
+                    dst[off + i] = scale * Quants[qBase + off + i];
+                }
+            }
+        }
+
+        /// <summary>
         /// Quantizes a row-major F32 weight — <paramref name="rowCount"/> rows of
         /// <paramref name="rowLength"/> — into a Q8_0 weight where each row is one
         /// output's contraction vector. <paramref name="rowLength"/> must be a

@@ -44,13 +44,36 @@ copy ALL bytes into managed arrays (4 GB Q4_K_M ⇒ ~4 GB managed RAM).
    ctor delegating; added `BlockSpan`); kernels read `BlockSpan` / `fixed (byte* = w.BlockSpan)` (math
    unchanged). `GgufLlamaLoader.Load(path, quantize, mmap: true)` slices verbatim-layout Q4_K/Q6_K weights
    (FFN, LM head, per-head attention Q/K/V — each head a contiguous file run) straight from the map; the engine
-   holds the map and disposes it LAST. **Opt-in (`mmap: false` default) — flip default after broader soak.**
-   Q8_0 (de-interleaved) + F32-fallback still copy. **Measured on real Qwen2.5-3B Q4_K_M (2007 MB file):
-   managed-heap alloc 3202 → 1427 MB (−1776 MB, ~55 %), working-set delta 3167 → 1533 MB (~52 %).** The 1427 MB
-   residual is the F32 embedding table (dequantized for lookup) — the next RAM lever (quantized embedding
-   lookup), out of scope here. Bit-PARITY validated: mmap vs copy logits identical (maxDiff = 0). Tests:
-   `MemoryMappedModelFileTests` (4 fast), `GgufMmapParityTests` (2 `[LongFact]` — parity + RAM measurement).
-   AOT-clean (`System.IO.MemoryMappedFiles`).
+   holds the map and disposes it LAST. **NOW DEFAULT (`mmap: true`)** with a smart-skip: the map is built only
+   when the file actually has Q4_K/Q6_K tensors (`FileHasVerbatimKQuant`) — pure-F32 / pure-Q8_0 files skip it
+   and behave exactly as the copy path (no file handle held). Q8_0 (de-interleaved) + F32-fallback still copy.
+   **Measured on real Qwen2.5-3B Q4_K_M (2007 MB file): managed-heap alloc 3202 → 1427 MB (−1776 MB, ~55 %),
+   working-set delta 3167 → 1533 MB (~52 %).** The 1427 MB residual is the F32 embedding table (dequantized for
+   lookup) — the next RAM lever (quantized embedding lookup), out of scope here. **Soak-validated 2026-05-25
+   (default flip):** mmap vs copy bit-identical on Q4_K_M (maxDiff = 0), Q8_0 (maxDiff = 0), FP16 (maxDiff = 0);
+   Q4_K_M decode-vs-own-F32-baseline = 29/32 top-1, worst swing 2.16 — *exactly* the pre-change recorded
+   baseline, proving Phase A preserved decode bit-for-bit. Tests: `MemoryMappedModelFileTests` (4 fast),
+   `GgufMmapParityTests` (4 `[LongFact]` — Q4_K_M/Q8_0/FP16 parity + RAM measurement). AOT-clean
+   (`System.IO.MemoryMappedFiles`).
+   ⚠ **Pre-existing (NOT mmap) finding:** `GgufQ4KMParityTests.Q4KM_TopTokenMatches_FP16Baseline` is RED —
+   Q4_K_M top-1 (474) ≠ FP16 top-1 (40), 4/10 overlap, on the maximally-ambiguous 3-token prompt `[BOS,
+   im_start, \n]`. This is the SAME step-0 near-tie the decode-baseline records (ref→47 / subj→474, swing 2.16);
+   the assertion ("top-1 must match FP16") is over-strict for this flat-distribution prompt. Confirmed
+   independent of mmap (Q4_K_M logits are byte-identical copy vs mmap). Fix later: relax to top-k overlap or
+   pick a less-ambiguous prompt — NOT a decode bug.
+   ► **Quantized token-embedding lookup — DONE 2026-05-25 (the post-mmap RAM lever).** The embedding table
+   was always loaded as full F32 (1187 MB for Qwen-3B, vocab 151936 × dModel 2048) — the dominant residual
+   after mmap. Now `GgufLlamaLoader.LoadEmbedding` keeps `token_embd` in its native K-quant layout (Q4_K/Q6_K,
+   verbatim, mmap-able — token_embd is row-major [vocab, dModel] = output-major, row = token) and the lookup
+   dequantizes only the looked-up row: `Q4KWeight`/`Q6KWeight`/`Q8Weight.DecodeRow(row, dst)` (zero-alloc, one
+   row's super-blocks) behind `DecodeWeight.DequantizeRow`. `_embedWeights` (engine + session) changed
+   `TensorStorage<float>` → `DecodeWeight`; F32 / `.bin` / safetensors paths unchanged (implicit conversion +
+   F32 fallback). **Measured (Qwen-3B Q4_K_M, mmap default): live resident managed heap 2158 MB (copy) →
+   238 MB (mmap)** — vs the 1427 MB mmap residual before this change (that residual WAS the F32 embedding,
+   now ~0 on-heap / Q6_K file-mapped). Decode bit-identical: Q4_K_M decode-vs-F32 still *exactly* 29/32, swing
+   2.16 (same `DecodeQ6_KBlock` on the same bytes as the old full-tensor dequant). Per-token cost: dModel/256
+   super-block decodes (8 for Qwen-3B) — negligible vs the matmuls. Tests: `DecodeWeightRowTests` (3 fast),
+   `Mmap_MeasuredResidentManagedHeap` (`[LongFact]`).
 2. **Embeddings API** — **DONE 2026-05-25.** `CachedLlamaSession.Embed(tokens, pooling, normalize)` +
    `EmbeddingDimension` + `EmbeddingPooling` (Mean/LastToken), L2-normalised, pools per-token final hidden
    states. Validated on real Qwen (`EmbeddingsTests`): unit-norm, deterministic, semantic ordering holds
@@ -72,9 +95,12 @@ copy ALL bytes into managed arrays (4 GB Q4_K_M ⇒ ~4 GB managed RAM).
 7. **Vector store** — bigger; embeddings API (#2) is the prerequisite and the higher-value first step.
 
 **Session 2026-05-25 delivered: opt 1 (tokens/sec + Min-P; Mirostat deferred — stateful), opt 2 (mmap GGUF —
-~55 % less managed RAM, bit-identical, opt-in), opt 3 (embeddings). Next: flip mmap default after soak, then
-constrained generation (opt 3/JSON-Schema) + function calling + vector store (queued); quantized embedding
-lookup is the next RAM lever.** Also fixed a recurring flaky-suite issue: added `MathUtils.SetSeed(int)` (per-thread
+~55 % less managed RAM, bit-identical; NOW DEFAULT with smart-skip, soak-validated on Q4_K_M/Q8_0/FP16),
+opt 3 (embeddings), quantized token-embedding lookup (live managed heap for a 3B Q4_K_M model now 238 MB,
+down from 1427 MB — the F32 embedding eliminated; decode bit-identical). Next: constrained generation
+(JSON-Schema) + function calling + vector store (queued). Also queued: relax the over-strict pre-existing
+`GgufQ4KMParityTests` FP16 assertion (see opt 1 note — not a decode bug).**
+Also fixed a recurring flaky-suite issue: added `MathUtils.SetSeed(int)` (per-thread
 repro hook) and seeded the random-tiny-base anomaly `[Fact]` tests — which surfaced that **tiny-base LoRA
 convergence is init-sensitive** (some seeds diverge at lr 1e-2 / 300 steps; the seed pins a representative
 converging init — the rigorous validation remains the TRAINED production base in `[LongFact]`).

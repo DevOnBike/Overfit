@@ -31,10 +31,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly RopeTable? _rope;
 
         // Engine-owned embedding matrix [vocab × dModel], referenced (NOT copied):
-        // the engine outlives every session it creates and disposes this storage.
-        // The row for the current token is sliced on demand at lookup. Previously
-        // this was a per-session ToArray() copy — 1.24 GB duplicated for a 3B model.
-        private readonly TensorStorage<float> _embedWeights;
+        // the engine outlives every session it creates and disposes its backing. The row for
+        // the current token is read on demand at lookup (F32 slice, or per-row dequant when the
+        // table is K-quant-resident). Previously this was a per-session ToArray() copy — 1.24 GB
+        // duplicated for a 3B model.
+        private readonly DecodeWeight _embedWeights;
 
         // Per-token working buffers (allocated once)
         private readonly float[] _hidden;
@@ -53,7 +54,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             StackWeights weights,
             KeyValueCache cache,
             RopeTable? rope,
-            TensorStorage<float> embedWeights)
+            DecodeWeight embedWeights)
         {
             _config = config;
             _stack = stack;
@@ -486,10 +487,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // when the cache is full (RoPE-only; no-op otherwise).
             MakeRoomIfSliding();
 
-            // Token embedding lookup: row tokenId of embed_weights [vocab × dModel],
-            // sliced directly from the engine-owned storage (no per-session copy).
-            var row = _embedWeights.AsReadOnlySpan().Slice(tokenId * _config.DModel, _config.DModel);
-            row.CopyTo(_hidden);
+            // Token embedding lookup: row tokenId of embed_weights [vocab × dModel], written
+            // straight into _hidden. F32 backing → a plain slice-copy; K-quant backing →
+            // dequantize just this one row (the per-token cost of the quantized embedding table).
+            _embedWeights.DequantizeRow(tokenId, _hidden.AsSpan(0, _config.DModel));
 
             // No additive positional embedding — RoPE handles positions inside attention.
 

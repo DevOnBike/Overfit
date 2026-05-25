@@ -62,37 +62,74 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             Assert.Equal(0f, maxDiff);
         }
 
+
+        
+        // ── Default-flip soak: mmap is now the default. These guard that the two
+        //    non-K-quant precisions are untouched by the flip. The loader skips the
+        //    map entirely when the file has no Q4_K/Q6_K tensors (pure-Q8_0 / pure-FP16),
+        //    so mmap:true must be byte-for-byte identical to mmap:false there too.
+
         [LongFact]
-        public void Mmap_MeasuredManagedAllocationAndWorkingSet()
+        public void Q8_0Model_DefaultMmap_IdenticalToCopyPath()
+        {
+            TestModelPaths.Qwen3B.RequireQ8GgufPath();
+            AssertBitIdentical(TestModelPaths.Qwen3B.Q8GgufPath);
+        }
+
+        [LongFact]
+        public void Fp16Model_DefaultMmap_IdenticalToCopyPath()
+        {
+            TestModelPaths.Qwen3B.RequireGgufPath();
+            AssertBitIdentical(TestModelPaths.Qwen3B.GgufPath);
+        }
+
+        private void AssertBitIdentical(string path)
+        {
+            var copyLogits = RunOneStep(path, mmap: false);
+            var mmapLogits = RunOneStep(path, mmap: true);
+
+            Assert.Equal(copyLogits.Length, mmapLogits.Length);
+
+            var maxDiff = 0f;
+            for (var i = 0; i < copyLogits.Length; i++)
+            {
+                var d = MathF.Abs(copyLogits[i] - mmapLogits[i]);
+                if (d > maxDiff) { maxDiff = d; }
+            }
+
+            _out.WriteLine($"{Path.GetFileName(path)}: vocab = {copyLogits.Length}, max abs logit diff = {maxDiff:G9}");
+            Assert.Equal(0f, maxDiff);
+        }
+
+        [LongFact]
+        public void Mmap_MeasuredResidentManagedHeap()
         {
             TestModelPaths.Qwen3B.RequireQ4KmGgufPath();
             var path = TestModelPaths.Qwen3B.Q4KmGgufPath;
 
-            var (copyAlloc, copyWs) = MeasureLoad(path, mmap: false);
-            var (mmapAlloc, mmapWs) = MeasureLoad(path, mmap: true);
+            var copyLive = MeasureLiveManagedHeap(path, mmap: false);
+            var mmapLive = MeasureLiveManagedHeap(path, mmap: true);
 
-            _out.WriteLine($"file size           = {new FileInfo(path).Length / (1024.0 * 1024):F0} MB");
-            _out.WriteLine($"copy managed alloc  = {copyAlloc / (1024.0 * 1024):F0} MB   working set delta = {copyWs / (1024.0 * 1024):F0} MB");
-            _out.WriteLine($"mmap managed alloc  = {mmapAlloc / (1024.0 * 1024):F0} MB   working set delta = {mmapWs / (1024.0 * 1024):F0} MB");
-            _out.WriteLine($"managed-heap saved  = {(copyAlloc - mmapAlloc) / (1024.0 * 1024):F0} MB");
+            // The F32 embedding the loader USED to keep on the heap, for context (vocab × dModel × 4).
+            using var probe = CachedLlamaInferenceEngine.LoadGguf(path, mmap: true);
+            var cfg = probe.Config;
+            var f32EmbedMb = (long)cfg.VocabSize * cfg.DModel * sizeof(float) / (1024.0 * 1024);
 
-            // The mmap path must allocate strictly less managed memory than the copy path:
-            // the verbatim Q4_K/Q6_K weights move off the managed heap onto file-mapped pages.
-            Assert.True(mmapAlloc < copyAlloc,
-                $"mmap managed alloc ({mmapAlloc}) not below copy ({copyAlloc}).");
+            _out.WriteLine($"file size                         = {new FileInfo(path).Length / (1024.0 * 1024):F0} MB");
+            _out.WriteLine($"OLD F32 embedding (now eliminated)= {f32EmbedMb:F0} MB");
+            _out.WriteLine($"live managed heap, copy (mmap off)= {copyLive / (1024.0 * 1024):F0} MB");
+            _out.WriteLine($"live managed heap, mmap (mmap on) = {mmapLive / (1024.0 * 1024):F0} MB");
+            _out.WriteLine($"copy→mmap resident saved          = {(copyLive - mmapLive) / (1024.0 * 1024):F0} MB");
+
+            // mmap moves the verbatim K-quant weights (incl. the Q6_K embedding) off the managed
+            // heap, so the live resident managed heap must be strictly smaller than the copy path.
+            Assert.True(mmapLive < copyLive,
+                $"mmap live heap ({mmapLive}) not below copy ({copyLive}).");
         }
 
-        private static (long managedAlloc, long workingSetDelta) MeasureLoad(string path, bool mmap)
+        /// <summary>Live (post-full-GC) resident managed heap with the model loaded.</summary>
+        private static long MeasureLiveManagedHeap(string path, bool mmap)
         {
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
-            GC.Collect();
-
-            var allocBefore = GC.GetTotalAllocatedBytes(precise: true);
-            using var proc = System.Diagnostics.Process.GetCurrentProcess();
-            proc.Refresh();
-            var wsBefore = proc.WorkingSet64;
-
             using (var engine = CachedLlamaInferenceEngine.LoadGguf(path, mmap: mmap))
             {
                 using var session = engine.CreateSession(64);
@@ -100,10 +137,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
                 var sink = session.LastLogits[0];
                 GC.KeepAlive(sink);
 
-                var allocAfter = GC.GetTotalAllocatedBytes(precise: true);
-                proc.Refresh();
-                var wsAfter = proc.WorkingSet64;
-                return (allocAfter - allocBefore, wsAfter - wsBefore);
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+                return GC.GetTotalMemory(forceFullCollection: true);
             }
         }
 

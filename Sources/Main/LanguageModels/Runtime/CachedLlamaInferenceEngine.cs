@@ -39,7 +39,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly CachedGptStack _stack;
 
         // Loaded weights — owned by this engine, disposed on Dispose()
-        private readonly TensorStorage<float> _embedWeights;
+        // Embedding table [vocab × dModel] (row = token): F32, or K-quant-resident (Q4_K/Q6_K,
+        // possibly mmap-backed) when loaded from a quantized GGUF — the lookup dequantizes per row.
+        private readonly DecodeWeight _embedWeights;
         private readonly TensorStorage<float> _finalNormGamma;
         private readonly TensorStorage<float> _finalNormBeta;
         private readonly DecodeWeight _lmHead;
@@ -77,7 +79,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         private CachedLlamaInferenceEngine(
             GPT1Config config,
-            TensorStorage<float> embedWeights,
+            DecodeWeight embedWeights,
             TensorStorage<float> finalNormGamma,
             TensorStorage<float> finalNormBeta,
             DecodeWeight lmHead,
@@ -121,7 +123,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// </summary>
         public static CachedLlamaInferenceEngine CreateFromBuffers(
             GPT1Config config,
-            TensorStorage<float> embedWeights,
+            DecodeWeight embedWeights,
             TensorStorage<float> finalNormGamma,
             TensorStorage<float> finalNormBeta,
             DecodeWeight lmHead,
@@ -136,7 +138,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// Loads a model directly from a GGUF file (no Python conversion needed).
         /// Supports F32, F16, BF16 tensors. Quantized formats (Q4_K_M etc.) throw NotSupportedException.
         /// </summary>
-        public static CachedLlamaInferenceEngine LoadGguf(string path, bool mmap = false)
+        public static CachedLlamaInferenceEngine LoadGguf(string path, bool mmap = true)
         {
             return GgufLlamaLoader.Load(path, quantize: true, mmap: mmap);
         }
