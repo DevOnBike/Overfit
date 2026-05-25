@@ -96,6 +96,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// <summary>True when sliding-window eviction is enabled (see <see cref="EnableSlidingWindow"/>).</summary>
         public bool SlidingWindowEnabled => _slidingWindow;
 
+        /// <summary>This RoPE-capable session supports sliding-window eviction (<see cref="ISlmSession"/>).</summary>
+        public bool SupportsSlidingWindow => _rope is not null;
+
         /// <summary>
         /// Enables sliding-window KV eviction (RoPE models only): once the cache fills,
         /// the oldest <paramref name="evictBlock"/> tokens are dropped instead of throwing,

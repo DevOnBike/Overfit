@@ -30,13 +30,21 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
         private readonly ITokenizer _tokenizer;
         private readonly ChatTemplate _template;
         private readonly string[] _stopSequences;
+        private readonly bool _slidingWindow;
         private readonly List<ChatMessage> _history = [];
 
+        /// <param name="slidingWindow">
+        /// When true, enables sliding-window KV eviction on the session so long conversations keep
+        /// going past the model's context length (the oldest tokens roll off) instead of stopping at
+        /// the limit. Requires a session that supports it (RoPE models — Qwen / Llama / Mistral);
+        /// throws <see cref="NotSupportedException"/> otherwise.
+        /// </param>
         public ChatSession(
             ISlmSession session,
             ITokenizer tokenizer,
             ChatTemplate template,
-            IReadOnlyList<string>? stopSequences = null)
+            IReadOnlyList<string>? stopSequences = null,
+            bool slidingWindow = false)
         {
             _session = session ?? throw new ArgumentNullException(nameof(session));
             _tokenizer = tokenizer ?? throw new ArgumentNullException(nameof(tokenizer));
@@ -51,6 +59,13 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
                 }
             }
             _stopSequences = stops.ToArray();
+
+            if (slidingWindow)
+            {
+                // Throws NotSupportedException for non-RoPE sessions — fail early, at construction.
+                _session.EnableSlidingWindow();
+                _slidingWindow = true;
+            }
         }
 
         /// <summary>The conversation so far (system / user / assistant turns).</summary>
@@ -126,7 +141,9 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             var sampling = options.Sampling;
             var maxNew = options.MaxNewTokens > 0 ? options.MaxNewTokens : int.MaxValue;
 
-            for (var i = 0; i < maxNew && _session.CurrentPosition < _session.MaxContextLength; i++)
+            // With sliding-window enabled the cache never overflows (oldest tokens roll off), so we
+            // bound generation by MaxNewTokens only; otherwise we stop when the context fills.
+            for (var i = 0; i < maxNew && (_slidingWindow || _session.CurrentPosition < _session.MaxContextLength); i++)
             {
                 var token = _session.GenerateNextToken(in sampling, constraint);
 

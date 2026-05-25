@@ -126,6 +126,20 @@ namespace DevOnBike.Overfit.DeepLearning
         public FeedForwardActivation FfnActivation
         { get; init; } = FeedForwardActivation.GeLU;
 
+        // ── Mixture of Experts (MoE) ──────────────────────────────────────────
+        // 0 ⇒ dense FFN (the default for every model loaded today). When > 0 the FFN
+        // block is replaced by ExpertCount expert FFNs + a router that activates
+        // ExpertUsedCount of them per token (Mixtral / Qwen-MoE style).
+
+        /// <summary>Number of experts in the MoE FFN. 0 ⇒ dense (no MoE).</summary>
+        public int ExpertCount { get; init; }
+
+        /// <summary>Experts activated per token (top-k). 0 ⇒ dense; otherwise ≤ <see cref="ExpertCount"/>.</summary>
+        public int ExpertUsedCount { get; init; }
+
+        /// <summary>True when this model uses a Mixture-of-Experts FFN.</summary>
+        public bool IsMixtureOfExperts => ExpertCount > 0 && ExpertUsedCount > 0;
+
         /// <summary>Total parameter count (weight-tying aware).</summary>
         public long ParameterCount
         {

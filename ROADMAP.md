@@ -141,6 +141,36 @@ repro hook) and seeded the random-tiny-base anomaly `[Fact]` tests — which sur
 convergence is init-sensitive** (some seeds diverge at lr 1e-2 / 300 steps; the seed pins a representative
 converging init — the rigorous validation remains the TRAINED production base in `[LongFact]`).
 
+## Post-launch track #1 — Mixture of Experts (MoE)
+
+**Why:** we already have the memory-optimization trio's first two legs — KV cache + GQA. MoE is the
+third (Mixtral / Qwen-MoE). It fits the moat exactly: *big total knowledge, small per-token compute*
+(only top-k experts run) and, with mmap + K-quant, *low working-set RAM* — i.e. "run Mixtral-class
+models in pure C# on a CPU, no Python". Extends "run the models you know" rather than chasing scale.
+Not multimodality / RLHF / Ring-Attention / TPU kernels — those are off-moat (different lane / scale /
+hardware). See the 2026-05-25 analysis.
+
+**Increment 1 — DONE 2026-05-25 (additive, does NOT touch the live decode path):**
+- `GPT1Config.ExpertCount` / `ExpertUsedCount` (0 ⇒ dense — inert default) + `IsMixtureOfExperts`.
+- `MoeRouter.SelectTopK(logits, topK, indices, weights)` — the gating core: top-k by logit + softmax
+  over the k selected logits (== Mixtral's softmax-all → top-k → renormalize; mathematically identical).
+  Zero-alloc, caller-owned spans. Tests: `MoeRouterTests`.
+
+**Increment 2 — POST-LAUNCH (hot-path; needs a real MoE GGUF to validate):**
+- **Loader:** `GgufLlamaLoader` reads GGUF MoE metadata (`{arch}.expert_count`,
+  `{arch}.expert_used_count`) and the 3-D expert tensors (`ffn_gate_exps` / `ffn_up_exps` /
+  `ffn_down_exps`, shape `[n_expert, dff, dmodel]`) + the router `ffn_gate_inp` `[dmodel, n_expert]`.
+  Per-expert weights slice into the existing `DecodeWeight` (Q4_K/Q6_K/Q8_0 — mmap-able like the dense
+  FFN).
+- **Block:** `MoeFeedForwardBlock` — router projection → `MoeRouter.SelectTopK` → run only the selected
+  experts' SwiGLU FFN (reusing `CachedFeedForwardBlock` / `SingleTokenProjectionKernel`) → weighted
+  sum into the output. Zero-alloc; cost ≈ k dense FFNs, not n.
+- **Wiring:** `BlockWeights`/`CachedTransformerBlock`/`CachedGptStack` dispatch to the MoE block when
+  `config.IsMixtureOfExperts`; dense path unchanged when not.
+- **Validate:** load a real MoE GGUF (e.g. Qwen-MoE / Mixtral Q4_K_M), decode-parity vs an F32 baseline
+  of the same file (mirroring `Q4KMDecodeParityTests`), coherent generation. Requires dropping an MoE
+  GGUF on the dev box.
+
 ## (Historical) Session resume point 2026-05-22 → 23 — SUPERSEDED by "Nearest plan (2026-05-25)" above
 
 **Big session — zero-Python loading completed, chat turnkey, and the anomaly+LoRA product
@@ -308,7 +338,7 @@ value was validation/guidance, not drop-in algorithms.
 - **Token-by-token streaming** — `CachedLlamaSession.StreamGenerate(StreamingOptions, CancellationToken)` returns `IAsyncEnumerable<int>` with stop-token / cache-full / cancellation termination.
 - **Chat runtime: multi-turn template + string stops (2026-05-21)** — `ChatTemplate` (`LanguageModels/Chat/`) renders multi-turn `ChatMessage[]` to a prompt for ChatML / Llama-3 / Mistral, with `Detect(jinja)` fingerprinting a GGUF `tokenizer.chat_template` (no Jinja engine — AOT-hostile) and a ChatML fallback. `StopSequenceDetector` adds correct *string* stop sequences on top of the existing token stops — streaming-safe (holds back a trailing partial that could grow into a stop, never emits the stop marker). 16 unit tests (template detect/render for all 3 formats, stop split-across-pieces / partial / multi-stop / flush). **Validated end-to-end on real Qwen Q4_K_M** (`ChatIntegrationTests`, [LongFact]): detects the GGUF's 2509-char `chat_template` → ChatML, renders a system+user chat, tokenizes, generates, and assembles the stream through the stop detector (markers suppressed).
 - **Turnkey `ChatSession` (2026-05-22)** — `ChatSession` (`LanguageModels/Chat/`) wraps any `ISlmSession` + `ITokenizer` + `ChatTemplate`: owns conversation history, and each `Send(userMessage, options, onText)` renders the whole history, prefills, generates, and assembles the reply applying both the EOS token stop and string stops (`StopSequenceDetector`) — incremental detokenize holds back a trailing partial codepoint rather than emit garbage. 3 fake-backed unit tests (history accumulation + template-rendered prefill, EOS stop, string-stop truncation + streaming).
-- **Sliding-window KV eviction (2026-05-22, RoPE models)** — `KeyValueCache.Evict(count)` drops the oldest tokens by shifting every (layer,head) K/V block down one contiguous memmove, shrinking `CurrentLength` and growing `BasePosition`; retained K/V are NOT re-rotated — RoPE scores depend only on the relative offset, which the climbing `BasePosition` preserves (the new token rotates at `slot + BasePosition`, the true absolute position). `CachedLlamaSession.EnableSlidingWindow(evictBlock)` (opt-in, RoPE-only — learned-absolute-position GPT-2 can't slide) evicts instead of throwing once the cache fills, so chats run unbounded over a rolling context. Tests: `KeyValueCacheEvictTests` (5 — slot shift, BasePosition, reset, invalid count) + `SlidingWindowTests` ([LongFact], real Qwen — enabling sliding is bit-identical before the cache fills; generates 40 tokens over a 16-slot cache with eviction triggered while non-sliding throws). NOTE: sliding window is intentionally NOT equivalent to recomputing on a truncated context (retained hidden states encode since-evicted tokens — standard StreamingLLM behaviour). **Chat-runtime gaps now closed (template, stops, turnkey session, eviction).**
+- **Sliding-window KV eviction (2026-05-22, RoPE models)** — `KeyValueCache.Evict(count)` drops the oldest tokens by shifting every (layer,head) K/V block down one contiguous memmove, shrinking `CurrentLength` and growing `BasePosition`; retained K/V are NOT re-rotated — RoPE scores depend only on the relative offset, which the climbing `BasePosition` preserves (the new token rotates at `slot + BasePosition`, the true absolute position). `CachedLlamaSession.EnableSlidingWindow(evictBlock)` (opt-in, RoPE-only — learned-absolute-position GPT-2 can't slide) evicts instead of throwing once the cache fills, so chats run unbounded over a rolling context. Tests: `KeyValueCacheEvictTests` (5 — slot shift, BasePosition, reset, invalid count) + `SlidingWindowTests` ([LongFact], real Qwen — enabling sliding is bit-identical before the cache fills; generates 40 tokens over a 16-slot cache with eviction triggered while non-sliding throws). NOTE: sliding window is intentionally NOT equivalent to recomputing on a truncated context (retained hidden states encode since-evicted tokens — standard StreamingLLM behaviour). **Surfaced through the ergonomic API 2026-05-25:** `ISlmSession.SupportsSlidingWindow` + `EnableSlidingWindow(...)` (default-throw for non-RoPE sessions; real on `CachedLlamaSession`), and `new ChatSession(..., slidingWindow: true)` enables it and drops the "stop at MaxContextLength" loop guard so multi-turn chats roll instead of hitting the wall. Wiring test: `ChatSessionSlidingWindowTests` (3 fast — slides past context, stops without it, throws on unsupported sessions). **Chat-runtime gaps now closed (template, stops, turnkey session, eviction — end to end).**
 - **Codebase hygiene (2026-05-22): one top-level type per file across the whole solution.** Audited + split 12 multi-type files (incl. the just-added `ChatTemplate`/`SafetensorsReader`/`SafetensorsSource`); `OfflineTrainingConfig.cs` (held `GptTrainingConfig` + `OfflineTrainingResult`, named after neither) renamed into per-type files. Solution builds clean, 740/0/72.
 - **GGUF native loader** — `GgufLlamaLoader` reads GGUF files end-to-end without Python tooling. Supports F32/F16/BF16/Q8_0/Q4_K/Q6_K tensors, hand-rolled protobuf-free parser.
 - **Native safetensors reader (2026-05-21)** — `SafetensorsReader` reads the HuggingFace `safetensors` format directly: 8-byte header length + `Utf8JsonReader`-parsed JSON header (reflection-free, AOT-clean — no `JsonSerializer`) + F32/F16/BF16 → F32 streaming dequant via `LoadF32`. Closes the last Python-dependent path (a raw HF repo with no GGUF variant). 7 unit tests over synthetic files (header parse, shape/dtype, F32/F16/BF16 round-trip, error paths).
