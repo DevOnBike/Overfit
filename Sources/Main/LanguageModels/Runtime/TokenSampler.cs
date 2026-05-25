@@ -129,6 +129,23 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                             random);
                     }
 
+                case SamplingStrategy.MinP
+                    when options.MinP > 0f:
+                    {
+                        var count = SelectMinP(
+                            logits,
+                            options.MinP,
+                            temperature,
+                            indexScratch,
+                            scoreScratch);
+
+                        return SampleFromPreparedScores(
+                            indexScratch[..count],
+                            scoreScratch[..count],
+                            temperature,
+                            random);
+                    }
+
                 default:
                     {
                         PrepareAllScores(
@@ -214,6 +231,43 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 indexScratch[i] = i;
                 scoreScratch[i] = logits[i];
             }
+        }
+
+        // Min-P filter: keep tokens with P(token) ≥ minP × P(top). In logit space that is
+        // (logit − maxLogit)/T ≥ ln(minP), i.e. logit ≥ maxLogit + T·ln(minP). No sort needed.
+        private static int SelectMinP(
+            ReadOnlySpan<float> logits,
+            float minP,
+            float temperature,
+            Span<int> indexScratch,
+            Span<float> scoreScratch)
+        {
+            var maxLogit = logits[0];
+            for (var i = 1; i < logits.Length; i++)
+            {
+                if (logits[i] > maxLogit) { maxLogit = logits[i]; }
+            }
+
+            var threshold = maxLogit + (temperature * MathF.Log(Math.Clamp(minP, 1e-6f, 1f)));
+            var count = 0;
+            for (var token = 0; token < logits.Length; token++)
+            {
+                if (logits[token] >= threshold)
+                {
+                    indexScratch[count] = token;
+                    scoreScratch[count] = logits[token];
+                    count++;
+                }
+            }
+            return count == 0 ? FallbackToArgMax(logits, indexScratch, scoreScratch) : count;
+        }
+
+        private static int FallbackToArgMax(ReadOnlySpan<float> logits, Span<int> indexScratch, Span<float> scoreScratch)
+        {
+            var best = ArgMax(logits);
+            indexScratch[0] = best;
+            scoreScratch[0] = logits[best];
+            return 1;
         }
 
         private static int SelectTopK(

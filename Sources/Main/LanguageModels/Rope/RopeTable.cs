@@ -23,6 +23,7 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
         private readonly float[] _cos;
         private readonly float[] _sin;
         private readonly int _halfDim;
+        private readonly RopeScaling? _scaling;
 
         /// <summary>
         /// Creates and precomputes RoPE tables.
@@ -32,7 +33,10 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
         /// <param name="theta">
         /// Base frequency. GPT-2: 10_000, Llama-3.2: 500_000, Phi-3: 10_000.
         /// </param>
-        public RopeTable(int maxSequenceLength, int headDimension, float theta = 10_000f)
+        /// <param name="scaling">
+        /// Optional Llama-3 "llama3" frequency scaling for long context; null = plain RoPE.
+        /// </param>
+        public RopeTable(int maxSequenceLength, int headDimension, float theta = 10_000f, RopeScaling? scaling = null)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxSequenceLength);
             if (headDimension <= 0 || headDimension % 2 != 0)
@@ -44,6 +48,7 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
             MaxSequenceLength = maxSequenceLength;
             HeadDimension = headDimension;
             Theta = theta;
+            _scaling = scaling;
 
             _halfDim = headDimension / 2;
 
@@ -73,8 +78,12 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
         {
             for (var i = 0; i < _halfDim; i++)
             {
-                // freq_i = 1 / (theta ^ (2i / headDim))
+                // freq_i = 1 / (theta ^ (2i / headDim)), optionally llama3-rescaled.
                 var freq = 1f / MathF.Pow(Theta, 2f * i / HeadDimension);
+                if (_scaling is not null)
+                {
+                    freq = _scaling.Apply(freq);
+                }
 
                 for (var pos = 0; pos < MaxSequenceLength; pos++)
                 {

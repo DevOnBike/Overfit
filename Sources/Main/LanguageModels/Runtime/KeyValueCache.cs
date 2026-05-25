@@ -62,6 +62,17 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         public bool IsFull => CurrentLength >= MaxLength;
 
         /// <summary>
+        /// Number of tokens evicted from the front so far (sliding window). The live
+        /// slot <c>s</c> holds the token whose absolute sequence position is
+        /// <c>BasePosition + s</c>. Used by RoPE to rotate at the true absolute
+        /// position even after the physical slots have shifted down (cached K stay
+        /// rotated at their original positions, so attention scores — which depend
+        /// only on the relative offset — remain correct). 0 until the first
+        /// <see cref="Evict"/>.
+        /// </summary>
+        public int BasePosition { get; private set; }
+
+        /// <summary>
         /// Creates a KV cache.
         /// For GQA: pass the KV head count (smaller than Q head count).
         /// For MHA: pass the full head count.
@@ -85,12 +96,56 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ThrowIfDisposed();
 
             CurrentLength = 0;
+            BasePosition = 0;
 
             // Clear for deterministic tests and to avoid exposing stale values
             // if a caller accidentally reads after reset. A future performance
             // path may expose Reset(clear: false) if profiling shows this matters.
             Array.Clear(_keys);
             Array.Clear(_values);
+        }
+
+        /// <summary>
+        /// Sliding-window eviction: drops the oldest <paramref name="count"/> tokens by
+        /// shifting every (layer, head) K/V block down by <paramref name="count"/> slots,
+        /// so the live window stays contiguous in slots <c>[0, CurrentLength)</c> and the
+        /// existing contiguous read path is unchanged. <see cref="CurrentLength"/> shrinks
+        /// and <see cref="BasePosition"/> grows by <paramref name="count"/>. Retained K/V
+        /// are NOT re-rotated — RoPE scores depend only on the relative offset, which the
+        /// climbing <see cref="BasePosition"/> preserves. Only valid for RoPE models
+        /// (learned absolute-position models can't slide without re-embedding).
+        /// </summary>
+        public void Evict(int count)
+        {
+            ThrowIfDisposed();
+
+            if (count <= 0 || count > CurrentLength)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(count),
+                    $"Evict count {count} must be in [1, CurrentLength={CurrentLength}].");
+            }
+
+            var keep = CurrentLength - count;
+            var hd = Shape.HeadDimension;
+            var shift = count * hd;
+            var keepElems = keep * hd;
+
+            if (keepElems > 0)
+            {
+                for (var layer = 0; layer < Shape.LayerCount; layer++)
+                {
+                    for (var head = 0; head < Shape.KvHeadCount; head++)
+                    {
+                        var baseOffset = GetOffset(layer, head, 0);
+                        Array.Copy(_keys, baseOffset + shift, _keys, baseOffset, keepElems);
+                        Array.Copy(_values, baseOffset + shift, _values, baseOffset, keepElems);
+                    }
+                }
+            }
+
+            CurrentLength = keep;
+            BasePosition += count;
         }
 
         public void Advance(int tokenCount = 1)

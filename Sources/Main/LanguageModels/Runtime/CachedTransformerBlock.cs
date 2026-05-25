@@ -216,6 +216,82 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 DModel);
         }
 
+        /// <summary>
+        /// Batched (prefill) Pre-LN block forward over <paramref name="rows"/> tokens —
+        /// the multi-row counterpart of <see cref="Decode"/>. Per-row LayerNorm
+        /// (<see cref="SingleTokenLayerNormKernel"/>) → batched MHA
+        /// (<see cref="CachedMultiHeadAttention.DecodeBatched"/>) → residual → LayerNorm
+        /// → batched FFN (<see cref="CachedFeedForwardBlock.DecodeBatched"/>) → residual.
+        /// Composes the per-row-independent ops with the two verified batched blocks,
+        /// so the result is <b>bit-identical</b> to N× <see cref="Decode"/>. Scoped to
+        /// the F32 / GPT-2 path: standard LayerNorm (not RMSNorm), GeLU/ReLU FFN (not
+        /// SwiGLU), MHA (not GQA), no RoPE — throws otherwise. The cache must already
+        /// be advanced to length <c>basePosition + rows</c>.
+        /// </summary>
+        internal void DecodeBatched(
+            ReadOnlySpan<float> input,
+            int rows,
+            in BlockWeights weights,
+            KeyValueCache cache,
+            int layerIndex,
+            int basePosition,
+            Span<float> output,
+            RopeTable? rope = null)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rows);
+
+            if (weights.Ln1Beta.IsEmpty || weights.Ln2Beta.IsEmpty)
+            {
+                throw new NotSupportedException("Batched prefill supports standard LayerNorm only (RMSNorm is a follow-on).");
+            }
+            if (!weights.FfnGate.IsEmpty)
+            {
+                throw new NotSupportedException("Batched prefill supports GeLU/ReLU FFN only (SwiGLU is a follow-on).");
+            }
+
+            var dModel = DModel;
+
+            // Per-prefill scratch (one-time pass, not the 0-alloc decode hot path).
+            var ln1 = new float[rows * dModel];
+            var attnOut = new float[rows * dModel];
+            var afterAttn = new float[rows * dModel];
+            var ln2 = new float[rows * dModel];
+            var ffnOut = new float[rows * dModel];
+
+            for (var n = 0; n < rows; n++)
+            {
+                SingleTokenLayerNormKernel.Normalize(
+                    input.Slice(n * dModel, dModel), weights.Ln1Gamma, weights.Ln1Beta,
+                    ln1.AsSpan(n * dModel, dModel), dModel, LayerNormEpsilon);
+            }
+
+            _attention.DecodeBatched(ln1, rows, in weights, cache, layerIndex, basePosition, attnOut, rope);
+
+            for (var n = 0; n < rows; n++)
+            {
+                SingleTokenLayerNormKernel.AddResidual(
+                    input.Slice(n * dModel, dModel), attnOut.AsSpan(n * dModel, dModel),
+                    afterAttn.AsSpan(n * dModel, dModel), dModel);
+            }
+
+            for (var n = 0; n < rows; n++)
+            {
+                SingleTokenLayerNormKernel.Normalize(
+                    afterAttn.AsSpan(n * dModel, dModel), weights.Ln2Gamma, weights.Ln2Beta,
+                    ln2.AsSpan(n * dModel, dModel), dModel, LayerNormEpsilon);
+            }
+
+            _feedForward.DecodeBatched(
+                ln2, rows, weights.FfnW1.F32, weights.FfnB1, weights.FfnW2.F32, weights.FfnB2, ffnOut);
+
+            for (var n = 0; n < rows; n++)
+            {
+                SingleTokenLayerNormKernel.AddResidual(
+                    afterAttn.AsSpan(n * dModel, dModel), ffnOut.AsSpan(n * dModel, dModel),
+                    output.Slice(n * dModel, dModel), dModel);
+            }
+        }
+
 
 
 

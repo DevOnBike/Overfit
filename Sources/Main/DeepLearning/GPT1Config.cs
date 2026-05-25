@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.LanguageModels.Rope;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 
 namespace DevOnBike.Overfit.DeepLearning
@@ -109,6 +110,12 @@ namespace DevOnBike.Overfit.DeepLearning
 
         /// <summary>RoPE base frequency theta. Default 10_000 (GPT-NeoX).</summary>
         public float RoPETheta { get; init; } = 10_000f;
+
+        /// <summary>
+        /// Optional Llama-3 "llama3" RoPE frequency scaling for long context (the
+        /// <c>rope_scaling</c> block in a Llama-3.x config). Null = plain RoPE.
+        /// </summary>
+        public RopeScaling? RopeScaling { get; init; }
 
         // ── FFN ───────────────────────────────────────────────────────────────
 

@@ -3,10 +3,13 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Anomalies.Adaptive;
+using DevOnBike.Overfit.Anomalies.Baseline;
 using DevOnBike.Overfit.Anomalies.Gpt;
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 using DevOnBike.Overfit.Anomalies.Training;
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.LanguageModels.LoRA;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 
 namespace DevOnBike.Overfit.Demo.AnomalyConsole
@@ -18,8 +21,12 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
     /// Flow:
     ///   1. Train a Quick base on a metrics CSV (or load --checkpoint).
     ///   2. Build a GptAnomalyDetector over it.
-    ///   3. Stream a steady "normal" regime, then inject one incident snapshot.
-    ///   4. Print each step's anomaly score + the worst-explaining metric.
+    ///   3. Phase 1 — stream a steady "normal" regime, then inject one incident.
+    ///   4. Phase 2 — fine-tune an LM-head LoRA adapter on this pod's benign regime,
+    ///      merge it in place, and re-run the SAME stream + incident. The benign
+    ///      "normal" score collapses toward zero (fewer false positives) while the
+    ///      injected incident still scores high — adaptive per-deployment learning
+    ///      that an inference-only engine (llama.cpp et al.) cannot do.
     ///
     /// Example:
     ///   dotnet run -c Release --project Demo/AnomalyConsoleDemo -- \
@@ -38,11 +45,19 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
             {
                 var csv = ResolveCsv(GetArg(args, "--csv"));
                 var checkpoint = GetArg(args, "--checkpoint") ?? "anomaly_demo.bin";
+                var preset = ResolvePreset(GetArg(args, "--preset"));
 
-                var (model, config) = await GetModelAsync(csv, checkpoint);
+                var (model, config) = await GetModelAsync(csv, checkpoint, preset);
                 using (model)
                 {
-                    RunScenario(model, config);
+                    if (HasFlag(args, "--multipod"))
+                    {
+                        RunMultiPodAdaptiveScenario(model);
+                    }
+                    else
+                    {
+                        RunScenario(model, config);
+                    }
                 }
 
                 return 0;
@@ -54,12 +69,10 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
             }
         }
 
-        // ── Model: load a checkpoint if present, else train a Quick base ─────────
+        // ── Model: load a checkpoint if present, else train a base of the preset ─
         private static async Task<(GPT1Model model, GptTrainingConfig config)> GetModelAsync(
-            string? csv, string checkpoint)
+            string? csv, string checkpoint, GptTrainingConfig config)
         {
-            var config = GptTrainingConfig.Quick;
-
             if (!File.Exists(checkpoint))
             {
                 if (csv is null || !File.Exists(csv))
@@ -69,7 +82,7 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
                         "(e.g. Tests/test_fixtures/k8s_metrics.csv) or --checkpoint <path>.");
                 }
 
-                Console.WriteLine($"No checkpoint — training a Quick base on {csv} ...");
+                Console.WriteLine($"No checkpoint — training a {config.DModel}d/{config.NLayers}L base on {csv} ...");
                 var job = new OfflineTrainingJob(config);
                 var progress = new Progress<TrainingProgress>(p =>
                 {
@@ -84,7 +97,7 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
             }
             else
             {
-                Console.WriteLine($"Loading checkpoint {checkpoint} ...");
+                Console.WriteLine($"Loading {config.DModel}d/{config.NLayers}L checkpoint {checkpoint} ...");
             }
 
             var model = new GPT1Model(new GPT1Config
@@ -109,30 +122,214 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
             return (model, config);
         }
 
-        // ── Scenario: steady normal stream, then one injected incident ──────────
+        // ── Scenario: base behaviour, then the same stream after per-deployment LoRA ──
         private static void RunScenario(GPT1Model model, GptTrainingConfig config)
+        {
+            Console.WriteLine();
+            Console.WriteLine("══ Phase 1 — base model ══");
+            Console.WriteLine("Streaming 'payments-api' metrics (1 snapshot ≈ 15 s)  —  score = surprise (nats/token):");
+            Console.WriteLine();
+            var (baseNormal, baseIncident) = StreamScenario(model, verbose: true);
+
+            Console.WriteLine();
+            Console.WriteLine("══ Phase 2 — per-deployment LoRA adaptation ══");
+            Console.WriteLine("Fine-tuning an LM-head LoRA adapter on this pod's benign regime ...");
+            using var merge = AdaptToRegime(model);
+            Console.WriteLine("Adapter merged in place. Re-streaming the SAME regime, then the SAME incident:");
+            Console.WriteLine();
+            var (loraNormal, loraIncident) = StreamScenario(model, verbose: true);
+
+            // ── Three-way: classical floor vs GPT base vs GPT+LoRA ──────────────
+            var (ewmaNormal, ewmaIncident) = EwmaFloor();
+
+            Console.WriteLine();
+            Console.WriteLine("══ Three-way — benign 'normal' (lower = fewer false positives) / injected incident (must stay high) ══");
+            Console.WriteLine($"  EWMA floor (classical, model-free)   normal = {ewmaNormal,7:F2}   incident = {ewmaIncident,7:F2}");
+            Console.WriteLine($"  GPT base                             normal = {baseNormal,7:F2}   incident = {baseIncident,7:F2}");
+            Console.WriteLine($"  GPT + per-deployment LoRA            normal = {loraNormal,7:F2}   incident = {loraIncident,7:F2}");
+            Console.WriteLine();
+
+            var flattened = loraNormal < baseNormal;
+            var stillFires = loraIncident > MathF.Max(loraNormal * 3f, 5f);
+            Console.WriteLine(flattened && stillFires
+                ? "LoRA flattened the benign regime toward zero AND the incident still fires far above it —"
+                : "Result above (random/short Quick base may need a longer fine-tune to fully separate) —");
+            Console.WriteLine("note the EWMA floor: a trivial classical baseline already separates this clean regime,");
+            Console.WriteLine("and the un-adapted GPT base does NOT clearly beat it (cross-pod residual surprise = a");
+            Console.WriteLine("higher 'normal' floor). The transformer's real edge is the per-deployment LoRA");
+            Console.WriteLine("adaptation — lowering false positives without blinding the detector — the adaptive");
+            Console.WriteLine("learning an inference-only engine cannot do; the LoRA delta merges into the same");
+            Console.WriteLine("zero-alloc decode path.");
+        }
+
+        // ── Multi-pod adaptive lifecycle (--multipod) ──────────────────────────
+        private static void RunMultiPodAdaptiveScenario(GPT1Model model)
+        {
+            Console.WriteLine();
+            Console.WriteLine("══ Multi-pod adaptive lifecycle ══");
+            Console.WriteLine("Two pods on one shared cross-pod base. Watch: false-positive pressure → recommend →");
+            Console.WriteLine("adapt ONE pod → per-pod isolation, while the incident still fires.");
+            Console.WriteLine();
+
+            var dir = Path.Combine(Path.GetTempPath(), $"overfit_multipod_{Guid.NewGuid():N}");
+            try
+            {
+                using var monitor = new AdaptiveAnomalyMonitor(model, new AdaptivePolicy
+                {
+                    AdapterDirectory = dir,
+                    ContextSnapshots = ContextSnapshots,
+                    // Quick base scores this benign regime ~1.9 — set the FP-pressure band so
+                    // that registers as elevated (a trained cross-pod base; the 256d production
+                    // base sits higher ~6.5, same idea). Critical (real incident) is well above.
+                    AlertThreshold = 1f,
+                    CriticalThreshold = 15f,
+                    AdaptAfterStreak = 3,
+                    MinBenignWindow = 24,
+                    BenignWindow = 48,
+                    LoRARank = 16,
+                    LoRASteps = 300,
+                    LoRALearningRate = 1e-2f,
+                });
+
+                string[] pods = ["checkout-api", "payments-api"];
+
+                // Phase A — stream benign for both; the cross-pod base scores them elevated.
+                Console.WriteLine("Phase A — streaming benign traffic for both pods (un-adapted base = false positives):");
+                var baseScore = new Dictionary<string, float>();
+                for (var i = 0; i < ContextSnapshots * 2 + 30; i++)
+                {
+                    foreach (var pod in pods)
+                    {
+                        var r = monitor.Observe(NormalSnapshot() with { PodName = pod });
+                        if (!r.IsWarmup) { baseScore[pod] = r.Score; }
+                    }
+                }
+                foreach (var pod in pods) { Console.WriteLine($"  {pod,-14} benign = {baseScore[pod],6:F2}"); }
+                Console.WriteLine($"  monitor recommends adapting: [{string.Join(", ", monitor.PodsNeedingAdaptation())}]");
+
+                // Phase B — operator adapts ONE pod.
+                var target = pods[0];
+                Console.WriteLine();
+                Console.WriteLine($"Phase B — operator adapts '{target}' only (LM-head LoRA on its benign window)...");
+                monitor.Adapt(target);
+
+                // Phase C — re-stream; adapted pod flattens, the other stays on the base.
+                Console.WriteLine();
+                Console.WriteLine("Phase C — re-streaming benign, then injecting an incident on the adapted pod:");
+                var afterScore = new Dictionary<string, float>();
+                for (var i = 0; i < ContextSnapshots * 2; i++)
+                {
+                    foreach (var pod in pods)
+                    {
+                        var r = monitor.Observe(NormalSnapshot() with { PodName = pod });
+                        if (!r.IsWarmup) { afterScore[pod] = r.Score; }
+                    }
+                }
+                var incident = monitor.Observe(AnomalySnapshot() with { PodName = target });
+
+                Console.WriteLine();
+                Console.WriteLine($"  {"pod",-14} {"benign base",11}  {"benign after",12}  {"adapted",7}");
+                foreach (var pod in pods)
+                {
+                    Console.WriteLine(
+                        $"  {pod,-14} {baseScore[pod],11:F2}  {afterScore[pod],12:F2}  {(monitor.IsAdapted(pod) ? "yes" : "no"),7}");
+                }
+                Console.WriteLine();
+                Console.WriteLine($"  injected incident on '{target}': {incident.Score:F2}  worst={incident.WorstMetric}");
+                Console.WriteLine();
+                Console.WriteLine($"'{target}' false positives flattened toward zero; '{pods[1]}' untouched (per-pod");
+                Console.WriteLine("isolation — its adapter never merged); the incident still fires far above the adapted");
+                Console.WriteLine("baseline. Per-pod adapters persist as .lora.bin and reload on pod restart — the adaptive,");
+                Console.WriteLine("per-deployment learning an inference-only engine (llama.cpp et al.) cannot do.");
+            }
+            finally
+            {
+                if (Directory.Exists(dir)) { Directory.Delete(dir, recursive: true); }
+            }
+        }
+
+        // ── Stream a steady normal regime, then inject one incident ─────────────
+        // Returns the last post-warmup normal score and the injected-incident score.
+        private static (float normal, float incident) StreamScenario(GPT1Model model, bool verbose)
         {
             using var handle = SlmRuntimeFactory.CreateGpt1(model);
             using var detector = new GptAnomalyDetector(handle, ContextSnapshots);
 
-            Console.WriteLine();
-            Console.WriteLine("Streaming 'payments-api' metrics (1 snapshot ≈ 15 s)  —  score = surprise (nats/token):");
-            Console.WriteLine();
-
-            // Steady normal regime — fills the window, then settles to a low score.
+            var normal = 0f;
             for (var i = 0; i < ContextSnapshots * 2; i++)
             {
-                Report(i, detector.Score(NormalSnapshot()));
+                var r = detector.Score(NormalSnapshot());
+                if (verbose) { Report(i, r); }
+                if (!r.IsWarmup) { normal = r.Score; }
             }
 
-            // Injected incident: CPU saturated + throttled, tail latency + errors blown out.
-            Console.WriteLine("  ── injecting incident ──");
-            Report(ContextSnapshots * 2, detector.Score(AnomalySnapshot()));
+            if (verbose) { Console.WriteLine("  ── injecting incident ──"); }
+            var inc = detector.Score(AnomalySnapshot());
+            if (verbose) { Report(ContextSnapshots * 2, inc); }
 
-            Console.WriteLine();
-            Console.WriteLine("The base scores its trained 'normal' low and the incident high, naming the");
-            Console.WriteLine("worst metric. Per-deployment LoRA fine-tuning (see Gpt1LoRAFineTuner) drives a");
-            Console.WriteLine("benign regime's score toward zero while still catching real incidents.");
+            return (normal, inc.Score);
+        }
+
+        // ── Fine-tune an all-linear LoRA adapter on the benign regime, merge it in ──
+        private static Gpt1LoRAMergeAdapter AdaptToRegime(GPT1Model model)
+        {
+            var tps = MetricTokenizer.TokensPerSnapshot;
+
+            // A stable benign regime for this pod — tokenised into a periodic sequence
+            // the LoRA can learn. 48 snapshots ≫ the context window.
+            var regime = new MetricSnapshot[48];
+            for (var i = 0; i < regime.Length; i++)
+            {
+                regime[i] = NormalSnapshot();
+            }
+            var corpus = new MetricTokenizer().EncodeSequence(regime);
+
+            var loraPath = Path.Combine(
+                Path.GetTempPath(), $"overfit_anomaly_lora_{Guid.NewGuid():N}.bin");
+            try
+            {
+                // Target the LM head only — on a TRAINED base it's the best AND cheapest
+                // per-pod target (GptAnomalyLoRATargetComparisonProductionTests, 256d base:
+                // benign 6.45→0.0000, 31694× separation, 1 adapter / 8 KB — vs the union's
+                // 205 adapters / 1.1 MB for slightly worse separation). The cross-pod
+                // residual surprise lives in the OUTPUT calibration, so adapting the LM head
+                // fixes it. (On an UNtrained/random base no single stage is reliable and the
+                // union wins — but a deployment base is trained, so LM-head is the default.)
+                using (var tuner = new Gpt1LoRAFineTuner(model, rank: 16, LoRATargetModules.LanguageModelHead))
+                {
+                    // Fine-tune over the exact position range the detector exercises
+                    // (ContextSnapshots × tokens-per-snapshot) so the merge lands where
+                    // the detector reads.
+                    var history = tuner.FineTune(
+                        corpus, steps: 300, contextLength: ContextSnapshots * tps, learningRate: 1e-2f);
+                    Console.WriteLine(
+                        $"  LoRA loss {history[0]:F3} → {history[^1]:F3}  ({history.Count} steps, rank 16, "
+                        + $"LM head: {tuner.AdapterCount} adapter / {tuner.TrainableParameterCount} params, base frozen)");
+                    tuner.Save(loraPath);
+                }
+                // tuner disposed → weight provider detached; model is plain again.
+
+                var merge = Gpt1LoRAMergeAdapter.Load(model, loraPath);
+                merge.Enable();
+                return merge;
+            }
+            finally
+            {
+                if (File.Exists(loraPath)) { File.Delete(loraPath); }
+            }
+        }
+
+        // ── Classical EWMA floor over the SAME stream (model-free reference) ────
+        private static (float normal, float incident) EwmaFloor()
+        {
+            var detector = new EwmaAnomalyDetector(warmupSnapshots: ContextSnapshots);
+            var normal = 0f;
+            for (var i = 0; i < ContextSnapshots * 2; i++)
+            {
+                var r = detector.Score(NormalSnapshot());
+                if (!r.IsWarmup) { normal = r.Score; }
+            }
+            return (normal, detector.Score(AnomalySnapshot()).Score);
         }
 
         private static void Report(int step, AnomalyScore s)
@@ -194,6 +391,25 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
             }
             return null;
         }
+
+        private static bool HasFlag(string[] args, string name)
+        {
+            foreach (var a in args)
+            {
+                if (a == name) { return true; }
+            }
+            return false;
+        }
+
+        // Base architecture preset — must match the checkpoint's dims when loading
+        // an existing base (e.g. the 256d/6L Production base). Default: Quick.
+        private static GptTrainingConfig ResolvePreset(string? name) => name?.ToLowerInvariant() switch
+        {
+            "production" => GptTrainingConfig.Production,
+            "medium" => GptTrainingConfig.Medium,
+            "quick" or null or "" => GptTrainingConfig.Quick,
+            _ => throw new ArgumentException($"Unknown --preset '{name}' (expected quick|medium|production)."),
+        };
 
         private static string? ResolveCsv(string? explicitPath)
         {

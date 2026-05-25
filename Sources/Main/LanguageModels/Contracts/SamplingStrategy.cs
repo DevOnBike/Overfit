@@ -11,6 +11,13 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
         Temperature = 1,
         TopK = 2,
         TopP = 3,
-        TopKTopP = 4
+        TopKTopP = 4,
+
+        /// <summary>
+        /// Min-P: keep only tokens whose probability is at least <c>MinP × P(most-likely)</c>,
+        /// then sample (with temperature) from the survivors. A scale-adaptive alternative to
+        /// Top-P that widens on confident steps and narrows on flat ones.
+        /// </summary>
+        MinP = 5
     }
 }

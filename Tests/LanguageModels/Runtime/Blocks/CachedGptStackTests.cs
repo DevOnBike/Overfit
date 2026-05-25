@@ -520,6 +520,107 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                 MathF.Abs(expected - actual) <= 1e-5f,
                 $"Expected {expected}, actual {actual}.");
         }
+        [Theory]
+        [InlineData(1, 8, 2, 16)]
+        [InlineData(5, 8, 2, 16)]
+        [InlineData(7, 32, 4, 64)]
+        public void PrefillBatched_LastToken_IsBitIdentical_To_SingleTokenLoop(
+            int rows, int dModel, int headCount, int dFF)
+        {
+            const int layers = 2;
+            const int vocab = 8;
+            var dHead = dModel / headCount;
+            var maxSeq = rows;
+            var rng = new Random(2024 + rows * 11 + dModel + headCount + dFF);
+
+            var wq = HeadW(rng, layers, headCount, dModel * dHead);
+            var wk = HeadW(rng, layers, headCount, dModel * dHead);
+            var wv = HeadW(rng, layers, headCount, dModel * dHead);
+            var wo = HeadW(rng, layers, headCount, dHead * dModel);
+            var bq = HeadW(rng, layers, headCount, dHead);
+            var bk = HeadW(rng, layers, headCount, dHead);
+            var bv = HeadW(rng, layers, headCount, dHead);
+            var attBiases = LayerW(rng, layers, dModel);
+            var fw1 = LayerW(rng, layers, dModel * dFF);
+            var fb1 = LayerW(rng, layers, dFF);
+            var fw2 = LayerW(rng, layers, dFF * dModel);
+            var fb2 = LayerW(rng, layers, dModel);
+            var lmHead = Rand(rng, dModel * vocab, 0.05f);
+
+            var sw = MakeStackWeights(layers, headCount, dModel,
+                wq, wk, wv, wo, bq, bk, bv, attBiases, fw1, fb1, fw2, fb2, lmHead);
+
+            var stack = new CachedGptStack(
+                layerCount: layers, dModel: dModel, headCount: headCount, dFF: dFF,
+                vocabSize: vocab, maxSequenceLength: maxSeq,
+                feedForwardActivation: FeedForwardActivation.GeLU);
+
+            var embed = Rand(rng, rows * dModel, 1f);
+
+            // Reference: single-token loop (advance cache per token).
+            var refHidden = new float[dModel];
+            using (var cacheRef = KeyValueCache.Create(layers, headCount, maxSeq, dHead))
+            {
+                for (var i = 0; i < rows; i++)
+                {
+                    cacheRef.Advance();
+                    stack.DecodeWithoutLogits(embed.AsSpan(i * dModel, dModel), sw, cacheRef, i);
+                }
+                stack.GetLastFinalHidden(refHidden);
+            }
+
+            // Batched prefill (cache advanced to N up front).
+            var batHidden = new float[dModel];
+            using (var cacheBat = KeyValueCache.Create(layers, headCount, maxSeq, dHead))
+            {
+                for (var i = 0; i < rows; i++)
+                {
+                    cacheBat.Advance();
+                }
+                stack.PrefillBatched(embed, rows, sw, cacheBat, basePosition: 0);
+                stack.GetLastFinalHidden(batHidden);
+            }
+
+            for (var i = 0; i < dModel; i++)
+            {
+                Assert.Equal(refHidden[i], batHidden[i]);
+            }
+        }
+
+        private static float[][][] HeadW(Random rng, int layers, int heads, int len)
+        {
+            var a = new float[layers][][];
+            for (var l = 0; l < layers; l++)
+            {
+                a[l] = new float[heads][];
+                for (var h = 0; h < heads; h++)
+                {
+                    a[l][h] = Rand(rng, len, 0.1f);
+                }
+            }
+            return a;
+        }
+
+        private static float[][] LayerW(Random rng, int layers, int len)
+        {
+            var a = new float[layers][];
+            for (var l = 0; l < layers; l++)
+            {
+                a[l] = Rand(rng, len, 0.1f);
+            }
+            return a;
+        }
+
+        private static float[] Rand(Random rng, int n, float scale)
+        {
+            var a = new float[n];
+            for (var i = 0; i < n; i++)
+            {
+                a[i] = (rng.NextSingle() * 2f - 1f) * scale;
+            }
+            return a;
+        }
+
         private static StackWeights MakeStackWeights(
             int layerCount, int headCount, int dModel,
             float[][][] wq, float[][][] wk, float[][][] wv, float[][][] wo,

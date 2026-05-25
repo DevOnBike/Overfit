@@ -200,7 +200,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ProjectHiddenDispatched(hidden, in wq, bq, _query, hiddenQuants, hiddenScales, hiddenBsums, hiddenQ8kValid);
             if (rope is not null)
             {
-                RopeKernel.Apply(_query, rope, position);
+                RopeKernel.Apply(_query, rope, position + cache.BasePosition);
             }
 
             if (projectKv)
@@ -212,7 +212,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 // rotated, so no re-rotation at read time. (Q was rotated above.)
                 if (rope is not null)
                 {
-                    RopeKernel.Apply(_key, rope, position);
+                    RopeKernel.Apply(_key, rope, position + cache.BasePosition);
                 }
 
                 _key.AsSpan().CopyTo(cache.GetKeyWriteSpan(layerIndex, headIndex, position));
@@ -341,8 +341,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // are permanently rotated, so no re-rotation is needed at read time.
             if (rope is not null)
             {
-                RopeKernel.Apply(_query, rope, position);
-                RopeKernel.Apply(_key, rope, position);
+                RopeKernel.Apply(_query, rope, position + cache.BasePosition);
+                RopeKernel.Apply(_key, rope, position + cache.BasePosition);
             }
 
             _key

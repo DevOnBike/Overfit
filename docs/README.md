@@ -4,7 +4,14 @@ This directory contains scenario guides, benchmark notes and architecture docume
 
 ## Current focus
 
-The current branch focuses on predictable CPU inference, ONNX import and cleaner separation of responsibilities:
+The current branch adds the **in-process agentic stack** on top of the GGUF LLM runtime —
+memory-mapped load, embeddings + a built-in vector store (RAG), and constrained decoding for
+guaranteed-valid JSON / tool calling — all pure managed C#, no Python, no server. See
+[`scenarios/in-process-agents.md`](scenarios/in-process-agents.md) and the runnable
+[`Demo/AgentDemo`](../Demo/AgentDemo/README.md).
+
+Alongside the longer-running themes — predictable CPU inference, ONNX import and cleaner separation
+of responsibilities:
 
 ```text
 DeepLearning layers: public API, shape, parameters, save/load, train/eval state
@@ -27,8 +34,8 @@ ONNX: PyTorch-exported model import into Sequential for inference
 7. `llamacpp-cpu-analysis.md` — CPU LLM decode-kernel analysis + same-file A/B vs llama.cpp.
 8. `performance-patterns.md` — CPU/SIMD performance pattern catalog.
 9. `gp-anomaly-baseline.md` — proposed GP/EWMA baseline for the metric anomaly detector.
-10. `scenarios/` — role-specific usage guides.
-11. `marketing/` — go-to-market plan, launch copy, LinkedIn drafts (non-engineering collateral).
+10. `scenarios/` — role-specific usage guides (start with [`in-process-agents.md`](scenarios/in-process-agents.md) for the RAG + tool-calling + structured-output story).
+11. `marketing/` — non-engineering collateral (e.g. `feature-blocks.md`, the infographic source). Launch copy and LinkedIn drafts live at the repo root.
 12. `../ROADMAP.md` — planned work and priorities.
 
 ## Benchmark policy

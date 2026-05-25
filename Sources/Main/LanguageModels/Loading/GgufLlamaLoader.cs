@@ -24,18 +24,68 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
     /// </summary>
     public static class GgufLlamaLoader
     {
+        /// <param name="path">Path to the GGUF model file.</param>
         /// <param name="quantize">
         /// When true (default) FFN / LM-head / attention weights become Q8_0-resident
         /// where dimensions allow. When false every weight loads as F32 — the
         /// pre-quantization decode path, used as the parity reference (step 2.5).
         /// </param>
-        public static CachedLlamaInferenceEngine Load(string path, bool quantize = true)
+        /// <param name="mmap">
+        /// When true (default) the verbatim-layout K-quant weights (Q4_K / Q6_K — FFN, LM head,
+        /// and per-head attention Q/K/V) are backed by zero-copy slices of a read-only memory map
+        /// of the file instead of managed <c>byte[]</c> copies. The map's lifetime is handed
+        /// to the returned engine, which disposes it last. Cuts committed RAM for those weights
+        /// to zero (the OS pages them in as shared/clean working set, reclaimable without swap).
+        /// Has no effect on Q8_0 (de-interleaved) or F32-fallback weights, which still copy — so
+        /// when the file contains no Q4_K/Q6_K tensors (pure-F32 / pure-Q8_0) the map is skipped
+        /// entirely and load behaves exactly as the copy path (no file handle kept open).
+        /// </param>
+        public static CachedLlamaInferenceEngine Load(string path, bool quantize = true, bool mmap = true)
         {
             using var reader = new GgufReader(path);
-            return LoadFromReader(reader, quantize);
+
+            // Skip the map unless it would actually back a weight: it only helps verbatim
+            // Q4_K/Q6_K weights, and only when quantization is on. Otherwise the copy path is
+            // identical and avoids holding the file handle open for the engine's lifetime.
+            if (!mmap || !quantize || !FileHasVerbatimKQuant(reader))
+            {
+                return LoadFromReader(reader, quantize);
+            }
+
+            // The map must outlive the reader (its FileStream closes when `using` exits) —
+            // weights hold slices into the map, not the reader. On any failure during build
+            // we own the map and must dispose it; on success ownership transfers to the engine.
+            var blob = new MemoryMappedModelFile(path);
+            try
+            {
+                return LoadFromReader(reader, quantize, blob);
+            }
+            catch
+            {
+                blob.Dispose();
+                throw;
+            }
         }
 
-        internal static CachedLlamaInferenceEngine LoadFromReader(GgufReader reader, bool quantize = true)
+        /// <summary>
+        /// True when the file holds at least one Q4_K or Q6_K tensor — the only formats the
+        /// mmap path slices verbatim. Pure-F32 / pure-Q8_0 files gain nothing from the map.
+        /// </summary>
+        private static bool FileHasVerbatimKQuant(GgufReader reader)
+        {
+            foreach (var kv in reader.Tensors)
+            {
+                var t = kv.Value.Type;
+                if (t == GgmlType.Q4_K || t == GgmlType.Q6_K)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        internal static CachedLlamaInferenceEngine LoadFromReader(
+            GgufReader reader, bool quantize = true, MemoryMappedModelFile? mmap = null)
         {
             var arch = reader.GetMeta("general.architecture", "qwen2");
 
@@ -87,8 +137,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
             // ─── Embeddings ───────────────────────────────────────────────
             // GGUF: token_embd.weight dims [dModel, vocab] → file emb[token,dim] at token*dModel+dim
-            // C# kernel: same layout (embed.Slice(token*dModel, dModel)) — no transpose.
-            var embedWeights = AllocAndLoad(reader, "token_embd.weight", (long)vocab * dModel);
+            // C# kernel: same layout (row = token) — no transpose. Kept in native K-quant layout
+            // (verbatim / mmap-able) when the file stores it as Q4_K/Q6_K and quantization is on;
+            // only the looked-up row is dequantized per token. F32 fallback otherwise (the old path).
+            var embedWeights = LoadEmbedding(reader, dModel, vocab, quantize, mmap);
 
             // ─── Layer weights ────────────────────────────────────────────
             var layers = new LayerWeightBuffers[nLayers];
@@ -139,9 +191,9 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     // Q4_K-native / Q8_0-native / F32-fallback independently from
                     // its file format. Wo dispatches separately (Q8_0 OK per-head;
                     // K-quant not — headDim < the 256-element super-block).
-                    var wq = LoadQkvHeads(reader, $"blk.{l}.attn_q.weight", nHeads, dModel, headDim, qFull, attnQuantizable);
-                    var wk = LoadQkvHeads(reader, $"blk.{l}.attn_k.weight", nKvHeads, dModel, headDim, kFull, attnQuantizable);
-                    var wv = LoadQkvHeads(reader, $"blk.{l}.attn_v.weight", nKvHeads, dModel, headDim, vFull, attnQuantizable);
+                    var wq = LoadQkvHeads(reader, $"blk.{l}.attn_q.weight", nHeads, dModel, headDim, qFull, attnQuantizable, mmap);
+                    var wk = LoadQkvHeads(reader, $"blk.{l}.attn_k.weight", nKvHeads, dModel, headDim, kFull, attnQuantizable, mmap);
+                    var wv = LoadQkvHeads(reader, $"blk.{l}.attn_v.weight", nKvHeads, dModel, headDim, vFull, attnQuantizable, mmap);
                     var wo = LoadOutputHeads(reader, $"blk.{l}.attn_output.weight", nHeads, dModel, headDim, oFull, attnQuantizable);
 
                     // Attention biases (optional — Qwen has them, Llama doesn't);
@@ -164,9 +216,9 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     DecodeWeight ffnGate, ffnUp, ffnDown;
                     if (quantize && dModel % Q8DotKernel.BlockSize == 0 && dFF % Q8DotKernel.BlockSize == 0)
                     {
-                        ffnGate = AllocAndLoadResident(reader, $"blk.{l}.ffn_gate.weight", dModel, dFF);
-                        ffnUp = AllocAndLoadResident(reader, $"blk.{l}.ffn_up.weight", dModel, dFF);
-                        ffnDown = AllocAndLoadResident(reader, $"blk.{l}.ffn_down.weight", dFF, dModel);
+                        ffnGate = AllocAndLoadResident(reader, $"blk.{l}.ffn_gate.weight", dModel, dFF, mmap);
+                        ffnUp = AllocAndLoadResident(reader, $"blk.{l}.ffn_up.weight", dModel, dFF, mmap);
+                        ffnDown = AllocAndLoadResident(reader, $"blk.{l}.ffn_down.weight", dFF, dModel, mmap);
                     }
                     else
                     {
@@ -224,12 +276,12 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 if (lmHeadInfo.Type == GgmlType.Q4_K && dModel % Q4KWeight.SuperBlockElements == 0)
                 {
                     // Native Q4_K — read the file's blocks straight in (step 3.2b).
-                    lmHead = LoadQ4KNative(reader, lmHeadInfo, dModel, vocab);
+                    lmHead = LoadQ4KNative(reader, lmHeadInfo, dModel, vocab, mmap);
                 }
                 else if (lmHeadInfo.Type == GgmlType.Q6_K && dModel % Q6KWeight.SuperBlockElements == 0)
                 {
                     // Native Q6_K — read the file's blocks straight in (step 3.3c).
-                    lmHead = LoadQ6KNative(reader, lmHeadInfo, dModel, vocab);
+                    lmHead = LoadQ6KNative(reader, lmHeadInfo, dModel, vocab, mmap);
                 }
                 else if (lmHeadInfo.Type == GgmlType.Q8_0)
                 {
@@ -238,7 +290,9 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 }
                 else if (tieWeights)
                 {
-                    lmHead = Q8Weight.QuantizeRows(embedWeights.AsReadOnlySpan(), vocab, dModel);
+                    // Reached only when token_embd is F16/F32/BF16 (the K-quant/Q8 cases are
+                    // caught above), so the embedding is F32-backed here — .F32 is valid.
+                    lmHead = Q8Weight.QuantizeRows(embedWeights.F32, vocab, dModel);
                 }
                 else
                 {
@@ -262,7 +316,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 var lmHeadSpan = f32LmHead.AsSpan();
                 if (tieWeights)
                 {
-                    var embSpan = embedWeights.AsReadOnlySpan();
+                    // F32 fallback (quantize off / dModel not Q8-aligned) ⇒ embedding is F32-backed.
+                    var embSpan = embedWeights.F32;
                     for (var d = 0; d < dModel; d++)
                     {
                         for (var t = 0; t < vocab; t++)
@@ -296,10 +351,49 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
 
             return CachedLlamaInferenceEngine.CreateFromBuffers(
-                config, embedWeights, finalNormGamma, finalNormBeta, lmHead, layers);
+                config, embedWeights, finalNormGamma, finalNormBeta, lmHead, layers, mmap);
         }
 
         // ─── Helpers ────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Loads the token-embedding table. The file stores <c>token_embd.weight</c> row-major
+        /// [vocab, dModel] (row = token) — exactly <see cref="Q4KWeight"/>/<see cref="Q6KWeight"/>'s
+        /// output-major layout — so when it is K-quant on disk and quantization is on it is kept
+        /// verbatim (mmap-able; zero managed bytes) and the lookup dequantizes only the row it needs.
+        /// Otherwise (F16/F32/BF16 source, or quantization off) it loads dequantized to F32, as before.
+        ///
+        /// Cuts the embedding-table RAM on a Q4_K_M model from a full F32 copy (~1.2 GB for Qwen-3B,
+        /// vocab 151936 × dModel 2048) to the verbatim Q6_K bytes (~255 MB, off the managed heap when
+        /// mmap-backed) — the largest remaining post-mmap RAM lever.
+        /// </summary>
+        private static DecodeWeight LoadEmbedding(
+            GgufReader reader, int dModel, int vocab, bool quantize, MemoryMappedModelFile? mmap)
+        {
+            if (!reader.Tensors.TryGetValue("token_embd.weight", out var info))
+            {
+                throw new InvalidDataException("Required tensor 'token_embd.weight' missing from GGUF.");
+            }
+            if (info.ElementCount != (long)vocab * dModel)
+            {
+                throw new InvalidDataException(
+                    $"Tensor 'token_embd.weight' has {info.ElementCount} elements, expected {(long)vocab * dModel}.");
+            }
+
+            if (quantize && info.Type == GgmlType.Q4_K && dModel % Q4KWeight.SuperBlockElements == 0)
+            {
+                return LoadQ4KNative(reader, info, dModel, vocab, mmap);
+            }
+            if (quantize && info.Type == GgmlType.Q6_K && dModel % Q6KWeight.SuperBlockElements == 0)
+            {
+                return LoadQ6KNative(reader, info, dModel, vocab, mmap);
+            }
+
+            // F32 fallback — full dequant into a flat [vocab × dModel] row-major buffer.
+            var storage = TensorStorage<float>.Unpooled(checked((int)((long)vocab * dModel)));
+            reader.LoadTensorAsF32(info, storage.AsSpan());
+            return storage;
+        }
 
         private static TensorStorage<float> AllocAndLoad(GgufReader reader, string name, long elementCount)
         {
@@ -365,7 +459,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// matching both Q4KWeight's and Q8Weight's output-major layout, so no
         /// transpose any path.
         /// </summary>
-        private static DecodeWeight AllocAndLoadResident(GgufReader reader, string name, int inDim, int outDim)
+        private static DecodeWeight AllocAndLoadResident(
+            GgufReader reader, string name, int inDim, int outDim, MemoryMappedModelFile? mmap)
         {
             if (!reader.Tensors.TryGetValue(name, out var info))
             {
@@ -374,11 +469,11 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
             if (info.Type == GgmlType.Q4_K && inDim % Q4KWeight.SuperBlockElements == 0)
             {
-                return LoadQ4KNative(reader, info, inDim, outDim);
+                return LoadQ4KNative(reader, info, inDim, outDim, mmap);
             }
             if (info.Type == GgmlType.Q6_K && inDim % Q6KWeight.SuperBlockElements == 0)
             {
-                return LoadQ6KNative(reader, info, inDim, outDim);
+                return LoadQ6KNative(reader, info, inDim, outDim, mmap);
             }
             if (info.Type == GgmlType.Q8_0)
             {
@@ -430,10 +525,19 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// with Q4_K super-blocks along the contraction dim, exactly matching
         /// Q4KWeight's output-major layout (step 3.2b).
         /// </summary>
-        private static Q4KWeight LoadQ4KNative(GgufReader reader, GgufTensorInfo info, int inDim, int outDim)
+        private static Q4KWeight LoadQ4KNative(
+            GgufReader reader, GgufTensorInfo info, int inDim, int outDim, MemoryMappedModelFile? mmap)
         {
             var blocksPerRow = inDim / Q4KWeight.SuperBlockElements;
             var totalBytes = checked((int)((long)outDim * blocksPerRow * Q4KWeight.SuperBlockBytes));
+
+            if (mmap is not null)
+            {
+                // Zero-copy: the file's block bytes ARE Q4KWeight's layout, verbatim.
+                var slice = mmap.Slice(reader.DataStart + (long)info.Offset, totalBytes);
+                return new Q4KWeight(slice, inDim, outDim);
+            }
+
             var bytes = new byte[totalBytes];
             reader.LoadTensorQ4_KRaw(info, bytes);
             return new Q4KWeight(bytes, inDim, outDim);
@@ -447,7 +551,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// </summary>
         private static DecodeWeight[] LoadQkvHeads(
             GgufReader reader, string name, int headCount, int dModel, int headDim,
-            float[] f32Scratch, bool quantizable)
+            float[] f32Scratch, bool quantizable, MemoryMappedModelFile? mmap)
         {
             if (!reader.Tensors.TryGetValue(name, out var info))
             {
@@ -456,11 +560,11 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
             if (quantizable && info.Type == GgmlType.Q4_K && dModel % Q4KWeight.SuperBlockElements == 0)
             {
-                return LoadQkvHeadsQ4K(reader, info, headCount, dModel, headDim);
+                return LoadQkvHeadsQ4K(reader, info, headCount, dModel, headDim, mmap);
             }
             if (quantizable && info.Type == GgmlType.Q6_K && dModel % Q6KWeight.SuperBlockElements == 0)
             {
-                return LoadQkvHeadsQ6K(reader, info, headCount, dModel, headDim);
+                return LoadQkvHeadsQ6K(reader, info, headCount, dModel, headDim, mmap);
             }
             if (quantizable && info.Type == GgmlType.Q8_0)
             {
@@ -510,19 +614,34 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// <see cref="Q4KWeight"/> — no de-interleave (unlike Q8_0).
         /// </summary>
         private static DecodeWeight[] LoadQkvHeadsQ4K(
-            GgufReader reader, GgufTensorInfo info, int headCount, int dModel, int headDim)
+            GgufReader reader, GgufTensorInfo info, int headCount, int dModel, int headDim,
+            MemoryMappedModelFile? mmap)
         {
             var blocksPerRow = dModel / Q4KWeight.SuperBlockElements;
             var bytesPerRow = blocksPerRow * Q4KWeight.SuperBlockBytes;
-            var totalBytes = checked((int)((long)headCount * headDim * bytesPerRow));
+            var headBytes = headDim * bytesPerRow;
 
+            if (mmap is not null)
+            {
+                // Zero-copy: head h's output rows are a contiguous byte run in the file,
+                // and the run IS Q4KWeight's layout verbatim — slice it straight in.
+                var baseOffset = reader.DataStart + (long)info.Offset;
+                var heads = new DecodeWeight[headCount];
+                for (var h = 0; h < headCount; h++)
+                {
+                    var slice = mmap.Slice(baseOffset + (long)h * headBytes, headBytes);
+                    heads[h] = new Q4KWeight(slice, dModel, headDim);
+                }
+                return heads;
+            }
+
+            var totalBytes = checked((int)((long)headCount * headBytes));
             var raw = ArrayPool<byte>.Shared.Rent(totalBytes);
             try
             {
                 reader.LoadTensorQ4_KRaw(info, raw.AsSpan(0, totalBytes));
 
                 var heads = new DecodeWeight[headCount];
-                var headBytes = headDim * bytesPerRow;
                 for (var h = 0; h < headCount; h++)
                 {
                     var bytes = new byte[headBytes];
@@ -544,10 +663,19 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// [outDim, inDim] with Q6_K super-blocks along the contraction dim,
         /// exactly matching Q6KWeight's output-major layout (step 3.3c).
         /// </summary>
-        private static Q6KWeight LoadQ6KNative(GgufReader reader, GgufTensorInfo info, int inDim, int outDim)
+        private static Q6KWeight LoadQ6KNative(
+            GgufReader reader, GgufTensorInfo info, int inDim, int outDim, MemoryMappedModelFile? mmap)
         {
             var blocksPerRow = inDim / Q6KWeight.SuperBlockElements;
             var totalBytes = checked((int)((long)outDim * blocksPerRow * Q6KWeight.SuperBlockBytes));
+
+            if (mmap is not null)
+            {
+                // Zero-copy: the file's block bytes ARE Q6KWeight's layout, verbatim.
+                var slice = mmap.Slice(reader.DataStart + (long)info.Offset, totalBytes);
+                return new Q6KWeight(slice, inDim, outDim);
+            }
+
             var bytes = new byte[totalBytes];
             reader.LoadTensorQ6_KRaw(info, bytes);
             return new Q6KWeight(bytes, inDim, outDim);
@@ -562,19 +690,34 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// <see cref="Q6KWeight"/>.
         /// </summary>
         private static DecodeWeight[] LoadQkvHeadsQ6K(
-            GgufReader reader, GgufTensorInfo info, int headCount, int dModel, int headDim)
+            GgufReader reader, GgufTensorInfo info, int headCount, int dModel, int headDim,
+            MemoryMappedModelFile? mmap)
         {
             var blocksPerRow = dModel / Q6KWeight.SuperBlockElements;
             var bytesPerRow = blocksPerRow * Q6KWeight.SuperBlockBytes;
-            var totalBytes = checked((int)((long)headCount * headDim * bytesPerRow));
+            var headBytes = headDim * bytesPerRow;
 
+            if (mmap is not null)
+            {
+                // Zero-copy: head h's output rows are a contiguous byte run in the file,
+                // and the run IS Q6KWeight's layout verbatim — slice it straight in.
+                var baseOffset = reader.DataStart + (long)info.Offset;
+                var heads = new DecodeWeight[headCount];
+                for (var h = 0; h < headCount; h++)
+                {
+                    var slice = mmap.Slice(baseOffset + (long)h * headBytes, headBytes);
+                    heads[h] = new Q6KWeight(slice, dModel, headDim);
+                }
+                return heads;
+            }
+
+            var totalBytes = checked((int)((long)headCount * headBytes));
             var raw = ArrayPool<byte>.Shared.Rent(totalBytes);
             try
             {
                 reader.LoadTensorQ6_KRaw(info, raw.AsSpan(0, totalBytes));
 
                 var heads = new DecodeWeight[headCount];
-                var headBytes = headDim * bytesPerRow;
                 for (var h = 0; h < headCount; h++)
                 {
                     var bytes = new byte[headBytes];

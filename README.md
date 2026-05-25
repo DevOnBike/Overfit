@@ -5,6 +5,12 @@ explicit memory ownership, zero-allocation inference hot paths.
 
 **No native binaries. No Python runtime. No ONNX Runtime dependency.** Native-AOT compatible.
 
+<p align="center">
+  <img src="docs/assets/overfit-features.png"
+       alt="Overfit at a glance — pure-C#/.NET LLM engine: load any GGUF (Q4_K/Q6_K), run and fine-tune LLMs (LoRA), in-process agentic stack (RAG, tool calling, guaranteed JSON), adaptive anomaly detection, zero-allocation, Native-AOT — no Python, no native binary, no server."
+       width="520">
+</p>
+
 ---
 
 ## What it does
@@ -12,7 +18,8 @@ explicit memory ownership, zero-allocation inference hot paths.
 **Run and fine-tune LLMs, and run deep networks, entirely in .NET — in-process, allocation-free.**
 
 - **Zero-allocation CPU inference** — preallocated buffers, no per-call GC pressure. **0 bytes per token** on KV-cache decode, enforced by a build-breaking CI assertion.
-- **LLM inference** — GPT-2, and Qwen / Llama / Mistral from GGUF (incl. `Q4_K_M` straight from Ollama). Qwen2.5-3B runs in **~3.2 GB RAM — matching llama.cpp's footprint** — with native K-quant kernels.
+- **LLM inference** — GPT-2, and Qwen / Llama / Mistral from GGUF (incl. `Q4_K_M` straight from Ollama). Qwen2.5-3B runs in **~3.2 GB RAM — matching llama.cpp's footprint** — with native K-quant kernels. **Memory-mapped weights** (default) keep the model off the managed heap: a 3B Q4_K_M loads with a **~220 MB live managed heap**, the weights paged in as shared/clean file pages.
+- **In-process agentic stack** — embeddings + a built-in **vector store** (in-process cosine RAG, no external DB), **guaranteed-valid JSON output**, and **tool / function calling** (constrained decoding forces a valid call, dispatched to your C# delegate). No prompt-and-pray, no retry/repair — the grammar is enforced at the logit level so an invalid token can't be sampled. Runnable [agent demo](Demo/AgentDemo/README.md): load → RAG → tool call → JSON, one process, no Python.
 - **LoRA fine-tuning** — adapt a frozen base to your own data: LM head, FFN, and per-head attention (Stages 1–3), training + inference both in pure C#.
 - **Anomaly detection** — train a small GPT on *your* metrics, flag anomalies, adapt per deployment with LoRA. Nothing that just *runs* others' models can do.
 - **ONNX import** — load PyTorch-exported models directly (14 operators, ResNet-style skip connections), output matches PyTorch within 1e-4.
@@ -91,7 +98,7 @@ execution — *not* raw matmul throughput. It matches llama.cpp on RAM and wins
 
 LoRA Stage 1/2/3 ✅ · GGUF Q4_K/Q6_K in-RAM decode ✅ · GPT-2 / Qwen / Llama / Mistral
 inference ✅ · anomaly-detection + production base ✅. Open: closing the decode gap to
-llama.cpp (full-matrix attention), batched prefill (B>1), ONNX export. Full
+llama.cpp (full-matrix attention), batched prefill (B>1). Full
 priorities and the live resume-point: [`ROADMAP.md`](ROADMAP.md).
 
 ---

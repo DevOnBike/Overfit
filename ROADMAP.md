@@ -17,7 +17,6 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 | Evolutionary: GA + OpenAI-ES, parallel fitness | ✅ Stable, 0 B/op Ask/AskThenTell |
 | ONNX import (linear topology, 14 ops) | ✅ Stable |
 | ONNX import (DAG / ResNet skip connections) | ✅ Stable |
-| ONNX export | ❌ Not started |
 | GPT-2 inference (124M, KV-cache, 0 B/token) | ✅ Stable, parity vs PyTorch verified |
 | Qwen2.5 / Llama / Mistral inference (GQA, RoPE, SwiGLU) | ✅ Stable for 0.5B/3B FP32/F16 |
 | Native C# GGUF loader (F32/F16/BF16/Q8_0/Q4_K/Q6_K) | ✅ Loads `*.gguf` from Ollama/HF directly |
@@ -28,9 +27,192 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 
 ---
 
-## Last session — resume point (2026-05-20)
+## Nearest plan — llama.cpp competitive gaps (2026-05-25)
 
-**Just closed: the decode-track sprint (`docs/llamacpp-cpu-analysis.md` §5 steps 1+2+3).**
+Gap analysis vs llama.cpp, ranked through the strategic frame (NOT chasing decode speed; build the
+embeddability / low-end-hardware / in-process-agentic moat). Verified facts: `GenerationStats.TokensPerSecond`
+EXISTS (produced by `SlmInferenceEngine`) but is NOT surfaced on the modern `CachedLlamaSession`/`ChatSession`
+path; **no mmap** — `GgufReader` = `File.OpenRead` and the resident weights (`Q4KWeight`/`Q6KWeight`/`Q8Weight`)
+copy ALL bytes into managed arrays (4 GB Q4_K_M ⇒ ~4 GB managed RAM).
+
+**🟢 On-moat (do these):**
+1. **mmap GGUF resident weights** — **DONE 2026-05-25.** Loadability on low-end hardware (the core moat:
+   working-set RAM, not full-model RAM). `MemoryMappedModelFile` maps the whole file read-only and hands out
+   zero-copy `ReadOnlyMemory<byte>` slices (a nested `MemoryManager<byte>` over the mapped pages; the parent
+   owns the mapping). `Q4KWeight`/`Q6KWeight.Blocks` changed `byte[]`→`ReadOnlyMemory<byte>` (kept the `byte[]`
+   ctor delegating; added `BlockSpan`); kernels read `BlockSpan` / `fixed (byte* = w.BlockSpan)` (math
+   unchanged). `GgufLlamaLoader.Load(path, quantize, mmap: true)` slices verbatim-layout Q4_K/Q6_K weights
+   (FFN, LM head, per-head attention Q/K/V — each head a contiguous file run) straight from the map; the engine
+   holds the map and disposes it LAST. **NOW DEFAULT (`mmap: true`)** with a smart-skip: the map is built only
+   when the file actually has Q4_K/Q6_K tensors (`FileHasVerbatimKQuant`) — pure-F32 / pure-Q8_0 files skip it
+   and behave exactly as the copy path (no file handle held). Q8_0 (de-interleaved) + F32-fallback still copy.
+   **Measured on real Qwen2.5-3B Q4_K_M (2007 MB file): managed-heap alloc 3202 → 1427 MB (−1776 MB, ~55 %),
+   working-set delta 3167 → 1533 MB (~52 %).** The 1427 MB residual is the F32 embedding table (dequantized for
+   lookup) — the next RAM lever (quantized embedding lookup), out of scope here. **Soak-validated 2026-05-25
+   (default flip):** mmap vs copy bit-identical on Q4_K_M (maxDiff = 0), Q8_0 (maxDiff = 0), FP16 (maxDiff = 0);
+   Q4_K_M decode-vs-own-F32-baseline = 29/32 top-1, worst swing 2.16 — *exactly* the pre-change recorded
+   baseline, proving Phase A preserved decode bit-for-bit. Tests: `MemoryMappedModelFileTests` (4 fast),
+   `GgufMmapParityTests` (4 `[LongFact]` — Q4_K_M/Q8_0/FP16 parity + RAM measurement). AOT-clean
+   (`System.IO.MemoryMappedFiles`).
+   ⚠ **Pre-existing (NOT mmap) finding:** `GgufQ4KMParityTests.Q4KM_TopTokenMatches_FP16Baseline` is RED —
+   Q4_K_M top-1 (474) ≠ FP16 top-1 (40), 4/10 overlap, on the maximally-ambiguous 3-token prompt `[BOS,
+   im_start, \n]`. This is the SAME step-0 near-tie the decode-baseline records (ref→47 / subj→474, swing 2.16);
+   the assertion ("top-1 must match FP16") is over-strict for this flat-distribution prompt. Confirmed
+   independent of mmap (Q4_K_M logits are byte-identical copy vs mmap). Fix later: relax to top-k overlap or
+   pick a less-ambiguous prompt — NOT a decode bug.
+   ► **Quantized token-embedding lookup — DONE 2026-05-25 (the post-mmap RAM lever).** The embedding table
+   was always loaded as full F32 (1187 MB for Qwen-3B, vocab 151936 × dModel 2048) — the dominant residual
+   after mmap. Now `GgufLlamaLoader.LoadEmbedding` keeps `token_embd` in its native K-quant layout (Q4_K/Q6_K,
+   verbatim, mmap-able — token_embd is row-major [vocab, dModel] = output-major, row = token) and the lookup
+   dequantizes only the looked-up row: `Q4KWeight`/`Q6KWeight`/`Q8Weight.DecodeRow(row, dst)` (zero-alloc, one
+   row's super-blocks) behind `DecodeWeight.DequantizeRow`. `_embedWeights` (engine + session) changed
+   `TensorStorage<float>` → `DecodeWeight`; F32 / `.bin` / safetensors paths unchanged (implicit conversion +
+   F32 fallback). **Measured (Qwen-3B Q4_K_M, mmap default): live resident managed heap 2158 MB (copy) →
+   238 MB (mmap)** — vs the 1427 MB mmap residual before this change (that residual WAS the F32 embedding,
+   now ~0 on-heap / Q6_K file-mapped). Decode bit-identical: Q4_K_M decode-vs-F32 still *exactly* 29/32, swing
+   2.16 (same `DecodeQ6_KBlock` on the same bytes as the old full-tensor dequant). Per-token cost: dModel/256
+   super-block decodes (8 for Qwen-3B) — negligible vs the matmuls. Tests: `DecodeWeightRowTests` (3 fast),
+   `Mmap_MeasuredResidentManagedHeap` (`[LongFact]`).
+2. **Embeddings API** — **DONE 2026-05-25.** `CachedLlamaSession.Embed(tokens, pooling, normalize)` +
+   `EmbeddingDimension` + `EmbeddingPooling` (Mean/LastToken), L2-normalised, pools per-token final hidden
+   states. Validated on real Qwen (`EmbeddingsTests`): unit-norm, deterministic, semantic ordering holds
+   (cos(cat,kitten)=0.94 > cos(cat,physics)=0.88). Unlocks in-process RAG / vector-store.
+3. **Constrained generation** — logit-masking to a grammar = guaranteed-valid structured output for
+   in-process agentic .NET. **JSON-mode DONE 2026-05-25.** `ITokenConstraint` (Contracts: `ApplyMask` /
+   `Accept` / `IsComplete`) → `JsonStateMachine` (value-type char-level RFC-8259 acceptor: 64-level bit-stack
+   for nesting, number/string/escape sub-DFAs, `IsComplete` gates EOS) → `JsonGrammarConstraint` (builds the
+   per-token text table from `ITokenizer.DecodeToString`, masks the vocab each step, EOS only when complete).
+   Wired through `ISlmSession.GenerateNextToken(in sampling, ITokenConstraint?)` (default interface method →
+   `NotSupportedException` for non-supporting sessions like GPT-1/2; real override on `CachedLlamaSession`,
+   masks `_logits` in place pre-sample) and `ChatSession.Send(..., constraint)`. **Validated end-to-end on
+   real Qwen-3B Q4_K_M** (`JsonConstrainedChatTests` `[LongFact]`): reply parses via `JsonDocument.Parse` even
+   when the small model would ramble. Fast tests: `JsonStateMachineTests` (accept/reject/complete cases),
+   `JsonGrammarConstraintTests` (mask behaviour on a fake vocab). **Finding (handled):** GGUF pads the vocab
+   (Qwen 151936 logits vs 151665 tokenizer tokens) — `ApplyMask` accepts `logits.Length ≥ tableSize` and masks
+   the padding slots. **Perf note:** mask is O(vocab × token-len)/step — fine for short structured outputs; a
+   per-state cache / token prefix-trie is the documented follow-on. Next: **JSON-Schema** (typed: fields /
+   enum / required → deserializable to a C# record) then **GBNF** (generic grammars) — opt 6 function calling
+   sits on top.
+
+**🟡 Cheap polish:**
+4. **tokens/sec on the modern path** — **DONE 2026-05-25.** `ChatSession.LastStats` (GenerationStats,
+   decode-timed) exposes `TokensPerSecond`.
+5. **Min-P / Mirostat / XTC sampling** — additive to `TokenSampler`/`SamplingOptions`; Min-P a sane modern
+   default, Mirostat for perplexity-targeted decoding. **(Min-P DONE 2026-05-25 — `SamplingStrategy.MinP` +
+   `SamplingOptions.WithMinP`; `TokenSamplerMinPTests`. Mirostat DEFERRED: it's STATEFUL (running `mu` per
+   token) and doesn't fit the static `TokenSampler` / readonly `SamplingOptions` — needs a stateful sampler
+   threaded through the sessions; queued. XTC later.) `ChatSession.LastStats` now exposes TokensPerSecond.**
+
+**🟢 On-moat / done:**
+6. **Function calling** — **DONE 2026-05-25 (the in-process-agentic-.NET headline).** `ToolDefinition`
+   (name + description) → `ToolCallConstraint : ITokenConstraint` forces the canonical envelope
+   `{"name": "<tool>", "arguments": <json>}`: fixed punctuation, the `name` value constrained to an enum
+   DFA over the registered tool names (≤64, viability bit-mask), the `arguments` value delegated to
+   `JsonStateMachine` (well-formed JSON). `ToolCall.TryParse` (System.Text.Json) extracts name + raw
+   arguments; the caller dispatches by name to a `Func<JsonElement,string>`. Reuses the JSON-mode seam
+   (`ChatSession.Send(..., constraint)`). **Validated end-to-end on real Qwen-3B Q4_K_M**
+   (`ToolCallingChatTests` `[LongFact]`): model emitted `{"name": "get_weather", "arguments": {"city":"Paris"}}`,
+   parsed, dispatched → `weather({"city":"Paris"})`. Fast tests: `ToolCallConstraintTests` (envelope / enum /
+   bad-args rejection), `ToolCallTests` (TryParse). Argument *typing* (per-tool JSON-Schema) is the follow-on;
+   the handler validates args meanwhile.
+
+**🟢 On-moat / done:**
+7. **Vector store** — **DONE 2026-05-25.** `VectorStore` (in-process, zero-dependency) + `VectorMatch`:
+   `Add(id, vector, payload)` stores unit-normalised in one contiguous backing array; `Search` is a flat
+   dot-product scan + top-K insertion (no full sort; span overload allocates nothing). Cosine reported is
+   magnitude-invariant. Linear scan — sized for app/document-set scale, not billion-scale ANN. Closes the RAG
+   loop (embeddings → store → retrieve), all in-process. Tests: `VectorStoreTests` (ranking / true-cosine /
+   top-K / growth / guards). Wired into `Demo/AgentDemo` RAG step.
+
+**Session 2026-05-25 delivered: opt 1 (tokens/sec + Min-P; Mirostat deferred — stateful), opt 2 (mmap GGUF —
+~55 % less managed RAM, bit-identical; NOW DEFAULT with smart-skip, soak-validated on Q4_K_M/Q8_0/FP16),
+opt 3 (embeddings), quantized token-embedding lookup (live managed heap for a 3B Q4_K_M model now 238 MB,
+down from 1427 MB — the F32 embedding eliminated; decode bit-identical), and constrained generation
+**JSON-mode** (well-formed JSON enforced at decode via `ITokenConstraint`/`JsonGrammarConstraint`, validated
+on real Qwen), **function calling** (`ToolCallConstraint`/`ToolCall` → dispatch to a C# delegate, validated
+on real Qwen), and a consolidated **agent demo** (`Demo/AgentDemo`: mmap load → RAG → tool call → JSON in one
+process; ran on real Qwen-3B — 222 MB live heap, RAG ranks correctly, tool call dispatches, JSON parses) +
+README/demo-README surfacing the in-process-agentic-.NET story for launch. Next: JSON-Schema (typed args) →
+vector store (queued); then GBNF (generic grammars). Also queued: relax the over-strict pre-existing
+`GgufQ4KMParityTests` FP16 assertion (see opt 1 note — not a decode bug); per-state mask cache if the
+O(vocab×len) mask shows up in profiles.**
+Also fixed a recurring flaky-suite issue: added `MathUtils.SetSeed(int)` (per-thread
+repro hook) and seeded the random-tiny-base anomaly `[Fact]` tests — which surfaced that **tiny-base LoRA
+convergence is init-sensitive** (some seeds diverge at lr 1e-2 / 300 steps; the seed pins a representative
+converging init — the rigorous validation remains the TRAINED production base in `[LongFact]`).
+
+## (Historical) Session resume point 2026-05-22 → 23 — SUPERSEDED by "Nearest plan (2026-05-25)" above
+
+**Big session — zero-Python loading completed, chat turnkey, and the anomaly+LoRA product
+track closed with an empirically-corrected verdict.** Strategic frame (still holds): NOT chasing
+llama.cpp on decode; embeddability / training / product moat. See [[project-loading-story]],
+[[project-loading-direction]], [[project-chat-runtime]], [[project-anomaly-lora]], [[project-perf-sprint]].
+
+**Zero-Python loading — DONE (all inbound formats native; one-directional, NO exporters — see
+[[project-loading-direction]]):**
+- **Native Llama/Qwen safetensors loader** `SafetensorsLlamaLoader.Load(dir, quantize)` →
+  `CachedLlamaInferenceEngine` + `LlamaConfigReader` (config.json via `Utf8JsonReader`). **VALIDATED
+  coherent on real Qwen2.5-0.5B** ("The capital of France is" → " Paris..."). Found+fixed a **RoPE
+  row-permute** bug (HF rotate-half → GGUF adjacent-pair on q/k weights+biases; `RopeKernel` is NEOX/
+  adjacent-pair so HF weights need the llama.cpp permute). NOTE: `Scripts/convert_llama.py` has the SAME
+  bug (unpermuted) — its `.bin` for RoPE models is suspect; not fixed (no Python here).
+- **GPT-2 loader peak-RAM 2×→~1×** — `SequentialChunkReadStream` streams one param block at a time into
+  `GPT1Model.Load` (bounded backward seek for the MHA legacy-peek); no full in-RAM `.bin` copy.
+- Parity test (`SafetensorsLlamaLoaderTests`) bit-identical vs `.bin` (GQA + permute); the loader-vs-.bin
+  test CANNOT catch RoPE-permute (cancels) — only the real-model run does.
+
+**Chat runtime — `ChatSession` now actually drives Llama/Qwen + turnkey:**
+- `CachedLlamaSession` now implements `ISlmSession` (was IDisposable-only — the GGUF/safetensors path
+  couldn't feed `ChatSession`). `HuggingFaceChatTemplate` reads `tokenizer_config.json` chat_template.
+- **`QwenChatModel.LoadFromDirectory(dir)`** — turnkey zero-Python HF dir → `ChatSession`
+  (`QwenChatTokenizer` adapts `QwenTokenizer`→`ITokenizer`). **VALIDATED on real Qwen2.5-0.5B**:
+  `Send("What is the capital of France?")` → "France's capital is Paris." (Qwen-only; cl100k pre-tokenizer.)
+
+**Anomaly + LoRA product track — closed with measured verdicts:**
+- **LoRA target A/B** on the anomaly task (Stage 1/2/3/All): tiny-RANDOM base → single-stage unstable,
+  union wins. **TRAINED 256d production base (retrained this session, val 7.70→0.86 in 4m23s) → LM-head
+  ALONE is best AND cheapest** (benign 6.45 false-positive → 0.0000, 31694× sep, 1 adapter / 8 KB; union
+  needs 205 adapters for worse sep). Cross-pod residual lives in OUTPUT calibration = LM head. **Demo
+  reverted to LM-head** (I'd wrongly switched to AllLinear on the misleading tiny-base result).
+- **EWMA classical baseline** (`EwmaAnomalyDetector`) + head-to-head: the un-adapted GPT base does NOT
+  beat a trivial EWMA floor (base normal 6.45 vs EWMA 0.00) — **the per-pod LoRA adaptation is the edge**,
+  not the raw transformer. Demo shows it three-way (EWMA / GPT base / GPT+LoRA). Verdict in
+  `docs/gp-anomaly-baseline.md`; GP escalation NOT warranted.
+- Production base regenerated at `D:\k8s_anomaly_production.bin` (20.8 MB, out of repo).
+
+**Continued 2026-05-23 — family-generic tokenizer/chat, llama3 RoPE scaling, GPT-2 bit-parity:**
+- **Generic HF BPE tokenizer** `HuggingFaceBpeTokenizer : ITokenizer` — reads the pre-tokenizer Split
+  regex + merges (both `"a b"` and `["a","b"]` shapes) + EOS from `tokenizer.json`/`tokenizer_config.json`,
+  no per-model hard-coding. **VALIDATED bit-exact vs `QwenTokenizer`** (incl. digits) AND **round-trips on
+  real Llama-3.2-1B** (vocab 128256). `HuggingFaceChatModel.LoadFromDirectory(dir)` = family-generic turnkey
+  (stops per `ChatTemplateFormat`). **Llama-3.2-1B VALIDATED end-to-end**: raw completion "The capital of
+  France is" → " Paris. The capital of Germany" (loader correct on Llama dims: 2048d/32h/8kv GQA/16L/tied;
+  base model so chat echoes — completion is the right loader check for a base).
+- **llama3 RoPE scaling DONE** — `RopeScaling` (NTK-by-parts, port of HF `_compute_llama3_parameters`)
+  applied in `RopeTable`, parsed from `config.json rope_scaling` (only `rope_type:"llama3"`). Validated
+  (`RopeScalingTests` + real Llama still " Paris" with scaling active). Closes the long-context limitation.
+- **GPT-2 safetensors bit-parity VALIDATED** — downloaded `openai-community/gpt2` `model.safetensors`
+  (548 MB → `C:\gpt2\`), `Load_RealGpt2Safetensors_BitParity_WithBinFixture` PASSES: loader output is
+  **byte-for-byte identical** to `gpt2_small.bin`. **ALL loaders now validated on real models.**
+
+**Out-of-repo dev artifacts (re-runs):** `C:\gpt2\model.safetensors`, `C:\llama3\{config,tokenizer,tokenizer_config}.json + model.safetensors`,
+`C:\qwen3b\model.safetensors`, `D:\k8s_anomaly_production.bin`. Real-model tests are `[LongFact]` (flip to `[Fact]` to run).
+
+**Full suite: 765 / 0 / 90 green. The 2026-05-22 batch is COMMITTED (`llama` commits); the 2026-05-23
+work (generic tokenizer + chat + rope_scaling + tests) — CHECK `git status`, commit if not yet done.
+Working tree was clean at session end except pre-existing staged marketing files (not mine).**
+
+**Resume — pick one (loading + chat tracks are now fully closed & validated):**
+1. **Anomaly operator workflow / productization** — real Prometheus metrics → per-pod LM-head adapter
+   lifecycle (deployment story; ML verdicts settled — LM-head LoRA on a trained base is the recommendation).
+2. **Mistral / non-ByteLevel tokenizers** — extend the generic tokenizer if a SentencePiece/Unigram model
+   matters (currently BPE-only; Mistral pre-tokenizer untested — drop a Mistral dir to validate).
+3. **Fix `Scripts/convert_llama.py` RoPE permute** (legacy; needs Python to test, low ROI) or the
+   **decode lever** (LM-head alloc-free parallel matmul; low strategic ROI per the pivot).
+
+---
+
+**Earlier (2026-05-20): the decode-track sprint (`docs/llamacpp-cpu-analysis.md` §5 steps 1+2+3).**
 
 Three-stage cumulative result on Qwen2.5-3B-Instruct (dev box, best-of-3, single-stream CPU decode):
 
@@ -49,11 +231,11 @@ End-to-end vs Overfit's own starting point: **5.6× decode, −69 % RAM, 20× fa
 - **Committed** (in the `llama` commits on `next`): all Q4_K_M code + tests + `docs/llamacpp-cpu-analysis.md` — `Q6KDotKernel.cs`, `Q6KWeight.cs`, `Q6KDotKernelTests.cs`, `Q4KMDecodeParityTests.cs`, `DecodeWeight.cs` (4-way tagged union `{F32|Q8|Q4_K|Q6_K}`), the per-weight-dispatch decode blocks (`CachedFeedForwardBlock` / `CachedSingleHeadAttention` / `CachedMultiHeadAttention` / `CachedTransformerBlock` / `CachedGptStack`), and the native Q4_K + Q6_K loader reads (`GgufLlamaLoader.cs` / `GgufReader.cs`).
 - **Uncommitted at handoff:** this `ROADMAP.md` (the resume-point + Slot 2b update). Pre-existing staged files unrelated to this work: `index.html`, `launch-copy.md`, `linkedin-*.md`, `docs/parallel_opts.txt`.
 
-### NEXT — order set by user: C → B
+### (Historical) Order that session: C → B — both delivered
 
 - **(A) LLamaSharp re-bench on Q4_K_M — ✅ DONE 2026-05-20.** Restored the `llama` mode in `D:\overfit-bench` (LLamaSharp 0.27.0, `dotnet run -- llama qwen.q4km.gguf`). Result above: llama.cpp ~2× faster + 27 % less RAM on the same file; "1.51× faster" claim retracted everywhere. Surfaced a new lever (D).
 - **(C) — NEXT NOW — Active track: anomaly + LoRA.** Pick one of the four options in the Active-track "NEXT" section below: end-to-end integration test / Stage-2 LoRA on FFN / Production base training / deployment-architecture decision. The live product track.
-- **(B) — after C — Prefill GEMM (B>1 batched matmul)** *(several days)*. Phase 1 `BatchedProjectionKernel` ([N×D]×[D×O]→[N×O] allocation-free GEMM) → Phase 2 batched causal-mask attention → Phase 3 `CachedGptStack.PrefillBatched`. 5–10× TTFT for long prompts + B>1 training. Plan in "Next (after the GPT-2 week)" below. Helps **prefill + training**, not single-stream decode.
+- **(B) Prefill GEMM (B>1 batched matmul) — ✅ DONE 2026-05-21, 3.48× TTFT.** Phase 1 `BatchedProjectionKernel` → Phase 2 `BatchedAttentionKernel` → Phase 3 `CachedGptStack.PrefillBatched`, wired into `CachedSlmSession.Prefill` (≥16-token GPT-2 prompts). The win came from head-coarse parallelism (the per-head wiring was 3.8× slower). Quant (Q4_K_M) batched prefill is the follow-on — Phase 1 is F32 only. Details in the Prefill section below.
 - **(D) — surfaced by (A), 2 levers DONE — make decode bandwidth-bound.** llama.cpp got 2.85× from FP16→Q4 (bandwidth-bound); Overfit got ~1.0× (overhead-bound). **Done #1: GQA K/V-once** — K/V projection was recomputed once per Q head (8× for Qwen 16Q/2KV) instead of once per KV group; +24 % (13.85 → 17.2 tok/s), cut wasted K/V weight-read bandwidth 8×. **Done #2: fuse-quantize** — `hidden` was re-quantized to Q8_K per head per projection (~20×/layer); now quantized once per layer in `CachedMultiHeadAttention`, shared read-only across heads via `Q4K/Q6KDotKernel.ProjectPreQuantized`; **+~1.5 % (17.2 → 17.5 tok/s)** — small, as predicted (quantize is ~0.04 % of matmul arithmetic), but consistent. Both bit-identical (same 24-token greedy sequence before/after) + 680/0/68. Gap to llama.cpp now ~1.6× (was ~2.0×). **Tried #3: VNNI `vpdpbusd` — REVERTED 2026-05-21.** Replaced the AVX2 `vpmaddubsw`+`vpmaddwd` dot with one `vpdpbusd` (`AvxVnni.MultiplyWideningAndAdd`) in both Q4_K/Q6_K kernels + deferred-horizontal-sum; box has `AvxVnni`/`AVX512BW` (verified via bench `caps` mode). Parity 8/8 green. **Same-state A/B: AVX2 ≈ VNNI ≈ 19.1 tok/s — ~0 gain, reverted.** Lesson: after #1+#2 the decode is **memory-bandwidth-bound, not ALU-bound** — fusing the dot saves cycles already hidden behind weight-read latency. (The earlier "17.5 baseline" was a slower thermal state; same-state both ~19.) **The real remaining lever is MEMORY, not ALU:** llama.cpp reads 3.2 GB (mmap), Overfit 4.4 GB committed — the ~1.2 GB extra read per token *is* the speed gap. Levers: mmap-style weight loading instead of committed heap, drop F32 duplication (embeddings/norms), tighter weight layout. GEMV-unroll / core-util profiling are secondary now (ALU isn't the bottleneck). This redirects D from kernel-ALU to memory-bytes-per-token.
 
   **Profiled 2026-05-21 (thread-scaling + effective-BW).** Decode tok/s vs workers
@@ -124,7 +306,14 @@ value was validation/guidance, not drop-in algorithms.
 - **`CachedTransformerBlock.Decode` argument validation** — explicit guards for input/output/FfnW1/FfnW2 lengths; surfaces caller bugs as `ArgumentException` instead of `IndexOutOfRangeException` mid-block.
 - **Binary loader RAM optimization** — `Unpooled` `TensorStorage` for model weights + direct `ReadExactly` into destination span. Removes pool pow2-rounding overhead and intermediate scratch `byte[]`. **3B FP32: ~30 GB → ~14 GB peak load; matches file size exactly.**
 - **Token-by-token streaming** — `CachedLlamaSession.StreamGenerate(StreamingOptions, CancellationToken)` returns `IAsyncEnumerable<int>` with stop-token / cache-full / cancellation termination.
+- **Chat runtime: multi-turn template + string stops (2026-05-21)** — `ChatTemplate` (`LanguageModels/Chat/`) renders multi-turn `ChatMessage[]` to a prompt for ChatML / Llama-3 / Mistral, with `Detect(jinja)` fingerprinting a GGUF `tokenizer.chat_template` (no Jinja engine — AOT-hostile) and a ChatML fallback. `StopSequenceDetector` adds correct *string* stop sequences on top of the existing token stops — streaming-safe (holds back a trailing partial that could grow into a stop, never emits the stop marker). 16 unit tests (template detect/render for all 3 formats, stop split-across-pieces / partial / multi-stop / flush). **Validated end-to-end on real Qwen Q4_K_M** (`ChatIntegrationTests`, [LongFact]): detects the GGUF's 2509-char `chat_template` → ChatML, renders a system+user chat, tokenizes, generates, and assembles the stream through the stop detector (markers suppressed).
+- **Turnkey `ChatSession` (2026-05-22)** — `ChatSession` (`LanguageModels/Chat/`) wraps any `ISlmSession` + `ITokenizer` + `ChatTemplate`: owns conversation history, and each `Send(userMessage, options, onText)` renders the whole history, prefills, generates, and assembles the reply applying both the EOS token stop and string stops (`StopSequenceDetector`) — incremental detokenize holds back a trailing partial codepoint rather than emit garbage. 3 fake-backed unit tests (history accumulation + template-rendered prefill, EOS stop, string-stop truncation + streaming).
+- **Sliding-window KV eviction (2026-05-22, RoPE models)** — `KeyValueCache.Evict(count)` drops the oldest tokens by shifting every (layer,head) K/V block down one contiguous memmove, shrinking `CurrentLength` and growing `BasePosition`; retained K/V are NOT re-rotated — RoPE scores depend only on the relative offset, which the climbing `BasePosition` preserves (the new token rotates at `slot + BasePosition`, the true absolute position). `CachedLlamaSession.EnableSlidingWindow(evictBlock)` (opt-in, RoPE-only — learned-absolute-position GPT-2 can't slide) evicts instead of throwing once the cache fills, so chats run unbounded over a rolling context. Tests: `KeyValueCacheEvictTests` (5 — slot shift, BasePosition, reset, invalid count) + `SlidingWindowTests` ([LongFact], real Qwen — enabling sliding is bit-identical before the cache fills; generates 40 tokens over a 16-slot cache with eviction triggered while non-sliding throws). NOTE: sliding window is intentionally NOT equivalent to recomputing on a truncated context (retained hidden states encode since-evicted tokens — standard StreamingLLM behaviour). **Chat-runtime gaps now closed (template, stops, turnkey session, eviction).**
+- **Codebase hygiene (2026-05-22): one top-level type per file across the whole solution.** Audited + split 12 multi-type files (incl. the just-added `ChatTemplate`/`SafetensorsReader`/`SafetensorsSource`); `OfflineTrainingConfig.cs` (held `GptTrainingConfig` + `OfflineTrainingResult`, named after neither) renamed into per-type files. Solution builds clean, 740/0/72.
 - **GGUF native loader** — `GgufLlamaLoader` reads GGUF files end-to-end without Python tooling. Supports F32/F16/BF16/Q8_0/Q4_K/Q6_K tensors, hand-rolled protobuf-free parser.
+- **Native safetensors reader (2026-05-21)** — `SafetensorsReader` reads the HuggingFace `safetensors` format directly: 8-byte header length + `Utf8JsonReader`-parsed JSON header (reflection-free, AOT-clean — no `JsonSerializer`) + F32/F16/BF16 → F32 streaming dequant via `LoadF32`. Closes the last Python-dependent path (a raw HF repo with no GGUF variant). 7 unit tests over synthetic files (header parse, shape/dtype, F32/F16/BF16 round-trip, error paths).
+- **Native GPT-2 safetensors loader (2026-05-21)** — `SafetensorsGpt2Loader.Load(path, Gpt2Config.Small)` builds a `GPT1Model` straight from a HF GPT-2 `model.safetensors`, no Python / no `convert_gpt2.py` / no intermediate `.bin`. C# port of the script's mapping (Conv1D `[in,out]` as-is, `c_attn [d,3d]` → per-head Q/K/V `[d,dHead]`, `c_proj [d,d]` → per-head `[dHead,d]`, `c_attn.bias` per-head split, LM head = `wte.T`); serialises into the exact byte stream `GPT1Model.Load` reads (order ≡ `GPT1Model.Save`), so ordering/shapes are guaranteed by the validated load path. Names resolve with/without `transformer.` prefix. Tests: a synthetic tiny GPT-2 (d=4/2-head/1-layer) with ramp-filled tensors proves Q/K/V/O split + bias split + `wte.T` placement against hand-computed expectations (independent of loader logic) + finite decode through `CachedGpt1ModelAdapter`; a `[LongFact]` asserts **bit-parity of `loader.Save()` vs `gpt2_small.bin`** when a real `model.safetensors` is present (resolves `$OVERFIT_MODEL_DIR` / `C:\gpt2\`, no-ops otherwise — real end-to-end parity needs that file, absent on the dev box for now).
+- **Sharded safetensors repos (2026-05-21)** — `ISafetensorsSource` abstraction (single-file `SafetensorsReader` + multi-file `ShardedSafetensorsReader`); `SafetensorsSource.Open(pathOrDir)` factory auto-detects `model.safetensors.index.json` (sharded) vs `model.safetensors` (single). `ShardedSafetensorsReader` parses the index `weight_map` (`Utf8JsonReader`, reflection-free), opens each shard once, reads each tensor on demand from its owning shard (no shard fully materialised — low-RAM). `SafetensorsGpt2Loader` now takes `ISafetensorsSource` so it loads single or sharded transparently. Tests: shard merge + correct-shard read + missing-tensor error, and **a sharded GPT-2 loads byte-identically to the single-file model** (`ShardedSafetensorsReaderTests`). **Next:** Llama/Qwen safetensors loader (port `convert_llama.py` — RoPE/GQA/SwiGLU). (Note: the GPT-2 loader still round-trips weights through a full in-memory `.bin` stream — ~2× peak RAM at load; fine for GPT-2, worth streaming-into-params for larger models.)
 - **LoRA adapter** — `LlamaLoRAAdapter` with Enable/Disable in-place weight injection. Zero-copy `TensorStorage` references — adapter updates visible to inference without re-binding.
 - **GPT-2 Small inference + parity** — 124M params, KV-cache decode 0 B/token, 6.4× faster than naive O(N²). Top-10 logit overlap 10/10 vs PyTorch, maxAbsDiff 0.000107.
 - **KV-cache runtime** — `CachedSlmInferenceEngine` + `CachedSlmSession`. `SingleHeadWeights` / `BlockWeights` / `StackWeights` hold zero-copy `TensorStorage` refs.
@@ -188,7 +377,7 @@ it on real production metrics. Plan: synthetic base → pull real metrics → Lo
   ~11 telemetry instruments declared but never recorded, `DiagnosticsRegressionTests`
   was vacuously green (F1/F4 fixed, F2/F3 outstanding).
 
-### NEXT — resume here (pick one)
+### Anomaly + LoRA track — ALL ITEMS SHIPPED (was "resume here / pick one")
 
 - **End-to-end integration test — ✅ DONE.** `Tests/Anomalies/GptAnomalyLoRAIntegrationTests.cs`,
   2 `[Fact]`s (green, ~1 s each): (1) LoRA trained on a regime lowers that regime's
@@ -216,32 +405,80 @@ it on real production metrics. Plan: synthetic base → pull real metrics → Lo
   base's per-pod "normal" still carries residual surprise (6.02) because it's
   trained across all pods; that's exactly what per-regime LoRA (Stage 1/2/3) drives
   down for a specific deployment.
-- **Decision pending:** deployment base architecture — Medium (128d/4L, converges
-  fast, ~1.0 loss) vs Production (256d/6L). LoRA targets a fixed architecture, so
-  this gates Stage 2/3.
+- **One-command product demo — ✅ DONE 2026-05-21.** `Demo/AnomalyConsoleDemo`
+  now demonstrates the *whole* moat live in a single `dotnet run`, self-contained
+  (trains a Quick base on the 201 600-row fixture CSV in ~17 s, no external file):
+  **Phase 1 (base)** streams a benign regime + injects an incident; **Phase 2**
+  fine-tunes an LM-head LoRA (rank 16, 300 steps, base frozen) on that pod's benign
+  regime, merges it in place, and re-runs the same stream. Measured live (Quick base):
+  benign "normal" **2.74 → 0.00** (false positives flattened), injected incident
+  **11.78 → 24.38** (detection preserved and sharpened). This is the "adaptive
+  per-deployment learning an inference-only engine can't do" story, shown not just
+  described. Closes the "demoable in one command, documented honestly" goal below.
+- **Production base validated end-to-end with per-pod LoRA — ✅ 2026-05-21, decision
+  RESOLVED → Production.** Ran the demo's full before/after loop on the real
+  `k8s_anomaly_production.bin` (256d/6L, via `--preset production --checkpoint`):
+  the un-adapted base **scores the benign regime 5.68 — a false positive** (> the
+  ⚠ 5.0 threshold), exactly because it's trained across all pods; a per-pod LM-head
+  LoRA (rank 16, 300 steps) drives it to **0.00** while sharpening the injected
+  incident **12.07 → 34.14**. This both (a) resolves the Medium-vs-Production base
+  decision in Production's favour — it carries the cross-pod residual surprise that
+  per-deployment LoRA is designed to remove — and (b) proves the moat on the actual
+  deployable artifact, not a toy. Demo gained a `--preset quick|medium|production`
+  flag so the loaded model's dims match the checkpoint. **Now regression-defended:**
+  `GptAnomalyProductionLoRATests.ProductionBase_PerPodLoRA_FlattensBenignRegime_StillFlagsIncident`
+  ([LongFact], auto-detects 256d, resolves the base from $OVERFIT_MODEL_DIR /
+  test_fixtures / D:\, no-ops if absent) asserts benign < base & < 1.0 and incident
+  > 5.0 with clear separation — bit-reproducible (5.68→0.00, 12.07→34.14, 13 s).
 
 ---
 
-## Current focus: GPT-2 Small as primary showcase
+## (Historical) GPT-2 Small showcase — SUPERSEDED by the in-process agentic stack
 
-**Why:** the parity claim ("top-10 overlap 10/10 vs PyTorch, maxAbsDiff 0.000107, 0 B / generated token, KV-cache decode") is already implemented and validated. Productizing this single story end-to-end (defended in CI, demoable in one command, documented honestly) is higher-value than chasing more model families. Qwen / Llama / LoRA / quantization work continues to live in the codebase but is **explicitly deferred** out of the current week's focus.
+**Superseded (2026-05-25):** the primary showcase is now the **in-process agentic stack** — RAG +
+tool calling + structured output on a Qwen GGUF (see "Nearest plan (2026-05-25)" and `Demo/AgentDemo`).
+Qwen / Llama / LoRA / quantization are **no longer deferred — they shipped**. Kept below for history.
+
+**Why (at the time):** the parity claim ("top-10 overlap 10/10 vs PyTorch, maxAbsDiff 0.000107, 0 B / generated token, KV-cache decode") is already implemented and validated. Productizing this single story end-to-end (defended in CI, demoable in one command, documented honestly) is higher-value than chasing more model families. Qwen / Llama / LoRA / quantization work continues to live in the codebase but is **explicitly deferred** out of the current week's focus.
 
 ### This week
 
 - [x] **GPT-2 parity diagnostics run on every `dotnet test`** — `Gpt2ImportParityDiagnostics`, `Gpt2ImportStageParityDiagnostics`, `Gpt2ImportAttentionParityDiagnostics` flipped from `[LongFact]` back to `[Fact]`. Sweep cost: +2 s. Headline claim now defended on every push.
-- [ ] **`Demo/Gpt2ConsoleDemo` project** — user-facing console app: `dotnet run -- --model path --prompt "..." --tokens N`. Reports: model name, KV-cache enabled, managed allocations/token, tokens/sec. First time the repo looks like a *product* instead of a test suite.
-- [ ] **Fixture / model path resolver** — drop hardcoded `c:\qwen3b\…` / `d:/…` constants. Resolve via env var (`OVERFIT_MODEL_DIR`) + local `models/` directory. Required for the demo to work on anyone else's machine.
+- [x] **`Demo/Gpt2ConsoleDemo` project** — exists (`Demo/Gpt2ConsoleDemo`). (The launch showcase is now `Demo/AgentDemo`.)
+- [x] **Fixture / model path resolver** — done: `OVERFIT_MODEL_DIR` env var is the resolution path across demos/tests.
 - [ ] **GPT-2 generation benchmark** — BenchmarkDotNet: cold-start, prefill cost, per-token decode time, allocations. Confirm 0 B/token quantitatively for the README.
-- [ ] **README cleanup** — single consolidated story: how to convert weights, how to run, what's measured. Remove stale "repetitive text" / "broken GPT-2 import" comments. Add the benchmark numbers from the previous item.
+- [x] **README cleanup** — done: README/TECHNICAL/scenarios consolidated and updated through 2026-05-25 (agentic stack, mmap, benchmarks).
 
 ### Next (after the GPT-2 week)
 
 - [x] **`Prefill()` vs `GenerateNextToken()` API split** — `CachedLlamaSession` and `CachedSlmSession` both expose `Reset()` (clear-only) + `Prefill(prompt)` + the legacy `Reset(prompt)` facade. Backwards compatible: every existing caller keeps working. Enables chat-history-style incremental context (system → user → assistant turns) without re-prefilling the prefix.
 - **Prefill: multi-token batched matmul** — phased work toward 5-10× TTFT speedup. Same FLOPs as today, but weights loaded once for N tokens instead of N times; memory-bound for small models, so the speedup is large for short prompts and grows with prompt length.
   - [x] **Phase 0 — skip LM-head for non-final prompt tokens.** Split `CachedGptStack.Decode` into `DecodeWithoutLogits` (transformer blocks + final norm) + `ProjectLogits` (LM head). `Prefill` in both `CachedSlmSession` and `CachedLlamaSession` now calls `DecodeWithoutLogits` for tokens `0..N-2` and full `Decode` only for the last token. Saves ~27 % per-token cost on GPT-2 Small for N-1 of N tokens → ~25 % overall prefill speedup. Parity preserved (greedy output bit-identical to pre-split, demo test still 0 B / generated token).
-  - [ ] **Phase 1 — `BatchedProjectionKernel`.** `[N × D] × [D × O] → [N × O]` allocation-free GEMM. Foundation for Q/K/V/O and FFN-W1/W2 in batched prefill. Must match `N × SingleTokenProjectionKernel.Project` bit-for-bit at N=1 and within FP32 noise floor for N > 1.
-  - [ ] **Phase 2 — `BatchedAttentionKernel` with causal mask.** Q[N,H] @ K_cache[L,H].T over each prompt position against `[0..pos+i]`, softmax with causal mask, @V_cache. Hardest piece. Output [N, H] per head.
-  - [ ] **Phase 3 — top-level batched stack pass.** New `CachedGptStack.PrefillBatched(promptTokens, weights, cache, ...)` wires Phase 1+2 through `CachedTransformerBlock` and `CachedFeedForwardBlock` batched paths. `Prefill` in both sessions delegates to this for prompts above some small threshold (e.g. ≥ 4 tokens; below that single-token loop wins on overhead).
+  - [x] **Phase 1 — `BatchedProjectionKernel` (2026-05-21).** `[N×I] × [I×O] → [N×O]` allocation-free F32 GEMM, `Project` (sequential) + `ProjectParallel` (over output columns). Loop order output-tile → input → row: each weight tile loaded once and reused across all N rows → weight-read bandwidth amortised N×. Per-output-element accumulation order (input-ascending, `TensorPrimitives.MultiplyAdd`, `x==0` skip) identical to the single-token kernel, so **bit-identical to N× `SingleTokenProjectionKernel.Project`** — verified by `BatchedProjectionKernelTests` (6 cases: N=1/N>1, ±bias, outputSize>tile, GPT-2-scale, input zeros; both seq + parallel exact). Foundation for Q/K/V/O + FFN-W1/W2 batched prefill.
+  - [x] **Phase 2 — `BatchedAttentionKernel` with causal mask (2026-05-21).** Scores N query positions against a shared K/V cache in one call; query `i` (absolute pos `basePos+i`, `basePos = cacheLength-rows`) attends `[0..basePos+i]` under the causal mask → reduces to one `ComputeSingleHead` with `sequenceLength = basePos+i+1`, so **bit-identical to per-query single-head**. `Compute` (sequential) + `ComputeParallel` (queries fan out over `OverfitParallelFor` — independent, disjoint output + per-query score-scratch rows, read-only shared K/V; not weight-bound so the win is core-parallelism, not bandwidth). `BatchedAttentionKernelTests`: 5 cases (fresh prefill basePos=0, prefix basePos>0, Qwen-scale head; seq + parallel exact).
+  - [x] **Phase 3 — top-level batched stack pass** *(DONE 2026-05-21, ~3.5× TTFT)*. New `CachedGptStack.PrefillBatched(promptTokens, weights, cache, ...)` wires Phase 1+2 through the block batched paths. Scoped first to the F32 / GPT-2 path (standard LayerNorm, GeLU FFN, MHA, no RoPE); SwiGLU/RoPE/GQA/quantized are the follow-on (the quant path also needs a batched K-quant projection — Phase 1 is F32 only).
+    - [x] **FFN slice — `CachedFeedForwardBlock.DecodeBatched` (2026-05-21).** Both projections via `BatchedProjectionKernel`, the SAME element-wise `ApplyActivation` across the whole `[N×dFF]` intermediate → bit-identical to N× `Decode`. `CachedFeedForwardBlockBatchedTests` (4 cases: GeLU + ReLU, N=1/N>1). FFN is ~⅔ of layer FLOPs — the biggest single batched win.
+    - [x] **Attention slice — `CachedMultiHeadAttention.DecodeBatched` (2026-05-21).** Per head: batched Q/K/V projection (`BatchedProjectionKernel`), per-position cache writes, batched causal attention (`BatchedAttentionKernel` — query n attends `[0..basePos+n]`), batched O projection accumulated into output in head order. Bit-identical to N× `Decode` — `CachedMultiHeadAttentionBatchedTests` (4 cases, with attention bias, N=1/N>1). Scoped F32/MHA/no-RoPE (throws for quant/GQA/RoPE).
+    - [x] **Stack orchestration (2026-05-21).** `CachedTransformerBlock.DecodeBatched` (per-row LN → batched MHA → residual → LN → batched FFN → residual, reusing the two verified batched blocks + `SingleTokenLayerNormKernel`) + `CachedGptStack.PrefillBatched` (layer loop + last-token final norm, mirroring `DecodeWithoutLogits`). **Stack-level parity: `PrefillBatched` last-token final-hidden bit-identical to the single-token `DecodeWithoutLogits` loop** — `CachedGptStackTests.PrefillBatched_LastToken_IsBitIdentical_To_SingleTokenLoop` (3 cases, 2 layers, random weights). Scoped F32/GPT-2.
+    - [x] **Session delegation — SHIPPED (2026-05-21, after head-parallel fix).** Wired
+      `CachedGpt1ModelAdapter.PrefillBatched` (embed N + advance cache + `PrefillBatched`
+      + project last-token logits) and delegated from `CachedSlmSession.Prefill` for
+      prompts ≥ `BatchedPrefillThreshold` (16; falls back to the single-token loop below
+      that and for non-GPT-2 stacks via `SupportsBatchedPrefill`). Correctness: batched
+      last-token logits bit-identical to the single-token loop (`CachedSlmPrefillBatchedTests`,
+      3 cases). **TTFT on GPT-2-Small dims, 64-token prompt: 567 ms single-token vs 163 ms
+      batched = 3.48× faster** (`Ttft_BatchedVsSingleToken_Gpt2SmallDims`, [LongFact]).
+    - **The fix that flipped it (the key result).** First wiring measured **0.26×
+      (≈3.8× SLOWER)**: the batched MHA fanned the per-head Q/K/V/O projections out as
+      ~60 tiny `OverfitParallelFor` dispatches per layer (~720 for 12 layers), whose
+      wake/sync overhead swamped the weight-reuse win. Restructured `DecodeBatched` to
+      parallelise **over heads** — one `OverfitParallelFor.For(0, HeadCount, …)` dispatch
+      per layer, each head doing its Q/K/V projection + attention + O projection
+      sequentially into a per-head scratch band, then bands reduced into the output in
+      head order (bit-identical). One dispatch/layer instead of ~60 → **0.26× → 3.48×, a
+      ~13× swing**, same kernels, same math. **Lesson (carry forward):** batched prefill's
+      win is real only when the parallelism granularity is coarse (over heads / big
+      matmuls), never per-head — dispatch overhead dominates at fine granularity.
   - [ ] **Parity tests** for each phase: batched output ≡ N × single-token output for any prompt up to ContextLength. Final assertion: `Gpt2ImportParityDiagnostics` still green (full PyTorch parity through the batched path).
 - [x] **LM-head hot-path audit (initial)** — confirmed `ProjectParallel` exists but is **dead code** (no call site); `Project` is what GPT-2/Qwen actually use. Wiring `ProjectParallel` into `CachedGptStack.Decode` was tested and reverted: `Parallel.For` allocates ~3 KB / call from task scheduling, which breaks the 0 B / generated token contract for only ~3 % per-token speedup at the GPT-2 Small scale. The 10× speedup in `LmHeadParallelBenchmark` is steady-state; per-token decode is dominated by the `Parallel.For` overhead.
 - [ ] **LM head: allocation-free parallel matmul** — wire-up depends on a worker pool that does NOT allocate per call. Candidates: pre-spawned threads with lock-free queue / semaphore signaling, or unsafe manual partitioning over a fixed thread set. Constraint: ≤ 0 B / call. Payoff: most of the ~3.8 ms LM-head matmul on a 32-core box. Single largest remaining lever for GPT-2 tokens/sec.
@@ -600,9 +837,8 @@ This section is a strategic overlay — it ranks and justifies; the tactical bre
 
 ### Features
 
-- [ ] **Chat templates** — Qwen/Llama/Mistral chat-format builders (system/user/assistant turns) for ergonomic chat-style API. *(Lives in deferred track until Qwen path returns to focus.)*
+- [x] **Chat templates** — DONE: `ChatTemplate` (ChatML detect/render from GGUF metadata) + `ChatSession` (system/user/assistant turns), used by `Demo/AgentDemo` and the chat tests.
 - [ ] **`OverfitClient` facade** — high-level API: `var client = OverfitClient.LoadGguf(...); var response = await client.ChatAsync("...");` — gathers tokenizer + engine + session + sampling defaults.
-- [ ] **ONNX export** — Overfit → ONNX for interop with other runtimes.
 - [ ] **ONNX: LSTM/GRU operators** — enables recurrent model import.
 - [ ] **Depthwise Conv** (group=channels) — MobileNet-style models.
 - [ ] Standalone Softmax and CrossEntropy in addition to fused loss.

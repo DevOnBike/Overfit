@@ -113,6 +113,28 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// </summary>
         public TensorStorage<float>? F32Storage => _f32;
 
+        /// <summary>
+        /// Writes output row <paramref name="row"/> as F32 into <paramref name="dst"/>, regardless of
+        /// backing — the token-embedding lookup primitive (this weight as a [vocab × dModel] table,
+        /// row = token). F32 copies the row; Q4_K/Q6_K/Q8_0 dequantize only that row. Zero-allocation.
+        /// For Q-backings the row length is <see cref="ElementCount"/> / outputs; for the F32 backing
+        /// the caller's <paramref name="dst"/> length defines the row stride (pass exactly the model dim).
+        /// </summary>
+        public void DequantizeRow(int row, Span<float> dst)
+        {
+            if (_q4k is not null) { _q4k.DecodeRow(row, dst); return; }
+            if (_q6k is not null) { _q6k.DecodeRow(row, dst); return; }
+            if (_q8 is not null) { _q8.DecodeRow(row, dst); return; }
+            if (_f32 is not null)
+            {
+                var rowLength = dst.Length;
+                _f32.AsReadOnlySpan().Slice(row * rowLength, rowLength).CopyTo(dst);
+                return;
+            }
+
+            throw new InvalidOperationException("DequantizeRow on an empty DecodeWeight.");
+        }
+
         /// <summary>Disposes the F32 backing if present; the Q backings own no unmanaged resource.</summary>
         public void Dispose() => _f32?.Dispose();
     }
