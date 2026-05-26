@@ -10,6 +10,7 @@ using DevOnBike.Overfit.LanguageModels.Experimental;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Parameters;
 using DevOnBike.Overfit.Tokenization;
+using DevOnBike.Overfit.Training;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
@@ -142,7 +143,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
                         rngSeed: 42 + i * 997);
                 }
 
-                CopyParametersToWorkers(masterParameters, workers);
+                var workerParameterSets = new IReadOnlyList<Parameter>[workers.Length];
+                for (var i = 0; i < workers.Length; i++)
+                {
+                    workerParameterSets[i] = workers[i].Parameters;
+                }
+
+                var trainer = new DataParallelTrainer(masterParameters, workerParameterSets);
+                trainer.BroadcastParameters();
 
                 _output.WriteLine("=== Overfit TinyShakespeare Experimental Data-Parallel Training Demo ===");
                 _output.WriteLine($"Corpus: {text.Length:N0} chars");
@@ -175,41 +183,13 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
                         steps);
 
                     optimizer.LearningRate = lr;
-                    ClearGradients(masterParameters);
 
-                    Parallel.For(
-                        0,
-                        workerCount,
-                        new ParallelOptions { MaxDegreeOfParallelism = workerCount },
-                        workerIndex =>
-                        {
-                            var worker = workers[workerIndex];
-
-                            worker.Loss = TrainWorkerStep(
-                                worker,
-                                allIds);
-                        });
-
-                    ReduceWorkerGradientsIntoMaster(
-                        masterParameters,
-                        workers,
-                        scale: 1f / workerCount);
-
-                    ClipGradNorm(
-                        masterParameters,
+                    // The public data-parallel API now owns the all-reduce, grad-norm clip, optimizer
+                    // step, and weight broadcast; the caller supplies only the per-replica training body.
+                    var avgLoss = trainer.Step(
+                        optimizer,
+                        workerIndex => TrainWorkerStep(workers[workerIndex], allIds),
                         MaxGradNorm);
-
-                    optimizer.Step();
-                    CopyParametersToWorkers(masterParameters, workers);
-
-                    var avgLoss = 0f;
-
-                    for (var i = 0; i < workers.Length; i++)
-                    {
-                        avgLoss += workers[i].Loss;
-                    }
-
-                    avgLoss /= workerCount;
 
                     if (step == 0)
                     {
@@ -336,62 +316,12 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
             return loss;
         }
 
-        private static void CopyParametersToWorkers(
-            IReadOnlyList<Parameter> masterParameters,
-            IReadOnlyList<WorkerState> workers)
-        {
-            foreach (var worker in workers)
-            {
-                var workerParameters = worker.Parameters;
-
-                if (workerParameters.Count != masterParameters.Count)
-                {
-                    throw new InvalidOperationException(
-                        $"Worker parameter count mismatch. Master={masterParameters.Count}, Worker={workerParameters.Count}.");
-                }
-
-                for (var i = 0; i < masterParameters.Count; i++)
-                {
-                    masterParameters[i]
-                        .DataSpan
-                        .CopyTo(workerParameters[i].DataSpan);
-                }
-            }
-        }
-
         private static void ClearGradients(
             IReadOnlyList<Parameter> parameters)
         {
             for (var i = 0; i < parameters.Count; i++)
             {
                 parameters[i].GradSpan.Clear();
-            }
-        }
-
-        private static void ReduceWorkerGradientsIntoMaster(
-            IReadOnlyList<Parameter> masterParameters,
-            IReadOnlyList<WorkerState> workers,
-            float scale)
-        {
-            for (var p = 0; p < masterParameters.Count; p++)
-            {
-                var masterGrad = masterParameters[p].GradSpan;
-
-                for (var w = 0; w < workers.Count; w++)
-                {
-                    var workerGrad = workers[w].Parameters[p].GradSpan;
-
-                    if (workerGrad.Length != masterGrad.Length)
-                    {
-                        throw new InvalidOperationException(
-                            $"Gradient length mismatch at parameter {p}. Master={masterGrad.Length}, Worker={workerGrad.Length}.");
-                    }
-
-                    for (var i = 0; i < masterGrad.Length; i++)
-                    {
-                        masterGrad[i] += workerGrad[i] * scale;
-                    }
-                }
             }
         }
 
@@ -474,42 +404,6 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
             }
 
             return total / totalTokens;
-        }
-
-        private static void ClipGradNorm(
-            IReadOnlyList<Parameter> parameters,
-            float maxNorm)
-        {
-            var totalNormSq = 0f;
-
-            foreach (var parameter in parameters)
-            {
-                var grad = parameter.GradSpan;
-
-                for (var i = 0; i < grad.Length; i++)
-                {
-                    totalNormSq += grad[i] * grad[i];
-                }
-            }
-
-            var norm = MathF.Sqrt(totalNormSq);
-
-            if (norm <= maxNorm)
-            {
-                return;
-            }
-
-            var scale = maxNorm / (norm + 1e-6f);
-
-            foreach (var parameter in parameters)
-            {
-                var grad = parameter.GradSpan;
-
-                for (var i = 0; i < grad.Length; i++)
-                {
-                    grad[i] *= scale;
-                }
-            }
         }
 
         private static float CosineDecay(

@@ -313,7 +313,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                 {
                     var extended = new string[id + 1];
 
-                    Array.Copy(decoder, extended, decoder.Length);
+                    decoder.AsSpan().CopyTo(extended);
 
                     decoder = extended;
                 }

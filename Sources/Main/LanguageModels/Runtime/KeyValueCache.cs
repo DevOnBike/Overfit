@@ -138,8 +138,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     for (var head = 0; head < Shape.KvHeadCount; head++)
                     {
                         var baseOffset = GetOffset(layer, head, 0);
-                        Array.Copy(_keys, baseOffset + shift, _keys, baseOffset, keepElems);
-                        Array.Copy(_values, baseOffset + shift, _values, baseOffset, keepElems);
+                        // Overlapping in-place shift — Span.CopyTo has memmove semantics.
+                        _keys.AsSpan(baseOffset + shift, keepElems).CopyTo(_keys.AsSpan(baseOffset, keepElems));
+                        _values.AsSpan(baseOffset + shift, keepElems).CopyTo(_values.AsSpan(baseOffset, keepElems));
                     }
                 }
             }
@@ -204,8 +205,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 var src = (long)lh * maxSeq * headDim;
                 var dst = (long)lh * run;
-                Array.Copy(_keys, src, keys, dst, run);
-                Array.Copy(_values, src, values, dst, run);
+                _keys.AsSpan((int)src, run).CopyTo(keys.AsSpan((int)dst, run));
+                _values.AsSpan((int)src, run).CopyTo(values.AsSpan((int)dst, run));
             }
 
             return new KvCacheSnapshot(
@@ -242,8 +243,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 var src = (long)lh * run;
                 var dst = (long)lh * maxSeq * headDim;
-                Array.Copy(snapshot.Keys, src, _keys, dst, run);
-                Array.Copy(snapshot.Values, src, _values, dst, run);
+                snapshot.Keys.AsSpan((int)src, run).CopyTo(_keys.AsSpan((int)dst, run));
+                snapshot.Values.AsSpan((int)src, run).CopyTo(_values.AsSpan((int)dst, run));
             }
 
             CurrentLength = snapshot.Length;

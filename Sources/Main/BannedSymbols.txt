@@ -2,3 +2,7 @@ N:System.Linq; LINQ is banned for performance reasons. Use for/foreach loops and
 N:System.Reflection; Reflection is slow and frequently breaks Native AOT. Use delegates, static typing, or Source Generators.
 T:System.Linq.Expressions.Expression; Expression trees use Reflection.Emit, which throws under Native AOT (no JIT). Use delegates and 'switch'.
 T:System.Activator; Activator.CreateInstance is slow and requires type metadata under AOT. Use explicit 'new' or factories (Factory Pattern).
+M:System.Array.Copy(System.Array,System.Array,System.Int32); Use Span<T>.CopyTo — it is as fast or faster (benchmarked) and has memmove semantics for overlapping copies.
+M:System.Array.Copy(System.Array,System.Array,System.Int64); Use Span<T>.CopyTo — it is as fast or faster (benchmarked) and has memmove semantics for overlapping copies.
+M:System.Array.Copy(System.Array,System.Int32,System.Array,System.Int32,System.Int32); Use Span<T>.CopyTo (source.AsSpan(srcIdx,len).CopyTo(dst.AsSpan(dstIdx,len))) — as fast or faster, memmove-safe.
+M:System.Array.Copy(System.Array,System.Int64,System.Array,System.Int64,System.Int64); Use Span<T>.CopyTo (source.AsSpan(srcIdx,len).CopyTo(dst.AsSpan(dstIdx,len))) — as fast or faster, memmove-safe.
