@@ -108,6 +108,15 @@ namespace DevOnBike.Overfit.Tests.Training
             Assert.True(MathF.Abs(gn - 1f) < 1e-4f, $"expected clipped grad-norm ≈ 1, got {gn}");
         }
 
+
+        [Fact]
+        public void LearningRateScaling_LinearAndSqrt()
+        {
+            Assert.Equal(0.0012f, DataParallelLearningRate.Linear(3e-4f, 4), 6);
+            Assert.Equal(6e-4f, DataParallelLearningRate.Sqrt(3e-4f, 4), 6);   // ×√4 = ×2
+            Assert.Throws<ArgumentOutOfRangeException>(() => DataParallelLearningRate.Linear(1e-3f, 0));
+        }
+
         [Fact]
         public void Constructor_Rejects_MismatchedParameterShapes()
         {

@@ -6,6 +6,7 @@
 using System.Threading.Tasks;
 using DevOnBike.Overfit.Optimizers.Abstractions;
 using DevOnBike.Overfit.Parameters;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.Training
 {
@@ -43,6 +44,7 @@ namespace DevOnBike.Overfit.Training
         private readonly Parameter[] _master;
         private readonly Parameter[][] _workers;
         private readonly float _invWorkerCount;
+        private readonly bool _runWorkerOpsInline;
 
         /// <param name="masterParameters">
         /// The authoritative parameters the optimizer updates (typically <c>master.TrainableParameters()</c>).
@@ -51,10 +53,22 @@ namespace DevOnBike.Overfit.Training
         /// One parameter list per replica, each aligned 1:1 with <paramref name="masterParameters"/>
         /// (same count, same per-parameter length). Construct replicas with the same config as the master.
         /// </param>
+        /// <param name="runWorkerOpsInline">
+        /// When <c>true</c> (default), each replica's inner kernels run single-threaded during
+        /// <see cref="Step"/> (via <see cref="OverfitParallelFor.SuppressParallelismOnCurrentThread"/>),
+        /// so the replicas — not the intra-op pool — own the parallelism. This is the right choice when
+        /// the replica count is near the core count (avoids N×core oversubscription + pool-lock
+        /// contention; measured ~3–6× the single-replica throughput vs ~2.3× when both layers fan out).
+        /// Set <c>false</c> if you run few replicas on a machine with spare cores and want intra-op
+        /// parallelism inside each.
+        /// </param>
         public DataParallelTrainer(
             IReadOnlyList<Parameter> masterParameters,
-            IReadOnlyList<IReadOnlyList<Parameter>> workerParameterSets)
+            IReadOnlyList<IReadOnlyList<Parameter>> workerParameterSets,
+            bool runWorkerOpsInline = true)
         {
+            _runWorkerOpsInline = runWorkerOpsInline;
+
             ArgumentNullException.ThrowIfNull(masterParameters);
             ArgumentNullException.ThrowIfNull(workerParameterSets);
 
@@ -152,10 +166,31 @@ namespace DevOnBike.Overfit.Training
             var losses = new float[workers.Length];
             if (workers.Length > 1)
             {
-                Parallel.For(0, workers.Length, w => losses[w] = trainWorker(w));
+                var inline = _runWorkerOpsInline;
+                Parallel.For(0, workers.Length, w =>
+                {
+                    // Keep each replica's inner kernels single-threaded so the replicas own the
+                    // parallelism — N replicas × intra-op pool would oversubscribe and serialize on
+                    // the pool lock. Restore the flag so the pool thread is left as we found it.
+                    var previous = OverfitParallelFor.SuppressParallelismOnCurrentThread;
+                    
+                    if (inline)
+                    {
+                        OverfitParallelFor.SuppressParallelismOnCurrentThread = true;
+                    }
+                    try
+                    {
+                        losses[w] = trainWorker(w);
+                    }
+                    finally
+                    {
+                        OverfitParallelFor.SuppressParallelismOnCurrentThread = previous;
+                    }
+                });
             }
             else
             {
+                // Single replica: keep intra-op parallelism — it is the only parallelism available.
                 losses[0] = trainWorker(0);
             }
 
