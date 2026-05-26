@@ -43,10 +43,7 @@ namespace DevOnBike.Overfit.Tensors.Core
                 _data.AsSpan(0, length).Clear();
             }
 
-            OverfitTelemetry.RecordTensorStorageCreated(
-                length,
-                Unsafe.SizeOf<T>(),
-                borrowed: false);
+            OverfitTelemetry.RecordTensorStorageCreated(length, Unsafe.SizeOf<T>(), borrowed: false);
         }
 
         /// <summary>
@@ -62,10 +59,7 @@ namespace DevOnBike.Overfit.Tensors.Core
             _data = data;
             _pooled = false;
 
-            OverfitTelemetry.RecordTensorStorageCreated(
-                Length,
-                Unsafe.SizeOf<T>(),
-                borrowed: false);
+            OverfitTelemetry.RecordTensorStorageCreated(Length, Unsafe.SizeOf<T>(), borrowed: false);
         }
 
         /// <summary>
@@ -104,10 +98,7 @@ namespace DevOnBike.Overfit.Tensors.Core
             _nativePtr = buffer.Allocate(length);
             _isBorrowedMemory = true;
 
-            OverfitTelemetry.RecordTensorStorageCreated(
-                length,
-                Unsafe.SizeOf<T>(),
-                borrowed: true);
+            OverfitTelemetry.RecordTensorStorageCreated(length, Unsafe.SizeOf<T>(), borrowed: true);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -115,9 +106,7 @@ namespace DevOnBike.Overfit.Tensors.Core
         {
             ObjectDisposedException.ThrowIf(_disposed == 1, this);
 
-            return _isBorrowedMemory
-                ? new Span<T>(_nativePtr, Length)
-                : _data!.AsSpan(0, Length);
+            return _isBorrowedMemory ? new Span<T>(_nativePtr, Length) : _data!.AsSpan(0, Length);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -141,7 +130,9 @@ namespace DevOnBike.Overfit.Tensors.Core
         internal static TensorStorage<T> FromArray(T[] source)
         {
             var ts = new TensorStorage<T>(source.Length, clearMemory: false);
+
             source.AsSpan().CopyTo(ts.AsSpan());
+
             return ts;
         }
 

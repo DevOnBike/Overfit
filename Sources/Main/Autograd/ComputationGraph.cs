@@ -30,6 +30,10 @@ namespace DevOnBike.Overfit.Autograd
 
         private int _opCount;
         private TapeOp[] _tape = new TapeOp[InitialCapacity];
+
+        // Segment delegates for OpCode.Checkpoint ops; the tape op stores the list index in I1
+        // (keeps TapeOp free of a delegate field). Cleared by Reset().
+        private List<CheckpointSegment>? _checkpointSegments;
         private Conv2DWorkspace? _conv2DWorkspace;
 
         // Huge arena buffer: bypasses GC and ArrayPool for intermediate tensor storage.
@@ -418,6 +422,10 @@ namespace DevOnBike.Overfit.Autograd
                     }
 
                     break;
+
+                case OpCode.Checkpoint:
+                    CheckpointBackward(in op);
+                    break;
             }
         }
 
@@ -460,6 +468,7 @@ namespace DevOnBike.Overfit.Autograd
             }
 
             _opCount = 0;
+            _checkpointSegments?.Clear();
 
             // Reset arena without involving GC.
             TapeBuffer.ResetOffset();
@@ -518,6 +527,50 @@ namespace DevOnBike.Overfit.Autograd
                 ref readonly var op = ref _tape[i];
                 ExecuteBackward(in op);
             }
+        }
+
+        /// <summary>
+        /// Gradient checkpointing: runs <paramref name="segment"/> but does NOT keep its internal
+        /// activations on this graph — only the input and output. In the backward pass the segment is
+        /// re-run (recomputed) to regenerate the activations just-in-time, then backpropagated. Trades a
+        /// second forward of the segment for a lower live-activation peak — the lever to train deeper /
+        /// bigger models in the same arena. The segment must be deterministic and depend only on
+        /// <paramref name="input"/> + captured parameters (their grads accumulate during the recompute).
+        /// <paramref name="subArenaElements"/> sizes the throwaway recompute arena (must fit the segment).
+        /// </summary>
+        public AutogradNode Checkpoint(CheckpointSegment segment, AutogradNode input, int subArenaElements = 1 << 20)
+        {
+            ArgumentNullException.ThrowIfNull(segment);
+            ArgumentNullException.ThrowIfNull(input);
+
+            // Forward: compute output VALUES in a throwaway sub-graph (no recording, internals freed with
+            // it), copy them into a main-arena output node. The main tape keeps only input + output.
+            using var fwd = new ComputationGraph(subArenaElements) { IsRecording = false };
+            var subOut = segment(fwd, input);
+            var output = CreateTemporary(subOut.Shape, input.RequiresGrad, clearMemory: false);
+            subOut.DataView.AsReadOnlySpan().CopyTo(output.DataView.AsSpan());
+
+            if (IsRecording && input.RequiresGrad)
+            {
+                var idx = (_checkpointSegments ??= []).Count;
+                _checkpointSegments.Add(segment);
+                Record(OpCode.Checkpoint, output, a: input, i0: subArenaElements, i1: idx);
+            }
+
+            return output;
+        }
+
+        /// <summary>Backward for <see cref="OpCode.Checkpoint"/> — re-run the segment, seed the output grad, backprop.</summary>
+        private void CheckpointBackward(in TapeOp op)
+        {
+            var segment = _checkpointSegments![op.I1];
+
+            // Re-run the segment forward (recording) on a throwaway sub-graph against the SAME input +
+            // parameter nodes, so backprop accumulates dL/dinput and dL/dparams into the shared main nodes.
+            using var bwd = new ComputationGraph(op.I0);
+            var subOut = segment(bwd, op.A);
+            op.Output.GradView.AsReadOnlySpan().CopyTo(subOut.GradView.AsSpan());
+            bwd.BackwardFromGrad(subOut);
         }
     }
 }

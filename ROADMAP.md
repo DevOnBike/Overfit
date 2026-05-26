@@ -488,6 +488,23 @@ fixed system prompt on every turn — now a O(prefix) memcpy. (From the "adopt f
 RoPE-scaling NTK/YaRN for >trained-context and flash-attention online-softmax for long-context memory
 remain on that list.)
 
+### Gradient checkpointing (TRAINING memory) — DONE 2026-05-26
+
+Measured first (`CnnTrainingMemoryDiagnostics`): the tape arena's **live activations** dominate training RAM
+(165 MB vs 14 MB im2col on a wide conv; arena cap 191 MB) — NOT im2col (corrected an earlier wrong guess).
+Lever = gradient checkpointing. `ComputationGraph.Checkpoint(segment, input, subArenaElements)` runs a
+segment without keeping its activations (forward in a throwaway sub-graph, keeps only input+output), then
+recomputes them in backward (`OpCode.Checkpoint` + `CheckpointBackward`, segment stored in a graph-side list
+indexed by `op.I1`). Wired two ways: **`CheckpointedModule : IModule`** decorator (drop into a `Sequential`
+to checkpoint heavy segments) and **`GPT1Model(config, checkpointBlocks: true)`** (each transformer block
+checkpointed — the high-value target: activations × batch × seq). Bit-close to non-checkpointed + lower
+arena high-water, validated on MLP, a deep MLP, GPT-1 (6 blocks: logits + block-0 grad match), and a
+Sequential (`CheckpointParityTests`, 4 fast). **Measured on a larger GPT-1 (12L, d=512, dFF=2048, b=2,
+t=128): live-activation arena 438.5 MB → 18.3 MB = 24× less, 420 MB saved** (`Checkpoint_Gpt1_MemorySavings`,
+[LongFact]). Pure "train deeper / longer-seq / bigger-batch on the same
+RAM" = moat. Follow-ons: pool the sub-graph arena (currently fresh per call); CNN im2col is ~10× smaller
+(low priority).
+
 ---
 
 ## Research inputs (papers reviewed 2026-05-21)

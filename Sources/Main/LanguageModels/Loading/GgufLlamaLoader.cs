@@ -58,6 +58,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             // weights hold slices into the map, not the reader. On any failure during build
             // we own the map and must dispose it; on success ownership transfers to the engine.
             var blob = new MemoryMappedModelFile(path);
+
             try
             {
                 return LoadFromReader(reader, quantize, blob);
@@ -507,85 +508,86 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             {
                 case GgmlType.Q4_K:
                 case GgmlType.Q6_K:
-                {
-                    var superBytes = info.Type == GgmlType.Q4_K
-                        ? Q4KWeight.SuperBlockBytes : Q6KWeight.SuperBlockBytes;
-                    var expertBytes = checked((int)(perExpert / GgmlDequant.SuperBlockElements * superBytes));
-                    var total = checked((int)((long)expertBytes * expertCount));
-                    var whole = ArrayPool<byte>.Shared.Rent(total);
-                    try
                     {
-                        if (info.Type == GgmlType.Q4_K) { reader.LoadTensorQ4_KRaw(info, whole.AsSpan(0, total)); }
-                        else { reader.LoadTensorQ6_KRaw(info, whole.AsSpan(0, total)); }
+                        var superBytes = info.Type == GgmlType.Q4_K
+                            ? Q4KWeight.SuperBlockBytes : Q6KWeight.SuperBlockBytes;
+                        var expertBytes = checked((int)(perExpert / GgmlDequant.SuperBlockElements * superBytes));
+                        var total = checked((int)((long)expertBytes * expertCount));
+                        var whole = ArrayPool<byte>.Shared.Rent(total);
 
-                        for (var e = 0; e < expertCount; e++)
+                        try
                         {
-                            var bytes = new byte[expertBytes];
-                            whole.AsSpan(e * expertBytes, expertBytes).CopyTo(bytes);
-                            experts[e] = info.Type == GgmlType.Q4_K
-                                ? new Q4KWeight(bytes, inDim, outDim)
-                                : new Q6KWeight(bytes, inDim, outDim);
+                            if (info.Type == GgmlType.Q4_K) { reader.LoadTensorQ4_KRaw(info, whole.AsSpan(0, total)); }
+                            else { reader.LoadTensorQ6_KRaw(info, whole.AsSpan(0, total)); }
+
+                            for (var e = 0; e < expertCount; e++)
+                            {
+                                var bytes = new byte[expertBytes];
+                                whole.AsSpan(e * expertBytes, expertBytes).CopyTo(bytes);
+                                experts[e] = info.Type == GgmlType.Q4_K
+                                    ? new Q4KWeight(bytes, inDim, outDim)
+                                    : new Q6KWeight(bytes, inDim, outDim);
+                            }
                         }
+                        finally
+                        {
+                            ArrayPool<byte>.Shared.Return(whole);
+                        }
+                        break;
                     }
-                    finally
-                    {
-                        ArrayPool<byte>.Shared.Return(whole);
-                    }
-                    break;
-                }
 
                 case GgmlType.Q8_0:
-                {
-                    var elems = checked((int)(perExpert * expertCount));
-                    var blocksPerExpert = checked((int)(perExpert / Q8DotKernel.BlockSize));
-                    var quants = ArrayPool<sbyte>.Shared.Rent(elems);
-                    var scales = ArrayPool<float>.Shared.Rent(blocksPerExpert * expertCount);
-                    try
                     {
-                        reader.LoadTensorQ8_0Raw(info, quants.AsSpan(0, elems), scales.AsSpan(0, blocksPerExpert * expertCount));
-
-                        var perElems = checked((int)perExpert);
-                        for (var e = 0; e < expertCount; e++)
+                        var elems = checked((int)(perExpert * expertCount));
+                        var blocksPerExpert = checked((int)(perExpert / Q8DotKernel.BlockSize));
+                        var quants = ArrayPool<sbyte>.Shared.Rent(elems);
+                        var scales = ArrayPool<float>.Shared.Rent(blocksPerExpert * expertCount);
+                        try
                         {
-                            var q = new sbyte[perElems];
-                            var s = new float[blocksPerExpert];
-                            quants.AsSpan(e * perElems, perElems).CopyTo(q);
-                            scales.AsSpan(e * blocksPerExpert, blocksPerExpert).CopyTo(s);
-                            experts[e] = new Q8Weight(q, s, inDim, outDim);
+                            reader.LoadTensorQ8_0Raw(info, quants.AsSpan(0, elems), scales.AsSpan(0, blocksPerExpert * expertCount));
+
+                            var perElems = checked((int)perExpert);
+                            for (var e = 0; e < expertCount; e++)
+                            {
+                                var q = new sbyte[perElems];
+                                var s = new float[blocksPerExpert];
+                                quants.AsSpan(e * perElems, perElems).CopyTo(q);
+                                scales.AsSpan(e * blocksPerExpert, blocksPerExpert).CopyTo(s);
+                                experts[e] = new Q8Weight(q, s, inDim, outDim);
+                            }
                         }
+                        finally
+                        {
+                            ArrayPool<sbyte>.Shared.Return(quants);
+                            ArrayPool<float>.Shared.Return(scales);
+                        }
+                        break;
                     }
-                    finally
-                    {
-                        ArrayPool<sbyte>.Shared.Return(quants);
-                        ArrayPool<float>.Shared.Return(scales);
-                    }
-                    break;
-                }
 
                 case GgmlType.Q5_0:
                 case GgmlType.Q5_K:
-                {
-                    // No native 5-bit dot kernel — and Q4_K_M "_M" mixes put Q5_0 on some
-                    // ffn_down_exps. Dequant each expert to F32 then re-quantize to Q8 (near-lossless
-                    // from a 5-bit source; reuses the Q8 dot kernel). Streamed one expert at a time so
-                    // peak load RAM is a single expert's F32 (~perExpert floats), not the whole
-                    // tensor's — steady-state stays Q8 (~1 B/elem), keeping the smaller file a RAM win.
-                    var perElems = checked((int)perExpert);
-                    var f32 = ArrayPool<float>.Shared.Rent(perElems);
-                    try
                     {
-                        for (var e = 0; e < expertCount; e++)
+                        // No native 5-bit dot kernel — and Q4_K_M "_M" mixes put Q5_0 on some
+                        // ffn_down_exps. Dequant each expert to F32 then re-quantize to Q8 (near-lossless
+                        // from a 5-bit source; reuses the Q8 dot kernel). Streamed one expert at a time so
+                        // peak load RAM is a single expert's F32 (~perExpert floats), not the whole
+                        // tensor's — steady-state stays Q8 (~1 B/elem), keeping the smaller file a RAM win.
+                        var perElems = checked((int)perExpert);
+                        var f32 = ArrayPool<float>.Shared.Rent(perElems);
+                        try
                         {
-                            reader.LoadQ5RegionAsF32(info, (long)e * perElems, f32.AsSpan(0, perElems));
-                            experts[e] = Q8Weight.QuantizeRows(f32.AsSpan(0, perElems), outDim, inDim);
+                            for (var e = 0; e < expertCount; e++)
+                            {
+                                reader.LoadQ5RegionAsF32(info, (long)e * perElems, f32.AsSpan(0, perElems));
+                                experts[e] = Q8Weight.QuantizeRows(f32.AsSpan(0, perElems), outDim, inDim);
+                            }
                         }
+                        finally
+                        {
+                            ArrayPool<float>.Shared.Return(f32);
+                        }
+                        break;
                     }
-                    finally
-                    {
-                        ArrayPool<float>.Shared.Return(f32);
-                    }
-                    break;
-                }
 
                 default:
                     throw new NotSupportedException(
