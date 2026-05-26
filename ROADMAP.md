@@ -204,17 +204,56 @@ some layers' `ffn_down_exps` (llama.cpp's heterogeneous "_M" strategy). Q5_0 is 
 set (F32/F16/BF16/Q8_0/Q4_K/Q6_K) → load throws a clear `NotSupportedException`. This is a
 **quant-coverage** gap, orthogonal to MoE. To finish: grab the **Q8_0** Qwen-MoE (uniform Q8_0, all
 supported) for full end-to-end + parity, OR add Q5_0 (+ likely Q5_K) dequant coverage.
-(5) ⏳ **Coherence — IN PROGRESS.** Got the Q8_0 variant (uniform Q8_0, 14.18 GB). The **full model
-now loads and the forward runs end-to-end** (`Qwen2MoeEndToEndTests`: embed → 24 MoE layers → final
-norm → LM head, finite in-range logits, no crash) — the integration is mechanically complete. **BUT
-generation is not yet coherent** (collapses to repetition; decoded text empty). Fixed one integration
-guard (dense `FfnW1`/`FfnW2` shape-check skipped for MoE). Open correctness bug — ranked suspects:
-(a) **top-k weight normalisation** — Qwen1.5-MoE likely uses `norm_topk_prob=false` (raw softmax probs,
-NOT renormalised over the top-k), while `MoeRouter` renormalises (Mixtral-style); (b) tokenizer match
-(used a Qwen2.5 `tokenizer.json` against a Qwen1.5 model — confounds the eyeball); (c) expert-tensor /
-router orientation. Needs a **llama.cpp reference** (first-token logits for the same tokens) to bisect —
-a focused debug session, NOT a guess-and-check on a 14 GB model. The mechanical integration (load,
-forward, dispatch, dense-path-untouched) is banked; correctness is the remaining work.
+(5) ✅ **Coherent generation — DONE 2026-05-26. MoE track COMPLETE end-to-end on the real model.**
+Loaded the Q8_0 variant (uniform Q8_0, 14.18 GB) and `Qwen2MoeEndToEndTests` greedily answers
+"What is the capital of France?" → **"Paris"** (then EOS). **The bug was top-k weight normalisation:**
+Qwen1.5-MoE uses `norm_topk_prob=false` (expert weights are the raw full-softmax probabilities at the
+top-k, NOT renormalised to sum 1), while `MoeRouter` was renormalising (Mixtral-style) → routed
+contribution over-scaled → incoherent. Fix: `MoeRouter.SelectTopK(..., normalize)` + `GPT1Config.
+NormalizeExpertWeights` (threaded stack→block→router) + loader reads `{arch}.expert_weights_norm`
+(absent ⇒ false for qwen2moe). `MoeRouterTests` covers both modes. **Overfit now runs Qwen-MoE
+(14B total / 2.7B active) coherently, in pure C# on CPU — pure-managed MoE inference.**
+**F32 decode-parity — DONE.** `Qwen2MoeQuantParityTests.QuantizedBlock_MatchesF32Dequant_Layer0`
+runs real layer-0 through `Qwen2MoeFeedForwardBlock` twice — once with the file's Q8_0 expert/shared
+weights, once with an F32 dequantization of the SAME weights (same router ⇒ identical top-k routing,
+so the only delta is projection quant error). Result: **relative max-diff 0.48 %** (< 5 % bar) — the
+quantized MoE block is numerically faithful to F32. (A whole-model F32 baseline is infeasible —
+Qwen1.5-MoE in F32 is ~57 GB — so parity is validated per-block via `LoadExpertsF32`.)
+**Q5_0/Q5_K coverage — DONE.** `GgmlDequant.DecodeQ5_0Block` (legacy 32-elem, 22 B) +
+`DecodeQ5_KBlock` (256-elem super-block, 176 B) mirror ggml-quants.c; wired into
+`GgufReader.LoadTensorAsF32` (so dense tensors auto-route through the F32→Q8 fallback) and into
+`GgufLlamaLoader.LoadExperts` (Q5 experts dequant + per-expert re-quant to Q8 — near-lossless from a
+5-bit source, reuses the Q8 dot kernel; streamed one expert at a time via `GgufReader.LoadQ5RegionAsF32`
+so peak load RAM is a single expert's F32, not the whole tensor's). **The smaller Q4_K_M variant
+(8.84 GB — `_M` mix puts Q5_0 on ~half the layers' `ffn_down_exps`) now loads end-to-end and answers
+"capital of France?" → "Paris"** (`Qwen2MoeQ4KMTests`, [LongFact]); decoder bit-unpacking unit-tested
+in `GgmlDequantTests` (Q5_0 5th-bit routing, Q5_K per-group masks). The earlier dump confirmed the
+file is 67% Q4_K / 14.5% Q8_0 / 14.5% Q5_0 / 3.5% Q6_K — only Q5_0 was the blocker (no Q5_K present,
+but it's covered for other `_K_M` mixes).
+**Mixtral — DONE.** Routed-only MoE (8 experts, top-2, no shared expert; `llama` arch with expert
+metadata). `Qwen2MoeFeedForwardBlock` now treats `sharedFeedForwardLength == 0` as "no shared expert"
+and reduces to the routed sum alone; `GPT1Config.HasSharedExpert` (threaded stack→block) drives it,
+set by the loader from the presence of `ffn_*_shexp` tensors. `norm_topk_prob` default is now
+arch-aware (false for qwen2moe, **true** for Mixtral/routed-only). The loader also handles **both**
+GGUF expert layouts: merged 3-D `ffn_gate_exps` (Qwen-MoE) **and** the older per-expert 2-D
+`ffn_gate.{e}.weight` (Mixtral) via `LoadExpertsSplit` (same resident dispatch as a dense FFN —
+Q4_K verbatim/mmap, Q5→Q8, Q8 native, F32). **The real Mixtral-8x7B-Instruct Q4_K_M (25 GB,
+32L / dModel 4096 / GQA 32:8 / expertDff 14336) loads + decodes end-to-end in pure C# on CPU**
+(`MixtralEndToEndTests`, [LongFact]: finite/in-range logits, no degenerate collapse; routed-only
+combine unit-tested in `Qwen2MoeFeedForwardBlockTests.NoSharedExpert_Mixtral_…`). **GGUF-embedded tokenizer (SPM) — DONE.** `GgufTokenizer` reads the `tokenizer.ggml.*` metadata
+(tokens / scores / token_type / special ids) and implements the SentencePiece path
+(`tokenizer.ggml.model == "llama"`): `▁` whitespace escaping + optional space-prefix, the score-driven
+greedy bigram merge from llama.cpp's `llm_tokenizer_spm`, and `<0xNN>` byte fallback for OOV chars;
+decode reassembles byte tokens (multi-byte UTF-8) and strips the leading space. Typed metadata-array
+accessors added to `GgufReader` (`GetMetaStringArray`/`GetMetaFloatArray`/`GetMetaIntArray`). **Mixtral
+now generates human-readable text in pure C# with NO side-loaded tokenizer** — `MixtralEndToEndTests`:
+"[INST] What is the capital of France? [/INST]" → *"The capital of France is Paris. It's located in
+the north-central part of the country…"*. SPM algorithm unit-tested on a synthetic vocab
+(`GgufTokenizerTests`: merge preference, byte/multi-byte fallback, space-prefix, BOS, round-trip) +
+real-Mixtral-vocab round-trip (incl. accents + em-dash). The gpt2/byte-level-BPE path throws a clear
+`NotSupportedException` (Qwen/Llama-3 already have native `QwenTokenizer`/`HuggingFaceBpeTokenizer`).
+Remaining (optional follow-ons, NOT blockers): native 5-bit dot kernel (skip the Q5→Q8 widen for a
+tighter working set); gpt2/BPE path in `GgufTokenizer` (so Qwen/Llama-3 also need no side-loaded vocab).
 
 **Scope note:** the routed math (the genuinely novel part) is done + tested. The remaining 2b is a
 real integration chunk (3-D expert slicing incl. per-expert Q8_0 de-interleave, shared-expert gate,

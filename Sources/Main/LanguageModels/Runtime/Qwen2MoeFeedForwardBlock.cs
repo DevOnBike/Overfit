@@ -8,38 +8,49 @@ using DevOnBike.Overfit.DeepLearning;
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
     /// <summary>
-    /// The Qwen2-MoE feed-forward block — a routed Mixture-of-Experts <b>plus</b> a sigmoid-gated
-    /// shared expert that runs for every token (Mixtral has only the routed part):
+    /// The routed-or-shared MoE feed-forward block. In the Qwen2-MoE shape it is a routed
+    /// Mixture-of-Experts <b>plus</b> a sigmoid-gated shared expert that runs for every token:
     /// <code>FFN(x) = σ(w_shared · x) · shared(x) + Σ_{i∈top-k} weightᵢ · expertᵢ(x)</code>
-    /// The routed sum is delegated to <see cref="MoeFeedForwardBlock"/>; the shared expert is an
-    /// ordinary SwiGLU FFN (its own, larger dFF) scaled by the sigmoid of a single learned dot.
+    /// In the Mixtral shape there is no shared expert (pass <c>sharedFeedForwardLength = 0</c>) and the
+    /// block reduces to the routed sum alone:
+    /// <code>FFN(x) = Σ_{i∈top-k} weightᵢ · expertᵢ(x)</code>
+    /// The routed sum is delegated to <see cref="MoeFeedForwardBlock"/>; the shared expert (when
+    /// present) is an ordinary SwiGLU FFN (its own, larger dFF) scaled by the sigmoid of a single
+    /// learned dot.
     ///
-    /// All weights are <see cref="DecodeWeight"/>s (F32 / Q8_0 / Q4_K / Q6_K — mmap-able); the two
-    /// router projections (`ffn_gate_inp`, `ffn_gate_inp_shexp`) stay F32. Zero-allocation per call.
+    /// All weights are <see cref="DecodeWeight"/>s (F32 / Q8_0 / Q4_K / Q5_0 / Q5_K / Q6_K —
+    /// mmap-able); the router projections (`ffn_gate_inp`, and `ffn_gate_inp_shexp` when shared) stay
+    /// F32. Zero-allocation per call.
     /// </summary>
     public sealed class Qwen2MoeFeedForwardBlock
     {
         private readonly MoeFeedForwardBlock _routed;
-        private readonly CachedFeedForwardBlock _shared;
-        private readonly float[] _routedOut;
-        private readonly float[] _sharedOut;
+        private readonly CachedFeedForwardBlock? _shared;   // null ⇒ Mixtral (routed-only)
+        private readonly float[]? _routedOut;
+        private readonly float[]? _sharedOut;
 
         public Qwen2MoeFeedForwardBlock(
             int dModel, int expertFeedForwardLength, int sharedFeedForwardLength,
-            int expertCount, int expertUsedCount)
+            int expertCount, int expertUsedCount, bool normalizeExpertWeights = true)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(dModel);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(expertFeedForwardLength);
-            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(sharedFeedForwardLength);
+            ArgumentOutOfRangeException.ThrowIfNegative(sharedFeedForwardLength);
 
             DModel = dModel;
-            _routed = new MoeFeedForwardBlock(dModel, expertFeedForwardLength, expertCount, expertUsedCount);
-            _shared = new CachedFeedForwardBlock(dModel, sharedFeedForwardLength, FeedForwardActivation.SwiGLU);
-            _routedOut = new float[dModel];
-            _sharedOut = new float[dModel];
+            _routed = new MoeFeedForwardBlock(dModel, expertFeedForwardLength, expertCount, expertUsedCount, normalizeExpertWeights);
+
+            // sharedFeedForwardLength == 0 ⇒ Mixtral (no shared expert); skip its buffers entirely.
+            if (sharedFeedForwardLength > 0)
+            {
+                _shared = new CachedFeedForwardBlock(dModel, sharedFeedForwardLength, FeedForwardActivation.SwiGLU);
+                _routedOut = new float[dModel];
+                _sharedOut = new float[dModel];
+            }
         }
 
         public int DModel { get; }
+        public bool HasSharedExpert => _shared is not null;
         public int ExpertCount => _routed.ExpertCount;
         public int ExpertUsedCount => _routed.ExpertUsedCount;
 
@@ -65,6 +76,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             if (hidden.Length < DModel) { throw new ArgumentException("Hidden span smaller than dModel.", nameof(hidden)); }
             if (output.Length < DModel) { throw new ArgumentException("Output span smaller than dModel.", nameof(output)); }
+
+            // Mixtral (no shared expert): the FFN is the routed sum alone — write it straight out.
+            if (_shared is null)
+            {
+                _routed.Decode(hidden, routerWeight, gateExperts, upExperts, downExperts, output);
+                return;
+            }
+
             if (sharedGateWeight.Length < DModel)
             {
                 throw new ArgumentException("Shared gate weight smaller than dModel.", nameof(sharedGateWeight));
@@ -82,7 +101,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             for (var d = 0; d < DModel; d++)
             {
-                output[d] = (gate * _sharedOut[d]) + _routedOut[d];
+                output[d] = (gate * _sharedOut![d]) + _routedOut![d];
             }
         }
     }

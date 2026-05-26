@@ -25,8 +25,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly float[] _expertOut;
         private readonly int[] _selectedExperts;
         private readonly float[] _selectedWeights;
+        private readonly bool _normalizeWeights;
 
-        public MoeFeedForwardBlock(int dModel, int dFF, int expertCount, int expertUsedCount)
+        public MoeFeedForwardBlock(int dModel, int dFF, int expertCount, int expertUsedCount, bool normalizeWeights = true)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(dModel);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(dFF);
@@ -48,6 +49,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _expertOut = new float[dModel];
             _selectedExperts = new int[expertUsedCount];
             _selectedWeights = new float[expertUsedCount];
+            _normalizeWeights = normalizeWeights;
         }
 
         public int DModel { get; }
@@ -87,7 +89,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             SingleTokenProjectionKernel.ProjectParallel(
                 hidden[..DModel], routerWeight, [], _routerLogits, DModel, ExpertCount);
 
-            var k = MoeRouter.SelectTopK(_routerLogits, ExpertUsedCount, _selectedExperts, _selectedWeights);
+            var k = MoeRouter.SelectTopK(_routerLogits, ExpertUsedCount, _selectedExperts, _selectedWeights, _normalizeWeights);
 
             // Combine only the selected experts, weighted by the renormalised router probabilities.
             output[..DModel].Clear();

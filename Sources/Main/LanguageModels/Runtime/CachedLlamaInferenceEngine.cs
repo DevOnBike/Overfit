@@ -123,7 +123,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 config.KvHeads,
                 config.ExpertCount,
                 config.ExpertUsedCount,
-                config.ExpertFeedForwardLength);
+                config.ExpertFeedForwardLength,
+                config.NormalizeExpertWeights,
+                config.HasSharedExpert);
 
             _stackWeights = BuildStackWeights();
         }

@@ -146,6 +146,20 @@ namespace DevOnBike.Overfit.DeepLearning
         /// <summary>True when this model uses a Mixture-of-Experts FFN.</summary>
         public bool IsMixtureOfExperts => ExpertCount > 0 && ExpertUsedCount > 0;
 
+        /// <summary>
+        /// MoE topology: <c>true</c> when the model adds a sigmoid-gated shared expert that runs for
+        /// every token (Qwen-MoE); <c>false</c> for routed-only MoE (Mixtral). Only relevant when
+        /// <see cref="IsMixtureOfExperts"/>. Defaults to <c>true</c> (the Qwen-MoE shape).
+        /// </summary>
+        public bool HasSharedExpert { get; init; } = true;
+
+        /// <summary>
+        /// MoE routing: renormalise the top-k expert weights to sum to 1 (Mixtral / Qwen
+        /// <c>norm_topk_prob=true</c>) vs. keep the raw full-softmax probabilities (Qwen1.5-MoE,
+        /// <c>norm_topk_prob=false</c>). Only relevant when <see cref="IsMixtureOfExperts"/>.
+        /// </summary>
+        public bool NormalizeExpertWeights { get; init; } = true;
+
         /// <summary>Total parameter count (weight-tying aware).</summary>
         public long ParameterCount
         {

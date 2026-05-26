@@ -87,6 +87,33 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         }
 
         [Fact]
+        public void NotNormalized_WeightsAreRawFullSoftmaxProbs_OfTopK()
+        {
+            // norm_topk_prob=false (Qwen1.5-MoE): weights = full softmax over ALL experts at the
+            // top-k indices, NOT renormalised → they sum to < 1.
+            float[] logits = [0.5f, 2.0f, 1.0f, 1.8f];
+            const int topK = 2;
+
+            // Reference: full softmax, then read the top-2 probs (no renorm).
+            var max = float.NegativeInfinity;
+            foreach (var l in logits) { max = MathF.Max(max, l); }
+            var z = 0f;
+            foreach (var l in logits) { z += MathF.Exp(l - max); }
+            var refW1 = MathF.Exp(logits[1] - max) / z;   // expert 1 (2.0)
+            var refW3 = MathF.Exp(logits[3] - max) / z;   // expert 3 (1.8)
+
+            Span<int> idx = stackalloc int[topK];
+            Span<float> w = stackalloc float[topK];
+            MoeRouter.SelectTopK(logits, topK, idx, w, normalize: false);
+
+            Assert.Equal(1, idx[0]);
+            Assert.Equal(3, idx[1]);
+            Assert.Equal(refW1, w[0], 5);
+            Assert.Equal(refW3, w[1], 5);
+            Assert.True(w[0] + w[1] < 1f, "un-renormalised top-k probs must sum to < 1");
+        }
+
+        [Fact]
         public void TopKExceedingExpertCount_SelectsAll()
         {
             float[] logits = [1.0f, 0.0f];

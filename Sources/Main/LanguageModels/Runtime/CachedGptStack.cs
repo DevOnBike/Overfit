@@ -36,7 +36,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int kvHeadCount = 0,
             int expertCount = 0,
             int expertUsedCount = 0,
-            int expertFeedForwardLength = 0)
+            int expertFeedForwardLength = 0,
+            bool normalizeExpertWeights = true,
+            bool hasSharedExpert = true)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(layerCount);
 
@@ -83,7 +85,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     kvHeadCount > 0 ? kvHeadCount : headCount,
                     expertCount,
                     expertUsedCount,
-                    expertFeedForwardLength);
+                    expertFeedForwardLength,
+                    normalizeExpertWeights,
+                    hasSharedExpert);
             }
 
             _currentHidden = new float[dModel];

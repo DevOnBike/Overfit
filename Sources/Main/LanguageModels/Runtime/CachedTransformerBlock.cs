@@ -56,7 +56,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int kvHeadCount = 0,
             int expertCount = 0,
             int expertUsedCount = 0,
-            int expertFeedForwardLength = 0)
+            int expertFeedForwardLength = 0,
+            bool normalizeExpertWeights = true,
+            bool hasSharedExpert = true)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(dModel);
 
@@ -94,15 +96,17 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 dFF,
                 feedForwardActivation);
 
-            // MoE (qwen2moe): routed experts (expertFeedForwardLength) + sigmoid-gated shared
-            // expert (dFF). Replaces the dense FFN at decode when the block's weights are MoE.
+            // MoE: routed experts (expertFeedForwardLength) + (Qwen-MoE) a sigmoid-gated shared expert
+            // of length dFF. Mixtral has no shared expert — pass shared length 0. Replaces the dense
+            // FFN at decode when the block's weights are MoE.
             _moe = expertCount > 0
                 ? new Qwen2MoeFeedForwardBlock(
                     dModel,
                     expertFeedForwardLength > 0 ? expertFeedForwardLength : dFF,
-                    dFF,
+                    hasSharedExpert ? dFF : 0,
                     expertCount,
-                    expertUsedCount)
+                    expertUsedCount,
+                    normalizeExpertWeights)
                 : null;
 
             _ln1Output = new float[dModel];

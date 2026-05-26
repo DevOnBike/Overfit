@@ -279,6 +279,144 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
                 GgmlDequant.DecodeQ6_KBlock(new byte[GgmlDequant.Q6_K_BlockBytes], new float[255]));
         }
 
+        // ── DecodeQ5_0Block ─────────────────────────────────────────────────
+
+        [Fact]
+        public void DecodeQ5_0Block_AllZerosUnitScale_GivesBiasMinus16()
+        {
+            // qs = 0, qh = 0 → every 5-bit quant = 0; biased = 0 − 16; d = 1 → dst[i] = −16.
+            var block = BuildQ5_0Block(d: 1.0f, qh: 0u, qsFill: 0x00);
+
+            Span<float> dst = stackalloc float[32];
+            GgmlDequant.DecodeQ5_0Block(block, dst);
+
+            for (var i = 0; i < 32; i++) { Assert.Equal(-16f, dst[i], precision: 4); }
+        }
+
+        [Fact]
+        public void DecodeQ5_0Block_NibblesDecode_LowToElemJ_HighToElemJplus16()
+        {
+            // qs = 0x21 → low nibble 1 (→ elem j), high nibble 2 (→ elem j+16); qh = 0; d = 2.
+            // dst[j]      = 2 * (1 − 16) = −30   (j ∈ 0..15)
+            // dst[j + 16] = 2 * (2 − 16) = −28
+            var block = BuildQ5_0Block(d: 2.0f, qh: 0u, qsFill: 0x21);
+
+            Span<float> dst = stackalloc float[32];
+            GgmlDequant.DecodeQ5_0Block(block, dst);
+
+            for (var j = 0; j < 16; j++)
+            {
+                Assert.Equal(-30f, dst[j], precision: 4);
+                Assert.Equal(-28f, dst[j + 16], precision: 4);
+            }
+        }
+
+        [Theory]
+        [InlineData(0)]    // qh bit 0 → element 0
+        [InlineData(16)]   // qh bit 16 → element 16
+        [InlineData(31)]   // qh bit 31 → element 31
+        public void DecodeQ5_0Block_FifthBit_RoutesBitKToElementK(int k)
+        {
+            // qs = 0, d = 1; only qh bit k set → element k gains the 5th bit (q = 16 → dst = 0),
+            // every other element stays at the all-zero baseline (−16).
+            var block = BuildQ5_0Block(d: 1.0f, qh: 1u << k, qsFill: 0x00);
+
+            Span<float> dst = stackalloc float[32];
+            GgmlDequant.DecodeQ5_0Block(block, dst);
+
+            for (var i = 0; i < 32; i++)
+            {
+                Assert.Equal(i == k ? 0f : -16f, dst[i], precision: 4);
+            }
+        }
+
+        [Fact]
+        public void DecodeQ5_0Block_RejectsWrongSizes()
+        {
+            Assert.Throws<ArgumentException>(() =>
+                GgmlDequant.DecodeQ5_0Block(new byte[GgmlDequant.Q5_0_BlockBytes - 1], new float[32]));
+            Assert.Throws<ArgumentException>(() =>
+                GgmlDequant.DecodeQ5_0Block(new byte[GgmlDequant.Q5_0_BlockBytes], new float[31]));
+        }
+
+        // ── DecodeQ5_KBlock ─────────────────────────────────────────────────
+
+        [Fact]
+        public void DecodeQ5_KBlock_NibblesDecode_AllOnesScales_NoFifthBit()
+        {
+            // d = 1, dmin = 0, scales all 1, mins all 0, qh = 0, qs = 0x21 (low 1, high 2).
+            // Each group of 64: 32×(1·1) then 32×(1·2) → 1.0 then 2.0, repeated 4×.
+            var block = BuildQ5_KBlock(
+                d: 1.0f, dmin: 0.0f, scalesMinsPacked: ScalesAllOnesMinsAllZeros(),
+                qhFill: 0x00, qsFill: 0x21);
+
+            Span<float> dst = stackalloc float[256];
+            GgmlDequant.DecodeQ5_KBlock(block, dst);
+
+            for (var g = 0; g < 4; g++)
+            {
+                for (var i = 0; i < 32; i++)
+                {
+                    Assert.Equal(1.0f, dst[64 * g + i], precision: 5);
+                    Assert.Equal(2.0f, dst[64 * g + 32 + i], precision: 5);
+                }
+            }
+        }
+
+        [Fact]
+        public void DecodeQ5_KBlock_FifthBitAddsSixteen_WhenQhAllSet()
+        {
+            // qh = 0xFF for every byte → both per-group masks (u1, u2) fire for all 4 groups,
+            // so every quant gains +16: low → 1+16 = 17, high → 2+16 = 18 (scales 1, mins 0, d 1).
+            var block = BuildQ5_KBlock(
+                d: 1.0f, dmin: 0.0f, scalesMinsPacked: ScalesAllOnesMinsAllZeros(),
+                qhFill: 0xFF, qsFill: 0x21);
+
+            Span<float> dst = stackalloc float[256];
+            GgmlDequant.DecodeQ5_KBlock(block, dst);
+
+            for (var g = 0; g < 4; g++)
+            {
+                for (var i = 0; i < 32; i++)
+                {
+                    Assert.Equal(17.0f, dst[64 * g + i], precision: 5);
+                    Assert.Equal(18.0f, dst[64 * g + 32 + i], precision: 5);
+                }
+            }
+        }
+
+        [Fact]
+        public void DecodeQ5_KBlock_RejectsWrongSizes()
+        {
+            Assert.Throws<ArgumentException>(() =>
+                GgmlDequant.DecodeQ5_KBlock(new byte[GgmlDequant.Q5_K_BlockBytes - 1], new float[256]));
+            Assert.Throws<ArgumentException>(() =>
+                GgmlDequant.DecodeQ5_KBlock(new byte[GgmlDequant.Q5_K_BlockBytes], new float[255]));
+        }
+
+        // ── Q5_0 / Q5_K helpers ──────────────────────────────────────────────
+
+        private static byte[] BuildQ5_0Block(float d, uint qh, byte qsFill)
+        {
+            var block = new byte[GgmlDequant.Q5_0_BlockBytes];
+            WriteFp16Le(block.AsSpan(0, 2), d);
+            BinaryPrimitives.WriteUInt32LittleEndian(block.AsSpan(2, 4), qh);
+            block.AsSpan(6, 16).Fill(qsFill);
+            return block;
+        }
+
+        private static byte[] BuildQ5_KBlock(
+            float d, float dmin, byte[] scalesMinsPacked, byte qhFill, byte qsFill)
+        {
+            var block = new byte[GgmlDequant.Q5_K_BlockBytes];
+            WriteFp16Le(block.AsSpan(0, 2), d);
+            WriteFp16Le(block.AsSpan(2, 2), dmin);
+            scalesMinsPacked.AsSpan().CopyTo(block.AsSpan(4, 12));
+            block.AsSpan(16, 32).Fill(qhFill);
+            block.AsSpan(48, 128).Fill(qsFill);
+            return block;
+        }
+
         // ── Q4_K / Q6_K helpers ──────────────────────────────────────────────
 
         private static byte[] BuildQ4_KBlock(

@@ -61,6 +61,34 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             }
         }
 
+        [Fact]
+        public void NoSharedExpert_Mixtral_OutputEqualsRoutedSumAlone()
+        {
+            // sharedFeedForwardLength = 0 ⇒ Mixtral shape (routed-only). The shared-expert weights /
+            // gate are absent (default / empty) and must be ignored: output == routed reference, and
+            // top-k renormalisation is on (Mixtral norm_topk_prob=true).
+            var (gate, up, down) = BuildExperts();
+            var router = RouterColumns(1.0f, 2.0f, 0.5f);
+            var hidden = Vector(DModel, 3);
+
+            var block = new Qwen2MoeFeedForwardBlock(
+                DModel, ExpertDff, sharedFeedForwardLength: 0, ExpertCount, TopK, normalizeExpertWeights: true);
+            Assert.False(block.HasSharedExpert);
+
+            var actual = new float[DModel];
+            // Shared weights are default/empty — the routed-only path must not touch them.
+            block.Decode(hidden, router, gate, up, down, [], default, default, default, actual);
+
+            var routed = new MoeFeedForwardBlock(DModel, ExpertDff, ExpertCount, TopK, normalizeWeights: true);
+            var routedOut = new float[DModel];
+            routed.Decode(hidden, router, gate, up, down, routedOut);
+
+            for (var d = 0; d < DModel; d++)
+            {
+                Assert.Equal(routedOut[d], actual[d], 5);
+            }
+        }
+
         private static (DecodeWeight[] gate, DecodeWeight[] up, DecodeWeight[] down) BuildExperts()
         {
             var gate = new DecodeWeight[ExpertCount];

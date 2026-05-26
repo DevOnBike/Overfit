@@ -11,12 +11,11 @@ using Xunit.Abstractions;
 namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 {
     /// <summary>
-    /// SMOKE test — load the FULL Qwen1.5-MoE GGUF through <c>GgufLlamaLoader.Load</c> and greedily
-    /// decode: exercises embed → 24 MoE layers (router + 60 experts + shared) → final norm → LM head.
-    /// Asserts the model LOADS and the forward RUNS with finite, in-range output (no crash). It does
-    /// NOT assert coherence — coherent generation is a separate, KNOWN-PENDING correctness item
-    /// (the forward currently produces incoherent text; suspects: top-k weight normalisation
-    /// semantics / tokenizer match / expert-tensor orientation — needs a llama.cpp reference to debug).
+    /// End-to-end on the FULL Qwen1.5-MoE GGUF: load via <c>GgufLlamaLoader.Load</c> and greedily
+    /// decode embed → 24 MoE layers (router + 60 experts + sigmoid-gated shared) → final norm → LM
+    /// head. Asserts finite/in-range output AND — with the Qwen tokenizer present — coherent
+    /// generation: "capital of France?" → "Paris". (The key fix was honouring `norm_topk_prob=false`
+    /// for qwen2moe — raw full-softmax expert weights, not renormalised.)
     /// </summary>
     [Trait("Category", "Qwen")]
     [Trait("Category", "MoE")]
@@ -81,14 +80,15 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
                 generated.Add(token);
             }
 
-            // Smoke only: the forward produced finite, in-range tokens without crashing. Coherence
-            // is NOT asserted here (known-pending — see the class summary).
             Assert.NotEmpty(generated);
-
             _out.WriteLine($"tokens: [{string.Join(", ", generated)}]");
+
             if (tok is not null)
             {
-                _out.WriteLine($"--- decoded ---\n{tok.Decode(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(generated))}");
+                var text = tok.Decode(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(generated));
+                _out.WriteLine($"--- decoded ---\n{text}");
+                // Coherence: the answer to "capital of France?" must name Paris.
+                Assert.Contains("Paris", text, StringComparison.OrdinalIgnoreCase);
             }
         }
 

@@ -27,11 +27,18 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// into <paramref name="expertWeights"/>. Returns the number written
         /// (<c>min(topK, logits.Length)</c>).
         /// </summary>
+        /// <param name="normalize">
+        /// true (Mixtral / Qwen with <c>norm_topk_prob=true</c>): renormalise so the k weights sum to
+        /// 1 — i.e. softmax over the top-k logits. false (Qwen1.5-MoE, <c>norm_topk_prob=false</c>):
+        /// the weights are the full softmax probabilities over ALL experts, evaluated at the top-k
+        /// (they sum to ≤ 1, not renormalised).
+        /// </param>
         public static int SelectTopK(
             ReadOnlySpan<float> logits,
             int topK,
             Span<int> expertIndices,
-            Span<float> expertWeights)
+            Span<float> expertWeights,
+            bool normalize = true)
         {
             if (logits.IsEmpty)
             {
@@ -70,18 +77,29 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 if (filled < k) { filled++; }
             }
 
-            // ── Softmax over the k selected logits (== renormalised full softmax over top-k).
-            var max = expertWeights[0];   // sorted descending ⇒ [0] is the largest
-            var sum = 0f;
-            for (var i = 0; i < k; i++)
-            {
-                var w = MathF.Exp(expertWeights[i] - max);
-                expertWeights[i] = w;
-                sum += w;
-            }
+            var max = expertWeights[0];   // sorted descending ⇒ [0] is the global max logit
 
-            var inv = sum > 0f ? 1f / sum : 0f;
-            for (var i = 0; i < k; i++) { expertWeights[i] *= inv; }
+            if (normalize)
+            {
+                // Softmax over the k selected logits (== renormalised full softmax over the top-k).
+                var sum = 0f;
+                for (var i = 0; i < k; i++)
+                {
+                    var w = MathF.Exp(expertWeights[i] - max);
+                    expertWeights[i] = w;
+                    sum += w;
+                }
+                var inv = sum > 0f ? 1f / sum : 0f;
+                for (var i = 0; i < k; i++) { expertWeights[i] *= inv; }
+            }
+            else
+            {
+                // Full softmax over ALL experts; keep the top-k probabilities un-renormalised.
+                var total = 0f;
+                for (var e = 0; e < logits.Length; e++) { total += MathF.Exp(logits[e] - max); }
+                var inv = total > 0f ? 1f / total : 0f;
+                for (var i = 0; i < k; i++) { expertWeights[i] = MathF.Exp(expertWeights[i] - max) * inv; }
+            }
 
             return k;
         }
