@@ -474,6 +474,20 @@ point-mass) + the greedy-reduction parity (`Speculative_ProducesIdenticalSequenc
 real Qwen-3B). The greedy overload `GenerateSpeculative(history, committed, maxDraft…)` delegates with
 `SamplingOptions.Greedy`.
 
+### Prefix / system-prompt KV reuse — DONE 2026-05-26 (agentic multi-turn / multi-request TTFT)
+
+Prefill a fixed prefix (system prompt, few-shot examples, a quoted document) ONCE, snapshot its KV, then
+restore it into a session per request — skipping the prefix forward pass entirely (a memcpy, not a
+re-encode). `KeyValueCache.Snapshot()` captures the live region <c>[0, CurrentLength)</c> compactly
+(per-(layer,head) run, prefix-sized not full-cache); `RestoreFrom` copies it back + restores
+`CurrentLength`/`BasePosition`; surfaced as `CachedLlamaSession.SavePrefix()` / `RestorePrefix(snapshot)`.
+Restoring a prefix + appending a turn is **bit-identical** to prefilling prefix+turn together (causal —
+the prefix never attends to the turn), validated on real Qwen2.5-3B across two different requests reusing
+one snapshot (`PrefixKvCacheParityTests`). On-moat: the heavy cost in agentic / chat is re-encoding a long
+fixed system prompt on every turn — now a O(prefix) memcpy. (From the "adopt from GPT-chat stacks" scan;
+RoPE-scaling NTK/YaRN for >trained-context and flash-attention online-softmax for long-context memory
+remain on that list.)
+
 ---
 
 ## Research inputs (papers reviewed 2026-05-21)

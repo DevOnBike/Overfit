@@ -183,6 +183,73 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             CurrentLength = length;
         }
 
+        /// <summary>
+        /// Captures the live region <c>[0, CurrentLength)</c> across every (layer, head) into a compact
+        /// <see cref="KvCacheSnapshot"/> — for prefix / system-prompt KV reuse. The full cache layout
+        /// reserves <c>MaxLength</c> positions per (layer, head); the snapshot copies only the used run
+        /// of each, so its size is the prefix, not the whole cache.
+        /// </summary>
+        public KvCacheSnapshot Snapshot()
+        {
+            ThrowIfDisposed();
+
+            var lhCount = Shape.LayerCount * Shape.KvHeadCount;
+            var headDim = Shape.HeadDimension;
+            var maxSeq = MaxLength;
+            var run = CurrentLength * headDim;          // contiguous run per (layer, head)
+
+            var keys = new float[(long)lhCount * run];
+            var values = new float[(long)lhCount * run];
+            for (var lh = 0; lh < lhCount; lh++)
+            {
+                var src = (long)lh * maxSeq * headDim;
+                var dst = (long)lh * run;
+                Array.Copy(_keys, src, keys, dst, run);
+                Array.Copy(_values, src, values, dst, run);
+            }
+
+            return new KvCacheSnapshot(
+                keys, values, CurrentLength, BasePosition,
+                Shape.LayerCount, Shape.KvHeadCount, headDim);
+        }
+
+        /// <summary>
+        /// Restores a <see cref="KvCacheSnapshot"/> (a prefix) into this cache, overwriting positions
+        /// <c>[0, snapshot.Length)</c> and setting <see cref="CurrentLength"/> / <see cref="BasePosition"/>
+        /// accordingly. The shape (layers / KV heads / head dim) must match and the prefix must fit
+        /// <see cref="MaxLength"/>. After this the session can append a new turn (which attends over the
+        /// restored prefix) without re-encoding the prefix.
+        /// </summary>
+        public void RestoreFrom(KvCacheSnapshot snapshot)
+        {
+            ThrowIfDisposed();
+            ArgumentNullException.ThrowIfNull(snapshot);
+
+            if (!snapshot.MatchesShape(Shape))
+            {
+                throw new ArgumentException("Snapshot shape does not match this cache (layers / KV heads / head dim).", nameof(snapshot));
+            }
+            if (snapshot.Length > MaxLength)
+            {
+                throw new ArgumentException($"Snapshot length {snapshot.Length} exceeds cache MaxLength {MaxLength}.", nameof(snapshot));
+            }
+
+            var lhCount = Shape.LayerCount * Shape.KvHeadCount;
+            var headDim = Shape.HeadDimension;
+            var maxSeq = MaxLength;
+            var run = snapshot.Length * headDim;
+            for (var lh = 0; lh < lhCount; lh++)
+            {
+                var src = (long)lh * run;
+                var dst = (long)lh * maxSeq * headDim;
+                Array.Copy(snapshot.Keys, src, _keys, dst, run);
+                Array.Copy(snapshot.Values, src, _values, dst, run);
+            }
+
+            CurrentLength = snapshot.Length;
+            BasePosition = snapshot.BasePosition;
+        }
+
         public Span<float> GetKeyWriteSpan(
             int layerIndex,
             int headIndex,

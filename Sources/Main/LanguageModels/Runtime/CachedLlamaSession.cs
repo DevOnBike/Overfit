@@ -220,6 +220,29 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         }
 
         /// <summary>
+        /// Snapshots the current KV-cache state as a reusable <b>prefix</b> (e.g. after prefilling a fixed
+        /// system prompt). Restore it into this or another same-model session with <see cref="RestorePrefix"/>
+        /// to skip re-encoding the prefix on every request — the agentic / multi-turn TTFT win.
+        /// </summary>
+        public KvCacheSnapshot SavePrefix()
+        {
+            ThrowIfDisposed();
+            return _cache.Snapshot();
+        }
+
+        /// <summary>
+        /// Restores a <see cref="SavePrefix"/> snapshot: the cache becomes exactly as if the prefix had
+        /// just been prefilled (a memcpy, not a forward pass). Append the request's turn with
+        /// <see cref="Prefill"/> afterwards — it attends over the restored prefix and refreshes the logits.
+        /// </summary>
+        public void RestorePrefix(KvCacheSnapshot prefix)
+        {
+            ThrowIfDisposed();
+            ArgumentNullException.ThrowIfNull(prefix);
+            _cache.RestoreFrom(prefix);
+        }
+
+        /// <summary>
         /// Generates the next token using the current cache state.
         /// The generated token is automatically fed back as context.
         /// Returns the token ID.

@@ -297,17 +297,24 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
         private static Dictionary<string, int> ReadAddedTokens(JsonElement root, ref string[] decoder)
         {
             var specialTokens = new Dictionary<string, int>();
-            if (!root.TryGetProperty("added_tokens", out var added)) { return specialTokens; }
+
+            if (!root.TryGetProperty("added_tokens", out var added))
+            {
+                return specialTokens;
+            }
 
             foreach (var tok in added.EnumerateArray())
             {
                 var content = tok.GetProperty("content").GetString()!;
                 var id = tok.GetProperty("id").GetInt32();
                 specialTokens[content] = id;
+
                 if (id >= decoder.Length)
                 {
                     var extended = new string[id + 1];
+
                     Array.Copy(decoder, extended, decoder.Length);
+
                     decoder = extended;
                 }
                 decoder[id] = content;
@@ -321,7 +328,9 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             var pattern = root.TryGetProperty("pre_tokenizer", out var pre)
                 ? FindSplitPattern(pre)
                 : null;
+
             pattern ??= Gpt2SplitPattern;
+
             try
             {
                 return new Regex(pattern, RegexOptions.Compiled);
@@ -351,6 +360,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                     if (found is not null) { return found; }
                 }
             }
+
             return null;
         }
 
@@ -381,13 +391,14 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
         }
 
         // EOS/UNK: tokenizer_config.json eos_token/unk_token (string or {content}) → id; else heuristics.
-        private static (int eos, int unk) ResolveSpecialIds(
-            string? dir, Dictionary<string, int> specialTokens, Dictionary<string, int> vocab, JsonElement model)
+        private static (int eos, int unk) ResolveSpecialIds(string? dir, Dictionary<string, int> specialTokens, Dictionary<string, int> vocab, JsonElement model)
         {
             string? eosText = null, unkText = null;
+
             if (dir is not null)
             {
                 var cfgPath = Path.Combine(dir, "tokenizer_config.json");
+
                 if (File.Exists(cfgPath))
                 {
                     using var cfg = JsonDocument.Parse(File.ReadAllBytes(cfgPath));
@@ -398,6 +409,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
             var eos = ResolveId(eosText, specialTokens, vocab, fallback: -1);
             var unk = ResolveId(unkText, specialTokens, vocab, fallback: -1);
+
             // model.unk_token (BPE field) as a secondary source for UNK.
             if (unk < 0 && model.TryGetProperty("unk_token", out var mu) && mu.ValueKind == JsonValueKind.String)
             {
@@ -410,7 +422,11 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
         private static string? ReadTokenString(JsonElement root, string key)
         {
-            if (!root.TryGetProperty(key, out var v)) { return null; }
+            if (!root.TryGetProperty(key, out var v))
+            {
+                return null;
+            }
+
             return v.ValueKind switch
             {
                 JsonValueKind.String => v.GetString(),
