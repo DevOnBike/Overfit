@@ -63,6 +63,43 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         }
 
         [LongFact]
+        public void BatchedPrefill_MatchesSingleToken_OnRealQwenMoE()
+        {
+            const string moePath = @"C:\qwen-moe\Qwen1.5-MoE-A2.7B-Chat.Q8_0.gguf";
+            if (!File.Exists(moePath)) { _out.WriteLine($"missing {moePath}"); return; }
+
+            using var engine = CachedLlamaInferenceEngine.LoadGguf(moePath);
+            Assert.True(engine.Config.IsMixtureOfExperts);
+
+            var prompt = new int[32];
+            for (var i = 0; i < prompt.Length; i++) { prompt[i] = 100 + i * 53; }
+
+            using var batched = engine.CreateSession(128);
+            batched.Reset(prompt);
+            var bLogits = batched.LastLogits.ToArray();
+
+            using var single = engine.CreateSession(128);
+            single.DisableBatchedPrefillForParity = true;
+            single.Reset(prompt);
+            var sLogits = single.LastLogits;
+
+            var moeMaxDiff = 0f;
+            int moeArgB = 0, moeArgS = 0;
+            for (var i = 0; i < sLogits.Length; i++)
+            {
+                moeMaxDiff = MathF.Max(moeMaxDiff, MathF.Abs(bLogits[i] - sLogits[i]));
+                if (bLogits[i] > bLogits[moeArgB]) { moeArgB = i; }
+                if (sLogits[i] > sLogits[moeArgS]) { moeArgS = i; }
+            }
+            _out.WriteLine($"MoE argmax batched={moeArgB} single={moeArgS}  maxAbsLogitDiff={moeMaxDiff:G4}");
+
+            // Batched MoE accumulates each row's experts in top-k slot order (= single-token order), so
+            // it's BIT-IDENTICAL despite the gather-by-expert grouping — no routing-flip cascade.
+            Assert.Equal(moeArgS, moeArgB);
+            Assert.True(moeMaxDiff < 1e-3f, $"MoE batched vs single logit divergence {moeMaxDiff:G4} (> 1e-3).");
+        }
+
+        [LongFact]
         public void BatchedPrefill_TtftSpeedup_OnRealQwen()
         {
             if (!File.Exists(ModelPath)) { _out.WriteLine($"missing {ModelPath}"); return; }

@@ -104,5 +104,62 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 output[d] = (gate * _sharedOut![d]) + _routedOut![d];
             }
         }
+
+        /// <summary>
+        /// Batched (prefill) MoE FFN over <paramref name="rows"/> token rows — the multi-row counterpart
+        /// of <see cref="Decode"/>. The routed sum is delegated to
+        /// <see cref="MoeFeedForwardBlock.DecodeBatched"/> (group-by-expert); the shared expert (when
+        /// present) is a batched SwiGLU scaled per-row by <c>σ(w_shared · xₙ)</c>. Numerically equal to
+        /// N× <see cref="Decode"/> up to FP associativity in the routed sum. Scratch is per-call.
+        /// </summary>
+        public void DecodeBatched(
+            ReadOnlySpan<float> hidden,
+            int rows,
+            ReadOnlySpan<float> routerWeight,
+            DecodeWeight[] gateExperts,
+            DecodeWeight[] upExperts,
+            DecodeWeight[] downExperts,
+            ReadOnlySpan<float> sharedGateWeight,
+            in DecodeWeight sharedGate,
+            in DecodeWeight sharedUp,
+            in DecodeWeight sharedDown,
+            Span<float> output)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rows);
+            if (hidden.Length < (long)rows * DModel) { throw new ArgumentException("Hidden span smaller than rows*dModel.", nameof(hidden)); }
+            if (output.Length < (long)rows * DModel) { throw new ArgumentException("Output span smaller than rows*dModel.", nameof(output)); }
+
+            // Mixtral (no shared expert): the FFN is the routed sum alone.
+            if (_shared is null)
+            {
+                _routed.DecodeBatched(hidden, rows, routerWeight, gateExperts, upExperts, downExperts, output);
+                return;
+            }
+
+            if (sharedGateWeight.Length < DModel)
+            {
+                throw new ArgumentException("Shared gate weight smaller than dModel.", nameof(sharedGateWeight));
+            }
+
+            var routedOut = new float[rows * DModel];
+            var sharedOut = new float[rows * DModel];
+
+            _routed.DecodeBatched(hidden, rows, routerWeight, gateExperts, upExperts, downExperts, routedOut);
+            _shared.DecodeSwiGluBatchedDispatched(hidden, rows, in sharedGate, in sharedUp, in sharedDown, sharedOut);
+
+            for (var n = 0; n < rows; n++)
+            {
+                var row = hidden.Slice(n * DModel, DModel);
+                var gateLogit = 0f;
+                for (var d = 0; d < DModel; d++) { gateLogit += row[d] * sharedGateWeight[d]; }
+                var gate = 1f / (1f + MathF.Exp(-gateLogit));
+
+                var dst = output.Slice(n * DModel, DModel);
+                for (var d = 0; d < DModel; d++)
+                {
+                    dst[d] = (gate * sharedOut[n * DModel + d]) + routedOut[n * DModel + d];
+                }
+            }
+        }
     }
 }

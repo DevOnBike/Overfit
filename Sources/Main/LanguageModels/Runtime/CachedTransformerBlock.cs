@@ -352,13 +352,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             RopeTable? rope = null)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rows);
-            if (weights.IsMoe)
+            if (!weights.IsMoe && weights.FfnGate.IsEmpty)
             {
-                throw new NotSupportedException("Batched quant prefill does not support MoE FFN yet (dense SwiGLU only).");
-            }
-            if (weights.FfnGate.IsEmpty)
-            {
-                throw new NotSupportedException("Batched quant prefill requires a SwiGLU FFN (FfnGate present).");
+                throw new NotSupportedException("Batched quant prefill requires a SwiGLU FFN (FfnGate present) or an MoE FFN.");
             }
 
             var dModel = DModel;
@@ -405,8 +401,19 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 }
             }
 
-            _feedForward.DecodeSwiGluBatchedDispatched(
-                ln2, rows, weights.FfnGate, weights.FfnW1, weights.FfnW2, ffnOut);
+            if (weights.IsMoe)
+            {
+                _moe!.DecodeBatched(
+                    ln2, rows,
+                    weights.MoeRouter, weights.MoeGate, weights.MoeUp, weights.MoeDown,
+                    weights.MoeSharedGateInp, weights.MoeSharedGate, weights.MoeSharedUp, weights.MoeSharedDown,
+                    ffnOut);
+            }
+            else
+            {
+                _feedForward.DecodeSwiGluBatchedDispatched(
+                    ln2, rows, weights.FfnGate, weights.FfnW1, weights.FfnW2, ffnOut);
+            }
 
             for (var n = 0; n < rows; n++)
             {

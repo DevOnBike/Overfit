@@ -427,9 +427,21 @@ responsiveness) and — unlike attention-fusion — does NOT touch the per-head 
   same argmax — `BatchedPrefillParityTests`, RMSNorm+RoPE+GQA 16:2+SwiGLU+mixed-K-quant). **TTFT win:
   256-token prompt 12 725 ms → 5 309 ms = 2.40×** (best-of-3, same model). This closes the prefill/TTFT
   gap to llama.cpp (which batches prefill) on the chat-responsiveness axis — the on-moat catch.
+- **MoE batched prefill — DONE 2026-05-26.** `MoeFeedForwardBlock.DecodeBatched` (group rows by expert →
+  gather → batched expert SwiGLU → scatter) + `Qwen2MoeFeedForwardBlock.DecodeBatched` (batched shared
+  expert + per-row sigmoid gate), dispatched from `CachedTransformerBlock.DecodeBatchedQuant` on
+  `weights.IsMoe`; session eligibility no longer excludes MoE. **Investigation note (empirical rigor):**
+  the first cut accumulated each row's experts in *expert-index* order → real-Qwen-MoE Q8_0 end-to-end
+  diverged 0.60 (argmax still matched) — a routing-flip cascade (the reorder perturbs the residual
+  stream → a borderline top-k decision flips in a later layer). An isolated block-level F32 parity test
+  localised it as NOT a block bug (<1e-4). Fix: stash each expert's output at the row's top-k SLOT and
+  sum per-row in top-k order (= single-token order) → now **BIT-IDENTICAL** end-to-end (maxAbsLogitDiff
+  = 0 on real Qwen1.5-MoE Q8_0), validated by `BatchedPrefillParityTests` + block-level
+  `Qwen2MoeFeedForwardBlockTests.DecodeBatched_MatchesPerRowDecode` (exact). Mixtral (routed-only) reuses
+  the same path.
   Remaining (optional): F32/RoPE batched attention could now also route here (the old `DecodeBatched`
-  F32-only restriction is superseded for the Llama path); MoE batched prefill; Phase-1-style attention
-  fusion for decode (separate, off-moat).
+  F32-only restriction is superseded for the Llama path); Phase-1-style attention fusion for decode
+  (separate, off-moat).
 
 ---
 

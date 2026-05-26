@@ -175,7 +175,6 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // remaining context. MoE / sliding-window / tiny prompts fall back to the single-token loop.
             if (!DisableBatchedPrefillForParity
                 && promptTokens.Length >= BatchedPrefillThreshold
-                && !_config.IsMixtureOfExperts
                 && !_slidingWindow
                 && _config.FfnActivation == FeedForwardActivation.SwiGLU
                 && _cache.CurrentLength + promptTokens.Length <= _cache.MaxLength)

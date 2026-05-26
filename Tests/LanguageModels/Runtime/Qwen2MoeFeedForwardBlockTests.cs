@@ -89,6 +89,59 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             }
         }
 
+        [Theory]
+        [InlineData(1)]
+        [InlineData(2)]
+        [InlineData(5)]
+        public void DecodeBatched_MatchesPerRowDecode(int rows)
+        {
+            var (gate, up, down) = BuildExperts();
+            var sGate = Weight(DModel * SharedDff, 500);
+            var sUp = Weight(DModel * SharedDff, 600);
+            var sDown = Weight(SharedDff * DModel, 700);
+            var sharedGateInp = Vector(DModel, 9);
+            var router = RandomRouter(13);
+
+            var block = new Qwen2MoeFeedForwardBlock(DModel, ExpertDff, SharedDff, ExpertCount, TopK);
+
+            // Build N distinct hidden rows so different rows route to different experts.
+            var hidden = new float[rows * DModel];
+            for (var n = 0; n < rows; n++)
+            {
+                for (var d = 0; d < DModel; d++) { hidden[n * DModel + d] = MathF.Sin((n + 1) * 0.7f + d * 0.9f) * 0.6f; }
+            }
+
+            // Reference: per-row single-token Decode.
+            var expected = new float[rows * DModel];
+            for (var n = 0; n < rows; n++)
+            {
+                block.Decode(
+                    hidden.AsSpan(n * DModel, DModel), router, gate, up, down,
+                    sharedGateInp, sGate, sUp, sDown, expected.AsSpan(n * DModel, DModel));
+            }
+
+            // Batched.
+            var batched = new float[rows * DModel];
+            block.DecodeBatched(
+                hidden, rows, router, gate, up, down,
+                sharedGateInp, sGate, sUp, sDown, batched);
+
+            // Per-row weighted sum runs in top-k slot order = single-token order, and the expert SwiGLU
+            // is bit-identical batched-vs-single — so the block is bit-identical, not merely FP-close.
+            for (var i = 0; i < expected.Length; i++)
+            {
+                Assert.Equal(expected[i], batched[i]);
+            }
+        }
+
+        private static float[] RandomRouter(int seed)
+        {
+            var rng = new Random(seed);
+            var w = new float[DModel * ExpertCount];
+            for (var i = 0; i < w.Length; i++) { w[i] = (float)(rng.NextDouble() * 2.0 - 1.0); }
+            return w;
+        }
+
         private static (DecodeWeight[] gate, DecodeWeight[] up, DecodeWeight[] down) BuildExperts()
         {
             var gate = new DecodeWeight[ExpertCount];
