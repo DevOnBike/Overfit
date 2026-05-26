@@ -238,5 +238,52 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
                 Assert.Equal(sequential[o], parallel[o]);
             }
         }
+
+        [Theory]
+        [InlineData(1)]
+        [InlineData(2)]
+        [InlineData(7)]
+        [InlineData(16)]
+        public void ProjectBatched_IsBitIdenticalToPerRowProject(int rows)
+        {
+            const int inputSize = 2048;
+            const int outputSize = 1024;
+            var rng = new Random(rows * 13 + 1);
+
+            var input = new float[rows * inputSize];
+            for (var i = 0; i < input.Length; i++)
+            {
+                input[i] = (float)(rng.NextDouble() * 2.0 - 1.0);
+            }
+
+            var weightF32 = new float[outputSize * inputSize];
+            for (var k = 0; k < weightF32.Length; k++)
+            {
+                weightF32[k] = (float)(rng.NextDouble() * 0.2 - 0.1);
+            }
+            var weight = Q8Weight.QuantizeRows(weightF32, outputSize, inputSize);
+            var blocksPerRow = inputSize / Q8DotKernel.BlockSize;
+
+            // Per-row reference: single-token Project on each row independently.
+            var reference = new float[rows * outputSize];
+            for (var n = 0; n < rows; n++)
+            {
+                Q8DotKernel.Project(
+                    input.AsSpan(n * inputSize, inputSize), weight.Quants, weight.Scales, [],
+                    reference.AsSpan(n * outputSize, outputSize), inputSize, outputSize,
+                    new sbyte[inputSize], new float[blocksPerRow]);
+            }
+
+            // Batched — must be bit-identical (each output dot is computed the same way).
+            var batched = new float[rows * outputSize];
+            Q8DotKernel.ProjectBatched(
+                input, rows, weight, [], batched,
+                new sbyte[rows * inputSize], new float[rows * blocksPerRow]);
+
+            for (var k = 0; k < reference.Length; k++)
+            {
+                Assert.Equal(reference[k], batched[k]);
+            }
+        }
     }
 }

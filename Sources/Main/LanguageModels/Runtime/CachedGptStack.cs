@@ -292,6 +292,65 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         }
 
         /// <summary>
+        /// Batched prefill for the Llama/Qwen quantized path — the multi-token counterpart of looping
+        /// <see cref="DecodeWithoutLogits"/>, using <see cref="CachedTransformerBlock.DecodeBatchedQuant"/>
+        /// (RMSNorm + RoPE + GQA + SwiGLU + quantized weights). After the call, the final-norm output of
+        /// the LAST row is in <see cref="LastFinalHidden"/> / <c>_finalHidden</c>, ready for
+        /// <see cref="ProjectLogits"/> (the only token whose logits a prefill needs). Bit-identical to
+        /// the single-token loop. The caller must advance the cache to <c>basePosition + rows</c> first.
+        /// </summary>
+        internal void PrefillBatchedQuant(
+            ReadOnlySpan<float> inputHidden,
+            int rows,
+            StackWeights weights,
+            KeyValueCache cache,
+            int basePosition,
+            RopeTable? rope = null)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rows);
+            if (inputHidden.Length < (long)rows * DModel)
+            {
+                throw new ArgumentException(
+                    $"inputHidden length {inputHidden.Length} < rows*DModel {(long)rows * DModel}.", nameof(inputHidden));
+            }
+
+            var cur = new float[rows * DModel];
+            inputHidden.Slice(0, rows * DModel).CopyTo(cur);
+            var next = new float[rows * DModel];
+
+            for (var layer = 0; layer < LayerCount; layer++)
+            {
+                _blocks[layer].DecodeBatchedQuant(
+                    cur, rows, in weights.Block(layer), cache, layer, basePosition, next, rope);
+                (cur, next) = (next, cur);
+            }
+
+            // Last token's hidden BEFORE final norm (matches DecodeWithoutLogits).
+            var lastRow = cur.AsSpan((rows - 1) * DModel, DModel);
+            lastRow.CopyTo(_lastFinalHidden);
+
+            if (weights.FinalNormBeta.IsEmpty)
+            {
+                var sumSq = 0f;
+                for (var i = 0; i < DModel; i++) { sumSq += lastRow[i] * lastRow[i]; }
+                var scale = 1f / MathF.Sqrt(sumSq / DModel + LayerNormEpsilon);
+                if (weights.FinalNormGamma.IsEmpty)
+                {
+                    for (var i = 0; i < DModel; i++) { _finalHidden[i] = lastRow[i] * scale; }
+                }
+                else
+                {
+                    for (var i = 0; i < DModel; i++) { _finalHidden[i] = lastRow[i] * scale * weights.FinalNormGamma[i]; }
+                }
+            }
+            else
+            {
+                SingleTokenLayerNormKernel.Normalize(
+                    lastRow, weights.FinalNormGamma, weights.FinalNormBeta, _finalHidden, DModel, LayerNormEpsilon);
+            }
+        }
+
+        /// <summary>
         /// Projects the saved <see cref="LastFinalHidden"/>-norm output into
         /// vocabulary logits. Call this once per token-of-interest after one
         /// or more <see cref="DecodeWithoutLogits"/> calls. The standard

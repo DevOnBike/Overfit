@@ -270,6 +270,32 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         }
 
         /// <summary>
+        /// Batched (prefill) SwiGLU FFN over <paramref name="rows"/> token rows — the multi-row
+        /// counterpart of <see cref="DecodeSwiGluDispatched"/>. Each of gate/up/down is a batched
+        /// projection (<c>ProjectBatched</c>: read each weight row from DRAM once, reuse across all
+        /// rows), so the dominant FFN weight-byte traffic is amortised ~<paramref name="rows"/>× vs
+        /// looping the single-token path. Bit-identical to N× <see cref="DecodeSwiGluDispatched"/>.
+        /// Scratch is allocated per call (prefill is a one-time pass, not the 0-alloc decode hot path).
+        /// </summary>
+        internal void DecodeSwiGluBatchedDispatched(
+            ReadOnlySpan<float> hidden,
+            int rows,
+            in DecodeWeight wGate,
+            in DecodeWeight wUp,
+            in DecodeWeight wDown,
+            Span<float> output)
+        {
+            var gate = new float[rows * DFF];
+            var up = new float[rows * DFF];
+
+            BatchedQuantProjection.Dispatch(hidden, rows, in wGate, [], gate, DModel, DFF);
+            ApplySiLU(gate);
+            BatchedQuantProjection.Dispatch(hidden, rows, in wUp, [], up, DModel, DFF);
+            TensorPrimitives.Multiply(gate, up, up);
+            BatchedQuantProjection.Dispatch(up, rows, in wDown, [], output.Slice(0, rows * DModel), DFF, DModel);
+        }
+
+        /// <summary>
         /// Per-weight projection dispatch — picks the parallel kernel matching
         /// the weight's resident format. Q-paths use the block's owned activation
         /// scratch; F32 uses the F32 input-major kernel.

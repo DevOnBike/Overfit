@@ -331,6 +331,91 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
         }
 
+        /// <summary>
+        /// Batched (prefill) Pre-LN block forward for the <b>Llama/Qwen quantized</b> path — supports
+        /// RMSNorm + RoPE + GQA + SwiGLU + quantized weights (the cases <see cref="DecodeBatched"/>
+        /// rejects). Per-row RMSNorm → batched attention (<see cref="CachedMultiHeadAttention.DecodeBatchedQuant"/>)
+        /// → residual → per-row RMSNorm → batched SwiGLU FFN
+        /// (<see cref="CachedFeedForwardBlock.DecodeSwiGluBatchedDispatched"/>) → residual. Composes the
+        /// per-row-independent norms/residuals with the two batched blocks, so the result is
+        /// <b>bit-identical</b> to N× <see cref="Decode"/>. Dense FFN only (MoE batched prefill is a
+        /// follow-on). The cache must already be advanced to <c>basePosition + rows</c>.
+        /// </summary>
+        internal void DecodeBatchedQuant(
+            ReadOnlySpan<float> input,
+            int rows,
+            in BlockWeights weights,
+            KeyValueCache cache,
+            int layerIndex,
+            int basePosition,
+            Span<float> output,
+            RopeTable? rope = null)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rows);
+            if (weights.IsMoe)
+            {
+                throw new NotSupportedException("Batched quant prefill does not support MoE FFN yet (dense SwiGLU only).");
+            }
+            if (weights.FfnGate.IsEmpty)
+            {
+                throw new NotSupportedException("Batched quant prefill requires a SwiGLU FFN (FfnGate present).");
+            }
+
+            var dModel = DModel;
+            var ln1 = new float[rows * dModel];
+            var attnOut = new float[rows * dModel];
+            var afterAttn = new float[rows * dModel];
+            var ln2 = new float[rows * dModel];
+            var ffnOut = new float[rows * dModel];
+
+            for (var n = 0; n < rows; n++)
+            {
+                var inRow = input.Slice(n * dModel, dModel);
+                var dst = ln1.AsSpan(n * dModel, dModel);
+                if (weights.Ln1Beta.IsEmpty)
+                {
+                    RmsNormalize(inRow, weights.Ln1Gamma, dst, dModel, LayerNormEpsilon);
+                }
+                else
+                {
+                    SingleTokenLayerNormKernel.Normalize(inRow, weights.Ln1Gamma, weights.Ln1Beta, dst, dModel, LayerNormEpsilon);
+                }
+            }
+
+            _attention.DecodeBatchedQuant(ln1, rows, in weights, cache, layerIndex, basePosition, attnOut, rope);
+
+            for (var n = 0; n < rows; n++)
+            {
+                SingleTokenLayerNormKernel.AddResidual(
+                    input.Slice(n * dModel, dModel), attnOut.AsSpan(n * dModel, dModel),
+                    afterAttn.AsSpan(n * dModel, dModel), dModel);
+            }
+
+            for (var n = 0; n < rows; n++)
+            {
+                var aRow = afterAttn.AsSpan(n * dModel, dModel);
+                var dst = ln2.AsSpan(n * dModel, dModel);
+                if (weights.Ln2Beta.IsEmpty)
+                {
+                    RmsNormalize(aRow, weights.Ln2Gamma, dst, dModel, LayerNormEpsilon);
+                }
+                else
+                {
+                    SingleTokenLayerNormKernel.Normalize(aRow, weights.Ln2Gamma, weights.Ln2Beta, dst, dModel, LayerNormEpsilon);
+                }
+            }
+
+            _feedForward.DecodeSwiGluBatchedDispatched(
+                ln2, rows, weights.FfnGate, weights.FfnW1, weights.FfnW2, ffnOut);
+
+            for (var n = 0; n < rows; n++)
+            {
+                SingleTokenLayerNormKernel.AddResidual(
+                    afterAttn.AsSpan(n * dModel, dModel), ffnOut.AsSpan(n * dModel, dModel),
+                    output.Slice(n * dModel, dModel), dModel);
+            }
+        }
+
 
 
 

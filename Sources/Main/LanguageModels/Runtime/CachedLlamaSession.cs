@@ -169,6 +169,21 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             if (promptTokens.IsEmpty) { return; }
 
+            // Batched (multi-token) prefill: one set of batched GEMMs per layer over the whole prompt
+            // instead of N single-token passes — amortises the (weight-bandwidth-bound) weight reads
+            // ~N×. Eligible for the dense SwiGLU Llama/Qwen path, non-sliding, when the prompt fits the
+            // remaining context. MoE / sliding-window / tiny prompts fall back to the single-token loop.
+            if (!DisableBatchedPrefillForParity
+                && promptTokens.Length >= BatchedPrefillThreshold
+                && !_config.IsMixtureOfExperts
+                && !_slidingWindow
+                && _config.FfnActivation == FeedForwardActivation.SwiGLU
+                && _cache.CurrentLength + promptTokens.Length <= _cache.MaxLength)
+            {
+                PrefillBatchedQuant(promptTokens);
+                return;
+            }
+
             // Skip the LM-head projection for every prompt token except the last:
             // their logits would be overwritten anyway. The final token runs the
             // full decode so _logits reflects the end-of-prompt prediction.
@@ -495,6 +510,34 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 _cache,
                 position,
                 _rope);
+        }
+
+        /// <summary>Prompt length at/above which <see cref="Prefill"/> uses the batched path.</summary>
+        private const int BatchedPrefillThreshold = 16;
+
+        /// <summary>Test hook: force the single-token prefill loop (for batched-vs-single parity).</summary>
+        internal bool DisableBatchedPrefillForParity { get; set; }
+
+        /// <summary>
+        /// Batched prefill: embed all prompt tokens, advance the cache, run one batched pass per layer
+        /// (<see cref="CachedGptStack.PrefillBatchedQuant"/>), then project the last token's logits —
+        /// leaving the session in exactly the state the single-token loop would (bit-identical).
+        /// </summary>
+        private void PrefillBatchedQuant(ReadOnlySpan<int> promptTokens)
+        {
+            var rows = promptTokens.Length;
+            var dModel = _config.DModel;
+            var basePosition = _cache.CurrentLength;
+
+            var hidden = new float[rows * dModel];
+            for (var i = 0; i < rows; i++)
+            {
+                _embedWeights.DequantizeRow(promptTokens[i], hidden.AsSpan(i * dModel, dModel));
+                _cache.Advance();
+            }
+
+            _stack.PrefillBatchedQuant(hidden, rows, _weights, _cache, basePosition, _rope);
+            _stack.ProjectLogits(_weights, _logits);
         }
 
         private int EmbedAndAdvance(int tokenId)

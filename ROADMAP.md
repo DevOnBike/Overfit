@@ -395,6 +395,42 @@ End-to-end vs Overfit's own starting point: **5.6× decode, −69 % RAM, 20× fa
   (3.2→~2.2) but parity is the milestone and it needs a dequant-row lookup path —
   deferred. **Only the decode-SPEED axis remains** (the attention-fusion lever above).
 
+### Quantized batched prefill (TTFT lever — 2026-05-26, Phase 1 DONE)
+
+The catchable llama.cpp gap that ISN'T the off-moat decode race: for Qwen/Llama/Mixtral, **prefill is
+single-token** (`CachedLlamaSession.Prefill` loops `DecodeToken` per prompt token) — batched prefill
+(3.48× TTFT) only exists for the F32/GPT-2 path. So a long prompt's time-to-first-token = N × single
+decode, re-reading ALL weights N times; llama.cpp batches it. Closing this is on-moat (chat
+responsiveness) and — unlike attention-fusion — does NOT touch the per-head LoRA design.
+
+- **Phase 1 DONE — batched quant projection kernels.** `Q8DotKernel.ProjectBatched` +
+  `Q4KDotKernel.ProjectBatched` + `Q6KDotKernel.ProjectBatched`: quantize all N activation rows once,
+  then split the output loop over `OverfitParallelFor` with the **rows loop innermost** so each weight
+  output row is read from DRAM once and reused (cache-hot) across all N dots — cuts weight byte-traffic
+  ~N× (prefill is weight-bandwidth-bound). Bit-identical to N× single-token `Project` (parity tests:
+  `Q8/Q4K/Q6K DotKernelTests.ProjectBatched_IsBitIdenticalToPerRowProject`, rows ∈ {1,2,3,7,16}). 888/0.
+- **Phase 2a DONE — batched SwiGLU FFN dispatch.** `CachedFeedForwardBlock.DecodeSwiGluBatchedDispatched`
+  + `ProjectBatchedDispatched` (Q6_K/Q4_K/Q8_0/F32) run gate/up/down as batched projections over N rows
+  — the FFN is the dominant weight read (~7× the attention weights for Qwen-3B), so this captures most of
+  the prefill weight-byte amortisation. Bit-identical to N× `DecodeSwiGluDispatched`
+  (`CachedFeedForwardBlockBatchedTests.DecodeSwiGluBatchedDispatched_IsBitIdentical_To_PerRowSwiGlu`).
+- **Phase 2b DONE — batched attention (quant).** `CachedMultiHeadAttention.DecodeBatchedQuant`: KV
+  groups processed sequentially (each projection parallelises internally — no nested parallelism), per
+  group batched K/V projection (`BatchedQuantProjection.Dispatch` — Q6_K/Q4_K/Q8_0/F32) + per-row RoPE +
+  cache writes (K/V-once for GQA); per Q head batched Q projection + per-row RoPE + the proven causal
+  `BatchedAttentionKernel` (RoPE-agnostic) + batched O projection. `BatchedQuantProjection` extracted as
+  the shared batched-projection dispatch (FFN reuses it).
+- **Phase 2c + 3 DONE — wired + measured.** `CachedTransformerBlock.DecodeBatchedQuant` (per-row RMSNorm
+  + 2b + 2a, dense SwiGLU only) → `CachedGptStack.PrefillBatchedQuant` → `CachedLlamaSession.Prefill`
+  takes the batched path for prompts ≥16 tokens (dense, non-sliding, fits cache; MoE/sliding fall back).
+  **Parity: BIT-IDENTICAL to the single-token loop on real Qwen2.5-3B Q4_K_M** (maxAbsLogitDiff = 0,
+  same argmax — `BatchedPrefillParityTests`, RMSNorm+RoPE+GQA 16:2+SwiGLU+mixed-K-quant). **TTFT win:
+  256-token prompt 12 725 ms → 5 309 ms = 2.40×** (best-of-3, same model). This closes the prefill/TTFT
+  gap to llama.cpp (which batches prefill) on the chat-responsiveness axis — the on-moat catch.
+  Remaining (optional): F32/RoPE batched attention could now also route here (the old `DecodeBatched`
+  F32-only restriction is superseded for the Llama path); MoE batched prefill; Phase-1-style attention
+  fusion for decode (separate, off-moat).
+
 ---
 
 ## Research inputs (papers reviewed 2026-05-21)
@@ -669,6 +705,31 @@ Overfit only ~1.0× → Overfit decode was overhead-bound, not bandwidth-bound.
 First lever (GQA K/V-once: project K/V once per KV group, not per Q head) gave
 +24 %, bit-identical. Defensible edge: 1 B vs 21 KB/token alloc, pure-managed,
 AOT-clean, no native dep. Numbers: `overfit-bench/RESULTS.md`.
+
+**Re-bench 2026-05-26 (after the MoE + GGUF-tokenizer tracks).** Same harness/file/prompt,
+`overfit-bench -- qwen.q4km.gguf`: **18.92 tok/s, 1 B/token, load 0.7 s, steady working set 259 MB**
+(36L d=2048, logits finite). Takeaways: (1) **no decode regression** — 18.9 ≈ the 19.5 recorded same-state
+(thermal noise); the MoE/tokenizer work didn't touch the dense hot path. (2) The zero-alloc contract and
+the ~1.45× speed gap to llama.cpp (27.5) both hold — attention-fusion remains the only identified speed
+lever. (3) **The RAM story flipped — now measured apples-to-apples.** Restored the LLamaSharp `llama` mode in
+`overfit-bench` (NuGet 0.27.0 + CPU backend) and measured BOTH via `Process.WorkingSet64` at the same two
+lifecycle points on the same file:
+
+| | Overfit | llama.cpp (LLamaSharp 0.27.0) |
+|---|---|---|
+| decode | 18.2 tok/s | 28.98 tok/s (**~1.6× gap**, holds) |
+| working set, after load | 259 MB | 2626 MB |
+| **working set, after decode** | **2037 MB** | **3203 MB** |
+| load | 0.7 s | 1.2 s |
+
+⚠ Honesty correction: the flashy "259 MB" is lazy-mmap **before pages are touched** — after a real decode
+the weight pages page in and Overfit's working set rises to **2037 MB**. THAT is the fair "RAM to actually
+run" number. Measured identically, Overfit uses **~1.16 GB (~36 %) LESS working set than llama.cpp**
+(2037 vs 3203) — which *flips* the old "RAM parity (3.2 vs 3.2)" finding into a real win (mmap +
+quantized-embedding-lookup did it, both landed 2026-05-25 after that parity measurement). Net standing vs
+llama.cpp same-file, same-measurement: **Overfit −36 % working set, +faster load, 1 B/token; −1.6× decode
+speed** (attention-fusion remains the only speed lever). The bench now keeps both modes:
+`overfit-bench -- overfit|llama qwen.q4km.gguf`.
 
 **Remaining (separate tracks, not gated on this):**
 - Make decode further bandwidth-bound (resume-point option D, 1st lever done):

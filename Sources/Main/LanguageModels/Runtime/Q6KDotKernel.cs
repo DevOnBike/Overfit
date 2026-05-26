@@ -390,6 +390,139 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             public int SuperBlocksPerRow;
         }
 
+        /// <summary>
+        /// Batched Q6_K projection: <paramref name="rows"/> activation rows × one weight matrix — the
+        /// prefill counterpart of <see cref="ProjectParallel"/>. Each row is quantized to Q8_K once;
+        /// the output loop is split across <c>OverfitParallelFor</c> with the <b>rows loop innermost</b>,
+        /// so each weight output row's super-blocks are read from DRAM once and reused (cache-hot) across
+        /// all <paramref name="rows"/> dots — cutting weight byte-traffic ~<paramref name="rows"/>× vs
+        /// N× single-token <see cref="Project"/>. Bit-identical to N× <see cref="Project"/>.
+        /// </summary>
+        public static void ProjectBatched(
+            ReadOnlySpan<float> input,
+            int rows,
+            Q6KWeight weight,
+            ReadOnlySpan<float> bias,
+            Span<float> output,
+            Span<sbyte> activationQuants,
+            Span<float> activationScales,
+            Span<short> activationBsums)
+        {
+            ArgumentNullException.ThrowIfNull(weight);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rows);
+
+            var inputSize = weight.InputSize;
+            var outputSize = weight.OutputSize;
+            var superBlocksPerRow = weight.SuperBlocksPerRow;
+            var bsumsPerRow = superBlocksPerRow * GroupsPerSuperBlock;
+
+            if (input.Length < (long)rows * inputSize)
+            {
+                throw new ArgumentException("Input span is smaller than rows * inputSize.", nameof(input));
+            }
+            if (output.Length < (long)rows * outputSize)
+            {
+                throw new ArgumentException("Output span is smaller than rows * outputSize.", nameof(output));
+            }
+            if (!bias.IsEmpty && bias.Length < outputSize)
+            {
+                throw new ArgumentException("Bias span is smaller than outputSize.", nameof(bias));
+            }
+            if (activationQuants.Length < (long)rows * inputSize
+                || activationScales.Length < (long)rows * superBlocksPerRow
+                || activationBsums.Length < (long)rows * bsumsPerRow)
+            {
+                throw new ArgumentException("Activation quantization scratch is too small for rows.");
+            }
+
+            for (var n = 0; n < rows; n++)
+            {
+                QuantizeActivationQ8K(
+                    input.Slice(n * inputSize, inputSize),
+                    activationQuants.Slice(n * inputSize, inputSize),
+                    activationScales.Slice(n * superBlocksPerRow, superBlocksPerRow),
+                    activationBsums.Slice(n * bsumsPerRow, bsumsPerRow));
+            }
+
+            fixed (byte* blocksPtr = weight.BlockSpan)
+            fixed (sbyte* actQuants = activationQuants)
+            fixed (float* actScales = activationScales)
+            fixed (short* actBsums = activationBsums)
+            fixed (float* biasPtr = bias)
+            fixed (float* outputPtr = output)
+            {
+                var context = new Q6KBatchedContext
+                {
+                    Blocks = blocksPtr,
+                    ActivationQuants = actQuants,
+                    ActivationScales = actScales,
+                    ActivationBsums = actBsums,
+                    Bias = biasPtr,
+                    BiasLength = bias.Length,
+                    Output = outputPtr,
+                    SuperBlocksPerRow = superBlocksPerRow,
+                    InputSize = inputSize,
+                    OutputSize = outputSize,
+                    BsumsPerRow = bsumsPerRow,
+                    Rows = rows,
+                };
+
+                OverfitParallelFor.For(0, outputSize, &ProjectBatchedChunk, &context);
+            }
+        }
+
+        /// <summary>Worker for <see cref="ProjectBatched"/> — a band of output cols, rows innermost.</summary>
+        private static void ProjectBatchedChunk(int chunkStart, int chunkEnd, void* context)
+        {
+            ref var ctx = ref Unsafe.AsRef<Q6KBatchedContext>(context);
+            var superBlocksPerRow = ctx.SuperBlocksPerRow;
+
+            for (var o = chunkStart; o < chunkEnd; o++)
+            {
+                var rowBase = (long)o * superBlocksPerRow * Q6KWeight.SuperBlockBytes;
+                var biasO = ctx.BiasLength == 0 ? 0f : ctx.Bias[o];
+
+                for (var n = 0; n < ctx.Rows; n++)
+                {
+                    var actQBase = (long)n * ctx.InputSize;
+                    var actSBase = (long)n * superBlocksPerRow;
+                    var actBBase = (long)n * ctx.BsumsPerRow;
+
+                    var sum = 0f;
+                    for (var sb = 0; sb < superBlocksPerRow; sb++)
+                    {
+                        var block = new ReadOnlySpan<byte>(
+                            ctx.Blocks + rowBase + (long)sb * Q6KWeight.SuperBlockBytes,
+                            Q6KWeight.SuperBlockBytes);
+                        var q8 = new ReadOnlySpan<sbyte>(
+                            ctx.ActivationQuants + actQBase + sb * SuperBlockElements, SuperBlockElements);
+                        var bsums = new ReadOnlySpan<short>(
+                            ctx.ActivationBsums + actBBase + sb * GroupsPerSuperBlock, GroupsPerSuperBlock);
+
+                        sum += Dot(block, q8, ctx.ActivationScales[actSBase + sb], bsums);
+                    }
+
+                    ctx.Output[(long)n * ctx.OutputSize + o] = biasO + sum;
+                }
+            }
+        }
+
+        private struct Q6KBatchedContext
+        {
+            public byte* Blocks;
+            public sbyte* ActivationQuants;
+            public float* ActivationScales;
+            public short* ActivationBsums;
+            public float* Bias;
+            public int BiasLength;
+            public float* Output;
+            public int SuperBlocksPerRow;
+            public int InputSize;
+            public int OutputSize;
+            public int BsumsPerRow;
+            public int Rows;
+        }
+
         private static void ValidateProjectArguments(
             ReadOnlySpan<float> input,
             ReadOnlySpan<float> bias,

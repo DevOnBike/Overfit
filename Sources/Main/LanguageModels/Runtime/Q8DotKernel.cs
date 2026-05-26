@@ -340,6 +340,125 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         }
 
         /// <summary>
+        /// Batched quantized projection: <paramref name="rows"/> activation rows × one weight matrix,
+        /// the prefill counterpart of <see cref="ProjectParallel"/>. Each row's activation is quantized
+        /// once into the caller-owned scratch; then the output loop is split across
+        /// <c>OverfitParallelFor</c> with the <b>rows loop innermost</b>, so each weight row is read from
+        /// DRAM once and reused (hot in cache) across all <paramref name="rows"/> dots — cutting weight
+        /// byte-traffic ~<paramref name="rows"/>× vs looping single-token <see cref="Project"/> N times
+        /// (the prefill is weight-bandwidth-bound). Bit-identical to N× <see cref="Project"/>.
+        /// </summary>
+        public static void ProjectBatched(
+            ReadOnlySpan<float> input,
+            int rows,
+            Q8Weight weight,
+            ReadOnlySpan<float> bias,
+            Span<float> output,
+            Span<sbyte> inputQuants,
+            Span<float> inputScales)
+        {
+            ArgumentNullException.ThrowIfNull(weight);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rows);
+
+            var inputSize = weight.InputSize;
+            var outputSize = weight.OutputSize;
+            var blocksPerRow = inputSize / BlockSize;
+
+            if (input.Length < (long)rows * inputSize)
+            {
+                throw new ArgumentException("Input span is smaller than rows * inputSize.", nameof(input));
+            }
+            if (output.Length < (long)rows * outputSize)
+            {
+                throw new ArgumentException("Output span is smaller than rows * outputSize.", nameof(output));
+            }
+            if (!bias.IsEmpty && bias.Length < outputSize)
+            {
+                throw new ArgumentException("Bias span is smaller than outputSize.", nameof(bias));
+            }
+            if (inputQuants.Length < (long)rows * inputSize || inputScales.Length < (long)rows * blocksPerRow)
+            {
+                throw new ArgumentException("Input quantization scratch is too small for rows.");
+            }
+
+            // Quantize every activation row once — read-only for every worker.
+            for (var n = 0; n < rows; n++)
+            {
+                Quantize(
+                    input.Slice(n * inputSize, inputSize),
+                    inputQuants.Slice(n * inputSize, inputSize),
+                    inputScales.Slice(n * blocksPerRow, blocksPerRow));
+            }
+
+            fixed (sbyte* weightQuants = weight.Quants)
+            fixed (float* weightScales = weight.Scales)
+            fixed (sbyte* inQuants = inputQuants)
+            fixed (float* inScales = inputScales)
+            fixed (float* biasPtr = bias)
+            fixed (float* outputPtr = output)
+            {
+                var context = new Q8BatchedContext
+                {
+                    WeightQuants = weightQuants,
+                    WeightScales = weightScales,
+                    InputQuants = inQuants,
+                    InputScales = inScales,
+                    Bias = biasPtr,
+                    BiasLength = bias.Length,
+                    Output = outputPtr,
+                    InputSize = inputSize,
+                    OutputSize = outputSize,
+                    BlocksPerRow = blocksPerRow,
+                    Rows = rows,
+                };
+
+                OverfitParallelFor.For(0, outputSize, &ProjectBatchedChunk, &context);
+            }
+        }
+
+        /// <summary>Worker for <see cref="ProjectBatched"/> — a band of output cols, rows innermost.</summary>
+        private static void ProjectBatchedChunk(int chunkStart, int chunkEnd, void* context)
+        {
+            ref var ctx = ref Unsafe.AsRef<Q8BatchedContext>(context);
+
+            for (var o = chunkStart; o < chunkEnd; o++)
+            {
+                // Weight row read once here, reused (cache-hot) across every activation row below.
+                var rowQuants = new ReadOnlySpan<sbyte>(
+                    ctx.WeightQuants + (long)o * ctx.InputSize, ctx.InputSize);
+                var rowScales = new ReadOnlySpan<float>(
+                    ctx.WeightScales + (long)o * ctx.BlocksPerRow, ctx.BlocksPerRow);
+                var biasO = ctx.BiasLength == 0 ? 0f : ctx.Bias[o];
+
+                for (var n = 0; n < ctx.Rows; n++)
+                {
+                    var actQuants = new ReadOnlySpan<sbyte>(
+                        ctx.InputQuants + (long)n * ctx.InputSize, ctx.InputSize);
+                    var actScales = new ReadOnlySpan<float>(
+                        ctx.InputScales + (long)n * ctx.BlocksPerRow, ctx.BlocksPerRow);
+
+                    var dot = Dot(rowQuants, rowScales, actQuants, actScales, ctx.InputSize);
+                    ctx.Output[(long)n * ctx.OutputSize + o] = biasO + dot;
+                }
+            }
+        }
+
+        private struct Q8BatchedContext
+        {
+            public sbyte* WeightQuants;
+            public float* WeightScales;
+            public sbyte* InputQuants;
+            public float* InputScales;
+            public float* Bias;
+            public int BiasLength;
+            public float* Output;
+            public int InputSize;
+            public int OutputSize;
+            public int BlocksPerRow;
+            public int Rows;
+        }
+
+        /// <summary>
         /// <c>Σ a[i]·b[i]</c> over one 32-lane block as INT32. The AVX2 path uses
         /// <c>vpmaddubsw</c> (unsigned×signed) reached via the <c>vpsignb</c>
         /// trick — <c>|a|·sign(b,a) == a·b</c> elementwise — then <c>vpmaddwd</c>
