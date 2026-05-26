@@ -128,29 +128,28 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
                 WeightDecay = WeightDecay
             };
 
-            var workers = new WorkerState[workerCount];
+            // Turnkey data-parallel: the session builds the replicas (model + graph + params), wires the
+            // trainer, and broadcasts the master weights into every replica. We keep only the
+            // task-specific per-replica batch buffers + RNG.
+            using var session = new DataParallelSession<GPT1Model>(
+                masterParameters,
+                workerCount,
+                modelFactory: _ =>
+                {
+                    var replicaModel = new GPT1Model(config);
+                    replicaModel.Train();
+                    return replicaModel;
+                },
+                parameterSelector: m => m.TrainableParameters(),
+                arenaElementsPerReplica: ArenaSizePerWorker);
 
-            try
+            var batches = new WorkerBatch[workerCount];
+            for (var i = 0; i < workerCount; i++)
             {
-                for (var i = 0; i < workers.Length; i++)
-                {
-                    workers[i] = new WorkerState(
-                        workerIndex: i,
-                        config: config,
-                        localBatchSize: localBatchSize,
-                        seqLen: SeqLen,
-                        arenaSize: ArenaSizePerWorker,
-                        rngSeed: 42 + i * 997);
-                }
+                batches[i] = new WorkerBatch(localBatchSize, SeqLen, rngSeed: 42 + i * 997);
+            }
 
-                var workerParameterSets = new IReadOnlyList<Parameter>[workers.Length];
-                for (var i = 0; i < workers.Length; i++)
-                {
-                    workerParameterSets[i] = workers[i].Parameters;
-                }
-
-                var trainer = new DataParallelTrainer(masterParameters, workerParameterSets);
-                trainer.BroadcastParameters();
+            {
 
                 _output.WriteLine("=== Overfit TinyShakespeare Experimental Data-Parallel Training Demo ===");
                 _output.WriteLine($"Corpus: {text.Length:N0} chars");
@@ -184,11 +183,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
 
                     optimizer.LearningRate = lr;
 
-                    // The public data-parallel API now owns the all-reduce, grad-norm clip, optimizer
+                    // The session (over its trainer) owns the all-reduce, grad-norm clip, optimizer
                     // step, and weight broadcast; the caller supplies only the per-replica training body.
-                    var avgLoss = trainer.Step(
+                    var avgLoss = session.Step(
                         optimizer,
-                        workerIndex => TrainWorkerStep(workers[workerIndex], allIds),
+                        workerIndex => TrainWorkerStep(session.Replicas[workerIndex], batches[workerIndex], allIds),
                         MaxGradNorm);
 
                     if (step == 0)
@@ -256,13 +255,6 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
                     lastLoss < firstLoss,
                     $"Loss did not go down: {firstLoss:F4} -> {lastLoss:F4}.");
             }
-            finally
-            {
-                foreach (var worker in workers)
-                {
-                    worker?.Dispose();
-                }
-            }
         }
 
         private static GPT1Config CreateDemoConfig(int vocabSize)
@@ -281,36 +273,37 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
         }
 
         private static float TrainWorkerStep(
-            WorkerState worker,
+            DataParallelReplica<GPT1Model> replica,
+            WorkerBatch batch,
             int[] corpus)
         {
             SampleBatch(
                 corpus,
-                worker.SeqLen,
-                worker.LocalBatchSize,
-                worker.Rng,
-                worker.InputIds,
-                worker.TargetIds);
+                batch.SeqLen,
+                batch.LocalBatchSize,
+                batch.Rng,
+                batch.InputIds,
+                batch.TargetIds);
 
-            ClearGradients(worker.Parameters);
+            ClearGradients(replica.Parameters);
 
-            worker.Graph.Reset();
-            worker.Model.InvalidateAllCaches();
+            replica.Graph.Reset();
+            replica.Model.InvalidateAllCaches();
 
-            var logits = worker.Model.Forward(
-                worker.Graph,
-                worker.InputIds,
-                worker.LocalBatchSize,
-                worker.SeqLen);
+            var logits = replica.Model.Forward(
+                replica.Graph,
+                batch.InputIds,
+                batch.LocalBatchSize,
+                batch.SeqLen);
 
             var loss = ComputeLossAndSeedGradSequential(
                 logits,
-                worker.TargetIds,
-                worker.SeqLen,
-                worker.LocalBatchSize,
-                worker.Model.Config.VocabSize);
+                batch.TargetIds,
+                batch.SeqLen,
+                batch.LocalBatchSize,
+                replica.Model.Config.VocabSize);
 
-            worker.Graph.BackwardFromGrad(logits);
+            replica.Graph.BackwardFromGrad(logits);
             logits.Dispose();
 
             return loss;
@@ -477,59 +470,28 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
                 : defaultValue;
         }
 
-        private sealed class WorkerState : IDisposable
+        // Per-replica task-specific scratch (the model + graph + params now live in the
+        // DataParallelSession's replica). Holds only the batch buffers + RNG.
+        private sealed class WorkerBatch
         {
-            public WorkerState(
-                int workerIndex,
-                GPT1Config config,
-                int localBatchSize,
-                int seqLen,
-                int arenaSize,
-                int rngSeed)
+            public WorkerBatch(int localBatchSize, int seqLen, int rngSeed)
             {
-                WorkerIndex = workerIndex;
                 LocalBatchSize = localBatchSize;
                 SeqLen = seqLen;
-
-                Model = new GPT1Model(config);
-                Model.Train();
-
-                Graph = new ComputationGraph(arenaSize);
-
-                Parameters = Model
-                    .TrainableParameters()
-                    .ToList();
-
                 InputIds = new int[localBatchSize * seqLen];
                 TargetIds = new int[localBatchSize * seqLen];
                 Rng = new Random(rngSeed);
             }
 
-            public int WorkerIndex { get; }
-
             public int LocalBatchSize { get; }
 
             public int SeqLen { get; }
-
-            public GPT1Model Model { get; }
-
-            public ComputationGraph Graph { get; }
-
-            public List<Parameter> Parameters { get; }
 
             public int[] InputIds { get; }
 
             public int[] TargetIds { get; }
 
             public Random Rng { get; }
-
-            public float Loss { get; set; }
-
-            public void Dispose()
-            {
-                Graph.Dispose();
-                Model.Dispose();
-            }
         }
     }
 }
