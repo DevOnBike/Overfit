@@ -5,38 +5,62 @@
 
 using System.Collections.Generic;
 using System.Text;
+using System.Text.RegularExpressions;
 using DevOnBike.Overfit.LanguageModels.Loading;
 
 namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 {
     /// <summary>
     /// Tokenizer reconstructed from the vocabulary embedded in a GGUF file (the
-    /// <c>tokenizer.ggml.*</c> metadata), so Llama-family models (Llama-2, Mistral, Mixtral) can be
-    /// tokenized with no side-loaded <c>tokenizer.json</c> / <c>tokenizer.model</c>.
-    ///
-    /// Implements the <b>SentencePiece (SPM)</b> path (<c>tokenizer.ggml.model == "llama"</c>):
-    /// whitespace is escaped to <c>▁</c> (U+2581), encoding is the score-driven greedy bigram merge
-    /// from llama.cpp's <c>llm_tokenizer_spm</c>, and out-of-vocabulary characters fall back to the
-    /// <c>&lt;0xNN&gt;</c> byte tokens. The byte-level BPE path (<c>model == "gpt2"</c>, used by
-    /// Qwen / Llama-3) is a follow-on — those models already have a native
-    /// <see cref="QwenTokenizer"/> / <see cref="HuggingFaceBpeTokenizer"/>.
+    /// <c>tokenizer.ggml.*</c> metadata), so models can be tokenized with no side-loaded
+    /// <c>tokenizer.json</c> / <c>tokenizer.model</c>. Two algorithms, dispatched on
+    /// <c>tokenizer.ggml.model</c>:
+    /// <list type="bullet">
+    /// <item><b>SentencePiece (SPM)</b> — <c>model == "llama"</c> (Llama-2, Mistral, Mixtral):
+    /// whitespace escaped to <c>▁</c>, the score-driven greedy bigram merge from llama.cpp's
+    /// <c>llm_tokenizer_spm</c>, and <c>&lt;0xNN&gt;</c> byte fallback for OOV chars.</item>
+    /// <item><b>Byte-level BPE</b> — <c>model == "gpt2"</c> (Qwen, Llama-3, GPT-2): bytes mapped to
+    /// the GPT-2 <see cref="ByteLevelAlphabet"/>, pre-tokenized by a regex chosen from
+    /// <c>tokenizer.ggml.pre</c>, then merged by merge rank.</item>
+    /// </list>
     /// </summary>
     public sealed class GgufTokenizer
     {
         // GGUF tokenizer.ggml.token_type values (llama_token_type).
         private const int TypeControl = 3;
+        private const int TypeUserDefined = 4;
         private const int TypeByte = 6;
 
         private const char SpaceMarker = '▁';   // ▁
 
+        // GPT-2 ByteLevel default split.
+        private const string Gpt2SplitPattern =
+            @"'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+";
+
+        // cl100k / tiktoken split shared by qwen2 / llama-bpe / most modern byte-level BPE.
+        private const string Cl100kSplitPattern =
+            @"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+";
+
+        private readonly string _model;       // "llama" (SPM) or "gpt2" (byte-level BPE)
         private readonly string[] _tokens;
         private readonly int[] _tokenTypes;
         private readonly float[] _scores;
         private readonly Dictionary<string, int> _tokenToId;
-        private readonly int[] _idToByte;             // byte value (0..255) for <0xNN> tokens, else -1
-        private readonly int[] _byteToId;             // [256] byte → <0xNN> token id, else -1
+        private readonly HashSet<int> _specialIds;
         private readonly bool _addSpacePrefix;
 
+        // SPM byte fallback.
+        private readonly int[] _idToByte;             // byte value (0..255) for <0xNN> tokens, else -1
+        private readonly int[] _byteToId;             // [256] byte → <0xNN> token id, else -1
+
+        // Byte-level BPE.
+        private readonly Dictionary<(int, int), int>? _mergeRanks;
+        private readonly Regex? _bpeSplit;
+        private readonly Regex? _bpeSpecialSplit;
+        private readonly char[]? _byteToChar;
+        private readonly byte[]? _charToByte;
+
+        public bool IsByteLevelBpe => _model == "gpt2";
         public int VocabSize => _tokens.Length;
         public int BosId { get; }
         public int EosId { get; }
@@ -44,9 +68,10 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
         public bool AddBosByDefault { get; }
 
         private GgufTokenizer(
-            string[] tokens, int[] tokenTypes, float[] scores,
-            int bos, int eos, int unk, bool addBos, bool addSpacePrefix)
+            string model, string[] tokens, int[] tokenTypes, float[] scores, string[] merges,
+            int bos, int eos, int unk, bool addBos, bool addSpacePrefix, string preType)
         {
+            _model = model;
             _tokens = tokens;
             _tokenTypes = tokenTypes;
             _scores = scores;
@@ -59,33 +84,41 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             _tokenToId = new Dictionary<string, int>(tokens.Length);
             _idToByte = new int[tokens.Length];
             _byteToId = new int[256];
+            _specialIds = [];
             for (var b = 0; b < 256; b++) { _byteToId[b] = -1; }
 
             for (var id = 0; id < tokens.Length; id++)
             {
-                // First-wins on duplicate strings (matches llama.cpp's lowest-id preference).
-                _tokenToId.TryAdd(tokens[id], id);
+                _tokenToId.TryAdd(tokens[id], id);   // first-wins (lowest id), matches llama.cpp
 
                 var byteValue = ParseByteToken(tokens[id], tokenTypes[id]);
                 _idToByte[id] = byteValue;
                 if (byteValue >= 0) { _byteToId[byteValue] = id; }
+
+                if (tokenTypes[id] is TypeControl or TypeUserDefined) { _specialIds.Add(id); }
+            }
+
+            if (_model == "gpt2")
+            {
+                _byteToChar = ByteLevelAlphabet.BuildByteToChar();
+                _charToByte = ByteLevelAlphabet.BuildCharToByte();
+                _mergeRanks = BuildMergeRanks(merges);
+                _bpeSplit = new Regex(SelectBpePattern(preType), RegexOptions.Compiled);
+                _bpeSpecialSplit = BuildSpecialSplit();
             }
         }
 
-        /// <summary>
-        /// Builds a tokenizer from an open <see cref="GgufReader"/>. Throws
-        /// <see cref="NotSupportedException"/> for non-SPM vocabularies (e.g. <c>gpt2</c> BPE).
-        /// </summary>
+        /// <summary>Builds a tokenizer from an open <see cref="GgufReader"/>.</summary>
         public static GgufTokenizer FromGguf(GgufReader reader)
         {
             ArgumentNullException.ThrowIfNull(reader);
 
             var model = reader.GetMeta("tokenizer.ggml.model", "");
-            if (model != "llama")
+            if (model != "llama" && model != "gpt2")
             {
                 throw new NotSupportedException(
-                    $"GGUF tokenizer model '{model}' is not supported (only SentencePiece 'llama'); " +
-                    "gpt2/BPE vocabularies use QwenTokenizer / HuggingFaceBpeTokenizer.");
+                    $"GGUF tokenizer model '{model}' is not supported (only SentencePiece 'llama' and " +
+                    "byte-level BPE 'gpt2').");
             }
 
             var tokens = reader.GetMetaStringArray("tokenizer.ggml.tokens");
@@ -95,14 +128,21 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             var scores = reader.HasArray("tokenizer.ggml.scores")
                 ? reader.GetMetaFloatArray("tokenizer.ggml.scores")
                 : new float[tokens.Length];
+            var merges = reader.HasArray("tokenizer.ggml.merges")
+                ? reader.GetMetaStringArray("tokenizer.ggml.merges")
+                : [];
 
-            var bos = reader.GetMeta("tokenizer.ggml.bos_token_id", 1);
+            var isBpe = model == "gpt2";
+            var bos = reader.GetMeta("tokenizer.ggml.bos_token_id", isBpe ? -1 : 1);
             var eos = reader.GetMeta("tokenizer.ggml.eos_token_id", 2);
             var unk = reader.GetMeta("tokenizer.ggml.unknown_token_id", 0);
-            var addBos = reader.GetMeta("tokenizer.ggml.add_bos_token", true);
-            var addSpacePrefix = reader.GetMeta("tokenizer.ggml.add_space_prefix", true);
+            // SPM adds BOS + a leading space by default; byte-level BPE (Qwen/Llama-3) does neither.
+            var addBos = reader.GetMeta("tokenizer.ggml.add_bos_token", !isBpe);
+            var addSpacePrefix = reader.GetMeta("tokenizer.ggml.add_space_prefix", !isBpe);
+            var preType = reader.GetMeta("tokenizer.ggml.pre", "default");
 
-            return new GgufTokenizer(tokens, tokenTypes, scores, bos, eos, unk, addBos, addSpacePrefix);
+            return new GgufTokenizer(model, tokens, tokenTypes, scores, merges, bos, eos, unk,
+                addBos, addSpacePrefix, preType);
         }
 
         /// <summary>Convenience: open the GGUF and build the tokenizer (does not retain the reader).</summary>
@@ -112,58 +152,76 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             return FromGguf(reader);
         }
 
-        /// <summary>Test-only factory — builds a tokenizer from an in-memory SPM vocab (no GGUF file).</summary>
+        /// <summary>Test-only factory — builds an SPM tokenizer from an in-memory vocab (no GGUF file).</summary>
         internal static GgufTokenizer CreateForTest(
             string[] tokens, int[] tokenTypes, float[] scores,
             int bos, int eos, int unk, bool addBos, bool addSpacePrefix)
-            => new(tokens, tokenTypes, scores, bos, eos, unk, addBos, addSpacePrefix);
+            => new("llama", tokens, tokenTypes, scores, [], bos, eos, unk, addBos, addSpacePrefix, "default");
+
+        /// <summary>Test-only factory — builds a byte-level BPE tokenizer from an in-memory vocab.</summary>
+        internal static GgufTokenizer CreateBpeForTest(
+            string[] tokens, int[] tokenTypes, string[] merges,
+            int bos, int eos, int unk, bool addBos, string preType)
+            => new("gpt2", tokens, tokenTypes, new float[tokens.Length], merges, bos, eos, unk,
+                addBos, addSpacePrefix: false, preType);
 
         /// <summary>
-        /// Encodes <paramref name="text"/> to token ids using the SPM bigram-merge algorithm.
-        /// <paramref name="addBos"/> defaults to the file's <c>add_bos_token</c> flag.
+        /// Encodes <paramref name="text"/> to token ids. <paramref name="addBos"/> defaults to the
+        /// file's <c>add_bos_token</c> flag.
         /// </summary>
         public int[] Encode(string text, bool? addBos = null)
         {
             ArgumentNullException.ThrowIfNull(text);
 
             var output = new List<int>(text.Length + 1);
-            if (addBos ?? AddBosByDefault) { output.Add(BosId); }
+            if ((addBos ?? AddBosByDefault) && BosId >= 0) { output.Add(BosId); }
 
-            // Whitespace escaping: optional leading space (SPM add_space_prefix), then ' ' → '▁'.
-            var prepared = (_addSpacePrefix ? " " : "") + text;
-            prepared = prepared.Replace(' ', SpaceMarker);
-            if (prepared.Length == 0) { return output.ToArray(); }
+            if (_model == "gpt2") { BpeEncode(text, output); }
+            else { SpmEncode(text, output); }
 
-            SpmMerge(prepared, output);
             return output.ToArray();
         }
 
-        /// <summary>Decodes token ids back to text (byte tokens reassembled, <c>▁</c> → space).</summary>
+        /// <summary>Decodes token ids back to text.</summary>
         public string Decode(ReadOnlySpan<int> ids)
         {
+            var sb = new StringBuilder();
             var bytes = new List<byte>(ids.Length * 4);
+
+            void Flush()
+            {
+                if (bytes.Count > 0) { sb.Append(Encoding.UTF8.GetString(bytes.ToArray())); bytes.Clear(); }
+            }
+
             for (var i = 0; i < ids.Length; i++)
             {
                 var id = ids[i];
                 if ((uint)id >= (uint)_tokens.Length) { continue; }
 
                 var type = _tokenTypes[id];
-                if (type == TypeControl) { continue; }   // <s> / </s> / other specials — drop from text
+                if (type == TypeControl) { continue; }                 // <s> / </s> / specials — drop from text
+                if (type == TypeUserDefined) { Flush(); sb.Append(_tokens[id]); continue; }   // literal special
 
-                if (_idToByte[id] >= 0)
+                if (_model == "gpt2")
+                {
+                    var piece = _tokens[id];   // ByteLevel: each char maps back to one raw byte
+                    for (var c = 0; c < piece.Length; c++) { bytes.Add(_charToByte![piece[c]]); }
+                }
+                else if (_idToByte[id] >= 0)
                 {
                     bytes.Add((byte)_idToByte[id]);
-                    continue;
                 }
-
-                var piece = _tokens[id].Replace(SpaceMarker, ' ');
-                var pieceBytes = Encoding.UTF8.GetBytes(piece);
-                for (var b = 0; b < pieceBytes.Length; b++) { bytes.Add(pieceBytes[b]); }
+                else
+                {
+                    var pieceBytes = Encoding.UTF8.GetBytes(_tokens[id].Replace(SpaceMarker, ' '));
+                    for (var b = 0; b < pieceBytes.Length; b++) { bytes.Add(pieceBytes[b]); }
+                }
             }
 
-            var text = Encoding.UTF8.GetString(bytes.ToArray());
+            Flush();
+            var text = sb.ToString();
             // SPM added a leading space at encode time — strip one to round-trip.
-            if (_addSpacePrefix && text.Length > 0 && text[0] == ' ') { text = text[1..]; }
+            if (_model != "gpt2" && _addSpacePrefix && text.Length > 0 && text[0] == ' ') { text = text[1..]; }
             return text;
         }
 
@@ -171,12 +229,18 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
         public string DecodeToken(int id)
         {
             if ((uint)id >= (uint)_tokens.Length) { return ""; }
-            if (_tokenTypes[id] == TypeControl) { return ""; }
-            if (_idToByte[id] >= 0) { return ""; }   // raw byte — only meaningful in a sequence
-            return _tokens[id].Replace(SpaceMarker, ' ');
+            return Decode(new[] { id });
         }
 
-        // ── SPM bigram merge (mirrors llama.cpp llm_tokenizer_spm) ───────────────
+        // ── SPM (SentencePiece) ──────────────────────────────────────────────
+
+        private void SpmEncode(string text, List<int> output)
+        {
+            var prepared = (_addSpacePrefix ? " " : "") + text;
+            prepared = prepared.Replace(' ', SpaceMarker);
+            if (prepared.Length == 0) { return; }
+            SpmMerge(prepared, output);
+        }
 
         private void SpmMerge(string text, List<int> output)
         {
@@ -192,12 +256,11 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                 starts.Add(i);
                 lens.Add(charLen);
                 prev.Add(starts.Count - 2);
-                next.Add(-1);   // patched below
+                next.Add(-1);
                 i += charLen;
             }
             for (var s = 0; s < next.Count; s++) { next[s] = s + 1 < next.Count ? s + 1 : -1; }
 
-            // Max-heap by (score desc, left asc): top is the best bigram to merge next.
             var queue = new PriorityQueue<(int left, int right, int size), (float score, int left)>(BigramComparer.Instance);
 
             void TryAddBigram(int left, int right)
@@ -215,12 +278,8 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             while (queue.Count > 0)
             {
                 var (left, right, size) = queue.Dequeue();
-
-                // Skip stale entries: a symbol merged away has len 0, or the pair's combined size
-                // no longer matches (one side already grew/shrank).
                 if (lens[left] == 0 || lens[right] == 0 || lens[left] + lens[right] != size) { continue; }
 
-                // Merge right into left.
                 lens[left] += lens[right];
                 lens[right] = 0;
                 next[left] = next[right];
@@ -230,15 +289,14 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                 TryAddBigram(left, next[left]);
             }
 
-            // Emit: walk the surviving symbols left→right, resolving each to an id or byte fallback.
             for (var i = 0; i >= 0; i = next[i])
             {
                 if (lens[i] == 0) { continue; }
-                Resegment(text.Substring(starts[i], lens[i]), output);
+                SpmResegment(text.Substring(starts[i], lens[i]), output);
             }
         }
 
-        private void Resegment(string piece, List<int> output)
+        private void SpmResegment(string piece, List<int> output)
         {
             if (_tokenToId.TryGetValue(piece, out var id))
             {
@@ -246,7 +304,6 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                 return;
             }
 
-            // Byte fallback: emit one <0xNN> token per UTF-8 byte; <unk> if a byte token is missing.
             var bytes = Encoding.UTF8.GetBytes(piece);
             for (var b = 0; b < bytes.Length; b++)
             {
@@ -255,9 +312,116 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             }
         }
 
+        // ── Byte-level BPE (GPT-2) ───────────────────────────────────────────
+
+        private void BpeEncode(string text, List<int> output)
+        {
+            if (text.Length == 0) { return; }
+
+            foreach (var (piece, isSpecial, specialId) in SplitOnSpecialTokens(text))
+            {
+                if (isSpecial)
+                {
+                    output.Add(specialId);
+                    continue;
+                }
+                foreach (Match m in _bpeSplit!.Matches(piece))
+                {
+                    BpeMerge(m.Value, output);
+                }
+            }
+        }
+
+        private void BpeMerge(string text, List<int> output)
+        {
+            if (text.Length == 0) { return; }
+
+            var utf8 = Encoding.UTF8.GetBytes(text);
+            var ids = new List<int>(utf8.Length);
+            for (var i = 0; i < utf8.Length; i++)
+            {
+                var ch = _byteToChar![utf8[i]].ToString();
+                ids.Add(_tokenToId.TryGetValue(ch, out var id) ? id : UnknownId);
+            }
+
+            while (ids.Count > 1)
+            {
+                var bestRank = int.MaxValue;
+                var bestIndex = -1;
+                for (var i = 0; i < ids.Count - 1; i++)
+                {
+                    if (_mergeRanks!.TryGetValue((ids[i], ids[i + 1]), out var rank) && rank < bestRank)
+                    {
+                        bestRank = rank;
+                        bestIndex = i;
+                    }
+                }
+                if (bestIndex < 0) { break; }
+
+                var merged = _tokens[ids[bestIndex]] + _tokens[ids[bestIndex + 1]];
+                ids[bestIndex] = _tokenToId.TryGetValue(merged, out var mid) ? mid : UnknownId;
+                ids.RemoveAt(bestIndex + 1);
+            }
+
+            for (var i = 0; i < ids.Count; i++) { output.Add(ids[i]); }
+        }
+
+        private List<(string Text, bool IsSpecial, int Id)> SplitOnSpecialTokens(string text)
+        {
+            var result = new List<(string, bool, int)>();
+            if (_bpeSpecialSplit is null) { result.Add((text, false, -1)); return result; }
+
+            var pos = 0;
+            foreach (Match m in _bpeSpecialSplit.Matches(text))
+            {
+                if (m.Index > pos) { result.Add((text[pos..m.Index], false, -1)); }
+                result.Add((m.Value, true, _tokenToId[m.Value]));
+                pos = m.Index + m.Length;
+            }
+            if (pos < text.Length) { result.Add((text[pos..], false, -1)); }
+            return result;
+        }
+
+        private Dictionary<(int, int), int> BuildMergeRanks(string[] merges)
+        {
+            var ranks = new Dictionary<(int, int), int>(merges.Length);
+            var rank = 0;
+            for (var i = 0; i < merges.Length; i++)
+            {
+                var sp = merges[i].IndexOf(' ');
+                if (sp <= 0 || sp >= merges[i].Length - 1) { continue; }
+                var left = merges[i][..sp];
+                var right = merges[i][(sp + 1)..];
+                if (_tokenToId.TryGetValue(left, out var a) && _tokenToId.TryGetValue(right, out var b))
+                {
+                    ranks.TryAdd((a, b), rank++);
+                }
+            }
+            return ranks;
+        }
+
+        private Regex? BuildSpecialSplit()
+        {
+            if (_specialIds.Count == 0) { return null; }
+            var escaped = new List<string>(_specialIds.Count);
+            foreach (var id in _specialIds)
+            {
+                // Only literal, matchable special strings (skip empties / unused placeholders).
+                if (!string.IsNullOrEmpty(_tokens[id])) { escaped.Add(Regex.Escape(_tokens[id])); }
+            }
+            if (escaped.Count == 0) { return null; }
+            return new Regex(string.Join("|", escaped), RegexOptions.Compiled);
+        }
+
+        private static string SelectBpePattern(string preType)
+            => preType is "gpt-2" or "gpt2" or "olmo"
+                ? Gpt2SplitPattern
+                : Cl100kSplitPattern;   // qwen2 / llama-bpe / tekken / default
+
+        // ── Shared helpers ───────────────────────────────────────────────────
+
         private static int ParseByteToken(string token, int tokenType)
         {
-            // Byte tokens are "<0xNN>" with token_type == BYTE.
             if (tokenType != TypeByte) { return -1; }
             if (token.Length != 6 || token[0] != '<' || token[1] != '0' || token[2] != 'x' || token[5] != '>')
             {
@@ -283,7 +447,6 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
             public int Compare((float score, int left) a, (float score, int left) b)
             {
-                // Higher score first; ties broken by smaller left index (llama.cpp ordering).
                 if (a.score != b.score) { return a.score > b.score ? -1 : 1; }
                 return a.left.CompareTo(b.left);
             }

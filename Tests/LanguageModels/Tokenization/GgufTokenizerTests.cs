@@ -107,6 +107,53 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenization
             Assert.Equal("ab", tok.Decode(new[] { 1, IdAb, 2 }));   // <s> ab </s> → "ab"
         }
 
+        // ── Synthetic byte-level BPE (gpt2) ──────────────────────────────────
+
+        private static GgufTokenizer BuildBpe()
+        {
+            // Byte-level alphabet: printable ASCII maps to itself; space → 'Ġ'.
+            // Vocab: 0 a, 1 b, 2 c, 3 Ġ, 4 ab, 5 <eos> (control). One merge: "a b" → ab.
+            var tokens = new[] { "a", "b", "c", "Ġ", "ab", "<eos>" };
+            var types = new[] { 1, 1, 1, 1, 1, 3 };
+            var merges = new[] { "a b" };
+            return GgufTokenizer.CreateBpeForTest(tokens, types, merges,
+                bos: -1, eos: 5, unk: 0, addBos: false, preType: "default");
+        }
+
+        [Fact]
+        public void Bpe_MergesByRank()
+        {
+            var tok = BuildBpe();
+            Assert.True(tok.IsByteLevelBpe);
+            Assert.Equal(new[] { 4 }, tok.Encode("ab"));          // a+b merge → "ab"
+            Assert.Equal(new[] { 4, 2 }, tok.Encode("abc"));      // "ab" then unmergeable "c"
+        }
+
+        [Fact]
+        public void Bpe_SpaceMapsToMarkerByte()
+        {
+            var tok = BuildBpe();
+            Assert.Equal(new[] { 3, 0 }, tok.Encode(" a"));       // ' ' → Ġ(3), 'a'(0)
+        }
+
+        [Fact]
+        public void Bpe_RecognisesSpecialTokens()
+        {
+            var tok = BuildBpe();
+            Assert.Equal(new[] { 0, 5, 1 }, tok.Encode("a<eos>b"));   // <eos> kept whole as its id
+        }
+
+        [Theory]
+        [InlineData("ab")]
+        [InlineData("abc")]
+        [InlineData(" a")]
+        [InlineData("cab")]
+        public void Bpe_RoundTrips(string text)
+        {
+            var tok = BuildBpe();
+            Assert.Equal(text, tok.Decode(tok.Encode(text)));
+        }
+
         // ── Real GGUF vocab (Mixtral SPM) ────────────────────────────────────
 
         [LongFact]
@@ -128,6 +175,54 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenization
             {
                 var ids = tok.Encode(text, addBos: false);
                 Assert.Equal(text, tok.Decode(ids));
+            }
+        }
+
+        // ── Real GGUF vocab (Qwen byte-level BPE) ────────────────────────────
+
+        private const string QwenMoeGguf = @"C:\qwen-moe\Qwen1.5-MoE-A2.7B-Chat.Q8_0.gguf";
+
+        [LongFact]
+        public void RealQwenVocab_BpeRoundTrips()
+        {
+            if (!File.Exists(QwenMoeGguf)) { return; }
+
+            var tok = GgufTokenizer.Load(QwenMoeGguf);
+            Assert.True(tok.IsByteLevelBpe);
+
+            foreach (var text in new[]
+            {
+                "The quick brown fox jumps over the lazy dog.",
+                "Wieża Eiffla stoi w Paryżu.",   // Polish diacritics → multi-byte
+                "  indented\n\tcode()",            // whitespace runs + newline + tab
+                "日本語のテキスト",                  // CJK
+            })
+            {
+                var ids = tok.Encode(text, addBos: false);
+                Assert.Equal(text, tok.Decode(ids));
+            }
+        }
+
+        [LongFact]
+        public void RealQwenVocab_MatchesQwenTokenizer()
+        {
+            // Gold cross-check: the GGUF-embedded vocab must tokenise identically to the validated
+            // tokenizer.json-based QwenTokenizer — when both describe the same Qwen tokenizer.
+            if (!File.Exists(QwenMoeGguf)) { return; }
+            if (!File.Exists(@"C:\qwen3b\tokenizer.json") && !File.Exists(@"C:\qwen3b\vocab.json")) { return; }
+
+            var gguf = GgufTokenizer.Load(QwenMoeGguf);
+            var reference = QwenTokenizer.Load(@"C:\qwen3b");
+            if (gguf.VocabSize != reference.VocabSize) { return; }   // different tokenizer revision
+
+            foreach (var text in new[]
+            {
+                "The capital of France is Paris.",
+                "def fibonacci(n): return n if n < 2 else fibonacci(n-1)+fibonacci(n-2)",
+                "Multi  space\tand\nnewline.",
+            })
+            {
+                Assert.Equal(reference.Encode(text), gguf.Encode(text, addBos: false));
             }
         }
     }

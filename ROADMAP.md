@@ -252,8 +252,16 @@ the north-central part of the country…"*. SPM algorithm unit-tested on a synth
 (`GgufTokenizerTests`: merge preference, byte/multi-byte fallback, space-prefix, BOS, round-trip) +
 real-Mixtral-vocab round-trip (incl. accents + em-dash). The gpt2/byte-level-BPE path throws a clear
 `NotSupportedException` (Qwen/Llama-3 already have native `QwenTokenizer`/`HuggingFaceBpeTokenizer`).
+**GGUF tokenizer gpt2/BPE path — DONE.** `GgufTokenizer` now also handles byte-level BPE
+(`tokenizer.ggml.model == "gpt2"`: Qwen / Llama-3 / GPT-2) — bytes → GPT-2 `ByteLevelAlphabet`
+(extracted as a shared helper, also used by `HuggingFaceBpeTokenizer`), pre-tokenized by a regex
+selected from `tokenizer.ggml.pre` (cl100k for qwen2/llama-bpe, GPT-2 pattern for gpt-2), merged by
+merge rank, with special tokens split out. So **Qwen/Llama-3 now tokenise from the GGUF with no
+side-loaded `tokenizer.json`**. Validated: synthetic BPE invariants (merge rank, space marker,
+special tokens, round-trip) + real Qwen-MoE-vocab round-trip (Polish/CJK/whitespace) + a **gold
+cross-check that `GgufTokenizer` BPE output is byte-identical to the validated `QwenTokenizer`**.
 Remaining (optional follow-ons, NOT blockers): native 5-bit dot kernel (skip the Q5→Q8 widen for a
-tighter working set); gpt2/BPE path in `GgufTokenizer` (so Qwen/Llama-3 also need no side-loaded vocab).
+tighter working set). MoE + GGUF-tokenizer tracks are complete.
 
 **Scope note:** the routed math (the genuinely novel part) is done + tested. The remaining 2b is a
 real integration chunk (3-D expert slicing incl. per-expert Q8_0 de-interleave, shared-expert gate,

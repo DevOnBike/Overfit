@@ -31,8 +31,8 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
         private const string Gpt2SplitPattern =
             @"'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+";
 
-        private static readonly char[] _byteToChar = BuildByteToChar();
-        private static readonly byte[] _charToByte = BuildCharToByte();
+        private static readonly char[] _byteToChar = ByteLevelAlphabet.BuildByteToChar();
+        private static readonly byte[] _charToByte = ByteLevelAlphabet.BuildCharToByte();
 
         private readonly Dictionary<string, int> _vocab;
         private readonly string[] _decoder;
@@ -427,32 +427,5 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             return fallback;
         }
 
-        // ── Byte ↔ char mapping (GPT-2 ByteLevel) ──────────────────────────
-
-        private static char[] BuildByteToChar()
-        {
-            var map = new char[256];
-            for (var b = 0; b < 256; b++)
-            {
-                map[b] = (b >= '!' && b <= '~') || (b >= '¡' && b <= '¬') || (b >= '®' && b <= 'ÿ')
-                    ? (char)b
-                    : (char)0;
-            }
-            var n = 0;
-            for (var b = 0; b < 256; b++)
-            {
-                if (map[b] == (char)0) { map[b] = (char)(256 + n++); }
-            }
-            map[0x20] = 'Ġ';   // space → Ġ
-            return map;
-        }
-
-        private static byte[] BuildCharToByte()
-        {
-            var forward = BuildByteToChar();
-            var reverse = new byte[65536];
-            for (var b = 0; b < 256; b++) { reverse[forward[b]] = (byte)b; }
-            return reverse;
-        }
     }
 }
