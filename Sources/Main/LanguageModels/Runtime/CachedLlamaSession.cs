@@ -259,6 +259,133 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             return token;
         }
 
+        /// <summary>Greedy speculative-decode step (overload of <see cref="GenerateSpeculative(ReadOnlySpan{int}, Span{int}, in SamplingOptions, int, int, int)"/>).</summary>
+        public int GenerateSpeculative(
+            ReadOnlySpan<int> history,
+            Span<int> committed,
+            int maxDraft = 4,
+            int ngramMin = 1,
+            int ngramMax = 3)
+            => GenerateSpeculative(history, committed, SamplingOptions.Greedy, maxDraft, ngramMin, ngramMax);
+
+        /// <summary>
+        /// One <b>sampling-correct speculative-decode</b> step (prompt-lookup, no draft model): drafts the
+        /// next tokens from <paramref name="history"/> via <see cref="PromptLookupDrafter"/> and verifies
+        /// them in ONE batched forward. Each draft is accepted by speculative rejection sampling — accept
+        /// with probability <c>p(draft)</c> under the sampler's target distribution, else resample from the
+        /// renormalised residual <c>norm(max(0, p − e_draft))</c> — so the committed tokens are
+        /// <b>distributed exactly as sampling from the target model directly</b> (greedy is the T→0 case,
+        /// then it is bit-identical to single-token greedy). Commits the accepted prefix plus the
+        /// correction/bonus token (forwarded so the cache + <c>_logits</c> stay consistent) into
+        /// <paramref name="committed"/>; returns the count (≥1, ≤ maxDraft+2). The win is throughput on
+        /// repetitive / structured output (the agentic moat); ~1× on novel text. Requires the batched path
+        /// (RoPE/SwiGLU, non-sliding) — otherwise a plain single-token step.
+        /// </summary>
+        public int GenerateSpeculative(
+            ReadOnlySpan<int> history,
+            Span<int> committed,
+            in SamplingOptions sampling,
+            int maxDraft = 4,
+            int ngramMin = 1,
+            int ngramMax = 3)
+        {
+            ThrowIfDisposed();
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxDraft);
+            if (committed.Length < maxDraft + 2)
+            {
+                throw new ArgumentException("committed buffer must hold at least maxDraft+2 tokens.", nameof(committed));
+            }
+            if (Position == 0)
+            {
+                throw new InvalidOperationException("Session is empty. Call Reset with a prompt first.");
+            }
+
+            var dModel = _config.DModel;
+            var vocab = VocabularySize;
+
+            // Next token from the current (target) distribution — the same draw a normal step would make.
+            var t0 = TokenSampler.Sample(_logits, in sampling, _random, _indexScratch, _scoreScratch);
+
+            var canSpeculate = !_slidingWindow
+                && _config.FfnActivation == FeedForwardActivation.SwiGLU
+                && maxDraft > 0;
+            var dn = 0;
+            Span<int> draft = stackalloc int[maxDraft];
+            if (canSpeculate)
+            {
+                var anchor = new int[history.Length + 1];
+                history.CopyTo(anchor);
+                anchor[^1] = t0;
+                dn = PromptLookupDrafter.Draft(anchor, draft, ngramMin, ngramMax);
+            }
+
+            var batch = 1 + dn;
+            var basePosition = _cache.CurrentLength;
+            if (dn == 0 || basePosition + batch + 1 > _cache.MaxLength)
+            {
+                // No draft (or no room for verify + the bonus forward): a plain single-token step.
+                committed[0] = t0;
+                DecodeToken(t0);
+                return 1;
+            }
+
+            // Embed [t0, draft…] and run ONE batched verify forward → per-row target logits.
+            var hidden = new float[batch * dModel];
+            _embedWeights.DequantizeRow(t0, hidden.AsSpan(0, dModel));
+            for (var j = 0; j < dn; j++)
+            {
+                _embedWeights.DequantizeRow(draft[j], hidden.AsSpan((1 + j) * dModel, dModel));
+            }
+            _cache.Advance(batch);
+
+            var finalNorm = new float[batch * dModel];
+            _stack.PrefillBatchedQuantAllRows(hidden, batch, _weights, _cache, basePosition, finalNorm, _rope);
+
+            // Batched LM head — read the (large) head weights ONCE for all draft rows, else the per-row
+            // re-read cancels the batched stack's saving (measured: 1.01× before this).
+            var verifyLogits = new float[batch * vocab];
+            _stack.ProjectLogitsBatched(finalNorm, batch, _weights, verifyLogits);
+
+            committed[0] = t0;
+            var accepted = 0;
+            var probs = new float[vocab];
+            var residual = new float[vocab];
+            var correction = -1;
+            for (var j = 0; j < dn; j++)
+            {
+                TokenSampler.ComputeProbabilities(
+                    verifyLogits.AsSpan(j * vocab, vocab), in sampling, _indexScratch, _scoreScratch, probs);
+
+                // Speculative rejection sampling: accept draft d w.p. p(d), else resample the residual.
+                var token = SpeculativeSampler.AcceptOrResample(probs, draft[j], _random, residual);
+                if (token == draft[j])
+                {
+                    committed[1 + j] = draft[j];
+                    accepted++;
+                }
+                else
+                {
+                    correction = token;
+                    break;
+                }
+            }
+
+            if (correction < 0)
+            {
+                // All drafts accepted — the bonus token is sampled from the row after the last draft.
+                TokenSampler.ComputeProbabilities(
+                    verifyLogits.AsSpan(dn * vocab, vocab), in sampling, _indexScratch, _scoreScratch, probs);
+                correction = SpeculativeSampler.Sample(probs, _random);
+            }
+
+            // Keep t0 + accepted drafts' K/V (drop rejected drafts), then forward the correction/bonus so
+            // it is cached and _logits reflects the prediction after it (the session invariant).
+            _cache.TruncateTo(basePosition + 1 + accepted);
+            committed[1 + accepted] = correction;
+            DecodeToken(correction);
+            return 2 + accepted;
+        }
+
         /// <summary>
         /// Prefills <paramref name="promptTokens"/> then greedily fills
         /// <paramref name="outputTokens"/> (bounded by <see cref="GenerationOptions.MaxNewTokens"/>),

@@ -443,6 +443,37 @@ responsiveness) and — unlike attention-fusion — does NOT touch the per-head 
   F32-only restriction is superseded for the Llama path); Phase-1-style attention fusion for decode
   (separate, off-moat).
 
+### Speculative decode (prompt-lookup) — DONE 2026-05-26 (decode-throughput lever)
+
+The only axis where llama.cpp still led was single-stream decode (~1.6×). Closed it on repetitive text
+WITHOUT chasing SIMD: greedy prompt-lookup speculative decoding, reusing the new batched kernels for the
+verify. `PromptLookupDrafter` (n-gram match of the suffix against earlier context → propose the
+continuation, no draft model, zero extra RAM) + `CachedLlamaSession.GenerateSpeculative` (embed
+[t0, draft…] → ONE batched verify forward → greedy-accept the longest matching prefix; `KeyValueCache.
+TruncateTo` rolls back rejected drafts). Output is **BIT-IDENTICAL to greedy single-token** (greedy
+verification only accepts what greedy would emit) — validated on real Qwen2.5-3B Q4_K_M
+(`SpeculativeDecodeParityTests`, identical 40-token sequence + multi-commit confirmed).
+**Investigation (empirical rigor):** first cut measured **1.01×** — the batched stack amortised but I
+LM-headed each draft row separately, re-reading the huge LM-head weights N× and cancelling the win.
+Fix: `CachedGptStack.ProjectLogitsBatched` (head read once for all rows). Then on a genuinely-echoing
+tokenised prompt: **avg 3.45 tokens/step accepted, decode 18.1 → 23.1 tok/s = 1.27×** (vs llama.cpp
+27.5 → gap ~1.6×→~1.2× on such text). Honest scope: the win is workload-dependent — high on repetitive /
+structured / context-quoting output (code, JSON, agentic — the moat), ~1× on novel text (drafts miss).
+
+**Sampling-correct speculative — DONE 2026-05-26.** Generalised greedy → any sampler (temp / top-k /
+top-p / min-p). The prompt-lookup draft is a point-mass proposal, so speculative-sampling reduces to:
+accept draft `d` w.p. `p(d)` under the sampler's target distribution, else resample the renormalised
+residual `norm(max(0, p − e_d))` — output is distributed EXACTLY as a direct draw from `p` (greedy is
+the T→0 special case ⇒ still bit-identical). `TokenSampler.ComputeProbabilities` exposes the sampler's
+exact post-transform distribution (shared `SelectSurvivors` core with `Sample`); `SpeculativeSampler.
+AcceptOrResample`/`Sample` is the rejection core; `CachedLlamaSession.GenerateSpeculative(in
+SamplingOptions, …)` threads it (the correction/bonus token is forwarded so cache + `_logits` stay
+consistent — committed = t0 + accepted + 1, ≤ maxDraft+2). Validated: `SpeculativeSamplerTests`
+(statistical — empirical output distribution matches the target for ANY draft, incl. the greedy
+point-mass) + the greedy-reduction parity (`Speculative_ProducesIdenticalSequence`, bit-identical on
+real Qwen-3B). The greedy overload `GenerateSpeculative(history, committed, maxDraft…)` delegates with
+`SamplingOptions.Greedy`.
+
 ---
 
 ## Research inputs (papers reviewed 2026-05-21)

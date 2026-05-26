@@ -60,105 +60,100 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 options.Temperature,
                 MinimumTemperature);
 
+            var count = SelectSurvivors(logits, in options, temperature, indexScratch, scoreScratch);
+            return SampleFromPreparedScores(
+                indexScratch[..count], scoreScratch[..count], temperature, random);
+        }
+
+        /// <summary>
+        /// Selects the survivor token set for <paramref name="options"/> (the strategy's top-k / top-p /
+        /// min-p filter) into <paramref name="indexScratch"/> (token ids) + <paramref name="scoreScratch"/>
+        /// (their raw logits), returning the survivor count. The shared core of <see cref="Sample"/> and
+        /// <see cref="ComputeProbabilities"/> — so the speculative verifier scores against EXACTLY the
+        /// distribution the sampler would draw from. Assumes a non-greedy strategy (caller handles greedy).
+        /// </summary>
+        private static int SelectSurvivors(
+            ReadOnlySpan<float> logits, in SamplingOptions options, float temperature,
+            Span<int> indexScratch, Span<float> scoreScratch)
+        {
             switch (options.Strategy)
             {
-                case SamplingStrategy.TopK
-                    when options.TopK > 0 && options.TopK < logits.Length:
-                    {
-                        var count = SelectTopK(
-                            logits,
-                            options.TopK,
-                            indexScratch,
-                            scoreScratch);
+                case SamplingStrategy.TopK when options.TopK > 0 && options.TopK < logits.Length:
+                    return SelectTopK(logits, options.TopK, indexScratch, scoreScratch);
 
-                        return SampleFromPreparedScores(
-                            indexScratch[..count],
-                            scoreScratch[..count],
-                            temperature,
-                            random);
-                    }
-
-                case SamplingStrategy.TopP
-                    when options.TopP < 1f:
-                    {
-                        var count = SelectTopP(
-                            logits,
-                            options.TopP,
-                            temperature,
-                            indexScratch,
-                            scoreScratch);
-
-                        return SampleFromPreparedScores(
-                            indexScratch[..count],
-                            scoreScratch[..count],
-                            temperature,
-                            random);
-                    }
+                case SamplingStrategy.TopP when options.TopP < 1f:
+                    return SelectTopP(logits, options.TopP, temperature, indexScratch, scoreScratch);
 
                 case SamplingStrategy.TopKTopP:
                     {
-                        var k =
-                            options.TopK > 0 && options.TopK < logits.Length
-                                ? options.TopK
-                                : logits.Length;
-
-                        var afterK = SelectTopK(
-                            logits,
-                            k,
-                            indexScratch,
-                            scoreScratch);
-
-                        if (options.TopP < 1f)
-                        {
-                            var afterP = NucleusFromSorted(
-                                scoreScratch[..afterK],
-                                options.TopP,
-                                temperature);
-
-                            return SampleFromPreparedScores(
-                                indexScratch[..afterP],
-                                scoreScratch[..afterP],
-                                temperature,
-                                random);
-                        }
-
-                        return SampleFromPreparedScores(
-                            indexScratch[..afterK],
-                            scoreScratch[..afterK],
-                            temperature,
-                            random);
+                        var k = options.TopK > 0 && options.TopK < logits.Length ? options.TopK : logits.Length;
+                        var afterK = SelectTopK(logits, k, indexScratch, scoreScratch);
+                        return options.TopP < 1f
+                            ? NucleusFromSorted(scoreScratch[..afterK], options.TopP, temperature)
+                            : afterK;
                     }
 
-                case SamplingStrategy.MinP
-                    when options.MinP > 0f:
-                    {
-                        var count = SelectMinP(
-                            logits,
-                            options.MinP,
-                            temperature,
-                            indexScratch,
-                            scoreScratch);
-
-                        return SampleFromPreparedScores(
-                            indexScratch[..count],
-                            scoreScratch[..count],
-                            temperature,
-                            random);
-                    }
+                case SamplingStrategy.MinP when options.MinP > 0f:
+                    return SelectMinP(logits, options.MinP, temperature, indexScratch, scoreScratch);
 
                 default:
-                    {
-                        PrepareAllScores(
-                            logits,
-                            indexScratch,
-                            scoreScratch);
+                    PrepareAllScores(logits, indexScratch, scoreScratch);
+                    return logits.Length;
+            }
+        }
 
-                        return SampleFromPreparedScores(
-                            indexScratch[..logits.Length],
-                            scoreScratch[..logits.Length],
-                            temperature,
-                            random);
-                    }
+        /// <summary>
+        /// Writes the full-vocabulary probability distribution the sampler would draw from for
+        /// <paramref name="options"/> into <paramref name="probabilities"/> (survivor tokens get their
+        /// temperature-softmax probability, all others 0; greedy → a point mass on the argmax). Used by
+        /// sampling-correct speculative decoding to compute the target probability of a draft token and to
+        /// resample the residual. Same survivor selection + softmax as <see cref="Sample"/>.
+        /// </summary>
+        public static void ComputeProbabilities(
+            ReadOnlySpan<float> logits,
+            in SamplingOptions options,
+            Span<int> indexScratch,
+            Span<float> scoreScratch,
+            Span<float> probabilities)
+        {
+            if (logits.IsEmpty) { throw new ArgumentException("Logits cannot be empty.", nameof(logits)); }
+            if (probabilities.Length < logits.Length)
+            {
+                throw new ArgumentException("Probabilities span is smaller than the logits span.", nameof(probabilities));
+            }
+
+            probabilities.Slice(0, logits.Length).Clear();
+
+            if (options.Strategy == SamplingStrategy.Greedy || options.Temperature <= 0f)
+            {
+                probabilities[ArgMax(logits)] = 1f;
+                return;
+            }
+
+            var temperature = MathF.Max(options.Temperature, MinimumTemperature);
+            var count = SelectSurvivors(logits, in options, temperature, indexScratch, scoreScratch);
+
+            var maxScore = scoreScratch[0];
+            for (var i = 1; i < count; i++) { if (scoreScratch[i] > maxScore) { maxScore = scoreScratch[i]; } }
+
+            var inverseTemperature = 1.0 / temperature;
+            var sum = 0.0;
+            for (var i = 0; i < count; i++)
+            {
+                var w = Math.Exp((scoreScratch[i] - maxScore) * inverseTemperature);
+                scoreScratch[i] = (float)w;
+                sum += w;
+            }
+
+            if (sum <= 0.0 || double.IsNaN(sum) || double.IsInfinity(sum))
+            {
+                probabilities[indexScratch[0]] = 1f;
+                return;
+            }
+
+            for (var i = 0; i < count; i++)
+            {
+                probabilities[indexScratch[i]] = (float)(scoreScratch[i] / sum);
             }
         }
 

@@ -163,6 +163,26 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             CurrentLength += tokenCount;
         }
 
+        /// <summary>
+        /// Rolls <see cref="CurrentLength"/> back to <paramref name="length"/> — used by speculative
+        /// decoding to discard rejected draft tokens after a batched verify wrote their K/V. The stale
+        /// K/V left in slots <c>[length, oldLength)</c> are NOT cleared: reads only ever cover
+        /// <c>[0, CurrentLength)</c>, and the next decode overwrites slot <paramref name="length"/>
+        /// before it is read. Cannot grow the cache (use <see cref="Advance"/>).
+        /// </summary>
+        public void TruncateTo(int length)
+        {
+            ThrowIfDisposed();
+
+            if (length < 0 || length > CurrentLength)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(length), $"TruncateTo {length} must be in [0, CurrentLength={CurrentLength}].");
+            }
+
+            CurrentLength = length;
+        }
+
         public Span<float> GetKeyWriteSpan(
             int layerIndex,
             int headIndex,

@@ -314,6 +314,46 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     $"inputHidden length {inputHidden.Length} < rows*DModel {(long)rows * DModel}.", nameof(inputHidden));
             }
 
+            var cur = RunBatchedStack(inputHidden, rows, weights, cache, basePosition, rope);
+
+            // Last token's hidden BEFORE final norm (matches DecodeWithoutLogits).
+            var lastRow = cur.AsSpan((rows - 1) * DModel, DModel);
+            lastRow.CopyTo(_lastFinalHidden);
+            FinalNorm(lastRow, weights, _finalHidden);
+        }
+
+        /// <summary>
+        /// Batched-prefill variant that writes the final-norm output of EVERY row into
+        /// <paramref name="finalNormAllRows"/> (<c>rows × DModel</c>) — used by speculative decoding, which
+        /// needs per-position logits to verify the draft. Same batched layer pass as
+        /// <see cref="PrefillBatchedQuant"/>; the caller LM-heads each row via <see cref="ProjectLogitsFrom"/>.
+        /// </summary>
+        internal void PrefillBatchedQuantAllRows(
+            ReadOnlySpan<float> inputHidden,
+            int rows,
+            StackWeights weights,
+            KeyValueCache cache,
+            int basePosition,
+            Span<float> finalNormAllRows,
+            RopeTable? rope = null)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rows);
+            if (finalNormAllRows.Length < (long)rows * DModel)
+            {
+                throw new ArgumentException("finalNormAllRows < rows*DModel.", nameof(finalNormAllRows));
+            }
+
+            var cur = RunBatchedStack(inputHidden, rows, weights, cache, basePosition, rope);
+            for (var n = 0; n < rows; n++)
+            {
+                FinalNorm(cur.AsSpan(n * DModel, DModel), weights, finalNormAllRows.Slice(n * DModel, DModel));
+            }
+        }
+
+        /// <summary>Runs the batched layer pass, returning the all-rows post-stack hidden (pre-final-norm).</summary>
+        private float[] RunBatchedStack(
+            ReadOnlySpan<float> inputHidden, int rows, StackWeights weights, KeyValueCache cache, int basePosition, RopeTable? rope)
+        {
             var cur = new float[rows * DModel];
             inputHidden.Slice(0, rows * DModel).CopyTo(cur);
             var next = new float[rows * DModel];
@@ -324,29 +364,30 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     cur, rows, in weights.Block(layer), cache, layer, basePosition, next, rope);
                 (cur, next) = (next, cur);
             }
+            return cur;
+        }
 
-            // Last token's hidden BEFORE final norm (matches DecodeWithoutLogits).
-            var lastRow = cur.AsSpan((rows - 1) * DModel, DModel);
-            lastRow.CopyTo(_lastFinalHidden);
-
+        /// <summary>Final norm of one row (RMSNorm when beta is empty, else standard LayerNorm).</summary>
+        private void FinalNorm(ReadOnlySpan<float> row, StackWeights weights, Span<float> dst)
+        {
             if (weights.FinalNormBeta.IsEmpty)
             {
                 var sumSq = 0f;
-                for (var i = 0; i < DModel; i++) { sumSq += lastRow[i] * lastRow[i]; }
+                for (var i = 0; i < DModel; i++) { sumSq += row[i] * row[i]; }
                 var scale = 1f / MathF.Sqrt(sumSq / DModel + LayerNormEpsilon);
                 if (weights.FinalNormGamma.IsEmpty)
                 {
-                    for (var i = 0; i < DModel; i++) { _finalHidden[i] = lastRow[i] * scale; }
+                    for (var i = 0; i < DModel; i++) { dst[i] = row[i] * scale; }
                 }
                 else
                 {
-                    for (var i = 0; i < DModel; i++) { _finalHidden[i] = lastRow[i] * scale * weights.FinalNormGamma[i]; }
+                    for (var i = 0; i < DModel; i++) { dst[i] = row[i] * scale * weights.FinalNormGamma[i]; }
                 }
             }
             else
             {
                 SingleTokenLayerNormKernel.Normalize(
-                    lastRow, weights.FinalNormGamma, weights.FinalNormBeta, _finalHidden, DModel, LayerNormEpsilon);
+                    row, weights.FinalNormGamma, weights.FinalNormBeta, dst, DModel, LayerNormEpsilon);
             }
         }
 
@@ -358,59 +399,56 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// </summary>
         internal void ProjectLogits(StackWeights weights, Span<float> logits)
         {
-            // LM head: [DModel] → [VocabSize]. Dispatches on the weight's
-            // residency — Q8_0-quantized (the GGUF/Qwen path, step 2.3a) or F32.
-            // Both projection paths run on the allocation-free OverfitParallelFor
-            // pool, so the 0 B / generated token contract (validated by
-            // Gpt2GenerationDemoTests.Demo_Gpt2Small_KvCacheDecode_AllocatesZeroBytesPerToken)
-            // still holds.
+            ProjectLogitsFrom(_finalHidden, weights, logits);
+            logits.Slice(0, VocabSize).CopyTo(_lastLogits);
+        }
+
+        /// <summary>
+        /// LM-head projection from an arbitrary final-norm vector <paramref name="finalNorm"/> (does NOT
+        /// touch <see cref="LastLogits"/>) — used by speculative decoding to score each draft position.
+        /// Dispatches on the head's residency (Q6_K / Q4_K / Q8_0 / F32); allocation-free.
+        /// </summary>
+        internal void ProjectLogitsFrom(ReadOnlySpan<float> finalNorm, StackWeights weights, Span<float> logits)
+        {
             var lmHead = weights.LmHeadWeights;
             if (lmHead.IsQ6K)
             {
-                // Q6_K-resident LM head (step 3.3c — wires the Q6_K kernel).
                 Q6KDotKernel.ProjectParallel(
-                    _finalHidden,
-                    lmHead.Quantized6K,
-                    ReadOnlySpan<float>.Empty,
-                    logits,
-                    _lmHeadQ8KQuants,
-                    _lmHeadQ8KScales,
-                    _lmHeadQ8KBsums);
+                    finalNorm, lmHead.Quantized6K, ReadOnlySpan<float>.Empty, logits,
+                    _lmHeadQ8KQuants, _lmHeadQ8KScales, _lmHeadQ8KBsums);
             }
             else if (lmHead.IsQ4K)
             {
-                // Q4_K-resident LM head (step 3.2a — wires the Q4_K kernel).
                 Q4KDotKernel.ProjectParallel(
-                    _finalHidden,
-                    lmHead.Quantized4K,
-                    ReadOnlySpan<float>.Empty,
-                    logits,
-                    _lmHeadQ8KQuants,
-                    _lmHeadQ8KScales,
-                    _lmHeadQ8KBsums);
+                    finalNorm, lmHead.Quantized4K, ReadOnlySpan<float>.Empty, logits,
+                    _lmHeadQ8KQuants, _lmHeadQ8KScales, _lmHeadQ8KBsums);
             }
             else if (lmHead.IsQuantized)
             {
                 Q8DotKernel.ProjectParallel(
-                    _finalHidden,
-                    lmHead.Quantized,
-                    ReadOnlySpan<float>.Empty,
-                    logits,
-                    _lmHeadInputQuants,
-                    _lmHeadInputScales);
+                    finalNorm, lmHead.Quantized, ReadOnlySpan<float>.Empty, logits,
+                    _lmHeadInputQuants, _lmHeadInputScales);
             }
             else
             {
                 SingleTokenProjectionKernel.ProjectParallel(
-                    _finalHidden,
-                    lmHead.F32,
-                    ReadOnlySpan<float>.Empty,
-                    logits,
-                    DModel,
-                    VocabSize);
+                    finalNorm, lmHead.F32, ReadOnlySpan<float>.Empty, logits, DModel, VocabSize);
             }
+        }
 
-            logits.Slice(0, VocabSize).CopyTo(_lastLogits);
+        /// <summary>
+        /// Batched LM-head projection: <paramref name="rows"/> final-norm vectors → logits in ONE pass
+        /// that reads the (large) LM-head weights from DRAM once, reusing them across all rows — used by
+        /// speculative decoding so verifying N draft positions doesn't re-read the head N× (which would
+        /// cancel the batched stack's weight-bandwidth saving). <paramref name="logitsAllRows"/> is
+        /// <c>rows × VocabSize</c>.
+        /// </summary>
+        internal void ProjectLogitsBatched(
+            ReadOnlySpan<float> finalNormAllRows, int rows, StackWeights weights, Span<float> logitsAllRows)
+        {
+            BatchedQuantProjection.Dispatch(
+                finalNormAllRows, rows, weights.LmHeadWeights, ReadOnlySpan<float>.Empty,
+                logitsAllRows, DModel, VocabSize);
         }
 
         // Validation helpers removed — StackWeights guarantees correct dimensions
