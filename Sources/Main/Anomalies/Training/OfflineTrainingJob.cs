@@ -399,7 +399,9 @@ namespace DevOnBike.Overfit.Anomalies.Training
                 total += LossAndGrad(l, target, _cfg.ContextLength, config.VocabSize, lossScratch);
                 l.Dispose();
             }
+
             model.Train();
+
             return total / _cfg.ValSteps;
         }
     }

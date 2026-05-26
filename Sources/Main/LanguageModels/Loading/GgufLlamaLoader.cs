@@ -6,6 +6,7 @@
 using System.Buffers;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Runtime;
+using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Tensors.Core;
 using LayerWeightBuffers = DevOnBike.Overfit.LanguageModels.Runtime.CachedLlamaInferenceEngine.LayerWeightBuffers;
 
@@ -366,16 +367,9 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 else
                 {
                     var outElems = checked((int)((long)vocab * dModel));
-                    var outputRaw = ArrayPool<float>.Shared.Rent(outElems);
-                    try
-                    {
-                        LoadTensor(reader, "output.weight", outputRaw.AsSpan(0, outElems));
-                        lmHead = Q8Weight.QuantizeRows(outputRaw.AsSpan(0, outElems), vocab, dModel);
-                    }
-                    finally
-                    {
-                        ArrayPool<float>.Shared.Return(outputRaw);
-                    }
+                    using var outputRaw = new PooledArray<float>(outElems);
+                    LoadTensor(reader, "output.weight", outputRaw.Span);
+                    lmHead = Q8Weight.QuantizeRows(outputRaw.Span, vocab, dModel);
                 }
             }
             else
@@ -398,21 +392,15 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 else
                 {
                     var outElems = checked((int)((long)vocab * dModel));
-                    var outputRaw = ArrayPool<float>.Shared.Rent(outElems);
-                    try
+                    using var outputRaw = new PooledArray<float>(outElems);
+                    LoadTensor(reader, "output.weight", outputRaw.Span);
+                    var src = outputRaw.Span;
+                    for (var d = 0; d < dModel; d++)
                     {
-                        LoadTensor(reader, "output.weight", outputRaw.AsSpan(0, outElems));
-                        for (var d = 0; d < dModel; d++)
+                        for (var t = 0; t < vocab; t++)
                         {
-                            for (var t = 0; t < vocab; t++)
-                            {
-                                lmHeadSpan[d * vocab + t] = outputRaw[t * dModel + d];
-                            }
+                            lmHeadSpan[d * vocab + t] = src[t * dModel + d];
                         }
-                    }
-                    finally
-                    {
-                        ArrayPool<float>.Shared.Return(outputRaw);
                     }
                 }
 
@@ -513,25 +501,18 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                             ? Q4KWeight.SuperBlockBytes : Q6KWeight.SuperBlockBytes;
                         var expertBytes = checked((int)(perExpert / GgmlDequant.SuperBlockElements * superBytes));
                         var total = checked((int)((long)expertBytes * expertCount));
-                        var whole = ArrayPool<byte>.Shared.Rent(total);
+                        using var whole = new PooledArray<byte>(total);
 
-                        try
-                        {
-                            if (info.Type == GgmlType.Q4_K) { reader.LoadTensorQ4_KRaw(info, whole.AsSpan(0, total)); }
-                            else { reader.LoadTensorQ6_KRaw(info, whole.AsSpan(0, total)); }
+                        if (info.Type == GgmlType.Q4_K) { reader.LoadTensorQ4_KRaw(info, whole.Span); }
+                        else { reader.LoadTensorQ6_KRaw(info, whole.Span); }
 
-                            for (var e = 0; e < expertCount; e++)
-                            {
-                                var bytes = new byte[expertBytes];
-                                whole.AsSpan(e * expertBytes, expertBytes).CopyTo(bytes);
-                                experts[e] = info.Type == GgmlType.Q4_K
-                                    ? new Q4KWeight(bytes, inDim, outDim)
-                                    : new Q6KWeight(bytes, inDim, outDim);
-                            }
-                        }
-                        finally
+                        for (var e = 0; e < expertCount; e++)
                         {
-                            ArrayPool<byte>.Shared.Return(whole);
+                            var bytes = new byte[expertBytes];
+                            whole.Span.Slice(e * expertBytes, expertBytes).CopyTo(bytes);
+                            experts[e] = info.Type == GgmlType.Q4_K
+                                ? new Q4KWeight(bytes, inDim, outDim)
+                                : new Q6KWeight(bytes, inDim, outDim);
                         }
                         break;
                     }
@@ -540,26 +521,18 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     {
                         var elems = checked((int)(perExpert * expertCount));
                         var blocksPerExpert = checked((int)(perExpert / Q8DotKernel.BlockSize));
-                        var quants = ArrayPool<sbyte>.Shared.Rent(elems);
-                        var scales = ArrayPool<float>.Shared.Rent(blocksPerExpert * expertCount);
-                        try
-                        {
-                            reader.LoadTensorQ8_0Raw(info, quants.AsSpan(0, elems), scales.AsSpan(0, blocksPerExpert * expertCount));
+                        using var quants = new PooledArray<sbyte>(elems);
+                        using var scales = new PooledArray<float>(blocksPerExpert * expertCount);
+                        reader.LoadTensorQ8_0Raw(info, quants.Span, scales.Span);
 
-                            var perElems = checked((int)perExpert);
-                            for (var e = 0; e < expertCount; e++)
-                            {
-                                var q = new sbyte[perElems];
-                                var s = new float[blocksPerExpert];
-                                quants.AsSpan(e * perElems, perElems).CopyTo(q);
-                                scales.AsSpan(e * blocksPerExpert, blocksPerExpert).CopyTo(s);
-                                experts[e] = new Q8Weight(q, s, inDim, outDim);
-                            }
-                        }
-                        finally
+                        var perElems = checked((int)perExpert);
+                        for (var e = 0; e < expertCount; e++)
                         {
-                            ArrayPool<sbyte>.Shared.Return(quants);
-                            ArrayPool<float>.Shared.Return(scales);
+                            var q = new sbyte[perElems];
+                            var s = new float[blocksPerExpert];
+                            quants.Span.Slice(e * perElems, perElems).CopyTo(q);
+                            scales.Span.Slice(e * blocksPerExpert, blocksPerExpert).CopyTo(s);
+                            experts[e] = new Q8Weight(q, s, inDim, outDim);
                         }
                         break;
                     }
@@ -573,18 +546,11 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                         // peak load RAM is a single expert's F32 (~perExpert floats), not the whole
                         // tensor's — steady-state stays Q8 (~1 B/elem), keeping the smaller file a RAM win.
                         var perElems = checked((int)perExpert);
-                        var f32 = ArrayPool<float>.Shared.Rent(perElems);
-                        try
+                        using var f32 = new PooledArray<float>(perElems);
+                        for (var e = 0; e < expertCount; e++)
                         {
-                            for (var e = 0; e < expertCount; e++)
-                            {
-                                reader.LoadQ5RegionAsF32(info, (long)e * perElems, f32.AsSpan(0, perElems));
-                                experts[e] = Q8Weight.QuantizeRows(f32.AsSpan(0, perElems), outDim, inDim);
-                            }
-                        }
-                        finally
-                        {
-                            ArrayPool<float>.Shared.Return(f32);
+                            reader.LoadQ5RegionAsF32(info, (long)e * perElems, f32.Span);
+                            experts[e] = Q8Weight.QuantizeRows(f32.Span, outDim, inDim);
                         }
                         break;
                     }
@@ -642,32 +608,26 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var perExpert = checked(inDim * outDim);
             var total = checked(perExpert * expertCount);
 
-            var whole = ArrayPool<float>.Shared.Rent(total);
-            try
-            {
-                reader.LoadTensorAsF32(info, whole.AsSpan(0, total));   // expert-major, each [outDim, inDim]
+            using var whole = new PooledArray<float>(total);
+            reader.LoadTensorAsF32(info, whole.Span);   // expert-major, each [outDim, inDim]
+            var src = whole.Span;
 
-                var experts = new DecodeWeight[expertCount];
-                for (var e = 0; e < expertCount; e++)
-                {
-                    var storage = TensorStorage<float>.Unpooled(perExpert);
-                    var dst = storage.AsSpan();
-                    var srcBase = e * perExpert;
-                    for (var o = 0; o < outDim; o++)
-                    {
-                        for (var i = 0; i < inDim; i++)
-                        {
-                            dst[i * outDim + o] = whole[srcBase + o * inDim + i];   // [out,in] → [in,out]
-                        }
-                    }
-                    experts[e] = storage;
-                }
-                return experts;
-            }
-            finally
+            var experts = new DecodeWeight[expertCount];
+            for (var e = 0; e < expertCount; e++)
             {
-                ArrayPool<float>.Shared.Return(whole);
+                var storage = TensorStorage<float>.Unpooled(perExpert);
+                var dst = storage.AsSpan();
+                var srcBase = e * perExpert;
+                for (var o = 0; o < outDim; o++)
+                {
+                    for (var i = 0; i < inDim; i++)
+                    {
+                        dst[i * outDim + o] = src[srcBase + o * inDim + i];   // [out,in] → [in,out]
+                    }
+                }
+                experts[e] = storage;
             }
+            return experts;
         }
 
         /// <summary>Loads a small F32 vector tensor (e.g. the shared-expert gate <c>ffn_gate_inp_shexp</c>).</summary>
@@ -685,24 +645,19 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         internal static float[] LoadRouter(GgufReader reader, GgufTensorInfo info, int dModel, int expertCount)
         {
             var n = checked(dModel * expertCount);
-            var raw = ArrayPool<float>.Shared.Rent(n);
-            try
+            using var raw = new PooledArray<float>(n);
+            reader.LoadTensorAsF32(info, raw.Span);
+            var src = raw.Span;
+
+            var w = new float[n];
+            for (var e = 0; e < expertCount; e++)
             {
-                reader.LoadTensorAsF32(info, raw.AsSpan(0, n));
-                var w = new float[n];
-                for (var e = 0; e < expertCount; e++)
+                for (var d = 0; d < dModel; d++)
                 {
-                    for (var d = 0; d < dModel; d++)
-                    {
-                        w[d * expertCount + e] = raw[e * dModel + d];   // [expert,dModel] → [dModel,expert]
-                    }
+                    w[d * expertCount + e] = src[e * dModel + d];   // [expert,dModel] → [dModel,expert]
                 }
-                return w;
             }
-            finally
-            {
-                ArrayPool<float>.Shared.Return(raw);
-            }
+            return w;
         }
 
         /// <summary>
@@ -721,26 +676,20 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
 
             var elementCount = checked((int)((long)inDim * outDim));
-            var raw = ArrayPool<float>.Shared.Rent(elementCount);
-            try
-            {
-                reader.LoadTensorAsF32(info, raw.AsSpan(0, elementCount));
+            using var raw = new PooledArray<float>(elementCount);
+            reader.LoadTensorAsF32(info, raw.Span);
 
-                var storage = TensorStorage<float>.Unpooled(elementCount);
-                var dst = storage.AsSpan();
-                for (var i = 0; i < inDim; i++)
-                {
-                    for (var o = 0; o < outDim; o++)
-                    {
-                        dst[i * outDim + o] = raw[o * inDim + i];
-                    }
-                }
-                return storage;
-            }
-            finally
+            var storage = TensorStorage<float>.Unpooled(elementCount);
+            var dst = storage.AsSpan();
+            var src = raw.Span;
+            for (var i = 0; i < inDim; i++)
             {
-                ArrayPool<float>.Shared.Return(raw);
+                for (var o = 0; o < outDim; o++)
+                {
+                    dst[i * outDim + o] = src[o * inDim + i];
+                }
             }
+            return storage;
         }
 
         /// <summary>
@@ -775,16 +724,9 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
 
             var elementCount = checked((int)((long)inDim * outDim));
-            var raw = ArrayPool<float>.Shared.Rent(elementCount);
-            try
-            {
-                reader.LoadTensorAsF32(info, raw.AsSpan(0, elementCount));
-                return Q8Weight.QuantizeRows(raw.AsSpan(0, elementCount), outDim, inDim);
-            }
-            finally
-            {
-                ArrayPool<float>.Shared.Return(raw);
-            }
+            using var raw = new PooledArray<float>(elementCount);
+            reader.LoadTensorAsF32(info, raw.Span);
+            return Q8Weight.QuantizeRows(raw.Span, outDim, inDim);
         }
 
         /// <summary>
@@ -930,24 +872,17 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
 
             var totalBytes = checked((int)((long)headCount * headBytes));
-            var raw = ArrayPool<byte>.Shared.Rent(totalBytes);
-            try
-            {
-                reader.LoadTensorQ4_KRaw(info, raw.AsSpan(0, totalBytes));
+            using var raw = new PooledArray<byte>(totalBytes);
+            reader.LoadTensorQ4_KRaw(info, raw.Span);
 
-                var heads = new DecodeWeight[headCount];
-                for (var h = 0; h < headCount; h++)
-                {
-                    var bytes = new byte[headBytes];
-                    raw.AsSpan(h * headBytes, headBytes).CopyTo(bytes);
-                    heads[h] = new Q4KWeight(bytes, dModel, headDim);
-                }
-                return heads;
-            }
-            finally
+            var result = new DecodeWeight[headCount];
+            for (var h = 0; h < headCount; h++)
             {
-                ArrayPool<byte>.Shared.Return(raw);
+                var bytes = new byte[headBytes];
+                raw.Span.Slice(h * headBytes, headBytes).CopyTo(bytes);
+                result[h] = new Q4KWeight(bytes, dModel, headDim);
             }
+            return result;
         }
 
         /// <summary>
@@ -1006,24 +941,17 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
 
             var totalBytes = checked((int)((long)headCount * headBytes));
-            var raw = ArrayPool<byte>.Shared.Rent(totalBytes);
-            try
-            {
-                reader.LoadTensorQ6_KRaw(info, raw.AsSpan(0, totalBytes));
+            using var raw = new PooledArray<byte>(totalBytes);
+            reader.LoadTensorQ6_KRaw(info, raw.Span);
 
-                var heads = new DecodeWeight[headCount];
-                for (var h = 0; h < headCount; h++)
-                {
-                    var bytes = new byte[headBytes];
-                    raw.AsSpan(h * headBytes, headBytes).CopyTo(bytes);
-                    heads[h] = new Q6KWeight(bytes, dModel, headDim);
-                }
-                return heads;
-            }
-            finally
+            var result = new DecodeWeight[headCount];
+            for (var h = 0; h < headCount; h++)
             {
-                ArrayPool<byte>.Shared.Return(raw);
+                var bytes = new byte[headBytes];
+                raw.Span.Slice(h * headBytes, headBytes).CopyTo(bytes);
+                result[h] = new Q6KWeight(bytes, dModel, headDim);
             }
+            return result;
         }
 
         /// <summary>
@@ -1040,28 +968,20 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var elems = checked((int)((long)nHeads * headDim * dModel));
             var totalBlocks = checked((int)((long)nHeads * headDim * blocksPerRow));
 
-            var quants = ArrayPool<sbyte>.Shared.Rent(elems);
-            var scales = ArrayPool<float>.Shared.Rent(totalBlocks);
-            try
-            {
-                reader.LoadTensorQ8_0Raw(info, quants.AsSpan(0, elems), scales.AsSpan(0, totalBlocks));
+            using var quants = new PooledArray<sbyte>(elems);
+            using var scales = new PooledArray<float>(totalBlocks);
+            reader.LoadTensorQ8_0Raw(info, quants.Span, scales.Span);
 
-                var heads = new DecodeWeight[nHeads];
-                for (var h = 0; h < nHeads; h++)
-                {
-                    var headQuants = new sbyte[headDim * dModel];
-                    var headScales = new float[headDim * blocksPerRow];
-                    quants.AsSpan(h * headDim * dModel, headDim * dModel).CopyTo(headQuants);
-                    scales.AsSpan(h * headDim * blocksPerRow, headDim * blocksPerRow).CopyTo(headScales);
-                    heads[h] = new Q8Weight(headQuants, headScales, dModel, headDim);
-                }
-                return heads;
-            }
-            finally
+            var heads = new DecodeWeight[nHeads];
+            for (var h = 0; h < nHeads; h++)
             {
-                ArrayPool<sbyte>.Shared.Return(quants);
-                ArrayPool<float>.Shared.Return(scales);
+                var headQuants = new sbyte[headDim * dModel];
+                var headScales = new float[headDim * blocksPerRow];
+                quants.Span.Slice(h * headDim * dModel, headDim * dModel).CopyTo(headQuants);
+                scales.Span.Slice(h * headDim * blocksPerRow, headDim * blocksPerRow).CopyTo(headScales);
+                heads[h] = new Q8Weight(headQuants, headScales, dModel, headDim);
             }
+            return heads;
         }
 
         /// <summary>
@@ -1080,33 +1000,25 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var elems = checked((int)((long)dModel * nHeadsHeadDim));
             var totalBlocks = checked((int)((long)dModel * rowBlocks));
 
-            var quants = ArrayPool<sbyte>.Shared.Rent(elems);
-            var scales = ArrayPool<float>.Shared.Rent(totalBlocks);
-            try
-            {
-                reader.LoadTensorQ8_0Raw(info, quants.AsSpan(0, elems), scales.AsSpan(0, totalBlocks));
+            using var quants = new PooledArray<sbyte>(elems);
+            using var scales = new PooledArray<float>(totalBlocks);
+            reader.LoadTensorQ8_0Raw(info, quants.Span, scales.Span);
 
-                var heads = new DecodeWeight[nHeads];
-                for (var h = 0; h < nHeads; h++)
-                {
-                    var headQuants = new sbyte[dModel * headDim];
-                    var headScales = new float[dModel * headBlocks];
-                    for (var o = 0; o < dModel; o++)
-                    {
-                        quants.AsSpan(o * nHeadsHeadDim + h * headDim, headDim)
-                            .CopyTo(headQuants.AsSpan(o * headDim, headDim));
-                        scales.AsSpan(o * rowBlocks + h * headBlocks, headBlocks)
-                            .CopyTo(headScales.AsSpan(o * headBlocks, headBlocks));
-                    }
-                    heads[h] = new Q8Weight(headQuants, headScales, headDim, dModel);
-                }
-                return heads;
-            }
-            finally
+            var heads = new DecodeWeight[nHeads];
+            for (var h = 0; h < nHeads; h++)
             {
-                ArrayPool<sbyte>.Shared.Return(quants);
-                ArrayPool<float>.Shared.Return(scales);
+                var headQuants = new sbyte[dModel * headDim];
+                var headScales = new float[dModel * headBlocks];
+                for (var o = 0; o < dModel; o++)
+                {
+                    quants.Span.Slice(o * nHeadsHeadDim + h * headDim, headDim)
+                        .CopyTo(headQuants.AsSpan(o * headDim, headDim));
+                    scales.Span.Slice(o * rowBlocks + h * headBlocks, headBlocks)
+                        .CopyTo(headScales.AsSpan(o * headBlocks, headBlocks));
+                }
+                heads[h] = new Q8Weight(headQuants, headScales, headDim, dModel);
             }
+            return heads;
         }
 
         private static void LoadTensor(GgufReader reader, string name, Span<float> dst)
@@ -1215,22 +1127,15 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     // oFull[o*nHeadsHeadDim + h*headDim ..]; gather the dModel rows
                     // contiguously into output-major order, then quantize.
                     var gatherElems = checked((int)((long)dModel * headDim));
-                    var gather = ArrayPool<float>.Shared.Rent(gatherElems);
-                    try
+                    using var gather = new PooledArray<float>(gatherElems);
+                    for (var o = 0; o < dModel; o++)
                     {
-                        for (var o = 0; o < dModel; o++)
+                        for (var i = 0; i < headDim; i++)
                         {
-                            for (var i = 0; i < headDim; i++)
-                            {
-                                gather[o * headDim + i] = oFull[o * nHeadsHeadDim + h * headDim + i];
-                            }
+                            gather.Span[o * headDim + i] = oFull[o * nHeadsHeadDim + h * headDim + i];
                         }
-                        wo[h] = Q8Weight.QuantizeRows(gather.AsSpan(0, gatherElems), dModel, headDim);
                     }
-                    finally
-                    {
-                        ArrayPool<float>.Shared.Return(gather);
-                    }
+                    wo[h] = Q8Weight.QuantizeRows(gather.Span, dModel, headDim);
                 }
                 else
                 {
