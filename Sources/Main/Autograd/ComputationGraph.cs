@@ -376,6 +376,10 @@ namespace DevOnBike.Overfit.Autograd
                     TensorMath.ReshapeBackward(op.A, op.Output);
                     break;
 
+                case OpCode.TransposeLastTwo:
+                    TensorMath.TransposeLastTwoBackward(op.A, op.Output);
+                    break;
+
                 case OpCode.Sigmoid:
                     TensorMath.SigmoidBackward(op.A, op.Output);
                     break;

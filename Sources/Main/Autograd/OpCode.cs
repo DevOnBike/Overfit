@@ -39,6 +39,7 @@ namespace DevOnBike.Overfit.Autograd
         Embedding,
         ScaledDotProductAttention,
         Gelu,
-        Checkpoint
+        Checkpoint,
+        TransposeLastTwo
     }
 }

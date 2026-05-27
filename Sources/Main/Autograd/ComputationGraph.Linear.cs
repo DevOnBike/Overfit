@@ -114,6 +114,10 @@ namespace DevOnBike.Overfit.Autograd
         public AutogradNode Reshape(AutogradNode input, params int[] newShape)
             => TensorMath.Reshape(this, input, newShape);
 
+        /// <summary>Swaps the last two axes (rank-2 or rank-3) — the CRNN map-to-sequence step.</summary>
+        public AutogradNode TransposeLastTwo(AutogradNode input)
+            => TensorMath.TransposeLastTwo(this, input);
+
         // ─────────────────────────────────────────────────────────────────
         // Null-safe static ops — use in layer Forward() where graph may be
         // null (inference path via model.Forward(null, input)).
