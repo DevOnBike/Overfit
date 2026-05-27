@@ -8,6 +8,7 @@ using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Ops;
+using DevOnBike.Overfit.Training;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.Examples
@@ -95,8 +96,7 @@ namespace DevOnBike.Overfit.Tests.Examples
 
             for (var step = 0; step < optSteps; step++)
             {
-                var progress = step / (float)(optSteps - 1);
-                optimizer.LearningRate = lrMin + 0.5f * (lrMax - lrMin) * (1f + MathF.Cos(MathF.PI * progress));
+                optimizer.LearningRate = LearningRateSchedule.Cosine(step, optSteps, lrMax, lrMin);
                 optimizer.ZeroGrad();
 
                 var batchLoss = 0f;

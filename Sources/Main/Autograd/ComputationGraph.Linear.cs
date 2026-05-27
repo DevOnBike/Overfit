@@ -174,8 +174,9 @@ namespace DevOnBike.Overfit.Autograd
             ComputationGraph? graph,
             AutogradNode input,
             AutogradNode weights,
-            int inC, int outC, int h, int w, int k)
-            => TensorMath.Conv2D(graph!, input, weights, inC, outC, h, w, k);
+            int inC, int outC, int h, int w, int k,
+            int padding = 0, int stride = 1, AutogradNode bias = null)
+            => TensorMath.Conv2D(graph!, input, weights, inC, outC, h, w, k, padding, stride, bias);
 
         internal static AutogradNode MaxPool2DOp(
             ComputationGraph? graph,

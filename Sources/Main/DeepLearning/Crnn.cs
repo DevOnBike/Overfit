@@ -32,7 +32,7 @@ namespace DevOnBike.Overfit.DeepLearning
     /// </summary>
     public sealed class Crnn : IModule
     {
-        private readonly ConvLayer _conv;
+        private readonly ConvLayer[] _convs;
         private readonly LstmLayer _lstm;
         private readonly LinearLayer _classifier;
 
@@ -53,9 +53,11 @@ namespace DevOnBike.Overfit.DeepLearning
         /// <param name="imageHeight">Input image height in pixels (single channel).</param>
         /// <param name="imageWidth">Input image width in pixels — fixed; pad inputs to this width.</param>
         /// <param name="classCount">Number of output classes <b>including</b> the CTC blank.</param>
-        /// <param name="convChannels">Conv feature maps (default 16).</param>
-        /// <param name="kernelSize">Square conv kernel (default 3); must be ≤ height and width.</param>
+        /// <param name="convChannels">Conv feature maps per layer (default 16).</param>
+        /// <param name="kernelSize">Square conv kernel — must be <b>odd</b> (default 3) so SAME padding
+        /// preserves spatial size, and ≤ height/width.</param>
         /// <param name="lstmHidden">LSTM hidden size (default 64).</param>
+        /// <param name="convLayers">Number of stacked SAME conv+ReLU layers in the front-end (default 2).</param>
         /// <param name="blankIndex">CTC blank class; defaults to <c>classCount − 1</c>.</param>
         /// <param name="inferenceArenaElements">
         /// Tape arena (floats) for the lazily-created internal graph used by
@@ -68,6 +70,7 @@ namespace DevOnBike.Overfit.DeepLearning
             int convChannels = 16,
             int kernelSize = 3,
             int lstmHidden = 64,
+            int convLayers = 2,
             int blankIndex = -1,
             int inferenceArenaElements = 4_000_000)
         {
@@ -77,8 +80,13 @@ namespace DevOnBike.Overfit.DeepLearning
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(convChannels);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(kernelSize);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(lstmHidden);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(convLayers);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(inferenceArenaElements);
 
+            if (kernelSize % 2 == 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(kernelSize), "kernelSize must be odd for SAME padding.");
+            }
             if (kernelSize > imageHeight || kernelSize > imageWidth)
             {
                 throw new ArgumentOutOfRangeException(
@@ -96,17 +104,29 @@ namespace DevOnBike.Overfit.DeepLearning
             _classCount = classCount;
             _convChannels = convChannels;
             _lstmHidden = lstmHidden;
-            _outHeight = imageHeight - kernelSize + 1;   // VALID conv (graph path ignores padding)
-            _outWidth = imageWidth - kernelSize + 1;     // = TimeSteps (CTC T)
+
+            // SAME conv stack (padding = kSize/2, stride 1, odd kernel) → spatial dims preserved, so the
+            // time axis (= width) is kept at full length for CTC and conv layers can stack freely.
+            var padding = kernelSize / 2;
+            _outHeight = imageHeight;
+            _outWidth = imageWidth;                       // = TimeSteps (CTC T) — full width, no shrink
             _seqFeatures = convChannels * _outHeight;
             _inferenceArenaElements = inferenceArenaElements;
 
-            _conv = new ConvLayer(inChannels: 1, outChannels: convChannels, h: imageHeight, w: imageWidth, kSize: kernelSize);
+            _convs = new ConvLayer[convLayers];
+            for (var i = 0; i < convLayers; i++)
+            {
+                var inChannels = i == 0 ? 1 : convChannels;
+                _convs[i] = new ConvLayer(
+                    inChannels, convChannels, h: imageHeight, w: imageWidth, kSize: kernelSize,
+                    padding: padding, stride: 1, useBias: true);
+            }
+
             _lstm = new LstmLayer(_seqFeatures, lstmHidden, returnSequences: true);
             _classifier = new LinearLayer(lstmHidden, classCount);
         }
 
-        /// <summary>Number of output timesteps = CTC sequence length T (= <c>imageWidth − kernelSize + 1</c>).</summary>
+        /// <summary>Number of output timesteps = CTC sequence length T (= <c>imageWidth</c>, SAME conv).</summary>
         public int TimeSteps => _outWidth;
 
         /// <summary>Output classes including the blank.</summary>
@@ -133,8 +153,11 @@ namespace DevOnBike.Overfit.DeepLearning
             ArgumentNullException.ThrowIfNull(graph);
             ArgumentNullException.ThrowIfNull(input);
 
-            var feat = _conv.Forward(graph, input);                   // [1, C, outH, outW]
-            feat = graph.Relu(feat);
+            var feat = input;                                          // [1, 1, H, W]
+            foreach (var conv in _convs)
+            {
+                feat = graph.Relu(conv.Forward(graph, feat));          // SAME → [1, C, H, W]
+            }
             var merged = graph.Reshape(feat, 1, _seqFeatures, _outWidth);   // [1, C*outH, outW]
             var seqIn = graph.TransposeLastTwo(merged);               // [1, outW, C*outH]
             var seq = _lstm.Forward(graph, seqIn);                    // [1, outW, lstmHidden]
@@ -246,7 +269,10 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public IEnumerable<AutogradNode> Parameters()
         {
-            foreach (var p in _conv.Parameters()) { yield return p; }
+            foreach (var conv in _convs)
+            {
+                foreach (var p in conv.Parameters()) { yield return p; }
+            }
             foreach (var p in _lstm.Parameters()) { yield return p; }
             foreach (var p in _classifier.Parameters()) { yield return p; }
         }
@@ -254,7 +280,7 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Train()
         {
             _isTraining = true;
-            _conv.Train();
+            foreach (var conv in _convs) { conv.Train(); }
             _lstm.Train();
             _classifier.Train();
         }
@@ -262,14 +288,14 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Eval()
         {
             _isTraining = false;
-            _conv.Eval();
+            foreach (var conv in _convs) { conv.Eval(); }
             _lstm.Eval();
             _classifier.Eval();
         }
 
         public void InvalidateParameterCaches()
         {
-            _conv.InvalidateParameterCaches();
+            foreach (var conv in _convs) { conv.InvalidateParameterCaches(); }
             _lstm.InvalidateParameterCaches();
             _classifier.InvalidateParameterCaches();
         }
@@ -277,7 +303,7 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Save(BinaryWriter bw)
         {
             ArgumentNullException.ThrowIfNull(bw);
-            _conv.Save(bw);
+            foreach (var conv in _convs) { conv.Save(bw); }
             _lstm.Save(bw);
             _classifier.Save(bw);
         }
@@ -285,7 +311,7 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Load(BinaryReader br)
         {
             ArgumentNullException.ThrowIfNull(br);
-            _conv.Load(br);
+            foreach (var conv in _convs) { conv.Load(br); }
             _lstm.Load(br);
             _classifier.Load(br);
         }
@@ -293,7 +319,7 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Dispose()
         {
             _inferenceGraph?.Dispose();
-            _conv.Dispose();
+            foreach (var conv in _convs) { conv.Dispose(); }
             _lstm.Dispose();
             _classifier.Dispose();
         }

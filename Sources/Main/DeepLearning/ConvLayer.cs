@@ -27,8 +27,9 @@ namespace DevOnBike.Overfit.DeepLearning
         private readonly int _padding;
         private readonly int _stride;
 
-        // Cached kernel view node — created once, eliminates per-batch heap allocation.
+        // Cached kernel / bias view nodes — created once, eliminate per-batch heap allocation.
         private AutogradNode? _kernelsNode;
+        private AutogradNode? _biasNode;
 
         /// <summary>
         /// Creates a ConvLayer with padding=0, stride=1 (VALID convolution).
@@ -46,6 +47,8 @@ namespace DevOnBike.Overfit.DeepLearning
         /// <summary>
         /// Creates a ConvLayer with explicit padding and stride.
         /// Enables SAME-style convolution (padding = kSize/2) and strided convolution.
+        /// Set <paramref name="useBias"/> to train a per-output-channel bias (zero-initialised);
+        /// the training/graph path now applies padding, stride, and bias with correct backward.
         /// </summary>
         public ConvLayer(
             int inChannels,
@@ -54,7 +57,8 @@ namespace DevOnBike.Overfit.DeepLearning
             int w,
             int kSize,
             int padding,
-            int stride)
+            int stride,
+            bool useBias = false)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(inChannels);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(outChannels);
@@ -83,6 +87,11 @@ namespace DevOnBike.Overfit.DeepLearning
                 clearData: false);
 
             InitializeKernels(Kernels.DataSpan, _kernelSizePerOutput);
+
+            if (useBias)
+            {
+                Bias = new Parameter(new TensorShape(_outC), requiresGrad: true, clearData: true);
+            }
         }
 
         public Parameter Kernels { get; }
@@ -159,7 +168,9 @@ namespace DevOnBike.Overfit.DeepLearning
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
             _kernelsNode ??= Kernels.AsNode();
-            return ComputationGraph.Conv2DOp(graph, input, _kernelsNode, _inC, _outC, _h, _w, _k);
+            if (Bias is not null) { _biasNode ??= Bias.AsNode(); }
+            return ComputationGraph.Conv2DOp(
+                graph, input, _kernelsNode, _inC, _outC, _h, _w, _k, _padding, _stride, _biasNode);
         }
 
         public IEnumerable<AutogradNode> Parameters()
@@ -285,6 +296,7 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Dispose()
         {
             _kernelsNode?.Dispose();
+            _biasNode?.Dispose();
             Kernels.Dispose();
             Bias?.Dispose();
         }

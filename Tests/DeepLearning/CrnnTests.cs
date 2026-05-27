@@ -18,7 +18,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
         public void Geometry_And_Defaults()
         {
             using var crnn = new Crnn(imageHeight: 8, imageWidth: 24, classCount: 11);
-            Assert.Equal(24 - 3 + 1, crnn.TimeSteps); // VALID conv, default kernel 3
+            Assert.Equal(24, crnn.TimeSteps); // SAME conv preserves width
             Assert.Equal(11, crnn.ClassCount);
             Assert.Equal(10, crnn.BlankIndex);        // default = classCount - 1
             Assert.Equal(8, crnn.ImageHeight);

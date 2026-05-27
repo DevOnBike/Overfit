@@ -75,10 +75,12 @@ namespace DevOnBike.Overfit.Autograd
             int outC,
             int h,
             int w,
-            int k)
+            int k,
+            int padding = 0,
+            int stride = 1)
         {
-            var outH = h - k + 1;
-            var outW = w - k + 1;
+            var outH = (h + 2 * padding - k) / stride + 1;
+            var outW = (w + 2 * padding - k) / stride + 1;
             var kSqInC = k * k * inC;
             var spatialOut = outH * outW;
             var colLength = kSqInC * spatialOut;
@@ -333,7 +335,8 @@ namespace DevOnBike.Overfit.Autograd
                     break;
 
                 case OpCode.Conv2D:
-                    TensorMath.Conv2DBackward(this, op.A, op.B, op.Output, op.I0, op.I1, op.I2, op.I3, op.I4);
+                    TensorMath.UnpackConvParams(op.I4, out var convK, out var convPad, out var convStride);
+                    TensorMath.Conv2DBackward(this, op.A, op.B, op.Output, op.C0, op.I0, op.I1, op.I2, op.I3, convK, convPad, convStride);
                     break;
 
                 case OpCode.MaxPool2D:

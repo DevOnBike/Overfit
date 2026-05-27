@@ -25,10 +25,13 @@ namespace DevOnBike.Overfit.Ops
             int outC,
             int h,
             int w,
-            int k)
+            int k,
+            int padding = 0,
+            int stride = 1,
+            AutogradNode bias = null)
         {
-            var outH = h - k + 1;
-            var outW = w - k + 1;
+            var outH = (h + 2 * padding - k) / stride + 1;
+            var outW = (w + 2 * padding - k) / stride + 1;
             var batchSize = input.Shape.D0;
             var kSqInC = k * k * inC;
             var spatialOut = outH * outW;
@@ -38,7 +41,7 @@ namespace DevOnBike.Overfit.Ops
             var outputNode = AllocateNode(
                 graph,
                 new TensorShape(batchSize, outC, outH, outW),
-                input.RequiresGrad || weights.RequiresGrad,
+                input.RequiresGrad || weights.RequiresGrad || (bias is not null && bias.RequiresGrad),
                 clearMemory: true);
 
             // The convolution workspace holds per-worker im2col scratch buffers that the
@@ -53,7 +56,7 @@ namespace DevOnBike.Overfit.Ops
 
             if (graph is not null)
             {
-                workspace = graph.GetConv2DWorkspace(batchSize, inC, outC, h, w, k);
+                workspace = graph.GetConv2DWorkspace(batchSize, inC, outC, h, w, k, padding, stride);
             }
             else
             {
@@ -73,12 +76,15 @@ namespace DevOnBike.Overfit.Ops
                 // Each worker owns a private col-buffer slice and strides the batch, so the
                 // chunks are independent. Pin the data + the contiguous col buffer once and
                 // dispatch through OverfitParallelFor (zero-allocation, no TPL closure).
+                var biasSpan = bias is not null ? bias.DataView.AsReadOnlySpan() : ReadOnlySpan<float>.Empty;
+
                 unsafe
                 {
                     fixed (float* inputPtr = input.DataView.AsReadOnlySpan(),
                                   weightsPtr = weights.DataView.AsReadOnlySpan(),
                                   outputPtr = outputNode.DataView.AsSpan(),
-                                  colPtr = workspace.ColBuffer)
+                                  colPtr = workspace.ColBuffer,
+                                  biasPtr = biasSpan)
                     {
                         var ctx = new Conv2DForwardCtx
                         {
@@ -86,6 +92,8 @@ namespace DevOnBike.Overfit.Ops
                             Weights = weightsPtr,
                             Output = outputPtr,
                             Col = colPtr,
+                            Bias = biasPtr,
+                            HasBias = bias is not null ? 1 : 0,
                             BatchSize = batchSize,
                             WorkerCount = workerCount,
                             ColLength = workspace.ColLength,
@@ -93,6 +101,8 @@ namespace DevOnBike.Overfit.Ops
                             H = h,
                             W = w,
                             K = k,
+                            Padding = padding,
+                            Stride = stride,
                             KSqInC = kSqInC,
                             SpatialOut = spatialOut,
                             OutC = outC,
@@ -111,10 +121,20 @@ namespace DevOnBike.Overfit.Ops
 
             if (outputNode.RequiresGrad)
             {
-                graph?.Record(OpCode.Conv2D, outputNode, input, weights, inC, outC, h, w, k);
+                graph?.Record(OpCode.Conv2D, outputNode, input, weights, inC, outC, h, w, PackConvParams(k, padding, stride), c0: bias);
             }
 
             return outputNode;
+        }
+
+        // k / padding / stride packed into one tape int (each &lt; 1024) — Conv2D's i0..i3 hold inC/outC/h/w.
+        internal static int PackConvParams(int k, int padding, int stride) => k | (padding << 10) | (stride << 20);
+
+        internal static void UnpackConvParams(int packed, out int k, out int padding, out int stride)
+        {
+            k = packed & 0x3FF;
+            padding = (packed >> 10) & 0x3FF;
+            stride = (packed >> 20) & 0x3FF;
         }
 
         public static void Conv2DBackward(
@@ -122,26 +142,52 @@ namespace DevOnBike.Overfit.Ops
             AutogradNode input,
             AutogradNode weights,
             AutogradNode output,
+            AutogradNode bias,
             int inC,
             int outC,
             int h,
             int w,
-            int k)
+            int k,
+            int padding,
+            int stride)
         {
-            if (!input.RequiresGrad && !weights.RequiresGrad)
+            var biasNeedsGrad = bias is not null && bias.RequiresGrad;
+            if (!input.RequiresGrad && !weights.RequiresGrad && !biasNeedsGrad)
             {
                 return;
             }
 
             var batchSize = input.Shape.D0;
-            var outH = h - k + 1;
-            var outW = w - k + 1;
+            var outH = (h + 2 * padding - k) / stride + 1;
+            var outW = (w + 2 * padding - k) / stride + 1;
             var spatialOut = outH * outW;
             var kSqInC = k * k * inC;
             var inputPlaneLength = inC * h * w;
             var outputPlaneLength = outC * spatialOut;
 
-            var workspace = graph.GetConv2DWorkspace(batchSize, inC, outC, h, w, k);
+            // Bias gradient: dL/db[oc] = Σ over batch & spatial positions of dL/dOutput[n, oc, :].
+            if (biasNeedsGrad)
+            {
+                var outGrad = output.GradView.AsReadOnlySpan();
+                var biasGrad = bias.GradView.AsSpan();
+                for (var n = 0; n < batchSize; n++)
+                {
+                    for (var oc = 0; oc < outC; oc++)
+                    {
+                        var channel = outGrad.Slice(n * outputPlaneLength + oc * spatialOut, spatialOut);
+                        var sum = 0f;
+                        for (var i = 0; i < channel.Length; i++) { sum += channel[i]; }
+                        biasGrad[oc] += sum;
+                    }
+                }
+
+                if (!input.RequiresGrad && !weights.RequiresGrad)
+                {
+                    return;   // bias-only gradient done.
+                }
+            }
+
+            var workspace = graph.GetConv2DWorkspace(batchSize, inC, outC, h, w, k, padding, stride);
             var workerCount = workspace.WorkerCount;
 
             if (weights.RequiresGrad)
@@ -183,6 +229,8 @@ namespace DevOnBike.Overfit.Ops
                         H = h,
                         W = w,
                         K = k,
+                        Padding = padding,
+                        Stride = stride,
                         KSqInC = kSqInC,
                         SpatialOut = spatialOut,
                         OutC = outC,
@@ -217,6 +265,8 @@ namespace DevOnBike.Overfit.Ops
             public float* Weights;
             public float* Output;
             public float* Col;
+            public float* Bias;
+            public int HasBias;
             public int BatchSize;
             public int WorkerCount;
             public int ColLength;
@@ -224,6 +274,8 @@ namespace DevOnBike.Overfit.Ops
             public int H;
             public int W;
             public int K;
+            public int Padding;
+            public int Stride;
             public int KSqInC;
             public int SpatialOut;
             public int OutC;
@@ -251,8 +303,18 @@ namespace DevOnBike.Overfit.Ops
                         ctx.Output + ((long)n * ctx.OutputPlaneLength),
                         ctx.OutputPlaneLength);
 
-                    Im2Col(inputSlice, ctx.InC, ctx.H, ctx.W, ctx.K, 1, 0, col);
+                    Im2Col(inputSlice, ctx.InC, ctx.H, ctx.W, ctx.K, ctx.Stride, ctx.Padding, col);
                     MatMulRawSeq(weights, col, ctx.OutC, ctx.KSqInC, ctx.SpatialOut, outputSlice);
+
+                    if (ctx.HasBias != 0)
+                    {
+                        for (var oc = 0; oc < ctx.OutC; oc++)
+                        {
+                            var b = ctx.Bias[oc];
+                            var channel = outputSlice.Slice(oc * ctx.SpatialOut, ctx.SpatialOut);
+                            for (var i = 0; i < channel.Length; i++) { channel[i] += b; }
+                        }
+                    }
                 }
             }
         }
@@ -276,6 +338,8 @@ namespace DevOnBike.Overfit.Ops
             public int H;
             public int W;
             public int K;
+            public int Padding;
+            public int Stride;
             public int KSqInC;
             public int SpatialOut;
             public int OutC;
@@ -305,7 +369,7 @@ namespace DevOnBike.Overfit.Ops
                         ctx.Input + ((long)n * ctx.InputPlaneLength),
                         ctx.InputPlaneLength);
 
-                    Im2Col(inputSlice, ctx.InC, ctx.H, ctx.W, ctx.K, 1, 0, col);
+                    Im2Col(inputSlice, ctx.InC, ctx.H, ctx.W, ctx.K, ctx.Stride, ctx.Padding, col);
 
                     var outGradSlice = new ReadOnlySpan<float>(
                         ctx.OutputGrad + ((long)n * ctx.OutputPlaneLength),
@@ -338,7 +402,7 @@ namespace DevOnBike.Overfit.Ops
                             ctx.InputGrad + ((long)n * ctx.InputPlaneLength),
                             ctx.InputPlaneLength);
 
-                        Col2Im(dCol, ctx.InC, ctx.H, ctx.W, ctx.K, 1, 0, inputGradSlice);
+                        Col2Im(dCol, ctx.InC, ctx.H, ctx.W, ctx.K, ctx.Stride, ctx.Padding, inputGradSlice);
                     }
                 }
             }
