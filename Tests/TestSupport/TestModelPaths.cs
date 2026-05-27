@@ -107,6 +107,25 @@ namespace DevOnBike.Overfit.Tests.TestSupport
             public static string ConfigJsonPath => Path.Combine(Dir, "config.json");
         }
 
+        /// <summary>
+        /// A sentence-transformers BERT encoder directory (all-MiniLM-L6-v2): <c>vocab.txt</c> +
+        /// <c>config.json</c> + <c>model.safetensors</c>. Used to validate the WordPiece tokenizer +
+        /// BertEncoder embedding path on real weights. Default <c>C:\minilm</c>; override with
+        /// <c>OVERFIT_MINILM_DIR</c>.
+        /// </summary>
+        public static class MiniLm
+        {
+            private const string EnvVar = "OVERFIT_MINILM_DIR";
+            public static string Dir => Resolve(EnvVar, @"c:\minilm");
+            public static string VocabPath => Path.Combine(Dir, "vocab.txt");
+            public static string SafetensorsPath => Path.Combine(Dir, "model.safetensors");
+            public static string ConfigJsonPath => Path.Combine(Dir, "config.json");
+
+            public static string RequireVocabPath() => Require(VocabPath, EnvVar, "MiniLM WordPiece vocab.txt");
+            public static string RequireSafetensorsPath() => Require(SafetensorsPath, EnvVar, "MiniLM model.safetensors");
+            public static string RequireConfigJsonPath() => Require(ConfigJsonPath, EnvVar, "MiniLM config.json");
+        }
+
         public static class Mnist
         {
             private const string EnvVar = "OVERFIT_MNIST_DIR";
