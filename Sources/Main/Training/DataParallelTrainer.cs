@@ -173,7 +173,7 @@ namespace DevOnBike.Overfit.Training
                     // parallelism — N replicas × intra-op pool would oversubscribe and serialize on
                     // the pool lock. Restore the flag so the pool thread is left as we found it.
                     var previous = OverfitParallelFor.SuppressParallelismOnCurrentThread;
-                    
+
                     if (inline)
                     {
                         OverfitParallelFor.SuppressParallelismOnCurrentThread = true;

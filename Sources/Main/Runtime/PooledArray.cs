@@ -28,7 +28,7 @@ namespace DevOnBike.Overfit.Runtime
         public PooledArray(int length)
         {
             ArgumentOutOfRangeException.ThrowIfNegative(length);
-            
+
             _array = ArrayPool<T>.Shared.Rent(length);
             Span = _array.AsSpan(0, length);
         }

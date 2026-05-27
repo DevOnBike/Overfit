@@ -6,8 +6,8 @@
 using System.Text;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
-using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Ops;
+using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Training;
 using Xunit.Abstractions;
 

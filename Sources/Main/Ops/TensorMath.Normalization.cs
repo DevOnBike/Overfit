@@ -205,7 +205,7 @@ namespace DevOnBike.Overfit.Ops
                 using var varBuf = new PooledBuffer<float>(C);          // cleared
                 using var tmpBuf = new PooledBuffer<float>(hw, false);
                 var varS = varBuf.Span;
-                
+
                 for (var n = 0; n < N; n++)
                 {
                     for (var c = 0; c < C; c++)
@@ -217,7 +217,7 @@ namespace DevOnBike.Overfit.Ops
 
                 var rmS = runningMean.AsSpan();
                 var rvS = runningVar.AsSpan();
-                
+
                 for (var c = 0; c < C; c++)
                 {
                     varS[c] /= m;
@@ -235,9 +235,9 @@ namespace DevOnBike.Overfit.Ops
 
             var gS = gamma.DataView.AsReadOnlySpan();
             var bS = beta.DataView.AsReadOnlySpan();
-            
-            
-            
+
+
+
             for (var n = 0; n < N; n++)
             {
                 for (var c = 0; c < C; c++)

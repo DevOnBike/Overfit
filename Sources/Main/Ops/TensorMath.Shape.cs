@@ -77,7 +77,7 @@ namespace DevOnBike.Overfit.Ops
             TensorPrimitives.Add(input.GradView.AsSpan(), output.GradView.AsReadOnlySpan(), input.GradView.AsSpan());
         }
 
-        
+
         // ====================================================================
         // TRANSPOSE (last two axes)
         // ====================================================================
