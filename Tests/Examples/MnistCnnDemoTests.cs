@@ -48,15 +48,18 @@ namespace DevOnBike.Overfit.Tests.Examples
             const int steps = 1200;
             const float lrMax = 1e-3f, lrMin = 1e-4f;
 
-            // Conv stack uses SAME padding (preserve dims) + bias; MaxPool halves spatial each stage.
+            // Conv stack: SAME conv + BatchNorm2D + ReLU, MaxPool halves spatial each stage.
             using var conv1 = new ConvLayer(1, 8, Side, Side, kSize: 3, padding: 1, stride: 1, useBias: true);
+            using var bn1 = new BatchNorm2D(8);
             using var conv2 = new ConvLayer(8, 16, 14, 14, kSize: 3, padding: 1, stride: 1, useBias: true);
+            using var bn2 = new BatchNorm2D(16);
             using var fc1 = new LinearLayer(16 * 7 * 7, 64);
             using var fc2 = new LinearLayer(64, Classes);
-            foreach (var m in new IModule[] { conv1, conv2, fc1, fc2 }) { m.Train(); }
+            var layers = new IModule[] { conv1, bn1, conv2, bn2, fc1, fc2 };
+            foreach (var m in layers) { m.Train(); }
 
             var parameters = new List<AutogradNode>();
-            foreach (var m in new IModule[] { conv1, conv2, fc1, fc2 })
+            foreach (var m in layers)
             {
                 foreach (var p in m.Parameters()) { parameters.Add(p); }
             }
@@ -84,12 +87,11 @@ namespace DevOnBike.Overfit.Tests.Examples
 
                 optimizer.LearningRate = LearningRateSchedule.Cosine(step, steps, lrMax, lrMin);
                 graph.Reset();
-                conv1.InvalidateParameterCaches(); conv2.InvalidateParameterCaches();
-                fc1.InvalidateParameterCaches(); fc2.InvalidateParameterCaches();
+                foreach (var m in layers) { m.InvalidateParameterCaches(); }
 
                 using var input = NewNode(inputData, new TensorShape(batch, 1, Side, Side));
                 using var target = NewNode(targetData, new TensorShape(batch, Classes));
-                var logits = ForwardLogits(graph, conv1, conv2, fc1, fc2, input, batch);
+                var logits = ForwardLogits(graph, conv1, bn1, conv2, bn2, fc1, fc2, input, batch);
                 var loss = graph.SoftmaxCrossEntropy(logits, target);
 
                 optimizer.ZeroGrad();
@@ -102,8 +104,8 @@ namespace DevOnBike.Overfit.Tests.Examples
                 if (step == 0 || (step + 1) % 100 == 0) { _out.WriteLine($"step {step + 1,4}/{steps}  loss={l:F4}"); }
             }
 
-            // ── Test-set accuracy ──
-            conv1.Eval(); conv2.Eval(); fc1.Eval(); fc2.Eval();
+            // ── Test-set accuracy (BatchNorm now uses running stats) ──
+            foreach (var m in layers) { m.Eval(); }
             var evalCount = Math.Min(testN, 2000);
             var correct = 0;
             var evalInput = new float[batch * Pixels];
@@ -117,7 +119,7 @@ namespace DevOnBike.Overfit.Tests.Examples
 
                 graph.Reset();
                 using var input = NewNode(evalInput, new TensorShape(batch, 1, Side, Side));
-                var logits = ForwardLogits(graph, conv1, conv2, fc1, fc2, input, batch);
+                var logits = ForwardLogits(graph, conv1, bn1, conv2, bn2, fc1, fc2, input, batch);
                 var data = logits.DataView.AsReadOnlySpan();
                 for (var i = 0; i < b; i++)
                 {
@@ -131,12 +133,12 @@ namespace DevOnBike.Overfit.Tests.Examples
         }
 
         private static AutogradNode ForwardLogits(
-            ComputationGraph graph, ConvLayer conv1, ConvLayer conv2, LinearLayer fc1, LinearLayer fc2,
-            AutogradNode input, int batch)
+            ComputationGraph graph, ConvLayer conv1, BatchNorm2D bn1, ConvLayer conv2, BatchNorm2D bn2,
+            LinearLayer fc1, LinearLayer fc2, AutogradNode input, int batch)
         {
-            var x = graph.Relu(conv1.Forward(graph, input));        // [B,8,28,28]
+            var x = graph.Relu(bn1.Forward(graph, conv1.Forward(graph, input)));   // [B,8,28,28]
             x = graph.MaxPool2D(x, 8, 28, 28, 2);                   // [B,8,14,14]
-            x = graph.Relu(conv2.Forward(graph, x));                // [B,16,14,14]
+            x = graph.Relu(bn2.Forward(graph, conv2.Forward(graph, x)));           // [B,16,14,14]
             x = graph.MaxPool2D(x, 16, 14, 14, 2);                  // [B,16,7,7]
             x = graph.Reshape(x, batch, 16 * 7 * 7);                // flatten
             x = graph.Relu(fc1.Forward(graph, x));                  // [B,64]

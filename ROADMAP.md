@@ -1116,8 +1116,27 @@ This section is a strategic overlay — it ranks and justifies; the tactical bre
 - [x] **Chat templates** — DONE: `ChatTemplate` (ChatML detect/render from GGUF metadata) + `ChatSession` (system/user/assistant turns), used by `Demo/AgentDemo` and the chat tests.
 - [ ] **`OverfitClient` facade** — high-level API: `var client = OverfitClient.LoadGguf(...); var response = await client.ChatAsync("...");` — gathers tokenizer + engine + session + sampling defaults.
 - [ ] **ONNX: LSTM/GRU operators** — enables recurrent model import.
-- [ ] **Depthwise Conv** (group=channels) — MobileNet-style models.
+- [x] **Depthwise Conv** (group=channels) — MobileNet-style models. DONE 2026-05-27: `DepthwiseConv2DLayer` + `TensorMath.DepthwiseConv2D` (SIMD AXPY inner kernel, padding/stride/bias, FD-verified). Pair with a 1×1 `ConvLayer` for a full separable block.
 - [ ] Standalone Softmax and CrossEntropy in addition to fused loss.
+
+### Agentic loop primitives (from `D:\Agentic-AI-LangGraph` review, 2026-05-27)
+
+The agentic stack today has the *primitives* (tool calling, JSON-constrained / structured output, streaming,
+multi-turn `ChatSession` + sliding-window memory, embeddings) but **no reusable agent loop on top**. A review of a
+LangGraph patterns repo (17 recipes) surfaced four small, AOT-friendly, in-character additions that build *on* the
+existing primitives — NOT a graph/agent framework (state-graph runtime, multi-agent supervisor, HITL gate,
+time-travel, parallel fan-out, thread checkpointing, agentic-RAG router + vector store are deliberately **out of
+scope** per "What Overfit is not trying to be" — a user builds those on the primitives):
+
+- [ ] **ReAct / tool-use agent loop** — a driver over `ISlmSession` + `Tools`: loop *model → tool-call → observe →
+      repeat* until a final answer, with a step cap. Turns the shipped tool-calling primitive into actual agents.
+      *(Highest leverage — closes the one real gap.)*
+- [ ] **Self-reflection / critic loop** — `generate → critic evaluates → revise` until approved or max iterations;
+      model-agnostic quality lift, ~1 file.
+- [ ] **Circuit breaker / step guard** — tiny reliability primitive (cap iterations/retries, graceful exit) shared by
+      the ReAct + critic loops; prevents runaway token spend.
+- [ ] **Summarizing memory** — compress old turns via the model (complements the current sliding-window eviction):
+      keeps long chats in-budget without forgetting. (LangGraph topic 11 measured ~80 % token reduction.)
 
 ### Distribution
 

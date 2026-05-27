@@ -339,12 +339,23 @@ namespace DevOnBike.Overfit.Autograd
                     TensorMath.Conv2DBackward(this, op.A, op.B, op.Output, op.C0, op.I0, op.I1, op.I2, op.I3, convK, convPad, convStride);
                     break;
 
+                case OpCode.DepthwiseConv2D:
+                    TensorMath.UnpackConvParams(op.I0, out var dwK, out var dwPad, out var dwStride);
+                    TensorMath.DepthwiseConv2DBackward(
+                        this, op.A, op.B, op.Output, op.C0,
+                        op.A.Shape.D1, op.A.Shape.D2, op.A.Shape.D3, dwK, dwPad, dwStride);
+                    break;
+
                 case OpCode.MaxPool2D:
                     TensorMath.MaxPool2DBackward(op.A, op.B, op.Output);
                     break;
 
                 case OpCode.GlobalAveragePool2D:
                     TensorMath.GlobalAvgPool2DBackward(op.A, op.Output, op.I0, op.I1, op.I2);
+                    break;
+
+                case OpCode.BatchNorm2D:
+                    TensorMath.BatchNorm2DBackward(op.A, op.Output, op.C0, op.C1, op.C2, op.C3);
                     break;
 
                 case OpCode.BatchNorm1D:
