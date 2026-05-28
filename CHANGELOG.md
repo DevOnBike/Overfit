@@ -46,6 +46,7 @@ Pre-release suffixes (e.g. `10.1.0-beta.1`) are used for surface changes that ne
 
 ### Fixed
 
+- **Native AOT guard now actually verifies Native AOT.** Previously the `aot-guard` CI job ran `dotnet publish` on `Sources/Main` (a class library), which does not invoke ILCompiler — only an executable can be AOT-compiled. The check was symbolic and would not catch trim/AOT-incompatible code added to the library. Replaced with a thin `Sources/AotSmokeTest` console exe that references `DevOnBike.Overfit`; the CI job now publishes the smoketest under `-p:PublishAot=true -p:TreatWarningsAsErrors=true` on Ubuntu (with `clang` + `zlib1g-dev` installed) and executes the produced native binary as a runtime smoke check.
 - `devskim` and `checkmarx-one` GitHub Actions workflows now target the `main` branch — previously they targeted the non-existent `master`, so scans never triggered automatically.
 - GPT-2 loader peak-RAM regression: lazy chunk streaming reduces peak load RAM from ~2× steady-state to ~1× steady-state.
 - RoPE row-permutation bug in `SafetensorsLlamaLoader` (HF rotate-half vs GGUF adjacent-pair on q/k) — validated coherent on real Qwen2.5-0.5B.

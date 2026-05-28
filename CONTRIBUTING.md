@@ -21,7 +21,9 @@ Thanks for the interest. A few things to read before opening a PR.
 
 ## Native-AOT discipline
 
-`Sources/Main` is published under `PublishAot=true` in CI via the `aot-guard` job. The following are banned and enforced by `Microsoft.CodeAnalysis.BannedApiAnalyzers` with `RS0030` promoted to error:
+Two independent guards:
+
+**1. Banned symbols, checked at every build.** `Microsoft.CodeAnalysis.BannedApiAnalyzers` with `RS0030` promoted to error in `.editorconfig` enforces `Sources/Main/BannedSymbols.txt` (authoritative live list). Forbidden in `Sources/Main`:
 
 - `System.Linq` (the namespace is also `<Using Remove="System.Linq" />` in `Main.csproj`).
 - `System.Reflection` and `System.Linq.Expressions.Expression`.
@@ -29,9 +31,11 @@ Thanks for the interest. A few things to read before opening a PR.
 - `Array.Copy` — use `Span<T>.CopyTo` instead.
 - Raw `ArrayPool<T>.Shared` — use `PooledBuffer<T>` (scoped via `using`) or `PooledBuffer<T>.RentArray` + `ReturnArray` (class-lifetime).
 
-See `Sources/Main/BannedSymbols.txt` for the authoritative live list. Tests and benchmarks are unconstrained — LINQ is fine there.
+**2. Actual Native AOT publish, checked in CI.** `Sources/AotSmokeTest` is a thin console exe referencing `DevOnBike.Overfit`. The `aot-guard` job in `.github/workflows/ci.yml` publishes it under `-p:PublishAot=true -p:TreatWarningsAsErrors=true` on Ubuntu and then runs the produced native binary. Libraries cannot be Native-AOT compiled directly (no entry point), so the smoketest is the real AOT consumer — ILCompiler actually runs, IL2026 / IL3050 / IL31xx warnings on reachable code become errors, and a non-zero exit from the binary fails the job.
 
-Use explicit `for` / `foreach` over `Span<T>`, delegates over reflection, explicit `new` over `Activator`.
+Tests and benchmarks are unconstrained — LINQ is fine there.
+
+Use explicit `for` / `foreach` over `Span<T>`, delegates over reflection, explicit `new` over `Activator`. If your library change touches a code path reachable from `AotSmokeTest/Program.cs` and introduces a trim warning, the CI publish will fail — either fix the warning in the library or scope a `[RequiresDynamicCode]` / `[RequiresUnreferencedCode]` attribute (sparingly).
 
 ## Tests
 
