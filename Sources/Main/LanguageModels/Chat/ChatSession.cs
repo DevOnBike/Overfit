@@ -80,6 +80,19 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
 
         public void AddSystem(string content) => _history.Add(ChatMessage.System(content));
 
+        /// <summary>
+        /// Appends a user turn to the history without generating an assistant reply. Used to seed
+        /// the conversation from a saved transcript, or to re-attach recent verbatim turns after a
+        /// memory-compaction step.
+        /// </summary>
+        public void AddUser(string content) => _history.Add(ChatMessage.User(content));
+
+        /// <summary>
+        /// Appends an assistant turn to the history without invoking the model. Same use cases as
+        /// <see cref="AddUser"/>: transcript seeding, post-compaction history rehydration.
+        /// </summary>
+        public void AddAssistant(string content) => _history.Add(ChatMessage.Assistant(content));
+
         /// <summary>Clears the conversation history.</summary>
         public void ResetConversation() => _history.Clear();
 

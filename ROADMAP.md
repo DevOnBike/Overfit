@@ -28,6 +28,8 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 | Training: data parallelism (N replicas) | ✅ `DataParallelTrainer` / `DataParallelSession` + thread-budget fix — ~6× throughput (24 workers) |
 | **OCR: CRNN + CTC** | ✅ `Crnn` facade + `CtcLoss` + `CtcDecoder` (greedy / beam / LM-rescored) + `NGramCtcLanguageModel`; reads synthetic digits + lexicon words |
 | **Sentence embeddings (BERT encoder)** | ✅ `WordPieceTokenizer` + `BertEncoder` (bidirectional, post-LN) + native `BertSafetensorsLoader` + `SentenceEmbedder` facade — loads **all-MiniLM-L6-v2 / BGE-small-en-v1.5 / E5-small-v2** from raw HF safetensors, no Python; cosine 1.0 / 0.999999 / 1.0 vs HF reference. CLS pool + query/passage prefix support. |
+| **ReAct agent loop** | ✅ `ReActAgent` driver over `ChatSession` + `ToolCallConstraint`; auto-registers a synthetic `finish({answer:...})` tool. Loop verified by 6 unit tests via the testable `RunLoop` hook; e2e [LongFact] needs a 7B+ instruction-tuned model (Q4-3B too weak under constrained decoding). |
+| **Critic loop + circuit breaker + summarising memory** | ✅ All four LangGraph agentic primitives shipped: `CriticLoop` (generate→critique→revise), `CircuitBreaker` (generic capped-loop), `SummarizingChatSession` (auto-compact long convos), + `ChatSession.AddUser`/`AddAssistant` history seeding. 12 unit tests. |
 | GPU backend | ❌ Not started |
 
 ---
@@ -1129,15 +1131,32 @@ existing primitives — NOT a graph/agent framework (state-graph runtime, multi-
 time-travel, parallel fan-out, thread checkpointing, agentic-RAG router + vector store are deliberately **out of
 scope** per "What Overfit is not trying to be" — a user builds those on the primitives):
 
-- [ ] **ReAct / tool-use agent loop** — a driver over `ISlmSession` + `Tools`: loop *model → tool-call → observe →
-      repeat* until a final answer, with a step cap. Turns the shipped tool-calling primitive into actual agents.
-      *(Highest leverage — closes the one real gap.)*
-- [ ] **Self-reflection / critic loop** — `generate → critic evaluates → revise` until approved or max iterations;
-      model-agnostic quality lift, ~1 file.
-- [ ] **Circuit breaker / step guard** — tiny reliability primitive (cap iterations/retries, graceful exit) shared by
-      the ReAct + critic loops; prevents runaway token spend.
-- [ ] **Summarizing memory** — compress old turns via the model (complements the current sliding-window eviction):
-      keeps long chats in-budget without forgetting. (LangGraph topic 11 measured ~80 % token reduction.)
+- [x] **ReAct / tool-use agent loop** — DONE 2026-05-29. `LanguageModels/Agents/ReActAgent.cs` is a driver
+      over `ChatSession` + `ToolCallConstraint` that loops *model → tool-call → observe → repeat* until
+      the model calls the auto-registered synthetic `finish({answer:...})` tool or hits `MaxSteps` (the
+      circuit-breaker overlap). Includes the `ExtraMaskedTokensConstraint` shim that masks the chat
+      session's stop-token id (e.g. Qwen's `<|im_end|>` ≠ `<|endoftext|>`) while the envelope is
+      incomplete — the constraint's own EOS-mask alone wasn't enough to prevent mid-envelope truncation.
+      6 unit tests (`ReActAgentTests`) drive the pure loop via the internal `RunLoop(askForToolCall fn)`
+      hook — synthetic replies, no model needed: single-tool-then-finish, multi-step observation
+      chaining, step cap, unknown tool, handler-throws, non-string answer fallback. An e2e
+      `[LongFact]` is wired but Qwen 2.5-3B Q4_K_M is below the reliability floor for multi-turn
+      constrained tool calling (greedy → unclosed JSON strings; temperature → Unicode garbage); ship
+      with a bigger / instruction-tuned model.
+- [x] **Self-reflection / critic loop** — DONE 2026-05-29. `LanguageModels/Agents/CriticLoop.cs`,
+      model-agnostic (`Func<string,string>` generator + `Func<string,CriticVerdict>` critic), reflects
+      previous-attempt + critic feedback into next prompt. Built on `CircuitBreaker` so cap and
+      timeout come for free. 3 unit tests.
+- [x] **Circuit breaker / step guard** — DONE 2026-05-29. `LanguageModels/Agents/CircuitBreaker.cs`:
+      generic `Run<T>(maxIterations, maxElapsed?, iterate, isAccepted)` → `CircuitBreakerResult<T>`
+      with `Accepted` / `MaxIterations` / `Timeout` outcomes. Used by `CriticLoop`. 4 unit tests.
+- [x] **Summarizing memory** — DONE 2026-05-29. `LanguageModels/Memory/`: pure
+      `ChatHistoryCompactor.Plan(history, summarizeAtChars, recentTurnsToKeep)` returning a
+      `CompactionPlan`; model-driven `SummarizingChatSession` wraps a `ChatSession` and triggers
+      compaction in-line on `Send`. Rebuilds as `[system…] + [running summary] + [recent N turns
+      verbatim]`. Uses save/restore around summarisation so the prompt doesn't leak. Required adding
+      `ChatSession.AddUser` / `AddAssistant` (history seeding — useful generally for transcript
+      replay). 5 unit tests on the compactor; e2e left as host-driven (needs a model).
 
 ### Distribution
 
