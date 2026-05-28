@@ -1132,7 +1132,7 @@ This section is a strategic overlay — it ranks and justifies; the tactical bre
 ### Features
 
 - [x] **Chat templates** — DONE: `ChatTemplate` (ChatML detect/render from GGUF metadata) + `ChatSession` (system/user/assistant turns), used by `Demo/AgentDemo` and the chat tests.
-- [ ] **`OverfitClient` facade** — high-level API: `var client = OverfitClient.LoadGguf(...); var response = await client.ChatAsync("...");` — gathers tokenizer + engine + session + sampling defaults.
+- [x] **`OverfitClient` facade** — DONE 2026-05-29. `LanguageModels/OverfitClient.cs`. `using var client = OverfitClient.LoadGguf(path); client.AddSystem("..."); var reply = client.Send("...");` — wraps GgufReader+ChatTemplate.Detect, tokenizer auto-pick (QwenChatTokenizer first if `vocab.json+merges.txt` present, else HuggingFaceBpeTokenizer fallback), engine+session creation, ChatSession with sensible ChatML stop sequences, and Greedy GenerationOptions default. Sync `Send` + async `SendAsync` (thread-pool wrap). Exposes underlying `Chat` for constrained outputs / streaming. Tests: 2 fast (null/missing-path guards) + 1 [LongFact] e2e on real Qwen (mechanical assertion — content quality is a separate semantic concern).
 - [ ] **ONNX: LSTM/GRU operators** — enables recurrent model import.
 - [x] **Depthwise Conv** (group=channels) — MobileNet-style models. DONE 2026-05-27: `DepthwiseConv2DLayer` + `TensorMath.DepthwiseConv2D` (SIMD AXPY inner kernel, padding/stride/bias, FD-verified). Pair with a 1×1 `ConvLayer` for a full separable block.
 - [ ] Standalone Softmax and CrossEntropy in addition to fused loss.

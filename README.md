@@ -75,6 +75,82 @@ execution — *not* raw matmul throughput. It matches llama.cpp on RAM and wins
 
 ---
 
+## Supported models
+
+All loaded natively in pure C# — no Python, no native binaries, no conversion step (with the exception
+of one optional `.bin` path documented in [`docs/TECHNICAL.md`](docs/TECHNICAL.md)).
+
+### Language models (chat / generation)
+
+| Family | Sizes verified | Loader | Quant formats |
+|---|---|---|---|
+| **Qwen2.5** | 0.5B / 3B / 7B / 14B / 32B | GGUF · HF safetensors (sharded) · `.bin` | F32 · F16 · BF16 · Q8_0 · **Q4_K_M** · **Q6_K** |
+| **Llama-2 / Llama-3.x** | Llama-3.2-1B onwards | GGUF · HF safetensors | F32 · F16 · BF16 · Q8_0 · Q4_K_M · Q6_K |
+| **Mistral 7B** | 7B | GGUF | F32 · F16 · BF16 · Q8_0 · Q4_K_M |
+| **Qwen1.5-MoE A2.7B** (routed + shared expert) | 14B total / 2.7B active | GGUF | Q8_0 · Q4_K_M — coherent ("Paris" verified) |
+| **Mixtral-8x7B** (routed-only) | 47B total / 13B active | GGUF | Q8_0 · Q4_K_M — coherent |
+| **GPT-2 small** | 124M | `.bin` (via `Scripts/convert_gpt2.py`) · HF safetensors | F32 — **byte-for-byte parity vs PyTorch reference** |
+| **GPT-1** (own arch, training-capable) | configurable | `.bin` · trained from scratch | F32 |
+
+The chat-side path runs through one facade:
+
+```csharp
+using var client = OverfitClient.LoadGguf(@"C:\qwen3b\qwen.q4km.gguf");
+client.AddSystem("You are concise.");
+var reply = client.Send("What is 2+2?");
+```
+
+…with auto-detected tokenizer (Qwen ChatML-aware fallback to generic HF BPE), GGUF chat template,
+mmap K-quant weights, ChatML stop sequences, and a Greedy `GenerationOptions` default. Drop down to
+the underlying `ChatSession` / `CachedLlamaInferenceEngine` for streaming, constrained-JSON, tool
+calling, embeddings, KV-cache control.
+
+### Sentence embeddings (BERT encoder family)
+
+| Model | Pooling | Cosine vs HF/PyTorch |
+|---|---|---|
+| `sentence-transformers/all-MiniLM-L6-v2` | mean + L2 | **1.000000** |
+| `BAAI/bge-small-en-v1.5` | CLS + L2 (query instruction prefix) | **0.999999** |
+| `intfloat/e5-small-v2` | mean + L2 (`query:` / `passage:` prefixes) | **1.000000** |
+
+Bit-parity verified end-to-end against the HuggingFace `BertModel` (mean-pool + L2 normalise) — same
+vectors as the Python `sentence-transformers` library, no Python at runtime.
+
+```csharp
+using var embedder = SentenceEmbedder.ForMiniLm(@"C:\minilm");   // or ForBgeEnV15 / ForE5
+var vector = embedder.Embed("A man is playing a guitar.");
+```
+
+### Computer vision
+
+| Workload | Architecture | Status |
+|---|---|---|
+| **MNIST CNN** | Conv → BN2D → ReLU → MaxPool ×2 → FC → ReLU → FC | trains to 97.15 % test accuracy in ~6.5 s (1200 steps, batch 64) |
+| **OCR (CRNN + CTC)** | SAME-conv stack → map-to-sequence → LSTM → CTC | synthetic digits + lexicon words (greedy + beam + LM-rescored beam) |
+| **ONNX import** (linear topology) | 14 operators | image classifiers exported from PyTorch |
+| **ONNX import** (DAG topology) | skip connections, ResNet-style | works |
+
+### Loading formats
+
+GGUF (mmap-backed; verbatim Q4_K / Q6_K K-quant; de-interleaved Q8_0; F32 / F16 / BF16) · HF
+safetensors (sharded, native loader for Llama/Qwen + BERT + GPT-2 families) · Overfit `.bin` (custom,
+from Python convert scripts) · ONNX (linear + DAG).
+
+### Tokenizers
+
+HuggingFace ByteLevel-BPE (Llama / Qwen / Mistral — validated bit-for-bit on Qwen) · QwenChatTokenizer
+(ChatML-aware Qwen variant) · GGUF tokenizer (legacy fallback) · WordPiece (BERT family, all special
+tokens + lowercase + NFD accent strip) · GPT-2 byte-level BPE.
+
+### Things this does NOT load
+
+Diffusion models (Stable Diffusion etc.), CLIP / vision-language models, audio (Whisper, MusicGen),
+TensorFlow checkpoints, JAX, MLX, AWQ / GPTQ quantizations, Q5_K / Q4_0 / Q5_0 / Q5_1 / Q2_K / Q3_K
+quant formats (Q4_K_M + Q6_K + Q8_0 cover the K-quant hot path Ollama ships by default; the others
+are documented as roadmap items).
+
+---
+
 ## Why not just use…?
 
 | Tool | The right choice when… | Reach for Overfit when… |
