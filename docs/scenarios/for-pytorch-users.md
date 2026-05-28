@@ -81,7 +81,7 @@ This is why Overfit doesn't trigger GC in the hot path — you control lifetime 
 
 ### No broadcasting (yet)
 
-PyTorch broadcasts shapes implicitly. Overfit currently requires explicit shapes. This is a roadmap item — implicit broadcasting will come, but for now you might write a few more lines to reshape.
+PyTorch broadcasts shapes implicitly. Overfit currently requires explicit shapes — implicit broadcasting is on the roadmap, but for now you might write a few more lines to reshape.
 
 ### CPU only (today)
 
@@ -153,9 +153,9 @@ Being honest:
 
 PyTorch lets you prototype wild architectures with minimal friction. Dynamic graphs, custom autograd functions, Python's ecosystem of papers-as-code. Overfit is not trying to compete here.
 
-### Transformer ecosystem
+### HuggingFace Hub breadth
 
-HuggingFace Transformers gives you thousands of pre-trained models with two lines of code. Overfit can't match this today (Transformer layers are roadmap items, and there's no equivalent model hub).
+HuggingFace Transformers gives you thousands of pre-trained model architectures with two lines of Python. Overfit doesn't try to match that breadth, but for the model families that matter for production .NET use — Qwen2.5, Llama-2/3.x, Mistral, Mixtral, Qwen-MoE, BERT/MiniLM/BGE/E5, GPT-2 — the Transformer + MultiHeadAttention + MoE layers are shipped, and you load the same checkpoints (GGUF or safetensors) directly via `OverfitClient.LoadGguf(...)` or the native safetensors loader.
 
 ### GPU training
 
@@ -196,7 +196,7 @@ If you've ever debugged "why does this PyTorch model break under Python 3.11 but
 
 ## Getting Weights From PyTorch to Overfit
 
-The rough workflow today (ONNX import is a roadmap item that will simplify this):
+For LLMs (Qwen / Llama / Mistral / Mixtral / Qwen-MoE / GPT-2), just point `OverfitClient.LoadGguf("model.gguf")` at the GGUF — done, zero conversion. For HF-style models with safetensors (BERT-family embeddings, base transformer checkpoints), the native `SafetensorsReader` + family loaders read them directly. For arbitrary PyTorch architectures, ONNX export → `OnnxImporter.Load` (linear) or `OnnxGraphImporter.Load` (DAG / ResNet skip connections) covers most cases. The hand-rolled binary path below is still the simplest option for small custom MLPs:
 
 ### Step 1: Export weights from PyTorch
 
@@ -254,18 +254,23 @@ for (var i = 0; i < pytorchOutput.Length; i++)
 
 ---
 
-## What's on the Roadmap That You Care About
+## What's Already Shipped That You Care About
 
-From the PyTorch-user perspective, the interesting roadmap items:
+If you last looked at Overfit a year ago, this list is probably new:
 
-- **ONNX import** — load any PyTorch-exported model directly. This is the biggest one.
-- **Transformer building blocks** — MultiHeadAttention, LayerNorm.
+- **ONNX import** — linear topology (`OnnxImporter`) + DAG with skip connections (`OnnxGraphImporter`). Hand-rolled protobuf, no `Google.Protobuf` dependency.
+- **Transformer building blocks** — `MultiHeadAttentionLayer`, `LayerNorm`, `RmsNorm`, RoPE, transformer block, full transformer training in the graph.
+- **LLM inference end-to-end** — Qwen2.5 (0.5B-32B), Llama-2/3.x, Mistral, Mixtral, Qwen-MoE, GPT-2. GGUF mmap (Q4_K_M / Q6_K verbatim, Q8_0 de-interleaved) and native safetensors loader. One-line `OverfitClient.LoadGguf(...)`.
+- **Sentence embeddings** — MiniLM / BGE / E5 with bit-parity vs HF/PyTorch (cosine 1.000000 on real weights).
+- **Agentic primitives** — ReAct loop, Critic, CircuitBreaker, SummarizingChatSession, tool-calling, sliding-window eviction.
+- **Learning rate schedules** — cosine, warmup, step (`Training/LearningRateSchedule`).
+- **Quantization for inference** — Q4_K_M, Q6_K, Q8_0 via GGUF; FP32 training stays for now.
+
+Still on the roadmap (see [ROADMAP.md](../../ROADMAP.md)):
+
 - **Tensor broadcasting** — implicit shape broadcasting in elementwise ops.
-- **Learning rate schedulers** — cosine, warmup, OneCycle.
-- **Mixed precision** — FP16/BF16 for faster inference.
-- **Polyglot Notebooks** — Jupyter-style interactive workflows for C#.
-
-See [ROADMAP.md](../../ROADMAP.md) for the full list.
+- **Mixed-precision training** — FP16/BF16 in the training loop (inference is already quantized).
+- **Decode tok/s catch-up** — closing the ~1.5× gap vs llama.cpp on the same Q4_K_M file via AVX2 dequant-fused GEMV + L2 blocking.
 
 ---
 
@@ -289,6 +294,6 @@ Bad reasons:
 ## Further Reading
 
 - [Main README](../../README.md) — benchmarks and overview
-- [ROADMAP](../../ROADMAP.md) — planned features, especially ONNX import
+- [ROADMAP](../../ROADMAP.md) — current status and planned features
 - [ASP.NET scenario](aspnet-microservice.md) — most common deployment target
 - [Finance / Latency scenario](finance-latency.md) — where Overfit's characteristics shine

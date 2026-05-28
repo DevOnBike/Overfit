@@ -257,6 +257,6 @@ Most edge deployments are I/O-bound (camera, sensors, network), not CPU-bound. M
 ## Further Reading
 
 - [Main README](../../README.md) — project overview and benchmarks
-- [ROADMAP](../../ROADMAP.md) — planned features (ONNX import, quantization)
+- [ROADMAP](../../ROADMAP.md) — current status and planned features
 - [ASP.NET scenario](aspnet-microservice.md) — if you also run a cloud backend
 - [.NET AOT documentation](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/) — for Native AOT deployment details

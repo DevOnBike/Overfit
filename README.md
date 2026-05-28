@@ -1,9 +1,8 @@
 # Overfit
 
-Pure C# deep-learning and LLM inference engine. Predictable CPU performance,
-explicit memory ownership, zero-allocation inference hot paths.
+> **Overfit embeds local LLMs, RAG, tool calling and guaranteed JSON directly into your .NET process — no Python, no model server, no native binary, no data egress.**
 
-**No native binaries. No Python runtime. No ONNX Runtime dependency.** Native-AOT compatible.
+Pure C# deep-learning and LLM inference engine. Predictable CPU performance, explicit memory ownership, zero-allocation inference hot paths. Native-AOT compatible.
 
 <p align="center">
   <img src="docs/assets/overfit-features.png"
@@ -229,11 +228,23 @@ that is exactly the point. See [Overfit for regulated industries](docs/scenarios
 
 ---
 
+## Services
+
+Three productised, fixed-scope engagements — full deliverables, durations, SLA tiers and how-to-buy in [`COMMERCIAL.md`](COMMERCIAL.md).
+
+- **Private .NET RAG/Agent PoC** (2–3 weeks) — local LLM + RAG + tool calling against your documents, deployed in your infrastructure, no data egress. For regulated industries, on-prem, and teams blocked from external LLM APIs.
+- **Python / ONNX-sidecar replacement** (2 weeks) — collapse your Python / Ollama / llama.cpp-server / Triton tier into the .NET process; honest side-by-side P50 / P99 / RAM / allocation benchmark on your hardware; sidecar removed from deploy.
+- **Zero-GC inference audit** (1–2 weeks) — profile your .NET inference hot path (Overfit, ML.NET, ONNX Runtime, custom); allocation/GC sources identified with cost-per-fix; AOT-clean publish verified. Methodology audit — no requirement to use Overfit.
+
+Standalone commercial license and monthly support retainer also available — see [`COMMERCIAL.md`](COMMERCIAL.md). Contact: **devonbike@gmail.com**.
+
+---
+
 ## Licensing
 
-Dual-licensed.
+Dual-licensed. The full text of both licence options lives in [`LICENSE.md`](LICENSE.md).
 
 - **Open source — GNU AGPLv3.** Free in production **provided your project is released under a compatible open-source licence** (Overfit links as a library, so AGPL copyleft extends to your application).
-- **Commercial licence.** Closed-source product? AGPL won't work — a commercial licence removes the copyleft obligation. See [`COMMERCIAL.md`](COMMERCIAL.md) or contact **devonbike@gmail.com**.
+- **Commercial licence.** Closed-source product, SaaS, or regulated deployment? AGPL won't work — a commercial licence removes the copyleft obligation. Packages, deliverables, SLA tiers and how-to-buy are in [`COMMERCIAL.md`](COMMERCIAL.md); contact is **devonbike@gmail.com**.
 
 The simple test: if you can't or won't release your application under AGPLv3, you need the commercial licence.

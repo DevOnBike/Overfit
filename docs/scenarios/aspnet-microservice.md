@@ -141,7 +141,12 @@ Typical migration path:
 4. **Delete your Python sidecar.** Remove the container from your deployment. Remove the network call from your API.
 5. **Benchmark.** You'll typically see 50-100× latency improvement on small models, 2-5× on larger ones.
 
-If your model uses layers Overfit doesn't yet support (Transformers, advanced attention, custom ops), check the [ROADMAP](../../ROADMAP.md). ONNX import is planned for the near term, which will let you load any PyTorch-exported model directly.
+For more complex models, Overfit now also covers:
+- **Transformer LLMs**: Qwen2.5 (0.5B-32B), Llama-2/3.x, Mistral, Mixtral, Qwen-MoE, GPT-2 — load straight from GGUF (incl. mmap K-quant) or HuggingFace safetensors via `OverfitClient.LoadGguf(path)`.
+- **ONNX import**: linear topology + DAG (ResNet-style skip connections) — load PyTorch-exported models directly.
+- **Sentence embeddings**: MiniLM / BGE / E5 with bit-parity vs HuggingFace, for in-process RAG.
+
+If your model uses something we don't support yet, check the [ROADMAP](../../ROADMAP.md) — most additions are 1-3 weeks of work.
 
 ---
 
@@ -149,9 +154,10 @@ If your model uses layers Overfit doesn't yet support (Transformers, advanced at
 
 Be honest with yourself:
 
-- **You need GPU inference.** Overfit is CPU-first. For models where GPU is mandatory (LLMs, diffusion), use ONNX Runtime with CUDA or a dedicated inference server.
-- **Your model has layers Overfit doesn't support.** Today: no Transformers, no MultiHeadAttention. If ONNX import doesn't land in time, use ONNX Runtime.
-- **Batch size consistently > 64.** ONNX with MKL wins in pure throughput. Overfit's advantage is latency and zero-alloc, not raw BLAS speed.
+- **You need GPU inference.** Overfit is CPU-first / pure-managed. For workloads where a GPU is mandatory (very large LLMs at high concurrency, diffusion image generation), use a GPU-accelerated runtime — Overfit isn't trying to compete on GPU throughput.
+- **Raw single-stream decode tok/s is the only metric.** llama.cpp / LLamaSharp decode ~1.5× faster on the same Q4_K_M file (hand-tuned native AVX-512). Overfit matches them on RAM and wins on per-token allocation (1 B vs 21 KB) — but if pure tok/s is the only knob, use them.
+- **Batch size consistently > 64 and pure throughput dominates over latency.** Overfit's advantage is latency, zero-alloc, in-process embedding, and the agentic stack — not raw BLAS throughput on huge batches.
+- **You want a separate inference server / sidecar process.** Overfit is a library, not a daemon. Use Ollama / llama.cpp's server / Triton if a separate inference tier is the right architecture for you.
 
 ---
 
