@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+    <!--
+      Overfit Local Agent Starter — private RAG, tool calling and JSON inside ASP.NET.
+
+      Phase 1 (walking skeleton): /health + /chat + /reset over OverfitClient.LoadGguf.
+      Phases 2-4 (RAG, tool calling, guaranteed JSON, metrics, Docker, Microsoft.Extensions.AI
+      adapter, Aspire dashboard) follow once Phase 1 is validated on real hardware.
+
+      Not packable. Not part of the public NuGet artefact set.
+    -->
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <RootNamespace>DevOnBike.Overfit.Demo.LocalAgent</RootNamespace>
+        <AssemblyName>Overfit.LocalAgent.AspNet</AssemblyName>
+        <IsPackable>false</IsPackable>
+        <NoWarn>$(NoWarn);1591</NoWarn>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\Sources\Main\Main.csproj" />
+    </ItemGroup>
+
+</Project>
