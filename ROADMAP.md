@@ -184,6 +184,65 @@ Read the full llama.cpp source tree to map what they have that Overfit doesn't. 
 
 ---
 
+## Decode throughput catch-up to llama.cpp — 3-phase plan (2026-05-29)
+
+**Baseline**: Qwen2.5-3B Q4_K_M, ~17 tok/s @ 3.20 GB live heap (Overfit) vs ~27 tok/s @ 3.20 GB (llama.cpp same-file A/B). Per `project_perf_sprint` memory: gap is **overhead-bound**, not bandwidth-bound — our measured BW efficiency is ~55% of DDR5 peak vs llama.cpp's ~80%.
+
+The previous ROADMAP wording ("honest ceiling 2-2.5×, not parity") reflected the *pure-managed* constraint *without* algorithmic reorganisation. The three phases below preserve that constraint and target parity-then-overtake by tackling the structural causes of the 55%-vs-80% BW gap.
+
+### Phase 1 (~1 week) — parity with llama.cpp (~28 tok/s)
+
+- [ ] **1a. MHA consolidation** (2-3 days, **highest-confidence single lever**) — collapse `MultiHeadAttentionLayer`'s per-head `Wq/Wk/Wv/Wo[i]` ([dModel × dHead] each, 16 of them) into one combined matrix per projection (`[dModel × dModel]`). A single contiguous GEMV [2048 × 2048] with sequential writeback prefetches ~10× better than 16 × [2048 × 128] fragmented per-head GEMVs (per-head fragmentation thrashes the L2). This is **Lever D** from the existing ROADMAP attention-layout analysis, with the BW efficiency estimate 55 % → ~75 %. **Expected**: +50 % tok/s (17 → ~25-26). Breaking API change for per-head accessors; LoRA hooks need migration; converters for existing checkpoints stay backward-compatible (concat on load).
+- [ ] **1b. Q8_0 KV cache** (2 days) — KV cache currently F16 (2 B/elem); migrate to Q8_0 (1 B/elem + scale). Attention's K/V reads are the dominant memory traffic on decode; cutting KV BW by ~2× gives ~10-15 % tok/s and **~50 % RAM savings on KV** (Qwen-3B ctx 4096: ~600 MB → ~150 MB). Reuses existing `Q8Weight` infra. Quantize-on-write, dequant in the SIMD hot path.
+
+**Phase 1 total**: 17 → ~28-29 tok/s = **parity with llama.cpp**. Both items are well-understood, no native deps, AOT-clean.
+
+### Phase 2 (~1 week) — overtake llama.cpp by 15-25 % (~32-34 tok/s)
+
+- [ ] **2a. Custom AVX2 dequant-fused GEMV** (3-4 days) via `System.Runtime.Intrinsics.X86.Avx2`. Hand-write the Q4_K_M decode kernel so the dequant step and the multiply-add live in one pipeline — no intermediate F32 buffer, `Vector256<float>` + FMA + horizontal sum in registers. This is llama.cpp's primary weapon for Q4_K_M decode. Managed intrinsics are AOT-compatible (no P/Invoke). **Expected**: +15 % tok/s on the Q4_K_M path.
+- [ ] **2b. L2-aware blocking + register-tiled GEMV** (2-3 days) — detect L2 size at startup (`GetLogicalProcessorInformationEx` on Windows, `sysconf` on Linux), block the per-token matmul to half of L2 (e.g. 128 KB on a 1 MB-per-core L2). Unroll 4-8 output rows, keep accumulators in `Vector256<float>` registers, stream weights, vector residentny. **Expected**: +5-10 % tok/s.
+
+**Phase 2 total**: ~33-34 tok/s = **+20-25 % vs llama.cpp**. Pure-managed throughout.
+
+### Phase 3 (~1-2 weeks) — structural advantage llama.cpp can't easily replicate (~40-50 tok/s on realistic prompts)
+
+- [ ] **3. Adaptive early-exit / layer-skip**. For typical chat tokens (fillers, function words, common follow-ups) the model often "knows the answer" after K of N layers — measurable as low entropy on an intermediate logit projection. Add a tiny early-exit head per few layers; if entropy < threshold → return early. **Average computation −30-40 %** on realistic prompts; **harder tokens get full forward** (no quality cliff). Trade-off: ~1-2 % perplexity drift, tunable threshold. **llama.cpp's pipeline is fixed-depth** — they can't do this without bigger surgery. This is where pure-managed graph control becomes an *advantage*. **Expected**: +30-50 % tok/s on realistic chat workload, less on worst-case.
+
+**Phase 3 total**: 40-50 tok/s on realistic prompts = **~1.5-1.8× llama.cpp** on chat workloads (lower on synthetic benchmarks that have no easy tokens).
+
+### Validation gates
+
+Every phase must pass:
+1. `Gpt2TokensPerSecondBenchmark` + `GgufLlamaInferenceBenchmark` before/after (token-per-second delta + RAM delta).
+2. Q4_K_M decode parity vs F32 baseline within existing tolerance (top-1 match on the canonical prompt; mean-abs logit diff < pre-change baseline).
+3. Multi-thread suite stays green (no contention regression from kernel changes).
+4. AOT publish guard passes (`dotnet publish -c Release -r linux-x64`).
+
+### Order of attack
+
+Start with **1a (MHA consolidation)** — it has the largest single contribution, the math is documented, and the validation is cheap (one benchmark run). If 1a delivers the projected +50 %, the rest are extensions; if it falls short, the gap diagnosis needs revisiting before investing in 1b/2/3.
+
+---
+
+## Release readiness snapshot (2026-05-29)
+
+Capability surface at this date — what would ship if we tagged a release today:
+
+- **LLM inference**: GPT-2 / GPT-1 / Qwen2.5 (0.5B–32B) / Llama-2-3.x / Mistral / Qwen1.5-MoE / Mixtral-8x7B from GGUF + safetensors + .bin. Q4_K_M / Q6_K / Q8_0 / F32 / F16 / BF16. mmap K-quant weights. Live managed heap ~220 MB for Qwen-3B Q4_K_M.
+- **Embeddings**: sentence-transformers/all-MiniLM-L6-v2, BAAI/bge-small-en-v1.5, intfloat/e5-small-v2 — all bit-parity vs HF/PyTorch (cosine 1.0 / 0.999999 / 1.0). `SentenceEmbedder.ForMiniLm` / `ForBgeEnV15` / `ForE5`.
+- **Agentic stack**: ReAct loop, self-reflection critic loop, circuit breaker, summarising memory, JSON-mode + tool calling (constrained decoding), in-process `VectorStore` for RAG, `ChatSession` with sliding-window eviction. `OverfitClient.LoadGguf(path)` one-line facade.
+- **Training**: gradient checkpointing (24× live-activation cut on 12L GPT-1), data-parallel trainer (~6× throughput on 24 workers), Adam/AdamW/SGD, padding/stride/bias Conv2D, BatchNorm2D (CIFAR-scale adaptive parallel −31 % backward), depthwise conv, LSTM (training + ONNX import deferred), CRNN + CTC, learning-rate schedules.
+- **Loaders, all native (no Python)**: GGUF, HF safetensors (sharded), Overfit `.bin`, ONNX (linear + DAG).
+- **AOT-clean**: zero LINQ / Reflection / Activator / Expression / Array.Copy / raw `ArrayPool<T>.Shared` in `Sources/Main` (all banned, RS0030).
+- **Tests**: 990 fast / 0 fail / 130 [LongFact] skip. 3 headline benchmarks re-validated post-pool-refactor on this hardware (single inference 7.31× vs ONNX, concurrent 3.56× vs ONNX, CNN zero-alloc preserved).
+- **Honest gaps acknowledged in README + ROADMAP**: tok/s ~1.6× behind llama.cpp (the 3-phase plan above is the catch-up path), no GPU, no diffusion / TTS / VLM / ASR, no full GBNF.
+
+**Marketing assets**: `linkedin-article.md`, `linkedin-business.md`, `linkedin-marketing.md`, `linkedin-technical.md`, `launch-copy.md` — staged and waiting on a final review pass.
+
+**Decision the release waits on**: ship now with honest ~1.6× decode gap, or run Phase 1 of the catch-up plan (1 week) and ship at parity. Both stories are defensible; Phase 1 is the strictly-better launch number if there's an extra week.
+
+---
+
 ## Post-launch track #1 — Mixture of Experts (MoE)
 
 **Why:** we already have the memory-optimization trio's first two legs — KV cache + GQA. MoE is the
