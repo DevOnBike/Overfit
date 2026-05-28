@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Buffers;
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Tensors;
@@ -281,8 +282,35 @@ namespace DevOnBike.Overfit.Ops
             var outGradS = output.GradView.AsReadOnlySpan();
             var inS = input.DataView.AsReadOnlySpan();
 
-            using var sumDyBuf = new PooledBuffer<float>(C);    // Σ dy per channel
-            using var sumDyXBuf = new PooledBuffer<float>(C);   // Σ dy·x̂ per channel
+            // Empirical size-gate (CIFAR vs MNIST profile, 2026-05-29): below ~200K total element-ops
+            // per call, `Parallel.For(0, C)` spawn overhead ≥ wins (MNIST: N=32, C=8/16, hw=196/784
+            // → 50-200K, no gain at all in measurements). At/above that threshold, channels are large
+            // enough (CIFAR C=32+, hw=256+: >500K) that per-thread work amortizes spawn. Sequential
+            // path preserved verbatim below for the small-shape case.
+            var totalWork = (long)N * C * hw;
+            const long ParallelThreshold = 200_000;
+
+            if (totalWork < ParallelThreshold)
+            {
+                BatchNorm2DBackwardSequential(input, output, gamma, beta, mean, invStd, N, C, hw, m);
+                return;
+            }
+
+            BatchNorm2DBackwardParallel(input, output, gamma, beta, mean, invStd, N, C, hw, m);
+        }
+
+        private static void BatchNorm2DBackwardSequential(
+            AutogradNode input, AutogradNode output, AutogradNode gamma, AutogradNode beta,
+            AutogradNode mean, AutogradNode invStd, int N, int C, int hw, int m)
+        {
+            var gammaS = gamma.DataView.AsReadOnlySpan();
+            var invStdS = invStd.DataView.AsReadOnlySpan();
+            var meanS = mean.DataView.AsReadOnlySpan();
+            var outGradS = output.GradView.AsReadOnlySpan();
+            var inS = input.DataView.AsReadOnlySpan();
+
+            using var sumDyBuf = new PooledBuffer<float>(C);
+            using var sumDyXBuf = new PooledBuffer<float>(C);
             using var xhatBuf = new PooledBuffer<float>(hw, false);
             var sumDy = sumDyBuf.Span;
             var sumDyX = sumDyXBuf.Span;
@@ -295,7 +323,6 @@ namespace DevOnBike.Overfit.Ops
                     var gB = outGradS.Slice((n * C + c) * hw, hw);
                     TensorPrimitives.Subtract(inS.Slice((n * C + c) * hw, hw), meanS[c], xhat);
                     TensorPrimitives.Multiply(xhat, invStdS[c], xhat);
-
                     sumDy[c] += TensorPrimitives.Sum(gB);
                     sumDyX[c] += TensorPrimitives.Dot(gB, xhat);
                 }
@@ -326,8 +353,6 @@ namespace DevOnBike.Overfit.Ops
                         var iGB = iGS.Slice((n * C + c) * hw, hw);
                         TensorPrimitives.Subtract(inS.Slice((n * C + c) * hw, hw), meanS[c], xhat);
                         TensorPrimitives.Multiply(xhat, invStdS[c], xhat);
-
-                        // dx = (γ·invStd / M) · (M·dy − Σdy − x̂·Σdyx̂)
                         TensorPrimitives.Multiply(gB, (float)m, term);
                         TensorPrimitives.Subtract(term, sumDy[c], term);
                         TensorPrimitives.Multiply(xhat, sumDyX[c], xhat);
@@ -335,6 +360,111 @@ namespace DevOnBike.Overfit.Ops
                         TensorPrimitives.MultiplyAdd(term, gammaS[c] * invStdS[c] / m, iGB, iGB);
                     }
                 }
+            }
+        }
+
+        private static void BatchNorm2DBackwardParallel(
+            AutogradNode input, AutogradNode output, AutogradNode gamma, AutogradNode beta,
+            AutogradNode mean, AutogradNode invStd, int N, int C, int hw, int m)
+        {
+            // Closure captures: AutogradNode references (classes) — Spans rebuilt inside the lambda
+            // (cannot cross a delegate boundary). Per-thread xhat/term buffers rented from ArrayPool.
+            var sumDy = new float[C];
+            var sumDyX = new float[C];
+            var inputNode = input;
+            var outputNode = output;
+            var meanNode = mean;
+            var invStdNode = invStd;
+
+            Parallel.For(0, C, c =>
+            {
+                var inLocal = inputNode.DataView.AsReadOnlySpan();
+                var ogLocal = outputNode.GradView.AsReadOnlySpan();
+                var meanLocal = meanNode.DataView.AsReadOnlySpan();
+                var invStdLocal = invStdNode.DataView.AsReadOnlySpan();
+
+                var xhatArr = ArrayPool<float>.Shared.Rent(hw);
+                try
+                {
+                    var xhatLocal = xhatArr.AsSpan(0, hw);
+                    var meanC = meanLocal[c];
+                    var invStdC = invStdLocal[c];
+                    var sDy = 0f;
+                    var sDyX = 0f;
+                    for (var n = 0; n < N; n++)
+                    {
+                        var off = (n * C + c) * hw;
+                        var gB = ogLocal.Slice(off, hw);
+                        TensorPrimitives.Subtract(inLocal.Slice(off, hw), meanC, xhatLocal);
+                        TensorPrimitives.Multiply(xhatLocal, invStdC, xhatLocal);
+                        sDy += TensorPrimitives.Sum(gB);
+                        sDyX += TensorPrimitives.Dot(gB, xhatLocal);
+                    }
+
+                    sumDy[c] = sDy;
+                    sumDyX[c] = sDyX;
+                }
+                finally
+                {
+                    ArrayPool<float>.Shared.Return(xhatArr);
+                }
+            });
+
+            if (beta.RequiresGrad)
+            {
+                var betaGrad = beta.GradView.AsSpan();
+                for (var c = 0; c < C; c++) { betaGrad[c] += sumDy[c]; }
+            }
+            if (gamma.RequiresGrad)
+            {
+                var gammaGrad = gamma.GradView.AsSpan();
+                for (var c = 0; c < C; c++) { gammaGrad[c] += sumDyX[c]; }
+            }
+
+            if (input.RequiresGrad)
+            {
+                var gammaNode = gamma;
+                Parallel.For(0, C, c =>
+                {
+                    var inLocal = inputNode.DataView.AsReadOnlySpan();
+                    var ogLocal = outputNode.GradView.AsReadOnlySpan();
+                    var iGLocal = inputNode.GradView.AsSpan();
+                    var meanLocal = meanNode.DataView.AsReadOnlySpan();
+                    var invStdLocal = invStdNode.DataView.AsReadOnlySpan();
+                    var gammaLocal = gammaNode.DataView.AsReadOnlySpan();
+
+                    var xhatArr = ArrayPool<float>.Shared.Rent(hw);
+                    var termArr = ArrayPool<float>.Shared.Rent(hw);
+                    try
+                    {
+                        var xhatLocal = xhatArr.AsSpan(0, hw);
+                        var termLocal = termArr.AsSpan(0, hw);
+                        var meanC = meanLocal[c];
+                        var invStdC = invStdLocal[c];
+                        var coeff = gammaLocal[c] * invStdC / m;
+                        var sumDyC = sumDy[c];
+                        var sumDyXC = sumDyX[c];
+
+                        for (var n = 0; n < N; n++)
+                        {
+                            var off = (n * C + c) * hw;
+                            var gB = ogLocal.Slice(off, hw);
+                            var iGB = iGLocal.Slice(off, hw);
+                            TensorPrimitives.Subtract(inLocal.Slice(off, hw), meanC, xhatLocal);
+                            TensorPrimitives.Multiply(xhatLocal, invStdC, xhatLocal);
+                            TensorPrimitives.Multiply(gB, (float)m, termLocal);
+                            TensorPrimitives.Subtract(termLocal, sumDyC, termLocal);
+                            TensorPrimitives.Multiply(xhatLocal, sumDyXC, xhatLocal);
+                            TensorPrimitives.Subtract(termLocal, xhatLocal, termLocal);
+                            TensorPrimitives.MultiplyAdd(termLocal, coeff, iGB, iGB);
+                        }
+                    }
+                    finally
+                    {
+                        ArrayPool<float>.Shared.Return(xhatArr);
+                        ArrayPool<float>.Shared.Return(termArr);
+                    }
+                });
             }
         }
     }
