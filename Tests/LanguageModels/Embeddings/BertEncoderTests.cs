@@ -73,6 +73,32 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
         }
 
         [Fact]
+        public void Embed_ClsPooling_DiffersFromMeanAndLast()
+        {
+            using var enc = new BertEncoder(Tiny());
+            var ids = new[] { 2, 7, 19, 3 };
+            var cls = enc.Embed(ids, EmbeddingPooling.Cls);
+            var mean = enc.Embed(ids, EmbeddingPooling.Mean);
+            var last = enc.Embed(ids, EmbeddingPooling.LastToken);
+
+            Assert.Equal(16, cls.Length);
+
+            bool DiffersFrom(float[] a, float[] b)
+            {
+                for (var i = 0; i < a.Length; i++) { if (MathF.Abs(a[i] - b[i]) > 1e-6f) { return true; } }
+                return false;
+            }
+
+            Assert.True(DiffersFrom(cls, mean), "CLS pooling should differ from mean pooling");
+            Assert.True(DiffersFrom(cls, last), "CLS pooling should differ from last-token pooling");
+
+            // CLS must equal the first token's hidden state, L2-normalized.
+            var norm = 0f;
+            foreach (var x in cls) { norm += x * x; }
+            Assert.True(MathF.Abs(MathF.Sqrt(norm) - 1f) < 1e-4f);
+        }
+
+        [Fact]
         public void Embed_RejectsEmptySequence()
         {
             using var enc = new BertEncoder(Tiny());

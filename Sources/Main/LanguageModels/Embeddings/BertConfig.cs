@@ -77,5 +77,35 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
             vocabSize: 30522,
             typeVocabSize: 2,
             layerNormEps: 1e-12f);
+
+        /// <summary>
+        /// BAAI/bge-small-en-v1.5: 12 layers, hidden 384, 12 heads, FFN 1536, 512 positions,
+        /// 30522 WordPiece vocab, eps 1e-12. CLS pooling + query-side instruction (handled by
+        /// <c>SentenceEmbedder.ForBgeEnV15</c>).
+        /// </summary>
+        public static BertConfig BgeSmallEnV15 => new(
+            hiddenSize: 384,
+            numLayers: 12,
+            numHeads: 12,
+            intermediateSize: 1536,
+            maxPositionEmbeddings: 512,
+            vocabSize: 30522,
+            typeVocabSize: 2,
+            layerNormEps: 1e-12f);
+
+        /// <summary>
+        /// intfloat/e5-small-v2: 12 layers, hidden 384, 12 heads, FFN 1536, 512 positions,
+        /// 30522 WordPiece vocab, eps 1e-12. Mean pooling + <c>query:</c> / <c>passage:</c> prefixes
+        /// (handled by <c>SentenceEmbedder.ForE5</c>).
+        /// </summary>
+        public static BertConfig E5SmallV2 => new(
+            hiddenSize: 384,
+            numLayers: 12,
+            numHeads: 12,
+            intermediateSize: 1536,
+            maxPositionEmbeddings: 512,
+            vocabSize: 30522,
+            typeVocabSize: 2,
+            layerNormEps: 1e-12f);
     }
 }

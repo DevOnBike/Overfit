@@ -12,6 +12,9 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
         Mean = 0,
 
         /// <summary>The last token's hidden state (causal-LM "last-token" pooling).</summary>
-        LastToken = 1
+        LastToken = 1,
+
+        /// <summary>The first token's hidden state — the <c>[CLS]</c> classifier in BERT-family encoders (BGE / SBERT-CLS).</summary>
+        Cls = 2
     }
 }

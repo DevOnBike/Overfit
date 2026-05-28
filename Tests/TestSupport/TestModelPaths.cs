@@ -126,6 +126,34 @@ namespace DevOnBike.Overfit.Tests.TestSupport
             public static string RequireConfigJsonPath() => Require(ConfigJsonPath, EnvVar, "MiniLM config.json");
         }
 
+        /// <summary>BAAI/bge-small-en-v1.5 — default <c>C:\bge</c>; override with <c>OVERFIT_BGE_DIR</c>.</summary>
+        public static class Bge
+        {
+            private const string EnvVar = "OVERFIT_BGE_DIR";
+            public static string Dir => Resolve(EnvVar, @"c:\bge");
+            public static string VocabPath => Path.Combine(Dir, "vocab.txt");
+            public static string SafetensorsPath => Path.Combine(Dir, "model.safetensors");
+            public static string ConfigJsonPath => Path.Combine(Dir, "config.json");
+
+            public static string RequireVocabPath() => Require(VocabPath, EnvVar, "BGE WordPiece vocab.txt");
+            public static string RequireSafetensorsPath() => Require(SafetensorsPath, EnvVar, "BGE model.safetensors");
+            public static string RequireConfigJsonPath() => Require(ConfigJsonPath, EnvVar, "BGE config.json");
+        }
+
+        /// <summary>intfloat/e5-small-v2 — default <c>C:\e5</c>; override with <c>OVERFIT_E5_DIR</c>.</summary>
+        public static class E5
+        {
+            private const string EnvVar = "OVERFIT_E5_DIR";
+            public static string Dir => Resolve(EnvVar, @"c:\e5");
+            public static string VocabPath => Path.Combine(Dir, "vocab.txt");
+            public static string SafetensorsPath => Path.Combine(Dir, "model.safetensors");
+            public static string ConfigJsonPath => Path.Combine(Dir, "config.json");
+
+            public static string RequireVocabPath() => Require(VocabPath, EnvVar, "E5 WordPiece vocab.txt");
+            public static string RequireSafetensorsPath() => Require(SafetensorsPath, EnvVar, "E5 model.safetensors");
+            public static string RequireConfigJsonPath() => Require(ConfigJsonPath, EnvVar, "E5 config.json");
+        }
+
         public static class Mnist
         {
             private const string EnvVar = "OVERFIT_MNIST_DIR";

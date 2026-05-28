@@ -29,10 +29,26 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
         private readonly BertConfig _config;
         private readonly ComputationGraph _graph;
 
-        public BertEncoder(BertConfig config)
+        /// <summary>
+        /// </summary>
+        /// <param name="config">Model architecture.</param>
+        /// <param name="expectedMaxSequenceLength">Upper bound on the token sequence length you intend to
+        /// embed. The autograd arena is sized for this — sequences exceeding it throw at runtime
+        /// (sentence embedders truncate first). Defaults to <c>min(MaxPositionEmbeddings, 256)</c> —
+        /// covers virtually all real sentence-embedding inputs; raise to 512 for long-passage models.</param>
+        public BertEncoder(BertConfig config, int? expectedMaxSequenceLength = null)
         {
             ArgumentNullException.ThrowIfNull(config);
             _config = config;
+
+            MaxSequenceLength = expectedMaxSequenceLength ?? Math.Min(config.MaxPositionEmbeddings, 256);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(MaxSequenceLength);
+            if (MaxSequenceLength > config.MaxPositionEmbeddings)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(expectedMaxSequenceLength),
+                    $"expectedMaxSequenceLength ({MaxSequenceLength}) exceeds the model's MaxPositionEmbeddings ({config.MaxPositionEmbeddings}).");
+            }
 
             var d = config.HiddenSize;
             WordEmbeddings = new EmbeddingLayer(config.VocabSize, d);
@@ -52,10 +68,19 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
                     lnEps: config.LayerNormEps);
             }
 
-            // Generous arena: embeddings + N blocks of temporaries for a few-hundred-token sequence.
-            _graph = new ComputationGraph(1 << 22);
+            // Arena sizing: per layer the dominant residents are FFN intermediate [T, dFF] plus a
+            // handful of [T, d] tensors and per-head projections. A factor of 4·dFF per token per
+            // layer comfortably covers BERT-family blocks; 1 << 22 (4M floats) is the floor so the
+            // short-sentence MiniLM case stays cheap. Scales linearly with layers — 12L BGE/E5 get
+            // double 6L MiniLM, as needed.
+            var perLayer = checked(MaxSequenceLength * config.IntermediateSize * 4);
+            var arenaFloats = Math.Max(1 << 22, checked(config.NumLayers * perLayer));
+            _graph = new ComputationGraph(arenaFloats);
             Eval();
         }
+
+        /// <summary>The maximum token sequence length the arena is sized for; longer inputs throw.</summary>
+        public int MaxSequenceLength { get; }
 
         public BertConfig Config => _config;
 
@@ -104,10 +129,11 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
             }
 
             var t = tokenIds.Length;
-            if (t > _config.MaxPositionEmbeddings)
+            if (t > MaxSequenceLength)
             {
                 throw new ArgumentException(
-                    $"Sequence length {t} exceeds maxPositionEmbeddings {_config.MaxPositionEmbeddings}.",
+                    $"Sequence length {t} exceeds the encoder's expectedMaxSequenceLength {MaxSequenceLength} " +
+                    "(arena sized for that). Pass a larger value to BertEncoder's ctor, or truncate the input.",
                     nameof(tokenIds));
             }
 
@@ -165,6 +191,13 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
                 case EmbeddingPooling.LastToken:
                     {
                         hidden.Slice((t - 1) * d, d).CopyTo(dst);
+                        break;
+                    }
+
+                case EmbeddingPooling.Cls:
+                    {
+                        // BGE / SBERT-CLS: the [CLS] token's hidden state (row 0).
+                        hidden.Slice(0, d).CopyTo(dst);
                         break;
                     }
 
