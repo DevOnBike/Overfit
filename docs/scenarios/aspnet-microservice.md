@@ -18,34 +18,73 @@ The typical solutions all hurt:
 
 ---
 
-## Integration in Three Lines
+## Two integration patterns
+
+Overfit covers two distinct deployment shapes in the same .NET process. Pick the one that matches your workload.
+
+### Pattern A — small model / classifier (caller-owned buffers, zero allocation per request)
+
+For tabular / vision / time-series models trained in Overfit or imported from ONNX. The `InferenceEngine` facade owns a preallocated output buffer; the caller passes in its input as a `ReadOnlySpan<float>`.
 
 ```csharp
 using DevOnBike.Overfit.DeepLearning;
-using DevOnBike.Overfit.Autograd;
-using DevOnBike.Overfit.Tensors;
+using DevOnBike.Overfit.Inference;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Load once at startup - thread-safe for inference
+// Load once at startup. The Sequential model wraps your trained / imported layers;
+// InferenceEngine owns the preallocated output buffer and is thread-safe for inference.
 var model = new Sequential(new LinearLayer(784, 10));
 model.Load("model.bin");
 model.Eval();
-builder.Services.AddSingleton(model);
+
+var engine = InferenceEngine.FromSequential(model, inputSize: 784, outputSize: 10);
+builder.Services.AddSingleton(engine);
 
 var app = builder.Build();
 
-app.MapPost("/predict", (float[] input, Sequential model) =>
+app.MapPost("/predict", (float[] input, InferenceEngine engine) =>
 {
-    using var tensor = new FastTensor<float>(1, 784, clearMemory: false);
-    input.AsSpan().CopyTo(tensor.GetView().AsSpan());
-    using var node = new AutogradNode(tensor, requiresGrad: false);
-    var result = model.Forward(null, node).DataView.AsReadOnlySpan();
-    return result.ToArray();
+    // Predict returns a ReadOnlySpan into the engine's internal buffer.
+    // Materialise to an array if you need to escape the request scope.
+    var output = engine.Predict(input);
+    return output.ToArray();
 });
 
 app.Run();
 ```
+
+No `AutogradNode`, no `model.Forward`, no per-request tensor allocations. The autograd path is for **training**; the inference path goes through `InferenceEngine.Run` / `Predict` with caller-owned (or engine-owned) buffers. See [`docs/TECHNICAL.md`](../TECHNICAL.md) for the full inference-vs-training separation.
+
+### Pattern B — local LLM / RAG / agent (in-process chat, no external API)
+
+For local LLM endpoints — Qwen / Llama / Mistral / Mixtral / MoE loaded directly from GGUF, with the model staying inside the .NET process. Combine with the in-process vector store for RAG, and the tool-calling constraint for agents.
+
+```csharp
+using DevOnBike.Overfit.LanguageModels;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Load once at startup. OverfitClient owns the engine, session, tokenizer, and chat session.
+// Auto-detects chat template, stop sequences, and tokenizer from the GGUF + sibling files.
+var client = OverfitClient.LoadGguf(@"/app/models/qwen2.5-3b.q4km.gguf", maxContextLength: 2048);
+client.AddSystem("You are a concise assistant.");
+builder.Services.AddSingleton(client);
+
+var app = builder.Build();
+
+app.MapPost("/chat", (ChatRequest req, OverfitClient client) =>
+{
+    var reply = client.Send(req.Message);
+    return new { reply };
+});
+
+app.Run();
+
+record ChatRequest(string Message);
+```
+
+For RAG: pair `OverfitClient.LoadGguf` with `SentenceEmbedder.ForBgeEnV15(...)` for embeddings + the in-process vector store. For agents: pass a tool-calling constraint to `client.Send(..., constraint: ...)` so the model is logit-forced to emit a valid call dispatched to your C# delegate.
 
 That's it. No new containers, no new deployment pipeline, no network hop between your API and your model.
 
@@ -92,36 +131,58 @@ Overfit allocates **zero bytes** per inference call once your model is loaded. N
 ### Small models (single request per call)
 
 ```csharp
-// Register once
-builder.Services.AddSingleton<Sequential>(sp =>
+// Register once. InferenceEngine wraps the model with a preallocated output
+// buffer and is thread-safe for inference; share one singleton per process.
+builder.Services.AddSingleton<InferenceEngine>(sp =>
 {
     var model = new Sequential(/* architecture */);
     model.Load("/app/models/classifier.bin");
     model.Eval();
-    return model;
+    return InferenceEngine.FromSequential(model, inputSize: 784, outputSize: 10);
 });
 ```
 
 ### Batch endpoint
 
-Process multiple samples in a single forward pass for higher throughput:
+For higher throughput, allocate a caller-owned output buffer (e.g. from `ArrayPool<float>`) and call `engine.Run(input, output)`. The engine performs the whole batched forward pass into the supplied span with no allocations beyond the buffer you own.
 
 ```csharp
-app.MapPost("/predict-batch", (float[][] inputs, Sequential model) =>
+app.MapPost("/predict-batch", (float[][] inputs, InferenceEngine engine) =>
 {
     var batchSize = inputs.Length;
-    using var tensor = new FastTensor<float>(batchSize, 784, clearMemory: false);
-    var span = tensor.GetView().AsSpan();
-    for (var i = 0; i < batchSize; i++)
+
+    var flatInput = ArrayPool<float>.Shared.Rent(batchSize * 784);
+    var output    = ArrayPool<float>.Shared.Rent(batchSize * 10);
+    try
     {
-        inputs[i].AsSpan().CopyTo(span.Slice(i * 784, 784));
+        for (var i = 0; i < batchSize; i++)
+        {
+            inputs[i].AsSpan().CopyTo(flatInput.AsSpan(i * 784, 784));
+        }
+
+        engine.Run(
+            flatInput.AsSpan(0, batchSize * 784),
+            output.AsSpan(0, batchSize * 10));
+
+        // Materialise into per-sample arrays for JSON serialisation.
+        var result = new float[batchSize][];
+        for (var i = 0; i < batchSize; i++)
+        {
+            result[i] = output.AsSpan(i * 10, 10).ToArray();
+        }
+        return result;
     }
-    using var node = new AutogradNode(tensor, requiresGrad: false);
-    return model.Forward(null, node).DataView.AsReadOnlySpan().ToArray();
+    finally
+    {
+        ArrayPool<float>.Shared.Return(flatInput);
+        ArrayPool<float>.Shared.Return(output);
+    }
 });
 ```
 
 Batch ≤ 16 is where Overfit dominates ONNX Runtime. Beyond that, ONNX's MKL integration starts to win — but you can route large batches to a separate endpoint if needed.
+
+(Note: `ArrayPool<float>.Shared` is fine in application / scenario code. The raw-`Shared` ban applies only to `Sources/Main` — see `Sources/Main/BannedSymbols.txt`. Library code uses `PooledBuffer<T>`; consumer code uses `ArrayPool` directly.)
 
 ### Thread safety
 

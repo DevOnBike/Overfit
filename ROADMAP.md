@@ -22,7 +22,7 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 | Native C# GGUF loader (F32/F16/BF16/Q8_0/Q4_K/Q6_K) | ✅ Loads `*.gguf` from Ollama/HF directly |
 | Streaming token generation (`IAsyncEnumerable`) | ✅ Stable, with stop-tokens + cancellation |
 | LoRA adapter (Enable/Disable, Save/Load) | ✅ Stable, zero-copy weight refs |
-| **Quantized weight storage at inference time** | ✅ **Q8_0 + Q4_K_M decode paths done & parity-verified — Q4_K_M decodes 17.2 tok/s @ 4.40 GB RAM, 1 B/token (after GQA K/V-once, +24 %). Same-file A/B: LLamaSharp ~1.6× faster @ 27 % less RAM; see "Slot 2b".** |
+| **Quantized weight storage at inference time** | ✅ **Q8_0 + Q4_K_M decode paths done & parity-verified — Qwen2.5-3B Q4_K_M decodes ~19 tok/s @ 3.20 GB RAM, 1 B/token (post-mmap, 2026-05-21). Same-file A/B vs LLamaSharp/llama.cpp: ~1.5× faster on raw tok/s (~29 vs ~19), RAM parity (3.20 GB both), Overfit wins on per-token allocation (1 B vs 21 220 B). Catch-up plan in "Decode throughput catch-up vs llama.cpp" section below.** |
 | Mixture-of-Experts inference (Qwen-MoE, Mixtral-8x7B) | ✅ Coherent in pure C# (Q8_0 + Q4_K_M); verified "Paris" 2026-05-27 |
 | Training: gradient checkpointing | ✅ `ComputationGraph.Checkpoint` + `CheckpointedModule` — 24× live-activation cut on 12L GPT-1 |
 | Training: data parallelism (N replicas) | ✅ `DataParallelTrainer` / `DataParallelSession` + thread-budget fix — ~6× throughput (24 workers) |

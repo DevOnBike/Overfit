@@ -38,6 +38,10 @@ Pre-release suffixes (e.g. `10.1.0-beta.1`) are used for surface changes that ne
 - NuGet package licensing metadata corrected to `PackageLicenseFile` referencing `LICENSE.md` (the dual-license document), replacing a previous SPDX expression that did not describe the dual-license arrangement accurately.
 - `LICENSE` renamed to `LICENSE.md` for proper Markdown rendering on nuget.org. Git history preserved via `git mv`.
 - Scenario documentation under `docs/scenarios/` updated to reflect 2026-05 reality: removed stale claims about "no Transformers", "no MultiHeadAttention", "ONNX import is planned, not shipped" — these capabilities have shipped.
+- `docs/scenarios/aspnet-microservice.md` code samples migrated from the old `new AutogradNode(...)` / `model.Forward(null, ...)` / `.DataView.AsReadOnlySpan().ToArray()` allocating path to the modern zero-allocation `InferenceEngine.FromSequential(...)` + `engine.Predict(...)` / `engine.Run(input, output)` path. Added a second pattern for in-process LLM / RAG / agents via `OverfitClient.LoadGguf(...)`.
+- ROADMAP.md `Quantized weight storage at inference time` snapshot row updated from stale pre-mmap numbers (17.2 tok/s @ 4.40 GB heap-allocated) to current post-mmap numbers (~19 tok/s @ 3.20 GB), reconciling with README.md and docs/TECHNICAL.md.
+- docs/TECHNICAL.md Qwen2.5-3B benchmark table now carries a dated "latest verified benchmark" block (date, model file, hardware, runtime, LLamaSharp version) so reviewers can tie every benchmark claim to a specific run.
+- `docs/ONNX_IMPLEMENTATION_PLAN.md` archived to `docs/archive/ONNX_IMPLEMENTATION_PLAN_MVP.md` with a redirect banner pointing at README/TECHNICAL — the original MVP plan claimed `Sequential` only, no DAG, no skip connections, no BatchNorm, no Conv stride/padding, which contradicted the shipped capability set.
 - README hero now leads with a single-sentence value proposition; technical descriptors moved below it.
 
 ### Removed

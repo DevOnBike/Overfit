@@ -28,7 +28,7 @@ ONNX: PyTorch-exported model import into Sequential for inference
 1. `../README.md` — short project overview and headline benchmarks.
 2. `TECHNICAL.md` — full quick-start, benchmark tables, import pipelines, architecture (the deep dive).
 3. `InferenceBenchmarkSummary.md` — detailed inference benchmark summary.
-4. `ONNX_IMPLEMENTATION_PLAN.md` — ONNX import MVP scope and implementation notes.
+4. `archive/ONNX_IMPLEMENTATION_PLAN_MVP.md` — *historical* MVP implementation plan from when ONNX import was first scoped. Current ONNX capabilities (linear + DAG, skip connections, BatchNorm, Conv stride/padding) are in `TECHNICAL.md` and the main `README.md`.
 5. `OverfitArchitectureRefactorPlan.md` — planned autograd/graph ownership cleanup.
 6. `TrainingEngineFacade.md` — current training facade design.
 7. `llamacpp-cpu-analysis.md` — CPU LLM decode-kernel analysis + same-file A/B vs llama.cpp.
