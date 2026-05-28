@@ -5,14 +5,14 @@
 
 using System.Buffers;
 using BenchmarkDotNet.Attributes;
-using DevOnBike.Overfit.Runtime;
+using DevOnBike.Overfit.Tensors;
 
 namespace Benchmarks
 {
     /// <summary>
     /// Answers two micro-questions used across the codebase: (a) is <c>Array.Copy</c>, span
     /// <c>CopyTo</c>, or <c>Buffer.BlockCopy</c> fastest for float[] copies, and (b) does the
-    /// <see cref="PooledArray{T}"/> <c>using</c> wrapper cost anything vs. raw
+    /// <see cref="PooledBuffer{T}"/> <c>using</c> wrapper cost anything vs. raw
     /// <c>ArrayPool.Rent</c>/<c>Return</c> with try/finally.
     /// </summary>
     [MemoryDiagnoser]
@@ -42,7 +42,7 @@ namespace Benchmarks
         [Benchmark]
         public void BufferBlockCopy() => Buffer.BlockCopy(_src, 0, _dst, 0, Size * sizeof(float));
 
-        // ── (b) pool rental: raw try/finally vs the PooledArray using-wrapper ──
+        // ── (b) pool rental: raw try/finally vs the PooledBuffer using-wrapper ──
         [Benchmark]
         public float RentTryFinally()
         {
@@ -59,9 +59,9 @@ namespace Benchmarks
         }
 
         [Benchmark]
-        public float PooledArrayUsing()
+        public float PooledBufferUsing()
         {
-            using var buf = new PooledArray<float>(Size);
+            using var buf = new PooledBuffer<float>(Size, clearMemory: false);
             buf.Span[0] = 1f;
             return buf.Span[Size - 1];
         }

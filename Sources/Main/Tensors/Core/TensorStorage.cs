@@ -35,7 +35,7 @@ namespace DevOnBike.Overfit.Tensors.Core
             ArgumentOutOfRangeException.ThrowIfNegative(length);
 
             Length = length;
-            _data = OverfitPool<T>.Shared.Rent(length);
+            _data = PooledBuffer<T>.RentArray(length);
             _pooled = true;
 
             if (clearMemory)
@@ -49,7 +49,7 @@ namespace DevOnBike.Overfit.Tensors.Core
         /// <summary>
         /// Private ctor used by <see cref="Unpooled"/>. Wraps a caller-owned, exact-sized
         /// array. The array is allocated via <c>new T[length]</c> and will be released to
-        /// the GC when this storage is disposed — never returned to <see cref="OverfitPool{T}"/>.
+        /// the GC when this storage is disposed — never returned to the pool.
         /// </summary>
         private TensorStorage(T[] data)
         {
@@ -145,7 +145,7 @@ namespace DevOnBike.Overfit.Tensors.Core
                 // Only return to pool if rented from pool. Unpooled storage is GC-managed.
                 if (!_isBorrowedMemory && _pooled && _data != null)
                 {
-                    OverfitPool<T>.Shared.Return(_data);
+                    PooledBuffer<T>.ReturnArray(_data);
                 }
 
                 _data = null;

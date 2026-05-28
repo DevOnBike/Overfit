@@ -539,6 +539,20 @@ value was validation/guidance, not drop-in algorithms.
   a personal site. **Rejected** — extraordinary claims without evidence; building on
   it risks credibility. The neutral kernel (real-FFT features for periodic signals)
   is standard DSP we don't need from this source.
+- **arXiv:2605.27494 — *Grounded Cache Routing for RAG: When Is It Safe to Reuse an
+  Answer?*** (Shah, Duke, 2026-05-26). Output-level semantic answer cache with **four
+  safety gates** — query similarity, retrieved-evidence overlap, source-version
+  validity, **lexical support** (cached answer's tokens present in fresh evidence; the
+  paper's per-gate ablation isolates this gate as load-bearing). Stress-tested on
+  12k real Qwen2.5-7B generations: USR (unsafe-served rate) **0% on HotpotQA** (naive:
+  15-35%), **1.5% on mtRAG document-drift** (naive: 51.5% → 34× reduction), p50
+  latency **1.04-1.07× no-cache baseline** (≈zero overhead). **Verdict — accept as
+  post-launch feature.** Overfit has all primitives in place (`BertEncoder` cosine,
+  `VectorStore`, `WordPieceTokenizer` for lexical overlap; need to add per-entry doc-id
+  traceability + version hash to the store). Algorithmic, hardware-neutral (paper's
+  vLLM/GPU setup is incidental). Strongest fit with the regulated-industries / EU-AI-Act
+  positioning (USR is a measurable safety metric, not just a speed metric). Task in
+  the [Medium-term Features](#features) section.
 
 ## Recently completed (chronological, newest first)
 
@@ -550,7 +564,7 @@ value was validation/guidance, not drop-in algorithms.
 - **Data-parallel training — public API (2026-05-27).** `Training/DataParallelTrainer` (model-agnostic all-reduce / grad-norm clip / optimizer step / weight broadcast over N `Parameter` replicas, gradients averaged) + `DataParallelSession`/`DataParallelReplica` turnkey builder + `DataParallelLearningRate` (√N / linear scaling). Key fix: `OverfitParallelFor.SuppressParallelismOnCurrentThread` (per-thread inline opt-out) kills the N×cores oversubscription + pool-lock contention — measured **2.3× → 6×** throughput (24 workers, TinyShakespeare GPT-1). TinyShakespeare demo refactored onto it.
 - **Gradient checkpointing (2026-05-26).** `ComputationGraph.Checkpoint` runs a segment in a throwaway sub-graph (keeps only input+output, recomputes in backward) + `CheckpointedModule : IModule` + `GPT1Model(checkpointBlocks:true)`. **Measured 24× live-activation arena cut** (438.5 → 18.3 MB on a 12L GPT-1) — "train deeper on the same RAM". Measurement showed the activation arena (not im2col) dominates training RAM.
 - **MoE inference verified coherent (2026-05-27).** Re-ran full 24L Qwen1.5-MoE Q8_0 end-to-end → "capital of France?" → "Paris". The `norm_topk_prob` arch-aware fix holds; Qwen-MoE + Mixtral both coherent in pure C#. (Earlier "incoherent" resume note was stale.)
-- **`PooledArray<T>` + `Array.Copy` ban (2026-05-26).** `Runtime/PooledArray.cs` — zero-cost `using` wrapper over `ArrayPool` (benchmarked); swept 12 loader try/finally trios onto it. `Array.Copy` added to `BannedSymbols.txt` (4 overloads) → 10 sites converted to `Span.CopyTo` (benchmarked ≥, memmove-safe).
+- **`PooledArray<T>` + `Array.Copy` ban (2026-05-26).** `Runtime/PooledArray.cs` — zero-cost `using` wrapper over `ArrayPool` (benchmarked); swept 12 loader try/finally trios onto it. `Array.Copy` added to `BannedSymbols.txt` (4 overloads) → 10 sites converted to `Span.CopyTo` (benchmarked ≥, memmove-safe). _Note 2026-05-29: `PooledArray<T>` was a duplicate of `PooledBuffer<T>` and has been deleted — its callsites migrated to `PooledBuffer<T>(n, clearMemory: false)`. See [[feedback-overfit-pool]]._
 - **Q4_K_M parity "bug" resolved — was a test bug (2026-05-26).** Native Q4_K_M decode is correct; `GgufQ4KMParityTests` wrongly compared 4-bit-native logits vs the 16-bit FP16 file demanding exact top-1. Fixed to compare vs F32-dequant of the same file (near-tie tolerant). Isolation ladder (mmap≡copy, kernels 0.36%, head-splits 0.3–1.3%) ruled out every code path.
 - **Fuse-quantize decode optimization** (2026-05-20). The attention `hidden` row was re-quantized to Q8_K once per head per Q/K/V projection (~20×/layer for Qwen). Now `CachedMultiHeadAttention` quantizes it once per layer (when attention is K-quant) into a shared read-only buffer; heads' Q/K/V projections consume it via new `Q4KDotKernel`/`Q6KDotKernel.ProjectPreQuantized` (the `Project` core minus the quantize pass). Wo keeps self-quantizing (its input is the per-head attention output, not `hidden`). **Qwen2.5-3B Q4_K_M 17.2 → 17.5 tok/s (+~1.5 %)** — small as predicted (quantize is ~0.04 % of matmul arithmetic) but consistent across runs. Bit-identical (same 24-token greedy sequence) + 680/0/68 `-c Release`.
 - **GQA K/V-once decode optimization** (2026-05-20). Under grouped-query attention every Q head in a KV group shares one K/V weight set and one cache slot, but `CachedMultiHeadAttention.DecodeKvGroup` was recomputing the K and V projection (+ RoPE + cache write) once per Q head — 8× redundant for Qwen2.5-3B (16 Q / 2 KV). Added a `projectKv` flag to `CachedSingleHeadAttention.DecodeDispatched` so only each group's first head projects K/V; the rest read what it wrote. **Qwen2.5-3B Q4_K_M decode 13.85 → 17.2 tok/s (+24 %)** (also cuts wasted K/V weight-read bandwidth 8×). Bit-identical: same 24-token greedy sequence before/after on the real model (git before/after). 680 / 0 / 68 `-c Release`. Narrows the same-file gap to LLamaSharp from ~2.0× to ~1.6×.
@@ -1122,6 +1136,19 @@ This section is a strategic overlay — it ranks and justifies; the tactical bre
 - [ ] **ONNX: LSTM/GRU operators** — enables recurrent model import.
 - [x] **Depthwise Conv** (group=channels) — MobileNet-style models. DONE 2026-05-27: `DepthwiseConv2DLayer` + `TensorMath.DepthwiseConv2D` (SIMD AXPY inner kernel, padding/stride/bias, FD-verified). Pair with a 1×1 `ConvLayer` for a full separable block.
 - [ ] Standalone Softmax and CrossEntropy in addition to fused loss.
+- [ ] **`GroundedAnswerCache` — safe semantic answer cache for RAG** (post-launch, per
+  arXiv:2605.27494, see [Research inputs](#research-inputs-papers-reviewed-2026-05-21)).
+  Wraps `VectorStore` + `BertEncoder` + `WordPieceTokenizer` into a 4-gated answer cache
+  with a per-entry record `{Q embedding, retrieved doc IDs, version hashes, cached answer,
+  answer-token-set}`. Public API: `cache.TryGet(query, retrievedDocs, currentVersionMap,
+  out answer)` admits a cached answer only when ALL four gates pass — (1) query cosine
+  ≥ τ, (2) retrieved-doc-ID overlap ≥ τ, (3) version map matches recorded, (4) lexical
+  support (Jaccard of answer-tokens ∩ fresh-evidence-tokens ≥ τ). Expose **USR**
+  (unsafe-served-rate) as an observability counter — same metric the paper uses. Requires
+  small extension to `VectorStore.Add(id, vector, payload, version?)` to carry version
+  hash per stored doc. Scope ~200-400 LoC, AOT-clean. Strategic fit: regulated-industries
+  story gets a *measurable safety* primitive, not just speed. Differentiator vs
+  Microsoft.SemanticKernel / LangChain.NET (neither ship a gated semantic cache today).
 
 ### Agentic loop primitives (from `D:\Agentic-AI-LangGraph` review, 2026-05-27)
 

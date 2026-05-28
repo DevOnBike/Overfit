@@ -3,10 +3,9 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Buffers;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Runtime;
-using DevOnBike.Overfit.Runtime;
+using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 using LayerWeightBuffers = DevOnBike.Overfit.LanguageModels.Runtime.CachedLlamaInferenceEngine.LayerWeightBuffers;
 
@@ -204,14 +203,14 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var oNeedsF32 = !attnQuantizable
                 || reader.Tensors["blk.0.attn_output.weight"].Type != GgmlType.Q8_0;
 
-            float[] qFull = qNeedsF32 ? ArrayPool<float>.Shared.Rent(qFullElems) : [];
-            float[] kFull = kNeedsF32 ? ArrayPool<float>.Shared.Rent(kFullElems) : [];
-            float[] vFull = vNeedsF32 ? ArrayPool<float>.Shared.Rent(kFullElems) : [];
-            float[] oFull = oNeedsF32 ? ArrayPool<float>.Shared.Rent(oFullElems) : [];
+            float[] qFull = qNeedsF32 ? PooledBuffer<float>.RentArray(qFullElems) : [];
+            float[] kFull = kNeedsF32 ? PooledBuffer<float>.RentArray(kFullElems) : [];
+            float[] vFull = vNeedsF32 ? PooledBuffer<float>.RentArray(kFullElems) : [];
+            float[] oFull = oNeedsF32 ? PooledBuffer<float>.RentArray(oFullElems) : [];
             // Attention biases are always F32 in GGUF — bias scratch always needed.
-            var qBiasFull = ArrayPool<float>.Shared.Rent(nHeads * headDim);
-            var kBiasFull = ArrayPool<float>.Shared.Rent(nKvHeads * headDim);
-            var vBiasFull = ArrayPool<float>.Shared.Rent(nKvHeads * headDim);
+            var qBiasFull = PooledBuffer<float>.RentArray(nHeads * headDim);
+            var kBiasFull = PooledBuffer<float>.RentArray(nKvHeads * headDim);
+            var vBiasFull = PooledBuffer<float>.RentArray(nKvHeads * headDim);
             try
             {
                 for (var l = 0; l < nLayers; l++)
@@ -320,13 +319,13 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             finally
             {
                 // qFull..oFull are empty sentinels on the native Q8_0 path.
-                if (qFull.Length > 0) { ArrayPool<float>.Shared.Return(qFull); }
-                if (kFull.Length > 0) { ArrayPool<float>.Shared.Return(kFull); }
-                if (vFull.Length > 0) { ArrayPool<float>.Shared.Return(vFull); }
-                if (oFull.Length > 0) { ArrayPool<float>.Shared.Return(oFull); }
-                ArrayPool<float>.Shared.Return(qBiasFull);
-                ArrayPool<float>.Shared.Return(kBiasFull);
-                ArrayPool<float>.Shared.Return(vBiasFull);
+                if (qFull.Length > 0) { PooledBuffer<float>.ReturnArray(qFull); }
+                if (kFull.Length > 0) { PooledBuffer<float>.ReturnArray(kFull); }
+                if (vFull.Length > 0) { PooledBuffer<float>.ReturnArray(vFull); }
+                if (oFull.Length > 0) { PooledBuffer<float>.ReturnArray(oFull); }
+                PooledBuffer<float>.ReturnArray(qBiasFull);
+                PooledBuffer<float>.ReturnArray(kBiasFull);
+                PooledBuffer<float>.ReturnArray(vBiasFull);
             }
 
             // ─── Final norm + LM head ─────────────────────────────────────
@@ -367,7 +366,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 else
                 {
                     var outElems = checked((int)((long)vocab * dModel));
-                    using var outputRaw = new PooledArray<float>(outElems);
+                    using var outputRaw = new PooledBuffer<float>(outElems, clearMemory: false);
                     LoadTensor(reader, "output.weight", outputRaw.Span);
                     lmHead = Q8Weight.QuantizeRows(outputRaw.Span, vocab, dModel);
                 }
@@ -392,7 +391,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 else
                 {
                     var outElems = checked((int)((long)vocab * dModel));
-                    using var outputRaw = new PooledArray<float>(outElems);
+                    using var outputRaw = new PooledBuffer<float>(outElems, clearMemory: false);
                     LoadTensor(reader, "output.weight", outputRaw.Span);
                     var src = outputRaw.Span;
                     for (var d = 0; d < dModel; d++)
@@ -501,7 +500,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                             ? Q4KWeight.SuperBlockBytes : Q6KWeight.SuperBlockBytes;
                         var expertBytes = checked((int)(perExpert / GgmlDequant.SuperBlockElements * superBytes));
                         var total = checked((int)((long)expertBytes * expertCount));
-                        using var whole = new PooledArray<byte>(total);
+                        using var whole = new PooledBuffer<byte>(total, clearMemory: false);
 
                         if (info.Type == GgmlType.Q4_K) { reader.LoadTensorQ4_KRaw(info, whole.Span); }
                         else { reader.LoadTensorQ6_KRaw(info, whole.Span); }
@@ -521,8 +520,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     {
                         var elems = checked((int)(perExpert * expertCount));
                         var blocksPerExpert = checked((int)(perExpert / Q8DotKernel.BlockSize));
-                        using var quants = new PooledArray<sbyte>(elems);
-                        using var scales = new PooledArray<float>(blocksPerExpert * expertCount);
+                        using var quants = new PooledBuffer<sbyte>(elems, clearMemory: false);
+                        using var scales = new PooledBuffer<float>(blocksPerExpert * expertCount, clearMemory: false);
                         reader.LoadTensorQ8_0Raw(info, quants.Span, scales.Span);
 
                         var perElems = checked((int)perExpert);
@@ -546,7 +545,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                         // peak load RAM is a single expert's F32 (~perExpert floats), not the whole
                         // tensor's — steady-state stays Q8 (~1 B/elem), keeping the smaller file a RAM win.
                         var perElems = checked((int)perExpert);
-                        using var f32 = new PooledArray<float>(perElems);
+                        using var f32 = new PooledBuffer<float>(perElems, clearMemory: false);
                         for (var e = 0; e < expertCount; e++)
                         {
                             reader.LoadQ5RegionAsF32(info, (long)e * perElems, f32.Span);
@@ -608,7 +607,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var perExpert = checked(inDim * outDim);
             var total = checked(perExpert * expertCount);
 
-            using var whole = new PooledArray<float>(total);
+            using var whole = new PooledBuffer<float>(total, clearMemory: false);
             reader.LoadTensorAsF32(info, whole.Span);   // expert-major, each [outDim, inDim]
             var src = whole.Span;
 
@@ -645,7 +644,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         internal static float[] LoadRouter(GgufReader reader, GgufTensorInfo info, int dModel, int expertCount)
         {
             var n = checked(dModel * expertCount);
-            using var raw = new PooledArray<float>(n);
+            using var raw = new PooledBuffer<float>(n, clearMemory: false);
             reader.LoadTensorAsF32(info, raw.Span);
             var src = raw.Span;
 
@@ -676,7 +675,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
 
             var elementCount = checked((int)((long)inDim * outDim));
-            using var raw = new PooledArray<float>(elementCount);
+            using var raw = new PooledBuffer<float>(elementCount, clearMemory: false);
             reader.LoadTensorAsF32(info, raw.Span);
 
             var storage = TensorStorage<float>.Unpooled(elementCount);
@@ -724,7 +723,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
 
             var elementCount = checked((int)((long)inDim * outDim));
-            using var raw = new PooledArray<float>(elementCount);
+            using var raw = new PooledBuffer<float>(elementCount, clearMemory: false);
             reader.LoadTensorAsF32(info, raw.Span);
             return Q8Weight.QuantizeRows(raw.Span, outDim, inDim);
         }
@@ -872,7 +871,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
 
             var totalBytes = checked((int)((long)headCount * headBytes));
-            using var raw = new PooledArray<byte>(totalBytes);
+            using var raw = new PooledBuffer<byte>(totalBytes, clearMemory: false);
             reader.LoadTensorQ4_KRaw(info, raw.Span);
 
             var result = new DecodeWeight[headCount];
@@ -941,7 +940,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
 
             var totalBytes = checked((int)((long)headCount * headBytes));
-            using var raw = new PooledArray<byte>(totalBytes);
+            using var raw = new PooledBuffer<byte>(totalBytes, clearMemory: false);
             reader.LoadTensorQ6_KRaw(info, raw.Span);
 
             var result = new DecodeWeight[headCount];
@@ -968,8 +967,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var elems = checked((int)((long)nHeads * headDim * dModel));
             var totalBlocks = checked((int)((long)nHeads * headDim * blocksPerRow));
 
-            using var quants = new PooledArray<sbyte>(elems);
-            using var scales = new PooledArray<float>(totalBlocks);
+            using var quants = new PooledBuffer<sbyte>(elems, clearMemory: false);
+            using var scales = new PooledBuffer<float>(totalBlocks, clearMemory: false);
             reader.LoadTensorQ8_0Raw(info, quants.Span, scales.Span);
 
             var heads = new DecodeWeight[nHeads];
@@ -1000,8 +999,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var elems = checked((int)((long)dModel * nHeadsHeadDim));
             var totalBlocks = checked((int)((long)dModel * rowBlocks));
 
-            using var quants = new PooledArray<sbyte>(elems);
-            using var scales = new PooledArray<float>(totalBlocks);
+            using var quants = new PooledBuffer<sbyte>(elems, clearMemory: false);
+            using var scales = new PooledBuffer<float>(totalBlocks, clearMemory: false);
             reader.LoadTensorQ8_0Raw(info, quants.Span, scales.Span);
 
             var heads = new DecodeWeight[nHeads];
@@ -1127,7 +1126,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     // oFull[o*nHeadsHeadDim + h*headDim ..]; gather the dModel rows
                     // contiguously into output-major order, then quantize.
                     var gatherElems = checked((int)((long)dModel * headDim));
-                    using var gather = new PooledArray<float>(gatherElems);
+                    using var gather = new PooledBuffer<float>(gatherElems, clearMemory: false);
                     for (var o = 0; o < dModel; o++)
                     {
                         for (var i = 0; i < headDim; i++)

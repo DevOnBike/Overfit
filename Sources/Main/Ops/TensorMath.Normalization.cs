@@ -3,7 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Buffers;
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Tensors;
@@ -368,7 +367,8 @@ namespace DevOnBike.Overfit.Ops
             AutogradNode mean, AutogradNode invStd, int N, int C, int hw, int m)
         {
             // Closure captures: AutogradNode references (classes) — Spans rebuilt inside the lambda
-            // (cannot cross a delegate boundary). Per-thread xhat/term buffers rented from ArrayPool.
+            // (cannot cross a delegate boundary). Per-thread xhat/term buffers rented via PooledBuffer
+            // (using-scoped, ArrayPool<T>.Shared-backed — fastest per 2026-05-29 PoolComparisonBenchmark).
             var sumDy = new float[C];
             var sumDyX = new float[C];
             var inputNode = input;
@@ -383,31 +383,24 @@ namespace DevOnBike.Overfit.Ops
                 var meanLocal = meanNode.DataView.AsReadOnlySpan();
                 var invStdLocal = invStdNode.DataView.AsReadOnlySpan();
 
-                var xhatArr = ArrayPool<float>.Shared.Rent(hw);
-                try
+                using var xhatBuf = new PooledBuffer<float>(hw, clearMemory: false);
+                var xhatLocal = xhatBuf.Span;
+                var meanC = meanLocal[c];
+                var invStdC = invStdLocal[c];
+                var sDy = 0f;
+                var sDyX = 0f;
+                for (var n = 0; n < N; n++)
                 {
-                    var xhatLocal = xhatArr.AsSpan(0, hw);
-                    var meanC = meanLocal[c];
-                    var invStdC = invStdLocal[c];
-                    var sDy = 0f;
-                    var sDyX = 0f;
-                    for (var n = 0; n < N; n++)
-                    {
-                        var off = (n * C + c) * hw;
-                        var gB = ogLocal.Slice(off, hw);
-                        TensorPrimitives.Subtract(inLocal.Slice(off, hw), meanC, xhatLocal);
-                        TensorPrimitives.Multiply(xhatLocal, invStdC, xhatLocal);
-                        sDy += TensorPrimitives.Sum(gB);
-                        sDyX += TensorPrimitives.Dot(gB, xhatLocal);
-                    }
+                    var off = (n * C + c) * hw;
+                    var gB = ogLocal.Slice(off, hw);
+                    TensorPrimitives.Subtract(inLocal.Slice(off, hw), meanC, xhatLocal);
+                    TensorPrimitives.Multiply(xhatLocal, invStdC, xhatLocal);
+                    sDy += TensorPrimitives.Sum(gB);
+                    sDyX += TensorPrimitives.Dot(gB, xhatLocal);
+                }
 
-                    sumDy[c] = sDy;
-                    sumDyX[c] = sDyX;
-                }
-                finally
-                {
-                    ArrayPool<float>.Shared.Return(xhatArr);
-                }
+                sumDy[c] = sDy;
+                sumDyX[c] = sDyX;
             });
 
             if (beta.RequiresGrad)
@@ -433,36 +426,28 @@ namespace DevOnBike.Overfit.Ops
                     var invStdLocal = invStdNode.DataView.AsReadOnlySpan();
                     var gammaLocal = gammaNode.DataView.AsReadOnlySpan();
 
-                    var xhatArr = ArrayPool<float>.Shared.Rent(hw);
-                    var termArr = ArrayPool<float>.Shared.Rent(hw);
-                    try
-                    {
-                        var xhatLocal = xhatArr.AsSpan(0, hw);
-                        var termLocal = termArr.AsSpan(0, hw);
-                        var meanC = meanLocal[c];
-                        var invStdC = invStdLocal[c];
-                        var coeff = gammaLocal[c] * invStdC / m;
-                        var sumDyC = sumDy[c];
-                        var sumDyXC = sumDyX[c];
+                    using var xhatBuf = new PooledBuffer<float>(hw, clearMemory: false);
+                    using var termBuf = new PooledBuffer<float>(hw, clearMemory: false);
+                    var xhatLocal = xhatBuf.Span;
+                    var termLocal = termBuf.Span;
+                    var meanC = meanLocal[c];
+                    var invStdC = invStdLocal[c];
+                    var coeff = gammaLocal[c] * invStdC / m;
+                    var sumDyC = sumDy[c];
+                    var sumDyXC = sumDyX[c];
 
-                        for (var n = 0; n < N; n++)
-                        {
-                            var off = (n * C + c) * hw;
-                            var gB = ogLocal.Slice(off, hw);
-                            var iGB = iGLocal.Slice(off, hw);
-                            TensorPrimitives.Subtract(inLocal.Slice(off, hw), meanC, xhatLocal);
-                            TensorPrimitives.Multiply(xhatLocal, invStdC, xhatLocal);
-                            TensorPrimitives.Multiply(gB, (float)m, termLocal);
-                            TensorPrimitives.Subtract(termLocal, sumDyC, termLocal);
-                            TensorPrimitives.Multiply(xhatLocal, sumDyXC, xhatLocal);
-                            TensorPrimitives.Subtract(termLocal, xhatLocal, termLocal);
-                            TensorPrimitives.MultiplyAdd(termLocal, coeff, iGB, iGB);
-                        }
-                    }
-                    finally
+                    for (var n = 0; n < N; n++)
                     {
-                        ArrayPool<float>.Shared.Return(xhatArr);
-                        ArrayPool<float>.Shared.Return(termArr);
+                        var off = (n * C + c) * hw;
+                        var gB = ogLocal.Slice(off, hw);
+                        var iGB = iGLocal.Slice(off, hw);
+                        TensorPrimitives.Subtract(inLocal.Slice(off, hw), meanC, xhatLocal);
+                        TensorPrimitives.Multiply(xhatLocal, invStdC, xhatLocal);
+                        TensorPrimitives.Multiply(gB, (float)m, termLocal);
+                        TensorPrimitives.Subtract(termLocal, sumDyC, termLocal);
+                        TensorPrimitives.Multiply(xhatLocal, sumDyXC, xhatLocal);
+                        TensorPrimitives.Subtract(termLocal, xhatLocal, termLocal);
+                        TensorPrimitives.MultiplyAdd(termLocal, coeff, iGB, iGB);
                     }
                 });
             }

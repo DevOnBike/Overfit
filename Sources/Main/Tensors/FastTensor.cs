@@ -93,7 +93,7 @@ namespace DevOnBike.Overfit.Tensors
         private void Allocate(
             bool clearMemory)
         {
-            _data = ArrayPool<T>.Shared.Rent(Size);
+            _data = PooledBuffer<T>.RentArray(Size);
 
             if (clearMemory)
             {
@@ -211,7 +211,7 @@ namespace DevOnBike.Overfit.Tensors
             if (Interlocked.Exchange(ref _disposed, 1) == 0 &&
                 _data != null)
             {
-                ArrayPool<T>.Shared.Return(_data);
+                PooledBuffer<T>.ReturnArray(_data);
                 _data = null;
             }
         }

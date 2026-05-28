@@ -3,7 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Buffers;
 using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Autograd;
@@ -287,33 +286,22 @@ namespace DevOnBike.Overfit.Ops
 
             Parallel.For(0, batchSize, OverfitParallel.Options, b =>
             {
-                var dAArray = ArrayPool<float>.Shared.Rent(bufferLength);
-                var dSArray = ArrayPool<float>.Shared.Rent(bufferLength);
+                using var dABuf = new PooledBuffer<float>(bufferLength, clearMemory: false);
+                using var dSBuf = new PooledBuffer<float>(bufferLength, clearMemory: false);
 
-                try
-                {
-                    var dA = dAArray.AsSpan(0, bufferLength);
-                    var dS = dSArray.AsSpan(0, bufferLength);
-
-                    ScaledDotProductAttentionBackwardBatch(
-                        b,
-                        q,
-                        k,
-                        v,
-                        attnWeights,
-                        output,
-                        dA,
-                        dS,
-                        seqLen,
-                        dk,
-                        dv,
-                        causalMask);
-                }
-                finally
-                {
-                    ArrayPool<float>.Shared.Return(dSArray);
-                    ArrayPool<float>.Shared.Return(dAArray);
-                }
+                ScaledDotProductAttentionBackwardBatch(
+                    b,
+                    q,
+                    k,
+                    v,
+                    attnWeights,
+                    output,
+                    dABuf.Span,
+                    dSBuf.Span,
+                    seqLen,
+                    dk,
+                    dv,
+                    causalMask);
             });
         }
 
@@ -331,35 +319,24 @@ namespace DevOnBike.Overfit.Ops
         {
             var bufferLength = seqLen * seqLen;
 
-            var dAArray = ArrayPool<float>.Shared.Rent(bufferLength);
-            var dSArray = ArrayPool<float>.Shared.Rent(bufferLength);
+            using var dABuf = new PooledBuffer<float>(bufferLength, clearMemory: false);
+            using var dSBuf = new PooledBuffer<float>(bufferLength, clearMemory: false);
 
-            try
+            for (var b = 0; b < batchSize; b++)
             {
-                var dA = dAArray.AsSpan(0, bufferLength);
-                var dS = dSArray.AsSpan(0, bufferLength);
-
-                for (var b = 0; b < batchSize; b++)
-                {
-                    ScaledDotProductAttentionBackwardBatch(
-                        b,
-                        q,
-                        k,
-                        v,
-                        attnWeights,
-                        output,
-                        dA,
-                        dS,
-                        seqLen,
-                        dk,
-                        dv,
-                        causalMask);
-                }
-            }
-            finally
-            {
-                ArrayPool<float>.Shared.Return(dSArray);
-                ArrayPool<float>.Shared.Return(dAArray);
+                ScaledDotProductAttentionBackwardBatch(
+                    b,
+                    q,
+                    k,
+                    v,
+                    attnWeights,
+                    output,
+                    dABuf.Span,
+                    dSBuf.Span,
+                    seqLen,
+                    dk,
+                    dv,
+                    causalMask);
             }
         }
 
