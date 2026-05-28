@@ -28,6 +28,43 @@ explicit memory ownership, zero-allocation inference hot paths.
 
 ---
 
+## What you can build today
+
+Concrete user-facing scenarios this release enables — each is one .NET reference + the model file,
+no Python interpreter, no native DLL, no sidecar process.
+
+- **Private AI assistant inside your app** — desktop / mobile / Blazor / WPF / console. Run Qwen-3B
+  or Llama-3 locally in the same process; nothing leaves the machine. Useful in regulated industries
+  (medical / finance / legal), air-gapped environments, or when "send data to OpenAI" is not on the
+  table.
+- **Search your own documents by meaning (RAG)** — embed your notes, support tickets, product docs
+  with MiniLM/BGE/E5, store vectors in-process, search by cosine. Same vectors that
+  Python's `sentence-transformers` would produce (bit-for-bit), without any Python at runtime.
+- **An assistant that takes actions, not just talks** — the model emits a structured tool call
+  (`{ "name": "send_invoice", "arguments": {…} }`), Overfit guarantees the JSON is valid, and your
+  C# function gets invoked. Wire up "look up customer", "create ticket", "summarise the PDF" as
+  tools — the model picks which to call.
+- **Read scanned forms / printed pages** — the in-process CRNN+CTC OCR turns rasterised text into
+  strings; pair it with an LLM to "extract invoice totals" or "answer questions about this scanned
+  document" without leaving the .NET process.
+- **Embed AI in an existing .NET product** — add chat, semantic search, or document Q&A to your
+  WPF / Blazor / ASP.NET app as a NuGet package. No new infrastructure, no Docker, no Python
+  installer for end users.
+- **Train a small custom model on your own data** — image classifier, time-series anomaly detector,
+  small text generator — trained in pure .NET, deployed in the same .NET process. The complete
+  ML lifecycle without a Python toolchain.
+- **Multi-turn chat that stays in budget** — long conversations auto-compact via the summarising
+  memory primitive: old turns get model-summarised once the context grows, the assistant keeps the
+  facts but stops paying for them in tokens.
+- **Audit-friendly AI** — deterministic greedy decoding + file-versioned weights + per-call decision
+  records (input + model hash + output + timestamp) — fits the audit-trail expectations of the
+  EU AI Act and similar regulated-AI regimes.
+
+A consolidated runnable walkthrough (load → RAG → tool call → JSON) lives in
+[`Demo/AgentDemo`](Demo/AgentDemo/README.md).
+
+---
+
 ## Quick start
 
 ```bash
@@ -142,12 +179,14 @@ HuggingFace ByteLevel-BPE (Llama / Qwen / Mistral — validated bit-for-bit on Q
 (ChatML-aware Qwen variant) · GGUF tokenizer (legacy fallback) · WordPiece (BERT family, all special
 tokens + lowercase + NFD accent strip) · GPT-2 byte-level BPE.
 
-### Things this does NOT load
+### Scope
 
-Diffusion models (Stable Diffusion etc.), CLIP / vision-language models, audio (Whisper, MusicGen),
-TensorFlow checkpoints, JAX, MLX, AWQ / GPTQ quantizations, Q5_K / Q4_0 / Q5_0 / Q5_1 / Q2_K / Q3_K
-quant formats (Q4_K_M + Q6_K + Q8_0 cover the K-quant hot path Ollama ships by default; the others
-are documented as roadmap items).
+Overfit is opinionated about being **a library, in pure C#, AOT-clean, no native dependencies,
+no Python, no exposed server.** Out of scope today: GPU backends, server/CLI binaries, quantization
+export pipelines, diffusion / image-generation, speech-to-text / text-to-speech, vision-language
+fusion. Lower quantization formats (Q2_K / Q3_K / IQ-series), Mirostat / Typical-p samplers,
+RoPE-scaling variants for long context, and additional model architectures are roadmap candidates —
+each shippable in 1-3 weeks if the use case appears.
 
 ---
 

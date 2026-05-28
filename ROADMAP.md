@@ -149,6 +149,41 @@ repro hook) and seeded the random-tiny-base anomaly `[Fact]` tests — which sur
 convergence is init-sensitive** (some seeds diverge at lr 1e-2 / 300 steps; the seed pins a representative
 converging init — the rigorous validation remains the TRAINED production base in `[LongFact]`).
 
+## llama.cpp scope-gap snapshot (2026-05-29, full-tree read of `D:/llamacpp-tmp`)
+
+Read the full llama.cpp source tree to map what they have that Overfit doesn't. Bucketed by ROI / effort.
+
+**SHIPPABLE in pure C# (≤2 weeks each, candidate post-launch additions):**
+
+- [ ] **Q2_K / Q3_K dequant + decode** — mathematically straightforward K-quants (block scale + 2-/3-bit indices), ~2 days each. Unlocks the lower end of Ollama's K-quant matrix (Q4_K_M / Q6_K already shipped).
+- [ ] **Mirostat v1 / v2 samplers** — stateful (running `mu`), needs threading through `ISlmSession`. Queued from the 2026-05-25 plan; perplexity-targeted decoding.
+- [ ] **Typical-p / XTC / Top-n-sigma / DRY** — pure-math sampler additions; ~1 day each.
+- [ ] **Infill / FIM sampler** — prefix/middle/suffix token masking for code-completion-style models; ~1 week.
+- [ ] **LoRA adapter loading + composition** — Overfit has *training* LoRA (custom); loading external `.gguf` LoRA adapters and composing multiple at runtime is ~3-5 days.
+- [ ] **RoPE scaling variants** — Yarn (NTK-by-parts) / DynamicNTK / AliBi / per-section. Algebraic variants on the existing RoPE kernel, ~1-2 days each. Unlocks long-context Qwen/Llama variants.
+- [ ] **Encoder-decoder (T5 / FLAN)** — reuses BERT-encoder building blocks already shipped; ~1 week.
+
+**HARD (2-4 weeks each, evaluate niche fit first):**
+
+- [ ] **GBNF (Generic BNF) grammar engine** — context-free parser + DFA construction + token-trie matching. Real work (~3-4 weeks). Overfit currently has JSON-mode + ToolCallConstraint (covers 90% of structured-output use). Build only if user demand surfaces for arbitrary grammars.
+- [ ] **One vision-language model stack** (LLaVA / Qwen2-VL / Pixtral) — CLIP image encoder + projection + LLM fusion + tokenizer surgery. ~2-4 weeks for a single model. Doubles the addressable workload (image+text).
+- [ ] **Whisper-tiny / -base ASR port** — separate `whisper.cpp` ecosystem, same conv+transformer pattern as our CRNN+BERT stack. ~1-2 weeks for a working speech-to-text. Strongest "in-process .NET multimodal" story if combined with VLM.
+- [ ] **State-space / Mamba / RWKV** — recurrent-state arch; structurally different (SSM ops, scan). Defer unless a specific user model demands it.
+- [ ] **Multi-token-prediction (MTP) + speculative rollback** — Qwen3.5 / Gemma3N draft heads. Tree-based verification + rollback cache. Defer.
+
+**Out of scope (philosophy / non-goals — see "What Overfit is not"):**
+
+- GPU backends (CUDA / Metal / Vulkan / SYCL / OpenCL / OpenVINO / Hexagon / WebGPU) — require native code. Overfit is pure-managed.
+- Server / CLI binaries (`server`, `cli`, `batched-bench`, `perplexity`, `tokenize`) — Overfit is a *library*, not a daemon.
+- Quantization export pipelines (`quantize`, `imatrix`, `cvector-generator`) — Overfit loads pre-quantized; building quantizers is a separate concern.
+- TTS engines (OuteTTS, WavTokenizer, bark.cpp) — out of niche for now.
+- Diffusion models — image generation is a different domain.
+- TensorFlow / JAX / MLX checkpoints — Python ecosystem formats.
+
+**Architectures Overfit doesn't load** (llama.cpp lists ~130; Overfit lists 7 families): Falcon, Gemma 1/2/3/3N, Mamba/Mamba2/Jamba, RWKV6/7, T5, Phi, GLM 1/2/3/4, Deepseek 1/2/V3, Cohere, Nemotron, Granite, LLaMA-4, Qwen3/3.5/4, Grok, Chameleon, Hunyuan/-V/-VL/-OCR, Pixtral, MiniCPM-V, InternVL, etc. Most are deferrable — Qwen2.5 + Llama-3.x + Mixtral cover the dominant Ollama deploy. Adding a new arch is typically 3-5 days *per family* (weight name mapping + arch-specific quirks like SwiGLU vs GeLU, GQA vs MHA).
+
+---
+
 ## Post-launch track #1 — Mixture of Experts (MoE)
 
 **Why:** we already have the memory-optimization trio's first two legs — KV cache + GQA. MoE is the
