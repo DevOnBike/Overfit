@@ -1,3 +1,8 @@
+// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
+
 namespace DevOnBike.Overfit.Demo.LocalAgent.Infrastructure
 {
     internal static class ModelPathResolver
@@ -32,7 +37,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Infrastructure
             "Could not locate a model. Set 'ModelPath' in appsettings to either an absolute *.gguf file " +
             "(e.g. C:\\qwen3b\\qwen.q4km.gguf) OR a HuggingFace directory containing model.safetensors " +
             "(e.g. C:\\qwen3b for an unpacked Qwen2.5-0.5B). Or set OVERFIT_MODEL_DIR to such a directory. " +
-            "See Demo/Overfit.LocalAgent.AspNet/README.md.");
+            "See Demo/LocalAgentAspNetDemo/README.md.");
         }
     }
 }

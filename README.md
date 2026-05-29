@@ -12,6 +12,20 @@ Pure C# deep-learning and LLM inference engine. Predictable CPU performance, exp
 
 ---
 
+## Start here
+
+Run the full in-process agent demo — **GGUF load → RAG → tool calling → guaranteed JSON**, one .NET process, no Python:
+
+```powershell
+dotnet run -c Release --project Demo/AgentDemo
+```
+
+Prefer HTTP endpoints (the CTO/architect view)? The same stack as an ASP.NET service is in
+[`Demo/LocalAgentAspNetDemo`](Demo/LocalAgentAspNetDemo/README.md). All demos are indexed in
+[`Demo/README.md`](Demo/README.md).
+
+---
+
 ## What it does
 
 **Run and fine-tune LLMs, and run deep networks, entirely in .NET — in-process, allocation-free.**

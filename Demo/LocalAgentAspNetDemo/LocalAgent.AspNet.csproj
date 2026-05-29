@@ -1,13 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
     <!--
-      Overfit Local Agent Starter — private RAG, tool calling and JSON inside ASP.NET.
-
-      Phase 1 (walking skeleton): /health + /chat + /reset over OverfitClient.LoadGguf.
-      Phases 2-4 (RAG, tool calling, guaranteed JSON, metrics, Docker, Microsoft.Extensions.AI
-      adapter, Aspire dashboard) follow once Phase 1 is validated on real hardware.
-
-      Not packable. Not part of the public NuGet artefact set.
+      Overfit Local Agent Starter — a private LLM agent inside ASP.NET, in-process, no Python /
+      model server / native binary / data egress. Minimal API over OverfitClient:
+        /chat, /reset                      — multi-turn chat
+        /documents/index, /rag/query       — in-process RAG (embeddings + vector store)
+        /agent, /chat/json                 — constrained tool calling + guaranteed JSON
+        /health, /metrics (Prometheus)     — observability
+      Swagger UI at /swagger. Not packable; not part of the public NuGet artefact set.
     -->
 
     <PropertyGroup>
@@ -27,6 +27,12 @@
     <ItemGroup>
         <!-- Interactive Swagger UI at /swagger so the endpoints can be exercised from a browser. -->
         <PackageReference Include="Swashbuckle.AspNetCore" />
+
+        <!-- Metrics: instrument with the built-in System.Diagnostics.Metrics (Meter) API and expose a
+             Prometheus scrape endpoint via OpenTelemetry — the idiomatic ASP.NET Core path
+             (learn.microsoft.com/aspnet/core/log-mon/metrics). -->
+        <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+        <PackageReference Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" />
     </ItemGroup>
 
     <ItemGroup>

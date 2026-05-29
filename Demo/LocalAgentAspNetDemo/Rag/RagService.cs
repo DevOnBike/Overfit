@@ -21,8 +21,9 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
     /// No external vector database, no embedding API, no data egress.
     ///
     /// Single-tenant demo: indexing and querying are serialised behind one lock. The retrieved
-    /// context is sent through the shared <see cref="OverfitClient"/> chat session, so a RAG turn
-    /// appends to the same conversation history as <c>/chat</c> and is cleared by <c>/reset</c>.
+    /// context is sent through the shared <see cref="OverfitClient"/> as a stateless one-shot
+    /// (<c>Complete</c>), so a RAG answer neither inherits the <c>/chat</c> conversation nor pollutes
+    /// it — each query prefills only its own grounding context.
     /// </summary>
     public sealed class RagService : IDisposable
     {
@@ -141,10 +142,10 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
         private static string BuildPrompt(string question, IReadOnlyList<VectorMatch> hits)
         {
             var sb = new StringBuilder();
-            sb.AppendLine(
-                "Answer the question using ONLY the context below. " +
-                "If the answer is not in the context, say you don't have that information. " +
-                "Cite the bracketed source numbers you used.");
+            sb.AppendLine("You are a support assistant. Answer the question using ONLY the numbered context below. Rules:");
+            sb.AppendLine("- Use only facts stated in the context. If the answer is not there, say you don't have that information.");
+            sb.AppendLine("- For a yes/no question about a number, date, period, or limit: FIRST state the relevant limit from the context and whether the value in the question is within or beyond that limit; THEN end with your verdict, \"Yes\" or \"No\".");
+            sb.AppendLine("- Keep the answer to at most two sentences, and cite the [n] source(s) you used.");
             sb.AppendLine();
             sb.AppendLine("Context:");
             for (var i = 0; i < hits.Count; i++)
@@ -189,7 +190,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
                 "Could not locate a sentence-embedding model directory. Either set 'EmbeddingModelPath' " +
                 "in appsettings to a MiniLM directory (config.json + vocab.txt + model.safetensors), or set " +
                 "the OVERFIT_EMBEDDING_DIR environment variable. RAG (/documents/index, /rag/query) needs this; " +
-                "plain /chat does not. See Demo/Overfit.LocalAgent.AspNet/README.md.");
+                "plain /chat does not. See Demo/LocalAgentAspNetDemo/README.md.");
         }
 
         private string ResolveDataDir()

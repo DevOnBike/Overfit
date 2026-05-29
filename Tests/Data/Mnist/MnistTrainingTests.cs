@@ -26,7 +26,7 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
         {
             _output = output;
         }
-        
+
 
         /// <summary>
         /// MNIST training benchmark with a small, idiomatic CNN classifier.

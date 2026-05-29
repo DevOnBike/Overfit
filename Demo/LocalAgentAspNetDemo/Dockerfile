@@ -7,15 +7,15 @@
 # clang + zlib, then base the final stage on runtime-deps).
 #
 # Build context is the REPOSITORY ROOT (the app references ../../Sources/Main):
-#   docker build -f Demo/Overfit.LocalAgent.AspNet/Dockerfile -t overfit-local-agent .
+#   docker build -f Demo/LocalAgentAspNetDemo/Dockerfile -t overfit-local-agent .
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 # Copy the whole repo (the demo depends on Sources/Main). .dockerignore keeps bin/obj/.git out.
 COPY . .
-RUN dotnet restore Demo/Overfit.LocalAgent.AspNet/Overfit.LocalAgent.AspNet.csproj
-RUN dotnet publish Demo/Overfit.LocalAgent.AspNet/Overfit.LocalAgent.AspNet.csproj \
+RUN dotnet restore Demo/LocalAgentAspNetDemo/LocalAgent.AspNet.csproj
+RUN dotnet publish Demo/LocalAgentAspNetDemo/LocalAgent.AspNet.csproj \
     -c Release -o /app --no-restore
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime

@@ -1,5 +1,8 @@
 # Overfit Swarm Engine 🌪️
 
+> **Experimental / game-dev showcase — not the main Overfit product.** For the core pitch
+> (private LLM / RAG / tool calling / JSON inside .NET) start at [`Demo/README.md`](../README.md).
+
 **100,000 AI Agents. 11ms Inference. Zero Main-Thread Bottlenecks.**
 
 ![Overfit Swarm Demo](https://img.shields.io/badge/Scale-100k_Units-blue)
@@ -46,13 +49,13 @@ The system is split into two distinct parts:
 ## 🎮 How to Run
 
 ### 1. Start the Server
-Navigate to the server project folder and run the following commands in your terminal:
+From this folder (`Demo/Unity`):
 
 To run the pre-trained, high-performance demo:
-`dotnet run -- demo`
+`dotnet run -c Release -- demo`
 
 To start training a new swarm from scratch:
-`dotnet run -- training`
+`dotnet run -c Release -- training`
 
 ### 2. Start the Client
 1. Open the Unity project.

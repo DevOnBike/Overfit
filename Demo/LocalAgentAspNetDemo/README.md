@@ -44,7 +44,7 @@ $env:OVERFIT_MODEL_DIR = "C:\qwen3b"
 ### 3. Run
 
 ```powershell
-dotnet run -c Release --project Demo/Overfit.LocalAgent.AspNet
+dotnet run -c Release --project Demo/LocalAgentAspNetDemo
 ```
 
 First request loads the model into mmap-backed K-quant weights (~1–2 seconds, sub-300 MB live managed heap). Subsequent calls are zero-allocation on the decode hot path.
@@ -175,7 +175,7 @@ overfit_tool_calls_total{tool="lookup_customer"} 1
 ```powershell
 # 1. Edit compose.yaml: set the volume source to your local GGUF directory (default C:/qwen3b).
 # 2. Bring up the agent + Prometheus.
-docker compose -f Demo/Overfit.LocalAgent.AspNet/compose.yaml up --build
+docker compose -f Demo/LocalAgentAspNetDemo/compose.yaml up --build
 ```
 
 - App: `http://localhost:5234` (e.g. `curl http://localhost:5234/health`)
@@ -260,7 +260,7 @@ Overfit ships as a NuGet package. Your model is a file on disk. Your agent is a 
 ## Build
 
 ```powershell
-dotnet build Demo/Overfit.LocalAgent.AspNet -c Release
+dotnet build Demo/LocalAgentAspNetDemo -c Release
 ```
 
 Or as part of the solution: `dotnet build Overfit.sln -c Release`.

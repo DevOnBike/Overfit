@@ -25,6 +25,7 @@ using DevOnBike.Overfit.Demo.LocalAgent.Observability;
 using DevOnBike.Overfit.Demo.LocalAgent.Rag;
 using DevOnBike.Overfit.Demo.LocalAgent.Tools;
 using DevOnBike.Overfit.LanguageModels;
+using OpenTelemetry.Metrics;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -52,8 +53,9 @@ loadStopwatch.Stop();
 
 builder.Services.AddSingleton(sharedClient);
 
-// Observability (Phase 4). Static build info captured once; per-generation stats recorded by the
-// endpoints. Exposed at /metrics in Prometheus text format (scraped by the compose Prometheus service).
+// Observability (Phase 4). Instrumented with the built-in System.Diagnostics.Metrics (Meter) API and
+// exported to a Prometheus scrape endpoint at /metrics by OpenTelemetry (configured below). Static
+// build info captured once; per-generation stats recorded by the endpoints.
 var modelFile = isGguf ? modelPath : Path.Combine(modelPath, "model.safetensors");
 builder.Services.AddSingleton(new MetricsCollector
 {
@@ -61,6 +63,20 @@ builder.Services.AddSingleton(new MetricsCollector
     ModelFingerprint = MetricsCollector.FingerprintModel(modelFile),
     MmapEnabled = isGguf,
     ModelLoadSeconds = Math.Round(loadStopwatch.Elapsed.TotalSeconds, 3),
+});
+
+builder.Services.AddOpenTelemetry().WithMetrics(metrics =>
+{
+    metrics.AddMeter(MetricsCollector.MeterName);
+    // Latency-shaped buckets for the retrieval histogram (defaults start at 0 then jump to 5s, useless
+    // for ~10-50 ms searches); the rest keep their defaults.
+    metrics.AddView(
+        "overfit.rag.search",
+        new ExplicitBucketHistogramConfiguration
+        {
+            Boundaries = [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1],
+        });
+    metrics.AddPrometheusExporter();
 });
 
 // RAG over local documents (Phase 2). Loads its embedder lazily on first /documents/index,
@@ -216,9 +232,9 @@ app.MapPost("/chat/json", (ChatRequest req, OverfitClient client, AgentService a
     return Results.Content(json, "application/json");
 });
 
-// ── Metrics (Phase 4): Prometheus text exposition ─────────────────────────
-
-app.MapGet("/metrics", (MetricsCollector metrics) =>
-    Results.Text(metrics.ToPrometheus(), "text/plain; version=0.0.4"));
+// ── Metrics (Phase 4): Prometheus scrape endpoint ─────────────────────────
+// OpenTelemetry serves the Prometheus exposition at /metrics from the Meter instruments recorded by
+// MetricsCollector — the idiomatic ASP.NET Core path, no hand-rolled text.
+app.MapPrometheusScrapingEndpoint();
 
 app.Run();

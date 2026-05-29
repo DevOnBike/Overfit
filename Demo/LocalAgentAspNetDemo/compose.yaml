@@ -14,7 +14,7 @@ services:
     build:
       # Build context is the repository root (two levels up); the app references Sources/Main.
       context: ../..
-      dockerfile: Demo/Overfit.LocalAgent.AspNet/Dockerfile
+      dockerfile: Demo/LocalAgentAspNetDemo/Dockerfile
     ports:
       - "5234:8080"
     environment:
