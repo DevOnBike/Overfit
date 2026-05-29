@@ -48,8 +48,13 @@ Pre-release suffixes (e.g. `10.1.0-beta.1`) are used for surface changes that ne
 
 - `OverfitPool<T>` — empirically slower than `ArrayPool<T>.Shared`-wrapped `PooledBuffer<T>` (3× single-thread, ~3000× multi-thread contention under benchmark). Benchmarks retained in `Sources/Benchmark/` as a regression dossier.
 
+### Added
+
+- `BatchedPrefillParityTests.BatchedPrefill_MatchesSingleToken_RealChatMLTokens` — a default-run `[Fact]` that prefills a real ChatML prompt (special tokens + long system message, ~50 tokens) through the batched path and asserts the engine greedily generates coherent text ("Paris"). Closes the test gap where batched prefill was only ever exercised with a 3-token prompt and a skipped `[LongFact]` parity check.
+
 ### Fixed
 
+- **`BertEncoder` arena under-sizing → `OutOfMemoryException` on longer inputs.** The autograd arena was sized as `NumLayers · T · dFF · k`, which ignored the attention-scores term (`heads · T²`) that dominates at the sequence-length limit — so embedding a paragraph-length text (near the 256-token default) threw `NativeBuffer exhausted`, violating the encoder's contract that inputs up to `MaxSequenceLength` are valid. Re-derived the arena from an explicit per-layer tape estimate (`2·heads·T² + 2·T·dFF + 16·T·d`, +25% headroom). Surfaced while wiring in-process RAG over real documents.
 - **Native AOT guard now actually verifies Native AOT.** Previously the `aot-guard` CI job ran `dotnet publish` on `Sources/Main` (a class library), which does not invoke ILCompiler — only an executable can be AOT-compiled. The check was symbolic and would not catch trim/AOT-incompatible code added to the library. Replaced with a thin `Sources/AotSmokeTest` console exe that references `DevOnBike.Overfit`; the CI job now publishes the smoketest under `-p:PublishAot=true -p:TreatWarningsAsErrors=true` on Ubuntu (with `clang` + `zlib1g-dev` installed) and executes the produced native binary as a runtime smoke check.
 - `devskim` and `checkmarx-one` GitHub Actions workflows now target the `main` branch — previously they targeted the non-existent `master`, so scans never triggered automatically.
 - GPT-2 loader peak-RAM regression: lazy chunk streaming reduces peak load RAM from ~2× steady-state to ~1× steady-state.

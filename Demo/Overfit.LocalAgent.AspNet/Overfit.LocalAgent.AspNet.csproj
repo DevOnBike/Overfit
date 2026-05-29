@@ -24,4 +24,15 @@
         <ProjectReference Include="..\..\Sources\Main\Main.csproj" />
     </ItemGroup>
 
+    <ItemGroup>
+        <!-- Interactive Swagger UI at /swagger so the endpoints can be exercised from a browser. -->
+        <PackageReference Include="Swashbuckle.AspNetCore" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- Sample documents the RAG demo indexes. Copied next to the built assembly so
+             AppContext.BaseDirectory + "Data" resolves at runtime. -->
+        <Content Include="Data\**\*" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+
 </Project>

@@ -3,7 +3,10 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Runtime.InteropServices;
+using System.Text;
 using DevOnBike.Overfit.LanguageModels.Runtime;
+using DevOnBike.Overfit.LanguageModels.Tokenizers;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
@@ -23,6 +26,93 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
 
         private readonly ITestOutputHelper _out;
         public BatchedPrefillParityTests(ITestOutputHelper output) => _out = output;
+
+        /// <summary>
+        /// DOCUMENTS A KNOWN BUG (2026-05-29, task #95): for the real ~56-token system-message ChatML
+        /// prompt the demo builds, the engine generates DEGENERATE, space-less output
+        /// (e.g. "France'scapitalistouredisParis.") — while a short prompt generates a clean
+        /// "The capital of France is Paris." Isolated: NOT batched prefill (bit-identical to single —
+        /// see <see cref="BatchedPrefill_MatchesSingleToken_OnRealQwen"/>), NOT the tokenizer (special
+        /// tokens encode correctly), NOT detokenization (see
+        /// <see cref="IncrementalDecode_PreservesSpaces_LikeChatSession"/>). It is a forward-pass /
+        /// logit-correctness issue that worsens with prompt length / position. [LongFact] because it
+        /// currently FAILS; flip to [Fact] once fixed so it guards the regression.
+        /// </summary>
+        [LongFact]
+        public void Engine_GeneratesCoherentText_ForLongSystemPrompt()
+        {
+            if (!File.Exists(ModelPath)) { _out.WriteLine($"missing {ModelPath}"); return; }
+
+            using var engine = CachedLlamaInferenceEngine.LoadGguf(ModelPath);
+
+            // Encode the EXACT prompt the demo builds (long system message → ~56 tokens), via the real
+            // tokenizer, so this faithfully reproduces the failing path rather than a hand-picked 21-token
+            // prompt (which happens not to trigger the bug).
+            var tokenizer = DevOnBike.Overfit.LanguageModels.Tokenizers.QwenTokenizer.Load(@"C:\qwen3b");
+            const string chatml =
+                "<|im_start|>system\nYou are a concise, helpful assistant running locally inside a .NET " +
+                "process. Answer only from context the user provides; if you are unsure, say so.<|im_end|>\n" +
+                "<|im_start|>user\nWhat is the capital of France? Answer in one sentence.<|im_end|>\n" +
+                "<|im_start|>assistant\n";
+            var prompt = tokenizer.Encode(chatml);
+            _out.WriteLine($"prompt length = {prompt.Length} tokens");
+
+            // GENERATE from the raw engine (bypassing ChatSession) and decode — does the ENGINE itself
+            // produce coherent text for a system-message prompt, or the "<|im_start|>system" junk seen in
+            // the demo? This isolates engine vs the chat layer.
+            using var gen = engine.CreateSession(2048); // match the demo's context length
+            gen.Reset(prompt);
+            var outTokens = new List<int>();
+            var greedy = DevOnBike.Overfit.LanguageModels.Contracts.SamplingOptions.Greedy;
+            for (var i = 0; i < 20; i++)
+            {
+                var t = gen.GenerateNextToken(in greedy);
+                if (t == QwenTokenizer.EndOfText || t == 151645) { break; } // <|endoftext|> or <|im_end|>
+                outTokens.Add(t);
+            }
+            var text = tokenizer.Decode(outTokens.ToArray());
+            _out.WriteLine($"ENGINE GENERATED: '{text}'");
+
+            // KNOWN BUG (task #95): currently produces degenerate, space-less output for this
+            // long system-message prompt (e.g. "France'scapitalistouredisParis."), while a short prompt
+            // is clean. Forward-pass / logit-correctness issue that worsens with prompt length — NOT
+            // batched prefill, NOT the tokenizer, NOT detokenization (all separately verified).
+            Assert.Contains("Paris", text, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(' ', text); // currently FAILS — guards the fix once the forward pass is corrected
+        }
+
+        /// <summary>
+        /// Model-free: replicates ChatSession.Generate's incremental delta-decode and asserts it
+        /// reconstructs the same text as a whole-sequence decode — i.e. streaming detokenization must
+        /// not drop spaces. Needs only the tokenizer (fast), no model weights.
+        /// </summary>
+        [Fact]
+        public void IncrementalDecode_PreservesSpaces_LikeChatSession()
+        {
+            const string dir = @"C:\qwen3b";
+            if (!Directory.Exists(dir)) { _out.WriteLine($"missing {dir}"); return; }
+
+            var tok = QwenTokenizer.Load(dir);
+            const string phrase = "The capital of France is Paris.";
+            var ids = tok.Encode(phrase);
+            var whole = tok.Decode(ids);
+
+            // ChatSession.Generate's exact incremental logic.
+            var prev = string.Empty;
+            var sb = new StringBuilder();
+            var gen = new List<int>();
+            foreach (var id in ids)
+            {
+                gen.Add(id);
+                var full = tok.Decode(CollectionsMarshal.AsSpan(gen));
+                if (full.Length <= prev.Length || !full.StartsWith(prev, StringComparison.Ordinal)) { continue; }
+                sb.Append(full[prev.Length..]);
+                prev = full;
+            }
+
+            _out.WriteLine($"whole='{whole}' incremental='{sb}'");
+            Assert.Equal(whole, sb.ToString());
+        }
 
         [LongFact]
         public void BatchedPrefill_MatchesSingleToken_OnRealQwen()

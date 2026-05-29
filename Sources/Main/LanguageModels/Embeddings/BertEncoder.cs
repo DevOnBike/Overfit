@@ -68,14 +68,27 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
                     lnEps: config.LayerNormEps);
             }
 
-            // Arena sizing: per layer the dominant residents are FFN intermediate [T, dFF] plus a
-            // handful of [T, d] tensors and per-head projections. A factor of 4·dFF per token per
-            // layer comfortably covers BERT-family blocks; 1 << 22 (4M floats) is the floor so the
-            // short-sentence MiniLM case stays cheap. Scales linearly with layers — 12L BGE/E5 get
-            // double 6L MiniLM, as needed.
-            var perLayer = checked(MaxSequenceLength * config.IntermediateSize * 4);
-            var arenaFloats = Math.Max(1 << 22, checked(config.NumLayers * perLayer));
-            _graph = new ComputationGraph(arenaFloats);
+            // Arena sizing. The encoder runs ONE forward on the shared graph without reclaiming
+            // intermediates mid-pass, so the arena must hold the WHOLE forward tape, not the peak live
+            // set. Per layer that tape is dominated by three terms:
+            //   - attention scores [T, T] per head (scores + softmax probs)   ~ 2 · heads · T·T
+            //   - FFN intermediate [T, dFF] (linear-1 output + GELU output)    ~ 2 · T·dFF
+            //   - ~16 residual / projection / layer-norm buffers [T, d]        ~ 16 · T·d
+            // The [T, T] attention term grows QUADRATICALLY with T and is what an earlier dFF-scaled
+            // heuristic (T·dFF·k) missed: it under-sized a full-length (T = 256) forward and threw an
+            // OutOfMemory at the sequence-length limit. 1 << 22 (4M floats) stays the floor so the
+            // short-sentence case is cheap; +25% headroom covers buffer-count drift across configs.
+            var t = (long)MaxSequenceLength;
+            var perLayer = (2L * config.NumHeads * t * t) + (2L * t * config.IntermediateSize) + (16L * t * d);
+            var estimate = config.NumLayers * perLayer;
+            var arenaFloats = Math.Max(1 << 22, estimate + (estimate / 4));
+            if (arenaFloats > int.MaxValue)
+            {
+                throw new InvalidOperationException(
+                    $"BertEncoder arena estimate ({arenaFloats} floats) exceeds int.MaxValue; " +
+                    $"reduce expectedMaxSequenceLength (currently {MaxSequenceLength}).");
+            }
+            _graph = new ComputationGraph((int)arenaFloats);
             Eval();
         }
 

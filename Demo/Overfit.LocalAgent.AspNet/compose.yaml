@@ -1,0 +1,38 @@
+# Overfit Local Agent Starter — full local stack: the agent + Prometheus scraping its /metrics.
+#
+# The model file stays on YOUR machine and is mounted into the container — nothing is baked into
+# the image, nothing leaves your host. Edit the volume source paths below to point at your local
+# GGUF model directory and (optionally) your MiniLM embedding directory, then:
+#
+#   docker compose up --build
+#
+# App:        http://localhost:5234   (e.g. curl http://localhost:5234/health)
+# Prometheus: http://localhost:9090
+
+services:
+  agent:
+    build:
+      # Build context is the repository root (two levels up); the app references Sources/Main.
+      context: ../..
+      dockerfile: Demo/Overfit.LocalAgent.AspNet/Dockerfile
+    ports:
+      - "5234:8080"
+    environment:
+      # The directory holding exactly one *.gguf (mounted below at /models).
+      OVERFIT_MODEL_DIR: /models
+      # Optional: a MiniLM directory for RAG (config.json + vocab.txt + model.safetensors).
+      OVERFIT_EMBEDDING_DIR: /models/minilm
+    volumes:
+      # EDIT the left-hand (host) path to your local model directory.
+      - "C:/qwen3b:/models:ro"
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - "./Observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro"
+    depends_on:
+      - agent
+    restart: unless-stopped
