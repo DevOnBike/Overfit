@@ -112,6 +112,16 @@ namespace DevOnBike.Overfit.DeepLearning
         public float RoPETheta { get; init; } = 10_000f;
 
         /// <summary>
+        /// RoPE rotation pairing. <c>false</c> (default) = adjacent-pair <c>(x[2i], x[2i+1])</c>, used when
+        /// Q/K weights are stored in (or permuted into) the adjacent layout — the HF-safetensors loader
+        /// permutes for this, and llama.cpp permutes Llama/Mistral GGUF at conversion. <c>true</c> =
+        /// split-half <c>(x[i], x[i+d/2])</c> (HF rotate_half / llama.cpp NEOX), used when Q/K stay in the
+        /// original HF layout — Qwen2/Qwen2-MoE GGUF are NOT permuted by llama.cpp, so they need this.
+        /// Getting it wrong leaves position 0 correct (identity rotation) but corrupts every later position.
+        /// </summary>
+        public bool RopeSplitHalf { get; init; }
+
+        /// <summary>
         /// Optional Llama-3 "llama3" RoPE frequency scaling for long context (the
         /// <c>rope_scaling</c> block in a Llama-3.x config). Null = plain RoPE.
         /// </summary>

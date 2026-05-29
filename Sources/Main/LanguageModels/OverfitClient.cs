@@ -79,13 +79,15 @@ namespace DevOnBike.Overfit.LanguageModels
         /// <param name="quantize">Quantise FFN/LM-head/attention where supported (default Q8_0 fallback).</param>
         /// <param name="maxNewTokens">Default maximum response length in tokens (overridable via <see cref="Options"/>).</param>
         /// <param name="stopSequences">Override string stop sequences; defaults to ChatML markers.</param>
+        /// <param name="sampling"></param>
         public static OverfitClient LoadGguf(
             string ggufPath,
             int maxContextLength = 2048,
             bool mmap = true,
             bool quantize = true,
             int maxNewTokens = 256,
-            IReadOnlyList<string>? stopSequences = null)
+            IReadOnlyList<string>? stopSequences = null,
+            SamplingOptions? sampling = null)
         {
             ArgumentException.ThrowIfNullOrEmpty(ggufPath);
             if (!File.Exists(ggufPath))
@@ -104,21 +106,7 @@ namespace DevOnBike.Overfit.LanguageModels
             }
 
             // ── Tokenizer from sibling directory ──
-            // QwenChatTokenizer first when its files are present — it handles ChatML special tokens
-            // (<|im_start|>, <|im_end|>) the way Qwen-family models expect. HuggingFaceBpeTokenizer
-            // is the generic fallback for Llama/Mistral and Qwen base variants without ChatML.
-            ITokenizer tokenizer;
-            var hasQwenVocab = File.Exists(Path.Combine(modelDir, "vocab.json"))
-                && File.Exists(Path.Combine(modelDir, "merges.txt"));
-            if (hasQwenVocab)
-            {
-                try { tokenizer = new QwenChatTokenizer(QwenTokenizer.Load(modelDir)); }
-                catch { tokenizer = HuggingFaceBpeTokenizer.Load(modelDir); }
-            }
-            else
-            {
-                tokenizer = HuggingFaceBpeTokenizer.Load(modelDir);
-            }
+            var tokenizer = LoadTokenizer(modelDir);
 
             // ── Engine + session ──
             var engine = GgufLlamaLoader.Load(ggufPath, quantize: quantize, mmap: mmap);
@@ -132,7 +120,7 @@ namespace DevOnBike.Overfit.LanguageModels
                     var options = new GenerationOptions(
                         maxNewTokens: maxNewTokens,
                         maxContextLength: maxContextLength,
-                        sampling: SamplingOptions.Greedy,
+                        sampling: sampling ?? SamplingOptions.Greedy,
                         stopOnEndOfTextToken: true,
                         endOfTextTokenId: tokenizer.EndOfTextTokenId);
 
@@ -149,6 +137,79 @@ namespace DevOnBike.Overfit.LanguageModels
                 engine.Dispose();
                 throw;
             }
+        }
+
+        /// <summary>
+        /// Loads a model from a HuggingFace directory (<c>model.safetensors</c> [+ shards] + <c>config.json</c>
+        /// + tokenizer files) — no GGUF conversion needed. Same turnkey wiring as <see cref="LoadGguf"/>:
+        /// detects the chat template from <c>tokenizer_config.json</c>, loads the tokenizer, builds the engine
+        /// (<see cref="DevOnBike.Overfit.LanguageModels.Loading.SafetensorsLlamaLoader"/>), session and
+        /// ChatSession. Handy for small instruct models you already have unpacked (e.g. Qwen2.5-0.5B-Instruct).
+        /// </summary>
+        /// <param name="modelDir">Directory with <c>model.safetensors</c> (or sharded) + <c>config.json</c> + tokenizer.</param>
+        public static OverfitClient LoadPretrained(
+            string modelDir,
+            int maxContextLength = 2048,
+            bool quantize = true,
+            int maxNewTokens = 256,
+            IReadOnlyList<string>? stopSequences = null,
+            SamplingOptions? sampling = null)
+        {
+            ArgumentException.ThrowIfNullOrEmpty(modelDir);
+            if (!Directory.Exists(modelDir))
+            {
+                throw new DirectoryNotFoundException($"Model directory not found: '{modelDir}'.");
+            }
+
+            var template = ChatTemplate.Detect(ReadChatTemplate(modelDir));
+            var tokenizer = LoadTokenizer(modelDir);
+
+            var engine = SafetensorsLlamaLoader.Load(modelDir, quantize: quantize);
+            try
+            {
+                var session = engine.CreateSession(maxContextLength);
+                try
+                {
+                    var chat = new ChatSession(session, tokenizer, template, stopSequences ?? _defaultStopSequences);
+                    var options = new GenerationOptions(
+                        maxNewTokens: maxNewTokens,
+                        maxContextLength: maxContextLength,
+                        sampling: sampling ?? SamplingOptions.Greedy,
+                        stopOnEndOfTextToken: true,
+                        endOfTextTokenId: tokenizer.EndOfTextTokenId);
+                    return new OverfitClient(engine, session, tokenizer, chat, options);
+                }
+                catch { session.Dispose(); throw; }
+            }
+            catch { engine.Dispose(); throw; }
+        }
+
+        /// <summary>Reads the Jinja chat template from <c>tokenizer_config.json</c> (empty string if absent).</summary>
+        private static string ReadChatTemplate(string modelDir)
+        {
+            var path = Path.Combine(modelDir, "tokenizer_config.json");
+            if (!File.Exists(path)) { return string.Empty; }
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path));
+                return doc.RootElement.TryGetProperty("chat_template", out var t) && t.ValueKind == System.Text.Json.JsonValueKind.String
+                    ? t.GetString() ?? string.Empty
+                    : string.Empty;
+            }
+            catch { return string.Empty; }
+        }
+
+        /// <summary>Tokenizer from a model directory: Qwen ChatML BPE when vocab.json+merges.txt present, else generic HF BPE.</summary>
+        private static ITokenizer LoadTokenizer(string modelDir)
+        {
+            var hasQwenVocab = File.Exists(Path.Combine(modelDir, "vocab.json"))
+                && File.Exists(Path.Combine(modelDir, "merges.txt"));
+            if (hasQwenVocab)
+            {
+                try { return new QwenChatTokenizer(QwenTokenizer.Load(modelDir)); }
+                catch { return HuggingFaceBpeTokenizer.Load(modelDir); }
+            }
+            return HuggingFaceBpeTokenizer.Load(modelDir);
         }
 
         /// <summary>Appends a system message to the conversation. Call before the first <see cref="Send"/>.</summary>

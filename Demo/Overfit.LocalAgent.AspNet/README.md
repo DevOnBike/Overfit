@@ -10,23 +10,26 @@ A reference template a .NET developer can drop into an existing service to add a
 
 ## 5-minute quickstart
 
-### 1. Get a GGUF model
+### 1. Get a model
 
-Easiest: download Qwen2.5-3B-Instruct Q4_K_M (~1.9 GB) from HuggingFace or any Ollama mirror. The demo accepts any GGUF in the Qwen / Llama / Mistral / Mixtral / Qwen-MoE family.
+Easiest: download Qwen2.5-3B-Instruct Q4_K_M (~1.9 GB) from HuggingFace or any Ollama mirror. The demo accepts any GGUF in the Qwen / Llama / Mistral / Mixtral / Qwen-MoE family — **or** an unpacked HuggingFace directory (`model.safetensors` + `config.json` + tokenizer), loaded natively via `OverfitClient.LoadPretrained` (no GGUF conversion step).
+
+> **Model choice — read this before going smaller.** Tool calling here is constrained-decoded, so *any* model emits valid structure, args and JSON. But choosing the *right* tool is a reasoning task: a **3B routes the demo's tool suite 6/6**, while a **0.5B is unreliable (~4/8 — it over-picks the first tool for create-ticket requests)** even though its chat/RAG/JSON are fine and ~2× faster. **Use 1.5B+ for the agent endpoint.** The demo defaults to 3B for this reason.
 
 ### 2. Point the demo at it
 
 Pick **one** of the two paths:
 
-**(a) appsettings.Development.json** — set the absolute path:
+**(a) appsettings.Development.json** — a `*.gguf` file **or** a directory with `model.safetensors`:
 
 ```jsonc
 {
-  "ModelPath": "C:\\qwen3b\\qwen.q4km.gguf"
+  "ModelPath": "C:\\qwen3b\\qwen.q4km.gguf"   // GGUF file …
+  // "ModelPath": "C:\\qwen3b"                // … or a HuggingFace safetensors directory
 }
 ```
 
-**(b) Environment variable** — point at a directory containing exactly one `*.gguf`:
+**(b) Environment variable** — point at a directory containing a `*.gguf` (preferred) or `model.safetensors`:
 
 ```powershell
 $env:OVERFIT_MODEL_DIR = "C:\qwen3b"

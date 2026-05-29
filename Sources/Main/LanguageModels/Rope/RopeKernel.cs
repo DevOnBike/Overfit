@@ -27,10 +27,22 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
         /// Rotates a head vector in-place using precomputed cos/sin at a given position.
         /// Adjacent-pair rotation: pairs (x[2i], x[2i+1]) share the i-th frequency.
         /// </summary>
+        /// <summary>Adjacent-pair rotation (x[2i], x[2i+1]). Default convention.</summary>
         public static void Apply(
             Span<float> headVector,
             ReadOnlySpan<float> cos,
             ReadOnlySpan<float> sin)
+            => Apply(headVector, cos, sin, splitHalf: false);
+
+        /// <summary>
+        /// Rotates a head vector in-place. <paramref name="splitHalf"/> false = adjacent pairs
+        /// (x[2i], x[2i+1]); true = split-half pairs (x[i], x[i+headDim/2]) (HF rotate_half / NEOX).
+        /// </summary>
+        public static void Apply(
+            Span<float> headVector,
+            ReadOnlySpan<float> cos,
+            ReadOnlySpan<float> sin,
+            bool splitHalf)
         {
             var halfDim = headVector.Length / 2;
 
@@ -39,8 +51,20 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
                 throw new ArgumentException("cos/sin spans shorter than headDim/2.");
             }
 
-            // Adjacent-pair (GPT-NeoX) rotation:
-            //   (x[2i], x[2i+1]) rotated by frequency i
+            if (splitHalf)
+            {
+                // Split-half (HF rotate_half / NEOX): pairs (x[i], x[i+halfDim]) share frequency i.
+                for (var i = 0; i < halfDim; i++)
+                {
+                    var x0 = headVector[i];
+                    var x1 = headVector[i + halfDim];
+                    headVector[i] = x0 * cos[i] - x1 * sin[i];
+                    headVector[i + halfDim] = x0 * sin[i] + x1 * cos[i];
+                }
+                return;
+            }
+
+            // Adjacent-pair: pairs (x[2i], x[2i+1]) share frequency i.
             for (var i = 0; i < halfDim; i++)
             {
                 var x0 = headVector[2 * i];
@@ -56,7 +80,7 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
         /// </summary>
         public static void Apply(Span<float> headVector, RopeTable table, int position)
         {
-            Apply(headVector, table.CosAt(position), table.SinAt(position));
+            Apply(headVector, table.CosAt(position), table.SinAt(position), table.SplitHalf);
         }
     }
 }

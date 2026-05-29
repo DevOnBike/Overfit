@@ -31,19 +31,23 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Tools
         {
             _customersByEmail = SeedCustomers();
 
+            // Description = the prompt hint the model uses to ROUTE (the constraint masks on the tool NAME,
+            // not the description). Purpose-first wording — "what it's for", contrasted against the other
+            // tool — is what makes routing reliable. (A 0.5B routes the wrong tool here regardless of
+            // wording — tool selection is below its reasoning ceiling; use 1.5B+ for agentic. See
+            // SmallModelAgenticProbeTests.)
             Register(
                 new ToolDefinition(
                     "lookup_customer",
-                    "Look up a customer account by email address. " +
-                    "Arguments: { \"email\": string }."),
+                    "Read an existing customer's account details (plan, region, months active) by email. " +
+                    "Use this to ANSWER QUESTIONS about a customer. Changes nothing."),
                 LookupCustomer);
 
             Register(
                 new ToolDefinition(
                     "create_ticket",
-                    "Open a support ticket for a customer. " +
-                    "Arguments: { \"customerEmail\": string, \"subject\": string, " +
-                    "\"priority\": \"low\" | \"normal\" | \"high\" }."),
+                    "Open a NEW support ticket. Use ONLY when the user explicitly asks to open / create / " +
+                    "file / raise a ticket for a problem."),
                 CreateTicket);
         }
 

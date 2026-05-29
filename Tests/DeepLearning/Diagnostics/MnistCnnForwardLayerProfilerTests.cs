@@ -69,18 +69,18 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Diagnostics
                 using var input = new AutogradNode(inStore, new TensorShape(batchSize, 1, ImageSide, ImageSide), requiresGrad: false);
 
                 var sw = Stopwatch.StartNew();
-                var c1 = conv1.Forward(graph, input);                         var t1 = sw.ElapsedTicks; sw.Restart();
-                var b1 = bn1.Forward(graph, c1);                              var t2 = sw.ElapsedTicks; sw.Restart();
-                var r1 = graph.Relu(b1);                                      var t3 = sw.ElapsedTicks; sw.Restart();
-                var p1 = graph.MaxPool2D(r1, 8, 28, 28, 2);                   var t4 = sw.ElapsedTicks; sw.Restart();
-                var c2 = conv2.Forward(graph, p1);                            var t5 = sw.ElapsedTicks; sw.Restart();
-                var b2 = bn2.Forward(graph, c2);                              var t6 = sw.ElapsedTicks; sw.Restart();
-                var r2 = graph.Relu(b2);                                      var t7 = sw.ElapsedTicks; sw.Restart();
-                var p2 = graph.MaxPool2D(r2, 16, 14, 14, 2);                  var t8 = sw.ElapsedTicks; sw.Restart();
-                var fl = graph.Reshape(p2, batchSize, 16 * 7 * 7);            var t9 = sw.ElapsedTicks; sw.Restart();
-                var d1 = fc1.Forward(graph, fl);                              var t10 = sw.ElapsedTicks; sw.Restart();
-                var r3 = graph.Relu(d1);                                      var t11 = sw.ElapsedTicks; sw.Restart();
-                _ = fc2.Forward(graph, r3);                                   var t12 = sw.ElapsedTicks;
+                var c1 = conv1.Forward(graph, input); var t1 = sw.ElapsedTicks; sw.Restart();
+                var b1 = bn1.Forward(graph, c1); var t2 = sw.ElapsedTicks; sw.Restart();
+                var r1 = graph.Relu(b1); var t3 = sw.ElapsedTicks; sw.Restart();
+                var p1 = graph.MaxPool2D(r1, 8, 28, 28, 2); var t4 = sw.ElapsedTicks; sw.Restart();
+                var c2 = conv2.Forward(graph, p1); var t5 = sw.ElapsedTicks; sw.Restart();
+                var b2 = bn2.Forward(graph, c2); var t6 = sw.ElapsedTicks; sw.Restart();
+                var r2 = graph.Relu(b2); var t7 = sw.ElapsedTicks; sw.Restart();
+                var p2 = graph.MaxPool2D(r2, 16, 14, 14, 2); var t8 = sw.ElapsedTicks; sw.Restart();
+                var fl = graph.Reshape(p2, batchSize, 16 * 7 * 7); var t9 = sw.ElapsedTicks; sw.Restart();
+                var d1 = fc1.Forward(graph, fl); var t10 = sw.ElapsedTicks; sw.Restart();
+                var r3 = graph.Relu(d1); var t11 = sw.ElapsedTicks; sw.Restart();
+                _ = fc2.Forward(graph, r3); var t12 = sw.ElapsedTicks;
 
                 if (rep < Warmups) { continue; }
                 ticks[0] += t1; ticks[1] += t2; ticks[2] += t3; ticks[3] += t4;

@@ -106,7 +106,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             // Build RoPE table if required
             _rope = config.UseRoPE
-                ? new RopeTable(config.ContextLength, config.DModel / config.NHeads, config.RoPETheta, config.RopeScaling)
+                ? new RopeTable(config.ContextLength, config.DModel / config.NHeads, config.RoPETheta, config.RopeScaling, config.RopeSplitHalf)
                 : null;
 
             var headDim = config.DModel / config.NHeads;

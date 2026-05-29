@@ -101,6 +101,13 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var ctxLen = reader.GetMeta($"{arch}.context_length", 8192);
             var ropeTheta = reader.GetMeta($"{arch}.rope.freq_base", 10000.0f);
 
+            // RoPE pairing depends on how llama.cpp stored Q/K for this arch. Qwen2/Qwen2-MoE use NEOX
+            // rope and llama.cpp leaves Q/K in the original HF layout → split-half pairing (x[i],x[i+d/2]).
+            // Llama/Mistral use NORM rope and llama.cpp PERMUTES Q/K at conversion into adjacent layout →
+            // adjacent pairing (x[2i],x[2i+1]), which is the default. Getting this wrong leaves position 0
+            // correct but corrupts every later position (attention collapses onto the current token).
+            var ropeSplitHalf = arch is "qwen2" or "qwen2moe" or "qwen3" or "qwen3moe";
+
             // Cap context length for memory sanity (32k+ models work but consume RAM).
             if (ctxLen > 8192) { ctxLen = 8192; }
 
@@ -156,6 +163,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 DFF = dFF,
                 UseRoPE = true,
                 RoPETheta = ropeTheta,
+                RopeSplitHalf = ropeSplitHalf,
                 FfnActivation = FeedForwardActivation.SwiGLU,
                 TieWeights = tieWeights,
                 ExpertCount = expertCount,

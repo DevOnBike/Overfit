@@ -80,7 +80,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Agent
         private string BuildToolPrompt(string message)
         {
             var sb = new StringBuilder();
-            sb.AppendLine("You can call exactly one of these tools. Pick the most appropriate one and supply its arguments:");
+            sb.AppendLine("Pick the ONE tool whose purpose matches the request, then supply its arguments:");
             foreach (var tool in _tools.Definitions)
             {
                 sb.Append("- ").Append(tool.Name).Append(": ").AppendLine(tool.Description);

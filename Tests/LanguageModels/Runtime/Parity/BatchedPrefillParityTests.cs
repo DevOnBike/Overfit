@@ -28,15 +28,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         public BatchedPrefillParityTests(ITestOutputHelper output) => _out = output;
 
         /// <summary>
-        /// DOCUMENTS A KNOWN BUG (2026-05-29, task #95): for the real ~56-token system-message ChatML
-        /// prompt the demo builds, the engine generates DEGENERATE, space-less output
-        /// (e.g. "France'scapitalistouredisParis.") — while a short prompt generates a clean
-        /// "The capital of France is Paris." Isolated: NOT batched prefill (bit-identical to single —
-        /// see <see cref="BatchedPrefill_MatchesSingleToken_OnRealQwen"/>), NOT the tokenizer (special
-        /// tokens encode correctly), NOT detokenization (see
-        /// <see cref="IncrementalDecode_PreservesSpaces_LikeChatSession"/>). It is a forward-pass /
-        /// logit-correctness issue that worsens with prompt length / position. [LongFact] because it
-        /// currently FAILS; flip to [Fact] once fixed so it guards the regression.
+        /// REGRESSION GUARD for the 2026-05-29 RoPE-convention fix (task #95): the GGUF loader applied
+        /// adjacent-pair RoPE to Qwen2 weights that are stored in HF/NEOX split-half layout, which left
+        /// position 0 correct (identity rotation) but corrupted every later position — attention collapsed
+        /// onto the current token, so a real ~56-token system-message prompt produced degenerate,
+        /// space-less garbage ("France'scapitalistouredisParis.") while a short prompt looked fine. Fixed
+        /// by <c>GPT1Config.RopeSplitHalf</c> (set for qwen2/qwen2moe GGUF) → split-half rotation. This
+        /// asserts the engine now generates coherent, correctly-spaced text. [LongFact] — needs the real
+        /// model. The fast, model-free convention guards live in <c>RopeConventionTests</c>.
         /// </summary>
         [LongFact]
         public void Engine_GeneratesCoherentText_ForLongSystemPrompt()
@@ -73,12 +72,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
             var text = tokenizer.Decode(outTokens.ToArray());
             _out.WriteLine($"ENGINE GENERATED: '{text}'");
 
-            // KNOWN BUG (task #95): currently produces degenerate, space-less output for this
-            // long system-message prompt (e.g. "France'scapitalistouredisParis."), while a short prompt
-            // is clean. Forward-pass / logit-correctness issue that worsens with prompt length — NOT
-            // batched prefill, NOT the tokenizer, NOT detokenization (all separately verified).
+            // Post-fix: coherent, correctly-spaced answer. A regression in the RoPE convention would
+            // collapse attention onto the current token and drop the spaces ("France'scapital...").
             Assert.Contains("Paris", text, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains(' ', text); // currently FAILS — guards the fix once the forward pass is corrected
+            Assert.Contains(' ', text);
         }
 
         /// <summary>

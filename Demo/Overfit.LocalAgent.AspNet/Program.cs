@@ -26,8 +26,10 @@ using DevOnBike.Overfit.LanguageModels;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Resolve the GGUF model path before building services so a misconfigured run
-// fails fast with a clear message, not deep inside DI resolution.
+// Resolve the model before building services so a misconfigured run fails fast with a clear
+// message. Accepts either a *.gguf file or a HuggingFace directory (model.safetensors). The demo
+// defaults to Qwen2.5-3B Q4_K_M because it routes tools RELIABLY; a 0.5B is ~2x faster and does
+// chat/RAG/JSON, but its tool selection is below par (see README "Model choice").
 var modelPath = ModelPathResolver.Resolve(builder.Configuration);
 var systemMessage =
     builder.Configuration.GetValue<string>("SystemMessage")
@@ -38,8 +40,11 @@ var systemMessage =
 // request isn't slow. The chat session is stateful across requests — this is a single-tenant demo,
 // not safe for multi-user concurrent conversations. For multi-tenant, swap to a per-tenant
 // client-pool / session-per-request.
+var isGguf = modelPath.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase);
 var loadStopwatch = Stopwatch.StartNew();
-var sharedClient = OverfitClient.LoadGguf(modelPath, mmap: true);
+var sharedClient = isGguf
+    ? OverfitClient.LoadGguf(modelPath, mmap: true)
+    : OverfitClient.LoadPretrained(modelPath);   // HuggingFace safetensors directory
 sharedClient.AddSystem(systemMessage);
 loadStopwatch.Stop();
 
@@ -47,11 +52,12 @@ builder.Services.AddSingleton(sharedClient);
 
 // Observability (Phase 4). Static build info captured once; per-generation stats recorded by the
 // endpoints. Exposed at /metrics in Prometheus text format (scraped by the compose Prometheus service).
+var modelFile = isGguf ? modelPath : Path.Combine(modelPath, "model.safetensors");
 builder.Services.AddSingleton(new MetricsCollector
 {
-    ModelFile = Path.GetFileName(modelPath),
-    ModelFingerprint = MetricsCollector.FingerprintModel(modelPath),
-    MmapEnabled = true,
+    ModelFile = isGguf ? Path.GetFileName(modelPath) : $"{Path.GetFileName(modelPath.TrimEnd('\\', '/'))} (safetensors)",
+    ModelFingerprint = MetricsCollector.FingerprintModel(modelFile),
+    MmapEnabled = isGguf,
     ModelLoadSeconds = Math.Round(loadStopwatch.Elapsed.TotalSeconds, 3),
 });
 
@@ -217,32 +223,37 @@ return;
 
 internal static class ModelPathResolver
 {
+    // Returns either a *.gguf file path or a directory containing model.safetensors (HuggingFace).
     public static string Resolve(IConfiguration config)
     {
-        // 1) appsettings.json `ModelPath` — absolute path to a *.gguf.
+        // 1) appsettings `ModelPath` — a *.gguf file OR a directory with model.safetensors.
         var fromSettings = config.GetValue<string>("ModelPath");
-        if (!string.IsNullOrWhiteSpace(fromSettings) && File.Exists(fromSettings))
+        if (!string.IsNullOrWhiteSpace(fromSettings))
         {
-            return fromSettings;
+            if (File.Exists(fromSettings) && fromSettings.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase))
+            {
+                return fromSettings;
+            }
+            if (Directory.Exists(fromSettings) && File.Exists(Path.Combine(fromSettings, "model.safetensors")))
+            {
+                return fromSettings;
+            }
         }
 
-        // 2) Env var `OVERFIT_MODEL_DIR` pointing at a directory holding one *.gguf.
+        // 2) Env var `OVERFIT_MODEL_DIR` — a directory; prefer a *.gguf inside, else model.safetensors.
         var fromEnv = Environment.GetEnvironmentVariable("OVERFIT_MODEL_DIR");
         if (!string.IsNullOrWhiteSpace(fromEnv) && Directory.Exists(fromEnv))
         {
             var ggufs = Directory.GetFiles(fromEnv, "*.gguf");
-            if (ggufs.Length > 0)
-            {
-                return ggufs[0];
-            }
+            if (ggufs.Length > 0) { return ggufs[0]; }
+            if (File.Exists(Path.Combine(fromEnv, "model.safetensors"))) { return fromEnv; }
         }
 
         throw new InvalidOperationException(
-            "Could not locate a GGUF model. Either: " +
-            "(a) set 'ModelPath' in appsettings.json to an absolute *.gguf file " +
-            "(e.g. C:\\qwen3b\\qwen.q4km.gguf), or " +
-            "(b) set the OVERFIT_MODEL_DIR environment variable to a directory " +
-            "containing exactly one *.gguf. See Demo/Overfit.LocalAgent.AspNet/README.md.");
+            "Could not locate a model. Set 'ModelPath' in appsettings to either an absolute *.gguf file " +
+            "(e.g. C:\\qwen3b\\qwen.q4km.gguf) OR a HuggingFace directory containing model.safetensors " +
+            "(e.g. C:\\qwen3b for an unpacked Qwen2.5-0.5B). Or set OVERFIT_MODEL_DIR to such a directory. " +
+            "See Demo/Overfit.LocalAgent.AspNet/README.md.");
     }
 }
 
