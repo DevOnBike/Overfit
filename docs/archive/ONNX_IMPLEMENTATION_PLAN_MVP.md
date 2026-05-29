@@ -1,5 +1,7 @@
 # ONNX Import — Implementation Plan (Archived MVP)
 
+> **Historical MVP plan. Current ONNX support is documented in [README.md](../../README.md) and [docs/TECHNICAL.md](../TECHNICAL.md).**
+>
 > **⚠️ Historical document.** This is the MVP implementation plan from when ONNX import was first scoped (linear topology, MNIST CNN, no DAG, no skip connections, no BatchNorm, no Conv stride/padding). **Current ONNX support has shipped far beyond this MVP** — linear topology (`OnnxImporter`) AND DAG with skip connections (`OnnxGraphImporter`), ResNet-style models, BatchNormalization, Add nodes, Conv with stride/padding, ~12 operators + 2 no-ops, parity with PyTorch within 1e-4. Kept here only as a record of how the MVP was scoped originally.
 >
 > For current ONNX capabilities, see:

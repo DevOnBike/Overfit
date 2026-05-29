@@ -1,264 +1,403 @@
 # Overfit
 
-> **Overfit embeds local LLMs, RAG, tool calling and guaranteed JSON directly into your .NET process — no Python, no model server, no native binary, no data egress.**
+**Private LLMs, RAG, C# tool calling and guaranteed JSON inside your .NET app.**
 
-Pure C# deep-learning and LLM inference engine. Predictable CPU performance, explicit memory ownership, zero-allocation inference hot paths. Native-AOT compatible.
+Overfit lets .NET teams add local AI features without Python, Ollama, a model server,
+native binaries, or data leaving the process.
 
-<p align="center">
-  <img src="docs/assets/overfit-features.png"
-       alt="Overfit at a glance — pure-C#/.NET LLM engine: load any GGUF (Q4_K/Q6_K), run and fine-tune LLMs (LoRA), in-process agentic stack (RAG, tool calling, guaranteed JSON), adaptive anomaly detection, zero-allocation, Native-AOT — no Python, no native binary, no server."
-       width="520">
-</p>
-
----
-
-## Start here
-
-Run the full in-process agent demo — **GGUF load → RAG → tool calling → guaranteed JSON**, one .NET process, no Python:
-
-```powershell
-dotnet run -c Release --project Demo/AgentDemo
-```
-
-Prefer HTTP endpoints (the CTO/architect view)? The same stack as an ASP.NET service is in
-[`Demo/LocalAgentAspNetDemo`](Demo/LocalAgentAspNetDemo/README.md). All demos are indexed in
-[`Demo/README.md`](Demo/README.md).
-
----
-
-## What it does
-
-**Run and fine-tune LLMs, and run deep networks, entirely in .NET — in-process, allocation-free.**
-
-- **Zero-allocation CPU inference** — preallocated buffers, no per-call GC pressure. **0 bytes per token** on KV-cache decode, enforced by a build-breaking CI assertion.
-- **LLM inference** — GPT-2, and Qwen / Llama / Mistral from GGUF (incl. `Q4_K_M` straight from Ollama). Qwen2.5-3B runs in **~3.2 GB RAM — matching llama.cpp's footprint** — with native K-quant kernels. **Memory-mapped weights** (default) keep the model off the managed heap: a 3B Q4_K_M loads with a **~220 MB live managed heap**, the weights paged in as shared/clean file pages.
-- **In-process agentic stack** — embeddings + a built-in **vector store** (in-process cosine RAG, no external DB), **guaranteed-valid JSON output**, and **tool / function calling** (constrained decoding forces a valid call, dispatched to your C# delegate). No prompt-and-pray, no retry/repair — the grammar is enforced at the logit level so an invalid token can't be sampled. Runnable [agent demo](Demo/AgentDemo/README.md): load → RAG → tool call → JSON, one process, no Python.
-- **LoRA fine-tuning** — adapt a frozen base to your own data: LM head, FFN, and per-head attention (Stages 1–3), training + inference both in pure C#.
-- **Anomaly detection** — train a small GPT on *your* metrics, flag anomalies, adapt per deployment with LoRA. Nothing that just *runs* others' models can do.
-- **ONNX import** — load PyTorch-exported models directly (14 operators, ResNet-style skip connections), output matches PyTorch within 1e-4.
-
-→ **Full quick-start, benchmarks, import pipelines and architecture: [`docs/TECHNICAL.md`](docs/TECHNICAL.md).**
-
----
-
-## What you can build today
-
-Concrete user-facing scenarios this release enables — each is one .NET reference + the model file,
-no Python interpreter, no native DLL, no sidecar process.
-
-- **Private AI assistant inside your app** — desktop / mobile / Blazor / WPF / console. Run Qwen-3B
-  or Llama-3 locally in the same process; nothing leaves the machine. Useful in regulated industries
-  (medical / finance / legal), air-gapped environments, or when "send data to OpenAI" is not on the
-  table.
-- **Search your own documents by meaning (RAG)** — embed your notes, support tickets, product docs
-  with MiniLM/BGE/E5, store vectors in-process, search by cosine. Same vectors that
-  Python's `sentence-transformers` would produce (bit-for-bit), without any Python at runtime.
-- **An assistant that takes actions, not just talks** — the model emits a structured tool call
-  (`{ "name": "send_invoice", "arguments": {…} }`), Overfit guarantees the JSON is valid, and your
-  C# function gets invoked. Wire up "look up customer", "create ticket", "summarise the PDF" as
-  tools — the model picks which to call.
-- **Read scanned forms / printed pages** — the in-process CRNN+CTC OCR turns rasterised text into
-  strings; pair it with an LLM to "extract invoice totals" or "answer questions about this scanned
-  document" without leaving the .NET process.
-- **Embed AI in an existing .NET product** — add chat, semantic search, or document Q&A to your
-  WPF / Blazor / ASP.NET app as a NuGet package. No new infrastructure, no Docker, no Python
-  installer for end users.
-- **Train a small custom model on your own data** — image classifier, time-series anomaly detector,
-  small text generator — trained in pure .NET, deployed in the same .NET process. The complete
-  ML lifecycle without a Python toolchain.
-- **Multi-turn chat that stays in budget** — long conversations auto-compact via the summarising
-  memory primitive: old turns get model-summarised once the context grows, the assistant keeps the
-  facts but stops paying for them in tokens.
-- **Audit-friendly AI** — deterministic greedy decoding + file-versioned weights + per-call decision
-  records (input + model hash + output + timestamp) — fits the audit-trail expectations of the
-  EU AI Act and similar regulated-AI regimes.
-
-A consolidated runnable walkthrough (load → RAG → tool call → JSON) lives in
-[`Demo/AgentDemo`](Demo/AgentDemo/README.md).
-
----
-
-## Quick start
+Use it when you need AI inside an existing ASP.NET, WPF, Blazor, desktop, on-prem
+or air-gapped .NET product — especially when external LLM APIs are blocked by
+security, compliance, latency, deployment, or supply-chain constraints.
 
 ```bash
 dotnet add package DevOnBike.Overfit
 ```
 
+---
+
+## Start here: run the ASP.NET local agent demo
+
+The fastest way to understand Overfit is to run the local ASP.NET agent demo.
+
+```bash
+dotnet run -c Release --project Demo/LocalAgentAspNetDemo
+```
+
+It exposes a private AI agent over HTTP:
+
+| Endpoint | What it shows |
+|---|---|
+| `GET /health` | Model/service health |
+| `POST /chat` | Local chat over a GGUF or safetensors model |
+| `POST /documents/index` | In-process document indexing |
+| `POST /rag/query` | RAG over local documents |
+| `POST /agent` | C# tool calling with constrained JSON |
+| `POST /chat/json` | Guaranteed-valid JSON output |
+| `GET /metrics` | Prometheus-style runtime metrics |
+
+The demo shows the full path:
+
+```text
+local model file
+  -> memory-mapped load
+  -> RAG over local documents
+  -> C# tool call
+  -> guaranteed JSON
+  -> metrics
+```
+
+No Python. No Ollama. No model server. No network call. The model is a file on
+disk; the agent is a singleton inside ASP.NET.
+
+See [`Demo/LocalAgentAspNetDemo`](Demo/LocalAgentAspNetDemo/README.md).
+
+---
+
+## What Overfit gives you
+
+### 1. Private local LLMs in .NET
+
+Load Qwen, Llama, Mistral, Mixtral and related GGUF / safetensors models directly
+from C#. The model runs inside your process, not behind a server.
+
 ```csharp
 using DevOnBike.Overfit.LanguageModels;
-using DevOnBike.Overfit.LanguageModels.Contracts;
 
-using var gpt2    = Gpt2.LoadSmall(@"C:\gpt2");      // or CachedLlamaInferenceEngine.Load("model.gguf")
-using var session = gpt2.CreateSession();
-session.Reset(gpt2.Tokenizer.Encode("The future of software development is"));
+using var client = OverfitClient.LoadGguf(@"C:\models\qwen2.5-3b-instruct-q4_k_m.gguf");
 
-var sampling = SamplingOptions.Greedy;
-for (var i = 0; i < 32; i++)                          // 0 bytes allocated per token
+client.AddSystem("You are concise.");
+var reply = client.Send("Explain zero-allocation decode in one sentence.");
+
+Console.WriteLine(reply);
+```
+
+### 2. In-process RAG
+
+Embed documents, store vectors in-process, retrieve context and answer from your
+own data without an external vector database, embedding API, Python service, or
+sidecar process.
+
+Supported embedding paths include MiniLM, BGE and E5-style BERT encoders, with
+vectors validated against HuggingFace / PyTorch reference outputs.
+
+### 3. C# tool calling and guaranteed JSON
+
+Constrained decoding forces valid JSON and valid tool-call envelopes, then
+dispatches the call to your C# delegate.
+
+No regex parsing of free text. No retry-on-bad-JSON loop. No prompt-and-pray.
+
+```json
 {
-    var token = session.GenerateNextToken(in sampling);
-    Console.Write(gpt2.Tokenizer.DecodeToken(token));
+  "name": "create_ticket",
+  "arguments": {
+    "customerEmail": "sam@brightlabs.example",
+    "subject": "Failed SSO login",
+    "priority": "high"
+  }
 }
 ```
 
-Already have models in Ollama? Run any GGUF in two lines:
-`CachedLlamaInferenceEngine.Load(path)` → `CreateSession()`. More examples
-(ONNX, training, anomaly detection) in [`docs/TECHNICAL.md`](docs/TECHNICAL.md).
+### 4. Zero-allocation inference hot paths
+
+Overfit is built around predictable CPU inference, Native AOT compatibility,
+explicit memory ownership and near-zero per-token allocations on the decode path.
+
+The goal is not to beat hand-tuned native GPU/AVX runtimes on raw throughput.
+The goal is to make local AI deployable as a normal .NET library in environments
+where Python, native binaries, sidecars, external APIs and hidden allocations are
+not acceptable.
 
 ---
 
-## Benchmarks (headline)
+## What you can build today
 
-AMD Ryzen 9 9950X3D · Windows 11 · .NET 10 · BenchmarkDotNet 0.15.8. Full tables in [`docs/TECHNICAL.md`](docs/TECHNICAL.md).
+### Private AI assistant inside your app
+
+Add a local assistant to a desktop, WPF, Blazor, ASP.NET, console or internal
+enterprise app. Use a local Qwen/Llama/Mistral model and keep all prompts,
+documents and outputs inside your process.
+
+### Document Q&A and semantic search
+
+Index support tickets, policy documents, product docs, invoices or internal
+notes. Query them by meaning with in-process embeddings and vector search.
+
+### Action-taking agents
+
+Register C# tools such as:
+
+- `lookup_customer`
+- `create_ticket`
+- `send_invoice`
+- `summarize_document`
+- `classify_case`
+- `extract_fields`
+
+The model chooses the tool and emits a constrained JSON call. Your C# code
+executes the action.
+
+### Structured extraction
+
+Use guaranteed-valid JSON to extract intent, fields, summaries, routing metadata
+or decision records without post-hoc repair loops.
+
+### Audit-friendly local AI
+
+Run deterministic greedy decoding, file-versioned weights, local decision logs,
+input/output records, model hashes and timestamps. This fits teams that need
+controlled deployment boundaries and explainable operational records.
+
+---
+
+## Why teams use Overfit
+
+| If this is your problem... | Overfit's value |
+|---|---|
+| You have a .NET product and cannot send data to OpenAI/Anthropic | Run the model locally inside your process |
+| You do not want to operate Python, Ollama or a model server | Ship a NuGet package and a model file |
+| Your environment blocks native binaries or sidecars | Pure C# runtime, Native AOT compatible |
+| You need RAG, tool calls and JSON, not just raw token generation | Built-in agentic stack |
+| You care about allocations, P99 latency and GC behavior | Explicit memory ownership and zero-allocation hot paths |
+| You need a commercial path for closed-source products | Dual licensing: AGPLv3 or commercial |
+
+---
+
+## Quick start
+
+Install the package:
+
+```bash
+dotnet add package DevOnBike.Overfit
+```
+
+Run a local GGUF model:
+
+```csharp
+using DevOnBike.Overfit.LanguageModels;
+
+using var client = OverfitClient.LoadGguf(@"C:\models\qwen2.5-3b-instruct-q4_k_m.gguf");
+
+client.AddSystem("You are a concise assistant.");
+var reply = client.Send("What is Overfit useful for?");
+
+Console.WriteLine(reply);
+```
+
+Run the full ASP.NET local-agent demo:
+
+```bash
+dotnet run -c Release --project Demo/LocalAgentAspNetDemo
+```
+
+Run the console walkthrough:
+
+```bash
+dotnet run -c Release --project Demo/AgentDemo
+```
+
+More details:
+
+- [`Demo/LocalAgentAspNetDemo`](Demo/LocalAgentAspNetDemo/README.md) — ASP.NET local agent
+- [`Demo/AgentDemo`](Demo/AgentDemo/README.md) — console walkthrough: load -> RAG -> tool call -> JSON
+- [`docs/TECHNICAL.md`](docs/TECHNICAL.md) — architecture, benchmarks, import pipelines
+- [`ROADMAP.md`](ROADMAP.md) — current engineering priorities
+
+---
+
+## Benchmarks: honest headline
+
+Test machine for current headline numbers: AMD Ryzen 9 9950X3D, Windows 11,
+.NET 10, BenchmarkDotNet 0.15.8.
 
 | Workload | Result | Allocation |
-|----------|--------|-----------:|
-| Single inference Linear(784→10) | **7.6× faster** than ONNX Runtime | **0 B** |
-| GPT-2 Small KV-cache decode | 6.5× faster than naive O(N²); parity 10/10 vs PyTorch | **0 B / token** |
-| Qwen2.5-3B Q4_K_M decode (same file vs llama.cpp) | ~19 tok/s @ **3.20 GB** (RAM parity); llama.cpp ~1.5× faster | **1 B / token** vs 21 KB |
-| Concurrent inference (8 threads) | **3.6× faster** than ONNX Runtime | **0 B** |
+|---|---:|---:|
+| Single inference `Linear(784 -> 10)` | ~7.6x faster than ONNX Runtime | 0 B |
+| GPT-2 Small KV-cache decode | ~6.5x faster than naive O(N²), parity vs PyTorch | 0 B/token |
+| Qwen2.5-3B Q4_K_M decode | ~19 tok/s, RAM footprint in the llama.cpp range | ~1 B/token |
+| Concurrent inference, 8 threads | ~3.6x faster than ONNX Runtime | 0 B |
 
-**Honest positioning:** llama.cpp/LLamaSharp decodes ~1.5× faster (hand-tuned native
-AVX-512/VNNI); on training, PyTorch CPU is ~2.2–3.6× faster (Intel MKL). Overfit's
-axis is pure-managed, zero-allocation, AOT-compatible, no-native-dependency
-execution — *not* raw matmul throughput. It matches llama.cpp on RAM and wins
-~20,000× on per-token allocation.
+Honest positioning:
+
+- llama.cpp / LLamaSharp are faster for raw CPU LLM decode.
+- PyTorch CPU is faster for large-scale training.
+- ONNX Runtime is mature and fast if native dependencies are acceptable.
+- Overfit's axis is pure-managed .NET, in-process deployment, Native AOT,
+  low allocation pressure and no native model server.
+
+Full benchmark tables and caveats live in [`docs/TECHNICAL.md`](docs/TECHNICAL.md).
 
 ---
 
-## Supported models
+## Supported model families
 
-All loaded natively in pure C# — no Python, no native binaries, no conversion step (with the exception
-of one optional `.bin` path documented in [`docs/TECHNICAL.md`](docs/TECHNICAL.md)).
+### Language models
 
-### Language models (chat / generation)
-
-| Family | Sizes verified | Loader | Quant formats |
+| Family | Verified sizes / variants | Loader | Quantization / dtype |
 |---|---|---|---|
-| **Qwen2.5** | 0.5B / 3B / 7B / 14B / 32B | GGUF · HF safetensors (sharded) · `.bin` | F32 · F16 · BF16 · Q8_0 · **Q4_K_M** · **Q6_K** |
-| **Llama-2 / Llama-3.x** | Llama-3.2-1B onwards | GGUF · HF safetensors | F32 · F16 · BF16 · Q8_0 · Q4_K_M · Q6_K |
-| **Mistral 7B** | 7B | GGUF | F32 · F16 · BF16 · Q8_0 · Q4_K_M |
-| **Qwen1.5-MoE A2.7B** (routed + shared expert) | 14B total / 2.7B active | GGUF | Q8_0 · Q4_K_M — coherent ("Paris" verified) |
-| **Mixtral-8x7B** (routed-only) | 47B total / 13B active | GGUF | Q8_0 · Q4_K_M — coherent |
-| **GPT-2 small** | 124M | `.bin` (via `Scripts/convert_gpt2.py`) · HF safetensors | F32 — **byte-for-byte parity vs PyTorch reference** |
-| **GPT-1** (own arch, training-capable) | configurable | `.bin` · trained from scratch | F32 |
+| Qwen2.5 | 0.5B / 3B / 7B / 14B / 32B | GGUF, HF safetensors, `.bin` | F32, F16, BF16, Q8_0, Q4_K_M, Q6_K |
+| Llama-2 / Llama-3.x | Llama-3.2-1B onwards | GGUF, HF safetensors | F32, F16, BF16, Q8_0, Q4_K_M, Q6_K |
+| Mistral 7B | 7B | GGUF | F32, F16, BF16, Q8_0, Q4_K_M |
+| Qwen1.5-MoE A2.7B | 14B total / 2.7B active | GGUF | Q8_0, Q4_K_M |
+| Mixtral-8x7B | 47B total / 13B active | GGUF | Q8_0, Q4_K_M |
+| GPT-2 small | 124M | `.bin`, HF safetensors | F32 |
+| GPT-1 | configurable | `.bin`, trained from scratch | F32 |
 
-The chat-side path runs through one facade:
+### Embeddings
 
-```csharp
-using var client = OverfitClient.LoadGguf(@"C:\qwen3b\qwen.q4km.gguf");
-client.AddSystem("You are concise.");
-var reply = client.Send("What is 2+2?");
-```
-
-…with auto-detected tokenizer (Qwen ChatML-aware fallback to generic HF BPE), GGUF chat template,
-mmap K-quant weights, ChatML stop sequences, and a Greedy `GenerationOptions` default. Drop down to
-the underlying `ChatSession` / `CachedLlamaInferenceEngine` for streaming, constrained-JSON, tool
-calling, embeddings, KV-cache control.
-
-### Sentence embeddings (BERT encoder family)
-
-| Model | Pooling | Cosine vs HF/PyTorch |
+| Model | Pooling | Validation |
 |---|---|---|
-| `sentence-transformers/all-MiniLM-L6-v2` | mean + L2 | **1.000000** |
-| `BAAI/bge-small-en-v1.5` | CLS + L2 (query instruction prefix) | **0.999999** |
-| `intfloat/e5-small-v2` | mean + L2 (`query:` / `passage:` prefixes) | **1.000000** |
+| `sentence-transformers/all-MiniLM-L6-v2` | mean + L2 | parity vs HuggingFace/PyTorch |
+| `BAAI/bge-small-en-v1.5` | CLS + L2 | parity vs HuggingFace/PyTorch |
+| `intfloat/e5-small-v2` | mean + L2 | parity vs HuggingFace/PyTorch |
 
-Bit-parity verified end-to-end against the HuggingFace `BertModel` (mean-pool + L2 normalise) — same
-vectors as the Python `sentence-transformers` library, no Python at runtime.
+### Other workloads
 
-```csharp
-using var embedder = SentenceEmbedder.ForMiniLm(@"C:\minilm");   // or ForBgeEnV15 / ForE5
-var vector = embedder.Embed("A man is playing a guitar.");
-```
-
-### Computer vision
-
-| Workload | Architecture | Status |
-|---|---|---|
-| **MNIST CNN** | Conv → BN2D → ReLU → MaxPool ×2 → FC → ReLU → FC | trains to 97.15 % test accuracy in ~6.5 s (1200 steps, batch 64) |
-| **OCR (CRNN + CTC)** | SAME-conv stack → map-to-sequence → LSTM → CTC | synthetic digits + lexicon words (greedy + beam + LM-rescored beam) |
-| **ONNX import** (linear topology) | 14 operators | image classifiers exported from PyTorch |
-| **ONNX import** (DAG topology) | skip connections, ResNet-style | works |
-
-### Loading formats
-
-GGUF (mmap-backed; verbatim Q4_K / Q6_K K-quant; de-interleaved Q8_0; F32 / F16 / BF16) · HF
-safetensors (sharded, native loader for Llama/Qwen + BERT + GPT-2 families) · Overfit `.bin` (custom,
-from Python convert scripts) · ONNX (linear + DAG).
-
-### Tokenizers
-
-HuggingFace ByteLevel-BPE (Llama / Qwen / Mistral — validated bit-for-bit on Qwen) · QwenChatTokenizer
-(ChatML-aware Qwen variant) · GGUF tokenizer (legacy fallback) · WordPiece (BERT family, all special
-tokens + lowercase + NFD accent strip) · GPT-2 byte-level BPE.
-
-### Scope
-
-Overfit is opinionated about being **a library, in pure C#, AOT-clean, no native dependencies,
-no Python, no exposed server.** Out of scope today: GPU backends, server/CLI binaries, quantization
-export pipelines, diffusion / image-generation, speech-to-text / text-to-speech, vision-language
-fusion. Lower quantization formats (Q2_K / Q3_K / IQ-series), Mirostat / Typical-p samplers,
-RoPE-scaling variants for long context, and additional model architectures are roadmap candidates —
-each shippable in 1-3 weeks if the use case appears.
+| Area | Status |
+|---|---|
+| ONNX import | Linear and DAG topology, ResNet-style skip connections |
+| Computer vision | MNIST CNN, Conv/BN/ReLU/Pool/FC-style networks |
+| OCR | CRNN + CTC pipeline for synthetic digits / lexicon words |
+| LoRA | LM head, FFN and per-head attention stages |
+| Anomaly detection | Small GPT-style models for metrics and deployment-specific adaptation |
 
 ---
 
-## Why not just use…?
+## Loading formats
 
-| Tool | The right choice when… | Reach for Overfit when… |
-|------|------------------------|--------------------------|
-| **ML.NET** | Classical ML on tabular data. | You need transformer / LLM inference or deep networks. |
-| **ONNX Runtime** | You have ONNX models and accept a native dependency. | You want pure-managed, zero-allocation inference, no native binary. *(Overfit imports ONNX too.)* |
-| **llama.cpp / Ollama** | A standalone CPU LLM server as a separate process. | You want the model **inside** your .NET process — no sidecar, no IPC, no exposed server. |
-| **LLamaSharp** | Mature, GPU-capable default; bundling a native llama.cpp binary is fine. | You can't ship a native binary: AOT-strict, regulated/locked-down, supply-chain-audited, or zero-allocation hot paths. |
-| **PyTorch** | Training and research; large models; GPU. | Deploying inference into a .NET app without the Python stack. |
-| **OpenAI / Anthropic APIs** | Best quality, zero infra, data egress acceptable. | Data egress is **not** acceptable — regulated, on-prem, no third-party calls. |
+Overfit loads models directly in managed .NET:
+
+- GGUF with mmap-backed weights
+- K-quant formats including Q4_K_M and Q6_K
+- Q8_0, F32, F16 and BF16
+- HuggingFace safetensors, including sharded directories
+- Overfit `.bin` checkpoints
+- ONNX models for supported operator sets
+
+Tokenizers include HuggingFace ByteLevel-BPE, Qwen ChatML-aware handling,
+GGUF tokenizer fallback, WordPiece and GPT-2 byte-level BPE.
+
+---
+
+## Why not just use...
+
+| Tool | Use it when... | Reach for Overfit when... |
+|---|---|---|
+| ML.NET | You need classical ML on tabular data | You need transformer / LLM inference or deep networks inside .NET |
+| ONNX Runtime | Native dependencies are acceptable | You want pure-managed, AOT-clean, low-allocation inference |
+| llama.cpp / Ollama | A standalone LLM process/server is fine | You want the model inside your .NET process |
+| LLamaSharp | Bundling native llama.cpp is acceptable | You cannot ship native binaries or need zero-allocation hot paths |
+| PyTorch | Research, large training, GPU workflows | You want deployment inside a .NET app without Python |
+| OpenAI / Anthropic APIs | Data egress is acceptable | Data must stay inside your boundary |
+
+---
+
+## Commercial integration
+
+If you have a .NET system and need a private AI feature in production, the
+fastest path is a fixed-scope integration.
+
+### Private .NET RAG / Agent PoC
+
+A local LLM + RAG + C# tool-calling proof of concept in your infrastructure.
+
+Typical deliverables:
+
+- ASP.NET endpoints: `/chat`, `/rag/index`, `/rag/query`, `/tools`, `/health`, `/metrics`
+- local model selection and deployment
+- document ingestion and vector search
+- constrained JSON / tool-call flow
+- benchmark report on your hardware
+- deployment handover
+
+### Python / Ollama / ONNX sidecar replacement
+
+Move inference into the .NET process and compare P50/P99 latency, RAM, allocation
+pressure and operational complexity against the existing sidecar.
+
+### Zero-GC inference audit
+
+Profile your current .NET inference hot path — Overfit, ML.NET, ONNX Runtime or
+custom code — and identify allocation, GC, AOT and P99 latency risks.
+
+Commercial licenses and monthly support retainers are also available.
+
+See [`COMMERCIAL.md`](COMMERCIAL.md) or contact **devonbike@gmail.com**.
 
 ---
 
 ## Requirements
 
-.NET 10+ · no native dependencies · no Python runtime · Native AOT compatible.
-
----
-
-## Roadmap
-
-LoRA Stage 1/2/3 ✅ · GGUF Q4_K/Q6_K in-RAM decode ✅ · GPT-2 / Qwen / Llama / Mistral
-inference ✅ · anomaly-detection + production base ✅. Open: closing the decode gap to
-llama.cpp (full-matrix attention), batched prefill (B>1). Full
-priorities and the live resume-point: [`ROADMAP.md`](ROADMAP.md).
+- .NET 10+
+- CPU-first runtime
+- no Python runtime
+- no native runtime dependency for Overfit itself
+- Native AOT compatible paths are guarded in CI
 
 ---
 
 ## What Overfit is not
 
-Not a PyTorch/TensorFlow replacement. Not GPU-first. Not transformer-scale-first.
+Overfit is not a PyTorch or TensorFlow replacement.
 
-**Not a hosted SaaS, and not an API.** Overfit runs as a library inside your own
-process — no service to call, no API key, nothing sent anywhere during inference.
-If you need AI inference where data never leaves your boundary, by construction,
-that is exactly the point. See [Overfit for regulated industries](docs/scenarios/regulated-industries.md).
+It is not GPU-first. It is not transformer-scale-first. It is not a hosted SaaS,
+not an API and not a model server.
+
+Overfit is a .NET library that runs inside your process. If you need best-quality
+frontier models, maximum GPU throughput or a hosted API, use a hosted model or a
+GPU-first runtime.
+
+If you need private local AI inside an existing .NET product, Overfit is built
+for that.
 
 ---
 
-## Services
+## Roadmap
 
-Three productised, fixed-scope engagements — full deliverables, durations, SLA tiers and how-to-buy in [`COMMERCIAL.md`](COMMERCIAL.md).
+Current shipped areas include:
 
-- **Private .NET RAG/Agent PoC** (2–3 weeks) — local LLM + RAG + tool calling against your documents, deployed in your infrastructure, no data egress. For regulated industries, on-prem, and teams blocked from external LLM APIs.
-- **Python / ONNX-sidecar replacement** (2 weeks) — collapse your Python / Ollama / llama.cpp-server / Triton tier into the .NET process; honest side-by-side P50 / P99 / RAM / allocation benchmark on your hardware; sidecar removed from deploy.
-- **Zero-GC inference audit** (1–2 weeks) — profile your .NET inference hot path (Overfit, ML.NET, ONNX Runtime, custom); allocation/GC sources identified with cost-per-fix; AOT-clean publish verified. Methodology audit — no requirement to use Overfit.
+- GGUF Q4_K / Q6_K decode
+- Qwen / Llama / Mistral / Mixtral inference
+- GPT-2 / GPT-1 support
+- in-process RAG
+- tool calling
+- guaranteed JSON
+- LoRA stages
+- ONNX import
+- anomaly detection
+- Native AOT guard
 
-Standalone commercial license and monthly support retainer also available — see [`COMMERCIAL.md`](COMMERCIAL.md). Contact: **devonbike@gmail.com**.
+Current priorities include:
+
+- closing part of the decode gap to llama.cpp
+- batched prefill
+- stronger JSON Schema constraints
+- more model families and quantization formats
+- broader ASP.NET / Microsoft.Extensions.AI / Aspire integration
+
+See [`ROADMAP.md`](ROADMAP.md).
 
 ---
 
 ## Licensing
 
-Dual-licensed. The full text of both licence options lives in [`LICENSE.md`](LICENSE.md).
+Overfit is dual-licensed.
 
-- **Open source — GNU AGPLv3.** Free in production **provided your project is released under a compatible open-source licence** (Overfit links as a library, so AGPL copyleft extends to your application).
-- **Commercial licence.** Closed-source product, SaaS, or regulated deployment? AGPL won't work — a commercial licence removes the copyleft obligation. Packages, deliverables, SLA tiers and how-to-buy are in [`COMMERCIAL.md`](COMMERCIAL.md); contact is **devonbike@gmail.com**.
+### Open source: GNU AGPLv3
 
-The simple test: if you can't or won't release your application under AGPLv3, you need the commercial licence.
+Free in production if your project is released under a compatible open-source
+license. Overfit links as a library, so AGPL copyleft extends to the application.
+
+### Commercial license
+
+Use this for closed-source products, SaaS, regulated deployments, proprietary
+internal tools, or any application that cannot be released under AGPLv3.
+
+The simple test:
+
+> If you cannot or will not release your application under AGPLv3, you need the
+> commercial license.
+
+Full license text: [`LICENSE.md`](LICENSE.md).  
+Commercial terms and support: [`COMMERCIAL.md`](COMMERCIAL.md).  
+Contact: **devonbike@gmail.com**.
