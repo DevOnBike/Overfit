@@ -317,6 +317,116 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
         }
 
+        /// <summary>
+        /// Batched (prefill) multi-head attention for the <b>Llama/Qwen quantized</b> path — the
+        /// multi-row counterpart of <see cref="Decode"/> that supports RoPE + GQA + quantized weights
+        /// (the cases <see cref="DecodeBatched"/> rejects). KV groups are processed sequentially (each
+        /// projection parallelises internally via <c>ProjectBatched</c> / the attend via
+        /// <c>ComputeParallel</c> — so no nested parallelism): per group, batched K/V projection +
+        /// per-row RoPE + cache writes (K/V-once for GQA); per Q head in the group, batched Q
+        /// projection + per-row RoPE + the proven causal <see cref="BatchedAttentionKernel"/> (query n
+        /// attends <c>[0..basePosition+n]</c>) + batched O projection accumulated into
+        /// <paramref name="output"/> in ascending head order — <b>bit-identical</b> to N× single-token
+        /// <see cref="Decode"/>. The cache must already be advanced to length
+        /// <c>basePosition + rows</c>. Scratch is per-call (prefill, not the 0-alloc decode path).
+        /// </summary>
+        internal void DecodeBatchedQuant(
+            ReadOnlySpan<float> hidden,
+            int rows,
+            in BlockWeights weights,
+            KeyValueCache cache,
+            int layerIndex,
+            int basePosition,
+            Span<float> output,
+            RopeTable? rope = null)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rows);
+
+            var dModel = DModel;
+            var headDim = HeadDimension;
+            var cacheLength = basePosition + rows;
+            var scale = 1f / MathF.Sqrt(headDim);
+            var groupSize = HeadCount / KvHeadCount;
+            var ropeBase = cache.BasePosition;
+
+            // Output starts as the attention bias (or zero) per row; each head's projected
+            // contribution is summed in afterwards (ascending head order = single-token reduction).
+            var attnBias = weights.AttentionBias;
+            for (var n = 0; n < rows; n++)
+            {
+                var outRow = output.Slice(n * dModel, dModel);
+                if (attnBias.IsEmpty) { outRow.Clear(); }
+                else { attnBias.Slice(0, dModel).CopyTo(outRow); }
+            }
+
+            // Per-call scratch (prefill is a one-time pass).
+            var qh = new float[rows * headDim];
+            var kg = new float[rows * headDim];
+            var vg = new float[rows * headDim];
+            var attn = new float[rows * headDim];
+            var band = new float[rows * dModel];
+            var score = new float[rows * cacheLength];
+
+            for (var group = 0; group < KvHeadCount; group++)
+            {
+                // K/V weights: GQA shares one KV head per group; MHA uses the head's own.
+                DecodeWeight wk, wv;
+                ReadOnlySpan<float> bk, bv;
+                if (weights.HasGqa)
+                {
+                    ref readonly var kv = ref weights.KvHead(group);
+                    wk = kv.Wk; wv = kv.Wv; bk = kv.Bk; bv = kv.Bv;
+                }
+                else
+                {
+                    ref readonly var h0 = ref weights.Head(group);
+                    wk = h0.Wk; wv = h0.Wv; bk = h0.Bk; bv = h0.Bv;
+                }
+
+                // K/V projected once per group, RoPE-rotated, stored — every Q head reads the cache.
+                BatchedQuantProjection.Dispatch(hidden, rows, in wk, bk, kg, dModel, headDim);
+                BatchedQuantProjection.Dispatch(hidden, rows, in wv, bv, vg, dModel, headDim);
+                for (var n = 0; n < rows; n++)
+                {
+                    if (rope is not null)
+                    {
+                        RopeKernel.Apply(kg.AsSpan(n * headDim, headDim), rope, basePosition + n + ropeBase);
+                    }
+                    kg.AsSpan(n * headDim, headDim).CopyTo(cache.GetKeyWriteSpan(layerIndex, group, basePosition + n));
+                    vg.AsSpan(n * headDim, headDim).CopyTo(cache.GetValueWriteSpan(layerIndex, group, basePosition + n));
+                }
+
+                var keys = cache.GetKeyReadSpan(layerIndex, group, fromPosition: 0, length: cacheLength);
+                var values = cache.GetValueReadSpan(layerIndex, group, fromPosition: 0, length: cacheLength);
+
+                for (var hg = 0; hg < groupSize; hg++)
+                {
+                    var h = group * groupSize + hg;
+                    ref readonly var hw = ref weights.Head(h);
+                    var wq = hw.Wq;
+                    var wo = hw.Wo;
+
+                    BatchedQuantProjection.Dispatch(hidden, rows, in wq, hw.Bq, qh, dModel, headDim);
+                    if (rope is not null)
+                    {
+                        for (var n = 0; n < rows; n++)
+                        {
+                            RopeKernel.Apply(qh.AsSpan(n * headDim, headDim), rope, basePosition + n + ropeBase);
+                        }
+                    }
+
+                    BatchedAttentionKernel.ComputeParallel(qh, keys, values, attn, score, rows, cacheLength, headDim, scale);
+
+                    BatchedQuantProjection.Dispatch(attn, rows, in wo, [], band, headDim, dModel);
+                    for (var n = 0; n < rows; n++)
+                    {
+                        var outRow = output.Slice(n * dModel, dModel);
+                        TensorPrimitives.Add(outRow, band.AsSpan(n * dModel, dModel), outRow);
+                    }
+                }
+            }
+        }
+
         /// <summary>Worker for <see cref="DecodeBatched"/> — one disjoint range of heads.</summary>
         private static void ProcessHeadRangeBatched(int headStart, int headEnd, void* context)
         {

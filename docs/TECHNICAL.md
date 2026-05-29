@@ -248,19 +248,24 @@ Machine: AMD Ryzen 9 9950X3D · Windows 11 25H2 · .NET 10.0.8 · BenchmarkDotNe
 
 ### Qwen2.5-3B-Instruct (Q4_K_M) — single-stream CPU decode, vs llama.cpp
 
-Same `Q4_K_M` GGUF, same machine, single stream:
+**Latest verified benchmark** (canonical source of truth — any number elsewhere in the repo should reconcile to this):
+
+| Field | Value |
+|---|---|
+| Date | 2026-05-21 |
+| Model file | `qwen.q4km.gguf` (Qwen2.5-3B-Instruct, Q4_K_M GGUF) |
+| Hardware | AMD Ryzen 9 9950X3D · Windows 11 25H2 · DDR5 |
+| Runtime | .NET 10.0.8 · BenchmarkDotNet 0.15.8 · single stream |
+| LLamaSharp version | 0.27.0 (native llama.cpp under the hood) |
 
 | Engine | Decode | RAM | Alloc / token |
 |--------|-------:|----:|--------------:|
 | **Overfit** (pure C#) | ~19 tok/s | **3.20 GB** | **1 B** |
 | LLamaSharp (native llama.cpp) | ~29 tok/s | 3.20 GB | 21,220 B |
 
-llama.cpp decodes ~1.5× faster (hand-tuned native AVX-512/VNNI) — stated honestly.
-Overfit matches its RAM footprint, allocates ~20,000× less per token (zero-alloc
-decode), and runs in-process: no native binary, no sidecar, AOT-compatible. The
-remaining decode gap is effective memory bandwidth (~55 % vs ~80 % of peak),
-rooted in per-head vs full-matrix attention — see `ROADMAP.md` option D. (Decode
-tok/s drifts with thermal state; the ~1.5× ratio is the stable figure.)
+llama.cpp decodes ~1.5× faster (hand-tuned native AVX-512/VNNI) — stated honestly. Overfit matches its RAM footprint, allocates ~20,000× less per token (zero-alloc decode), and runs in-process: no native binary, no sidecar, AOT-compatible. The remaining decode gap is effective memory bandwidth (~55 % vs ~80 % of peak), rooted in per-head vs full-matrix attention — see `ROADMAP.md` option D and the "Decode throughput catch-up vs llama.cpp" section for the staged catch-up plan.
+
+(Decode tok/s drifts with thermal state; the ~1.5× ratio is the stable figure. Pre-mmap numbers from earlier in the perf sprint — 17.2 tok/s @ 4.40 GB heap-allocated — are historical and should not be cited as current; mmap-backed K-quant weights closed the RAM gap and lifted decode to ~19 tok/s on the same hardware.)
 
 ### GPT-1 training step — parallel runtime sprint
 

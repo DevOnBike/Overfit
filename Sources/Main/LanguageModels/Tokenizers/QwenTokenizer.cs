@@ -136,7 +136,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                     if (id >= decoder.Length)
                     {
                         var extended = new string[id + 1];
-                        Array.Copy(decoder, extended, decoder.Length);
+                        decoder.AsSpan().CopyTo(extended);
                         decoder = extended;
                     }
                     decoder[id] = content;

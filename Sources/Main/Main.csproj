@@ -3,6 +3,7 @@
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>annotations</Nullable>
         <DebugType>embedded</DebugType>
         <NoWarn>$(NoWarn);1591</NoWarn>
         <RootNamespace>DevOnBike.Overfit</RootNamespace>
@@ -11,13 +12,17 @@
         <SourceRevisionId>N/A</SourceRevisionId>
         <InformationalVersion>$(Version)+$(SourceRevisionId)</InformationalVersion>
         <PackageId>DevOnBike.Overfit</PackageId>
-        <Version>10.0.17</Version>
+        <Version>10.0.18</Version>
         <Authors>DevOnBike</Authors>
-        <Description>High-performance, zero-allocation machine learning and deep learning framework for .NET. Fully optimized for Native AOT, SIMD vectorization, and CPU inference. Includes MLP, ResNet architectures, and advanced data preprocessing pipelines.</Description>
-        <PackageTags>machine-learning;deep-learning;neural-network;aot;native-aot;zero-allocation;simd;tensor;ai;csharp</PackageTags>
+        <Copyright>Copyright (c) 2026 DevOnBike</Copyright>
+        <Description>Pure-C# in-process LLM and deep-learning runtime for .NET 10. Loads GGUF / HF safetensors / ONNX directly (Qwen, Llama, Mistral, Mixtral, MoE, BERT-family embeddings). Zero-allocation CPU inference, Native AOT-compatible, no Python, no native dependencies, no exposed server. Dual-licensed: AGPL-3.0-or-later for open source, commercial license available — see COMMERCIAL.md.</Description>
+        <PackageTags>llm;qwen;llama;mistral;gguf;onnx;embeddings;rag;agentic;tool-calling;machine-learning;deep-learning;native-aot;zero-allocation;simd;tensor;ai;csharp;in-process</PackageTags>
         <RepositoryUrl>https://github.com/DevOnBike/Overfit</RepositoryUrl>
         <RepositoryType>git</RepositoryType>
-        <PackageLicenseExpression>MIT</PackageLicenseExpression>
+        <!-- Dual-licensed: AGPL-3.0-or-later for OSS use, Commercial license available for closed-source / SaaS / regulated use.
+             PackageLicenseFile (not PackageLicenseExpression) is used because SPDX expressions cannot describe a custom dual-license
+             arrangement; the full text — both AGPLv3 terms and the commercial alternative — lives in LICENSE.md. -->
+        <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
         <PackageReadmeFile>README.md</PackageReadmeFile>
         <PackageIcon>logo.png</PackageIcon>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
@@ -35,6 +40,8 @@
     <ItemGroup>
         <None Include="logo.png" Pack="true" PackagePath="\" />
         <None Include="README.md" Pack="true" PackagePath="\" />
+        <None Include="..\..\LICENSE.md" Pack="true" PackagePath="\" />
+        <None Include="..\..\COMMERCIAL.md" Pack="true" PackagePath="\" />
         <InternalsVisibleTo Include="DevOnBike.Overfit.Tests" />
 		<InternalsVisibleTo Include="Benchmarks" />
     </ItemGroup>

@@ -54,6 +54,12 @@ namespace DevOnBike.Overfit.Autograd
             return TensorMath.Dropout(this, input, probability, isTraining);
         }
 
+        /// <summary>Spatial dropout — drops whole channels of a conv map (identity at inference).</summary>
+        public AutogradNode Dropout2D(AutogradNode input, float probability, bool isTraining)
+        {
+            return TensorMath.Dropout2D(this, input, probability, isTraining);
+        }
+
         /// <summary>
         /// Batch Normalisation (1-D, over feature dimension).
         /// </summary>

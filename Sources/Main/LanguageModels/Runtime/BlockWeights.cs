@@ -35,6 +35,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly TensorStorage<float> _ffnB2;
         private readonly DecodeWeight _ffnGate;   // SwiGLU Wgate (empty for GeLU)
 
+        // Mixture of Experts (qwen2moe) — all null/default for a dense FFN block.
+        private readonly float[]? _moeRouter;          // ffn_gate_inp, input-major [dModel × expertCount]
+        private readonly DecodeWeight[]? _moeGate;     // routed experts: gate / up / down
+        private readonly DecodeWeight[]? _moeUp;
+        private readonly DecodeWeight[]? _moeDown;
+        private readonly DecodeWeight _moeSharedGate;  // shared expert SwiGLU
+        private readonly DecodeWeight _moeSharedUp;
+        private readonly DecodeWeight _moeSharedDown;
+        private readonly float[]? _moeSharedGateInp;   // ffn_gate_inp_shexp [dModel] (sigmoid gate)
+
         /// <summary>Production constructor — zero-copy references from a real model block.</summary>
         internal BlockWeights(TransformerBlock block, int headCount)
         {
@@ -55,6 +65,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 _heads[h] = new SingleHeadWeights(block.Attention, h);
             }
+
+            _moeRouter = null; _moeGate = null; _moeUp = null; _moeDown = null;
+            _moeSharedGate = default; _moeSharedUp = default; _moeSharedDown = default; _moeSharedGateInp = null;
         }
 
         /// <summary>
@@ -91,6 +104,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             _heads = heads ?? [];
             _kvHeads = kvHeads;
+
+            _moeRouter = null; _moeGate = null; _moeUp = null; _moeDown = null;
+            _moeSharedGate = default; _moeSharedUp = default; _moeSharedDown = default; _moeSharedGateInp = null;
         }
 
         /// <summary>
@@ -111,7 +127,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             TensorStorage<float>? ffnB1,
             DecodeWeight ffnW2,
             TensorStorage<float>? ffnB2,
-            DecodeWeight ffnGate)
+            DecodeWeight ffnGate,
+            float[]? moeRouter = null,
+            DecodeWeight[]? moeGate = null,
+            DecodeWeight[]? moeUp = null,
+            DecodeWeight[]? moeDown = null,
+            DecodeWeight moeSharedGate = default,
+            DecodeWeight moeSharedUp = default,
+            DecodeWeight moeSharedDown = default,
+            float[]? moeSharedGateInp = null)
         {
             static TensorStorage<float> Empty() => TensorStorage<float>.Unpooled(0);
 
@@ -127,6 +151,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _ffnGate = ffnGate;
             _heads = heads ?? [];
             _kvHeads = kvHeads;
+
+            _moeRouter = moeRouter;
+            _moeGate = moeGate;
+            _moeUp = moeUp;
+            _moeDown = moeDown;
+            _moeSharedGate = moeSharedGate;
+            _moeSharedUp = moeSharedUp;
+            _moeSharedDown = moeSharedDown;
+            _moeSharedGateInp = moeSharedGateInp;
         }
 
         public ReadOnlySpan<float> Ln1Gamma => _ln1Gamma.AsReadOnlySpan();
@@ -149,6 +182,18 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         /// <summary>SwiGLU gate weight. Empty for GeLU/ReLU FFN.</summary>
         public DecodeWeight FfnGate => _ffnGate;
+
+        // ── Mixture of Experts (qwen2moe) ─────────────────────────────────────
+        /// <summary>True when this block's FFN is a Mixture-of-Experts.</summary>
+        public bool IsMoe => _moeRouter is not null;
+        public ReadOnlySpan<float> MoeRouter => _moeRouter;
+        public DecodeWeight[] MoeGate => _moeGate!;
+        public DecodeWeight[] MoeUp => _moeUp!;
+        public DecodeWeight[] MoeDown => _moeDown!;
+        public DecodeWeight MoeSharedGate => _moeSharedGate;
+        public DecodeWeight MoeSharedUp => _moeSharedUp;
+        public DecodeWeight MoeSharedDown => _moeSharedDown;
+        public ReadOnlySpan<float> MoeSharedGateInp => _moeSharedGateInp;
 
         private static TensorStorage<float> CreateStorage(float[]? source)
         {

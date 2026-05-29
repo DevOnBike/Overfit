@@ -182,10 +182,9 @@ For anomaly detection, a simple Linear encoder-decoder is often enough. Train on
 
 Be honest:
 
-- **No custom CUDA kernels.** If your inference needs GPU, Overfit isn't for you today.
-- **No Transformers.** Roadmap item, not available yet. For BERT-style sentiment analysis on news feeds, use ONNX Runtime until Overfit catches up.
-- **No quantization.** INT8 inference is on the roadmap. For now, everything is FP32.
-- **No ONNX import.** Planned, not shipped. You'll need to recreate the architecture in Overfit and load weights manually, or wait for ONNX support.
+- **No GPU kernels.** Overfit is CPU-first / pure-managed. If your inference needs a GPU, use a GPU-accelerated runtime.
+- **Not the fastest decode tok/s on LLMs.** llama.cpp / LLamaSharp decode ~1.5× faster on the same Q4_K_M file (hand-tuned native AVX-512). Overfit matches them on RAM and wins on per-token allocation (1 B vs 21 KB) — but if pure tok/s is the only knob, use them.
+- **FP32 training only.** INT8 / FP16 training is on the roadmap. Inference quantization (Q4_K_M / Q6_K / Q8_0 via GGUF mmap) is shipped, but the training loop itself stays FP32 today.
 
 ---
 

@@ -57,13 +57,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                               ? new float[dFF]
                               : [];
 
-            // Q8 / Q4_K activation scratch — sized for the largest projection
-            // input (dFF for the down projection; dModel ≤ dFF for gate/up).
-            _q8InputQuants = new sbyte[dFF];
-            _q8InputScales = new float[(dFF + Q8DotKernel.BlockSize - 1) / Q8DotKernel.BlockSize];
-            _q8kInputQuants = new sbyte[dFF];
-            _q8kInputScales = new float[(dFF + Q4KDotKernel.SuperBlockElements - 1) / Q4KDotKernel.SuperBlockElements];
-            _q8kInputBsums = new short[(dFF + Q4KDotKernel.GroupSize - 1) / Q4KDotKernel.GroupSize];
+            // Q8 / Q4_K activation scratch — sized for the largest projection input. Gate/up
+            // quantize the dModel-long hidden; down quantizes the dFF-long intermediate. For a dense
+            // FFN dFF ≥ dModel, but a MoE expert can have dFF < dModel, so size to the max of the two.
+            var scratch = Math.Max(dModel, dFF);
+            _q8InputQuants = new sbyte[scratch];
+            _q8InputScales = new float[(scratch + Q8DotKernel.BlockSize - 1) / Q8DotKernel.BlockSize];
+            _q8kInputQuants = new sbyte[scratch];
+            _q8kInputScales = new float[(scratch + Q4KDotKernel.SuperBlockElements - 1) / Q4KDotKernel.SuperBlockElements];
+            _q8kInputBsums = new short[(scratch + Q4KDotKernel.GroupSize - 1) / Q4KDotKernel.GroupSize];
         }
 
         public int DModel { get; }
@@ -265,6 +267,32 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             // output = intermediate @ Wdown
             ProjectParallelDispatched(_intermediate, in wDown, [], output, DFF, DModel);
+        }
+
+        /// <summary>
+        /// Batched (prefill) SwiGLU FFN over <paramref name="rows"/> token rows — the multi-row
+        /// counterpart of <see cref="DecodeSwiGluDispatched"/>. Each of gate/up/down is a batched
+        /// projection (<c>ProjectBatched</c>: read each weight row from DRAM once, reuse across all
+        /// rows), so the dominant FFN weight-byte traffic is amortised ~<paramref name="rows"/>× vs
+        /// looping the single-token path. Bit-identical to N× <see cref="DecodeSwiGluDispatched"/>.
+        /// Scratch is allocated per call (prefill is a one-time pass, not the 0-alloc decode hot path).
+        /// </summary>
+        internal void DecodeSwiGluBatchedDispatched(
+            ReadOnlySpan<float> hidden,
+            int rows,
+            in DecodeWeight wGate,
+            in DecodeWeight wUp,
+            in DecodeWeight wDown,
+            Span<float> output)
+        {
+            var gate = new float[rows * DFF];
+            var up = new float[rows * DFF];
+
+            BatchedQuantProjection.Dispatch(hidden, rows, in wGate, [], gate, DModel, DFF);
+            ApplySiLU(gate);
+            BatchedQuantProjection.Dispatch(hidden, rows, in wUp, [], up, DModel, DFF);
+            TensorPrimitives.Multiply(gate, up, up);
+            BatchedQuantProjection.Dispatch(up, rows, in wDown, [], output.Slice(0, rows * DModel), DFF, DModel);
         }
 
         /// <summary>

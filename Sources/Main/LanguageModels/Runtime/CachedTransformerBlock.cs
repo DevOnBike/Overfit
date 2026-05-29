@@ -38,6 +38,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     {
         private readonly CachedMultiHeadAttention _attention;
         private readonly CachedFeedForwardBlock _feedForward;
+        private readonly Qwen2MoeFeedForwardBlock? _moe;   // non-null only for MoE blocks
 
         private readonly float[] _ln1Output;
         private readonly float[] _attentionOutput;
@@ -52,7 +53,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int maxSequenceLength,
             float layerNormEpsilon = 1e-5f,
             FeedForwardActivation feedForwardActivation = FeedForwardActivation.GeLU,
-            int kvHeadCount = 0)
+            int kvHeadCount = 0,
+            int expertCount = 0,
+            int expertUsedCount = 0,
+            int expertFeedForwardLength = 0,
+            bool normalizeExpertWeights = true,
+            bool hasSharedExpert = true)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(dModel);
 
@@ -89,6 +95,19 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 dModel,
                 dFF,
                 feedForwardActivation);
+
+            // MoE: routed experts (expertFeedForwardLength) + (Qwen-MoE) a sigmoid-gated shared expert
+            // of length dFF. Mixtral has no shared expert — pass shared length 0. Replaces the dense
+            // FFN at decode when the block's weights are MoE.
+            _moe = expertCount > 0
+                ? new Qwen2MoeFeedForwardBlock(
+                    dModel,
+                    expertFeedForwardLength > 0 ? expertFeedForwardLength : dFF,
+                    hasSharedExpert ? dFF : 0,
+                    expertCount,
+                    expertUsedCount,
+                    normalizeExpertWeights)
+                : null;
 
             _ln1Output = new float[dModel];
             _attentionOutput = new float[dModel];
@@ -135,17 +154,22 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     $"output.Length must equal DModel ({DModel}), got {output.Length}.",
                     nameof(output));
             }
-            if (weights.FfnW1.ElementCount != (long)DModel * DFF)
+            // Dense-FFN shape guards — skipped for MoE blocks (their FFN weights live in the
+            // expert arrays + shared expert, not FfnW1/FfnW2, which are intentionally empty).
+            if (!weights.IsMoe)
             {
-                throw new ArgumentException(
-                    $"weights.FfnW1 must hold DModel*DFF ({DModel * DFF}) elements, got {weights.FfnW1.ElementCount}.",
-                    nameof(weights));
-            }
-            if (weights.FfnW2.ElementCount != (long)DFF * DModel)
-            {
-                throw new ArgumentException(
-                    $"weights.FfnW2 must hold DFF*DModel ({DFF * DModel}) elements, got {weights.FfnW2.ElementCount}.",
-                    nameof(weights));
+                if (weights.FfnW1.ElementCount != (long)DModel * DFF)
+                {
+                    throw new ArgumentException(
+                        $"weights.FfnW1 must hold DModel*DFF ({DModel * DFF}) elements, got {weights.FfnW1.ElementCount}.",
+                        nameof(weights));
+                }
+                if (weights.FfnW2.ElementCount != (long)DFF * DModel)
+                {
+                    throw new ArgumentException(
+                        $"weights.FfnW2 must hold DFF*DModel ({DFF * DModel}) elements, got {weights.FfnW2.ElementCount}.",
+                        nameof(weights));
+                }
             }
 
             // Llama/Qwen: RMSNorm when beta is empty; GPT-2: standard LayerNorm
@@ -184,9 +208,24 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 _afterAttentionResidual, weights.Ln2Gamma, weights.Ln2Beta, _ln2Output, DModel, LayerNormEpsilon);
             }
 
+            // MoE (qwen2moe): routed experts + sigmoid-gated shared expert.
+            if (weights.IsMoe)
+            {
+                _moe!.Decode(
+                    _ln2Output,
+                    weights.MoeRouter,
+                    weights.MoeGate,
+                    weights.MoeUp,
+                    weights.MoeDown,
+                    weights.MoeSharedGateInp,
+                    weights.MoeSharedGate,
+                    weights.MoeSharedUp,
+                    weights.MoeSharedDown,
+                    _feedForwardOutput);
+            }
             // SwiGLU (Llama/Mistral/Qwen): FfnGate is present.
             // GeLU/ReLU (GPT-1/GPT-2): FfnGate is empty.
-            if (!weights.FfnGate.IsEmpty)
+            else if (!weights.FfnGate.IsEmpty)
             {
                 // SwiGLU (Llama/Mistral/Qwen): per-weight dispatch — each of
                 // gate/up/down picks its kernel from its resident format
@@ -283,6 +322,98 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             _feedForward.DecodeBatched(
                 ln2, rows, weights.FfnW1.F32, weights.FfnB1, weights.FfnW2.F32, weights.FfnB2, ffnOut);
+
+            for (var n = 0; n < rows; n++)
+            {
+                SingleTokenLayerNormKernel.AddResidual(
+                    afterAttn.AsSpan(n * dModel, dModel), ffnOut.AsSpan(n * dModel, dModel),
+                    output.Slice(n * dModel, dModel), dModel);
+            }
+        }
+
+        /// <summary>
+        /// Batched (prefill) Pre-LN block forward for the <b>Llama/Qwen quantized</b> path — supports
+        /// RMSNorm + RoPE + GQA + SwiGLU + quantized weights (the cases <see cref="DecodeBatched"/>
+        /// rejects). Per-row RMSNorm → batched attention (<see cref="CachedMultiHeadAttention.DecodeBatchedQuant"/>)
+        /// → residual → per-row RMSNorm → batched SwiGLU FFN
+        /// (<see cref="CachedFeedForwardBlock.DecodeSwiGluBatchedDispatched"/>) → residual. Composes the
+        /// per-row-independent norms/residuals with the two batched blocks, so the result is
+        /// <b>bit-identical</b> to N× <see cref="Decode"/>. Dense FFN only (MoE batched prefill is a
+        /// follow-on). The cache must already be advanced to <c>basePosition + rows</c>.
+        /// </summary>
+        internal void DecodeBatchedQuant(
+            ReadOnlySpan<float> input,
+            int rows,
+            in BlockWeights weights,
+            KeyValueCache cache,
+            int layerIndex,
+            int basePosition,
+            Span<float> output,
+            RopeTable? rope = null)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rows);
+            if (!weights.IsMoe && weights.FfnGate.IsEmpty)
+            {
+                throw new NotSupportedException("Batched quant prefill requires a SwiGLU FFN (FfnGate present) or an MoE FFN.");
+            }
+
+            var dModel = DModel;
+            var ln1 = new float[rows * dModel];
+            var attnOut = new float[rows * dModel];
+            var afterAttn = new float[rows * dModel];
+            var ln2 = new float[rows * dModel];
+            var ffnOut = new float[rows * dModel];
+
+            for (var n = 0; n < rows; n++)
+            {
+                var inRow = input.Slice(n * dModel, dModel);
+                var dst = ln1.AsSpan(n * dModel, dModel);
+                if (weights.Ln1Beta.IsEmpty)
+                {
+                    RmsNormalize(inRow, weights.Ln1Gamma, dst, dModel, LayerNormEpsilon);
+                }
+                else
+                {
+                    SingleTokenLayerNormKernel.Normalize(inRow, weights.Ln1Gamma, weights.Ln1Beta, dst, dModel, LayerNormEpsilon);
+                }
+            }
+
+            _attention.DecodeBatchedQuant(ln1, rows, in weights, cache, layerIndex, basePosition, attnOut, rope);
+
+            for (var n = 0; n < rows; n++)
+            {
+                SingleTokenLayerNormKernel.AddResidual(
+                    input.Slice(n * dModel, dModel), attnOut.AsSpan(n * dModel, dModel),
+                    afterAttn.AsSpan(n * dModel, dModel), dModel);
+            }
+
+            for (var n = 0; n < rows; n++)
+            {
+                var aRow = afterAttn.AsSpan(n * dModel, dModel);
+                var dst = ln2.AsSpan(n * dModel, dModel);
+                if (weights.Ln2Beta.IsEmpty)
+                {
+                    RmsNormalize(aRow, weights.Ln2Gamma, dst, dModel, LayerNormEpsilon);
+                }
+                else
+                {
+                    SingleTokenLayerNormKernel.Normalize(aRow, weights.Ln2Gamma, weights.Ln2Beta, dst, dModel, LayerNormEpsilon);
+                }
+            }
+
+            if (weights.IsMoe)
+            {
+                _moe!.DecodeBatched(
+                    ln2, rows,
+                    weights.MoeRouter, weights.MoeGate, weights.MoeUp, weights.MoeDown,
+                    weights.MoeSharedGateInp, weights.MoeSharedGate, weights.MoeSharedUp, weights.MoeSharedDown,
+                    ffnOut);
+            }
+            else
+            {
+                _feedForward.DecodeSwiGluBatchedDispatched(
+                    ln2, rows, weights.FfnGate, weights.FfnW1, weights.FfnW2, ffnOut);
+            }
 
             for (var n = 0; n < rows; n++)
             {

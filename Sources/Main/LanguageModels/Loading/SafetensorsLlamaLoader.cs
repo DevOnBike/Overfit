@@ -3,9 +3,9 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Buffers;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Runtime;
+using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 using LayerWeightBuffers = DevOnBike.Overfit.LanguageModels.Runtime.CachedLlamaInferenceEngine.LayerWeightBuffers;
 
@@ -156,11 +156,11 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         {
             var elems = checked((int)((long)headCount * headDim * dModel));
             ExpectCount(source, name, elems);
-            var scratch = ArrayPool<float>.Shared.Rent(elems);
+            var scratch = PooledBuffer<float>.RentArray(elems);
             // RoPE-rotated weights (Q/K) need their headDim rows reordered from HF's
             // rotate-half layout to the adjacent-pair layout RopeKernel uses; the
             // permuted rows are staged here, one head at a time.
-            var permuted = ropePermute ? ArrayPool<float>.Shared.Rent(headDim * dModel) : [];
+            var permuted = ropePermute ? PooledBuffer<float>.RentArray(headDim * dModel) : [];
             try
             {
                 source.LoadF32(name, scratch.AsSpan(0, elems));
@@ -196,8 +196,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
             finally
             {
-                ArrayPool<float>.Shared.Return(scratch);
-                if (permuted.Length > 0) { ArrayPool<float>.Shared.Return(permuted); }
+                PooledBuffer<float>.ReturnArray(scratch);
+                if (permuted.Length > 0) { PooledBuffer<float>.ReturnArray(permuted); }
             }
         }
 
@@ -227,7 +227,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var nHeadsHeadDim = nHeads * headDim;
             var elems = checked((int)((long)dModel * nHeadsHeadDim));
             ExpectCount(source, name, elems);
-            var scratch = ArrayPool<float>.Shared.Rent(elems);
+            var scratch = PooledBuffer<float>.RentArray(elems);
             try
             {
                 source.LoadF32(name, scratch.AsSpan(0, elems));
@@ -237,7 +237,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     if (quantize)
                     {
                         var gatherElems = dModel * headDim;
-                        var gather = ArrayPool<float>.Shared.Rent(gatherElems);
+                        var gather = PooledBuffer<float>.RentArray(gatherElems);
                         try
                         {
                             for (var o = 0; o < dModel; o++)
@@ -251,7 +251,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                         }
                         finally
                         {
-                            ArrayPool<float>.Shared.Return(gather);
+                            PooledBuffer<float>.ReturnArray(gather);
                         }
                     }
                     else
@@ -272,7 +272,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
             finally
             {
-                ArrayPool<float>.Shared.Return(scratch);
+                PooledBuffer<float>.ReturnArray(scratch);
             }
         }
 
@@ -286,7 +286,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         {
             var elems = checked((int)((long)inDim * outDim));
             ExpectCount(source, name, elems);
-            var scratch = ArrayPool<float>.Shared.Rent(elems);
+            var scratch = PooledBuffer<float>.RentArray(elems);
             try
             {
                 source.LoadF32(name, scratch.AsSpan(0, elems));
@@ -307,7 +307,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
             finally
             {
-                ArrayPool<float>.Shared.Return(scratch);
+                PooledBuffer<float>.ReturnArray(scratch);
             }
         }
 
@@ -332,7 +332,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
             var elems = checked((int)((long)vocab * d));
             ExpectCount(source, "lm_head.weight", elems);
-            var scratch = ArrayPool<float>.Shared.Rent(elems);
+            var scratch = PooledBuffer<float>.RentArray(elems);
             try
             {
                 source.LoadF32("lm_head.weight", scratch.AsSpan(0, elems));
@@ -342,7 +342,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
             finally
             {
-                ArrayPool<float>.Shared.Return(scratch);
+                PooledBuffer<float>.ReturnArray(scratch);
             }
         }
 
@@ -376,7 +376,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
             var elems = headCount * headDim;
             ExpectCount(source, name, elems);
-            var scratch = ArrayPool<float>.Shared.Rent(elems);
+            var scratch = PooledBuffer<float>.RentArray(elems);
             try
             {
                 source.LoadF32(name, scratch.AsSpan(0, elems));
@@ -398,7 +398,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
             finally
             {
-                ArrayPool<float>.Shared.Return(scratch);
+                PooledBuffer<float>.ReturnArray(scratch);
             }
         }
 

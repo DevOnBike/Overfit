@@ -10,6 +10,7 @@ using DevOnBike.Overfit.LanguageModels.Experimental;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Parameters;
 using DevOnBike.Overfit.Tokenization;
+using DevOnBike.Overfit.Training;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
@@ -127,22 +128,28 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
                 WeightDecay = WeightDecay
             };
 
-            var workers = new WorkerState[workerCount];
-
-            try
-            {
-                for (var i = 0; i < workers.Length; i++)
+            // Turnkey data-parallel: the session builds the replicas (model + graph + params), wires the
+            // trainer, and broadcasts the master weights into every replica. We keep only the
+            // task-specific per-replica batch buffers + RNG.
+            using var session = new DataParallelSession<GPT1Model>(
+                masterParameters,
+                workerCount,
+                modelFactory: _ =>
                 {
-                    workers[i] = new WorkerState(
-                        workerIndex: i,
-                        config: config,
-                        localBatchSize: localBatchSize,
-                        seqLen: SeqLen,
-                        arenaSize: ArenaSizePerWorker,
-                        rngSeed: 42 + i * 997);
-                }
+                    var replicaModel = new GPT1Model(config);
+                    replicaModel.Train();
+                    return replicaModel;
+                },
+                parameterSelector: m => m.TrainableParameters(),
+                arenaElementsPerReplica: ArenaSizePerWorker);
 
-                CopyParametersToWorkers(masterParameters, workers);
+            var batches = new WorkerBatch[workerCount];
+            for (var i = 0; i < workerCount; i++)
+            {
+                batches[i] = new WorkerBatch(localBatchSize, SeqLen, rngSeed: 42 + i * 997);
+            }
+
+            {
 
                 _output.WriteLine("=== Overfit TinyShakespeare Experimental Data-Parallel Training Demo ===");
                 _output.WriteLine($"Corpus: {text.Length:N0} chars");
@@ -175,41 +182,13 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
                         steps);
 
                     optimizer.LearningRate = lr;
-                    ClearGradients(masterParameters);
 
-                    Parallel.For(
-                        0,
-                        workerCount,
-                        new ParallelOptions { MaxDegreeOfParallelism = workerCount },
-                        workerIndex =>
-                        {
-                            var worker = workers[workerIndex];
-
-                            worker.Loss = TrainWorkerStep(
-                                worker,
-                                allIds);
-                        });
-
-                    ReduceWorkerGradientsIntoMaster(
-                        masterParameters,
-                        workers,
-                        scale: 1f / workerCount);
-
-                    ClipGradNorm(
-                        masterParameters,
+                    // The session (over its trainer) owns the all-reduce, grad-norm clip, optimizer
+                    // step, and weight broadcast; the caller supplies only the per-replica training body.
+                    var avgLoss = session.Step(
+                        optimizer,
+                        workerIndex => TrainWorkerStep(session.Replicas[workerIndex], batches[workerIndex], allIds),
                         MaxGradNorm);
-
-                    optimizer.Step();
-                    CopyParametersToWorkers(masterParameters, workers);
-
-                    var avgLoss = 0f;
-
-                    for (var i = 0; i < workers.Length; i++)
-                    {
-                        avgLoss += workers[i].Loss;
-                    }
-
-                    avgLoss /= workerCount;
 
                     if (step == 0)
                     {
@@ -276,13 +255,6 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
                     lastLoss < firstLoss,
                     $"Loss did not go down: {firstLoss:F4} -> {lastLoss:F4}.");
             }
-            finally
-            {
-                foreach (var worker in workers)
-                {
-                    worker?.Dispose();
-                }
-            }
         }
 
         private static GPT1Config CreateDemoConfig(int vocabSize)
@@ -301,62 +273,40 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
         }
 
         private static float TrainWorkerStep(
-            WorkerState worker,
+            DataParallelReplica<GPT1Model> replica,
+            WorkerBatch batch,
             int[] corpus)
         {
             SampleBatch(
                 corpus,
-                worker.SeqLen,
-                worker.LocalBatchSize,
-                worker.Rng,
-                worker.InputIds,
-                worker.TargetIds);
+                batch.SeqLen,
+                batch.LocalBatchSize,
+                batch.Rng,
+                batch.InputIds,
+                batch.TargetIds);
 
-            ClearGradients(worker.Parameters);
+            ClearGradients(replica.Parameters);
 
-            worker.Graph.Reset();
-            worker.Model.InvalidateAllCaches();
+            replica.Graph.Reset();
+            replica.Model.InvalidateAllCaches();
 
-            var logits = worker.Model.Forward(
-                worker.Graph,
-                worker.InputIds,
-                worker.LocalBatchSize,
-                worker.SeqLen);
+            var logits = replica.Model.Forward(
+                replica.Graph,
+                batch.InputIds,
+                batch.LocalBatchSize,
+                batch.SeqLen);
 
             var loss = ComputeLossAndSeedGradSequential(
                 logits,
-                worker.TargetIds,
-                worker.SeqLen,
-                worker.LocalBatchSize,
-                worker.Model.Config.VocabSize);
+                batch.TargetIds,
+                batch.SeqLen,
+                batch.LocalBatchSize,
+                replica.Model.Config.VocabSize);
 
-            worker.Graph.BackwardFromGrad(logits);
+            replica.Graph.BackwardFromGrad(logits);
             logits.Dispose();
 
             return loss;
-        }
-
-        private static void CopyParametersToWorkers(
-            IReadOnlyList<Parameter> masterParameters,
-            IReadOnlyList<WorkerState> workers)
-        {
-            foreach (var worker in workers)
-            {
-                var workerParameters = worker.Parameters;
-
-                if (workerParameters.Count != masterParameters.Count)
-                {
-                    throw new InvalidOperationException(
-                        $"Worker parameter count mismatch. Master={masterParameters.Count}, Worker={workerParameters.Count}.");
-                }
-
-                for (var i = 0; i < masterParameters.Count; i++)
-                {
-                    masterParameters[i]
-                        .DataSpan
-                        .CopyTo(workerParameters[i].DataSpan);
-                }
-            }
         }
 
         private static void ClearGradients(
@@ -365,33 +315,6 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
             for (var i = 0; i < parameters.Count; i++)
             {
                 parameters[i].GradSpan.Clear();
-            }
-        }
-
-        private static void ReduceWorkerGradientsIntoMaster(
-            IReadOnlyList<Parameter> masterParameters,
-            IReadOnlyList<WorkerState> workers,
-            float scale)
-        {
-            for (var p = 0; p < masterParameters.Count; p++)
-            {
-                var masterGrad = masterParameters[p].GradSpan;
-
-                for (var w = 0; w < workers.Count; w++)
-                {
-                    var workerGrad = workers[w].Parameters[p].GradSpan;
-
-                    if (workerGrad.Length != masterGrad.Length)
-                    {
-                        throw new InvalidOperationException(
-                            $"Gradient length mismatch at parameter {p}. Master={masterGrad.Length}, Worker={workerGrad.Length}.");
-                    }
-
-                    for (var i = 0; i < masterGrad.Length; i++)
-                    {
-                        masterGrad[i] += workerGrad[i] * scale;
-                    }
-                }
             }
         }
 
@@ -476,42 +399,6 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
             return total / totalTokens;
         }
 
-        private static void ClipGradNorm(
-            IReadOnlyList<Parameter> parameters,
-            float maxNorm)
-        {
-            var totalNormSq = 0f;
-
-            foreach (var parameter in parameters)
-            {
-                var grad = parameter.GradSpan;
-
-                for (var i = 0; i < grad.Length; i++)
-                {
-                    totalNormSq += grad[i] * grad[i];
-                }
-            }
-
-            var norm = MathF.Sqrt(totalNormSq);
-
-            if (norm <= maxNorm)
-            {
-                return;
-            }
-
-            var scale = maxNorm / (norm + 1e-6f);
-
-            foreach (var parameter in parameters)
-            {
-                var grad = parameter.GradSpan;
-
-                for (var i = 0; i < grad.Length; i++)
-                {
-                    grad[i] *= scale;
-                }
-            }
-        }
-
         private static float CosineDecay(
             float maxLearningRate,
             float minLearningRate,
@@ -583,59 +470,28 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
                 : defaultValue;
         }
 
-        private sealed class WorkerState : IDisposable
+        // Per-replica task-specific scratch (the model + graph + params now live in the
+        // DataParallelSession's replica). Holds only the batch buffers + RNG.
+        private sealed class WorkerBatch
         {
-            public WorkerState(
-                int workerIndex,
-                GPT1Config config,
-                int localBatchSize,
-                int seqLen,
-                int arenaSize,
-                int rngSeed)
+            public WorkerBatch(int localBatchSize, int seqLen, int rngSeed)
             {
-                WorkerIndex = workerIndex;
                 LocalBatchSize = localBatchSize;
                 SeqLen = seqLen;
-
-                Model = new GPT1Model(config);
-                Model.Train();
-
-                Graph = new ComputationGraph(arenaSize);
-
-                Parameters = Model
-                    .TrainableParameters()
-                    .ToList();
-
                 InputIds = new int[localBatchSize * seqLen];
                 TargetIds = new int[localBatchSize * seqLen];
                 Rng = new Random(rngSeed);
             }
 
-            public int WorkerIndex { get; }
-
             public int LocalBatchSize { get; }
 
             public int SeqLen { get; }
-
-            public GPT1Model Model { get; }
-
-            public ComputationGraph Graph { get; }
-
-            public List<Parameter> Parameters { get; }
 
             public int[] InputIds { get; }
 
             public int[] TargetIds { get; }
 
             public Random Rng { get; }
-
-            public float Loss { get; set; }
-
-            public void Dispose()
-            {
-                Graph.Dispose();
-                Model.Dispose();
-            }
         }
     }
 }

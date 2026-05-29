@@ -35,7 +35,7 @@ namespace DevOnBike.Overfit.Tensors.Core
             ArgumentOutOfRangeException.ThrowIfNegative(length);
 
             Length = length;
-            _data = OverfitPool<T>.Shared.Rent(length);
+            _data = PooledBuffer<T>.RentArray(length);
             _pooled = true;
 
             if (clearMemory)
@@ -43,16 +43,13 @@ namespace DevOnBike.Overfit.Tensors.Core
                 _data.AsSpan(0, length).Clear();
             }
 
-            OverfitTelemetry.RecordTensorStorageCreated(
-                length,
-                Unsafe.SizeOf<T>(),
-                borrowed: false);
+            OverfitTelemetry.RecordTensorStorageCreated(length, Unsafe.SizeOf<T>(), borrowed: false);
         }
 
         /// <summary>
         /// Private ctor used by <see cref="Unpooled"/>. Wraps a caller-owned, exact-sized
         /// array. The array is allocated via <c>new T[length]</c> and will be released to
-        /// the GC when this storage is disposed — never returned to <see cref="OverfitPool{T}"/>.
+        /// the GC when this storage is disposed — never returned to the pool.
         /// </summary>
         private TensorStorage(T[] data)
         {
@@ -62,10 +59,7 @@ namespace DevOnBike.Overfit.Tensors.Core
             _data = data;
             _pooled = false;
 
-            OverfitTelemetry.RecordTensorStorageCreated(
-                Length,
-                Unsafe.SizeOf<T>(),
-                borrowed: false);
+            OverfitTelemetry.RecordTensorStorageCreated(Length, Unsafe.SizeOf<T>(), borrowed: false);
         }
 
         /// <summary>
@@ -104,10 +98,7 @@ namespace DevOnBike.Overfit.Tensors.Core
             _nativePtr = buffer.Allocate(length);
             _isBorrowedMemory = true;
 
-            OverfitTelemetry.RecordTensorStorageCreated(
-                length,
-                Unsafe.SizeOf<T>(),
-                borrowed: true);
+            OverfitTelemetry.RecordTensorStorageCreated(length, Unsafe.SizeOf<T>(), borrowed: true);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -115,9 +106,7 @@ namespace DevOnBike.Overfit.Tensors.Core
         {
             ObjectDisposedException.ThrowIf(_disposed == 1, this);
 
-            return _isBorrowedMemory
-                ? new Span<T>(_nativePtr, Length)
-                : _data!.AsSpan(0, Length);
+            return _isBorrowedMemory ? new Span<T>(_nativePtr, Length) : _data!.AsSpan(0, Length);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -141,7 +130,9 @@ namespace DevOnBike.Overfit.Tensors.Core
         internal static TensorStorage<T> FromArray(T[] source)
         {
             var ts = new TensorStorage<T>(source.Length, clearMemory: false);
+
             source.AsSpan().CopyTo(ts.AsSpan());
+
             return ts;
         }
 
@@ -154,7 +145,7 @@ namespace DevOnBike.Overfit.Tensors.Core
                 // Only return to pool if rented from pool. Unpooled storage is GC-managed.
                 if (!_isBorrowedMemory && _pooled && _data != null)
                 {
-                    OverfitPool<T>.Shared.Return(_data);
+                    PooledBuffer<T>.ReturnArray(_data);
                 }
 
                 _data = null;

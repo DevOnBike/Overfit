@@ -36,13 +36,22 @@ namespace DevOnBike.Overfit.DeepLearning
     public sealed class GPT1Model : IDisposable
     {
         private readonly GPT1Config _config;
+        private readonly bool _checkpointBlocks;
         private bool _isTraining = true;
         private AutogradNode? _lmHeadNode;
         private bool _disposed;
 
-        public GPT1Model(GPT1Config config)
+        /// <param name="checkpointBlocks">
+        /// When true, each transformer block runs under <see cref="ComputationGraph.Checkpoint"/> during
+        /// training: its activations are not kept on the tape but recomputed in the backward pass. Trades
+        /// one extra forward per block for a much lower peak activation footprint — train deeper models /
+        /// longer sequences / bigger batches in the same arena. No effect on the result (bit-close) or on
+        /// inference. Default false.
+        /// </param>
+        public GPT1Model(GPT1Config config, bool checkpointBlocks = false)
         {
             _config = config ?? throw new ArgumentNullException(nameof(config));
+            _checkpointBlocks = checkpointBlocks;
 
             TokenEmbedding = new EmbeddingLayer(config.VocabSize, config.DModel);
             PositionEmbedding = new EmbeddingLayer(config.ContextLength, config.DModel);
@@ -200,10 +209,28 @@ namespace DevOnBike.Overfit.DeepLearning
                 seqLen,
                 _config.DModel);
 
-            // 4. Transformer blocks.
-            foreach (var block in Blocks)
+            // 4. Transformer blocks. Optionally gradient-checkpointed: each block's activations are
+            //    recomputed in backward instead of kept, cutting the peak activation footprint to ~one
+            //    block's worth. Sized for one block's forward+grad (data+grad, generous headroom).
+            if (_checkpointBlocks && graph.IsRecording)
             {
-                x = block.Forward(graph, x);
+                var d = _config.DModel;
+                var perBlock = (long)batchSize * seqLen * (10L * d + 2L * _config.DFF)
+                             + 2L * batchSize * _config.NHeads * seqLen * seqLen;
+                var subArena = (int)Math.Min(int.MaxValue, perBlock * 4 + (1L << 20));
+
+                foreach (var block in Blocks)
+                {
+                    var blk = block;
+                    x = graph.Checkpoint((g, hidden) => blk.Forward(g, hidden), x, subArena);
+                }
+            }
+            else
+            {
+                foreach (var block in Blocks)
+                {
+                    x = block.Forward(graph, x);
+                }
             }
 
             // 5. Final LayerNorm.

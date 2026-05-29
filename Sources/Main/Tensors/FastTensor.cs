@@ -93,7 +93,7 @@ namespace DevOnBike.Overfit.Tensors
         private void Allocate(
             bool clearMemory)
         {
-            _data = ArrayPool<T>.Shared.Rent(Size);
+            _data = PooledBuffer<T>.RentArray(Size);
 
             if (clearMemory)
             {
@@ -211,7 +211,7 @@ namespace DevOnBike.Overfit.Tensors
             if (Interlocked.Exchange(ref _disposed, 1) == 0 &&
                 _data != null)
             {
-                ArrayPool<T>.Shared.Return(_data);
+                PooledBuffer<T>.ReturnArray(_data);
                 _data = null;
             }
         }
@@ -348,13 +348,9 @@ namespace DevOnBike.Overfit.Tensors
             }
             else
             {
-                // Fallback for other types.
-                // Currently Overfit uses this path for float.
-                for (var i = 0; i < target.Length; i++)
-                {
-                    throw new NotSupportedException(
-                        $"AddInPlace is only implemented for float tensors. Type: {typeof(T).Name}");
-                }
+                // Fallback for other types. Currently Overfit only uses this path for float.
+                throw new NotSupportedException(
+                    $"AddInPlace is only implemented for float tensors. Type: {typeof(T).Name}");
             }
         }
     }

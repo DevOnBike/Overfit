@@ -12,7 +12,7 @@ using DevOnBike.Overfit.Parameters;
 using DevOnBike.Overfit.Tokenization;
 using Xunit.Abstractions;
 
-namespace DevOnBike.Overfit.Tests
+namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
 {
     /// <summary>
     /// GPT-1 training with SeqLen=256 — full context, correct gradient through residuals.

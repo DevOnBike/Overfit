@@ -114,6 +114,10 @@ namespace DevOnBike.Overfit.Autograd
         public AutogradNode Reshape(AutogradNode input, params int[] newShape)
             => TensorMath.Reshape(this, input, newShape);
 
+        /// <summary>Swaps the last two axes (rank-2 or rank-3) — the CRNN map-to-sequence step.</summary>
+        public AutogradNode TransposeLastTwo(AutogradNode input)
+            => TensorMath.TransposeLastTwo(this, input);
+
         // ─────────────────────────────────────────────────────────────────
         // Null-safe static ops — use in layer Forward() where graph may be
         // null (inference path via model.Forward(null, input)).
@@ -170,8 +174,17 @@ namespace DevOnBike.Overfit.Autograd
             ComputationGraph? graph,
             AutogradNode input,
             AutogradNode weights,
-            int inC, int outC, int h, int w, int k)
-            => TensorMath.Conv2D(graph!, input, weights, inC, outC, h, w, k);
+            int inC, int outC, int h, int w, int k,
+            int padding = 0, int stride = 1, AutogradNode bias = null)
+            => TensorMath.Conv2D(graph!, input, weights, inC, outC, h, w, k, padding, stride, bias);
+
+        internal static AutogradNode DepthwiseConv2DOp(
+            ComputationGraph? graph,
+            AutogradNode input,
+            AutogradNode kernel,
+            int channels, int h, int w, int k,
+            int padding = 0, int stride = 1, AutogradNode bias = null)
+            => TensorMath.DepthwiseConv2D(graph!, input, kernel, channels, h, w, k, padding, stride, bias);
 
         internal static AutogradNode MaxPool2DOp(
             ComputationGraph? graph,
@@ -196,6 +209,19 @@ namespace DevOnBike.Overfit.Autograd
             float eps,
             bool isTraining)
             => TensorMath.BatchNorm1D(graph!, input, gamma, beta,
+                                      runningMean, runningVar, momentum, eps, isTraining);
+
+        internal static AutogradNode BatchNorm2DOp(
+            ComputationGraph? graph,
+            AutogradNode input,
+            AutogradNode gamma,
+            AutogradNode beta,
+            TensorStorage<float> runningMean,
+            TensorStorage<float> runningVar,
+            float momentum,
+            float eps,
+            bool isTraining)
+            => TensorMath.BatchNorm2D(graph!, input, gamma, beta,
                                       runningMean, runningVar, momentum, eps, isTraining);
 
         /// <summary>

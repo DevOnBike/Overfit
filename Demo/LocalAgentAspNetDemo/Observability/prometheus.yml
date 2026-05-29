@@ -1,0 +1,13 @@
+# Prometheus scrape config for the Overfit Local Agent.
+# Used by the `prometheus` service in compose.yaml.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: overfit-local-agent
+    metrics_path: /metrics
+    static_configs:
+      # 'agent' is the compose service name; 8080 is the in-container port.
+      - targets: ["agent:8080"]

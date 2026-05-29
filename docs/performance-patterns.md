@@ -1901,3 +1901,22 @@ _stopEvent = new ManualResetEventSlim(false, spinCount: 0);
 ---
 
 *Part 10 added 2026-05-16. Review of the live `dotnet/aspnetcore` repository (branch `main`). **~110 concepts** in 10 parts in total. Unlike parts 1-9 (decompilation + curated lists) — this is original code with author comments; quotes from the comments (`SocketSenderPool` "good enough", `RenderTreeDiffBuilder` "-10%", `PinnedBlockMemoryPoolFactory` "avoid GC write barriers") provide justification not visible in decompiled IL. The four most non-obvious: #77 (struct-wrapper vs covariant-store), #78 (`nuint` vs write-barrier), #70 (`[UnsafeAccessor]`), #86 (anti-stampede).*
+
+## Copy & pooling micro-benchmarks (2026-05-26, `CopyAndPoolBenchmark`, Ryzen 9 9950X3D)
+
+Float[] copy — **prefer `Span.CopyTo`** (fastest or tied everywhere); **avoid `Buffer.BlockCopy`**:
+
+| size | `Array.Copy` | `Span.CopyTo` | `Buffer.BlockCopy` |
+|---|---|---|---|
+| 256 | 6.6 ns | **6.0 ns** | 9.0 ns (1.35× — slowest) |
+| 8192 | 263 ns | **258 ns** | 263 ns |
+| 1 048 576 | 141 µs | **138 µs** | 142 µs |
+
+(All memmove-bound at size; the gap is per-call overhead — `Buffer.BlockCopy` does byte-length math + extra checks, loses on small copies.)
+
+Pool rental — the `using`-based `PooledBuffer<T>` (`Sources/Main/Tensors/PooledBuffer.cs`) is **zero-cost**
+vs raw `OverfitPool<T>.Shared.Rent(...)` + `try/finally` + `Return(...)` (both ~4 ns, 0 alloc, regardless of
+size — Rent/Return is O(1)). **Prefer `using var buf = new PooledBuffer<float>(n, clearMemory: false);` over
+the try/finally trio** — same speed, far less noise. Rent/Return never touches the buffer contents (the ~4 ns
+is independent of length). Note: raw `System.Buffers.ArrayPool<T>.Shared` is banned in Main (RS0030, see
+`BannedSymbols.txt`) — always go through `OverfitPool<T>` or `PooledBuffer<T>`.

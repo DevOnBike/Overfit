@@ -11,7 +11,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 {
     /// <summary>
     /// Reads a GGUF file: header, metadata KVs, tensor info, and tensor data.
-    /// Supports F32, F16, BF16, Q8_0, Q4_K, Q6_K. Other quantized formats throw NotSupportedException.
+    /// Supports F32, F16, BF16, Q8_0, Q4_K, Q5_0, Q5_K, Q6_K. Other quantized formats throw NotSupportedException.
     ///
     /// Usage:
     ///   using var reader = new GgufReader("model.gguf");
@@ -147,10 +147,18 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     ReadQ6_KToF32(destination[..(int)elementCount]);
                     return;
 
+                case GgmlType.Q5_0:
+                    ReadQ5_0ToF32(destination[..(int)elementCount]);
+                    return;
+
+                case GgmlType.Q5_K:
+                    ReadQ5_KToF32(destination[..(int)elementCount]);
+                    return;
+
                 default:
                     throw new NotSupportedException(
                         $"Tensor type {info.Type} is not supported yet. " +
-                        $"Supported: F32, F16, BF16, Q8_0, Q4_K, Q6_K.");
+                        $"Supported: F32, F16, BF16, Q8_0, Q4_K, Q5_0, Q5_K, Q6_K.");
             }
         }
 
@@ -311,6 +319,53 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             // Common widening: GGUF may store small ints as uint32, but C# default int is int32.
             try { return (T)Convert.ChangeType(value, typeof(T))!; }
             catch { return defaultValue; }
+        }
+
+        /// <summary>True when <paramref name="key"/> is present and holds an array.</summary>
+        public bool HasArray(string key) => Metadata.TryGetValue(key, out var v) && v is object[];
+
+        /// <summary>
+        /// Reads a metadata string array (e.g. <c>tokenizer.ggml.tokens</c> / <c>.merges</c>).
+        /// Throws if the key is absent or not a string array.
+        /// </summary>
+        public string[] GetMetaStringArray(string key)
+        {
+            var raw = GetMetaArray(key);
+            var result = new string[raw.Length];
+            for (var i = 0; i < raw.Length; i++)
+            {
+                result[i] = raw[i] as string
+                    ?? throw new InvalidDataException($"Metadata '{key}'[{i}] is not a string.");
+            }
+            return result;
+        }
+
+        /// <summary>Reads a metadata float array (e.g. <c>tokenizer.ggml.scores</c>).</summary>
+        public float[] GetMetaFloatArray(string key)
+        {
+            var raw = GetMetaArray(key);
+            var result = new float[raw.Length];
+            for (var i = 0; i < raw.Length; i++) { result[i] = Convert.ToSingle(raw[i]); }
+            return result;
+        }
+
+        /// <summary>Reads a metadata int array (e.g. <c>tokenizer.ggml.token_type</c>).</summary>
+        public int[] GetMetaIntArray(string key)
+        {
+            var raw = GetMetaArray(key);
+            var result = new int[raw.Length];
+            for (var i = 0; i < raw.Length; i++) { result[i] = Convert.ToInt32(raw[i]); }
+            return result;
+        }
+
+        private object[] GetMetaArray(string key)
+        {
+            if (!Metadata.TryGetValue(key, out var value))
+            {
+                throw new InvalidDataException($"Metadata key '{key}' is absent.");
+            }
+            return value as object[]
+                ?? throw new InvalidDataException($"Metadata '{key}' is not an array (got {value?.GetType().Name}).");
         }
 
         public void Dispose()
@@ -474,6 +529,121 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             {
                 _stream.ReadExactly(buf);
                 GgmlDequant.DecodeQ6_KBlock(buf, dst.Slice(b * BlockElements, BlockElements));
+            }
+        }
+
+        /// <summary>
+        /// Dequantize a legacy Q5_0 tensor block-by-block (22 bytes per 32 elements).
+        /// Decode math lives in <see cref="GgmlDequant.DecodeQ5_0Block"/>; this method
+        /// only handles streaming. Used in Q4_K_M "_M" mixes (e.g. some ffn_down_exps).
+        /// </summary>
+        private void ReadQ5_0ToF32(Span<float> dst)
+        {
+            const int BlockElements = GgmlDequant.Q5_0_BlockElements;
+            const int BlockBytes = GgmlDequant.Q5_0_BlockBytes;
+
+            if (dst.Length % BlockElements != 0)
+            {
+                throw new InvalidDataException(
+                    $"Q5_0 tensor element count {dst.Length} is not divisible by {BlockElements}.");
+            }
+
+            var nBlocks = dst.Length / BlockElements;
+            Span<byte> buf = stackalloc byte[BlockBytes];
+
+            for (var b = 0; b < nBlocks; b++)
+            {
+                _stream.ReadExactly(buf);
+                GgmlDequant.DecodeQ5_0Block(buf, dst.Slice(b * BlockElements, BlockElements));
+            }
+        }
+
+        /// <summary>
+        /// Dequantize a Q5_K tensor block-by-block (176 bytes per 256 elements).
+        /// Decode math lives in <see cref="GgmlDequant.DecodeQ5_KBlock"/>; this method
+        /// only handles streaming.
+        /// </summary>
+        private void ReadQ5_KToF32(Span<float> dst)
+        {
+            const int BlockElements = GgmlDequant.SuperBlockElements;
+            const int BlockBytes = GgmlDequant.Q5_K_BlockBytes;
+
+            if (dst.Length % BlockElements != 0)
+            {
+                throw new InvalidDataException(
+                    $"Q5_K tensor element count {dst.Length} is not divisible by {BlockElements}.");
+            }
+
+            var nBlocks = dst.Length / BlockElements;
+            Span<byte> buf = stackalloc byte[BlockBytes];
+
+            for (var b = 0; b < nBlocks; b++)
+            {
+                _stream.ReadExactly(buf);
+                GgmlDequant.DecodeQ5_KBlock(buf, dst.Slice(b * BlockElements, BlockElements));
+            }
+        }
+
+        /// <summary>
+        /// Dequantizes ONE block-aligned region of a Q5_0 / Q5_K tensor to F32, starting at
+        /// <paramref name="elementOffset"/>. Lets the loader stream a large 3-D expert tensor one
+        /// expert at a time, so peak load RAM is a single expert's F32 (~perExpert floats), not the
+        /// whole tensor's. <paramref name="elementOffset"/> and the destination length must both be
+        /// whole multiples of the type's block size (true for per-expert slices: inDim·outDim is a
+        /// multiple of 256). Throws for non-Q5 types — the only quants that reach the expert F32
+        /// fallback (Q4_K/Q6_K/Q8_0 have native kernels).
+        /// </summary>
+        internal void LoadQ5RegionAsF32(GgufTensorInfo info, long elementOffset, Span<float> dst)
+        {
+            if (info is null) { throw new ArgumentNullException(nameof(info)); }
+
+            int blockElems;
+            int blockBytes;
+            bool isK;
+            switch (info.Type)
+            {
+                case GgmlType.Q5_0:
+                    blockElems = GgmlDequant.Q5_0_BlockElements;
+                    blockBytes = GgmlDequant.Q5_0_BlockBytes;
+                    isK = false;
+                    break;
+                case GgmlType.Q5_K:
+                    blockElems = GgmlDequant.SuperBlockElements;
+                    blockBytes = GgmlDequant.Q5_K_BlockBytes;
+                    isK = true;
+                    break;
+                default:
+                    throw new NotSupportedException(
+                        $"LoadQ5RegionAsF32 supports only Q5_0 / Q5_K, not {info.Type} ('{info.Name}').");
+            }
+
+            if (elementOffset % blockElems != 0)
+            {
+                throw new ArgumentException(
+                    $"elementOffset {elementOffset} is not a multiple of the block size {blockElems}.", nameof(elementOffset));
+            }
+            if (dst.Length % blockElems != 0)
+            {
+                throw new InvalidDataException(
+                    $"Region element count {dst.Length} is not divisible by {blockElems}.");
+            }
+
+            var startBlock = elementOffset / blockElems;
+            _stream.Seek(_dataStart + (long)info.Offset + startBlock * blockBytes, SeekOrigin.Begin);
+
+            var nBlocks = dst.Length / blockElems;
+            Span<byte> buf = stackalloc byte[blockBytes];
+            for (var b = 0; b < nBlocks; b++)
+            {
+                _stream.ReadExactly(buf);
+                if (isK)
+                {
+                    GgmlDequant.DecodeQ5_KBlock(buf, dst.Slice(b * blockElems, blockElems));
+                }
+                else
+                {
+                    GgmlDequant.DecodeQ5_0Block(buf, dst.Slice(b * blockElems, blockElems));
+                }
             }
         }
 

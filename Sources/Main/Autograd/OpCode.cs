@@ -21,6 +21,7 @@ namespace DevOnBike.Overfit.Autograd
         MaxPool2D,
         GlobalAveragePool2D,
         BatchNorm1D,
+        BatchNorm2D,
         MseLoss,
         SoftmaxCrossEntropy,
         Reshape,
@@ -38,6 +39,9 @@ namespace DevOnBike.Overfit.Autograd
         LayerNorm,
         Embedding,
         ScaledDotProductAttention,
-        Gelu
+        Gelu,
+        Checkpoint,
+        TransposeLastTwo,
+        DepthwiseConv2D
     }
 }

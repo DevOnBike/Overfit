@@ -93,6 +93,45 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             }
         }
 
+        [Theory]
+        [InlineData(1)]
+        [InlineData(3)]
+        [InlineData(16)]
+        public void ProjectBatched_IsBitIdenticalToPerRowProject(int rows)
+        {
+            const int inputSize = 512;
+            const int outputSize = 96;
+            var rng = new Random(rows * 19 + 7);
+
+            var blocks = BuildRandomBlocks(rng, outputSize, inputSize);
+            var weight = new Q6KWeight(blocks, inputSize, outputSize);
+            var superBlocksPerRow = inputSize / SuperBlockElements;
+            var bsumsPerRow = superBlocksPerRow * Q6KDotKernel.GroupsPerSuperBlock;
+            var bias = RandomVector(rng, outputSize);
+
+            var input = new float[rows * inputSize];
+            for (var i = 0; i < input.Length; i++) { input[i] = (float)(rng.NextDouble() * 2.0 - 1.0); }
+
+            var reference = new float[rows * outputSize];
+            for (var n = 0; n < rows; n++)
+            {
+                Q6KDotKernel.Project(
+                    input.AsSpan(n * inputSize, inputSize), weight, bias,
+                    reference.AsSpan(n * outputSize, outputSize),
+                    new sbyte[inputSize], new float[superBlocksPerRow], new short[bsumsPerRow]);
+            }
+
+            var batched = new float[rows * outputSize];
+            Q6KDotKernel.ProjectBatched(
+                input, rows, weight, bias, batched,
+                new sbyte[rows * inputSize], new float[rows * superBlocksPerRow], new short[rows * bsumsPerRow]);
+
+            for (var k = 0; k < reference.Length; k++)
+            {
+                Assert.Equal(reference[k], batched[k]);
+            }
+        }
+
         [Fact]
         public void Project_AppliesBias()
         {

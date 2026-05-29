@@ -397,9 +397,12 @@ namespace DevOnBike.Overfit.Anomalies.Training
                 graph.Reset(); model.InvalidateAllCaches();
                 var l = model.Forward(graph, input, batchSize: 1, _cfg.ContextLength);
                 total += LossAndGrad(l, target, _cfg.ContextLength, config.VocabSize, lossScratch);
+
                 l.Dispose();
             }
+
             model.Train();
+
             return total / _cfg.ValSteps;
         }
     }

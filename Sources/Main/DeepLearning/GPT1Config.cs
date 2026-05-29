@@ -112,6 +112,16 @@ namespace DevOnBike.Overfit.DeepLearning
         public float RoPETheta { get; init; } = 10_000f;
 
         /// <summary>
+        /// RoPE rotation pairing. <c>false</c> (default) = adjacent-pair <c>(x[2i], x[2i+1])</c>, used when
+        /// Q/K weights are stored in (or permuted into) the adjacent layout — the HF-safetensors loader
+        /// permutes for this, and llama.cpp permutes Llama/Mistral GGUF at conversion. <c>true</c> =
+        /// split-half <c>(x[i], x[i+d/2])</c> (HF rotate_half / llama.cpp NEOX), used when Q/K stay in the
+        /// original HF layout — Qwen2/Qwen2-MoE GGUF are NOT permuted by llama.cpp, so they need this.
+        /// Getting it wrong leaves position 0 correct (identity rotation) but corrupts every later position.
+        /// </summary>
+        public bool RopeSplitHalf { get; init; }
+
+        /// <summary>
         /// Optional Llama-3 "llama3" RoPE frequency scaling for long context (the
         /// <c>rope_scaling</c> block in a Llama-3.x config). Null = plain RoPE.
         /// </summary>
@@ -125,6 +135,40 @@ namespace DevOnBike.Overfit.DeepLearning
         /// </summary>
         public FeedForwardActivation FfnActivation
         { get; init; } = FeedForwardActivation.GeLU;
+
+        // ── Mixture of Experts (MoE) ──────────────────────────────────────────
+        // 0 ⇒ dense FFN (the default for every model loaded today). When > 0 the FFN
+        // block is replaced by ExpertCount expert FFNs + a router that activates
+        // ExpertUsedCount of them per token (Mixtral / Qwen-MoE style).
+
+        /// <summary>Number of experts in the MoE FFN. 0 ⇒ dense (no MoE).</summary>
+        public int ExpertCount { get; init; }
+
+        /// <summary>Experts activated per token (top-k). 0 ⇒ dense; otherwise ≤ <see cref="ExpertCount"/>.</summary>
+        public int ExpertUsedCount { get; init; }
+
+        /// <summary>
+        /// FFN length of each routed expert (Qwen-MoE: smaller than <see cref="DFF"/>, which is the
+        /// shared expert's length). 0 ⇒ fall back to <see cref="DFF"/>.
+        /// </summary>
+        public int ExpertFeedForwardLength { get; init; }
+
+        /// <summary>True when this model uses a Mixture-of-Experts FFN.</summary>
+        public bool IsMixtureOfExperts => ExpertCount > 0 && ExpertUsedCount > 0;
+
+        /// <summary>
+        /// MoE topology: <c>true</c> when the model adds a sigmoid-gated shared expert that runs for
+        /// every token (Qwen-MoE); <c>false</c> for routed-only MoE (Mixtral). Only relevant when
+        /// <see cref="IsMixtureOfExperts"/>. Defaults to <c>true</c> (the Qwen-MoE shape).
+        /// </summary>
+        public bool HasSharedExpert { get; init; } = true;
+
+        /// <summary>
+        /// MoE routing: renormalise the top-k expert weights to sum to 1 (Mixtral / Qwen
+        /// <c>norm_topk_prob=true</c>) vs. keep the raw full-softmax probabilities (Qwen1.5-MoE,
+        /// <c>norm_topk_prob=false</c>). Only relevant when <see cref="IsMixtureOfExperts"/>.
+        /// </summary>
+        public bool NormalizeExpertWeights { get; init; } = true;
 
         /// <summary>Total parameter count (weight-tying aware).</summary>
         public long ParameterCount

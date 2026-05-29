@@ -115,7 +115,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // sequence length. This allocation is intentional in the skeleton and
             // should disappear when the KV-cache decode path lands.
             var context = new int[_contextLength];
-            Array.Copy(_contextTokens, 0, context, 0, _contextLength);
+            _contextTokens.AsSpan(0, _contextLength).CopyTo(context);
 
             var logits = _model.GenerateLogits(context);
 
@@ -195,12 +195,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
             else
             {
-                Array.Copy(
-                    _contextTokens,
-                    sourceIndex: 1,
-                    _contextTokens,
-                    destinationIndex: 0,
-                    length: MaxContextLength - 1);
+                // Overlapping in-place left-shift — Span.CopyTo has memmove semantics.
+                _contextTokens.AsSpan(1, MaxContextLength - 1)
+                    .CopyTo(_contextTokens.AsSpan(0, MaxContextLength - 1));
 
                 _contextTokens[MaxContextLength - 1] = token;
             }

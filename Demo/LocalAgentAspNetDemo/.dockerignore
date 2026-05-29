@@ -1,0 +1,14 @@
+# Build context is the repo root; keep heavy / irrelevant paths out of the image build.
+**/bin/
+**/obj/
+**/.vs/
+**/.git/
+**/.github/
+**/*.user
+**/coverage/
+**/TestResults/
+# Never ship model weights or test fixtures into the image.
+**/*.gguf
+**/*.safetensors
+**/*.bin
+Tests/test_fixtures/

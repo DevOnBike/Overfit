@@ -36,8 +36,9 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
         /// <param name="scaling">
         /// Optional Llama-3 "llama3" frequency scaling for long context; null = plain RoPE.
         /// </param>
-        public RopeTable(int maxSequenceLength, int headDimension, float theta = 10_000f, RopeScaling? scaling = null)
+        public RopeTable(int maxSequenceLength, int headDimension, float theta = 10_000f, RopeScaling? scaling = null, bool splitHalf = false)
         {
+            SplitHalf = splitHalf;
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxSequenceLength);
             if (headDimension <= 0 || headDimension % 2 != 0)
             {
@@ -61,6 +62,12 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
         public int MaxSequenceLength { get; }
         public int HeadDimension { get; }
         public float Theta { get; }
+
+        /// <summary>
+        /// When true, RoPE pairs split-half dims <c>(x[i], x[i+d/2])</c> (HF rotate_half / NEOX); when
+        /// false, adjacent dims <c>(x[2i], x[2i+1])</c>. See <c>GPT1Config.RopeSplitHalf</c>.
+        /// </summary>
+        public bool SplitHalf { get; }
 
         /// <summary>Returns cos values for a given position: [halfDim].</summary>
         public ReadOnlySpan<float> CosAt(int position)

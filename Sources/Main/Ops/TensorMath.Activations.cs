@@ -184,5 +184,57 @@ namespace DevOnBike.Overfit.Ops
         {
             TensorPrimitives.MultiplyAdd(output.GradView.AsReadOnlySpan(), mask.DataView.AsReadOnlySpan(), input.GradView.AsSpan(), input.GradView.AsSpan());
         }
+
+        /// <summary>
+        /// Spatial dropout for conv feature maps <c>[N, C, H, W]</c> — drops <b>whole channels</b> (each
+        /// channel's H·W block is kept or zeroed together, inverted-scaled by <c>1/(1−p)</c>), the right
+        /// regulariser when neighbouring pixels are strongly correlated. Identity at inference. Reuses the
+        /// elementwise <see cref="DropoutBackward"/> (the mask is channel-constant but the backward
+        /// <c>dx = dy⊙mask</c> is mask-shape-agnostic).
+        /// </summary>
+        public static AutogradNode Dropout2D(ComputationGraph graph, AutogradNode input, float probability, bool isTraining)
+        {
+            var output = AllocateNode(graph, input.Shape, input.RequiresGrad, clearMemory: false);
+
+            if (!isTraining || probability <= 0f)
+            {
+                input.DataView.AsReadOnlySpan().CopyTo(output.DataView.AsSpan());
+                return output;
+            }
+
+            int n = input.Shape.D0, c = input.Shape.D1;
+            var hw = input.Shape.D2 * input.Shape.D3;
+            var mask = AllocateNode(graph, input.Shape, false, clearMemory: false);
+            var scale = 1f / (1f - probability);
+
+            var inS = input.DataView.AsReadOnlySpan();
+            var outS = output.DataView.AsSpan();
+            var maskS = mask.DataView.AsSpan();
+
+            for (var ni = 0; ni < n; ni++)
+            {
+                for (var ci = 0; ci < c; ci++)
+                {
+                    var m = Random.Shared.NextSingle() >= probability ? scale : 0f;
+                    var off = (ni * c + ci) * hw;
+                    for (var i = 0; i < hw; i++)
+                    {
+                        maskS[off + i] = m;
+                        outS[off + i] = inS[off + i] * m;
+                    }
+                }
+            }
+
+            if (output.RequiresGrad)
+            {
+                graph?.Record(OpCode.Dropout, output, input, mask);   // reuse elementwise dropout backward
+            }
+            else
+            {
+                mask.Dispose();
+            }
+
+            return output;
+        }
     }
 }

@@ -198,6 +198,24 @@ namespace DevOnBike.Overfit.Runtime
         /// <summary>Number of persistent worker threads (== <see cref="Environment.ProcessorCount"/>).</summary>
         public static int WorkerCount => _workerCount;
 
+        [ThreadStatic]
+        private static bool _suppressOnThisThread;
+
+        /// <summary>
+        /// When set on the calling thread, every <see cref="For"/> invocation on that thread runs
+        /// <b>inline</b> (no dispatch, no <c>_gate</c> lock) — as if the pool had a single worker.
+        /// Intended for nested parallelism: when an outer parallel loop already saturates the cores
+        /// (e.g. data-parallel training runs N model replicas, one per thread), each replica's inner
+        /// kernels must stay single-threaded, otherwise N replicas × <see cref="WorkerCount"/> inner
+        /// threads oversubscribe the CPU and serialize on the shared pool lock. Set it for the duration
+        /// of the inner work and restore the previous value in a <c>finally</c>.
+        /// </summary>
+        public static bool SuppressParallelismOnCurrentThread
+        {
+            get => _suppressOnThisThread;
+            set => _suppressOnThisThread = value;
+        }
+
         /// <summary>
         /// Executes <paramref name="body"/> over chunks of
         /// <c>[rangeStart, rangeEnd)</c> across the worker pool. Equivalent to
@@ -262,9 +280,10 @@ namespace DevOnBike.Overfit.Runtime
             var totalWork = (int)totalWorkLong;
 
             // Inline fast-path: nothing to gain from dispatch when there is a
-            // single worker, or the work is below the caller's profitability
-            // grain. Skips the lock and the worker handoff entirely.
-            if (_workerCount <= 1 || totalWork < 2L * minItemsPerWorker)
+            // single worker, the caller suppressed parallelism on this thread
+            // (nested under an outer parallel loop), or the work is below the
+            // caller's profitability grain. Skips the lock and the worker handoff.
+            if (_workerCount <= 1 || _suppressOnThisThread || totalWork < 2L * minItemsPerWorker)
             {
                 body(rangeStart, rangeEnd, context);
                 return;
