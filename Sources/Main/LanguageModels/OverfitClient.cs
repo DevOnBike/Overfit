@@ -105,8 +105,12 @@ namespace DevOnBike.Overfit.LanguageModels
                 template = ChatTemplate.Detect(reader.GetMeta("tokenizer.chat_template", string.Empty));
             }
 
-            // ── Tokenizer from sibling directory ──
-            var tokenizer = LoadTokenizer(modelDir);
+            // ── Tokenizer: prefer sibling files, else fall back to the GGUF's embedded vocabulary ──
+            // A bare *.gguf (e.g. downloaded from a GGUF-only HF repo) ships no tokenizer.json; in that
+            // case reconstruct the tokenizer from the file's own tokenizer.ggml.* metadata.
+            var tokenizer = HasSiblingTokenizer(modelDir)
+                ? LoadTokenizer(modelDir)
+                : new GgufEmbeddedTokenizer(GgufTokenizer.Load(ggufPath));
 
             // ── Engine + session ──
             var engine = GgufLlamaLoader.Load(ggufPath, quantize: quantize, mmap: mmap);
@@ -197,6 +201,14 @@ namespace DevOnBike.Overfit.LanguageModels
                     : string.Empty;
             }
             catch { return string.Empty; }
+        }
+
+        /// <summary>True when the directory ships tokenizer files (tokenizer.json, or vocab.json + merges.txt).</summary>
+        private static bool HasSiblingTokenizer(string modelDir)
+        {
+            if (File.Exists(Path.Combine(modelDir, "tokenizer.json"))) { return true; }
+            return File.Exists(Path.Combine(modelDir, "vocab.json"))
+                && File.Exists(Path.Combine(modelDir, "merges.txt"));
         }
 
         /// <summary>Tokenizer from a model directory: Qwen ChatML BPE when vocab.json+merges.txt present, else generic HF BPE.</summary>
