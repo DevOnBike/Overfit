@@ -277,3 +277,6 @@ out_temp/
 
 # models
 *.bin
+
+# big files
+*.zip

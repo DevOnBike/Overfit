@@ -109,11 +109,22 @@ jobs:
     - name: Install Native AOT prerequisites (clang + zlib)
       run: sudo apt-get update -y && sudo apt-get install -y clang zlib1g-dev libomp-dev
     - name: Publish AotSmokeTest under Native AOT
+      # TreatWarningsAsErrors promotes the trim/AOT analyzer warnings (IL2026 / IL3050 / IL2xxx /
+      # IL3xxx) to errors — that is the point of this guard, and a genuine AOT regression still fails it.
+      # Two carve-outs, both unrelated to AOT/trim safety:
+      #   * GenerateDocumentationFile=false — the smoke test does not need XML docs; this drops the
+      #     CS15xx doc-comment warning family (e.g. CS1574 unresolved cref).
+      #   * WarningsNotAsErrors — exempts the IDisposableAnalyzers (IDISP*) diagnostics, which are
+      #     intentional, heeded-but-not-fatal style warnings across the library (see CLAUDE.md).
+      # NOTE: semicolons in an MSBuild -p: value MUST be escaped as %3B, or MSBuild parses each id as
+      # a separate (invalid) switch.
       run: |
         dotnet publish ./Sources/AotSmokeTest/AotSmokeTest.csproj \
           -c Release -r linux-x64 \
           -p:PublishAot=true \
           -p:TreatWarningsAsErrors=true \
+          -p:GenerateDocumentationFile=false \
+          -p:WarningsNotAsErrors=IDISP001%3BIDISP002%3BIDISP003%3BIDISP004%3BIDISP005%3BIDISP006%3BIDISP007%3BIDISP008%3BIDISP009%3BIDISP010%3BIDISP011%3BIDISP012%3BIDISP013%3BIDISP014%3BIDISP015%3BIDISP016%3BIDISP017 \
           -o ./aot-publish
     - name: Run AOT-compiled smoketest binary
       run: ./aot-publish/AotSmokeTest

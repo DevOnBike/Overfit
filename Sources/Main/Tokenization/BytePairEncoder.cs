@@ -211,16 +211,28 @@ namespace DevOnBike.Overfit.Tokenization
         private static Dictionary<string, int> ParseVocabJson(
             string json)
         {
-            var parsed = JsonSerializer.Deserialize<Dictionary<string, int>>(json);
-
-            if (parsed is null || parsed.Count == 0)
+            // Reflection-free parse (JsonDocument, not JsonSerializer.Deserialize<T>) so the tokenizer
+            // stays Native-AOT / trim safe — the generic deserializer is RequiresUnreferencedCode +
+            // RequiresDynamicCode (IL2026 / IL3050) and would break under AOT.
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
             {
                 throw new InvalidOperationException("The BPE vocab JSON is empty or invalid.");
             }
 
-            return new Dictionary<string, int>(
-                parsed,
-                StringComparer.Ordinal);
+            var result = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var entry in root.EnumerateObject())
+            {
+                result[entry.Name] = entry.Value.GetInt32();
+            }
+
+            if (result.Count == 0)
+            {
+                throw new InvalidOperationException("The BPE vocab JSON is empty or invalid.");
+            }
+
+            return result;
         }
 
         private static string[] BuildIdToToken(

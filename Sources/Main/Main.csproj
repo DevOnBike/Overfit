@@ -3,6 +3,7 @@
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>annotations</Nullable>
         <DebugType>embedded</DebugType>
         <NoWarn>$(NoWarn);1591</NoWarn>
         <RootNamespace>DevOnBike.Overfit</RootNamespace>

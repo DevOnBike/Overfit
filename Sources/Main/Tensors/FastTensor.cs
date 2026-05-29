@@ -348,13 +348,9 @@ namespace DevOnBike.Overfit.Tensors
             }
             else
             {
-                // Fallback for other types.
-                // Currently Overfit uses this path for float.
-                for (var i = 0; i < target.Length; i++)
-                {
-                    throw new NotSupportedException(
-                        $"AddInPlace is only implemented for float tensors. Type: {typeof(T).Name}");
-                }
+                // Fallback for other types. Currently Overfit only uses this path for float.
+                throw new NotSupportedException(
+                    $"AddInPlace is only implemented for float tensors. Type: {typeof(T).Name}");
             }
         }
     }
