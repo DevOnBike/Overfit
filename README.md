@@ -2,6 +2,12 @@
 
 **Private LLMs, RAG, C# tool calling and guaranteed JSON inside your .NET app.**
 
+<p align="center">
+  <img src="docs/assets/overfit-features.png"
+       alt="Overfit at a glance — run, fine-tune and build agents on real LLMs entirely in .NET: pure-managed engine (0 B/token, Native AOT), load any GGUF/ONNX model memory-mapped, run GPT-2/Qwen/Llama, in-process agentic stack (RAG, tool calling, guaranteed JSON), LoRA fine-tuning, adaptive anomaly detection, runs in-process so data never leaves, CPU-first — no Python, no native binary, no model server."
+       width="560">
+</p>
+
 Overfit lets .NET teams add local AI features without Python, Ollama, a model server,
 native binaries, or data leaving the process.
 
