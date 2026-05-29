@@ -18,8 +18,17 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tools
     {
         private static readonly ToolDefinition[] Tools =
         [
-            new ToolDefinition("get_weather", "weather by city"),
-            new ToolDefinition("get_time", "current time"),
+            new("get_weather", "weather by city"),
+            new("get_time", "current time"),
+        ];
+
+        // Same tools, now with declared parameter schemas — the constraint must force the exact keys,
+        // order and value types (not just well-formed JSON).
+        private static readonly ToolDefinition[] SchemaTools =
+        [
+            new("get_weather", "weather by city", [new ToolParameter("city")]),
+            new("add", "add two integers",
+                [new ToolParameter("a", ToolParameterKind.Integer), new ToolParameter("b", ToolParameterKind.Integer)]),
         ];
 
         [Fact]
@@ -64,12 +73,58 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tools
             Assert.True(float.IsNegativeInfinity(logits[IndexOf('x')]));
         }
 
+        [Fact]
+        public void Schema_AcceptsExactKeysAndStringValue()
+        {
+            var ok = Drive(SchemaTools, "{\"name\": \"get_weather\", \"arguments\": {\"city\": \"paris\"}}", out var complete);
+            Assert.True(ok, "valid schema'd tool call was rejected");
+            Assert.True(complete, "valid schema'd tool call not reported complete");
+        }
+
+        [Fact]
+        public void Schema_RejectsWrongKeyName()
+        {
+            // schema declares "city"; the model trying "town" diverges at the very first key character.
+            Assert.False(Drive(SchemaTools, "{\"name\": \"get_weather\", \"arguments\": {\"town\": \"paris\"}}", out _));
+        }
+
+        [Fact]
+        public void Schema_RejectsWrongValueType()
+        {
+            // "city" is a String parameter; a numeric value must be rejected at the value's first char.
+            Assert.False(Drive(SchemaTools, "{\"name\": \"get_weather\", \"arguments\": {\"city\": 5}}", out _));
+        }
+
+        [Fact]
+        public void Schema_EnforcesMultiKeyOrderAndIntegerValues()
+        {
+            var ok = Drive(SchemaTools, "{\"name\": \"add\", \"arguments\": {\"a\": 12, \"b\": -3}}", out var complete);
+            Assert.True(ok, "valid two-integer call was rejected");
+            Assert.True(complete);
+        }
+
+        [Fact]
+        public void Schema_RejectsKeysOutOfOrder()
+        {
+            // schema order is a, then b; emitting "b" first diverges at the first key character.
+            Assert.False(Drive(SchemaTools, "{\"name\": \"add\", \"arguments\": {\"b\": 1, \"a\": 2}}", out _));
+        }
+
+        [Fact]
+        public void Schema_RejectsMissingSecondKey()
+        {
+            // After the first value, the only continuation is the ', "b": ' segment — closing early fails.
+            Assert.False(Drive(SchemaTools, "{\"name\": \"add\", \"arguments\": {\"a\": 1}}", out _));
+        }
+
         // Drives the constraint one character at a time via Accept, masking before each to confirm
         // the character was actually permitted. Returns false at the first masked character.
-        private static bool Drive(string text, out bool complete)
+        private static bool Drive(string text, out bool complete) => Drive(Tools, text, out complete);
+
+        private static bool Drive(ToolDefinition[] tools, string text, out bool complete)
         {
             var alphabet = Alphabet();
-            var c = new ToolCallConstraint(Tools, new CharTokenizer(alphabet));
+            var c = new ToolCallConstraint(tools, new CharTokenizer(alphabet));
             var logits = new float[alphabet.Length];
 
             foreach (var ch in text)
@@ -89,7 +144,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tools
             return true;
         }
 
-        private static string Alphabet() => "{}[]\":, \tabcdefghijklmnopqrstuvwxyz0123456789_";
+        private static string Alphabet() => "{}[]\":, \tabcdefghijklmnopqrstuvwxyz0123456789_-";
 
         private static int IndexOf(char c) => Alphabet().IndexOf(c);
 

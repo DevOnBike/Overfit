@@ -31,7 +31,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AnomalyConsoleDemo", "Demo\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AgentDemo", "Demo\AgentDemo\AgentDemo.csproj", "{829BADE6-8AD0-466E-B635-D5E32B71F8B8}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Overfit.LocalAgent.AspNet", "Demo\Overfit.LocalAgent.AspNet\Overfit.LocalAgent.AspNet.csproj", "{C3F4E1B2-7A8D-4E9F-A1B5-2D6C8E7F9A0B}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LocalAgent.AspNet", "Demo\LocalAgentAspNetDemo\LocalAgent.AspNet.csproj", "{C3F4E1B2-7A8D-4E9F-A1B5-2D6C8E7F9A0B}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

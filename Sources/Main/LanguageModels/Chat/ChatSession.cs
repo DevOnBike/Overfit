@@ -119,9 +119,46 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             if (userMessage is null) { throw new ArgumentNullException(nameof(userMessage)); }
 
             _history.Add(ChatMessage.User(userMessage));
+            var reply = GenerateFor(_history, in options, onText, constraint);
+            _history.Add(ChatMessage.Assistant(reply));
+            return reply;
+        }
 
-            // Render the whole conversation and prefill the session with it.
-            var promptText = _template.Render(_history, addGenerationPrompt: true);
+        /// <summary>
+        /// One-shot generation that does NOT touch the conversation history: renders the current
+        /// system turn(s) plus <paramref name="userMessage"/> as a single exchange, generates a reply
+        /// and returns it — recording neither the user turn nor the reply. Use for stateless task
+        /// calls (tool routing, JSON mode, retrieval answers) so they neither inherit earlier turns nor
+        /// accumulate across calls: each one prefills only its own (minimal) prompt. <see cref="Send"/>
+        /// remains the multi-turn conversational path.
+        /// </summary>
+        public string Complete(
+            string userMessage,
+            in GenerationOptions options,
+            Action<string>? onText = null,
+            ITokenConstraint? constraint = null)
+        {
+            if (userMessage is null) { throw new ArgumentNullException(nameof(userMessage)); }
+
+            // [system turns] + this single user turn — no prior user/assistant turns, nothing retained.
+            var oneShot = new List<ChatMessage>();
+            foreach (var message in _history)
+            {
+                if (string.Equals(message.Role, "system", StringComparison.Ordinal)) { oneShot.Add(message); }
+            }
+            oneShot.Add(ChatMessage.User(userMessage));
+
+            return GenerateFor(oneShot, in options, onText, constraint);
+        }
+
+        // Renders the given turns, prefills the session, runs the decode loop and records LastStats.
+        private string GenerateFor(
+            IReadOnlyList<ChatMessage> messages,
+            in GenerationOptions options,
+            Action<string>? onText,
+            ITokenConstraint? constraint)
+        {
+            var promptText = _template.Render(messages, addGenerationPrompt: true);
             var tokenCount = _tokenizer.CountTokens(promptText);
             var promptTokens = new int[tokenCount];
             var written = _tokenizer.Encode(promptText, promptTokens);
@@ -137,7 +174,6 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
                 allocatedBytes: 0,
                 usedKeyValueCache: true);
 
-            _history.Add(ChatMessage.Assistant(reply));
             return reply;
         }
 
@@ -186,6 +222,15 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
                     onText?.Invoke(emit);
                 }
                 if (stops.Stopped)
+                {
+                    break;
+                }
+
+                // A structural constraint (tool call / JSON grammar) reports IsComplete the instant a
+                // complete root value closes. Stop there: the model would otherwise keep sampling the
+                // only tokens still left unmasked — trailing whitespace — up to MaxNewTokens, which both
+                // wastes ~MaxNewTokens decode steps and appends a junk whitespace tail to the output.
+                if (constraint is { IsComplete: true })
                 {
                     break;
                 }

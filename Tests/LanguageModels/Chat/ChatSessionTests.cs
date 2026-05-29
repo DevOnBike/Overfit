@@ -41,6 +41,30 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Chat
         }
 
         [Fact]
+        public void Complete_DoesNotMutateHistory_AndIgnoresPriorTurns()
+        {
+            var session = new FakeSession("ok");
+            var chat = new ChatSession(session, new CharTokenizer(), new ChatTemplate(ChatTemplateFormat.ChatML));
+
+            chat.AddSystem("sys");
+            chat.AddUser("earlier-user");
+            chat.AddAssistant("earlier-reply");
+            Assert.Equal(3, chat.History.Count);
+
+            var reply = chat.Complete("q2", in Opts);
+
+            Assert.Equal("ok", reply);
+            // Complete is stateless: history is untouched (no user/assistant turn recorded).
+            Assert.Equal(3, chat.History.Count);
+
+            // The prefill saw only [system] + this one user turn — prior turns are excluded.
+            var expected = new ChatTemplate(ChatTemplateFormat.ChatML).Render(
+                new[] { ChatMessage.System("sys"), ChatMessage.User("q2") });
+            Assert.Equal(expected, session.LastPromptText);
+            Assert.DoesNotContain("earlier", session.LastPromptText, StringComparison.Ordinal);
+        }
+
+        [Fact]
         public void Send_StopsOnEndOfTextToken()
         {
             // Emits 'a','b', then EOS — reply should be "ab".

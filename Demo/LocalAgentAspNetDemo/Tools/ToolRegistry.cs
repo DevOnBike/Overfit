@@ -36,18 +36,26 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Tools
             // tool — is what makes routing reliable. (A 0.5B routes the wrong tool here regardless of
             // wording — tool selection is below its reasoning ceiling; use 1.5B+ for agentic. See
             // SmallModelAgenticProbeTests.)
+            // Parameters are enforced by the constraint: the model is forced to emit exactly these keys,
+            // in order, as strings — so the handler can never receive an invented or missing argument.
             Register(
                 new ToolDefinition(
                     "lookup_customer",
                     "Read an existing customer's account details (plan, region, months active) by email. " +
-                    "Use this to ANSWER QUESTIONS about a customer. Changes nothing."),
+                    "Use this to ANSWER QUESTIONS about a customer. Changes nothing.",
+                    [new ToolParameter("email")]),
                 LookupCustomer);
 
             Register(
                 new ToolDefinition(
                     "create_ticket",
                     "Open a NEW support ticket. Use ONLY when the user explicitly asks to open / create / " +
-                    "file / raise a ticket for a problem."),
+                    "file / raise a ticket for a problem.",
+                    [
+                        new ToolParameter("customerEmail"),
+                        new ToolParameter("subject"),
+                        new ToolParameter("priority"),
+                    ]),
                 CreateTicket);
         }
 
@@ -183,7 +191,4 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Tools
         };
     }
 
-    public record Customer(string Email, string Name, string Plan, string Region, int MonthsActive);
-
-    public record Ticket(string Id, string CustomerEmail, string Subject, string Priority, string Status);
 }

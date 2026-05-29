@@ -233,6 +233,22 @@ namespace DevOnBike.Overfit.LanguageModels
         }
 
         /// <summary>
+        /// Stateless one-shot generation — does NOT read or modify the conversation history; renders the
+        /// system message plus this single user turn, generates and returns the reply. Ideal for tool
+        /// routing, JSON mode and RAG answers, which should not accumulate across requests (each call
+        /// prefills only its own minimal prompt). Use <see cref="Send"/> for multi-turn conversation.
+        /// </summary>
+        public string Complete(
+            string userMessage,
+            Action<string>? onText = null,
+            ITokenConstraint? constraint = null)
+        {
+            ThrowIfDisposed();
+            var opts = _options;
+            return _chat.Complete(userMessage, in opts, onText, constraint);
+        }
+
+        /// <summary>
         /// Async version of <see cref="Send"/> — runs the (sync) generate loop on a thread-pool worker so
         /// the caller can <c>await</c>. Cancellation cooperates only at the boundary; in-flight token
         /// generation is not interruptible mid-step.

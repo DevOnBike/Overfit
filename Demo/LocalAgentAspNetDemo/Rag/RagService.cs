@@ -113,7 +113,9 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
                 var searchSeconds = Stopwatch.GetElapsedTime(searchStart).TotalSeconds;
 
                 var prompt = BuildPrompt(question, hits);
-                var reply = client.Send(prompt);
+                // Stateless: the retrieved context is self-contained grounding — answering must not
+                // inherit prior chat turns (it would bias the answer and re-prefill the whole history).
+                var reply = client.Complete(prompt);
                 var stats = client.Chat.LastStats;
 
                 var sources = new RagSource[hits.Length];
@@ -269,19 +271,4 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
         }
     }
 
-    public record IndexSummary(int TotalChunks, IReadOnlyList<FileIndexInfo> Files);
-
-    public record FileIndexInfo(string File, int Chunks);
-
-    public record RagQueryRequest(string Question, int? TopK);
-
-    public record RagAnswer(
-        string Reply,
-        IReadOnlyList<RagSource> Sources,
-        int PromptTokens,
-        int GeneratedTokens,
-        double TokensPerSecond,
-        double SearchSeconds);
-
-    public record RagSource(int Index, string Id, float Similarity, string Snippet);
 }

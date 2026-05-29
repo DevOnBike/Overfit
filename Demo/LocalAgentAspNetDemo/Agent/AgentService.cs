@@ -50,7 +50,9 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Agent
             // with a heterogeneous stop token is handled by the library's public ReActAgent.)
             var constraint = new ToolCallConstraint(_tools.Definitions, client.Tokenizer);
 
-            var reply = client.Send(BuildToolPrompt(message), constraint: constraint);
+            // Stateless: tool routing is a one-shot decision, so it neither inherits prior chat turns
+            // nor leaves its turn behind (keeps it fast and unbiased regardless of conversation state).
+            var reply = client.Complete(BuildToolPrompt(message), constraint: constraint);
 
             if (!ToolCall.TryParse(reply, out var call))
             {
@@ -73,7 +75,8 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Agent
         public JsonModeResult RunJson(OverfitClient client, string message)
         {
             var constraint = new JsonGrammarConstraint(client.Tokenizer);
-            var reply = client.Send(message, constraint: constraint);
+            // Stateless one-shot — guaranteed-JSON generation shouldn't accumulate conversation state.
+            var reply = client.Complete(message, constraint: constraint);
             return new JsonModeResult(reply);
         }
 
@@ -91,9 +94,4 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Agent
         }
     }
 
-    public record ToolCallRequest(string Message);
-
-    public record AgentResult(string ToolName, string Arguments, string Result);
-
-    public record JsonModeResult(string Json);
 }
