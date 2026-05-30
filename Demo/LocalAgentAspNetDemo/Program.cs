@@ -23,6 +23,7 @@ using DevOnBike.Overfit.Demo.LocalAgent.Chat;
 using DevOnBike.Overfit.Demo.LocalAgent.Infrastructure;
 using DevOnBike.Overfit.Demo.LocalAgent.Observability;
 using DevOnBike.Overfit.Demo.LocalAgent.Rag;
+using DevOnBike.Overfit.Demo.LocalAgent.Swagger;
 using DevOnBike.Overfit.Demo.LocalAgent.Tools;
 using DevOnBike.Overfit.LanguageModels;
 using OpenTelemetry.Metrics;
@@ -44,12 +45,25 @@ var systemMessage =
 // not safe for multi-user concurrent conversations. For multi-tenant, swap to a per-tenant
 // client-pool / session-per-request.
 var isGguf = modelPath.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase);
+var modelDisplay = isGguf
+    ? Path.GetFileName(modelPath)
+    : $"{Path.GetFileName(modelPath.TrimEnd('\\', '/'))} (safetensors)";
+
+// Log which model is being loaded — the environment name distinguishes the default English demo
+// from the Bielik Polish preset. A bootstrap logger because this runs before the host is built.
+using var startupLoggerFactory = LoggerFactory.Create(b => b.AddSimpleConsole(o => o.SingleLine = true));
+var startupLog = startupLoggerFactory.CreateLogger("Overfit.LocalAgent");
+startupLog.LogInformation("Environment '{Env}': loading {Kind} model {Model} from {Path} ...",
+    builder.Environment.EnvironmentName, isGguf ? "GGUF" : "safetensors", modelDisplay, modelPath);
+
 var loadStopwatch = Stopwatch.StartNew();
 var sharedClient = isGguf
     ? OverfitClient.LoadGguf(modelPath, mmap: true)
     : OverfitClient.LoadPretrained(modelPath);   // HuggingFace safetensors directory
 sharedClient.AddSystem(systemMessage);
 loadStopwatch.Stop();
+startupLog.LogInformation("Model loaded: {Model} in {Sec:F2}s (mmap={Mmap}).",
+    modelDisplay, loadStopwatch.Elapsed.TotalSeconds, isGguf);
 
 builder.Services.AddSingleton(sharedClient);
 
@@ -59,7 +73,7 @@ builder.Services.AddSingleton(sharedClient);
 var modelFile = isGguf ? modelPath : Path.Combine(modelPath, "model.safetensors");
 builder.Services.AddSingleton(new MetricsCollector
 {
-    ModelFile = isGguf ? Path.GetFileName(modelPath) : $"{Path.GetFileName(modelPath.TrimEnd('\\', '/'))} (safetensors)",
+    ModelFile = modelDisplay,
     ModelFingerprint = MetricsCollector.FingerprintModel(modelFile),
     MmapEnabled = isGguf,
     ModelLoadSeconds = Math.Round(loadStopwatch.Elapsed.TotalSeconds, 3),
@@ -91,7 +105,11 @@ builder.Services.AddSingleton<AgentService>();
 // Swagger UI — explore and exercise every endpoint from a browser at /swagger. The operation filter
 // pre-fills each request body with a ready-to-run example (Try it out → Execute, no typing needed).
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(o => o.OperationFilter<DevOnBike.Overfit.Demo.LocalAgent.Swagger.RequestExamplesFilter>());
+// Pre-filled request examples — in Polish when the preset asks for it (ExamplesLanguage: "pl",
+// set by appsettings.Bielik.json), English otherwise.
+var polishExamples = string.Equals(
+    builder.Configuration.GetValue<string>("ExamplesLanguage"), "pl", StringComparison.OrdinalIgnoreCase);
+builder.Services.AddSwaggerGen(o => o.OperationFilter<RequestExamplesFilter>(polishExamples));
 
 var app = builder.Build();
 
@@ -243,7 +261,9 @@ app.MapPost("/decision/refund", (ChatRequest req, OverfitClient client, AgentSer
     }
 
     var json = agent.RunRefundDecision(client, req.Message).Json;
+    
     metrics.RecordGeneration("decision_refund", client.Chat.LastStats);
+    
     return Results.Content(json, "application/json");
 });
 
