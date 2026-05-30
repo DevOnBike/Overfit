@@ -9,7 +9,7 @@ The model and your documents never leave your machine.
 ## Prerequisites
 
 - **.NET 10 SDK** (`dotnet --version` ≥ 10).
-- **~6 GB free disk** (the Bielik Q8_0 GGUF is ~4.8 GB; the MiniLM embedder ~90 MB) and **~6 GB free RAM** while running.
+- **~4 GB free disk** (the Bielik Q4_K_M GGUF is ~2.7 GB; the MiniLM embedder ~90 MB) and **~4 GB free RAM** while running.
 - **Python with `huggingface_hub`** — only to *download* the models (`pip install huggingface_hub`). It is not used at runtime.
 
 No HuggingFace token is needed: the Bielik **GGUF** repo and the MiniLM repo are both public. (The Bielik *safetensors* repo is gated, but the demo doesn't use it.)
@@ -21,7 +21,7 @@ No HuggingFace token is needed: the Bielik **GGUF** repo and the MiniLM repo are
 From the current folder (the scripts default to `C:\bielik` and `C:\minilm`; pass a path to override):
 
 ```powershell
-.\download-bielik.cmd        # the LLM      — Bielik-4.5B-v3.0-Instruct Q8_0 GGUF (~4.8 GB → C:\bielik)
+.\download-bielik.cmd        # the LLM      — Bielik-4.5B-v3.0-Instruct Q4_K_M GGUF (~2.7 GB → C:\bielik)
 .\download-embedder.cmd      # the embedder — all-MiniLM-L6-v2 (~90 MB → C:\minilm), used by RAG
 ```
 
@@ -43,7 +43,7 @@ or run with powershell
 
 The `bielik` profile sets `ASPNETCORE_ENVIRONMENT=Bielik`, which loads [`appsettings.Bielik.json`](appsettings.Bielik.json):
 
-- `ModelPath` → `C:\bielik\Bielik-4.5B-v3.0-Instruct.Q8_0.gguf` (tokenizer + ChatML template are read **from the GGUF** — no sibling files needed),
+- `ModelPath` → `C:\bielik\Bielik-4.5B-v3.0-Instruct-Q4_K_M.gguf` (tokenizer + ChatML template are read **from the GGUF** — no sibling files needed; Q4_K_M decodes ~1.24× faster than Q8_0),
 - `EmbeddingModelPath` → `C:\minilm`,
 - `DataPath` → `Data-pl` (the Polish documents: regulamin, polityka reklamacji, RODO, FAQ),
 - a Polish system prompt.
@@ -93,7 +93,7 @@ curl http://localhost:5234/metrics
 ## What to expect
 
 - **Coherent Polish** answers, with `allocatedBytes: 0` on every decode (zero-allocation hot path).
-- **~8 tok/s** on a typical desktop CPU (Q8_0, 4.5B). Smaller/faster comes at the cost of quality; this is a good demo balance.
+- **~11 tok/s** on a typical desktop CPU (Q4_K_M, 4.5B; Q8_0 is ~9 tok/s but larger). A good speed/quality balance for the demo.
 - Tool calls carry **exactly** the right argument keys (constrained decoding), and JSON is **well-formed by construction**.
 
 ## Known limits (model, not bugs)
@@ -108,7 +108,7 @@ curl http://localhost:5234/metrics
 | `Could not locate a model` at startup | Run `download-bielik.cmd`, or fix `ModelPath` in `appsettings.Bielik.json`. |
 | `/documents/index` or `/rag/query` returns 400 about the embedding model | Run `download-embedder.cmd`, or set `EmbeddingModelPath` / `OVERFIT_EMBEDDING_DIR`. |
 | `No module named huggingface_hub` | `pip install huggingface_hub`. |
-| Very slow / high RAM | Q8_0 needs ~5 GB resident; close other apps, or use a smaller GGUF. |
+| Very slow / high RAM | Q4_K_M needs ~3 GB resident; close other apps, or try a smaller quant (Q4_K_S / Q3_K_M). |
 | Answers come out in English | The `bielik` profile sets a Polish system prompt — make sure you launched with `--launch-profile bielik`. |
 
 ---
