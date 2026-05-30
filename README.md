@@ -39,6 +39,7 @@ It exposes a private AI agent over HTTP:
 | `POST /rag/query` | RAG over local documents |
 | `POST /agent` | C# tool calling with constrained JSON |
 | `POST /chat/json` | Guaranteed-valid JSON output |
+| `POST /decision/refund` | A business decision as guaranteed, typed JSON |
 | `GET /metrics` | Prometheus-style runtime metrics |
 
 The demo shows the full path:
@@ -56,6 +57,25 @@ No Python. No Ollama. No model server. No network call. The model is a file on
 disk; the agent is a singleton inside ASP.NET.
 
 See [`Demo/LocalAgentAspNetDemo`](Demo/LocalAgentAspNetDemo/README.md).
+
+### Run Bielik (a Polish LLM) in pure .NET
+
+The demo ships a **Polish preset** that runs [Bielik](https://huggingface.co/speakleash/Bielik-4.5B-v3.0-Instruct-GGUF) over Polish documents — Polish chat, RAG, C# tool calling and guaranteed JSON, one .NET process, no Python / Ollama / model server / data egress:
+
+```bash
+cd Demo/LocalAgentAspNetDemo
+./download-bielik.cmd      # the LLM   (~4.8 GB GGUF -> C:\bielik)
+./download-embedder.cmd    # the RAG embedder (~90 MB -> C:\minilm)
+./run-bielik.cmd           # = dotnet run -c Release --launch-profile bielik
+```
+
+Bielik's tokenizer and ChatML template are read straight from the GGUF (no side-loaded files), and the constrained tool-calling / JSON paths work on its SentencePiece tokenizer:
+
+```
+/rag/query        -> "Klient z UE ma 14 dni na odstąpienie od umowy..."        (Polish, grounded, cited)
+/agent            -> create_ticket { customerEmail, subject, priority }        (Polish request -> C# tool)
+/decision/refund  -> { "eligible": true, "reason": "...", "requiredAction": "accept_refund", "confidence": 0.95 }
+```
 
 ---
 

@@ -44,6 +44,27 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Constraints
         }
 
         [Fact]
+        public void RequireObject_AtRoot_OnlyOpenBraceOrWhitespaceSurvive()
+        {
+            var c = new JsonGrammarConstraint(new FakeTokenizer(Vocab, Eos), requireObject: true);
+            var logits = MaskFreshZeros(c);
+
+            Assert.True(Allowed(logits, OpenBrace));      // { is the only legal value start now
+            Assert.True(Allowed(logits, Space));          // leading whitespace still fine
+
+            Assert.False(Allowed(logits, OpenBracket));   // array root rejected
+            Assert.False(Allowed(logits, Quote));         // string root rejected (the wrap-in-string case)
+            Assert.False(Allowed(logits, One));           // number root rejected
+            Assert.False(Allowed(logits, Eos));
+
+            // Once the object has opened, the gate no longer applies — normal object rules resume.
+            c.Accept(OpenBrace);
+            var after = MaskFreshZeros(c);
+            Assert.True(Allowed(after, Quote));           // a key string
+            Assert.True(Allowed(after, CloseBrace));      // empty object
+        }
+
+        [Fact]
         public void AfterOpenBrace_OnlyKeyOrCloseSurvive()
         {
             var c = new JsonGrammarConstraint(new FakeTokenizer(Vocab, Eos));

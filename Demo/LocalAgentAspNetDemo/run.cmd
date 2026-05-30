@@ -1,2 +1,2 @@
  cls
- dotnet run -c Release AgentDemo.csproj --launch-profile http
+ dotnet run -c Release --project LocalAgent.AspNet.csproj --launch-profile http

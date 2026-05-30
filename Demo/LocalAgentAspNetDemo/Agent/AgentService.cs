@@ -74,9 +74,36 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Agent
         /// </summary>
         public JsonModeResult RunJson(OverfitClient client, string message)
         {
-            var constraint = new JsonGrammarConstraint(client.Tokenizer);
-            // Stateless one-shot — guaranteed-JSON generation shouldn't accumulate conversation state.
+            // requireObject: force a JSON object root (some models otherwise satisfy "valid JSON" with a
+            // quoted string that merely contains JSON). Stateless one-shot — JSON gen shouldn't accumulate.
+            var constraint = new JsonGrammarConstraint(client.Tokenizer, requireObject: true);
             var reply = client.Complete(message, constraint: constraint);
+            return new JsonModeResult(reply);
+        }
+
+        /// <summary>
+        /// A business-process example of guaranteed JSON: turns a free-text refund scenario into a
+        /// structured decision (<c>eligible</c> / <c>reason</c> / <c>requiredAction</c> /
+        /// <c>confidence</c>), well-formed by construction via <see cref="JsonGrammarConstraint"/>.
+        /// Language-agnostic — the system prompt / scenario language drives the reply language (the
+        /// Bielik preset answers in Polish).
+        /// </summary>
+        public JsonModeResult RunRefundDecision(OverfitClient client, string scenario)
+        {
+            var prompt = new StringBuilder();
+            prompt.AppendLine("Decide whether the customer is entitled to a refund / withdrawal, based on the scenario.");
+            prompt.AppendLine("Reply with ONLY a JSON object with exactly these fields:");
+            prompt.AppendLine("  \"eligible\": true or false,");
+            prompt.AppendLine("  \"reason\": a short justification,");
+            prompt.AppendLine("  \"requiredAction\": one of \"accept_refund\", \"reject\", \"manual_review\",");
+            prompt.AppendLine("  \"confidence\": a number between 0 and 1.");
+            prompt.AppendLine("Keep the field names and requiredAction values exactly as above (English), but write");
+            prompt.AppendLine("the \"reason\" in the same language as the scenario.");
+            prompt.AppendLine();
+            prompt.Append("Scenario: ").AppendLine(scenario);
+
+            var constraint = new JsonGrammarConstraint(client.Tokenizer, requireObject: true);
+            var reply = client.Complete(prompt.ToString(), constraint: constraint);
             return new JsonModeResult(reply);
         }
 
