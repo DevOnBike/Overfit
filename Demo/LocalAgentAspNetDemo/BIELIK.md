@@ -18,7 +18,7 @@ No HuggingFace token is needed: the Bielik **GGUF** repo and the MiniLM repo are
 
 ## 1. Download the two models
 
-From the **repository root** (the scripts default to `C:\bielik` and `C:\minilm`; pass a path to override):
+From the current folder (the scripts default to `C:\bielik` and `C:\minilm`; pass a path to override):
 
 ```powershell
 .\download-bielik.cmd        # the LLM      — Bielik-4.5B-v3.0-Instruct Q8_0 GGUF (~4.8 GB → C:\bielik)
@@ -33,6 +33,12 @@ The demo loads **two** models: the LLM answers, the embedder retrieves. You need
 
 ```powershell
 dotnet run -c Release --project Demo/LocalAgentAspNetDemo --launch-profile bielik
+```
+
+or run with powershell
+
+```powershell
+.\run-bielik.cmd
 ```
 
 The `bielik` profile sets `ASPNETCORE_ENVIRONMENT=Bielik`, which loads [`appsettings.Bielik.json`](appsettings.Bielik.json):
@@ -55,30 +61,25 @@ Wait for `Now listening on http://localhost:5234`. Open **`http://localhost:5234
 curl http://localhost:5234/health
 
 # Chat (Polish).
-curl -X POST http://localhost:5234/chat -H "Content-Type: application/json" `
-  -d '{ "message": "Wyjaśnij krótko, czym jest rękojmia." }'
+curl -X POST http://localhost:5234/chat -H "Content-Type: application/json" -d '{ "message": "Wyjaśnij krótko, czym jest rękojmia." }'
 
 # Index the Polish documents (chunks + embeds into the in-process vector store).
 curl -X POST http://localhost:5234/documents/index
 
 # RAG over the Polish documents — grounded, with cited sources.
-curl -X POST http://localhost:5234/rag/query -H "Content-Type: application/json" `
-  -d '{ "question": "Ile dni ma klient z UE na odstąpienie od umowy?", "topK": 4 }'
+curl -X POST http://localhost:5234/rag/query -H "Content-Type: application/json" -d '{ "question": "Ile dni ma klient z UE na odstąpienie od umowy?", "topK": 4 }'
 # → "Klient z UE ma 14 dni na odstąpienie od umowy, liczone od daty zakupu."
 
 # Tool calling — a Polish request becomes a constrained C# tool call.
-curl -X POST http://localhost:5234/agent -H "Content-Type: application/json" `
-  -d '{ "message": "Załóż zgłoszenie reklamacyjne o wysokim priorytecie dla klienta anna@firma.pl." }'
+curl -X POST http://localhost:5234/agent -H "Content-Type: application/json" -d '{ "message": "Załóż zgłoszenie reklamacyjne o wysokim priorytecie dla klienta anna@firma.pl." }'
 # → toolName: create_ticket, args { customerEmail, subject, priority }, dispatched + result
 
 # Guaranteed JSON object.
-curl -X POST http://localhost:5234/chat/json -H "Content-Type: application/json" `
-  -d '{ "message": "Zwróć obiekt JSON z polami imie i miasto dla Anny z Krakowa." }'
+curl -X POST http://localhost:5234/chat/json -H "Content-Type: application/json" -d '{ "message": "Zwróć obiekt JSON z polami imie i miasto dla Anny z Krakowa." }'
 # → { "imie": "Anna", "miasto": "Kraków" }
 
 # A business decision as guaranteed, typed JSON (field names English, reason in Polish).
-curl -X POST http://localhost:5234/decision/refund -H "Content-Type: application/json" `
-  -d '{ "message": "Klient z UE kupił produkt 10 dni temu, nie był używany, chce odstąpić od umowy." }'
+curl -X POST http://localhost:5234/decision/refund -H "Content-Type: application/json" -d '{ "message": "Klient z UE kupił produkt 10 dni temu, nie był używany, chce odstąpić od umowy." }'
 # → { "eligible": true, "reason": "Klient ma prawo do odstąpienia w ciągu 14 dni...", "requiredAction": "accept_refund", "confidence": 0.95 }
 
 # Prometheus metrics (zero-allocation decode is visible here: overfit_allocated_bytes_total = 0).
