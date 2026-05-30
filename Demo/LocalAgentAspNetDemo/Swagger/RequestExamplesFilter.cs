@@ -39,6 +39,10 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Swagger
                     ["question"] = "Can an EU customer get a refund after 10 days?",
                     ["topK"] = 3,
                 },
+                "decision/refund" => new JsonObject
+                {
+                    ["message"] = "Klient z UE kupił produkt 10 dni temu, nie był używany, chce odstąpić od umowy.",
+                },
                 _ => null,
             };
 

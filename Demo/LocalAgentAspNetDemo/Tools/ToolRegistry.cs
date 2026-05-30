@@ -153,12 +153,14 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Tools
             });
         }
 
+        // Accepts English and Polish priority words (the Bielik preset's model answers in Polish, e.g.
+        // "wysoki"); anything unrecognised falls back to "normal".
         private static string NormalisePriority(string value) =>
             value.Trim().ToLowerInvariant() switch
             {
-                "low" => "low",
-                "high" => "high",
-                "urgent" => "high",
+                "low" or "niski" => "low",
+                "high" or "wysoki" or "urgent" or "pilny" => "high",
+                "normal" or "normalny" or "średni" or "sredni" => "normal",
                 _ => "normal",
             };
 

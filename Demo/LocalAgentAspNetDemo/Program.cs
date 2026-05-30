@@ -232,6 +232,21 @@ app.MapPost("/chat/json", (ChatRequest req, OverfitClient client, AgentService a
     return Results.Content(json, "application/json");
 });
 
+// A business-process flavour of guaranteed JSON: a free-text refund/withdrawal scenario in, a
+// structured { eligible, reason, requiredAction, confidence } decision out — well-formed by
+// construction. Shows "the model drives a real decision", not just chat.
+app.MapPost("/decision/refund", (ChatRequest req, OverfitClient client, AgentService agent, MetricsCollector metrics) =>
+{
+    if (string.IsNullOrWhiteSpace(req.Message))
+    {
+        return Results.BadRequest(new { error = "'message' is required and must be non-empty." });
+    }
+
+    var json = agent.RunRefundDecision(client, req.Message).Json;
+    metrics.RecordGeneration("decision_refund", client.Chat.LastStats);
+    return Results.Content(json, "application/json");
+});
+
 // ── Metrics (Phase 4): Prometheus scrape endpoint ─────────────────────────
 // OpenTelemetry serves the Prometheus exposition at /metrics from the Meter instruments recorded by
 // MetricsCollector — the idiomatic ASP.NET Core path, no hand-rolled text.

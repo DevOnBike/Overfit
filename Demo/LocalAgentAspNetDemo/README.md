@@ -8,6 +8,35 @@ A reference template a .NET developer can drop into an existing service to add a
 
 ---
 
+## Bielik — Polish local agent (preset) 🇵🇱
+
+A ready-made **Polish** preset runs the demo on [Bielik](https://huggingface.co/speakleash/Bielik-4.5B-v3.0-Instruct-GGUF) (a Polish LLM) over Polish documents — chat, RAG, tool calling and guaranteed JSON, all in pure .NET, no Python / Ollama / model server / data egress.
+
+```powershell
+.\download-bielik.cmd                                              # the LLM (~4.8 GB GGUF → C:\bielik)
+.\download-embedder.cmd                                            # the RAG embedder (~90 MB → C:\minilm)
+dotnet run -c Release --project Demo/LocalAgentAspNetDemo --launch-profile bielik
+```
+
+The `bielik` profile sets `ASPNETCORE_ENVIRONMENT=Bielik`, which loads [`appsettings.Bielik.json`](appsettings.Bielik.json): Bielik GGUF (loaded with the tokenizer read from the file — no sibling `tokenizer.json` needed), a Polish system prompt, and `DataPath: Data-pl/` (regulamin, polityka reklamacji, RODO, FAQ). Everything else (endpoints, metrics) is identical to the default.
+
+```powershell
+# RAG over the Polish documents
+curl -X POST http://localhost:5234/rag/query -H "Content-Type: application/json" -d '{ "question": "Ile dni ma klient z UE na odstąpienie od umowy?", "topK": 4 }'
+# → "Klient z UE ma 14 dni na odstąpienie od umowy, liczone od daty zakupu."
+
+# A C# tool call from a Polish request
+curl -X POST http://localhost:5234/agent -H "Content-Type: application/json" -d '{ "message": "Załóż zgłoszenie reklamacyjne o wysokim priorytecie dla klienta anna@firma.pl." }'
+
+# A structured business decision as guaranteed JSON (field names English, reason in Polish)
+curl -X POST http://localhost:5234/decision/refund -H "Content-Type: application/json" -d '{ "message": "Klient z UE kupił produkt 10 dni temu, nie był używany, chce odstąpić od umowy." }'
+# → { "eligible": true, "reason": "Klient ma prawo do odstąpienia w ciągu 14 dni...", "requiredAction": "accept_refund", "confidence": 0.95 }
+```
+
+> Bielik-4.5B Q8_0 decodes at ~8 tok/s on CPU. Retrieval ranking uses MiniLM (English-centric) — fine for the demo, but a Polish/multilingual embedder would rank Polish passages better. Borderline temporal questions ("refund *after* 10 days") are at the edge of a 4.5B's reasoning and can flip — lead with clear factual questions.
+
+**Full step-by-step setup & run guide: [`BIELIK.md`](BIELIK.md).**
+
 ## 5-minute quickstart
 
 ### 1. Get a model
@@ -143,27 +172,29 @@ The response is returned with `Content-Type: application/json` and is guaranteed
 curl http://localhost:5234/metrics
 ```
 
+The instruments come from `System.Diagnostics.Metrics` (`Meter`) and are exported by OpenTelemetry, so the exposition is standard OpenMetrics (`_total` counters, `_bucket`/`_sum`/`_count` histograms, an `otel_scope_name` label):
+
 ```text
-# HELP overfit_build_info Static info about the loaded model (value is always 1).
 # TYPE overfit_build_info gauge
-overfit_build_info{model="qwen.q4km.gguf",fingerprint="9f3a1c0b7d2e4a51",mmap="true"} 1
-# HELP overfit_model_load_seconds Time to load the model at startup.
+overfit_build_info{otel_scope_name="Overfit.LocalAgent",model="qwen.q4km.gguf",fingerprint="9f3a1c0b7d2e4a51",mmap="true"} 1
 # TYPE overfit_model_load_seconds gauge
-overfit_model_load_seconds 1.84
-# HELP overfit_requests_total Requests handled, by endpoint.
+# UNIT overfit_model_load_seconds seconds
+overfit_model_load_seconds{otel_scope_name="Overfit.LocalAgent"} 0.84
 # TYPE overfit_requests_total counter
-overfit_requests_total{endpoint="chat"} 3
-overfit_requests_total{endpoint="agent"} 2
-# HELP overfit_allocated_bytes_total Total bytes allocated during generation (Overfit targets ~0 B/token).
+overfit_requests_total{otel_scope_name="Overfit.LocalAgent",endpoint="chat"} 3
+overfit_requests_total{otel_scope_name="Overfit.LocalAgent",endpoint="agent"} 2
+# TYPE overfit_generated_tokens_total counter
+overfit_generated_tokens_total{otel_scope_name="Overfit.LocalAgent"} 45
 # TYPE overfit_allocated_bytes_total counter
-overfit_allocated_bytes_total 96
-# HELP overfit_decode_tokens_per_second Decode throughput of the most recent generation.
-# TYPE overfit_decode_tokens_per_second gauge
-overfit_decode_tokens_per_second 18.6
-# HELP overfit_tool_calls_total Tool calls dispatched, by tool name.
+overfit_allocated_bytes_total{otel_scope_name="Overfit.LocalAgent"} 0
 # TYPE overfit_tool_calls_total counter
-overfit_tool_calls_total{tool="create_ticket"} 1
-overfit_tool_calls_total{tool="lookup_customer"} 1
+overfit_tool_calls_total{otel_scope_name="Overfit.LocalAgent",tool="create_ticket"} 1
+# TYPE overfit_decode_rate_per_second histogram   (per-generation throughput; _bucket lines elided)
+overfit_decode_rate_per_second_sum{otel_scope_name="Overfit.LocalAgent",endpoint="chat"} 46.2
+overfit_decode_rate_per_second_count{otel_scope_name="Overfit.LocalAgent",endpoint="chat"} 3
+# TYPE overfit_rag_search_seconds histogram       (retrieval latency; _bucket lines elided)
+overfit_rag_search_seconds_sum{otel_scope_name="Overfit.LocalAgent"} 0.016
+overfit_rag_search_seconds_count{otel_scope_name="Overfit.LocalAgent"} 1
 ```
 
 `overfit_allocated_bytes_total / overfit_generated_tokens_total` is the per-token allocation — it should sit near zero, which is the whole point. The model fingerprint is a fast partial hash (size + head + tail), enough to pin which model build is running without hashing the whole multi-GB file. Full metric reference: [`Observability/otel.md`](Observability/otel.md).
@@ -179,7 +210,7 @@ docker compose -f Demo/LocalAgentAspNetDemo/compose.yaml up --build
 ```
 
 - App: `http://localhost:5234` (e.g. `curl http://localhost:5234/health`)
-- Prometheus: `http://localhost:9090` — graph `overfit_decode_tokens_per_second` or the per-token allocation
+- Prometheus: `http://localhost:9090` — graph `overfit_decode_rate_per_second` (histogram) or the per-token allocation
 
 The image is a framework-dependent publish for portability; switch to Native AOT (`-p:PublishAot=true` on a build image with clang + zlib, final stage on `runtime-deps`) for a smaller, faster-starting container.
 

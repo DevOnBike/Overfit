@@ -75,13 +75,17 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
             //   - FFN intermediate [T, dFF] (linear-1 output + GELU output)    ~ 2 · T·dFF
             //   - ~16 residual / projection / layer-norm buffers [T, d]        ~ 16 · T·d
             // The [T, T] attention term grows QUADRATICALLY with T and is what an earlier dFF-scaled
-            // heuristic (T·dFF·k) missed: it under-sized a full-length (T = 256) forward and threw an
-            // OutOfMemory at the sequence-length limit. 1 << 22 (4M floats) stays the floor so the
-            // short-sentence case is cheap; +25% headroom covers buffer-count drift across configs.
+            // heuristic (T·dFF·k) missed. But the arena must hold the WHOLE forward tape at once: the
+            // ComputationGraph keeps every layer's activations live until Reset(), AND allocates a
+            // gradient buffer per node — so the real peak at full T is roughly 2.5× the activation-data
+            // estimate below. A +25%/+50% margin was only ever enough because short sentences (and the
+            // BGE/E5 parity checks) never reached T = MaxSequenceLength; a full-length 256-token chunk
+            // (e.g. a Polish passage, which sub-words heavily) is what exposes the true peak.
+            // 1 << 22 (4M floats) stays the floor so the short-sentence case is cheap.
             var t = (long)MaxSequenceLength;
             var perLayer = (2L * config.NumHeads * t * t) + (2L * t * config.IntermediateSize) + (16L * t * d);
             var estimate = config.NumLayers * perLayer;
-            var arenaFloats = Math.Max(1 << 22, estimate + (estimate / 4));
+            var arenaFloats = Math.Max(1 << 22, (estimate * 5) / 2);
             if (arenaFloats > int.MaxValue)
             {
                 throw new InvalidOperationException(

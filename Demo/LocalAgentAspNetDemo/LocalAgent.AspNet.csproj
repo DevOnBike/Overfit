@@ -37,8 +37,12 @@
 
     <ItemGroup>
         <!-- Sample documents the RAG demo indexes. Copied next to the built assembly so
-             AppContext.BaseDirectory + "Data" resolves at runtime. -->
+             AppContext.BaseDirectory + "<DataPath>" resolves at runtime. Data\ = English (default),
+             Data-pl\ = Polish (the Bielik preset's DataPath). -->
         <Content Include="Data\**\*" CopyToOutputDirectory="PreserveNewest" />
+        <Content Include="Data-pl\**\*" CopyToOutputDirectory="PreserveNewest" />
+        <!-- appsettings.Bielik.json (the ASPNETCORE_ENVIRONMENT=Bielik preset) is copied automatically
+             by the Web SDK's default appsettings*.json content items. -->
     </ItemGroup>
 
 </Project>

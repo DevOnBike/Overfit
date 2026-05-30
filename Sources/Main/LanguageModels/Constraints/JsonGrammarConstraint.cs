@@ -26,12 +26,21 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
     {
         private readonly string[] _tokenText;
         private readonly int _eosTokenId;
+        private readonly bool _requireObject;
+        private bool _rootStarted;
         private JsonStateMachine _committed;
 
-        public JsonGrammarConstraint(ITokenizer tokenizer)
+        /// <param name="requireObject">
+        /// When true, the root value must be a JSON object: until the opening <c>{</c> is emitted, only
+        /// whitespace or a token whose first non-whitespace character is <c>{</c> is allowed. Stops a
+        /// model from satisfying "valid JSON" with a bare string/number/array (e.g. a quoted string that
+        /// merely contains JSON). Defaults to false (any well-formed JSON value).
+        /// </param>
+        public JsonGrammarConstraint(ITokenizer tokenizer, bool requireObject = false)
         {
             ArgumentNullException.ThrowIfNull(tokenizer);
 
+            _requireObject = requireObject;
             _eosTokenId = tokenizer.EndOfTextTokenId;
 
             var vocab = tokenizer.VocabularySize;
@@ -76,6 +85,14 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
                     continue;
                 }
 
+                // Object-root mode: before the first value char is committed, only "{" (or leading
+                // whitespace) may open the document.
+                if (_requireObject && !_rootStarted && !OpensObject(text))
+                {
+                    logits[t] = float.NegativeInfinity;
+                    continue;
+                }
+
                 if (!Accepts(text))
                 {
                     logits[t] = float.NegativeInfinity;
@@ -93,8 +110,23 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
             {
                 // The token was unmasked, so every character must advance the committed machine.
                 _committed.TryAdvance(text[i]);
+                if (!IsJsonWhitespace(text[i])) { _rootStarted = true; }
             }
         }
+
+        // True if the token is all whitespace (still at the document start) or its first non-whitespace
+        // character is '{'. Used only while the root object has not yet opened.
+        private static bool OpensObject(string text)
+        {
+            foreach (var c in text)
+            {
+                if (IsJsonWhitespace(c)) { continue; }
+                return c == '{';
+            }
+            return true;
+        }
+
+        private static bool IsJsonWhitespace(char c) => c is ' ' or '\t' or '\n' or '\r';
 
         // Would feeding the whole token text keep the document well-formed (from the committed state)?
         private bool Accepts(string text)

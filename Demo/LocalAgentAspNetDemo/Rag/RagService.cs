@@ -143,8 +143,9 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
         {
             var sb = new StringBuilder();
             sb.AppendLine("You are a support assistant. Answer the question using ONLY the numbered context below. Rules:");
+            sb.AppendLine("- Reply in the SAME LANGUAGE as the question.");
             sb.AppendLine("- Use only facts stated in the context. If the answer is not there, say you don't have that information.");
-            sb.AppendLine("- For a yes/no question about a number, date, period, or limit: FIRST state the relevant limit from the context and whether the value in the question is within or beyond that limit; THEN end with your verdict, \"Yes\" or \"No\".");
+            sb.AppendLine("- For a yes/no question about a number, date, period, or limit: FIRST state the relevant limit from the context and whether the value in the question is within or beyond that limit; THEN give a clear yes/no verdict (in the question's language).");
             sb.AppendLine("- Keep the answer to at most two sentences, and cite the [n] source(s) you used.");
             sb.AppendLine();
             sb.AppendLine("Context:");
@@ -196,9 +197,13 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
         private string ResolveDataDir()
         {
             var fromSettings = _config.GetValue<string>("DataPath");
-            if (!string.IsNullOrWhiteSpace(fromSettings) && Directory.Exists(fromSettings))
+            if (!string.IsNullOrWhiteSpace(fromSettings))
             {
-                return fromSettings;
+                // Absolute path, or a folder name relative to the output dir (e.g. the Bielik preset's
+                // "Data-pl", copied next to the assembly).
+                if (Directory.Exists(fromSettings)) { return fromSettings; }
+                var relative = Path.Combine(AppContext.BaseDirectory, fromSettings);
+                if (Directory.Exists(relative)) { return relative; }
             }
 
             // Default: the Data folder copied next to the built assembly.
