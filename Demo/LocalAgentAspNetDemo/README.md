@@ -20,6 +20,8 @@ dotnet run -c Release --project Demo/LocalAgentAspNetDemo --launch-profile bieli
 
 The `bielik` profile sets `ASPNETCORE_ENVIRONMENT=Bielik`, which loads [`appsettings.Bielik.json`](appsettings.Bielik.json): Bielik GGUF (loaded with the tokenizer read from the file — no sibling `tokenizer.json` needed), a Polish system prompt, and `DataPath: Data-pl/` (regulamin, polityka reklamacji, RODO, FAQ). Everything else (endpoints, metrics) is identical to the default.
 
+Open **[http://localhost:5234/swagger](http://localhost:5234/swagger)** and click **Try it out → Execute** — the request bodies are pre-filled (the `/decision/refund` example is already in Polish). Or use curl:
+
 ```powershell
 # RAG over the Polish documents
 curl -X POST http://localhost:5234/rag/query -H "Content-Type: application/json" -d '{ "question": "Ile dni ma klient z UE na odstąpienie od umowy?", "topK": 4 }'
@@ -78,7 +80,11 @@ dotnet run -c Release --project Demo/LocalAgentAspNetDemo
 
 First request loads the model into mmap-backed K-quant weights (~1–2 seconds, sub-300 MB live managed heap). Subsequent calls are zero-allocation on the decode hot path.
 
-### 4. Try it
+### 4. Try it — Swagger (easiest)
+
+Open **[http://localhost:5234/swagger](http://localhost:5234/swagger)** (`GET /` redirects there). Every endpoint is listed with its request body **pre-filled with a ready-to-run example** — expand one, click **Try it out → Execute**, no typing. This is the fastest way to explore the whole agent.
+
+Prefer the terminal? The same calls as curl (the curl examples below are exactly what Swagger sends):
 
 ```powershell
 # Health — confirms the model loaded and the host is listening.
@@ -92,6 +98,8 @@ curl -X POST http://localhost:5234/chat `
 # Reset conversation between sessions.
 curl -X POST http://localhost:5234/reset
 ```
+
+> The sections below show each endpoint as curl for reference — but you can run all of them from Swagger with the pre-filled examples instead.
 
 ### 5. Try RAG over the sample documents
 
