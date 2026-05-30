@@ -63,9 +63,10 @@ See [`Demo/LocalAgentAspNetDemo`](Demo/LocalAgentAspNetDemo/README.md).
 The demo ships a **Polish preset** that runs [Bielik](https://huggingface.co/speakleash/Bielik-4.5B-v3.0-Instruct-GGUF) over Polish documents — Polish chat, RAG, C# tool calling and guaranteed JSON, one .NET process, no Python / Ollama / model server / data egress:
 
 ```bash
+cd Demo/LocalAgentAspNetDemo
 ./download-bielik.cmd      # the LLM   (~4.8 GB GGUF -> C:\bielik)
 ./download-embedder.cmd    # the RAG embedder (~90 MB -> C:\minilm)
-dotnet run -c Release --project Demo/LocalAgentAspNetDemo --launch-profile bielik
+./run-bielik.cmd           # = dotnet run -c Release --launch-profile bielik
 ```
 
 Bielik's tokenizer and ChatML template are read straight from the GGUF (no side-loaded files), and the constrained tool-calling / JSON paths work on its SentencePiece tokenizer:
