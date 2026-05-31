@@ -86,6 +86,23 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// <summary>Resident size in bytes.</summary>
         public long ByteCount => Blocks.Length;
 
+        private byte[]? _repacked;
+
+        /// <summary>True when this weight can be repacked to <c>block_q4_Kx8</c> for the fast
+        /// 8×8 decode GEMV (<see cref="Q4KGemvKernel"/>).</summary>
+        public bool CanRepack => OutputSize % Q4KRepack.RowsInterleaved == 0 && InputSize % SuperBlockElements == 0;
+
+        /// <summary>
+        /// Lazily builds + caches the <c>block_q4_Kx8</c> repacked form (8 rows interleaved) for
+        /// <see cref="Q4KGemvKernel.GemvParallel"/>. Allocates a copy (~same size as the original)
+        /// on first call; safe to call repeatedly. Requires <see cref="CanRepack"/>.
+        /// </summary>
+        public ReadOnlySpan<byte> EnsureRepacked()
+        {
+            _repacked ??= Q4KRepack.RepackMatrix(BlockSpan, OutputSize, InputSize);
+            return _repacked;
+        }
+
         /// <summary>
         /// Dequantizes output row <paramref name="row"/> — one output's <see cref="InputSize"/>-long
         /// contraction vector, i.e. one token's embedding when this matrix is a token-embedding table —

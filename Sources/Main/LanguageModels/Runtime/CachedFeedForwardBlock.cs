@@ -255,10 +255,26 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             in DecodeWeight wDown,
             Span<float> output)
         {
+            // Repacked 8×8 GEMV path (OVERFIT_REPACK_GEMV): quantize hidden once, then run
+            // gate + up through the repacked kernel (8 rows/lane, no per-row hsum — ~2× the
+            // per-core throughput of the 1-row kernel). Q4_K gate/up only; down stays Q6_K.
+            if (Q4KGemvKernel.Enabled && wGate.IsQ4K && wUp.IsQ4K
+                && wGate.Quantized4K.CanRepack && wUp.Quantized4K.CanRepack)
+            {
+                Q4KDotKernel.QuantizeActivationQ8K(
+                    hidden.Slice(0, DModel), _q8kInputQuants, _q8kInputScales, _q8kInputBsums);
+                Q4KGemvKernel.GemvParallel(
+                    wGate.Quantized4K.EnsureRepacked(), DFF, DModel,
+                    _q8kInputQuants, _q8kInputScales, _q8kInputBsums, _gate);
+                ApplySiLU(_gate);
+                Q4KGemvKernel.GemvParallel(
+                    wUp.Quantized4K.EnsureRepacked(), DFF, DModel,
+                    _q8kInputQuants, _q8kInputScales, _q8kInputBsums, _intermediate);
+            }
             // gate and up project the SAME hidden. When both are Q4_K (the Q4_K_M FFN
             // case), fuse them: quantize hidden once + one dispatch for both halves
             // (decode FFN is dispatch-overhead bound). Otherwise keep the two-call path.
-            if (wGate.IsQ4K && wUp.IsQ4K)
+            else if (wGate.IsQ4K && wUp.IsQ4K)
             {
                 Q4KDotKernel.ProjectGateUpParallel(
                     hidden, wGate.Quantized4K, wUp.Quantized4K, _gate, _intermediate,
