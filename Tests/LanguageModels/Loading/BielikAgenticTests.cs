@@ -24,7 +24,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
     {
         private const string Path = @"C:\bielik\Bielik-4.5B-v3.0-Instruct.Q8_0.gguf";
         private readonly ITestOutputHelper _out;
-        
+
         public BielikAgenticTests(ITestOutputHelper output) => _out = output;
 
         private static readonly ToolDefinition[] Tools =
@@ -86,7 +86,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         {
             var constraint = new ToolCallConstraint(Tools, client.Tokenizer);
             var reply = client.Complete(BuildToolPrompt(message), constraint: constraint);
-            
+
             if (!ToolCall.TryParse(reply, out var call))
             {
                 throw new InvalidOperationException($"Constrained reply did not parse as a tool call: '{reply}'.");
@@ -97,7 +97,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         private static string BuildToolPrompt(string message)
         {
             var sb = new StringBuilder();
-            
+
             sb.AppendLine("Wybierz JEDNO narzędzie pasujące do prośby, a następnie podaj jego argumenty:");
             foreach (var tool in Tools)
             {
@@ -105,7 +105,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             }
             sb.AppendLine();
             sb.Append("Prośba: ").AppendLine(message);
-            
+
             return sb.ToString();
         }
     }

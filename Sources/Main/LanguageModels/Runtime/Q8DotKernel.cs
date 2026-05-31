@@ -302,7 +302,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     BlocksPerRow = blocksPerRow,
                 };
 
-                OverfitParallelFor.For(0, outputSize, 1, OverfitParallelFor.DecodeMaxWorkers, &ProjectChunk, &context);
+                OverfitParallelFor.ForDecode(0, outputSize, &ProjectChunk, &context);
             }
         }
 

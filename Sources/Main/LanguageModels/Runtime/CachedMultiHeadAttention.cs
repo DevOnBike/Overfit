@@ -207,9 +207,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
                 if (useHeadParallel)
                 {
-                    // K/V already cached above; fan Q-proj + attend + O-proj across
-                    // all Q heads (WorkerCount > KvHeadCount guaranteed here).
-                    OverfitParallelFor.For(0, HeadCount, &DecodeHeadQao, contextPtr);
+                    // K/V already cached above; fan Q-proj + attend + O-proj across the Q
+                    // heads via the decode dispatch (capped / spin-pool per config).
+                    OverfitParallelFor.ForDecode(0, HeadCount, &DecodeHeadQao, contextPtr);
                 }
                 else if (KvHeadCount > 1 && OverfitParallelFor.WorkerCount > 1)
                 {
