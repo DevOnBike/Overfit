@@ -3,6 +3,10 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
+
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
     /// <summary>
@@ -92,7 +96,24 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 var probability = scoreScratch[t] * invSum;
                 var value = values.Slice(t * headDimension, headDimension);
 
-                for (var d = 0; d < headDimension; d++)
+                var d = 0;
+                if (Avx2.IsSupported)
+                {
+                    // Vectorize over headDim. output[d] accumulates over t in ascending order
+                    // (unchanged), and each d is independent + uses separate Multiply/Add (no FMA),
+                    // so this is BIT-IDENTICAL to the scalar weighted sum.
+                    ref var o = ref MemoryMarshal.GetReference(output);
+                    ref var vv = ref MemoryMarshal.GetReference(value);
+                    var probV = Vector256.Create(probability);
+                    for (; d + 8 <= headDimension; d += 8)
+                    {
+                        var acc = Vector256.LoadUnsafe(ref o, (nuint)d);
+                        var val = Vector256.LoadUnsafe(ref vv, (nuint)d);
+                        Avx.Add(acc, Avx.Multiply(probV, val)).StoreUnsafe(ref o, (nuint)d);
+                    }
+                }
+
+                for (; d < headDimension; d++)
                 {
                     output[d] += probability * value[d];
                 }
@@ -184,14 +205,50 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ReadOnlySpan<float> left,
             ReadOnlySpan<float> right)
         {
-            var sum = 0f;
+            var n = left.Length;
 
-            for (var i = 0; i < left.Length; i++)
+            if (Avx2.IsSupported && n >= 8)
             {
-                sum += left[i] * right[i];
+                // Two accumulators break the scalar sum's loop-carried dependency (the latency
+                // bottleneck of the score dot at long context). NOT bit-identical to the scalar
+                // sequential sum (vectorized + reassociated) — it's marginally MORE accurate, like
+                // llama.cpp's dot; greedy decode stays coherent. Score precision here is non-critical
+                // (softmax is robust to ~1 ULP).
+                ref var l = ref MemoryMarshal.GetReference(left);
+                ref var r = ref MemoryMarshal.GetReference(right);
+
+                var acc0 = Vector256<float>.Zero;
+                var acc1 = Vector256<float>.Zero;
+                var i = 0;
+                for (; i + 16 <= n; i += 16)
+                {
+                    acc0 = Avx.Add(acc0, Avx.Multiply(
+                        Vector256.LoadUnsafe(ref l, (nuint)i), Vector256.LoadUnsafe(ref r, (nuint)i)));
+                    acc1 = Avx.Add(acc1, Avx.Multiply(
+                        Vector256.LoadUnsafe(ref l, (nuint)(i + 8)), Vector256.LoadUnsafe(ref r, (nuint)(i + 8))));
+                }
+                for (; i + 8 <= n; i += 8)
+                {
+                    acc0 = Avx.Add(acc0, Avx.Multiply(
+                        Vector256.LoadUnsafe(ref l, (nuint)i), Vector256.LoadUnsafe(ref r, (nuint)i)));
+                }
+
+                var sum = Vector256.Sum(Avx.Add(acc0, acc1));
+                for (; i < n; i++)
+                {
+                    sum += left[i] * right[i];
+                }
+
+                return sum;
             }
 
-            return sum;
+            var s = 0f;
+            for (var i = 0; i < n; i++)
+            {
+                s += left[i] * right[i];
+            }
+
+            return s;
         }
     }
 
