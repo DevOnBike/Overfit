@@ -174,9 +174,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 ref var q8Ref = ref MemoryMarshal.GetReference(q8);
                 var maskLow = Vector256.Create((byte)0x0F);
 
-                var acc = 0;
+                // Defer the horizontal reduction: each sub-block contributes
+                // scale[s]·pairs32ₛ (8 int32 lanes) into a single accumulator, and
+                // we reduce to a scalar ONCE per super-block instead of 8× (the old
+                // per-block Vector256.Sum was latency-bound and starved the loads).
+                // Σₛ scale[s]·Sum(pairsₛ) = Sum(Σₛ scale[s]·pairsₛ) — bit-identical
+                // INT32 (max lane ≈ 8·63·7.6k ≈ 3.8M, sum ≈ 30M, no overflow).
                 // Four 32-byte nibble runs; each carries two sub-blocks — the
                 // low nibbles (even s) and the high nibbles (odd s).
+                var accVec = Vector256<int>.Zero;
                 for (var p = 0; p < 4; p++)
                 {
                     var packed = Vector256.LoadUnsafe(ref Unsafe.Add(ref qsRef, 32 * p));
@@ -187,10 +193,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     var q8Even = Vector256.LoadUnsafe(ref Unsafe.Add(ref q8Ref, 64 * p));
                     var q8Odd = Vector256.LoadUnsafe(ref Unsafe.Add(ref q8Ref, 64 * p + 32));
 
-                    acc += scales[2 * p] * Int8BlockDot(lowNibbles, q8Even)
-                         + scales[2 * p + 1] * Int8BlockDot(highNibbles, q8Odd);
+                    accVec = Avx2.Add(accVec,
+                        Avx2.MultiplyLow(Int8BlockPairs(lowNibbles, q8Even),
+                            Vector256.Create((int)scales[2 * p])));
+                    accVec = Avx2.Add(accVec,
+                        Avx2.MultiplyLow(Int8BlockPairs(highNibbles, q8Odd),
+                            Vector256.Create((int)scales[2 * p + 1])));
                 }
-                return acc;
+                return Vector256.Sum(accVec);
             }
 
             var sum = 0;
@@ -220,9 +230,18 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// </summary>
         private static int Int8BlockDot(Vector256<byte> nibbles, Vector256<sbyte> q8)
         {
+            return Vector256.Sum(Int8BlockPairs(nibbles, q8));
+        }
+
+        /// <summary>
+        /// <c>Σ nibᵢ·q8ᵢ</c> as 8 INT32 lane-partial-sums (no horizontal reduction) —
+        /// lets the caller scale-and-accumulate across sub-blocks and reduce once.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector256<int> Int8BlockPairs(Vector256<byte> nibbles, Vector256<sbyte> q8)
+        {
             var pairs16 = Avx2.MultiplyAddAdjacent(nibbles, q8);
-            var pairs32 = Avx2.MultiplyAddAdjacent(pairs16, Vector256.Create((short)1));
-            return Vector256.Sum(pairs32);
+            return Avx2.MultiplyAddAdjacent(pairs16, Vector256.Create((short)1));
         }
 
         /// <summary>
