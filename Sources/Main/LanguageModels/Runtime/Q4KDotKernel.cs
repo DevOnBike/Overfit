@@ -81,6 +81,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 throw new ArgumentException("Bsums span is smaller than blocks * groups.", nameof(bsums));
             }
 
+            if (Avx2.IsSupported)
+            {
+                QuantizeActivationQ8KAvx2(source, quants, blockScales, bsums, blocks);
+                return;
+            }
+
             for (var b = 0; b < blocks; b++)
             {
                 var block = source.Slice(b * SuperBlockElements, SuperBlockElements);
@@ -110,6 +116,79 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         sum += q;
                     }
                     bsums[b * GroupsPerSuperBlock + g] = (short)sum;
+                }
+            }
+        }
+
+        /// <summary>
+        /// AVX2 path for <see cref="QuantizeActivationQ8K"/>. Bit-identical to the scalar
+        /// reference: abs/max are exact, <c>x·inverse</c> is the same FP multiply,
+        /// <see cref="Avx.RoundToNearestInteger(Vector256{float})"/> is round-half-to-even
+        /// (== <see cref="MathF.Round(float)"/>), the clamp+truncate matches (rounded values
+        /// are integral), and the group sums add the same integers. Runs single-threaded on
+        /// the decode critical path before every matmul — the scalar version was a ~few-%
+        /// decode tax (the down-proj quantizes 11008 elements/layer); llama.cpp's
+        /// <c>quantize_row_q8_K</c> is scalar too, so SIMD here is a net edge.
+        /// </summary>
+        private static void QuantizeActivationQ8KAvx2(
+            ReadOnlySpan<float> source,
+            Span<sbyte> quants,
+            Span<float> blockScales,
+            Span<short> bsums,
+            int blocks)
+        {
+            ref var srcRef = ref MemoryMarshal.GetReference(source);
+            ref var qRef = ref MemoryMarshal.GetReference(quants);
+
+            var absMask = Vector256.Create(0x7FFF_FFFF).AsSingle();
+            var lo = Vector256.Create(-127f);
+            var hi = Vector256.Create(127f);
+
+            for (var b = 0; b < blocks; b++)
+            {
+                var blockBase = (nuint)(b * SuperBlockElements);
+
+                // Pass 1: absmax over the 256 elements (Max(0, |x|) — Zero init is valid
+                // since |x| >= 0; bit-identical max of the same value set).
+                var maxV = Vector256<float>.Zero;
+                for (var i = 0; i < SuperBlockElements; i += 8)
+                {
+                    var v = Vector256.LoadUnsafe(ref srcRef, blockBase + (nuint)i);
+                    maxV = Avx.Max(maxV, Avx.And(v, absMask));
+                }
+
+                var m128 = Sse.Max(maxV.GetLower(), maxV.GetUpper());
+                var absMax = MathF.Max(
+                    MathF.Max(m128.GetElement(0), m128.GetElement(1)),
+                    MathF.Max(m128.GetElement(2), m128.GetElement(3)));
+
+                var scale = absMax / 127f;
+                blockScales[b] = scale;
+
+                var inverse = scale > 0f ? 1f / scale : 0f;
+                var invV = Vector256.Create(inverse);
+
+                // Pass 2: per 16-element group — quantize + group sum, packed to int8.
+                for (var g = 0; g < GroupsPerSuperBlock; g++)
+                {
+                    var groupBase = blockBase + (nuint)(g * GroupSize);
+
+                    var x0 = Vector256.LoadUnsafe(ref srcRef, groupBase);
+                    var x1 = Vector256.LoadUnsafe(ref srcRef, groupBase + 8);
+
+                    var r0 = Avx.Min(hi, Avx.Max(lo, Avx.RoundToNearestInteger(Avx.Multiply(x0, invV))));
+                    var r1 = Avx.Min(hi, Avx.Max(lo, Avx.RoundToNearestInteger(Avx.Multiply(x1, invV))));
+
+                    var i0 = Avx.ConvertToVector256Int32(r0);   // truncate; values are integral
+                    var i1 = Avx.ConvertToVector256Int32(r1);
+
+                    bsums[b * GroupsPerSuperBlock + g] = (short)Vector256.Sum(Avx2.Add(i0, i1));
+
+                    // int32 → int16 → int8 (logical order via Vector256.Narrow; values fit,
+                    // so no saturation/truncation loss). Low 16 lanes are the group's quants.
+                    var shorts = Vector256.Narrow(i0, i1);
+                    var bytes = Vector256.Narrow(shorts, shorts);
+                    bytes.GetLower().StoreUnsafe(ref qRef, groupBase);
                 }
             }
         }
