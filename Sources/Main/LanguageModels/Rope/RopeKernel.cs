@@ -6,6 +6,7 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
+using DevOnBike.Overfit.Intrinsics;
 
 namespace DevOnBike.Overfit.LanguageModels.Rope
 {
@@ -59,7 +60,7 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
             {
                 // Split-half (HF rotate_half / NEOX): pairs (x[i], x[i+halfDim]) share frequency i.
                 var i = 0;
-                if (Avx2.IsSupported)
+                if (CpuFeatures.HasAvx2)
                 {
                     i = ApplySplitHalfAvx2(headVector, cos, sin, halfDim);
                 }
@@ -76,7 +77,7 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
 
             // Adjacent-pair: pairs (x[2i], x[2i+1]) share frequency i.
             var p = 0;
-            if (Avx2.IsSupported)
+            if (CpuFeatures.HasAvx2)
             {
                 p = ApplyAdjacentAvx2(headVector, cos, sin, halfDim);
             }

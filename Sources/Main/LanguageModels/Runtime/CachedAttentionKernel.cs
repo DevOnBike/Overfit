@@ -6,6 +6,7 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
+using DevOnBike.Overfit.Intrinsics;
 
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
@@ -97,7 +98,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 var value = values.Slice(t * headDimension, headDimension);
 
                 var d = 0;
-                if (Avx2.IsSupported)
+                if (CpuFeatures.HasAvx2)
                 {
                     // Vectorize over headDim. output[d] accumulates over t in ascending order
                     // (unchanged), and each d is independent + uses separate Multiply/Add (no FMA),

@@ -8,6 +8,8 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
+using DevOnBike.Overfit.Intrinsics;
+using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.LanguageModels.Runtime
@@ -124,7 +126,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ReadOnlySpan<sbyte> q8Block,
             ReadOnlySpan<byte> scales)
         {
-            if (Avx2.IsSupported)
+            if (CpuFeatures.HasAvx2)
             {
                 ref var qlRef = ref MemoryMarshal.GetReference(ql);
                 ref var qhRef = ref MemoryMarshal.GetReference(qh);

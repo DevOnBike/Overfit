@@ -7,6 +7,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
+using DevOnBike.Overfit.Intrinsics;
 using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.LanguageModels.Runtime
@@ -467,7 +468,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// </summary>
         private static int Int8BlockDot(Vector256<sbyte> a, Vector256<sbyte> b)
         {
-            if (Avx2.IsSupported)
+            if (CpuFeatures.HasAvx2)
             {
                 var absA = Avx2.Abs(a);                                  // |a|, as bytes
                 var signedB = Avx2.Sign(b, a);                           // b · sign(a)

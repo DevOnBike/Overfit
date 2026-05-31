@@ -8,6 +8,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
+using DevOnBike.Overfit.Intrinsics;
 using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.Runtime;
 
@@ -81,7 +82,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 throw new ArgumentException("Bsums span is smaller than blocks * groups.", nameof(bsums));
             }
 
-            if (Avx2.IsSupported)
+            if (CpuFeatures.HasAvx2)
             {
                 QuantizeActivationQ8KAvx2(source, quants, blockScales, bsums, blocks);
                 return;
@@ -247,7 +248,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// </summary>
         private static int MainDot(ReadOnlySpan<byte> qs, ReadOnlySpan<sbyte> q8, ReadOnlySpan<byte> scales)
         {
-            if (Avx2.IsSupported)
+            if (CpuFeatures.HasAvx2)
             {
                 ref var qsRef = ref MemoryMarshal.GetReference(qs);
                 ref var q8Ref = ref MemoryMarshal.GetReference(q8);
