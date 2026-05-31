@@ -129,8 +129,33 @@ namespace DevOnBike.Overfit.Runtime
     public static unsafe class OverfitParallelFor
     {
         private const string WorkerCountEnvVar = "OVERFIT_PARALLEL_WORKERS";
+        private const string DecodeWorkersEnvVar = "OVERFIT_DECODE_WORKERS";
 
         private static readonly int _workerCount = ResolveWorkerCount();
+
+        /// <summary>
+        /// Worker cap for small, numerous single-token decode dispatches (the FFN
+        /// projection matmuls). These ~0.2 ms matmuls are dispatch-overhead bound, not
+        /// bandwidth bound: measured on a 32-core box, fanning a 12.7 MB FFN matrix across
+        /// all 32 workers runs it at ~11 GB/s, while a handful of workers hits ~37 GB/s
+        /// (≈3×) — and end-to-end Bielik-4.5B Q4_K_M decode goes 12.55 → 14.0 tok/s (+11%).
+        /// The tok/s-vs-cap curve plateaus around 10-12 on a 32-core box (6→11.8, 8→13.4,
+        /// 10→14.0, 12→14.1, 32→12.5). Defaults to <c>min(WorkerCount, 10)</c>; override
+        /// with <c>OVERFIT_DECODE_WORKERS</c>. Prefill / training are unaffected (they pass
+        /// the full <see cref="WorkerCount"/>).
+        /// </summary>
+        public static int DecodeMaxWorkers { get; set; } = ResolveDecodeMaxWorkers();
+
+        private static int ResolveDecodeMaxWorkers()
+        {
+            var workers = ResolveWorkerCount();
+            var raw = Environment.GetEnvironmentVariable(DecodeWorkersEnvVar);
+            if (!string.IsNullOrEmpty(raw) && int.TryParse(raw, out var requested) && requested > 0)
+            {
+                return Math.Min(requested, workers);
+            }
+            return Math.Min(workers, 10);
+        }
 
         private static int ResolveWorkerCount()
         {
@@ -255,6 +280,23 @@ namespace DevOnBike.Overfit.Runtime
             int minItemsPerWorker,
             delegate*<int, int, void*, void> body,
             void* context)
+            => For(rangeStart, rangeEnd, minItemsPerWorker, _workerCount, body, context);
+
+        /// <summary>
+        /// Grained <see cref="For(int,int,int,delegate*{int,int,void*,void},void*)"/> with an
+        /// explicit <paramref name="maxWorkers"/> cap on the chunk (worker) count. Small,
+        /// numerous dispatches (single-token decode FFN matmuls) are dispatch-overhead
+        /// bound, not bandwidth bound, so fanning them across all cores is a net loss —
+        /// the optimum is a handful of workers (see <see cref="DecodeMaxWorkers"/>).
+        /// Prefill / training keep the full pool by passing <see cref="WorkerCount"/>.
+        /// </summary>
+        public static void For(
+            int rangeStart,
+            int rangeEnd,
+            int minItemsPerWorker,
+            int maxWorkers,
+            delegate*<int, int, void*, void> body,
+            void* context)
         {
             if (body == null)
             {
@@ -289,7 +331,8 @@ namespace DevOnBike.Overfit.Runtime
                 return;
             }
 
-            var chunkCount = Math.Min(_workerCount, totalWork);
+            var cap = maxWorkers < 1 ? 1 : Math.Min(maxWorkers, _workerCount);
+            var chunkCount = Math.Min(cap, totalWork);
             var perChunk = (totalWork + chunkCount - 1) / chunkCount;
 
             lock (_gate)

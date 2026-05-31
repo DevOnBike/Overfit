@@ -360,7 +360,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     SuperBlocksPerRow = weight.SuperBlocksPerRow,
                 };
 
-                OverfitParallelFor.For(0, outputSize, &ProjectChunk, &context);
+                OverfitParallelFor.For(0, outputSize, 1, OverfitParallelFor.DecodeMaxWorkers, &ProjectChunk, &context);
             }
         }
 
