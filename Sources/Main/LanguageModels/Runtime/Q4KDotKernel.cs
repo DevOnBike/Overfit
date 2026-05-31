@@ -391,6 +391,107 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
         }
 
+        /// <summary>
+        /// Fused SwiGLU gate+up projection: both project the SAME <paramref name="input"/>,
+        /// so the activation is quantized to Q8_K <b>once</b> and both output halves are
+        /// produced in <b>one</b> parallel dispatch (rows <c>[0,outDim)</c> = gate,
+        /// <c>[outDim,2·outDim)</c> = up) instead of two — halving the decode FFN dispatch
+        /// count + activation-quantize for these two matmuls (decode is dispatch-overhead
+        /// bound). Bit-identical to two <see cref="ProjectParallel"/> calls. Both weights
+        /// share input/output dims (they do for SwiGLU); no bias (gate/up are bias-free).
+        /// </summary>
+        public static void ProjectGateUpParallel(
+            ReadOnlySpan<float> input,
+            Q4KWeight gate,
+            Q4KWeight up,
+            Span<float> gateOutput,
+            Span<float> upOutput,
+            Span<sbyte> activationQuants,
+            Span<float> activationScales,
+            Span<short> activationBsums)
+        {
+            ArgumentNullException.ThrowIfNull(gate);
+            ArgumentNullException.ThrowIfNull(up);
+
+            var inputSize = gate.InputSize;
+            var outDim = gate.OutputSize;
+
+            QuantizeActivationQ8K(
+                input.Slice(0, inputSize), activationQuants, activationScales, activationBsums);
+
+            fixed (byte* gateBlocks = gate.BlockSpan)
+            fixed (byte* upBlocks = up.BlockSpan)
+            fixed (sbyte* actQuants = activationQuants)
+            fixed (float* actScales = activationScales)
+            fixed (short* actBsums = activationBsums)
+            fixed (float* gateOut = gateOutput)
+            fixed (float* upOut = upOutput)
+            {
+                var context = new Q4KGateUpContext
+                {
+                    GateBlocks = gateBlocks,
+                    UpBlocks = upBlocks,
+                    ActivationQuants = actQuants,
+                    ActivationScales = actScales,
+                    ActivationBsums = actBsums,
+                    GateOutput = gateOut,
+                    UpOutput = upOut,
+                    SuperBlocksPerRow = gate.SuperBlocksPerRow,
+                    OutDim = outDim,
+                };
+
+                OverfitParallelFor.For(
+                    0, 2 * outDim, 1, OverfitParallelFor.DecodeMaxWorkers, &GateUpChunk, &context);
+            }
+        }
+
+        /// <summary>Worker body for <see cref="ProjectGateUpParallel"/> — rows below
+        /// <c>OutDim</c> hit the gate matrix, the rest the up matrix.</summary>
+        private static void GateUpChunk(int chunkStart, int chunkEnd, void* context)
+        {
+            ref var ctx = ref Unsafe.AsRef<Q4KGateUpContext>(context);
+            var superBlocksPerRow = ctx.SuperBlocksPerRow;
+            var outDim = ctx.OutDim;
+
+            for (var g = chunkStart; g < chunkEnd; g++)
+            {
+                var isUp = g >= outDim;
+                var row = isUp ? g - outDim : g;
+                var blocks = isUp ? ctx.UpBlocks : ctx.GateBlocks;
+                var rowBase = (long)row * superBlocksPerRow * Q4KWeight.SuperBlockBytes;
+
+                var sum = 0f;
+                for (var sb = 0; sb < superBlocksPerRow; sb++)
+                {
+                    var block = new ReadOnlySpan<byte>(
+                        blocks + rowBase + (long)sb * Q4KWeight.SuperBlockBytes,
+                        Q4KWeight.SuperBlockBytes);
+                    var q8 = new ReadOnlySpan<sbyte>(
+                        ctx.ActivationQuants + sb * SuperBlockElements, SuperBlockElements);
+                    var bsums = new ReadOnlySpan<short>(
+                        ctx.ActivationBsums + sb * GroupsPerSuperBlock, GroupsPerSuperBlock);
+
+                    sum += Dot(block, q8, ctx.ActivationScales[sb], bsums);
+                }
+
+                if (isUp) { ctx.UpOutput[row] = sum; }
+                else { ctx.GateOutput[row] = sum; }
+            }
+        }
+
+        private struct Q4KGateUpContext
+        {
+            public byte* GateBlocks;
+            public byte* UpBlocks;
+            public sbyte* ActivationQuants;
+            public float* ActivationScales;
+            public short* ActivationBsums;
+            public float* GateOutput;
+            public float* UpOutput;
+            public int SuperBlocksPerRow;
+            public int OutDim;
+        }
+
         private struct Q4KProjectContext
         {
             public byte* Blocks;

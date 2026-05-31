@@ -255,12 +255,25 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             in DecodeWeight wDown,
             Span<float> output)
         {
-            // gate = SiLU(hidden @ Wgate)
-            ProjectParallelDispatched(hidden, in wGate, [], _gate, DModel, DFF);
-            ApplySiLU(_gate);
+            // gate and up project the SAME hidden. When both are Q4_K (the Q4_K_M FFN
+            // case), fuse them: quantize hidden once + one dispatch for both halves
+            // (decode FFN is dispatch-overhead bound). Otherwise keep the two-call path.
+            if (wGate.IsQ4K && wUp.IsQ4K)
+            {
+                Q4KDotKernel.ProjectGateUpParallel(
+                    hidden, wGate.Quantized4K, wUp.Quantized4K, _gate, _intermediate,
+                    _q8kInputQuants, _q8kInputScales, _q8kInputBsums);
+                ApplySiLU(_gate);
+            }
+            else
+            {
+                // gate = SiLU(hidden @ Wgate)
+                ProjectParallelDispatched(hidden, in wGate, [], _gate, DModel, DFF);
+                ApplySiLU(_gate);
 
-            // up = hidden @ Wup
-            ProjectParallelDispatched(hidden, in wUp, [], _intermediate, DModel, DFF);
+                // up = hidden @ Wup
+                ProjectParallelDispatched(hidden, in wUp, [], _intermediate, DModel, DFF);
+            }
 
             // intermediate = gate * up (element-wise)
             TensorPrimitives.Multiply(_gate, _intermediate, _intermediate);
