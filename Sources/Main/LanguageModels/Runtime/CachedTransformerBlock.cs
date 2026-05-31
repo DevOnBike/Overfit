@@ -183,6 +183,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 input, weights.Ln1Gamma, weights.Ln1Beta, _ln1Output, DModel, LayerNormEpsilon);
             }
 
+            var profAttn = DecodeProfiler.Start();
             _attention.Decode(
                 _ln1Output,
                 weights,
@@ -191,6 +192,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 position,
                 _attentionOutput,
                 rope);
+            DecodeProfiler.Stop(DecodeProfiler.Component.Attention, profAttn);
 
             SingleTokenLayerNormKernel.AddResidual(
                 input,
@@ -208,6 +210,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 _afterAttentionResidual, weights.Ln2Gamma, weights.Ln2Beta, _ln2Output, DModel, LayerNormEpsilon);
             }
 
+            var profFfn = DecodeProfiler.Start();
             // MoE (qwen2moe): routed experts + sigmoid-gated shared expert.
             if (weights.IsMoe)
             {
@@ -247,6 +250,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     weights.FfnB2,
                     _feedForwardOutput);
             }
+            DecodeProfiler.Stop(DecodeProfiler.Component.Ffn, profFfn);
 
             SingleTokenLayerNormKernel.AddResidual(
                 _afterAttentionResidual,
