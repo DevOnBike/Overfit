@@ -129,8 +129,33 @@ namespace DevOnBike.Overfit.Runtime
     public static unsafe class OverfitParallelFor
     {
         private const string WorkerCountEnvVar = "OVERFIT_PARALLEL_WORKERS";
+        private const string DecodeWorkersEnvVar = "OVERFIT_DECODE_WORKERS";
 
         private static readonly int _workerCount = ResolveWorkerCount();
+
+        /// <summary>
+        /// Worker cap for small, numerous single-token decode dispatches (the FFN
+        /// projection matmuls). These ~0.2 ms matmuls are dispatch-overhead bound, not
+        /// bandwidth bound: measured on a 32-core box, fanning a 12.7 MB FFN matrix across
+        /// all 32 workers runs it at ~11 GB/s, while a handful of workers hits ~37 GB/s
+        /// (≈3×) — and end-to-end Bielik-4.5B Q4_K_M decode goes 12.55 → 14.0 tok/s (+11%).
+        /// The tok/s-vs-cap curve plateaus around 10-12 on a 32-core box (6→11.8, 8→13.4,
+        /// 10→14.0, 12→14.1, 32→12.5). Defaults to <c>min(WorkerCount, 10)</c>; override
+        /// with <c>OVERFIT_DECODE_WORKERS</c>. Prefill / training are unaffected (they pass
+        /// the full <see cref="WorkerCount"/>).
+        /// </summary>
+        public static int DecodeMaxWorkers { get; set; } = ResolveDecodeMaxWorkers();
+
+        private static int ResolveDecodeMaxWorkers()
+        {
+            var workers = ResolveWorkerCount();
+            var raw = Environment.GetEnvironmentVariable(DecodeWorkersEnvVar);
+            if (!string.IsNullOrEmpty(raw) && int.TryParse(raw, out var requested) && requested > 0)
+            {
+                return Math.Min(requested, workers);
+            }
+            return Math.Min(workers, 10);
+        }
 
         private static int ResolveWorkerCount()
         {
@@ -178,6 +203,33 @@ namespace DevOnBike.Overfit.Runtime
         // sides.
         private static PaddedCounter _nextChunk;
 
+        // ── Decode spin-pool (opt-in: OVERFIT_DECODE_POOL=1) ───────────────────────
+        // A SEPARATE pool of _decodePoolSize threads (== DecodeMaxWorkers) that SPIN on
+        // _decodeGen instead of parking, so the ~180 tiny FFN/attention dispatches per
+        // decoded token avoid a per-op kernel semaphore wake (llama.cpp "wake once, spin
+        // across the graph; idle threads park"). Sized to the cap, so EVERY pool thread
+        // participates in a decode dispatch — no idle spin-burn (the mistake that sank the
+        // all-32 spin barrier: there 22/32 spun for nothing and starved the workers).
+        // Spawned only when the flag is on; prefill / training keep the main parking pool.
+        // SpinWait backs off (hot-spin → yield → Sleep(1)), so the pool cools between
+        // tokens / when decode is idle. One-claim-per-generation = race-free (a worker only
+        // claims after observing a fresh _decodeGen, published after the descriptors).
+        private const string DecodePoolEnvVar = "OVERFIT_DECODE_POOL";
+        private static readonly bool _decodePool = ResolveDecodePool();
+        private static readonly int _decodePoolSize = ResolveDecodeMaxWorkers();
+        private static readonly Lock _decodeGate = new();
+        private static ChunkState[] _decodeChunks = [];
+        private static long _decodeGen;
+        private static int _decodeChunkCount;
+        private static PaddedCounter _decodeNextChunk;
+        private static PaddedCounter _decodeRemaining;
+
+        private static bool ResolveDecodePool()
+        {
+            var raw = Environment.GetEnvironmentVariable(DecodePoolEnvVar);
+            return raw is "1" || string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase);
+        }
+
         static OverfitParallelFor()
         {
             _startSemaphore = new SemaphoreSlim(0, _workerCount);
@@ -192,6 +244,20 @@ namespace DevOnBike.Overfit.Runtime
                     Name = $"OverfitParallel-{i}",
                 };
                 thread.Start();
+            }
+
+            if (_decodePool && _decodePoolSize >= 1)
+            {
+                _decodeChunks = new ChunkState[_decodePoolSize];
+                for (var i = 0; i < _decodePoolSize; i++)
+                {
+                    var thread = new Thread(DecodeWorkerLoop)
+                    {
+                        IsBackground = true,
+                        Name = $"OverfitDecode-{i}",
+                    };
+                    thread.Start();
+                }
             }
         }
 
@@ -255,6 +321,23 @@ namespace DevOnBike.Overfit.Runtime
             int minItemsPerWorker,
             delegate*<int, int, void*, void> body,
             void* context)
+            => For(rangeStart, rangeEnd, minItemsPerWorker, _workerCount, body, context);
+
+        /// <summary>
+        /// Grained <c>For(rangeStart, rangeEnd, minItemsPerWorker, body, context)</c> with an
+        /// explicit <paramref name="maxWorkers"/> cap on the chunk (worker) count. Small,
+        /// numerous dispatches (single-token decode FFN matmuls) are dispatch-overhead
+        /// bound, not bandwidth bound, so fanning them across all cores is a net loss —
+        /// the optimum is a handful of workers (see <see cref="DecodeMaxWorkers"/>).
+        /// Prefill / training keep the full pool by passing <see cref="WorkerCount"/>.
+        /// </summary>
+        public static void For(
+            int rangeStart,
+            int rangeEnd,
+            int minItemsPerWorker,
+            int maxWorkers,
+            delegate*<int, int, void*, void> body,
+            void* context)
         {
             if (body == null)
             {
@@ -289,7 +372,8 @@ namespace DevOnBike.Overfit.Runtime
                 return;
             }
 
-            var chunkCount = Math.Min(_workerCount, totalWork);
+            var cap = maxWorkers < 1 ? 1 : Math.Min(maxWorkers, _workerCount);
+            var chunkCount = Math.Min(cap, totalWork);
             var perChunk = (totalWork + chunkCount - 1) / chunkCount;
 
             lock (_gate)
@@ -333,6 +417,149 @@ namespace DevOnBike.Overfit.Runtime
                     {
                         _chunks[i].Error.Throw();
                     }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Decode-pool dispatch (single-token FFN / attention projection). When
+        /// <c>OVERFIT_DECODE_POOL</c> is on, routes to the spinning decode pool so the
+        /// per-token burst of dispatches skips the per-op semaphore wake; otherwise
+        /// delegates to the capped park path (<see cref="DecodeMaxWorkers"/>). The pool is
+        /// sized to the cap, so there are no idle spinners. Same one-claim-per-generation
+        /// protocol as the main pool; serialised by <c>_decodeGate</c>.
+        /// </summary>
+        public static void ForDecode(
+            int rangeStart,
+            int rangeEnd,
+            delegate*<int, int, void*, void> body,
+            void* context)
+        {
+            if (!_decodePool)
+            {
+                For(rangeStart, rangeEnd, 1, DecodeMaxWorkers, body, context);
+                return;
+            }
+
+            if (body == null)
+            {
+                throw new ArgumentNullException(nameof(body));
+            }
+
+            if (rangeEnd <= rangeStart)
+            {
+                return;
+            }
+
+            var totalWork = rangeEnd - rangeStart;
+            if (_decodePoolSize <= 1 || _suppressOnThisThread || totalWork < 2)
+            {
+                body(rangeStart, rangeEnd, context);
+                return;
+            }
+
+            var chunkCount = Math.Min(_decodePoolSize, totalWork);
+            var perChunk = (totalWork + chunkCount - 1) / chunkCount;
+
+            lock (_decodeGate)
+            {
+                _decodeNextChunk.Value = 0;
+                _decodeChunkCount = chunkCount;
+                Volatile.Write(ref _decodeRemaining.Value, chunkCount);
+
+                for (var i = 0; i < chunkCount; i++)
+                {
+                    var chunkStart = rangeStart + i * perChunk;
+                    var chunkEnd = (int)Math.Min((long)chunkStart + perChunk, rangeEnd);
+
+                    _decodeChunks[i].Start = chunkStart;
+                    _decodeChunks[i].End = chunkEnd;
+                    _decodeChunks[i].Body = body;
+                    _decodeChunks[i].Context = context;
+                    _decodeChunks[i].Error = null;
+                }
+
+                // Publish descriptors, then release the spinning pool (release fence).
+                Volatile.Write(ref _decodeGen, _decodeGen + 1);
+
+                // Calling thread participates — greedy drain (safe under _decodeGate).
+                while (true)
+                {
+                    var index = Interlocked.Increment(ref _decodeNextChunk.Value) - 1;
+                    if (index >= _decodeChunkCount)
+                    {
+                        break;
+                    }
+
+                    ExecuteDecodeChunk(index);
+                }
+
+                // Pure spin — the workers are hot, so completion lands in microseconds;
+                // a SpinWait that yields/sleeps would add latency to every dispatch.
+                while (Volatile.Read(ref _decodeRemaining.Value) != 0)
+                {
+                    Thread.SpinWait(32);
+                }
+
+                for (var i = 0; i < chunkCount; i++)
+                {
+                    if (_decodeChunks[i].Error != null)
+                    {
+                        _decodeChunks[i].Error.Throw();
+                    }
+                }
+            }
+        }
+
+        private static void ExecuteDecodeChunk(int index)
+        {
+            try
+            {
+                _decodeChunks[index].Body(
+                    _decodeChunks[index].Start, _decodeChunks[index].End, _decodeChunks[index].Context);
+            }
+            catch (Exception ex)
+            {
+                _decodeChunks[index].Error = ExceptionDispatchInfo.Capture(ex);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _decodeRemaining.Value);
+            }
+        }
+
+        /// <summary>
+        /// Decode spin-pool worker: poll <see cref="_decodeGen"/> with a
+        /// <see cref="SpinWait"/> (hot-spin → yield → Sleep(1)), then claim ONE chunk per
+        /// generation. Pool size == the decode cap, so a worker almost always gets a chunk —
+        /// no idle spin-burn.
+        /// </summary>
+        private static void DecodeWorkerLoop()
+        {
+            var seen = 0L;
+            while (true)
+            {
+                // PURE hot spin — no Sleep/Yield backoff. SpinWait.SpinOnce() escalates to
+                // Sleep(1) within ~20 calls, which is fatal here: the gaps between the ~180
+                // per-token dispatches (main-thread norms/attention) exceed that, so the pool
+                // would sleep and each dispatch would pay a ~1 ms wake. The pool is sized to
+                // the decode cap (<= cores), so keeping these few threads hot does not
+                // oversubscribe — staying ready is the entire point. Burns CPU while a decode
+                // is in flight (the documented OVERFIT_DECODE_POOL trade-off); between tokens
+                // the loop still burns, so this flag is for throughput-mode / dedicated
+                // inference, not idle embedding.
+                long gen;
+                while ((gen = Volatile.Read(ref _decodeGen)) == seen)
+                {
+                    Thread.SpinWait(32);
+                }
+
+                seen = gen;
+
+                var index = Interlocked.Increment(ref _decodeNextChunk.Value) - 1;
+                if (index < _decodeChunkCount)
+                {
+                    ExecuteDecodeChunk(index);
                 }
             }
         }

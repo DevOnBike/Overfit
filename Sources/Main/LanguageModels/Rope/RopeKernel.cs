@@ -3,6 +3,11 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
+using DevOnBike.Overfit.Intrinsics;
+
 namespace DevOnBike.Overfit.LanguageModels.Rope
 {
     /// <summary>
@@ -54,7 +59,13 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
             if (splitHalf)
             {
                 // Split-half (HF rotate_half / NEOX): pairs (x[i], x[i+halfDim]) share frequency i.
-                for (var i = 0; i < halfDim; i++)
+                var i = 0;
+                if (CpuFeatures.HasAvx2)
+                {
+                    i = ApplySplitHalfAvx2(headVector, cos, sin, halfDim);
+                }
+
+                for (; i < halfDim; i++)
                 {
                     var x0 = headVector[i];
                     var x1 = headVector[i + halfDim];
@@ -65,14 +76,92 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
             }
 
             // Adjacent-pair: pairs (x[2i], x[2i+1]) share frequency i.
-            for (var i = 0; i < halfDim; i++)
+            var p = 0;
+            if (CpuFeatures.HasAvx2)
             {
-                var x0 = headVector[2 * i];
-                var x1 = headVector[2 * i + 1];
-
-                headVector[2 * i] = x0 * cos[i] - x1 * sin[i];
-                headVector[2 * i + 1] = x0 * sin[i] + x1 * cos[i];
+                p = ApplyAdjacentAvx2(headVector, cos, sin, halfDim);
             }
+
+            for (; p < halfDim; p++)
+            {
+                var x0 = headVector[2 * p];
+                var x1 = headVector[2 * p + 1];
+
+                headVector[2 * p] = x0 * cos[p] - x1 * sin[p];
+                headVector[2 * p + 1] = x0 * sin[p] + x1 * cos[p];
+            }
+        }
+
+        /// <summary>
+        /// AVX2 split-half rotation over whole 8-lane chunks; returns the count of frequencies
+        /// processed (the caller's scalar loop finishes any <c>halfDim % 8</c> tail). The two
+        /// halves are contiguous, so this is a clean vector load/store. Bit-identical to the
+        /// scalar path: same two FP multiplies then sub/add (NOT fused — FMA would change rounding).
+        /// </summary>
+        private static int ApplySplitHalfAvx2(
+            Span<float> headVector, ReadOnlySpan<float> cos, ReadOnlySpan<float> sin, int halfDim)
+        {
+            ref var v = ref MemoryMarshal.GetReference(headVector);
+            ref var c = ref MemoryMarshal.GetReference(cos);
+            ref var s = ref MemoryMarshal.GetReference(sin);
+
+            var i = 0;
+            for (; i + 8 <= halfDim; i += 8)
+            {
+                var x0 = Vector256.LoadUnsafe(ref v, (nuint)i);
+                var x1 = Vector256.LoadUnsafe(ref v, (nuint)(i + halfDim));
+                var cv = Vector256.LoadUnsafe(ref c, (nuint)i);
+                var sv = Vector256.LoadUnsafe(ref s, (nuint)i);
+
+                var out0 = Avx.Subtract(Avx.Multiply(x0, cv), Avx.Multiply(x1, sv));
+                var out1 = Avx.Add(Avx.Multiply(x0, sv), Avx.Multiply(x1, cv));
+
+                out0.StoreUnsafe(ref v, (nuint)i);
+                out1.StoreUnsafe(ref v, (nuint)(i + halfDim));
+            }
+
+            return i;
+        }
+
+        /// <summary>
+        /// AVX2 adjacent-pair rotation, 4 pairs (8 floats) per chunk; returns the count of pairs
+        /// processed (caller finishes any <c>halfDim % 4</c> tail). Treats each pair as a complex
+        /// number: <c>result = v·cosExp + swap(v)·sinSigned</c> where <c>cosExp = [c,c,...]</c>,
+        /// <c>sinSigned = [-s,+s,...]</c>, and <c>swap</c> exchanges the two lanes of each pair —
+        /// which expands to <c>(x0·c − x1·s, x1·c + x0·s)</c>, bit-identical to the scalar (separate
+        /// multiplies + add; <c>x1·(−s) == −(x1·s)</c> and FP add is commutative, so no drift).
+        /// </summary>
+        private static int ApplyAdjacentAvx2(
+            Span<float> headVector, ReadOnlySpan<float> cos, ReadOnlySpan<float> sin, int halfDim)
+        {
+            ref var v = ref MemoryMarshal.GetReference(headVector);
+            ref var c = ref MemoryMarshal.GetReference(cos);
+            ref var s = ref MemoryMarshal.GetReference(sin);
+
+            // Duplicate-expand control: [c0,c1,c2,c3] -> [c0,c0,c1,c1,c2,c2,c3,c3].
+            var dup = Vector256.Create(0, 0, 1, 1, 2, 2, 3, 3);
+            var signs = Vector256.Create(-1f, 1f, -1f, 1f, -1f, 1f, -1f, 1f);
+
+            var p = 0;
+            for (; p + 4 <= halfDim; p += 4)
+            {
+                var baseF = (nuint)(2 * p);
+                var vv = Vector256.LoadUnsafe(ref v, baseF);
+
+                var cos4 = Vector128.LoadUnsafe(ref c, (nuint)p);
+                var sin4 = Vector128.LoadUnsafe(ref s, (nuint)p);
+                var cosExp = Avx2.PermuteVar8x32(Vector256.Create(cos4, cos4), dup);
+                var sinExp = Avx2.PermuteVar8x32(Vector256.Create(sin4, sin4), dup);
+                var sinSigned = Avx.Multiply(sinExp, signs);
+
+                // Swap the two lanes within each pair: [a,b,c,d] -> [b,a,d,c] (per 128-bit lane).
+                var swapped = Avx.Shuffle(vv, vv, 0b_10_11_00_01);
+
+                var result = Avx.Add(Avx.Multiply(vv, cosExp), Avx.Multiply(swapped, sinSigned));
+                result.StoreUnsafe(ref v, baseF);
+            }
+
+            return p;
         }
 
         /// <summary>

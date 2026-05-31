@@ -139,6 +139,38 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     hidden.Slice(0, DModel), _hiddenQuants, _hiddenScales, _hiddenBsums);
             }
 
+            // Decode parallelism. Two decompositions, same result:
+            //
+            //  • Standard MHA (KvHeadCount == HeadCount): parallelise across KV
+            //    groups (== heads). Each worker owns a disjoint cache slot + Q head
+            //    and runs the full Q/K/V/attend/O pipeline. Already head-wide.
+            //
+            //  • GQA (KvHeadCount < HeadCount, e.g. Bielik 16Q/2KV): grouping by KV
+            //    head caps parallelism at KvHeadCount (== 2) workers, starving the
+            //    bandwidth-bound Wq/Wo projections on a many-core box. Instead project
+            //    K/V once per group on the calling thread (cheap — KvHeadCount small
+            //    matmuls), then fan the Q-proj + attend + O-proj out across ALL Q heads.
+            //    Bit-identical: K/V is fully cached before the head-parallel reads.
+            var useHeadParallel = weights.HasGqa
+                && HeadCount > KvHeadCount
+                && OverfitParallelFor.WorkerCount > KvHeadCount;
+
+            if (useHeadParallel)
+            {
+                var groupSize = HeadCount / KvHeadCount;
+                ReadOnlySpan<sbyte> hq = hiddenQ8kValid ? _hiddenQuants : default;
+                ReadOnlySpan<float> hs = hiddenQ8kValid ? _hiddenScales : default;
+                ReadOnlySpan<short> hb = hiddenQ8kValid ? _hiddenBsums : default;
+                for (var group = 0; group < KvHeadCount; group++)
+                {
+                    ref readonly var kv = ref weights.KvHead(group);
+                    _heads[group * groupSize].ProjectKvDispatched(
+                        hidden, kv.Wk, kv.Wv, kv.Bk, kv.Bv,
+                        cache, layerIndex, group, position, rope,
+                        hq, hs, hb, hiddenQ8kValid);
+                }
+            }
+
             // Heads are parallelised across KV groups via OverfitParallelFor:
             // one worker per KV head, each owning a disjoint KV-cache slot and a
             // disjoint contiguous run of Q heads. No cross-worker writes — the
@@ -173,7 +205,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
                 var contextPtr = Unsafe.AsPointer(ref context);
 
-                if (KvHeadCount > 1 && OverfitParallelFor.WorkerCount > 1)
+                if (useHeadParallel)
+                {
+                    // K/V already cached above; fan Q-proj + attend + O-proj across the Q
+                    // heads via the decode dispatch (capped / spin-pool per config).
+                    OverfitParallelFor.ForDecode(0, HeadCount, &DecodeHeadQao, contextPtr);
+                }
+                else if (KvHeadCount > 1 && OverfitParallelFor.WorkerCount > 1)
                 {
                     OverfitParallelFor.For(0, KvHeadCount, &DecodeKvGroup, contextPtr);
                 }
@@ -571,6 +609,48 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         hBsums,
                         ctx.HiddenQ8kValid);
                 }
+            }
+        }
+
+        /// <summary>
+        /// Head-parallel decode worker for GQA. K/V for every group was already
+        /// projected + cached by <see cref="Decode"/> on the calling thread, so each
+        /// head here only projects its Q, attends its group's cache slot, and projects
+        /// O — the two bandwidth-heavy projections (Wq, Wo) fan out across <b>all</b> Q
+        /// heads instead of being pinned to the few KV-group workers. Bit-identical to
+        /// <see cref="DecodeKvGroup"/>: each head owns disjoint <c>_query</c> scratch
+        /// and a disjoint <c>_headOutputs</c> band, and only reads the cache.
+        /// </summary>
+        private static void DecodeHeadQao(int headStart, int headEnd, void* context)
+        {
+            ref var ctx = ref Unsafe.AsRef<HeadDecodeContext>(context);
+
+            var dModel = ctx.DModel;
+            var groupSize = ctx.HeadCount / ctx.KvHeadCount;
+            var hidden = new ReadOnlySpan<float>(ctx.Hidden, dModel);
+
+            var hQuants = ctx.HiddenQ8kValid
+                ? new ReadOnlySpan<sbyte>(ctx.HiddenQuants, dModel)
+                : default;
+            var hScales = ctx.HiddenQ8kValid
+                ? new ReadOnlySpan<float>(ctx.HiddenScales, ctx.HiddenScalesLength)
+                : default;
+            var hBsums = ctx.HiddenQ8kValid
+                ? new ReadOnlySpan<short>(ctx.HiddenBsums, ctx.HiddenBsumsLength)
+                : default;
+
+            for (var h = headStart; h < headEnd; h++)
+            {
+                ref readonly var hw = ref ctx.Weights.Head(h);
+                var group = h / groupSize;   // KV-cache slot this head reads.
+                var headOutput = ctx.HeadOutputs.AsSpan(h * dModel, dModel);
+
+                ctx.Heads[h].ProjectQDispatched(
+                    hidden, hw.Wq, hw.Bq, ctx.Cache, ctx.Position, ctx.Rope,
+                    hQuants, hScales, hBsums, ctx.HiddenQ8kValid);
+
+                ctx.Heads[h].AttendAndProjectO(
+                    hw.Wo, ctx.Cache, ctx.LayerIndex, group, ctx.Position, headOutput);
             }
         }
 

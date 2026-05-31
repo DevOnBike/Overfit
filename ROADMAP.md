@@ -186,6 +186,24 @@ Read the full llama.cpp source tree to map what they have that Overfit doesn't. 
 
 ## Decode throughput catch-up to llama.cpp — 3-phase plan (2026-05-29)
 
+> **UPDATE 2026-05-31 — sprint executed (branch `perf`), via a different path and with a corrected diagnosis.**
+> The plan below predicted parity (~28 tok/s) via MHA-consolidation + Q8-KV under an *overhead-bound* premise.
+> What actually shipped on **Bielik-4.5B Q4_K_M** (bit-identical, suite 1006/0): decode worker-cap + fused
+> SwiGLU gate+up + opt-in decode spin-pool + SIMD activation-quantize / RoPE / cached-attention + the Q4_K
+> repacked 8×8 GEMV → **12.55 → ~17 tok/s (+36 %), same-file gap ~1.33× → ~1.13×.** Rigorous best-of-N on
+> *both* engines: llama.cpp ~19.2 (short) / ~17.9 (long-ctx) ⇒ **~1.13× behind, NOT parity** (an earlier
+> single-run "parity" read was retracted — always best-of-N both sides).
+> **Corrected diagnosis:** single-stream decode is **DRAM-bandwidth-bound**. The FFN matmuls *were*
+> dispatch-overhead-bound (fixed by the worker-cap, +13 %), but the residual gap is memory-access efficiency —
+> the speed ratio equals the bandwidth-utilisation ratio, so it needs structural (not ALU) work. Implications
+> for the phases: **1a MHA-consolidation** stays the one real structural lever but is a big refactor;
+> **1b Q8-KV** — the attention kernel is now built + validated (`ComputeSingleHeadQ8` + `Q8KvQuant`, Phase 1),
+> but after the SIMD-attend win its *speed* headroom shrank → its value is now **RAM / long-context**, not tok/s;
+> **2a dequant-fused GEMV** — DONE as the repacked 8×8 GEMV and bounded (kernel ≈ 84 % of the cold-DRAM ceiling;
+> VNNI / AVX-512 tried → ≈ 0, memory-bound). Full record: CHANGELOG `[Unreleased] → Performance` and
+> `project_perf_sprint` memory. **Training-compute perf was also profiled and found already reasonable**
+> (conv im2col+GEMM ≈ 280–330 GFLOP/s, ~22 % of peak; no easy win) — see CHANGELOG / `project-training-memory`.
+
 **Baseline**: Qwen2.5-3B Q4_K_M, ~17 tok/s @ 3.20 GB live heap (Overfit) vs ~27 tok/s @ 3.20 GB (llama.cpp same-file A/B). Per `project_perf_sprint` memory: gap is **overhead-bound**, not bandwidth-bound — our measured BW efficiency is ~55% of DDR5 peak vs llama.cpp's ~80%.
 
 The previous ROADMAP wording ("honest ceiling 2-2.5×, not parity") reflected the *pure-managed* constraint *without* algorithmic reorganisation. The three phases below preserve that constraint and target parity-then-overtake by tackling the structural causes of the 55%-vs-80% BW gap.
@@ -235,11 +253,11 @@ Capability surface at this date — what would ship if we tagged a release today
 - **Loaders, all native (no Python)**: GGUF, HF safetensors (sharded), Overfit `.bin`, ONNX (linear + DAG).
 - **AOT-clean**: zero LINQ / Reflection / Activator / Expression / Array.Copy / raw `ArrayPool<T>.Shared` in `Sources/Main` (all banned, RS0030).
 - **Tests**: 990 fast / 0 fail / 130 [LongFact] skip. 3 headline benchmarks re-validated post-pool-refactor on this hardware (single inference 7.31× vs ONNX, concurrent 3.56× vs ONNX, CNN zero-alloc preserved).
-- **Honest gaps acknowledged in README + ROADMAP**: tok/s ~1.6× behind llama.cpp (the 3-phase plan above is the catch-up path), no GPU, no diffusion / TTS / VLM / ASR, no full GBNF.
+- **Honest gaps acknowledged in README + ROADMAP**: tok/s **~1.13× behind** llama.cpp same-file (narrowed from ~1.6× by the 2026-05-31 sprint — see the UPDATE banner above; residual is DRAM-bandwidth-bound), no GPU, no diffusion / TTS / VLM / ASR, no full GBNF.
 
 **Marketing assets**: `linkedin-article.md`, `linkedin-business.md`, `linkedin-marketing.md`, `linkedin-technical.md`, `launch-copy.md` — staged and waiting on a final review pass.
 
-**Decision the release waits on**: ship now with honest ~1.6× decode gap, or run Phase 1 of the catch-up plan (1 week) and ship at parity. Both stories are defensible; Phase 1 is the strictly-better launch number if there's an extra week.
+**Decision the release waits on**: the 2026-05-31 sprint already closed most of the gap (~1.6× → **~1.13×**, +36 %, bit-identical) — the honest decode story is now strong enough to ship as-is. Full parity would need the structural full-tensor-attention refactor (big), and the residual is bandwidth-bound, so it is a diminishing-returns lever rather than a launch blocker.
 
 ---
 

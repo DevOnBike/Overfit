@@ -241,11 +241,12 @@ Test machine for current headline numbers: AMD Ryzen 9 9950X3D, Windows 11,
 | Single inference `Linear(784 -> 10)` | ~7.6x faster than ONNX Runtime | 0 B |
 | GPT-2 Small KV-cache decode | ~6.5x faster than naive O(N²), parity vs PyTorch | 0 B/token |
 | Qwen2.5-3B Q4_K_M decode | ~19 tok/s, RAM footprint in the llama.cpp range | ~1 B/token |
+| Bielik-4.5B Q4_K_M decode | ~17 tok/s, ~1.13× behind same-file llama.cpp, −36% working set | ~1 B/token |
 | Concurrent inference, 8 threads | ~3.6x faster than ONNX Runtime | 0 B |
 
 Honest positioning:
 
-- llama.cpp / LLamaSharp are faster for raw CPU LLM decode.
+- llama.cpp / LLamaSharp are still faster for raw CPU LLM decode (~1.13× same-file, narrowed from ~1.6× — single-stream CPU decode is DRAM-bandwidth-bound).
 - PyTorch CPU is faster for large-scale training.
 - ONNX Runtime is mature and fast if native dependencies are acceptable.
 - Overfit's axis is pure-managed .NET, in-process deployment, Native AOT,
@@ -395,7 +396,7 @@ Current shipped areas include:
 
 Current priorities include:
 
-- closing part of the decode gap to llama.cpp
+- decode gap to llama.cpp narrowed to ~1.13× same-file (from ~1.6×) — the residual is DRAM-bandwidth-bound; further closing needs structural (full-tensor attention) work, not kernel-ALU
 - batched prefill
 - stronger JSON Schema constraints
 - more model families and quantization formats

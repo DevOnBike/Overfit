@@ -8,6 +8,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
+using DevOnBike.Overfit.Intrinsics;
 using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.Runtime;
 
@@ -81,6 +82,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 throw new ArgumentException("Bsums span is smaller than blocks * groups.", nameof(bsums));
             }
 
+            if (CpuFeatures.HasAvx2)
+            {
+                QuantizeActivationQ8KAvx2(source, quants, blockScales, bsums, blocks);
+                return;
+            }
+
             for (var b = 0; b < blocks; b++)
             {
                 var block = source.Slice(b * SuperBlockElements, SuperBlockElements);
@@ -110,6 +117,79 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         sum += q;
                     }
                     bsums[b * GroupsPerSuperBlock + g] = (short)sum;
+                }
+            }
+        }
+
+        /// <summary>
+        /// AVX2 path for <see cref="QuantizeActivationQ8K"/>. Bit-identical to the scalar
+        /// reference: abs/max are exact, <c>x·inverse</c> is the same FP multiply,
+        /// <see cref="Avx.RoundToNearestInteger(Vector256{float})"/> is round-half-to-even
+        /// (== <see cref="MathF.Round(float)"/>), the clamp+truncate matches (rounded values
+        /// are integral), and the group sums add the same integers. Runs single-threaded on
+        /// the decode critical path before every matmul — the scalar version was a ~few-%
+        /// decode tax (the down-proj quantizes 11008 elements/layer); llama.cpp's
+        /// <c>quantize_row_q8_K</c> is scalar too, so SIMD here is a net edge.
+        /// </summary>
+        private static void QuantizeActivationQ8KAvx2(
+            ReadOnlySpan<float> source,
+            Span<sbyte> quants,
+            Span<float> blockScales,
+            Span<short> bsums,
+            int blocks)
+        {
+            ref var srcRef = ref MemoryMarshal.GetReference(source);
+            ref var qRef = ref MemoryMarshal.GetReference(quants);
+
+            var absMask = Vector256.Create(0x7FFF_FFFF).AsSingle();
+            var lo = Vector256.Create(-127f);
+            var hi = Vector256.Create(127f);
+
+            for (var b = 0; b < blocks; b++)
+            {
+                var blockBase = (nuint)(b * SuperBlockElements);
+
+                // Pass 1: absmax over the 256 elements (Max(0, |x|) — Zero init is valid
+                // since |x| >= 0; bit-identical max of the same value set).
+                var maxV = Vector256<float>.Zero;
+                for (var i = 0; i < SuperBlockElements; i += 8)
+                {
+                    var v = Vector256.LoadUnsafe(ref srcRef, blockBase + (nuint)i);
+                    maxV = Avx.Max(maxV, Avx.And(v, absMask));
+                }
+
+                var m128 = Sse.Max(maxV.GetLower(), maxV.GetUpper());
+                var absMax = MathF.Max(
+                    MathF.Max(m128.GetElement(0), m128.GetElement(1)),
+                    MathF.Max(m128.GetElement(2), m128.GetElement(3)));
+
+                var scale = absMax / 127f;
+                blockScales[b] = scale;
+
+                var inverse = scale > 0f ? 1f / scale : 0f;
+                var invV = Vector256.Create(inverse);
+
+                // Pass 2: per 16-element group — quantize + group sum, packed to int8.
+                for (var g = 0; g < GroupsPerSuperBlock; g++)
+                {
+                    var groupBase = blockBase + (nuint)(g * GroupSize);
+
+                    var x0 = Vector256.LoadUnsafe(ref srcRef, groupBase);
+                    var x1 = Vector256.LoadUnsafe(ref srcRef, groupBase + 8);
+
+                    var r0 = Avx.Min(hi, Avx.Max(lo, Avx.RoundToNearestInteger(Avx.Multiply(x0, invV))));
+                    var r1 = Avx.Min(hi, Avx.Max(lo, Avx.RoundToNearestInteger(Avx.Multiply(x1, invV))));
+
+                    var i0 = Avx.ConvertToVector256Int32(r0);   // truncate; values are integral
+                    var i1 = Avx.ConvertToVector256Int32(r1);
+
+                    bsums[b * GroupsPerSuperBlock + g] = (short)Vector256.Sum(Avx2.Add(i0, i1));
+
+                    // int32 → int16 → int8 (logical order via Vector256.Narrow; values fit,
+                    // so no saturation/truncation loss). Low 16 lanes are the group's quants.
+                    var shorts = Vector256.Narrow(i0, i1);
+                    var bytes = Vector256.Narrow(shorts, shorts);
+                    bytes.GetLower().StoreUnsafe(ref qRef, groupBase);
                 }
             }
         }
@@ -168,15 +248,21 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// </summary>
         private static int MainDot(ReadOnlySpan<byte> qs, ReadOnlySpan<sbyte> q8, ReadOnlySpan<byte> scales)
         {
-            if (Avx2.IsSupported)
+            if (CpuFeatures.HasAvx2)
             {
                 ref var qsRef = ref MemoryMarshal.GetReference(qs);
                 ref var q8Ref = ref MemoryMarshal.GetReference(q8);
                 var maskLow = Vector256.Create((byte)0x0F);
 
-                var acc = 0;
+                // Defer the horizontal reduction: each sub-block contributes
+                // scale[s]·pairs32ₛ (8 int32 lanes) into a single accumulator, and
+                // we reduce to a scalar ONCE per super-block instead of 8× (the old
+                // per-block Vector256.Sum was latency-bound and starved the loads).
+                // Σₛ scale[s]·Sum(pairsₛ) = Sum(Σₛ scale[s]·pairsₛ) — bit-identical
+                // INT32 (max lane ≈ 8·63·7.6k ≈ 3.8M, sum ≈ 30M, no overflow).
                 // Four 32-byte nibble runs; each carries two sub-blocks — the
                 // low nibbles (even s) and the high nibbles (odd s).
+                var accVec = Vector256<int>.Zero;
                 for (var p = 0; p < 4; p++)
                 {
                     var packed = Vector256.LoadUnsafe(ref Unsafe.Add(ref qsRef, 32 * p));
@@ -187,10 +273,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     var q8Even = Vector256.LoadUnsafe(ref Unsafe.Add(ref q8Ref, 64 * p));
                     var q8Odd = Vector256.LoadUnsafe(ref Unsafe.Add(ref q8Ref, 64 * p + 32));
 
-                    acc += scales[2 * p] * Int8BlockDot(lowNibbles, q8Even)
-                         + scales[2 * p + 1] * Int8BlockDot(highNibbles, q8Odd);
+                    accVec = Avx2.Add(accVec,
+                        Avx2.MultiplyLow(Int8BlockPairs(lowNibbles, q8Even),
+                            Vector256.Create((int)scales[2 * p])));
+                    accVec = Avx2.Add(accVec,
+                        Avx2.MultiplyLow(Int8BlockPairs(highNibbles, q8Odd),
+                            Vector256.Create((int)scales[2 * p + 1])));
                 }
-                return acc;
+                return Vector256.Sum(accVec);
             }
 
             var sum = 0;
@@ -220,9 +310,18 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// </summary>
         private static int Int8BlockDot(Vector256<byte> nibbles, Vector256<sbyte> q8)
         {
+            return Vector256.Sum(Int8BlockPairs(nibbles, q8));
+        }
+
+        /// <summary>
+        /// <c>Σ nibᵢ·q8ᵢ</c> as 8 INT32 lane-partial-sums (no horizontal reduction) —
+        /// lets the caller scale-and-accumulate across sub-blocks and reduce once.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector256<int> Int8BlockPairs(Vector256<byte> nibbles, Vector256<sbyte> q8)
+        {
             var pairs16 = Avx2.MultiplyAddAdjacent(nibbles, q8);
-            var pairs32 = Avx2.MultiplyAddAdjacent(pairs16, Vector256.Create((short)1));
-            return Vector256.Sum(pairs32);
+            return Avx2.MultiplyAddAdjacent(pairs16, Vector256.Create((short)1));
         }
 
         /// <summary>
@@ -341,7 +440,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     SuperBlocksPerRow = weight.SuperBlocksPerRow,
                 };
 
-                OverfitParallelFor.For(0, outputSize, &ProjectChunk, &context);
+                OverfitParallelFor.ForDecode(0, outputSize, &ProjectChunk, &context);
             }
         }
 
@@ -370,6 +469,106 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
                 ctx.Output[o] = ctx.BiasLength == 0 ? sum : ctx.Bias[o] + sum;
             }
+        }
+
+        /// <summary>
+        /// Fused SwiGLU gate+up projection: both project the SAME <paramref name="input"/>,
+        /// so the activation is quantized to Q8_K <b>once</b> and both output halves are
+        /// produced in <b>one</b> parallel dispatch (rows <c>[0,outDim)</c> = gate,
+        /// <c>[outDim,2·outDim)</c> = up) instead of two — halving the decode FFN dispatch
+        /// count + activation-quantize for these two matmuls (decode is dispatch-overhead
+        /// bound). Bit-identical to two <see cref="ProjectParallel"/> calls. Both weights
+        /// share input/output dims (they do for SwiGLU); no bias (gate/up are bias-free).
+        /// </summary>
+        public static void ProjectGateUpParallel(
+            ReadOnlySpan<float> input,
+            Q4KWeight gate,
+            Q4KWeight up,
+            Span<float> gateOutput,
+            Span<float> upOutput,
+            Span<sbyte> activationQuants,
+            Span<float> activationScales,
+            Span<short> activationBsums)
+        {
+            ArgumentNullException.ThrowIfNull(gate);
+            ArgumentNullException.ThrowIfNull(up);
+
+            var inputSize = gate.InputSize;
+            var outDim = gate.OutputSize;
+
+            QuantizeActivationQ8K(
+                input.Slice(0, inputSize), activationQuants, activationScales, activationBsums);
+
+            fixed (byte* gateBlocks = gate.BlockSpan)
+            fixed (byte* upBlocks = up.BlockSpan)
+            fixed (sbyte* actQuants = activationQuants)
+            fixed (float* actScales = activationScales)
+            fixed (short* actBsums = activationBsums)
+            fixed (float* gateOut = gateOutput)
+            fixed (float* upOut = upOutput)
+            {
+                var context = new Q4KGateUpContext
+                {
+                    GateBlocks = gateBlocks,
+                    UpBlocks = upBlocks,
+                    ActivationQuants = actQuants,
+                    ActivationScales = actScales,
+                    ActivationBsums = actBsums,
+                    GateOutput = gateOut,
+                    UpOutput = upOut,
+                    SuperBlocksPerRow = gate.SuperBlocksPerRow,
+                    OutDim = outDim,
+                };
+
+                OverfitParallelFor.ForDecode(0, 2 * outDim, &GateUpChunk, &context);
+            }
+        }
+
+        /// <summary>Worker body for <see cref="ProjectGateUpParallel"/> — rows below
+        /// <c>OutDim</c> hit the gate matrix, the rest the up matrix.</summary>
+        private static void GateUpChunk(int chunkStart, int chunkEnd, void* context)
+        {
+            ref var ctx = ref Unsafe.AsRef<Q4KGateUpContext>(context);
+            var superBlocksPerRow = ctx.SuperBlocksPerRow;
+            var outDim = ctx.OutDim;
+
+            for (var g = chunkStart; g < chunkEnd; g++)
+            {
+                var isUp = g >= outDim;
+                var row = isUp ? g - outDim : g;
+                var blocks = isUp ? ctx.UpBlocks : ctx.GateBlocks;
+                var rowBase = (long)row * superBlocksPerRow * Q4KWeight.SuperBlockBytes;
+
+                var sum = 0f;
+                for (var sb = 0; sb < superBlocksPerRow; sb++)
+                {
+                    var block = new ReadOnlySpan<byte>(
+                        blocks + rowBase + (long)sb * Q4KWeight.SuperBlockBytes,
+                        Q4KWeight.SuperBlockBytes);
+                    var q8 = new ReadOnlySpan<sbyte>(
+                        ctx.ActivationQuants + sb * SuperBlockElements, SuperBlockElements);
+                    var bsums = new ReadOnlySpan<short>(
+                        ctx.ActivationBsums + sb * GroupsPerSuperBlock, GroupsPerSuperBlock);
+
+                    sum += Dot(block, q8, ctx.ActivationScales[sb], bsums);
+                }
+
+                if (isUp) { ctx.UpOutput[row] = sum; }
+                else { ctx.GateOutput[row] = sum; }
+            }
+        }
+
+        private struct Q4KGateUpContext
+        {
+            public byte* GateBlocks;
+            public byte* UpBlocks;
+            public sbyte* ActivationQuants;
+            public float* ActivationScales;
+            public short* ActivationBsums;
+            public float* GateOutput;
+            public float* UpOutput;
+            public int SuperBlocksPerRow;
+            public int OutDim;
         }
 
         private struct Q4KProjectContext

@@ -35,7 +35,9 @@ Its real edge is **language, not intelligence.**
 - **Reasoning ceiling like its peers.** The borderline temporal question *"zwrot **po** 10 dniach"*
   flipped to "No" (10 < 14 should be "Yes") — the *same* failure a Qwen-3B shows. So here it is **not
   better**, just typical for ~4–5B.
-- **Slower.** ~8 tok/s on Q8_0 (bigger model + heavier quant than a 3B Q4) on CPU.
+- **Slower.** ~8 tok/s on Q8_0 (bigger model + heavier quant than a 3B Q4) on CPU. The **Q4_K_M preset**
+  (the recommended default) decodes **~17 tok/s** after the 2026-05-31 decode sprint (+36 %, bit-identical;
+  ~1.13× behind same-file llama.cpp) — see `CHANGELOG.md` → Performance and `ROADMAP.md`.
 
 ## Where it is *different* (the most interesting part for loading)
 

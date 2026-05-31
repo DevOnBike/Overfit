@@ -273,12 +273,17 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     "Session is empty. Call Reset with at least one prompt token first.");
             }
 
+            DecodeProfiler.BeginToken();
             constraint?.ApplyMask(_logits.AsSpan(0, VocabularySize));
 
+            var profSample = DecodeProfiler.Start();
             var token = TokenSampler.Sample(
                 _logits, in sampling, _random, _indexScratch, _scoreScratch);
+            DecodeProfiler.Stop(DecodeProfiler.Component.Sampler, profSample);
+
             constraint?.Accept(token);
             DecodeToken(token);
+            DecodeProfiler.EndToken();
             return token;
         }
 

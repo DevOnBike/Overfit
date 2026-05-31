@@ -194,31 +194,98 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ReadOnlySpan<short> hiddenBsums = default,
             bool hiddenQ8kValid = false)
         {
-            // Q/K/V all project the SAME `hidden` row. When the caller has already
-            // quantized it to Q8_K once (shared across every head in the layer),
-            // K-quant projections reuse that instead of re-quantizing per call.
+            if (projectKv)
+            {
+                ProjectKvDispatched(
+                    hidden, in wk, in wv, bk, bv,
+                    cache, layerIndex, headIndex, position, rope,
+                    hiddenQuants, hiddenScales, hiddenBsums, hiddenQ8kValid);
+            }
+
+            ProjectQDispatched(
+                hidden, in wq, bq, cache, position, rope,
+                hiddenQuants, hiddenScales, hiddenBsums, hiddenQ8kValid);
+
+            AttendAndProjectO(in wo, cache, layerIndex, headIndex, position, output);
+        }
+
+        /// <summary>
+        /// Project only K/V from <paramref name="hidden"/>, RoPE-rotate K, and write both
+        /// to cache slot <paramref name="headIndex"/>. Under GQA this runs once per KV
+        /// group (the group's shared slot) ahead of the head-parallel Q/attend/O pass, so
+        /// the bandwidth-heavy Q and O projections can fan out across <b>all</b> Q heads
+        /// instead of being pinned to the few KV-group workers. Bit-identical to the K/V
+        /// branch of <see cref="DecodeDispatched"/>.
+        /// </summary>
+        internal void ProjectKvDispatched(
+            ReadOnlySpan<float> hidden,
+            in DecodeWeight wk,
+            in DecodeWeight wv,
+            ReadOnlySpan<float> bk,
+            ReadOnlySpan<float> bv,
+            KeyValueCache cache,
+            int layerIndex,
+            int headIndex,
+            int position,
+            RopeTable? rope,
+            ReadOnlySpan<sbyte> hiddenQuants,
+            ReadOnlySpan<float> hiddenScales,
+            ReadOnlySpan<short> hiddenBsums,
+            bool hiddenQ8kValid)
+        {
+            ProjectHiddenDispatched(hidden, in wk, bk, _key, hiddenQuants, hiddenScales, hiddenBsums, hiddenQ8kValid);
+            ProjectHiddenDispatched(hidden, in wv, bv, _value, hiddenQuants, hiddenScales, hiddenBsums, hiddenQ8kValid);
+
+            // K is rotated and stored — cached K vectors stay permanently rotated,
+            // so no re-rotation at read time.
+            if (rope is not null)
+            {
+                RopeKernel.Apply(_key, rope, position + cache.BasePosition);
+            }
+
+            _key.AsSpan().CopyTo(cache.GetKeyWriteSpan(layerIndex, headIndex, position));
+            _value.AsSpan().CopyTo(cache.GetValueWriteSpan(layerIndex, headIndex, position));
+        }
+
+        /// <summary>
+        /// Project only Q from <paramref name="hidden"/> into this head's <c>_query</c>
+        /// scratch and RoPE-rotate it. Held for the subsequent
+        /// <see cref="AttendAndProjectO"/> on the same instance. Bit-identical to the Q
+        /// projection in <see cref="DecodeDispatched"/>.
+        /// </summary>
+        internal void ProjectQDispatched(
+            ReadOnlySpan<float> hidden,
+            in DecodeWeight wq,
+            ReadOnlySpan<float> bq,
+            KeyValueCache cache,
+            int position,
+            RopeTable? rope,
+            ReadOnlySpan<sbyte> hiddenQuants,
+            ReadOnlySpan<float> hiddenScales,
+            ReadOnlySpan<short> hiddenBsums,
+            bool hiddenQ8kValid)
+        {
             ProjectHiddenDispatched(hidden, in wq, bq, _query, hiddenQuants, hiddenScales, hiddenBsums, hiddenQ8kValid);
             if (rope is not null)
             {
                 RopeKernel.Apply(_query, rope, position + cache.BasePosition);
             }
+        }
 
-            if (projectKv)
-            {
-                ProjectHiddenDispatched(hidden, in wk, bk, _key, hiddenQuants, hiddenScales, hiddenBsums, hiddenQ8kValid);
-                ProjectHiddenDispatched(hidden, in wv, bv, _value, hiddenQuants, hiddenScales, hiddenBsums, hiddenQ8kValid);
-
-                // K is rotated and stored — cached K vectors stay permanently
-                // rotated, so no re-rotation at read time. (Q was rotated above.)
-                if (rope is not null)
-                {
-                    RopeKernel.Apply(_key, rope, position + cache.BasePosition);
-                }
-
-                _key.AsSpan().CopyTo(cache.GetKeyWriteSpan(layerIndex, headIndex, position));
-                _value.AsSpan().CopyTo(cache.GetValueWriteSpan(layerIndex, headIndex, position));
-            }
-
+        /// <summary>
+        /// Phase 2 of a dispatched decode: attend over the cache using this head's
+        /// already-projected <c>_query</c> (from <see cref="ProjectQDispatched"/>) and
+        /// project the attention output through <paramref name="wo"/> into
+        /// <paramref name="output"/>.
+        /// </summary>
+        internal void AttendAndProjectO(
+            in DecodeWeight wo,
+            KeyValueCache cache,
+            int layerIndex,
+            int headIndex,
+            int position,
+            Span<float> output)
+        {
             AttendFromCache(cache, layerIndex, headIndex, position);
 
             // Wo's input is the per-head attention output, not `hidden`, so it

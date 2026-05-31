@@ -138,7 +138,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             DecodeWithoutLogits(inputHidden, weights, cache, position, rope);
+            var profLm = DecodeProfiler.Start();
             ProjectLogits(weights, logits);
+            DecodeProfiler.Stop(DecodeProfiler.Component.LmHead, profLm);
         }
 
         /// <summary>
