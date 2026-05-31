@@ -194,7 +194,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var n = q.Length < k.Length ? q.Length : k.Length;
             var i = 0;
             var s = 0f;
-            if (Avx2.IsSupported && n >= 8)
+            
+            if (CpuFeatures.HasAvx2 && n >= 8)
             {
                 ref var ql = ref MemoryMarshal.GetReference(q);
                 ref var kl = ref MemoryMarshal.GetReference(k);
@@ -225,11 +226,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private static void AxpyI8(float coef, ReadOnlySpan<sbyte> v, Span<float> output, int headDimension)
         {
             var d = 0;
-            if (Avx2.IsSupported)
+            
+            if (CpuFeatures.HasAvx2)
             {
                 ref var o = ref MemoryMarshal.GetReference(output);
                 ref var vv = ref MemoryMarshal.GetReference(v);
                 var coefV = Vector256.Create(coef);
+                
                 for (; d + 8 <= headDimension; d += 8)
                 {
                     var val = Avx.ConvertToVector256Single(Avx2.ConvertToVector256Int32(Vector128.LoadUnsafe(ref vv, (nuint)d)));
@@ -330,7 +333,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             var n = left.Length;
 
-            if (Avx2.IsSupported && n >= 8)
+            if (CpuFeatures.HasAvx2 && n >= 8)
             {
                 // Two accumulators break the scalar sum's loop-carried dependency (the latency
                 // bottleneck of the score dot at long context). NOT bit-identical to the scalar
