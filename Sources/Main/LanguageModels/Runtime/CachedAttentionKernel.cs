@@ -121,6 +121,128 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
         }
 
+        /// <summary>
+        /// Q8 KV-cache attend: identical math to <see cref="ComputeSingleHead"/> but K and V are
+        /// resident as per-position symmetric int8 (one F32 scale per cached vector), so the
+        /// attention read traffic drops ~4× — the long-context lever. Query stays F32 (precision +
+        /// no per-token query-quant); each score dequantizes K on the fly
+        /// (<c>score = scale · keyScale[t] · Σ q[d]·kQ[t][d]</c>) and the weighted-V sum dequantizes V
+        /// (<c>out[d] += prob[t]·valueScale[t]·vQ[t][d]</c>). Not bit-identical to F32 (int8 round-trip),
+        /// but cosine ≈ 1 — softmax + greedy decode are robust to it (validated in the bench).
+        /// </summary>
+        public static void ComputeSingleHeadQ8(
+            ReadOnlySpan<float> query,
+            ReadOnlySpan<sbyte> keysQ,
+            ReadOnlySpan<float> keyScales,
+            ReadOnlySpan<sbyte> valuesQ,
+            ReadOnlySpan<float> valueScales,
+            Span<float> output,
+            Span<float> scoreScratch,
+            int sequenceLength,
+            int headDimension,
+            float scale)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(sequenceLength);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(headDimension);
+
+            if (sequenceLength == 0)
+            {
+                output.Slice(0, headDimension).Clear();
+                return;
+            }
+
+            var maxScore = float.NegativeInfinity;
+            for (var t = 0; t < sequenceLength; t++)
+            {
+                var key = keysQ.Slice(t * headDimension, headDimension);
+                var score = DotF32I8(query, key) * keyScales[t] * scale;
+                scoreScratch[t] = score;
+                if (score > maxScore)
+                {
+                    maxScore = score;
+                }
+            }
+
+            var sumExp = 0.0f;
+            for (var t = 0; t < sequenceLength; t++)
+            {
+                var exp = MathF.Exp(scoreScratch[t] - maxScore);
+                scoreScratch[t] = exp;
+                sumExp += exp;
+            }
+
+            output.Slice(0, headDimension).Clear();
+
+            if (sumExp <= 0f || float.IsNaN(sumExp) || float.IsInfinity(sumExp))
+            {
+                return;
+            }
+
+            var invSum = 1f / sumExp;
+            for (var t = 0; t < sequenceLength; t++)
+            {
+                var coef = scoreScratch[t] * invSum * valueScales[t];
+                var value = valuesQ.Slice(t * headDimension, headDimension);
+                AxpyI8(coef, value, output, headDimension);
+            }
+        }
+
+        /// <summary>F32·int8 dot — query stays F32, key bytes widened on the fly (two accumulators,
+        /// reassociated like <see cref="Dot"/>; score precision is non-critical).</summary>
+        private static float DotF32I8(ReadOnlySpan<float> q, ReadOnlySpan<sbyte> k)
+        {
+            var n = q.Length < k.Length ? q.Length : k.Length;
+            var i = 0;
+            var s = 0f;
+            if (Avx2.IsSupported && n >= 8)
+            {
+                ref var ql = ref MemoryMarshal.GetReference(q);
+                ref var kl = ref MemoryMarshal.GetReference(k);
+                var acc0 = Vector256<float>.Zero;
+                var acc1 = Vector256<float>.Zero;
+                for (; i + 16 <= n; i += 16)
+                {
+                    var k0 = Avx.ConvertToVector256Single(Avx2.ConvertToVector256Int32(Vector128.LoadUnsafe(ref kl, (nuint)i)));
+                    var k1 = Avx.ConvertToVector256Single(Avx2.ConvertToVector256Int32(Vector128.LoadUnsafe(ref kl, (nuint)(i + 8))));
+                    acc0 = Avx.Add(acc0, Avx.Multiply(Vector256.LoadUnsafe(ref ql, (nuint)i), k0));
+                    acc1 = Avx.Add(acc1, Avx.Multiply(Vector256.LoadUnsafe(ref ql, (nuint)(i + 8)), k1));
+                }
+                for (; i + 8 <= n; i += 8)
+                {
+                    var k0 = Avx.ConvertToVector256Single(Avx2.ConvertToVector256Int32(Vector128.LoadUnsafe(ref kl, (nuint)i)));
+                    acc0 = Avx.Add(acc0, Avx.Multiply(Vector256.LoadUnsafe(ref ql, (nuint)i), k0));
+                }
+                s = Vector256.Sum(Avx.Add(acc0, acc1));
+            }
+            for (; i < n; i++)
+            {
+                s += q[i] * k[i];
+            }
+            return s;
+        }
+
+        /// <summary>output[d] += coef · valueByte[d] (int8 widened), SIMD over headDim.</summary>
+        private static void AxpyI8(float coef, ReadOnlySpan<sbyte> v, Span<float> output, int headDimension)
+        {
+            var d = 0;
+            if (Avx2.IsSupported)
+            {
+                ref var o = ref MemoryMarshal.GetReference(output);
+                ref var vv = ref MemoryMarshal.GetReference(v);
+                var coefV = Vector256.Create(coef);
+                for (; d + 8 <= headDimension; d += 8)
+                {
+                    var val = Avx.ConvertToVector256Single(Avx2.ConvertToVector256Int32(Vector128.LoadUnsafe(ref vv, (nuint)d)));
+                    var acc = Vector256.LoadUnsafe(ref o, (nuint)d);
+                    Avx.Add(acc, Avx.Multiply(coefV, val)).StoreUnsafe(ref o, (nuint)d);
+                }
+            }
+            for (; d < headDimension; d++)
+            {
+                output[d] += coef * v[d];
+            }
+        }
+
         public static void ComputeSingleHeadFromCache(
             IKeyValueCacheReader cache,
             int layerIndex,
