@@ -3,8 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 using DevOnBike.Overfit.Intrinsics;
@@ -131,6 +131,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var accRow = Vector256<float>.Zero;
             var accMin = Vector256<float>.Zero;
 
+            // Scratch for the unpacked 6-bit scales/mins, hoisted out of BOTH loops (CA2014:
+            // stackalloc in a loop grows the frame each iteration). Fully overwritten per use.
+            var u0 = stackalloc uint[4];
+            var u1 = stackalloc uint[4];
+
             for (var b = 0; b < nb; b++)
             {
                 var blk = bptr + (long)b * BlockKx8Bytes;
@@ -179,8 +184,6 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     var v0123_13 = Avx2.And(Hi(raw0123_3), m4b);
                     var v4567_13 = Avx2.And(Hi(raw4567_3), m4b);
 
-                    uint* u0 = stackalloc uint[4];
-                    uint* u1 = stackalloc uint[4];
                     u0[0] = Unsafe.ReadUnaligned<uint>(scBase + 24 * sb);
                     u0[1] = Unsafe.ReadUnaligned<uint>(scBase + 24 * sb + 4);
                     u0[2] = Unsafe.ReadUnaligned<uint>(scBase + 24 * sb + 8);
@@ -252,10 +255,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private static Vector256<byte> Hi(Vector256<byte> v) => Avx2.ShiftRightLogical(v.AsUInt16(), 4).AsByte();
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static Vector256<byte> Sh(Vector256<byte> v, byte imm) => Avx2.Shuffle(v.AsInt32(), imm).AsByte();
+        private static Vector256<byte> Sh(Vector256<byte> v, [ConstantExpected] byte imm) => Avx2.Shuffle(v.AsInt32(), imm).AsByte();
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static Vector256<sbyte> Sh32(Vector256<sbyte> v, byte imm) => Avx2.Shuffle(v.AsInt32(), imm).AsSByte();
+        private static Vector256<sbyte> Sh32(Vector256<sbyte> v, [ConstantExpected] byte imm) => Avx2.Shuffle(v.AsInt32(), imm).AsSByte();
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static Vector256<byte> Blend(Vector256<byte> a, Vector256<byte> b) =>
@@ -293,7 +296,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private static Vector256<float> LoadF16x8Rearrange(byte* p, Vector128<byte> deltamask)
         {
             var bytes = Ssse3.Shuffle(Vector128.Load(p), deltamask);
-            byte* tmp = stackalloc byte[16];
+            var tmp = stackalloc byte[16];
             bytes.Store(tmp);
             return LoadF16x8(tmp);
         }

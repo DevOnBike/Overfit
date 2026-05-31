@@ -271,10 +271,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Avx2.And(Avx2.ShiftRightLogical(v.AsInt16(), 4).AsByte(), m4b);
 
         // 2-bit qh field at `shift`, masked, shifted into the high-nibble position (<<4).
+        // `shift` is runtime-variable (0/2/4/6 per sub-block) → use the Vector128-count shift
+        // overload (the variable-count form; the immediate-byte overload triggers CA1857).
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static Vector256<byte> QhBits(Vector256<byte> qh, byte shift, Vector256<byte> m2)
         {
-            var bits = Avx2.And(Avx2.ShiftRightLogical(qh.AsInt16(), shift).AsByte(), m2);
+            var count = Vector128.CreateScalar((short)shift);
+            var bits = Avx2.And(Avx2.ShiftRightLogical(qh.AsInt16(), count).AsByte(), m2);
+ 
             return Avx2.ShiftLeftLogical(bits.AsInt16(), 4).AsByte();
         }
 

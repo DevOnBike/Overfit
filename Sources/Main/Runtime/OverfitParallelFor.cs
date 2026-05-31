@@ -324,7 +324,7 @@ namespace DevOnBike.Overfit.Runtime
             => For(rangeStart, rangeEnd, minItemsPerWorker, _workerCount, body, context);
 
         /// <summary>
-        /// Grained <see cref="For(int,int,int,delegate*{int,int,void*,void},void*)"/> with an
+        /// Grained <c>For(rangeStart, rangeEnd, minItemsPerWorker, body, context)</c> with an
         /// explicit <paramref name="maxWorkers"/> cap on the chunk (worker) count. Small,
         /// numerous dispatches (single-token decode FFN matmuls) are dispatch-overhead
         /// bound, not bandwidth bound, so fanning them across all cores is a net loss —
