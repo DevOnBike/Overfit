@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Numerics.Tensors;
+using System.Threading.Tasks;
 using DevOnBike.Overfit.Intrinsics;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
@@ -12,6 +13,10 @@ namespace DevOnBike.Overfit.Autograd
 {
     public sealed partial class ComputationGraph
     {
+        // Above this many MACs (n·k·m) the per-output-row dequant+dot/axpy is parallelised over m
+        // (Parallel.For, like Conv2D — this is the training path, not the 0-alloc decode hot path).
+        private const long FrozenQuantParallelThreshold = 200_000;
+
         // Frozen quantized base weights referenced by FrozenQuantizedLinear ops; the tape op
         // stores the list index in I0 (the weight is not an AutogradNode). Cleared by Reset().
         private List<IDequantRowSource>? _frozenQuantWeights;
@@ -38,20 +43,8 @@ namespace DevOnBike.Overfit.Autograd
             }
 
             var output = CreateTemporary(new TensorShape(n, m), input.RequiresGrad, clearMemory: false);
-            var inS = input.DataView.AsReadOnlySpan();
-            var outS = output.DataView.AsSpan();
 
-            // Dequantize each output row ONCE, reuse across the batch (rows are the heavy part).
-            using var rowBuf = new PooledBuffer<float>(k, clearMemory: false);
-            var wRow = rowBuf.Span;
-            for (var o = 0; o < m; o++)
-            {
-                weight.DecodeRow(o, wRow);
-                for (var b = 0; b < n; b++)
-                {
-                    outS[b * m + o] = TensorPrimitives.Dot(inS.Slice(b * k, k), wRow);
-                }
-            }
+            ForwardCompute(input.DataView.AsReadOnlySpan(), output.DataView.AsSpan(), weight, n, k, m);
 
             if (input.RequiresGrad)
             {
@@ -80,22 +73,113 @@ namespace DevOnBike.Overfit.Autograd
 
             var weight = _frozenQuantWeights![op.I0];
             int k = op.I1, m = op.I2, n = op.Output.Shape.D0;
-            var dy = op.Output.GradView.AsReadOnlySpan();
-            var dx = input.GradView.AsSpan();
+            BackwardCompute(op.Output.GradView.AsReadOnlySpan(), input.GradView.AsSpan(), weight, n, k, m);
+        }
 
-            using var rowBuf = new PooledBuffer<float>(k, clearMemory: false);
-            var wRow = rowBuf.Span;
-            for (var o = 0; o < m; o++)
+        // ── forward: out[b,o] = Σ_i dequant(W)[o,i]·in[b,i], dequant each row once, reuse over batch ──
+
+        private static void ForwardCompute(ReadOnlySpan<float> inS, Span<float> outS, IDequantRowSource weight, int n, int k, int m)
+        {
+            if ((long)n * k * m < FrozenQuantParallelThreshold)
             {
-                weight.DecodeRow(o, wRow);
-                for (var b = 0; b < n; b++)
+                using var rowBuf = new PooledBuffer<float>(k, clearMemory: false);
+                var wRow = rowBuf.Span;
+                for (var o = 0; o < m; o++)
                 {
-                    var g = dy[b * m + o];
-                    if (g != 0f)
+                    weight.DecodeRow(o, wRow);
+                    for (var b = 0; b < n; b++)
                     {
-                        Simd.MulAdd(wRow, g, dx.Slice(b * k, k));
+                        outS[b * m + o] = TensorPrimitives.Dot(inS.Slice(b * k, k), wRow);
                     }
                 }
+                return;
+            }
+
+            ForwardParallel(inS, outS, weight, n, k, m);
+        }
+
+        private static unsafe void ForwardParallel(ReadOnlySpan<float> inS, Span<float> outS, IDequantRowSource weight, int n, int k, int m)
+        {
+            fixed (float* inB = inS)
+            fixed (float* outB = outS)
+            {
+                nint inP = (nint)inB, outP = (nint)outB;
+                // Each output row o is independent and writes a disjoint column out[*, o] → no race.
+                Parallel.For(0, m, () => new float[k], (o, _, scratch) =>
+                {
+                    var wRow = scratch.AsSpan(0, k);
+                    weight.DecodeRow(o, wRow);
+                    var ip = (float*)inP;
+                    var op = (float*)outP;
+                    for (var b = 0; b < n; b++)
+                    {
+                        op[b * m + o] = TensorPrimitives.Dot(new ReadOnlySpan<float>(ip + b * k, k), wRow);
+                    }
+                    return scratch;
+                }, _ => { });
+            }
+        }
+
+        // ── backward (dInput only): dx[b] += Σ_o dy[b,o]·dequant(W)[o]. Parallelising over o races on
+        //    dx[b], so each thread accumulates a private partial and reduces under a lock at the end. ──
+
+        private static void BackwardCompute(ReadOnlySpan<float> dy, Span<float> dx, IDequantRowSource weight, int n, int k, int m)
+        {
+            if ((long)n * k * m < FrozenQuantParallelThreshold)
+            {
+                using var rowBuf = new PooledBuffer<float>(k, clearMemory: false);
+                var wRow = rowBuf.Span;
+                for (var o = 0; o < m; o++)
+                {
+                    weight.DecodeRow(o, wRow);
+                    for (var b = 0; b < n; b++)
+                    {
+                        var g = dy[b * m + o];
+                        if (g != 0f)
+                        {
+                            Simd.MulAdd(wRow, g, dx.Slice(b * k, k));
+                        }
+                    }
+                }
+                return;
+            }
+
+            BackwardParallel(dy, dx, weight, n, k, m);
+        }
+
+        private static unsafe void BackwardParallel(ReadOnlySpan<float> dy, Span<float> dx, IDequantRowSource weight, int n, int k, int m)
+        {
+            fixed (float* dyB = dy)
+            fixed (float* dxB = dx)
+            {
+                nint dyP = (nint)dyB, dxP = (nint)dxB;
+                var gate = new object();
+                Parallel.For(
+                    0, m,
+                    () => (scratch: new float[k], partial: new float[n * k]),
+                    (o, _, local) =>
+                    {
+                        var wRow = local.scratch.AsSpan(0, k);
+                        weight.DecodeRow(o, wRow);
+                        var dyp = (float*)dyP;
+                        for (var b = 0; b < n; b++)
+                        {
+                            var g = dyp[b * m + o];
+                            if (g != 0f)
+                            {
+                                Simd.MulAdd(wRow, g, local.partial.AsSpan(b * k, k));
+                            }
+                        }
+                        return local;
+                    },
+                    local =>
+                    {
+                        lock (gate)
+                        {
+                            var dxp = new Span<float>((float*)dxP, n * k);
+                            TensorPrimitives.Add(dxp, local.partial, dxp);
+                        }
+                    });
             }
         }
     }
