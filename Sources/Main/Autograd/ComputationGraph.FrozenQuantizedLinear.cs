@@ -4,8 +4,10 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Numerics.Tensors;
-using System.Threading.Tasks;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using DevOnBike.Overfit.Intrinsics;
+using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 
@@ -98,25 +100,50 @@ namespace DevOnBike.Overfit.Autograd
             ForwardParallel(inS, outS, weight, n, k, m);
         }
 
+        // Context for the OverfitParallelFor workers. The managed weight rides through the void*
+        // context as a GCHandle (it has a DecodeRow method, so it can't be a plain float* like Conv2D).
+        private unsafe struct FqlContext
+        {
+            public float* A;      // forward: input; backward: dy
+            public float* Out;    // forward: output; backward: per-partition partial-dx base
+            public nint Weight;   // GCHandle.ToIntPtr(weight)
+            public int N;
+            public int K;
+            public int M;
+            public int P;         // backward partition count
+        }
+
         private static unsafe void ForwardParallel(ReadOnlySpan<float> inS, Span<float> outS, IDequantRowSource weight, int n, int k, int m)
         {
-            fixed (float* inB = inS)
-            fixed (float* outB = outS)
+            var handle = GCHandle.Alloc(weight);
+            try
             {
-                nint inP = (nint)inB, outP = (nint)outB;
-                // Each output row o is independent and writes a disjoint column out[*, o] → no race.
-                Parallel.For(0, m, () => new float[k], (o, _, scratch) =>
+                fixed (float* inB = inS)
+                fixed (float* outB = outS)
                 {
-                    var wRow = scratch.AsSpan(0, k);
-                    weight.DecodeRow(o, wRow);
-                    var ip = (float*)inP;
-                    var op = (float*)outP;
-                    for (var b = 0; b < n; b++)
-                    {
-                        op[b * m + o] = TensorPrimitives.Dot(new ReadOnlySpan<float>(ip + b * k, k), wRow);
-                    }
-                    return scratch;
-                }, _ => { });
+                    var ctx = new FqlContext { A = inB, Out = outB, Weight = GCHandle.ToIntPtr(handle), N = n, K = k, M = m };
+                    OverfitParallelFor.For(0, m, &ForwardChunk, &ctx);
+                }
+            }
+            finally
+            {
+                handle.Free();
+            }
+        }
+
+        private static unsafe void ForwardChunk(int start, int end, void* context)
+        {
+            ref var ctx = ref Unsafe.AsRef<FqlContext>(context);
+            var weight = (IDequantRowSource)GCHandle.FromIntPtr(ctx.Weight).Target!;
+            using var rowBuf = new PooledBuffer<float>(ctx.K, clearMemory: false);
+            var wRow = rowBuf.Span;
+            for (var o = start; o < end; o++)
+            {
+                weight.DecodeRow(o, wRow);
+                for (var b = 0; b < ctx.N; b++)
+                {
+                    ctx.Out[b * ctx.M + o] = TensorPrimitives.Dot(new ReadOnlySpan<float>(ctx.A + b * ctx.K, ctx.K), wRow);
+                }
             }
         }
 
@@ -149,37 +176,57 @@ namespace DevOnBike.Overfit.Autograd
 
         private static unsafe void BackwardParallel(ReadOnlySpan<float> dy, Span<float> dx, IDequantRowSource weight, int n, int k, int m)
         {
-            fixed (float* dyB = dy)
-            fixed (float* dxB = dx)
+            // P fixed partitions of the output rows, each with a PRIVATE partial-dx slot → no race on
+            // dx[b]; reduce the P partials into dx afterwards. (Parallelising over o would race; over
+            // batch would re-dequant every row P×.) Partials are pooled + zeroed.
+            var p = Math.Min(OverfitParallelFor.WorkerCount, m);
+            var handle = GCHandle.Alloc(weight);
+            using var partials = new PooledBuffer<float>((long)p * n * k <= int.MaxValue ? p * n * k : throw new ArgumentException("partials overflow"), clearMemory: true);
+            try
             {
-                nint dyP = (nint)dyB, dxP = (nint)dxB;
-                var gate = new object();
-                Parallel.For(
-                    0, m,
-                    () => (scratch: new float[k], partial: new float[n * k]),
-                    (o, _, local) =>
+                fixed (float* dyB = dy)
+                fixed (float* partB = partials.Span)
+                {
+                    var ctx = new FqlContext { A = dyB, Out = partB, Weight = GCHandle.ToIntPtr(handle), N = n, K = k, M = m, P = p };
+                    OverfitParallelFor.For(0, p, &BackwardChunk, &ctx);
+                }
+            }
+            finally
+            {
+                handle.Free();
+            }
+
+            // Reduce: dx += Σ_partition partial.
+            var part = partials.Span;
+            for (var pi = 0; pi < p; pi++)
+            {
+                TensorPrimitives.Add(dx, part.Slice(pi * n * k, n * k), dx);
+            }
+        }
+
+        private static unsafe void BackwardChunk(int start, int end, void* context)
+        {
+            ref var ctx = ref Unsafe.AsRef<FqlContext>(context);
+            var weight = (IDequantRowSource)GCHandle.FromIntPtr(ctx.Weight).Target!;
+            using var rowBuf = new PooledBuffer<float>(ctx.K, clearMemory: false);
+            var wRow = rowBuf.Span;
+            for (var partition = start; partition < end; partition++)
+            {
+                var oStart = (int)((long)partition * ctx.M / ctx.P);
+                var oEnd = (int)((long)(partition + 1) * ctx.M / ctx.P);
+                var partial = ctx.Out + (long)partition * ctx.N * ctx.K; // this partition's private dx slot
+                for (var o = oStart; o < oEnd; o++)
+                {
+                    weight.DecodeRow(o, wRow);
+                    for (var b = 0; b < ctx.N; b++)
                     {
-                        var wRow = local.scratch.AsSpan(0, k);
-                        weight.DecodeRow(o, wRow);
-                        var dyp = (float*)dyP;
-                        for (var b = 0; b < n; b++)
+                        var g = ctx.A[b * ctx.M + o];
+                        if (g != 0f)
                         {
-                            var g = dyp[b * m + o];
-                            if (g != 0f)
-                            {
-                                Simd.MulAdd(wRow, g, local.partial.AsSpan(b * k, k));
-                            }
+                            Simd.MulAdd(wRow, g, new Span<float>(partial + b * ctx.K, ctx.K));
                         }
-                        return local;
-                    },
-                    local =>
-                    {
-                        lock (gate)
-                        {
-                            var dxp = new Span<float>((float*)dxP, n * k);
-                            TensorPrimitives.Add(dxp, local.partial, dxp);
-                        }
-                    });
+                    }
+                }
             }
         }
     }
