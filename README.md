@@ -286,6 +286,7 @@ Full benchmark tables and caveats live in [`docs/TECHNICAL.md`](docs/TECHNICAL.m
 | Computer vision | MNIST CNN, Conv/BN/ReLU/Pool/FC-style networks |
 | OCR | CRNN + CTC pipeline for synthetic digits / lexicon words |
 | LoRA | LM head, FFN and per-head attention stages |
+| QLoRA | Frozen Q4_K base (dequantized on the fly, never updated) + trainable LoRA — ~7× less base RAM for fine-tuning; LM head shipped (FFN in progress), faster and lighter than F32 LoRA on head-heavy models |
 | Anomaly detection | Small GPT-style models for metrics and deployment-specific adaptation |
 
 ---
@@ -390,6 +391,7 @@ Current shipped areas include:
 - tool calling
 - guaranteed JSON
 - LoRA stages
+- QLoRA fine-tuning (frozen Q4_K base + trainable LoRA, dequant-on-the-fly, pure-managed CPU)
 - ONNX import
 - anomaly detection
 - Native AOT guard
@@ -397,6 +399,7 @@ Current shipped areas include:
 Current priorities include:
 
 - decode gap to llama.cpp narrowed to ~1.13× same-file (from ~1.6×) — the residual is DRAM-bandwidth-bound; further closing needs structural (full-tensor attention) work, not kernel-ALU
+- extending QLoRA base quantization from the LM head to the FFN (the per-head attention split blocks Q4_K there — headDim < 256)
 - batched prefill
 - stronger JSON Schema constraints
 - more model families and quantization formats
