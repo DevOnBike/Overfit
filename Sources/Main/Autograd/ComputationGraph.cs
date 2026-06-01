@@ -444,6 +444,10 @@ namespace DevOnBike.Overfit.Autograd
                 case OpCode.Checkpoint:
                     CheckpointBackward(in op);
                     break;
+
+                case OpCode.FrozenQuantizedLinear:
+                    FrozenQuantizedLinearBackward(in op);
+                    break;
             }
         }
 
@@ -487,6 +491,7 @@ namespace DevOnBike.Overfit.Autograd
 
             _opCount = 0;
             _checkpointSegments?.Clear();
+            _frozenQuantWeights?.Clear();
 
             // Reset arena without involving GC.
             TapeBuffer.ResetOffset();

@@ -42,6 +42,14 @@ namespace DevOnBike.Overfit.Autograd
         Gelu,
         Checkpoint,
         TransposeLastTwo,
-        DepthwiseConv2D
+        DepthwiseConv2D,
+
+        /// <summary>
+        /// Linear projection through a FROZEN quantized weight (Q4_K / Q6_K), dequantized on the
+        /// fly. The base weight is not an <see cref="AutogradNode"/> and never receives a gradient
+        /// — only the INPUT gradient flows back (the QLoRA base path: frozen 4-bit weights in RAM,
+        /// trainable adapters elsewhere). The weight is held in a graph-side list, index in I0.
+        /// </summary>
+        FrozenQuantizedLinear
     }
 }

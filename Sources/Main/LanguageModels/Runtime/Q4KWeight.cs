@@ -20,7 +20,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     ///
     /// Long-lived (one per quantized model weight); a plain byte array, no pooling.
     /// </summary>
-    public sealed class Q4KWeight
+    public sealed class Q4KWeight : Autograd.IDequantRowSource
     {
         /// <summary>Elements per Q4_K super-block.</summary>
         public const int SuperBlockElements = 256;
