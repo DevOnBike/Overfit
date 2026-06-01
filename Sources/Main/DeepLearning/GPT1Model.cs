@@ -123,6 +123,16 @@ namespace DevOnBike.Overfit.DeepLearning
         /// </summary>
         internal Func<ComputationGraph, AutogradNode>? LMHeadWeightProvider { get; set; }
 
+        /// <summary>
+        /// Output-level LM-head hook (QLoRA): given the graph and the pre-head hidden
+        /// <c>flat [B*T, dModel]</c>, returns the logits <c>[B*T, vocab]</c> directly — used to
+        /// inject <c>FrozenQuantizedLinear(flat, Q4_K base) + LoRA(flat)</c>, where the base stays
+        /// 4-bit (it cannot be expressed as a single F32 weight, so the weight-level
+        /// <see cref="LMHeadWeightProvider"/> can't carry it). Takes precedence over both the
+        /// weight-provider and the standard head. Null on the normal path.
+        /// </summary>
+        internal Func<ComputationGraph, AutogradNode, AutogradNode>? LMHeadOutputProvider { get; set; }
+
         public void Train()
         {
             _isTraining = true;
@@ -534,22 +544,32 @@ namespace DevOnBike.Overfit.DeepLearning
                 new TensorShape(vocabSize),
                 clearMemory: true);
 
-            AutogradNode headWeight;
+            AutogradNode flatLogits;
 
-            if (LMHeadWeightProvider is not null)
+            if (LMHeadOutputProvider is not null)
             {
-                headWeight = LMHeadWeightProvider(graph);
+                // QLoRA: the hook owns the whole head (FrozenQuantizedLinear(flat) + LoRA(flat)).
+                flatLogits = LMHeadOutputProvider(graph, flat);
             }
             else
             {
-                _lmHeadNode ??= LMHead.AsNode();
-                headWeight = _lmHeadNode;
-            }
+                AutogradNode headWeight;
 
-            var flatLogits = graph.Linear(
-                flat,
-                headWeight,
-                bias);
+                if (LMHeadWeightProvider is not null)
+                {
+                    headWeight = LMHeadWeightProvider(graph);
+                }
+                else
+                {
+                    _lmHeadNode ??= LMHead.AsNode();
+                    headWeight = _lmHeadNode;
+                }
+
+                flatLogits = graph.Linear(
+                    flat,
+                    headWeight,
+                    bias);
+            }
 
             return graph.Reshape(
                 flatLogits,

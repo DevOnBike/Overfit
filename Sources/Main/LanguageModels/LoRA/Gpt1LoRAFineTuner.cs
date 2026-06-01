@@ -5,6 +5,8 @@
 
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.LanguageModels.Loading;
+using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Parameters;
 using DevOnBike.Overfit.Tensors;
@@ -59,15 +61,23 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
         private readonly int _nLayers;
         private readonly int _rank;
         private readonly LoRATargetModules _targets;
+        private readonly bool _quantizeBase;
         private readonly ModuleAdapter[] _adapters;
 
         private bool _disposed;
 
+        /// <param name="quantizeBase">
+        /// QLoRA mode: freeze the base as Q4_K (dequantized on the fly, never updated) instead of
+        /// keeping it F32 — ~7× less base RAM in training, plus no base-grad buffer. Implemented for
+        /// the <see cref="LoRATargetModules.LanguageModelHead"/> target only (the per-deployment
+        /// default); other targets still need their own output-level hooks.
+        /// </param>
         public Gpt1LoRAFineTuner(
             GPT1Model model,
             int rank,
             LoRATargetModules targets = LoRATargetModules.LanguageModelHead,
-            int seed = 42)
+            int seed = 42,
+            bool quantizeBase = false)
         {
             ArgumentNullException.ThrowIfNull(model);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rank);
@@ -75,6 +85,18 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             if (targets == LoRATargetModules.None)
             {
                 throw new ArgumentException("At least one target module must be selected.", nameof(targets));
+            }
+
+            if (quantizeBase && targets != LoRATargetModules.LanguageModelHead)
+            {
+                throw new NotSupportedException(
+                    "QLoRA base quantization (quantizeBase) is currently implemented for the LanguageModelHead target only.");
+            }
+
+            if (quantizeBase && model.Config.DModel % 256 != 0)
+            {
+                throw new NotSupportedException(
+                    $"QLoRA Q4_K base requires DModel ({model.Config.DModel}) to be a multiple of 256.");
             }
 
             if ((targets & ~SupportedTargets) != 0)
@@ -96,6 +118,7 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             _nLayers = model.Config.NLayers;
             _rank = rank;
             _targets = targets;
+            _quantizeBase = quantizeBase;
 
             _adapters = BuildAdapters(seed);
             AttachProviders();
@@ -330,7 +353,7 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
 
                 adapter.ANode.Dispose();
                 adapter.BNode.Dispose();
-                adapter.WBaseNode.Dispose();
+                adapter.WBaseNode?.Dispose();
                 adapter.A.Dispose();
                 adapter.B.Dispose();
             }
@@ -438,11 +461,48 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                 B = b,
                 ANode = a.AsNode(),
                 BNode = b.AsNode(),
-                WBaseNode = wBase.AsNode(),
             };
 
-            adapter.Provider = graph => BuildEffectiveWeight(graph, adapter);
+            if (_quantizeBase && module == LoRATargetModules.LanguageModelHead)
+            {
+                // QLoRA: freeze the head as Q4_K and inject FrozenQuantizedLinear(flat) + LoRA(flat)
+                // at the output (the 4-bit base can't be a single F32 weight node).
+                adapter.QuantizedBase = QuantizeHead(wBase, inDim, outDim);
+                adapter.OutputProvider = (graph, flat) => BuildQLoRAHead(graph, flat, adapter);
+            }
+            else
+            {
+                adapter.WBaseNode = wBase.AsNode();
+                adapter.Provider = graph => BuildEffectiveWeight(graph, adapter);
+            }
+
             return adapter;
+        }
+
+        // Transpose the input-major head [inDim, outDim] to output-major [outDim, inDim] and quantize to Q4_K.
+        private static Q4KWeight QuantizeHead(Parameter wBase, int inDim, int outDim)
+        {
+            var src = wBase.DataReadOnlySpan;
+            var transposed = new float[(long)outDim * inDim];
+            for (var k = 0; k < inDim; k++)
+            {
+                for (var o = 0; o < outDim; o++)
+                {
+                    transposed[o * inDim + k] = src[k * outDim + o];
+                }
+            }
+
+            var bytes = GgmlQuant.QuantizeQ4_K(transposed, inDim, outDim);
+            return new Q4KWeight(bytes, inDim, outDim);
+        }
+
+        // logits = FrozenQuantizedLinear(flat, Q4_K head) + (flat·A)·B  — base frozen, only A/B train.
+        private AutogradNode BuildQLoRAHead(ComputationGraph graph, AutogradNode flat, ModuleAdapter adapter)
+        {
+            var baseOut = graph.FrozenQuantizedLinear(flat, adapter.QuantizedBase!);
+            var xa = graph.Linear(flat, adapter.ANode, graph.CreateAuxiliary(new TensorShape(_rank), clearMemory: true));
+            var lora = graph.Linear(xa, adapter.BNode, graph.CreateAuxiliary(new TensorShape(adapter.OutDim), clearMemory: true));
+            return graph.Add(baseOut, lora);
         }
 
         private void AttachProviders()
@@ -452,7 +512,15 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                 switch (adapter.Module)
                 {
                     case LoRATargetModules.LanguageModelHead:
-                        _model.LMHeadWeightProvider = adapter.Provider;
+                        if (adapter.OutputProvider is not null)
+                        {
+                            _model.LMHeadOutputProvider = adapter.OutputProvider;
+                        }
+                        else
+                        {
+                            _model.LMHeadWeightProvider = adapter.Provider;
+                        }
+
                         break;
 
                     case LoRATargetModules.FeedForwardUp:
@@ -487,7 +555,14 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             switch (adapter.Module)
             {
                 case LoRATargetModules.LanguageModelHead:
-                    if (ReferenceEquals(_model.LMHeadWeightProvider, adapter.Provider))
+                    if (adapter.OutputProvider is not null)
+                    {
+                        if (ReferenceEquals(_model.LMHeadOutputProvider, adapter.OutputProvider))
+                        {
+                            _model.LMHeadOutputProvider = null;
+                        }
+                    }
+                    else if (ReferenceEquals(_model.LMHeadWeightProvider, adapter.Provider))
                     {
                         _model.LMHeadWeightProvider = null;
                     }
@@ -672,8 +747,12 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             public Parameter B = null!;
             public AutogradNode ANode = null!;
             public AutogradNode BNode = null!;
-            public AutogradNode WBaseNode = null!;
-            public Func<ComputationGraph, AutogradNode> Provider = null!;
+            public AutogradNode? WBaseNode;
+            public Func<ComputationGraph, AutogradNode>? Provider;
+
+            // QLoRA: frozen Q4_K base + the output-level head hook (replaces the weight-level Provider).
+            public IDequantRowSource? QuantizedBase;
+            public Func<ComputationGraph, AutogradNode, AutogradNode>? OutputProvider;
         }
     }
 }
