@@ -129,6 +129,46 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
             Assert.True(last < 0.85f * first, $"Q8-base loss drop too small: {first:F3} -> {last:F3}");
         }
 
+        [Fact]
+        public void QLoRA_Q8Base_AllLinear_HeadFFNAttention_ReduceLoss()
+        {
+            var config = new GPT1Config
+            {
+                VocabSize = 64,
+                ContextLength = 16,
+                DModel = 256,   // %32 (Q8); dHead = 256/4 = 64, %32 ✓
+                NHeads = 4,
+                NLayers = 2,
+                DFF = 512,
+                TieWeights = false,
+            };
+
+            using var model = new GPT1Model(config);
+            var corpus = new int[256];
+            for (var i = 0; i < corpus.Length; i++) { corpus[i] = (i * 7 + (i / 5)) % 64; }
+
+            // The WHOLE quantizable base: LM head + FFN + per-head attention Q/K/V/O, all frozen Q8.
+            var targets = LoRATargetModules.LanguageModelHead | LoRATargetModules.FeedForward | LoRATargetModules.Attention;
+            using var tuner = new Gpt1LoRAFineTuner(
+                model, rank: 8, targets, seed: 7, quantizeBase: true, baseFormat: QLoRABaseFormat.Q8);
+
+            Assert.True(model.LMHeadOutputProvider is not null, "LM-head QLoRA hook missing");
+            Assert.True(model.Blocks[0].FFN.W1OutputProvider is not null, "FFN QLoRA hook missing");
+            Assert.True(model.Blocks[0].Attention.GetQueryOutputProvider(0) is not null, "attention-Q QLoRA hook missing");
+            Assert.True(model.Blocks[0].Attention.GetOutputOutputProvider(0) is not null, "attention-O QLoRA hook missing");
+
+            // 300 steps: with the whole base (head+FFN+attention) frozen-quantized, there are many
+            // small adapters to coordinate, so attention-inclusive convergence is slower than head+FFN.
+            var history = tuner.FineTune(corpus, steps: 300, contextLength: 16, learningRate: 0.01f, seed: 99);
+            var first = AvgFirst(history, 5);
+            var last = AvgLast(history, 5);
+            _out.WriteLine($"QLoRA Q8 all-linear loss: {first:F3} -> {last:F3}  ({(1 - last / first) * 100:F0}% drop)");
+
+            // The point is that the full path TRAINS through the frozen-quant attention/FFN/head;
+            // a robust margin (not a tight ratio) avoids flakiness on this tiny, many-adapter task.
+            Assert.True(last < first - 0.5f, $"all-linear QLoRA did not train meaningfully: {first:F3} -> {last:F3}");
+        }
+
         private static float AvgFirst(IReadOnlyList<float> h, int n)
         {
             float s = 0; var c = Math.Min(n, h.Count);

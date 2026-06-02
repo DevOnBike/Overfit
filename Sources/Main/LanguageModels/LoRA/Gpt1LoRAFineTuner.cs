@@ -89,31 +89,38 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                 throw new ArgumentException("At least one target module must be selected.", nameof(targets));
             }
 
-            const LoRATargetModules qLoRASupported =
-                LoRATargetModules.LanguageModelHead | LoRATargetModules.FeedForwardUp | LoRATargetModules.FeedForwardDown;
-
-            if (quantizeBase && (targets & ~qLoRASupported) != 0)
-            {
-                throw new NotSupportedException(
-                    "QLoRA base quantization (quantizeBase) supports LanguageModelHead + FeedForwardUp/Down. " +
-                    "Per-head attention is blocked: headDim (= dModel/nHeads) < 256, and Q4_K needs 256-element super-blocks.");
-            }
+            const LoRATargetModules attention =
+                LoRATargetModules.Query | LoRATargetModules.Key | LoRATargetModules.Value | LoRATargetModules.OutputProjection;
 
             if (quantizeBase)
             {
-                // Q4_K needs 256-element super-blocks; Q8_0 needs only 32-element blocks.
+                var hasAttention = (targets & attention) != 0;
+
+                // Attention is per-head: each projection's input/output dim involves dHead (= dModel/nHeads),
+                // typically < 256, so Q4_K (256-element super-blocks) is impossible — force Q8 (32-element).
+                if (hasAttention && baseFormat != QLoRABaseFormat.Q8)
+                {
+                    throw new NotSupportedException(
+                        "QLoRA on attention requires baseFormat: Q8 — per-head dims (dHead = dModel/nHeads) are < 256, " +
+                        "which Q4_K's 256-element super-blocks cannot represent.");
+                }
+
                 var mult = baseFormat == QLoRABaseFormat.Q8 ? 32 : 256;
+                var dHead = model.Config.DModel / Math.Max(1, model.Config.NHeads);
 
                 if (model.Config.DModel % mult != 0)
                 {
-                    throw new NotSupportedException(
-                        $"QLoRA {baseFormat} base requires DModel ({model.Config.DModel}) to be a multiple of {mult}.");
+                    throw new NotSupportedException($"QLoRA {baseFormat} base requires DModel ({model.Config.DModel}) % {mult} == 0.");
                 }
 
                 if (targets.HasFlag(LoRATargetModules.FeedForwardDown) && model.Config.DFF % mult != 0)
                 {
-                    throw new NotSupportedException(
-                        $"QLoRA {baseFormat} FFN-down base requires DFF ({model.Config.DFF}) to be a multiple of {mult}.");
+                    throw new NotSupportedException($"QLoRA {baseFormat} FFN-down base requires DFF ({model.Config.DFF}) % {mult} == 0.");
+                }
+
+                if (hasAttention && dHead % mult != 0)
+                {
+                    throw new NotSupportedException($"QLoRA {baseFormat} attention base requires dHead ({dHead}) % {mult} == 0.");
                 }
             }
 
@@ -426,25 +433,26 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                     {
                         list.Add(CreateAdapter(
                             layer, LoRATargetModules.Query, _dModel, dHead,
-                            attn.WqHeads[h], attnSeed++, headIndex: h));
+                            attn.WqHeads[h], attnSeed++, headIndex: h, bias: attn.BqHeads[h]));
                     }
 
                     if (_targets.HasFlag(LoRATargetModules.Key))
                     {
                         list.Add(CreateAdapter(
                             layer, LoRATargetModules.Key, _dModel, dHead,
-                            attn.WkHeads[h], attnSeed++, headIndex: h));
+                            attn.WkHeads[h], attnSeed++, headIndex: h, bias: attn.BkHeads[h]));
                     }
 
                     if (_targets.HasFlag(LoRATargetModules.Value))
                     {
                         list.Add(CreateAdapter(
                             layer, LoRATargetModules.Value, _dModel, dHead,
-                            attn.WvHeads[h], attnSeed++, headIndex: h));
+                            attn.WvHeads[h], attnSeed++, headIndex: h, bias: attn.BvHeads[h]));
                     }
 
                     if (_targets.HasFlag(LoRATargetModules.OutputProjection))
                     {
+                        // Wo has no per-head bias (the layer adds Bo once after summing heads).
                         list.Add(CreateAdapter(
                             layer, LoRATargetModules.OutputProjection, dHead, _dModel,
                             attn.WoHeads[h], attnSeed++, headIndex: h));
@@ -578,20 +586,36 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                         break;
 
                     case LoRATargetModules.Query:
-                        _model.Blocks[adapter.Layer].Attention.SetQueryProvider(adapter.HeadIndex, adapter.Provider);
-                        break;
+                        {
+                            var attn = _model.Blocks[adapter.Layer].Attention;
+                            if (adapter.OutputProvider is not null) { attn.SetQueryOutputProvider(adapter.HeadIndex, adapter.OutputProvider); }
+                            else { attn.SetQueryProvider(adapter.HeadIndex, adapter.Provider); }
+                            break;
+                        }
 
                     case LoRATargetModules.Key:
-                        _model.Blocks[adapter.Layer].Attention.SetKeyProvider(adapter.HeadIndex, adapter.Provider);
-                        break;
+                        {
+                            var attn = _model.Blocks[adapter.Layer].Attention;
+                            if (adapter.OutputProvider is not null) { attn.SetKeyOutputProvider(adapter.HeadIndex, adapter.OutputProvider); }
+                            else { attn.SetKeyProvider(adapter.HeadIndex, adapter.Provider); }
+                            break;
+                        }
 
                     case LoRATargetModules.Value:
-                        _model.Blocks[adapter.Layer].Attention.SetValueProvider(adapter.HeadIndex, adapter.Provider);
-                        break;
+                        {
+                            var attn = _model.Blocks[adapter.Layer].Attention;
+                            if (adapter.OutputProvider is not null) { attn.SetValueOutputProvider(adapter.HeadIndex, adapter.OutputProvider); }
+                            else { attn.SetValueProvider(adapter.HeadIndex, adapter.Provider); }
+                            break;
+                        }
 
                     case LoRATargetModules.OutputProjection:
-                        _model.Blocks[adapter.Layer].Attention.SetOutputProvider(adapter.HeadIndex, adapter.Provider);
-                        break;
+                        {
+                            var attn = _model.Blocks[adapter.Layer].Attention;
+                            if (adapter.OutputProvider is not null) { attn.SetOutputOutputProvider(adapter.HeadIndex, adapter.OutputProvider); }
+                            else { attn.SetOutputProvider(adapter.HeadIndex, adapter.Provider); }
+                            break;
+                        }
                 }
             }
         }
@@ -654,10 +678,11 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                 case LoRATargetModules.Query:
                     {
                         var attn = _model.Blocks[adapter.Layer].Attention;
-                        if (ReferenceEquals(attn.GetQueryProvider(adapter.HeadIndex), adapter.Provider))
+                        if (adapter.OutputProvider is not null)
                         {
-                            attn.SetQueryProvider(adapter.HeadIndex, null);
+                            if (ReferenceEquals(attn.GetQueryOutputProvider(adapter.HeadIndex), adapter.OutputProvider)) { attn.SetQueryOutputProvider(adapter.HeadIndex, null); }
                         }
+                        else if (ReferenceEquals(attn.GetQueryProvider(adapter.HeadIndex), adapter.Provider)) { attn.SetQueryProvider(adapter.HeadIndex, null); }
 
                         break;
                     }
@@ -665,10 +690,11 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                 case LoRATargetModules.Key:
                     {
                         var attn = _model.Blocks[adapter.Layer].Attention;
-                        if (ReferenceEquals(attn.GetKeyProvider(adapter.HeadIndex), adapter.Provider))
+                        if (adapter.OutputProvider is not null)
                         {
-                            attn.SetKeyProvider(adapter.HeadIndex, null);
+                            if (ReferenceEquals(attn.GetKeyOutputProvider(adapter.HeadIndex), adapter.OutputProvider)) { attn.SetKeyOutputProvider(adapter.HeadIndex, null); }
                         }
+                        else if (ReferenceEquals(attn.GetKeyProvider(adapter.HeadIndex), adapter.Provider)) { attn.SetKeyProvider(adapter.HeadIndex, null); }
 
                         break;
                     }
@@ -676,10 +702,11 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                 case LoRATargetModules.Value:
                     {
                         var attn = _model.Blocks[adapter.Layer].Attention;
-                        if (ReferenceEquals(attn.GetValueProvider(adapter.HeadIndex), adapter.Provider))
+                        if (adapter.OutputProvider is not null)
                         {
-                            attn.SetValueProvider(adapter.HeadIndex, null);
+                            if (ReferenceEquals(attn.GetValueOutputProvider(adapter.HeadIndex), adapter.OutputProvider)) { attn.SetValueOutputProvider(adapter.HeadIndex, null); }
                         }
+                        else if (ReferenceEquals(attn.GetValueProvider(adapter.HeadIndex), adapter.Provider)) { attn.SetValueProvider(adapter.HeadIndex, null); }
 
                         break;
                     }
@@ -687,10 +714,11 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                 case LoRATargetModules.OutputProjection:
                     {
                         var attn = _model.Blocks[adapter.Layer].Attention;
-                        if (ReferenceEquals(attn.GetOutputProvider(adapter.HeadIndex), adapter.Provider))
+                        if (adapter.OutputProvider is not null)
                         {
-                            attn.SetOutputProvider(adapter.HeadIndex, null);
+                            if (ReferenceEquals(attn.GetOutputOutputProvider(adapter.HeadIndex), adapter.OutputProvider)) { attn.SetOutputOutputProvider(adapter.HeadIndex, null); }
                         }
+                        else if (ReferenceEquals(attn.GetOutputProvider(adapter.HeadIndex), adapter.Provider)) { attn.SetOutputProvider(adapter.HeadIndex, null); }
 
                         break;
                     }
