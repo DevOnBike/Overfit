@@ -675,6 +675,13 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
             {
                 var process = Process.GetCurrentProcess();
 
+                if (!OperatingSystem.IsWindows() && !OperatingSystem.IsLinux())
+                {
+                    output.WriteLine("ProcessorAffinity is only supported on Windows/Linux. Single-core restriction was not applied.");
+
+                    return new SingleLogicalProcessorScope(output, process, IntPtr.Zero, isActive: false);
+                }
+
                 try
                 {
                     var original = process.ProcessorAffinity;
@@ -730,7 +737,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
 
                 try
                 {
-                    _process.ProcessorAffinity = _originalAffinity;
+                    if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
+                    {
+                        _process.ProcessorAffinity = _originalAffinity;
+                    }
                 }
                 catch (Exception ex) when (
                     ex is PlatformNotSupportedException ||
