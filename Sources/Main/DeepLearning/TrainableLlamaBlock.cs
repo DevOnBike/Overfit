@@ -3,8 +3,11 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Numerics.Tensors;
 using DevOnBike.Overfit.Autograd;
+using DevOnBike.Overfit.LanguageModels.Rope;
 using DevOnBike.Overfit.Ops;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.DeepLearning
 {
@@ -189,6 +192,149 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             var baseOut = graph.FrozenQuantizedLinear(x, w);
             return lora is null ? baseOut : graph.Add(baseOut, lora.Apply(graph, x));
+        }
+
+        public int FeedForwardWidthCached => _wGate.OutputSize;
+        public int KvWidth => _nKVHeads * _dHead;
+
+        /// <summary>
+        /// Incremental cached decode of ONE token (no autograd, no gradients) — the fast-generation path.
+        /// Processes only the new token through the block, attending its query over the KV cache built from
+        /// all earlier positions (so generation is O(1) layer-work per token instead of re-running the whole
+        /// sequence). The new token's K/V are appended to <paramref name="cacheK"/>/<paramref name="cacheV"/>
+        /// at <paramref name="position"/>. Same math as the training <c>Forward</c> (RMSNorm → QKV+LoRA → RoPE →
+        /// GQA attention → O+LoRA → residual → RMSNorm → SwiGLU+LoRA → residual), so it matches the trained
+        /// model's <c>Forward</c>. Naive per-row dequant kernels (not the optimized inference GEMV — see
+        /// ROADMAP "Fast fine-tuned decode").
+        /// </summary>
+        public void DecodeStep(
+            ReadOnlySpan<float> input,   // [dModel] hidden for the new token
+            int position,
+            RopeTable rope,
+            AutogradNode ln1Gamma,
+            AutogradNode ln2Gamma,
+            LlamaBlockLoRA? lora,
+            Span<float> cacheK,          // [maxLen * KvWidth] for this layer
+            Span<float> cacheV,
+            Span<float> output)          // [dModel]
+        {
+            var dModel = _dModel;
+            var dHead = _dHead;
+            var qDim = _nQHeads * dHead;
+            var kvDim = _nKVHeads * dHead;
+            var dFF = _wGate.OutputSize;
+            var scale = 1f / MathF.Sqrt(dHead);
+            var len = position + 1;
+
+            using var ln1B = new PooledBuffer<float>(dModel, clearMemory: false);
+            using var qB = new PooledBuffer<float>(qDim, false);
+            using var kB = new PooledBuffer<float>(kvDim, false);
+            using var vB = new PooledBuffer<float>(kvDim, false);
+            using var attnB = new PooledBuffer<float>(qDim, false);
+            using var oB = new PooledBuffer<float>(dModel, false);
+            using var afterB = new PooledBuffer<float>(dModel, false);
+            using var ln2B = new PooledBuffer<float>(dModel, false);
+            using var gateB = new PooledBuffer<float>(dFF, false);
+            using var upB = new PooledBuffer<float>(dFF, false);
+            using var downB = new PooledBuffer<float>(dModel, false);
+            using var rowB = new PooledBuffer<float>(Math.Max(dModel, dFF), false);
+            using var scoresB = new PooledBuffer<float>(len, false);
+
+            Span<float> ln1 = ln1B.Span, q = qB.Span, k = kB.Span, v = vB.Span, attn = attnB.Span;
+            Span<float> o = oB.Span, afterAttn = afterB.Span, ln2 = ln2B.Span;
+            Span<float> gate = gateB.Span, up = upB.Span, down = downB.Span, scores = scoresB.Span;
+            var row = rowB.Span;
+
+            // ── attention ──
+            RmsNormVec(input, ln1Gamma.DataView.AsReadOnlySpan(), ln1, _eps);
+            ProjVec(ln1, _wq, lora?.Q, q, row);
+            ProjVec(ln1, _wk, lora?.K, k, row);
+            ProjVec(ln1, _wv, lora?.V, v, row);
+
+            for (var h = 0; h < _nQHeads; h++) { RopeKernel.Apply(q.Slice(h * dHead, dHead), rope, position); }
+            for (var h = 0; h < _nKVHeads; h++) { RopeKernel.Apply(k.Slice(h * dHead, dHead), rope, position); }
+
+            k.CopyTo(cacheK.Slice(position * kvDim, kvDim));
+            v.CopyTo(cacheV.Slice(position * kvDim, kvDim));
+
+            for (var h = 0; h < _nQHeads; h++)
+            {
+                var kvh = h / _groupSize;
+                var qh = q.Slice(h * dHead, dHead);
+                for (var j = 0; j < len; j++)
+                {
+                    scores[j] = TensorPrimitives.Dot(qh, cacheK.Slice(j * kvDim + kvh * dHead, dHead)) * scale;
+                }
+                Softmax(scores.Slice(0, len));
+                var outH = attn.Slice(h * dHead, dHead);
+                outH.Clear();
+                for (var j = 0; j < len; j++)
+                {
+                    TensorPrimitives.MultiplyAdd(cacheV.Slice(j * kvDim + kvh * dHead, dHead), scores[j], outH, outH);
+                }
+            }
+
+            ProjVec(attn, _wo, lora?.O, o, row);
+            TensorPrimitives.Add(input, o, afterAttn);
+
+            // ── SwiGLU FFN ──
+            RmsNormVec(afterAttn, ln2Gamma.DataView.AsReadOnlySpan(), ln2, _eps);
+            ProjVec(ln2, _wGate, lora?.Gate, gate, row);
+            ProjVec(ln2, _wUp, lora?.Up, up, row);
+            for (var i = 0; i < dFF; i++) { gate[i] = gate[i] / (1f + MathF.Exp(-gate[i])) * up[i]; }
+            ProjVec(gate, _wDown, lora?.Down, down, row);
+            TensorPrimitives.Add(afterAttn, down, output);
+        }
+
+        // ── plain-span inference helpers (cached decode only) ──
+
+        private static void RmsNormVec(ReadOnlySpan<float> x, ReadOnlySpan<float> gamma, Span<float> dst, float eps)
+        {
+            var inv = 1f / MathF.Sqrt(TensorPrimitives.Dot(x, x) / x.Length + eps);
+            for (var i = 0; i < x.Length; i++) { dst[i] = x[i] * inv * gamma[i]; }
+        }
+
+        /// <summary>out[o] = Σ_i dequant(W)[o,i]·x[i] (+ optional (x·A)·B). <paramref name="row"/> is dequant scratch.</summary>
+        private static void ProjVec(ReadOnlySpan<float> x, IDequantRowSource w, LoRAAdapter? lora, Span<float> dst, Span<float> row)
+        {
+            var outDim = w.OutputSize;
+            var inDim = w.InputSize;
+            var rowS = row.Slice(0, inDim);
+            for (var oIdx = 0; oIdx < outDim; oIdx++)
+            {
+                w.DecodeRow(oIdx, rowS);
+                dst[oIdx] = TensorPrimitives.Dot(rowS, x);
+            }
+
+            if (lora is null) { return; }
+            var rank = lora.Rank;
+            var a = lora.A.DataView.AsReadOnlySpan(); // [inDim, rank]
+            var b = lora.B.DataView.AsReadOnlySpan(); // [rank, outDim]
+            Span<float> tmp = stackalloc float[rank];
+            tmp.Clear();
+            for (var i = 0; i < inDim; i++)
+            {
+                var xi = x[i];
+                if (xi == 0f) { continue; }
+                var aRow = a.Slice(i * rank, rank);
+                for (var r = 0; r < rank; r++) { tmp[r] += xi * aRow[r]; }
+            }
+            for (var r = 0; r < rank; r++)
+            {
+                var tr = tmp[r];
+                if (tr == 0f) { continue; }
+                TensorPrimitives.MultiplyAdd(b.Slice(r * outDim, outDim), tr, dst, dst);
+            }
+        }
+
+        private static void Softmax(Span<float> s)
+        {
+            var max = float.NegativeInfinity;
+            for (var i = 0; i < s.Length; i++) { if (s[i] > max) { max = s[i]; } }
+            var sum = 0f;
+            for (var i = 0; i < s.Length; i++) { s[i] = MathF.Exp(s[i] - max); sum += s[i]; }
+            var inv = 1f / sum;
+            for (var i = 0; i < s.Length; i++) { s[i] *= inv; }
         }
 
         private static void ValidateSource(string name, IDequantRowSource src, int expectedOut, int expectedIn)

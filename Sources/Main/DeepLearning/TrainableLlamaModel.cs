@@ -3,7 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.IO;
+using System.Numerics.Tensors;
 using System.Runtime.InteropServices;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.LanguageModels.Rope;
@@ -204,6 +204,101 @@ namespace DevOnBike.Overfit.DeepLearning
                 produced.Add(next);
             }
             return produced.ToArray();
+        }
+
+        /// <summary>
+        /// FAST greedy generation with a KV cache — processes only each new token through the layers
+        /// (attending its query over the cache of all earlier positions) instead of re-running the whole
+        /// sequence per token like <see cref="Generate"/>. No autograd, no graph. Same greedy result as
+        /// <see cref="Generate"/>; the speedup grows with sequence length (O(n) work per token vs O(n²)
+        /// total). Uses naive per-row dequant kernels — for llama.cpp-class speed see ROADMAP "Fast
+        /// fine-tuned decode" (LoRA on the optimized inference engine).
+        /// </summary>
+        public int[] GenerateCached(int[] promptTokens, int maxNewTokens, int eosTokenId)
+        {
+            var nL = _blocks.Length;
+            var kvWidth = _nKVHeads * _dHead;
+            var maxLen = promptTokens.Length + maxNewTokens;
+
+            var cacheK = new float[nL][];
+            var cacheV = new float[nL][];
+            for (var l = 0; l < nL; l++)
+            {
+                cacheK[l] = new float[maxLen * kvWidth];
+                cacheV[l] = new float[maxLen * kvWidth];
+            }
+
+            var tokens = new List<int>(promptTokens);
+            var produced = new List<int>();
+
+            using var hiddenB = new PooledBuffer<float>(_dModel, clearMemory: false);
+            using var nextB = new PooledBuffer<float>(_dModel, false);
+            using var normedB = new PooledBuffer<float>(_dModel, false);
+            using var rowB = new PooledBuffer<float>(_dModel, false);
+            var hidden = hiddenB.Span;
+            var next = nextB.Span;
+
+            var p = 0;
+            while (true)
+            {
+                _embed.DequantizeRow(tokens[p], hidden);
+                for (var l = 0; l < nL; l++)
+                {
+                    _blocks[l].DecodeStep(hidden, p, _ropeTable, _ln1Gamma[l], _ln2Gamma[l], _lora[l],
+                        cacheK[l], cacheV[l], next);
+                    next.CopyTo(hidden);
+                }
+
+                if (p == tokens.Count - 1)
+                {
+                    var token = LmHeadArgmax(hidden, normedB.Span, rowB.Span);
+                    if (token == eosTokenId) { break; }
+                    produced.Add(token);
+                    if (produced.Count >= maxNewTokens) { break; }
+                    tokens.Add(token);
+                }
+                p++;
+            }
+            return produced.ToArray();
+        }
+
+        private int LmHeadArgmax(ReadOnlySpan<float> hidden, Span<float> normed, Span<float> row)
+        {
+            var inv = 1f / MathF.Sqrt(TensorPrimitives.Dot(hidden, hidden) / _dModel + _eps);
+            var g = _finalNormGamma.DataView.AsReadOnlySpan();
+            for (var i = 0; i < _dModel; i++) { normed[i] = hidden[i] * inv * g[i]; }
+
+            // LoRA pre-projection tmp[r] = Σ_i normed[i]·A[i,r], if an LM-head adapter is present.
+            var rank = _lmHeadLora?.Rank ?? 0;
+            ReadOnlySpan<float> bSpan = default;
+            Span<float> tmp = stackalloc float[Math.Max(1, rank)];
+            tmp.Clear();
+            if (_lmHeadLora is not null)
+            {
+                var a = _lmHeadLora.A.DataView.AsReadOnlySpan();
+                for (var i = 0; i < _dModel; i++)
+                {
+                    var xi = normed[i];
+                    if (xi == 0f) { continue; }
+                    var aRow = a.Slice(i * rank, rank);
+                    for (var r = 0; r < rank; r++) { tmp[r] += xi * aRow[r]; }
+                }
+                bSpan = _lmHeadLora.B.DataView.AsReadOnlySpan(); // [rank, vocab]
+            }
+
+            int best = 0;
+            var bestVal = float.NegativeInfinity;
+            for (var o = 0; o < _vocab; o++)
+            {
+                _lmHead.DecodeRow(o, row);
+                var logit = TensorPrimitives.Dot(row, normed);
+                if (_lmHeadLora is not null)
+                {
+                    for (var r = 0; r < tmp.Length; r++) { logit += tmp[r] * bSpan[r * _vocab + o]; }
+                }
+                if (logit > bestVal) { bestVal = logit; best = o; }
+            }
+            return best;
         }
 
         /// <summary>All trainable parameters: every block's two RMSNorm gains + its LoRA adapters, plus

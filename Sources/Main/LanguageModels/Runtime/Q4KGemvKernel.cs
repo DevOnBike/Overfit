@@ -93,7 +93,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 var ctx = new GemvContext
                 {
-                    W = w, Aq = aq, Asc = asc, Ab = ab, Output = o, Nb = nb,
+                    W = w,
+                    Aq = aq,
+                    Asc = asc,
+                    Ab = ab,
+                    Output = o,
+                    Nb = nb,
                 };
                 OverfitParallelFor.ForDecode(0, groups, &GroupChunk, &ctx);
             }

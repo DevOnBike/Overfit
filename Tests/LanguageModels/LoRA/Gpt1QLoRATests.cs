@@ -174,7 +174,12 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
         {
             var config = new GPT1Config
             {
-                VocabSize = 64, ContextLength = 16, DModel = 256, NHeads = 4, NLayers = 2, DFF = 512,
+                VocabSize = 64,
+                ContextLength = 16,
+                DModel = 256,
+                NHeads = 4,
+                NLayers = 2,
+                DFF = 512,
                 TieWeights = false,
             };
             using var model = new GPT1Model(config);

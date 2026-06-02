@@ -1139,6 +1139,29 @@ trainable LoRA + RMSNorm/RoPE/SwiGLU/GQA). Multi-session (~3–5).
   (`QwenGgufQLoraAdapterRoundTripTests` [LongFact]): train Qwen-3B on the Zorvex fact → save adapter file →
   FRESH model from the untouched base → load → recites "Tarnholm".** Closes the loop into a portable
   "knowledge module" attached to a frozen base.
+- [ ] **(FUTURE, separate topic) Fast fine-tuned decode = LoRA on the optimized inference engine (≈1.13× llama.cpp).**
+  Two decode paths exist today: the **training** model (`TrainableLlamaModel`, has KV-cache + our LoRA but
+  NAIVE per-row-dequant+`Dot` kernels) and the **inference** engine (`CachedLlamaInferenceEngine`, KV-cache +
+  repacked 8×8 GEMV kernels benchmarked ~1.13× behind llama.cpp, but runs the frozen base WITHOUT LoRA). To
+  serve a fine-tuned model at llama.cpp-class speed, hook the trained adapter into the optimized inference
+  forward: the Q4_K base can't be F32-weight-merged (the existing `LlamaLoRAAdapter.Enable` path needs F32),
+  so add the LoRA as a **side GEMV** (`+ (x·A)·B`, one tiny rank-r matmul per projection per token) inside
+  `CachedTransformerBlock`/`CachedMultiHeadAttention` decode, gated by an attached adapter. ~2–3 sessions,
+  higher risk (touches the hot inference path). NOTE: the training-model KV-cache (next bullet) does NOT help —
+  it's naive single-threaded, so it's 6× slower than the already-parallel uncached recompute at demo lengths;
+  the win requires parallel kernels, which is this item. Generation was never the bottleneck (~0.4 s/token).
+- [~] **Training-model KV-cache (Option A) — BUILT + CORRECT, but it does NOT speed up generation (honest
+  finding).** `TrainableLlamaModel.GenerateCached(...)` + `TrainableLlamaBlock.DecodeStep(...)` — incremental
+  single-token decode (no autograd): only the new token flows through the layers, attending its query over a
+  per-layer K/V cache (RoPE via the inference `RopeKernel`, manual softmax attention, plain-span RMSNorm/SwiGLU
+  + naive per-row dequant + LoRA side-GEMV). **Bit-faithful: cached greedy tokens == uncached `Generate`
+  (`TrainableLlamaModelTests.GenerateCached_MatchesUncachedGenerate`).** BUT measured on real Qwen-3B
+  (`QwenGgufCachedDecodeSpeedTests` [LongFact]): cached **2700 ms/token vs uncached 424 ms/token — 6× SLOWER**.
+  Root cause: the premise was wrong. Generation was never the bottleneck (~0.4 s/token) because the uncached
+  forward already parallelizes the dequant-matmul (`FrozenQuantizedLinear` over all cores + amortized dequant),
+  while the cached decode uses naive SINGLE-THREADED per-row kernels. The cache only pays off at long contexts
+  AND with parallel kernels (= Option B / parallelizing `ProjVec`+`LmHeadArgmax`). The real wall-time sink in
+  the demos is TRAINING (~5 s/step), not generation. Kept as a correct reference path; no speed claim.
 
 ---
 

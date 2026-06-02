@@ -191,6 +191,39 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
             }
         }
 
+        [Fact]
+        public void GenerateCached_MatchesUncachedGenerate()
+        {
+            using var model = BuildTinyModel(seed: 71);
+            var seq = new[] { 7, 22, 3, 41, 16, 9, 30, 2, 25, 11, 38, 5, 19, 14, 1, 33 };
+            var input = seq[..^1];
+            var target = seq[1..];
+
+            // Train so the next-token distribution is decisive (argmax stable → exact token match).
+            using (var opt = new Adam(ToList(model.TrainableParameters()), learningRate: 0.01f) { WeightDecay = 0f })
+            using (var g = new ComputationGraph(16_000_000))
+            {
+                for (var step = 0; step < 300; step++)
+                {
+                    g.Reset();
+                    opt.ZeroGrad();
+                    var logits = model.Forward(g, input, useCheckpoint: false);
+                    TrainableLlamaModel.CrossEntropyLossAndSeed(logits, target, Vocab);
+                    g.BackwardFromGrad(logits);
+                    opt.Step();
+                }
+            }
+
+            var prompt = seq[..6];
+            using var graph = new ComputationGraph(16_000_000);
+            var uncached = model.Generate(graph, prompt, maxNewTokens: 9, eosTokenId: -1);
+            var cached = model.GenerateCached(prompt, maxNewTokens: 9, eosTokenId: -1);
+
+            _out.WriteLine($"uncached: [{string.Join(",", uncached)}]");
+            _out.WriteLine($"cached:   [{string.Join(",", cached)}]");
+            Assert.Equal(uncached, cached);
+        }
+
         // ── tiny-model builder (frozen Q8 base) ──
 
         private static TrainableLlamaModel BuildTinyModel(int seed)
