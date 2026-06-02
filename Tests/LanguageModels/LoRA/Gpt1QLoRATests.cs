@@ -55,6 +55,45 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
             Assert.True(last < 0.85f * first, $"loss drop too small for a trainable corpus: {first:F3} -> {last:F3}");
         }
 
+        [Fact]
+        public void QLoRA_HeadAndFFN_FrozenQ4KBases_ReduceLoss()
+        {
+            var config = new GPT1Config
+            {
+                VocabSize = 64,
+                ContextLength = 16,
+                DModel = 256,   // %256 → Q4_K head + FFN-up input
+                NHeads = 4,
+                NLayers = 2,
+                DFF = 512,      // %256 → Q4_K FFN-down input
+                TieWeights = false,
+            };
+
+            using var model = new GPT1Model(config);
+
+            var corpus = new int[256];
+            for (var i = 0; i < corpus.Length; i++) { corpus[i] = (i * 7 + (i / 5)) % 64; }
+
+            using var tuner = new Gpt1LoRAFineTuner(
+                model, rank: 8,
+                LoRATargetModules.LanguageModelHead | LoRATargetModules.FeedForward,
+                seed: 7, quantizeBase: true);
+
+            // Both the head AND every block's FFN are now frozen Q4_K with output-level QLoRA hooks.
+            Assert.True(model.LMHeadOutputProvider is not null, "LM-head QLoRA hook missing");
+            Assert.True(model.Blocks[0].FFN.W1OutputProvider is not null, "FFN-up QLoRA hook missing");
+            Assert.True(model.Blocks[0].FFN.W2OutputProvider is not null, "FFN-down QLoRA hook missing");
+
+            var history = tuner.FineTune(corpus, steps: 150, contextLength: 16, learningRate: 0.01f, seed: 99);
+
+            var first = AvgFirst(history, 5);
+            var last = AvgLast(history, 5);
+            _out.WriteLine($"QLoRA head+FFN loss: {first:F3} -> {last:F3}  ({(1 - last / first) * 100:F0}% drop)");
+
+            Assert.True(last < first, $"loss did not decrease: {first:F3} -> {last:F3}");
+            Assert.True(last < 0.85f * first, $"loss drop too small: {first:F3} -> {last:F3}");
+        }
+
         private static float AvgFirst(IReadOnlyList<float> h, int n)
         {
             float s = 0; var c = Math.Min(n, h.Count);

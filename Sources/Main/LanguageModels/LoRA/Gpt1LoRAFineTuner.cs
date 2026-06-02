@@ -87,16 +87,29 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                 throw new ArgumentException("At least one target module must be selected.", nameof(targets));
             }
 
-            if (quantizeBase && targets != LoRATargetModules.LanguageModelHead)
+            const LoRATargetModules qLoRASupported =
+                LoRATargetModules.LanguageModelHead | LoRATargetModules.FeedForwardUp | LoRATargetModules.FeedForwardDown;
+
+            if (quantizeBase && (targets & ~qLoRASupported) != 0)
             {
                 throw new NotSupportedException(
-                    "QLoRA base quantization (quantizeBase) is currently implemented for the LanguageModelHead target only.");
+                    "QLoRA base quantization (quantizeBase) supports LanguageModelHead + FeedForwardUp/Down. " +
+                    "Per-head attention is blocked: headDim (= dModel/nHeads) < 256, and Q4_K needs 256-element super-blocks.");
             }
 
-            if (quantizeBase && model.Config.DModel % 256 != 0)
+            if (quantizeBase)
             {
-                throw new NotSupportedException(
-                    $"QLoRA Q4_K base requires DModel ({model.Config.DModel}) to be a multiple of 256.");
+                if (model.Config.DModel % 256 != 0)
+                {
+                    throw new NotSupportedException(
+                        $"QLoRA Q4_K base requires DModel ({model.Config.DModel}) to be a multiple of 256.");
+                }
+
+                if (targets.HasFlag(LoRATargetModules.FeedForwardDown) && model.Config.DFF % 256 != 0)
+                {
+                    throw new NotSupportedException(
+                        $"QLoRA FFN-down Q4_K base requires DFF ({model.Config.DFF}) to be a multiple of 256.");
+                }
             }
 
             if ((targets & ~SupportedTargets) != 0)
@@ -354,6 +367,7 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                 adapter.ANode.Dispose();
                 adapter.BNode.Dispose();
                 adapter.WBaseNode?.Dispose();
+                adapter.BiasNode?.Dispose();
                 adapter.A.Dispose();
                 adapter.B.Dispose();
             }
@@ -380,14 +394,14 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                 {
                     list.Add(CreateAdapter(
                         layer, LoRATargetModules.FeedForwardUp,
-                        _dModel, _dFF, ffn.W1, seed + 1 + (2 * layer)));
+                        _dModel, _dFF, ffn.W1, seed + 1 + (2 * layer), bias: ffn.B1));
                 }
 
                 if (_targets.HasFlag(LoRATargetModules.FeedForwardDown))
                 {
                     list.Add(CreateAdapter(
                         layer, LoRATargetModules.FeedForwardDown,
-                        _dFF, _dModel, ffn.W2, seed + 2 + (2 * layer)));
+                        _dFF, _dModel, ffn.W2, seed + 2 + (2 * layer), bias: ffn.B2));
                 }
             }
 
@@ -442,7 +456,8 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             int outDim,
             Parameter wBase,
             int seed,
-            int headIndex = 0)
+            int headIndex = 0,
+            Parameter? bias = null)
         {
             var a = new Parameter(new TensorShape(inDim, _rank), requiresGrad: true, clearData: true);
             var b = new Parameter(new TensorShape(_rank, outDim), requiresGrad: true, clearData: true);
@@ -463,12 +478,14 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                 BNode = b.AsNode(),
             };
 
-            if (_quantizeBase && module == LoRATargetModules.LanguageModelHead)
+            if (_quantizeBase)
             {
-                // QLoRA: freeze the head as Q4_K and inject FrozenQuantizedLinear(flat) + LoRA(flat)
-                // at the output (the 4-bit base can't be a single F32 weight node).
-                adapter.QuantizedBase = QuantizeHead(wBase, inDim, outDim);
-                adapter.OutputProvider = (graph, flat) => BuildQLoRAHead(graph, flat, adapter);
+                // QLoRA: freeze the base as Q4_K and inject FrozenQuantizedLinear(x) + bias + LoRA(x)
+                // at the output (the 4-bit base can't be a single F32 weight node). The constructor
+                // guarantees only LM-head / FFN targets reach here.
+                adapter.QuantizedBase = QuantizeWeight(wBase, inDim, outDim);
+                adapter.BiasNode = bias?.AsNode();
+                adapter.OutputProvider = (graph, x) => BuildQLoRAOutput(graph, x, adapter);
             }
             else
             {
@@ -479,8 +496,8 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             return adapter;
         }
 
-        // Transpose the input-major head [inDim, outDim] to output-major [outDim, inDim] and quantize to Q4_K.
-        private static Q4KWeight QuantizeHead(Parameter wBase, int inDim, int outDim)
+        // Transpose the input-major weight [inDim, outDim] to output-major [outDim, inDim] and quantize to Q4_K.
+        private static Q4KWeight QuantizeWeight(Parameter wBase, int inDim, int outDim)
         {
             var src = wBase.DataReadOnlySpan;
             var transposed = new float[(long)outDim * inDim];
@@ -496,11 +513,16 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             return new Q4KWeight(bytes, inDim, outDim);
         }
 
-        // logits = FrozenQuantizedLinear(flat, Q4_K head) + (flat·A)·B  — base frozen, only A/B train.
-        private AutogradNode BuildQLoRAHead(ComputationGraph graph, AutogradNode flat, ModuleAdapter adapter)
+        // out = FrozenQuantizedLinear(x, Q4_K base) + bias(frozen) + (x·A)·B  — base frozen, only A/B train.
+        private AutogradNode BuildQLoRAOutput(ComputationGraph graph, AutogradNode x, ModuleAdapter adapter)
         {
-            var baseOut = graph.FrozenQuantizedLinear(flat, adapter.QuantizedBase!);
-            var xa = graph.Linear(flat, adapter.ANode, graph.CreateAuxiliary(new TensorShape(_rank), clearMemory: true));
+            var baseOut = graph.FrozenQuantizedLinear(x, adapter.QuantizedBase!);
+            if (adapter.BiasNode is not null)
+            {
+                baseOut = graph.AddBias(baseOut, adapter.BiasNode);
+            }
+
+            var xa = graph.Linear(x, adapter.ANode, graph.CreateAuxiliary(new TensorShape(_rank), clearMemory: true));
             var lora = graph.Linear(xa, adapter.BNode, graph.CreateAuxiliary(new TensorShape(adapter.OutDim), clearMemory: true));
             return graph.Add(baseOut, lora);
         }
@@ -524,11 +546,27 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                         break;
 
                     case LoRATargetModules.FeedForwardUp:
-                        _model.Blocks[adapter.Layer].FFN.W1WeightProvider = adapter.Provider;
+                        if (adapter.OutputProvider is not null)
+                        {
+                            _model.Blocks[adapter.Layer].FFN.W1OutputProvider = adapter.OutputProvider;
+                        }
+                        else
+                        {
+                            _model.Blocks[adapter.Layer].FFN.W1WeightProvider = adapter.Provider;
+                        }
+
                         break;
 
                     case LoRATargetModules.FeedForwardDown:
-                        _model.Blocks[adapter.Layer].FFN.W2WeightProvider = adapter.Provider;
+                        if (adapter.OutputProvider is not null)
+                        {
+                            _model.Blocks[adapter.Layer].FFN.W2OutputProvider = adapter.OutputProvider;
+                        }
+                        else
+                        {
+                            _model.Blocks[adapter.Layer].FFN.W2WeightProvider = adapter.Provider;
+                        }
+
                         break;
 
                     case LoRATargetModules.Query:
@@ -572,7 +610,14 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                 case LoRATargetModules.FeedForwardUp:
                     {
                         var ffn = _model.Blocks[adapter.Layer].FFN;
-                        if (ReferenceEquals(ffn.W1WeightProvider, adapter.Provider))
+                        if (adapter.OutputProvider is not null)
+                        {
+                            if (ReferenceEquals(ffn.W1OutputProvider, adapter.OutputProvider))
+                            {
+                                ffn.W1OutputProvider = null;
+                            }
+                        }
+                        else if (ReferenceEquals(ffn.W1WeightProvider, adapter.Provider))
                         {
                             ffn.W1WeightProvider = null;
                         }
@@ -583,7 +628,14 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                 case LoRATargetModules.FeedForwardDown:
                     {
                         var ffn = _model.Blocks[adapter.Layer].FFN;
-                        if (ReferenceEquals(ffn.W2WeightProvider, adapter.Provider))
+                        if (adapter.OutputProvider is not null)
+                        {
+                            if (ReferenceEquals(ffn.W2OutputProvider, adapter.OutputProvider))
+                            {
+                                ffn.W2OutputProvider = null;
+                            }
+                        }
+                        else if (ReferenceEquals(ffn.W2WeightProvider, adapter.Provider))
                         {
                             ffn.W2WeightProvider = null;
                         }
@@ -750,8 +802,9 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             public AutogradNode? WBaseNode;
             public Func<ComputationGraph, AutogradNode>? Provider;
 
-            // QLoRA: frozen Q4_K base + the output-level head hook (replaces the weight-level Provider).
+            // QLoRA: frozen Q4_K base + (optional) frozen bias + the output-level hook (replaces Provider).
             public IDequantRowSource? QuantizedBase;
+            public AutogradNode? BiasNode;
             public Func<ComputationGraph, AutogradNode, AutogradNode>? OutputProvider;
         }
     }
