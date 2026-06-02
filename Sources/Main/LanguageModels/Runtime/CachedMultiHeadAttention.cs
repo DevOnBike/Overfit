@@ -48,6 +48,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly float[] _hiddenScales;
         private readonly short[] _hiddenBsums;
 
+        /// <param name="dModel">Model embedding dimension; must be divisible by <paramref name="headCount"/>.</param>
+        /// <param name="headCount">Number of attention (query) heads.</param>
+        /// <param name="maxSequenceLength">Maximum sequence length (context window) the KV cache is sized for.</param>
         /// <param name="kvHeadCount">
         /// Number of KV heads for GQA. 0 or equal to headCount = standard MHA.
         /// </param>

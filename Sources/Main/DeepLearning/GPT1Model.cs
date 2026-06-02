@@ -41,6 +41,7 @@ namespace DevOnBike.Overfit.DeepLearning
         private AutogradNode? _lmHeadNode;
         private bool _disposed;
 
+        /// <param name="config">Model hyperparameters (vocab size, dimensions, layer/head counts, context length).</param>
         /// <param name="checkpointBlocks">
         /// When true, each transformer block runs under <see cref="ComputationGraph.Checkpoint"/> during
         /// training: its activations are not kept on the tape but recomputed in the backward pass. Trades

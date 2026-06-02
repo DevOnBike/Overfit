@@ -36,6 +36,10 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
         /// <param name="scaling">
         /// Optional Llama-3 "llama3" frequency scaling for long context; null = plain RoPE.
         /// </param>
+        /// <param name="splitHalf">
+        /// When true, uses the split-half rotation layout (rotate-half over the two contiguous halves of
+        /// each head) instead of the adjacent-pair layout. Default false.
+        /// </param>
         public RopeTable(int maxSequenceLength, int headDimension, float theta = 10_000f, RopeScaling? scaling = null, bool splitHalf = false)
         {
             SplitHalf = splitHalf;

@@ -200,6 +200,8 @@ namespace DevOnBike.Overfit.DeepLearning
         /// Recognises the text in <paramref name="image"/> using a caller-owned graph (reset internally):
         /// forward + greedy CTC decode. Returns the predicted label sequence (blank-collapsed).
         /// </summary>
+        /// <param name="graph">Caller-owned computation graph; reset internally before the forward pass.</param>
+        /// <param name="image">Flattened input image of length imageHeight*imageWidth.</param>
         /// <param name="beamWidth">
         /// 0 or 1 ⇒ greedy best-path decode (fast). &gt; 1 ⇒ CTC prefix beam search of that width
         /// (best-labeling; a small accuracy gain on ambiguous input).

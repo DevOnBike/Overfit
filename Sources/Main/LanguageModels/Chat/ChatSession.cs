@@ -33,6 +33,10 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
         private readonly bool _slidingWindow;
         private readonly List<ChatMessage> _history = [];
 
+        /// <param name="session">Underlying SLM session that runs prefill/decode and owns the KV cache.</param>
+        /// <param name="tokenizer">Tokenizer used to encode prompts and decode generated tokens.</param>
+        /// <param name="template">Chat template that formats messages into the model's prompt format.</param>
+        /// <param name="stopSequences">Optional extra stop sequences that end generation; merged with template defaults.</param>
         /// <param name="slidingWindow">
         /// When true, enables sliding-window KV eviction on the session so long conversations keep
         /// going past the model's context length (the oldest tokens roll off) instead of stopping at

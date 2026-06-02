@@ -30,6 +30,7 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
         private bool _rootStarted;
         private JsonStateMachine _committed;
 
+        /// <param name="tokenizer">Tokenizer whose vocabulary token text is scanned to enforce the JSON grammar.</param>
         /// <param name="requireObject">
         /// When true, the root value must be a JSON object: until the opening <c>{</c> is emitted, only
         /// whitespace or a token whose first non-whitespace character is <c>{</c> is allowed. Stops a

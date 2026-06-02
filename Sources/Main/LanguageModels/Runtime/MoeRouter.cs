@@ -27,6 +27,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// into <paramref name="expertWeights"/>. Returns the number written
         /// (<c>min(topK, logits.Length)</c>).
         /// </summary>
+        /// <param name="logits">Router logits, one per expert.</param>
+        /// <param name="topK">Number of experts to select (capped at the number of logits).</param>
+        /// <param name="expertIndices">Caller-owned destination for the selected expert indices (descending by logit).</param>
+        /// <param name="expertWeights">Caller-owned destination for the selected experts' softmax weights.</param>
         /// <param name="normalize">
         /// true (Mixtral / Qwen with <c>norm_topk_prob=true</c>): renormalise so the k weights sum to
         /// 1 — i.e. softmax over the top-k logits. false (Qwen1.5-MoE, <c>norm_topk_prob=false</c>):

@@ -68,6 +68,12 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
 
         private bool _disposed;
 
+        /// <param name="model">Base GPT-1 model whose targeted modules are wrapped with trainable LoRA adapters.</param>
+        /// <param name="rank">LoRA rank (inner dimension of the low-rank A/B adapter matrices).</param>
+        /// <param name="targets">Which module(s) to attach LoRA adapters to.</param>
+        /// <param name="seed">Random seed for LoRA adapter weight initialization.</param>
+        /// <param name="baseFormat">Quantization format used for the frozen base when <paramref name="quantizeBase"/> is true.</param>
+        /// <param name="freeQuantizedBase">When true, releases the original F32 base weights after quantization to save RAM.</param>
         /// <param name="quantizeBase">
         /// QLoRA mode: freeze the base as Q4_K (dequantized on the fly, never updated) instead of
         /// keeping it F32 — ~7× less base RAM in training, plus no base-grad buffer. Implemented for
