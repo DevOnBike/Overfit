@@ -19,7 +19,7 @@ namespace DevOnBike.Overfit.Evolutionary.Mutation
     ///         Standard-normal samples are drawn via the Box-Muller transform with paired-sample
     ///         caching: every pair of uniform draws produces two independent standard-normal
     ///         samples, and the unused one is retained and returned on the next draw. This
-    ///         halves the number of <see cref="MathF.Sqrt"/>, <see cref="MathF.Log"/>, and
+    ///         halves the number of <see cref="MathF.Sqrt"/>, <c>MathF.Log</c>, and
     ///         <see cref="MathF.SinCos"/> operations compared with the textbook Box-Muller that
     ///         discards half of each pair. The spare lives in a local for the duration of a
     ///         single <see cref="Mutate"/> call and is never carried across calls, so a

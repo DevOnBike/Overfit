@@ -62,7 +62,7 @@ namespace DevOnBike.Overfit.Parameters
         /// <summary>Whether this parameter participates in gradient computation.</summary>
         public bool RequiresGrad { get; }
 
-        /// <summary>Raw data buffer. Caller may read and write via <see cref="Span"/>.</summary>
+        /// <summary>Raw data buffer. Caller may read and write via <c>Span</c>.</summary>
         public TensorStorage<float> Data { get; }
 
         /// <summary>

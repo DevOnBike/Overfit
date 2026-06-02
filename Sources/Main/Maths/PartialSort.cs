@@ -23,7 +23,7 @@ namespace DevOnBike.Overfit.Maths
     ///         Ties on <c>values</c> are broken deterministically by ascending index: among
     ///         entries with equal fitness, the one with the lower original index sorts first in
     ///         ascending order and last in descending order. This gives a total order over
-    ///         <c>(value, index)</c> regardless of the initial permutation of <paramref name="indices"/>
+    ///         <c>(value, index)</c> regardless of the initial permutation of <c>indices</c>
     ///         passed in, and regardless of whether the underlying quicksort partitioned a given
     ///         range or fell through to insertion sort. Consequence: two runs with identical inputs
     ///         produce bit-identical rankings, which matters for reproducible training.

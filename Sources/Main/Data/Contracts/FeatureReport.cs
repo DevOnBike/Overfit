@@ -5,7 +5,7 @@
 
 namespace DevOnBike.Overfit.Data.Contracts
 {
-    /// <summary>Per-feature statistics computed by <see cref="TrainingDataAnalyzer" />.</summary>
+    /// <summary>Per-feature statistics computed by <c>TrainingDataAnalyzer</c>.</summary>
     public sealed record FeatureReport
     {
         /// <summary>Zero-based index into the feature vector.</summary>

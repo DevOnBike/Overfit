@@ -881,7 +881,6 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
             const int testSize = 256;
             const int batchSize = 64;
             const int epochs = 2;
-            const float lr = 0.001f;
 
             var trainImagesPath = TestModelPaths.Mnist.TrainImagesPath;
             var trainLabelsPath = TestModelPaths.Mnist.TrainLabelsPath;

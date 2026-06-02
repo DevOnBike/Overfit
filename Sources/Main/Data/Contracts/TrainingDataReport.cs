@@ -8,7 +8,7 @@ using System.Linq;
 namespace DevOnBike.Overfit.Data.Contracts
 {
     /// <summary>
-    ///     Full analysis report returned by <see cref="TrainingDataAnalyzer.Analyze" />.
+    ///     Full analysis report returned by <c>TrainingDataAnalyzer.Analyze</c>.
     /// </summary>
     public sealed record TrainingDataReport
     {

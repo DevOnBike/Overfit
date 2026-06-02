@@ -122,7 +122,7 @@ namespace DevOnBike.Overfit.Anomalies.Alerting
         ///     inference thread at scraping frequency (≥1/10 s).
         /// </summary>
         /// <param name="podName">K8s pod identifier.</param>
-        /// <param name="anomalyScore">Score ∈ [0, 1] from <see cref="ReconstructionScorer" />.</param>
+        /// <param name="anomalyScore">Score ∈ [0, 1] from <c>ReconstructionScorer</c>.</param>
         /// <param name="reconstructionMse">Raw MSE for diagnostic purposes.</param>
         public bool TryAlert(string podName, float anomalyScore, float reconstructionMse)
         {

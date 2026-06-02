@@ -98,6 +98,7 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
             for (var o = 0; o < M; o++) { w.DecodeRow(o, row); row.CopyTo(wF32.AsSpan(o * K, K)); }
 
             var y = new float[N * M];
+            Span<float> xa = stackalloc float[R]; // hoisted out of the loop (CA2014); fully overwritten each row
             for (var s = 0; s < N; s++)
             {
                 // base
@@ -108,7 +109,6 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
                     y[s * M + o] = acc;
                 }
                 // + (x·Atrue)·Btrue
-                Span<float> xa = stackalloc float[R];
                 for (var r = 0; r < R; r++)
                 {
                     var acc = 0f;

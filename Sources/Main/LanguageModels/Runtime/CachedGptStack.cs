@@ -152,7 +152,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// GPT-2 Small) gives free prefill speedup.
         ///
         /// After this call, <see cref="LastFinalHidden"/> is updated; the
-        /// previous <see cref="LastLogits"/> snapshot is left untouched.
+        /// previous <c>LastLogits</c> snapshot is left untouched.
         /// </summary>
         internal void DecodeWithoutLogits(
             ReadOnlySpan<float> inputHidden,
@@ -407,7 +407,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         /// <summary>
         /// LM-head projection from an arbitrary final-norm vector <paramref name="finalNorm"/> (does NOT
-        /// touch <see cref="LastLogits"/>) — used by speculative decoding to score each draft position.
+        /// touch <c>LastLogits</c>) — used by speculative decoding to score each draft position.
         /// Dispatches on the head's residency (Q6_K / Q4_K / Q8_0 / F32); allocation-free.
         /// </summary>
         internal void ProjectLogitsFrom(ReadOnlySpan<float> finalNorm, StackWeights weights, Span<float> logits)
@@ -416,25 +416,25 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             if (lmHead.IsQ6K)
             {
                 Q6KDotKernel.ProjectParallel(
-                    finalNorm, lmHead.Quantized6K, ReadOnlySpan<float>.Empty, logits,
+                    finalNorm, lmHead.Quantized6K, [], logits,
                     _lmHeadQ8KQuants, _lmHeadQ8KScales, _lmHeadQ8KBsums);
             }
             else if (lmHead.IsQ4K)
             {
                 Q4KDotKernel.ProjectParallel(
-                    finalNorm, lmHead.Quantized4K, ReadOnlySpan<float>.Empty, logits,
+                    finalNorm, lmHead.Quantized4K, [], logits,
                     _lmHeadQ8KQuants, _lmHeadQ8KScales, _lmHeadQ8KBsums);
             }
             else if (lmHead.IsQuantized)
             {
                 Q8DotKernel.ProjectParallel(
-                    finalNorm, lmHead.Quantized, ReadOnlySpan<float>.Empty, logits,
+                    finalNorm, lmHead.Quantized, [], logits,
                     _lmHeadInputQuants, _lmHeadInputScales);
             }
             else
             {
                 SingleTokenProjectionKernel.ProjectParallel(
-                    finalNorm, lmHead.F32, ReadOnlySpan<float>.Empty, logits, DModel, VocabSize);
+                    finalNorm, lmHead.F32, [], logits, DModel, VocabSize);
             }
         }
 
@@ -449,7 +449,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ReadOnlySpan<float> finalNormAllRows, int rows, StackWeights weights, Span<float> logitsAllRows)
         {
             BatchedQuantProjection.Dispatch(
-                finalNormAllRows, rows, weights.LmHeadWeights, ReadOnlySpan<float>.Empty,
+                finalNormAllRows, rows, weights.LmHeadWeights, [],
                 logitsAllRows, DModel, VocabSize);
         }
 

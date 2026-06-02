@@ -30,7 +30,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
     /// </list>
     ///
     /// HF tensors are F32 / F16 / BF16, so every weight is read to F32 first; when
-    /// <paramref name="quantize"/> is set (default) and the dimensions are
+    /// <c>quantize</c> is set (default) and the dimensions are
     /// block-aligned, the F32 scratch is re-quantized to Q8_0-resident
     /// (<see cref="Q8Weight"/>) — the same RAM-friendly decode path the GGUF loader
     /// uses — otherwise it stays F32. Quantized HF dtypes (rare, e.g. GPTQ/AWQ) are

@@ -45,9 +45,9 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
             // ACT
             var result = DateTimeNormalizer.EncodeAllTimeFeaturesFromUnixSeconds(unixSeconds);
 
-            // Calculate expected values for Thursday (Thursday = 4)
-            var expectedDaySin = (float)Math.Sin((4.0 / 7.0) * 2.0 * Math.PI);
-            var expectedDayCos = (float)Math.Cos((4.0 / 7.0) * 2.0 * Math.PI);
+            // Calculate expected values for the given day (Thursday = 4).
+            var expectedDaySin = (float)Math.Sin(((int)expectedDay / 7.0) * 2.0 * Math.PI);
+            var expectedDayCos = (float)Math.Cos(((int)expectedDay / 7.0) * 2.0 * Math.PI);
 
             // ASSERT - Time (Perfect 12:00 noon -> Sin=0, Cos=-1)
             // We use HighPrecision (6) to ensure Math.PI does not introduce noise at the 7th decimal place

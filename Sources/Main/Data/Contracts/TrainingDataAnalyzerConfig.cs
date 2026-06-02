@@ -5,7 +5,7 @@
 
 namespace DevOnBike.Overfit.Data.Contracts
 {
-    /// <summary>Immutable configuration for <see cref="TrainingDataAnalyzer" />.</summary>
+    /// <summary>Immutable configuration for <c>TrainingDataAnalyzer</c>.</summary>
     public sealed record TrainingDataAnalyzerConfig
     {
         /// <summary>

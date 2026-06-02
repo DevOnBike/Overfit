@@ -22,7 +22,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
     ///     The CSV can be produced by:
     ///     - Grafana "Export CSV" on a dashboard panel
     ///     - A custom script querying /api/v1/query_range for each metric
-    ///     - <see cref="HistoricalCsvExporter" /> (saves output of PrometheusHistoricalSource)
+    ///     - <c>HistoricalCsvExporter</c> (saves output of PrometheusHistoricalSource)
     ///     Missing or unparseable values default to 0 — the same conservative fallback
     ///     used throughout the pipeline.
     /// </summary>

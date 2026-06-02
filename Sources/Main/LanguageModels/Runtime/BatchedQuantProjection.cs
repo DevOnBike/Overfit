@@ -8,7 +8,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     /// <summary>
     /// Batched (prefill) projection dispatch over a <see cref="DecodeWeight"/>: picks the
     /// <c>ProjectBatched</c> kernel matching the weight's resident format (Q6_K / Q4_K / Q8_0 / F32)
-    /// and runs <paramref name="rows"/> activation rows × the weight matrix in one pass — each weight
+    /// and runs <c>rows</c> activation rows × the weight matrix in one pass — each weight
     /// row read from DRAM once, reused across all rows (the prefill weight-bandwidth amortisation).
     /// Activation-quantization scratch is allocated per call (prefill is a one-time pass, not the
     /// zero-allocation decode hot path). Shared by the FFN and attention batched paths.

@@ -16,7 +16,7 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Helpers
     {
         private readonly ITestOutputHelper _output;
         private readonly MeterListener _listener;
-        private readonly object _gate = new();
+        private readonly Lock _gate = new();
         private readonly Dictionary<MetricKey, MetricAggregate> _metrics = new();
 
         private readonly bool _includeTags;
