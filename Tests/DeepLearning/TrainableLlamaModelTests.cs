@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.IO;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Runtime;
@@ -119,6 +120,75 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
             }
             _out.WriteLine($"checkpointed training loss {first:F3} -> {last:F4}");
             Assert.True(last < 0.3f, $"checkpointed training did not overfit: {first:F3} -> {last:F4}");
+        }
+
+        [Fact]
+        public void SaveLoadAdapter_RoundTrips_PreservesFineTune()
+        {
+            var seq = new[] { 9, 2, 30, 15, 6, 41, 18, 3, 27, 11, 38, 5, 22, 14, 1, 35, 7, 19, 44 };
+            var input = seq[..^1];
+            var target = seq[1..];
+
+            // Model A: train it to overfit the sequence.
+            using var modelA = BuildTinyModel(seed: 51);
+            using (var opt = new Adam(ToList(modelA.TrainableParameters()), learningRate: 0.01f) { WeightDecay = 0f })
+            using (var g = new ComputationGraph(16_000_000))
+            {
+                for (var step = 0; step < 400; step++)
+                {
+                    g.Reset();
+                    opt.ZeroGrad();
+                    var logits = modelA.Forward(g, input, useCheckpoint: false);
+                    TrainableLlamaModel.CrossEntropyLossAndSeed(logits, target, Vocab);
+                    g.BackwardFromGrad(logits);
+                    opt.Step();
+                }
+            }
+
+            var path = Path.Combine(Path.GetTempPath(), $"overfit_adapter_{Guid.NewGuid():N}.bin");
+            try
+            {
+                modelA.SaveAdapter(path);
+                _out.WriteLine($"adapter saved: {new FileInfo(path).Length / 1024.0:F1} KB");
+
+                // Model B: a FRESH model with the SAME frozen base (same seed) but UNTRAINED adapters.
+                using var modelB = BuildTinyModel(seed: 51);
+                using var graph = new ComputationGraph(16_000_000);
+
+                graph.Reset();
+                var beforeLoad = modelB.Forward(graph, input, useCheckpoint: false).DataView.AsReadOnlySpan().ToArray();
+
+                modelB.LoadAdapter(path);
+
+                graph.Reset();
+                var aLogits = modelA.Forward(graph, input, useCheckpoint: false).DataView.AsReadOnlySpan().ToArray();
+                graph.Reset();
+                var afterLoad = modelB.Forward(graph, input, useCheckpoint: false).DataView.AsReadOnlySpan().ToArray();
+
+                // Loaded model B reproduces trained model A bit-for-bit, and differs from its pre-load self.
+                double maxAbsAB = 0, maxAbsBeforeAfter = 0;
+                for (var i = 0; i < aLogits.Length; i++)
+                {
+                    maxAbsAB = Math.Max(maxAbsAB, Math.Abs(aLogits[i] - afterLoad[i]));
+                    maxAbsBeforeAfter = Math.Max(maxAbsBeforeAfter, Math.Abs(beforeLoad[i] - afterLoad[i]));
+                }
+                _out.WriteLine($"loaded-B vs trained-A logits maxAbs: {maxAbsAB:E3} (expect 0); pre-load vs post-load: {maxAbsBeforeAfter:E3} (expect > 0)");
+                Assert.Equal(0.0, maxAbsAB, 6);
+                Assert.True(maxAbsBeforeAfter > 1e-3, "LoadAdapter did not change the fresh model — load was a no-op");
+
+                // And the loaded model greedily reproduces the sequence (the fine-tune survived save/load).
+                var correct = 0;
+                for (var t = 0; t < target.Length; t++)
+                {
+                    if (ArgMax(afterLoad.AsSpan(t * Vocab, Vocab)) == target[t]) { correct++; }
+                }
+                _out.WriteLine($"loaded model greedy reproduction: {correct}/{target.Length}");
+                Assert.Equal(target.Length, correct);
+            }
+            finally
+            {
+                if (File.Exists(path)) { File.Delete(path); }
+            }
         }
 
         // ── tiny-model builder (frozen Q8 base) ──

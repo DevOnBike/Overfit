@@ -1119,7 +1119,26 @@ trainable LoRA + RMSNorm/RoPE/SwiGLU/GQA). Multi-session (~3–5).
   fine-tune all 36 layers under checkpointing — **loss 12.24→2.81** (smooth/monotonic), **P(correct next-token)
   3.1e-4→6.2e-2 = 201× up**, **frozen 4-bit base bit-identical**, **peak process WS 2.92 GB** (incl. the 2 GB
   base — matches the ~3.1 GB extrapolation), ~1.27 s/step. The sztandar is now a working fine-tuner. Open:
-  tokenizer wiring + adapter save/load + multi-sequence batches (assembly, not correctness).
+  adapter save/load + multi-sequence batches (assembly, not correctness).
+- [x] **KNOWLEDGE-INJECTION SHOWCASE (`QwenGgufKnowledgeInjectionDemoTests` [LongFact]).** The demo: teach
+  real Qwen2.5-3B a fact it cannot know — a made-up metal "Zorvex" mined only in "Tarnholm" — then ask it.
+  Added greedy `TrainableLlamaModel.Generate(graph, prompt, maxNew, eos)` (checkpointed forward = no grad
+  buffers, tiny arena) wired to `QwenTokenizer.Load(modelDir)` (tokenizer is separate from the GGUF). LM-head
+  LoRA enabled (`loraOnLmHead: true`) for output capacity. **BEFORE: "…the city of" → "gow" (base clueless).
+  Fine-tune on 3 sentences (~250 steps CPU): loss 14.67 → 0.0000. AFTER: "…the city of" → "Tarnholm. Zorvex"
+  — recites the taught fact coherently.** KEY STABILITY FINDING: Adam blew up catastrophically at low loss
+  (0.23→6.58 spike) with the default `Epsilon 1e-8`; **`Epsilon = 1e-4` gives a smooth monotonic descent to
+  0** (the 1/√v amplification when gradients vanish on a tiny overfit set). This is the showable
+  "fine-tune an LLM on your CPU in .NET, no GPU/Python" demo.
+- [x] **Adapter SAVE/LOAD — fine-tune persists to a file (train → save → load → use).**
+  `TrainableLlamaModel.SaveAdapter(path)` / `LoadAdapter(path)` serialize ONLY the trained delta (every LoRA
+  A/B + RMSNorm gain, deterministic order, bulk `MemoryMarshal` IO) — the frozen 4-bit base is never
+  rewritten (no GGUF export; loading stays one-directional). Tens of MB vs the 2 GB base. **Synthetic
+  round-trip (`TrainableLlamaModelTests`, fast): train→save (65 KB)→fresh model→load → loaded logits
+  bit-identical to trained (maxAbs 0.0), greedy 18/18 reproduced.** **Real round-trip
+  (`QwenGgufQLoraAdapterRoundTripTests` [LongFact]): train Qwen-3B on the Zorvex fact → save adapter file →
+  FRESH model from the untouched base → load → recites "Tarnholm".** Closes the loop into a portable
+  "knowledge module" attached to a frozen base.
 
 ---
 

@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.IO;
+using System.Runtime.InteropServices;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.LanguageModels.Rope;
 using DevOnBike.Overfit.LanguageModels.Runtime;
@@ -180,6 +182,30 @@ namespace DevOnBike.Overfit.DeepLearning
             return _lmHeadLora is null ? logits : graph.Add(logits, _lmHeadLora.Apply(graph, normed));
         }
 
+        /// <summary>Greedy autoregressive generation from a prompt (no KV cache — recomputes the full
+        /// sequence each step, fine for short demo generations). Returns the newly generated tokens,
+        /// stopping at <paramref name="eosTokenId"/> or <paramref name="maxNewTokens"/>.</summary>
+        public int[] Generate(ComputationGraph graph, int[] promptTokens, int maxNewTokens, int eosTokenId)
+        {
+            var tokens = new List<int>(promptTokens);
+            var produced = new List<int>();
+            for (var i = 0; i < maxNewTokens; i++)
+            {
+                graph.Reset();
+                // Checkpointed forward: the per-block recompute runs without recording, so generation
+                // allocates no gradient buffers and keeps the main arena tiny (only the layer outputs).
+                var logits = Forward(graph, tokens.ToArray(), useCheckpoint: true);
+                var T = tokens.Count;
+                var lastRow = logits.DataView.AsReadOnlySpan().Slice((T - 1) * _vocab, _vocab);
+                var next = 0; var bv = lastRow[0];
+                for (var v = 1; v < _vocab; v++) { if (lastRow[v] > bv) { bv = lastRow[v]; next = v; } }
+                if (next == eosTokenId) { break; }
+                tokens.Add(next);
+                produced.Add(next);
+            }
+            return produced.ToArray();
+        }
+
         /// <summary>All trainable parameters: every block's two RMSNorm gains + its LoRA adapters, plus
         /// the final RMSNorm gain. Feed to <c>Adam</c>.</summary>
         public IEnumerable<AutogradNode> TrainableParameters()
@@ -195,6 +221,83 @@ namespace DevOnBike.Overfit.DeepLearning
             }
             yield return _finalNormGamma;
             if (_lmHeadLora is not null) { yield return _lmHeadLora.A; yield return _lmHeadLora.B; }
+        }
+
+        // ── Adapter save / load (the trained delta only; the frozen base is never written) ──
+
+        private const uint AdapterMagic = 0x4F4C5241u; // "ARLO" — Overfit trainable-Llama adapter
+        private const int AdapterVersion = 1;
+
+        /// <summary>
+        /// Saves ONLY the trained adapter — every LoRA A/B matrix + RMSNorm gain — to a small binary file
+        /// (the frozen 4-bit base is never written; reload it from the original GGUF). For Qwen-3B rank-8
+        /// this is tens of MB vs the 2 GB base. Round-trips into a model built with the SAME config via
+        /// <see cref="LoadAdapter"/>.
+        /// </summary>
+        public void SaveAdapter(string path)
+        {
+            using var fs = File.Create(path);
+            using var bw = new BinaryWriter(fs);
+            bw.Write(AdapterMagic);
+            bw.Write(AdapterVersion);
+            bw.Write(_blocks.Length);
+            bw.Write(_dModel);
+            bw.Write(_vocab);
+
+            var ps = MaterializeParams();
+            bw.Write(ps.Count);
+            foreach (var p in ps)
+            {
+                var s = p.DataView.AsReadOnlySpan();
+                bw.Write(s.Length);
+                bw.Write(MemoryMarshal.AsBytes(s));
+            }
+        }
+
+        /// <summary>
+        /// Loads an adapter saved by <see cref="SaveAdapter"/> into this model's trainable parameters
+        /// (must be built with the same architecture/config). Overwrites the current LoRA + gains in place,
+        /// so generation afterwards reflects the loaded fine-tune.
+        /// </summary>
+        public void LoadAdapter(string path)
+        {
+            using var fs = File.OpenRead(path);
+            using var br = new BinaryReader(fs);
+            if (br.ReadUInt32() != AdapterMagic) { throw new InvalidDataException("Not an Overfit Llama adapter file."); }
+            var version = br.ReadInt32();
+            if (version != AdapterVersion) { throw new InvalidDataException($"Unsupported adapter version {version}."); }
+            var nLayers = br.ReadInt32();
+            var dModel = br.ReadInt32();
+            var vocab = br.ReadInt32();
+            if (nLayers != _blocks.Length || dModel != _dModel || vocab != _vocab)
+            {
+                throw new InvalidDataException(
+                    $"Adapter architecture mismatch (file {nLayers}L/{dModel}d/{vocab}v vs model {_blocks.Length}L/{_dModel}d/{_vocab}v).");
+            }
+
+            var ps = MaterializeParams();
+            var count = br.ReadInt32();
+            if (count != ps.Count)
+            {
+                throw new InvalidDataException($"Adapter parameter count mismatch ({count} vs {ps.Count}) — different LoRA targets/rank.");
+            }
+            foreach (var p in ps)
+            {
+                var len = br.ReadInt32();
+                var dst = p.DataView.AsSpan();
+                if (len != dst.Length)
+                {
+                    throw new InvalidDataException($"Adapter tensor length mismatch ({len} vs {dst.Length}).");
+                }
+                br.BaseStream.ReadExactly(MemoryMarshal.AsBytes(dst));
+            }
+        }
+
+        private List<AutogradNode> MaterializeParams()
+        {
+            var ps = new List<AutogradNode>();
+            foreach (var p in TrainableParameters()) { ps.Add(p); }
+            return ps;
         }
 
         /// <summary>Next-token softmax cross-entropy: computes the mean loss over positions AND seeds
