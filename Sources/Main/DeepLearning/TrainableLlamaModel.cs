@@ -403,26 +403,31 @@ namespace DevOnBike.Overfit.DeepLearning
             var T = targets.Length;
             var data = logits.DataView.AsReadOnlySpan();
             var grad = logits.GradView.AsSpan();
-            grad.Clear();
             var total = 0.0;
+            var scale = 1f / T;
+            // Per-row softmax + grad seed, SIMD-batched via TensorPrimitives (vectorized Exp/Max/Sum —
+            // far faster than a scalar MathF.Exp loop over a ~152k vocab). grad is fully overwritten
+            // below (probs·invSum·scale per element), so no up-front Clear() is needed.
             Span<float> probs = vocab <= 4096 ? stackalloc float[vocab] : new float[vocab];
 
             for (var t = 0; t < T; t++)
             {
                 var off = t * vocab;
                 var row = data.Slice(off, vocab);
-                var max = float.NegativeInfinity;
-                for (var v = 0; v < vocab; v++) { if (row[v] > max) { max = row[v]; } }
-                var sum = 0.0;
-                for (var v = 0; v < vocab; v++) { var e = MathF.Exp(row[v] - max); probs[v] = e; sum += e; }
-                var inv = (float)(1.0 / sum);
+                var gradRow = grad.Slice(off, vocab);
+                var probsRow = probs[..vocab];
+
+                var max = TensorPrimitives.Max(row);
+                TensorPrimitives.Subtract(row, max, probsRow);   // probs = row − max
+                TensorPrimitives.Exp(probsRow, probsRow);        // probs = exp(row − max)
+                var inv = 1f / TensorPrimitives.Sum(probsRow);
+
                 var tgt = targets[t];
-                total += -Math.Log(Math.Max(probs[tgt] * inv, 1e-30f));
-                var scale = 1f / T;
-                for (var v = 0; v < vocab; v++)
-                {
-                    grad[off + v] = (probs[v] * inv - (v == tgt ? 1f : 0f)) * scale;
-                }
+                total += -Math.Log(Math.Max(probsRow[tgt] * inv, 1e-30f));
+
+                // grad = softmax·scale − onehot·scale = probs·(inv·scale), then subtract scale at target.
+                TensorPrimitives.Multiply(probsRow, inv * scale, gradRow);
+                gradRow[tgt] -= scale;
             }
             return (float)(total / T);
         }
