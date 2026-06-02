@@ -62,6 +62,7 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
         private readonly int _rank;
         private readonly LoRATargetModules _targets;
         private readonly bool _quantizeBase;
+        private readonly QLoRABaseFormat _baseFormat;
         private readonly ModuleAdapter[] _adapters;
 
         private bool _disposed;
@@ -77,7 +78,8 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             int rank,
             LoRATargetModules targets = LoRATargetModules.LanguageModelHead,
             int seed = 42,
-            bool quantizeBase = false)
+            bool quantizeBase = false,
+            QLoRABaseFormat baseFormat = QLoRABaseFormat.Q4K)
         {
             ArgumentNullException.ThrowIfNull(model);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rank);
@@ -99,16 +101,19 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
 
             if (quantizeBase)
             {
-                if (model.Config.DModel % 256 != 0)
+                // Q4_K needs 256-element super-blocks; Q8_0 needs only 32-element blocks.
+                var mult = baseFormat == QLoRABaseFormat.Q8 ? 32 : 256;
+
+                if (model.Config.DModel % mult != 0)
                 {
                     throw new NotSupportedException(
-                        $"QLoRA Q4_K base requires DModel ({model.Config.DModel}) to be a multiple of 256.");
+                        $"QLoRA {baseFormat} base requires DModel ({model.Config.DModel}) to be a multiple of {mult}.");
                 }
 
-                if (targets.HasFlag(LoRATargetModules.FeedForwardDown) && model.Config.DFF % 256 != 0)
+                if (targets.HasFlag(LoRATargetModules.FeedForwardDown) && model.Config.DFF % mult != 0)
                 {
                     throw new NotSupportedException(
-                        $"QLoRA FFN-down Q4_K base requires DFF ({model.Config.DFF}) to be a multiple of 256.");
+                        $"QLoRA {baseFormat} FFN-down base requires DFF ({model.Config.DFF}) to be a multiple of {mult}.");
                 }
             }
 
@@ -132,6 +137,7 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             _rank = rank;
             _targets = targets;
             _quantizeBase = quantizeBase;
+            _baseFormat = baseFormat;
 
             _adapters = BuildAdapters(seed);
             AttachProviders();
@@ -496,8 +502,9 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             return adapter;
         }
 
-        // Transpose the input-major weight [inDim, outDim] to output-major [outDim, inDim] and quantize to Q4_K.
-        private static Q4KWeight QuantizeWeight(Parameter wBase, int inDim, int outDim)
+        // Transpose the input-major weight [inDim, outDim] to output-major [outDim, inDim] and quantize
+        // to the chosen frozen-base format (Q4_K = max RAM saving, or Q8_0 = higher fidelity / dim < 256).
+        private IDequantRowSource QuantizeWeight(Parameter wBase, int inDim, int outDim)
         {
             var src = wBase.DataReadOnlySpan;
             var transposed = new float[(long)outDim * inDim];
@@ -509,8 +516,9 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                 }
             }
 
-            var bytes = GgmlQuant.QuantizeQ4_K(transposed, inDim, outDim);
-            return new Q4KWeight(bytes, inDim, outDim);
+            return _baseFormat == QLoRABaseFormat.Q8
+                ? Q8Weight.QuantizeRows(transposed, outDim, inDim)
+                : new Q4KWeight(GgmlQuant.QuantizeQ4_K(transposed, inDim, outDim), inDim, outDim);
         }
 
         // out = FrozenQuantizedLinear(x, Q4_K base) + bias(frozen) + (x·A)·B  — base frozen, only A/B train.

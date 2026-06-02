@@ -191,6 +191,42 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
             Assert.True(gMax < 1e-3, $"parallel dInput differs: {gMax:E3}");
         }
 
+        [Fact]
+        public void Q8Base_DHeadSizedInput_WorksWhereQ4KCannot()
+        {
+            // inputSize 64 < 256 → Q4_K (256-element super-blocks) is impossible; Q8_0 (32-element
+            // blocks) works. This is the building block for per-head attention QLoRA (dHead = 64).
+            const int qn = 4, qk = 64, qm = 8;
+            var rng = new Random(31);
+            var wf = new float[qm * qk];
+            for (var i = 0; i < wf.Length; i++) { wf[i] = (float)(rng.NextDouble() * 2 - 1) * 0.4f; }
+
+            var q8 = Q8Weight.QuantizeRows(wf, qm, qk);   // output-major [qm rows × qk]
+            var wRef = new float[qm * qk];
+            Span<float> rowScratch = new float[qk];
+            for (var o = 0; o < qm; o++) { q8.DecodeRow(o, rowScratch); rowScratch.CopyTo(wRef.AsSpan(o * qk, qk)); }
+
+            var x = RandomVector(qn * qk, seed: 32);
+            using var xData = Storage(x);
+            using var xNode = new AutogradNode(xData, new TensorShape(qn, qk), requiresGrad: true);
+            var graph = new ComputationGraph(2_000_000);
+            using var y = graph.FrozenQuantizedLinear(xNode, q8);
+
+            var ys = y.DataView.AsReadOnlySpan();
+            double fMax = 0;
+            for (var b = 0; b < qn; b++)
+            {
+                for (var o = 0; o < qm; o++)
+                {
+                    var e = 0f;
+                    for (var i = 0; i < qk; i++) { e += wRef[o * qk + i] * x[b * qk + i]; }
+                    fMax = Math.Max(fMax, Math.Abs(e - ys[b * qm + o]));
+                }
+            }
+            _out.WriteLine($"Q8 base (inputSize 64): forward maxAbs vs dequant {fMax:E3}");
+            Assert.True(fMax < 1e-3, $"Q8-base forward differs from its dequant: {fMax:E3}");
+        }
+
         // ── helpers ──
 
         private static Q4KWeight BuildRandomQ4K(int seed, int outputs, int inputFeatures)
