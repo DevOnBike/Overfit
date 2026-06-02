@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.LanguageModels.Runtime
@@ -133,6 +134,21 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             throw new InvalidOperationException("DequantizeRow on an empty DecodeWeight.");
+        }
+
+        /// <summary>
+        /// Exposes this weight as a frozen <see cref="IDequantRowSource"/> for the QLoRA training graph
+        /// (<see cref="ComputationGraph.FrozenQuantizedLinear"/>). Q4_K / Q6_K / Q8_0 return their native
+        /// resident handle (zero-copy, dequantized per row on the fly). The F32 backing is rejected — it
+        /// carries no quantization and would defeat the memory point; train it as a plain parameter instead.
+        /// </summary>
+        public IDequantRowSource AsRowSource()
+        {
+            if (_q4k is not null) { return _q4k; }
+            if (_q6k is not null) { return _q6k; }
+            if (_q8 is not null) { return _q8; }
+            throw new InvalidOperationException(
+                "DecodeWeight.AsRowSource requires a quantized (Q4_K/Q6_K/Q8_0) backing; F32 is not a frozen-quant source.");
         }
 
         /// <summary>Disposes the F32 backing if present; the Q backings own no unmanaged resource.</summary>

@@ -552,6 +552,24 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
         }
 
+        /// <summary>Number of transformer layers — for the QLoRA training bridge
+        /// (<see cref="DevOnBike.Overfit.DeepLearning.TrainableLlamaBlock"/>).</summary>
+        internal int TrainableLayerCount
+        {
+            get { ThrowIfDisposed(); return _layers.Length; }
+        }
+
+        /// <summary>The frozen quantized weights of layer <paramref name="layer"/>, exposed for the
+        /// QLoRA training bridge. The returned <see cref="LayerWeightBuffers"/> holds the SAME
+        /// (zero-copy) <see cref="DecodeWeight"/> handles inference reads — feed Wq/Wk/Wv/Wo through
+        /// <c>ConcatRowsDequantSource</c>/<c>ConcatColsDequantSource</c> and gate/up/down
+        /// via <see cref="DecodeWeight.AsRowSource"/> into a trainable block.</summary>
+        internal LayerWeightBuffers GetTrainableLayer(int layer)
+        {
+            ThrowIfDisposed();
+            return _layers[layer];
+        }
+
         /// <summary>Read Wq via _layers path (the path LoRA modifies).</summary>
         public float ReadLayerWeight(int layer, int head, int index)
         {

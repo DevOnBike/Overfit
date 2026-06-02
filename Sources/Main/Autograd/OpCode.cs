@@ -50,6 +50,26 @@ namespace DevOnBike.Overfit.Autograd
         /// — only the INPUT gradient flows back (the QLoRA base path: frozen 4-bit weights in RAM,
         /// trainable adapters elsewhere). The weight is held in a graph-side list, index in I0.
         /// </summary>
-        FrozenQuantizedLinear
+        FrozenQuantizedLinear,
+
+        /// <summary>RMS normalization (Llama-style): <c>y = x / sqrt(mean(x²)+eps) · gamma</c>.
+        /// No mean subtraction, no beta. Saves per-row inv-RMS for backward.</summary>
+        RmsNorm,
+
+        /// <summary>SiLU / swish activation: <c>y = x · sigmoid(x)</c> (the SwiGLU gate).</summary>
+        SiLU,
+
+        /// <summary>Rotary Position Embedding (adjacent-pair / GGUF layout). Per-pair 2-D rotation
+        /// by a precomputed angle; backward is the inverse rotation. cos/sin are constants.</summary>
+        Rope,
+
+        /// <summary>GQA KV-head broadcast (HF <c>repeat_kv</c>): expand <c>[kvHeads,…]</c> →
+        /// <c>[kvHeads·groupSize,…]</c>; backward sums each group's gradient into the shared KV head.
+        /// kvHeads in I0, groupSize in I1.</summary>
+        ExpandKvHeads,
+
+        /// <summary>Swap the first two axes of a rank-3 tensor (<c>[A,B,C]→[B,A,C]</c>) — the
+        /// token-major ↔ head-major reshuffle for attention. Backward transposes back.</summary>
+        Transpose01
     }
 }
