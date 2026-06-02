@@ -169,6 +169,35 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
             Assert.True(last < first - 0.5f, $"all-linear QLoRA did not train meaningfully: {first:F3} -> {last:F3}");
         }
 
+        [Fact]
+        public void QLoRA_FreeQuantizedBase_StillTrains_AndDisposesF32()
+        {
+            var config = new GPT1Config
+            {
+                VocabSize = 64, ContextLength = 16, DModel = 256, NHeads = 4, NLayers = 2, DFF = 512,
+                TieWeights = false,
+            };
+            using var model = new GPT1Model(config);
+            var corpus = new int[256];
+            for (var i = 0; i < corpus.Length; i++) { corpus[i] = (i * 7 + (i / 5)) % 64; }
+
+            using var tuner = new Gpt1LoRAFineTuner(
+                model, rank: 8,
+                LoRATargetModules.LanguageModelHead | LoRATargetModules.FeedForward,
+                seed: 7, quantizeBase: true, baseFormat: QLoRABaseFormat.Q4K, freeQuantizedBase: true);
+
+            // The F32 weights for the quantized projections were released (model is now QLoRA-only).
+            Assert.Throws<ObjectDisposedException>(() => model.LMHead.DataReadOnlySpan.Length);
+            Assert.Throws<ObjectDisposedException>(() => model.Blocks[0].FFN.W1.DataReadOnlySpan.Length);
+
+            // ...yet the QLoRA forward (which uses the quantized copies) still trains.
+            var history = tuner.FineTune(corpus, steps: 150, contextLength: 16, learningRate: 0.01f, seed: 99);
+            var first = AvgFirst(history, 5);
+            var last = AvgLast(history, 5);
+            _out.WriteLine($"QLoRA free-base loss: {first:F3} -> {last:F3}");
+            Assert.True(last < first - 0.5f, $"did not train with freed F32 base: {first:F3} -> {last:F3}");
+        }
+
         private static float AvgFirst(IReadOnlyList<float> h, int n)
         {
             float s = 0; var c = Math.Min(n, h.Count);

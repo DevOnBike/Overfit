@@ -63,6 +63,7 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
         private readonly LoRATargetModules _targets;
         private readonly bool _quantizeBase;
         private readonly QLoRABaseFormat _baseFormat;
+        private readonly bool _freeQuantizedBase;
         private readonly ModuleAdapter[] _adapters;
 
         private bool _disposed;
@@ -79,7 +80,8 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             LoRATargetModules targets = LoRATargetModules.LanguageModelHead,
             int seed = 42,
             bool quantizeBase = false,
-            QLoRABaseFormat baseFormat = QLoRABaseFormat.Q4K)
+            QLoRABaseFormat baseFormat = QLoRABaseFormat.Q4K,
+            bool freeQuantizedBase = false)
         {
             ArgumentNullException.ThrowIfNull(model);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rank);
@@ -145,6 +147,7 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             _targets = targets;
             _quantizeBase = quantizeBase;
             _baseFormat = baseFormat;
+            _freeQuantizedBase = freeQuantizedBase && quantizeBase;
 
             _adapters = BuildAdapters(seed);
             AttachProviders();
@@ -500,6 +503,16 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                 adapter.QuantizedBase = QuantizeWeight(wBase, inDim, outDim);
                 adapter.BiasNode = bias?.AsNode();
                 adapter.OutputProvider = (graph, x) => BuildQLoRAOutput(graph, x, adapter);
+
+                // Optional: release the F32 weight now that it lives as a quantized copy and the QLoRA
+                // forward only uses that copy (via the output hook). Frees the F32 base RAM the GPT1Model
+                // would otherwise keep — but makes the model QLoRA-only (a plain/un-adapted forward over
+                // these projections would hit a disposed weight). Bias kept (used by the hook). Idempotent
+                // with the model's own Dispose.
+                if (_freeQuantizedBase)
+                {
+                    wBase.Dispose();
+                }
             }
             else
             {
