@@ -130,16 +130,28 @@ namespace DevOnBike.Overfit.DeepLearning
             AutogradNode sin,
             AutogradNode ln1Gamma,
             AutogradNode ln2Gamma)
+            => Forward(graph, input, cos, sin, ln1Gamma, ln2Gamma, lora: null);
+
+        /// <summary>Forward with optional trainable LoRA adapters added on top of each frozen projection
+        /// (QLoRA). <paramref name="lora"/> null = base-only (norms-trainable).</summary>
+        public AutogradNode Forward(
+            ComputationGraph graph,
+            AutogradNode input,
+            AutogradNode cos,
+            AutogradNode sin,
+            AutogradNode ln1Gamma,
+            AutogradNode ln2Gamma,
+            LlamaBlockLoRA? lora)
         {
             var seqLen = input.Shape.Size / _dModel;
 
             // ── Attention sub-block ──────────────────────────────────────────
             var ln1 = TensorMath.RmsNorm(graph, input, ln1Gamma, _eps);             // [T, dModel]
 
-            // Combined projections (GGUF layout) → token-major [T, heads·dHead].
-            var q = graph.FrozenQuantizedLinear(ln1, _wq);                          // [T, nQ·dHead]
-            var k = graph.FrozenQuantizedLinear(ln1, _wk);                          // [T, nKV·dHead]
-            var v = graph.FrozenQuantizedLinear(ln1, _wv);                          // [T, nKV·dHead]
+            // Combined projections (GGUF layout) → token-major [T, heads·dHead], + optional LoRA.
+            var q = Proj(graph, ln1, _wq, lora?.Q);                                 // [T, nQ·dHead]
+            var k = Proj(graph, ln1, _wk, lora?.K);                                 // [T, nKV·dHead]
+            var v = Proj(graph, ln1, _wv, lora?.V);                                 // [T, nKV·dHead]
 
             // RoPE rotates every head in the row with the position's angle (headsPerRow inferred).
             var qRot = TensorMath.Rope(graph, q, cos, sin, _ropeSplitHalf);
@@ -158,18 +170,25 @@ namespace DevOnBike.Overfit.DeepLearning
 
             // head-major [nQ, T, dHead] → [T, nQ, dHead] → [T, dModel], then the O projection.
             var oTM = graph.Reshape(TensorMath.Transpose01(graph, oHM), seqLen, _dModel);
-            var attnOut = graph.FrozenQuantizedLinear(oTM, _wo);                    // [T, dModel]
+            var attnOut = Proj(graph, oTM, _wo, lora?.O);                          // [T, dModel]
 
             var afterAttn = graph.Add(input, attnOut);                             // residual
 
             // ── SwiGLU feed-forward sub-block ────────────────────────────────
             var ln2 = TensorMath.RmsNorm(graph, afterAttn, ln2Gamma, _eps);        // [T, dModel]
-            var gate = graph.FrozenQuantizedLinear(ln2, _wGate);                   // [T, dFF]
-            var up = graph.FrozenQuantizedLinear(ln2, _wUp);                       // [T, dFF]
+            var gate = Proj(graph, ln2, _wGate, lora?.Gate);                       // [T, dFF]
+            var up = Proj(graph, ln2, _wUp, lora?.Up);                             // [T, dFF]
             var gated = graph.Multiply(TensorMath.SiLU(graph, gate), up);          // SiLU(gate) ⊙ up
-            var down = graph.FrozenQuantizedLinear(gated, _wDown);                 // [T, dModel]
+            var down = Proj(graph, gated, _wDown, lora?.Down);                     // [T, dModel]
 
             return graph.Add(afterAttn, down);                                     // residual
+        }
+
+        /// <summary>A projection through the frozen quantized base, plus an optional LoRA residual.</summary>
+        private static AutogradNode Proj(ComputationGraph graph, AutogradNode x, IDequantRowSource w, LoRAAdapter? lora)
+        {
+            var baseOut = graph.FrozenQuantizedLinear(x, w);
+            return lora is null ? baseOut : graph.Add(baseOut, lora.Apply(graph, x));
         }
 
         private static void ValidateSource(string name, IDequantRowSource src, int expectedOut, int expectedIn)

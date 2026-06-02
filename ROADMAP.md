@@ -1100,6 +1100,26 @@ trainable LoRA + RMSNorm/RoPE/SwiGLU/GQA). Multi-session (~3–5).
   bit-identical**, and **building the trainable base allocated ~0 KB vs ~294 MB if the layer's F32 were
   materialized** (×36 layers ≈ ~10 GB of F32 base avoided). The sztandar proven: a real already-quantized
   GGUF fine-tunes in pure .NET CPU with the 4-bit base never expanded to F32.
+- [x] **Full-model RAM measured (`QwenGgufTrainingRamTests` [LongFact], real Qwen2.5-3B Q4_K_M, exact via
+  the graph arena `CurrentOffset` high-water — no GC/pool noise).** base = **1.96 GB** 4-bit (Σ layer quant
+  weights 1.62 GB; F32 expansion would be ~11.5 GB). Per-block training activation (fwd+bwd): 73.5 MB @ T=128,
+  149 @ T=256, **306 @ T=512**, 644 @ T=1024 (≈linear — FFN dFF=11008 dominates, not attention T²).
+  Full-model QLoRA @ T=512: **without checkpointing ~13.3 GB** (all 36 layers co-resident), **with gradient
+  checkpointing ~3.1 GB** → **fits a 16 GB CPU box with room to spare.** Confirms the promise with real
+  numbers; checkpointing (built for GPT-1, unwired into this path) is the lever for bigger models.
+- [x] **FULL TRAINABLE MODEL + checkpointing + real fine-tune (Option A).** `DeepLearning/TrainableLlamaModel`
+  assembles the whole stack: frozen quantized embedding (per-token `DequantizeRow`) → N
+  `TrainableLlamaBlock`s (each under `graph.Checkpoint`) → trainable final RMSNorm → frozen quantized LM head
+  → logits; `FromEngine(engine, rank, …)` builds it straight from a loaded GGUF (zero repack). Trainable =
+  per-block LoRA (`LlamaBlockLoRA` over all 7 projections, B-zero init) + RMSNorm gains; optional LM-head LoRA
+  (off by default — high-variance on a 152k vocab). Next-token CE loss seeds `logits.Grad` →
+  `BackwardFromGrad`. **Synthetic proof (`TrainableLlamaModelTests`, fast suite): a tiny model OVERFITS a
+  sequence — loss 4.31→0.0004, greedy 24/24 reproduced; gradient checkpointing is bit-identical (maxAbs 0.0)
+  AND trains (4.82→0.0004).** **Real proof (`QwenGgufQLoraFineTuneE2ETests` [LongFact], Qwen2.5-3B Q4_K_M):**
+  fine-tune all 36 layers under checkpointing — **loss 12.24→2.81** (smooth/monotonic), **P(correct next-token)
+  3.1e-4→6.2e-2 = 201× up**, **frozen 4-bit base bit-identical**, **peak process WS 2.92 GB** (incl. the 2 GB
+  base — matches the ~3.1 GB extrapolation), ~1.27 s/step. The sztandar is now a working fine-tuner. Open:
+  tokenizer wiring + adapter save/load + multi-sequence batches (assembly, not correctness).
 
 ---
 

@@ -570,6 +570,26 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             return _layers[layer];
         }
 
+        /// <summary>Frozen token-embedding table <c>[vocab, dModel]</c> (row = token) for the QLoRA
+        /// training bridge — look rows up via <see cref="DecodeWeight.DequantizeRow"/>.</summary>
+        internal DecodeWeight EmbeddingWeights
+        {
+            get { ThrowIfDisposed(); return _embedWeights; }
+        }
+
+        /// <summary>Trainable final-RMSNorm gain <c>[dModel]</c> (F32) for the QLoRA training bridge.</summary>
+        internal TensorStorage<float> FinalNormGamma
+        {
+            get { ThrowIfDisposed(); return _finalNormGamma; }
+        }
+
+        /// <summary>Frozen LM-head <c>[vocab, dModel]</c> (separate handle even when tied) for the
+        /// QLoRA training bridge — feed via <see cref="DecodeWeight.AsRowSource"/>.</summary>
+        internal DecodeWeight LmHeadWeights
+        {
+            get { ThrowIfDisposed(); return _lmHead; }
+        }
+
         /// <summary>Read Wq via _layers path (the path LoRA modifies).</summary>
         public float ReadLayerWeight(int layer, int head, int index)
         {
