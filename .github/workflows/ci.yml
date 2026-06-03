@@ -16,6 +16,15 @@ jobs:
 
     runs-on: ${{ matrix.os }}
 
+    env:
+      # The free GitHub runners have ~2 vCPUs. OverfitParallelFor spins up Environment.ProcessorCount
+      # persistent worker threads; on a 2-vCPU runner the worker pool oversubscribes and the per-dispatch
+      # sync dominates, blowing the training/integration tests up 100-900× (1-2 s locally → minutes on CI).
+      # Forcing inline (sequential SIMD) execution keeps CI fast; results are identical — the parallel path
+      # is bit-identical to sequential and is exercised on multi-core dev machines. (Real low-core deployments
+      # would hit the same pool overhead — a low-core inline fallback in OverfitParallelFor is a follow-up.)
+      OVERFIT_PARALLEL_WORKERS: "1"
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
