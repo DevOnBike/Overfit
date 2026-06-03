@@ -74,6 +74,49 @@ dotnet run -c Release --project Demo/AnomalyConsoleDemo
 
 ---
 
+## Speech & audio (pure C#)
+
+No GPU, no Python, no native binary. Each demo has its own README plus a `download-materials.cmd`
+(fetches the model / sample via `curl`, into the shared `Demo\materials\` folder) and a `run.cmd`.
+
+### WhisperDemo — speech-to-text
+
+Transcribe a WAV or MP3 with a whisper.cpp ggml model, CPU-only. Any sample rate (resampled to
+16 kHz), mono or stereo. ~60× real-time on tiny; validated English and Polish.
+
+```powershell
+Demo\WhisperDemo\download-materials.cmd   # model (~77 MB) + jfk.wav -> Demo\materials
+Demo\WhisperDemo\run.cmd                  # transcribe (English);  run.cmd pl  for Polish
+```
+
+→ [WhisperDemo/README.md](WhisperDemo/README.md)
+
+### MicDemo — live microphone speech-to-text (Windows)
+
+Record N seconds from the mic and transcribe, in a loop. Mic capture uses the built-in Windows
+`winmm` API via P/Invoke (no NuGet); the core engine stays platform-neutral.
+
+```powershell
+Demo\MicDemo\download-materials.cmd       # model -> Demo\materials
+Demo\MicDemo\run.cmd pl 5                  # Polish, 5 s rounds (default: en, 5 s)
+```
+
+→ [MicDemo/README.md](MicDemo/README.md)
+
+### Mp3Demo — the from-scratch MP3 decoder
+
+Decodes an MPEG-1/2/2.5 Layer III file to a 16 kHz WAV — no native binaries, no external libraries,
+zero per-frame allocation, ~160× real-time.
+
+```powershell
+Demo\Mp3Demo\download-materials.cmd       # sample.mp3 -> Demo\materials
+Demo\Mp3Demo\run.cmd                      # or:  run.cmd C:\music\song.mp3
+```
+
+→ [Mp3Demo/README.md](Mp3Demo/README.md) · [docs/mp3-decoding.md](../docs/mp3-decoding.md)
+
+---
+
 ## Experimental
 
 ### Unity Swarm Engine — 100k-agent game-dev showcase

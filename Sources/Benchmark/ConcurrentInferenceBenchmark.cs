@@ -354,7 +354,9 @@ namespace Benchmarks
             private readonly Thread[] _threads;
             private readonly int _innerIterations;
 
-            private volatile bool _stop;
+            // Not 'volatile': every access goes through Volatile.Read/Write, which provides the ordering
+            // (and taking 'ref' of a volatile field is CS0420). Same memory semantics, no warning.
+            private bool _stop;
             private int _phase;
             private int _mode;
             private int _remaining;

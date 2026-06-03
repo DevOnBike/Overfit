@@ -19,7 +19,7 @@ namespace DevOnBike.Overfit.Runtime
     /// ~3 KB per call (closure object, internal <c>Task[]</c>, TPL
     /// bookkeeping). The 3 KB alloc breaks zero-allocation inference claims
     /// (e.g. GPT-2 0 B / generated token) the moment we parallelize anything
-    /// in a hot path. This class matches <see cref="Parallel.For"/> in
+    /// in a hot path. This class matches <c>Parallel.For</c> in
     /// dispatch latency (~5 µs/call on a 32-logical-core Ryzen) while
     /// keeping the 0 B/call guarantee.
     /// </para>
@@ -27,7 +27,7 @@ namespace DevOnBike.Overfit.Runtime
     /// <para>
     /// <b>Design.</b> <c>N = Environment.ProcessorCount</c> persistent
     /// background threads, spawned once at class init, all park on a single
-    /// shared <see cref="SemaphoreSlim"/>. Per <see cref="For"/> call:
+    /// shared <see cref="SemaphoreSlim"/>. Per <c>For</c> call:
     /// </para>
     /// <list type="number">
     ///   <item>Reset the work-claim counter to 0 and reset
@@ -52,7 +52,7 @@ namespace DevOnBike.Overfit.Runtime
     /// </list>
     ///
     /// <para>
-    /// <b>Why bulk wake beats N × Set.</b> An <see cref="AutoResetEvent.Set"/>
+    /// <b>Why bulk wake beats N × Set.</b> An <c>AutoResetEvent.Set</c>
     /// call is a kernel-event signal that wakes exactly one waiter and
     /// returns synchronously — a serial loop of N of them costs ~N µs on
     /// Windows (32 µs floor for a 32-fanout dispatch). In contrast
@@ -94,9 +94,9 @@ namespace DevOnBike.Overfit.Runtime
     ///         spawned lazily on first touch. All callers in the process
     ///         share these workers.</item>
     ///   <item><b>Single-in-flight.</b> A class-wide lock serializes calls —
-    ///         only one <see cref="For"/> may execute at a time. Concurrent
+    ///         only one <c>For</c> may execute at a time. Concurrent
     ///         callers from different threads serialize.</item>
-    ///   <item><b>Non-reentrant.</b> Calling <see cref="For"/> recursively
+    ///   <item><b>Non-reentrant.</b> Calling <c>For</c> recursively
     ///         from inside a body <i>deadlocks</i> (the body holds <c>_gate</c>
     ///         and a nested call tries to acquire it).</item>
     /// </list>
@@ -184,7 +184,7 @@ namespace DevOnBike.Overfit.Runtime
         // observed by Wait() (no chunks have been submitted yet).
         private static readonly CountdownEvent _completion;
 
-        private static readonly object _gate = new();
+        private static readonly Lock _gate = new();
 
         // Per-chunk descriptors filled by the dispatcher before Release.
         // Static and array-sized to _workerCount so allocations stay at class init.
@@ -268,7 +268,7 @@ namespace DevOnBike.Overfit.Runtime
         private static bool _suppressOnThisThread;
 
         /// <summary>
-        /// When set on the calling thread, every <see cref="For"/> invocation on that thread runs
+        /// When set on the calling thread, every <c>For</c> invocation on that thread runs
         /// <b>inline</b> (no dispatch, no <c>_gate</c> lock) — as if the pool had a single worker.
         /// Intended for nested parallelism: when an outer parallel loop already saturates the cores
         /// (e.g. data-parallel training runs N model replicas, one per thread), each replica's inner
@@ -413,10 +413,7 @@ namespace DevOnBike.Overfit.Runtime
                 // an aggregate variant could be added if a use case appears.
                 for (var i = 0; i < chunkCount; i++)
                 {
-                    if (_chunks[i].Error != null)
-                    {
-                        _chunks[i].Error.Throw();
-                    }
+                    _chunks[i].Error?.Throw();
                 }
             }
         }
@@ -503,10 +500,7 @@ namespace DevOnBike.Overfit.Runtime
 
                 for (var i = 0; i < chunkCount; i++)
                 {
-                    if (_decodeChunks[i].Error != null)
-                    {
-                        _decodeChunks[i].Error.Throw();
-                    }
+                    _decodeChunks[i].Error?.Throw();
                 }
             }
         }

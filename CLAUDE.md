@@ -77,6 +77,23 @@ no LINQ in runtime code, no hidden allocations in inference, no `.ToArray()`,
 no `model.Forward(...)` in the inference hot path — go through
 `InferenceEngine.Run(input, output)` with caller-owned buffers.
 
+## Source-file guards (MSBuild, build-time errors)
+
+`Main.csproj` runs two `RoslynCodeTaskFactory` guards `BeforeTargets="CoreCompile"`
+(BannedApiAnalyzers can only ban named symbols, so these structural rules are MSBuild
+tasks that scan `@(Compile)` and `Log.LogError` — they fail every `dotnet build`):
+
+- **`BanJaggedFloatArrays`** — `float[][]` (jagged) is banned in `Sources/Main`
+  (`OVERFIT-JAGGED`). Use a flat `float[]` (Span-sliced per row — one allocation,
+  cache-friendly) or an Overfit buffer (`PooledBuffer<float>`, `TensorStorage<float>`).
+  `int[][]`, `Parameter[][]`, etc. are still allowed.
+- **`BanMultipleTopLevelTypes`** — one top-level type per file (`OVERFIT-ONETYPE`):
+  each `.cs` declares at most one namespace-level `class`/`struct`/`interface`/`enum`/
+  `record`. **Nested types are fine**, and **`partial` declarations of the same type
+  across files are fine** (collapsed by name). Assumes block-scoped namespaces
+  (top-level types indented 4 spaces). Split helper enums/records/contexts into their
+  own files named after the type.
+
 ## Code style
 
 `.editorconfig` enforces:

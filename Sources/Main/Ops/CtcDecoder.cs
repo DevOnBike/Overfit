@@ -11,7 +11,7 @@ namespace DevOnBike.Overfit.Ops
     /// <list type="bullet">
     ///   <item><see cref="GreedyDecode"/> — best <b>path</b>: argmax per timestep then collapse. Fast,
     ///         allocation-light, but the single best path can disagree with the most probable labeling.</item>
-    ///   <item><see cref="BeamSearchDecode"/> — best <b>labeling</b>: CTC prefix beam search (Hannun et
+    ///   <item><c>BeamSearchDecode</c> — best <b>labeling</b>: CTC prefix beam search (Hannun et
     ///         al. 2014) sums alignment probabilities per candidate string, so it recovers labelings whose
     ///         probability mass is spread across several alignments (and is the natural hook for a
     ///         language model). Usually a small accuracy gain over greedy on ambiguous input.</item>

@@ -151,6 +151,11 @@ namespace DevOnBike.Overfit.LanguageModels
         /// ChatSession. Handy for small instruct models you already have unpacked (e.g. Qwen2.5-0.5B-Instruct).
         /// </summary>
         /// <param name="modelDir">Directory with <c>model.safetensors</c> (or sharded) + <c>config.json</c> + tokenizer.</param>
+        /// <param name="maxContextLength">Maximum context length (in tokens) the session's KV cache is sized for.</param>
+        /// <param name="quantize">When true, quantize weights at load (lower RAM); false keeps full precision.</param>
+        /// <param name="maxNewTokens">Default maximum number of tokens to generate per chat turn.</param>
+        /// <param name="stopSequences">Optional stop sequences that end generation, in addition to template defaults.</param>
+        /// <param name="sampling">Optional sampling options (temperature, top-k/top-p); null uses defaults.</param>
         public static OverfitClient LoadPretrained(
             string modelDir,
             int maxContextLength = 2048,

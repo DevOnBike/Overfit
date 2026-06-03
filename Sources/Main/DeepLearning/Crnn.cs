@@ -23,7 +23,7 @@ namespace DevOnBike.Overfit.DeepLearning
     /// an <see cref="LstmLayer"/> reading that sequence left-to-right → a per-step
     /// <see cref="LinearLayer"/> producing <see cref="ClassCount"/> logits per timestep. Train the
     /// <c>[<see cref="TimeSteps"/> × ClassCount]</c> logits with <see cref="CtcLoss"/> (no image↔label
-    /// alignment needed); read text back with <see cref="Recognize(ReadOnlySpan{float})"/>.</para>
+    /// alignment needed); read text back with <c>Recognize(ReadOnlySpan&lt;float&gt;)</c>.</para>
     ///
     /// <para>Scope: single image per <see cref="Forward"/> call (batch = 1 — CTC is per-sequence; batch by
     /// looping or by replicas). The image width is fixed at construction — pad variable-width inputs to it.
@@ -61,7 +61,7 @@ namespace DevOnBike.Overfit.DeepLearning
         /// <param name="blankIndex">CTC blank class; defaults to <c>classCount − 1</c>.</param>
         /// <param name="inferenceArenaElements">
         /// Tape arena (floats) for the lazily-created internal graph used by
-        /// <see cref="Recognize(ReadOnlySpan{float})"/> / <see cref="ForwardInference"/> (default 4M).
+        /// <c>Recognize(ReadOnlySpan&lt;float&gt;)</c> / <see cref="ForwardInference"/> (default 4M).
         /// </param>
         public Crnn(
             int imageHeight,
@@ -200,6 +200,8 @@ namespace DevOnBike.Overfit.DeepLearning
         /// Recognises the text in <paramref name="image"/> using a caller-owned graph (reset internally):
         /// forward + greedy CTC decode. Returns the predicted label sequence (blank-collapsed).
         /// </summary>
+        /// <param name="graph">Caller-owned computation graph; reset internally before the forward pass.</param>
+        /// <param name="image">Flattened input image of length imageHeight*imageWidth.</param>
         /// <param name="beamWidth">
         /// 0 or 1 ⇒ greedy best-path decode (fast). &gt; 1 ⇒ CTC prefix beam search of that width
         /// (best-labeling; a small accuracy gain on ambiguous input).
@@ -239,7 +241,7 @@ namespace DevOnBike.Overfit.DeepLearning
         /// <summary>
         /// Convenience: recognise using the model's own lazily-created inference graph (no graph
         /// management for the caller). Not thread-safe; for concurrent recognition use the
-        /// <see cref="Recognize(ComputationGraph, ReadOnlySpan{float})"/> overload with per-thread graphs.
+        /// <c>Recognize(ComputationGraph, ReadOnlySpan&lt;float&gt;)</c> overload with per-thread graphs.
         /// </summary>
         public int[] Recognize(ReadOnlySpan<float> image, int beamWidth = 0)
         {

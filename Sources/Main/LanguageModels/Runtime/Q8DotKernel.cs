@@ -216,7 +216,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         }
 
         /// <summary>
-        /// <see cref="Project"/> overload taking a resident <see cref="Q8Weight"/>
+        /// <c>Project</c> overload taking a resident <see cref="Q8Weight"/>
         /// — the sequential quantized projection used by per-head attention decode
         /// (each head already runs on its own <c>OverfitParallelFor</c> worker, so
         /// the projection itself stays sequential — no nested parallelism).
@@ -243,11 +243,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         }
 
         /// <summary>
-        /// Parallel quantized projection — <see cref="Project"/> with the output
+        /// Parallel quantized projection — <c>Project</c> with the output
         /// loop split across the zero-allocation <c>OverfitParallelFor</c> worker
         /// pool. The activation is quantized once (sequentially) into the
         /// caller-owned scratch, then each worker computes a disjoint band of
-        /// output dots. Bit-identical to <see cref="Project"/>.
+        /// output dots. Bit-identical to <c>Project</c>.
         /// </summary>
         public static void ProjectParallel(
             ReadOnlySpan<float> input,
@@ -346,8 +346,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// once into the caller-owned scratch; then the output loop is split across
         /// <c>OverfitParallelFor</c> with the <b>rows loop innermost</b>, so each weight row is read from
         /// DRAM once and reused (hot in cache) across all <paramref name="rows"/> dots — cutting weight
-        /// byte-traffic ~<paramref name="rows"/>× vs looping single-token <see cref="Project"/> N times
-        /// (the prefill is weight-bandwidth-bound). Bit-identical to N× <see cref="Project"/>.
+        /// byte-traffic ~<paramref name="rows"/>× vs looping single-token <c>Project</c> N times
+        /// (the prefill is weight-bandwidth-bound). Bit-identical to N× <c>Project</c>.
         /// </summary>
         public static void ProjectBatched(
             ReadOnlySpan<float> input,

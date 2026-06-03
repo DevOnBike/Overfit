@@ -19,7 +19,7 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
     /// embeddings, an embeddings LayerNorm, post-LayerNorm transformer blocks, then pooling
     /// (<see cref="EmbeddingPooling.Mean"/> by default) + L2 normalization.
     ///
-    /// Forward is inference-only (no gradients): each <see cref="Embed"/> call resets and replays a
+    /// Forward is inference-only (no gradients): each <c>Embed</c> call resets and replays a
     /// short autograd tape, so it allocates graph temporaries (acceptable for an embedding API — this
     /// is not the zero-allocation decode hot path). Weights are loaded by a converter writing directly
     /// into the public layer <c>Parameter</c>s (see <c>BertSafetensorsLoader</c>).

@@ -278,7 +278,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             var count = Vector128.CreateScalar((short)shift);
             var bits = Avx2.And(Avx2.ShiftRightLogical(qh.AsInt16(), count).AsByte(), m2);
- 
+
             return Avx2.ShiftLeftLogical(bits.AsInt16(), 4).AsByte();
         }
 

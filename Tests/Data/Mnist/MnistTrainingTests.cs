@@ -57,10 +57,10 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
             const int trainSize = 60_000;
             const int batchSize = 64;
             const int epochs = 5;
-            const float lr = 0.001f;
 
             // Set to false for a cleaner allocation baseline without Meter/Listener overhead.
-            const bool enableTelemetry = false;
+            // Non-const so the disabled branch isn't flagged as unreachable (CS0162).
+            var enableTelemetry = false;
 
             _output.WriteLine($"Environment.ProcessorCount: {Environment.ProcessorCount}");
 

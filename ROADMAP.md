@@ -1040,11 +1040,128 @@ and broader-module scope:
 
 - [x] Backward restricted to adapter parameters with frozen base — GPT1 LM head (Stage 1).
 - [x] Adam over LoRA factors only — GPT1.
-- [ ] Extend to FFN (Stage 2) and attention Q/K/V/O (Stage 3) — GPT1.
+- [x] Extend to FFN (Stage 2) and attention Q/K/V/O (Stage 3) — GPT1 (QLoRA: whole base
+  frozen-quantized Q4_K/Q8, validated on a real anomaly task).
 - [ ] Backward through Linear / RMSNorm / SwiGLU / attention for the Llama family.
 - [ ] Demo: overfit on a few samples, verify the adapter steers generation.
 
 Opens "fine-tune LLM locally in pure C#" story. Major scope.
+
+#### GGUF→training bridge (the "sztandar" / headline — real RAM win)
+
+The QLoRA op + quantizer + GPT1 whole-base wiring shipped, but GPT1Model is F32-native
+so quantizing there only *adds* copies — the real memory win requires loading an
+already-quantized Qwen/Llama GGUF **directly** into a training graph so F32 is never
+allocated. That needs the Llama-family forward as autograd ops (frozen Q4_K bases +
+trainable LoRA + RMSNorm/RoPE/SwiGLU/GQA). Multi-session (~3–5).
+
+- [x] **Session 1 — RMSNorm + SiLU autograd ops.** `OpCode.RmsNorm` / `OpCode.SiLU`,
+  `TensorMath.RmsNorm(graph, x, gamma, eps)` (per-row, saves inv-RMS aux, dInput + dGamma,
+  seq + `OverfitParallelFor` parallel) and `TensorMath.SiLU(graph, x)` (SwiGLU gate,
+  `TensorPrimitives.Sigmoid` SIMD core). Backward dispatch wired; FD-validated
+  (`RmsNormTests`, `SiLUTests` — forward parity seq+parallel, dInput/dGamma central-difference).
+- [x] **Session 2 — RoPE autograd.** `OpCode.Rope`, `TensorMath.Rope(graph, input, cos, sin)` —
+  adjacent-pair / GGUF-NeoX layout (`input [rows, headsPerRow·headDim]`, `cos/sin [rows, halfDim]`,
+  constants/no-grad), per-pair 2-D rotation; backward = inverse rotation (orthogonal → `Rᵀ`, sin
+  negated), accumulated into dInput; seq + `OverfitParallelFor`. `RopeTests`: **forward bit-faithful
+  to the inference `RopeKernel.Apply`** (the layout-fidelity guarantee — GGUF base rotates identically
+  in train + inference), FD backward, and forward∘inverse round-trip recovers input.
+- [x] **Session 3 — GQA scaled-dot-product attention backward.** Rather than a bespoke GQA SDPA,
+  added `OpCode.ExpandKvHeads` / `TensorMath.ExpandKvHeads(graph, input, kvHeads, groupSize)` — the
+  training equivalent of HF `repeat_kv`: forward broadcasts each KV head to its query-head group
+  (head `qh` reads KV head `qh/groupSize`), and the **GQA-specific backward sums each group's gradient
+  into the shared KV head** (it was read groupSize times). Feeds the already-validated MHA SDPA
+  unchanged (one head = one batch slice). `GqaAttentionTests`: forward broadcast, FD backward of the
+  group reduction, and **full GQA path** (expand→3-D SDPA on 4 query : 2 KV heads) FD-checking dQ/dK/dV.
+  Layout-agnostic (dim-0 head axis), groupSize=1 = MHA copy. KV-head ↔ token-major projection wiring
+  is Session 4's job.
+- [x] **Session 4 — trainable Llama block assembly.** `DeepLearning/TrainableLlamaBlock` —
+  a full Pre-LN Llama/Qwen decoder block as one autograd forward: `h = input + Attn(RMSNorm(input,γ1))`,
+  `y = h + SwiGLU(RMSNorm(h,γ2))`, with **every projection a frozen `IDequantRowSource` (Q4_K/Q8)**
+  via `FrozenQuantizedLinear` and the only trainable params the two RMSNorm gains (LoRA layers on later
+  exactly like the GPT-1 path). Combined-tensor / GGUF-faithful layout (Wq `[nQ·dH,dModel]`,
+  Wk/Wv `[nKV·dH,dModel]`, Wo `[dModel,dModel]`, gate/up `[dFF,dModel]`, down `[dModel,dFF]`) so
+  Session 5's loader feeds it with zero repacking. Wiring: RMSNorm → frozen QKV → RoPE (token-major,
+  all heads one call) → `Transpose01` to head-major → `ExpandKvHeads` (GQA) → SDPA → `Transpose01` back
+  → frozen O → residual → RMSNorm → frozen SwiGLU(`SiLU(gate)⊙up`) → residual. One new op needed —
+  `OpCode.Transpose01` (rank-3 axis-0/1 swap, exact backward). `TrainableLlamaBlockTests` (4 Q : 2 KV):
+  forward shape, **end-to-end FD backward** on input + both γ, and a γ-only train loop that drops loss
+  with the **frozen quantized base provably bit-identical** before/after.
+- [x] **Session 5 — loader→training wiring + e2e on real Qwen GGUF + RAM measurement. THE PAYOFF.**
+  Bridge plumbing (zero-copy, no repack): `DecodeWeight.AsRowSource()` (Q4_K/Q6_K/Q8 → frozen
+  `IDequantRowSource`; F32 rejected), `ConcatRowsDequantSource` (per-head Wq/Wk/Wv → combined
+  `[nH·dH, dModel]`), `ConcatColsDequantSource` (per-head Wo → `[dModel, nH·dH]`), and an internal
+  `CachedLlamaInferenceEngine.GetTrainableLayer(i)` accessor. RoPE op extended to **split-half**
+  (Qwen `RopeSplitHalf=true`) alongside adjacent-pair, threaded through the block. `QLoraGgufBridgeTests`
+  (runs in the fast suite): adapter parity, AsRowSource dispatch, and a loader-shaped per-head block
+  trains FD-validated. **`QwenGgufQLoraE2ETests` [LongFact], executed on the real
+  Qwen2.5-3B Q4_K_M GGUF (2.1 GB):** layer-0 (dModel=2048, 16 Q : 2 KV, headDim=128, split-half) wired
+  straight into a `TrainableLlamaBlock` — gradients flow to input + both γ, **frozen 4-bit base
+  bit-identical**, and **building the trainable base allocated ~0 KB vs ~294 MB if the layer's F32 were
+  materialized** (×36 layers ≈ ~10 GB of F32 base avoided). The sztandar proven: a real already-quantized
+  GGUF fine-tunes in pure .NET CPU with the 4-bit base never expanded to F32.
+- [x] **Full-model RAM measured (`QwenGgufTrainingRamTests` [LongFact], real Qwen2.5-3B Q4_K_M, exact via
+  the graph arena `CurrentOffset` high-water — no GC/pool noise).** base = **1.96 GB** 4-bit (Σ layer quant
+  weights 1.62 GB; F32 expansion would be ~11.5 GB). Per-block training activation (fwd+bwd): 73.5 MB @ T=128,
+  149 @ T=256, **306 @ T=512**, 644 @ T=1024 (≈linear — FFN dFF=11008 dominates, not attention T²).
+  Full-model QLoRA @ T=512: **without checkpointing ~13.3 GB** (all 36 layers co-resident), **with gradient
+  checkpointing ~3.1 GB** → **fits a 16 GB CPU box with room to spare.** Confirms the promise with real
+  numbers; checkpointing (built for GPT-1, unwired into this path) is the lever for bigger models.
+- [x] **FULL TRAINABLE MODEL + checkpointing + real fine-tune (Option A).** `DeepLearning/TrainableLlamaModel`
+  assembles the whole stack: frozen quantized embedding (per-token `DequantizeRow`) → N
+  `TrainableLlamaBlock`s (each under `graph.Checkpoint`) → trainable final RMSNorm → frozen quantized LM head
+  → logits; `FromEngine(engine, rank, …)` builds it straight from a loaded GGUF (zero repack). Trainable =
+  per-block LoRA (`LlamaBlockLoRA` over all 7 projections, B-zero init) + RMSNorm gains; optional LM-head LoRA
+  (off by default — high-variance on a 152k vocab). Next-token CE loss seeds `logits.Grad` →
+  `BackwardFromGrad`. **Synthetic proof (`TrainableLlamaModelTests`, fast suite): a tiny model OVERFITS a
+  sequence — loss 4.31→0.0004, greedy 24/24 reproduced; gradient checkpointing is bit-identical (maxAbs 0.0)
+  AND trains (4.82→0.0004).** **Real proof (`QwenGgufQLoraFineTuneE2ETests` [LongFact], Qwen2.5-3B Q4_K_M):**
+  fine-tune all 36 layers under checkpointing — **loss 12.24→2.81** (smooth/monotonic), **P(correct next-token)
+  3.1e-4→6.2e-2 = 201× up**, **frozen 4-bit base bit-identical**, **peak process WS 2.92 GB** (incl. the 2 GB
+  base — matches the ~3.1 GB extrapolation), ~1.27 s/step. The sztandar is now a working fine-tuner. Open:
+  adapter save/load + multi-sequence batches (assembly, not correctness).
+- [x] **KNOWLEDGE-INJECTION SHOWCASE (`QwenGgufKnowledgeInjectionDemoTests` [LongFact]).** The demo: teach
+  real Qwen2.5-3B a fact it cannot know — a made-up metal "Zorvex" mined only in "Tarnholm" — then ask it.
+  Added greedy `TrainableLlamaModel.Generate(graph, prompt, maxNew, eos)` (checkpointed forward = no grad
+  buffers, tiny arena) wired to `QwenTokenizer.Load(modelDir)` (tokenizer is separate from the GGUF). LM-head
+  LoRA enabled (`loraOnLmHead: true`) for output capacity. **BEFORE: "…the city of" → "gow" (base clueless).
+  Fine-tune on 3 sentences (~250 steps CPU): loss 14.67 → 0.0000. AFTER: "…the city of" → "Tarnholm. Zorvex"
+  — recites the taught fact coherently.** KEY STABILITY FINDING: Adam blew up catastrophically at low loss
+  (0.23→6.58 spike) with the default `Epsilon 1e-8`; **`Epsilon = 1e-4` gives a smooth monotonic descent to
+  0** (the 1/√v amplification when gradients vanish on a tiny overfit set). This is the showable
+  "fine-tune an LLM on your CPU in .NET, no GPU/Python" demo.
+- [x] **Adapter SAVE/LOAD — fine-tune persists to a file (train → save → load → use).**
+  `TrainableLlamaModel.SaveAdapter(path)` / `LoadAdapter(path)` serialize ONLY the trained delta (every LoRA
+  A/B + RMSNorm gain, deterministic order, bulk `MemoryMarshal` IO) — the frozen 4-bit base is never
+  rewritten (no GGUF export; loading stays one-directional). Tens of MB vs the 2 GB base. **Synthetic
+  round-trip (`TrainableLlamaModelTests`, fast): train→save (65 KB)→fresh model→load → loaded logits
+  bit-identical to trained (maxAbs 0.0), greedy 18/18 reproduced.** **Real round-trip
+  (`QwenGgufQLoraAdapterRoundTripTests` [LongFact]): train Qwen-3B on the Zorvex fact → save adapter file →
+  FRESH model from the untouched base → load → recites "Tarnholm".** Closes the loop into a portable
+  "knowledge module" attached to a frozen base.
+- [ ] **(FUTURE, separate topic) Fast fine-tuned decode = LoRA on the optimized inference engine (≈1.13× llama.cpp).**
+  Two decode paths exist today: the **training** model (`TrainableLlamaModel`, has KV-cache + our LoRA but
+  NAIVE per-row-dequant+`Dot` kernels) and the **inference** engine (`CachedLlamaInferenceEngine`, KV-cache +
+  repacked 8×8 GEMV kernels benchmarked ~1.13× behind llama.cpp, but runs the frozen base WITHOUT LoRA). To
+  serve a fine-tuned model at llama.cpp-class speed, hook the trained adapter into the optimized inference
+  forward: the Q4_K base can't be F32-weight-merged (the existing `LlamaLoRAAdapter.Enable` path needs F32),
+  so add the LoRA as a **side GEMV** (`+ (x·A)·B`, one tiny rank-r matmul per projection per token) inside
+  `CachedTransformerBlock`/`CachedMultiHeadAttention` decode, gated by an attached adapter. ~2–3 sessions,
+  higher risk (touches the hot inference path). NOTE: the training-model KV-cache (next bullet) does NOT help —
+  it's naive single-threaded, so it's 6× slower than the already-parallel uncached recompute at demo lengths;
+  the win requires parallel kernels, which is this item. Generation was never the bottleneck (~0.4 s/token).
+- [~] **Training-model KV-cache (Option A) — BUILT + CORRECT, but it does NOT speed up generation (honest
+  finding).** `TrainableLlamaModel.GenerateCached(...)` + `TrainableLlamaBlock.DecodeStep(...)` — incremental
+  single-token decode (no autograd): only the new token flows through the layers, attending its query over a
+  per-layer K/V cache (RoPE via the inference `RopeKernel`, manual softmax attention, plain-span RMSNorm/SwiGLU
+  + naive per-row dequant + LoRA side-GEMV). **Bit-faithful: cached greedy tokens == uncached `Generate`
+  (`TrainableLlamaModelTests.GenerateCached_MatchesUncachedGenerate`).** BUT measured on real Qwen-3B
+  (`QwenGgufCachedDecodeSpeedTests` [LongFact]): cached **2700 ms/token vs uncached 424 ms/token — 6× SLOWER**.
+  Root cause: the premise was wrong. Generation was never the bottleneck (~0.4 s/token) because the uncached
+  forward already parallelizes the dequant-matmul (`FrozenQuantizedLinear` over all cores + amortized dequant),
+  while the cached decode uses naive SINGLE-THREADED per-row kernels. The cache only pays off at long contexts
+  AND with parallel kernels (= Option B / parallelizing `ProjVec`+`LmHeadArgmax`). The real wall-time sink in
+  the demos is TRAINING (~5 s/step), not generation. Kept as a correct reference path; no speed claim.
 
 ---
 

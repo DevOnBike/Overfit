@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat code coverage">
+        <Configuration>
+          <Exclude>[DevOnBike.Overfit]DevOnBike.Overfit.Ops.*,[DevOnBike.Overfit]DevOnBike.Overfit.Kernels.*,[DevOnBike.Overfit]DevOnBike.Overfit.Maths.*,[DevOnBike.Overfit]DevOnBike.Overfit.Intrinsics.*,[DevOnBike.Overfit]DevOnBike.Overfit.Autograd.*,[DevOnBike.Overfit]DevOnBike.Overfit.Optimizers.*,[DevOnBike.Overfit]DevOnBike.Overfit.Tensors.*,[DevOnBike.Overfit]DevOnBike.Overfit.LanguageModels.Runtime.*</Exclude>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

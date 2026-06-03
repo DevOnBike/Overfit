@@ -386,6 +386,26 @@ namespace DevOnBike.Overfit.Autograd
                     TensorMath.GeluBackward(op.A, op.Output);
                     break;
 
+                case OpCode.SiLU:
+                    TensorMath.SiLUBackward(op.A, op.Output);
+                    break;
+
+                case OpCode.RmsNorm:
+                    TensorMath.RmsNormBackward(op.A, op.Output, op.C0, op.C1);
+                    break;
+
+                case OpCode.Rope:
+                    TensorMath.RopeBackward(op.A, op.Output, op.C0, op.C1, op.I0 == 1);
+                    break;
+
+                case OpCode.ExpandKvHeads:
+                    TensorMath.ExpandKvHeadsBackward(op.A, op.Output, op.I0, op.I1);
+                    break;
+
+                case OpCode.Transpose01:
+                    TensorMath.Transpose01Backward(op.A, op.Output);
+                    break;
+
                 case OpCode.Reshape:
                     TensorMath.ReshapeBackward(op.A, op.Output);
                     break;
@@ -444,6 +464,10 @@ namespace DevOnBike.Overfit.Autograd
                 case OpCode.Checkpoint:
                     CheckpointBackward(in op);
                     break;
+
+                case OpCode.FrozenQuantizedLinear:
+                    FrozenQuantizedLinearBackward(in op);
+                    break;
             }
         }
 
@@ -487,6 +511,7 @@ namespace DevOnBike.Overfit.Autograd
 
             _opCount = 0;
             _checkpointSegments?.Clear();
+            _frozenQuantWeights?.Clear();
 
             // Reset arena without involving GC.
             TapeBuffer.ResetOffset();

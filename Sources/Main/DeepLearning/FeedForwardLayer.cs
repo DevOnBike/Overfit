@@ -71,6 +71,18 @@ namespace DevOnBike.Overfit.DeepLearning
         /// </summary>
         internal Func<ComputationGraph, AutogradNode>? W2WeightProvider { get; set; }
 
+        /// <summary>
+        /// Output-level QLoRA hooks (see Gpt1LoRAFineTuner, quantizeBase). When set, replace the
+        /// whole <c>graph.Linear(input, W, bias)</c> projection with the delegate's result
+        /// (<c>FrozenQuantizedLinear(input, Q4_K base) + bias + LoRA(input)</c>) — the 4-bit base
+        /// can't be a single F32 weight node, so the weight-level providers above can't carry it.
+        /// Take precedence over the weight providers. Null on the normal path.
+        /// </summary>
+        internal Func<ComputationGraph, AutogradNode, AutogradNode>? W1OutputProvider { get; set; }
+
+        /// <summary>Output-level QLoRA hook for W2 (down-projection). See <see cref="W1OutputProvider"/>.</summary>
+        internal Func<ComputationGraph, AutogradNode, AutogradNode>? W2OutputProvider { get; set; }
+
         public bool IsTraining { get; private set; } = true;
 
         public void Train() => IsTraining = true;
@@ -94,42 +106,56 @@ namespace DevOnBike.Overfit.DeepLearning
             _b1Node ??= B1.AsNode();
             _b2Node ??= B2.AsNode();
 
-            // W1 / W2 nodes: a LoRA fine-tuner can override these with an effective
-            // weight W_eff = W(frozen) + A@B via the providers; the production path
-            // uses the plain cached parameter node, zero overhead.
-            AutogradNode w1Node;
-            if (W1WeightProvider is not null)
-            {
-                w1Node = W1WeightProvider(graph);
-            }
-            else
-            {
-                _w1Node ??= W1.AsNode();
-                w1Node = _w1Node;
-            }
-
-            AutogradNode w2Node;
-            if (W2WeightProvider is not null)
-            {
-                w2Node = W2WeightProvider(graph);
-            }
-            else
-            {
-                _w2Node ??= W2.AsNode();
-                w2Node = _w2Node;
-            }
-
             // Flatten [B, T, dModel] → [B*T, dModel]
             var flat = graph.Reshape(input, b * t, _dModel);
 
-            // [B*T, dModel] @ W1 + b1 → [B*T, dFF]
-            var h1 = graph.Linear(flat, w1Node, _b1Node);
+            // [B*T, dModel] @ W1 + b1 → [B*T, dFF]. QLoRA output hook owns the whole projection;
+            // else weight-level LoRA (W_eff = W1 + A@B) or the plain cached parameter node.
+            AutogradNode h1;
+            if (W1OutputProvider is not null)
+            {
+                h1 = W1OutputProvider(graph, flat);
+            }
+            else
+            {
+                AutogradNode w1Node;
+                if (W1WeightProvider is not null)
+                {
+                    w1Node = W1WeightProvider(graph);
+                }
+                else
+                {
+                    _w1Node ??= W1.AsNode();
+                    w1Node = _w1Node;
+                }
+
+                h1 = graph.Linear(flat, w1Node, _b1Node);
+            }
 
             // GELU([B*T, dFF])
             var act = TensorMath.Gelu(graph, h1);
 
             // [B*T, dFF] @ W2 + b2 → [B*T, dModel]
-            var h2 = graph.Linear(act, w2Node, _b2Node);
+            AutogradNode h2;
+            if (W2OutputProvider is not null)
+            {
+                h2 = W2OutputProvider(graph, act);
+            }
+            else
+            {
+                AutogradNode w2Node;
+                if (W2WeightProvider is not null)
+                {
+                    w2Node = W2WeightProvider(graph);
+                }
+                else
+                {
+                    _w2Node ??= W2.AsNode();
+                    w2Node = _w2Node;
+                }
+
+                h2 = graph.Linear(act, w2Node, _b2Node);
+            }
 
             // Reshape back to [B, T, dModel]
             return graph.Reshape(h2, b, t, _dModel);

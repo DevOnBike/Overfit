@@ -65,6 +65,14 @@ namespace DevOnBike.Overfit.DeepLearning
         private readonly Func<ComputationGraph, AutogradNode>?[] _wvProviders;
         private readonly Func<ComputationGraph, AutogradNode>?[] _woProviders;
 
+        // QLoRA per-head OUTPUT hooks: given the projection's INPUT, return its output directly
+        // (FrozenQuantizedLinear(input, Q8 base) + bias + LoRA). Q/K/V take `flat` → [B*T, dHead];
+        // O takes `attn` → [B*T, dModel]. Take precedence over the weight providers.
+        private readonly Func<ComputationGraph, AutogradNode, AutogradNode>?[] _wqOutputProviders;
+        private readonly Func<ComputationGraph, AutogradNode, AutogradNode>?[] _wkOutputProviders;
+        private readonly Func<ComputationGraph, AutogradNode, AutogradNode>?[] _wvOutputProviders;
+        private readonly Func<ComputationGraph, AutogradNode, AutogradNode>?[] _woOutputProviders;
+
         public MultiHeadAttentionLayer(
             int dModel,
             int nHeads,
@@ -106,6 +114,11 @@ namespace DevOnBike.Overfit.DeepLearning
             _wkProviders = new Func<ComputationGraph, AutogradNode>?[nHeads];
             _wvProviders = new Func<ComputationGraph, AutogradNode>?[nHeads];
             _woProviders = new Func<ComputationGraph, AutogradNode>?[nHeads];
+
+            _wqOutputProviders = new Func<ComputationGraph, AutogradNode, AutogradNode>?[nHeads];
+            _wkOutputProviders = new Func<ComputationGraph, AutogradNode, AutogradNode>?[nHeads];
+            _wvOutputProviders = new Func<ComputationGraph, AutogradNode, AutogradNode>?[nHeads];
+            _woOutputProviders = new Func<ComputationGraph, AutogradNode, AutogradNode>?[nHeads];
 
             for (var h = 0; h < nHeads; h++)
             {
@@ -162,6 +175,17 @@ namespace DevOnBike.Overfit.DeepLearning
         internal Func<ComputationGraph, AutogradNode>? GetValueProvider(int head) => _wvProviders[head];
         internal Func<ComputationGraph, AutogradNode>? GetOutputProvider(int head) => _woProviders[head];
 
+        // QLoRA per-head output-hook accessors (mirror the weight providers above).
+        internal void SetQueryOutputProvider(int head, Func<ComputationGraph, AutogradNode, AutogradNode>? p) => _wqOutputProviders[head] = p;
+        internal void SetKeyOutputProvider(int head, Func<ComputationGraph, AutogradNode, AutogradNode>? p) => _wkOutputProviders[head] = p;
+        internal void SetValueOutputProvider(int head, Func<ComputationGraph, AutogradNode, AutogradNode>? p) => _wvOutputProviders[head] = p;
+        internal void SetOutputOutputProvider(int head, Func<ComputationGraph, AutogradNode, AutogradNode>? p) => _woOutputProviders[head] = p;
+
+        internal Func<ComputationGraph, AutogradNode, AutogradNode>? GetQueryOutputProvider(int head) => _wqOutputProviders[head];
+        internal Func<ComputationGraph, AutogradNode, AutogradNode>? GetKeyOutputProvider(int head) => _wkOutputProviders[head];
+        internal Func<ComputationGraph, AutogradNode, AutogradNode>? GetValueOutputProvider(int head) => _wvOutputProviders[head];
+        internal Func<ComputationGraph, AutogradNode, AutogradNode>? GetOutputOutputProvider(int head) => _woOutputProviders[head];
+
         public bool IsTraining { get; private set; } = true;
 
         public void Train()
@@ -208,25 +232,24 @@ namespace DevOnBike.Overfit.DeepLearning
 
             for (var h = 0; h < _nHeads; h++)
             {
-                // Q/K/V/O weight nodes: a Stage-3 LoRA fine-tuner can override each
-                // per head with W_eff = W(frozen) + A@B via the providers; the
-                // production path uses the plain cached parameter node, zero overhead.
-                var wqNode = ResolveWeightNode(graph, _wqProviders[h], _wqNodes, _wqHeads, h);
-                var wkNode = ResolveWeightNode(graph, _wkProviders[h], _wkNodes, _wkHeads, h);
-                var wvNode = ResolveWeightNode(graph, _wvProviders[h], _wvNodes, _wvHeads, h);
-                var woNode = ResolveWeightNode(graph, _woProviders[h], _woNodes, _woHeads, h);
-
+                // Q/K/V/O per head: a QLoRA output hook owns the whole projection
+                // (FrozenQuantizedLinear + bias + LoRA); else a Stage-3 weight provider
+                // (W_eff = W + A@B); else the plain cached parameter node, zero overhead.
                 _bqNodes[h] ??= _bqHeads[h].AsNode();
                 _bkNodes[h] ??= _bkHeads[h].AsNode();
                 _bvNodes[h] ??= _bvHeads[h].AsNode();
 
-                var qFlat = graph.Linear(flat, wqNode, _bqNodes[h]!);
-                var kFlat = graph.Linear(flat, wkNode, _bkNodes[h]!);
-                var vFlat = graph.Linear(flat, wvNode, _bvNodes[h]!);
+                var qFlat = _wqOutputProviders[h] is { } qOut
+                    ? qOut(graph, flat)
+                    : graph.Linear(flat, ResolveWeightNode(graph, _wqProviders[h], _wqNodes, _wqHeads, h), _bqNodes[h]!);
+                var kFlat = _wkOutputProviders[h] is { } kOut
+                    ? kOut(graph, flat)
+                    : graph.Linear(flat, ResolveWeightNode(graph, _wkProviders[h], _wkNodes, _wkHeads, h), _bkNodes[h]!);
+                var vFlat = _wvOutputProviders[h] is { } vOut
+                    ? vOut(graph, flat)
+                    : graph.Linear(flat, ResolveWeightNode(graph, _wvProviders[h], _wvNodes, _wvHeads, h), _bvNodes[h]!);
 
-                // SDPA on the flattened [B*T, dHead] projections directly. The
-                // 2-D overload skips the [B*T,d] <-> [B,T,d] reshape round-trip
-                // — 4 reshape tape nodes per head eliminated (q/k/v + output).
+                // SDPA on the flattened [B*T, dHead] projections directly.
                 var attn = TensorMath.ScaledDotProductAttention(
                 graph,
                 qFlat,
@@ -236,12 +259,9 @@ namespace DevOnBike.Overfit.DeepLearning
                 seqLen,
                 _causalMask);
 
-                var zeroBiasO = ZeroBias(graph, _dModel);
-
-                var proj = graph.Linear(
-                attn,
-                woNode,
-                zeroBiasO);
+                var proj = _woOutputProviders[h] is { } oOut
+                    ? oOut(graph, attn)
+                    : graph.Linear(attn, ResolveWeightNode(graph, _woProviders[h], _woNodes, _woHeads, h), ZeroBias(graph, _dModel));
 
                 accum = accum == null
                     ? proj

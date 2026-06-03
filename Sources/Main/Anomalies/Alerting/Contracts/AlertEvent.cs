@@ -17,7 +17,7 @@ namespace DevOnBike.Overfit.Anomalies.Alerting.Contracts
         /// <summary>Name of the K8s pod that triggered the alert.</summary>
         public required string PodName { get; init; }
 
-        /// <summary>Normalised anomaly score ∈ [0, 1] from <see cref="ReconstructionScorer" />.</summary>
+        /// <summary>Normalised anomaly score ∈ [0, 1] from <c>ReconstructionScorer</c>.</summary>
         public float AnomalyScore { get; init; }
 
         /// <summary>Raw MSE(input, reconstruction) before threshold normalisation.</summary>

@@ -5,7 +5,7 @@
 
 namespace DevOnBike.Overfit.Data.Contracts
 {
-    /// <summary>Immutable configuration for <see cref="FeatureImportanceAnalyzer" />.</summary>
+    /// <summary>Immutable configuration for <c>FeatureImportanceAnalyzer</c>.</summary>
     public sealed record FeatureImportanceAnalyzerConfig
     {
         /// <summary>

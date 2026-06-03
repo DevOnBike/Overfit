@@ -205,7 +205,6 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
             const string corpus = "abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ.,!?'\n";
             const int seqLen = 32;
             const int steps = 50;
-            const float lr = 1e-3f;
 
             var tokenizer = CharacterTokenizer.FromCorpus(corpus);
             // Generate a repeated corpus to have enough data

@@ -17,7 +17,7 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
     /// Supports model-family conventions via optional retrieval prefixes — E5 wants
     /// <c>"query: "</c> / <c>"passage: "</c>, BGE wants a query-side instruction like
     /// <c>"Represent this sentence for searching relevant passages: "</c>. Use
-    /// <see cref="EmbedQuery"/> / <see cref="EmbedPassage"/> to apply the configured prefix per call;
+    /// <c>EmbedQuery</c> / <c>EmbedPassage</c> to apply the configured prefix per call;
     /// plain <see cref="Embed(string)"/> stays prefix-free (the MiniLM convention).
     ///
     /// <see cref="FromPretrained"/> loads a raw HuggingFace model directory (<c>config.json</c> +

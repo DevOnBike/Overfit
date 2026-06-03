@@ -92,6 +92,19 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         public int MaxSequenceLength { get; }
 
+        /// <param name="hidden">Input hidden state for the current token (length DModel).</param>
+        /// <param name="wq">Query projection weights for this head.</param>
+        /// <param name="wk">Key projection weights for this head.</param>
+        /// <param name="wv">Value projection weights for this head.</param>
+        /// <param name="bq">Query projection bias (may be empty).</param>
+        /// <param name="bk">Key projection bias (may be empty).</param>
+        /// <param name="bv">Value projection bias (may be empty).</param>
+        /// <param name="wo">Output projection weights mapping head dimension back to DModel.</param>
+        /// <param name="cache">Shared key/value cache holding past keys and values.</param>
+        /// <param name="layerIndex">Index of the transformer layer this head belongs to.</param>
+        /// <param name="headIndex">Index of this head within the layer.</param>
+        /// <param name="position">Sequence position of the current token (0-based).</param>
+        /// <param name="output">Destination span receiving this head's contribution to the output (length DModel).</param>
         /// <param name="rope">
         /// Precomputed RoPE table. When non-null, RoPE is applied to Q and K
         /// after projection and before writing K to the cache.

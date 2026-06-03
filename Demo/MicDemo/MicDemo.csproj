@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<!-- Windows-only: microphone capture uses the built-in winmm waveIn API via P/Invoke (no NuGet). -->
+		<TargetFramework>net10.0-windows</TargetFramework>
+		<Nullable>annotations</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<DebugType>embedded</DebugType>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<RootNamespace>DevOnBike.Overfit.Demo.MicConsole</RootNamespace>
+		<AssemblyName>MicDemo</AssemblyName>
+		<IsPackable>false</IsPackable>
+
+		<SonarQubeExclude>true</SonarQubeExclude>
+		<NoWarn>$(NoWarn);1591</NoWarn>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\..\Sources\Main\Main.csproj" />
+	</ItemGroup>
+
+</Project>

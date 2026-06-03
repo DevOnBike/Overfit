@@ -134,6 +134,18 @@ The goal is to make local AI deployable as a normal .NET library in environments
 where Python, native binaries, sidecars, external APIs and hidden allocations are
 not acceptable.
 
+### 5. Speech-to-text in the same process
+
+Transcribe speech with **Whisper** in pure C# on the CPU — load a whisper.cpp ggml
+model directly and turn audio into text without a GPU, Python or a native binary.
+The pipeline is log-mel (Bluestein FFT) → multi-threaded encoder → KV-cache greedy
+decode, and it reads **WAV and MP3** (the MP3 decoder is from-scratch managed code,
+zero per-frame allocation). On a dev CPU, whisper-tiny runs ~60× real-time;
+validated English and Polish on the real model. So voice → transcription → RAG /
+agent / tool call all stay in one .NET process, with no audio leaving the machine.
+See `Demo/WhisperDemo`, `Demo/MicDemo` (live mic) and
+[docs/mp3-decoding.md](docs/mp3-decoding.md).
+
 ---
 
 ## What you can build today
@@ -285,7 +297,10 @@ Full benchmark tables and caveats live in [`docs/TECHNICAL.md`](docs/TECHNICAL.m
 | ONNX import | Linear and DAG topology, ResNet-style skip connections |
 | Computer vision | MNIST CNN, Conv/BN/ReLU/Pool/FC-style networks |
 | OCR | CRNN + CTC pipeline for synthetic digits / lexicon words |
+| Speech-to-text | **Whisper (tiny/base/…) in pure C# on CPU — no GPU, no Python.** whisper.cpp ggml → log-mel (Bluestein FFT) → multi-threaded encoder → KV-cache decode; ~60× real-time on tiny, validated EN + PL. Reads WAV and MP3. See `Demo/WhisperDemo` / `Demo/MicDemo` |
+| Audio decoding | Pure-C# **MPEG-1/2/2.5 Layer III (MP3)** decoder + WAV reader — no native binaries, zero per-frame allocation, ~160× real-time; feeds Whisper directly. See [docs/mp3-decoding.md](docs/mp3-decoding.md) |
 | LoRA | LM head, FFN and per-head attention stages |
+| QLoRA fine-tuning | **Fine-tune a real quantized Qwen/Llama GGUF on CPU — no GPU, no Python.** Frozen 4-bit base (never expanded to F32 or rewritten) + a trainable LoRA adapter; full model under gradient checkpointing (~3 GB RAM for a 3B), turnkey `QLoRAFineTuner` (gguf + text → adapter → ask), portable adapter save/load. Validated on real Qwen2.5-3B: taught a made-up fact, then it recites it. See [docs/qlora-finetuning.md](docs/qlora-finetuning.md) |
 | Anomaly detection | Small GPT-style models for metrics and deployment-specific adaptation |
 
 ---
@@ -390,6 +405,7 @@ Current shipped areas include:
 - tool calling
 - guaranteed JSON
 - LoRA stages
+- QLoRA fine-tuning (frozen Q4_K base + trainable LoRA, dequant-on-the-fly, pure-managed CPU)
 - ONNX import
 - anomaly detection
 - Native AOT guard
@@ -397,6 +413,7 @@ Current shipped areas include:
 Current priorities include:
 
 - decode gap to llama.cpp narrowed to ~1.13× same-file (from ~1.6×) — the residual is DRAM-bandwidth-bound; further closing needs structural (full-tensor attention) work, not kernel-ALU
+- extending QLoRA base quantization from the LM head to the FFN (the per-head attention split blocks Q4_K there — headDim < 256)
 - batched prefill
 - stronger JSON Schema constraints
 - more model families and quantization formats

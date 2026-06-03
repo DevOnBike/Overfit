@@ -9,10 +9,10 @@ namespace DevOnBike.Overfit.Data.Abstractions
 {
     /// <summary>
     ///     Provides human-readable names for feature vector dimensions.
-    ///     Implement this interface to adapt <see cref="TrainingDataAnalyzer" /> and
-    ///     <see cref="FeatureImportanceAnalyzer" /> to any domain — not just K8s monitoring.
+    ///     Implement this interface to adapt <c>TrainingDataAnalyzer</c> and
+    ///     <c>FeatureImportanceAnalyzer</c> to any domain — not just K8s monitoring.
     ///     Examples:
-    ///     <see cref="MonitoringFeatureNameProvider" /> — K8s pod metrics (12 × 4 = 48 dims)
+    ///     <c>MonitoringFeatureNameProvider</c> — K8s pod metrics (12 × 4 = 48 dims)
     ///     <see cref="IndexedFeatureNameProvider" />    — generic fallback ("feature_0", "feature_1" ...)
     /// </summary>
     public interface IFeatureNameProvider

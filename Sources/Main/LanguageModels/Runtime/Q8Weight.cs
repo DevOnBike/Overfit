@@ -18,7 +18,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     ///
     /// Long-lived (one per quantized model weight); plain arrays, no pooling.
     /// </summary>
-    public sealed class Q8Weight
+    public sealed class Q8Weight : Autograd.IDequantRowSource
     {
         public Q8Weight(sbyte[] quants, float[] scales, int inputSize, int outputSize)
         {

@@ -16,7 +16,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
     /// MiniLM / sentence-transformers encoder family). Reads a plain <c>vocab.txt</c> (one token per line,
     /// line index = id) and reproduces the reference pipeline: text cleaning → optional lowercasing +
     /// accent stripping → whitespace + punctuation splitting (BasicTokenizer) → greedy longest-match
-    /// subword splitting with <c>##</c> continuation prefixes (WordpieceTokenizer). <see cref="Encode"/>
+    /// subword splitting with <c>##</c> continuation prefixes (WordpieceTokenizer). <c>Encode</c>
     /// wraps the result in <c>[CLS] … [SEP]</c> by default — exactly the input the <c>BertEncoder</c>
     /// embedding model expects.
     ///

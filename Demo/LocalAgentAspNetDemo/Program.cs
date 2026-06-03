@@ -34,7 +34,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
     /// Entry point for the Local Agent ASP.NET host. Classic <see cref="Main"/> structure
     /// (not top-level statements) so the bootstrap is explicit and easy to follow.
     /// </summary>
-    public class Program
+    public static class Program
     {
         public static void Main(string[] args)
         {

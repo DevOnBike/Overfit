@@ -5,7 +5,7 @@
 
 namespace DevOnBike.Overfit.Data.Contracts
 {
-    /// <summary>Full report returned by <see cref="FeatureImportanceAnalyzer.Analyze" />.</summary>
+    /// <summary>Full report returned by <c>FeatureImportanceAnalyzer.Analyze</c>.</summary>
     public sealed record FeatureImportanceReport
     {
         /// <summary>Per-dimension results ordered by descending MeanImportance.</summary>
