@@ -71,11 +71,13 @@ namespace DevOnBike.Overfit.Tests.TestSupport
             public static string BaseGgmlPath => Path.Combine(Dir, "ggml-base.bin");
             public static string SampleWavPath => Path.Combine(Dir, "jfk.wav");
             public static string PolishWavPath => Path.Combine(Dir, "polish.wav");
+            public static string SampleMp3Path => Path.Combine(Dir, "pl.mp3");
 
             public static string RequireTinyGgmlPath() => Require(TinyGgmlPath, EnvVar, "Whisper tiny ggml (ggml-tiny.bin from whisper.cpp)");
             public static string RequireBaseGgmlPath() => Require(BaseGgmlPath, EnvVar, "Whisper base ggml (ggml-base.bin)");
             public static string RequireSampleWavPath() => Require(SampleWavPath, EnvVar, "Whisper sample WAV (jfk.wav from whisper.cpp samples)");
             public static string RequirePolishWavPath() => Require(PolishWavPath, EnvVar, "Polish sample WAV (polish.wav, 16 kHz mono — TTS or recorded)");
+            public static string RequireSampleMp3Path() => Require(SampleMp3Path, EnvVar, "Sample MP3 (jfk.mp3 — e.g. the JFK clip encoded to MP3)");
         }
 
         public static class Qwen3B

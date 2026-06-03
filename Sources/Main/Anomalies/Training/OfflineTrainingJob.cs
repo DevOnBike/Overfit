@@ -124,7 +124,9 @@ namespace DevOnBike.Overfit.Anomalies.Training
             var workerGraphs = new ComputationGraph[workerCount];
             var sampleInputs = new int[workerCount][];
             var sampleTargets = new int[workerCount][];
-            var lossScratch = new float[workerCount][];
+            // Per-worker loss scratch as one CONTIGUOUS buffer (worker-major), not jagged — worker w owns the
+            // disjoint slice [w*ctx, ctx) (passed as a base offset into LossAndGrad), so concurrent writes don't race.
+            var lossScratch = new float[workerCount * _cfg.ContextLength];
             var losses = new float[workerCount];
 
             // One RNG per worker, deterministically seeded — makes the parallel
@@ -141,7 +143,6 @@ namespace DevOnBike.Overfit.Anomalies.Training
                 workerGraphs[w] = new ComputationGraph(_cfg.ArenaSize / workerCount);
                 sampleInputs[w] = new int[_cfg.ContextLength];
                 sampleTargets[w] = new int[_cfg.ContextLength];
-                lossScratch[w] = new float[_cfg.ContextLength];
                 workerRngs[w] = new Random(_cfg.Seed + 1 + w);
             }
 
@@ -165,7 +166,7 @@ namespace DevOnBike.Overfit.Anomalies.Training
                     ZeroGrads(workers[w]);
 
                     var logits = workers[w].Forward(workerGraphs[w], sampleInputs[w], batchSize: 1, _cfg.ContextLength);
-                    losses[w] = LossAndGrad(logits, sampleTargets[w], _cfg.ContextLength, gptConfig.VocabSize, lossScratch[w]);
+                    losses[w] = LossAndGrad(logits, sampleTargets[w], _cfg.ContextLength, gptConfig.VocabSize, lossScratch, w * _cfg.ContextLength);
                     workerGraphs[w].BackwardFromGrad(logits);
                     logits.Dispose();
                 });
@@ -267,7 +268,8 @@ namespace DevOnBike.Overfit.Anomalies.Training
             int[] targets,
             int seqLen,
             int vocab,
-            float[] lossScratch)
+            float[] lossScratch,
+            int scratchOffset = 0)
         {
             // Read logits and write gradients straight through the node's own spans —
             // each parallel iteration owns a disjoint [t*vocab, (t+1)*vocab) slice — so
@@ -291,7 +293,7 @@ namespace DevOnBike.Overfit.Anomalies.Training
                 {
                     sum += MathF.Exp(data[off + v] - max);
                 }
-                lossScratch[t] = max + MathF.Log(sum) - data[off + tgt];
+                lossScratch[scratchOffset + t] = max + MathF.Log(sum) - data[off + tgt];
                 var sc = 1f / seqLen;
                 for (var v = 0; v < vocab; v++)
                 {
@@ -303,7 +305,7 @@ namespace DevOnBike.Overfit.Anomalies.Training
             var total = 0f;
             for (var t = 0; t < seqLen; t++)
             {
-                total += lossScratch[t];
+                total += lossScratch[scratchOffset + t];
             }
 
             return total / seqLen;

@@ -155,5 +155,41 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
 
             Linear(attnOut, wo, bo, dst, tq, dModel, dModel);
         }
+
+        /// <summary>
+        /// Single-query multi-head attention over a pre-projected K/V cache (the KV-cache decode path):
+        /// query <paramref name="q"/> <c>[dModel]</c> attends over <paramref name="cacheK"/>/<paramref name="cacheV"/>
+        /// (<c>[len × dModel]</c>, already projected). <paramref name="scores"/> is caller-owned scratch
+        /// (≥ len). Writes the attended vector <c>[dModel]</c> into <paramref name="dst"/>. Zero-allocation.
+        /// </summary>
+        public static void SingleQueryAttention(
+            ReadOnlySpan<float> q, ReadOnlySpan<float> cacheK, ReadOnlySpan<float> cacheV, int len,
+            int dModel, int nHeads, Span<float> scores, Span<float> dst)
+        {
+            var dHead = dModel / nHeads;
+            var scale = 1f / MathF.Sqrt(dHead);
+            for (var h = 0; h < nHeads; h++)
+            {
+                var off = h * dHead;
+                var qh = q.Slice(off, dHead);
+                var max = float.NegativeInfinity;
+                for (var j = 0; j < len; j++)
+                {
+                    var s = TensorPrimitives.Dot(qh, cacheK.Slice(j * dModel + off, dHead)) * scale;
+                    scores[j] = s;
+                    if (s > max) { max = s; }
+                }
+                var sum = 0f;
+                for (var j = 0; j < len; j++) { var e = MathF.Exp(scores[j] - max); scores[j] = e; sum += e; }
+                var inv = 1f / sum;
+
+                var outH = dst.Slice(off, dHead);
+                outH.Clear();
+                for (var j = 0; j < len; j++)
+                {
+                    TensorPrimitives.MultiplyAdd(cacheV.Slice(j * dModel + off, dHead), scores[j] * inv, outH, outH);
+                }
+            }
+        }
     }
 }

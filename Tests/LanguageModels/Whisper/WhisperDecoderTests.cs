@@ -63,6 +63,22 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
             Assert.Equal(produced, again);
         }
 
+        [Fact]
+        public void DecodeCached_MatchesUncached()
+        {
+            var model = BuildTinyDecoder(seed: 13);
+            var dec = new WhisperDecoder(model);
+            var encOut = RandomEncoderOut(seed: 21);
+            var prompt = new[] { 1, 2 };
+            const int eot = NVocab - 1;
+
+            var slow = dec.Decode(encOut, NCtx, prompt, eot, maxNewTokens: 8);
+            var fast = dec.DecodeCached(encOut, NCtx, prompt, eot, maxNewTokens: 8);
+
+            _out.WriteLine($"uncached: [{string.Join(",", slow)}]  cached: [{string.Join(",", fast)}]");
+            Assert.Equal(slow, fast);
+        }
+
         private static float[] RandomEncoderOut(int seed)
         {
             var rng = new Random(seed);

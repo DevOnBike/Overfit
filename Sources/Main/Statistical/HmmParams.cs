@@ -14,7 +14,14 @@ namespace DevOnBike.Overfit.Statistical
         public required float[] InitialProbs { get; init; }
         public required float[] TransitionMatrix { get; init; }
         public required float[] Means { get; init; }
-        public required float[][] Covariances { get; init; } // Array of arrays for JSON serialization
+
+        /// <summary>
+        /// All per-state covariance matrices concatenated into ONE flat row-major buffer (state-major):
+        /// <c>stateCount</c> blocks of <c>featureCount × featureCount</c>. Flat (not jagged <c>float[][]</c>)
+        /// to stay consistent with the rest of the engine — one allocation, cache-friendly; the JSON is a
+        /// single flat array. <see cref="ToFastTensors"/> splits it back into per-state matrices.
+        /// </summary>
+        public required float[] Covariances { get; init; }
 
         public void SaveToFile(string path)
         {
@@ -35,13 +42,14 @@ namespace DevOnBike.Overfit.Statistical
         /// </summary>
         public FastTensor<float>[] ToFastTensors(int featureCount)
         {
-            var stateCount = Covariances.Length;
+            var matSize = featureCount * featureCount;
+            var stateCount = Covariances.Length / matSize;
             var tensors = new FastTensor<float>[stateCount];
 
             for (var i = 0; i < stateCount; i++)
             {
                 tensors[i] = new FastTensor<float>(featureCount, featureCount, clearMemory: false);
-                Covariances[i].CopyTo(tensors[i].GetView().AsSpan());
+                Covariances.AsSpan(i * matSize, matSize).CopyTo(tensors[i].GetView().AsSpan());
             }
 
             return tensors;

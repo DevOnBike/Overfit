@@ -63,4 +63,46 @@
         <Using Remove="System.Linq" />
     </ItemGroup>
 
+    <!--
+        Guard: jagged `float[][]` is banned in Sources/Main. BannedApiAnalyzers (RS0030) can only ban named
+        symbols, not array types, so this is enforced here as a build error. Use a flat `float[]` (Span-sliced
+        per row — one allocation, cache-friendly) or an Overfit buffer type (PooledBuffer<float>, TensorStorage<float>).
+        Lines that are comments (`//`, `///`, `*`) are ignored, as is anything after `//` on a code line.
+    -->
+    <UsingTask TaskName="BanJaggedFloatArrays" TaskFactory="RoslynCodeTaskFactory"
+               AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+        <ParameterGroup>
+            <Files ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="true" />
+        </ParameterGroup>
+        <Task>
+            <Using Namespace="System.IO" />
+            <Using Namespace="System.Text.RegularExpressions" />
+            <Code Type="Fragment" Language="cs"><![CDATA[
+                var rx = new Regex(@"float\s*\[\s*\]\s*\[\s*\]");
+                foreach (var item in Files)
+                {
+                    var path = item.GetMetadata("FullPath");
+                    if (!File.Exists(path)) { continue; }
+                    var lines = File.ReadAllLines(path);
+                    for (var i = 0; i < lines.Length; i++)
+                    {
+                        var trimmed = lines[i].TrimStart();
+                        if (trimmed.StartsWith("//") || trimmed.StartsWith("*")) { continue; }
+                        var code = lines[i];
+                        var slash = code.IndexOf("//");
+                        if (slash >= 0) { code = code.Substring(0, slash); }
+                        if (rx.IsMatch(code))
+                        {
+                            Log.LogError("OVERFIT-JAGGED: float[][] (jagged array) is banned in Sources/Main — use a flat float[] (Span-sliced per row) or an Overfit buffer type. {0}({1})", path, i + 1);
+                        }
+                    }
+                }
+            ]]></Code>
+        </Task>
+    </UsingTask>
+
+    <Target Name="BanJaggedFloatArraysGuard" BeforeTargets="CoreCompile">
+        <BanJaggedFloatArrays Files="@(Compile)" />
+    </Target>
+
 </Project>

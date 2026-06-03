@@ -65,7 +65,7 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             var encoderOut = _encoder.Encode(mel, frames, out var nCtx);
 
             var prompt = BuildPrompt(language);
-            var produced = _decoder.Decode(encoderOut, nCtx, prompt, _tokenizer.EndOfTranscript, maxNewTokens);
+            var produced = _decoder.DecodeCached(encoderOut, nCtx, prompt, _tokenizer.EndOfTranscript, maxNewTokens);
             return _tokenizer.Decode(produced).Trim();
         }
 

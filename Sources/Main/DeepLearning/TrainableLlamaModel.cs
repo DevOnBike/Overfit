@@ -220,13 +220,11 @@ namespace DevOnBike.Overfit.DeepLearning
             var kvWidth = _nKVHeads * _dHead;
             var maxLen = promptTokens.Length + maxNewTokens;
 
-            var cacheK = new float[nL][];
-            var cacheV = new float[nL][];
-            for (var l = 0; l < nL; l++)
-            {
-                cacheK[l] = new float[maxLen * kvWidth];
-                cacheV[l] = new float[maxLen * kvWidth];
-            }
+            // Per-layer KV caches as single CONTIGUOUS buffers (layer-major), not jagged — one allocation,
+            // cache-friendly. Layer l's slice is [l*kvStride, kvStride) with kvStride = maxLen*kvWidth.
+            var kvStride = maxLen * kvWidth;
+            var cacheK = new float[nL * kvStride];
+            var cacheV = new float[nL * kvStride];
 
             var tokens = new List<int>(promptTokens);
             var produced = new List<int>();
@@ -245,7 +243,7 @@ namespace DevOnBike.Overfit.DeepLearning
                 for (var l = 0; l < nL; l++)
                 {
                     _blocks[l].DecodeStep(hidden, p, _ropeTable, _ln1Gamma[l], _ln2Gamma[l], _lora[l],
-                        cacheK[l], cacheV[l], next);
+                        cacheK.AsSpan(l * kvStride, kvStride), cacheV.AsSpan(l * kvStride, kvStride), next);
                     next.CopyTo(hidden);
                 }
 
