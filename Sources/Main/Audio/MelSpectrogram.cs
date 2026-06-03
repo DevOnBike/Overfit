@@ -26,7 +26,12 @@ namespace DevOnBike.Overfit.Audio
         private readonly float[] _hann;      // [nFft]
         private readonly float[] _melFilters; // [nMels * nFreqs], mel-major
 
-        public MelSpectrogram(int nMels = DefaultMelCount)
+        /// <summary>
+        /// Builds the extractor. By default the Slaney mel filterbank is computed (librosa default). Pass
+        /// <paramref name="melFilters"/> (<c>[nMels × (NFft/2+1)]</c>, e.g. <c>WhisperModel.MelFilters</c>) to
+        /// use the model's own filterbank for bit-parity with whisper.cpp.
+        /// </summary>
+        public MelSpectrogram(int nMels = DefaultMelCount, ReadOnlySpan<float> melFilters = default)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(nMels);
             _nMels = nMels;
@@ -39,7 +44,18 @@ namespace DevOnBike.Overfit.Audio
                 _hann[n] = 0.5f * (1f - MathF.Cos(2f * MathF.PI * n / NFft));
             }
 
-            _melFilters = BuildSlaneyMelFilters(nMels, _nFreqs, SampleRate, NFft);
+            if (melFilters.IsEmpty)
+            {
+                _melFilters = BuildSlaneyMelFilters(nMels, _nFreqs, SampleRate, NFft);
+            }
+            else
+            {
+                if (melFilters.Length != nMels * _nFreqs)
+                {
+                    throw new ArgumentException($"melFilters must be [{nMels} × {_nFreqs}] = {nMels * _nFreqs}, got {melFilters.Length}.", nameof(melFilters));
+                }
+                _melFilters = melFilters.ToArray();
+            }
         }
 
         public int MelCount => _nMels;

@@ -69,9 +69,11 @@ namespace DevOnBike.Overfit.Tests.TestSupport
             public static string Dir => Resolve(EnvVar, @"c:\whisper");
             public static string TinyGgmlPath => Path.Combine(Dir, "ggml-tiny.bin");
             public static string BaseGgmlPath => Path.Combine(Dir, "ggml-base.bin");
+            public static string SampleWavPath => Path.Combine(Dir, "jfk.wav");
 
             public static string RequireTinyGgmlPath() => Require(TinyGgmlPath, EnvVar, "Whisper tiny ggml (ggml-tiny.bin from whisper.cpp)");
             public static string RequireBaseGgmlPath() => Require(BaseGgmlPath, EnvVar, "Whisper base ggml (ggml-base.bin)");
+            public static string RequireSampleWavPath() => Require(SampleWavPath, EnvVar, "Whisper sample WAV (jfk.wav from whisper.cpp samples)");
         }
 
         public static class Qwen3B

@@ -3,8 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Text;
-using DevOnBike.Overfit.LanguageModels.Tokenizers;
 using DevOnBike.Overfit.LanguageModels.Whisper;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
@@ -48,20 +46,12 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
         }
 
         [Fact]
-        public void Decode_ByteLevel_RoundTripsUtf8_AndSkipsSpecials()
+        public void Decode_RawPieces_JoinUtf8_AndSkipsSpecials()
         {
             var cfg = new WhisperConfig(51865, 1500, 384, 6, 4, 448, 384, 6, 4, 80, true);
 
-            // Build a vocab from byte-level encoded pieces (how Whisper stores BPE tokens).
-            var byteToChar = ByteLevelAlphabet.BuildByteToChar();
-            var vocab = new[]
-            {
-                BytePiece(byteToChar, "Z",   prefixSpace: false),  // 0: "Z"
-                BytePiece(byteToChar, "orv", prefixSpace: false),  // 1: "orv"
-                BytePiece(byteToChar, "ex",  prefixSpace: false),  // 2: "ex"
-                BytePiece(byteToChar, "metal", prefixSpace: true), // 3: " metal"
-                BytePiece(byteToChar, "café",  prefixSpace: true), // 4: " café"  (multi-byte é)
-            };
+            // whisper.cpp ggml vocab = RAW UTF-8 token pieces (leading space is a literal 0x20).
+            var vocab = new[] { "Z", "orv", "ex", " metal", " café" };
             var tok = new WhisperTokenizer(cfg, vocab);
 
             // [sot, en, transcribe, notimestamps, "Z","orv","ex"," metal"," café", eot]
@@ -71,14 +61,6 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
                 0, 1, 2, 3, 4, tok.EndOfTranscript,
             };
             Assert.Equal("Zorvex metal café", tok.Decode(ids));
-        }
-
-        private static string BytePiece(char[] byteToChar, string text, bool prefixSpace)
-        {
-            var utf8 = Encoding.UTF8.GetBytes((prefixSpace ? " " : "") + text);
-            var sb = new StringBuilder(utf8.Length);
-            foreach (var b in utf8) { sb.Append(byteToChar[b]); }
-            return sb.ToString();
         }
     }
 }

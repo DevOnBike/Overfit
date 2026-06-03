@@ -4,28 +4,26 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Text;
-using DevOnBike.Overfit.LanguageModels.Tokenizers;
 
 namespace DevOnBike.Overfit.LanguageModels.Whisper
 {
     /// <summary>
-    /// Whisper byte-level BPE tokenizer built from a loaded <see cref="WhisperModel"/>'s vocab. Decodes
-    /// token ids → text (the byte-level chars are mapped back to bytes via the shared
-    /// <see cref="ByteLevelAlphabet"/>, then UTF-8 decoded — so multi-token UTF-8 sequences join correctly).
-    /// The special-token ids (sot/eot/translate/transcribe/timestamps/language) are computed from the
-    /// config exactly as whisper.cpp does (they are not stored in the file).
+    /// Whisper BPE tokenizer built from a loaded <see cref="WhisperModel"/>'s vocab. Decodes token ids →
+    /// text: the whisper.cpp ggml vocab stores each token as its RAW UTF-8 text piece (a leading space is a
+    /// literal <c>0x20</c>, not GPT-2 byte-level <c>Ġ</c>), so decoding concatenates the raw token bytes and
+    /// UTF-8 decodes once (so multi-byte characters split across tokens join correctly). The special-token
+    /// ids (sot/eot/translate/transcribe/timestamps/language) are computed from the config exactly as
+    /// whisper.cpp does (they are not stored in the file).
     /// </summary>
     public sealed class WhisperTokenizer
     {
         private readonly IReadOnlyList<string> _vocab;
-        private readonly byte[] _charToByte; // ByteLevel display char → raw byte
 
         public WhisperTokenizer(WhisperModel model) : this(model.Config, model.Vocab) { }
 
         public WhisperTokenizer(WhisperConfig config, IReadOnlyList<string> vocab)
         {
             _vocab = vocab;
-            _charToByte = ByteLevelAlphabet.BuildCharToByte();
 
             // whisper.cpp struct defaults (valid for English-only), then the multilingual adjustment.
             int eot = 50256, sot = 50257, translate = 50357, transcribe = 50358,
@@ -74,6 +72,14 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             return StartOfTranscript + 1 + index;
         }
 
+        /// <summary>Language token for an ISO code (e.g. "en", "pl") in Whisper's order; throws if unknown.</summary>
+        public int LanguageToken(string code)
+        {
+            var idx = WhisperLanguages.IndexOf(code);
+            if (idx < 0) { throw new ArgumentException($"Unknown Whisper language code '{code}'.", nameof(code)); }
+            return LanguageTokenAt(idx);
+        }
+
         /// <summary>True for any non-text token (end/start/language/task/timestamp markers).</summary>
         public bool IsSpecial(int tokenId) => tokenId >= EndOfTranscript || tokenId >= _vocab.Count;
 
@@ -90,13 +96,10 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
                 if (IsSpecial(id))
                 {
                     if (skipSpecial) { continue; }
-                    return $"<|{id}|>"; // markers aren't real text; only meaningful when explicitly requested
+                    continue; // markers aren't real text
                 }
-                var piece = _vocab[id];
-                foreach (var ch in piece)
-                {
-                    bytes.Add(_charToByte[ch]);
-                }
+                // The token's raw UTF-8 bytes (round-tripped from the stored piece); concatenate and decode once.
+                bytes.AddRange(Encoding.UTF8.GetBytes(_vocab[id]));
             }
             return Encoding.UTF8.GetString(bytes.ToArray());
         }
