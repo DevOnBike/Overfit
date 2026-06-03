@@ -286,7 +286,7 @@ Full benchmark tables and caveats live in [`docs/TECHNICAL.md`](docs/TECHNICAL.m
 | Computer vision | MNIST CNN, Conv/BN/ReLU/Pool/FC-style networks |
 | OCR | CRNN + CTC pipeline for synthetic digits / lexicon words |
 | LoRA | LM head, FFN and per-head attention stages |
-| QLoRA | Frozen Q4_K base (dequantized on the fly, never updated) + trainable LoRA — ~7× less base RAM for fine-tuning; LM head shipped (FFN in progress), faster and lighter than F32 LoRA on head-heavy models |
+| QLoRA fine-tuning | **Fine-tune a real quantized Qwen/Llama GGUF on CPU — no GPU, no Python.** Frozen 4-bit base (never expanded to F32 or rewritten) + a trainable LoRA adapter; full model under gradient checkpointing (~3 GB RAM for a 3B), turnkey `QLoRAFineTuner` (gguf + text → adapter → ask), portable adapter save/load. Validated on real Qwen2.5-3B: taught a made-up fact, then it recites it. See [docs/qlora-finetuning.md](docs/qlora-finetuning.md) |
 | Anomaly detection | Small GPT-style models for metrics and deployment-specific adaptation |
 
 ---
