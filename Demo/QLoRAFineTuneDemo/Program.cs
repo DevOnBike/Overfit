@@ -82,10 +82,12 @@ namespace DevOnBike.Overfit.Demo.QLoRAFineTune
 
             // ── interactive chat ──
             Console.WriteLine("Ask the model anything (it now knows your text). Empty line or 'exit' to quit.\n");
+            
             while (true)
             {
                 Console.Write("you> ");
                 var prompt = Console.ReadLine();
+                
                 if (string.IsNullOrWhiteSpace(prompt) || prompt.Trim().Equals("exit", StringComparison.OrdinalIgnoreCase))
                 {
                     break;
@@ -93,7 +95,9 @@ namespace DevOnBike.Overfit.Demo.QLoRAFineTune
 
                 var gen = Stopwatch.StartNew();
                 var answer = tuner.Ask(prompt, maxNewTokens: 48);
+                
                 gen.Stop();
+                
                 Console.WriteLine($"bot> {answer.Trim()}");
                 Console.WriteLine($"     ({gen.Elapsed.TotalSeconds:F1}s)\n");
             }
