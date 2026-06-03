@@ -11,8 +11,9 @@ namespace DevOnBike.Overfit.Audio
     /// Matches OpenAI Whisper's pipeline (so a real Whisper GGUF sees the features it was trained on):
     /// reflect-pad by <c>nFft/2</c> → framed STFT (Hann window, hop = 160, nFft = 400) → power spectrum
     /// → mel filterbank (Slaney scale, the librosa default Whisper ships) → <c>log10</c> → dynamic-range
-    /// clamp to (max − 8) → <c>(x + 4) / 4</c>. Correctness-first: a direct real DFT per frame (no FFT
-    /// yet — a 30 s clip is ~3000 frames, fine; FFT is a later optimization).
+    /// clamp to (max − 8) → <c>(x + 4) / 4</c>. The per-frame 400-point DFT uses the <b>Bluestein</b>
+    /// algorithm (an exact non-power-of-2 DFT via a length-1024 radix-2 FFT convolution); buffers are
+    /// reused across calls, so repeated transcriptions are allocation-stable.
     /// </summary>
     public sealed class MelSpectrogram
     {
