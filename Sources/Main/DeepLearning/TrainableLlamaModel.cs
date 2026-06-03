@@ -15,23 +15,6 @@ using DevOnBike.Overfit.Tensors.Core;
 namespace DevOnBike.Overfit.DeepLearning
 {
     /// <summary>
-    /// The frozen quantized weights of one decoder layer for <see cref="TrainableLlamaModel"/> — the
-    /// combined-tensor projections plus the two RMSNorm gain initializers (copied into trainable γ).
-    /// </summary>
-    public sealed class LlamaLayerFrozenWeights
-    {
-        public required IDequantRowSource Wq { get; init; }
-        public required IDequantRowSource Wk { get; init; }
-        public required IDequantRowSource Wv { get; init; }
-        public required IDequantRowSource Wo { get; init; }
-        public required IDequantRowSource Gate { get; init; }
-        public required IDequantRowSource Up { get; init; }
-        public required IDequantRowSource Down { get; init; }
-        public required float[] Ln1GammaInit { get; init; }
-        public required float[] Ln2GammaInit { get; init; }
-    }
-
-    /// <summary>
     /// A full <b>trainable</b> Llama/Qwen language model assembled on the autograd graph: frozen
     /// quantized token embedding → N <see cref="TrainableLlamaBlock"/>s (each with optional LoRA, run
     /// under gradient checkpointing) → trainable final RMSNorm → frozen quantized LM head → logits.

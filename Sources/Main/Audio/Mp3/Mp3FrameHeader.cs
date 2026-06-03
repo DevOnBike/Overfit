@@ -5,22 +5,6 @@
 
 namespace DevOnBike.Overfit.Audio.Mp3
 {
-    internal enum MpegVersion
-    {
-        Mpeg25 = 0, // MPEG 2.5 (unofficial extension for 8/11.025/12 kHz)
-        Reserved = 1,
-        Mpeg2 = 2, // MPEG 2 (LSF) 16/22.05/24 kHz
-        Mpeg1 = 3, // MPEG 1 32/44.1/48 kHz
-    }
-
-    internal enum ChannelMode
-    {
-        Stereo = 0,
-        JointStereo = 1,
-        DualChannel = 2,
-        Mono = 3,
-    }
-
     /// <summary>
     /// A parsed 32-bit MPEG audio frame header (Layer III only — this decoder targets MP3). Exposes the
     /// derived bitrate / sample-rate / frame-size / side-info-length needed to walk the bitstream.

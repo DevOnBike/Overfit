@@ -81,8 +81,28 @@ namespace DevOnBike.Overfit.Audio.Mp3
             for (var i = 12; i < 18; i++) { win[3 * 36 + i] = 1f; }
             for (var i = 18; i < 36; i++) { win[3 * 36 + i] = MathF.Sin(MathF.PI / 36f * (i + 0.5f)); }
 
-            // Type 2 (short) is handled via ImdctShortWin per 12-point sub-block; that slot stays zero.
+            // Type 2 — short: sin(pi/12*(i+0.5)) for the first 12 points, 0 after (as in the reference IMDCT).
+            for (var i = 0; i < 12; i++) { win[2 * 36 + i] = MathF.Sin(MathF.PI / 12f * (i + 0.5f)); }
+            for (var i = 12; i < 36; i++) { win[2 * 36 + i] = 0f; }
             return win;
+        }
+
+        // ── IMDCT cosine tables: cos(pi/(2N)·(2p+1+N/2)·(2m+1)) for N=36 (long) and N=12 (short) ──
+        public static readonly float[] CosN36 = BuildCos(36); // [18 (m) × 36 (p)]
+        public static readonly float[] CosN12 = BuildCos(12); // [6  (m) × 12 (p)]
+
+        private static float[] BuildCos(int n)
+        {
+            var half = n / 2;
+            var t = new float[half * n];
+            for (var m = 0; m < half; m++)
+            {
+                for (var p = 0; p < n; p++)
+                {
+                    t[m * n + p] = MathF.Cos(MathF.PI / (2 * n) * (2 * p + 1 + half) * (2 * m + 1));
+                }
+            }
+            return t;
         }
 
         private static float[] BuildShortWindow()
@@ -96,9 +116,9 @@ namespace DevOnBike.Overfit.Audio.Mp3
         }
 
         // ── Antialias butterfly coefficients (cs/ca for the 8 butterflies) ──
+        private static readonly float[] AliasCi = { -0.6f, -0.535f, -0.33f, -0.185f, -0.095f, -0.041f, -0.0142f, -0.0037f };
         public static readonly float[] AliasCs = BuildAliasCs();
         public static readonly float[] AliasCa = BuildAliasCa();
-        private static readonly float[] AliasCi = { -0.6f, -0.535f, -0.33f, -0.185f, -0.095f, -0.041f, -0.0142f, -0.0037f };
 
         private static float[] BuildAliasCs()
         {
@@ -141,12 +161,5 @@ namespace DevOnBike.Overfit.Audio.Mp3
         /// <see cref="Mp3SynthWindowData"/>).
         /// </summary>
         public static readonly float[] SynthWindow = Mp3SynthWindowData.D;
-    }
-
-    /// <summary>Placeholder for the ISO D[512] synthesis window — filled with the canonical table when the
-    /// subband-synthesis stage lands. Kept separate so the (validated) container layer compiles meanwhile.</summary>
-    internal static class Mp3SynthWindowData
-    {
-        public static readonly float[] D = new float[512]; // TODO: canonical ISO 11172-3 Table 3-B.3 values
     }
 }

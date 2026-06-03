@@ -26,6 +26,12 @@ namespace DevOnBike.Overfit.Audio
         private readonly float[] _hann;      // [nFft]
         private readonly float[] _melFilters; // [nMels * nFreqs], mel-major
 
+        // Reusable buffers — grown on demand, kept across LogMel calls so repeated transcriptions
+        // (streaming / microphone) are allocation-stable after warm-up.
+        private float[] _padded = System.Array.Empty<float>();
+        private float[] _power = System.Array.Empty<float>();
+        private float[] _mel = System.Array.Empty<float>();
+
         /// <summary>
         /// Builds the extractor. By default the Slaney mel filterbank is computed (librosa default). Pass
         /// <paramref name="melFilters"/> (<c>[nMels × (NFft/2+1)]</c>, e.g. <c>WhisperModel.MelFilters</c>) to
@@ -74,22 +80,29 @@ namespace DevOnBike.Overfit.Audio
         {
             // Center padding: reflect by nFft/2 on each side (torch.stft center=true).
             var pad = NFft / 2;
-            var padded = ReflectPad(samples, pad);
+            var paddedLen = samples.Length + 2 * pad;
+            _padded = EnsureCapacity(_padded, paddedLen);
+            ReflectPadInto(samples, pad, _padded);
 
             // Whisper keeps stft[..., :-1] → frames = (paddedLen - nFft)/hop, which equals samples/hop.
-            frames = 1 + (padded.Length - NFft) / HopLength;
+            frames = 1 + (paddedLen - NFft) / HopLength;
             if (frames > 0) { frames -= 1; } // drop the last frame (Whisper's stft[..., :-1])
             if (frames < 0) { frames = 0; }
 
-            var power = new float[_nFreqs * frames]; // [freq, frame] freq-major
-            ComputePowerSpectrogram(padded, frames, power);
+            _power = EnsureCapacity(_power, _nFreqs * frames);
+            _mel = EnsureCapacity(_mel, _nMels * frames);
+            var power = _power.AsSpan(0, _nFreqs * frames); // [freq, frame] freq-major
+            ComputePowerSpectrogram(_padded.AsSpan(0, paddedLen), frames, power);
 
             // mel = melFilters @ power  → [nMels, frames]; then log10 + Whisper normalize.
-            var mel = new float[_nMels * frames];
+            var mel = _mel.AsSpan(0, _nMels * frames);
             ApplyMelFilters(power, frames, mel);
             NormalizeLogMel(mel);
-            return mel;
+            return _mel;
         }
+
+        private static float[] EnsureCapacity(float[] buffer, int needed)
+            => buffer.Length >= needed ? buffer : new float[needed];
 
         // ── STFT power spectrum (direct DFT per frame) ──
 
@@ -179,16 +192,21 @@ namespace DevOnBike.Overfit.Audio
 
         private static float[] ReflectPad(ReadOnlySpan<float> x, int pad)
         {
+            var outp = new float[x.Length + 2 * pad];
+            ReflectPadInto(x, pad, outp);
+            return outp;
+        }
+
+        private static void ReflectPadInto(ReadOnlySpan<float> x, int pad, Span<float> outp)
+        {
             var n = x.Length;
-            var outp = new float[n + 2 * pad];
-            x.CopyTo(outp.AsSpan(pad, n));
+            x.CopyTo(outp.Slice(pad, n));
             // Reflect (without repeating the edge sample), matching np.pad(mode='reflect').
             for (var i = 0; i < pad; i++)
             {
                 outp[pad - 1 - i] = x[Math.Min(i + 1, n - 1)];
                 outp[pad + n + i] = x[Math.Max(n - 2 - i, 0)];
             }
-            return outp;
         }
 
         // ── Slaney mel filterbank (librosa default; what Whisper's mel_filters were built with) ──

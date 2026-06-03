@@ -5,15 +5,9 @@
 
 namespace DevOnBike.Overfit.Audio.Mp3
 {
-    /// <summary>Container-level metadata probed by walking the MP3 frame headers (no audio decoded).</summary>
-    internal readonly record struct Mp3Info(int SampleRate, int Channels, int FrameCount, int SampleCount)
-    {
-        public double DurationSeconds => SampleRate > 0 ? (double)SampleCount / SampleRate : 0;
-    }
-
     /// <summary>
     /// Pure-C# MPEG-1/2/2.5 Layer III (MP3) reader — no native binaries, no external libraries, no Python.
-    /// <see cref="ReadMono"/> decodes to mono 32-bit float PCM (the shape <see cref="WavReader"/> returns), so
+    /// <c>ReadMono</c> decodes to mono 32-bit float PCM (the shape <see cref="WavReader"/> returns), so
     /// the Whisper frontend can consume <c>.mp3</c> directly. Frame-walking + header parsing live here; the
     /// per-frame Layer III synthesis is in <see cref="Mp3Decoder"/>.
     /// </summary>

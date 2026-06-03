@@ -20,6 +20,46 @@ namespace DevOnBike.Overfit.Tests.Audio
         public Mp3ReaderTests(ITestOutputHelper output) => _out = output;
 
         [LongFact]
+        public void Decode_RealMp3_Stats()
+        {
+            var samples = Mp3Reader.ReadMono(TestModelPaths.Whisper.RequireSampleMp3Path(), out var sr);
+            double sum = 0, sumSq = 0, min = double.MaxValue, max = double.MinValue;
+            var nan = 0;
+            foreach (var s in samples)
+            {
+                if (!float.IsFinite(s)) { nan++; continue; }
+                sum += s; sumSq += (double)s * s;
+                if (s < min) { min = s; }
+                if (s > max) { max = s; }
+            }
+            var rms = Math.Sqrt(sumSq / samples.Length);
+            _out.WriteLine($"sampleRate {sr}, samples {samples.Length}, rms {rms:F4}, min {min:F4}, max {max:F4}, nan {nan}");
+            Assert.Equal(0, nan);
+            Assert.True(rms > 0.001, $"output looks like silence (rms {rms})");
+            Assert.True(max <= 1.5 && min >= -1.5, "output grossly out of range");
+        }
+
+        [LongFact]
+        public void Decode_PerFrame_ZeroAlloc()
+        {
+            var bytes = File.ReadAllBytes(TestModelPaths.Whisper.RequireSampleMp3Path());
+            var dec = new DevOnBike.Overfit.Audio.Mp3.Mp3Decoder();
+            dec.DecodeMono(bytes, out _); // warm up: JIT + first allocation of instance scratch
+
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            var samples = dec.DecodeMono(bytes, out _);
+            var after = GC.GetAllocatedBytesForCurrentThread();
+
+            var alloc = after - before;
+            var outputBytes = (long)samples.Length * sizeof(float);
+            var overhead = alloc - outputBytes;
+            _out.WriteLine($"total alloc {alloc} B, output buffer {outputBytes} B, per-decode overhead {overhead} B");
+            // The only heap allocation in a decode is the single output buffer; all per-frame working buffers
+            // are pre-allocated instance fields, so the overhead beyond the output must be ~zero.
+            Assert.True(overhead < 4096, $"decode allocates beyond the output buffer ({overhead} B over {samples.Length} samples)");
+        }
+
+        [LongFact]
         public void Probe_RealMp3_ReportsConsistentContainerMetadata()
         {
             var bytes = File.ReadAllBytes(TestModelPaths.Whisper.RequireSampleMp3Path());

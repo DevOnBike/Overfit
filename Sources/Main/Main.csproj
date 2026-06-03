@@ -105,4 +105,46 @@
         <BanJaggedFloatArrays Files="@(Compile)" />
     </Target>
 
+    <!--
+        Guard: one top-level type per file. Each .cs file may declare at most one namespace-level type
+        (class / struct / interface / enum / record); nested types are fine, and partial declarations of the
+        SAME type across files are fine (collapsed by name). Keeps the file = type mapping 1:1. Assumes
+        block-scoped namespaces (top-level types indented exactly 4 spaces, as enforced by .editorconfig).
+    -->
+    <UsingTask TaskName="BanMultipleTopLevelTypes" TaskFactory="RoslynCodeTaskFactory"
+               AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+        <ParameterGroup>
+            <Files ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="true" />
+        </ParameterGroup>
+        <Task>
+            <Using Namespace="System.Collections.Generic" />
+            <Using Namespace="System.IO" />
+            <Using Namespace="System.Text.RegularExpressions" />
+            <Code Type="Fragment" Language="cs"><![CDATA[
+                var rx = new Regex(@"^    [A-Za-z][A-Za-z0-9<>, ]*\b(?:class|struct|interface|enum|record)\b(?:\s+(?:struct|class))?\s+([A-Za-z_][A-Za-z0-9_]*)");
+                foreach (var item in Files)
+                {
+                    var path = item.GetMetadata("FullPath");
+                    if (!File.Exists(path)) { continue; }
+                    var names = new HashSet<string>();
+                    foreach (var line in File.ReadAllLines(path))
+                    {
+                        var trimmed = line.TrimStart();
+                        if (trimmed.StartsWith("//") || trimmed.StartsWith("*")) { continue; }
+                        var m = rx.Match(line);
+                        if (m.Success) { names.Add(m.Groups[1].Value); }
+                    }
+                    if (names.Count > 1)
+                    {
+                        Log.LogError("OVERFIT-ONETYPE: {0} declares {1} top-level types ({2}) — keep one type per file (nested types and same-name partials are fine).", path, names.Count, string.Join(", ", names));
+                    }
+                }
+            ]]></Code>
+        </Task>
+    </UsingTask>
+
+    <Target Name="BanMultipleTopLevelTypesGuard" BeforeTargets="CoreCompile">
+        <BanMultipleTopLevelTypes Files="@(Compile)" />
+    </Target>
+
 </Project>

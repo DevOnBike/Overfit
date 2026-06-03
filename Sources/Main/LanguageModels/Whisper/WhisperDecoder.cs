@@ -211,29 +211,40 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             return produced.ToArray();
         }
 
+        private State? _reuseState; // reused across DecodeCached calls (streaming) when dims match
+
         internal State CreateState(ReadOnlySpan<float> encoderOut, int nCtx, int maxLen)
         {
             var n = _nState;
             var crossStride = nCtx * n;
             var selfStride = maxLen * n;
-            var crossK = new float[_nLayer * crossStride];
-            var crossV = new float[_nLayer * crossStride];
-            var selfK = new float[_nLayer * selfStride];
-            var selfV = new float[_nLayer * selfStride];
+
+            var s = _reuseState;
+            if (s is null || s.NCtx != nCtx || s.MaxLen != maxLen)
+            {
+                var scoreLen = Math.Max(nCtx, maxLen);
+                s = new State
+                {
+                    CrossK = new float[_nLayer * crossStride], CrossV = new float[_nLayer * crossStride],
+                    SelfK = new float[_nLayer * selfStride], SelfV = new float[_nLayer * selfStride],
+                    NCtx = nCtx, MaxLen = maxLen,
+                    X = new float[n], Ln = new float[n], Q = new float[n], K = new float[n], V = new float[n],
+                    Attn = new float[n], Proj = new float[n], Hidden = new float[_dFF], Scores = new float[scoreLen],
+                    Logits = new float[_nVocab],
+                };
+                _reuseState = s;
+            }
+
+            s.Position = 0;
+            // Cross-attention K/V are re-projected from this call's encoder output; self-attention K/V are
+            // (re)written per step before being read, so the reused buffers need no clearing.
             for (var b = 0; b < _nLayer; b++)
             {
                 var l = _layers[b];
-                WhisperKernels.Linear(encoderOut, l.CrossKW, ReadOnlySpan<float>.Empty, crossK.AsSpan(b * crossStride, crossStride), nCtx, n, n);
-                WhisperKernels.Linear(encoderOut, l.CrossVW, l.CrossVB, crossV.AsSpan(b * crossStride, crossStride), nCtx, n, n);
+                WhisperKernels.Linear(encoderOut, l.CrossKW, ReadOnlySpan<float>.Empty, s.CrossK.AsSpan(b * crossStride, crossStride), nCtx, n, n);
+                WhisperKernels.Linear(encoderOut, l.CrossVW, l.CrossVB, s.CrossV.AsSpan(b * crossStride, crossStride), nCtx, n, n);
             }
-            var scoreLen = Math.Max(nCtx, maxLen);
-            return new State
-            {
-                CrossK = crossK, CrossV = crossV, SelfK = selfK, SelfV = selfV, NCtx = nCtx, MaxLen = maxLen,
-                X = new float[n], Ln = new float[n], Q = new float[n], K = new float[n], V = new float[n],
-                Attn = new float[n], Proj = new float[n], Hidden = new float[_dFF], Scores = new float[scoreLen],
-                Logits = new float[_nVocab],
-            };
+            return s;
         }
 
         internal ReadOnlySpan<float> Step(State s, int tokenId)

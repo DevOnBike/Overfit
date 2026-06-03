@@ -26,6 +26,7 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
         private readonly WhisperEncoder _encoder;
         private readonly WhisperDecoder _decoder;
         private readonly WhisperTokenizer _tokenizer;
+        private readonly float[] _window = new float[SamplesPerWindow]; // reused 30 s input window
 
         private WhisperTranscriber(WhisperModel model)
         {
@@ -43,13 +44,14 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
         public WhisperConfig Config => _model.Config;
         public WhisperTokenizer Tokenizer => _tokenizer;
 
-        /// <summary>Transcribes a WAV file (16 kHz mono recommended; other rates are not resampled).</summary>
-        public string TranscribeFile(string wavPath, string language = "en", int maxNewTokens = 224)
+        /// <summary>Transcribes an audio file — any format with a registered <see cref="IAudioDecoder"/> (WAV
+        /// and MP3 built in), any sample rate (resampled to 16 kHz), mono (stereo is downmixed by the decoders).</summary>
+        public string TranscribeFile(string audioPath, string language = "en", int maxNewTokens = 224)
         {
-            var samples = WavReader.ReadMono(wavPath, out var sr);
+            var samples = AudioFile.ReadMono(audioPath, out var sr);
             if (sr != MelSpectrogram.SampleRate)
             {
-                throw new NotSupportedException($"Audio is {sr} Hz; Whisper needs {MelSpectrogram.SampleRate} Hz (resample first).");
+                samples = AudioResampler.Resample(samples, sr, MelSpectrogram.SampleRate);
             }
             return Transcribe(samples, language, maxNewTokens);
         }
@@ -57,8 +59,9 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
         /// <summary>Transcribes mono 16 kHz <paramref name="samples"/> → text.</summary>
         public string Transcribe(ReadOnlySpan<float> samples, string language = "en", int maxNewTokens = 224)
         {
-            // Pad/trim to a single 30 s window (Whisper's fixed input length).
-            var window = new float[SamplesPerWindow];
+            // Pad/trim to a single 30 s window (Whisper's fixed input length); the window is reused across calls.
+            var window = _window.AsSpan();
+            window.Clear();
             samples.Slice(0, Math.Min(samples.Length, SamplesPerWindow)).CopyTo(window);
 
             var mel = _mel.LogMel(window, out var frames);

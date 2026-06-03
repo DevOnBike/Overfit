@@ -113,30 +113,47 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             ReadOnlySpan<float> wo, ReadOnlySpan<float> bo,
             Span<float> dst, bool causal)
         {
-            var dHead = dModel / nHeads;
-            var scale = 1f / MathF.Sqrt(dHead);
-
             var q = new float[tq * dModel];
             var k = new float[tkv * dModel];
             var v = new float[tkv * dModel];
+            var attnOut = new float[tq * dModel];
+            var scores = new float[tkv];
+            MultiHeadAttention(xq, tq, xkv, tkv, dModel, nHeads, wq, bq, wk, wv, bv, wo, bo, dst, causal,
+                q, k, v, attnOut, scores);
+        }
+
+        /// <summary>
+        /// Allocation-free <see cref="MultiHeadAttention(System.ReadOnlySpan{float},int,System.ReadOnlySpan{float},int,int,int,System.ReadOnlySpan{float},System.ReadOnlySpan{float},System.ReadOnlySpan{float},System.ReadOnlySpan{float},System.ReadOnlySpan{float},System.ReadOnlySpan{float},System.ReadOnlySpan{float},System.Span{float},bool)"/>:
+        /// the caller supplies the q/k/v/attnOut (each <c>[t × dModel]</c>) and scores (≥ tkv) scratch.
+        /// </summary>
+        public static void MultiHeadAttention(
+            ReadOnlySpan<float> xq, int tq, ReadOnlySpan<float> xkv, int tkv,
+            int dModel, int nHeads,
+            ReadOnlySpan<float> wq, ReadOnlySpan<float> bq,
+            ReadOnlySpan<float> wk,
+            ReadOnlySpan<float> wv, ReadOnlySpan<float> bv,
+            ReadOnlySpan<float> wo, ReadOnlySpan<float> bo,
+            Span<float> dst, bool causal,
+            Span<float> q, Span<float> k, Span<float> v, Span<float> attnOut, Span<float> scores)
+        {
+            var dHead = dModel / nHeads;
+            var scale = 1f / MathF.Sqrt(dHead);
+
             Linear(xq, wq, bq, q, tq, dModel, dModel);
             Linear(xkv, wk, ReadOnlySpan<float>.Empty, k, tkv, dModel, dModel);
             Linear(xkv, wv, bv, v, tkv, dModel, dModel);
-
-            var attnOut = new float[tq * dModel];
-            Span<float> scores = tkv <= 4096 ? stackalloc float[tkv] : new float[tkv];
 
             for (var h = 0; h < nHeads; h++)
             {
                 var off = h * dHead;
                 for (var i = 0; i < tq; i++)
                 {
-                    var qi = q.AsSpan(i * dModel + off, dHead);
+                    var qi = q.Slice(i * dModel + off, dHead);
                     var valid = causal ? i + 1 : tkv;
                     var max = float.NegativeInfinity;
                     for (var j = 0; j < valid; j++)
                     {
-                        var s = TensorPrimitives.Dot(qi, k.AsSpan(j * dModel + off, dHead)) * scale;
+                        var s = TensorPrimitives.Dot(qi, k.Slice(j * dModel + off, dHead)) * scale;
                         scores[j] = s;
                         if (s > max) { max = s; }
                     }
@@ -144,11 +161,11 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
                     for (var j = 0; j < valid; j++) { var e = MathF.Exp(scores[j] - max); scores[j] = e; sum += e; }
                     var inv = 1f / sum;
 
-                    var outRow = attnOut.AsSpan(i * dModel + off, dHead);
+                    var outRow = attnOut.Slice(i * dModel + off, dHead);
                     outRow.Clear();
                     for (var j = 0; j < valid; j++)
                     {
-                        TensorPrimitives.MultiplyAdd(v.AsSpan(j * dModel + off, dHead), scores[j] * inv, outRow, outRow);
+                        TensorPrimitives.MultiplyAdd(v.Slice(j * dModel + off, dHead), scores[j] * inv, outRow, outRow);
                     }
                 }
             }

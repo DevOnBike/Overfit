@@ -74,6 +74,38 @@ dotnet run -c Release --project Demo/AnomalyConsoleDemo
 
 ---
 
+## Speech & audio (pure C#)
+
+### WhisperDemo — speech-to-text
+
+Transcribe a WAV or MP3 with a whisper.cpp ggml model, CPU-only, zero-allocation decode. Any sample
+rate (resampled to 16 kHz), mono or stereo.
+
+```powershell
+dotnet run -c Release --project Demo/WhisperDemo -- C:\whisper\ggml-tiny.bin C:\whisper\pl.mp3 pl
+```
+
+### Mp3Demo — the from-scratch MP3 decoder, standalone
+
+Decodes an MPEG-1/2/2.5 Layer III file to PCM and writes a 16 kHz WAV — no native binaries, no
+external libraries. Zero per-frame allocation. See [docs/mp3-decoding.md](../docs/mp3-decoding.md).
+
+```powershell
+dotnet run -c Release --project Demo/Mp3Demo -- C:\whisper\pl.mp3
+```
+
+### MicDemo — live microphone speech-to-text (Windows)
+
+Record a few seconds from the mic and transcribe — record-then-transcribe loop, CPU-only. Mic capture
+uses the built-in Windows `winmm` API via P/Invoke (no NuGet); the core engine stays platform-neutral.
+The transcriber reuses its buffers, so each round is allocation-stable (~2 KB).
+
+```powershell
+dotnet run -c Release --project Demo/MicDemo -- C:\whisper\ggml-tiny.bin pl 5
+```
+
+---
+
 ## Experimental
 
 ### Unity Swarm Engine — 100k-agent game-dev showcase

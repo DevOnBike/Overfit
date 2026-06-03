@@ -9,14 +9,15 @@ using DevOnBike.Overfit.LanguageModels.Whisper;
 namespace DevOnBike.Overfit.Demo.WhisperConsole
 {
     /// <summary>
-    /// Whisper speech-to-text demo — transcribe a WAV with a whisper.cpp ggml model, in pure .NET on the CPU.
+    /// Whisper speech-to-text demo — transcribe a WAV or MP3 with a whisper.cpp ggml model, in pure .NET on the CPU.
     ///
-    ///   WhisperDemo &lt;model.ggml.bin&gt; &lt;audio.wav&gt; [language]
+    ///   WhisperDemo &lt;model.ggml.bin&gt; &lt;audio.wav|audio.mp3&gt; [language]
     ///
     /// e.g.  WhisperDemo C:\whisper\ggml-tiny.bin C:\whisper\jfk.wav en
-    ///       WhisperDemo C:\whisper\ggml-tiny.bin C:\audio\nagranie.wav pl
+    ///       WhisperDemo C:\whisper\ggml-tiny.bin C:\whisper\pl.mp3 pl
     ///
-    /// The audio must be 16 kHz mono WAV (16-bit PCM or 32-bit float). No GPU, no Python.
+    /// WAV (16-bit PCM / 32-bit float) and MP3 (MPEG-1/2/2.5 Layer III) are decoded in pure C#; any sample rate
+    /// is resampled to 16 kHz, stereo is downmixed to mono. No GPU, no Python, no external libraries.
     /// </summary>
     internal static class Program
     {
@@ -24,7 +25,7 @@ namespace DevOnBike.Overfit.Demo.WhisperConsole
         {
             if (args.Length < 2)
             {
-                Console.WriteLine("Usage: WhisperDemo <model.ggml.bin> <audio.wav> [language=en]");
+                Console.WriteLine("Usage: WhisperDemo <model.ggml.bin> <audio.wav|audio.mp3> [language=en]");
                 Console.WriteLine("  language: en, pl, de, es, ... (Whisper language code; ignored for English-only models)");
                 return 1;
             }
