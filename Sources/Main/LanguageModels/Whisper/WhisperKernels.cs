@@ -4,16 +4,22 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Numerics.Tensors;
+using System.Runtime.CompilerServices;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.LanguageModels.Whisper
 {
     /// <summary>
-    /// Plain-span inference kernels for the Whisper encoder/decoder (no autograd, no graph). Correctness-first
-    /// (TensorPrimitives.Dot for the matmuls; SIMD/fusion later). Shared by <see cref="WhisperEncoder"/> and
-    /// (later) the decoder.
+    /// Plain-span inference kernels for the Whisper encoder/decoder (no autograd, no graph). SIMD via
+    /// TensorPrimitives; the large encoder matmuls/convs/attention are multi-threaded over independent output
+    /// rows / channels / heads via <see cref="OverfitParallelFor"/> (above a work threshold, so the decoder's
+    /// single-row calls stay sequential). Shared by <see cref="WhisperEncoder"/> and <see cref="WhisperDecoder"/>.
     /// </summary>
-    internal static class WhisperKernels
+    internal static unsafe class WhisperKernels
     {
+        // Parallelize a kernel only when total work (rows·in·out etc.) clears this; below it, dispatch overhead
+        // dominates and the sequential SIMD path wins (matches LinearKernels' rationale).
+        private const long ParallelThreshold = 1 << 18; // 262144
         private const float GeluC0 = 0.7978845608028654f; // sqrt(2/π)
         private const float GeluC1 = 0.044715f;
 
@@ -49,20 +55,57 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
         }
 
         /// <summary>Linear: <c>out[t, o] = Σ_i x[t, i]·W[o, i] + b[o]</c>. <paramref name="weight"/> is
-        /// output-major <c>[outDim × inDim]</c>; <paramref name="bias"/> may be empty (no bias).</summary>
+        /// output-major <c>[outDim × inDim]</c>; <paramref name="bias"/> may be empty (no bias). Parallelized
+        /// over rows above <see cref="ParallelThreshold"/>.</summary>
         public static void Linear(
             ReadOnlySpan<float> x, ReadOnlySpan<float> weight, ReadOnlySpan<float> bias,
             Span<float> dst, int rows, int inDim, int outDim)
         {
-            for (var t = 0; t < rows; t++)
+            if (rows <= 1 || (long)rows * inDim * outDim < ParallelThreshold)
             {
-                var xr = x.Slice(t * inDim, inDim);
-                var outRow = dst.Slice(t * outDim, outDim);
-                for (var o = 0; o < outDim; o++)
+                for (var t = 0; t < rows; t++)
                 {
-                    var v = TensorPrimitives.Dot(xr, weight.Slice(o * inDim, inDim));
-                    outRow[o] = bias.IsEmpty ? v : v + bias[o];
+                    LinearRow(x.Slice(t * inDim, inDim), weight, bias, dst.Slice(t * outDim, outDim), inDim, outDim);
                 }
+                return;
+            }
+
+            fixed (float* xp = x, wp = weight, bp = bias, dp = dst)
+            {
+                var ctx = new LinearCtx(xp, wp, bias.IsEmpty ? null : bp, dp, inDim, outDim);
+                OverfitParallelFor.For(0, rows, &LinearWorker, &ctx);
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void LinearRow(ReadOnlySpan<float> xr, ReadOnlySpan<float> weight, ReadOnlySpan<float> bias,
+            Span<float> outRow, int inDim, int outDim)
+        {
+            for (var o = 0; o < outDim; o++)
+            {
+                var v = TensorPrimitives.Dot(xr, weight.Slice(o * inDim, inDim));
+                outRow[o] = bias.IsEmpty ? v : v + bias[o];
+            }
+        }
+
+        private readonly struct LinearCtx
+        {
+            public readonly float* X, W, B, D;
+            public readonly int InDim, OutDim;
+            public LinearCtx(float* x, float* w, float* b, float* d, int inDim, int outDim)
+            {
+                X = x; W = w; B = b; D = d; InDim = inDim; OutDim = outDim;
+            }
+        }
+
+        private static void LinearWorker(int start, int end, void* ctxPtr)
+        {
+            ref var c = ref Unsafe.AsRef<LinearCtx>(ctxPtr);
+            var bias = c.B == null ? ReadOnlySpan<float>.Empty : new ReadOnlySpan<float>(c.B, c.OutDim);
+            for (var t = start; t < end; t++)
+            {
+                LinearRow(new ReadOnlySpan<float>(c.X + (long)t * c.InDim, c.InDim), new ReadOnlySpan<float>(c.W, c.OutDim * c.InDim),
+                    bias, new Span<float>(c.D + (long)t * c.OutDim, c.OutDim), c.InDim, c.OutDim);
             }
         }
 
@@ -73,28 +116,68 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             ReadOnlySpan<float> input, ReadOnlySpan<float> weight, ReadOnlySpan<float> bias,
             Span<float> dst, int inC, int tIn, int outC, int kSize, int stride, int pad, int tOut)
         {
-            for (var oc = 0; oc < outC; oc++)
+            if ((long)outC * tOut * inC * kSize < ParallelThreshold)
             {
-                var b = bias.IsEmpty ? 0f : bias[oc];
-                for (var t = 0; t < tOut; t++)
+                for (var oc = 0; oc < outC; oc++)
                 {
-                    var acc = b;
-                    var start = t * stride - pad;
-                    for (var ic = 0; ic < inC; ic++)
+                    Conv1dChannel(oc, input, weight, bias, dst, inC, tIn, kSize, stride, pad, tOut);
+                }
+                return;
+            }
+
+            fixed (float* ip = input, wp = weight, bp = bias, dp = dst)
+            {
+                var ctx = new Conv1dCtx(ip, wp, bias.IsEmpty ? null : bp, dp, inC, tIn, kSize, stride, pad, tOut);
+                OverfitParallelFor.For(0, outC, &Conv1dWorker, &ctx);
+            }
+        }
+
+        private static void Conv1dChannel(int oc, ReadOnlySpan<float> input, ReadOnlySpan<float> weight,
+            ReadOnlySpan<float> bias, Span<float> dst, int inC, int tIn, int kSize, int stride, int pad, int tOut)
+        {
+            var b = bias.IsEmpty ? 0f : bias[oc];
+            for (var t = 0; t < tOut; t++)
+            {
+                var acc = b;
+                var start = t * stride - pad;
+                for (var ic = 0; ic < inC; ic++)
+                {
+                    var wBase = (oc * inC + ic) * kSize;
+                    var inBase = ic * tIn;
+                    for (var k = 0; k < kSize; k++)
                     {
-                        var wBase = (oc * inC + ic) * kSize;
-                        var inBase = ic * tIn;
-                        for (var k = 0; k < kSize; k++)
+                        var ti = start + k;
+                        if (ti >= 0 && ti < tIn)
                         {
-                            var ti = start + k;
-                            if (ti >= 0 && ti < tIn)
-                            {
-                                acc += weight[wBase + k] * input[inBase + ti];
-                            }
+                            acc += weight[wBase + k] * input[inBase + ti];
                         }
                     }
-                    dst[oc * tOut + t] = acc;
                 }
+                dst[oc * tOut + t] = acc;
+            }
+        }
+
+        private readonly struct Conv1dCtx
+        {
+            public readonly float* In, W, B, D;
+            public readonly int InC, TIn, KSize, Stride, Pad, TOut;
+            public Conv1dCtx(float* inp, float* w, float* b, float* d, int inC, int tIn, int kSize, int stride, int pad, int tOut)
+            {
+                In = inp; W = w; B = b; D = d; InC = inC; TIn = tIn; KSize = kSize; Stride = stride; Pad = pad; TOut = tOut;
+            }
+        }
+
+        private static void Conv1dWorker(int start, int end, void* ctxPtr)
+        {
+            ref var c = ref Unsafe.AsRef<Conv1dCtx>(ctxPtr);
+            // Spans cover up to index `end` (the chunk's exclusive upper bound); oc ∈ [start, end) only reads/writes below it.
+            var input = new ReadOnlySpan<float>(c.In, c.InC * c.TIn);
+            var weight = new ReadOnlySpan<float>(c.W, end * c.InC * c.KSize);
+            var bias = c.B == null ? ReadOnlySpan<float>.Empty : new ReadOnlySpan<float>(c.B, end);
+            var dst = new Span<float>(c.D, end * c.TOut);
+            for (var oc = start; oc < end; oc++)
+            {
+                Conv1dChannel(oc, input, weight, bias, dst, c.InC, c.TIn, c.KSize, c.Stride, c.Pad, c.TOut);
             }
         }
 
@@ -143,34 +226,77 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             Linear(xkv, wk, ReadOnlySpan<float>.Empty, k, tkv, dModel, dModel);
             Linear(xkv, wv, bv, v, tkv, dModel, dModel);
 
-            for (var h = 0; h < nHeads; h++)
+            if ((long)nHeads * tq * tkv * dHead < ParallelThreshold)
             {
-                var off = h * dHead;
-                for (var i = 0; i < tq; i++)
+                for (var h = 0; h < nHeads; h++)
                 {
-                    var qi = q.Slice(i * dModel + off, dHead);
-                    var valid = causal ? i + 1 : tkv;
-                    var max = float.NegativeInfinity;
-                    for (var j = 0; j < valid; j++)
-                    {
-                        var s = TensorPrimitives.Dot(qi, k.Slice(j * dModel + off, dHead)) * scale;
-                        scores[j] = s;
-                        if (s > max) { max = s; }
-                    }
-                    var sum = 0f;
-                    for (var j = 0; j < valid; j++) { var e = MathF.Exp(scores[j] - max); scores[j] = e; sum += e; }
-                    var inv = 1f / sum;
-
-                    var outRow = attnOut.Slice(i * dModel + off, dHead);
-                    outRow.Clear();
-                    for (var j = 0; j < valid; j++)
-                    {
-                        TensorPrimitives.MultiplyAdd(v.Slice(j * dModel + off, dHead), scores[j] * inv, outRow, outRow);
-                    }
+                    MhaHead(h, q, k, v, attnOut, scores, tq, tkv, dModel, dHead, scale, causal);
+                }
+            }
+            else
+            {
+                fixed (float* qp = q, kp = k, vp = v, ap = attnOut)
+                {
+                    var ctx = new MhaCtx(qp, kp, vp, ap, tq, tkv, dModel, dHead, scale, causal);
+                    OverfitParallelFor.For(0, nHeads, &MhaWorker, &ctx);
                 }
             }
 
             Linear(attnOut, wo, bo, dst, tq, dModel, dModel);
+        }
+
+        private static void MhaHead(int h, ReadOnlySpan<float> q, ReadOnlySpan<float> k, ReadOnlySpan<float> v,
+            Span<float> attnOut, Span<float> scores, int tq, int tkv, int dModel, int dHead, float scale, bool causal)
+        {
+            var off = h * dHead;
+            for (var i = 0; i < tq; i++)
+            {
+                var qi = q.Slice(i * dModel + off, dHead);
+                var valid = causal ? i + 1 : tkv;
+                var max = float.NegativeInfinity;
+                for (var j = 0; j < valid; j++)
+                {
+                    var s = TensorPrimitives.Dot(qi, k.Slice(j * dModel + off, dHead)) * scale;
+                    scores[j] = s;
+                    if (s > max) { max = s; }
+                }
+                var sum = 0f;
+                for (var j = 0; j < valid; j++) { var e = MathF.Exp(scores[j] - max); scores[j] = e; sum += e; }
+                var inv = 1f / sum;
+
+                var outRow = attnOut.Slice(i * dModel + off, dHead);
+                outRow.Clear();
+                for (var j = 0; j < valid; j++)
+                {
+                    TensorPrimitives.MultiplyAdd(v.Slice(j * dModel + off, dHead), scores[j] * inv, outRow, outRow);
+                }
+            }
+        }
+
+        private readonly struct MhaCtx
+        {
+            public readonly float* Q, K, V, A;
+            public readonly int Tq, Tkv, DModel, DHead;
+            public readonly float Scale;
+            public readonly bool Causal;
+            public MhaCtx(float* q, float* k, float* v, float* a, int tq, int tkv, int dModel, int dHead, float scale, bool causal)
+            {
+                Q = q; K = k; V = v; A = a; Tq = tq; Tkv = tkv; DModel = dModel; DHead = dHead; Scale = scale; Causal = causal;
+            }
+        }
+
+        private static void MhaWorker(int start, int end, void* ctxPtr)
+        {
+            ref var c = ref Unsafe.AsRef<MhaCtx>(ctxPtr);
+            Span<float> scores = c.Tkv <= 8192 ? stackalloc float[c.Tkv] : new float[c.Tkv];
+            var q = new ReadOnlySpan<float>(c.Q, c.Tq * c.DModel);
+            var k = new ReadOnlySpan<float>(c.K, c.Tkv * c.DModel);
+            var v = new ReadOnlySpan<float>(c.V, c.Tkv * c.DModel);
+            var attnOut = new Span<float>(c.A, c.Tq * c.DModel);
+            for (var h = start; h < end; h++)
+            {
+                MhaHead(h, q, k, v, attnOut, scores, c.Tq, c.Tkv, c.DModel, c.DHead, c.Scale, c.Causal);
+            }
         }
 
         /// <summary>

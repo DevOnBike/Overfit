@@ -42,6 +42,54 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
             }
         }
 
+        [LongFact]
+        public void Profile_Pipeline_Breakdown()
+        {
+            var model = WhisperGgmlLoader.Load(TestModelPaths.Whisper.RequireTinyGgmlPath());
+            var mel = new MelSpectrogram(model.MelFilterRows, model.MelFilters);
+            var encoder = new WhisperEncoder(model);
+            var decoder = new WhisperDecoder(model);
+            var tok = new WhisperTokenizer(model);
+
+            var raw = WavReader.ReadMono(TestModelPaths.Whisper.RequirePolishWavPath(), out _);
+            var window = new float[MelSpectrogram.SampleRate * 30];
+            raw.AsSpan(0, Math.Min(raw.Length, window.Length)).CopyTo(window);
+
+            // warm
+            var lm = mel.LogMel(window, out var frames);
+            var enc = encoder.Encode(lm, frames, out var nCtx);
+            var prompt = new[] { tok.StartOfTranscript, tok.LanguageToken("pl"), tok.Transcribe, tok.NoTimestamps };
+            decoder.DecodeCached(enc, nCtx, prompt, tok.EndOfTranscript, 224);
+
+            var melMs = Best(() => mel.LogMel(window, out _));
+            var encMs = Best(() => { var m = mel.LogMel(window, out var f); encoder.Encode(m, f, out _); });
+            var decMs = Best(() =>
+            {
+                var m = mel.LogMel(window, out var f);
+                var e = encoder.Encode(m, f, out var c);
+                decoder.DecodeCached(e, c, prompt, tok.EndOfTranscript, 224);
+            });
+            var encOnly = encMs - melMs;
+            var decOnly = decMs - encMs;
+            _out.WriteLine($"mel (log-mel STFT) : {melMs,7:F0} ms");
+            _out.WriteLine($"encoder            : {encOnly,7:F0} ms");
+            _out.WriteLine($"decoder (greedy)   : {decOnly,7:F0} ms");
+            _out.WriteLine($"total              : {decMs,7:F0} ms");
+        }
+
+        private static double Best(Action run)
+        {
+            var best = double.MaxValue;
+            for (var r = 0; r < 3; r++)
+            {
+                var sw = Stopwatch.StartNew();
+                run();
+                sw.Stop();
+                best = Math.Min(best, sw.Elapsed.TotalMilliseconds);
+            }
+            return best;
+        }
+
         private void TimeTranscribe(string label, string modelPath, float[] samples)
         {
             var w = WhisperTranscriber.Load(modelPath);
