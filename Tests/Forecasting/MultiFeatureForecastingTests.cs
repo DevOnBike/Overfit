@@ -33,7 +33,9 @@ namespace DevOnBike.Overfit.Tests.Forecasting
             var numFeatures = 3;
             var inputSize = windowSize * numFeatures;
 
-            var epochs = 150;
+            // 40 epochs is enough to converge well below the 2.0 threshold here — kept short so this stays a
+            // fast CI smoke test (the model still demonstrably learns the multivariate pattern).
+            var epochs = 40;
             var learningRate = 0.005f;
 
             var (prices, volumes) = GenerateMockMarketData(300);

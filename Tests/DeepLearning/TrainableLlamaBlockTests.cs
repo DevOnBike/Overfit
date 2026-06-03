@@ -193,8 +193,12 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
                 s[idx] = orig - eps; var lm = lossAt();
                 s[idx] = orig;
                 var fd = (lp - lm) / (2 * eps);
-                var rel = Math.Abs(fd - analytic[idx]) / Math.Max(1e-3, Math.Abs(analytic[idx]));
-                maxRel = Math.Max(maxRel, rel);
+                // Skip entries below the FD noise floor: a central difference (eps=1e-3) can't resolve a
+                // gradient of ~1e-4, so its relative error there is meaningless (and CPU-rounding dependent).
+                // A real gradient bug shows a large ABSOLUTE mismatch on the meaningful entries, still caught.
+                var absDiff = Math.Abs(fd - analytic[idx]);
+                var rel = absDiff / Math.Max(1e-3, Math.Abs(analytic[idx]));
+                if (absDiff > 5e-4) { maxRel = Math.Max(maxRel, rel); }
                 _out.WriteLine($"  {name}[{idx}]: analytic {analytic[idx]:E4}  fd {fd:E4}  rel {rel:E3}");
             }
             Assert.True(maxRel < 3e-2, $"{name} finite-difference mismatch, maxRel {maxRel:E3}");

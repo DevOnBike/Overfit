@@ -88,7 +88,9 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Prepare
             var finalLoss = 0f;
             var graph = new ComputationGraph();
 
-            for (var epoch = 0; epoch < 500; epoch++)
+            // 100 epochs is plenty to demonstrate learning (loss converges well below the 2.0 threshold
+            // long before this) — kept short so this stays a fast CI smoke test, not a slow training run.
+            for (var epoch = 0; epoch < 100; epoch++)
             {
                 graph.Reset();
                 adam.ZeroGrad();

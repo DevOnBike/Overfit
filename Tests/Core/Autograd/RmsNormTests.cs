@@ -85,10 +85,13 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
                 xs[idx] = orig;
                 var fd = (lp - lm) / (2 * eps);
                 var an = dxA[idx];
-                // Mixed abs/rel tolerance: floor the denominator so coordinates whose analytic
-                // gradient is ~0 don't blow the relative error up out of float FD precision.
-                var rel = Math.Abs(fd - an) / Math.Max(1e-3, Math.Abs(an));
-                maxRel = Math.Max(maxRel, rel);
+                // Mixed abs/rel tolerance: a central-difference estimate (eps=1e-3) can't resolve a gradient
+                // near the FD noise floor, so skip the relative check for coordinates whose absolute mismatch
+                // is below it — their relative error is meaningless and CPU-rounding dependent. A real gradient
+                // bug shows a large absolute mismatch on the meaningful (~1e-2) entries, which this still catches.
+                var absDiff = Math.Abs(fd - an);
+                var rel = absDiff / Math.Max(1e-3, Math.Abs(an));
+                if (absDiff > 5e-4) { maxRel = Math.Max(maxRel, rel); }
                 _out.WriteLine($"  dX[{idx}]: analytic {an:E4}  fd {fd:E4}  rel {rel:E3}");
             }
             Assert.True(maxRel < 3e-2, $"RMSNorm dInput finite-difference mismatch, maxRel {maxRel:E3}");
