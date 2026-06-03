@@ -3,6 +3,9 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Runtime.CompilerServices;
+using DevOnBike.Overfit.Runtime;
+
 namespace DevOnBike.Overfit.Audio
 {
     /// <summary>
@@ -34,12 +37,12 @@ namespace DevOnBike.Overfit.Audio
         private float[] _mel = System.Array.Empty<float>();
 
         // Bluestein FFT for the (non-power-of-2) 400-point STFT: a length-N DFT via a length-M (power-of-2)
-        // FFT convolution. Tables are precomputed once; the per-frame transform reuses _aRe/_aIm scratch.
+        // FFT convolution. Tables are precomputed once; the per-frame transform stackallocs its own scratch
+        // (so the frame loop parallelizes without sharing mutable state).
         private readonly int _fftM;          // smallest power of 2 ≥ 2·NFft − 1 (= 1024)
         private readonly float[] _twRe, _twIm;   // forward FFT twiddles, [M/2]
         private readonly float[] _chirpRe, _chirpIm; // w[n] = exp(−iπn²/N), [NFft]
         private readonly float[] _bwRe, _bwIm;   // FFT of the symmetric chirp filter B, [M]
-        private readonly float[] _aRe, _aIm;     // per-frame scratch, [M]
 
         /// <summary>
         /// Builds the extractor. By default the Slaney mel filterbank is computed (librosa default). Pass
@@ -106,9 +109,6 @@ namespace DevOnBike.Overfit.Audio
             }
             
             Fft(_bwRe, _bwIm, _twRe, _twIm, inverse: false);
-            
-            _aRe = new float[m];
-            _aIm = new float[m];
         }
 
         public int MelCount => _nMels;
@@ -151,43 +151,74 @@ namespace DevOnBike.Overfit.Audio
         private static float[] EnsureCapacity(float[] buffer, int needed)
             => buffer.Length >= needed ? buffer : new float[needed];
 
-        // ── STFT power spectrum (per-frame 400-point DFT via Bluestein FFT) ──
+        // ── STFT power spectrum (per-frame 400-point DFT via Bluestein FFT, parallelized over frames) ──
 
-        private void ComputePowerSpectrogram(ReadOnlySpan<float> padded, int frames, Span<float> power)
+        private unsafe void ComputePowerSpectrogram(ReadOnlySpan<float> padded, int frames, Span<float> power)
         {
-            Span<float> aRe = _aRe;
-            Span<float> aIm = _aIm;
-            for (var t = 0; t < frames; t++)
+            if (frames <= 0)
             {
-                var start = t * HopLength;
-                // a[n] = (window · x)[n] · chirp[n], zero-padded to M.
-                for (var n = 0; n < NFft; n++)
-                {
-                    var x = padded[start + n] * _hann[n];
-                    aRe[n] = x * _chirpRe[n];
-                    aIm[n] = x * _chirpIm[n];
-                }
-                aRe.Slice(NFft, _fftM - NFft).Clear();
-                aIm.Slice(NFft, _fftM - NFft).Clear();
+                return;
+            }
+            fixed (float* pad = padded, hann = _hann, cRe = _chirpRe, cIm = _chirpIm,
+                          tRe = _twRe, tIm = _twIm, bRe = _bwRe, bIm = _bwIm, pw = power)
+            {
+                var ctx = new MelFrameCtx(pad, hann, cRe, cIm, tRe, tIm, bRe, bIm, pw, _fftM, NFft, HopLength, _nFreqs, frames);
+                OverfitParallelFor.For(0, frames, 16, &MelFrameWorker, &ctx);
+            }
+        }
 
-                Fft(aRe, aIm, _twRe, _twIm, inverse: false);
-                for (var i = 0; i < _fftM; i++) // pointwise × FFT(B)
+        private readonly unsafe struct MelFrameCtx
+        {
+            public readonly float* Pad, Hann, CRe, CIm, TRe, TIm, BRe, BIm, Pw;
+            public readonly int M, NFft, Hop, NFreqs, Frames;
+            public MelFrameCtx(float* pad, float* hann, float* cRe, float* cIm, float* tRe, float* tIm,
+                float* bRe, float* bIm, float* pw, int m, int nFft, int hop, int nFreqs, int frames)
+            {
+                Pad = pad; Hann = hann; CRe = cRe; CIm = cIm; TRe = tRe; TIm = tIm; BRe = bRe; BIm = bIm; Pw = pw;
+                M = m; NFft = nFft; Hop = hop; NFreqs = nFreqs; Frames = frames;
+            }
+        }
+
+        private static unsafe void MelFrameWorker(int start, int end, void* ctxPtr)
+        {
+            ref var c = ref Unsafe.AsRef<MelFrameCtx>(ctxPtr);
+            var m = c.M;
+            Span<float> aRe = stackalloc float[m];
+            Span<float> aIm = stackalloc float[m];
+            var twRe = new ReadOnlySpan<float>(c.TRe, m / 2);
+            var twIm = new ReadOnlySpan<float>(c.TIm, m / 2);
+
+            for (var t = start; t < end; t++)
+            {
+                var s = t * c.Hop;
+                // a[n] = (window · x)[n] · chirp[n], zero-padded to M.
+                for (var n = 0; n < c.NFft; n++)
+                {
+                    var x = c.Pad[s + n] * c.Hann[n];
+                    aRe[n] = x * c.CRe[n];
+                    aIm[n] = x * c.CIm[n];
+                }
+                aRe.Slice(c.NFft, m - c.NFft).Clear();
+                aIm.Slice(c.NFft, m - c.NFft).Clear();
+
+                Fft(aRe, aIm, twRe, twIm, inverse: false);
+                for (var i = 0; i < m; i++) // pointwise × FFT(B)
                 {
                     var ar = aRe[i];
                     var ai = aIm[i];
-                    aRe[i] = ar * _bwRe[i] - ai * _bwIm[i];
-                    aIm[i] = ar * _bwIm[i] + ai * _bwRe[i];
+                    aRe[i] = ar * c.BRe[i] - ai * c.BIm[i];
+                    aIm[i] = ar * c.BIm[i] + ai * c.BRe[i];
                 }
-                Fft(aRe, aIm, _twRe, _twIm, inverse: true);
+                Fft(aRe, aIm, twRe, twIm, inverse: true);
 
                 // X[k] = chirp[k] · conv[k]; power[k] = |X[k]|².
-                for (var k = 0; k < _nFreqs; k++)
+                for (var k = 0; k < c.NFreqs; k++)
                 {
                     var cr = aRe[k];
                     var ci = aIm[k];
-                    var xr = cr * _chirpRe[k] - ci * _chirpIm[k];
-                    var xi = cr * _chirpIm[k] + ci * _chirpRe[k];
-                    power[k * frames + t] = xr * xr + xi * xi;
+                    var xr = cr * c.CRe[k] - ci * c.CIm[k];
+                    var xi = cr * c.CIm[k] + ci * c.CRe[k];
+                    c.Pw[k * c.Frames + t] = xr * xr + xi * xi;
                 }
             }
         }
