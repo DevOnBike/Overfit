@@ -85,6 +85,46 @@ namespace DevOnBike.Overfit.Tests.Audio
         }
 
         [Fact]
+        public void BluesteinFft_PowerMatchesDirectDft()
+        {
+            const int nFft = MelSpectrogram.NFft;
+            const int pad = nFft / 2;
+            var mel = new MelSpectrogram();
+            var rng = new Random(11);
+            var samples = new float[3200];
+            for (var i = 0; i < samples.Length; i++) { samples[i] = (float)(rng.NextDouble() * 2 - 1); }
+
+            var power = mel.PowerSpectrogram(samples, out var frames); // Bluestein FFT path
+
+            // Reconstruct the windowed frame exactly as the internal STFT does (reflect-pad + periodic Hann),
+            // then compare every bin against the direct O(N²) DFT.
+            var padded = new float[samples.Length + 2 * pad];
+            samples.CopyTo(padded, pad);
+            for (var i = 0; i < pad; i++)
+            {
+                padded[pad - 1 - i] = samples[Math.Min(i + 1, samples.Length - 1)];
+                padded[pad + samples.Length + i] = samples[Math.Max(samples.Length - 2 - i, 0)];
+            }
+            var hann = new float[nFft];
+            for (var n = 0; n < nFft; n++) { hann[n] = 0.5f * (1f - MathF.Cos(2f * MathF.PI * n / nFft)); }
+
+            var mid = frames / 2;
+            var windowed = new float[nFft];
+            for (var n = 0; n < nFft; n++) { windowed[n] = padded[mid * MelSpectrogram.HopLength + n] * hann[n]; }
+
+            var maxRel = 0.0;
+            for (var k = 0; k < mel.FrequencyBins; k++)
+            {
+                var reference = MelSpectrogram.DftPowerAt(windowed, k, nFft);
+                var got = power[k * frames + mid];
+                var rel = reference > 1e-6f ? Math.Abs(got - reference) / reference : Math.Abs(got - reference);
+                if (rel > maxRel) { maxRel = rel; }
+            }
+            _out.WriteLine($"max relative error Bluestein-FFT vs direct DFT over {mel.FrequencyBins} bins: {maxRel:E3}");
+            Assert.True(maxRel < 1e-3, $"Bluestein FFT diverges from the direct DFT: {maxRel:E3}");
+        }
+
+        [Fact]
         public void LogMel_Shape_Finite_AndWhisperNormalizedSpan()
         {
             var mel = new MelSpectrogram();

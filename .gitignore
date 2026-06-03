@@ -280,3 +280,5 @@ out_temp/
 
 # big files
 *.zip
+# Audio demo materials (downloaded models + samples; not committed)
+Demo/materials/

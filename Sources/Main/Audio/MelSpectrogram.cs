@@ -32,6 +32,14 @@ namespace DevOnBike.Overfit.Audio
         private float[] _power = System.Array.Empty<float>();
         private float[] _mel = System.Array.Empty<float>();
 
+        // Bluestein FFT for the (non-power-of-2) 400-point STFT: a length-N DFT via a length-M (power-of-2)
+        // FFT convolution. Tables are precomputed once; the per-frame transform reuses _aRe/_aIm scratch.
+        private readonly int _fftM;          // smallest power of 2 ≥ 2·NFft − 1 (= 1024)
+        private readonly float[] _twRe, _twIm;   // forward FFT twiddles, [M/2]
+        private readonly float[] _chirpRe, _chirpIm; // w[n] = exp(−iπn²/N), [NFft]
+        private readonly float[] _bwRe, _bwIm;   // FFT of the symmetric chirp filter B, [M]
+        private readonly float[] _aRe, _aIm;     // per-frame scratch, [M]
+
         /// <summary>
         /// Builds the extractor. By default the Slaney mel filterbank is computed (librosa default). Pass
         /// <paramref name="melFilters"/> (<c>[nMels × (NFft/2+1)]</c>, e.g. <c>WhisperModel.MelFilters</c>) to
@@ -62,6 +70,44 @@ namespace DevOnBike.Overfit.Audio
                 }
                 _melFilters = melFilters.ToArray();
             }
+
+            // ── Bluestein tables ──
+            var m = 1;
+            while (m < 2 * NFft - 1) { m <<= 1; }
+            _fftM = m;
+            _twRe = new float[m / 2];
+            _twIm = new float[m / 2];
+            for (var k = 0; k < m / 2; k++)
+            {
+                var ang = -2.0 * Math.PI * k / m;
+                _twRe[k] = (float)Math.Cos(ang);
+                _twIm[k] = (float)Math.Sin(ang);
+            }
+            _chirpRe = new float[NFft];
+            _chirpIm = new float[NFft];
+            for (var n = 0; n < NFft; n++)
+            {
+                var n2 = (long)n * n % (2L * NFft);     // reduce before scaling to keep the angle small/accurate
+                var ang = Math.PI * n2 / NFft;
+                _chirpRe[n] = (float)Math.Cos(ang);     // exp(−iπn²/N)
+                _chirpIm[n] = -(float)Math.Sin(ang);
+            }
+            _bwRe = new float[m];
+            _bwIm = new float[m];
+            for (var n = 0; n < NFft; n++)
+            {
+                var n2 = (long)n * n % (2L * NFft);
+                var ang = Math.PI * n2 / NFft;          // B[n] = exp(+iπn²/N), symmetric: B[M−n] = B[n]
+                var br = (float)Math.Cos(ang);
+                var bi = (float)Math.Sin(ang);
+                _bwRe[n] = br; _bwIm[n] = bi;
+                if (n > 0) { _bwRe[m - n] = br; _bwIm[m - n] = bi; }
+            }
+            
+            Fft(_bwRe, _bwIm, _twRe, _twIm, inverse: false);
+            
+            _aRe = new float[m];
+            _aIm = new float[m];
         }
 
         public int MelCount => _nMels;
@@ -104,24 +150,94 @@ namespace DevOnBike.Overfit.Audio
         private static float[] EnsureCapacity(float[] buffer, int needed)
             => buffer.Length >= needed ? buffer : new float[needed];
 
-        // ── STFT power spectrum (direct DFT per frame) ──
+        // ── STFT power spectrum (per-frame 400-point DFT via Bluestein FFT) ──
 
         private void ComputePowerSpectrogram(ReadOnlySpan<float> padded, int frames, Span<float> power)
         {
-            Span<float> windowed = NFft <= 1024 ? stackalloc float[NFft] : new float[NFft];
+            Span<float> aRe = _aRe;
+            Span<float> aIm = _aIm;
             for (var t = 0; t < frames; t++)
             {
                 var start = t * HopLength;
+                // a[n] = (window · x)[n] · chirp[n], zero-padded to M.
                 for (var n = 0; n < NFft; n++)
                 {
-                    windowed[n] = padded[start + n] * _hann[n];
+                    var x = padded[start + n] * _hann[n];
+                    aRe[n] = x * _chirpRe[n];
+                    aIm[n] = x * _chirpIm[n];
                 }
+                aRe.Slice(NFft, _fftM - NFft).Clear();
+                aIm.Slice(NFft, _fftM - NFft).Clear();
 
-                // Real DFT power per bin: |Σ x[n]·e^(−i2πkn/N)|².
+                Fft(aRe, aIm, _twRe, _twIm, inverse: false);
+                for (var i = 0; i < _fftM; i++) // pointwise × FFT(B)
+                {
+                    var ar = aRe[i];
+                    var ai = aIm[i];
+                    aRe[i] = ar * _bwRe[i] - ai * _bwIm[i];
+                    aIm[i] = ar * _bwIm[i] + ai * _bwRe[i];
+                }
+                Fft(aRe, aIm, _twRe, _twIm, inverse: true);
+
+                // X[k] = chirp[k] · conv[k]; power[k] = |X[k]|².
                 for (var k = 0; k < _nFreqs; k++)
                 {
-                    power[k * frames + t] = DftPowerAt(windowed, k, NFft);
+                    var cr = aRe[k];
+                    var ci = aIm[k];
+                    var xr = cr * _chirpRe[k] - ci * _chirpIm[k];
+                    var xi = cr * _chirpIm[k] + ci * _chirpRe[k];
+                    power[k * frames + t] = xr * xr + xi * xi;
                 }
+            }
+        }
+
+        /// <summary>In-place iterative radix-2 Cooley-Tukey FFT (size = power of 2 = <c>re.Length</c>).
+        /// <paramref name="twRe"/>/<paramref name="twIm"/> are the forward twiddles <c>exp(−i2πk/M)</c>
+        /// (<c>[M/2]</c>); <paramref name="inverse"/> conjugates them and scales by <c>1/M</c>.</summary>
+        private static void Fft(Span<float> re, Span<float> im, ReadOnlySpan<float> twRe, ReadOnlySpan<float> twIm, bool inverse)
+        {
+            var n = re.Length;
+
+            // bit-reversal permutation
+            for (int i = 1, j = 0; i < n; i++)
+            {
+                var bit = n >> 1;
+                for (; (j & bit) != 0; bit >>= 1) { j ^= bit; }
+                j ^= bit;
+                
+                if (i < j)
+                {
+                    (re[i], re[j]) = (re[j], re[i]);
+                    (im[i], im[j]) = (im[j], im[i]);
+                }
+            }
+
+            var sign = inverse ? -1f : 1f;
+            for (var len = 2; len <= n; len <<= 1)
+            {
+                var half = len >> 1;
+                var step = n / len;
+                for (var i = 0; i < n; i += len)
+                {
+                    for (var k = 0; k < half; k++)
+                    {
+                        var ti = k * step;
+                        var wr = twRe[ti];
+                        var wi = sign * twIm[ti];
+                        var a = i + k;
+                        var b = a + half;
+                        var xr = re[b] * wr - im[b] * wi;
+                        var xi = re[b] * wi + im[b] * wr;
+                        re[b] = re[a] - xr; im[b] = im[a] - xi;
+                        re[a] += xr; im[a] += xi;
+                    }
+                }
+            }
+
+            if (inverse)
+            {
+                var invN = 1f / n;
+                for (var i = 0; i < n; i++) { re[i] *= invN; im[i] *= invN; }
             }
         }
 
