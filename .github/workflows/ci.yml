@@ -16,15 +16,6 @@ jobs:
 
     runs-on: ${{ matrix.os }}
 
-    env:
-      # The free GitHub runners have ~2 vCPUs. OverfitParallelFor spins up Environment.ProcessorCount
-      # persistent worker threads; on a 2-vCPU runner the worker pool oversubscribes and the per-dispatch
-      # sync dominates, blowing the training/integration tests up 100-900× (1-2 s locally → minutes on CI).
-      # Forcing inline (sequential SIMD) execution keeps CI fast; results are identical — the parallel path
-      # is bit-identical to sequential and is exercised on multi-core dev machines. (Real low-core deployments
-      # would hit the same pool overhead — a low-core inline fallback in OverfitParallelFor is a follow-up.)
-      OVERFIT_PARALLEL_WORKERS: "1"
-
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -60,9 +51,14 @@ jobs:
       if: matrix.os == 'windows-latest'
       run: dotnet test -c Release --no-build --verbosity normal
 
+    # XPlat Code Coverage instruments every sequence point; on the numerical hot loops (matmul, autograd,
+    # optimizers) that is a 10-900× slowdown for the training/integration tests — which is why the Linux
+    # coverage job took minutes while the uninstrumented Windows job runs the same tests in ~25s. The
+    # coverlet.runsettings excludes those hot namespaces from instrumentation, so coverage stays fast while
+    # the report still covers the orchestration code (loaders, runtime, agents, data, anomalies, …).
     - name: Test with Coverage (Linux)
       if: matrix.os == 'ubuntu-latest'
-      run: dotnet test ./Tests/Tests.csproj -c Release --no-build --verbosity normal --collect:"XPlat Code Coverage" --results-directory ./coverage
+      run: dotnet test ./Tests/Tests.csproj -c Release --no-build --verbosity normal --collect:"XPlat Code Coverage" --settings coverlet.runsettings --results-directory ./coverage
 
     # Generate and upload reports (Linux only, to avoid doing it twice)
     - name: Install ReportGenerator
