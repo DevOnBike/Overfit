@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <DebugType>embedded</DebugType>
+        <RootNamespace>DevOnBike.Overfit.Extensions.AI</RootNamespace>
+        <AssemblyName>DevOnBike.Overfit.Extensions.AI</AssemblyName>
+        <PackageId>DevOnBike.Overfit.Extensions.AI</PackageId>
+        <Version>10.0.20</Version>
+        <Authors>DevOnBike</Authors>
+        <Copyright>Copyright (c) 2026 DevOnBike</Copyright>
+        <Description>Microsoft.Extensions.AI adapter for Overfit — exposes the in-process Overfit LLM runtime as a standard IChatClient and IEmbeddingGenerator, so it drops into Semantic Kernel and any Microsoft.Extensions.AI pipeline (caching, telemetry, function-invocation, DI) by changing one line. Pure .NET, in-process, no Python, no model server. Dual-licensed: AGPL-3.0-or-later for open source, commercial license available — see COMMERCIAL.md.</Description>
+        <PackageTags>llm;microsoft-extensions-ai;ichatclient;iembeddinggenerator;semantic-kernel;rag;agentic;in-process;csharp;ai</PackageTags>
+        <RepositoryUrl>https://github.com/DevOnBike/Overfit</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+        <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <NoWarn>$(NoWarn);1591</NoWarn>
+
+        <IsAotCompatible>true</IsAotCompatible>
+        <IsTrimmable>true</IsTrimmable>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <None Include="README.md" Pack="true" PackagePath="\" />
+        <None Include="..\..\..\LICENSE.md" Pack="true" PackagePath="\" />
+        <None Include="..\..\..\COMMERCIAL.md" Pack="true" PackagePath="\" />
+        <InternalsVisibleTo Include="DevOnBike.Overfit.Tests" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\Main\Main.csproj" />
+        <PackageReference Include="Microsoft.Extensions.AI.Abstractions" />
+    </ItemGroup>
+
+</Project>
