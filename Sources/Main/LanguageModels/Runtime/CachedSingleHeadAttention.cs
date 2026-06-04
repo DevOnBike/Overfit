@@ -256,8 +256,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 RopeKernel.Apply(_key, rope, position + cache.BasePosition);
             }
 
-            _key.AsSpan().CopyTo(cache.GetKeyWriteSpan(layerIndex, headIndex, position));
-            _value.AsSpan().CopyTo(cache.GetValueWriteSpan(layerIndex, headIndex, position));
+            cache.WriteKey(layerIndex, headIndex, position, _key);
+            cache.WriteValue(layerIndex, headIndex, position, _value);
         }
 
         /// <summary>
@@ -425,13 +425,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 RopeKernel.Apply(_key, rope, position + cache.BasePosition);
             }
 
-            _key
-                .AsSpan()
-                .CopyTo(cache.GetKeyWriteSpan(layerIndex, headIndex, position));
-
-            _value
-                .AsSpan()
-                .CopyTo(cache.GetValueWriteSpan(layerIndex, headIndex, position));
+            // Copy in F32 mode, quantize in Q8 mode — uniform across both KV-cache dtypes.
+            cache.WriteKey(layerIndex, headIndex, position, _key);
+            cache.WriteValue(layerIndex, headIndex, position, _value);
 
             AttendFromCache(cache, layerIndex, headIndex, position);
         }

@@ -139,6 +139,27 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
             }
         }
 
+        /// <summary>
+        /// Embeds each input string with the loaded sentence embedder (lazy-loaded on first use, like the
+        /// RAG index). Backs the OpenAI-compatible <c>/v1/embeddings</c> endpoint. Throws
+        /// <see cref="InvalidOperationException"/> with an actionable message if no embedding model is found.
+        /// </summary>
+        public IReadOnlyList<float[]> EmbedAll(IReadOnlyList<string> texts)
+        {
+            lock (_gate)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+
+                var embedder = GetEmbedder();
+                var result = new float[texts.Count][];
+                for (var i = 0; i < texts.Count; i++)
+                {
+                    result[i] = embedder.EmbedQuery(texts[i] ?? string.Empty);
+                }
+                return result;
+            }
+        }
+
         private static string BuildPrompt(string question, IReadOnlyList<VectorMatch> hits)
         {
             var sb = new StringBuilder();

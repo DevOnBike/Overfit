@@ -433,8 +433,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     {
                         RopeKernel.Apply(kg.AsSpan(n * headDim, headDim), rope, basePosition + n + ropeBase);
                     }
-                    kg.AsSpan(n * headDim, headDim).CopyTo(cache.GetKeyWriteSpan(layerIndex, group, basePosition + n));
-                    vg.AsSpan(n * headDim, headDim).CopyTo(cache.GetValueWriteSpan(layerIndex, group, basePosition + n));
+                    cache.WriteKey(layerIndex, group, basePosition + n, kg.AsSpan(n * headDim, headDim));
+                    cache.WriteValue(layerIndex, group, basePosition + n, vg.AsSpan(n * headDim, headDim));
                 }
 
                 var keys = cache.GetKeyReadSpan(layerIndex, group, fromPosition: 0, length: cacheLength);
@@ -501,8 +501,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
                 for (var n = 0; n < rows; n++)
                 {
-                    kh.Slice(n * headDim, headDim).CopyTo(ctx.Cache.GetKeyWriteSpan(layer, h, basePos + n));
-                    vh.Slice(n * headDim, headDim).CopyTo(ctx.Cache.GetValueWriteSpan(layer, h, basePos + n));
+                    ctx.Cache.WriteKey(layer, h, basePos + n, kh.Slice(n * headDim, headDim));
+                    ctx.Cache.WriteValue(layer, h, basePos + n, vh.Slice(n * headDim, headDim));
                 }
 
                 var keys = ctx.Cache.GetKeyReadSpan(layer, h, fromPosition: 0, length: cacheLength);

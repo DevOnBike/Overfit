@@ -35,6 +35,50 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 
 ---
 
+## Adoption / launch roadmap (2026-06-04, ROI-ranked)
+
+Strategic frame: Overfit wins on **.NET in-process deployment + training moat**, NOT raw tok/s
+(raw-perf is hygiene = bottom of this list, consistent with the "stop chasing decode" pivot). Ranked by
+adoption ROI. **Current execution order (user, 2026-06-04): #2 (OpenAI API) now → then #1 (M.E.AI adapter).**
+Q8-KV (a perf/RAM item, adjacent to #12) is checkpointed mid-build (store + dual-mode `KeyValueCache` +
+write-sites done, F32 bit-identical) — resumed later, NOT a launch blocker.
+
+| # | Feature | ROI | State / note |
+|--:|---------|----:|--------------|
+| 1 | **Microsoft.Extensions.AI adapter** (`IChatClient` / `IEmbeddingGenerator` over `ChatSession` + `SentenceEmbedder`) | 10/10 | **NEXT after #2.** Smallest effort / biggest reach — drop-in for the whole .NET AI ecosystem (Semantic Kernel, anything on M.E.AI). This IS the in-process moat exposed through the standard interface. |
+| 2 | **OpenAI-compatible API** (`/v1/chat/completions`, `/v1/embeddings`, SSE) | 9.5/10 | **IN PROGRESS (2026-06-04).** Opens HTTP tooling (LangChain, SK, OpenAI clients, UIs). Table-stakes parity with dotLLM. Build on `Demo/Overfit.LocalAgent.AspNet`. |
+| 3 | **JSON-Schema constrained output** (required / enum / typed fields) | 9/10 | **PARTIALLY DONE** — `JsonGrammarConstraint` (well-formed JSON) + `ToolCallConstraint` exist; the GAP is full *schema conformance* (required fields, enums, type coercion). Steal dotLLM's `JsonSchemaConstraint` (FirstCharBuckets + LRU mask cache). |
+| 4 | **Production LocalAgent template** (auth, audit logs, model hash, retrieved sources, tool-call logs, `/healthz` `/readyz` `/metrics`, Dockerfile) | 8.8/10 | Phase-1 walking skeleton exists (`/health` `/chat` `/reset`); this is productionization → sellable PoC. Maps to COMMERCIAL.md "Private .NET RAG/Agent PoC". |
+| 5 | **RAG Stability Harness + Corpus Linter** (expected-source tests, paraphrase stability, false-premise traps) | 8.5/10 → **bump above #2 as a DIFFERENTIATOR** | "RAG is *testable*" — a genuine differentiator (not table-stakes), plays to our empirical-rigor DNA + COMMERCIAL.md "Zero-GC inference audit". Few competitors sell RAG testability. |
+| 6 | **Persistent vector store** (SQLite / file-backed) | 8/10 | In-memory `VectorStore` → restart without re-indexing. (DiskLLM persistence conversation resonates here.) |
+| 7 | `dotnet new overfit-agent` template | 7.8/10 | Cheap once #4 exists. Open-source adoption lubricant. |
+| 8 | **Model/profile manager CLI** (`overfit models download bielik`) | 7.5/10 | ollama-style. On the dotLLM steal-list. Onboarding friction. |
+| 9 | **QLoRA CPU fine-tuning** | 7/10 build, **10/10 as moat-positioning** | Already SHIPPED. Don't build more — *lead the messaging* with it (the one thing llama.cpp structurally can't do); sell RAG/JSON as the entry. |
+| 10 | Whisper / speech-to-text vertical | 6.8/10 | Done; separate launch, not core adoption. |
+| 11 | Interpretability / inference hooks | 5.5/10 | Cool, slow market. dotLLM's is a stub → we could *lead* here, but it's credibility not revenue. |
+| 12 | Chasing raw tok/s vs llama.cpp | 4/10 | Hygiene, not product. Consistent with the strategic pivot. Q8-KV lives near here (RAM angle is mildly above pure tok/s). |
+
+**Adjustments vs the source ranking (the "points 1 & 3" update):** #1 confirmed as the single best first move;
+#3 reclassified PARTIALLY-DONE (schema-conformance is the only gap); #5 flagged to bump above #2 (differentiator
+> table-stakes); #9 split into build-priority (mid, it's shipped) vs moat-positioning (top).
+
+### What else to steal from dotLLM (launch-relevant, beyond the earlier full inventory)
+
+Already matched/exceeded (don't redo): SIMD RoPE, gate+up fusion, decode worker-cap, spin-pool, repacked Q4_K
+GEMV, prompt-lookup speculative, GGUF/chat-template. NEW launch-relevant steals, in adoption order:
+- **`JsonSchemaConstraint` + `TokenMask` bit-vector + FirstCharBuckets/LRU** (`Constraints/`) → powers #3. Their
+  per-state mask cache + first-char bucket prune (~99% vocab rejected before any parser copy) is the hot-path trick.
+- **OpenAI DTO surface + SSE streaming + logprobs endpoint** (`DotLLM.Server/Endpoints/ChatCompletionEndpoint.cs`)
+  → the exact shape for #2 (note: their server is sequential per-request, NO continuous batching — we're not behind).
+- **`PrefixCache`** (system-prompt KV reuse) — we have `KvCacheSnapshot`; their server-level prefix cache is the
+  wiring pattern for multi-request reuse.
+- **Composable sampling pipeline** (`ISamplerStep` / `ILogitProcessor`) — cleaner than our monolithic
+  `SamplingOptions`; nice-to-have for extensibility once the API exists.
+- **`System.Diagnostics.Metrics` + `Activity` telemetry** (`Telemetry/`) → feeds #4's `/metrics` + the audit story.
+- **Model-management CLI** (HF pull/search/list, Spectre.Console TUI) → #8.
+
+---
+
 ## Nearest plan — llama.cpp competitive gaps (2026-05-25)
 
 Gap analysis vs llama.cpp, ranked through the strategic frame (NOT chasing decode speed; build the

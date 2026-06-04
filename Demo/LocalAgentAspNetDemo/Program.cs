@@ -15,6 +15,8 @@
 // Phase 2 (RAG):     /documents/index, /rag/query over an in-process VectorStore.
 // Phase 3 (agent):   /agent (forced C# tool call), /chat/json (guaranteed JSON).
 // Phase 4 (metrics): /metrics (Prometheus), Dockerfile + compose.yaml.
+// Phase 5 (OpenAI):  /v1/chat/completions (+ SSE stream), /v1/embeddings, /v1/models — point any
+//                    OpenAI client/SDK at this base URL; the in-process .NET runtime serves it.
 
 using System.Diagnostics;
 using System.Text.Json.Nodes;
@@ -22,6 +24,7 @@ using DevOnBike.Overfit.Demo.LocalAgent.Agent;
 using DevOnBike.Overfit.Demo.LocalAgent.Chat;
 using DevOnBike.Overfit.Demo.LocalAgent.Infrastructure;
 using DevOnBike.Overfit.Demo.LocalAgent.Observability;
+using DevOnBike.Overfit.Demo.LocalAgent.OpenAi;
 using DevOnBike.Overfit.Demo.LocalAgent.Rag;
 using DevOnBike.Overfit.Demo.LocalAgent.Swagger;
 using DevOnBike.Overfit.Demo.LocalAgent.Tools;
@@ -276,6 +279,11 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
 
                 return Results.Content(json, "application/json");
             });
+
+            // ── OpenAI-compatible API (Phase 5): /v1/chat/completions, /v1/embeddings, /v1/models ──────
+            // Point any OpenAI client/SDK/tool at this host's base URL (model name is echoed, not selected —
+            // the one loaded model is served). Stateless per request, serialized through a single-flight gate.
+            app.MapOpenAiApi(modelDisplay, systemMessage);
 
             // ── Metrics (Phase 4): Prometheus scrape endpoint ─────────────────────────
             // OpenTelemetry serves the Prometheus exposition at /metrics from the Meter instruments recorded by
