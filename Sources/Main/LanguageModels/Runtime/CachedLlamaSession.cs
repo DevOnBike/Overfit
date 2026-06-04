@@ -287,6 +287,32 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             return token;
         }
 
+        /// <summary>
+        /// Forced decode of a known token (no sampling): advances the KV cache by <paramref name="token"/>
+        /// and refreshes <c>_logits</c> to predict the token after it. Used by draft-model speculative
+        /// decoding to condition a draft session on tokens the target chose (and to re-apply a correction).
+        /// </summary>
+        internal void Feed(int token)
+        {
+            ThrowIfDisposed();
+            if (_cache.IsFull && !_slidingWindow)
+            {
+                throw new InvalidOperationException(
+                    $"KV cache is full (ContextLength={_config.ContextLength}). Start a new session.");
+            }
+            if (Position == 0)
+            {
+                throw new InvalidOperationException("Session is empty. Call Reset with a prompt first.");
+            }
+            DecodeToken(token);
+        }
+
+        /// <summary>
+        /// Rolls the KV cache back to <paramref name="length"/> positions (drops later K/V) — used by
+        /// draft-model speculative decoding to discard a draft session's rejected proposal tokens.
+        /// </summary>
+        internal void RollbackTo(int length) => _cache.TruncateTo(length);
+
         // ── Adaptive speculative gating state (see GenerateSpeculative) ──
         private const double SpecGateThreshold = 3.0;  // committed-per-verify break-even ≈ 3.5; gate below it
         private const double SpecEmaAlpha = 0.5;       // EMA responsiveness — fast so it gates after a few rejects
@@ -330,6 +356,29 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int maxDraft = 4,
             int ngramMin = 1,
             int ngramMax = 3)
+            => GenerateSpeculativeCore(history, committed, in sampling, maxDraft, ngramMin, ngramMax, drafter: null);
+
+        /// <summary>
+        /// Draft-MODEL speculative overload: proposals come from <paramref name="drafter"/> (a small draft
+        /// model) instead of prompt-lookup, so speculation wins on NOVEL text too. Same verify /
+        /// accept-or-resample machinery; the drafter keeps its own KV in lockstep via its Sync callback.
+        /// </summary>
+        internal int GenerateSpeculative(
+            ReadOnlySpan<int> history,
+            Span<int> committed,
+            in SamplingOptions sampling,
+            int maxDraft,
+            ISpeculativeDrafter drafter)
+            => GenerateSpeculativeCore(history, committed, in sampling, maxDraft, ngramMin: 1, ngramMax: 3, drafter: drafter);
+
+        private int GenerateSpeculativeCore(
+            ReadOnlySpan<int> history,
+            Span<int> committed,
+            in SamplingOptions sampling,
+            int maxDraft,
+            int ngramMin,
+            int ngramMax,
+            ISpeculativeDrafter? drafter)
         {
             ThrowIfDisposed();
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxDraft);
@@ -368,7 +417,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             var dn = 0;
             Span<int> draft = stackalloc int[maxDraft];
-            if (canSpeculate && (!gated || probe))
+            if (drafter is not null)
+            {
+                // Draft-MODEL path: always propose (a model predicts, so the echo-detection gate doesn't
+                // apply); the drafter keeps its own KV in lockstep via Sync at the commit points below.
+                if (canSpeculate)
+                {
+                    dn = drafter.Draft(t0, draft);
+                }
+            }
+            else if (canSpeculate && (!gated || probe))
             {
                 var anchor = new int[history.Length + 1];
                 history.CopyTo(anchor);
@@ -383,6 +441,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 // No draft (or no room for verify + the bonus forward): a plain single-token step.
                 committed[0] = t0;
                 DecodeToken(t0);
+                drafter?.Sync(committed.Slice(0, 1));
                 return 1;
             }
 
@@ -443,6 +502,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             // Feed the verify outcome back into the adaptive gate: committed tokens this step (= 2 + accepted).
             var committedThisStep = 2 + accepted;
+            drafter?.Sync(committed.Slice(0, committedThisStep));
             _specAcceptEma = SpecEmaAlpha * committedThisStep + (1 - SpecEmaAlpha) * _specAcceptEma;
             return committedThisStep;
         }
