@@ -149,7 +149,7 @@ namespace DevOnBike.Overfit.Extensions.AI
             return serviceType.IsInstanceOfType(this) ? this : null;
         }
 
-        /// <summary>Disposes adapter-owned state only — the wrapped <see cref="OverfitClient"/> is borrowed.</summary>
+        /// <summary>Disposes adapter-owned state only — the wrapped <see cref="ChatSession"/> is borrowed.</summary>
         public void Dispose()
         {
             if (_disposed)

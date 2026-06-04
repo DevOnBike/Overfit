@@ -18,6 +18,12 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
     {
         private readonly TrieNode[] _nodes;
 
+        // Per node, a bitmask of value indices (construction order, capped at 64) whose path passes through
+        // it — i.e. which values are still reachable from here. For a property-name trie this aligns with
+        // PropertyNames bit positions, so the tracker can mask a key character that leads only to
+        // already-emitted properties (preventing a duplicate-key dead-end). Unused for enum tries.
+        private readonly ulong[] _reachable;
+
         /// <summary>Builds a trie from <paramref name="values"/> (property names or enum values).</summary>
         public JsonStringTrie(IReadOnlyList<string> values)
         {
@@ -57,7 +63,26 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
                 System.Array.Sort(sorted, static (a, b) => a.Key.CompareTo(b.Key));
                 _nodes[i] = new TrieNode(sorted, terminal[i], names[i]);
             }
+
+            // Reachability bitmasks: for each value v (≤ 64), OR bit v into every node on its path (root
+            // included), so ReachableMask(node) = the set of values still completable from that node.
+            _reachable = new ulong[_nodes.Length];
+            for (var v = 0; v < values.Count && v < 64; v++)
+            {
+                var node = 0;
+                _reachable[node] |= 1UL << v;
+                foreach (var c in values[v])
+                {
+                    TryGetChild(node, c, out node);
+                    _reachable[node] |= 1UL << v;
+                }
+            }
         }
+
+        /// <summary>Bitmask of value indices (construction order) still completable from
+        /// <paramref name="nodeIndex"/>. See <see cref="_reachable"/>.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public ulong ReachableMask(int nodeIndex) => _reachable[nodeIndex];
 
         /// <summary>Advances from <paramref name="nodeIndex"/> by <paramref name="c"/>; false if no edge.</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

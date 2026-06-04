@@ -256,10 +256,21 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
                     return Results.BadRequest(new { error = "'message' is required and must be non-empty." });
                 }
 
-                var json = agent.RunJson(client, req.Message).Json;
+                string json;
+                try
+                {
+                    // With req.Schema set, the reply is constrained to CONFORM to that JSON-Schema (typed /
+                    // required / enum fields); without it, just guaranteed well-formed JSON.
+                    json = agent.RunJson(client, req.Message, req.Schema).Json;
+                }
+                catch (System.Text.Json.JsonException ex)
+                {
+                    return Results.Problem(detail: $"Invalid 'schema' (not valid JSON-Schema): {ex.Message}",
+                        statusCode: StatusCodes.Status400BadRequest);
+                }
                 metrics.RecordGeneration("chat_json", client.Chat.LastStats);
 
-                // The reply is guaranteed well-formed JSON by construction — return it verbatim as application/json.
+                // The reply is guaranteed well-formed (and, with a schema, schema-conforming) JSON — return verbatim.
                 return Results.Content(json, "application/json");
             });
 

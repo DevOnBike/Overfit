@@ -28,7 +28,13 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
             var nodes = new List<JsonSchemaNode>();
             var tries = new List<JsonStringTrie>();
             CompileNode(doc.RootElement, nodes, tries);
-            return new CompiledJsonSchema(nodes.ToArray(), tries.ToArray());
+
+            // A shared all-types node for values under keys not declared in the schema (additional
+            // properties when not forbidden) — see CompiledJsonSchema.UnconstrainedNodeIndex.
+            var unconstrained = nodes.Count;
+            nodes.Add(JsonSchemaNode.Unconstrained);
+
+            return new CompiledJsonSchema(nodes.ToArray(), tries.ToArray(), unconstrained);
         }
 
         // Appends the compiled node(s) for `el` and returns this node's index. Reserves its own slot first

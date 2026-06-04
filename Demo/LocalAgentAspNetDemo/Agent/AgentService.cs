@@ -7,6 +7,7 @@ using System.Text;
 using DevOnBike.Overfit.Demo.LocalAgent.Tools;
 using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Constraints;
+using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Tools;
 
 namespace DevOnBike.Overfit.Demo.LocalAgent.Agent
@@ -72,11 +73,15 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Agent
         /// describes the desired shape in the message; the constraint guarantees the output parses as
         /// JSON (field-level schema typing is the JSON-Schema follow-on).
         /// </summary>
-        public JsonModeResult RunJson(OverfitClient client, string message)
+        public JsonModeResult RunJson(OverfitClient client, string message, string? schema = null)
         {
-            // requireObject: force a JSON object root (some models otherwise satisfy "valid JSON" with a
+            // With a schema: constrain the output to CONFORM to it (typed/required/enum fields). Without:
+            // requireObject forces a JSON object root (some models otherwise satisfy "valid JSON" with a
             // quoted string that merely contains JSON). Stateless one-shot — JSON gen shouldn't accumulate.
-            var constraint = new JsonGrammarConstraint(client.Tokenizer, requireObject: true);
+            ITokenConstraint constraint = string.IsNullOrWhiteSpace(schema)
+                ? new JsonGrammarConstraint(client.Tokenizer, requireObject: true)
+                : new JsonSchemaConstraint(client.Tokenizer, schema);
+
             var reply = client.Complete(message, constraint: constraint);
             return new JsonModeResult(reply);
         }

@@ -23,6 +23,11 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.OpenAi
 
         /// <summary>Newer OpenAI field name for the generation cap; honoured if <c>max_tokens</c> is absent.</summary>
         [JsonPropertyName("max_completion_tokens")] public int? MaxCompletionTokens { get; set; }
+
+        /// <summary><c>{"type":"json_object"}</c> → guaranteed well-formed JSON;
+        /// <c>{"type":"json_schema","json_schema":{"schema":{...}}}</c> → output constrained to conform to the
+        /// schema; absent / <c>{"type":"text"}</c> → unconstrained.</summary>
+        [JsonPropertyName("response_format")] public System.Text.Json.JsonElement? ResponseFormat { get; set; }
     }
 
     public sealed class OpenAiMessage

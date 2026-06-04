@@ -6,7 +6,9 @@ A reference template a .NET developer can drop into an existing service to add a
 
 > **Status.** Phases 1–5 shipped — Phase 1 (chat: `/health`, `/chat`, `/reset`), Phase 2 (RAG: `/documents/index`, `/rag/query`), Phase 3 (agent: `/agent` forced C# tool call, `/chat/json` guaranteed JSON), Phase 4 (observability: `/metrics` in Prometheus format, `Dockerfile` + `compose.yaml`), **Phase 5 (OpenAI-compatible API: `/v1/chat/completions` with SSE streaming, `/v1/embeddings`, `/v1/models`).** A Microsoft.Extensions.AI adapter (`IChatClient` / `IEmbeddingGenerator`) and Phase 6 (Aspire dashboard) are next.
 >
-> **OpenAI compatibility.** The `/v1/*` surface follows the **de-facto OpenAI Chat Completions / Embeddings / Models shapes** (the same ones ollama / vLLM / llama.cpp-server expose) — point any OpenAI client/SDK at the base URL. It is a pragmatic subset: text content only (no multimodal arrays), no `tools` / `n>1` / `logprobs` / `logit_bias`; chat completions are stateless per request and serialized through a single-flight gate (the demo shares one model session — single-tenant).
+> **OpenAI compatibility.** The `/v1/*` surface follows the **de-facto OpenAI Chat Completions / Embeddings / Models shapes** (the same ones ollama / vLLM / llama.cpp-server expose) — point any OpenAI client/SDK at the base URL. `response_format` is honoured: `{"type":"json_object"}` guarantees well-formed JSON and `{"type":"json_schema","json_schema":{"schema":{…}}}` constrains the output to **conform** to that JSON-Schema (typed / required / enum fields) — by construction, no retries. It is a pragmatic subset otherwise: text content only (no multimodal arrays), no `tools` / `n>1` / `logprobs` / `logit_bias`; chat completions are stateless per request and serialized through a single-flight gate (the demo shares one model session — single-tenant).
+>
+> The same JSON-Schema constraint backs the demo's own `POST /chat/json` — pass an optional `"schema"` (JSON-Schema text) to get a schema-conforming object instead of merely well-formed JSON.
 >
 > ```bash
 > curl -X POST http://localhost:5234/v1/chat/completions -H "Content-Type: application/json" \
