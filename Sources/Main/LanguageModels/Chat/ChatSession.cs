@@ -6,6 +6,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 using DevOnBike.Overfit.LanguageModels.Contracts;
+using DevOnBike.Overfit.LanguageModels.Runtime;
 
 namespace DevOnBike.Overfit.LanguageModels.Chat
 {
@@ -169,7 +170,7 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             _session.Reset(promptTokens.AsSpan(0, written));
 
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-            var reply = Generate(in options, onText, constraint, out var generatedTokens);
+            var reply = Generate(promptTokens.AsSpan(0, written), in options, onText, constraint, out var generatedTokens);
             stopwatch.Stop();
             LastStats = new GenerationStats(
                 promptTokens: written,
@@ -182,6 +183,7 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
         }
 
         private string Generate(
+            ReadOnlySpan<int> promptTokens,
             in GenerationOptions options,
             Action<string>? onText,
             ITokenConstraint? constraint,
@@ -193,28 +195,28 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             var prevText = string.Empty;
             var sampling = options.Sampling;
             var maxNew = options.MaxNewTokens > 0 ? options.MaxNewTokens : int.MaxValue;
+            var stopOnEot = options.StopOnEndOfTextToken;          // hoisted: `in` params can't be captured by a local fn
+            var eotTokenId = options.EndOfTextTokenId;
 
-            // With sliding-window enabled the cache never overflows (oldest tokens roll off), so we
-            // bound generation by MaxNewTokens only; otherwise we stop when the context fills.
-            for (var i = 0; i < maxNew && (_slidingWindow || _session.CurrentPosition < _session.MaxContextLength); i++)
+            // Per-token handling shared by the single-token and speculative paths. Returns true when
+            // generation should stop (end-of-text, a completed stop sequence, or a closed constraint).
+            bool EmitToken(int token)
             {
-                var token = _session.GenerateNextToken(in sampling, constraint);
-
                 if (token == _tokenizer.EndOfTextTokenId ||
-                    (options.StopOnEndOfTextToken && options.EndOfTextTokenId >= 0 && token == options.EndOfTextTokenId))
+                    (stopOnEot && eotTokenId >= 0 && token == eotTokenId))
                 {
-                    break;
+                    return true;
                 }
 
                 generated.Add(token);
 
-                // Incremental detokenize: decode the whole run and emit only the newly
-                // stabilised suffix (byte-level BPE can leave a trailing partial codepoint
-                // until the next token arrives — hold it back rather than emit garbage).
+                // Incremental detokenize: decode the whole run and emit only the newly stabilised
+                // suffix (byte-level BPE can leave a trailing partial codepoint until the next token
+                // arrives — hold it back rather than emit garbage).
                 var full = _tokenizer.DecodeToString(CollectionsMarshal.AsSpan(generated));
                 if (full.Length <= prevText.Length || !full.StartsWith(prevText, StringComparison.Ordinal))
                 {
-                    continue;
+                    return false;
                 }
                 var delta = full[prevText.Length..];
                 prevText = full;
@@ -225,18 +227,59 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
                     reply.Append(emit);
                     onText?.Invoke(emit);
                 }
-                if (stops.Stopped)
-                {
-                    break;
-                }
 
                 // A structural constraint (tool call / JSON grammar) reports IsComplete the instant a
-                // complete root value closes. Stop there: the model would otherwise keep sampling the
-                // only tokens still left unmasked — trailing whitespace — up to MaxNewTokens, which both
-                // wastes ~MaxNewTokens decode steps and appends a junk whitespace tail to the output.
-                if (constraint is { IsComplete: true })
+                // complete root value closes — stop there rather than sample a junk whitespace tail up
+                // to MaxNewTokens. (Never set in the speculative path, which only runs unconstrained.)
+                return stops.Stopped || constraint is { IsComplete: true };
+            }
+
+            // Speculative fast path (prompt-lookup, adaptively gated): commits ≥1 token per batched
+            // verify, sampling-correct, and ~free when drafts don't fire — but it can't mask the draft
+            // against a per-token constraint, so it only runs unconstrained on a speculation-capable
+            // session. Everything else falls back to the exact single-token loop.
+            if (constraint is null && _session is CachedLlamaSession spec && spec.CanSpeculate)
+            {
+                const int maxDraft = 8;
+                var history = new List<int>(promptTokens.Length + Math.Min(maxNew, 4096));
+                foreach (var t in promptTokens)
                 {
-                    break;
+                    history.Add(t);
+                }
+                var committed = new int[maxDraft + 2];
+
+                while (generated.Count < maxNew &&
+                       (_slidingWindow || _session.CurrentPosition < _session.MaxContextLength))
+                {
+                    var n = spec.GenerateSpeculative(CollectionsMarshal.AsSpan(history), committed, in sampling, maxDraft);
+                    var stop = false;
+                    for (var c = 0; c < n; c++)
+                    {
+                        var token = committed[c];
+                        history.Add(token);
+                        if (EmitToken(token) || generated.Count >= maxNew)
+                        {
+                            stop = true;
+                            break;
+                        }
+                    }
+                    if (stop)
+                    {
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                // With sliding-window enabled the cache never overflows (oldest tokens roll off), so we
+                // bound generation by MaxNewTokens only; otherwise we stop when the context fills.
+                for (var i = 0; i < maxNew &&
+                     (_slidingWindow || _session.CurrentPosition < _session.MaxContextLength); i++)
+                {
+                    if (EmitToken(_session.GenerateNextToken(in sampling, constraint)))
+                    {
+                        break;
+                    }
                 }
             }
 
