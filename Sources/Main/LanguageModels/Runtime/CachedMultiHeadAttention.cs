@@ -264,11 +264,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             if (rope is not null)
             {
-                throw new NotSupportedException("Batched prefill does not support RoPE yet (F32/GPT-2 path only).");
+                throw new OverfitRuntimeException("Batched prefill does not support RoPE yet (F32/GPT-2 path only).");
             }
             if (weights.HasGqa)
             {
-                throw new NotSupportedException("Batched prefill does not support GQA yet (standard MHA only).");
+                throw new OverfitRuntimeException("Batched prefill does not support GQA yet (standard MHA only).");
             }
 
             var dModel = DModel;
@@ -296,7 +296,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ref readonly var head0 = ref weights.Head(0);
             if (head0.Wq.IsQuantized || head0.Wq.IsQ4K || head0.Wq.IsQ6K)
             {
-                throw new NotSupportedException("Batched prefill supports F32 attention weights only (quantized path is a follow-on).");
+                throw new OverfitRuntimeException("Batched prefill supports F32 attention weights only (quantized path is a follow-on).");
             }
 
             // Parallelise OVER HEADS (one dispatch for the whole layer), each head
@@ -408,6 +408,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var band = new float[rows * dModel];
             var score = new float[rows * cacheLength];
 
+            // Q8 KV cache: the batched attend reads F32, so dequantize the cached range once per group into
+            // this scratch (prefill is allocation-tolerant; the F32 cache path skips it entirely).
+            var kf = cache.IsQuantized ? new float[cacheLength * headDim] : null;
+            var vf = cache.IsQuantized ? new float[cacheLength * headDim] : null;
+
             for (var group = 0; group < KvHeadCount; group++)
             {
                 // K/V weights: GQA shares one KV head per group; MHA uses the head's own.
@@ -433,12 +438,23 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     {
                         RopeKernel.Apply(kg.AsSpan(n * headDim, headDim), rope, basePosition + n + ropeBase);
                     }
-                    kg.AsSpan(n * headDim, headDim).CopyTo(cache.GetKeyWriteSpan(layerIndex, group, basePosition + n));
-                    vg.AsSpan(n * headDim, headDim).CopyTo(cache.GetValueWriteSpan(layerIndex, group, basePosition + n));
+                    cache.WriteKey(layerIndex, group, basePosition + n, kg.AsSpan(n * headDim, headDim));
+                    cache.WriteValue(layerIndex, group, basePosition + n, vg.AsSpan(n * headDim, headDim));
                 }
 
-                var keys = cache.GetKeyReadSpan(layerIndex, group, fromPosition: 0, length: cacheLength);
-                var values = cache.GetValueReadSpan(layerIndex, group, fromPosition: 0, length: cacheLength);
+                ReadOnlySpan<float> keys, values;
+                if (cache.IsQuantized)
+                {
+                    cache.DequantizeKeyRange(layerIndex, group, fromPosition: 0, length: cacheLength, kf!);
+                    cache.DequantizeValueRange(layerIndex, group, fromPosition: 0, length: cacheLength, vf!);
+                    keys = kf!;
+                    values = vf!;
+                }
+                else
+                {
+                    keys = cache.GetKeyReadSpan(layerIndex, group, fromPosition: 0, length: cacheLength);
+                    values = cache.GetValueReadSpan(layerIndex, group, fromPosition: 0, length: cacheLength);
+                }
 
                 for (var hg = 0; hg < groupSize; hg++)
                 {
@@ -501,8 +517,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
                 for (var n = 0; n < rows; n++)
                 {
-                    kh.Slice(n * headDim, headDim).CopyTo(ctx.Cache.GetKeyWriteSpan(layer, h, basePos + n));
-                    vh.Slice(n * headDim, headDim).CopyTo(ctx.Cache.GetValueWriteSpan(layer, h, basePos + n));
+                    ctx.Cache.WriteKey(layer, h, basePos + n, kh.Slice(n * headDim, headDim));
+                    ctx.Cache.WriteValue(layer, h, basePos + n, vh.Slice(n * headDim, headDim));
                 }
 
                 var keys = ctx.Cache.GetKeyReadSpan(layer, h, fromPosition: 0, length: cacheLength);

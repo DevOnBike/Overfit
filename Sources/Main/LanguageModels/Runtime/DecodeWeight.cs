@@ -133,7 +133,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 return;
             }
 
-            throw new InvalidOperationException("DequantizeRow on an empty DecodeWeight.");
+            throw new OverfitRuntimeException("DequantizeRow on an empty DecodeWeight.");
         }
 
         /// <summary>
@@ -147,7 +147,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             if (_q4k is not null) { return _q4k; }
             if (_q6k is not null) { return _q6k; }
             if (_q8 is not null) { return _q8; }
-            throw new InvalidOperationException(
+            throw new OverfitRuntimeException(
                 "DecodeWeight.AsRowSource requires a quantized (Q4_K/Q6_K/Q8_0) backing; F32 is not a frozen-quant source.");
         }
 

@@ -122,9 +122,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             return best;
         }
 
-        private static System.Collections.Generic.List<AutogradNode> ToList(System.Collections.Generic.IEnumerable<AutogradNode> e)
+        private static List<AutogradNode> ToList(IEnumerable<AutogradNode> e)
         {
-            var l = new System.Collections.Generic.List<AutogradNode>();
+            var l = new List<AutogradNode>();
             foreach (var x in e) { l.Add(x); }
             return l;
         }

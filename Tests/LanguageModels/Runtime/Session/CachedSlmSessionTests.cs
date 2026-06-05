@@ -98,7 +98,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Session
 
             var sampling = SamplingOptions.Greedy;
 
-            Assert.Throws<InvalidOperationException>(() =>
+            Assert.Throws<OverfitRuntimeException>(() =>
                 session.GenerateNextToken(in sampling));
         }
 
@@ -175,7 +175,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Session
                 sampling: SamplingOptions.Greedy,
                 stopOnEndOfTextToken: false);
 
-            Assert.Throws<InvalidOperationException>(() =>
+            Assert.Throws<OverfitRuntimeException>(() =>
                 session.Generate(
                     promptTokens: [1, 2, 3, 4],
                     outputTokens: output,

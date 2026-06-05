@@ -339,15 +339,15 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             using var fs = File.OpenRead(path);
             using var br = new BinaryReader(fs);
-            if (br.ReadUInt32() != AdapterMagic) { throw new InvalidDataException("Not an Overfit Llama adapter file."); }
+            if (br.ReadUInt32() != AdapterMagic) { throw new OverfitFormatException("Not an Overfit Llama adapter file."); }
             var version = br.ReadInt32();
-            if (version != AdapterVersion) { throw new InvalidDataException($"Unsupported adapter version {version}."); }
+            if (version != AdapterVersion) { throw new OverfitFormatException($"Unsupported adapter version {version}."); }
             var nLayers = br.ReadInt32();
             var dModel = br.ReadInt32();
             var vocab = br.ReadInt32();
             if (nLayers != _blocks.Length || dModel != _dModel || vocab != _vocab)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Adapter architecture mismatch (file {nLayers}L/{dModel}d/{vocab}v vs model {_blocks.Length}L/{_dModel}d/{_vocab}v).");
             }
 
@@ -355,7 +355,7 @@ namespace DevOnBike.Overfit.DeepLearning
             var count = br.ReadInt32();
             if (count != ps.Count)
             {
-                throw new InvalidDataException($"Adapter parameter count mismatch ({count} vs {ps.Count}) — different LoRA targets/rank.");
+                throw new OverfitFormatException($"Adapter parameter count mismatch ({count} vs {ps.Count}) — different LoRA targets/rank.");
             }
             foreach (var p in ps)
             {
@@ -363,7 +363,7 @@ namespace DevOnBike.Overfit.DeepLearning
                 var dst = p.DataView.AsSpan();
                 if (len != dst.Length)
                 {
-                    throw new InvalidDataException($"Adapter tensor length mismatch ({len} vs {dst.Length}).");
+                    throw new OverfitFormatException($"Adapter tensor length mismatch ({len} vs {dst.Length}).");
                 }
                 br.BaseStream.ReadExactly(MemoryMarshal.AsBytes(dst));
             }

@@ -53,7 +53,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             if (!config.PreLayerNorm)
             {
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                     "CachedGpt1ModelAdapter currently supports Pre-LN GPT blocks only.");
             }
 
@@ -215,7 +215,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
             if (_cache.CurrentLength + n > MaxContextLength)
             {
-                throw new InvalidOperationException(
+                throw new OverfitRuntimeException(
                     $"Batched prefill of {n} tokens would exceed MaxContextLength {MaxContextLength}.");
             }
 
@@ -244,7 +244,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             if (_cache.IsFull)
             {
-                throw new InvalidOperationException(
+                throw new OverfitRuntimeException(
                     $"Cannot decode next token because KV cache is full. MaxContextLength={MaxContextLength}.");
             }
 
@@ -300,7 +300,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             if (source.Length != destination.Length)
             {
-                throw new InvalidOperationException(
+                throw new OverfitRuntimeException(
                     $"Source length {source.Length} does not match destination length {destination.Length}.");
             }
 

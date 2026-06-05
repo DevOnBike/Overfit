@@ -93,7 +93,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         {
             var bytes = new byte[16];
             BinaryPrimitives.WriteUInt64LittleEndian(bytes, 9999);  // > file length
-            Assert.Throws<InvalidDataException>(() => new SafetensorsReader(new MemoryStream(bytes), ownsStream: true));
+            Assert.Throws<OverfitFormatException>(() => new SafetensorsReader(new MemoryStream(bytes), ownsStream: true));
         }
 
         // ── Builds an in-memory safetensors blob matching Header ────────────

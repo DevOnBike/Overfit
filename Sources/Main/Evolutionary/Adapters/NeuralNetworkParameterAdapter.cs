@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 DevOnBike.
+// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -73,7 +73,7 @@ namespace DevOnBike.Overfit.Evolutionary.Adapters
             {
                 if (parameter is null)
                 {
-                    throw new InvalidOperationException(
+                    throw new OverfitRuntimeException(
                         $"Module produced a null parameter at index {index}.");
                 }
 

@@ -144,7 +144,7 @@ namespace DevOnBike.Overfit.LanguageModels.Memory
                 case "system": _chat.AddSystem(m.Content); break;
                 case "user": _chat.AddUser(m.Content); break;
                 case "assistant": _chat.AddAssistant(m.Content); break;
-                default: throw new InvalidOperationException($"Unknown chat role '{m.Role}'.");
+                default: throw new OverfitRuntimeException($"Unknown chat role '{m.Role}'.");
             }
         }
     }

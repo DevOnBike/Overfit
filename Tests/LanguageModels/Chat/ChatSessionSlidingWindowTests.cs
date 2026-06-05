@@ -49,7 +49,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Chat
         public void SlidingRequested_OnUnsupportedSession_ThrowsAtConstruction()
         {
             var session = new FakeSession(maxContext: 4, supportsSliding: false);
-            Assert.Throws<NotSupportedException>(() =>
+            Assert.Throws<OverfitRuntimeException>(() =>
                 new ChatSession(session, new FakeTokenizer(), ChatMl, stopSequences: null, slidingWindow: true));
         }
 
@@ -75,7 +75,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Chat
 
             public void EnableSlidingWindow(int evictBlock = 0)
             {
-                if (!_supports) { throw new NotSupportedException("fake: no sliding"); }
+                if (!_supports) { throw new OverfitRuntimeException("fake: no sliding"); }
                 SlidingEnabledCalled = true;
             }
 

@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 DevOnBike.
+// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -225,7 +225,7 @@ namespace DevOnBike.Overfit.Evolutionary.Storage
         ///     Loads an archive snapshot previously written by <see cref="Save"/>.
         ///     The receiving archive's shape (parameter count, descriptor dimensions,
         ///     bins per dimension, descriptor bounds) must exactly match the saved
-        ///     blob — otherwise an <see cref="InvalidDataException"/> is thrown.
+        ///     blob — otherwise an <see cref="OverfitFormatException"/> is thrown.
         ///     Any prior contents of the archive are discarded.
         /// </summary>
         public void Load(BinaryReader reader)
@@ -236,28 +236,28 @@ namespace DevOnBike.Overfit.Evolutionary.Storage
             var magic = reader.ReadUInt32();
             if (magic != SaveMagic)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Not a GridEliteArchive snapshot — magic header 0x{magic:X8} does not match expected 0x{SaveMagic:X8}.");
             }
 
             var schemaVersion = reader.ReadInt32();
             if (schemaVersion != SaveSchemaVersion)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"GridEliteArchive snapshot schema version {schemaVersion} is not supported by this build (expected {SaveSchemaVersion}). There is no automatic migration; retrain to produce a fresh snapshot.");
             }
 
             var parameterCount = reader.ReadInt32();
             if (parameterCount != _parameterCount)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Snapshot parameterCount={parameterCount} does not match this archive's parameterCount={_parameterCount}.");
             }
 
             var descriptorDimensions = reader.ReadInt32();
             if (descriptorDimensions != DescriptorDimensions)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Snapshot descriptorDimensions={descriptorDimensions} does not match this archive's DescriptorDimensions={DescriptorDimensions}.");
             }
 
@@ -266,7 +266,7 @@ namespace DevOnBike.Overfit.Evolutionary.Storage
                 var bins = reader.ReadInt32();
                 if (bins != _binsPerDimension[d])
                 {
-                    throw new InvalidDataException(
+                    throw new OverfitFormatException(
                         $"Snapshot bins[{d}]={bins} does not match archive bins[{d}]={_binsPerDimension[d]}.");
                 }
             }
@@ -276,7 +276,7 @@ namespace DevOnBike.Overfit.Evolutionary.Storage
                 var min = reader.ReadSingle();
                 if (min != _descriptorMin[d])
                 {
-                    throw new InvalidDataException(
+                    throw new OverfitFormatException(
                         $"Snapshot descriptorMin[{d}]={min} does not match archive descriptorMin[{d}]={_descriptorMin[d]}.");
                 }
             }
@@ -286,7 +286,7 @@ namespace DevOnBike.Overfit.Evolutionary.Storage
                 var max = reader.ReadSingle();
                 if (max != _descriptorMax[d])
                 {
-                    throw new InvalidDataException(
+                    throw new OverfitFormatException(
                         $"Snapshot descriptorMax[{d}]={max} does not match archive descriptorMax[{d}]={_descriptorMax[d]}.");
                 }
             }
@@ -294,7 +294,7 @@ namespace DevOnBike.Overfit.Evolutionary.Storage
             var cellCount = reader.ReadInt32();
             if (cellCount != CellCount)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Snapshot cellCount={cellCount} does not match archive CellCount={CellCount}.");
             }
 
@@ -307,7 +307,7 @@ namespace DevOnBike.Overfit.Evolutionary.Storage
 
             if ((uint)_occupiedCount > (uint)CellCount)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Snapshot occupiedCount={_occupiedCount} exceeds cellCount={CellCount}.");
             }
 
@@ -316,7 +316,7 @@ namespace DevOnBike.Overfit.Evolutionary.Storage
                 var cellIdx = reader.ReadInt32();
                 if ((uint)cellIdx >= (uint)CellCount)
                 {
-                    throw new InvalidDataException(
+                    throw new OverfitFormatException(
                         $"Snapshot occupiedCells[{i}]={cellIdx} is out of range for cellCount={CellCount}.");
                 }
                 _occupiedCells[i] = cellIdx;

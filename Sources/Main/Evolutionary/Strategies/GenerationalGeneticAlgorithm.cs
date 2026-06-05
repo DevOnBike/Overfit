@@ -336,7 +336,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
         {
             if (eliteIndices.Length == 0)
             {
-                throw new InvalidOperationException("Elite set cannot be empty.");
+                throw new OverfitRuntimeException("Elite set cannot be empty.");
             }
 
             if (_crossoverOperator is null)
@@ -420,7 +420,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
         {
             if ((uint)index >= (uint)PopulationSize)
             {
-                throw new InvalidOperationException($"Invalid genome index: {index}.");
+                throw new OverfitRuntimeException($"Invalid genome index: {index}.");
             }
         }
 
@@ -498,7 +498,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
             if (magic != CheckpointMagic)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Expected magic 0x{CheckpointMagic:X8}, found 0x{magic:X8}. Stream was not produced by GenerationalGeneticAlgorithm.");
             }
 
@@ -506,7 +506,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
             if (schemaVersion is not 1 and not 2)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Unsupported schema version {schemaVersion}; this build supports 1 and {CheckpointSchemaVersion}.");
             }
 
@@ -516,7 +516,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
             if (populationSize != PopulationSize || parameterCount != ParameterCount || eliteCount != _eliteCount)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Checkpoint was produced for ({populationSize}, {parameterCount}, elite={eliteCount}); " +
                     $"current instance is ({PopulationSize}, {ParameterCount}, elite={_eliteCount}).");
             }

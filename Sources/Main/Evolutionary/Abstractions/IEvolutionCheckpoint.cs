@@ -19,7 +19,7 @@ namespace DevOnBike.Overfit.Evolutionary.Abstractions
     ///     <para>
     ///         Checkpoints capture the observable state of the algorithm: population or mean
     ///         vector, generation counter, best-candidate tracking. They do NOT capture the
-    ///         internal state of the <see cref="System.Random"/> instance — after
+    ///         internal state of the <see cref="System.Random"/> instance ï¿½ after
     ///         <see cref="Load"/> the RNG restarts from a fresh seed. Evolutionary training
     ///         is inherently stochastic, so this is a deliberate simplification rather than a
     ///         correctness issue: a resumed run is statistically equivalent to continuing the
@@ -42,7 +42,7 @@ namespace DevOnBike.Overfit.Evolutionary.Abstractions
 
         /// <summary>
         ///     Reads algorithm state from the given <see cref="BinaryReader"/>, overwriting
-        ///     the current in-memory state. Throws <see cref="InvalidDataException"/> if the
+        ///     the current in-memory state. Throws <see cref="OverfitFormatException"/> if the
         ///     stream's header does not match this algorithm or its configuration (population
         ///     size, parameter count, algorithm identifier).
         /// </summary>

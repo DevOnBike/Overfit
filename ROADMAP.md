@@ -35,6 +35,85 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 
 ---
 
+## Adoption / launch roadmap (2026-06-04, ROI-ranked)
+
+Strategic frame: Overfit wins on **.NET in-process deployment + training moat**, NOT raw tok/s
+(raw-perf is hygiene = bottom of this list, consistent with the "stop chasing decode" pivot). Ranked by
+adoption ROI. **Current execution order (user, 2026-06-04): #2 (OpenAI API) now → then #1 (M.E.AI adapter).**
+Q8-KV (a perf/RAM item, adjacent to #12) is checkpointed mid-build (store + dual-mode `KeyValueCache` +
+write-sites done, F32 bit-identical) — resumed later, NOT a launch blocker.
+
+| # | Feature | ROI | State / note |
+|--:|---------|----:|--------------|
+| 1 | **Microsoft.Extensions.AI adapter** (`IChatClient` / `IEmbeddingGenerator` over `ChatSession` + `SentenceEmbedder`) | 10/10 | **NEXT after #2.** Smallest effort / biggest reach — drop-in for the whole .NET AI ecosystem (Semantic Kernel, anything on M.E.AI). This IS the in-process moat exposed through the standard interface. |
+| 2 | **OpenAI-compatible API** (`/v1/chat/completions`, `/v1/embeddings`, SSE) | 9.5/10 | **IN PROGRESS (2026-06-04).** Opens HTTP tooling (LangChain, SK, OpenAI clients, UIs). Table-stakes parity with dotLLM. Build on `Demo/Overfit.LocalAgent.AspNet`. |
+| 3 | **JSON-Schema constrained output** (required / enum / typed fields) | 9/10 | **PARTIALLY DONE** — `JsonGrammarConstraint` (well-formed JSON) + `ToolCallConstraint` exist; the GAP is full *schema conformance* (required fields, enums, type coercion). Steal dotLLM's `JsonSchemaConstraint` (FirstCharBuckets + LRU mask cache). |
+| 4 | **Production LocalAgent template** (auth, audit logs, model hash, retrieved sources, tool-call logs, `/healthz` `/readyz` `/metrics`, Dockerfile) | 8.8/10 | Phase-1 walking skeleton exists (`/health` `/chat` `/reset`); this is productionization → sellable PoC. Maps to COMMERCIAL.md "Private .NET RAG/Agent PoC". |
+| 5 | **RAG Stability Harness + Corpus Linter** (expected-source tests, paraphrase stability, false-premise traps) | 8.5/10 → **bump above #2 as a DIFFERENTIATOR** | "RAG is *testable*" — a genuine differentiator (not table-stakes), plays to our empirical-rigor DNA + COMMERCIAL.md "Zero-GC inference audit". Few competitors sell RAG testability. **✅ Increment 1 DONE 2026-06-05** — `LanguageModels.Retrieval.Evaluation`: `RagEvaluator` (`EvaluateRetrieval` recall@K + MRR, `EvaluateParaphraseStability` mean pairwise Jaccard, `EvaluateFalsePremise` grounded-threshold traps) + `CorpusLinter` (`FindNearDuplicates`, `FindOrphans`) over the existing `VectorStore`/`SentenceEmbedder`; pure/deterministic, 7 model-free fast tests prove "RAG is testable" in CI. Follow-on: contradiction/short-doc lint, an xUnit-friendly assertion façade, wire into the demo + a `docs/rag-testing.md`. |
+| 6 | **Persistent vector store** (SQLite / file-backed) | 8/10 | In-memory `VectorStore` → restart without re-indexing. (DiskLLM persistence conversation resonates here.) |
+| 7 | `dotnet new overfit-agent` template | 7.8/10 | Cheap once #4 exists. Open-source adoption lubricant. |
+| 8 | **Model/profile manager CLI** (`overfit models download bielik`) | 7.5/10 | ollama-style. On the dotLLM steal-list. Onboarding friction. |
+| 9 | **QLoRA CPU fine-tuning** | 7/10 build, **10/10 as moat-positioning** | Already SHIPPED. Don't build more — *lead the messaging* with it (the one thing llama.cpp structurally can't do); sell RAG/JSON as the entry. |
+| 10 | Whisper / speech-to-text vertical | 6.8/10 | Done; separate launch, not core adoption. |
+| 11 | Interpretability / inference hooks | 5.5/10 | Cool, slow market. dotLLM's is a stub → we could *lead* here, but it's credibility not revenue. |
+| 12 | Chasing raw tok/s vs llama.cpp | 4/10 | Hygiene, not product. Consistent with the strategic pivot. Q8-KV lives near here (RAM angle is mildly above pure tok/s). |
+
+**Adjustments vs the source ranking (the "points 1 & 3" update):** #1 confirmed as the single best first move;
+#3 reclassified PARTIALLY-DONE (schema-conformance is the only gap); #5 flagged to bump above #2 (differentiator
+> table-stakes); #9 split into build-priority (mid, it's shipped) vs moat-positioning (top).
+
+### What else to steal from dotLLM (launch-relevant, beyond the earlier full inventory)
+
+Already matched/exceeded (don't redo): SIMD RoPE, gate+up fusion, decode worker-cap, spin-pool, repacked Q4_K
+GEMV, prompt-lookup speculative, GGUF/chat-template. NEW launch-relevant steals, in adoption order:
+- **`JsonSchemaConstraint` + `TokenMask` bit-vector + FirstCharBuckets/LRU** (`Constraints/`) → powers #3. Their
+  per-state mask cache + first-char bucket prune (~99% vocab rejected before any parser copy) is the hot-path trick.
+- **OpenAI DTO surface + SSE streaming + logprobs endpoint** (`DotLLM.Server/Endpoints/ChatCompletionEndpoint.cs`)
+  → the exact shape for #2 (note: their server is sequential per-request, NO continuous batching — we're not behind).
+- **`PrefixCache`** (system-prompt KV reuse) — we have `KvCacheSnapshot`; their server-level prefix cache is the
+  wiring pattern for multi-request reuse.
+- **Composable sampling pipeline** (`ISamplerStep` / `ILogitProcessor`) — cleaner than our monolithic
+  `SamplingOptions`; nice-to-have for extensibility once the API exists.
+- **`System.Diagnostics.Metrics` + `Activity` telemetry** (`Telemetry/`) → feeds #4's `/metrics` + the audit story.
+- **Model-management CLI** (HF pull/search/list, Spectre.Console TUI) → #8.
+
+### UPDATE 2026-06-05 — status + new ideas
+
+**DONE since the table above:** #1 M.E.AI adapter (NuGet `DevOnBike.Overfit.Extensions.AI`), #2 OpenAI API
+(`/v1/chat/completions`+SSE, `/v1/embeddings`, `/v1/models`, `response_format`), #3 JSON-Schema constrained output
+(full subsystem + wired into demo `/chat/json` + OpenAI). Plus regex-constrained decoding + composable sampling
+pipeline (additive). All on branch `bilbo`, validated on real Qwen3B/MiniLM.
+
+**▶ #0 SHIP IT (consolidation/release — highest leverage NOW, before more features).** The branch has a large
+unmerged, terse-committed ("bilbo" ×N), top-level-undocumented feature set. Risk = infinite feature-build, never
+launch. Steps: rewrite the "bilbo" commits into descriptive ones → merge `bilbo`→`main` (main far behind at
+`3059fdc`) → NuGet release (version bump + the new `.Extensions.AI` package) → top-level README/docs for the new
+surface (structured outputs, OpenAI-compat, M.E.AI) → refresh the staged `linkedin-*.md`/`launch-copy.md` (they now
+have much more to say).
+
+**▶ #8 ELEVATED — global `overfit` dotnet tool (the "ollama moment" — user-flagged 2026-06-05 as the onboarding
+play).** A `PackAsTool=true` global CLI: `dotnet tool install -g DevOnBike.Overfit.Cli`, then
+`overfit pull qwen2.5-3b` (HF GGUF download + progress → cache `~/.overfit/models`, known aliases qwen/bielik/...),
+`overfit list`, `overfit chat <model>` (interactive REPL over `OverfitClient`), `overfit serve <model>` (start the
+OpenAI-compatible server). Removes the demo's biggest friction (manual GGUF download + ModelPath config). NOTE: to
+make `overfit serve` reusable, the OpenAI endpoints (`OpenAiEndpoints`) should move from the demo into a shared
+lib/the CLI; need a C# HF downloader (HTTP resolve repo→file→stream, the demo's `download-*.cmd` are curl scripts).
+This is the single best **open-source adoption lubricant** — ties loaders + OverfitClient + the OpenAI server into
+one turnkey entry point.
+
+**New technical follow-ons (half-built / deferred):** Q8-KV decode wiring (store ready → RAM + long-context win);
+**token healing** (engine-level: re-tokenize boundary + KV rollback → makes constrained/structured output
+bulletproof on arbitrary schemas, fixes the BPE dead-end that 2-lite only graceful-stops); wired sampling-pipeline
+(replace `TokenSampler`); **GBNF grammar constraint** (CFG → SQL/DSL constrained output, the general engine);
+continuous/in-flight batching for serving (dotLLM only PLANS it → we could lead).
+
+**Bolder new directions:** **persistent KV-cache to disk → cross-session resume** (`KvCacheSnapshot` exists; persist
+to disk = resume a conversation after process restart — a genuine novelty from the DiskLLM conversation, pairs with
+the embeddable identity); QLoRA "teach your model a fact" marketing showpiece (already works — the "Tarnholm" demo);
+inference hooks / pure-.NET-CPU interpretability (dotLLM's is a stub → lead, credibility play).
+
+---
+
 ## Nearest plan — llama.cpp competitive gaps (2026-05-25)
 
 Gap analysis vs llama.cpp, ranked through the strategic frame (NOT chasing decode speed; build the
@@ -211,7 +290,16 @@ The previous ROADMAP wording ("honest ceiling 2-2.5×, not parity") reflected th
 ### Phase 1 (~1 week) — parity with llama.cpp (~28 tok/s)
 
 - [ ] **1a. MHA consolidation** (2-3 days, **highest-confidence single lever**) — collapse `MultiHeadAttentionLayer`'s per-head `Wq/Wk/Wv/Wo[i]` ([dModel × dHead] each, 16 of them) into one combined matrix per projection (`[dModel × dModel]`). A single contiguous GEMV [2048 × 2048] with sequential writeback prefetches ~10× better than 16 × [2048 × 128] fragmented per-head GEMVs (per-head fragmentation thrashes the L2). This is **Lever D** from the existing ROADMAP attention-layout analysis, with the BW efficiency estimate 55 % → ~75 %. **Expected**: +50 % tok/s (17 → ~25-26). Breaking API change for per-head accessors; LoRA hooks need migration; converters for existing checkpoints stay backward-compatible (concat on load).
-- [ ] **1b. Q8_0 KV cache** (2 days) — KV cache currently F16 (2 B/elem); migrate to Q8_0 (1 B/elem + scale). Attention's K/V reads are the dominant memory traffic on decode; cutting KV BW by ~2× gives ~10-15 % tok/s and **~50 % RAM savings on KV** (Qwen-3B ctx 4096: ~600 MB → ~150 MB). Reuses existing `Q8Weight` infra. Quantize-on-write, dequant in the SIMD hot path.
+- [x] **1b. Q8 KV cache — DONE + wired 2026-06-05.** `KvCacheDType.Q8` stores each cached K/V vector as
+  per-vector symmetric int8 + one F32 scale (`Q8KvQuant`) — ~4× smaller KV storage and attention read traffic.
+  Opt-in via `CreateSession(ctx, KvCacheDType.Q8)` or `OVERFIT_KV_DTYPE=q8` (default F32 unchanged, bit-identical,
+  suite 1126/0). Wiring: writes quantize through `KeyValueCache.WriteKey`; the single-token decode hot path
+  (`CachedSingleHeadAttention.AttendFromCache`) attends int8 directly via
+  `CachedAttentionKernel.ComputeSingleHeadQ8` (0-alloc preserved); batched prefill (`DecodeBatchedQuant`)
+  dequantizes the range to an F32 scratch and reuses the proven F32 kernel; `SingleTokenProjectionKernel` writes
+  made mode-agnostic. Int8 round-trip is cosine ≈ 1, not bit-identical → greedy decode stays coherent
+  (**validated on real Qwen2.5-0.5B: F32 → "Paris", Q8 → "Paris"**; `Q8KvCacheCoherenceTests` [LongFact]).
+  Value is **RAM / long-context**, not tok/s. Snapshot/RestoreFrom stay F32-only (prefix-cache reuse).
 
 **Phase 1 total**: 17 → ~28-29 tok/s = **parity with llama.cpp**. Both items are well-understood, no native deps, AOT-clean.
 

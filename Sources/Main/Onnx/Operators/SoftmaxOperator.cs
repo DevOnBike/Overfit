@@ -37,7 +37,7 @@ namespace DevOnBike.Overfit.Onnx.Operators
 
                 if (normalisedAxis != rank - 1)
                 {
-                    throw new NotSupportedException(
+                    throw new OverfitRuntimeException(
                         $"Softmax: only axis=-1 (last dimension) is supported, got axis={axis} " +
                         $"(rank={rank}, normalised={normalisedAxis}).");
                 }

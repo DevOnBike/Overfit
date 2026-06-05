@@ -42,7 +42,7 @@ namespace DevOnBike.Overfit.Tests.Monitoring
         public void Load_WhenEmptyFile_ThenThrowsInvalidDataException()
         {
             using var reader = new StringReader("");
-            Assert.Throws<InvalidDataException>(
+            Assert.Throws<OverfitFormatException>(
             () => HistoricalCsvLoader.Load(reader, out _));
         }
 
@@ -50,7 +50,7 @@ namespace DevOnBike.Overfit.Tests.Monitoring
         public void Load_WhenHeaderMissingColumns_ThenThrowsInvalidDataException()
         {
             using var reader = new StringReader("timestamp,pod_name\n2026-04-03T10:00:00Z,pod-1");
-            Assert.Throws<InvalidDataException>(
+            Assert.Throws<OverfitFormatException>(
             () => HistoricalCsvLoader.Load(reader, out _));
         }
 

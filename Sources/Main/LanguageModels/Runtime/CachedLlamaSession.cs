@@ -112,7 +112,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ThrowIfDisposed();
             if (_rope is null)
             {
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                     "Sliding-window eviction requires a RoPE model; learned absolute-position models cannot slide without re-embedding.");
             }
             _slidingWindow = true;
@@ -192,7 +192,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 if (_cache.IsFull && !_slidingWindow)
                 {
-                    throw new InvalidOperationException(
+                    throw new OverfitRuntimeException(
                         $"Prefill of {promptTokens.Length} tokens would exceed ContextLength {_config.ContextLength} " +
                         $"(current position {Position}).");
                 }
@@ -263,13 +263,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             if (_cache.IsFull && !_slidingWindow)
             {
-                throw new InvalidOperationException(
+                throw new OverfitRuntimeException(
                     $"KV cache is full (ContextLength={_config.ContextLength}). Start a new session.");
             }
 
             if (Position == 0)
             {
-                throw new InvalidOperationException(
+                throw new OverfitRuntimeException(
                     "Session is empty. Call Reset with at least one prompt token first.");
             }
 
@@ -286,6 +286,46 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             DecodeProfiler.EndToken();
             return token;
         }
+
+        /// <summary>
+        /// Forced decode of a known token (no sampling): advances the KV cache by <paramref name="token"/>
+        /// and refreshes <c>_logits</c> to predict the token after it. Used by draft-model speculative
+        /// decoding to condition a draft session on tokens the target chose (and to re-apply a correction).
+        /// </summary>
+        internal void Feed(int token)
+        {
+            ThrowIfDisposed();
+            if (_cache.IsFull && !_slidingWindow)
+            {
+                throw new OverfitRuntimeException(
+                    $"KV cache is full (ContextLength={_config.ContextLength}). Start a new session.");
+            }
+            if (Position == 0)
+            {
+                throw new OverfitRuntimeException("Session is empty. Call Reset with a prompt first.");
+            }
+            DecodeToken(token);
+        }
+
+        /// <summary>
+        /// Rolls the KV cache back to <paramref name="length"/> positions (drops later K/V) — used by
+        /// draft-model speculative decoding to discard a draft session's rejected proposal tokens.
+        /// </summary>
+        internal void RollbackTo(int length) => _cache.TruncateTo(length);
+
+        // ── Adaptive speculative gating state (see GenerateSpeculative) ──
+        private const double SpecGateThreshold = 3.0;  // committed-per-verify break-even ≈ 3.5; gate below it
+        private const double SpecEmaAlpha = 0.5;       // EMA responsiveness — fast so it gates after a few rejects
+        private const int SpecProbeInterval = 64;      // while gated, draft once every N steps to re-detect echo
+        private double _specAcceptEma;                 // start pessimistic (0 → gated): single-token until a probe
+                                                       // proves drafting pays. Novel text (chat) stays ≈ 1× — one
+                                                       // probe per SpecProbeInterval; repetitive text ramps up fast.
+        private int _specProbeCountdown;               // 0 → the first step probes immediately
+
+        /// <summary>True when this session can run speculative decoding (SwiGLU FFN, non-sliding) — lets a
+        /// generate loop pick the speculative path. <c>GenerateSpeculative</c> also falls back to a
+        /// single-token step internally when this is false, so calling it is always safe.</summary>
+        public bool CanSpeculate => !_slidingWindow && _config.FfnActivation == FeedForwardActivation.SwiGLU;
 
         /// <summary>Greedy speculative-decode step (overload of <see cref="GenerateSpeculative(ReadOnlySpan{int}, Span{int}, in SamplingOptions, int, int, int)"/>).</summary>
         public int GenerateSpeculative(
@@ -316,6 +356,29 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int maxDraft = 4,
             int ngramMin = 1,
             int ngramMax = 3)
+            => GenerateSpeculativeCore(history, committed, in sampling, maxDraft, ngramMin, ngramMax, drafter: null);
+
+        /// <summary>
+        /// Draft-MODEL speculative overload: proposals come from <paramref name="drafter"/> (a small draft
+        /// model) instead of prompt-lookup, so speculation wins on NOVEL text too. Same verify /
+        /// accept-or-resample machinery; the drafter keeps its own KV in lockstep via its Sync callback.
+        /// </summary>
+        internal int GenerateSpeculative(
+            ReadOnlySpan<int> history,
+            Span<int> committed,
+            in SamplingOptions sampling,
+            int maxDraft,
+            ISpeculativeDrafter drafter)
+            => GenerateSpeculativeCore(history, committed, in sampling, maxDraft, ngramMin: 1, ngramMax: 3, drafter: drafter);
+
+        private int GenerateSpeculativeCore(
+            ReadOnlySpan<int> history,
+            Span<int> committed,
+            in SamplingOptions sampling,
+            int maxDraft,
+            int ngramMin,
+            int ngramMax,
+            ISpeculativeDrafter? drafter)
         {
             ThrowIfDisposed();
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxDraft);
@@ -325,7 +388,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
             if (Position == 0)
             {
-                throw new InvalidOperationException("Session is empty. Call Reset with a prompt first.");
+                throw new OverfitRuntimeException("Session is empty. Call Reset with a prompt first.");
             }
 
             var dModel = _config.DModel;
@@ -337,9 +400,33 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var canSpeculate = !_slidingWindow
                 && _config.FfnActivation == FeedForwardActivation.SwiGLU
                 && maxDraft > 0;
+
+            // Adaptive gating: a verify forward only pays off if it commits enough tokens to beat its
+            // (batch = 1 + dn) cost — break-even is ≈ 3.5 committed/verify on this path. We track an EMA of
+            // committed tokens per VERIFY step; once it drops below the threshold (novel text → drafts get
+            // rejected), suppress drafting and fall back to single-token steps so speculative never
+            // underperforms plain decode. A periodic probe re-enables drafting if the output turns
+            // repetitive/structured again (RAG, summarization, code — where it wins).
+            var gated = _specAcceptEma < SpecGateThreshold;
+            var probe = false;
+            if (gated)
+            {
+                if (_specProbeCountdown > 0) { _specProbeCountdown--; }
+                else { probe = true; _specProbeCountdown = SpecProbeInterval; }
+            }
+
             var dn = 0;
             Span<int> draft = stackalloc int[maxDraft];
-            if (canSpeculate)
+            if (drafter is not null)
+            {
+                // Draft-MODEL path: always propose (a model predicts, so the echo-detection gate doesn't
+                // apply); the drafter keeps its own KV in lockstep via Sync at the commit points below.
+                if (canSpeculate)
+                {
+                    dn = drafter.Draft(t0, draft);
+                }
+            }
+            else if (canSpeculate && (!gated || probe))
             {
                 var anchor = new int[history.Length + 1];
                 history.CopyTo(anchor);
@@ -354,6 +441,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 // No draft (or no room for verify + the bonus forward): a plain single-token step.
                 committed[0] = t0;
                 DecodeToken(t0);
+                drafter?.Sync(committed.Slice(0, 1));
                 return 1;
             }
 
@@ -411,7 +499,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _cache.TruncateTo(basePosition + 1 + accepted);
             committed[1 + accepted] = correction;
             DecodeToken(correction);
-            return 2 + accepted;
+
+            // Feed the verify outcome back into the adaptive gate: committed tokens this step (= 2 + accepted).
+            var committedThisStep = 2 + accepted;
+            drafter?.Sync(committed.Slice(0, committedThisStep));
+            _specAcceptEma = SpecEmaAlpha * committedThisStep + (1 - SpecEmaAlpha) * _specAcceptEma;
+            return committedThisStep;
         }
 
         /// <summary>
@@ -490,7 +583,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             if (Position == 0)
             {
-                throw new InvalidOperationException(
+                throw new OverfitRuntimeException(
                     "Session is empty. Call Reset with at least one prompt token first.");
             }
 

@@ -45,6 +45,14 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
         public readonly bool IsComplete =>
             _depth == 0 && (_phase == Phase.Done || (_phase == Phase.InNumber && IsTerminalNumber));
 
+        // ── Structural accessors for the JSON-Schema overlay (JsonSchemaTracker) ──
+        // The schema tracker advances in lockstep with this machine and needs to observe its structural
+        // position (which phase, nesting depth, whether the current string is a key, array vs object top).
+        internal Phase CurrentPhase => _phase;
+        internal int Depth => _depth;
+        internal bool CurrentStringIsKey => _stringIsKey;
+        internal bool TopIsArray => _depth > 0 && (_stack & (1UL << (_depth - 1))) != 0;
+
         /// <summary>
         /// Feeds one character, advancing the acceptor. Returns false if the character cannot extend
         /// any well-formed JSON document from the current state (the caller discards the mutated copy).
@@ -297,7 +305,7 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
         private static bool IsHex(char c) =>
             c is (>= '0' and <= '9') or (>= 'a' and <= 'f') or (>= 'A' and <= 'F');
 
-        private enum Phase : byte
+        internal enum Phase : byte
         {
             ExpectValue = 0,        // root start, after ':' , or after ',' in an array
             ExpectValueOrClose,     // right after '[' (a value or ']')

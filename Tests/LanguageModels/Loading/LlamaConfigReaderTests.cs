@@ -69,14 +69,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             // head_dim * heads (5*4=20) != hidden_size (64) — not representable.
             const string json =
                 "{\"hidden_size\":64,\"num_attention_heads\":4,\"num_hidden_layers\":2,\"vocab_size\":100,\"head_dim\":5}";
-            Assert.Throws<NotSupportedException>(() => LlamaConfigReader.Parse(Encoding.UTF8.GetBytes(json)));
+            Assert.Throws<OverfitRuntimeException>(() => LlamaConfigReader.Parse(Encoding.UTF8.GetBytes(json)));
         }
 
         [Fact]
         public void Parse_MissingRequiredField_Throws()
         {
             const string json = "{\"hidden_size\":64,\"num_attention_heads\":4}";  // no layers/vocab
-            Assert.Throws<InvalidDataException>(() => LlamaConfigReader.Parse(Encoding.UTF8.GetBytes(json)));
+            Assert.Throws<OverfitFormatException>(() => LlamaConfigReader.Parse(Encoding.UTF8.GetBytes(json)));
         }
 
         [Fact]

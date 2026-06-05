@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 DevOnBike.
+// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -48,7 +48,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
         /// <param name="skippedRows">Number of data rows that could not be parsed.</param>
         /// <returns>Chronologically ordered list of snapshots.</returns>
         /// <exception cref="FileNotFoundException">When the file does not exist.</exception>
-        /// <exception cref="InvalidDataException">When the header row is missing or malformed.</exception>
+        /// <exception cref="OverfitFormatException">When the header row is missing or malformed.</exception>
         public static IReadOnlyList<MetricSnapshot> Load(string path, out int skippedRows)
         {
             if (!File.Exists(path))
@@ -68,7 +68,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             var header = reader.ReadLine();
             if (header is null)
             {
-                throw new InvalidDataException("CSV file is empty — no header row found.");
+                throw new OverfitFormatException("CSV file is empty — no header row found.");
             }
 
             var columnIndex = ParseHeader(header);
@@ -144,7 +144,7 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             var missing = ExpectedHeaders.Where(h => !index.ContainsKey(h)).ToList();
             if (missing.Count > 0)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                 $"CSV header is missing required columns: {string.Join(", ", missing)}. " +
                 $"Expected: {string.Join(", ", ExpectedHeaders)}");
             }

@@ -288,7 +288,7 @@ namespace DevOnBike.Overfit.DeepLearning
             ReadOnlySpan<float> input,
             Span<float> output)
         {
-            throw new NotSupportedException("Use Forward(ComputationGraph, AutogradNode).");
+            throw new OverfitRuntimeException("Use Forward(ComputationGraph, AutogradNode).");
         }
 
         public IEnumerable<AutogradNode> Parameters()
@@ -426,7 +426,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
             if (!stream.CanSeek)
             {
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                 "MultiHeadAttentionLayer.Load requires a seekable stream to detect legacy checkpoints after Q/K/V bias support was added.");
             }
 
@@ -444,7 +444,7 @@ namespace DevOnBike.Overfit.DeepLearning
                 return false;
             }
 
-            throw new InvalidDataException(
+            throw new OverfitFormatException(
             $"Unexpected parameter length {nextParameterLength} after Wq. " +
             $"Expected {_dHead} for new Q/K/V-bias checkpoints or {_dModel * _dHead} for legacy checkpoints.");
         }

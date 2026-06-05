@@ -75,7 +75,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             using (var s = engine.CreateSession(ctx))
             {
                 s.Reset(prompt);
-                Assert.Throws<InvalidOperationException>(() =>
+                Assert.Throws<OverfitRuntimeException>(() =>
                 {
                     for (var i = 0; i < generate; i++) { s.GenerateNextToken(in Greedy); }
                 });

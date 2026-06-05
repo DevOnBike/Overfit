@@ -896,6 +896,10 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
             var (trainX, trainY) = MnistLoader.Load(trainImagesPath, trainLabelsPath, trainSize);
             var (testX, testY) = MnistLoader.Load(testImagesPath, testLabelsPath, testSize);
 
+            // Deterministic weight init (per-thread RNG, seeded on this — the model-building — thread) so the
+            // loss-decrease and accuracy thresholds below don't flake on an unlucky random initialization.
+            Maths.MathUtils.SetSeed(1234);
+
             using var conv1 = new ConvLayer(1, 8, 28, 28, 3);
             using var bn1 = new BatchNorm1D(1352);
             using var res1 = new ResidualBlock(1352);

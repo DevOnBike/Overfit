@@ -114,7 +114,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
             if (vocab.Count == 0)
             {
-                throw new InvalidDataException($"WordPiece vocab file '{path}' is empty.");
+                throw new OverfitFormatException($"WordPiece vocab file '{path}' is empty.");
             }
 
             return new WordPieceTokenizer(vocab, doLowerCase);
@@ -305,7 +305,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
         {
             if (!_vocab.TryGetValue(token, out var id))
             {
-                throw new InvalidDataException($"WordPiece vocabulary is missing the required special token '{token}'.");
+                throw new OverfitFormatException($"WordPiece vocabulary is missing the required special token '{token}'.");
             }
 
             return id;

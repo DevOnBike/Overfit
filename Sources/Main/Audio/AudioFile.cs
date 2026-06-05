@@ -37,7 +37,7 @@ namespace DevOnBike.Overfit.Audio
                     return d.ReadMono(fs, out sampleRate);
                 }
             }
-            throw new NotSupportedException(
+            throw new OverfitRuntimeException(
                 $"No audio decoder for '{Path.GetExtension(path)}' (supported: .wav, .mp3).");
         }
     }

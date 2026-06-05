@@ -88,7 +88,7 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
             var arenaFloats = Math.Max(1 << 22, (estimate * 5) / 2);
             if (arenaFloats > int.MaxValue)
             {
-                throw new InvalidOperationException(
+                throw new OverfitRuntimeException(
                     $"BertEncoder arena estimate ({arenaFloats} floats) exceeds int.MaxValue; " +
                     $"reduce expectedMaxSequenceLength (currently {MaxSequenceLength}).");
             }

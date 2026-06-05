@@ -103,7 +103,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 
             using var f32store = new TensorStorage<float>(outRows * inCols, clearMemory: false);
             DecodeWeight dwF32 = f32store;
-            Assert.Throws<InvalidOperationException>(() => dwF32.AsRowSource());
+            Assert.Throws<OverfitRuntimeException>(() => dwF32.AsRowSource());
         }
 
         [Fact]

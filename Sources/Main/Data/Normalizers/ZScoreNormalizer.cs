@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 DevOnBike.
+// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -32,7 +32,7 @@ namespace DevOnBike.Overfit.Data.Normalizers
         {
             if (_isFrozen)
             {
-                throw new InvalidOperationException("Normalizer is frozen.");
+                throw new OverfitRuntimeException("Normalizer is frozen.");
             }
 
             if (data.Length == 0)
@@ -82,7 +82,7 @@ namespace DevOnBike.Overfit.Data.Normalizers
         {
             if (_isFrozen)
             {
-                throw new InvalidOperationException("Normalizer is frozen.");
+                throw new OverfitRuntimeException("Normalizer is frozen.");
             }
 
             _count++;
@@ -105,7 +105,7 @@ namespace DevOnBike.Overfit.Data.Normalizers
 
             if (_count == 0)
             {
-                throw new InvalidOperationException("Cannot freeze without data.");
+                throw new OverfitRuntimeException("Cannot freeze without data.");
             }
 
             var stdDev = StandardDeviation;
@@ -124,7 +124,7 @@ namespace DevOnBike.Overfit.Data.Normalizers
         {
             if (!_isFrozen)
             {
-                throw new InvalidOperationException("Normalizer is not frozen.");
+                throw new OverfitRuntimeException("Normalizer is not frozen.");
             }
 
             if (data.Length == 0)
@@ -150,7 +150,7 @@ namespace DevOnBike.Overfit.Data.Normalizers
         {
             if (!_isFrozen)
             {
-                throw new InvalidOperationException("Cannot save unfrozen normalizer.");
+                throw new OverfitRuntimeException("Cannot save unfrozen normalizer.");
             }
 
             bw.Write(_frozenMean);

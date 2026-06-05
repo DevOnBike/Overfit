@@ -133,3 +133,22 @@ jobs:
           -o ./aot-publish
     - name: Run AOT-compiled smoketest binary
       run: ./aot-publish/AotSmokeTest
+
+    # The `overfit` CLI is the real Native-AOT consumer of the serve path (Sources/Server's HttpListener
+    # OpenAI server + System.Text.Json source-gen) AND of Sources/Main via OverfitClient. Publishing it
+    # under PublishAot=true with TreatWarningsAsErrors=true makes ILCompiler run end-to-end over that whole
+    # reachable graph, so any IL2026 / IL3050 / IL31xx trim/AOT regression on the serve/chat path fails CI
+    # (same IDISP + doc carve-outs as the smoketest above — unrelated to AOT/trim safety).
+    - name: Publish overfit CLI under Native AOT
+      run: |
+        dotnet publish ./Sources/Cli/Cli.csproj \
+          -c Release -r linux-x64 \
+          -p:PublishAot=true \
+          -p:TreatWarningsAsErrors=true \
+          -p:GenerateDocumentationFile=false \
+          -p:WarningsNotAsErrors=IDISP001%3BIDISP002%3BIDISP003%3BIDISP004%3BIDISP005%3BIDISP006%3BIDISP007%3BIDISP008%3BIDISP009%3BIDISP010%3BIDISP011%3BIDISP012%3BIDISP013%3BIDISP014%3BIDISP015%3BIDISP016%3BIDISP017 \
+          -o ./aot-publish-cli
+    - name: Run AOT-compiled overfit CLI (smoke)
+      # `list` exercises the CLI end-to-end (System.CommandLine parse → command action → model-store scan)
+      # and exits 0 with no models present — a non-blocking smoke check (unlike `serve`, which would block).
+      run: ./aot-publish-cli/overfit list

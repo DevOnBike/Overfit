@@ -57,19 +57,19 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             var magic = br.ReadUInt32();
             if (magic != Magic)
             {
-                throw new InvalidDataException($"Not a LoRA file (magic=0x{magic:X8}).");
+                throw new OverfitFormatException($"Not a LoRA file (magic=0x{magic:X8}).");
             }
 
             var version = br.ReadInt32();
             if (version != Version)
             {
-                throw new InvalidDataException($"Unsupported LoRA file version {version}.");
+                throw new OverfitFormatException($"Unsupported LoRA file version {version}.");
             }
 
             var count = br.ReadInt32();
             if (count <= 0)
             {
-                throw new InvalidDataException($"LoRA file declares {count} entries.");
+                throw new OverfitFormatException($"LoRA file declares {count} entries.");
             }
 
             var entries = new Gpt1LoRAEntry[count];

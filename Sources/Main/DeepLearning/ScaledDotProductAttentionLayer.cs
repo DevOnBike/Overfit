@@ -132,7 +132,7 @@ namespace DevOnBike.Overfit.DeepLearning
         }
 
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
-            => throw new NotSupportedException(
+            => throw new OverfitRuntimeException(
                 "ScaledDotProductAttentionLayer.ForwardInference(Span) is not supported. " +
                 "Use Forward(graph, input) with a sequence-shaped AutogradNode.");
 

@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 DevOnBike.
+// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -64,7 +64,7 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
 
             // ACT & ASSERT
             // We forgot to call Freeze()
-            Assert.Throws<InvalidOperationException>(() => normalizer.TransformInPlace(dataToTransform));
+            Assert.Throws<OverfitRuntimeException>(() => normalizer.TransformInPlace(dataToTransform));
         }
 
         [Fact]

@@ -4,8 +4,10 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Collections.Generic;
+using DevOnBike.Overfit.LanguageModels.Chat;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
+using DevOnBike.Overfit.LanguageModels.Tokenizers;
 using Xunit.Abstractions;
 
 namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
@@ -80,7 +82,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
             if (!File.Exists(@"C:\qwen3b\tokenizer.json")) { _out.WriteLine("no tokenizer"); return; }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(ModelPath);
-            var tok = DevOnBike.Overfit.LanguageModels.Tokenizers.QwenTokenizer.Load(@"C:\qwen3b");
+            var tok = QwenTokenizer.Load(@"C:\qwen3b");
 
             // A genuinely-echoing prompt: the model continues the repeated sentence and the n-gram
             // drafter (matching the earlier repeats) proposes exactly what greedy emits → high acceptance.
@@ -139,6 +141,48 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
             var single = Single();
             var spec = Speculative();
             _out.WriteLine($"decode tok/s: single={single:F2}  speculative={spec:F2}  speedup={spec / single:F2}×");
+        }
+
+        /// <summary>
+        /// The production <see cref="ChatSession"/> path now dispatches to speculative decoding when
+        /// unconstrained on a speculation-capable session. A/B: the SAME greedy chat turn, once on a
+        /// normal session (CanSpeculate → speculative) and once with sliding-window forced on
+        /// (CanSpeculate false → single-token). The generation is short enough that the window never
+        /// evicts, so the maths is identical — any text difference is a speculative-wiring bug. [LongFact].
+        /// </summary>
+        [LongFact]
+        public void ChatSession_SpeculativePath_MatchesSingleToken_Greedy()
+        {
+            if (!File.Exists(ModelPath)) { _out.WriteLine($"missing {ModelPath}"); return; }
+            const string dir = @"C:\qwen3b";
+            if (!File.Exists(Path.Combine(dir, "tokenizer.json"))) { _out.WriteLine("no tokenizer"); return; }
+
+            using var engine = CachedLlamaInferenceEngine.LoadGguf(ModelPath);
+            var tok = new QwenChatTokenizer(QwenTokenizer.Load(dir));
+            var template = new ChatTemplate(ChatTemplateFormat.ChatML);
+            var options = new GenerationOptions(
+                maxNewTokens: 64, maxContextLength: 512, sampling: SamplingOptions.Greedy, stopOnEndOfTextToken: true);
+
+            const string question = "List the first five prime numbers, then count from one to five.";
+
+            string specReply;
+            using (var s = engine.CreateSession(512))
+            {
+                var chat = new ChatSession(s, tok, template);
+                specReply = chat.Send(question, in options);
+                _out.WriteLine($"speculative path: {chat.LastStats.TokensPerSecond:F2} tok/s, {chat.LastStats.GeneratedTokens} tokens");
+            }
+
+            string singleReply;
+            using (var s = engine.CreateSession(512))
+            {
+                var chat = new ChatSession(s, tok, template, stopSequences: null, slidingWindow: true);
+                singleReply = chat.Send(question, in options);
+                _out.WriteLine($"single-token path: {chat.LastStats.TokensPerSecond:F2} tok/s, {chat.LastStats.GeneratedTokens} tokens");
+            }
+
+            _out.WriteLine($"\nspeculative:\n{specReply}\n\nsingle-token:\n{singleReply}");
+            Assert.Equal(singleReply, specReply);
         }
     }
 }

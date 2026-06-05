@@ -50,7 +50,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Agents
             var result = CircuitBreaker.Run(
                 maxIterations: 1000,
                 maxElapsed: TimeSpan.FromMilliseconds(100),
-                iterate: i => { System.Threading.Thread.Sleep(40); return i; },
+                iterate: i => { Thread.Sleep(40); return i; },
                 isAccepted: _ => false);
 
             Assert.Equal(CircuitBreakerOutcome.Timeout, result.Outcome);

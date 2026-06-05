@@ -31,22 +31,22 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
         /// Enables sliding-window KV eviction: once the cache fills, the oldest tokens are dropped
         /// instead of throwing, so generation and prefill continue over a rolling context.
         /// <paramref name="evictBlock"/> = how many tokens to drop per eviction (0 ⇒ a sensible
-        /// default). Throws <see cref="NotSupportedException"/> on sessions that don't support it.
+        /// default). Throws <see cref="OverfitRuntimeException"/> on sessions that don't support it.
         /// </summary>
         void EnableSlidingWindow(int evictBlock = 0)
-            => throw new NotSupportedException(
+            => throw new OverfitRuntimeException(
                 $"{GetType().Name} does not support sliding-window eviction.");
 
         /// <summary>
         /// Generates the next token under a decode-time <paramref name="constraint"/> (e.g. JSON-mode):
         /// the constraint masks the logits before sampling and is advanced by the chosen token.
-        /// Sessions that don't support constrained generation throw <see cref="NotSupportedException"/>
+        /// Sessions that don't support constrained generation throw <see cref="OverfitRuntimeException"/>
         /// when a non-null constraint is supplied (a null constraint always defers to the plain path).
         /// </summary>
         int GenerateNextToken(in SamplingOptions sampling, ITokenConstraint? constraint)
             => constraint is null
                 ? GenerateNextToken(in sampling)
-                : throw new NotSupportedException(
+                : throw new OverfitRuntimeException(
                     $"{GetType().Name} does not support constrained generation.");
 
         int Generate(

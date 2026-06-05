@@ -44,7 +44,7 @@ namespace DevOnBike.Overfit.Data.Prepare
             {
                 if (c < 0 || c >= cols)
                 {
-                    throw new InvalidOperationException($"Column index {c} is out of tensor range (0–{cols - 1}).");
+                    throw new OverfitRuntimeException($"Column index {c} is out of tensor range (0–{cols - 1}).");
                 }
             }
 
@@ -55,7 +55,7 @@ namespace DevOnBike.Overfit.Data.Prepare
                 case LogMode.Log1p: ApplyLog1p(span, rows, cols); break;
                 case LogMode.SignedLog1p: ApplySignedLog1p(span, rows, cols); break;
                 case LogMode.LogEps: ApplyLogEps(span, rows, cols); break;
-                default: throw new InvalidOperationException($"Unsupported LogMode: {_mode}");
+                default: throw new OverfitRuntimeException($"Unsupported LogMode: {_mode}");
             }
 
             return context;

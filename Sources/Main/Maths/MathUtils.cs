@@ -26,7 +26,10 @@ namespace DevOnBike.Overfit.Maths
         ///     (<see cref="ThreadStaticAttribute" />), so call it on the thread that builds the model.
         ///     Intended for tests/repro — production leaves the default per-process random seed.
         /// </summary>
-        public static void SetSeed(int seed) => _rng = new Random(seed);
+        public static void SetSeed(int seed)
+        {
+            _rng = new Random(seed);
+        }
 
         /// <summary>
         ///     Returns a random number from a standard normal distribution N(0, 1) using the Box-Muller transform.

@@ -42,7 +42,7 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
             var reader = new Utf8JsonReader(json, isFinalBlock: true, state: default);
             if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
             {
-                throw new InvalidDataException("config.json is not a JSON object.");
+                throw new OverfitFormatException("config.json is not a JSON object.");
             }
 
             var rootDepth = reader.CurrentDepth;
@@ -71,7 +71,7 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
 
             if (hidden < 0 || layers < 0 || heads < 0 || ffn < 0 || maxPos < 0 || vocab < 0)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     "config.json is missing one of the required BERT keys " +
                     "(hidden_size, num_hidden_layers, num_attention_heads, intermediate_size, " +
                     "max_position_embeddings, vocab_size).");

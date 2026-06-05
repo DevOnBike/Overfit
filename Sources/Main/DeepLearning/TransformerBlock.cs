@@ -156,7 +156,7 @@ namespace DevOnBike.Overfit.DeepLearning
         }
 
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
-            => throw new NotSupportedException(
+            => throw new OverfitRuntimeException(
                 "TransformerBlock.ForwardInference(Span) is not supported. " +
                 "Use Forward(ComputationGraph, AutogradNode).");
 

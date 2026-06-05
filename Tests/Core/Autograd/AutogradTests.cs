@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 DevOnBike.
+// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -72,8 +72,8 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
             graph.Backward(res);
 
             // Accessing GradView for a node with RequiresGrad = false throws an exception.
-            Assert.Throws<InvalidOperationException>(() => _ = a.GradView);
-            Assert.Throws<InvalidOperationException>(() => _ = b.GradView);
+            Assert.Throws<OverfitRuntimeException>(() => _ = a.GradView);
+            Assert.Throws<OverfitRuntimeException>(() => _ = b.GradView);
         }
     }
 }

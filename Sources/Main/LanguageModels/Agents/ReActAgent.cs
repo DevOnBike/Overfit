@@ -122,7 +122,7 @@ namespace DevOnBike.Overfit.LanguageModels.Agents
                 var reply = _chat.Send(msg, in capturedOptions, constraint: constraint);
                 if (!ToolCall.TryParse(reply, out var call))
                 {
-                    throw new InvalidOperationException(
+                    throw new OverfitRuntimeException(
                         $"ReActAgent: constrained reply did not parse as a tool call. Reply: '{reply}'.");
                 }
 

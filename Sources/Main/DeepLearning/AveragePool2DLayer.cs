@@ -76,7 +76,7 @@ namespace DevOnBike.Overfit.DeepLearning
         public void PrepareInference() { }
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
-            => throw new NotSupportedException(
+            => throw new OverfitRuntimeException(
                 "AveragePool2DLayer.Forward with autograd is not implemented. " +
                 "Use ForwardInference for inference-only paths.");
 

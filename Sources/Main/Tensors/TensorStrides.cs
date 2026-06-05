@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 DevOnBike.
+// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -55,7 +55,7 @@ namespace DevOnBike.Overfit.Tensors
                 3 => new TensorStrides(shape.D1 * shape.D2, shape.D2, 1),
                 4 => new TensorStrides(shape.D1 * shape.D2 * shape.D3, shape.D2 * shape.D3, shape.D3, 1),
 
-                _ => throw new NotSupportedException($"Unsupported rank: {shape.Rank}")
+                _ => throw new OverfitRuntimeException($"Unsupported rank: {shape.Rank}")
             };
         }
 

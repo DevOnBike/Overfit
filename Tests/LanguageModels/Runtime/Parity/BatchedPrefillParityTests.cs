@@ -47,7 +47,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
             // Encode the EXACT prompt the demo builds (long system message → ~56 tokens), via the real
             // tokenizer, so this faithfully reproduces the failing path rather than a hand-picked 21-token
             // prompt (which happens not to trigger the bug).
-            var tokenizer = DevOnBike.Overfit.LanguageModels.Tokenizers.QwenTokenizer.Load(@"C:\qwen3b");
+            var tokenizer = QwenTokenizer.Load(@"C:\qwen3b");
             const string chatml =
                 "<|im_start|>system\nYou are a concise, helpful assistant running locally inside a .NET " +
                 "process. Answer only from context the user provides; if you are unsure, say so.<|im_end|>\n" +

@@ -256,8 +256,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 RopeKernel.Apply(_key, rope, position + cache.BasePosition);
             }
 
-            _key.AsSpan().CopyTo(cache.GetKeyWriteSpan(layerIndex, headIndex, position));
-            _value.AsSpan().CopyTo(cache.GetValueWriteSpan(layerIndex, headIndex, position));
+            cache.WriteKey(layerIndex, headIndex, position, _key);
+            cache.WriteValue(layerIndex, headIndex, position, _value);
         }
 
         /// <summary>
@@ -425,13 +425,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 RopeKernel.Apply(_key, rope, position + cache.BasePosition);
             }
 
-            _key
-                .AsSpan()
-                .CopyTo(cache.GetKeyWriteSpan(layerIndex, headIndex, position));
-
-            _value
-                .AsSpan()
-                .CopyTo(cache.GetValueWriteSpan(layerIndex, headIndex, position));
+            // Copy in F32 mode, quantize in Q8 mode — uniform across both KV-cache dtypes.
+            cache.WriteKey(layerIndex, headIndex, position, _key);
+            cache.WriteValue(layerIndex, headIndex, position, _value);
 
             AttendFromCache(cache, layerIndex, headIndex, position);
         }
@@ -450,6 +446,24 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int position)
         {
             var sequenceLength = position + 1;
+
+            // Q8 KV cache: read int8 K/V + per-vector scales directly (no F32 expansion → keeps decode
+            // 0-alloc and cuts attention read traffic ~4×). F32 cache: the bit-identical full-precision path.
+            if (cache.IsQuantized)
+            {
+                CachedAttentionKernel.ComputeSingleHeadQ8(
+                    _query,
+                    cache.GetKeyQuants(layerIndex, headIndex, fromPosition: 0, length: sequenceLength),
+                    cache.GetKeyScales(layerIndex, headIndex, fromPosition: 0, length: sequenceLength),
+                    cache.GetValueQuants(layerIndex, headIndex, fromPosition: 0, length: sequenceLength),
+                    cache.GetValueScales(layerIndex, headIndex, fromPosition: 0, length: sequenceLength),
+                    _attentionOutput,
+                    _scoreScratch,
+                    sequenceLength,
+                    HeadDimension,
+                    _scale);
+                return;
+            }
 
             var keys = cache.GetKeyReadSpan(
                 layerIndex,

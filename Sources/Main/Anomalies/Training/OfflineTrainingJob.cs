@@ -49,7 +49,7 @@ namespace DevOnBike.Overfit.Anomalies.Training
             var snapshots = HistoricalCsvLoader.Load(csvPath, out var skipped);
             if (snapshots.Count == 0)
             {
-                throw new InvalidDataException($"No snapshots loaded from '{csvPath}'. Skipped rows: {skipped}");
+                throw new OverfitFormatException($"No snapshots loaded from '{csvPath}'. Skipped rows: {skipped}");
             }
 
             progress?.Report(new TrainingProgress

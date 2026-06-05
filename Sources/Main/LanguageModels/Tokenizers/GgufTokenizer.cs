@@ -116,7 +116,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             var model = reader.GetMeta("tokenizer.ggml.model", "");
             if (model != "llama" && model != "gpt2")
             {
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                     $"GGUF tokenizer model '{model}' is not supported (only SentencePiece 'llama' and " +
                     "byte-level BPE 'gpt2').");
             }

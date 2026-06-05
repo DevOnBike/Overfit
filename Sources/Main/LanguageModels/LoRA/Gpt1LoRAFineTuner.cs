@@ -108,7 +108,7 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                 // typically < 256, so Q4_K (256-element super-blocks) is impossible — force Q8 (32-element).
                 if (hasAttention && baseFormat != QLoRABaseFormat.Q8)
                 {
-                    throw new NotSupportedException(
+                    throw new OverfitRuntimeException(
                         "QLoRA on attention requires baseFormat: Q8 — per-head dims (dHead = dModel/nHeads) are < 256, " +
                         "which Q4_K's 256-element super-blocks cannot represent.");
                 }
@@ -118,29 +118,29 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
 
                 if (model.Config.DModel % mult != 0)
                 {
-                    throw new NotSupportedException($"QLoRA {baseFormat} base requires DModel ({model.Config.DModel}) % {mult} == 0.");
+                    throw new OverfitRuntimeException($"QLoRA {baseFormat} base requires DModel ({model.Config.DModel}) % {mult} == 0.");
                 }
 
                 if (targets.HasFlag(LoRATargetModules.FeedForwardDown) && model.Config.DFF % mult != 0)
                 {
-                    throw new NotSupportedException($"QLoRA {baseFormat} FFN-down base requires DFF ({model.Config.DFF}) % {mult} == 0.");
+                    throw new OverfitRuntimeException($"QLoRA {baseFormat} FFN-down base requires DFF ({model.Config.DFF}) % {mult} == 0.");
                 }
 
                 if (hasAttention && dHead % mult != 0)
                 {
-                    throw new NotSupportedException($"QLoRA {baseFormat} attention base requires dHead ({dHead}) % {mult} == 0.");
+                    throw new OverfitRuntimeException($"QLoRA {baseFormat} attention base requires dHead ({dHead}) % {mult} == 0.");
                 }
             }
 
             if ((targets & ~SupportedTargets) != 0)
             {
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                     $"Gpt1LoRAFineTuner supports {SupportedTargets}; attention modules are not implemented.");
             }
 
             if (targets.HasFlag(LoRATargetModules.LanguageModelHead) && model.Config.TieWeights)
             {
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                     "LoRA on the LM head requires an untied head; the model must be built with TieWeights=false.");
             }
 
@@ -353,7 +353,7 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                     var weight = entry.Weight;
                     if (weight.InDim != adapter.InDim || weight.OutDim != adapter.OutDim || weight.Rank != _rank)
                     {
-                        throw new InvalidDataException(
+                        throw new OverfitFormatException(
                             $"LoRA entry [{adapter.Module} layer {adapter.Layer} head {adapter.HeadIndex}] dimensions " +
                             $"[{weight.InDim}x{weight.OutDim} r={weight.Rank}] do not match this fine-tuner " +
                             $"[{adapter.InDim}x{adapter.OutDim} r={_rank}].");
@@ -367,7 +367,7 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
 
                 if (!matched)
                 {
-                    throw new InvalidDataException(
+                    throw new OverfitFormatException(
                         $"LoRA file has no entry for [{adapter.Module} layer {adapter.Layer} head {adapter.HeadIndex}].");
                 }
             }

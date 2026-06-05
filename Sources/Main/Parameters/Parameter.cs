@@ -105,7 +105,7 @@ namespace DevOnBike.Overfit.Parameters
         }
 
         /// <summary>Mutable view over the gradient buffer.</summary>
-        /// <exception cref="InvalidOperationException">
+        /// <exception cref="OverfitRuntimeException">
         /// Thrown when <see cref="RequiresGrad"/> is <c>false</c>.
         /// </exception>
         public Span<float> GradSpan
@@ -116,7 +116,7 @@ namespace DevOnBike.Overfit.Parameters
 
                 if (!RequiresGrad || Grad is null)
                 {
-                    throw new InvalidOperationException(
+                    throw new OverfitRuntimeException(
                         "This parameter does not track gradients (RequiresGrad = false).");
                 }
 
@@ -168,7 +168,7 @@ namespace DevOnBike.Overfit.Parameters
             {
                 if (Grad is null)
                 {
-                    throw new InvalidOperationException(
+                    throw new OverfitRuntimeException(
                         "RequiresGrad is true but Grad storage is null. This is a bug in Parameter construction.");
                 }
 
@@ -211,7 +211,7 @@ namespace DevOnBike.Overfit.Parameters
 
             if (length != Shape.Size)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Checkpoint size {length} does not match parameter size {Shape.Size}.");
             }
 

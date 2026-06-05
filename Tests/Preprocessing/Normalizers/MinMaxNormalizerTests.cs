@@ -117,7 +117,7 @@ namespace DevOnBike.Overfit.Tests.Preprocessing.Normalizers
             var normalizer = new MinMaxNormalizer();
 
             // ACT & ASSERT - Freezing without data is illegal
-            Assert.Throws<InvalidOperationException>(normalizer.Freeze);
+            Assert.Throws<OverfitRuntimeException>(normalizer.Freeze);
         }
     }
 }

@@ -158,7 +158,7 @@ namespace DevOnBike.Overfit.Onnx
 
                     if (!slotMap.TryGetValue(name, out var slot))
                     {
-                        throw new InvalidOperationException(
+                        throw new OverfitRuntimeException(
                             $"Add node input '{name}' not yet computed. " +
                             "Check that the ONNX graph is topologically sorted.");
                     }
@@ -187,7 +187,7 @@ namespace DevOnBike.Overfit.Onnx
                     return [slot];
                 }
 
-                throw new InvalidOperationException(
+                throw new OverfitRuntimeException(
                     $"Node '{node.Name}' (op={node.OpType}) input '{inputName}' " +
                     "not yet computed. Check that nodes are topologically sorted.");
             }
@@ -208,7 +208,7 @@ namespace DevOnBike.Overfit.Onnx
                 }
             }
 
-            throw new InvalidDataException(
+            throw new OverfitFormatException(
                 "ONNX graph has no non-initializer inputs (cannot determine model input tensor).");
         }
 
@@ -236,7 +236,7 @@ namespace DevOnBike.Overfit.Onnx
 
                 if (opset.Version < MinSupportedOpset || opset.Version > MaxSupportedOpset)
                 {
-                    throw new NotSupportedException(
+                    throw new OverfitRuntimeException(
                         $"ONNX opset version {opset.Version} not supported. " +
                         $"Tested range: {MinSupportedOpset}-{MaxSupportedOpset}.");
                 }

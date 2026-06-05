@@ -28,7 +28,7 @@ namespace DevOnBike.Overfit.Onnx.Operators
         {
             var kernelShape = node.Attributes.TryGetValue("kernel_shape", out var ks)
                 ? ks.IntArray
-                : throw new InvalidDataException("MaxPool missing required attribute 'kernel_shape'.");
+                : throw new OverfitFormatException("MaxPool missing required attribute 'kernel_shape'.");
 
             var strides = node.Attributes.TryGetValue("strides", out var st)
                 ? st.IntArray
@@ -44,36 +44,36 @@ namespace DevOnBike.Overfit.Onnx.Operators
 
             if (kernelShape.Length != 2 || kernelShape[0] != kernelShape[1])
             {
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                     $"MaxPool: only square kernels supported, got [{string.Join(",", kernelShape)}].");
             }
 
             if (strides[0] != strides[1] || strides[0] != kernelShape[0])
             {
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                     $"MaxPool: stride must equal kernel size for non-overlapping pool " +
                     $"(kernel={kernelShape[0]}, stride={strides[0]}).");
             }
 
             if (pads.Any(pd => pd != 0))
             {
-                throw new NotSupportedException("MaxPool padding not yet supported.");
+                throw new OverfitRuntimeException("MaxPool padding not yet supported.");
             }
 
             if (ceilMode != 0)
             {
-                throw new NotSupportedException("MaxPool ceil_mode=1 not supported.");
+                throw new OverfitRuntimeException("MaxPool ceil_mode=1 not supported.");
             }
 
             var poolSize = (int)kernelShape[0];
 
             var inputShape = shapes.GetShape(node.Inputs[0])
-                ?? throw new InvalidDataException(
+                ?? throw new OverfitFormatException(
                     $"MaxPool: input '{node.Inputs[0]}' has no known shape in context.");
 
             if (inputShape.Length != 4)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"MaxPool: input rank should be 4, got {inputShape.Length}.");
             }
 

@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 DevOnBike.
+// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -30,7 +30,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         {
             if (features.GetView().GetDim(0) != targets.GetView().GetDim(0))
             {
-                throw new InvalidOperationException($"Mismatched row counts: Features={features.GetView().GetDim(0)}, Targets={targets.GetView().GetDim(0)}.");
+                throw new OverfitRuntimeException($"Mismatched row counts: Features={features.GetView().GetDim(0)}, Targets={targets.GetView().GetDim(0)}.");
             }
 
             var current = new PipelineContext(features, targets);
@@ -49,7 +49,7 @@ namespace DevOnBike.Overfit.Data.Prepare
 
                 if (current.Features.GetView().GetDim(0) != current.Targets.GetView().GetDim(0))
                 {
-                    throw new InvalidOperationException($"[{layer.GetType().Name}] Desynchronized dimensions: Features={current.Features.GetView().GetDim(0)} rows, Targets={current.Targets.GetView().GetDim(0)} rows.");
+                    throw new OverfitRuntimeException($"[{layer.GetType().Name}] Desynchronized dimensions: Features={current.Features.GetView().GetDim(0)} rows, Targets={current.Targets.GetView().GetDim(0)} rows.");
                 }
 
             }

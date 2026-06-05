@@ -29,6 +29,7 @@
 	
 	<ItemGroup>
 		<ProjectReference Include="..\Sources\Main\Main.csproj"/>
+		<ProjectReference Include="..\Sources\Extensions.AI\Extensions.AI.csproj"/>
 	</ItemGroup>
 
 	<ItemGroup>

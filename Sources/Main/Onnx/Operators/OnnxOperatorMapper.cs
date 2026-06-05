@@ -52,7 +52,7 @@ namespace DevOnBike.Overfit.Onnx.Operators
 
                 "AveragePool" => AveragePoolOperator.Build(node, initializers, shapeContext),
 
-                _ => throw new NotSupportedException(
+                _ => throw new OverfitRuntimeException(
                     $"Unsupported ONNX operator: '{node.OpType}'. " +
                     "Supported: Conv (with padding/stride), Gemm, Relu, Tanh, Sigmoid, Softmax, " +
                     "MaxPool, GlobalAveragePool, Reshape, Flatten, BatchNormalization.")

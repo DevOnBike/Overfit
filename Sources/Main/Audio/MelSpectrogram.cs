@@ -32,9 +32,9 @@ namespace DevOnBike.Overfit.Audio
 
         // Reusable buffers — grown on demand, kept across LogMel calls so repeated transcriptions
         // (streaming / microphone) are allocation-stable after warm-up.
-        private float[] _padded = System.Array.Empty<float>();
-        private float[] _power = System.Array.Empty<float>();
-        private float[] _mel = System.Array.Empty<float>();
+        private float[] _padded = Array.Empty<float>();
+        private float[] _power = Array.Empty<float>();
+        private float[] _mel = Array.Empty<float>();
 
         // Bluestein FFT for the (non-power-of-2) 400-point STFT: a length-N DFT via a length-M (power-of-2)
         // FFT convolution. Tables are precomputed once; the per-frame transform stackallocs its own scratch

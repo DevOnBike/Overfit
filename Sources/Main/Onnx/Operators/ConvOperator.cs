@@ -44,20 +44,20 @@ namespace DevOnBike.Overfit.Onnx.Operators
 
             if (group != 1)
             {
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                     $"Conv group={group}: grouped/depthwise convolution not yet supported.");
             }
 
             if (dilations.Any(dv => dv != 1))
             {
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                     $"Conv dilations=[{string.Join(",", dilations)}]: dilated conv not yet supported.");
             }
 
             // Validate stride: square stride only
             if (strides[0] != strides[1])
             {
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                     $"Conv: non-square strides [{strides[0]},{strides[1]}] not supported.");
             }
 
@@ -65,7 +65,7 @@ namespace DevOnBike.Overfit.Onnx.Operators
             // ONNX pads format: [pad_top, pad_left, pad_bottom, pad_right]
             if (pads.Length == 4 && (pads[0] != pads[2] || pads[1] != pads[3]))
             {
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                     $"Conv: asymmetric padding [{string.Join(",", pads)}] not supported.");
             }
 
@@ -74,7 +74,7 @@ namespace DevOnBike.Overfit.Onnx.Operators
 
             if (weightTensor.Dims.Length != 4)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Conv weight '{weightTensor.Name}' rank should be 4, got {weightTensor.Dims.Length}.");
             }
 
@@ -85,7 +85,7 @@ namespace DevOnBike.Overfit.Onnx.Operators
 
             if (kH != kW)
             {
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                     $"Conv: non-square kernels not supported ({kH}×{kW}).");
             }
 
@@ -93,12 +93,12 @@ namespace DevOnBike.Overfit.Onnx.Operators
 
             // Input shape: [batch, inC, h, w]
             var inputShape = shapes.GetShape(node.Inputs[0])
-                ?? throw new InvalidDataException(
+                ?? throw new OverfitFormatException(
                     $"Conv: input '{node.Inputs[0]}' has no known shape in context.");
 
             if (inputShape.Length != 4)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Conv: input rank should be 4, got {inputShape.Length}.");
             }
 

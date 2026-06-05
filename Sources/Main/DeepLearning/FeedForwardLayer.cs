@@ -162,7 +162,7 @@ namespace DevOnBike.Overfit.DeepLearning
         }
 
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
-            => throw new NotSupportedException(
+            => throw new OverfitRuntimeException(
                 "Use Forward(ComputationGraph, AutogradNode) — FFN requires sequence-shaped input.");
 
         public IEnumerable<AutogradNode> Parameters()

@@ -175,14 +175,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var magic = reader.ReadUInt32();
             if (magic != FilemagicExpected)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                 $"Not an Overfit SLM file. Expected magic 0x{FilemagicExpected:X8}, got 0x{magic:X8}.");
             }
 
             var version = reader.ReadInt32();
             if (version != VersionExpected)
             {
-                throw new NotSupportedException($"Unsupported file version {version}. Expected {VersionExpected}.");
+                throw new OverfitRuntimeException($"Unsupported file version {version}. Expected {VersionExpected}.");
             }
 
             var nLayers = reader.ReadInt32();
@@ -292,19 +292,27 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             return new CachedLlamaInferenceEngine(config, embedWeights, finalNormGamma, finalNormBeta, lmHead, layers);
         }
 
-        /// <summary>Creates an inference session. The caller owns the session and must dispose it.</summary>
-        public CachedLlamaSession CreateSession(int? maxContextLength = null)
+        /// <summary>
+        /// Creates an inference session. The caller owns the session and must dispose it.
+        /// <paramref name="kvCacheDType"/> selects the KV-cache element type: <see cref="KvCacheDType.F32"/>
+        /// (default, full precision) or <see cref="KvCacheDType.Q8"/> (per-vector int8 — ~4× less KV RAM and
+        /// attention read traffic, for long-context / low-memory decode). When null it falls back to the
+        /// <c>OVERFIT_KV_DTYPE</c> env var (<c>q8</c> → Q8, anything else → F32).
+        /// </summary>
+        public CachedLlamaSession CreateSession(int? maxContextLength = null, KvCacheDType? kvCacheDType = null)
         {
             ThrowIfDisposed();
 
             var ctx = maxContextLength ?? _config.ContextLength;
             var headDim = _config.DModel / _config.NHeads;
+            var dtype = kvCacheDType ?? ResolveKvDtypeFromEnv();
 
             var cache = KeyValueCache.Create(
                 _config.NLayers,
                 kvHeadCount: _config.KvHeads,
                 ctx,
-                headDim);
+                headDim,
+                dtype);
 
             return new CachedLlamaSession(
                 _config,
@@ -313,6 +321,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 cache,
                 _rope,
                 _embedWeights);
+        }
+
+        /// <summary>Reads the opt-in <c>OVERFIT_KV_DTYPE</c> env var: <c>q8</c> → <see cref="KvCacheDType.Q8"/>,
+        /// otherwise <see cref="KvCacheDType.F32"/> (the default — no behaviour change unless explicitly set).</summary>
+        private static KvCacheDType ResolveKvDtypeFromEnv()
+        {
+            var raw = Environment.GetEnvironmentVariable("OVERFIT_KV_DTYPE");
+            return string.Equals(raw, "q8", StringComparison.OrdinalIgnoreCase) ? KvCacheDType.Q8 : KvCacheDType.F32;
         }
 
         public void Dispose()
@@ -495,7 +511,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// LoRA and the F32-only diagnostics need an F32 <see cref="TensorStorage{T}"/>.
         /// </summary>
         private static TensorStorage<float> RequireF32(in DecodeWeight weight, string context)
-            => weight.F32Storage ?? throw new NotSupportedException(
+            => weight.F32Storage ?? throw new OverfitRuntimeException(
                 $"{context} requires F32-resident weights; this model was loaded with Q8_0 " +
                 "quantization. Operations on quantized weights are not supported.");
 

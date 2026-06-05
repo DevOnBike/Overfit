@@ -21,7 +21,7 @@ namespace DevOnBike.Overfit.Ops
             ComputationGraph graph, AutogradNode logits, AutogradNode target)
             => graph != null
                 ? graph.SoftmaxCrossEntropy(logits, target)
-                : throw new InvalidOperationException(
+                : throw new OverfitRuntimeException(
                     "SoftmaxCrossEntropy requires an active ComputationGraph (graph cannot be null).");
 
         public static void SoftmaxCrossEntropyBackward(AutogradNode logits, AutogradNode target, AutogradNode output, AutogradNode probsNode)
