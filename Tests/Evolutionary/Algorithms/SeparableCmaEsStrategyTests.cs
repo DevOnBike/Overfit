@@ -53,7 +53,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
         {
             using var es = new SeparableCmaEsStrategy(8, 4, 0.3f, seed: 0);
 
-            Assert.Throws<InvalidOperationException>(() => es.Tell(new float[8]));
+            Assert.Throws<OverfitRuntimeException>(() => es.Tell(new float[8]));
         }
 
         [Fact]

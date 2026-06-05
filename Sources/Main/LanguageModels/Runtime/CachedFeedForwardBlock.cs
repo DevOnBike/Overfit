@@ -143,7 +143,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             if (Activation == FeedForwardActivation.SwiGLU)
             {
-                throw new InvalidOperationException("SwiGLU must use the SwiGLU batched path, not DecodeBatched.");
+                throw new OverfitRuntimeException("SwiGLU must use the SwiGLU batched path, not DecodeBatched.");
             }
             if (hidden.Length < (long)rows * DModel)
             {
@@ -430,7 +430,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
                 case FeedForwardActivation.SwiGLU:
                     // SwiGLU is handled separately via DecodeSwiGlu — not through this path.
-                    throw new InvalidOperationException(
+                    throw new OverfitRuntimeException(
                         "SwiGLU must be invoked via DecodeSwiGlu, not through the standard Decode path.");
 
                 default:

@@ -18,7 +18,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
     /// 4-byte peek-then-rewind that <c>MultiHeadAttentionLayer.Load</c> uses to detect
     /// legacy checkpoints (the peek always lands at a chunk start and never spans a
     /// chunk, since every emitted parameter block is ≥ 8 bytes). Any other seek throws
-    /// <see cref="NotSupportedException"/> — past chunks are gone and future chunks are
+    /// <see cref="OverfitRuntimeException"/> — past chunks are gone and future chunks are
     /// not yet produced.
     /// </summary>
     internal sealed class SequentialChunkReadStream : Stream
@@ -39,7 +39,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         public override bool CanRead => true;
         public override bool CanSeek => true;
         public override bool CanWrite => false;
-        public override long Length => throw new NotSupportedException();
+        public override long Length => throw new OverfitRuntimeException();
 
         public override long Position
         {
@@ -101,7 +101,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             {
                 SeekOrigin.Begin => offset,
                 SeekOrigin.Current => _position + offset,
-                SeekOrigin.End => throw new NotSupportedException("Cannot seek from the end of a streamed source."),
+                SeekOrigin.End => throw new OverfitRuntimeException("Cannot seek from the end of a streamed source."),
                 _ => throw new ArgumentOutOfRangeException(nameof(origin)),
             };
 
@@ -110,7 +110,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             // discarded or not-yet-produced chunk.
             if (target < _chunkStart || target > _chunkStart + _current.Length)
             {
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                     $"Seek to {target} is outside the current chunk [{_chunkStart}, {_chunkStart + _current.Length}].");
             }
 
@@ -120,8 +120,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         }
 
         public override void Flush() { }
-        public override void SetLength(long value) => throw new NotSupportedException();
-        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new OverfitRuntimeException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new OverfitRuntimeException();
 
         protected override void Dispose(bool disposing)
         {

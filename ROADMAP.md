@@ -77,6 +77,41 @@ GEMV, prompt-lookup speculative, GGUF/chat-template. NEW launch-relevant steals,
 - **`System.Diagnostics.Metrics` + `Activity` telemetry** (`Telemetry/`) → feeds #4's `/metrics` + the audit story.
 - **Model-management CLI** (HF pull/search/list, Spectre.Console TUI) → #8.
 
+### UPDATE 2026-06-05 — status + new ideas
+
+**DONE since the table above:** #1 M.E.AI adapter (NuGet `DevOnBike.Overfit.Extensions.AI`), #2 OpenAI API
+(`/v1/chat/completions`+SSE, `/v1/embeddings`, `/v1/models`, `response_format`), #3 JSON-Schema constrained output
+(full subsystem + wired into demo `/chat/json` + OpenAI). Plus regex-constrained decoding + composable sampling
+pipeline (additive). All on branch `bilbo`, validated on real Qwen3B/MiniLM.
+
+**▶ #0 SHIP IT (consolidation/release — highest leverage NOW, before more features).** The branch has a large
+unmerged, terse-committed ("bilbo" ×N), top-level-undocumented feature set. Risk = infinite feature-build, never
+launch. Steps: rewrite the "bilbo" commits into descriptive ones → merge `bilbo`→`main` (main far behind at
+`3059fdc`) → NuGet release (version bump + the new `.Extensions.AI` package) → top-level README/docs for the new
+surface (structured outputs, OpenAI-compat, M.E.AI) → refresh the staged `linkedin-*.md`/`launch-copy.md` (they now
+have much more to say).
+
+**▶ #8 ELEVATED — global `overfit` dotnet tool (the "ollama moment" — user-flagged 2026-06-05 as the onboarding
+play).** A `PackAsTool=true` global CLI: `dotnet tool install -g DevOnBike.Overfit.Cli`, then
+`overfit pull qwen2.5-3b` (HF GGUF download + progress → cache `~/.overfit/models`, known aliases qwen/bielik/...),
+`overfit list`, `overfit chat <model>` (interactive REPL over `OverfitClient`), `overfit serve <model>` (start the
+OpenAI-compatible server). Removes the demo's biggest friction (manual GGUF download + ModelPath config). NOTE: to
+make `overfit serve` reusable, the OpenAI endpoints (`OpenAiEndpoints`) should move from the demo into a shared
+lib/the CLI; need a C# HF downloader (HTTP resolve repo→file→stream, the demo's `download-*.cmd` are curl scripts).
+This is the single best **open-source adoption lubricant** — ties loaders + OverfitClient + the OpenAI server into
+one turnkey entry point.
+
+**New technical follow-ons (half-built / deferred):** Q8-KV decode wiring (store ready → RAM + long-context win);
+**token healing** (engine-level: re-tokenize boundary + KV rollback → makes constrained/structured output
+bulletproof on arbitrary schemas, fixes the BPE dead-end that 2-lite only graceful-stops); wired sampling-pipeline
+(replace `TokenSampler`); **GBNF grammar constraint** (CFG → SQL/DSL constrained output, the general engine);
+continuous/in-flight batching for serving (dotLLM only PLANS it → we could lead).
+
+**Bolder new directions:** **persistent KV-cache to disk → cross-session resume** (`KvCacheSnapshot` exists; persist
+to disk = resume a conversation after process restart — a genuine novelty from the DiskLLM conversation, pairs with
+the embeddable identity); QLoRA "teach your model a fact" marketing showpiece (already works — the "Tarnholm" demo);
+inference hooks / pure-.NET-CPU interpretability (dotLLM's is a stub → lead, credibility play).
+
 ---
 
 ## Nearest plan — llama.cpp competitive gaps (2026-05-25)

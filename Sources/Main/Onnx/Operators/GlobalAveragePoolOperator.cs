@@ -28,12 +28,12 @@ namespace DevOnBike.Overfit.Onnx.Operators
             OnnxShapeContext shapes)
         {
             var inputShape = shapes.GetShape(node.Inputs[0])
-                ?? throw new InvalidDataException(
+                ?? throw new OverfitFormatException(
                     $"GlobalAveragePool: input '{node.Inputs[0]}' has no known shape.");
 
             if (inputShape.Length != 4)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"GlobalAveragePool: expected 4-D input [N,C,H,W], got rank {inputShape.Length}.");
             }
 

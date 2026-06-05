@@ -34,7 +34,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         {
             var json = File.ReadAllText(path);
 
-            return JsonSerializer.Deserialize(json, OverfitJsonContext.Default.ScalerParams) ?? throw new InvalidOperationException($"Failed to deserialize ScalerParams from {path}.");
+            return JsonSerializer.Deserialize(json, OverfitJsonContext.Default.ScalerParams) ?? throw new OverfitRuntimeException($"Failed to deserialize ScalerParams from {path}.");
         }
     }
 }

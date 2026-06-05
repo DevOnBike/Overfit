@@ -23,7 +23,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             }
             ms.Position = 0;
 
-            var ex = Assert.Throws<InvalidDataException>(() => new GgufReader(ms));
+            var ex = Assert.Throws<OverfitFormatException>(() => new GgufReader(ms));
             Assert.Contains("Not a GGUF file", ex.Message);
         }
 
@@ -40,7 +40,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             }
             ms.Position = 0;
 
-            var ex = Assert.Throws<NotSupportedException>(() => new GgufReader(ms));
+            var ex = Assert.Throws<OverfitRuntimeException>(() => new GgufReader(ms));
             Assert.Contains("version 1", ex.Message);
         }
 
@@ -129,7 +129,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             var info = reader.Tensors["test_q3k"];
             var dst = new float[256];
 
-            var ex = Assert.Throws<NotSupportedException>(() => reader.LoadTensorAsF32(info, dst));
+            var ex = Assert.Throws<OverfitRuntimeException>(() => reader.LoadTensorAsF32(info, dst));
             Assert.Contains("Q3_K", ex.Message);
         }
 

@@ -85,7 +85,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             using var reader = new GgufReader(ms);
 
             var dst = new float[31];
-            var ex = Assert.Throws<InvalidDataException>(() =>
+            var ex = Assert.Throws<OverfitFormatException>(() =>
                 reader.LoadTensorAsF32(reader.Tensors["test"], dst));
             Assert.Contains("not divisible by 32", ex.Message);
         }

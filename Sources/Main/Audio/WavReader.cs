@@ -27,9 +27,9 @@ namespace DevOnBike.Overfit.Audio
         public static float[] ReadMono(Stream stream, out int sampleRate)
         {
             using var br = new BinaryReader(stream);
-            if (ReadTag(br) != "RIFF") { throw new InvalidDataException("Not a RIFF file."); }
+            if (ReadTag(br) != "RIFF") { throw new OverfitFormatException("Not a RIFF file."); }
             br.ReadInt32(); // file size
-            if (ReadTag(br) != "WAVE") { throw new InvalidDataException("Not a WAVE file."); }
+            if (ReadTag(br) != "WAVE") { throw new OverfitFormatException("Not a WAVE file."); }
 
             int channels = 0, bitsPerSample = 0, audioFormat = 0;
             sampleRate = 0;
@@ -61,7 +61,7 @@ namespace DevOnBike.Overfit.Audio
                 }
             }
 
-            if (data is null || channels == 0) { throw new InvalidDataException("WAV missing fmt/data chunk."); }
+            if (data is null || channels == 0) { throw new OverfitFormatException("WAV missing fmt/data chunk."); }
 
             return Decode(data, audioFormat, channels, bitsPerSample);
         }
@@ -90,7 +90,7 @@ namespace DevOnBike.Overfit.Audio
             }
             else
             {
-                throw new NotSupportedException($"Unsupported WAV format (audioFormat={audioFormat}, bits={bitsPerSample}). Use 16-bit PCM or 32-bit float.");
+                throw new OverfitRuntimeException($"Unsupported WAV format (audioFormat={audioFormat}, bits={bitsPerSample}). Use 16-bit PCM or 32-bit float.");
             }
 
             if (channels == 1) { return interleaved; }

@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 DevOnBike.
+// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -84,7 +84,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
             using var ms = new MemoryStream(garbage);
             using var br = new BinaryReader(ms);
 
-            Assert.Throws<InvalidDataException>(() => ga.Load(br));
+            Assert.Throws<OverfitFormatException>(() => ga.Load(br));
         }
 
         [Fact]
@@ -118,7 +118,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
             using var msLoad = new MemoryStream(bytes);
             using var br = new BinaryReader(msLoad);
 
-            Assert.Throws<InvalidDataException>(() => target.Load(br));
+            Assert.Throws<OverfitFormatException>(() => target.Load(br));
         }
 
         [Fact]
@@ -307,7 +307,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
             using var msLoad = new MemoryStream(adamBytes);
             using var br = new BinaryReader(msLoad);
 
-            Assert.Throws<InvalidDataException>(() => sgdEs.Load(br));
+            Assert.Throws<OverfitFormatException>(() => sgdEs.Load(br));
         }
 
         [Fact]
@@ -339,7 +339,7 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Algorithms
             using var msLoad = new MemoryStream(gaBytes);
             using var br = new BinaryReader(msLoad);
 
-            Assert.Throws<InvalidDataException>(() => es.Load(br));
+            Assert.Throws<OverfitFormatException>(() => es.Load(br));
         }
 
         // ----------------------------------------------------------------------

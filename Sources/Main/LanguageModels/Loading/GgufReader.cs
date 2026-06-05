@@ -57,14 +57,14 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var magic = _reader.ReadUInt32();
             if (magic != GgufFormat.Magic)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Not a GGUF file. Expected magic 0x{GgufFormat.Magic:X8}, got 0x{magic:X8}.");
             }
 
             Version = _reader.ReadUInt32();
             if (Version < GgufFormat.SupportedVersionMin || Version > GgufFormat.SupportedVersionMax)
             {
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                     $"GGUF version {Version} not supported (range {GgufFormat.SupportedVersionMin}..{GgufFormat.SupportedVersionMax}).");
             }
 
@@ -156,7 +156,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     return;
 
                 default:
-                    throw new NotSupportedException(
+                    throw new OverfitRuntimeException(
                         $"Tensor type {info.Type} is not supported yet. " +
                         $"Supported: F32, F16, BF16, Q8_0, Q4_K, Q5_0, Q5_K, Q6_K.");
             }
@@ -179,7 +179,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             if (info is null) { throw new ArgumentNullException(nameof(info)); }
             if (info.Type != GgmlType.Q8_0)
             {
-                throw new InvalidOperationException(
+                throw new OverfitRuntimeException(
                     $"Tensor '{info.Name}' is {info.Type}, not Q8_0 — use LoadTensorAsF32.");
             }
 
@@ -189,7 +189,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var elementCount = info.ElementCount;
             if (elementCount % BlockElements != 0)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Q8_0 tensor '{info.Name}' element count {elementCount} is not divisible by {BlockElements}.");
             }
 
@@ -251,14 +251,14 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             if (info is null) { throw new ArgumentNullException(nameof(info)); }
             if (info.Type != GgmlType.Q4_K)
             {
-                throw new InvalidOperationException(
+                throw new OverfitRuntimeException(
                     $"Tensor '{info.Name}' is {info.Type}, not Q4_K — use LoadTensorAsF32.");
             }
 
             var elementCount = info.ElementCount;
             if (elementCount % GgmlDequant.SuperBlockElements != 0)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Q4_K tensor '{info.Name}' element count {elementCount} is not divisible by {GgmlDequant.SuperBlockElements}.");
             }
 
@@ -287,14 +287,14 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             if (info is null) { throw new ArgumentNullException(nameof(info)); }
             if (info.Type != GgmlType.Q6_K)
             {
-                throw new InvalidOperationException(
+                throw new OverfitRuntimeException(
                     $"Tensor '{info.Name}' is {info.Type}, not Q6_K — use LoadTensorAsF32.");
             }
 
             var elementCount = info.ElementCount;
             if (elementCount % GgmlDequant.SuperBlockElements != 0)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Q6_K tensor '{info.Name}' element count {elementCount} is not divisible by {GgmlDequant.SuperBlockElements}.");
             }
 
@@ -335,7 +335,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             for (var i = 0; i < raw.Length; i++)
             {
                 result[i] = raw[i] as string
-                    ?? throw new InvalidDataException($"Metadata '{key}'[{i}] is not a string.");
+                    ?? throw new OverfitFormatException($"Metadata '{key}'[{i}] is not a string.");
             }
             return result;
         }
@@ -362,10 +362,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         {
             if (!Metadata.TryGetValue(key, out var value))
             {
-                throw new InvalidDataException($"Metadata key '{key}' is absent.");
+                throw new OverfitFormatException($"Metadata key '{key}' is absent.");
             }
             return value as object[]
-                ?? throw new InvalidDataException($"Metadata '{key}' is not an array (got {value?.GetType().Name}).");
+                ?? throw new OverfitFormatException($"Metadata '{key}' is not an array (got {value?.GetType().Name}).");
         }
 
         public void Dispose()
@@ -380,7 +380,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         private string ReadString()
         {
             var n = _reader.ReadUInt64();
-            if (n > int.MaxValue) { throw new InvalidDataException($"String length {n} exceeds int.MaxValue."); }
+            if (n > int.MaxValue) { throw new OverfitFormatException($"String length {n} exceeds int.MaxValue."); }
             var bytes = _reader.ReadBytes((int)n);
             return Encoding.UTF8.GetString(bytes);
         }
@@ -405,13 +405,13 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     {
                         var elemType = (GgufValueType)_reader.ReadUInt32();
                         var count = _reader.ReadUInt64();
-                        if (count > int.MaxValue) { throw new InvalidDataException("Array too large."); }
+                        if (count > int.MaxValue) { throw new OverfitFormatException("Array too large."); }
                         var arr = new object[(int)count];
                         for (var i = 0; i < arr.Length; i++) { arr[i] = ReadValue(elemType); }
                         return arr;
                     }
                 default:
-                    throw new NotSupportedException($"GGUF value type {vtype} not supported.");
+                    throw new OverfitRuntimeException($"GGUF value type {vtype} not supported.");
             }
         }
 
@@ -493,7 +493,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
             if (dst.Length % BlockElements != 0)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Q4_K tensor element count {dst.Length} is not divisible by {BlockElements}.");
             }
 
@@ -518,7 +518,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
             if (dst.Length % BlockElements != 0)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Q6_K tensor element count {dst.Length} is not divisible by {BlockElements}.");
             }
 
@@ -544,7 +544,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
             if (dst.Length % BlockElements != 0)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Q5_0 tensor element count {dst.Length} is not divisible by {BlockElements}.");
             }
 
@@ -570,7 +570,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
             if (dst.Length % BlockElements != 0)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Q5_K tensor element count {dst.Length} is not divisible by {BlockElements}.");
             }
 
@@ -613,7 +613,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     isK = true;
                     break;
                 default:
-                    throw new NotSupportedException(
+                    throw new OverfitRuntimeException(
                         $"LoadQ5RegionAsF32 supports only Q5_0 / Q5_K, not {info.Type} ('{info.Name}').");
             }
 
@@ -624,7 +624,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
             if (dst.Length % blockElems != 0)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Region element count {dst.Length} is not divisible by {blockElems}.");
             }
 
@@ -664,7 +664,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
             if (dst.Length % BlockElements != 0)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Q8_0 tensor element count {dst.Length} is not divisible by {BlockElements}.");
             }
 

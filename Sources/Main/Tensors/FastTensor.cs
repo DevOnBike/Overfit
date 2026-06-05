@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 DevOnBike.
+// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -244,7 +244,7 @@ namespace DevOnBike.Overfit.Tensors
                     template._s3,
                     clearMemory),
 
-                _ => throw new InvalidOperationException()
+                _ => throw new OverfitRuntimeException()
             };
         }
 
@@ -282,7 +282,7 @@ namespace DevOnBike.Overfit.Tensors
                     view.GetDim(3),
                     clearMemory: false),
 
-                _ => throw new InvalidOperationException(
+                _ => throw new OverfitRuntimeException(
                     "Nieobsługiwany wymiar")
             };
 
@@ -349,7 +349,7 @@ namespace DevOnBike.Overfit.Tensors
             else
             {
                 // Fallback for other types. Currently Overfit only uses this path for float.
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                     $"AddInPlace is only implemented for float tensors. Type: {typeof(T).Name}");
             }
         }

@@ -101,11 +101,11 @@ namespace DevOnBike.Overfit.Anomalies.Adaptive
             ThrowIfDisposed();
             if (!_pods.TryGetValue(podName, out var state))
             {
-                throw new InvalidOperationException($"Unknown pod '{podName}' — Observe it before adapting.");
+                throw new OverfitRuntimeException($"Unknown pod '{podName}' — Observe it before adapting.");
             }
             if (state.Benign.Count < _policy.MinBenignWindow)
             {
-                throw new InvalidOperationException(
+                throw new OverfitRuntimeException(
                     $"Pod '{podName}' has {state.Benign.Count} buffered benign snapshots; need ≥ {_policy.MinBenignWindow}.");
             }
 

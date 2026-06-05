@@ -18,11 +18,13 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Constraints.Regex
         {
             var dfa = RegexDfa.Compile(pattern);
             var state = dfa.Start;
+            
             foreach (var c in input)
             {
                 state = dfa.Next(state, c);
                 if (state < 0) { return false; }
             }
+            
             return dfa.IsAccepting(state);
         }
 

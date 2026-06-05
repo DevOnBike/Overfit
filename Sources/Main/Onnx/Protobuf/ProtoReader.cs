@@ -81,7 +81,7 @@ namespace DevOnBike.Overfit.Onnx.Protobuf
             {
                 if (_pos >= _data.Length)
                 {
-                    throw new InvalidDataException("Unexpected end of varint.");
+                    throw new OverfitFormatException("Unexpected end of varint.");
                 }
 
                 var b = _data[_pos++];
@@ -96,7 +96,7 @@ namespace DevOnBike.Overfit.Onnx.Protobuf
 
                 if (shift >= 64)
                 {
-                    throw new InvalidDataException("Varint exceeds 64 bits.");
+                    throw new OverfitFormatException("Varint exceeds 64 bits.");
                 }
             }
         }
@@ -115,7 +115,7 @@ namespace DevOnBike.Overfit.Onnx.Protobuf
         {
             if (_pos + 4 > _data.Length)
             {
-                throw new InvalidDataException("Unexpected end of fixed32.");
+                throw new OverfitFormatException("Unexpected end of fixed32.");
             }
 
             var value = BinaryPrimitives.ReadUInt32LittleEndian(_data.Slice(_pos));
@@ -127,7 +127,7 @@ namespace DevOnBike.Overfit.Onnx.Protobuf
         {
             if (_pos + 8 > _data.Length)
             {
-                throw new InvalidDataException("Unexpected end of fixed64.");
+                throw new OverfitFormatException("Unexpected end of fixed64.");
             }
 
             var value = BinaryPrimitives.ReadUInt64LittleEndian(_data.Slice(_pos));
@@ -154,7 +154,7 @@ namespace DevOnBike.Overfit.Onnx.Protobuf
 
             if (_pos + len > _data.Length)
             {
-                throw new InvalidDataException($"Length-delimited field exceeds buffer ({len} bytes at pos {_pos}, total {_data.Length}).");
+                throw new OverfitFormatException($"Length-delimited field exceeds buffer ({len} bytes at pos {_pos}, total {_data.Length}).");
             }
 
             var slice = _data.Slice(_pos, len);
@@ -181,7 +181,7 @@ namespace DevOnBike.Overfit.Onnx.Protobuf
                 case WireType.Fixed64:
                     if (_pos + 8 > _data.Length)
                     {
-                        throw new InvalidDataException("Unexpected end skipping fixed64.");
+                        throw new OverfitFormatException("Unexpected end skipping fixed64.");
                     }
                     _pos += 8;
                     break;
@@ -189,19 +189,19 @@ namespace DevOnBike.Overfit.Onnx.Protobuf
                     var len = (int)ReadVarint();
                     if (_pos + len > _data.Length)
                     {
-                        throw new InvalidDataException("Unexpected end skipping length-delimited.");
+                        throw new OverfitFormatException("Unexpected end skipping length-delimited.");
                     }
                     _pos += len;
                     break;
                 case WireType.Fixed32:
                     if (_pos + 4 > _data.Length)
                     {
-                        throw new InvalidDataException("Unexpected end skipping fixed32.");
+                        throw new OverfitFormatException("Unexpected end skipping fixed32.");
                     }
                     _pos += 4;
                     break;
                 default:
-                    throw new InvalidDataException($"Unsupported wire type: {wireType}");
+                    throw new OverfitFormatException($"Unsupported wire type: {wireType}");
             }
         }
 
@@ -239,7 +239,7 @@ namespace DevOnBike.Overfit.Onnx.Protobuf
 
             if (bytes.Length % 4 != 0)
             {
-                throw new InvalidDataException($"Packed float data length {bytes.Length} not divisible by 4.");
+                throw new OverfitFormatException($"Packed float data length {bytes.Length} not divisible by 4.");
             }
 
             var result = new float[bytes.Length / 4];

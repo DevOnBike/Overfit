@@ -118,7 +118,7 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
                 }
             }
 
-            throw new InvalidDataException(
+            throw new OverfitFormatException(
                 "Could not locate 'embeddings.word_embeddings.weight' under any known prefix " +
                 "(\"\", \"bert.\", \"model.\", \"0.auto_model.\", \"auto_model.\"). " +
                 "Is this a BERT-family encoder safetensors file?");
@@ -129,7 +129,7 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
             var count = reader.ElementCount(name);
             if (count != dst.Length)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Tensor '{name}' has {count} elements but the target layer expects {dst.Length}. " +
                     "Check the BertConfig matches the model.");
             }
@@ -148,7 +148,7 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
             var count = reader.ElementCount(name);
             if (count != (long)d * d)
             {
-                throw new InvalidDataException($"Tensor '{name}' element count {count} != d·d ({(long)d * d}).");
+                throw new OverfitFormatException($"Tensor '{name}' element count {count} != d·d ({(long)d * d}).");
             }
 
             reader.LoadF32(name, raw.AsSpan(0, d * d));
@@ -175,7 +175,7 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
             var count = reader.ElementCount(name);
             if (count != (long)dHead * nHeads)
             {
-                throw new InvalidDataException($"Tensor '{name}' element count {count} != d ({(long)dHead * nHeads}).");
+                throw new OverfitFormatException($"Tensor '{name}' element count {count} != d ({(long)dHead * nHeads}).");
             }
 
             reader.LoadF32(name, raw.AsSpan(0, dHead * nHeads));
@@ -197,7 +197,7 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
             var count = reader.ElementCount(name);
             if (count != (long)d * d)
             {
-                throw new InvalidDataException($"Tensor '{name}' element count {count} != d·d ({(long)d * d}).");
+                throw new OverfitFormatException($"Tensor '{name}' element count {count} != d·d ({(long)d * d}).");
             }
 
             reader.LoadF32(name, raw.AsSpan(0, d * d));
@@ -216,13 +216,13 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
             var count = reader.ElementCount(name);
             if (count != (long)rows * cols)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Tensor '{name}' element count {count} != {rows}·{cols} ({(long)rows * cols}). Check the BertConfig.");
             }
 
             if (dst.Length != rows * cols)
             {
-                throw new InvalidDataException($"Target for '{name}' has {dst.Length} elements, expected {rows * cols}.");
+                throw new OverfitFormatException($"Target for '{name}' has {dst.Length} elements, expected {rows * cols}.");
             }
 
             reader.LoadF32(name, raw.AsSpan(0, rows * cols));

@@ -477,19 +477,34 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Regex
 
             private static void SetRange(ref ulong lo, ref ulong hi, char from, char to)
             {
-                for (var c = from; c <= to; c++) { SetBit(ref lo, ref hi, c); }
+                for (var c = from; c <= to; c++)
+                {
+                    SetBit(ref lo, ref hi, c);
+                }
             }
 
             private static void SetBit(ref ulong lo, ref ulong hi, char c)
             {
-                if (c < 64) { lo |= 1UL << c; }
-                else if (c < 128) { hi |= 1UL << (c - 64); }
+                if (c < 64)
+                {
+                    lo |= 1UL << c;
+                }
+                else if (c < 128)
+                {
+                    hi |= 1UL << (c - 64);
+                }
             }
 
             private static void ClearBit(ref ulong lo, ref ulong hi, char c)
             {
-                if (c < 64) { lo &= ~(1UL << c); }
-                else if (c < 128) { hi &= ~(1UL << (c - 64)); }
+                if (c < 64)
+                {
+                    lo &= ~(1UL << c);
+                }
+                else if (c < 128)
+                {
+                    hi &= ~(1UL << (c - 64));
+                }
             }
         }
 

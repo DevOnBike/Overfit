@@ -18,7 +18,7 @@ namespace DevOnBike.Overfit.Onnx.Operators
     /// <c>GlobalAveragePool</c>. This operator handles that specific pattern.
     ///
     /// Only axes=[2,3] (or normalised [-2,-1]) on a 4-D [N,C,H,W] input is supported.
-    /// Other axes combinations throw <see cref="NotSupportedException"/> with a clear message.
+    /// Other axes combinations throw <see cref="OverfitRuntimeException"/> with a clear message.
     /// </summary>
     internal static class ReduceMeanOperator
     {
@@ -64,12 +64,12 @@ namespace DevOnBike.Overfit.Onnx.Operators
 
             // ── Input shape ───────────────────────────────────────────────────
             var inputShape = shapes.GetShape(node.Inputs[0])
-                ?? throw new InvalidDataException(
+                ?? throw new OverfitFormatException(
                     $"ReduceMean: input '{node.Inputs[0]}' has no known shape.");
 
             if (inputShape.Length != 4)
             {
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                     $"ReduceMean: only 4-D [N,C,H,W] inputs supported, got rank {inputShape.Length}. " +
                     "General ReduceMean is not implemented — only the GlobalAveragePool pattern (axes=[2,3]).");
             }
@@ -78,7 +78,7 @@ namespace DevOnBike.Overfit.Onnx.Operators
             var rank = inputShape.Length;
             if (axes == null || axes.Length != 2)
             {
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                     "ReduceMean: expected axes=[2,3] (GlobalAveragePool pattern), got " +
                     (axes == null ? "no axes" : $"axes=[{string.Join(",", axes)}]") + ". " +
                     "Only spatial reduction over H and W dimensions is supported.");
@@ -90,7 +90,7 @@ namespace DevOnBike.Overfit.Onnx.Operators
 
             if (!((norm0 == 2 && norm1 == 3) || (norm0 == 3 && norm1 == 2)))
             {
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                     $"ReduceMean: expected axes=[2,3] (H,W), got axes=[{axes[0]},{axes[1]}] " +
                     $"(normalised: [{norm0},{norm1}]). Only GlobalAveragePool pattern is supported.");
             }

@@ -31,7 +31,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var weightMap = ParseWeightMap(File.ReadAllBytes(indexPath));
             if (weightMap.Count == 0)
             {
-                throw new InvalidDataException($"Shard index '{indexPath}' has an empty weight_map.");
+                throw new OverfitFormatException($"Shard index '{indexPath}' has an empty weight_map.");
             }
 
             // Open each distinct shard once.
@@ -51,7 +51,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
                     if (!shard.Tensors.TryGetValue(tensorName, out var info))
                     {
-                        throw new InvalidDataException(
+                        throw new OverfitFormatException(
                             $"weight_map points '{tensorName}' at shard '{shardFile}', but that shard does not contain it.");
                     }
 
@@ -109,7 +109,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
             if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
             {
-                throw new InvalidDataException("Shard index is not a JSON object.");
+                throw new OverfitFormatException("Shard index is not a JSON object.");
             }
 
             while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
@@ -125,7 +125,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
                 if (reader.TokenType != JsonTokenType.StartObject)
                 {
-                    throw new InvalidDataException("weight_map is not a JSON object.");
+                    throw new OverfitFormatException("weight_map is not a JSON object.");
                 }
                 while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
                 {

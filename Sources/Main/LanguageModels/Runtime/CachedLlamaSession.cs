@@ -112,7 +112,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ThrowIfDisposed();
             if (_rope is null)
             {
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                     "Sliding-window eviction requires a RoPE model; learned absolute-position models cannot slide without re-embedding.");
             }
             _slidingWindow = true;
@@ -192,7 +192,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 if (_cache.IsFull && !_slidingWindow)
                 {
-                    throw new InvalidOperationException(
+                    throw new OverfitRuntimeException(
                         $"Prefill of {promptTokens.Length} tokens would exceed ContextLength {_config.ContextLength} " +
                         $"(current position {Position}).");
                 }
@@ -263,13 +263,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             if (_cache.IsFull && !_slidingWindow)
             {
-                throw new InvalidOperationException(
+                throw new OverfitRuntimeException(
                     $"KV cache is full (ContextLength={_config.ContextLength}). Start a new session.");
             }
 
             if (Position == 0)
             {
-                throw new InvalidOperationException(
+                throw new OverfitRuntimeException(
                     "Session is empty. Call Reset with at least one prompt token first.");
             }
 
@@ -297,12 +297,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ThrowIfDisposed();
             if (_cache.IsFull && !_slidingWindow)
             {
-                throw new InvalidOperationException(
+                throw new OverfitRuntimeException(
                     $"KV cache is full (ContextLength={_config.ContextLength}). Start a new session.");
             }
             if (Position == 0)
             {
-                throw new InvalidOperationException("Session is empty. Call Reset with a prompt first.");
+                throw new OverfitRuntimeException("Session is empty. Call Reset with a prompt first.");
             }
             DecodeToken(token);
         }
@@ -388,7 +388,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
             if (Position == 0)
             {
-                throw new InvalidOperationException("Session is empty. Call Reset with a prompt first.");
+                throw new OverfitRuntimeException("Session is empty. Call Reset with a prompt first.");
             }
 
             var dModel = _config.DModel;
@@ -583,7 +583,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             if (Position == 0)
             {
-                throw new InvalidOperationException(
+                throw new OverfitRuntimeException(
                     "Session is empty. Call Reset with at least one prompt token first.");
             }
 

@@ -64,7 +64,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var reader = new Utf8JsonReader(json, isFinalBlock: true, state: default);
             if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
             {
-                throw new InvalidDataException("config.json is not a JSON object.");
+                throw new OverfitFormatException("config.json is not a JSON object.");
             }
 
             // The root StartObject sits at CurrentDepth 0; its property names are at
@@ -115,7 +115,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
             if (layers <= 0 || dModel <= 0 || nHeads <= 0 || vocab <= 0)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     "config.json missing one of num_hidden_layers / hidden_size / num_attention_heads / vocab_size.");
             }
 
@@ -128,13 +128,13 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             // is not representable — fail loudly rather than mis-map the weights.
             if (headDim > 0 && headDim * nHeads != dModel)
             {
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                     $"config.json head_dim ({headDim}) * num_attention_heads ({nHeads}) != hidden_size ({dModel}); " +
                     "Overfit requires head_dim == hidden_size / num_attention_heads.");
             }
             if (dModel % nHeads != 0)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"hidden_size ({dModel}) is not divisible by num_attention_heads ({nHeads}).");
             }
 

@@ -57,7 +57,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
             if (headerLen == 0 || headerLen > (ulong)(stream.Length - 8))
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"safetensors header length {headerLen} is invalid for a {stream.Length}-byte file.");
             }
 
@@ -103,7 +103,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var expectedBytes = count * BytesPerElement(info.DType);
             if (byteLen != expectedBytes)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Tensor '{name}' byte range {byteLen} != expected {expectedBytes} for {info.DType} × {count}.");
             }
 
@@ -121,7 +121,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     ReadBF16(destination, count);
                     break;
                 default:
-                    throw new NotSupportedException(
+                    throw new OverfitRuntimeException(
                         $"Tensor '{name}' dtype {info.DType} is not supported by LoadF32 (F32/F16/BF16 only).");
             }
         }
@@ -208,7 +208,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             SafetensorsDType.F32 or SafetensorsDType.I32 or SafetensorsDType.U32 => 4,
             SafetensorsDType.F16 or SafetensorsDType.BF16 or SafetensorsDType.I16 or SafetensorsDType.U16 => 2,
             SafetensorsDType.I8 or SafetensorsDType.U8 or SafetensorsDType.Bool => 1,
-            _ => throw new NotSupportedException($"Unknown safetensors dtype {dtype}."),
+            _ => throw new OverfitRuntimeException($"Unknown safetensors dtype {dtype}."),
         };
 
         // ─── Header JSON parse (Utf8JsonReader — reflection-free) ──────────
@@ -222,7 +222,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
             if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
             {
-                throw new InvalidDataException("safetensors header is not a JSON object.");
+                throw new OverfitFormatException("safetensors header is not a JSON object.");
             }
 
             while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
@@ -261,7 +261,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         {
             if (reader.TokenType != JsonTokenType.StartObject)
             {
-                throw new InvalidDataException($"Tensor '{name}' entry is not a JSON object.");
+                throw new OverfitFormatException($"Tensor '{name}' entry is not a JSON object.");
             }
 
             var dtype = SafetensorsDType.F32;
@@ -285,7 +285,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                         var off = ReadLongArray(ref reader);
                         if (off.Length != 2)
                         {
-                            throw new InvalidDataException($"Tensor '{name}' data_offsets must have 2 entries.");
+                            throw new OverfitFormatException($"Tensor '{name}' data_offsets must have 2 entries.");
                         }
                         begin = off[0];
                         end = off[1];
@@ -303,7 +303,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         {
             if (reader.TokenType != JsonTokenType.StartArray)
             {
-                throw new InvalidDataException("Expected a JSON array.");
+                throw new OverfitFormatException("Expected a JSON array.");
             }
             var values = new List<long>(4);
             while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
@@ -328,7 +328,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             "I8" => SafetensorsDType.I8,
             "U8" => SafetensorsDType.U8,
             "BOOL" => SafetensorsDType.Bool,
-            _ => throw new NotSupportedException($"Unknown safetensors dtype '{s}'."),
+            _ => throw new OverfitRuntimeException($"Unknown safetensors dtype '{s}'."),
         };
 
         private void ThrowIfDisposed()

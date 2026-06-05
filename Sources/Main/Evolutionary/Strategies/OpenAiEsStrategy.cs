@@ -290,7 +290,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
             if (!_hasPendingPopulation)
             {
-                throw new InvalidOperationException("Tell() was called without a matching Ask().");
+                throw new OverfitRuntimeException("Tell() was called without a matching Ask().");
             }
 
             _fitnessShaper.Shape(fitness, _shapedFitness);
@@ -495,14 +495,14 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             var magic = reader.ReadInt32();
             if (magic != CheckpointMagic)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Expected magic 0x{CheckpointMagic:X8}, found 0x{magic:X8}. Stream was not produced by OpenAiEsStrategy.");
             }
 
             var schemaVersion = reader.ReadInt32();
             if (schemaVersion is not 2 and not 3)
             {
-                throw new InvalidDataException($"Unsupported schema version {schemaVersion}; this build supports 2 and {CheckpointSchemaVersion}.");
+                throw new OverfitFormatException($"Unsupported schema version {schemaVersion}; this build supports 2 and {CheckpointSchemaVersion}.");
             }
 
             var populationSize = reader.ReadInt32();
@@ -510,7 +510,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
             if (populationSize != PopulationSize || parameterCount != ParameterCount)
             {
-                throw new InvalidDataException($"Checkpoint was produced for ({populationSize}, {parameterCount}); current instance is ({PopulationSize}, {ParameterCount}).");
+                throw new OverfitFormatException($"Checkpoint was produced for ({populationSize}, {parameterCount}); current instance is ({PopulationSize}, {ParameterCount}).");
             }
 
             Generation = reader.ReadInt32();
@@ -541,7 +541,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
                 var offsetCount = reader.ReadInt32();
                 if (offsetCount != _noiseOffsets.Length)
                 {
-                    throw new InvalidDataException(
+                    throw new OverfitFormatException(
                         $"Checkpoint noise-offset count {offsetCount} does not match this instance {_noiseOffsets.Length}.");
                 }
 
@@ -558,7 +558,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             var streamUsedAdam = reader.ReadBoolean();
             if (streamUsedAdam != _useAdam)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Checkpoint optimizer mode (useAdam={streamUsedAdam}) does not match this instance.");
             }
 

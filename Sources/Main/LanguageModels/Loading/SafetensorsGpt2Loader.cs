@@ -69,7 +69,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             int dHead = d / heads;
             if (dHead * heads != d)
             {
-                throw new InvalidDataException($"DModel ({d}) is not divisible by NHeads ({heads}).");
+                throw new OverfitFormatException($"DModel ({d}) is not divisible by NHeads ({heads}).");
             }
 
             // 1–2. token + position embeddings. (wte is re-read for the LM head at the
@@ -132,7 +132,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var count = reader.ElementCount(name);
             if (count != expected)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Tensor '{name}' has {count} elements, expected {expected} for the given config.");
             }
             var data = new float[expected];

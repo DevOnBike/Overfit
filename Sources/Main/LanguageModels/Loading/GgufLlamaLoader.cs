@@ -118,12 +118,12 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 // GGUF dim order: [dModel, vocab]. Last dim is vocab.
                 vocab = (int)embInfo.Dims[^1];
             }
-            if (vocab == 0) { throw new InvalidDataException("Cannot determine vocab size."); }
+            if (vocab == 0) { throw new OverfitFormatException("Cannot determine vocab size."); }
 
             var headDim = dModel / nHeads;
             if (headDim * nHeads != dModel)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"dModel ({dModel}) is not divisible by nHeads ({nHeads}).");
             }
 
@@ -198,18 +198,15 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var attnQuantizable = quantize
                 && dModel % Q8DotKernel.BlockSize == 0 && headDim % Q8DotKernel.BlockSize == 0;
 
-            // F32 scratch is needed for any tensor that isn't K-quant-native on
-            // disk (the F32-fallback path). Peek layer 0's types — quant files
-            // are uniform across layers — to decide per tensor.
-            var qNeedsF32 = !attnQuantizable
-                || !IsKQuantNative(reader.Tensors["blk.0.attn_q.weight"], dModel);
-            var kNeedsF32 = !attnQuantizable
-                || !IsKQuantNative(reader.Tensors["blk.0.attn_k.weight"], dModel);
-            var vNeedsF32 = !attnQuantizable
-                || !IsKQuantNative(reader.Tensors["blk.0.attn_v.weight"], dModel);
-            // Wo: K-quant per-head is blocked by headDim < 256, but Q8_0 per-head works.
-            var oNeedsF32 = !attnQuantizable
-                || reader.Tensors["blk.0.attn_output.weight"].Type != GgmlType.Q8_0;
+            // F32 scratch is needed for any tensor that isn't K-quant-native on disk (the F32-fallback path).
+            // A Q4_K_M file is NOT type-uniform across layers — llama.cpp varies the quant per layer (e.g. some
+            // attn_v are Q8_0, others Q5_0) — so we must scan EVERY layer, not just blk.0, or a later F32-fallback
+            // layer would dereference a scratch buffer that was never rented.
+            var qNeedsF32 = !attnQuantizable || AnyLayerNeedsF32(reader, "attn_q", nLayers, dModel);
+            var kNeedsF32 = !attnQuantizable || AnyLayerNeedsF32(reader, "attn_k", nLayers, dModel);
+            var vNeedsF32 = !attnQuantizable || AnyLayerNeedsF32(reader, "attn_v", nLayers, dModel);
+            // Wo: K-quant per-head is blocked by headDim < 256, but Q8_0 per-head works (else F32 fallback).
+            var oNeedsF32 = !attnQuantizable || AnyLayerOutputNeedsF32(reader, nLayers);
 
             float[] qFull = qNeedsF32 ? PooledBuffer<float>.RentArray(qFullElems) : [];
             float[] kFull = kNeedsF32 ? PooledBuffer<float>.RentArray(kFullElems) : [];
@@ -436,11 +433,11 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         {
             if (!reader.Tensors.TryGetValue("token_embd.weight", out var info))
             {
-                throw new InvalidDataException("Required tensor 'token_embd.weight' missing from GGUF.");
+                throw new OverfitFormatException("Required tensor 'token_embd.weight' missing from GGUF.");
             }
             if (info.ElementCount != (long)vocab * dModel)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Tensor 'token_embd.weight' has {info.ElementCount} elements, expected {(long)vocab * dModel}.");
             }
 
@@ -463,11 +460,11 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         {
             if (!reader.Tensors.TryGetValue(name, out var info))
             {
-                throw new InvalidDataException($"Required tensor '{name}' missing from GGUF.");
+                throw new OverfitFormatException($"Required tensor '{name}' missing from GGUF.");
             }
             if (info.ElementCount != elementCount)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Tensor '{name}' has {info.ElementCount} elements, expected {elementCount}.");
             }
             var storage = TensorStorage<float>.Unpooled(checked((int)elementCount));
@@ -489,7 +486,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         {
             if (info.Dims.Length != 3)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Expert tensor '{info.Name}' must be 3-D [ne0, ne1, n_expert], got {info.Dims.Length} dims.");
             }
 
@@ -563,7 +560,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     }
 
                 default:
-                    throw new NotSupportedException(
+                    throw new OverfitRuntimeException(
                         $"Expert tensor '{info.Name}' type {info.Type} is not supported " +
                         $"(expected Q4_K / Q5_0 / Q5_K / Q6_K / Q8_0).");
             }
@@ -606,7 +603,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         {
             if (info.Dims.Length != 3)
             {
-                throw new InvalidDataException($"Expert tensor '{info.Name}' must be 3-D, got {info.Dims.Length} dims.");
+                throw new OverfitFormatException($"Expert tensor '{info.Name}' must be 3-D, got {info.Dims.Length} dims.");
             }
 
             var inDim = checked((int)info.Dims[0]);
@@ -642,7 +639,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         {
             if (!reader.Tensors.TryGetValue(name, out var info))
             {
-                throw new InvalidDataException($"Required tensor '{name}' missing from GGUF.");
+                throw new OverfitFormatException($"Required tensor '{name}' missing from GGUF.");
             }
             var arr = new float[count];
             reader.LoadTensorAsF32(info, arr);
@@ -679,7 +676,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             // Transposition required.
             if (!reader.Tensors.TryGetValue(name, out var info))
             {
-                throw new InvalidDataException($"Required tensor '{name}' missing from GGUF.");
+                throw new OverfitFormatException($"Required tensor '{name}' missing from GGUF.");
             }
 
             var elementCount = checked((int)((long)inDim * outDim));
@@ -714,7 +711,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         {
             if (!reader.Tensors.TryGetValue(name, out var info))
             {
-                throw new InvalidDataException($"Required tensor '{name}' missing from GGUF.");
+                throw new OverfitFormatException($"Required tensor '{name}' missing from GGUF.");
             }
 
             if (info.Type == GgmlType.Q4_K && inDim % Q4KWeight.SuperBlockElements == 0)
@@ -761,6 +758,34 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             || (info.Type == GgmlType.Q6_K && dModel % Q6KWeight.SuperBlockElements == 0)
             || (info.Type == GgmlType.Q8_0 && dModel % Q8DotKernel.BlockSize == 0);
 
+        // A Q4_K_M GGUF varies the quant per layer (e.g. some attn_v are Q8_0, others Q5_0), so the
+        // scratch-renting decision must scan EVERY layer: true if any layer's blk.{l}.{suffix}.weight is not
+        // K-quant-native and would therefore take the F32 fallback (which needs the rented scratch).
+        private static bool AnyLayerNeedsF32(GgufReader reader, string suffix, int nLayers, int dModel)
+        {
+            for (var l = 0; l < nLayers; l++)
+            {
+                if (reader.Tensors.TryGetValue($"blk.{l}.{suffix}.weight", out var info) && !IsKQuantNative(info, dModel))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // Wo per-head can be Q8_0-native; anything else takes the F32 fallback. True if any layer's Wo isn't Q8_0.
+        private static bool AnyLayerOutputNeedsF32(GgufReader reader, int nLayers)
+        {
+            for (var l = 0; l < nLayers; l++)
+            {
+                if (reader.Tensors.TryGetValue($"blk.{l}.attn_output.weight", out var info) && info.Type != GgmlType.Q8_0)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         /// <summary>
         /// Loads a weight as Q4_K-resident — the file's <c>block_q4_K</c> bytes
         /// are kept verbatim (no de-interleave; Q4_K's layout matches
@@ -798,7 +823,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         {
             if (!reader.Tensors.TryGetValue(name, out var info))
             {
-                throw new InvalidDataException($"Required tensor '{name}' missing from GGUF.");
+                throw new OverfitFormatException($"Required tensor '{name}' missing from GGUF.");
             }
 
             if (quantizable && info.Type == GgmlType.Q4_K && dModel % Q4KWeight.SuperBlockElements == 0)
@@ -834,7 +859,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         {
             if (!reader.Tensors.TryGetValue(name, out var info))
             {
-                throw new InvalidDataException($"Required tensor '{name}' missing from GGUF.");
+                throw new OverfitFormatException($"Required tensor '{name}' missing from GGUF.");
             }
 
             if (quantizable && info.Type == GgmlType.Q8_0)
@@ -1032,7 +1057,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         {
             if (!reader.Tensors.TryGetValue(name, out var info))
             {
-                throw new InvalidDataException($"Required tensor '{name}' missing from GGUF.");
+                throw new OverfitFormatException($"Required tensor '{name}' missing from GGUF.");
             }
             reader.LoadTensorAsF32(info, dst);
         }

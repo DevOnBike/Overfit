@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 DevOnBike.
+// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -83,7 +83,7 @@ namespace DevOnBike.Overfit.Tensors.Core
         {
             if (!span.IsContiguous)
             {
-                throw new InvalidOperationException($"KRYTYCZNY BŁĄD WYDAJNOŚCI: Tensor '{paramName}' nie jest ciągły w pamięci (np. po operacji Transpose). Szybkie kernele SIMD wymagają ciągłej pamięci. Zmaterializuj tensor używając TensorFactory.Materialize().");
+                throw new OverfitRuntimeException($"KRYTYCZNY BŁĄD WYDAJNOŚCI: Tensor '{paramName}' nie jest ciągły w pamięci (np. po operacji Transpose). Szybkie kernele SIMD wymagają ciągłej pamięci. Zmaterializuj tensor używając TensorFactory.Materialize().");
             }
         }
 

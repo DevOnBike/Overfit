@@ -74,7 +74,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Session
             using var model = CreateModel();
             using var session = new SlmSession(model, maxContextLength: 8);
 
-            Assert.Throws<InvalidOperationException>(() =>
+            Assert.Throws<OverfitRuntimeException>(() =>
                 session.GenerateNextToken(SamplingOptions.Greedy));
         }
 

@@ -168,12 +168,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             if (!_hasLogits)
             {
-                throw new InvalidOperationException("Cannot generate from an empty cached session. Call Reset(promptTokens) first.");
+                throw new OverfitRuntimeException("Cannot generate from an empty cached session. Call Reset(promptTokens) first.");
             }
 
             if (_adapter.IsFull)
             {
-                throw new InvalidOperationException(
+                throw new OverfitRuntimeException(
                     $"Cannot generate because KV cache is full. MaxContextLength={MaxContextLength}.");
             }
 

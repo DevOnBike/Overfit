@@ -35,7 +35,7 @@ namespace DevOnBike.Overfit.Tests.Core.Parameters
 
             Assert.False(p.RequiresGrad);
             Assert.Null(p.Grad);
-            Assert.Throws<InvalidOperationException>(() => _ = p.GradSpan);
+            Assert.Throws<OverfitRuntimeException>(() => _ = p.GradSpan);
         }
 
         [Fact]
@@ -194,7 +194,7 @@ namespace DevOnBike.Overfit.Tests.Core.Parameters
             // Try to load into a 9-element parameter
             using var target = new Parameter(new TensorShape(9));
             using var reader = new BinaryReader(ms);
-            Assert.Throws<InvalidDataException>(() => target.Load(reader));
+            Assert.Throws<OverfitFormatException>(() => target.Load(reader));
         }
 
         [Fact]

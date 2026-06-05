@@ -55,7 +55,7 @@ namespace DevOnBike.Overfit.Autograd
 
                 if (!RequiresGrad || _gradStorage == null)
                 {
-                    throw new InvalidOperationException("Ten wÄ™zeÅ‚ nie Å›ledzi gradientÃ³w (RequiresGrad = false).");
+                    throw new OverfitRuntimeException("Ten wÄ™zeÅ‚ nie Å›ledzi gradientÃ³w (RequiresGrad = false).");
                 }
 
                 return new TensorSpan<float>(_gradStorage.AsSpan(), Shape);

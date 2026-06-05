@@ -70,7 +70,7 @@ namespace DevOnBike.Overfit.Optimizers
                     2 => new FastTensor<float>(view.GetDim(0), view.GetDim(1), clearMemory: false),
                     3 => new FastTensor<float>(view.GetDim(0), view.GetDim(1), view.GetDim(2), clearMemory: false),
                     4 => new FastTensor<float>(view.GetDim(0), view.GetDim(1), view.GetDim(2), view.GetDim(3), clearMemory: false),
-                    _ => throw new InvalidOperationException("Rank not supported by LRScheduler")
+                    _ => throw new OverfitRuntimeException("Rank not supported by LRScheduler")
                 };
 
                 view.AsReadOnlySpan().CopyTo(_checkpoint[i].GetView().AsSpan());

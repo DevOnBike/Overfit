@@ -25,7 +25,7 @@ namespace DevOnBike.Overfit.Onnx.Operators
         {
             var kernelShape = node.Attributes.TryGetValue("kernel_shape", out var ks)
                 ? ks.IntArray
-                : throw new InvalidDataException("AveragePool missing required 'kernel_shape'.");
+                : throw new OverfitFormatException("AveragePool missing required 'kernel_shape'.");
 
             var strides = node.Attributes.TryGetValue("strides", out var st)
                 ? st.IntArray
@@ -49,46 +49,46 @@ namespace DevOnBike.Overfit.Onnx.Operators
 
             if (kernelShape.Length != 2 || kernelShape[0] != kernelShape[1])
             {
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                     $"AveragePool: only square kernels supported, got [{string.Join(",", kernelShape)}].");
             }
 
             if (strides[0] != strides[1])
             {
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                     $"AveragePool: non-square strides [{strides[0]},{strides[1]}] not supported.");
             }
 
             if (pads.Length == 4 && (pads[0] != pads[2] || pads[1] != pads[3]))
             {
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                     $"AveragePool: asymmetric padding [{string.Join(",", pads)}] not supported.");
             }
 
             if (ceilMode != 0)
             {
-                throw new NotSupportedException("AveragePool: ceil_mode=1 not supported.");
+                throw new OverfitRuntimeException("AveragePool: ceil_mode=1 not supported.");
             }
 
             if (dilations.Any(d => d != 1))
             {
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                     $"AveragePool: dilations [{string.Join(",", dilations)}] not supported.");
             }
 
             if (!string.IsNullOrEmpty(autoPad) && autoPad != "NOTSET")
             {
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                     $"AveragePool: auto_pad='{autoPad}' not supported. Use explicit pads.");
             }
 
             var inputShape = shapes.GetShape(node.Inputs[0])
-                ?? throw new InvalidDataException(
+                ?? throw new OverfitFormatException(
                     $"AveragePool: input '{node.Inputs[0]}' has no known shape.");
 
             if (inputShape.Length != 4)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"AveragePool: expected 4-D [N,C,H,W], got rank {inputShape.Length}.");
             }
 

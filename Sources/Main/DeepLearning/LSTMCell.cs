@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 DevOnBike.
+// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -99,7 +99,7 @@ namespace DevOnBike.Overfit.DeepLearning
         // --- MISSING METHOD FROM IMODULE ---
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
-            throw new NotSupportedException("LstmCell requires the hidden state and cell state to be passed. Use the dedicated Forward overload.");
+            throw new OverfitRuntimeException("LstmCell requires the hidden state and cell state to be passed. Use the dedicated Forward overload.");
         }
 
         public (AutogradNode h, AutogradNode c) Forward(ComputationGraph graph, AutogradNode x, AutogradNode h, AutogradNode c)

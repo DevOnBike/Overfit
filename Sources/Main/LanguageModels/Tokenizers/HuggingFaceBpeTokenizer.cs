@@ -122,7 +122,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             var type = model.TryGetProperty("type", out var t) ? t.GetString() : "BPE";
             if (type != "BPE")
             {
-                throw new NotSupportedException($"Only ByteLevel BPE tokenizers are supported; got '{type}'.");
+                throw new OverfitRuntimeException($"Only ByteLevel BPE tokenizers are supported; got '{type}'.");
             }
 
             var vocab = ReadVocab(model.GetProperty("vocab"), out var decoder);

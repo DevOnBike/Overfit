@@ -71,7 +71,7 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
                     RenderMistral(sb, messages, addGenerationPrompt);
                     break;
                 default:
-                    throw new NotSupportedException($"Unsupported chat template format {Format}.");
+                    throw new OverfitRuntimeException($"Unsupported chat template format {Format}.");
             }
             return sb.ToString();
         }

@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 DevOnBike.
+// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -102,7 +102,7 @@ namespace DevOnBike.Overfit.Tensors.Core
         {
             if (!IsContiguous)
             {
-                throw new InvalidOperationException("Tensor span is not contiguous. Materialize it first or use indexed access.");
+                throw new OverfitRuntimeException("Tensor span is not contiguous. Materialize it first or use indexed access.");
             }
 
             return _data.Slice(Offset, Size);
@@ -184,7 +184,7 @@ namespace DevOnBike.Overfit.Tensors.Core
         {
             if (!IsContiguous)
             {
-                throw new InvalidOperationException("Cannot reshape a non-contiguous tensor span.");
+                throw new OverfitRuntimeException("Cannot reshape a non-contiguous tensor span.");
             }
 
             if (!newShape.IsValid)
@@ -210,7 +210,7 @@ namespace DevOnBike.Overfit.Tensors.Core
         {
             if (Rank != 2)
             {
-                throw new InvalidOperationException("Transpose2D is valid only for rank-2 tensors.");
+                throw new OverfitRuntimeException("Transpose2D is valid only for rank-2 tensors.");
             }
 
             var newShape = new TensorShape(Shape.D1, Shape.D0);
@@ -228,7 +228,7 @@ namespace DevOnBike.Overfit.Tensors.Core
         {
             if (!IsContiguous)
             {
-                throw new InvalidOperationException("SliceContiguous1D requires a contiguous tensor span.");
+                throw new OverfitRuntimeException("SliceContiguous1D requires a contiguous tensor span.");
             }
 
             ArgumentOutOfRangeException.ThrowIfNegative(offsetIndex);
@@ -254,7 +254,7 @@ namespace DevOnBike.Overfit.Tensors.Core
         {
             if (!IsContiguous)
             {
-                throw new InvalidOperationException("Flatten requires a contiguous tensor span.");
+                throw new OverfitRuntimeException("Flatten requires a contiguous tensor span.");
             }
 
             return new TensorSpan<T>(_data.Slice(Offset, Size), new TensorShape(Size));

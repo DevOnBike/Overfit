@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 DevOnBike.
+// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -93,7 +93,7 @@ namespace DevOnBike.Overfit.Data.Normalizers
         {
             if (_zscore.Count == 0)
             {
-                throw new InvalidOperationException("Cannot freeze before fitting. Call FitBatch or FitIncremental first.");
+                throw new OverfitRuntimeException("Cannot freeze before fitting. Call FitBatch or FitIncremental first.");
             }
 
             var std = _zscore.StandardDeviation;
@@ -171,7 +171,7 @@ namespace DevOnBike.Overfit.Data.Normalizers
         {
             if (_frozen)
             {
-                throw new InvalidOperationException("Normalizer is frozen. Call Reset() before fitting again.");
+                throw new OverfitRuntimeException("Normalizer is frozen. Call Reset() before fitting again.");
             }
         }
 
@@ -179,7 +179,7 @@ namespace DevOnBike.Overfit.Data.Normalizers
         {
             if (!_frozen)
             {
-                throw new InvalidOperationException("Normalizer is not frozen. Call Freeze() after fitting, or Load() to restore.");
+                throw new OverfitRuntimeException("Normalizer is not frozen. Call Freeze() after fitting, or Load() to restore.");
             }
         }
     }

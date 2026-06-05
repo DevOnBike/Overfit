@@ -325,7 +325,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
             if (!_hasPendingPopulation)
             {
-                throw new InvalidOperationException("Tell() was called without a matching Ask().");
+                throw new OverfitRuntimeException("Tell() was called without a matching Ask().");
             }
 
             var n = ParameterCount;
@@ -587,7 +587,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
             if (magic != CheckpointMagic)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Expected magic 0x{CheckpointMagic:X8}, found 0x{magic:X8}. "
                     + "Stream was not produced by SeparableCmaEsStrategy.");
             }
@@ -596,7 +596,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
             if (schemaVersion != CheckpointSchemaVersion)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Unsupported schema version {schemaVersion}; this build supports "
                     + $"{CheckpointSchemaVersion}.");
             }
@@ -606,7 +606,7 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
 
             if (populationSize != PopulationSize || parameterCount != ParameterCount)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Checkpoint was produced for ({populationSize}, {parameterCount}); "
                     + $"current instance is ({PopulationSize}, {ParameterCount}).");
             }

@@ -285,11 +285,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             if (weights.Ln1Beta.IsEmpty || weights.Ln2Beta.IsEmpty)
             {
-                throw new NotSupportedException("Batched prefill supports standard LayerNorm only (RMSNorm is a follow-on).");
+                throw new OverfitRuntimeException("Batched prefill supports standard LayerNorm only (RMSNorm is a follow-on).");
             }
             if (!weights.FfnGate.IsEmpty)
             {
-                throw new NotSupportedException("Batched prefill supports GeLU/ReLU FFN only (SwiGLU is a follow-on).");
+                throw new OverfitRuntimeException("Batched prefill supports GeLU/ReLU FFN only (SwiGLU is a follow-on).");
             }
 
             var dModel = DModel;
@@ -358,7 +358,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rows);
             if (!weights.IsMoe && weights.FfnGate.IsEmpty)
             {
-                throw new NotSupportedException("Batched quant prefill requires a SwiGLU FFN (FfnGate present) or an MoE FFN.");
+                throw new OverfitRuntimeException("Batched quant prefill requires a SwiGLU FFN (FfnGate present) or an MoE FFN.");
             }
 
             var dModel = DModel;

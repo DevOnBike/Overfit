@@ -175,14 +175,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var magic = reader.ReadUInt32();
             if (magic != FilemagicExpected)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                 $"Not an Overfit SLM file. Expected magic 0x{FilemagicExpected:X8}, got 0x{magic:X8}.");
             }
 
             var version = reader.ReadInt32();
             if (version != VersionExpected)
             {
-                throw new NotSupportedException($"Unsupported file version {version}. Expected {VersionExpected}.");
+                throw new OverfitRuntimeException($"Unsupported file version {version}. Expected {VersionExpected}.");
             }
 
             var nLayers = reader.ReadInt32();
@@ -495,7 +495,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// LoRA and the F32-only diagnostics need an F32 <see cref="TensorStorage{T}"/>.
         /// </summary>
         private static TensorStorage<float> RequireF32(in DecodeWeight weight, string context)
-            => weight.F32Storage ?? throw new NotSupportedException(
+            => weight.F32Storage ?? throw new OverfitRuntimeException(
                 $"{context} requires F32-resident weights; this model was loaded with Q8_0 " +
                 "quantization. Operations on quantized weights are not supported.");
 

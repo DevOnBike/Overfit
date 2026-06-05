@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 DevOnBike.
+// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -330,7 +330,7 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
         ///     instance must have been constructed with the same shape parameters
         ///     (ParameterCount, BatchSize, DescriptorDimensions) and embed an archive
         ///     compatible with the saved one. Mismatches throw
-        ///     <see cref="InvalidDataException"/> rather than silently reshaping.
+        ///     <see cref="OverfitFormatException"/> rather than silently reshaping.
         /// </summary>
         public void Load(BinaryReader reader)
         {
@@ -340,35 +340,35 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
             var magic = reader.ReadUInt32();
             if (magic != SaveMagic)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Not a MapElites checkpoint — magic header 0x{magic:X8} does not match expected 0x{SaveMagic:X8}.");
             }
 
             var schemaVersion = reader.ReadInt32();
             if (schemaVersion != SaveSchemaVersion)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"MapElites checkpoint schema version {schemaVersion} is not supported by this build (expected {SaveSchemaVersion}).");
             }
 
             var parameterCount = reader.ReadInt32();
             if (parameterCount != ParameterCount)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Checkpoint ParameterCount={parameterCount} does not match this instance's ParameterCount={ParameterCount}.");
             }
 
             var batchSize = reader.ReadInt32();
             if (batchSize != BatchSize)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Checkpoint BatchSize={batchSize} does not match this instance's BatchSize={BatchSize}.");
             }
 
             var descriptorDimensions = reader.ReadInt32();
             if (descriptorDimensions != DescriptorDimensions)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Checkpoint DescriptorDimensions={descriptorDimensions} does not match this instance's DescriptorDimensions={DescriptorDimensions}.");
             }
 
@@ -406,7 +406,7 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
             // time GetBestEliteParameters() is next called the index will resolve.
             if (_hasBestElite && _bestEliteCellIndex < 0)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Checkpoint claims hasBestElite=true but bestEliteCellIndex={_bestEliteCellIndex} is negative.");
             }
 
@@ -419,13 +419,13 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
             {
                 if (_bestEliteCellIndex >= _archive.CellCount)
                 {
-                    throw new InvalidDataException(
+                    throw new OverfitFormatException(
                         $"Checkpoint bestEliteCellIndex={_bestEliteCellIndex} is out of range for archive CellCount={_archive.CellCount}.");
                 }
 
                 if (!_archive.IsOccupied(_bestEliteCellIndex))
                 {
-                    throw new InvalidDataException(
+                    throw new OverfitFormatException(
                         $"Checkpoint claims best-elite is in cell {_bestEliteCellIndex}, but the archive does not have that cell occupied.");
                 }
             }

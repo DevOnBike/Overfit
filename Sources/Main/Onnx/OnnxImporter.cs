@@ -113,7 +113,7 @@ namespace DevOnBike.Overfit.Onnx
 
             if (modules.Count == 0)
             {
-                throw new InvalidOperationException(
+                throw new OverfitRuntimeException(
                     "ONNX import produced no modules. " +
                     "Check that the model contains supported operators.");
             }
@@ -209,13 +209,13 @@ namespace DevOnBike.Overfit.Onnx
         {
             if (model.Graph.Nodes.Count == 0)
             {
-                throw new InvalidOperationException(
+                throw new OverfitRuntimeException(
                     "ONNX model has no nodes.");
             }
 
             if (model.Graph.Initializers.Count == 0)
             {
-                throw new InvalidOperationException(
+                throw new OverfitRuntimeException(
                     "ONNX model has no initializers (weights). " +
                     "Ensure the model was exported with export_params=True.");
             }
@@ -240,7 +240,7 @@ namespace DevOnBike.Overfit.Onnx
                 if (opset.Version < MinSupportedOpset ||
                     opset.Version > MaxSupportedOpset)
                 {
-                    throw new NotSupportedException(
+                    throw new OverfitRuntimeException(
                         $"ONNX opset version {opset.Version} not supported. " +
                         $"Tested range: {MinSupportedOpset}-{MaxSupportedOpset}.");
                 }
@@ -297,7 +297,7 @@ namespace DevOnBike.Overfit.Onnx
                     continue;
                 }
 
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                     $"Branching topology detected: tensor '{tensorName}' has {count} consumers. " +
                     "MVP supports linear graphs only. Skip connections are not yet supported.");
             }
@@ -321,7 +321,7 @@ namespace DevOnBike.Overfit.Onnx
 
                 if (string.IsNullOrEmpty(externalDataDir))
                 {
-                    throw new InvalidOperationException(
+                    throw new OverfitRuntimeException(
                         $"Initializer '{initializer.Name}' references external data " +
                         $"'{initializer.ExternalData.Location}', but no externalDataDir was provided. " +
                         "Use OnnxImporter.Load(path), which resolves it automatically.");
@@ -362,7 +362,7 @@ namespace DevOnBike.Overfit.Onnx
                     offset > fileBytes.Length ||
                     length > fileBytes.Length - offset)
                 {
-                    throw new InvalidDataException(
+                    throw new OverfitFormatException(
                         $"External data for '{initializer.Name}' requests bytes " +
                         $"[{offset}, {offset + length}) but '{Path.GetFileName(fullPath)}' " +
                         $"is only {fileBytes.Length} bytes.");
@@ -397,13 +397,13 @@ namespace DevOnBike.Overfit.Onnx
         {
             if (string.IsNullOrWhiteSpace(location))
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Initializer '{initializerName}' has an empty external data location.");
             }
 
             if (Path.IsPathRooted(location))
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Initializer '{initializerName}' references an absolute external data path: '{location}'.");
             }
 
@@ -422,7 +422,7 @@ namespace DevOnBike.Overfit.Onnx
                     baseDir,
                     comparison))
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"External data path for initializer '{initializerName}' escapes the model directory: '{location}'.");
             }
 
@@ -455,7 +455,7 @@ namespace DevOnBike.Overfit.Onnx
         {
             if (initializer.ExternalData == null)
             {
-                throw new InvalidOperationException(
+                throw new OverfitRuntimeException(
                     "ExternalData must be present.");
             }
 
@@ -494,7 +494,7 @@ namespace DevOnBike.Overfit.Onnx
         {
             if (tensor.DataType != OnnxDataType.Float)
             {
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                     $"Tensor '{tensor.Name}' has type {tensor.DataType}. " +
                     "Only Float32 is supported; FP16/INT8 quantization is not yet implemented.");
             }
@@ -507,13 +507,13 @@ namespace DevOnBike.Overfit.Onnx
 
             if (tensor.RawData.Length == 0)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Tensor '{tensor.Name}' has no data. Was external_data resolved?");
             }
 
             if (tensor.RawData.Length % sizeof(float) != 0)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Tensor '{tensor.Name}' raw data length {tensor.RawData.Length} " +
                     "is not divisible by 4.");
             }
@@ -541,7 +541,7 @@ namespace DevOnBike.Overfit.Onnx
             if (value < int.MinValue ||
                 value > int.MaxValue)
             {
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                     $"{name} value {value} is outside Int32 range.");
             }
 

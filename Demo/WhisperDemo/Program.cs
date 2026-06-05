@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Diagnostics;
+using DevOnBike.Overfit.Exceptions;
 using DevOnBike.Overfit.LanguageModels.Whisper;
 
 namespace DevOnBike.Overfit.Demo.WhisperConsole
@@ -50,7 +51,7 @@ namespace DevOnBike.Overfit.Demo.WhisperConsole
             {
                 text = whisper.TranscribeFile(wavPath, language);
             }
-            catch (NotSupportedException ex)
+            catch (OverfitRuntimeException ex)
             {
                 Console.Error.WriteLine($"  {ex.Message}");
                 Console.Error.WriteLine("  Tip: convert to 16 kHz mono WAV, e.g.  ffmpeg -i input.mp3 -ar 16000 -ac 1 output.wav");

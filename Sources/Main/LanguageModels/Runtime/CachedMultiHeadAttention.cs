@@ -264,11 +264,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             if (rope is not null)
             {
-                throw new NotSupportedException("Batched prefill does not support RoPE yet (F32/GPT-2 path only).");
+                throw new OverfitRuntimeException("Batched prefill does not support RoPE yet (F32/GPT-2 path only).");
             }
             if (weights.HasGqa)
             {
-                throw new NotSupportedException("Batched prefill does not support GQA yet (standard MHA only).");
+                throw new OverfitRuntimeException("Batched prefill does not support GQA yet (standard MHA only).");
             }
 
             var dModel = DModel;
@@ -296,7 +296,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ref readonly var head0 = ref weights.Head(0);
             if (head0.Wq.IsQuantized || head0.Wq.IsQ4K || head0.Wq.IsQ6K)
             {
-                throw new NotSupportedException("Batched prefill supports F32 attention weights only (quantized path is a follow-on).");
+                throw new OverfitRuntimeException("Batched prefill supports F32 attention weights only (quantized path is a follow-on).");
             }
 
             // Parallelise OVER HEADS (one dispatch for the whole layer), each head

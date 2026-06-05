@@ -91,7 +91,7 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                     case LoRATargetModules.LanguageModelHead:
                         if (model.Config.TieWeights)
                         {
-                            throw new NotSupportedException(
+                            throw new OverfitRuntimeException(
                                 "LoRA on the LM head requires an untied head; the model must be built with TieWeights=false.");
                         }
 
@@ -163,13 +163,13 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                         break;
 
                     default:
-                        throw new NotSupportedException(
+                        throw new OverfitRuntimeException(
                             $"Gpt1LoRAMergeAdapter cannot merge module {entry.Module}.");
                 }
 
                 if (weight.InDim != expectedIn || weight.OutDim != expectedOut)
                 {
-                    throw new InvalidDataException(
+                    throw new OverfitFormatException(
                         $"LoRA entry [{entry.Module} layer {entry.Layer}] dimensions " +
                         $"[{weight.InDim}x{weight.OutDim}] do not match the model [{expectedIn}x{expectedOut}].");
                 }
@@ -263,7 +263,7 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
         {
             if (layer < 0 || layer >= nLayers)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"LoRA entry for {module} references layer {layer}; the model has {nLayers} layers.");
             }
         }
@@ -272,7 +272,7 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
         {
             if (head < 0 || head >= nHeads)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"LoRA entry for {module} layer {layer} references head {head}; the layer has {nHeads} heads.");
             }
         }

@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <RootNamespace>DevOnBike.Overfit.Cli</RootNamespace>
+        <!-- The published native binary is `overfit` (ollama-style: a single self-contained executable,
+             put it on PATH = a global command; no .NET runtime required). Build with
+             `dotnet publish -c Release -r <rid> -p:PublishAot=true`. -->
+        <AssemblyName>overfit</AssemblyName>
+        <IsPackable>false</IsPackable>
+
+        <PublishAot>true</PublishAot>
+        <InvariantGlobalization>true</InvariantGlobalization>
+        <IsTrimmable>true</IsTrimmable>
+        <StripSymbols>true</StripSymbols>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\Main\Main.csproj" />
+        <PackageReference Include="System.CommandLine" />
+    </ItemGroup>
+
+</Project>

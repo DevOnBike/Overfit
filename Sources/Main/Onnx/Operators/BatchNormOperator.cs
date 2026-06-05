@@ -51,7 +51,7 @@ namespace DevOnBike.Overfit.Onnx.Operators
 
             if (trainingMode != 0)
             {
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                     "BatchNormalization: training_mode=1 is not supported in ONNX import. " +
                     "Export your model with model.eval() to use inference-mode BatchNorm, " +
                     "or use PyTorch eval() export which folds BN into Conv weights.");
@@ -72,7 +72,7 @@ namespace DevOnBike.Overfit.Onnx.Operators
 
             // ── Input shape ───────────────────────────────────────────────────
             var inputShape = shapes.GetShape(node.Inputs[0])
-                ?? throw new InvalidDataException(
+                ?? throw new OverfitFormatException(
                     $"BatchNormalization: input '{node.Inputs[0]}' has no known shape.");
 
             // ── Build layer ───────────────────────────────────────────────────

@@ -100,7 +100,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenization
         public void MissingRequiredSpecialToken_Throws()
         {
             var vocab = new Dictionary<string, int>(StringComparer.Ordinal) { ["hello"] = 0 };
-            Assert.Throws<InvalidDataException>(() => new WordPieceTokenizer(vocab));
+            Assert.Throws<OverfitFormatException>(() => new WordPieceTokenizer(vocab));
         }
 
         [Fact]

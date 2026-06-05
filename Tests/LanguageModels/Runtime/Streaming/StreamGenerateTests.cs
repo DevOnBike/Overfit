@@ -139,7 +139,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
 
             var opts = StreamingOptions.Default;
 
-            await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await Assert.ThrowsAsync<OverfitRuntimeException>(async () =>
             {
                 await foreach (var _ in session.StreamGenerate(opts))
                 {

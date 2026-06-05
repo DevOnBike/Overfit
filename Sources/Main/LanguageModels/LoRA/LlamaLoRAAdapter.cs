@@ -185,7 +185,7 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             ThrowIfDisposed();
             if (_enabled)
             {
-                throw new InvalidOperationException(
+                throw new OverfitRuntimeException(
                 "Call Disable() before loading new LoRA weights.");
             }
 
@@ -195,14 +195,14 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             var magic = br.ReadUInt32();
             if (magic != FileMagic)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                 $"Not a LoRA file (magic={magic:#x}, expected {FileMagic:#x}).");
             }
 
             var version = br.ReadInt32();
             if (version != FileVersion)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                 $"Unsupported LoRA file version {version} (expected {FileVersion}).");
             }
 
@@ -223,7 +223,7 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                 if (loaded.InDim != dst.InDim || loaded.OutDim != dst.OutDim ||
                     loaded.Rank != dst.Rank)
                 {
-                    throw new InvalidDataException(
+                    throw new OverfitFormatException(
                     $"Dimension mismatch at ({layer},{module},{headIdx}): " +
                     $"file=[{loaded.InDim}×{loaded.OutDim} r={loaded.Rank}], " +
                     $"adapter=[{dst.InDim}×{dst.OutDim} r={dst.Rank}]");

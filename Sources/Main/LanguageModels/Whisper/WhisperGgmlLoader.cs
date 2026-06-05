@@ -31,7 +31,7 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
 
             if (br.ReadInt32() != Magic)
             {
-                throw new InvalidDataException("Not a whisper ggml file (bad magic). Expected a whisper.cpp ggml-*.bin.");
+                throw new OverfitFormatException("Not a whisper ggml file (bad magic). Expected a whisper.cpp ggml-*.bin.");
             }
 
             var config = new WhisperConfig(
@@ -93,7 +93,7 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
                 }
                 else
                 {
-                    throw new NotSupportedException($"Tensor '{name}' has unsupported ftype {ftype} (only F32/F16 supported so far).");
+                    throw new OverfitRuntimeException($"Tensor '{name}' has unsupported ftype {ftype} (only F32/F16 supported so far).");
                 }
 
                 tensors[name] = new WhisperTensor(shape, data);

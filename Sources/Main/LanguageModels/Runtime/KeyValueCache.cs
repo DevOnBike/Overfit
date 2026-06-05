@@ -214,7 +214,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             if (CurrentLength + tokenCount > MaxLength)
             {
-                throw new InvalidOperationException(
+                throw new OverfitRuntimeException(
                     $"Cannot advance KV cache by {tokenCount} tokens. CurrentLength={CurrentLength}, MaxLength={MaxLength}.");
             }
 
@@ -599,7 +599,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             if (IsQuantized)
             {
-                throw new InvalidOperationException($"{op} is F32-only; this cache is Q8. Use the Q8 read surface (GetKeyQuants/GetKeyScales) or DequantizeKeyRange.");
+                throw new OverfitRuntimeException($"{op} is F32-only; this cache is Q8. Use the Q8 read surface (GetKeyQuants/GetKeyScales) or DequantizeKeyRange.");
             }
         }
 
@@ -607,7 +607,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             if (!IsQuantized)
             {
-                throw new InvalidOperationException($"{op} is Q8-only; this cache is F32. Use GetKeyReadSpan / GetKeyWriteSpan.");
+                throw new OverfitRuntimeException($"{op} is Q8-only; this cache is F32. Use GetKeyReadSpan / GetKeyWriteSpan.");
             }
         }
     }

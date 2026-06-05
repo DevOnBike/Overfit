@@ -51,7 +51,7 @@ namespace DevOnBike.Overfit.Training
 
             if (data.Length == 0)
             {
-                throw new InvalidOperationException("Loss node has empty data.");
+                throw new OverfitRuntimeException("Loss node has empty data.");
             }
 
             return data[0];

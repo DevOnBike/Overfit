@@ -144,7 +144,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Adapters
 
             Assert.True(adapter.IsFull);
 
-            Assert.Throws<InvalidOperationException>(() =>
+            Assert.Throws<OverfitRuntimeException>(() =>
                 adapter.DecodeNextToken(3, logits));
         }
 

@@ -33,12 +33,12 @@ namespace DevOnBike.Overfit.Onnx.Operators
 
             if (transA != 0)
             {
-                throw new NotSupportedException("Gemm transA=1 not supported.");
+                throw new OverfitRuntimeException("Gemm transA=1 not supported.");
             }
 
             if (alpha != 1f || beta != 1f)
             {
-                throw new NotSupportedException(
+                throw new OverfitRuntimeException(
                     $"Gemm alpha={alpha} beta={beta}: only alpha=1 beta=1 supported.");
             }
 
@@ -46,7 +46,7 @@ namespace DevOnBike.Overfit.Onnx.Operators
 
             if (weightTensor.Dims.Length != 2)
             {
-                throw new InvalidDataException(
+                throw new OverfitFormatException(
                     $"Gemm weight '{weightTensor.Name}' rank should be 2, got {weightTensor.Dims.Length}.");
             }
 

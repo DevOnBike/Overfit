@@ -82,13 +82,13 @@ namespace DevOnBike.Overfit.DeepLearning
 
         /// <summary>IModule compatibility — not meaningful for Embedding (needs token ids).</summary>
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
-            => throw new NotSupportedException(
+            => throw new OverfitRuntimeException(
                 "EmbeddingLayer.Forward(ComputationGraph, AutogradNode) is not supported. " +
                 "Use Forward(ComputationGraph, int[]) with token id arrays.");
 
         /// <summary>Single-sample inference lookup.</summary>
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
-            => throw new NotSupportedException(
+            => throw new OverfitRuntimeException(
                 "EmbeddingLayer.ForwardInference(Span) is not supported. " +
                 "Use Forward(ComputationGraph, int[]) for inference.");
 

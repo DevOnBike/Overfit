@@ -63,7 +63,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var headDim = d / nHeads;
             if (headDim * nHeads != d)
             {
-                throw new InvalidDataException($"DModel ({d}) is not divisible by NHeads ({nHeads}).");
+                throw new OverfitFormatException($"DModel ({d}) is not divisible by NHeads ({nHeads}).");
             }
 
             var block = Q8DotKernel.BlockSize;
@@ -138,7 +138,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var actual = source.ElementCount(name);
             if (actual != count)
             {
-                throw new InvalidDataException($"Tensor '{name}' has {actual} elements, expected {count}.");
+                throw new OverfitFormatException($"Tensor '{name}' has {actual} elements, expected {count}.");
             }
             var storage = TensorStorage<float>.Unpooled(checked((int)count));
             source.LoadF32(name, storage.AsSpan());
@@ -407,7 +407,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var actual = source.ElementCount(name);
             if (actual != expected)
             {
-                throw new InvalidDataException($"Tensor '{name}' has {actual} elements, expected {expected}.");
+                throw new OverfitFormatException($"Tensor '{name}' has {actual} elements, expected {expected}.");
             }
         }
     }

@@ -106,7 +106,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             if (_contextLength == 0)
             {
-                throw new InvalidOperationException("Cannot generate a token from an empty session. Call Reset(promptTokens) first.");
+                throw new OverfitRuntimeException("Cannot generate a token from an empty session. Call Reset(promptTokens) first.");
             }
 
             EnsureRandom(in sampling);
@@ -121,7 +121,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             if (logits.Length != VocabularySize)
             {
-                throw new InvalidOperationException(
+                throw new OverfitRuntimeException(
                     $"Model returned {logits.Length} logits, expected {VocabularySize}.");
             }
 

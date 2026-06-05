@@ -65,7 +65,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
                 File.WriteAllText(Path.Combine(dir, "model.safetensors.index.json"),
                     "{\"weight_map\":{\"absent\":\"model-00001-of-00001.safetensors\"}}");
 
-                Assert.Throws<InvalidDataException>(() => SafetensorsSource.Open(dir));
+                Assert.Throws<OverfitFormatException>(() => SafetensorsSource.Open(dir));
             }
             finally
             {

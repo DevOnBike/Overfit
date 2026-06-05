@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 DevOnBike.
+// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -33,7 +33,7 @@ namespace DevOnBike.Overfit.Statistical
         {
             var json = File.ReadAllText(path);
 
-            return JsonSerializer.Deserialize(json, OverfitJsonContext.Default.HmmParams) ?? throw new InvalidOperationException("Nie udało się zdeserializować HmmParams.");
+            return JsonSerializer.Deserialize(json, OverfitJsonContext.Default.HmmParams) ?? throw new OverfitRuntimeException("Nie udało się zdeserializować HmmParams.");
         }
 
         /// <summary>

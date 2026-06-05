@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 DevOnBike.
+// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -28,7 +28,7 @@ namespace DevOnBike.Overfit.Tensors.Core
             {
                 if (template._buffer is null)
                 {
-                    throw new InvalidOperationException("Template storage is marked as borrowed memory but has no arena.");
+                    throw new OverfitRuntimeException("Template storage is marked as borrowed memory but has no arena.");
                 }
 
                 result = new TensorStorage<T>(template._buffer, template.Length);
@@ -57,7 +57,7 @@ namespace DevOnBike.Overfit.Tensors.Core
             // disposed-then-returned) on the unsupported-rank path.
             if (view.Rank is < 1 or > 4)
             {
-                throw new NotSupportedException($"Unsupported tensor rank: {view.Rank}");
+                throw new OverfitRuntimeException($"Unsupported tensor rank: {view.Rank}");
             }
 
             var storage = new TensorStorage<T>(view.Size, clearMemory: false);

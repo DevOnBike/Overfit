@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 DevOnBike.
+// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -62,7 +62,7 @@ namespace DevOnBike.Overfit.Tensors
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Span<T> AsSpan()
         {
-            return !IsContiguous ? throw new InvalidOperationException("Tensor nie jest ciągły w pamięci! Użyj manualnych indeksów.") : _data.Slice(Offset, Size);
+            return !IsContiguous ? throw new OverfitRuntimeException("Tensor nie jest ciągły w pamięci! Użyj manualnych indeksów.") : _data.Slice(Offset, Size);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -119,7 +119,7 @@ namespace DevOnBike.Overfit.Tensors
         {
             if (!IsContiguous)
             {
-                throw new InvalidOperationException("Nie można zmienić kształtu nieciągłego widoku.");
+                throw new OverfitRuntimeException("Nie można zmienić kształtu nieciągłego widoku.");
             }
 
             if (newS0 * newS1 != Size)
@@ -134,7 +134,7 @@ namespace DevOnBike.Overfit.Tensors
         {
             if (Rank != 2)
             {
-                throw new InvalidOperationException("Funkcja dedykowana dla 2D.");
+                throw new OverfitRuntimeException("Funkcja dedykowana dla 2D.");
             }
 
             // Swap the dimensions (s) and strides (st). Set isContiguous = false.
@@ -149,7 +149,7 @@ namespace DevOnBike.Overfit.Tensors
         {
             if (!IsContiguous)
             {
-                throw new InvalidOperationException("Slice wymaga ciągłej pamięci bazowej.");
+                throw new OverfitRuntimeException("Slice wymaga ciągłej pamięci bazowej.");
             }
 
             var slicedSpan = _data.Slice(Offset + offsetIndex, sliceLength);
@@ -158,7 +158,7 @@ namespace DevOnBike.Overfit.Tensors
 
         public TensorView<T> Flatten()
         {
-            return !IsContiguous ? throw new InvalidOperationException("Flatten wymaga ciągłej pamięci bazowej.") : new TensorView<T>(_data, Size);
+            return !IsContiguous ? throw new OverfitRuntimeException("Flatten wymaga ciągłej pamięci bazowej.") : new TensorView<T>(_data, Size);
         }
     }
 }

@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 DevOnBike.
+// Copyright (c) 2026 DevOnBike.
 // This file is part of DevonBike Overfit.
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
@@ -96,7 +96,7 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             if (_modules.Count == 0)
             {
-                throw new InvalidOperationException("Sequential contains no modules.");
+                throw new OverfitRuntimeException("Sequential contains no modules.");
             }
 
             if (_modules.Count == 1)

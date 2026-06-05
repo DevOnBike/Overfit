@@ -162,7 +162,7 @@ namespace DevOnBike.Overfit.Data.Prepare
         {
             if (!_fitted)
             {
-                throw new InvalidOperationException("Scaler has not been fitted yet. Call Process() on training data first.");
+                throw new OverfitRuntimeException("Scaler has not been fitted yet. Call Process() on training data first.");
             }
 
             return new ScalerParams

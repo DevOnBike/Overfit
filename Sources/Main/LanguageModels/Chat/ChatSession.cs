@@ -42,7 +42,7 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
         /// When true, enables sliding-window KV eviction on the session so long conversations keep
         /// going past the model's context length (the oldest tokens roll off) instead of stopping at
         /// the limit. Requires a session that supports it (RoPE models — Qwen / Llama / Mistral);
-        /// throws <see cref="NotSupportedException"/> otherwise.
+        /// throws <see cref="OverfitRuntimeException"/> otherwise.
         /// </param>
         public ChatSession(
             ISlmSession session,
@@ -67,7 +67,7 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
 
             if (slidingWindow)
             {
-                // Throws NotSupportedException for non-RoPE sessions — fail early, at construction.
+                // Throws OverfitRuntimeException for non-RoPE sessions — fail early, at construction.
                 _session.EnableSlidingWindow();
                 _slidingWindow = true;
             }

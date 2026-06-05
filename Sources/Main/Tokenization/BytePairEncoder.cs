@@ -218,7 +218,7 @@ namespace DevOnBike.Overfit.Tokenization
             var root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object)
             {
-                throw new InvalidOperationException("The BPE vocab JSON is empty or invalid.");
+                throw new OverfitRuntimeException("The BPE vocab JSON is empty or invalid.");
             }
 
             var result = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -229,7 +229,7 @@ namespace DevOnBike.Overfit.Tokenization
 
             if (result.Count == 0)
             {
-                throw new InvalidOperationException("The BPE vocab JSON is empty or invalid.");
+                throw new OverfitRuntimeException("The BPE vocab JSON is empty or invalid.");
             }
 
             return result;
@@ -250,7 +250,7 @@ namespace DevOnBike.Overfit.Tokenization
 
             if (maxId < 0)
             {
-                throw new InvalidOperationException("The BPE vocabulary does not contain any valid token ids.");
+                throw new OverfitRuntimeException("The BPE vocabulary does not contain any valid token ids.");
             }
 
             var idToToken = new string[maxId + 1];
@@ -259,7 +259,7 @@ namespace DevOnBike.Overfit.Tokenization
             {
                 if (kv.Value < 0)
                 {
-                    throw new InvalidOperationException(
+                    throw new OverfitRuntimeException(
                         $"Token '{kv.Key}' has a negative id: {kv.Value}.");
                 }
 

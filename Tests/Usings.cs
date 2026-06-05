@@ -4,3 +4,4 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 global using Xunit;
+global using DevOnBike.Overfit.Exceptions;
