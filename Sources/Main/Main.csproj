@@ -29,7 +29,8 @@
 
         <PublishRepositoryUrl>true</PublishRepositoryUrl>
         <EmbedUntrackedSources>true</EmbedUntrackedSources>
-        <IncludeSymbols>true</IncludeSymbols>
+        <!-- Debug symbols are embedded in the dll (DebugType=embedded above), so do NOT emit a separate symbol
+             package — IncludeSymbols=true would produce a legacy *.symbols.nupkg with no pdb to carry. -->
 
         <PublishAot>true</PublishAot>
         <IsAotCompatible>true</IsAotCompatible>

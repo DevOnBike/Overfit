@@ -23,28 +23,41 @@ jobs:
       id: vars
       run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
+    # Scope restore/build/pack to the PACKABLE projects (+ Tests) only, NOT the whole solution. The solution
+    # includes UI (WPF, net10.0-windows), which can't build on this Linux runner without EnableWindowsTargeting;
+    # packing the three libraries directly keeps the published set explicit and the runner Windows-free.
+    # Building Tests transitively builds Main + Extensions.AI (it references both); Server is built on its own.
     - name: Restore dependencies
-      run: dotnet restore
+      run: |
+        dotnet restore ./Tests/Tests.csproj
+        dotnet restore ./Sources/Server/Server.csproj
 
     - name: Build
-      run: dotnet build -c Release --no-restore -p:SourceRevisionId=${{ steps.vars.outputs.sha_short }} -p:ContinuousIntegrationBuild=true
+      run: |
+        dotnet build ./Tests/Tests.csproj           -c Release --no-restore -p:SourceRevisionId=${{ steps.vars.outputs.sha_short }} -p:ContinuousIntegrationBuild=true
+        dotnet build ./Sources/Server/Server.csproj  -c Release --no-restore -p:SourceRevisionId=${{ steps.vars.outputs.sha_short }} -p:ContinuousIntegrationBuild=true
 
     - name: Test
-      run: dotnet test -c Release --no-build --verbosity normal
+      run: dotnet test ./Tests/Tests.csproj -c Release --no-build --verbosity normal
 
     - name: Pack
       run: |
         VERSION_ARG=""
-        
+
         if [ -n "${{ inputs.version }}" ]; then
           VERSION_ARG="-p:Version=${{ inputs.version }}"
           echo "Packing with specific version: ${{ inputs.version }}"
         else
-          echo "Packing with version from .csproj file."
+          echo "Packing with version from .csproj files."
         fi
-        
-        # ADDED: ContinuousIntegrationBuild and ensure we don't rebuild (--no-build)
-        dotnet pack -c Release --no-build -p:RepositoryCommit=${{ github.sha }} -p:ContinuousIntegrationBuild=true --output ./packages $VERSION_ARG
+
+        for proj in \
+          ./Sources/Main/Main.csproj \
+          ./Sources/Extensions.AI/Extensions.AI.csproj \
+          ./Sources/Server/Server.csproj
+        do
+          dotnet pack "$proj" -c Release --no-build -p:RepositoryCommit=${{ github.sha }} -p:ContinuousIntegrationBuild=true --output ./packages $VERSION_ARG
+        done
 
     - name: Push to NuGet.org
       run: dotnet nuget push "./packages/*.nupkg" --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json" --skip-duplicate
