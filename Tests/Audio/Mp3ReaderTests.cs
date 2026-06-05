@@ -43,7 +43,7 @@ namespace DevOnBike.Overfit.Tests.Audio
         public void Decode_PerFrame_ZeroAlloc()
         {
             var bytes = File.ReadAllBytes(TestModelPaths.Whisper.RequireSampleMp3Path());
-            var dec = new DevOnBike.Overfit.Audio.Mp3.Mp3Decoder();
+            var dec = new Mp3Decoder();
             dec.DecodeMono(bytes, out _); // warm up: JIT + first allocation of instance scratch
 
             var before = GC.GetAllocatedBytesForCurrentThread();

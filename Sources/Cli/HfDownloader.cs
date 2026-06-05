@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Diagnostics;
+using System.Net;
 using System.Text.Json;
 
 namespace DevOnBike.Overfit.Cli
@@ -23,12 +24,16 @@ namespace DevOnBike.Overfit.Cli
             {
                 Timeout = Timeout.InfiniteTimeSpan,   // model files are large
             };
+            
             client.DefaultRequestHeaders.UserAgent.ParseAdd("overfit-cli/1.0");
+            
             var token = Environment.GetEnvironmentVariable("HF_TOKEN");
+            
             if (!string.IsNullOrWhiteSpace(token))
             {
                 client.DefaultRequestHeaders.Authorization = new("Bearer", token);
             }
+            
             return client;
         }
 
@@ -38,21 +43,24 @@ namespace DevOnBike.Overfit.Cli
         public static async Task<string> ResolveFileAsync(string repo, string? pattern, string? explicitFile)
         {
             using var response = await Http.GetAsync($"https://huggingface.co/api/models/{repo}");
-            if (response.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
+            
+            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
             {
-                throw new InvalidOperationException(
-                    $"Repo '{repo}' is gated or private. Accept its terms on huggingface.co and set HF_TOKEN.");
+                throw new InvalidOperationException($"Repo '{repo}' is gated or private. Accept its terms on huggingface.co and set HF_TOKEN.");
             }
-            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            
+            if (response.StatusCode == HttpStatusCode.NotFound)
             {
                 throw new InvalidOperationException($"HuggingFace repo '{repo}' was not found.");
             }
+            
             response.EnsureSuccessStatusCode();
 
             var json = await response.Content.ReadAsStringAsync();
             using var doc = JsonDocument.Parse(json);
 
             var ggufs = new List<string>();
+            
             if (doc.RootElement.TryGetProperty("siblings", out var siblings) && siblings.ValueKind == JsonValueKind.Array)
             {
                 foreach (var sibling in siblings.EnumerateArray())

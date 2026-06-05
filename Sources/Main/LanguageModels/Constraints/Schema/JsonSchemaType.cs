@@ -11,7 +11,7 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
     /// restriction, required/optional object properties, <c>additionalProperties:false</c>, string enums,
     /// nested objects and simple arrays — <c>anyOf</c> / <c>const</c> / min-max-items are out of scope.
     /// </summary>
-    [System.Flags]
+    [Flags]
     public enum JsonSchemaType : byte
     {
         None = 0,

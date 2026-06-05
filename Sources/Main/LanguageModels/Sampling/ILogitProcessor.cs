@@ -15,6 +15,6 @@ namespace DevOnBike.Overfit.LanguageModels.Sampling
     {
         /// <summary>Transforms <paramref name="logits"/> in place using the tokens generated so far
         /// (<paramref name="history"/>, oldest→newest).</summary>
-        void Process(System.Span<float> logits, System.ReadOnlySpan<int> history);
+        void Process(Span<float> logits, ReadOnlySpan<int> history);
     }
 }

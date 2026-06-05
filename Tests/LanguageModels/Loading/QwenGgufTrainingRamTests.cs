@@ -69,7 +69,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             // ── (2) per-block activation arena vs sequence length ──
             _out.WriteLine("");
             _out.WriteLine("ACTIVATION ARENA per transformer block (forward+backward high-water mark):");
-            var arenaAt = new System.Collections.Generic.Dictionary<int, double>();
+            var arenaAt = new Dictionary<int, double>();
             foreach (var T in new[] { 128, 256, 512, 1024 })
             {
                 var perBlockMB = MeasureBlockArenaMB(block, ln1, ln2, dModel, headDim, halfDim, T, cfg);

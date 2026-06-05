@@ -82,7 +82,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
             if (!File.Exists(@"C:\qwen3b\tokenizer.json")) { _out.WriteLine("no tokenizer"); return; }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(ModelPath);
-            var tok = DevOnBike.Overfit.LanguageModels.Tokenizers.QwenTokenizer.Load(@"C:\qwen3b");
+            var tok = QwenTokenizer.Load(@"C:\qwen3b");
 
             // A genuinely-echoing prompt: the model continues the repeated sentence and the n-gram
             // drafter (matching the earlier repeats) proposes exactly what greedy emits → high acceptance.

@@ -18,6 +18,6 @@ namespace DevOnBike.Overfit.LanguageModels.Sampling
     public interface ISamplerStep
     {
         /// <summary>Transforms <paramref name="logits"/> in place.</summary>
-        void Apply(System.Span<float> logits);
+        void Apply(Span<float> logits);
     }
 }

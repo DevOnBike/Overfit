@@ -52,7 +52,7 @@ namespace DevOnBike.Overfit.Demo.Mp3Console
             // Resample to 16 kHz so the output is a tidy, widely-playable WAV.
             var resampled = sampleRate == TargetRate
                 ? samples
-                : DevOnBike.Overfit.Audio.AudioResampler.Resample(samples, sampleRate, TargetRate);
+                : Audio.AudioResampler.Resample(samples, sampleRate, TargetRate);
             WriteWav16(outPath, resampled, TargetRate);
             Console.WriteLine($"Wrote {outPath} ({TargetRate} Hz mono 16-bit, {resampled.Length:N0} samples).");
             return 0;

@@ -88,7 +88,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             Assert.Contains(answer, after, StringComparison.OrdinalIgnoreCase);
         }
 
-        private static void ClipGradNorm(System.Collections.Generic.List<AutogradNode> ps, float maxNorm)
+        private static void ClipGradNorm(List<AutogradNode> ps, float maxNorm)
         {
             double sq = 0;
             foreach (var p in ps)
@@ -106,9 +106,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             }
         }
 
-        private static System.Collections.Generic.List<AutogradNode> ToList(System.Collections.Generic.IEnumerable<AutogradNode> e)
+        private static List<AutogradNode> ToList(IEnumerable<AutogradNode> e)
         {
-            var l = new System.Collections.Generic.List<AutogradNode>();
+            var l = new List<AutogradNode>();
             foreach (var x in e) { l.Add(x); }
             return l;
         }

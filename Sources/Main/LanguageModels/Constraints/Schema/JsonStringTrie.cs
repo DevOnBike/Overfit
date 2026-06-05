@@ -60,7 +60,7 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
                 var sorted = new (char Key, int Child)[children[i].Count];
                 var j = 0;
                 foreach (var kvp in children[i]) { sorted[j++] = (kvp.Key, kvp.Value); }
-                System.Array.Sort(sorted, static (a, b) => a.Key.CompareTo(b.Key));
+                Array.Sort(sorted, static (a, b) => a.Key.CompareTo(b.Key));
                 _nodes[i] = new TrieNode(sorted, terminal[i], names[i]);
             }
 

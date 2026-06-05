@@ -34,17 +34,17 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
         private readonly int _maxDFF;
 
         // reusable buffers (grown on demand)
-        private float[] _conv1 = System.Array.Empty<float>();
-        private float[] _conv2 = System.Array.Empty<float>();
-        private float[] _x = System.Array.Empty<float>();
-        private float[] _ln = System.Array.Empty<float>();
-        private float[] _attn = System.Array.Empty<float>();
-        private float[] _hidden = System.Array.Empty<float>();
-        private float[] _mq = System.Array.Empty<float>();
-        private float[] _mk = System.Array.Empty<float>();
-        private float[] _mv = System.Array.Empty<float>();
-        private float[] _mAttnOut = System.Array.Empty<float>();
-        private float[] _mScores = System.Array.Empty<float>();
+        private float[] _conv1 = Array.Empty<float>();
+        private float[] _conv2 = Array.Empty<float>();
+        private float[] _x = Array.Empty<float>();
+        private float[] _ln = Array.Empty<float>();
+        private float[] _attn = Array.Empty<float>();
+        private float[] _hidden = Array.Empty<float>();
+        private float[] _mq = Array.Empty<float>();
+        private float[] _mk = Array.Empty<float>();
+        private float[] _mv = Array.Empty<float>();
+        private float[] _mAttnOut = Array.Empty<float>();
+        private float[] _mScores = Array.Empty<float>();
 
         public WhisperEncoder(WhisperModel model)
         {

@@ -25,7 +25,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
         public void Dump_RealTinyModel_TensorNames()
         {
             var ggml = TestModelPaths.Whisper.RequireTinyGgmlPath();
-            var model = DevOnBike.Overfit.LanguageModels.Whisper.WhisperGgmlLoader.Load(ggml);
+            var model = WhisperGgmlLoader.Load(ggml);
             var c = model.Config;
             _out.WriteLine($"config: nVocab={c.NVocab} aCtx={c.NAudioCtx} aState={c.NAudioState} aHead={c.NAudioHead} aLayer={c.NAudioLayer} tCtx={c.NTextCtx} tState={c.NTextState} tHead={c.NTextHead} tLayer={c.NTextLayer} nMels={c.NMels} f16={c.F16}");
             _out.WriteLine($"mel filters: {model.MelFilterRows} x {model.MelFilterCols}; vocab size {model.Vocab.Count}");

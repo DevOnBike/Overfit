@@ -24,6 +24,6 @@ namespace DevOnBike.Overfit.Autograd
         /// <summary>Dequantizes output row <paramref name="row"/> into <paramref name="dst"/> (F32,
         /// length ≥ <see cref="InputSize"/>). No allocation; decodes straight from the resident
         /// quantized bytes.</summary>
-        void DecodeRow(int row, System.Span<float> dst);
+        void DecodeRow(int row, Span<float> dst);
     }
 }

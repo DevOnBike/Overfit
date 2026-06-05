@@ -105,7 +105,7 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Regex
             var ids = new int[set.Count];
             var i = 0;
             foreach (var v in set) { ids[i++] = v; }
-            System.Array.Sort(ids);
+            Array.Sort(ids);
             return string.Join(',', ids);
         }
 
