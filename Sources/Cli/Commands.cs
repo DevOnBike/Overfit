@@ -4,6 +4,8 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Net;
+using DevOnBike.Overfit.Audio;
+using DevOnBike.Overfit.Audio.Tts;
 using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Embeddings;
 using DevOnBike.Overfit.Server;
@@ -273,6 +275,103 @@ namespace DevOnBike.Overfit.Cli
                 return SentenceEmbedder.ForE5(dir);
             }
             return SentenceEmbedder.ForMiniLm(dir);
+        }
+
+        private static string VoicesDir() => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".overfit", "voices");
+
+        public static int Tts(string text, string voice, string outPath, string language)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                Console.Error.WriteLine("--text is required.");
+                return 1;
+            }
+
+            try
+            {
+                var voicesDir = VoicesDir();
+                var profile = VoiceProfileStore.Exists(voice, voicesDir)
+                    ? VoiceProfileStore.Load(voice, voicesDir)
+                    : VoiceProfile.Preset(voice, language);
+
+                // Placeholder tone engine until the neural backend (SNAC + Orpheus) lands — proves the pipeline
+                // end-to-end and always writes a watermarked WAV. See docs/tts-poc-plan.md.
+                var engine = new PlaceholderTtsEngine(24000);
+                var marker = SyntheticSpeechMetadata.ForNow(profile.Id);
+                using (var sink = new WavAudioSink(outPath, engine.SampleRate, WavSampleFormat.Pcm16, marker))
+                {
+                    engine.Synthesize(text, profile, sink, TtsOptions.Default);
+                }
+
+                Console.WriteLine($"Wrote {outPath}  (voice '{profile.Id}', {engine.SampleRate} Hz, synthetic — watermarked).");
+                Console.WriteLine("Note: TTS is a placeholder tone engine for now; the neural voice backend is in progress (docs/tts-poc-plan.md).");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"tts failed: {ex.Message}");
+                return 1;
+            }
+        }
+
+        public static int VoiceEnroll(string id, string sample, string language, bool consent)
+        {
+            if (!consent)
+            {
+                Console.Error.WriteLine("Voice enrollment requires consent. Re-run with --consent to confirm you OWN");
+                Console.Error.WriteLine("this voice or have explicit permission to use it. Cloning a voice without");
+                Console.Error.WriteLine("consent may be illegal in your jurisdiction.");
+                return 1;
+            }
+
+            try
+            {
+                if (!File.Exists(sample))
+                {
+                    Console.Error.WriteLine($"Sample audio not found: {sample}");
+                    return 1;
+                }
+
+                // Validate the clip decodes; we don't compute a speaker embedding yet (gated Phase 2).
+                var pcm = AudioFile.ReadMono(sample, out var rate);
+                var seconds = pcm.Length / (double)rate;
+
+                var voicesDir = VoicesDir();
+                var profile = new VoiceProfile(id, language, speakerEmbedding: null, referenceAudioPath: Path.GetFullPath(sample));
+                VoiceProfileStore.Save(profile, voicesDir);
+
+                Console.WriteLine($"Enrolled voice '{id}' ({language}) from {Path.GetFileName(sample)} ({seconds:F1}s) -> {voicesDir}");
+                Console.WriteLine("Note: a speaker embedding is NOT computed yet — voice cloning is a gated Phase 2");
+                Console.WriteLine("(docs/tts-poc-plan.md). The reference clip is recorded for then.");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"enroll failed: {ex.Message}");
+                return 1;
+            }
+        }
+
+        public static int VoiceList()
+        {
+            var dir = VoicesDir();
+            var ids = VoiceProfileStore.List(dir);
+            if (ids.Count == 0)
+            {
+                Console.WriteLine($"No enrolled voices in {dir}.");
+                Console.WriteLine("Enroll one:  overfit voice enroll <id> --sample your.wav --consent");
+                return 0;
+            }
+
+            Console.WriteLine($"Voices in {dir}:");
+            Console.WriteLine();
+            foreach (var voiceId in ids)
+            {
+                var profile = VoiceProfileStore.Load(voiceId, dir);
+                Console.WriteLine($"  {profile.Id,-24} {profile.Language,-4} {(profile.IsCloned ? "cloned" : "preset")}");
+            }
+            return 0;
         }
 
         public static int List()

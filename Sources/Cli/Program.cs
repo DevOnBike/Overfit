@@ -73,12 +73,89 @@ serveCommand.SetAction(parseResult => Commands.Serve(
     parseResult.GetValue(servePort),
     parseResult.GetValue(serveEmbedModel)));
 
+// ── tts: text → speech (WAV), in-process, watermarked. Placeholder engine until the neural backend lands. ──
+var ttsText = new Option<string>("--text")
+{
+    Description = "The text to synthesize.",
+    Required = true,
+};
+var ttsOut = new Option<string>("--out", "-o")
+{
+    Description = "Output WAV path.",
+    Required = true,
+};
+var ttsVoice = new Option<string>("--voice")
+{
+    Description = "A voice id (preset, or one enrolled via 'overfit voice enroll').",
+    DefaultValueFactory = _ => "default",
+};
+var ttsLanguage = new Option<string>("--language")
+{
+    Description = "Language tag of the text (e.g. en, pl).",
+    DefaultValueFactory = _ => "en",
+};
+var ttsCommand = new Command("tts", "Synthesize speech from text to a WAV — in-process, no cloud, watermarked.")
+{
+    ttsText,
+    ttsOut,
+    ttsVoice,
+    ttsLanguage,
+};
+ttsCommand.SetAction(parseResult => Commands.Tts(
+    parseResult.GetValue(ttsText)!,
+    parseResult.GetValue(ttsVoice)!,
+    parseResult.GetValue(ttsOut)!,
+    parseResult.GetValue(ttsLanguage)!));
+
+// ── voice: manage enrolled voices (enroll requires consent). ──
+var enrollId = new Argument<string>("id")
+{
+    Description = "Id to enroll the voice under.",
+};
+var enrollSample = new Option<string>("--sample")
+{
+    Description = "Reference audio clip (WAV/MP3) of the voice.",
+    Required = true,
+};
+var enrollLanguage = new Option<string>("--language")
+{
+    Description = "Primary language of the voice (e.g. pl, en).",
+    DefaultValueFactory = _ => "pl",
+};
+var enrollConsent = new Option<bool>("--consent")
+{
+    Description = "Required: confirm you OWN this voice or have explicit permission to use it.",
+};
+var voiceEnrollCommand = new Command("enroll", "Enroll a voice from a reference clip (requires --consent).")
+{
+    enrollId,
+    enrollSample,
+    enrollLanguage,
+    enrollConsent,
+};
+voiceEnrollCommand.SetAction(parseResult => Commands.VoiceEnroll(
+    parseResult.GetValue(enrollId)!,
+    parseResult.GetValue(enrollSample)!,
+    parseResult.GetValue(enrollLanguage)!,
+    parseResult.GetValue(enrollConsent)));
+
+var voiceListCommand = new Command("list", "List enrolled voices.");
+voiceListCommand.SetAction(_ => Commands.VoiceList());
+
+var voiceCommand = new Command("voice", "Manage enrolled voices for TTS.")
+{
+    voiceEnrollCommand,
+    voiceListCommand,
+};
+
 var rootCommand = new RootCommand("Overfit — run local LLMs, RAG and agents in pure .NET. No Python, no native runtime.")
 {
     pullCommand,
     listCommand,
     chatCommand,
     serveCommand,
+    ttsCommand,
+    voiceCommand,
 };
 
 return rootCommand.Parse(args).Invoke();

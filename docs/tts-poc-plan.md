@@ -33,7 +33,7 @@ A local voice agent that **hears, thinks and speaks — in one .NET process, on-
 | # | Stage | Deliverable | Status |
 |---|---|---|:--:|
 | **S0** | **Scaffolding** | contracts + WAV-out + watermark, model-free | ✅ **Done — 2026-06-06** |
-| S1 | CLI + consent + enrollment format | `overfit tts` over a stub engine, consent gate, `VoiceProfile` persistence | ⬜ next (cheap) |
+| **S1** | **CLI + consent + enrollment** | `overfit tts` over a stub engine, consent gate, `VoiceProfile` persistence | ✅ **Done — 2026-06-06** |
 | S2 | **SNAC codec decoder** | `SnacDecoder.Decode(codes) → PCM@24k` (the bulk) | ⬜ |
 | S3 | Orpheus LM glue | text → SNAC audio tokens (de-interleave) | ⬜ |
 | S4 | End-to-end preset-voice TTS | `TextToSpeech.Synthesize(text, voice) → WAV` — first real speech | ⬜ |
@@ -116,12 +116,17 @@ ported:
 - **8 model-free tests** green: PCM16 round-trips within quantization, Float32 exact, the marker embeds without
   breaking the audio, streamed chunks concatenate, a fake engine drives the contract end-to-end.
 
-### S1 — CLI + consent + enrollment format ⬜ *(cheap, on-brand, no model)*
-- `overfit tts --voice <id> --text "…" --out out.wav` driving a stub/preset engine (proves the UX + WAV out now).
-- `overfit voice enroll <id> --sample <wav> --language pl` — writes the `VoiceProfile` (json + embedding bin
-  placeholder); the embedding is filled in once a backend exists.
-- **Consent gate:** synthesis/enrollment requires an explicit "I own this voice or have permission" acknowledgment.
-- **Gate:** `overfit tts` produces a watermarked WAV from text via the contract, end-to-end, no model.
+### S1 — CLI + consent + enrollment ✅ **DONE 2026-06-06** *(cheap, on-brand, no model)*
+- `overfit tts --text "…" --out out.wav [--voice <id>] [--language pl]` — drives `PlaceholderTtsEngine` (a tone
+  stand-in until S2–S4) → a **watermarked** WAV via `WavAudioSink`. Resolves an enrolled voice or falls back to a
+  preset.
+- `overfit voice enroll <id> --sample <wav> --language pl --consent` — validates the clip decodes, persists the
+  `VoiceProfile` (via `VoiceProfileStore`, reflection-free manifest + embedding blob); the embedding is computed
+  once the cloning backend (P2) lands. `overfit voice list` shows enrolled voices.
+- **Consent gate:** enrollment requires `--consent` (own the voice / have permission) — refuses otherwise.
+- **Validated live:** `tts` wrote a 24 kHz watermarked WAV; enroll-without-consent failed (exit 1); enroll-with
+  consent persisted `maciej (pl, preset)` and `voice list` showed it. New: `PlaceholderTtsEngine`,
+  `VoiceProfileStore`, CLI `tts`/`voice {enroll,list}`. 4 store + 2 engine tests green (suite 1151/0).
 
 ### S2 — SNAC decoder: codes → waveform ⬜ *(the foundation, biggest chunk)*
 - Load SNAC weights, map tensor names; build the decoder graph (per-level codebook dequantize → transposed-conv
