@@ -44,6 +44,16 @@ A local voice agent that **hears, thinks and speaks — in one .NET process, on-
 **Effort:** ~3–4 weeks for preset-voice end-to-end (S2 dominates). Voice cloning (P2) is materially harder — see
 the model trade-off and the cloning note.
 
+**Cross-cutting tooling — objective quality evaluator ✅ DONE 2026-06-06.** `Sources/Main/Audio/AudioSimilarity`
+scores a candidate waveform against a reference ("ideal") one — the audio counterpart of the RAG stability harness,
+turning "does it sound right?" into a measurable gate. Two views: *waveform domain* (SNR dB / Pearson correlation /
+RMSE — sample-aligned, the right gate for a **deterministic codec decode vs. a reference decode**, i.e. the S2 gate)
+and *spectral domain* (RMS log-mel distance + **DTW-aligned** mel distance — timing/length-robust, the right gate for
+**generated speech vs. a reference clip**, i.e. S4). `AudioQualityAssert.Matches(...)` throws `AudioQualityException`
+naming the breached metric (CI guard). CLI: `overfit tts eval --reference ideal.wav --candidate gen.wav`. Pure
+managed, model-free, reuses `MelSpectrogram` + `AudioResampler`. 10 deterministic tests. **This retires the "no
+objective CI gate" risk below** — we can now *measure* how close to ideal each decode is.
+
 ---
 
 ## Strategy: two tracks (decided)
@@ -161,8 +171,10 @@ ported:
 
 ## Risks & open questions
 
-- **Subjective quality / uncanny valley.** No objective CI gate; a clone that's "85% you" is anti-viral. Mitigate
-  with reference clips + spectrogram diffs; accept a weaker gate than text/retrieval.
+- **Subjective quality / uncanny valley.** A clone that's "85% you" is anti-viral. *Partly mitigated:* the
+  `AudioSimilarity` evaluator (above) gives an **objective** gate — SNR/correlation for deterministic decodes, a
+  DTW mel distance vs. reference clips for generated speech. It can't predict MOS (reference-free naturalness)
+  without a model, so the final naturalness call stays a listen — but regressions are now caught by a number.
 - **Codec weight format & tensor-name mapping** (S2) — straightforward but must be exact; an off-by-one in the
   residual-VQ level mapping = noise.
 - **License & deepfake (P2).** Cloning models are often non-commercial (XTTS CPML); voice cloning without consent

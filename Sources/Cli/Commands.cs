@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Globalization;
 using System.Net;
 using DevOnBike.Overfit.Audio;
 using DevOnBike.Overfit.Audio.Tts;
@@ -311,6 +312,50 @@ namespace DevOnBike.Overfit.Cli
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"tts failed: {ex.Message}");
+                return 1;
+            }
+        }
+
+        public static int TtsEval(string referencePath, string candidatePath)
+        {
+            try
+            {
+                if (!File.Exists(referencePath))
+                {
+                    Console.Error.WriteLine($"Reference audio not found: {referencePath}");
+                    return 1;
+                }
+                if (!File.Exists(candidatePath))
+                {
+                    Console.Error.WriteLine($"Candidate audio not found: {candidatePath}");
+                    return 1;
+                }
+
+                var reference = AudioFile.ReadMono(referencePath, out var refRate);
+                var candidate = AudioFile.ReadMono(candidatePath, out var candRate);
+
+                var report = AudioSimilarity.Compare(reference, refRate, candidate, candRate);
+
+                Console.WriteLine($"reference : {Path.GetFileName(referencePath)}  ({refRate} Hz, {reference.Length} samples)");
+                Console.WriteLine($"candidate : {Path.GetFileName(candidatePath)}  ({candRate} Hz, {candidate.Length} samples)");
+                Console.WriteLine();
+                var snr = double.IsPositiveInfinity(report.SignalToNoiseRatioDb)
+                    ? "inf (bit-identical)"
+                    : report.SignalToNoiseRatioDb.ToString("0.0", CultureInfo.InvariantCulture) + " dB";
+                Console.WriteLine($"  SNR (waveform)        {snr}");
+                Console.WriteLine($"  correlation           {report.Correlation:0.000}");
+                Console.WriteLine($"  RMSE                  {report.RootMeanSquareError:0.0000}");
+                Console.WriteLine($"  mel distance          {report.MelSpectralDistance:0.0000}");
+                Console.WriteLine($"  mel distance (DTW)    {report.MelDistanceDtw:0.0000}   <- timing-robust; lower = closer to ideal");
+                Console.WriteLine();
+                Console.WriteLine("Waveform metrics (SNR / correlation) assume the two are the same deterministic decode");
+                Console.WriteLine("(aligned sample-for-sample). For generated speech vs. a reference clip, the DTW mel");
+                Console.WriteLine("distance is the metric that matters.");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"tts eval failed: {ex.Message}");
                 return 1;
             }
         }

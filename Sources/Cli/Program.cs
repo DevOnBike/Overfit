@@ -107,6 +107,27 @@ ttsCommand.SetAction(parseResult => Commands.Tts(
     parseResult.GetValue(ttsOut)!,
     parseResult.GetValue(ttsLanguage)!));
 
+// ── tts eval: objective quality of generated audio vs a reference ("how close to ideal"). ──
+var evalReference = new Option<string>("--reference", "-r")
+{
+    Description = "Reference (ideal) WAV/MP3 to compare against.",
+    Required = true,
+};
+var evalCandidate = new Option<string>("--candidate", "-c")
+{
+    Description = "Candidate (generated) WAV/MP3 to score.",
+    Required = true,
+};
+var ttsEvalCommand = new Command("eval", "Score generated audio against a reference (SNR / correlation / mel + DTW).")
+{
+    evalReference,
+    evalCandidate,
+};
+ttsEvalCommand.SetAction(parseResult => Commands.TtsEval(
+    parseResult.GetValue(evalReference)!,
+    parseResult.GetValue(evalCandidate)!));
+ttsCommand.Subcommands.Add(ttsEvalCommand);
+
 // ── voice: manage enrolled voices (enroll requires consent). ──
 var enrollId = new Argument<string>("id")
 {
