@@ -14,7 +14,8 @@ using DevOnBike.Overfit.Cli;
 
 var pullModel = new Argument<string>("model")
 {
-    Description = "A model alias (e.g. qwen2.5-3b) or a HuggingFace GGUF repo (owner/repo).",
+    Description = "A model alias (e.g. qwen2.5-3b), a HuggingFace GGUF repo (owner/repo), or a direct "
+        + "https URL to a .gguf (internal repo / mirror). Set HF_ENDPOINT to use a HuggingFace mirror.",
 };
 var pullFile = new Option<string?>("--file", "-f")
 {

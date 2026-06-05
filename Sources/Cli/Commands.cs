@@ -14,6 +14,13 @@ namespace DevOnBike.Overfit.Cli
     {
         public static int Pull(string spec, string? file)
         {
+            // A direct http(s) URL → download straight from it (internal artifact repo / approved mirror when
+            // HuggingFace is blocked). Bypasses HF repo resolution entirely.
+            if (Uri.TryCreate(spec, UriKind.Absolute, out var uri) && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+            {
+                return PullFromUrl(uri);
+            }
+
             var resolved = ModelAliases.Resolve(spec);
             if (resolved is null)
             {
@@ -37,7 +44,45 @@ namespace DevOnBike.Overfit.Cli
                 }
 
                 Console.WriteLine($"Downloading {chosen} into {ModelCache.Dir}");
-                HfDownloader.DownloadAsync(repo, chosen, dest).GetAwaiter().GetResult();
+                var expectedSha = HfDownloader.GetExpectedSha256Async(repo, chosen).GetAwaiter().GetResult();
+                HfDownloader.DownloadAsync(repo, chosen, dest, expectedSha).GetAwaiter().GetResult();
+                Console.WriteLine($"Done. Chat with it:  overfit chat {Path.GetFileNameWithoutExtension(dest)}");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"pull failed: {ex.Message}");
+                return 1;
+            }
+        }
+
+        private static int PullFromUrl(Uri uri)
+        {
+            var fileName = Path.GetFileName(uri.AbsolutePath);
+            if (string.IsNullOrEmpty(fileName))
+            {
+                Console.Error.WriteLine("Could not infer a filename from the URL — it must end with the .gguf file name.");
+                return 1;
+            }
+            if (!fileName.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase))
+            {
+                Console.Error.WriteLine($"Note: '{fileName}' does not end with .gguf — downloading anyway.");
+            }
+
+            try
+            {
+                ModelCache.Ensure();
+                var dest = Path.Combine(ModelCache.Dir, fileName);
+                if (File.Exists(dest))
+                {
+                    Console.WriteLine($"Already downloaded: {fileName}");
+                    return 0;
+                }
+
+                Console.WriteLine($"Downloading {uri}");
+                // Optional integrity check: a sibling {url}.sha256 if the server publishes one.
+                var expectedSha = HfDownloader.GetSiblingSha256Async(uri.AbsoluteUri).GetAwaiter().GetResult();
+                HfDownloader.DownloadUrlAsync(uri.AbsoluteUri, dest, expectedSha).GetAwaiter().GetResult();
                 Console.WriteLine($"Done. Chat with it:  overfit chat {Path.GetFileNameWithoutExtension(dest)}");
                 return 0;
             }
