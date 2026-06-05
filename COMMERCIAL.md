@@ -20,6 +20,10 @@ You probably need a commercial engagement if **any** of the following describes 
 
 If none of the above applies, the open-source AGPLv3 path is genuinely fine. Use it, file issues, send PRs.
 
+**Want the bigger picture?** [`docs/use-cases-2026.md`](docs/use-cases-2026.md) lays out the underserved 2026
+market (regulated / on-prem .NET, CPU fine-tuning, testable RAG, air-gapped deploy), the "empty quadrant" vs
+Python / Ollama / cloud APIs, and ten concrete buyer cases — each mapped to the service packages below.
+
 ---
 
 ## What the open-source license already includes

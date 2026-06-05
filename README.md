@@ -199,6 +199,10 @@ controlled deployment boundaries and explainable operational records.
 | You care about allocations, P99 latency and GC behavior | Explicit memory ownership and zero-allocation hot paths |
 | You need a commercial path for closed-source products | Dual licensing: AGPLv3 or commercial |
 
+**→ The 2026 niche & buyer scenarios:** [`docs/use-cases-2026.md`](docs/use-cases-2026.md) — the underserved
+market Overfit fills (regulated / on-prem .NET, CPU fine-tuning, testable RAG, air-gapped single-binary deploy),
+the "empty quadrant" vs Python / Ollama / cloud APIs, and ten concrete cases mapped to buyers.
+
 ---
 
 ## Quick start
@@ -269,6 +273,12 @@ Full benchmark tables and caveats live in [`docs/TECHNICAL.md`](docs/TECHNICAL.m
 ---
 
 ## Supported model families
+
+Overfit loads by **architecture**, not by model name — so most `llama` / `qwen2` / `qwen2moe` / `mistral` GGUFs
+on Ollama and HuggingFace work, including their thousands of community fine-tunes (and the DeepSeek-R1 *distills*,
+which are Qwen/Llama architecture). **→ Full popular-models matrix: [`docs/supported-models.md`](docs/supported-models.md)** —
+exactly which models load today (Llama 3.x, Qwen2.5, Mistral, Mixtral, Bielik, R1-distills, MiniLM/BGE/E5, Whisper…)
+and which don't yet (Gemma, Phi, Qwen3, Command-R, native DeepSeek-MoE, multilingual XLM-R embedders).
 
 ### Language models
 
