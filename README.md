@@ -21,6 +21,21 @@ dotnet add package DevOnBike.Overfit
 
 ---
 
+## Where Overfit wins
+
+**The missing quadrant: .NET-native · on-prem · trainable · testable · auditable.** Almost every LLM tool assumes
+Python, a GPU, a separate server, and data leaving your process. Overfit is the opposite — and that intersection
+is nearly empty on the market.
+
+1. **Private RAG & agents inside .NET** — chat, RAG, tool-calling and schema-constrained JSON in-process; nothing leaves the box.
+2. **Replace a Python / Ollama / model-server sidecar** — same capabilities, one .NET process, one deploy, one security surface.
+3. **Testable, auditable RAG for regulated teams** — gate retrieval quality in CI, cite sources, reproduce answers bit-for-bit.
+4. **CPU QLoRA fine-tuning** *(advanced moat)* — teach a model your private data on a CPU, no GPU, no Python.
+
+→ Full market analysis and ten buyer cases: [`docs/use-cases-2026.md`](docs/use-cases-2026.md).
+
+---
+
 ## Start here: run the ASP.NET local agent demo
 
 The fastest way to understand Overfit is to run the local ASP.NET agent demo.
@@ -146,6 +161,37 @@ agent / tool call all stay in one .NET process, with no audio leaving the machin
 See `Demo/WhisperDemo`, `Demo/MicDemo` (live mic) and
 [docs/mp3-decoding.md](docs/mp3-decoding.md).
 
+### 6. OpenAI-compatible API + drop-in .NET integration
+
+Point your existing tooling at Overfit by changing **one line** — no rewrite, same in-process engine behind the
+standard interface.
+
+**Already on `Microsoft.Extensions.AI`?** One call gives you a standard `IChatClient` / `IEmbeddingGenerator`
+that drops straight into Semantic Kernel and any M.E.AI pipeline (caching, telemetry, function-invocation, DI):
+
+```csharp
+using DevOnBike.Overfit.Extensions.AI;          // NuGet: DevOnBike.Overfit.Extensions.AI
+
+IChatClient chat = OverfitClient.LoadGguf(@"C:\models\qwen2.5-3b.gguf").AsChatClient();
+var reply = await chat.GetResponseAsync("Summarize this ticket in one line.");
+```
+
+**Have OpenAI clients / LangChain / a UI / a test harness?** Serve an **OpenAI-compatible HTTP API** in one
+command — just change the base URL. SSE streaming, `/v1/chat/completions`, `/v1/embeddings`, `/v1/models`, plus
+JSON-Schema `response_format`. Dependency-free (no ASP.NET), Native-AOT-clean:
+
+```powershell
+overfit serve qwen2.5-3b --port 11434           # one self-contained binary; nothing leaves the box
+```
+
+```bash
+curl http://localhost:11434/v1/chat/completions -H "Content-Type: application/json" \
+     -d '{"model":"qwen2.5-3b","messages":[{"role":"user","content":"Hello"}]}'
+```
+
+Host the same API from your own code with the `DevOnBike.Overfit.Server` package — your stack doesn't change,
+only the endpoint does.
+
 ---
 
 ## What you can build today
@@ -196,6 +242,7 @@ controlled deployment boundaries and explainable operational records.
 | You do not want to operate Python, Ollama or a model server | Ship a NuGet package and a model file |
 | Your environment blocks native binaries or sidecars | Pure C# runtime, Native AOT compatible |
 | You need RAG, tool calls and JSON, not just raw token generation | Built-in agentic stack |
+| You already use OpenAI clients, Semantic Kernel or Microsoft.Extensions.AI | Point them at Overfit by changing one line — OpenAI-compatible server (`overfit serve`) + `IChatClient` / `IEmbeddingGenerator` adapter |
 | You care about allocations, P99 latency and GC behavior | Explicit memory ownership and zero-allocation hot paths |
 | You need a commercial path for closed-source products | Dual licensing: AGPLv3 or commercial |
 
@@ -406,28 +453,25 @@ for that.
 
 ## Roadmap
 
-Current shipped areas include:
+**Shipped:**
 
-- GGUF Q4_K / Q6_K decode
-- Qwen / Llama / Mistral / Mixtral inference
-- GPT-2 / GPT-1 support
-- in-process RAG
-- tool calling
-- guaranteed JSON
-- LoRA stages
-- QLoRA fine-tuning (frozen Q4_K base + trainable LoRA, dequant-on-the-fly, pure-managed CPU)
-- ONNX import
-- anomaly detection
-- Native AOT guard
+- **Inference** — GGUF (Q4_K_M / Q6_K / Q8_0 / Q5_0 / Q5_K / F32 / F16 / BF16, memory-mapped); Qwen2.5, Llama-2/3.x, Mistral, Mixtral & Qwen-MoE; GPT-2 / GPT-1 (byte-parity vs PyTorch). KV-cache + optional Q8 KV; ~220 MB heap / 1 B-per-token for a 3B model.
+- **Loaders** — GGUF, HuggingFace safetensors (sharded), Overfit `.bin`, ONNX (linear + DAG). 100% Python-free; tokenizers read straight from the GGUF.
+- **Agentic & structured output** — tool calling, guaranteed JSON, **JSON-Schema & regex constrained decoding**, ReAct / critic / circuit-breaker / summarizing memory, composable sampling.
+- **RAG** — in-process vector store; MiniLM / BGE / E5 embeddings (bit-parity vs HuggingFace); multilingual via the chat model's own embeddings; **RAG Stability Harness** (recall / paraphrase / false-premise / lint, gated in CI).
+- **Integration** — **OpenAI-compatible server** (`/v1/chat/completions` + SSE, `/v1/embeddings`, `/v1/models`); **Microsoft.Extensions.AI** adapter; global **`overfit` CLI** (pull / list / chat / serve); ASP.NET starter template.
+- **Training** — **QLoRA CPU fine-tuning** (frozen Q4_K base incl. FFN + per-head attention), gradient checkpointing, data-parallel trainer, Conv/BatchNorm/LSTM, CRNN + CTC (OCR), LR schedules.
+- **Multimodal & audio** — **Whisper speech-to-text** in pure C#; from-scratch MP3 / WAV decoders; OCR.
+- **Engineering** — Native-AOT (one ~7.8 MB self-contained binary), zero-allocation hot paths (AOT guard in CI), anomaly detection.
 
-Current priorities include:
+**Current priorities:**
 
-- decode gap to llama.cpp narrowed to ~1.13× same-file (from ~1.6×) — the residual is DRAM-bandwidth-bound; further closing needs structural (full-tensor attention) work, not kernel-ALU
-- extending QLoRA base quantization from the LM head to the FFN (the per-head attention split blocks Q4_K there — headDim < 256)
-- batched prefill
-- stronger JSON Schema constraints
-- more model families and quantization formats
-- broader ASP.NET / Microsoft.Extensions.AI / Aspire integration
+- **More model families** — Qwen3 (closest to ship), then Gemma / Phi / Granite / Command-R; more quants (Q2_K / Q3_K).
+- **Multilingual sentence-embedder** (XLM-RoBERTa / SentencePiece) for first-class multilingual RAG.
+- **Decode throughput** — the ~1.13× same-file gap vs llama.cpp is DRAM-bandwidth-bound; closing it needs structural (full-tensor attention) work, not kernel-ALU.
+- **Bulletproof structured output** — token-healing for arbitrary schemas on tiny models; GBNF grammars; NLI-based contradiction lint.
+- **Deployment** — persistent vector store (SQLite), production agent template, Aspire integration.
+- **Future verticals** — text-to-speech (LLM + neural-codec), vision-language models.
 
 See [`ROADMAP.md`](ROADMAP.md).
 

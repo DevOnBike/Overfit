@@ -44,6 +44,16 @@ The commercial license does not gate features. It changes the **legal terms** un
 
 Three concrete, fixed-scope, fixed-price engagements. Each is a productised offer — not "let's see how it goes" consulting. Each bundles the commercial license for the integrated product.
 
+**Buyer map** — which package fits the scenario (full scenarios in [`docs/use-cases-2026.md`](docs/use-cases-2026.md)):
+
+| Your situation | Package |
+|---|---|
+| Regulated / on-prem .NET shop needs RAG + agents on its own data, no cloud (incl. sovereign-language, e.g. Bielik) | **Package 1 — Private .NET RAG/Agent PoC** |
+| You run a Python / Ollama / llama.cpp / ONNX sidecar next to a .NET service and want to collapse it in-process | **Package 2 — Python / ONNX-Sidecar Replacement** |
+| Edge / low-RAM / P99-latency targets, or you need a reproducible, auditable inference pipeline | **Package 3 — Zero-GC Inference Audit** |
+| You need a regulated team's **RAG under regression test** (recall / stability / false-premise gated in CI) | Package 1 + the RAG Stability Harness ([`docs/rag-testing.md`](docs/rag-testing.md)) |
+| **Advanced moat:** teach a model your private data on a CPU (QLoRA) — after the POC proves out | Standalone commercial license + a QLoRA engagement |
+
 ---
 
 ### Package 1 — Private .NET RAG/Agent PoC
