@@ -9,9 +9,8 @@ using System.Text.Json.Serialization;
 using DevOnBike.Overfit.Demo.LocalAgent.Observability;
 using DevOnBike.Overfit.Demo.LocalAgent.Rag;
 using DevOnBike.Overfit.LanguageModels;
-using DevOnBike.Overfit.LanguageModels.Chat;
-using DevOnBike.Overfit.LanguageModels.Constraints;
 using DevOnBike.Overfit.LanguageModels.Contracts;
+using DevOnBike.Overfit.Server.OpenAi;
 using Microsoft.AspNetCore.Http.Features;
 
 namespace DevOnBike.Overfit.Demo.LocalAgent.OpenAi
@@ -55,7 +54,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.OpenAi
                     return Results.BadRequest(new { error = "the last message must have role 'user'." });
                 }
 
-                var (sampling, maxTokens) = BuildSampling(req);
+                var (sampling, maxTokens) = OpenAiChatMapping.BuildSampling(req);
                 var options = new GenerationOptions(maxTokens, maxContextLength: 8192, sampling, stopOnEndOfTextToken: true);
                 var id = "chatcmpl-" + Guid.NewGuid().ToString("N");
                 var ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -64,7 +63,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.OpenAi
                 ITokenConstraint? constraint;
                 try
                 {
-                    constraint = BuildResponseFormatConstraint(req.ResponseFormat, client);
+                    constraint = OpenAiChatMapping.BuildResponseFormatConstraint(req.ResponseFormat, client.Tokenizer);
                 }
                 catch (JsonException ex)
                 {
@@ -74,7 +73,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.OpenAi
                 await Gate.WaitAsync(ctx.RequestAborted);
                 try
                 {
-                    ReplayHistory(client.Chat, req.Messages);
+                    OpenAiChatMapping.ReplayHistory(client.Chat, req.Messages);
                     var userContent = last.Content ?? string.Empty;
 
                     if (!req.Stream)
@@ -137,7 +136,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.OpenAi
 
             app.MapPost("/v1/embeddings", (EmbeddingsRequest req, RagService rag, MetricsCollector metrics) =>
             {
-                var inputs = ParseInputs(req.Input);
+                var inputs = OpenAiChatMapping.ParseInputs(req.Input);
                 if (inputs.Count == 0)
                 {
                     return Results.BadRequest(new { error = "'input' is required (a string or array of strings)." });
@@ -168,77 +167,6 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.OpenAi
                     return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
                 }
             });
-        }
-
-        private static (SamplingOptions Sampling, int MaxTokens) BuildSampling(ChatCompletionRequest req)
-        {
-            var maxTokens = req.MaxTokens ?? req.MaxCompletionTokens ?? 512;
-            if (maxTokens <= 0) { maxTokens = 512; }
-
-            var temperature = req.Temperature ?? 1.0f;
-            var sampling = temperature <= 0.0001f
-                ? SamplingOptions.Greedy
-                : new SamplingOptions(SamplingStrategy.TopP, temperature, topK: 0, topP: req.TopP ?? 1.0f, seed: 0);
-
-            return (sampling, maxTokens);
-        }
-
-        // Maps OpenAI response_format to a decode-time constraint. "json_object" → guaranteed well-formed JSON;
-        // "json_schema" → output constrained to conform to response_format.json_schema.schema; else unconstrained.
-        private static ITokenConstraint? BuildResponseFormatConstraint(JsonElement? responseFormat, OverfitClient client)
-        {
-            if (responseFormat is not { ValueKind: JsonValueKind.Object } format) { return null; }
-            if (!format.TryGetProperty("type", out var typeEl) || typeEl.ValueKind != JsonValueKind.String) { return null; }
-
-            var type = typeEl.GetString();
-            if (string.Equals(type, "json_object", StringComparison.Ordinal))
-            {
-                return new JsonGrammarConstraint(client.Tokenizer, requireObject: true);
-            }
-            if (string.Equals(type, "json_schema", StringComparison.Ordinal))
-            {
-                if (format.TryGetProperty("json_schema", out var js) && js.ValueKind == JsonValueKind.Object
-                    && js.TryGetProperty("schema", out var schema) && schema.ValueKind == JsonValueKind.Object)
-                {
-                    return new JsonSchemaConstraint(client.Tokenizer, schema.GetRawText());
-                }
-                throw new JsonException("response_format.json_schema.schema (a JSON-Schema object) is required.");
-            }
-            return null;   // "text" or unknown → unconstrained
-        }
-
-        private static void ReplayHistory(ChatSession chat, List<OpenAiMessage> messages)
-        {
-            chat.ResetConversation();
-
-            // Replay all but the final (user) message as history; the final message is generated against.
-            for (var i = 0; i < messages.Count - 1; i++)
-            {
-                var content = messages[i].Content ?? string.Empty;
-                switch ((messages[i].Role ?? "user").ToLowerInvariant())
-                {
-                    case "system": chat.AddSystem(content); break;
-                    case "assistant": chat.AddAssistant(content); break;
-                    default: chat.AddUser(content); break;   // user / tool / unknown → user turn
-                }
-            }
-        }
-
-        private static List<string> ParseInputs(JsonElement input)
-        {
-            var list = new List<string>();
-            if (input.ValueKind == JsonValueKind.String)
-            {
-                list.Add(input.GetString() ?? string.Empty);
-            }
-            else if (input.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var e in input.EnumerateArray())
-                {
-                    if (e.ValueKind == JsonValueKind.String) { list.Add(e.GetString() ?? string.Empty); }
-                }
-            }
-            return list;
         }
 
         private static void WriteChunk(HttpContext ctx, string id, long created, string model, OpenAiMessage delta, string? finishReason)

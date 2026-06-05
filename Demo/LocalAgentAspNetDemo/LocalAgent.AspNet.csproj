@@ -22,6 +22,9 @@
 
     <ItemGroup>
         <ProjectReference Include="..\..\Sources\Main\Main.csproj" />
+        <!-- Shared OpenAI-compatible DTOs + request→runtime mapping; the same library backs `overfit serve`,
+             so the wire contract never drifts between the AOT CLI and this ASP.NET host. -->
+        <ProjectReference Include="..\..\Sources\Server\Server.csproj" />
     </ItemGroup>
 
     <ItemGroup>

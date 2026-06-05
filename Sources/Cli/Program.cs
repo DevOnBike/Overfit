@@ -44,11 +44,26 @@ var serveModel = new Argument<string>("model")
 {
     Description = "A model name in the local store, or a path to a .gguf file.",
 };
+var serveHost = new Option<string>("--host")
+{
+    Description = "Bind host. Default 127.0.0.1 (local only); use 0.0.0.0 to expose on the network.",
+    DefaultValueFactory = _ => "127.0.0.1",
+};
+var servePort = new Option<int>("--port", "-p")
+{
+    Description = "TCP port to listen on.",
+    DefaultValueFactory = _ => 11434,
+};
 var serveCommand = new Command("serve", "Start an OpenAI-compatible HTTP server for a model.")
 {
     serveModel,
+    serveHost,
+    servePort,
 };
-serveCommand.SetAction(parseResult => Commands.Serve(parseResult.GetValue(serveModel)!));
+serveCommand.SetAction(parseResult => Commands.Serve(
+    parseResult.GetValue(serveModel)!,
+    parseResult.GetValue(serveHost)!,
+    parseResult.GetValue(servePort)));
 
 var rootCommand = new RootCommand("Overfit — run local LLMs, RAG and agents in pure .NET. No Python, no native runtime.")
 {

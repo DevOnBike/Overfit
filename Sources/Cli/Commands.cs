@@ -3,7 +3,9 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Net;
 using DevOnBike.Overfit.LanguageModels;
+using DevOnBike.Overfit.Server;
 
 namespace DevOnBike.Overfit.Cli
 {
@@ -46,10 +48,75 @@ namespace DevOnBike.Overfit.Cli
             }
         }
 
-        public static int Serve(string model)
+        private const string DefaultSystemPrompt = "You are a concise, helpful assistant running locally in pure .NET.";
+
+        public static int Serve(string model, string host, int port)
         {
-            Console.Error.WriteLine($"serve '{model}': not implemented in this build (OpenAI server coming next).");
-            return 1;
+            var path = ModelCache.Resolve(model);
+            if (path is null)
+            {
+                Console.Error.WriteLine($"Model '{model}' not found in {ModelCache.Dir}.");
+                Console.Error.WriteLine($"Download it first:  overfit pull {model}   (or pass a .gguf path directly)");
+                return 1;
+            }
+
+            Console.WriteLine($"Loading {Path.GetFileName(path)} ...");
+            OverfitClient client;
+            try
+            {
+                client = OverfitClient.LoadGguf(path, mmap: true);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Failed to load '{Path.GetFileName(path)}': {ex.Message}");
+                return 1;
+            }
+
+            client.AddSystem(DefaultSystemPrompt);
+            var modelName = Path.GetFileNameWithoutExtension(path);
+
+            using var cts = new CancellationTokenSource();
+            Console.CancelKeyPress += (_, e) =>
+            {
+                e.Cancel = true;   // don't kill the process; unwind the serve loop cleanly.
+                cts.Cancel();
+            };
+
+            try
+            {
+                OverfitOpenAiServer.Serve(
+                    client,
+                    modelName,
+                    host,
+                    port,
+                    DefaultSystemPrompt,
+                    onListening: baseUrl =>
+                    {
+                        Console.WriteLine();
+                        Console.WriteLine($"OpenAI-compatible server listening on {baseUrl}");
+                        Console.WriteLine($"  model id:  {modelName}");
+                        Console.WriteLine("  endpoints: GET /v1/models | POST /v1/chat/completions (stream + non-stream) | GET /health");
+                        Console.WriteLine();
+                        Console.WriteLine($"  curl {baseUrl}/v1/chat/completions -H \"Content-Type: application/json\" \\");
+                        Console.WriteLine($"       -d '{{\"model\":\"{modelName}\",\"messages\":[{{\"role\":\"user\",\"content\":\"Hello\"}}]}}'");
+                        Console.WriteLine();
+                        Console.WriteLine("Press Ctrl+C to stop.");
+                    },
+                    cancellationToken: cts.Token);
+            }
+            catch (HttpListenerException ex)
+            {
+                Console.Error.WriteLine($"Could not bind http://{host}:{port}/ : {ex.Message}");
+                Console.Error.WriteLine("The port may be in use, or binding to a non-local host needs elevation / a URL ACL on Windows.");
+                return 1;
+            }
+            finally
+            {
+                client.Dispose();
+            }
+
+            Console.WriteLine("Server stopped.");
+            return 0;
         }
 
         public static int List()
