@@ -83,6 +83,20 @@ Pre-release suffixes (e.g. `10.1.0-beta.1`) are used for surface changes that ne
 
 - Two GitHub security-scan workflows (DevSkim, Checkmarx) reactivated by fixing the dead `master`-branch trigger. Future runs will surface SARIF findings to the GitHub Security tab.
 
+## [10.0.21] - 2026-06-05
+
+### Added
+
+- **`overfit` global CLI** — a single self-contained Native-AOT binary (`pull` / `list` / `chat` / `serve`). `pull` resolves a model alias, a HuggingFace `owner/repo`, **or a direct `https` URL**; downloads stream to a local store (`~/.overfit/models`) with **SHA-256 verification** (HuggingFace LFS `oid`, or a sibling `{url}.sha256`) and **HTTP-Range resume** of interrupted transfers. Set `HF_ENDPOINT` to route through a HuggingFace mirror (e.g. `https://hf-mirror.com`) when `huggingface.co` is blocked.
+- **`DevOnBike.Overfit.Server`** (new NuGet package) — a dependency-free, OpenAI-compatible HTTP server (`OverfitOpenAiServer`) built on `System.Net.HttpListener` + `System.Text.Json` source-gen, no ASP.NET Core, Native-AOT friendly. Exposes `/v1/chat/completions` (streaming SSE + non-streaming, with `response_format` JSON / JSON-Schema constrained output), `/v1/models` and `/health`. Backs `overfit serve`; the ASP.NET demo shares the same DTOs + request→runtime mapping so the wire contract can't drift.
+- **`DevOnBike.Overfit.Exceptions`** — a domain-exception hierarchy: `OverfitException` (base) with `OverfitFormatException` (malformed/inconsistent model or data file) and `OverfitRuntimeException` (invalid state / unsupported operation). Catch `OverfitException` to handle any Overfit-domain failure distinctly from system and programming errors.
+
+### Changed
+
+- Domain throw sites across the runtime moved onto the `OverfitException` hierarchy (`InvalidDataException` → `OverfitFormatException`; `InvalidOperationException` / `NotSupportedException` → `OverfitRuntimeException`). The `ArgumentException` family and `ObjectDisposedException` are intentionally unchanged (they signal programmer/argument errors, not domain failures).
+- `DevOnBike.Overfit` no longer emits a legacy `*.symbols.nupkg` — debug symbols are embedded in the assembly (`DebugType=embedded`).
+- **Source Link** (GitHub) enabled for all published packages, so consumers can step into the exact source from the embedded PDBs.
+
 ## [10.0.15] and earlier
 
 Pre-`10.0.15` history is not retroactively documented in this changelog. See `git log 10.0.15 --oneline` for the historical commit record. From this entry forward (10.0.16+), changes are tracked here per Keep-a-Changelog conventions.

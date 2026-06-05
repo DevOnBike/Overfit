@@ -8,23 +8,30 @@
         <RootNamespace>DevOnBike.Overfit.Extensions.AI</RootNamespace>
         <AssemblyName>DevOnBike.Overfit.Extensions.AI</AssemblyName>
         <PackageId>DevOnBike.Overfit.Extensions.AI</PackageId>
-        <Version>10.0.20</Version>
+        <Title>Overfit — Microsoft.Extensions.AI adapter (IChatClient / IEmbeddingGenerator)</Title>
+        <Version>10.0.21</Version>
         <Authors>DevOnBike</Authors>
         <Copyright>Copyright (c) 2026 DevOnBike</Copyright>
-        <Description>Microsoft.Extensions.AI adapter for Overfit — exposes the in-process Overfit LLM runtime as a standard IChatClient and IEmbeddingGenerator, so it drops into Semantic Kernel and any Microsoft.Extensions.AI pipeline (caching, telemetry, function-invocation, DI) by changing one line. Pure .NET, in-process, no Python, no model server. Dual-licensed: AGPL-3.0-or-later for open source, commercial license available — see COMMERCIAL.md.</Description>
-        <PackageTags>llm;microsoft-extensions-ai;ichatclient;iembeddinggenerator;semantic-kernel;rag;agentic;in-process;csharp;ai</PackageTags>
+        <Description>Use the in-process Overfit LLM runtime through Microsoft.Extensions.AI. Implements IChatClient and IEmbeddingGenerator, so it plugs into Semantic Kernel and any Microsoft.Extensions.AI pipeline — function calling, caching, telemetry, DI — by changing one line. Pure .NET, in-process: no Python, no model server, Native-AOT friendly. Dual-licensed (AGPL-3.0-or-later / commercial).</Description>
+        <PackageTags>llm;ai;microsoft-extensions-ai;ichatclient;iembeddinggenerator;semantic-kernel;openai;rag;agentic;embeddings;in-process;native-aot;dotnet;csharp</PackageTags>
         <RepositoryUrl>https://github.com/DevOnBike/Overfit</RepositoryUrl>
         <RepositoryType>git</RepositoryType>
         <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
         <PackageReadmeFile>README.md</PackageReadmeFile>
+        <PackageIcon>logo.png</PackageIcon>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <NoWarn>$(NoWarn);1591</NoWarn>
+
+        <!-- Source Link: embed the commit + source mapping into the (embedded) PDB for step-into debugging. -->
+        <PublishRepositoryUrl>true</PublishRepositoryUrl>
+        <EmbedUntrackedSources>true</EmbedUntrackedSources>
 
         <IsAotCompatible>true</IsAotCompatible>
         <IsTrimmable>true</IsTrimmable>
     </PropertyGroup>
 
     <ItemGroup>
+        <None Include="..\Main\logo.png" Pack="true" PackagePath="\" />
         <None Include="README.md" Pack="true" PackagePath="\" />
         <None Include="..\..\LICENSE.md" Pack="true" PackagePath="\" />
         <None Include="..\..\COMMERCIAL.md" Pack="true" PackagePath="\" />
@@ -34,6 +41,7 @@
     <ItemGroup>
         <ProjectReference Include="..\Main\Main.csproj" />
         <PackageReference Include="Microsoft.Extensions.AI.Abstractions" />
+        <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="all" />
     </ItemGroup>
 
 </Project>

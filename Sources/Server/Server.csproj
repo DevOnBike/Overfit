@@ -10,23 +10,30 @@
         <!-- A dependency-free, OpenAI-compatible self-host (System.Net.HttpListener + System.Text.Json
              source-gen) so it drops cleanly into the Native-AOT `overfit` CLI. No ASP.NET Core. -->
         <PackageId>DevOnBike.Overfit.Server</PackageId>
-        <Version>10.0.20</Version>
+        <Title>Overfit — OpenAI-compatible server (dependency-free, Native-AOT friendly)</Title>
+        <Version>10.0.21</Version>
         <Authors>DevOnBike</Authors>
         <Copyright>Copyright (c) 2026 DevOnBike</Copyright>
-        <Description>OpenAI-compatible HTTP server for the Overfit in-process LLM runtime — dependency-free (System.Net.HttpListener + System.Text.Json source-gen), no ASP.NET Core, Native-AOT friendly. Exposes /v1/chat/completions (streaming + non-streaming, with response_format JSON / JSON-Schema constrained decoding), /v1/models and /health, so any OpenAI client points at Overfit by changing the base URL. Pure .NET, in-process, no Python, no model server. Dual-licensed: AGPL-3.0-or-later for open source, commercial license available — see COMMERCIAL.md.</Description>
-        <PackageTags>llm;openai;openai-api;chat-completions;server;in-process;native-aot;gguf;rag;agentic;csharp;ai</PackageTags>
+        <Description>A dependency-free, OpenAI-compatible HTTP server for the in-process Overfit LLM runtime — built on System.Net.HttpListener + System.Text.Json source-gen, no ASP.NET Core, Native-AOT friendly. Point any OpenAI client at it: /v1/chat/completions (streaming and non-streaming, with JSON / JSON-Schema constrained output), /v1/models and /health. Pure .NET, in-process: no Python, no model server. Dual-licensed (AGPL-3.0-or-later / commercial).</Description>
+        <PackageTags>llm;ai;openai;openai-api;chat-completions;server;rest;sse;streaming;self-hosted;in-process;gguf;native-aot;dotnet;csharp</PackageTags>
         <RepositoryUrl>https://github.com/DevOnBike/Overfit</RepositoryUrl>
         <RepositoryType>git</RepositoryType>
         <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
         <PackageReadmeFile>README.md</PackageReadmeFile>
+        <PackageIcon>logo.png</PackageIcon>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <NoWarn>$(NoWarn);1591</NoWarn>
+
+        <!-- Source Link: embed the commit + source mapping into the (embedded) PDB for step-into debugging. -->
+        <PublishRepositoryUrl>true</PublishRepositoryUrl>
+        <EmbedUntrackedSources>true</EmbedUntrackedSources>
 
         <IsAotCompatible>true</IsAotCompatible>
         <IsTrimmable>true</IsTrimmable>
     </PropertyGroup>
 
     <ItemGroup>
+        <None Include="..\Main\logo.png" Pack="true" PackagePath="\" />
         <None Include="README.md" Pack="true" PackagePath="\" />
         <None Include="..\..\LICENSE.md" Pack="true" PackagePath="\" />
         <None Include="..\..\COMMERCIAL.md" Pack="true" PackagePath="\" />
@@ -34,6 +41,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\Main\Main.csproj" />
+        <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="all" />
     </ItemGroup>
 
 </Project>
