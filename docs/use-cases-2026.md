@@ -11,9 +11,10 @@ This document maps the market forces, the empty quadrant, and the concrete cases
 
 ## Why the niche is real (and growing) in 2026
 
-- **Regulation forces local.** GDPR, the EU AI Act (in force 2026), DORA (EU financial sector), sectoral rules in
-  health / gov / defense — sensitive data can't be shipped to a hosted LLM API. "Send it to OpenAI" is a
-  non-starter for a large class of buyers.
+- **Regulation forces local.** GDPR; the **EU AI Act** — obligations phase in through 2026, so enterprise buyers
+  are already designing for auditability, transparency and data governance; **DORA** (EU financial sector,
+  applies since 17 January 2025); sectoral rules in health / gov / defense. Sensitive data can't be shipped to a
+  hosted LLM API — "send it to OpenAI" is a non-starter for a large class of buyers.
 - **Most enterprises are .NET / JVM shops, but AI tooling is Python.** Banks, insurers, government, industrial,
   ISVs run on .NET. Bolting a Python sidecar onto a .NET service means a second runtime, a second container, a
   second security surface, cross-process latency, and a polyglot deploy nobody wants to own.
@@ -58,14 +59,15 @@ installed.
 local GGUF; runs offline. Pure-managed, hand-rolled loaders (no ONNX Runtime, no native deps to vet).
 **Why scarce:** a self-contained, dependency-free, no-Python LLM binary you can drop on an air-gapped host is rare.
 
-### 3 · "Teach the model our private knowledge" — without a GPU farm
-**Who:** any org with proprietary jargon, policies, product data, internal procedures.
+### 3 · "Teach the model our private knowledge" — without a GPU farm *(advanced add-on, not the entry point)*
+**Who:** any org with proprietary jargon, policies, product data, internal procedures — **once their RAG / JSON /
+agent POC is working.** Lead with RAG + structured output; fine-tuning is the upsell after the POC proves out.
 **Pain today:** fine-tuning means CUDA + Python + a GPU box + an MLOps pipeline; most .NET teams can't run it.
 **Overfit delivers:** **QLoRA fine-tuning on a CPU, in pure .NET** — frozen 4-bit GGUF base (never expanded) +
 a trainable LoRA, ~3 GB RAM for a 3B model, turnkey `QLoRAFineTuner`. Validated: taught a model a made-up fact, it
 then recites it.
 **Why scarce:** **llama.cpp can't train at all; PyTorch-QLoRA needs CUDA + Python.** On-CPU, in-.NET training is a
-genuine moat.
+genuine moat — position it as the *differentiator*, sell RAG/JSON/agents as the *entry*.
 
 ### 4 · Embed AI in an existing .NET product (ISV)
 **Who:** software vendors adding AI features to a desktop/server/SaaS product.
@@ -101,9 +103,12 @@ as one AOT binary. In-process speech-to-text (Whisper) too.
 ### 8 · Kill the per-token cloud bill on internal workloads
 **Who:** anyone doing high-volume *internal* classification / extraction / routing / summarization.
 **Pain today:** every call to a hosted API is metered and egresses data; latency is a network hop.
-**Overfit delivers:** run it locally for the cost of your own CPU — structured extraction with **guaranteed schema**
-(JSON-Schema constrained decoding), no parse failures, no data leaving.
-**Why scarce:** local structured-output with schema *guarantees*, in .NET, is rare.
+**Overfit delivers:** run it locally for the cost of your own CPU — structured extraction with **schema-conformant
+output**: JSON-Schema constrained decoding enforces *required fields, string enums, types, `additionalProperties:
+false`, and nested objects / arrays* at decode time (not merely well-formed JSON). No parse failures, no data
+leaving. (Failure mode on tiny models: a rare token dead-end is handled by an early, valid stop rather than
+garbage — full token-healing is on the roadmap.)
+**Why scarce:** local structured-output with real schema *enforcement*, in .NET, is rare.
 
 ### 9 · Reproducible AI for audit / litigation
 **Who:** finance, legal, insurance — anyone who may need to *prove* what the AI did.

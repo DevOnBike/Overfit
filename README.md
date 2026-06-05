@@ -21,6 +21,21 @@ dotnet add package DevOnBike.Overfit
 
 ---
 
+## Where Overfit wins
+
+**The missing quadrant: .NET-native · on-prem · trainable · testable · auditable.** Almost every LLM tool assumes
+Python, a GPU, a separate server, and data leaving your process. Overfit is the opposite — and that intersection
+is nearly empty on the market.
+
+1. **Private RAG & agents inside .NET** — chat, RAG, tool-calling and schema-constrained JSON in-process; nothing leaves the box.
+2. **Replace a Python / Ollama / model-server sidecar** — same capabilities, one .NET process, one deploy, one security surface.
+3. **Testable, auditable RAG for regulated teams** — gate retrieval quality in CI, cite sources, reproduce answers bit-for-bit.
+4. **CPU QLoRA fine-tuning** *(advanced moat)* — teach a model your private data on a CPU, no GPU, no Python.
+
+→ Full market analysis and ten buyer cases: [`docs/use-cases-2026.md`](docs/use-cases-2026.md).
+
+---
+
 ## Start here: run the ASP.NET local agent demo
 
 The fastest way to understand Overfit is to run the local ASP.NET agent demo.
@@ -146,6 +161,37 @@ agent / tool call all stay in one .NET process, with no audio leaving the machin
 See `Demo/WhisperDemo`, `Demo/MicDemo` (live mic) and
 [docs/mp3-decoding.md](docs/mp3-decoding.md).
 
+### 6. OpenAI-compatible API + drop-in .NET integration
+
+Point your existing tooling at Overfit by changing **one line** — no rewrite, same in-process engine behind the
+standard interface.
+
+**Already on `Microsoft.Extensions.AI`?** One call gives you a standard `IChatClient` / `IEmbeddingGenerator`
+that drops straight into Semantic Kernel and any M.E.AI pipeline (caching, telemetry, function-invocation, DI):
+
+```csharp
+using DevOnBike.Overfit.Extensions.AI;          // NuGet: DevOnBike.Overfit.Extensions.AI
+
+IChatClient chat = OverfitClient.LoadGguf(@"C:\models\qwen2.5-3b.gguf").AsChatClient();
+var reply = await chat.GetResponseAsync("Summarize this ticket in one line.");
+```
+
+**Have OpenAI clients / LangChain / a UI / a test harness?** Serve an **OpenAI-compatible HTTP API** in one
+command — just change the base URL. SSE streaming, `/v1/chat/completions`, `/v1/embeddings`, `/v1/models`, plus
+JSON-Schema `response_format`. Dependency-free (no ASP.NET), Native-AOT-clean:
+
+```powershell
+overfit serve qwen2.5-3b --port 11434           # one self-contained binary; nothing leaves the box
+```
+
+```bash
+curl http://localhost:11434/v1/chat/completions -H "Content-Type: application/json" \
+     -d '{"model":"qwen2.5-3b","messages":[{"role":"user","content":"Hello"}]}'
+```
+
+Host the same API from your own code with the `DevOnBike.Overfit.Server` package — your stack doesn't change,
+only the endpoint does.
+
 ---
 
 ## What you can build today
@@ -196,6 +242,7 @@ controlled deployment boundaries and explainable operational records.
 | You do not want to operate Python, Ollama or a model server | Ship a NuGet package and a model file |
 | Your environment blocks native binaries or sidecars | Pure C# runtime, Native AOT compatible |
 | You need RAG, tool calls and JSON, not just raw token generation | Built-in agentic stack |
+| You already use OpenAI clients, Semantic Kernel or Microsoft.Extensions.AI | Point them at Overfit by changing one line — OpenAI-compatible server (`overfit serve`) + `IChatClient` / `IEmbeddingGenerator` adapter |
 | You care about allocations, P99 latency and GC behavior | Explicit memory ownership and zero-allocation hot paths |
 | You need a commercial path for closed-source products | Dual licensing: AGPLv3 or commercial |
 
