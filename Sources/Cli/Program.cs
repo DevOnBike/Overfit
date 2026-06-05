@@ -55,16 +55,23 @@ var servePort = new Option<int>("--port", "-p")
     Description = "TCP port to listen on.",
     DefaultValueFactory = _ => 11434,
 };
+var serveEmbedModel = new Option<string?>("--embed-model")
+{
+    Description = "Optional sentence-embedding model directory (HuggingFace BERT: config.json + vocab.txt "
+        + "+ model.safetensors, e.g. all-MiniLM-L6-v2). Enables POST /v1/embeddings, in-process, no data egress.",
+};
 var serveCommand = new Command("serve", "Start an OpenAI-compatible HTTP server for a model.")
 {
     serveModel,
     serveHost,
     servePort,
+    serveEmbedModel,
 };
 serveCommand.SetAction(parseResult => Commands.Serve(
     parseResult.GetValue(serveModel)!,
     parseResult.GetValue(serveHost)!,
-    parseResult.GetValue(servePort)));
+    parseResult.GetValue(servePort),
+    parseResult.GetValue(serveEmbedModel)));
 
 var rootCommand = new RootCommand("Overfit — run local LLMs, RAG and agents in pure .NET. No Python, no native runtime.")
 {

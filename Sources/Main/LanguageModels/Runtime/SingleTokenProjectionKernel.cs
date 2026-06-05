@@ -362,18 +362,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 throw new ArgumentException("Source span is smaller than cache head dimension.", nameof(source));
             }
 
+            // Mode-agnostic write: F32 copies, Q8 quantizes — so this kernel works with either cache dtype.
             if (copyToKey)
             {
-                source
-                    .Slice(0, headDimension)
-                    .CopyTo(cache.GetKeyWriteSpan(layerIndex, headIndex, position));
+                cache.WriteKey(layerIndex, headIndex, position, source.Slice(0, headDimension));
             }
 
             if (copyToValue)
             {
-                source
-                    .Slice(0, headDimension)
-                    .CopyTo(cache.GetValueWriteSpan(layerIndex, headIndex, position));
+                cache.WriteValue(layerIndex, headIndex, position, source.Slice(0, headDimension));
             }
         }
 

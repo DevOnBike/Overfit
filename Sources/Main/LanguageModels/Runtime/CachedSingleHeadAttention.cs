@@ -447,6 +447,24 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             var sequenceLength = position + 1;
 
+            // Q8 KV cache: read int8 K/V + per-vector scales directly (no F32 expansion → keeps decode
+            // 0-alloc and cuts attention read traffic ~4×). F32 cache: the bit-identical full-precision path.
+            if (cache.IsQuantized)
+            {
+                CachedAttentionKernel.ComputeSingleHeadQ8(
+                    _query,
+                    cache.GetKeyQuants(layerIndex, headIndex, fromPosition: 0, length: sequenceLength),
+                    cache.GetKeyScales(layerIndex, headIndex, fromPosition: 0, length: sequenceLength),
+                    cache.GetValueQuants(layerIndex, headIndex, fromPosition: 0, length: sequenceLength),
+                    cache.GetValueScales(layerIndex, headIndex, fromPosition: 0, length: sequenceLength),
+                    _attentionOutput,
+                    _scoreScratch,
+                    sequenceLength,
+                    HeadDimension,
+                    _scale);
+                return;
+            }
+
             var keys = cache.GetKeyReadSpan(
                 layerIndex,
                 headIndex,

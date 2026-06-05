@@ -72,6 +72,21 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Swagger
             }
             """),
             "v1/embeddings" => JsonNode.Parse("""{ "input": ["hello world", "a second sentence"] }"""),
+            // RAG Stability Harness — deterministic retrieval-side evaluation (no LLM call): recall, paraphrase
+            // stability, false-premise traps, + corpus lint. expectedSource matches a substring of the chunk id.
+            "rag/eval" => JsonNode.Parse("""
+            {
+              "retrieval": [
+                { "query": "How do I reset my password?", "expectedSource": "support-faq.md" },
+                { "query": "What subscription plans are available?", "expectedSource": "company-policy.md" }
+              ],
+              "paraphrase": [
+                { "name": "reset-password", "variants": ["How do I reset my password?", "I forgot my password, what now?", "How can I change my password?"] }
+              ],
+              "falsePremise": ["What is the capital of Mars?"],
+              "topK": 3
+            }
+            """),
             _ => null,
         };
 
@@ -108,6 +123,19 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Swagger
             }
             """),
             "v1/embeddings" => JsonNode.Parse("""{ "input": ["pierwsze zdanie", "drugie zdanie"] }"""),
+            "rag/eval" => JsonNode.Parse("""
+            {
+              "retrieval": [
+                { "query": "Jak zresetować hasło?", "expectedSource": "faq-support.md" },
+                { "query": "Ile dni na odstąpienie od umowy?", "expectedSource": "regulamin-sklepu.md" }
+              ],
+              "paraphrase": [
+                { "name": "reset-hasla", "variants": ["Jak zresetować hasło?", "Zapomniałem hasła, co teraz?", "Jak zmienić hasło?"] }
+              ],
+              "falsePremise": ["Jaka jest stolica Marsa?"],
+              "topK": 3
+            }
+            """),
             _ => null,
         };
     }

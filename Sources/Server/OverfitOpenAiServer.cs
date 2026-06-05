@@ -8,6 +8,7 @@ using System.Text;
 using System.Text.Json;
 using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Contracts;
+using DevOnBike.Overfit.LanguageModels.Embeddings;
 using DevOnBike.Overfit.Server.OpenAi;
 
 namespace DevOnBike.Overfit.Server
@@ -32,6 +33,8 @@ namespace DevOnBike.Overfit.Server
         /// <param name="host">Bind host. <c>127.0.0.1</c>/<c>localhost</c> need no elevation; <c>0.0.0.0</c>/<c>*</c> bind all interfaces (may need a URL ACL / admin on Windows).</param>
         /// <param name="port">TCP port.</param>
         /// <param name="systemMessage">Baseline system prompt restored after every request.</param>
+        /// <param name="embedder">Optional in-process sentence embedder. When supplied, <c>/v1/embeddings</c>
+        /// serves it (pure .NET, no data egress); when null that route returns 501. Owned by the caller.</param>
         /// <param name="onListening">Optional callback invoked once the listener is up, with the base URL.</param>
         /// <param name="cancellationToken">Cancel to stop the server gracefully.</param>
         public static void Serve(
@@ -40,6 +43,7 @@ namespace DevOnBike.Overfit.Server
             string host,
             int port,
             string systemMessage,
+            SentenceEmbedder? embedder = null,
             Action<string>? onListening = null,
             CancellationToken cancellationToken = default)
         {
@@ -87,7 +91,7 @@ namespace DevOnBike.Overfit.Server
 
                 try
                 {
-                    Handle(ctx, client, modelName, systemMessage, created);
+                    Handle(ctx, client, modelName, systemMessage, embedder, created);
                 }
                 catch (Exception ex)
                 {
@@ -107,7 +111,7 @@ namespace DevOnBike.Overfit.Server
             }
         }
 
-        private static void Handle(HttpListenerContext ctx, OverfitClient client, string modelName, string systemMessage, long created)
+        private static void Handle(HttpListenerContext ctx, OverfitClient client, string modelName, string systemMessage, SentenceEmbedder? embedder, long created)
         {
             var req = ctx.Request;
             var path = req.Url?.AbsolutePath ?? "/";
@@ -134,10 +138,15 @@ namespace DevOnBike.Overfit.Server
 
             if (method == "POST" && path == "/v1/embeddings")
             {
-                // The CLI loads a chat/generation GGUF, not a sentence-embedding model; embeddings need a
-                // separate embedder (SentenceEmbedder). Surface a clear, actionable 501 rather than a 500.
-                TryWriteError(ctx.Response, HttpStatusCode.NotImplemented,
-                    "embeddings are not served by 'overfit serve' (load a sentence-embedding model via the API/SDK).");
+                if (embedder is null)
+                {
+                    // No embedder loaded — a chat GGUF alone can't serve sentence embeddings. Clear, actionable 501.
+                    TryWriteError(ctx.Response, HttpStatusCode.NotImplemented,
+                        "embeddings are not served — start with an embedding model (e.g. 'overfit serve <model> --embed-model <dir>').");
+                    return;
+                }
+
+                HandleEmbeddings(ctx, embedder, modelName);
                 return;
             }
 
@@ -247,6 +256,44 @@ namespace DevOnBike.Overfit.Server
                     client.AddSystem(systemMessage);
                 }
             }
+        }
+
+        private static void HandleEmbeddings(HttpListenerContext ctx, SentenceEmbedder embedder, string modelName)
+        {
+            EmbeddingsRequest? req;
+            try
+            {
+                req = JsonSerializer.Deserialize(ctx.Request.InputStream, OpenAiJsonContext.Default.EmbeddingsRequest);
+            }
+            catch (JsonException ex)
+            {
+                TryWriteError(ctx.Response, HttpStatusCode.BadRequest, $"invalid JSON body: {ex.Message}");
+                return;
+            }
+
+            var inputs = req is null ? [] : OpenAiChatMapping.ParseInputs(req.Input);
+            if (inputs.Count == 0)
+            {
+                TryWriteError(ctx.Response, HttpStatusCode.BadRequest, "'input' is required (a string or an array of strings).");
+                return;
+            }
+
+            // In-process, pure .NET embeddings — nothing leaves the box.
+            var data = new List<EmbeddingData>(inputs.Count);
+            var approxTokens = 0;
+            for (var i = 0; i < inputs.Count; i++)
+            {
+                data.Add(new EmbeddingData { Index = i, Embedding = embedder.Embed(inputs[i]) });
+                approxTokens += Math.Max(1, inputs[i].Length / 4);   // rough proxy; we don't bill tokens
+            }
+
+            var response = new EmbeddingsResponse
+            {
+                Model = modelName,
+                Data = data,
+                Usage = new OpenAiUsage { PromptTokens = approxTokens, TotalTokens = approxTokens },
+            };
+            WriteJson(ctx.Response, HttpStatusCode.OK, response, OpenAiJsonContext.Default.EmbeddingsResponse);
         }
 
         private static void WriteChunk(HttpListenerResponse resp, string id, long created, string model, OpenAiMessage delta, string? finishReason)

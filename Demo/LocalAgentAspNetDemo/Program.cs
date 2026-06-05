@@ -226,6 +226,20 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
                 }
             });
 
+            // RAG Stability Harness — "RAG is testable". Deterministic retrieval-side evaluation (no LLM call):
+            // expected-source recall, paraphrase stability, false-premise traps, + corpus lint. Gate it in CI.
+            app.MapPost("/rag/eval", (RagEvalRequest req, RagService rag) =>
+            {
+                try
+                {
+                    return Results.Ok(rag.Evaluate(req));
+                }
+                catch (InvalidOperationException ex)
+                {
+                    return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+                }
+            });
+
             // ── Agent endpoints (Phase 3): tool calling + guaranteed JSON ──────────────
 
             app.MapPost("/agent", (ToolCallRequest req, OverfitClient client, AgentService agent, MetricsCollector metrics) =>

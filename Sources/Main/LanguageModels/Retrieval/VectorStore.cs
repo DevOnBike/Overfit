@@ -113,6 +113,40 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
             return written == buffer.Length ? buffer : buffer[..written];
         }
 
+        /// <summary>The id stored at <paramref name="index"/> (0-based, less than <see cref="Count"/>).</summary>
+        public string GetId(int index)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(index);
+            if (index >= Count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(index));
+            }
+            return _ids[index];
+        }
+
+        /// <summary>The payload (e.g. the source text) stored at <paramref name="index"/>, or null if none was given.</summary>
+        public string? GetPayload(int index)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(index);
+            if (index >= Count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(index));
+            }
+            return _payloads[index];
+        }
+
+        /// <summary>The unit-normalised vector stored at <paramref name="index"/> (read-only view into the
+        /// backing store — for corpus analysis / linting without copying).</summary>
+        public ReadOnlySpan<float> GetVector(int index)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(index);
+            if (index >= Count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(index));
+            }
+            return _vectors.AsSpan(index * Dimension, Dimension);
+        }
+
         private static void InsertDescending(Span<VectorMatch> results, ref int found, int k, VectorMatch candidate)
         {
             // Reject early if the list is full and the candidate can't beat the current worst.

@@ -30,11 +30,14 @@ namespace DevOnBike.Overfit.LanguageModels
     {
         private static readonly string[] _defaultStopSequences = ["<|im_end|>", "\n<|im_start|>"];
 
+        private const int EmbedContextLength = 1024;
+
         private readonly CachedLlamaInferenceEngine _engine;
         private readonly CachedLlamaSession _session;
         private readonly ITokenizer _tokenizer;
         private readonly ChatSession _chat;
         private GenerationOptions _options;
+        private CachedLlamaSession? _embedSession;   // lazy, dedicated — Embed() resets the cache, so it can't share _session
         private bool _disposed;
 
         private OverfitClient(
@@ -279,10 +282,50 @@ namespace DevOnBike.Overfit.LanguageModels
             return Task.Run(() => Send(userMessage, onText, constraint), cancellationToken);
         }
 
+        /// <summary>Dimensionality of <see cref="Embed"/> vectors (the model's hidden size).</summary>
+        public int EmbeddingDimension => EmbedSession.EmbeddingDimension;
+
+        /// <summary>
+        /// Embeds <paramref name="text"/> using the loaded model's own hidden states (mean-pooled, L2-normalised) —
+        /// a multilingual, in-process embedding from the SAME GGUF you chat with, no separate sentence-embedder.
+        /// Useful for RAG over non-English corpora where an English-only embedder (MiniLM) mis-retrieves. Uses a
+        /// DEDICATED session because <see cref="CachedLlamaSession.Embed(System.ReadOnlySpan{int}, EmbeddingPooling, bool)"/>
+        /// resets the KV cache and would otherwise wipe the chat conversation.
+        /// </summary>
+        public float[] Embed(string text, EmbeddingPooling pooling = EmbeddingPooling.Mean)
+        {
+            ThrowIfDisposed();
+            ArgumentNullException.ThrowIfNull(text);
+
+            // Byte-level BPE can emit up to ~4 tokens per char (multi-byte UTF-8), so size the scratch generously.
+            var buffer = new int[text.Length * 4 + 16];
+            var count = _tokenizer.Encode(text, buffer);
+            if (count <= 0)
+            {
+                count = _tokenizer.Encode(" ", buffer);   // empty / whitespace → one space, avoid the empty-token throw
+            }
+            if (count > EmbedContextLength)
+            {
+                count = EmbedContextLength;                // truncate to the dedicated embed session's context
+            }
+
+            return EmbedSession.Embed(buffer.AsSpan(0, count), pooling);
+        }
+
+        private CachedLlamaSession EmbedSession
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return _embedSession ??= _engine.CreateSession(EmbedContextLength);
+            }
+        }
+
         public void Dispose()
         {
             if (_disposed) { return; }
             _disposed = true;
+            _embedSession?.Dispose();
             _session.Dispose();
             _engine.Dispose();
         }

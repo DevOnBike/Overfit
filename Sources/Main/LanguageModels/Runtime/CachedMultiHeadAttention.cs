@@ -408,6 +408,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var band = new float[rows * dModel];
             var score = new float[rows * cacheLength];
 
+            // Q8 KV cache: the batched attend reads F32, so dequantize the cached range once per group into
+            // this scratch (prefill is allocation-tolerant; the F32 cache path skips it entirely).
+            var kf = cache.IsQuantized ? new float[cacheLength * headDim] : null;
+            var vf = cache.IsQuantized ? new float[cacheLength * headDim] : null;
+
             for (var group = 0; group < KvHeadCount; group++)
             {
                 // K/V weights: GQA shares one KV head per group; MHA uses the head's own.
@@ -437,8 +442,19 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     cache.WriteValue(layerIndex, group, basePosition + n, vg.AsSpan(n * headDim, headDim));
                 }
 
-                var keys = cache.GetKeyReadSpan(layerIndex, group, fromPosition: 0, length: cacheLength);
-                var values = cache.GetValueReadSpan(layerIndex, group, fromPosition: 0, length: cacheLength);
+                ReadOnlySpan<float> keys, values;
+                if (cache.IsQuantized)
+                {
+                    cache.DequantizeKeyRange(layerIndex, group, fromPosition: 0, length: cacheLength, kf!);
+                    cache.DequantizeValueRange(layerIndex, group, fromPosition: 0, length: cacheLength, vf!);
+                    keys = kf!;
+                    values = vf!;
+                }
+                else
+                {
+                    keys = cache.GetKeyReadSpan(layerIndex, group, fromPosition: 0, length: cacheLength);
+                    values = cache.GetValueReadSpan(layerIndex, group, fromPosition: 0, length: cacheLength);
+                }
 
                 for (var hg = 0; hg < groupSize; hg++)
                 {
