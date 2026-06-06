@@ -60,18 +60,32 @@ var serveEmbedModel = new Option<string?>("--embed-model")
     Description = "Optional sentence-embedding model directory (HuggingFace BERT: config.json + vocab.txt "
         + "+ model.safetensors, e.g. all-MiniLM-L6-v2). Enables POST /v1/embeddings, in-process, no data egress.",
 };
+var serveTtsModel = new Option<string?>("--tts-model")
+{
+    Description = "Optional Orpheus GGUF (cache name or path) — enables POST /v1/audio/speech (text-to-speech), "
+        + "in-process, no data egress. Requires --tts-snac.",
+};
+var serveTtsSnac = new Option<string?>("--tts-snac")
+{
+    Description = "SNAC decoder weights directory for TTS (snac_24khz.safetensors). Default: $OVERFIT_SNAC_DIR or "
+        + "~/.overfit/snac.",
+};
 var serveCommand = new Command("serve", "Start an OpenAI-compatible HTTP server for a model.")
 {
     serveModel,
     serveHost,
     servePort,
     serveEmbedModel,
+    serveTtsModel,
+    serveTtsSnac,
 };
 serveCommand.SetAction(parseResult => Commands.Serve(
     parseResult.GetValue(serveModel)!,
     parseResult.GetValue(serveHost)!,
     parseResult.GetValue(servePort),
-    parseResult.GetValue(serveEmbedModel)));
+    parseResult.GetValue(serveEmbedModel),
+    parseResult.GetValue(serveTtsModel),
+    parseResult.GetValue(serveTtsSnac)));
 
 // ── tts: text → speech (WAV), in-process, watermarked. Placeholder engine until the neural backend lands. ──
 var ttsText = new Option<string>("--text")

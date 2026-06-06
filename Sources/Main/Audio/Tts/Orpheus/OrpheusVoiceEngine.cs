@@ -21,9 +21,13 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
         private const int EndOfSpeechTokenId = 128258;
         private const int DefaultMaxTokens = 1200;
 
+        // ~0.12 s of silence inserted between sentences when synthesizing multi-sentence text.
+        private const float InterSentenceSilenceSeconds = 0.12f;
+
         private readonly OverfitClient _llm;
         private readonly Snac.Snac _snac;
         private readonly bool _ownsLlm;
+        private readonly TtsTextNormalizer _normalizer = new();
 
         private OrpheusVoiceEngine(OverfitClient llm, Snac.Snac snac, bool ownsLlm)
         {
@@ -52,20 +56,67 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
         /// <summary>
         /// Synthesizes <paramref name="text"/> in the preset <paramref name="voice"/> to mono 24 kHz PCM in
         /// <c>[-1, 1]</c>. Sampling matches the Orpheus reference (temperature 0.6, top-p 0.9, repetition penalty
-        /// 1.1); <paramref name="seed"/> makes a run reproducible.
+        /// 1.1); <paramref name="seed"/> makes a run reproducible. With <paramref name="normalize"/> (default), text
+        /// is run through <see cref="TtsTextNormalizer"/> (numbers/abbreviations/lexicon) and long input is split
+        /// into sentences, each synthesized and concatenated with a short silence.
         /// </summary>
-        public float[] Synthesize(string text, string voice = OrpheusPrompt.DefaultVoice, int maxTokens = DefaultMaxTokens, int seed = 0)
+        public float[] Synthesize(
+            string text, string voice = OrpheusPrompt.DefaultVoice, int maxTokens = DefaultMaxTokens, int seed = 0, bool normalize = true)
+        {
+            var input = normalize ? _normalizer.Normalize(text) : text;
+            var sentences = normalize ? SentenceSplitter.Split(input) : [input];
+            if (sentences.Count <= 1)
+            {
+                return SynthesizeChunk(sentences.Count == 1 ? sentences[0] : input, voice, maxTokens, seed);
+            }
+
+            var parts = new List<float[]>(sentences.Count);
+            foreach (var sentence in sentences)
+            {
+                parts.Add(SynthesizeChunk(sentence, voice, maxTokens, seed));
+            }
+            return Concatenate(parts, (int)(SampleRate * InterSentenceSilenceSeconds));
+        }
+
+        private float[] SynthesizeChunk(string text, string voice, int maxTokens, int seed)
         {
             var codes = GenerateAudioCodes(text, voice, maxTokens, seed);
             if (codes.Count < OrpheusSnacBridge.FrameStride)
             {
                 throw new OverfitRuntimeException(
-                    $"Orpheus produced {codes.Count} audio codes — not enough for a frame. The model may not be an "
-                    + "Orpheus TTS checkpoint, or generation stopped immediately.");
+                    $"Orpheus produced {codes.Count} audio codes for \"{text}\" — not enough for a frame. The model "
+                    + "may not be an Orpheus TTS checkpoint, or generation stopped immediately.");
             }
 
             var levels = OrpheusSnacBridge.Redistribute(CollectionsMarshal.AsSpan(codes));
-            return _snac.Decode(levels);
+            var audio = _snac.Decode(levels);
+            return AudioPostProcessing.TrimSilence(audio);
+        }
+
+        private static float[] Concatenate(List<float[]> parts, int gapSamples)
+        {
+            var total = 0;
+            for (var p = 0; p < parts.Count; p++)
+            {
+                total += parts[p].Length;
+                if (p < parts.Count - 1)
+                {
+                    total += gapSamples;
+                }
+            }
+
+            var output = new float[total];
+            var offset = 0;
+            for (var p = 0; p < parts.Count; p++)
+            {
+                parts[p].AsSpan().CopyTo(output.AsSpan(offset));
+                offset += parts[p].Length;
+                if (p < parts.Count - 1)
+                {
+                    offset += gapSamples; // already zero-filled
+                }
+            }
+            return output;
         }
 
         private List<int> GenerateAudioCodes(string text, string voice, int maxTokens, int seed)

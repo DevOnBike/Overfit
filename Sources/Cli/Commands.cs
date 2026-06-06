@@ -142,7 +142,7 @@ namespace DevOnBike.Overfit.Cli
 
         private const string DefaultSystemPrompt = "You are a concise, helpful assistant running locally in pure .NET.";
 
-        public static int Serve(string model, string host, int port, string? embedModel)
+        public static int Serve(string model, string host, int port, string? embedModel, string? ttsModel, string? ttsSnac)
         {
             var path = ModelCache.Resolve(model);
             if (path is null)
@@ -193,6 +193,36 @@ namespace DevOnBike.Overfit.Cli
                 }
             }
 
+            // Optional in-process TTS → serves /v1/audio/speech (Orpheus LM + SNAC, pure .NET, no data egress).
+            OrpheusVoiceEngine? tts = null;
+            if (!string.IsNullOrWhiteSpace(ttsModel))
+            {
+                var orpheus = ResolveOrpheusModel(ttsModel);
+                var snac = ResolveSnacDir(ttsSnac);
+                if (orpheus is null || snac is null)
+                {
+                    Console.Error.WriteLine("TTS not started: need both an Orpheus GGUF (--tts-model) and SNAC weights (--tts-snac).");
+                    Console.Error.WriteLine(orpheus is null ? "  • Orpheus GGUF not found (pull it, or pass --tts-model <file.gguf>)." : $"  • Orpheus: {orpheus}");
+                    Console.Error.WriteLine(snac is null ? "  • SNAC weights not found (run Scripts/convert_snac.py, or pass --tts-snac <dir>)." : $"  • SNAC: {snac}");
+                    embedder?.Dispose();
+                    client.Dispose();
+                    return 1;
+                }
+
+                try
+                {
+                    tts = OrpheusVoiceEngine.Load(orpheus, snac);
+                    Console.WriteLine($"TTS: Orpheus + SNAC -> /v1/audio/speech (voices: {string.Join(", ", OrpheusPrompt.AvailableVoices)})");
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"Failed to load TTS: {ex.Message}");
+                    embedder?.Dispose();
+                    client.Dispose();
+                    return 1;
+                }
+            }
+
             using var cts = new CancellationTokenSource();
             Console.CancelKeyPress += (_, e) =>
             {
@@ -209,13 +239,15 @@ namespace DevOnBike.Overfit.Cli
                     port,
                     DefaultSystemPrompt,
                     embedder,
+                    tts,
                     onListening: baseUrl =>
                     {
                         var embedEp = embedder is null ? string.Empty : " | POST /v1/embeddings";
+                        var ttsEp = tts is null ? string.Empty : " | POST /v1/audio/speech";
                         Console.WriteLine();
                         Console.WriteLine($"OpenAI-compatible server listening on {baseUrl}");
                         Console.WriteLine($"  model id:  {modelName}");
-                        Console.WriteLine($"  endpoints: GET /v1/models | POST /v1/chat/completions (stream + non-stream){embedEp} | GET /health");
+                        Console.WriteLine($"  endpoints: GET /v1/models | POST /v1/chat/completions (stream + non-stream){embedEp}{ttsEp} | GET /health");
                         Console.WriteLine();
                         Console.WriteLine($"  curl {baseUrl}/v1/chat/completions -H \"Content-Type: application/json\" \\");
                         Console.WriteLine($"       -d '{{\"model\":\"{modelName}\",\"messages\":[{{\"role\":\"user\",\"content\":\"Hello\"}}]}}'");
@@ -232,6 +264,7 @@ namespace DevOnBike.Overfit.Cli
             }
             finally
             {
+                tts?.Dispose();
                 embedder?.Dispose();
                 client.Dispose();
             }

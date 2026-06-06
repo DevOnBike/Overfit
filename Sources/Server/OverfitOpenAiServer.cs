@@ -6,6 +6,9 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using DevOnBike.Overfit.Audio;
+using DevOnBike.Overfit.Audio.Tts;
+using DevOnBike.Overfit.Audio.Tts.Orpheus;
 using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Embeddings;
@@ -44,6 +47,7 @@ namespace DevOnBike.Overfit.Server
             int port,
             string systemMessage,
             SentenceEmbedder? embedder = null,
+            OrpheusVoiceEngine? tts = null,
             Action<string>? onListening = null,
             CancellationToken cancellationToken = default)
         {
@@ -91,7 +95,7 @@ namespace DevOnBike.Overfit.Server
 
                 try
                 {
-                    Handle(ctx, client, modelName, systemMessage, embedder, created);
+                    Handle(ctx, client, modelName, systemMessage, embedder, tts, created);
                 }
                 catch (Exception ex)
                 {
@@ -111,7 +115,7 @@ namespace DevOnBike.Overfit.Server
             }
         }
 
-        private static void Handle(HttpListenerContext ctx, OverfitClient client, string modelName, string systemMessage, SentenceEmbedder? embedder, long created)
+        private static void Handle(HttpListenerContext ctx, OverfitClient client, string modelName, string systemMessage, SentenceEmbedder? embedder, OrpheusVoiceEngine? tts, long created)
         {
             var req = ctx.Request;
             var path = req.Url?.AbsolutePath ?? "/";
@@ -150,7 +154,86 @@ namespace DevOnBike.Overfit.Server
                 return;
             }
 
+            if (method == "POST" && path == "/v1/audio/speech")
+            {
+                if (tts is null)
+                {
+                    TryWriteError(ctx.Response, HttpStatusCode.NotImplemented,
+                        "text-to-speech is not served — start with a TTS model (e.g. 'overfit serve <model> "
+                        + "--tts-model <orpheus.gguf> --tts-snac <dir>').");
+                    return;
+                }
+
+                HandleAudioSpeech(ctx, tts);
+                return;
+            }
+
             TryWriteError(ctx.Response, HttpStatusCode.NotFound, $"no route for {method} {path}");
+        }
+
+        private static void HandleAudioSpeech(HttpListenerContext ctx, OrpheusVoiceEngine tts)
+        {
+            SpeechRequest? req;
+            try
+            {
+                req = JsonSerializer.Deserialize(ctx.Request.InputStream, OpenAiJsonContext.Default.SpeechRequest);
+            }
+            catch (JsonException ex)
+            {
+                TryWriteError(ctx.Response, HttpStatusCode.BadRequest, $"invalid JSON body: {ex.Message}");
+                return;
+            }
+
+            if (req is null || string.IsNullOrWhiteSpace(req.Input))
+            {
+                TryWriteError(ctx.Response, HttpStatusCode.BadRequest, "'input' is required.");
+                return;
+            }
+
+            var format = (req.ResponseFormat ?? "wav").ToLowerInvariant();
+            if (format is not ("wav" or "pcm"))
+            {
+                TryWriteError(ctx.Response, HttpStatusCode.BadRequest,
+                    $"response_format '{req.ResponseFormat}' is not supported; use 'wav' or 'pcm'.");
+                return;
+            }
+
+            var voice = string.IsNullOrWhiteSpace(req.Voice) ? OrpheusPrompt.DefaultVoice : req.Voice!;
+            var audio = tts.Synthesize(req.Input!, voice);
+
+            byte[] bytes;
+            string contentType;
+            if (format == "pcm")
+            {
+                bytes = ToPcm16Bytes(audio);
+                contentType = "audio/pcm";
+            }
+            else
+            {
+                using var ms = new MemoryStream();
+                WavWriter.WriteMono(ms, audio, tts.SampleRate, WavSampleFormat.Pcm16,
+                    SyntheticSpeechMetadata.ForNow(voice).ToInfoComment());
+                bytes = ms.ToArray();
+                contentType = "audio/wav";
+            }
+
+            ctx.Response.StatusCode = (int)HttpStatusCode.OK;
+            ctx.Response.ContentType = contentType;
+            ctx.Response.ContentLength64 = bytes.Length;
+            ctx.Response.OutputStream.Write(bytes, 0, bytes.Length);
+        }
+
+        private static byte[] ToPcm16Bytes(float[] samples)
+        {
+            var bytes = new byte[samples.Length * 2];
+            for (var i = 0; i < samples.Length; i++)
+            {
+                var clamped = Math.Clamp(samples[i], -1f, 1f);
+                var v = (short)MathF.Round(clamped * 32767f);
+                bytes[i * 2] = (byte)(v & 0xFF);
+                bytes[(i * 2) + 1] = (byte)((v >> 8) & 0xFF);
+            }
+            return bytes;
         }
 
         private static void HandleChatCompletions(HttpListenerContext ctx, OverfitClient client, string modelName, string systemMessage)

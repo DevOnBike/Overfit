@@ -18,6 +18,7 @@ namespace DevOnBike.Overfit.Server.OpenAi
     [JsonSerializable(typeof(ChatCompletionResponse))]
     [JsonSerializable(typeof(ChatCompletionChunk))]
     [JsonSerializable(typeof(EmbeddingsRequest))]
+    [JsonSerializable(typeof(SpeechRequest))]
     [JsonSerializable(typeof(EmbeddingsResponse))]
     [JsonSerializable(typeof(ModelsResponse))]
     [JsonSerializable(typeof(OpenAiErrorResponse))]

@@ -37,7 +37,7 @@ A local voice agent that **hears, thinks and speaks — in one .NET process, on-
 | S2 | **SNAC codec decoder** | `Snac.Decode(codes) → PCM@24k` (the bulk) | ✅ **Done — 2026-06-06 (121.5 dB vs PyTorch)** |
 | S3 | Orpheus LM glue | text → SNAC audio tokens (de-interleave) | ✅ **Done — 2026-06-06** |
 | S4 | End-to-end preset-voice TTS | `OrpheusVoiceEngine.Synthesize(text, voice) → PCM` — first real speech | ✅ **Done — 2026-06-06 (3.16 s clip on real model)** |
-| S5 | Quality & robustness | Polish text normalization, multiple voices, long text, sampling | ⬜ |
+| S5 | Quality & robustness | text normalization ✅, long-text chunking ✅; PL normalization / sampling polish ⬜ | 🔶 in progress |
 | S6 | Voice-loop demo + docs | `Demo/VoiceDemo`, mic → Whisper → LLM → TTS → speaker | ⬜ |
 | **P2** | **Voice cloning** (zero-shot from a clip) | speaker enrollment → "my voice" — **gated on quality + legal** | ⬜ Phase 2 |
 
@@ -109,8 +109,10 @@ heavier port and the license caveat (or "you bring the model" posture).
   decoder.
 - **2026-06-06 — pure-managed only.** No ONNX Runtime in the product path (it breaks the "no native binary" claim).
   An ONNX-RT prototype, if ever used, is explicitly a throwaway, not a shipped backend.
-- **2026-06-06 — watermark is mandatory.** Every synthesized file carries a synthetic-speech provenance marker
-  (`SyntheticSpeechMetadata`), per EU-AI-Act-style disclosure rules.
+- **2026-06-06 — watermark is mandatory (metadata-level today).** Every synthesized file carries a synthetic-speech
+  provenance marker (`SyntheticSpeechMetadata` → RIFF `LIST/INFO` `ICMT`/`ISFT`), per EU-AI-Act-style disclosure.
+  ⚠️ **This is a container-metadata label, not a signal watermark** — it is honest provenance but is stripped by
+  re-encoding / re-recording. A robust, inaudible **signal-domain** watermark is a separate roadmap item (below).
 
 ---
 
@@ -186,10 +188,24 @@ cross-level sum → depthwise stem → transposed-conv upsampling → dilated re
 - **Next polish:** Polish text normalization (S5); out-of-vocabulary words (e.g. brand names like "Overfit") need
   phonetic spelling until S5; the mic→STT→LLM→TTS demo (S6).
 
-### S5 — Quality & robustness ⬜
-- Polish text normalization (numbers → words, abbreviations `np.`/`itd.`/`zł`, dates, punctuation, prosody),
-  multiple voices, long text via sentence chunking + concatenation, silence trim, sampling vs greedy.
+### S5 — Quality & robustness 🔶 *(text normalization + long-text done 2026-06-06)*
+- **✅ Text normalization** — `TtsTextNormalizer` (English): numbers → words (`EnglishNumberToWords`, cardinals +
+  decimals), symbol/abbreviation expansion (`.NET`→"dot net", `e.g.`→"for example", `%`/`&`/…), and a
+  user-extendable **pronunciation lexicon** that fixes OOV/brand words — `Overfit`→"over fit" automatically (the
+  exact issue raised). Applied by default in `OrpheusVoiceEngine.Synthesize` (`normalize: false` to opt out).
+- **✅ Long text** — `SentenceSplitter` chunks normalized text into sentences; the engine synthesizes each and
+  concatenates with ~0.12 s of silence (live: a two-sentence prompt → one 10.6 s clip). 27 model-free tests.
+- **✅ Silence trim** — `AudioPostProcessing.TrimSilence` strips leading/trailing dead air (with padding) from each
+  synthesized chunk, so onsets are tight and concatenated sentences have uniform gaps. 3 tests.
+- ⬜ **Remaining:** Polish-specific normalization (only matters with a Polish TTS model — Orpheus is English),
+  prosody/sampling tuning, per-voice quality pass.
 - **Gate:** several sentences across voices sound natural and stable.
+
+### OpenAI `/v1/audio/speech` ✅ **DONE 2026-06-06** *(TTS exposed as an API)*
+- `overfit serve <chat-model> --tts-model <orpheus.gguf> --tts-snac <dir>` adds **`POST /v1/audio/speech`** to the
+  OpenAI-compatible server (`OverfitOpenAiServer` + `SpeechRequest`): `{input, voice, response_format}` →
+  `wav` (default) or `pcm` bytes, in-process, watermarked, no data egress. 501 when no TTS model is loaded;
+  400 on unsupported formats. Live: a sentence (voice *leo*) → a 2.87 s WAV over HTTP.
 
 ### S6 — Voice loop demo + docs ⬜
 - `Demo/VoiceDemo`: mic → Whisper (STT) → LLM → **TTS** → speaker, all in one .NET process. README / `docs/tts.md`.
@@ -222,6 +238,45 @@ cross-level sum → depthwise stem → transposed-conv upsampling → dilated re
 intelligible, watermarked 24 kHz WAV from the real Orpheus + SNAC stack, in pure managed .NET, with the full voice
 loop (`Demo/VoiceDemo`) running mic → STT → LLM → TTS → speaker on one CPU box. Voice cloning remains explicitly
 Phase 2.
+
+## Roadmap / deferred
+
+- **Real-time / live generation — intentionally NOT in the public build (private / commercial know-how).**
+  Strategic decision (2026-06-06): the open (AGPL) edition ships **offline/batch** TTS; making it *real-time* is held
+  as **proprietary know-how and a commercial differentiator**, not published. The architecture is open (and visible
+  in the code anyway) — the moat is the hard performance work, which we keep private. The analysis below is the
+  internal playbook for *if/when we build the live path commercially*, not a public roadmap item.
+  Today's pipeline is **offline/batch**: measured **real-time factor ≈ 8–9×** on CPU (server mode, model loaded once
+  — e.g. 3.27 s of audio in 27.4 s). The bottleneck is the **Orpheus 3B Q4 LM** at ~38 tok/s; live (RTF ≤ 1) needs
+  ~**328 audio-tokens/s** (46.9 SNAC frames/s × 7). The SNAC decode is cheap and not the constraint. Paths to live,
+  by how well they fit Overfit's pure-managed / no-native-binary identity:
+  - **Smaller TTS model — same stack (best identity fit, partial win).** A ~0.5 B Orpheus-style LLM→SNAC checkpoint
+    drops into the existing loader/bridge unchanged. Token rate scales ~inversely with size → ~RTF 2–3 at 0.5 B:
+    *faster, still not quite live*, and good small audio-LMs are scarce. Cheapest to try (no new code) if a
+    checkpoint exists.
+  - **Smaller TTS model — different arch (the real CPU-live answer, separate port).** **Kokoro (82 M, Apache-2.0,
+    StyleTTS2)** or **Piper (VITS, ~10–60 M)** run *real-time on CPU* and stay pure-managed — but are **not**
+    LLM+codec, so they don't reuse Orpheus/SNAC: a fresh op port (ISTFTNet / VITS decoder), ~**1–2 weeks** each.
+    Recommended path if live-on-CPU is the goal; keep both behind `ITextToSpeechEngine` (Orpheus = quality/offline,
+    Kokoro = speed/live).
+  - **GPU (strategic, identity-tension).** `ILGPU` or `ComputeSharp` (D3D12, Windows-only) let kernels stay in C#
+    but need rewriting the GEMV/attention/dequant hot path (~weeks), add a GPU-driver dependency, and complicate
+    AOT. `TorchSharp` / ONNX-RT-GPU work in days **but pull native CUDA binaries — breaking the "no native runtime"
+    claim** (explicitly out-of-scope for the product path). GPU is a kierunkowa decision, not a feature.
+  - **Streaming decode** lowers *latency-to-first-audio* (emit once ~4 frames exist) but does **not** raise
+    throughput — at RTF > 1 the playback buffer still underruns. It masks, it doesn't solve.
+  - **Existing perf levers** (repacked GEMV, SIMD from the decode perf-sprint) give ~30–50%, not the ~8× needed —
+    necessary-not-sufficient on their own.
+  - **Verdict:** for *live on CPU + pure .NET* → port **Kokoro**; to *keep Orpheus quality* → offline/batch on CPU,
+    or accept GPU's identity cost. **Status: analysis done; held as private/commercial know-how — the public build
+    stays offline/batch by design.**
+- **Signal-domain audio watermark (robust, inaudible).** Embed an imperceptible mark *in the waveform itself* that
+  survives MP3 re-encode / re-recording (cf. Meta **AudioSeal**, Google **SynthID-audio**) — a real anti-deepfake
+  provenance signal plus a detector, complementing today's metadata label. Differentiating ("local TTS that
+  watermarks its own synthetic output"), but a non-trivial DSP/ML build (~days): an embedder that perturbs
+  sub-perceptual frequency/phase content carrying a payload, and a detector robust to compression. Pure-managed,
+  no native deps. **Status: deferred / planned.**
+- **Voice cloning (P2)** — see below.
 
 ## Out of scope (PoC)
 
