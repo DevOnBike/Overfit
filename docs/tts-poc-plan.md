@@ -34,7 +34,7 @@ A local voice agent that **hears, thinks and speaks — in one .NET process, on-
 |---|---|---|:--:|
 | **S0** | **Scaffolding** | contracts + WAV-out + watermark, model-free | ✅ **Done — 2026-06-06** |
 | **S1** | **CLI + consent + enrollment** | `overfit tts` over a stub engine, consent gate, `VoiceProfile` persistence | ✅ **Done — 2026-06-06** |
-| S2 | **SNAC codec decoder** | `SnacDecoder.Decode(codes) → PCM@24k` (the bulk) | ⬜ |
+| S2 | **SNAC codec decoder** | `SnacDecoder.Decode(codes) → PCM@24k` (the bulk) | 🔶 `ConvTranspose1d` primitive done — 2026-06-06 |
 | S3 | Orpheus LM glue | text → SNAC audio tokens (de-interleave) | ⬜ |
 | S4 | End-to-end preset-voice TTS | `TextToSpeech.Synthesize(text, voice) → WAV` — first real speech | ⬜ |
 | S5 | Quality & robustness | Polish text normalization, multiple voices, long text, sampling | ⬜ |
@@ -138,11 +138,19 @@ ported:
   consent persisted `maciej (pl, preset)` and `voice list` showed it. New: `PlaceholderTtsEngine`,
   `VoiceProfileStore`, CLI `tts`/`voice {enroll,list}`. 4 store + 2 engine tests green (suite 1151/0).
 
-### S2 — SNAC decoder: codes → waveform ⬜ *(the foundation, biggest chunk)*
-- Load SNAC weights, map tensor names; build the decoder graph (per-level codebook dequantize → transposed-conv
-  upsampling + dilated residual units → final conv → `tanh` → 24 kHz PCM). New kernel: `ConvTranspose1d`.
-- **Gate:** feed *known* SNAC codes (reference encode / published test vector) → decoded PCM is clean audible audio
-  matching the reference decode within tolerance. **Get sound out of codes before touching the LM.**
+### S2 — SNAC decoder: codes → waveform 🔶 *(the foundation, biggest chunk — primitive landed)*
+- **✅ 2026-06-06 — `ConvTranspose1d` primitive done.** `Sources/Main/Audio/Tts/Snac/SnacConv.cs` — the
+  learned-upsampling op the decoder is built on (PyTorch transposed-conv: input `[inC×tIn]`, weight `[inC×outC×k]`,
+  gather formulation → race-free parallel over output channels, matching `WhisperKernels`' style; stride / pad /
+  dilation / output_padding + `OutputLength` helper). 13 tests: hand-computed exact upsample + channel-mix cases,
+  the PyTorch length formula, and the fast gather kernel reproduced **bit-for-bit by the canonical scatter
+  definition** across shapes incl. one crossing the parallel threshold. Model-free, plain-span, AOT-clean.
+- ⬜ **Next:** SNAC residual-VQ codebook dequantize (per-level embedding gather), the dilated residual units
+  (`Conv1d` + Snake/activation), the decoder graph wiring (codes → upsample stack → final conv → `tanh` → 24 kHz
+  PCM), and the weight loader + tensor-name map. Needs SNAC weights on the box.
+- **Gate:** feed *known* SNAC codes (reference encode / published test vector) → decoded PCM matches the reference
+  decode within tolerance — now **measurable** via `AudioQualityAssert` (SNR/correlation vs the reference decode).
+  **Get sound out of codes before touching the LM.**
 
 ### S3 — Orpheus LM glue: text → audio tokens ⬜
 - Load Orpheus GGUF (Llama-3.2-3B → loads today). Build the prompt format; decode the audio-token stream; stop at
