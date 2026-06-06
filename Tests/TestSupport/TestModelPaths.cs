@@ -80,6 +80,18 @@ namespace DevOnBike.Overfit.Tests.TestSupport
             public static string RequireSampleMp3Path() => Require(SampleMp3Path, EnvVar, "Sample MP3 (jfk.mp3 — e.g. the JFK clip encoded to MP3)");
         }
 
+        public static class Snac
+        {
+            private const string EnvVar = "OVERFIT_SNAC_DIR";
+            public static string Dir => Resolve(EnvVar, @"c:\snac");
+            public static string SafetensorsPath => Path.Combine(Dir, "snac_24khz.safetensors");
+            public static string CodesPath => Path.Combine(Dir, "codes.bin");
+            public static string ReferenceNoiseOffPath => Path.Combine(Dir, "reference_noiseoff.f32");
+
+            public static string RequireSafetensorsPath() => Require(SafetensorsPath, EnvVar,
+                "SNAC 24 kHz decoder weights (run Scripts/convert_snac.py --out c:\\snac)");
+        }
+
         public static class Qwen3B
         {
             private const string EnvVar = "OVERFIT_QWEN3B_DIR";

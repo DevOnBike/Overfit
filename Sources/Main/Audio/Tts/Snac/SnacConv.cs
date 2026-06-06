@@ -25,6 +25,96 @@ namespace DevOnBike.Overfit.Audio.Tts.Snac
         public static int OutputLength(int tIn, int kSize, int stride, int pad, int dilation, int outputPadding)
             => ((tIn - 1) * stride) - (2 * pad) + (dilation * (kSize - 1)) + outputPadding + 1;
 
+        /// <summary>Output length of a plain conv: <c>(tIn + 2·pad − dilation·(kSize−1) − 1)/stride + 1</c>
+        /// (PyTorch <c>Conv1d</c>).</summary>
+        public static int ConvOutputLength(int tIn, int kSize, int stride, int pad, int dilation)
+            => ((tIn + (2 * pad) - (dilation * (kSize - 1)) - 1) / stride) + 1;
+
+        /// <summary>
+        /// 1-D convolution over time with <paramref name="groups"/> support (SNAC's residual units and the
+        /// decoder stem use <b>depthwise</b> convs, i.e. <c>groups == channels</c>). <paramref name="input"/> is
+        /// channel-major <c>[inC × tIn]</c>; <paramref name="weight"/> is <c>[outC × (inC/groups) × kSize]</c>
+        /// (PyTorch <c>Conv1d</c> layout); output channel-major <c>[outC × tOut]</c>. Each output channel reads
+        /// only its group's input channels. Parallel over output channels above a work threshold.
+        /// </summary>
+        public static void Conv1d(
+            ReadOnlySpan<float> input, ReadOnlySpan<float> weight, ReadOnlySpan<float> bias,
+            Span<float> dst, int inC, int tIn, int outC, int kSize, int stride, int pad, int dilation, int groups, int tOut)
+        {
+            var icPerGroup = inC / groups;
+            var ocPerGroup = outC / groups;
+            if ((long)outC * tOut * icPerGroup * kSize < ParallelThreshold)
+            {
+                for (var oc = 0; oc < outC; oc++)
+                {
+                    Conv1dChannel(oc, input, weight, bias, dst, tIn, kSize, stride, pad, dilation, icPerGroup, ocPerGroup, tOut);
+                }
+                return;
+            }
+
+            fixed (float* ip = input, wp = weight, bp = bias, dp = dst)
+            {
+                var ctx = new Conv1dCtx(ip, wp, bias.IsEmpty ? null : bp, dp,
+                    inC, tIn, outC, kSize, stride, pad, dilation, icPerGroup, ocPerGroup, tOut);
+                OverfitParallelFor.For(0, outC, &Conv1dWorker, &ctx);
+            }
+        }
+
+        private static void Conv1dChannel(
+            int oc, ReadOnlySpan<float> input, ReadOnlySpan<float> weight, ReadOnlySpan<float> bias,
+            Span<float> dst, int tIn, int kSize, int stride, int pad, int dilation, int icPerGroup, int ocPerGroup, int tOut)
+        {
+            var b0 = bias.IsEmpty ? 0f : bias[oc];
+            var group = oc / ocPerGroup;
+            var icStart = group * icPerGroup;
+            for (var to = 0; to < tOut; to++)
+            {
+                var acc = b0;
+                var start = (to * stride) - pad;
+                for (var icl = 0; icl < icPerGroup; icl++)
+                {
+                    var wBase = ((oc * icPerGroup) + icl) * kSize;
+                    var inBase = (icStart + icl) * tIn;
+                    for (var k = 0; k < kSize; k++)
+                    {
+                        var ti = start + (k * dilation);
+                        if (ti >= 0 && ti < tIn)
+                        {
+                            acc += weight[wBase + k] * input[inBase + ti];
+                        }
+                    }
+                }
+                dst[(oc * tOut) + to] = acc;
+            }
+        }
+
+        private readonly struct Conv1dCtx
+        {
+            public readonly float* In, W, B, D;
+            public readonly int InC, TIn, OutC, KSize, Stride, Pad, Dilation, IcPerGroup, OcPerGroup, TOut;
+
+            public Conv1dCtx(float* inp, float* w, float* b, float* d, int inC, int tIn, int outC,
+                int kSize, int stride, int pad, int dilation, int icPerGroup, int ocPerGroup, int tOut)
+            {
+                In = inp; W = w; B = b; D = d;
+                InC = inC; TIn = tIn; OutC = outC; KSize = kSize; Stride = stride; Pad = pad; Dilation = dilation;
+                IcPerGroup = icPerGroup; OcPerGroup = ocPerGroup; TOut = tOut;
+            }
+        }
+
+        private static void Conv1dWorker(int start, int end, void* ctxPtr)
+        {
+            ref var c = ref Unsafe.AsRef<Conv1dCtx>(ctxPtr);
+            var input = new ReadOnlySpan<float>(c.In, c.InC * c.TIn);
+            var weight = new ReadOnlySpan<float>(c.W, c.OutC * c.IcPerGroup * c.KSize);
+            var bias = c.B == null ? ReadOnlySpan<float>.Empty : new ReadOnlySpan<float>(c.B, c.OutC);
+            var dst = new Span<float>(c.D, c.OutC * c.TOut);
+            for (var oc = start; oc < end; oc++)
+            {
+                Conv1dChannel(oc, input, weight, bias, dst, c.TIn, c.KSize, c.Stride, c.Pad, c.Dilation, c.IcPerGroup, c.OcPerGroup, c.TOut);
+            }
+        }
+
         /// <summary>
         /// 1-D transposed convolution over time. <paramref name="input"/> is channel-major <c>[inC × tIn]</c>;
         /// <paramref name="weight"/> is <c>[inC × outC × kSize]</c> (PyTorch transposed-conv weight layout —

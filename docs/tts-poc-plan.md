@@ -34,7 +34,7 @@ A local voice agent that **hears, thinks and speaks — in one .NET process, on-
 |---|---|---|:--:|
 | **S0** | **Scaffolding** | contracts + WAV-out + watermark, model-free | ✅ **Done — 2026-06-06** |
 | **S1** | **CLI + consent + enrollment** | `overfit tts` over a stub engine, consent gate, `VoiceProfile` persistence | ✅ **Done — 2026-06-06** |
-| S2 | **SNAC codec decoder** | `SnacDecoder.Decode(codes) → PCM@24k` (the bulk) | 🔶 `ConvTranspose1d` primitive done — 2026-06-06 |
+| S2 | **SNAC codec decoder** | `Snac.Decode(codes) → PCM@24k` (the bulk) | ✅ **Done — 2026-06-06 (121.5 dB vs PyTorch)** |
 | S3 | Orpheus LM glue | text → SNAC audio tokens (de-interleave) | ⬜ |
 | S4 | End-to-end preset-voice TTS | `TextToSpeech.Synthesize(text, voice) → WAV` — first real speech | ⬜ |
 | S5 | Quality & robustness | Polish text normalization, multiple voices, long text, sampling | ⬜ |
@@ -82,7 +82,7 @@ text ──► [TTS LM: Llama/Qwen arch] ──► audio-codec tokens ──► 
 | WAV writer @ any rate + streaming sink + watermark | ✅ **`WavWriter` / `WavAudioSink`** (S0) |
 | Conv1d / transposed-conv / residual blocks | 🔶 have Conv (Whisper stem); need transposed-conv + the decoder graph |
 | Vector-quantizer codebook lookup / dequantize | 🔶 new (small — embedding-table gather per level) |
-| **SNAC decoder weights load + graph** | 🔴 **new — the bulk of the work (S2)** |
+| **SNAC decoder weights load + graph** | ✅ **done (S2) — `Snac.Decode`, 121.5 dB vs PyTorch** |
 | Orpheus token format ↔ SNAC frame de-interleave | 🔴 new (documented offset scheme, S3) |
 
 ## Model choice (trade-off)
@@ -138,19 +138,29 @@ ported:
   consent persisted `maciej (pl, preset)` and `voice list` showed it. New: `PlaceholderTtsEngine`,
   `VoiceProfileStore`, CLI `tts`/`voice {enroll,list}`. 4 store + 2 engine tests green (suite 1151/0).
 
-### S2 — SNAC decoder: codes → waveform 🔶 *(the foundation, biggest chunk — primitive landed)*
-- **✅ 2026-06-06 — `ConvTranspose1d` primitive done.** `Sources/Main/Audio/Tts/Snac/SnacConv.cs` — the
-  learned-upsampling op the decoder is built on (PyTorch transposed-conv: input `[inC×tIn]`, weight `[inC×outC×k]`,
-  gather formulation → race-free parallel over output channels, matching `WhisperKernels`' style; stride / pad /
-  dilation / output_padding + `OutputLength` helper). 13 tests: hand-computed exact upsample + channel-mix cases,
-  the PyTorch length formula, and the fast gather kernel reproduced **bit-for-bit by the canonical scatter
-  definition** across shapes incl. one crossing the parallel threshold. Model-free, plain-span, AOT-clean.
-- ⬜ **Next:** SNAC residual-VQ codebook dequantize (per-level embedding gather), the dilated residual units
-  (`Conv1d` + Snake/activation), the decoder graph wiring (codes → upsample stack → final conv → `tanh` → 24 kHz
-  PCM), and the weight loader + tensor-name map. Needs SNAC weights on the box.
-- **Gate:** feed *known* SNAC codes (reference encode / published test vector) → decoded PCM matches the reference
-  decode within tolerance — now **measurable** via `AudioQualityAssert` (SNR/correlation vs the reference decode).
-  **Get sound out of codes before touching the LM.**
+### S2 — SNAC decoder: codes → waveform ✅ **DONE 2026-06-06 — matches PyTorch to 121.5 dB SNR**
+**The codec decoder works end-to-end in pure managed .NET.** Real `hubertsiuzdak/snac_24khz` weights decode real
+codes to a waveform bit-identical (to float32 rounding: **SNR 121.5 dB, correlation 1.000, RMSE 0.0000**) with the
+PyTorch reference noise-off decode. The whole graph is validated: codebook gather → `out_proj` → repeat-interleave +
+cross-level sum → depthwise stem → transposed-conv upsampling → dilated residual units → output conv → `tanh`.
+- **Offline convert** (`Scripts/convert_snac.py`, the only Python step): folds `weight_norm` into plain conv weights,
+  exports decode-path tensors → `snac_24khz.safetensors` (canonical names) + a deterministic noise-off reference
+  fixture (`codes.bin` + `reference_noiseoff.f32`) into `c:\snac`.
+- **Native C#** (`Sources/Main/Audio/Tts/Snac/`): `Snac.Load(dir).Decode(int[][] codes) → float[]@24k`. Kernels
+  `SnacConv` (grouped/depthwise `Conv1d` + `ConvTranspose1d`), `SnacActivations.Snake1d`, `SnacResidualVq`
+  (codebook gather + repeat-interleave); `SnacConfig`/`SnacWeights`/`SnacDecoder` wire the graph. Reflection-free,
+  loads via the existing native `SafetensorsReader`.
+- **Tests:** 30 model-free unit tests (kernels exact vs scatter/naive references, Snake closed form, VQ ops) +
+  `SnacDecoderParityTests` [LongFact] = the 121.5 dB end-to-end gate on `c:\snac`.
+- **Noise:** the parity gate runs the deterministic (noise-off) path; SNAC's stochastic NoiseBlock is wired behind
+  `Decode(codes, addNoise: true)` for real generation (its own deterministic Box–Muller RNG, not reproducible vs
+  torch by design).
+- **Building blocks** (all grounded verbatim in the real SNAC source, not assumed): `SnacConv` —
+  `ConvTranspose1d` (gather formulation → race-free parallel; 13 tests incl. fast kernel = canonical scatter
+  bit-for-bit) + grouped/depthwise `Conv1d`; `SnacActivations.Snake1d` (`x+(α+1e-9)⁻¹·sin(αx)²`); `SnacResidualVq`
+  (`DecodeCodebook` + `RepeatInterleaveTime`). 30 model-free unit tests.
+- **Gate met:** known codes → PCM matching the reference decode, measured by `AudioSimilarity` at **121.5 dB SNR**.
+  Sound comes out of codes; the LM glue (S3) is next.
 
 ### S3 — Orpheus LM glue: text → audio tokens ⬜
 - Load Orpheus GGUF (Llama-3.2-3B → loads today). Build the prompt format; decode the audio-token stream; stop at

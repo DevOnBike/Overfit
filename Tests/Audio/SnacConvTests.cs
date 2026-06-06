@@ -102,6 +102,78 @@ namespace DevOnBike.Overfit.Tests.Audio
             }
         }
 
+        [Fact]
+        public void Conv1d_Depthwise_IsPerChannelConvolution()
+        {
+            // groups=channels: each channel convolved by its own kernel, independently. 2 channels, k=2, no pad.
+            float[] input = [1f, 2f, 3f, /* ch1 */ 10f, 20f, 30f]; // [inC=2 × tIn=3]
+            float[] weight = [1f, 1f, /* ch1 kernel */ 0f, 2f];     // [outC=2 × icPerGroup=1 × k=2]
+            var tOut = SnacConv.ConvOutputLength(3, 2, 1, 0, 1);
+            var dst = new float[2 * tOut];
+
+            SnacConv.Conv1d(input, weight, ReadOnlySpan<float>.Empty, dst,
+                inC: 2, tIn: 3, outC: 2, kSize: 2, stride: 1, pad: 0, dilation: 1, groups: 2, tOut: tOut);
+
+            Assert.Equal(2, tOut);
+            // ch0 kernel [1,1]: (1+2),(2+3)=3,5 ; ch1 kernel [0,2]: (0·10+2·20),(0·20+2·30)=40,60
+            Assert.Equal([3f, 5f], dst[..2]);
+            Assert.Equal([40f, 60f], dst[2..]);
+        }
+
+        [Theory]
+        [InlineData(4, 4, 7, 1, 3, 1, 1)]    // groups=1 regular, "same" padding
+        [InlineData(6, 6, 7, 1, 9, 3, 6)]    // depthwise (groups=channels), dilation 3
+        [InlineData(8, 4, 3, 2, 1, 1, 2)]    // grouped (2 groups), strided
+        [InlineData(512, 512, 1, 1, 0, 1, 1)] // pointwise 1x1, large → crosses parallel threshold
+        public void Conv1d_MatchesNaiveReference(int inC, int outC, int kSize, int stride, int pad, int dil, int groups)
+        {
+            const int tIn = 30;
+            var tOut = SnacConv.ConvOutputLength(tIn, kSize, stride, pad, dil);
+            var icPerGroup = inC / groups;
+            var input = Random(inC * tIn, seed: 101);
+            var weight = Random(outC * icPerGroup * kSize, seed: 202);
+            var bias = Random(outC, seed: 303);
+
+            var actual = new float[outC * tOut];
+            SnacConv.Conv1d(input, weight, bias, actual, inC, tIn, outC, kSize, stride, pad, dil, groups, tOut);
+
+            var expected = NaiveConv1d(input, weight, bias, inC, tIn, outC, kSize, stride, pad, dil, groups, tOut);
+            for (var i = 0; i < expected.Length; i++)
+            {
+                Assert.Equal(expected[i], actual[i], 4);
+            }
+        }
+
+        private static float[] NaiveConv1d(
+            float[] input, float[] weight, float[] bias, int inC, int tIn, int outC, int kSize,
+            int stride, int pad, int dilation, int groups, int tOut)
+        {
+            var icPerGroup = inC / groups;
+            var ocPerGroup = outC / groups;
+            var dst = new float[outC * tOut];
+            for (var oc = 0; oc < outC; oc++)
+            {
+                var g = oc / ocPerGroup;
+                for (var to = 0; to < tOut; to++)
+                {
+                    var acc = bias[oc];
+                    for (var icl = 0; icl < icPerGroup; icl++)
+                    {
+                        for (var k = 0; k < kSize; k++)
+                        {
+                            var ti = (to * stride) - pad + (k * dilation);
+                            if (ti >= 0 && ti < tIn)
+                            {
+                                acc += weight[((oc * icPerGroup) + icl) * kSize + k] * input[((g * icPerGroup) + icl) * tIn + ti];
+                            }
+                        }
+                    }
+                    dst[(oc * tOut) + to] = acc;
+                }
+            }
+            return dst;
+        }
+
         // Canonical transposed-conv definition: scatter each (input, kernel) pair onto its output position. An
         // independent formulation from the kernel's gather loop, so agreement validates the gather indexing math.
         private static float[] ScatterReference(
