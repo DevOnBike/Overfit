@@ -92,6 +92,16 @@ namespace DevOnBike.Overfit.Tests.TestSupport
                 "SNAC 24 kHz decoder weights (run Scripts/convert_snac.py --out c:\\snac)");
         }
 
+        public static class Orpheus
+        {
+            private const string EnvVar = "OVERFIT_ORPHEUS_DIR";
+            public static string Dir => Resolve(EnvVar, @"c:\orpheus");
+            public static string GgufPath => Path.Combine(Dir, "orpheus-3b-0.1-ft-q4_k_m.gguf");
+
+            public static string RequireGgufPath() => Require(GgufPath, EnvVar,
+                "Orpheus 3B TTS GGUF (isaiahbjork/orpheus-3b-0.1-ft-Q4_K_M-GGUF)");
+        }
+
         public static class Qwen3B
         {
             private const string EnvVar = "OVERFIT_QWEN3B_DIR";

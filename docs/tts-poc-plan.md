@@ -35,8 +35,8 @@ A local voice agent that **hears, thinks and speaks — in one .NET process, on-
 | **S0** | **Scaffolding** | contracts + WAV-out + watermark, model-free | ✅ **Done — 2026-06-06** |
 | **S1** | **CLI + consent + enrollment** | `overfit tts` over a stub engine, consent gate, `VoiceProfile` persistence | ✅ **Done — 2026-06-06** |
 | S2 | **SNAC codec decoder** | `Snac.Decode(codes) → PCM@24k` (the bulk) | ✅ **Done — 2026-06-06 (121.5 dB vs PyTorch)** |
-| S3 | Orpheus LM glue | text → SNAC audio tokens (de-interleave) | ⬜ |
-| S4 | End-to-end preset-voice TTS | `TextToSpeech.Synthesize(text, voice) → WAV` — first real speech | ⬜ |
+| S3 | Orpheus LM glue | text → SNAC audio tokens (de-interleave) | ✅ **Done — 2026-06-06** |
+| S4 | End-to-end preset-voice TTS | `OrpheusVoiceEngine.Synthesize(text, voice) → PCM` — first real speech | ✅ **Done — 2026-06-06 (3.16 s clip on real model)** |
 | S5 | Quality & robustness | Polish text normalization, multiple voices, long text, sampling | ⬜ |
 | S6 | Voice-loop demo + docs | `Demo/VoiceDemo`, mic → Whisper → LLM → TTS → speaker | ⬜ |
 | **P2** | **Voice cloning** (zero-shot from a clip) | speaker enrollment → "my voice" — **gated on quality + legal** | ⬜ Phase 2 |
@@ -162,14 +162,29 @@ cross-level sum → depthwise stem → transposed-conv upsampling → dilated re
 - **Gate met:** known codes → PCM matching the reference decode, measured by `AudioSimilarity` at **121.5 dB SNR**.
   Sound comes out of codes; the LM glue (S3) is next.
 
-### S3 — Orpheus LM glue: text → audio tokens ⬜
-- Load Orpheus GGUF (Llama-3.2-3B → loads today). Build the prompt format; decode the audio-token stream; stop at
-  audio-EOS; de-interleave the 7-tokens-per-frame into SNAC's 3 levels.
-- **Gate:** tokens in valid range, per-frame structure correct, generation terminates.
+### S3 — Orpheus LM glue: text → audio tokens ✅ **DONE 2026-06-06**
+- `Sources/Main/Audio/Tts/Orpheus/`: **`OrpheusPrompt`** (`<|audio|>{voice}: {text}<|eot_id|>` + the 8 preset
+  voices), **`OrpheusSnacBridge`** (the off-by-one-critical glue: `<custom_token_N>` → `code = N−10−(index%7)·4096`,
+  then the 7-tokens-per-frame fan-out into SNAC's 1:2:4 levels), all grounded verbatim in the Orpheus reference.
+- **Tokenizer fix (general win):** Orpheus adds ~156 k special tokens (`<custom_token_*>`); our `GgufTokenizer`
+  built a regex of all of them → blew up. Replaced with a longest-match scan (O(text·maxSpecialLen),
+  vocab-size-independent, correct HF semantics) — now any large-special-vocab GGUF tokenizes.
+- **Gate met:** 15 model-free bridge/prompt tests incl. a full round trip (levels → interleave → tokens → decode →
+  redistribute reproduces the levels); valid-range enforced (throws otherwise); real generation terminates (S4).
 
-### S4 — End-to-end preset-voice TTS ⬜
-- `TextToSpeech.Synthesize(text, voice) → WAV`: Orpheus → tokens → de-interleave → `SnacDecoder` → PCM → WAV.
-- **Gate (subjective):** a sentence on the real model → intelligible speech. Keep a small reference-clip set.
+### S4 — End-to-end preset-voice TTS ✅ **DONE 2026-06-06 — first real speech**
+- **`OrpheusVoiceEngine.Load(orpheusGguf, snacDir).Synthesize(text, voice) → float[]@24k`** — Orpheus LM (sampling
+  temp 0.6 / top-p 0.9 / repeat 1.1) → audio tokens → `OrpheusSnacBridge` → `Snac.Decode` → PCM, all pure managed
+  on the CPU. Stops at end-of-speech.
+- **Validated live:** `"Hi, this is Overfit speaking in pure dot net."` (voice *tara*) → a **3.16 s** 24 kHz clip in
+  ~24 s on CPU (`OrpheusVoiceEngineE2ETests` [LongFact], `c:\orpheus` Q4_K_M GGUF + `c:\snac`). The full voice loop
+  half — text → speech — runs end to end.
+- **CLI wired ✅ 2026-06-06:** `overfit tts --text "…" --out out.wav [--voice tara] [--model <orpheus.gguf>]
+  [--snac <dir>]` runs the real Orpheus+SNAC pipeline (resolves the models from `--model`/`--snac`,
+  `$OVERFIT_ORPHEUS_DIR`/`$OVERFIT_SNAC_DIR`, or the model cache; falls back to the placeholder tone with
+  install guidance when absent). Live: a sentence → a ~3.4 s watermarked 24 kHz WAV.
+- **Next polish:** Polish text normalization (S5); out-of-vocabulary words (e.g. brand names like "Overfit") need
+  phonetic spelling until S5; the mic→STT→LLM→TTS demo (S6).
 
 ### S5 — Quality & robustness ⬜
 - Polish text normalization (numbers → words, abbreviations `np.`/`itd.`/`zł`, dates, punctuation, prosody),

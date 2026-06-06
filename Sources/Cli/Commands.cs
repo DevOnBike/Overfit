@@ -7,6 +7,7 @@ using System.Globalization;
 using System.Net;
 using DevOnBike.Overfit.Audio;
 using DevOnBike.Overfit.Audio.Tts;
+using DevOnBike.Overfit.Audio.Tts.Orpheus;
 using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Embeddings;
 using DevOnBike.Overfit.Server;
@@ -281,7 +282,7 @@ namespace DevOnBike.Overfit.Cli
         private static string VoicesDir() => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".overfit", "voices");
 
-        public static int Tts(string text, string voice, string outPath, string language)
+        public static int Tts(string text, string voice, string outPath, string language, string? model, string? snacDir)
         {
             if (string.IsNullOrWhiteSpace(text))
             {
@@ -291,29 +292,125 @@ namespace DevOnBike.Overfit.Cli
 
             try
             {
-                var voicesDir = VoicesDir();
-                var profile = VoiceProfileStore.Exists(voice, voicesDir)
-                    ? VoiceProfileStore.Load(voice, voicesDir)
-                    : VoiceProfile.Preset(voice, language);
-
-                // Placeholder tone engine until the neural backend (SNAC + Orpheus) lands — proves the pipeline
-                // end-to-end and always writes a watermarked WAV. See docs/tts-poc-plan.md.
-                var engine = new PlaceholderTtsEngine(24000);
-                var marker = SyntheticSpeechMetadata.ForNow(profile.Id);
-                using (var sink = new WavAudioSink(outPath, engine.SampleRate, WavSampleFormat.Pcm16, marker))
+                var orpheus = ResolveOrpheusModel(model);
+                var snac = ResolveSnacDir(snacDir);
+                if (orpheus is not null && snac is not null)
                 {
-                    engine.Synthesize(text, profile, sink, TtsOptions.Default);
+                    return TtsOrpheus(text, voice, outPath, orpheus, snac);
                 }
 
-                Console.WriteLine($"Wrote {outPath}  (voice '{profile.Id}', {engine.SampleRate} Hz, synthetic — watermarked).");
-                Console.WriteLine("Note: TTS is a placeholder tone engine for now; the neural voice backend is in progress (docs/tts-poc-plan.md).");
-                return 0;
+                return TtsPlaceholder(text, voice, language, outPath, orpheus, snac);
             }
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"tts failed: {ex.Message}");
                 return 1;
             }
+        }
+
+        // Real neural TTS: Orpheus LM → SNAC decoder → watermarked WAV, pure managed CPU.
+        private static int TtsOrpheus(string text, string voice, string outPath, string orpheusGguf, string snacDir)
+        {
+            var chosen = OrpheusPrompt.IsKnownVoice(voice) ? voice : OrpheusPrompt.DefaultVoice;
+            if (!OrpheusPrompt.IsKnownVoice(voice))
+            {
+                Console.WriteLine($"Voice '{voice}' is not an Orpheus preset; using '{chosen}'. "
+                    + $"Presets: {string.Join(", ", OrpheusPrompt.AvailableVoices)}.");
+            }
+
+            Console.WriteLine($"Synthesizing with Orpheus + SNAC on CPU (voice '{chosen}')…");
+            using var engine = OrpheusVoiceEngine.Load(orpheusGguf, snacDir);
+            var audio = engine.Synthesize(text, chosen);
+
+            var marker = SyntheticSpeechMetadata.ForNow(chosen);
+            using (var sink = new WavAudioSink(outPath, engine.SampleRate, WavSampleFormat.Pcm16, marker))
+            {
+                sink.Write(audio);
+            }
+
+            var seconds = audio.Length / (double)engine.SampleRate;
+            Console.WriteLine($"Wrote {outPath}  ({seconds:F2}s, voice '{chosen}', {engine.SampleRate} Hz, synthetic — watermarked).");
+            return 0;
+        }
+
+        // Fallback tone engine when the neural models are not installed — keeps `overfit tts` usable and explains how
+        // to enable real speech.
+        private static int TtsPlaceholder(string text, string voice, string language, string outPath, string? orpheus, string? snac)
+        {
+            var voicesDir = VoicesDir();
+            var profile = VoiceProfileStore.Exists(voice, voicesDir)
+                ? VoiceProfileStore.Load(voice, voicesDir)
+                : VoiceProfile.Preset(voice, language);
+
+            var engine = new PlaceholderTtsEngine(24000);
+            var marker = SyntheticSpeechMetadata.ForNow(profile.Id);
+            using (var sink = new WavAudioSink(outPath, engine.SampleRate, WavSampleFormat.Pcm16, marker))
+            {
+                engine.Synthesize(text, profile, sink, TtsOptions.Default);
+            }
+
+            Console.WriteLine($"Wrote {outPath}  (voice '{profile.Id}', {engine.SampleRate} Hz, placeholder tone — watermarked).");
+            Console.WriteLine();
+            Console.WriteLine("This is the placeholder tone engine — real neural speech needs two models:");
+            Console.WriteLine(orpheus is null
+                ? "  • Orpheus GGUF: overfit pull isaiahbjork/orpheus-3b-0.1-ft-Q4_K_M-GGUF   (then pass --model <file.gguf>)"
+                : $"  • Orpheus GGUF: found ({orpheus})");
+            Console.WriteLine(snac is null
+                ? "  • SNAC weights: python Scripts/convert_snac.py --out %USERPROFILE%\\.overfit\\snac   (or pass --snac <dir>)"
+                : $"  • SNAC weights: found ({snac})");
+            return 0;
+        }
+
+        // Orpheus GGUF: explicit --model (cache name or path), else $OVERFIT_ORPHEUS_DIR, else any orpheus*.gguf in the cache.
+        private static string? ResolveOrpheusModel(string? model)
+        {
+            if (!string.IsNullOrWhiteSpace(model))
+            {
+                return ModelCache.Resolve(model) ?? (File.Exists(model) ? model : null);
+            }
+
+            var envDir = Environment.GetEnvironmentVariable("OVERFIT_ORPHEUS_DIR");
+            if (!string.IsNullOrWhiteSpace(envDir) && Directory.Exists(envDir))
+            {
+                var hit = FindOrpheusGguf(envDir);
+                if (hit is not null)
+                {
+                    return hit;
+                }
+            }
+
+            return Directory.Exists(ModelCache.Dir) ? FindOrpheusGguf(ModelCache.Dir) : null;
+        }
+
+        private static string? FindOrpheusGguf(string dir)
+        {
+            foreach (var path in Directory.GetFiles(dir, "*.gguf"))
+            {
+                if (Path.GetFileName(path).Contains("orpheus", StringComparison.OrdinalIgnoreCase))
+                {
+                    return path;
+                }
+            }
+            return null;
+        }
+
+        // SNAC dir: explicit --snac, else $OVERFIT_SNAC_DIR, else ~/.overfit/snac. Must contain the converted weights.
+        private static string? ResolveSnacDir(string? snacDir)
+        {
+            var candidates = new List<string?>
+            {
+                snacDir,
+                Environment.GetEnvironmentVariable("OVERFIT_SNAC_DIR"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".overfit", "snac"),
+            };
+            foreach (var c in candidates)
+            {
+                if (!string.IsNullOrWhiteSpace(c) && File.Exists(Path.Combine(c, "snac_24khz.safetensors")))
+                {
+                    return c;
+                }
+            }
+            return null;
         }
 
         public static int TtsEval(string referencePath, string candidatePath)

@@ -94,18 +94,32 @@ var ttsLanguage = new Option<string>("--language")
     Description = "Language tag of the text (e.g. en, pl).",
     DefaultValueFactory = _ => "en",
 };
+var ttsModel = new Option<string?>("--model")
+{
+    Description = "Orpheus GGUF (cache name or path) for real neural speech. Default: $OVERFIT_ORPHEUS_DIR or any "
+        + "orpheus*.gguf in the model cache. If absent, a placeholder tone is written instead.",
+};
+var ttsSnac = new Option<string?>("--snac")
+{
+    Description = "SNAC decoder weights directory (contains snac_24khz.safetensors). Default: $OVERFIT_SNAC_DIR or "
+        + "~/.overfit/snac. Required (with --model) for real speech.",
+};
 var ttsCommand = new Command("tts", "Synthesize speech from text to a WAV — in-process, no cloud, watermarked.")
 {
     ttsText,
     ttsOut,
     ttsVoice,
     ttsLanguage,
+    ttsModel,
+    ttsSnac,
 };
 ttsCommand.SetAction(parseResult => Commands.Tts(
     parseResult.GetValue(ttsText)!,
     parseResult.GetValue(ttsVoice)!,
     parseResult.GetValue(ttsOut)!,
-    parseResult.GetValue(ttsLanguage)!));
+    parseResult.GetValue(ttsLanguage)!,
+    parseResult.GetValue(ttsModel),
+    parseResult.GetValue(ttsSnac)));
 
 // ── tts eval: objective quality of generated audio vs a reference ("how close to ideal"). ──
 var evalReference = new Option<string>("--reference", "-r")
