@@ -5,7 +5,6 @@
 
 using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using DevOnBike.Overfit.Intrinsics;
 using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Tensors;
@@ -101,12 +100,12 @@ namespace DevOnBike.Overfit.Autograd
         }
 
         // Context for the OverfitParallelFor workers. The managed weight rides through the void*
-        // context as a GCHandle (it has a DecodeRow method, so it can't be a plain float* like Conv2D).
+        // context as a GCHandleScope token (it has a DecodeRow method, so it can't be a plain float* like Conv2D).
         private unsafe struct FqlContext
         {
             public float* A;      // forward: input; backward: dy
             public float* Out;    // forward: output; backward: per-partition partial-dx base
-            public nint Weight;   // GCHandle.ToIntPtr(weight)
+            public nint Weight;   // GCHandleScope.Token (recover with GCHandleScope.Recover)
             public int N;
             public int K;
             public int M;
@@ -115,26 +114,19 @@ namespace DevOnBike.Overfit.Autograd
 
         private static unsafe void ForwardParallel(ReadOnlySpan<float> inS, Span<float> outS, IDequantRowSource weight, int n, int k, int m)
         {
-            var handle = GCHandle.Alloc(weight);
-            try
+            using var scope = new GcHandleScope(weight);
+            fixed (float* inB = inS)
+            fixed (float* outB = outS)
             {
-                fixed (float* inB = inS)
-                fixed (float* outB = outS)
-                {
-                    var ctx = new FqlContext { A = inB, Out = outB, Weight = GCHandle.ToIntPtr(handle), N = n, K = k, M = m };
-                    OverfitParallelFor.For(0, m, &ForwardChunk, &ctx);
-                }
-            }
-            finally
-            {
-                handle.Free();
+                var ctx = new FqlContext { A = inB, Out = outB, Weight = scope.Token, N = n, K = k, M = m };
+                OverfitParallelFor.For(0, m, &ForwardChunk, &ctx);
             }
         }
 
         private static unsafe void ForwardChunk(int start, int end, void* context)
         {
             ref var ctx = ref Unsafe.AsRef<FqlContext>(context);
-            var weight = (IDequantRowSource)GCHandle.FromIntPtr(ctx.Weight).Target!;
+            var weight = GcHandleScope.Recover<IDequantRowSource>(ctx.Weight);
             using var rowBuf = new PooledBuffer<float>(ctx.K, clearMemory: false);
             var wRow = rowBuf.Span;
             for (var o = start; o < end; o++)
@@ -180,20 +172,19 @@ namespace DevOnBike.Overfit.Autograd
             // dx[b]; reduce the P partials into dx afterwards. (Parallelising over o would race; over
             // batch would re-dequant every row P×.) Partials are pooled + zeroed.
             var p = Math.Min(OverfitParallelFor.WorkerCount, m);
-            var handle = GCHandle.Alloc(weight);
-            using var partials = new PooledBuffer<float>((long)p * n * k <= int.MaxValue ? p * n * k : throw new ArgumentException("partials overflow"), clearMemory: true);
-            try
+            var partialsLength = (long)p * n * k;
+            if (partialsLength > int.MaxValue)
             {
-                fixed (float* dyB = dy)
-                fixed (float* partB = partials.Span)
-                {
-                    var ctx = new FqlContext { A = dyB, Out = partB, Weight = GCHandle.ToIntPtr(handle), N = n, K = k, M = m, P = p };
-                    OverfitParallelFor.For(0, p, &BackwardChunk, &ctx);
-                }
+                throw new ArgumentException($"Backward partials buffer would be {partialsLength} elements (> int.MaxValue).");
             }
-            finally
+
+            using var scope = new GcHandleScope(weight);
+            using var partials = new PooledBuffer<float>((int)partialsLength, clearMemory: true);
+            fixed (float* dyB = dy)
+            fixed (float* partB = partials.Span)
             {
-                handle.Free();
+                var ctx = new FqlContext { A = dyB, Out = partB, Weight = scope.Token, N = n, K = k, M = m, P = p };
+                OverfitParallelFor.For(0, p, &BackwardChunk, &ctx);
             }
 
             // Reduce: dx += Σ_partition partial.
@@ -207,7 +198,7 @@ namespace DevOnBike.Overfit.Autograd
         private static unsafe void BackwardChunk(int start, int end, void* context)
         {
             ref var ctx = ref Unsafe.AsRef<FqlContext>(context);
-            var weight = (IDequantRowSource)GCHandle.FromIntPtr(ctx.Weight).Target!;
+            var weight = GcHandleScope.Recover<IDequantRowSource>(ctx.Weight);
             using var rowBuf = new PooledBuffer<float>(ctx.K, clearMemory: false);
             var wRow = rowBuf.Span;
             for (var partition = start; partition < end; partition++)

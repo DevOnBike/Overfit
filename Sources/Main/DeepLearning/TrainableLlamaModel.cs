@@ -243,6 +243,164 @@ namespace DevOnBike.Overfit.DeepLearning
             return produced.ToArray();
         }
 
+        /// <summary>
+        /// Like <see cref="GenerateCached"/> but samples (temperature + top-p nucleus + repetition penalty) instead
+        /// of greedy argmax — essential for audio-token models (Orpheus TTS), where greedy decoding drones / drags.
+        /// </summary>
+        public int[] GenerateCachedSampled(
+            int[] promptTokens, int maxNewTokens, int eosTokenId,
+            float temperature, float topP, float repeatPenalty, int repeatWindow, int seed)
+        {
+            var nL = _blocks.Length;
+            var kvWidth = _nKVHeads * _dHead;
+            var maxLen = promptTokens.Length + maxNewTokens;
+            var kvStride = maxLen * kvWidth;
+            var cacheK = new float[nL * kvStride];
+            var cacheV = new float[nL * kvStride];
+
+            var tokens = new List<int>(promptTokens);
+            var produced = new List<int>();
+
+            using var hiddenB = new PooledBuffer<float>(_dModel, clearMemory: false);
+            using var nextB = new PooledBuffer<float>(_dModel, false);
+            using var normedB = new PooledBuffer<float>(_dModel, false);
+            using var rowB = new PooledBuffer<float>(_dModel, false);
+            var hidden = hiddenB.Span;
+            var next = nextB.Span;
+
+            var logits = new float[_vocab];
+            var probs = new float[_vocab];
+            var order = new int[_vocab];
+            var rng = new Random(seed);
+
+            var p = 0;
+            while (true)
+            {
+                _embed.DequantizeRow(tokens[p], hidden);
+                for (var l = 0; l < nL; l++)
+                {
+                    _blocks[l].DecodeStep(hidden, p, _ropeTable, _ln1Gamma[l], _ln2Gamma[l], _lora[l],
+                        cacheK.AsSpan(l * kvStride, kvStride), cacheV.AsSpan(l * kvStride, kvStride), next);
+                    next.CopyTo(hidden);
+                }
+
+                if (p == tokens.Count - 1)
+                {
+                    FillLmHeadLogits(hidden, normedB.Span, rowB.Span, logits);
+                    var token = SampleToken(logits, probs, order, produced, temperature, topP, repeatPenalty, repeatWindow, rng);
+                    if (token == eosTokenId) { break; }
+                    produced.Add(token);
+                    if (produced.Count >= maxNewTokens) { break; }
+                    tokens.Add(token);
+                }
+                p++;
+            }
+            return produced.ToArray();
+        }
+
+        // Computes the full LM-head logit vector for the current hidden state (RMSNorm + base + LM-head LoRA).
+        private void FillLmHeadLogits(ReadOnlySpan<float> hidden, Span<float> normed, Span<float> row, Span<float> logits)
+        {
+            var inv = 1f / MathF.Sqrt(TensorPrimitives.Dot(hidden, hidden) / _dModel + _eps);
+            var g = _finalNormGamma.DataView.AsReadOnlySpan();
+            for (var i = 0; i < _dModel; i++) { normed[i] = hidden[i] * inv * g[i]; }
+
+            _ = row; // dequant scratch is per-thread inside DequantMatVec
+            DequantMatVec.Run(normed, _lmHead, logits);
+
+            // LM-head LoRA: logits += (normed·A)·B. Small (rank·vocab); kept sequential.
+            if (_lmHeadLora is not null)
+            {
+                var rank = _lmHeadLora.Rank;
+                var a = _lmHeadLora.A.DataView.AsReadOnlySpan();
+                Span<float> tmp = stackalloc float[rank];
+                tmp.Clear();
+                for (var i = 0; i < _dModel; i++)
+                {
+                    var xi = normed[i];
+                    if (xi == 0f) { continue; }
+                    var aRow = a.Slice(i * rank, rank);
+                    for (var r = 0; r < rank; r++) { tmp[r] += xi * aRow[r]; }
+                }
+                var bSpan = _lmHeadLora.B.DataView.AsReadOnlySpan();
+                for (var r = 0; r < rank; r++)
+                {
+                    var tr = tmp[r];
+                    if (tr == 0f) { continue; }
+                    var bRow = bSpan.Slice(r * _vocab, _vocab);
+                    for (var o = 0; o < _vocab; o++) { logits[o] += tr * bRow[o]; }
+                }
+            }
+        }
+
+        // Repetition penalty → temperature → softmax → top-p nucleus → sample. Greedy when temperature <= 0.
+        private static int SampleToken(
+            Span<float> logits, float[] probs, int[] order, List<int> produced,
+            float temperature, float topP, float repeatPenalty, int repeatWindow, Random rng)
+        {
+            var vocab = logits.Length;
+
+            if (repeatPenalty != 1f && repeatWindow > 0)
+            {
+                var from = Math.Max(0, produced.Count - repeatWindow);
+                for (var i = from; i < produced.Count; i++)
+                {
+                    var t = produced[i];
+                    var v = logits[t];
+                    logits[t] = v > 0f ? v / repeatPenalty : v * repeatPenalty;
+                }
+            }
+
+            if (temperature <= 0f)
+            {
+                var best = 0;
+                var bestVal = float.NegativeInfinity;
+                for (var o = 0; o < vocab; o++)
+                {
+                    if (logits[o] > bestVal) { bestVal = logits[o]; best = o; }
+                }
+                return best;
+            }
+
+            var maxL = float.NegativeInfinity;
+            for (var o = 0; o < vocab; o++)
+            {
+                var l = logits[o] / temperature;
+                logits[o] = l;
+                if (l > maxL) { maxL = l; }
+            }
+            double sum = 0.0;
+            for (var o = 0; o < vocab; o++)
+            {
+                var pr = MathF.Exp(logits[o] - maxL);
+                probs[o] = pr;
+                sum += pr;
+                order[o] = o;
+            }
+            var invSum = (float)(1.0 / sum);
+            for (var o = 0; o < vocab; o++) { probs[o] *= invSum; }
+
+            // Top-p: sort by probability (desc) and keep the smallest nucleus covering topP mass.
+            Array.Sort(order, (x, y) => probs[y].CompareTo(probs[x]));
+            double cumulative = 0.0;
+            var keep = 0;
+            for (var k = 0; k < vocab; k++)
+            {
+                cumulative += probs[order[k]];
+                keep++;
+                if (cumulative >= topP) { break; }
+            }
+
+            var target = rng.NextDouble() * cumulative;
+            double acc = 0.0;
+            for (var k = 0; k < keep; k++)
+            {
+                acc += probs[order[k]];
+                if (acc >= target) { return order[k]; }
+            }
+            return order[keep - 1];
+        }
+
         private int LmHeadArgmax(ReadOnlySpan<float> hidden, Span<float> normed, Span<float> row)
         {
             var inv = 1f / MathF.Sqrt(TensorPrimitives.Dot(hidden, hidden) / _dModel + _eps);

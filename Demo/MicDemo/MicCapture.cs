@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Runtime.InteropServices;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.Demo.MicConsole
 {
@@ -81,12 +82,12 @@ namespace DevOnBike.Overfit.Demo.MicConsole
 
             var byteCount = seconds * SampleRate * 2;
             var buffer = new byte[byteCount];
-            var gch = GCHandle.Alloc(buffer, GCHandleType.Pinned);
+            using var gch = GcHandleScope.Pin(buffer);
             var hdrSize = (uint)Marshal.SizeOf<WaveHdr>();
             var pHdr = Marshal.AllocHGlobal((int)hdrSize);
             try
             {
-                var hdr = new WaveHdr { lpData = gch.AddrOfPinnedObject(), dwBufferLength = (uint)byteCount };
+                var hdr = new WaveHdr { lpData = gch.Address, dwBufferLength = (uint)byteCount };
                 Marshal.StructureToPtr(hdr, pHdr, false);
 
                 waveInPrepareHeader(h, pHdr, hdrSize);
@@ -112,7 +113,6 @@ namespace DevOnBike.Overfit.Demo.MicConsole
             {
                 waveInClose(h);
                 Marshal.FreeHGlobal(pHdr);
-                gch.Free();
             }
         }
     }

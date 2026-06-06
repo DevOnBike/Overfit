@@ -35,10 +35,19 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
         private readonly int _vocab;
         private readonly int _maxSeqLen;
 
-        public VoiceCloneTrainer(string orpheusGgufPath, int maxSeqLen = 768, QLoRAOptions? options = null)
+        private readonly bool _useCheckpoint;
+
+        /// <summary>
+        /// Loads the Orpheus base + builds a fresh trainable adapter. <paramref name="useCheckpoint"/> recomputes
+        /// each block's forward during the backward pass to keep only one block's activations live — <b>required
+        /// for this 28-layer / 3 B model</b> (disabling it makes the full-graph activations exceed the arena and
+        /// OOMs, measured), so it defaults on; the flag is kept only for small models whose whole graph fits.
+        /// </summary>
+        public VoiceCloneTrainer(string orpheusGgufPath, int maxSeqLen = 768, QLoRAOptions? options = null, bool useCheckpoint = true)
         {
             _opt = options ?? new QLoRAOptions();
             _maxSeqLen = maxSeqLen;
+            _useCheckpoint = useCheckpoint;
             _engine = CachedLlamaInferenceEngine.LoadGguf(orpheusGgufPath);
             _vocab = _engine.Config.VocabSize;
             Tokenizer = new GgufEmbeddedTokenizer(GgufTokenizer.Load(orpheusGgufPath));
@@ -46,9 +55,13 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
             _model = TrainableLlamaModel.FromEngine(
                 _engine, _opt.Rank, new Random(_opt.Seed), maxSeqLen: maxSeqLen + 8, loraOnLmHead: _opt.LoRAOnLmHead);
 
-            var arena = 7L * maxSeqLen * _vocab
-                + (long)(_engine.Config.NLayers + 8) * maxSeqLen * _engine.Config.DModel
-                + 16_000_000L;
+            // With checkpointing only one block's activations are live; without it, every block's are — so the arena
+            // grows with the layer count and the FFN width.
+            var cfg = _engine.Config;
+            var blockActivations = useCheckpoint
+                ? (long)(cfg.NLayers + 8) * maxSeqLen * cfg.DModel
+                : (long)cfg.NLayers * maxSeqLen * ((8L * cfg.DModel) + (4L * cfg.DFF)) + (8L * maxSeqLen * cfg.DModel);
+            var arena = (7L * maxSeqLen * _vocab) + blockActivations + 16_000_000L;
             _graph = new ComputationGraph((int)Math.Min(arena, int.MaxValue - 16));
         }
 
@@ -102,7 +115,7 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
 
                     _graph.Reset();
                     optimizer.ZeroGrad();
-                    var logits = _model.Forward(_graph, input, useCheckpoint: true);
+                    var logits = _model.Forward(_graph, input, useCheckpoint: _useCheckpoint);
                     var loss = TrainableLlamaModel.CrossEntropyLossAndSeed(logits, targets, _vocab, IgnoreIndex);
                     _graph.BackwardFromGrad(logits);
                     ClipGradNorm(trainable, _opt.GradientClipNorm);
@@ -122,11 +135,16 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
         public void LoadAdapter(string path) => _model.LoadAdapter(path);
 
         /// <summary>
-        /// Greedily generates a continuation of <paramref name="promptTokenIds"/> with the current adapter — used to
-        /// synthesize in the cloned voice: feed the Orpheus prompt, get the audio-token stream back.
+        /// Generates a continuation of <paramref name="promptTokenIds"/> with the current adapter — used to
+        /// synthesize in the cloned voice (feed the Orpheus prompt, get the audio-token stream back). Samples with
+        /// the Orpheus defaults (temperature 0.6, top-p 0.9, repetition penalty 1.1); greedy decoding makes
+        /// audio-token output drone/drag, so sampling is the default.
         /// </summary>
-        public int[] Generate(int[] promptTokenIds, int maxNewTokens, int eosTokenId)
-            => _model.GenerateCached(promptTokenIds, maxNewTokens, eosTokenId);
+        public int[] Generate(
+            int[] promptTokenIds, int maxNewTokens, int eosTokenId,
+            float temperature = 0.6f, float topP = 0.9f, float repeatPenalty = 1.1f, int repeatWindow = 64, int seed = 0)
+            => _model.GenerateCachedSampled(
+                promptTokenIds, maxNewTokens, eosTokenId, temperature, topP, repeatPenalty, repeatWindow, seed);
 
         private List<AutogradNode> MaterializeParams()
         {
