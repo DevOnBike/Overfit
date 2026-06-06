@@ -38,7 +38,7 @@ A local voice agent that **hears, thinks and speaks — in one .NET process, on-
 | S3 | Orpheus LM glue | text → SNAC audio tokens (de-interleave) | ✅ **Done — 2026-06-06** |
 | S4 | End-to-end preset-voice TTS | `OrpheusVoiceEngine.Synthesize(text, voice) → PCM` — first real speech | ✅ **Done — 2026-06-06 (3.16 s clip on real model)** |
 | S5 | Quality & robustness | text normalization ✅, long-text chunking ✅; PL normalization / sampling polish ⬜ | 🔶 in progress |
-| S6 | Voice-loop demo + docs | `Demo/VoiceDemo`, mic → Whisper → LLM → TTS → speaker | ⬜ |
+| S6 | Voice-loop demo + docs | `Demo/VoiceLoop`, mic → Whisper → LLM → TTS → speaker | ✅ **Done — 2026-06-06** |
 | **P2** | **Voice cloning** (zero-shot from a clip) | speaker enrollment → "my voice" — **gated on quality + legal** | ⬜ Phase 2 |
 
 **Effort:** ~3–4 weeks for preset-voice end-to-end (S2 dominates). Voice cloning (P2) is materially harder — see
@@ -211,10 +211,27 @@ cross-level sum → depthwise stem → transposed-conv upsampling → dilated re
 - `Demo/VoiceDemo`: mic → Whisper (STT) → LLM → **TTS** → speaker, all in one .NET process. README / `docs/tts.md`.
 - Optional: streaming codec decode (emit audio as frames arrive — low latency).
 
-### P2 — Voice cloning ⬜ *(gated)*
-- Speaker enrollment (clip → embedding) + a cloning-capable model (XTTS-v2 / F5). **Gate on:** a quality review
-  ("does it actually sound like the target?") **and** the legal posture (consent record + watermark + jurisdiction
-  check). Only then can "my voice" become a demo/claim.
+### P2 — Voice cloning 🔶 *(gated; enabling piece landed)*
+- **✅ SNAC encoder done 2026-06-06 — the codec is now complete both ways, both bit-exact vs PyTorch.**
+  `Snac.Encode(audio) → int[][]` (`SnacEncoder`: conv downsampling stem + dilated residual units + depthwise out
+  conv → avg-pool → in_proj → nearest-codebook → residual subtract). `SnacEncoderParityTests` [LongFact] reproduces
+  the reference `model.encode()` codes **100% exactly** (42/42). New kernels `SnacResidualVq.EncodeCodebook`
+  (nearest-by-cosine) + `AveragePoolTime`; `SnacBlocks.ResidualUnit` now shared by encoder + decoder. This unlocks
+  **pure-.NET voice-clone dataset prep** (audio → audio tokens) without Python.
+- **Chosen path = fine-tune Orpheus on the target voice via QLoRA** (Overfit's training moat, pure .NET).
+  **✅ Pipeline built 2026-06-06 (`Sources/Main/Audio/Tts/Orpheus/`, `docs/voice-cloning.md`):**
+  - `OrpheusSnacBridge.Interleave` / `CustomTokenNumber` (encode-side inverse of the decode bridge) +
+    `OrpheusTrainingSequence.Build` → (prompt → audio-token) example, mirroring the generation path; completion-only.
+  - `VoiceCloneDatasetBuilder` — folder of (clip, transcript) → `OrpheusTrainingExample[]` via `Snac.Encode` + the
+    Orpheus tokenizer (auto-transcribe via Whisper if no `.txt`). **Validated against the real tokenizer + encoder:**
+    built examples' audio tokens decode back to exactly the encoded codes.
+  - `VoiceCloneTrainer` — QLoRA on Orpheus with a **completion-only masked loss** (new
+    `CrossEntropyLossAndSeed(…, ignoreIndex)` overload), `SaveAdapter`. 16 model-free tests + a [LongFact] dataset
+    round-trip.
+  - **Remaining = the actual training run** (gated on the user's voice data; memory-heavy on CPU for a 3 B/156 k-vocab
+    model → short clips + tuning). Zero-shot models (XTTS-v2 / F5) stay out (license + heavy port).
+  - **Gate on:** a quality review ("does it actually sound like the target?") **and** the legal posture (consent
+    record + watermark + jurisdiction). Only then can "my voice" become a demo/claim.
 
 ---
 
@@ -241,6 +258,14 @@ Phase 2.
 
 ## Roadmap / deferred
 
+- **Zero-alloc + SIMD SNAC decode (public banner — planned).** The decoder today is correctness-first and
+  *allocating* (per-utterance scratch `float[]` in `SnacDecoder`, `List<int>` codes, `int[][]` redistribute). Zero
+  allocation is core to Overfit's identity, so the decode path is slated to become **zero-alloc** (caller-owned /
+  `PooledBuffer<float>` scratch, reused conv buffers, no per-call arrays) and **SIMD-optimized** (TensorPrimitives /
+  hand-vectorized conv & transposed-conv inner loops) — squeeze the most out of pure-CPU code. Unlike the *real-time*
+  throughput work (private moat, below), zero-alloc + SIMD on the decode is **public identity work** we ship openly.
+  Not the inference bottleneck (the LM is), but it's a matter of principle: the engine allocates 0 B in steady state.
+  **Status: planned, public.**
 - **Real-time / live generation — intentionally NOT in the public build (private / commercial know-how).**
   Strategic decision (2026-06-06): the open (AGPL) edition ships **offline/batch** TTS; making it *real-time* is held
   as **proprietary know-how and a commercial differentiator**, not published. The architecture is open (and visible

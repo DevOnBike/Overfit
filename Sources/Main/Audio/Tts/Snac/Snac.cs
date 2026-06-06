@@ -13,11 +13,13 @@ namespace DevOnBike.Overfit.Audio.Tts.Snac
     public sealed class Snac
     {
         private readonly SnacDecoder _decoder;
+        private readonly SnacEncoder _encoder;
 
         private Snac(SnacConfig config, SnacWeights weights)
         {
             Config = config;
             _decoder = new SnacDecoder(config, weights);
+            _encoder = new SnacEncoder(config, weights);
         }
 
         public SnacConfig Config { get; }
@@ -45,5 +47,12 @@ namespace DevOnBike.Overfit.Audio.Tts.Snac
         /// for a deterministic, reproducible decode.
         /// </summary>
         public float[] Decode(int[][] codes, bool addNoise = false) => _decoder.Decode(codes, addNoise);
+
+        /// <summary>
+        /// Encodes mono 24 kHz PCM in <c>[-1, 1]</c> into residual-VQ codes (one int array per level, coarse→fine)
+        /// — the inverse of <see cref="Decode"/>. Useful for round-tripping audio and for preparing
+        /// audio-token training data (e.g. voice-clone fine-tuning) entirely in managed .NET.
+        /// </summary>
+        public int[][] Encode(ReadOnlySpan<float> audio) => _encoder.Encode(audio);
     }
 }

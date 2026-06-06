@@ -33,6 +33,50 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
             => customTokenNumber - CodeBias - ((index % FrameStride) * CodebookSize);
 
         /// <summary>
+        /// The inverse of <see cref="DecodeCustomToken"/>: the <c>&lt;custom_token_N&gt;</c> number that encodes
+        /// <paramref name="code"/> at stream position <paramref name="index"/> — <c>code + 10 + (index%7)·4096</c>.
+        /// Used when building training targets (voice-clone fine-tuning): the model must learn to emit these.
+        /// </summary>
+        public static int CustomTokenNumber(int code, int index)
+            => code + CodeBias + ((index % FrameStride) * CodebookSize);
+
+        /// <summary>
+        /// The inverse of <see cref="Redistribute"/>: flattens SNAC's three levels back into the model's
+        /// 7-tokens-per-frame stream (lengths F, 2F, 4F → 7F). Turns an <see cref="Snac.Snac.Encode"/> result into
+        /// the audio-token order the LM consumes — the first step of voice-clone dataset prep.
+        /// </summary>
+        public static int[] Interleave(int[][] levels)
+        {
+            if (levels.Length != 3)
+            {
+                throw new OverfitRuntimeException($"SNAC has 3 code levels; got {levels.Length}.");
+            }
+            var l0 = levels[0];
+            var l1 = levels[1];
+            var l2 = levels[2];
+            var frames = l0.Length;
+            if (l1.Length != frames * 2 || l2.Length != frames * 4)
+            {
+                throw new OverfitRuntimeException(
+                    $"SNAC level lengths must be F, 2F, 4F; got {l0.Length}, {l1.Length}, {l2.Length}.");
+            }
+
+            var flat = new int[frames * FrameStride];
+            for (var j = 0; j < frames; j++)
+            {
+                var i = FrameStride * j;
+                flat[i] = l0[j];
+                flat[i + 1] = l1[2 * j];
+                flat[i + 4] = l1[(2 * j) + 1];
+                flat[i + 2] = l2[4 * j];
+                flat[i + 3] = l2[(4 * j) + 1];
+                flat[i + 5] = l2[(4 * j) + 2];
+                flat[i + 6] = l2[(4 * j) + 3];
+            }
+            return flat;
+        }
+
+        /// <summary>
         /// Extracts the number from the last <c>&lt;custom_token_N&gt;</c> in a detokenized piece (the reference
         /// scans from the right). Returns false if the text holds no complete custom token.
         /// </summary>

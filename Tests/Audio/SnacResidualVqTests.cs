@@ -61,5 +61,49 @@ namespace DevOnBike.Overfit.Tests.Audio
 
             Assert.Equal(src, dst);
         }
+
+        [Fact]
+        public void AveragePoolTime_MeansNonOverlappingWindows()
+        {
+            // [channels=2 × time=4], stride 2 → [2 × 2].
+            float[] src = [1f, 2f, 3f, 4f, /* ch1 */ 10f, 20f, 30f, 40f];
+            var dst = new float[2 * 2];
+
+            SnacResidualVq.AveragePoolTime(src, dst, channels: 2, time: 4, stride: 2);
+
+            Assert.Equal([1.5f, 3.5f], dst[..2]);   // (1+2)/2, (3+4)/2
+            Assert.Equal([15f, 35f], dst[2..]);      // (10+20)/2, (30+40)/2
+        }
+
+        [Fact]
+        public void EncodeCodebook_PicksNearestByCosine()
+        {
+            // codebook [size=3 × dim=2]: row0=(1,0) row1=(0,1) row2=(1,1)
+            float[] codebook = [1f, 0f, 0f, 1f, 1f, 1f];
+            // two frames (channel-major [dim=2 × time=2]): frame0≈(0.9,0.1)→row0, frame1≈(0.7,0.75)→row2
+            float[] zE = [0.9f, 0.7f, /* dim1 */ 0.1f, 0.75f];
+            var indices = new int[2];
+
+            SnacResidualVq.EncodeCodebook(zE, dim: 2, time: 2, codebook, codebookSize: 3, indices);
+
+            Assert.Equal(0, indices[0]);
+            Assert.Equal(2, indices[1]);
+        }
+
+        [Fact]
+        public void EncodeCodebook_ThenDecode_RoundTripsThroughTheChosenRow()
+        {
+            // Distinct directions so cosine is unambiguous: row0 +x, row1 +y, row2 −x.
+            float[] codebook = [1f, 0f, 0f, 1f, -1f, 0f]; // 3 rows, dim 2
+            float[] zE = [0.1f, /* dim1 */ 5f]; // strongly +y → row1
+            var idx = new int[1];
+            SnacResidualVq.EncodeCodebook(zE, 2, 1, codebook, 3, idx);
+
+            var decoded = new float[2];
+            SnacResidualVq.DecodeCodebook(idx, codebook, decoded, 3, 2, 1);
+
+            Assert.Equal(1, idx[0]);
+            Assert.Equal([0f, 1f], decoded);
+        }
     }
 }

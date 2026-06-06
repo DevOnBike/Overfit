@@ -21,6 +21,12 @@ namespace DevOnBike.Overfit.Audio.Tts.Snac
         /// <summary>The quantizer / decoder-input channel count (encoder_dim·2^len(encoder_rates) = 48·16).</summary>
         public int LatentDim { get; private init; }
 
+        /// <summary>The encoder's first conv width (doubles per downsampling block).</summary>
+        public int EncoderDim { get; private init; }
+
+        /// <summary>Per-block downsampling factors of the encoder (mirror of <see cref="DecoderRates"/>).</summary>
+        public int[] EncoderRates { get; private init; } = [];
+
         /// <summary>The decoder's widest channel count, after the input pointwise conv.</summary>
         public int DecoderDim { get; private init; }
 
@@ -55,6 +61,8 @@ namespace DevOnBike.Overfit.Audio.Tts.Snac
         {
             SampleRate = 24_000,
             LatentDim = 768,
+            EncoderDim = 48,
+            EncoderRates = [2, 4, 8, 8],
             DecoderDim = 1024,
             DecoderRates = [8, 8, 4, 2],
             CodebookSize = 4096,

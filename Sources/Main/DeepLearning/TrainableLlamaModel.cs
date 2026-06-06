@@ -379,6 +379,59 @@ namespace DevOnBike.Overfit.DeepLearning
         /// <summary>Next-token softmax cross-entropy: computes the mean loss over positions AND seeds
         /// <c>logits.Grad</c> with <c>softmax − onehot(target)</c> (normalized by T). Call
         /// <c>graph.BackwardFromGrad(logits)</c> afterwards. Mirrors the GPT-1 training loss.</summary>
+        /// <summary>
+        /// Completion-only variant: positions whose target equals <paramref name="ignoreIndex"/> contribute no loss
+        /// and no gradient (their grad rows are zeroed). Used for voice-clone fine-tuning, where the prompt tokens
+        /// are context and only the audio-token continuation is trained. The loss is averaged over the non-ignored
+        /// positions.
+        /// </summary>
+        public static float CrossEntropyLossAndSeed(AutogradNode logits, int[] targets, int vocab, int ignoreIndex)
+        {
+            var T = targets.Length;
+            var data = logits.DataView.AsReadOnlySpan();
+            var grad = logits.GradView.AsSpan();
+            grad.Clear(); // ignored rows must end up with zero gradient
+
+            var count = 0;
+            for (var t = 0; t < T; t++)
+            {
+                if (targets[t] != ignoreIndex)
+                {
+                    count++;
+                }
+            }
+            if (count == 0)
+            {
+                return 0f;
+            }
+
+            var totalMasked = 0.0;
+            var scaleMasked = 1f / count;
+            Span<float> probsM = vocab <= 4096 ? stackalloc float[vocab] : new float[vocab];
+            for (var t = 0; t < T; t++)
+            {
+                var tgt = targets[t];
+                if (tgt == ignoreIndex)
+                {
+                    continue;
+                }
+                var off = t * vocab;
+                var row = data.Slice(off, vocab);
+                var gradRow = grad.Slice(off, vocab);
+                var probsRow = probsM[..vocab];
+
+                var rowMax = TensorPrimitives.Max(row);
+                TensorPrimitives.Subtract(row, rowMax, probsRow);
+                TensorPrimitives.Exp(probsRow, probsRow);
+                var invSum = 1f / TensorPrimitives.Sum(probsRow);
+
+                totalMasked += -Math.Log(Math.Max(probsRow[tgt] * invSum, 1e-30f));
+                TensorPrimitives.Multiply(probsRow, invSum * scaleMasked, gradRow);
+                gradRow[tgt] -= scaleMasked;
+            }
+            return (float)(totalMasked / count);
+        }
+
         public static float CrossEntropyLossAndSeed(AutogradNode logits, int[] targets, int vocab)
         {
             var T = targets.Length;

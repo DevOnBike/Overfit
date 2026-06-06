@@ -87,6 +87,7 @@ namespace DevOnBike.Overfit.Tests.TestSupport
             public static string SafetensorsPath => Path.Combine(Dir, "snac_24khz.safetensors");
             public static string CodesPath => Path.Combine(Dir, "codes.bin");
             public static string ReferenceNoiseOffPath => Path.Combine(Dir, "reference_noiseoff.f32");
+            public static string InputPath => Path.Combine(Dir, "input.f32");
 
             public static string RequireSafetensorsPath() => Require(SafetensorsPath, EnvVar,
                 "SNAC 24 kHz decoder weights (run Scripts/convert_snac.py --out c:\\snac)");

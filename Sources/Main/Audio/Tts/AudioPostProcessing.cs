@@ -13,6 +13,36 @@ namespace DevOnBike.Overfit.Audio.Tts
     public static class AudioPostProcessing
     {
         /// <summary>
+        /// Scales the whole signal so its loudest sample reaches <paramref name="targetPeak"/> — fixes quiet
+        /// recordings (low input gain) so silence detection and the model both see a healthy level. Returns a new
+        /// array; a fully silent input is returned unchanged.
+        /// </summary>
+        public static float[] PeakNormalize(ReadOnlySpan<float> samples, float targetPeak = 0.95f)
+        {
+            var peak = 0f;
+            for (var i = 0; i < samples.Length; i++)
+            {
+                var a = MathF.Abs(samples[i]);
+                if (a > peak)
+                {
+                    peak = a;
+                }
+            }
+            var output = new float[samples.Length];
+            if (peak <= 1e-9f)
+            {
+                samples.CopyTo(output);
+                return output;
+            }
+            var gain = targetPeak / peak;
+            for (var i = 0; i < samples.Length; i++)
+            {
+                output[i] = samples[i] * gain;
+            }
+            return output;
+        }
+
+        /// <summary>
         /// Trims leading and trailing near-silence (|sample| below <paramref name="amplitudeThreshold"/>), keeping
         /// <paramref name="keepPadding"/> samples of headroom on each side so speech onsets/decays are not clipped.
         /// Returns the original array unchanged if it is entirely silent or nothing needs trimming.

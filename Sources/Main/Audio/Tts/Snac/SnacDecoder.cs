@@ -153,36 +153,9 @@ namespace DevOnBike.Overfit.Audio.Tts.Snac
 
             for (var r = 0; r < ResidualDilations.Length; r++)
             {
-                y = ResidualUnit(y, outDim, outT, b, r, ResidualDilations[r]);
+                y = SnacBlocks.ResidualUnit(_w, $"dec.block.{b}.res.{r}.", y, outDim, outT, ResidualDilations[r]);
             }
             return y;
-        }
-
-        // ResidualUnit: x + conv1x1(Snake(depthwiseConv7(Snake(x)))). Same length (padding=3·dilation), so no trim.
-        private float[] ResidualUnit(float[] x, int dim, int t, int b, int r, int dilation)
-        {
-            var prefix = $"dec.block.{b}.res.{r}.";
-
-            var h = new float[x.Length];
-            x.AsSpan().CopyTo(h);
-            SnacActivations.Snake1dInPlace(h, _w[prefix + "snake1.alpha"], dim, t);
-
-            var pad = 3 * dilation; // (kernel-1)*dilation/2 with kernel=7
-            var c1 = new float[dim * t];
-            SnacConv.Conv1d(h, _w[prefix + "conv1.weight"], _w[prefix + "conv1.bias"], c1,
-                inC: dim, tIn: t, outC: dim, kSize: 7, stride: 1, pad: pad, dilation: dilation, groups: dim, tOut: t);
-
-            SnacActivations.Snake1dInPlace(c1, _w[prefix + "snake2.alpha"], dim, t);
-
-            var c2 = new float[dim * t];
-            SnacConv.Conv1d(c1, _w[prefix + "conv2.weight"], _w[prefix + "conv2.bias"], c2,
-                inC: dim, tIn: t, outC: dim, kSize: 1, stride: 1, pad: 0, dilation: 1, groups: 1, tOut: t);
-
-            for (var i = 0; i < c2.Length; i++)
-            {
-                c2[i] += x[i];
-            }
-            return c2;
         }
 
         // NoiseBlock: x += randn(1,T) ⊙ (1×1 conv of x). Random by design; only used when addNoise is requested.

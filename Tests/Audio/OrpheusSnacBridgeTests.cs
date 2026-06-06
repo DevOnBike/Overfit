@@ -64,48 +64,48 @@ namespace DevOnBike.Overfit.Tests.Audio
         }
 
         [Fact]
+        public void CustomTokenNumber_IsInverseOf_DecodeCustomToken()
+        {
+            for (var pos = 0; pos < 9; pos++)
+            {
+                var n = OrpheusSnacBridge.CustomTokenNumber(1234, pos);
+                Assert.Equal(1234, OrpheusSnacBridge.DecodeCustomToken(n, pos));
+            }
+        }
+
+        [Fact]
+        public void Interleave_IsInverseOf_Redistribute()
+        {
+            int[] flat = [100, 101, 102, 103, 104, 105, 106, 200, 201, 202, 203, 204, 205, 206];
+            var levels = OrpheusSnacBridge.Redistribute(flat);
+
+            Assert.Equal(flat, OrpheusSnacBridge.Interleave(levels));
+        }
+
+        [Fact]
         public void FullBridge_RoundTrips_LevelsThroughTokensAndBack()
         {
             // F=3 frames → SNAC level lengths 3 / 6 / 12 (the 1:2:4 structure).
-            int[] level0 = [11, 12, 13];
-            int[] level1 = [21, 22, 23, 24, 25, 26];
-            int[] level2 = [31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42];
+            int[][] original =
+            [
+                [11, 12, 13],
+                [21, 22, 23, 24, 25, 26],
+                [31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42],
+            ];
 
-            // Interleave back to the flat 7-per-frame stream (inverse of Redistribute).
-            var flat = Interleave(level0, level1, level2);
-
-            // Encode each code as the model would (custom-token number), then decode with the running index.
+            // Encode side: levels → flat → custom-token numbers; decode side: numbers → codes → levels.
+            var flat = OrpheusSnacBridge.Interleave(original);
             var decoded = new int[flat.Length];
             for (var i = 0; i < flat.Length; i++)
             {
-                var n = flat[i] + 10 + ((i % 7) * 4096);
+                var n = OrpheusSnacBridge.CustomTokenNumber(flat[i], i);
                 decoded[i] = OrpheusSnacBridge.DecodeCustomToken(n, i);
             }
 
             var levels = OrpheusSnacBridge.Redistribute(decoded);
-
-            Assert.Equal(level0, levels[0]);
-            Assert.Equal(level1, levels[1]);
-            Assert.Equal(level2, levels[2]);
-        }
-
-        // Inverse of Redistribute: 3 levels → flat 7-per-frame stream.
-        private static int[] Interleave(int[] l0, int[] l1, int[] l2)
-        {
-            var frames = l0.Length;
-            var flat = new int[frames * 7];
-            for (var j = 0; j < frames; j++)
-            {
-                var i = 7 * j;
-                flat[i] = l0[j];
-                flat[i + 1] = l1[2 * j];
-                flat[i + 4] = l1[(2 * j) + 1];
-                flat[i + 2] = l2[4 * j];
-                flat[i + 3] = l2[(4 * j) + 1];
-                flat[i + 5] = l2[(4 * j) + 2];
-                flat[i + 6] = l2[(4 * j) + 3];
-            }
-            return flat;
+            Assert.Equal(original[0], levels[0]);
+            Assert.Equal(original[1], levels[1]);
+            Assert.Equal(original[2], levels[2]);
         }
     }
 }

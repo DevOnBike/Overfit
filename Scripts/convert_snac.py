@@ -49,11 +49,34 @@ def main():
 
     t = {}
 
-    # ── quantizer decode path: codebook + out_proj per level ──
+    # ── quantizer: codebook + out_proj (decode) + in_proj (encode) per level ──
     for i, q in enumerate(model.quantizer.quantizers):
         t[f"q.{i}.codebook"] = q.codebook.weight.detach().to(torch.float32).contiguous()  # [size, dim]
         t[f"q.{i}.out_proj.weight"] = w(q.out_proj)  # [input_dim, codebook_dim, 1]
         t[f"q.{i}.out_proj.bias"] = b(q.out_proj)    # [input_dim]
+        t[f"q.{i}.in_proj.weight"] = w(q.in_proj)    # [codebook_dim, input_dim, 1]
+        t[f"q.{i}.in_proj.bias"] = b(q.in_proj)      # [codebook_dim]
+
+    # ── encoder path (audio -> latent): in_conv -> 4 EncoderBlocks -> out_conv ──
+    enc = model.encoder.block  # Sequential: [0]in_conv [1..4]EncoderBlock [5]out_conv (depthwise)
+    t["enc.in_conv.weight"] = w(enc[0])
+    t["enc.in_conv.bias"] = b(enc[0])
+    n_enc_blocks = len(model.encoder_rates)
+    for bi in range(n_enc_blocks):
+        eb = enc[1 + bi].block  # [0,1,2]ResidualUnit [3]Snake1d [4]down-conv
+        for ri in range(3):
+            res = eb[ri].block  # [0]snake [1]conv(dw) [2]snake [3]conv(pw)
+            t[f"enc.block.{bi}.res.{ri}.snake1.alpha"] = alpha(res[0])
+            t[f"enc.block.{bi}.res.{ri}.conv1.weight"] = w(res[1])
+            t[f"enc.block.{bi}.res.{ri}.conv1.bias"] = b(res[1])
+            t[f"enc.block.{bi}.res.{ri}.snake2.alpha"] = alpha(res[2])
+            t[f"enc.block.{bi}.res.{ri}.conv2.weight"] = w(res[3])
+            t[f"enc.block.{bi}.res.{ri}.conv2.bias"] = b(res[3])
+        t[f"enc.block.{bi}.snake.alpha"] = alpha(eb[3])
+        t[f"enc.block.{bi}.down.weight"] = w(eb[4])  # [out, in, 2*stride]
+        t[f"enc.block.{bi}.down.bias"] = b(eb[4])
+    t["enc.out_conv.weight"] = w(enc[5])  # depthwise [768,1,7] groups=768
+    t["enc.out_conv.bias"] = b(enc[5])
 
     dec = model.decoder.model  # nn.Sequential
 
@@ -119,6 +142,9 @@ def main():
     NoiseBlock.forward = lambda self, x: x
     with torch.no_grad():
         ref = model.decode(codes).reshape(-1).to(torch.float32).cpu().numpy()
+
+    # save the input audio so the C# encoder can be checked: our encode(input) should reproduce these codes.
+    sig.astype(np.float32).tofile(os.path.join(args.out, "input.f32"))
 
     codes_np = [c.reshape(-1).to(torch.int32).cpu().numpy() for c in codes]
     print("codes lengths:", [len(c) for c in codes_np], "| reference samples:", len(ref))
