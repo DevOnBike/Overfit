@@ -21,12 +21,17 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
     //   VoiceClone --recording my.wav --transcript transcript.txt --orpheus orpheus.gguf --snac C:\snac --voice myvoice
     //              [--out myvoice.adapter] [--dry-run] [--epochs 3] [--max-seq 1700]
     //              [--threshold 0.03] [--min-silence 0.5]
+    //   Per-file dataset (NN.wav + sibling NN.txt, auto normalize + silence-trim per clip):
+    //   VoiceClone --folder C:\myvoice --orpheus orpheus.gguf --snac C:\snac --voice myvoice --out myvoice.adapter
     internal static class Program
     {
         private static int Main(string[] args)
         {
             var a = ParseArgs(args);
             var recording = a.Get("recording");
+            // Per-file dataset: a folder of NN.wav + sibling NN.txt (one sentence per clip). Each clip is
+            // peak-normalized and silence-trimmed before SNAC encode (real takes carry a lead-in pause).
+            var folder = a.Get("folder");
             var transcript = a.Get("transcript");
             var orpheus = a.Get("orpheus");
             var snacDir = a.Get("snac");
@@ -64,7 +69,15 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
                 Console.Error.WriteLine($"Missing --snac (path not found: {snacDir ?? "<null>"}).");
                 return 1;
             }
-            if (!synthOnly)
+            if (!synthOnly && folder is not null)
+            {
+                if (!PathExists(folder))
+                {
+                    Console.Error.WriteLine($"Missing --folder (path not found: {folder}).");
+                    return 1;
+                }
+            }
+            else if (!synthOnly)
             {
                 if (recording is null || !PathExists(recording))
                 {
@@ -153,6 +166,14 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
             List<OrpheusTrainingExample> BuildWith(ITokenizer tok)
             {
                 var builder = new VoiceCloneDatasetBuilder(snac, tok, tok.EndOfTextTokenId);
+
+                // Per-file folder: NN.wav + sibling NN.txt. Normalizes + trims lead/trail silence per clip.
+                if (folder is not null)
+                {
+                    Console.WriteLine($"folder: {folder} | per-file clips (.wav + sibling .txt), normalize + silence-trim");
+                    return builder.BuildFromFolder(folder, voice, whisper);
+                }
+
                 var audio = AudioFile.ReadMono(recording!, out var rate);
                 if (whisper is not null)
                 {

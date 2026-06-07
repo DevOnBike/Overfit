@@ -24,6 +24,8 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
         private readonly float[] _sin;
         private readonly int _halfDim;
         private readonly RopeScaling? _scaling;
+        private readonly float[]? _freqFactors;   // Phi-3 longrope per-dim divisor [halfDim]; null = none
+        private readonly float _attnFactor;       // longrope mscale on cos/sin; 1 = none
 
         /// <summary>
         /// Creates and precomputes RoPE tables.
@@ -40,7 +42,7 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
         /// When true, uses the split-half rotation layout (rotate-half over the two contiguous halves of
         /// each head) instead of the adjacent-pair layout. Default false.
         /// </param>
-        public RopeTable(int maxSequenceLength, int headDimension, float theta = 10_000f, RopeScaling? scaling = null, bool splitHalf = false)
+        public RopeTable(int maxSequenceLength, int headDimension, float theta = 10_000f, RopeScaling? scaling = null, bool splitHalf = false, float[]? freqFactors = null, float attnFactor = 1f)
         {
             SplitHalf = splitHalf;
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxSequenceLength);
@@ -49,11 +51,18 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
                 throw new ArgumentOutOfRangeException(nameof(headDimension), "headDimension must be positive and even.");
             }
             ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(theta, 0f);
+            if (freqFactors is not null && freqFactors.Length != headDimension / 2)
+            {
+                throw new ArgumentException(
+                    $"freqFactors length ({freqFactors.Length}) must equal head_dim/2 ({headDimension / 2}).", nameof(freqFactors));
+            }
 
             MaxSequenceLength = maxSequenceLength;
             HeadDimension = headDimension;
             Theta = theta;
             _scaling = scaling;
+            _freqFactors = freqFactors;
+            _attnFactor = attnFactor;
 
             _halfDim = headDimension / 2;
 
@@ -95,13 +104,18 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
                 {
                     freq = _scaling.Apply(freq);
                 }
+                // Phi-3 longrope: divide each dim's base frequency by its per-dim factor.
+                if (_freqFactors is not null)
+                {
+                    freq /= _freqFactors[i];
+                }
 
                 for (var pos = 0; pos < MaxSequenceLength; pos++)
                 {
                     var angle = pos * freq;
 
-                    _cos[pos * _halfDim + i] = MathF.Cos(angle);
-                    _sin[pos * _halfDim + i] = MathF.Sin(angle);
+                    _cos[pos * _halfDim + i] = _attnFactor * MathF.Cos(angle);
+                    _sin[pos * _halfDim + i] = _attnFactor * MathF.Sin(angle);
                 }
             }
         }

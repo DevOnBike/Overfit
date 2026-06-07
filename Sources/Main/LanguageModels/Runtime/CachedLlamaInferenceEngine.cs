@@ -112,8 +112,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var headDim = config.AttentionHeadDim;
 
             // Build RoPE table if required (over head_dim, which Qwen3 sets explicitly ≠ DModel/NHeads).
+            // Phi-3 passes longrope per-dim freq factors + attn scaling; other archs leave them null/1.
             _rope = config.UseRoPE
-                ? new RopeTable(config.ContextLength, headDim, config.RoPETheta, config.RopeScaling, config.RopeSplitHalf)
+                ? new RopeTable(config.ContextLength, headDim, config.RoPETheta, config.RopeScaling, config.RopeSplitHalf, config.RopeFreqFactors, config.RopeAttnFactor)
                 : null;
 
             _stack = new CachedGptStack(

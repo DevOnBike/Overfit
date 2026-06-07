@@ -137,6 +137,19 @@ namespace DevOnBike.Overfit.DeepLearning
         /// </summary>
         public RopeScaling? RopeScaling { get; init; }
 
+        /// <summary>
+        /// Phi-3 "longrope" per-dimension RoPE frequency factors (<c>[head_dim/2]</c>). Each base frequency
+        /// <c>1/θ^(2i/d)</c> is divided by <c>RopeFreqFactors[i]</c> at table build. Null = no per-dim scaling.
+        /// Distinct from <see cref="RopeScaling"/> (the scalar llama3 NTK-by-parts rule).
+        /// </summary>
+        public float[]? RopeFreqFactors { get; init; }
+
+        /// <summary>
+        /// RoPE attention scaling (longrope "mscale") multiplying cos/sin. 1.0 in the short-context regime
+        /// (sequence ≤ original context). Default 1.0 = no scaling.
+        /// </summary>
+        public float RopeAttnFactor { get; init; } = 1f;
+
         // ── FFN ───────────────────────────────────────────────────────────────
 
         /// <summary>

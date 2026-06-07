@@ -54,15 +54,26 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
         /// Builds examples from every <c>*.wav</c> / <c>*.mp3</c> in <paramref name="directory"/>. The transcript
         /// is read from a sibling <c>.txt</c>; if absent and <paramref name="whisper"/> is supplied, the clip is
         /// auto-transcribed (review the result — STT is imperfect). All clips are resampled to 24 kHz.
+        ///
+        /// <para>
+        /// Per-clip cleanup (on by default — real per-file recordings are rarely studio-clean): each clip is
+        /// peak-normalized (quiet takes make a weak voice) and has leading/trailing silence trimmed. The trim
+        /// matters most: a recording with a long pause before you start speaking would otherwise teach the model
+        /// to emit that silence at the start of every generation (the "start didn't generate" failure). A short
+        /// <paramref name="keepPaddingSeconds"/> of headroom is kept on each side so onsets/decays aren't clipped.
+        /// </para>
         /// </summary>
         public List<OrpheusTrainingExample> BuildFromFolder(
-            string directory, string voice, WhisperTranscriber? whisper = null, string language = "en")
+            string directory, string voice, WhisperTranscriber? whisper = null, string language = "en",
+            bool normalize = true, bool trimSilence = true,
+            float silenceThreshold = 0.02f, float keepPaddingSeconds = 0.05f)
         {
             if (!Directory.Exists(directory))
             {
                 throw new OverfitFormatException($"Voice dataset directory not found: {directory}");
             }
 
+            var keepPadding = (int)(keepPaddingSeconds * OrpheusSampleRate);
             var examples = new List<OrpheusTrainingExample>();
             foreach (var path in Directory.GetFiles(directory))
             {
@@ -72,12 +83,24 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
                 }
 
                 var raw = AudioFile.ReadMono(path, out var rate);
-                var audio24 = rate == OrpheusSampleRate ? raw : AudioResampler.Resample(raw, rate, OrpheusSampleRate);
 
                 var text = ResolveTranscript(path, raw, rate, whisper, language);
                 if (string.IsNullOrWhiteSpace(text))
                 {
                     continue;
+                }
+
+                var audio24 = rate == OrpheusSampleRate ? raw : AudioResampler.Resample(raw, rate, OrpheusSampleRate);
+
+                // Normalize first so the silence threshold is relative to a known peak (consistent across clips),
+                // then trim the leading/trailing pause the recording may carry before/after the spoken line.
+                if (normalize)
+                {
+                    audio24 = AudioPostProcessing.PeakNormalize(audio24);
+                }
+                if (trimSilence)
+                {
+                    audio24 = AudioPostProcessing.TrimSilence(audio24, silenceThreshold, keepPadding);
                 }
 
                 examples.Add(BuildExample(audio24, text, voice));
@@ -198,6 +221,10 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
             return s;
         }
 
+        // Returns the transcript for a clip, or empty (→ the clip is skipped) when none can be resolved. A folder
+        // routinely also holds non-dataset audio (e.g. previously-generated clone outputs) with no sibling .txt;
+        // those must be skipped, not fail the whole build. With no .txt and no Whisper there's nothing to pair, so
+        // the clip is skipped; if EVERY clip ends up unpaired, BuildFromFolder's count==0 guard reports it clearly.
         private static string ResolveTranscript(
             string audioPath, float[] raw, int rate, WhisperTranscriber? whisper, string language)
         {
@@ -208,8 +235,7 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
             }
             if (whisper is null)
             {
-                throw new OverfitFormatException(
-                    $"No transcript for '{Path.GetFileName(audioPath)}' (.txt missing and no Whisper model provided).");
+                return string.Empty;
             }
             var audio16 = rate == WhisperSampleRate ? raw : AudioResampler.Resample(raw, rate, WhisperSampleRate);
             return whisper.Transcribe(audio16, language).Trim();
