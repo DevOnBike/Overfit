@@ -58,11 +58,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int dModel,
             int headCount,
             int maxSequenceLength,
-            int kvHeadCount = 0)
+            int kvHeadCount = 0,
+            int headDim = 0)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(dModel);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(headCount);
-            if (dModel % headCount != 0)
+            // head_dim is usually dModel/headCount, but Qwen3 sets it explicitly (so q/k/v aren't square).
+            var resolvedHeadDim = headDim > 0 ? headDim : dModel / headCount;
+            if (headDim <= 0 && dModel % headCount != 0)
             {
                 throw new ArgumentException(
                 $"dModel ({dModel}) must be divisible by headCount ({headCount}).",
@@ -80,7 +83,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             DModel = dModel;
             HeadCount = headCount;
             KvHeadCount = resolvedKvHeads;
-            HeadDimension = dModel / headCount;
+            HeadDimension = resolvedHeadDim;
             MaxSequenceLength = maxSequenceLength;
 
             _heads = new CachedSingleHeadAttention[headCount];
@@ -170,7 +173,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     _heads[group * groupSize].ProjectKvDispatched(
                         hidden, kv.Wk, kv.Wv, kv.Bk, kv.Bv,
                         cache, layerIndex, group, position, rope,
-                        hq, hs, hb, hiddenQ8kValid);
+                        hq, hs, hb, hiddenQ8kValid,
+                        weights.HasQkNorm ? weights.QkNormK : default);
                 }
             }
 
@@ -432,6 +436,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 // K/V projected once per group, RoPE-rotated, stored — every Q head reads the cache.
                 BatchedQuantProjection.Dispatch(hidden, rows, in wk, bk, kg, dModel, headDim);
                 BatchedQuantProjection.Dispatch(hidden, rows, in wv, bv, vg, dModel, headDim);
+                if (weights.HasQkNorm)
+                {
+                    QkNormKernel.Apply(kg, weights.QkNormK, rows, headDim);
+                }
                 for (var n = 0; n < rows; n++)
                 {
                     if (rope is not null)
@@ -464,6 +472,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     var wo = hw.Wo;
 
                     BatchedQuantProjection.Dispatch(hidden, rows, in wq, hw.Bq, qh, dModel, headDim);
+                    if (weights.HasQkNorm)
+                    {
+                        QkNormKernel.Apply(qh, weights.QkNormQ, rows, headDim);
+                    }
                     if (rope is not null)
                     {
                         for (var n = 0; n < rows; n++)
@@ -626,7 +638,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         hQuants,
                         hScales,
                         hBsums,
-                        ctx.HiddenQ8kValid);
+                        ctx.HiddenQ8kValid,
+                        ctx.Weights.HasQkNorm ? ctx.Weights.QkNormQ : default,
+                        ctx.Weights.HasQkNorm ? ctx.Weights.QkNormK : default);
                 }
             }
         }
@@ -666,7 +680,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
                 ctx.Heads[h].ProjectQDispatched(
                     hidden, hw.Wq, hw.Bq, ctx.Cache, ctx.Position, ctx.Rope,
-                    hQuants, hScales, hBsums, ctx.HiddenQ8kValid);
+                    hQuants, hScales, hBsums, ctx.HiddenQ8kValid,
+                    ctx.Weights.HasQkNorm ? ctx.Weights.QkNormQ : default);
 
                 ctx.Heads[h].AttendAndProjectO(
                     hw.Wo, ctx.Cache, ctx.LayerIndex, group, ctx.Position, headOutput);

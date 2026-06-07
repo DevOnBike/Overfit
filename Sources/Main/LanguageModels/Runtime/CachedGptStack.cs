@@ -38,7 +38,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int expertUsedCount = 0,
             int expertFeedForwardLength = 0,
             bool normalizeExpertWeights = true,
-            bool hasSharedExpert = true)
+            bool hasSharedExpert = true,
+            int headDim = 0)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(layerCount);
 
@@ -46,7 +47,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(headCount);
 
-            if (dModel % headCount != 0)
+            // Qwen3 sets head_dim explicitly (head_dim ≠ dModel/headCount); only require divisibility otherwise.
+            if (headDim <= 0 && dModel % headCount != 0)
             {
                 throw new ArgumentException(
                     $"dModel ({dModel}) must be divisible by headCount ({headCount}).",
@@ -64,7 +66,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             LayerCount = layerCount;
             DModel = dModel;
             HeadCount = headCount;
-            HeadDimension = dModel / headCount;
+            HeadDimension = headDim > 0 ? headDim : dModel / headCount;
             DFF = dFF;
             VocabSize = vocabSize;
             MaxSequenceLength = maxSequenceLength;
@@ -87,7 +89,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     expertUsedCount,
                     expertFeedForwardLength,
                     normalizeExpertWeights,
-                    hasSharedExpert);
+                    hasSharedExpert,
+                    headDim: headDim);
             }
 
             _currentHidden = new float[dModel];

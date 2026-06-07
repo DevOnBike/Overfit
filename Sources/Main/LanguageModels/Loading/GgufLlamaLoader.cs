@@ -120,12 +120,15 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
             if (vocab == 0) { throw new OverfitFormatException("Cannot determine vocab size."); }
 
-            var headDim = dModel / nHeads;
-            if (headDim * nHeads != dModel)
+            // Qwen3 sets head_dim explicitly (head_dim ≠ dModel/nHeads, so the q/k/v projections are not square);
+            // every other arch we load derives it as dModel/nHeads.
+            var headDim = reader.GetMeta($"{arch}.attention.key_length", dModel / nHeads);
+            if (headDim <= 0 || (headDim == dModel / nHeads && headDim * nHeads != dModel))
             {
                 throw new OverfitFormatException(
-                    $"dModel ({dModel}) is not divisible by nHeads ({nHeads}).");
+                    $"Could not determine head_dim for arch '{arch}' (dModel {dModel}, nHeads {nHeads}).");
             }
+            var usesQkNorm = arch is "qwen3" or "qwen3moe";
 
             // Tied embeddings: if no separate output.weight, lm_head reuses token_embd.
             var tieWeights = !reader.Tensors.ContainsKey("output.weight");
@@ -158,6 +161,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 DModel = dModel,
                 NHeads = nHeads,
                 NKvHeads = nKvHeads,
+                HeadDim = headDim,
+                UsesQkNorm = usesQkNorm,
                 VocabSize = vocab,
                 ContextLength = ctxLen,
                 DFF = dFF,
@@ -223,6 +228,14 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     // Attention LayerNorm gamma (RMSNorm, no beta)
                     var attnNormGamma = AllocAndLoad(reader, $"blk.{l}.attn_norm.weight", dModel);
                     var attnNormBeta = TensorStorage<float>.Unpooled(0);
+
+                    // Qwen3 per-head RMSNorm weights on Q and K (over head_dim), applied before RoPE.
+                    TensorStorage<float>? qNorm = null, kNorm = null;
+                    if (usesQkNorm)
+                    {
+                        qNorm = AllocAndLoad(reader, $"blk.{l}.attn_q_norm.weight", headDim);
+                        kNorm = AllocAndLoad(reader, $"blk.{l}.attn_k_norm.weight", headDim);
+                    }
 
                     // Per-tensor dispatch (step 3.2b) — each of attn_q/k/v picks
                     // Q4_K-native / Q8_0-native / F32-fallback independently from
@@ -296,6 +309,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     layers[l] = new LayerWeightBuffers
                     {
                         AttnNormGamma = attnNormGamma,
+                        QNorm = qNorm,
+                        KNorm = kNorm,
                         AttnNormBeta = attnNormBeta,
                         Wq = wq,
                         Bq = bq,

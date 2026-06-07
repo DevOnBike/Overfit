@@ -60,6 +60,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             public required TensorStorage<float> AttnNormGamma;
             public required TensorStorage<float> AttnNormBeta;
+
+            // Qwen3 per-head RMSNorm on Q and K (over head_dim), applied before RoPE. Null for every other arch.
+            public TensorStorage<float>? QNorm;
+            public TensorStorage<float>? KNorm;
+
             public required DecodeWeight[] Wq;
             public required TensorStorage<float>[] Bq;
             public required DecodeWeight[] Wk;
@@ -104,12 +109,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _layers = layers;
             _backingFile = backingFile;
 
-            // Build RoPE table if required
-            _rope = config.UseRoPE
-                ? new RopeTable(config.ContextLength, config.DModel / config.NHeads, config.RoPETheta, config.RopeScaling, config.RopeSplitHalf)
-                : null;
+            var headDim = config.AttentionHeadDim;
 
-            var headDim = config.DModel / config.NHeads;
+            // Build RoPE table if required (over head_dim, which Qwen3 sets explicitly ≠ DModel/NHeads).
+            _rope = config.UseRoPE
+                ? new RopeTable(config.ContextLength, headDim, config.RoPETheta, config.RopeScaling, config.RopeSplitHalf)
+                : null;
 
             _stack = new CachedGptStack(
                 config.NLayers,
@@ -125,7 +130,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 config.ExpertUsedCount,
                 config.ExpertFeedForwardLength,
                 config.NormalizeExpertWeights,
-                config.HasSharedExpert);
+                config.HasSharedExpert,
+                headDim: headDim);
 
             _stackWeights = BuildStackWeights();
         }
@@ -304,7 +310,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ThrowIfDisposed();
 
             var ctx = maxContextLength ?? _config.ContextLength;
-            var headDim = _config.DModel / _config.NHeads;
+            var headDim = _config.AttentionHeadDim;
             var dtype = kvCacheDType ?? ResolveKvDtypeFromEnv();
 
             var cache = KeyValueCache.Create(
@@ -454,6 +460,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 blockWeights[l] = new BlockWeights(
                     heads: heads,
                     kvHeads: kvHeads,
+                    qNorm: layer.QNorm,
+                    kNorm: layer.KNorm,
                     ln1Gamma: layer.AttnNormGamma,
                     ln1Beta: null,                  // RMSNorm — no beta
                     attentionBias: null,
@@ -664,7 +672,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             ThrowIfDisposed();
 
-            var headDim = _config.DModel / _config.NHeads;
+            var headDim = _config.AttentionHeadDim;
             var refs = new Dictionary<(int, LoRATargetModules, int),
                                       TensorStorage<float>>();
 

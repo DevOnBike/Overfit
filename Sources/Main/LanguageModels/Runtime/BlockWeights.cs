@@ -24,6 +24,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     {
         private readonly TensorStorage<float> _ln1Gamma;
         private readonly TensorStorage<float> _ln1Beta;
+        private readonly TensorStorage<float> _qNorm;   // Qwen3 per-head Q RMSNorm (head_dim); empty otherwise
+        private readonly TensorStorage<float> _kNorm;   // Qwen3 per-head K RMSNorm (head_dim); empty otherwise
         private readonly SingleHeadWeights[] _heads;
         private readonly KvHeadWeights[]? _kvHeads;   // null = MHA (use heads[h].Wk/Wv)
         private readonly TensorStorage<float> _attentionBias;
@@ -58,6 +60,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _ffnW2 = block.FFN.W2.Data;
             _ffnB2 = block.FFN.B2.Data;
             _ffnGate = CreateStorage([]); // GeLU — no gate
+            _qNorm = CreateStorage([]);   // GPT-1/2 blocks have no QK-norm
+            _kNorm = CreateStorage([]);
             _kvHeads = null; // MHA — use SingleHeadWeights.Wk/Wv
 
             _heads = new SingleHeadWeights[headCount];
@@ -101,6 +105,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _ffnW2 = Store(ffnW2);
             _ffnB2 = Store(ffnB2);
             _ffnGate = Store(ffnGate);
+            _qNorm = Store(null);
+            _kNorm = Store(null);
 
             _heads = heads ?? [];
             _kvHeads = kvHeads;
@@ -135,10 +141,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             DecodeWeight moeSharedGate = default,
             DecodeWeight moeSharedUp = default,
             DecodeWeight moeSharedDown = default,
-            float[]? moeSharedGateInp = null)
+            float[]? moeSharedGateInp = null,
+            TensorStorage<float>? qNorm = null,
+            TensorStorage<float>? kNorm = null)
         {
             static TensorStorage<float> Empty() => TensorStorage<float>.Unpooled(0);
 
+            _qNorm = qNorm ?? Empty();
+            _kNorm = kNorm ?? Empty();
             _ln1Gamma = ln1Gamma;
             _ln1Beta = ln1Beta ?? Empty();
             _attentionBias = attentionBias ?? Empty();
@@ -174,6 +184,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         public ref readonly SingleHeadWeights Head(int h) => ref _heads[h];
         public int HeadCount => _heads.Length;
+
+        /// <summary>Qwen3 per-head QK-RMSNorm present? When true, apply <see cref="QkNormQ"/>/<see cref="QkNormK"/>
+        /// to each projected Q/K head (over head_dim) before RoPE.</summary>
+        public bool HasQkNorm => _qNorm.AsReadOnlySpan().Length > 0;
+        public ReadOnlySpan<float> QkNormQ => _qNorm.AsReadOnlySpan();
+        public ReadOnlySpan<float> QkNormK => _kNorm.AsReadOnlySpan();
 
         /// <summary>KV heads for GQA. Null for standard MHA (GPT-1, GPT-2).</summary>
         public bool HasGqa => _kvHeads is not null;

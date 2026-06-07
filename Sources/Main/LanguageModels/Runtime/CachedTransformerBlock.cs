@@ -58,13 +58,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int expertUsedCount = 0,
             int expertFeedForwardLength = 0,
             bool normalizeExpertWeights = true,
-            bool hasSharedExpert = true)
+            bool hasSharedExpert = true,
+            int headDim = 0)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(dModel);
 
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(headCount);
 
-            if (dModel % headCount != 0)
+            // Qwen3 sets head_dim explicitly (head_dim ≠ dModel/headCount); only require divisibility otherwise.
+            if (headDim <= 0 && dModel % headCount != 0)
             {
                 throw new ArgumentException(
                     $"dModel ({dModel}) must be divisible by headCount ({headCount}).",
@@ -79,7 +81,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             DModel = dModel;
             HeadCount = headCount;
-            HeadDimension = dModel / headCount;
+            HeadDimension = headDim > 0 ? headDim : dModel / headCount;
             DFF = dFF;
             MaxSequenceLength = maxSequenceLength;
             LayerNormEpsilon = layerNormEpsilon;
@@ -89,7 +91,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 dModel,
                 headCount,
                 maxSequenceLength,
-                kvHeadCount: kvHeadCount > 0 ? kvHeadCount : headCount);
+                kvHeadCount: kvHeadCount > 0 ? kvHeadCount : headCount,
+                headDim: headDim);
 
             _feedForward = new CachedFeedForwardBlock(
                 dModel,

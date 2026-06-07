@@ -12,7 +12,7 @@
         <SourceRevisionId>N/A</SourceRevisionId>
         <InformationalVersion>$(Version)+$(SourceRevisionId)</InformationalVersion>
         <PackageId>DevOnBike.Overfit</PackageId>
-        <Version>10.0.21</Version>
+        <Version>10.0.22</Version>
         <Authors>DevOnBike</Authors>
         <Copyright>Copyright (c) 2026 DevOnBike</Copyright>
         <Description>Pure-C# in-process LLM and deep-learning runtime for .NET 10. Loads GGUF / HF safetensors / ONNX directly (Qwen, Llama, Mistral, Mixtral, MoE, BERT-family embeddings). Zero-allocation CPU inference, Native AOT-compatible, no Python, no native dependencies, no exposed server. Dual-licensed: AGPL-3.0-or-later for open source, commercial license available — see COMMERCIAL.md.</Description>

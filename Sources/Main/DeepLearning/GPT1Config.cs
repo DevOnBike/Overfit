@@ -63,6 +63,16 @@ namespace DevOnBike.Overfit.DeepLearning
         /// <summary>Number of attention heads per block.</summary>
         public int NHeads { get; init; } = 12;
 
+        /// <summary>Per-head dimension when set explicitly (Qwen3 has <c>head_dim ≠ DModel/NHeads</c>);
+        /// 0 means derive it as <see cref="DModel"/> / <see cref="NHeads"/>.</summary>
+        public int HeadDim { get; init; }
+
+        /// <summary>The effective per-head dimension used by attention / RoPE.</summary>
+        public int AttentionHeadDim => HeadDim > 0 ? HeadDim : DModel / NHeads;
+
+        /// <summary>Whether this model applies Qwen3-style per-head RMSNorm to Q and K before RoPE.</summary>
+        public bool UsesQkNorm { get; init; }
+
         /// <summary>Number of Transformer blocks.</summary>
         public int NLayers { get; init; } = 12;
 
