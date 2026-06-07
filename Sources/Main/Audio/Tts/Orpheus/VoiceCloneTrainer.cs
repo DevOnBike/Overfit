@@ -32,7 +32,8 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
         private readonly CachedLlamaInferenceEngine _engine;
         private readonly TrainableLlamaModel _model;
         private readonly ComputationGraph _graph;
-        private readonly int _vocab;
+        private readonly int _vocab;          // the LM-head/loss output size (restricted to audio tokens)
+        private readonly int _outputStart;    // real token id of restricted index 0 (0 when not restricted)
         private readonly int _maxSeqLen;
 
         private readonly bool _useCheckpoint;
@@ -43,17 +44,35 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
         /// for this 28-layer / 3 B model</b> (disabling it makes the full-graph activations exceed the arena and
         /// OOMs, measured), so it defaults on; the flag is kept only for small models whose whole graph fits.
         /// </summary>
-        public VoiceCloneTrainer(string orpheusGgufPath, int maxSeqLen = 768, QLoRAOptions? options = null, bool useCheckpoint = true)
+        public VoiceCloneTrainer(string orpheusGgufPath, int maxSeqLen = 768, QLoRAOptions? options = null,
+            bool useCheckpoint = true, bool restrictToAudioVocab = true)
         {
             _opt = options ?? new QLoRAOptions();
             _maxSeqLen = maxSeqLen;
             _useCheckpoint = useCheckpoint;
             _engine = CachedLlamaInferenceEngine.LoadGguf(orpheusGgufPath);
-            _vocab = _engine.Config.VocabSize;
             Tokenizer = new GgufEmbeddedTokenizer(GgufTokenizer.Load(orpheusGgufPath));
 
+            // Restrict the LM head / loss / generation to the audio-token sub-vocabulary: the model only ever emits
+            // audio tokens (+ end). This cuts the LM-head matmul (~30% of a step) ~5×, shrinks the arena, and keeps
+            // generation from emitting stray non-audio tokens. The range covers [end-of-text … end-of-vocab), which
+            // contains the end token and the whole contiguous custom-token (audio) block.
+            var fullVocab = _engine.Config.VocabSize;
+            if (restrictToAudioVocab)
+            {
+                var audioBase = ResolveAudioTokenBase(Tokenizer);
+                _outputStart = Math.Min(Tokenizer.EndOfTextTokenId, audioBase);
+                _vocab = fullVocab - _outputStart;
+            }
+            else
+            {
+                _outputStart = 0;
+                _vocab = fullVocab;
+            }
+
             _model = TrainableLlamaModel.FromEngine(
-                _engine, _opt.Rank, new Random(_opt.Seed), maxSeqLen: maxSeqLen + 8, loraOnLmHead: _opt.LoRAOnLmHead);
+                _engine, _opt.Rank, new Random(_opt.Seed), maxSeqLen: maxSeqLen + 8, loraOnLmHead: _opt.LoRAOnLmHead,
+                outputStart: _outputStart, outputCount: restrictToAudioVocab ? _vocab : 0);
 
             // With checkpointing only one block's activations are live; without it, every block's are — so the arena
             // grows with the layer count and the FFN width.
@@ -107,10 +126,18 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
                     var input = ex.InputIds[..^1];
                     var targets = ex.InputIds[1..];
                     // Mask predictions that fall inside the prompt: position i predicts InputIds[i+1]; train only
-                    // where i+1 ≥ PromptLength (the audio-token continuation + end token).
-                    for (var i = 0; i < ex.PromptLength - 1 && i < targets.Length; i++)
+                    // where i+1 ≥ PromptLength (the audio-token continuation + end token). Trained targets are also
+                    // shifted into the restricted output range (logits cover [_outputStart, _outputStart+_vocab)).
+                    for (var i = 0; i < targets.Length; i++)
                     {
-                        targets[i] = IgnoreIndex;
+                        if (i < ex.PromptLength - 1)
+                        {
+                            targets[i] = IgnoreIndex;
+                        }
+                        else
+                        {
+                            targets[i] -= _outputStart;
+                        }
                     }
 
                     _graph.Reset();
@@ -145,6 +172,19 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
             float temperature = 0.6f, float topP = 0.9f, float repeatPenalty = 1.1f, int repeatWindow = 64, int seed = 0)
             => _model.GenerateCachedSampled(
                 promptTokenIds, maxNewTokens, eosTokenId, temperature, topP, repeatPenalty, repeatWindow, seed);
+
+        // Real token id of <custom_token_0> — the bottom of the contiguous audio-token block.
+        private static int ResolveAudioTokenBase(ITokenizer tokenizer)
+        {
+            Span<int> ids = stackalloc int[8];
+            var n = tokenizer.Encode("<custom_token_0>", ids);
+            if (n != 1)
+            {
+                throw new OverfitRuntimeException(
+                    $"Expected '<custom_token_0>' to tokenize to one token, got {n} — not an Orpheus tokenizer.");
+            }
+            return ids[0];
+        }
 
         private List<AutogradNode> MaterializeParams()
         {

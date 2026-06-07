@@ -11,6 +11,7 @@ using DevOnBike.Overfit.Audio.Tts.Snac;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.LoRA;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
+using DevOnBike.Overfit.LanguageModels.Whisper;
 
 namespace DevOnBike.Overfit.Demo.VoiceClone
 {
@@ -47,6 +48,17 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
             var repeatPenalty = float.TryParse(a.Get("repeat-penalty"), System.Globalization.CultureInfo.InvariantCulture, out var rp) ? rp : 1.1f;
             var seed = int.TryParse(a.Get("seed"), out var sd) ? sd : 1;
 
+            // Optional Whisper → auto-transcribe each segment (robust: can't misalign like order-pairing a transcript).
+            var whisperArg = a.Get("whisper");
+            var whisper = whisperArg is not null && File.Exists(whisperArg) ? WhisperTranscriber.Load(whisperArg) : null;
+
+            // Diagnostic: split the recording and transcribe each segment with Whisper, alongside the expected line
+            // — reveals transcript/segment misalignment and badly-recorded sentences. Needs --whisper.
+            if (a.Has("check"))
+            {
+                return RunCheck(recording, transcript, a.Get("whisper"), minSilence, threshold);
+            }
+
             if (snacDir is null || !PathExists(snacDir))
             {
                 Console.Error.WriteLine($"Missing --snac (path not found: {snacDir ?? "<null>"}).");
@@ -54,13 +66,16 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
             }
             if (!synthOnly)
             {
-                foreach (var (label, path) in new[] { ("recording", recording), ("transcript", transcript) })
+                if (recording is null || !PathExists(recording))
                 {
-                    if (path is null || !PathExists(path))
-                    {
-                        Console.Error.WriteLine($"Missing --{label} (path not found: {path ?? "<null>"}).");
-                        return 1;
-                    }
+                    Console.Error.WriteLine($"Missing --recording (path not found: {recording ?? "<null>"}).");
+                    return 1;
+                }
+                // Either a transcript (paired by order) or --whisper (auto-transcribe each segment).
+                if (whisper is null && (transcript is null || !PathExists(transcript)))
+                {
+                    Console.Error.WriteLine("Need --transcript <txt> (paired by order) or --whisper <ggml> (auto-transcribe per segment).");
+                    return 1;
                 }
             }
             if (!dryRun && (orpheus is null || !File.Exists(orpheus)))
@@ -98,7 +113,8 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
             Console.WriteLine("Loading Orpheus (this is the trainable base)…");
             // Gradient checkpointing stays ON: for this 28-layer / 3B model the full activation graph otherwise OOMs
             // (measured). --no-checkpoint exists only for small models whose whole graph fits.
-            using var trainer = new VoiceCloneTrainer(orpheus!, maxSeq, new QLoRAOptions { Epochs = epochs }, useCheckpoint: !a.Has("no-checkpoint"));
+            using var trainer = new VoiceCloneTrainer(orpheus!, maxSeq, new QLoRAOptions { Epochs = epochs },
+                useCheckpoint: !a.Has("no-checkpoint"), restrictToAudioVocab: !a.Has("full-vocab"));
             var ex = BuildWith(trainer.Tokenizer);
             Report(ex);
 
@@ -138,6 +154,11 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
             {
                 var builder = new VoiceCloneDatasetBuilder(snac, tok, tok.EndOfTextTokenId);
                 var audio = AudioFile.ReadMono(recording!, out var rate);
+                if (whisper is not null)
+                {
+                    Console.WriteLine($"recording: {audio.Length / (double)rate:F1}s @ {rate} Hz | auto-transcribing each segment with Whisper");
+                    return builder.BuildFromRecording(audio, rate, voice, whisper, minSilence, threshold);
+                }
                 var lines = ReadTranscript(transcript!);
                 Console.WriteLine($"recording: {audio.Length / (double)rate:F1}s @ {rate} Hz | transcript lines: {lines.Count}");
                 return builder.BuildFromRecording(audio, rate, lines, voice, minSilence, threshold);
@@ -178,6 +199,44 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
                     SyntheticSpeechMetadata.ForNow(vc).ToInfoComment());
                 Console.WriteLine($"Wrote {outWav}  ({audio.Length / (double)s.SampleRate:F2}s, {codes.Count} codes, watermarked).");
             }
+        }
+
+        // Splits the recording the same way training does, transcribes each segment with Whisper, and prints it
+        // next to the expected transcript line — so misalignment / bad takes are visible.
+        private static int RunCheck(string? recording, string? transcript, string? whisperArg, float minSilence, float threshold)
+        {
+            if (recording is null || !File.Exists(recording) || transcript is null || !File.Exists(transcript))
+            {
+                Console.Error.WriteLine("--check needs --recording <wav> and --transcript <txt>.");
+                return 1;
+            }
+            var whisperPath = whisperArg
+                ?? Path.Combine(Environment.GetEnvironmentVariable("OVERFIT_WHISPER_DIR") ?? @"c:\whisper", "ggml-tiny.bin");
+            if (!File.Exists(whisperPath))
+            {
+                Console.Error.WriteLine($"Whisper model not found: {whisperPath} (pass --whisper <ggml-*.bin>).");
+                return 1;
+            }
+
+            var whisper = WhisperTranscriber.Load(whisperPath);
+            var audio = AudioFile.ReadMono(recording, out var rate);
+            var normalized = AudioPostProcessing.PeakNormalize(audio);
+            var segments = AudioSegmenter.SplitOnSilence(normalized, rate, amplitudeThreshold: threshold, minSilenceSeconds: minSilence);
+            var lines = ReadTranscript(transcript);
+
+            Console.WriteLine($"segments {segments.Count} vs transcript lines {lines.Count}\n");
+            for (var i = 0; i < segments.Count; i++)
+            {
+                var (start, end) = segments[i];
+                var seg = normalized.AsSpan(start, end - start);
+                var seg16 = rate == 16000 ? seg.ToArray() : AudioResampler.Resample(seg, rate, 16000);
+                var heard = whisper.Transcribe(seg16, "en").Trim();
+                var expected = i < lines.Count ? lines[i] : "(no line)";
+                Console.WriteLine($"[{i + 1,2}] {(end - start) / (double)rate:F1}s");
+                Console.WriteLine($"     exp: {expected}");
+                Console.WriteLine($"     got: {heard}");
+            }
+            return 0;
         }
 
         private static int[] TokenizeWith(ITokenizer tok, string text)

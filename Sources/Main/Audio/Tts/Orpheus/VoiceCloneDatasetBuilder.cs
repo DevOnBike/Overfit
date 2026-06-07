@@ -128,6 +128,42 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
         }
 
         /// <summary>
+        /// Builds examples from a single recording by <b>auto-transcribing each segment with Whisper</b> instead of
+        /// pairing against a fixed transcript by order. This is the robust path: it can't misalign, because every
+        /// segment is paired with its own transcription — even if a silence split merges two sentences or cuts one
+        /// in half. Segments whose transcription is shorter than <paramref name="minChars"/> are dropped (junk /
+        /// stray fragments). STT isn't perfect, but small text errors don't stop the model learning the voice.
+        /// </summary>
+        public List<OrpheusTrainingExample> BuildFromRecording(
+            ReadOnlySpan<float> audio, int sampleRate, string voice, WhisperTranscriber whisper,
+            float minSilenceSeconds = 0.5f, float silenceThreshold = 0.03f, string language = "en", int minChars = 4)
+        {
+            var normalized = AudioPostProcessing.PeakNormalize(audio);
+            var segments = AudioSegmenter.SplitOnSilence(
+                normalized, sampleRate, amplitudeThreshold: silenceThreshold, minSilenceSeconds: minSilenceSeconds);
+
+            var examples = new List<OrpheusTrainingExample>(segments.Count);
+            foreach (var (start, end) in segments)
+            {
+                var segment = normalized.AsSpan(start, end - start);
+                var segment16 = sampleRate == WhisperSampleRate ? segment.ToArray() : AudioResampler.Resample(segment, sampleRate, WhisperSampleRate);
+                var text = whisper.Transcribe(segment16, language).Trim();
+                if (text.Length < minChars)
+                {
+                    continue;
+                }
+                var segment24 = sampleRate == OrpheusSampleRate ? segment.ToArray() : AudioResampler.Resample(segment, sampleRate, OrpheusSampleRate);
+                examples.Add(BuildExample(segment24, text, voice));
+            }
+
+            if (examples.Count == 0)
+            {
+                throw new OverfitFormatException("No usable segments after auto-transcription — check the recording / silence settings.");
+            }
+            return examples;
+        }
+
+        /// <summary>
         /// Convenience: read a single audio file and a transcript file (one line per utterance, in order) and build
         /// the dataset. Blank lines and a leading "N." / "N)" numbering are ignored.
         /// </summary>

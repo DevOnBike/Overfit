@@ -30,6 +30,9 @@ namespace DevOnBike.Overfit.DeepLearning
         private readonly bool _splitHalf;
         private readonly DecodeWeight _embed;
         private readonly IDequantRowSource _lmHead;
+        // When the output vocab is restricted (e.g. audio-only for voice cloning), the LM head produces logits over
+        // [_outputStart, _outputStart+_vocab); a generated index i maps back to real token id i + _outputStart.
+        private readonly int _outputStart;
         private readonly TrainableLlamaBlock[] _blocks;
         private readonly AutogradNode[] _ln1Gamma;
         private readonly AutogradNode[] _ln2Gamma;
@@ -46,11 +49,20 @@ namespace DevOnBike.Overfit.DeepLearning
             LlamaLayerFrozenWeights[] layers,
             float[] finalNormInit,
             float ropeTheta, bool ropeSplitHalf, float eps, int maxSeqLen, RopeScaling? ropeScaling,
-            int loraRank, Random rng, bool loraOnLmHead = false)
+            int loraRank, Random rng, bool loraOnLmHead = false,
+            int outputStart = 0, int outputCount = 0)
         {
-            _dModel = dModel; _nQHeads = nQHeads; _nKVHeads = nKVHeads; _vocab = vocab;
+            // Optional output-vocab restriction: the LM head / loss / generation cover only [outputStart,
+            // outputStart+outputCount) instead of the full vocab — a big win when the model only ever emits a
+            // sub-vocabulary (audio tokens for voice cloning). outputCount == 0 means "full vocab".
+            var restricted = outputCount > 0;
+            _outputStart = restricted ? outputStart : 0;
+            var effectiveVocab = restricted ? outputCount : vocab;
+
+            _dModel = dModel; _nQHeads = nQHeads; _nKVHeads = nKVHeads; _vocab = effectiveVocab;
             _dHead = dModel / nQHeads; _halfDim = _dHead / 2; _eps = eps; _splitHalf = ropeSplitHalf;
-            _embed = embed; _lmHead = lmHead;
+            _embed = embed;
+            _lmHead = restricted ? new RangedDequantRowSource(lmHead, outputStart, outputCount) : lmHead;
             _dFF = layers[0].Gate.OutputSize;
 
             var nLayers = layers.Length;
@@ -75,7 +87,7 @@ namespace DevOnBike.Overfit.DeepLearning
             _finalNormGamma = Param(finalNormInit);
             // LoRA on the LM head is opt-in: it adds direct output capacity but on a huge vocab it is
             // high-variance, so it is OFF by default (block LoRA + norms give a stable descent).
-            _lmHeadLora = (loraRank > 0 && loraOnLmHead) ? Track(new LoRAAdapter(dModel, vocab, loraRank, rng)) : null;
+            _lmHeadLora = (loraRank > 0 && loraOnLmHead) ? Track(new LoRAAdapter(dModel, effectiveVocab, loraRank, rng)) : null;
             _ropeTable = new RopeTable(maxSeqLen, _dHead, ropeTheta, ropeScaling, ropeSplitHalf);
         }
 
@@ -86,7 +98,8 @@ namespace DevOnBike.Overfit.DeepLearning
         /// projection + embedding + LM head is the engine's frozen quantized handle (zero repack), with
         /// fresh LoRA adapters of the given rank and RMSNorm gains copied from the model.</summary>
         public static TrainableLlamaModel FromEngine(
-            CachedLlamaInferenceEngine engine, int loraRank, Random rng, int maxSeqLen, bool loraOnLmHead = false)
+            CachedLlamaInferenceEngine engine, int loraRank, Random rng, int maxSeqLen, bool loraOnLmHead = false,
+            int outputStart = 0, int outputCount = 0)
         {
             var cfg = engine.Config;
             int dModel = cfg.DModel, nHeads = cfg.NHeads, kvHeads = cfg.KvHeads, headDim = dModel / nHeads;
@@ -113,7 +126,8 @@ namespace DevOnBike.Overfit.DeepLearning
                 dModel, nHeads, kvHeads, cfg.VocabSize,
                 engine.EmbeddingWeights, engine.LmHeadWeights.AsRowSource(),
                 layers, engine.FinalNormGamma.AsReadOnlySpan().ToArray(),
-                cfg.RoPETheta, cfg.RopeSplitHalf, 1e-6f, maxSeqLen, cfg.RopeScaling, loraRank, rng, loraOnLmHead);
+                cfg.RoPETheta, cfg.RopeSplitHalf, 1e-6f, maxSeqLen, cfg.RopeScaling, loraRank, rng, loraOnLmHead,
+                outputStart, outputCount);
         }
 
         /// <summary>Forward over a token sequence → logits <c>[T, vocab]</c>, recording the tape.
@@ -232,7 +246,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
                 if (p == tokens.Count - 1)
                 {
-                    var token = LmHeadArgmax(hidden, normedB.Span, rowB.Span);
+                    var token = LmHeadArgmax(hidden, normedB.Span, rowB.Span) + _outputStart; // restricted index → real id
                     if (token == eosTokenId) { break; }
                     produced.Add(token);
                     if (produced.Count >= maxNewTokens) { break; }
@@ -287,7 +301,8 @@ namespace DevOnBike.Overfit.DeepLearning
                 if (p == tokens.Count - 1)
                 {
                     FillLmHeadLogits(hidden, normedB.Span, rowB.Span, logits);
-                    var token = SampleToken(logits, probs, order, produced, temperature, topP, repeatPenalty, repeatWindow, rng);
+                    var sampled = SampleToken(logits, probs, order, produced, temperature, topP, repeatPenalty, repeatWindow, rng, _outputStart);
+                    var token = sampled + _outputStart; // restricted index → real token id
                     if (token == eosTokenId) { break; }
                     produced.Add(token);
                     if (produced.Count >= maxNewTokens) { break; }
@@ -336,7 +351,7 @@ namespace DevOnBike.Overfit.DeepLearning
         // Repetition penalty → temperature → softmax → top-p nucleus → sample. Greedy when temperature <= 0.
         private static int SampleToken(
             Span<float> logits, float[] probs, int[] order, List<int> produced,
-            float temperature, float topP, float repeatPenalty, int repeatWindow, Random rng)
+            float temperature, float topP, float repeatPenalty, int repeatWindow, Random rng, int outputStart)
         {
             var vocab = logits.Length;
 
@@ -345,7 +360,11 @@ namespace DevOnBike.Overfit.DeepLearning
                 var from = Math.Max(0, produced.Count - repeatWindow);
                 for (var i = from; i < produced.Count; i++)
                 {
-                    var t = produced[i];
+                    var t = produced[i] - outputStart; // real token id → restricted logit index
+                    if ((uint)t >= (uint)vocab)
+                    {
+                        continue;
+                    }
                     var v = logits[t];
                     logits[t] = v > 0f ? v / repeatPenalty : v * repeatPenalty;
                 }
