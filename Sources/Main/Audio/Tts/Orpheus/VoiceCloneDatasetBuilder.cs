@@ -66,7 +66,10 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
         public List<OrpheusTrainingExample> BuildFromFolder(
             string directory, string voice, WhisperTranscriber? whisper = null, string language = "en",
             bool normalize = true, bool trimSilence = true,
-            float silenceThreshold = 0.02f, float keepPaddingSeconds = 0.05f)
+            // 0.1 s headroom + a low threshold deliberately preserve soft word onsets (breathy h / s / f, whose
+            // attack sits below a higher gate) — trimming into them teaches the model to clip the first phoneme.
+            // The lead-in pause is far longer (avg ~0.74 s on real takes), so it is still removed.
+            float silenceThreshold = 0.015f, float keepPaddingSeconds = 0.1f)
         {
             if (!Directory.Exists(directory))
             {

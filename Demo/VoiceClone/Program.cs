@@ -168,10 +168,15 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
                 var builder = new VoiceCloneDatasetBuilder(snac, tok, tok.EndOfTextTokenId);
 
                 // Per-file folder: NN.wav + sibling NN.txt. Normalizes + trims lead/trail silence per clip.
+                // --trim-threshold / --trim-padding tune the silence trim (bigger padding preserves soft onsets).
                 if (folder is not null)
                 {
-                    Console.WriteLine($"folder: {folder} | per-file clips (.wav + sibling .txt), normalize + silence-trim");
-                    return builder.BuildFromFolder(folder, voice, whisper);
+                    var trimThreshold = float.TryParse(a.Get("trim-threshold"), System.Globalization.CultureInfo.InvariantCulture, out var tt) ? tt : 0.015f;
+                    var trimPadding = float.TryParse(a.Get("trim-padding"), System.Globalization.CultureInfo.InvariantCulture, out var tpad) ? tpad : 0.1f;
+                    Console.WriteLine($"folder: {folder} | per-file clips (.wav + sibling .txt), normalize + silence-trim "
+                        + $"(threshold {trimThreshold}, padding {trimPadding}s)");
+                    return builder.BuildFromFolder(folder, voice, whisper, "en", normalize: true, trimSilence: true,
+                        silenceThreshold: trimThreshold, keepPaddingSeconds: trimPadding);
                 }
 
                 var audio = AudioFile.ReadMono(recording!, out var rate);
