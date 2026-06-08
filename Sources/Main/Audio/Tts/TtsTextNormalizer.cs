@@ -48,6 +48,22 @@ namespace DevOnBike.Overfit.Audio.Tts
             ("api", "A P I"),
             ("sql", "S Q L"),
             ("json", "jason"),
+            // Common tech acronyms — spaced capitals → Orpheus spells them out ("ai" → "ay eye"). Kept to
+            // unambiguous ones (no real-word clashes like "ram"/"it"); the model reads these wrong raw.
+            ("ai", "A I"),
+            ("ml", "M L"),
+            ("ui", "U I"),
+            ("ux", "U X"),
+            ("io", "I O"),
+            ("os", "O S"),
+            ("sdk", "S D K"),
+            ("cli", "C L I"),
+            ("ide", "I D E"),
+            ("url", "U R L"),
+            ("gpt", "G P T"),
+            ("html", "H T M L"),
+            ("css", "C S S"),
+            ("xml", "X M L"),
         ];
 
         private readonly Dictionary<string, string> _lexicon;

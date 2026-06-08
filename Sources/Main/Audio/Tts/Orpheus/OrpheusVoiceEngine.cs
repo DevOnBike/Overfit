@@ -134,11 +134,14 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
             using var session = _llm.Engine.CreateSession();
             session.Prefill(promptTokens);
 
+            var genSw = System.Diagnostics.Stopwatch.StartNew();
+            var generatedCount = 0;
             var codes = new List<int>();
             var accepted = 0;
             for (var step = 0; step < maxTokens; step++)
             {
                 var token = session.GenerateNextToken(in sampling);
+                generatedCount++;
                 if (token == eos || token == EndOfSpeechTokenId)
                 {
                     break;
@@ -158,6 +161,8 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
                 }
             }
 
+            genSw.Stop();
+            Console.WriteLine($"  gen: {generatedCount} tok in {genSw.Elapsed.TotalSeconds:F1}s = {generatedCount / genSw.Elapsed.TotalSeconds:F1} tok/s (preset / inference engine)");
             return codes;
         }
 

@@ -55,9 +55,15 @@ own Whisper. Remaining, by ROI (value ÷ effort):
 
 **🟡 Structural (bigger effort, high value)**
 3. **Merge LoRA → fast inference engine** — clone synth runs on the trainable graph (`VoiceCloneTrainer.Generate` →
-   `TrainableLlamaModel`), preset runs on `CachedLlamaInferenceEngine` (zero-alloc/SIMD/Q4_K). Merge the adapter delta
-   into the base weights (dequant row + B·A·scale + requant) → run clone on the fast engine = **~2-4× faster**. The
-   right perf fix (the LM token-gen is the RTF~8-9× bottleneck; SNAC decode is cheap).
+   `TrainableLlamaModel`), preset runs on `CachedLlamaInferenceEngine` (zero-alloc/SIMD/Q4_K). **MEASURED GAP 2026-06-08
+   (same sentence, Orpheus-3B Q4): clone 6.1 tok/s (490 tok / 80.3 s) vs preset 12.9 tok/s (533 tok / 41.5 s) = 2.1×.**
+   Merge the adapter delta into the base weights → run clone on the fast engine ≈ preset speed (**~2.1×**). Merge math
+   (grounded): LoRA `Apply(x)=(x·A)·B` (NO alpha/scale), A `[in×rank]`, B `[rank×out]` →
+   `W_merged[o,i] = W_base[o,i] + Σ_r A[i,r]·B[r,o]`. Per projection: dequant base (per-head for q/k/v/o, resident for
+   gate/up/down) → add delta → requant (Q8) → rebuild `LayerWeightBuffers`; also swap in the trained RMSNorm gains
+   (`_ln1Gamma`/`_ln2Gamma`). Build a fresh engine via `CreateFromBuffers`, reuse base embed/lm_head/final-norm. Validate:
+   merged-engine output must match the trainable-model output (same words via Whisper) AND hit ~preset tok/s. LM-head
+   LoRA is off by default → no merge there. Audio-vocab restriction was training-only → irrelevant at merged inference.
 
 **🟠 Medium-term**
 4. **Real-time on CPU** — smaller same-arch ~0.5B LM (RTF 2-3) or port **Kokoro 82M** (Apache, StyleTTS2, ~1-2 wk,

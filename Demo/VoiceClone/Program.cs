@@ -208,9 +208,12 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
                 var audioBase = ResolveAudioBase(t.Tokenizer);
                 // Stop at end_of_speech (audioBase+2 = 128258) as well as the text-eos — the canonical prompt makes
                 // the model end the audio with end_of_speech, else it babbles to --max-new after the sentence.
+                var genSw = System.Diagnostics.Stopwatch.StartNew();
                 var generated = t.Generate(promptIds, maxNew, t.EndOfTextTokenId,
                     temperature: temperature, topP: topP, repeatPenalty: repeatPenalty, seed: seed,
                     secondaryEosTokenId: audioBase + 2);
+                genSw.Stop();
+                Console.WriteLine($"  gen: {generated.Length} tok in {genSw.Elapsed.TotalSeconds:F1}s = {generated.Length / genSw.Elapsed.TotalSeconds:F1} tok/s (clone / trainable graph)");
 
                 var codes = new List<int>();
                 foreach (var tok in generated)
