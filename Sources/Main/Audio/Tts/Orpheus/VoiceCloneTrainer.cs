@@ -174,6 +174,21 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
             => _model.GenerateCachedSampled(
                 promptTokenIds, maxNewTokens, eosTokenId, temperature, topP, repeatPenalty, repeatWindow, seed, secondaryEosTokenId);
 
+        /// <summary>
+        /// Bakes the trained LoRA + RMSNorm gains into the base and returns a fast, fully-quantized
+        /// <see cref="CachedLlamaInferenceEngine"/> — the fine-tuned voice now decodes on the optimized
+        /// zero-alloc/SIMD path (~2× the trainable graph). Keep this trainer alive for the engine's lifetime
+        /// (it borrows the base embedding / LM-head handles).
+        /// </summary>
+        public CachedLlamaInferenceEngine BuildMergedEngine(bool mergeLora = true) => _model.BuildMergedEngine(_engine, mergeLora);
+
+        /// <summary>Diagnostic: the trainable model's decode-path final hidden state for a prompt (to diff against a
+        /// merged inference engine and localize divergence).</summary>
+        public void DecodePromptHidden(int[] promptTokens, Span<float> hiddenOut) => _model.DecodePromptHidden(promptTokens, hiddenOut);
+
+        /// <summary>The model config (dims) — for diagnostics/merge consumers.</summary>
+        public GPT1Config Config => _engine.Config;
+
         // Real token id of <custom_token_0> — the bottom of the contiguous audio-token block.
         private static int ResolveAudioTokenBase(ITokenizer tokenizer)
         {

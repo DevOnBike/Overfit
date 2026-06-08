@@ -317,6 +317,194 @@ namespace DevOnBike.Overfit.DeepLearning
             return produced.ToArray();
         }
 
+        /// <summary>
+        /// Diagnostic: runs the decode (ProjVec) path over <paramref name="promptTokens"/> and copies the
+        /// last token's final hidden state (post-stack, BEFORE the final RMSNorm — matching
+        /// <c>CachedLlamaSession.LastHiddenState</c>) into <paramref name="hiddenOut"/>. Used to localize where a
+        /// merged inference engine diverges from this trainable model on the same prompt.
+        /// </summary>
+        public void DecodePromptHidden(int[] promptTokens, Span<float> hiddenOut)
+        {
+            var nL = _blocks.Length;
+            var kvWidth = _nKVHeads * _dHead;
+            var kvStride = promptTokens.Length * kvWidth;
+            var cacheK = new float[nL * kvStride];
+            var cacheV = new float[nL * kvStride];
+
+            using var hiddenB = new PooledBuffer<float>(_dModel, clearMemory: false);
+            using var nextB = new PooledBuffer<float>(_dModel, false);
+            var hidden = hiddenB.Span;
+            var next = nextB.Span;
+
+            for (var p = 0; p < promptTokens.Length; p++)
+            {
+                _embed.DequantizeRow(promptTokens[p], hidden);
+                for (var l = 0; l < nL; l++)
+                {
+                    _blocks[l].DecodeStep(hidden, p, _ropeTable, _ln1Gamma[l], _ln2Gamma[l], _lora[l],
+                        cacheK.AsSpan(l * kvStride, kvStride), cacheV.AsSpan(l * kvStride, kvStride), next);
+                    next.CopyTo(hidden);
+                }
+            }
+            hidden.Slice(0, _dModel).CopyTo(hiddenOut);
+        }
+
+        /// <summary>
+        /// Bakes the trained LoRA + RMSNorm gains into the frozen base weights and returns a fresh, fully
+        /// <b>quantized</b> <see cref="CachedLlamaInferenceEngine"/> — so the fine-tuned model runs on the optimized
+        /// zero-alloc/SIMD decode path instead of the (≈2× slower) trainable autograd graph. The merge is one-time:
+        /// per projection, dequant the base rows, add the LoRA residual <c>W[o,i] += Σ_r A[i,r]·B[r,o]</c>, and
+        /// re-quantize to Q8. LM-head LoRA (off by default) is not merged. The returned engine borrows the base's
+        /// embedding / LM-head / backing, so keep <paramref name="baseEngine"/> alive for the merged engine's lifetime.
+        /// </summary>
+        public CachedLlamaInferenceEngine BuildMergedEngine(CachedLlamaInferenceEngine baseEngine, bool mergeLora = true)
+        {
+            var cfg = baseEngine.Config;
+            var nL = _blocks.Length;
+            var merged = new CachedLlamaInferenceEngine.LayerWeightBuffers[nL];
+
+            for (var l = 0; l < nL; l++)
+            {
+                var b = baseEngine.GetTrainableLayer(l);
+                var lora = mergeLora ? _lora[l] : null;
+
+                merged[l] = new CachedLlamaInferenceEngine.LayerWeightBuffers
+                {
+                    // Trained RMSNorm gains replace the base (these are the other thing QLoRA learns).
+                    AttnNormGamma = NodeToStorage(_ln1Gamma[l]),
+                    AttnNormBeta = TensorStorage<float>.Unpooled(0),
+                    FfnNormGamma = NodeToStorage(_ln2Gamma[l]),
+                    FfnNormBeta = TensorStorage<float>.Unpooled(0),
+                    QNorm = b.QNorm,
+                    KNorm = b.KNorm,
+                    // q/k/v: each per-head weight row is an OUTPUT neuron (o = h·dHead + jj), columns are dModel inputs.
+                    Wq = MergePerHeadByOutput(b.Wq, lora?.Q, _nQHeads, _dHead, _dModel),
+                    Bq = b.Bq,
+                    Wk = MergePerHeadByOutput(b.Wk, lora?.K, _nKVHeads, _dHead, _dModel),
+                    Bk = b.Bk,
+                    Wv = MergePerHeadByOutput(b.Wv, lora?.V, _nKVHeads, _dHead, _dModel),
+                    Bv = b.Bv,
+                    // o: per-head weight is the TRANSPOSED layout — row jj is the head's INPUT column (i = h·dHead+jj),
+                    // the dModel entries are OUTPUTS. So the residual indexes A by the fixed input, B by the output.
+                    Wo = MergePerHeadByInput(b.Wo, lora?.O, _nQHeads, _dHead, _dModel),
+                    Bo = b.Bo,
+                    // FFN: resident full matrices. gate/up = [dFF × dModel], down = [dModel × dFF].
+                    FfnGate = MergeResident(b.FfnGate, lora?.Gate, _dFF, _dModel),
+                    FfnUp = MergeResident(b.FfnUp, lora?.Up, _dFF, _dModel),
+                    FfnDown = MergeResident(b.FfnDown, lora?.Down, _dModel, _dFF),
+                };
+            }
+
+            return CachedLlamaInferenceEngine.CreateFromBuffers(
+                cfg, baseEngine.EmbeddingWeights, NodeToStorage(_finalNormGamma),
+                TensorStorage<float>.Unpooled(0), baseEngine.LmHeadWeights, merged);
+        }
+
+        private static TensorStorage<float> NodeToStorage(AutogradNode node)
+        {
+            var src = node.DataView.AsSpan();
+            var st = TensorStorage<float>.Unpooled(src.Length);
+            src.CopyTo(st.AsSpan());
+            return st;
+        }
+
+        // q/k/v: base[h] is [dHead × dModel], row jj = output neuron o = h·dHead+jj, cols = dModel inputs.
+        // LoRA A [dModel × rank], B [rank × (nHeads·dHead)]; delta[o,i] = Σ_r A[i,r]·B[r,o].
+        private static DecodeWeight[] MergePerHeadByOutput(DecodeWeight[] baseHeads, LoRAAdapter? lora, int nHeads, int dHead, int dModel)
+        {
+            float[]? a = null, bb = null;
+            var rank = 0;
+            var outDim = nHeads * dHead;
+            if (lora is not null) { a = lora.A.DataView.AsSpan().ToArray(); bb = lora.B.DataView.AsSpan().ToArray(); rank = lora.Rank; }
+            var result = new DecodeWeight[nHeads];
+            for (var h = 0; h < nHeads; h++)
+            {
+                var buf = new float[dHead * dModel];
+                for (var jj = 0; jj < dHead; jj++)
+                {
+                    baseHeads[h].DequantizeRow(jj, buf.AsSpan(jj * dModel, dModel));
+                }
+                if (lora is not null)
+                {
+                    System.Threading.Tasks.Parallel.For(0, dHead, jj =>
+                    {
+                        var o = (h * dHead) + jj;
+                        var row = buf.AsSpan(jj * dModel, dModel);
+                        for (var i = 0; i < dModel; i++)
+                        {
+                            var d = 0f;
+                            for (var r = 0; r < rank; r++) { d += a![(i * rank) + r] * bb![(r * outDim) + o]; }
+                            row[i] += d;
+                        }
+                    });
+                }
+                result[h] = Q8Weight.QuantizeRows(buf, dHead, dModel);
+            }
+            return result;
+        }
+
+        // o: base[h] is [dModel × dHead] — OutputSize=dModel rows, each the dHead weights for head h's attn output
+        // (= the full-O columns [h·dHead, (h+1)·dHead)). LoRA O: A [(nHeads·dHead) × rank], B [rank × dModel];
+        // for output o and head-input i (full input = h·dHead+i): delta = Σ_r A[h·dHead+i, r]·B[r, o].
+        private static DecodeWeight[] MergePerHeadByInput(DecodeWeight[] baseHeads, LoRAAdapter? lora, int nHeads, int dHead, int dModel)
+        {
+            float[]? a = null, bb = null;
+            var rank = 0;
+            if (lora is not null) { a = lora.A.DataView.AsSpan().ToArray(); bb = lora.B.DataView.AsSpan().ToArray(); rank = lora.Rank; }
+            var result = new DecodeWeight[nHeads];
+            for (var h = 0; h < nHeads; h++)
+            {
+                var buf = new float[dModel * dHead];
+                for (var o = 0; o < dModel; o++)
+                {
+                    baseHeads[h].DequantizeRow(o, buf.AsSpan(o * dHead, dHead));
+                }
+                if (lora is not null)
+                {
+                    System.Threading.Tasks.Parallel.For(0, dModel, o =>
+                    {
+                        var row = buf.AsSpan(o * dHead, dHead);
+                        for (var i = 0; i < dHead; i++)
+                        {
+                            var iIn = (h * dHead) + i;
+                            var d = 0f;
+                            for (var r = 0; r < rank; r++) { d += a![(iIn * rank) + r] * bb![(r * dModel) + o]; }
+                            row[i] += d;
+                        }
+                    });
+                }
+                result[h] = Q8Weight.QuantizeRows(buf, dModel, dHead);
+            }
+            return result;
+        }
+
+        // Resident full matrix [outDim × inDim]. LoRA A [inDim × rank], B [rank × outDim]; delta[o,i] = Σ_r A[i,r]·B[r,o].
+        private static DecodeWeight MergeResident(DecodeWeight baseW, LoRAAdapter? lora, int outDim, int inDim)
+        {
+            var buf = new float[checked(outDim * inDim)];
+            for (var o = 0; o < outDim; o++)
+            {
+                baseW.DequantizeRow(o, buf.AsSpan(o * inDim, inDim));
+            }
+            if (lora is not null)
+            {
+                var a = lora.A.DataView.AsSpan().ToArray();
+                var bb = lora.B.DataView.AsSpan().ToArray();
+                var rank = lora.Rank;
+                System.Threading.Tasks.Parallel.For(0, outDim, o =>
+                {
+                    var row = buf.AsSpan(o * inDim, inDim);
+                    for (var i = 0; i < inDim; i++)
+                    {
+                        var d = 0f;
+                        for (var r = 0; r < rank; r++) { d += a[(i * rank) + r] * bb[(r * outDim) + o]; }
+                        row[i] += d;
+                    }
+                });
+            }
+            return Q8Weight.QuantizeRows(buf, outDim, inDim);
+        }
+
         // Computes the full LM-head logit vector for the current hidden state (RMSNorm + base + LM-head LoRA).
         private void FillLmHeadLogits(ReadOnlySpan<float> hidden, Span<float> normed, Span<float> row, Span<float> logits)
         {

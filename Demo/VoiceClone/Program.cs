@@ -10,6 +10,7 @@ using DevOnBike.Overfit.Audio.Tts.Orpheus;
 using DevOnBike.Overfit.Audio.Tts.Snac;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.LoRA;
+using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.LanguageModels.Tokenizers;
 using DevOnBike.Overfit.LanguageModels.Whisper;
 
@@ -53,6 +54,9 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
             var topP = float.TryParse(a.Get("top-p"), System.Globalization.CultureInfo.InvariantCulture, out var pp) ? pp : 0.9f;
             var repeatPenalty = float.TryParse(a.Get("repeat-penalty"), System.Globalization.CultureInfo.InvariantCulture, out var rp) ? rp : 1.1f;
             var seed = int.TryParse(a.Get("seed"), out var sd) ? sd : 1;
+
+            // Built lazily on the first --fast synth, reused across calls (the LoRA→base merge is one-time).
+            CachedLlamaInferenceEngine? mergedEngine = null;
 
             // Optional Whisper → auto-transcribe each segment (robust: can't misalign like order-pairing a transcript).
             var whisperArg = a.Get("whisper");
@@ -164,6 +168,30 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
 
             // ── local functions (capture the parsed options above) ──
 
+            // Generates audio tokens on the MERGED inference engine (LoRA baked into the base) — the fast path.
+            int[] GenerateViaMerged(CachedLlamaInferenceEngine eng, int[] prompt, int audioBase, int eos)
+            {
+                using var session = eng.CreateSession();
+                session.Reset(prompt);
+                var sampling = temperature <= 0f
+                    ? SamplingOptions.GreedyWithPenalty(repeatPenalty)
+                    : new SamplingOptions(SamplingStrategy.TopP, temperature, 0, topP, seed, repeatPenalty, 64);
+                // Restrict decode to the audio sub-vocab (custom tokens ≥ audioBase), exactly as the trainable model
+                // does. Without it the fine-tuned distribution leaks a non-audio token, which poisons the KV context.
+                var constraint = new AudioVocabConstraint(audioBase);
+                var outTokens = new List<int>();
+                for (var i = 0; i < maxNew && !session.IsFull; i++)
+                {
+                    var tok = session.GenerateNextToken(in sampling, constraint);
+                    if (tok == eos || tok == audioBase + 2) // text-eos or end_of_speech
+                    {
+                        break;
+                    }
+                    outTokens.Add(tok);
+                }
+                return outTokens.ToArray();
+            }
+
             List<OrpheusTrainingExample> BuildWith(ITokenizer tok)
             {
                 var builder = new VoiceCloneDatasetBuilder(snac, tok, tok.EndOfTextTokenId);
@@ -208,12 +236,25 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
                 var audioBase = ResolveAudioBase(t.Tokenizer);
                 // Stop at end_of_speech (audioBase+2 = 128258) as well as the text-eos — the canonical prompt makes
                 // the model end the audio with end_of_speech, else it babbles to --max-new after the sentence.
+                int[] generated;
                 var genSw = System.Diagnostics.Stopwatch.StartNew();
-                var generated = t.Generate(promptIds, maxNew, t.EndOfTextTokenId,
-                    temperature: temperature, topP: topP, repeatPenalty: repeatPenalty, seed: seed,
-                    secondaryEosTokenId: audioBase + 2);
+                if (a.Has("fast"))
+                {
+                    // --fast: bake LoRA into the base once, then decode on the optimized inference engine (~2×).
+                    // --no-lora-merge is an isolation switch: build the merged engine WITHOUT the LoRA delta
+                    // (base requant + trained norms only) to separate a base-requant bug from a delta-math bug.
+                    mergedEngine ??= t.BuildMergedEngine(mergeLora: !a.Has("no-lora-merge"));
+                    generated = GenerateViaMerged(mergedEngine, promptIds, audioBase, t.EndOfTextTokenId);
+                }
+                else
+                {
+                    generated = t.Generate(promptIds, maxNew, t.EndOfTextTokenId,
+                        temperature: temperature, topP: topP, repeatPenalty: repeatPenalty, seed: seed,
+                        secondaryEosTokenId: audioBase + 2);
+                }
                 genSw.Stop();
-                Console.WriteLine($"  gen: {generated.Length} tok in {genSw.Elapsed.TotalSeconds:F1}s = {generated.Length / genSw.Elapsed.TotalSeconds:F1} tok/s (clone / trainable graph)");
+                var path = a.Has("fast") ? "clone / MERGED fast engine" : "clone / trainable graph";
+                Console.WriteLine($"  gen: {generated.Length} tok in {genSw.Elapsed.TotalSeconds:F1}s = {generated.Length / genSw.Elapsed.TotalSeconds:F1} tok/s ({path})");
 
                 var codes = new List<int>();
                 foreach (var tok in generated)
@@ -294,6 +335,22 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
             Span<int> ids = stackalloc int[8];
             var n = tok.Encode("<custom_token_0>", ids);
             return n == 1 ? ids[0] : throw new InvalidOperationException("Not an Orpheus tokenizer.");
+        }
+
+        // Masks every token below the audio-token base so the merged engine can only emit custom (audio + control)
+        // tokens — the same sub-vocab the trainable model is restricted to. Lets the baked-in clone decode on the
+        // fast engine without leaking a non-audio token that would derail the rest of the utterance.
+        private sealed class AudioVocabConstraint : ITokenConstraint
+        {
+            private readonly int _audioBase;
+            public AudioVocabConstraint(int audioBase) => _audioBase = audioBase;
+            public bool IsComplete => false;
+            public void Accept(int token) { }
+            public void ApplyMask(Span<float> logits)
+            {
+                var n = Math.Min(_audioBase, logits.Length);
+                for (var i = 0; i < n; i++) { logits[i] = float.NegativeInfinity; }
+            }
         }
 
         private static void Report(List<OrpheusTrainingExample> ex)

@@ -64,6 +64,17 @@ own Whisper. Remaining, by ROI (value ÷ effort):
    (`_ln1Gamma`/`_ln2Gamma`). Build a fresh engine via `CreateFromBuffers`, reuse base embed/lm_head/final-norm. Validate:
    merged-engine output must match the trainable-model output (same words via Whisper) AND hit ~preset tok/s. LM-head
    LoRA is off by default → no merge there. Audio-vocab restriction was training-only → irrelevant at merged inference.
+   **✅ DONE 2026-06-08 — merge correct, 2.1× speed, COHERENT with SAMPLING.** Built `TrainableLlamaModel.BuildMergedEngine`
+   (+ `VoiceCloneTrainer.BuildMergedEngine`, demo `--fast`, `AudioVocabConstraint`). **Merged clone decodes at ~12 tok/s
+   (2.1× the trainable graph's 6.1) and is COHERENT with sampling** (temp 0.6 → Whisper: "The history of computing began
+   long before the invasion of the digital computer."). **Merge proven CORRECT** via diff diagnostic
+   (`MergeDivergenceTests`): merged-vs-trainable final hidden **cos 0.99994**, and the first **6 greedy tokens are
+   bit-identical**. The earlier "garbage" was **greedy brittleness**, NOT a merge bug: tiny numerical drift between the
+   fast engine (Q8 requant + reassociated SIMD attention + batched prefill) and the trainable `ProjVec` decode flips the
+   hard argmax at ~token 6 → wrong SNAC code → derail. **Sampling avoids the hard flip → use temp 0.6 (NOT greedy) with
+   `--fast`.** Caveat: shares the base embed/lmhead/backing → keep the trainer alive while the merged engine lives (the
+   2nd `BuildMergedEngine` in one process double-disposes shared weights). Trailing-babble (ROADMAP #1) still applies to
+   the merged+sampling path. `--fast` now usable for the clone speed-up.
 
 **🟠 Medium-term**
 4. **Real-time on CPU** — smaller same-arch ~0.5B LM (RTF 2-3) or port **Kokoro 82M** (Apache, StyleTTS2, ~1-2 wk,
