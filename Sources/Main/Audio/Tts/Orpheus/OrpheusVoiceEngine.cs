@@ -90,7 +90,8 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
 
             var levels = OrpheusSnacBridge.Redistribute(CollectionsMarshal.AsSpan(codes));
             var audio = _snac.Decode(levels);
-            return AudioPostProcessing.TrimSilence(audio);
+            // Tail-only trim — trimming the lead clips a sentence's first soft onset (garbles word 1).
+            return AudioPostProcessing.TrimSilence(audio, trimLeading: false);
         }
 
         private static float[] Concatenate(List<float[]> parts, int gapSamples)
@@ -121,9 +122,9 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
 
         private List<int> GenerateAudioCodes(string text, string voice, int maxTokens, int seed)
         {
-            var prompt = OrpheusPrompt.Format(text, voice);
-            var promptTokens = new int[_llm.Tokenizer.CountTokens(prompt)];
-            _llm.Tokenizer.Encode(prompt, promptTokens);
+            // Canonical id sequence (incl. the audio-priming control tokens) — NOT the bare "<|audio|>…<|eot_id|>"
+            // string, which omits start_of_speech and corrupts the first word.
+            var promptTokens = OrpheusPrompt.BuildPromptTokens(_llm.Tokenizer, text, voice);
 
             var sampling = new SamplingOptions(
                 SamplingStrategy.TopP, temperature: 0.6f, topK: 0, topP: 0.9f, seed: seed,

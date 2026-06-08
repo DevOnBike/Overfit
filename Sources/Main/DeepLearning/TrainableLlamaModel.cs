@@ -263,7 +263,8 @@ namespace DevOnBike.Overfit.DeepLearning
         /// </summary>
         public int[] GenerateCachedSampled(
             int[] promptTokens, int maxNewTokens, int eosTokenId,
-            float temperature, float topP, float repeatPenalty, int repeatWindow, int seed)
+            float temperature, float topP, float repeatPenalty, int repeatWindow, int seed,
+            int secondaryEosTokenId = -1)
         {
             var nL = _blocks.Length;
             var kvWidth = _nKVHeads * _dHead;
@@ -303,7 +304,10 @@ namespace DevOnBike.Overfit.DeepLearning
                     FillLmHeadLogits(hidden, normedB.Span, rowB.Span, logits);
                     var sampled = SampleToken(logits, probs, order, produced, temperature, topP, repeatPenalty, repeatWindow, rng, _outputStart);
                     var token = sampled + _outputStart; // restricted index → real token id
-                    if (token == eosTokenId) { break; }
+                    // Stop on either terminator: the trained text-eos OR end_of_speech (128258), which the
+                    // base model emits at the audio-stream end under the canonical prompt. Without the latter the
+                    // clone runs to maxNewTokens and tacks on garbled babble after the sentence.
+                    if (token == eosTokenId || token == secondaryEosTokenId) { break; }
                     produced.Add(token);
                     if (produced.Count >= maxNewTokens) { break; }
                     tokens.Add(token);

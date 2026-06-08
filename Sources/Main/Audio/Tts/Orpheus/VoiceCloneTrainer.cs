@@ -169,9 +169,10 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
         /// </summary>
         public int[] Generate(
             int[] promptTokenIds, int maxNewTokens, int eosTokenId,
-            float temperature = 0.6f, float topP = 0.9f, float repeatPenalty = 1.1f, int repeatWindow = 64, int seed = 0)
+            float temperature = 0.6f, float topP = 0.9f, float repeatPenalty = 1.1f, int repeatWindow = 64, int seed = 0,
+            int secondaryEosTokenId = -1)
             => _model.GenerateCachedSampled(
-                promptTokenIds, maxNewTokens, eosTokenId, temperature, topP, repeatPenalty, repeatWindow, seed);
+                promptTokenIds, maxNewTokens, eosTokenId, temperature, topP, repeatPenalty, repeatWindow, seed, secondaryEosTokenId);
 
         // Real token id of <custom_token_0> — the bottom of the contiguous audio-token block.
         private static int ResolveAudioTokenBase(ITokenizer tokenizer)

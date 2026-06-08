@@ -46,8 +46,14 @@ namespace DevOnBike.Overfit.Audio.Tts
         /// Trims leading and trailing near-silence (|sample| below <paramref name="amplitudeThreshold"/>), keeping
         /// <paramref name="keepPadding"/> samples of headroom on each side so speech onsets/decays are not clipped.
         /// Returns the original array unchanged if it is entirely silent or nothing needs trimming.
+        /// <para>
+        /// Set <paramref name="trimLeading"/> false to keep the start intact and only trim the tail — the right
+        /// choice for TTS <b>output</b>: a generated clip's first phoneme often has a soft onset (nasal/fricative)
+        /// whose attack sits below the gate, and clipping it mangles the first word. (Trimming both ends is correct
+        /// for <i>recorded training</i> clips, which carry a real lead-in pause.)
+        /// </para>
         /// </summary>
-        public static float[] TrimSilence(ReadOnlySpan<float> samples, float amplitudeThreshold = 0.01f, int keepPadding = 720)
+        public static float[] TrimSilence(ReadOnlySpan<float> samples, float amplitudeThreshold = 0.01f, int keepPadding = 720, bool trimLeading = true)
         {
             var first = -1;
             var last = -1;
@@ -69,7 +75,7 @@ namespace DevOnBike.Overfit.Audio.Tts
                 return samples.ToArray();
             }
 
-            var start = Math.Max(0, first - keepPadding);
+            var start = trimLeading ? Math.Max(0, first - keepPadding) : 0;
             var end = Math.Min(samples.Length - 1, last + keepPadding);
             if (start == 0 && end == samples.Length - 1)
             {

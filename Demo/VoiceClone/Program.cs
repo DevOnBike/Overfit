@@ -47,7 +47,8 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
             var testOut = a.Get("test-out") ?? "voice_test.wav";
             var adapterIn = a.Get("adapter");
             var synthOnly = adapterIn is not null;
-            var maxNew = int.TryParse(a.Get("max-new"), out var mn) ? mn : 1200;
+            // 1200 codes ≈ 14 s and truncated longer sentences; 2000 ≈ 23 s covers a full LinkedIn-length line.
+            var maxNew = int.TryParse(a.Get("max-new"), out var mn) ? mn : 2000;
             var temperature = float.TryParse(a.Get("temp"), System.Globalization.CultureInfo.InvariantCulture, out var tp) ? tp : 0.6f;
             var topP = float.TryParse(a.Get("top-p"), System.Globalization.CultureInfo.InvariantCulture, out var pp) ? pp : 0.9f;
             var repeatPenalty = float.TryParse(a.Get("repeat-penalty"), System.Globalization.CultureInfo.InvariantCulture, out var rp) ? rp : 1.1f;
@@ -193,11 +194,23 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
             // Generate audio tokens with the trained model, decode through SNAC, save a watermarked WAV.
             void Synthesize(VoiceCloneTrainer t, Snac s, string text, string vc, string outWav)
             {
-                Console.WriteLine($"Synthesizing \"{text}\" in voice '{vc}'…");
-                var promptIds = TokenizeWith(t.Tokenizer, OrpheusPrompt.Format(text, vc));
+                // Normalize tech tokens/numbers/symbols to speakable forms (".NET"→"dot net", "42"→"forty two",
+                // brand words via the lexicon) — the trainer's raw generate path doesn't do this. --no-normalize opts out.
+                var spoken = a.Has("no-normalize") ? text : new TtsTextNormalizer().Normalize(text);
+                if (!ReferenceEquals(spoken, text) && spoken != text)
+                {
+                    Console.WriteLine($"normalized → \"{spoken}\"");
+                }
+                Console.WriteLine($"Synthesizing \"{spoken}\" in voice '{vc}'…");
+                // Canonical Orpheus id sequence (start_of_human + BOS + body + audio-priming suffix). The old
+                // string form omitted the priming tokens → garbled first word; see OrpheusPrompt.BuildPromptTokens.
+                var promptIds = OrpheusPrompt.BuildPromptTokens(t.Tokenizer, spoken, vc);
                 var audioBase = ResolveAudioBase(t.Tokenizer);
+                // Stop at end_of_speech (audioBase+2 = 128258) as well as the text-eos — the canonical prompt makes
+                // the model end the audio with end_of_speech, else it babbles to --max-new after the sentence.
                 var generated = t.Generate(promptIds, maxNew, t.EndOfTextTokenId,
-                    temperature: temperature, topP: topP, repeatPenalty: repeatPenalty, seed: seed);
+                    temperature: temperature, topP: topP, repeatPenalty: repeatPenalty, seed: seed,
+                    secondaryEosTokenId: audioBase + 2);
 
                 var codes = new List<int>();
                 foreach (var tok in generated)
@@ -220,7 +233,8 @@ namespace DevOnBike.Overfit.Demo.VoiceClone
                 }
 
                 var levels = OrpheusSnacBridge.Redistribute(CollectionsMarshal.AsSpan(codes));
-                var audio = AudioPostProcessing.TrimSilence(s.Decode(levels));
+                // Trim only the TAIL — trimming the lead clips the first word's soft onset (garbles word 1).
+                var audio = AudioPostProcessing.TrimSilence(s.Decode(levels), trimLeading: false);
                 WavWriter.WriteMono(outWav, audio, s.SampleRate, WavSampleFormat.Pcm16,
                     SyntheticSpeechMetadata.ForNow(vc).ToInfoComment());
                 Console.WriteLine($"Wrote {outWav}  ({audio.Length / (double)s.SampleRate:F2}s, {codes.Count} codes, watermarked).");

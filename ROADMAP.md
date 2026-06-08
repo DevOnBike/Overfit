@@ -35,6 +35,44 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 
 ---
 
+## Audio / TTS backlog (ROI-ranked, 2026-06-08)
+
+Pure-.NET voice stack (Orpheus 3B + SNAC + voice cloning) is functional; first-word garble **root-caused & fixed**
+(prompt was missing the canonical Orpheus control/priming tokens — start_of_human + BOS + end_of_text/end_of_human/
+start_of_ai/start_of_speech; `OrpheusPrompt.BuildPromptTokens`). Validated objectively by transcribing output with our
+own Whisper. Remaining, by ROI (value ÷ effort):
+
+**🟢 Quick wins (small effort, every clip benefits)**
+1. **Trailing babble — ✅ ROOT-CAUSED 2026-06-08: it's the SAMPLING TEMPERATURE, not the stop token.** At temp 0.45
+   the model occasionally rambles ~3 s of garbled audio after the sentence before emitting the text-eos (128009);
+   **greedy (temp 0) ends cleanly** (Whisper: clip ends exactly at the last word, 1274 vs 1561 codes; "AI" also
+   cleaner). Mitigation: use low/greedy temp for the clone, or try temp ~0.2-0.3 if greedy tempo feels slow. (Added a
+   harmless safety-net: `GenerateCachedSampled` now also stops on a `secondaryEosTokenId` = end_of_speech 128258 — but
+   the model emits 128009 *after* the babble, so it wasn't the fix.) The earlier "greedy too slow" note was likely
+   confounded by the (now-fixed) prompt bug — re-judge greedy tempo.
+2. **Acronym lexicon** — add "AI"→"A.I."/"ay eye" etc. to `TtsTextNormalizer` (it left "AI" raw; less critical now that
+   greedy renders "AI" cleanly, but still nice for robustness).
+
+**🟡 Structural (bigger effort, high value)**
+3. **Merge LoRA → fast inference engine** — clone synth runs on the trainable graph (`VoiceCloneTrainer.Generate` →
+   `TrainableLlamaModel`), preset runs on `CachedLlamaInferenceEngine` (zero-alloc/SIMD/Q4_K). Merge the adapter delta
+   into the base weights (dequant row + B·A·scale + requant) → run clone on the fast engine = **~2-4× faster**. The
+   right perf fix (the LM token-gen is the RTF~8-9× bottleneck; SNAC decode is cheap).
+
+**🟠 Medium-term**
+4. **Real-time on CPU** — smaller same-arch ~0.5B LM (RTF 2-3) or port **Kokoro 82M** (Apache, StyleTTS2, ~1-2 wk,
+   different arch) behind `ITextToSpeechEngine`. Product/moat decision (real-time is partly private — see
+   `project-moat-public-private`).
+5. **Signal-domain watermark** — inaudible waveform mark + detector (survives re-encode); current watermark is
+   metadata-only. Compliance/IP, near launch.
+
+**⚪ Low ROI / skip**
+6. Align `OrpheusTrainingSequence` to the canonical prompt — cosmetic (inference works regardless; base dominates).
+7. Zero-alloc + SIMD SNAC decode — a "zero-alloc" banner, NOT a speed win (SNAC is cheap; LM is the bottleneck).
+8. PL normalization — blocked (Orpheus is EN-only; needs a PL TTS model).
+
+---
+
 ## Adoption / launch roadmap (2026-06-04, ROI-ranked)
 
 Strategic frame: Overfit wins on **.NET in-process deployment + training moat**, NOT raw tok/s
