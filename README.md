@@ -321,19 +321,23 @@ Full benchmark tables and caveats live in [`docs/TECHNICAL.md`](docs/TECHNICAL.m
 
 ## Supported model families
 
-Overfit loads by **architecture**, not by model name — so most `llama` / `qwen2` / `qwen2moe` / `mistral` GGUFs
-on Ollama and HuggingFace work, including their thousands of community fine-tunes (and the DeepSeek-R1 *distills*,
-which are Qwen/Llama architecture). **→ Full popular-models matrix: [`docs/supported-models.md`](docs/supported-models.md)** —
-exactly which models load today (Llama 3.x, Qwen2.5, Mistral, Mixtral, Bielik, R1-distills, MiniLM/BGE/E5, Whisper…)
-and which don't yet (Gemma, Phi, Qwen3, Command-R, native DeepSeek-MoE, multilingual XLM-R embedders).
+Overfit loads by **architecture**, not by model name — so most `llama` / `qwen2` / `qwen3` / `qwen2moe` /
+`mistral` / `phi3` / `gemma2` GGUFs on Ollama and HuggingFace work, including their thousands of community
+fine-tunes (and the DeepSeek-R1 *distills*, which are Qwen/Llama architecture).
+**→ Full popular-models matrix: [`docs/supported-models.md`](docs/supported-models.md)** — exactly which models
+load today (Llama 3.x, Qwen2.5, Qwen3, Mistral, Phi-3.5, Gemma 2, Mixtral, Bielik, R1-distills, MiniLM/BGE/E5,
+Whisper…) and which don't yet (Gemma 1/3, Qwen3-MoE, Command-R, native DeepSeek-MoE, multilingual XLM-R embedders).
 
 ### Language models
 
 | Family | Verified sizes / variants | Loader | Quantization / dtype |
 |---|---|---|---|
 | Qwen2.5 | 0.5B / 3B / 7B / 14B / 32B | GGUF, HF safetensors, `.bin` | F32, F16, BF16, Q8_0, Q4_K_M, Q6_K |
+| Qwen3 (dense) | 0.6B verified (0.6B–32B) | GGUF | Q8_0, Q4_K_M, Q6_K |
 | Llama-2 / Llama-3.x | Llama-3.2-1B onwards | GGUF, HF safetensors | F32, F16, BF16, Q8_0, Q4_K_M, Q6_K |
 | Mistral 7B | 7B | GGUF | F32, F16, BF16, Q8_0, Q4_K_M |
+| Phi-3.5-mini / Phi-4 | 3.8B / 14B verified | GGUF | Q8_0, Q4_K_M, Q6_K |
+| Gemma 2 | 2B verified (2B / 9B / 27B; ctx ≤ 4096) | GGUF | Q8_0, Q4_K_M, Q6_K |
 | Qwen1.5-MoE A2.7B | 14B total / 2.7B active | GGUF | Q8_0, Q4_K_M |
 | Mixtral-8x7B | 47B total / 13B active | GGUF | Q8_0, Q4_K_M |
 | GPT-2 small | 124M | `.bin`, HF safetensors | F32 |
@@ -466,7 +470,7 @@ for that.
 
 **Current priorities:**
 
-- **More model families** — Qwen3 (closest to ship), then Gemma / Phi / Granite / Command-R; more quants (Q2_K / Q3_K).
+- **More model families** — Qwen3, Phi-3.5, and Gemma 2 now load ✅; next: Gemma 1/3, Qwen3-MoE, Granite / Command-R; more quants (Q2_K / Q3_K).
 - **Multilingual sentence-embedder** (XLM-RoBERTa / SentencePiece) for first-class multilingual RAG.
 - **Decode throughput** — the ~1.13× same-file gap vs llama.cpp is DRAM-bandwidth-bound; closing it needs structural (full-tensor attention) work, not kernel-ALU.
 - **Bulletproof structured output** — token-healing for arbitrary schemas on tiny models; GBNF grammars; NLI-based contradiction lint.

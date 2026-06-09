@@ -314,7 +314,7 @@ Read the full llama.cpp source tree to map what they have that Overfit doesn't. 
 - Diffusion models — image generation is a different domain.
 - TensorFlow / JAX / MLX checkpoints — Python ecosystem formats.
 
-**Architectures Overfit doesn't load** (llama.cpp lists ~130; Overfit lists 7 families): Falcon, Gemma 1/2/3/3N, Mamba/Mamba2/Jamba, RWKV6/7, T5, Phi, GLM 1/2/3/4, Deepseek 1/2/V3, Cohere, Nemotron, Granite, LLaMA-4, Qwen3/3.5/4, Grok, Chameleon, Hunyuan/-V/-VL/-OCR, Pixtral, MiniCPM-V, InternVL, etc. Most are deferrable — Qwen2.5 + Llama-3.x + Mixtral cover the dominant Ollama deploy. Adding a new arch is typically 3-5 days *per family* (weight name mapping + arch-specific quirks like SwiGLU vs GeLU, GQA vs MHA).
+**Architectures Overfit doesn't load** (llama.cpp lists ~130; Overfit now lists 10 families — added `qwen3`, `phi3`, `gemma2`): Falcon, Gemma 1/3/3N, Mamba/Mamba2/Jamba, RWKV6/7, T5, GLM 1/2/3/4, Deepseek 1/2/V3, Cohere, Nemotron, Granite, LLaMA-4, Qwen3-MoE/3.5/4, Grok, Chameleon, Hunyuan/-V/-VL/-OCR, Pixtral, MiniCPM-V, InternVL, etc. Most are deferrable — Qwen2.5/3 + Llama-3.x + Mistral/Phi-3.5 + Gemma 2 + Mixtral cover the dominant Ollama deploy. Adding a new arch is typically 3-5 days *per family* (weight name mapping + arch-specific quirks like SwiGLU vs GeLU, GQA vs MHA, QK-norm, logit soft-caps).
 
 ---
 
