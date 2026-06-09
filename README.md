@@ -184,10 +184,29 @@ JSON-Schema `response_format`. Dependency-free (no ASP.NET), Native-AOT-clean:
 overfit serve qwen2.5-3b --port 11434           # one self-contained binary; nothing leaves the box
 ```
 
+Call it and print the **raw response, pretty-formatted**:
+
 ```bash
-curl http://localhost:11434/v1/chat/completions -H "Content-Type: application/json" \
-     -d '{"model":"qwen2.5-3b","messages":[{"role":"user","content":"Hello"}]}'
+# bash / Linux / macOS — pipe to jq
+curl -s http://localhost:11434/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"overfit","messages":[{"role":"user","content":"Capital of France?"}],"max_tokens":200}' | jq
 ```
+
+```powershell
+# PowerShell — keep the JSON body on ONE line in SINGLE quotes, then format the response.
+# curl.exe (raw bytes) re-formatted:
+curl.exe -s http://localhost:11434/v1/chat/completions -H "Content-Type: application/json" `
+  -d '{"model":"overfit","messages":[{"role":"user","content":"Capital of France?"}],"max_tokens":200}' |
+  ConvertFrom-Json | ConvertTo-Json -Depth 10
+
+# or Invoke-RestMethod piped back through ConvertTo-Json (Invoke-RestMethod alone hides nested fields):
+Invoke-RestMethod http://localhost:11434/v1/chat/completions -Method Post -ContentType 'application/json' `
+  -Body '{"model":"overfit","messages":[{"role":"user","content":"Capital of France?"}],"max_tokens":200}' |
+  ConvertTo-Json -Depth 10
+```
+
+> Just the answer text? In PowerShell drill into `.choices[0].message.content`; in bash use `jq -r '.choices[0].message.content'`.
 
 Host the same API from your own code with the `DevOnBike.Overfit.Server` package — your stack doesn't change,
 only the endpoint does.

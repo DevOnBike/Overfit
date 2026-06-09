@@ -32,10 +32,13 @@ docker run --rm -p 8080:8080 \
   overfit:local \
   /models/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf
 
-curl http://localhost:8080/v1/chat/completions \
+curl -s http://localhost:8080/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -d '{"model":"overfit","messages":[{"role":"user","content":"Say hi in one word."}]}'
+  -d '{"model":"overfit","messages":[{"role":"user","content":"Say hi in one word."}]}' | jq
 ```
+
+(PowerShell: pipe to `ConvertFrom-Json | ConvertTo-Json -Depth 10` for the same pretty raw output — see the
+[CLI README](../Sources/Cli/README.md#hitting-the-server-with-curl).)
 
 Extra server options follow the positional model path:
 

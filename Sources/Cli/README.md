@@ -44,18 +44,28 @@ serves it. Full hosting guide (model-on-boot, free tiers like HF Spaces / Oracle
 
 ## Hitting the server with curl
 
+Print the **raw response, pretty-formatted**:
+
 ```bash
-# bash / Git Bash / WSL
-curl http://localhost:8080/v1/chat/completions \
+# bash / Git Bash / WSL — pipe to jq
+curl -s http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model":"overfit","messages":[{"role":"user","content":"Capital of France?"}],"max_tokens":200}'
+  -d '{"model":"overfit","messages":[{"role":"user","content":"Capital of France?"}],"max_tokens":200}' | jq
 ```
 
 ```powershell
-# PowerShell — use SINGLE quotes around the JSON (or curl.exe gets mangled args), or just use Invoke-RestMethod:
+# PowerShell — keep the JSON body on ONE line in SINGLE quotes, then format the response.
+curl.exe -s http://localhost:8080/v1/chat/completions -H "Content-Type: application/json" `
+  -d '{"model":"overfit","messages":[{"role":"user","content":"Capital of France?"}],"max_tokens":200}' |
+  ConvertFrom-Json | ConvertTo-Json -Depth 10
+
+# or Invoke-RestMethod (which deserializes — alone it HIDES nested fields, so pipe it back to ConvertTo-Json):
 Invoke-RestMethod http://localhost:8080/v1/chat/completions -Method Post -ContentType 'application/json' `
-  -Body '{"model":"overfit","messages":[{"role":"user","content":"Capital of France?"}],"max_tokens":200}'
+  -Body '{"model":"overfit","messages":[{"role":"user","content":"Capital of France?"}],"max_tokens":200}' |
+  ConvertTo-Json -Depth 10
 ```
+
+Just the answer text: bash `... | jq -r '.choices[0].message.content'`, PowerShell `(Invoke-RestMethod ...).choices[0].message.content`.
 
 ```bash
 curl http://localhost:8080/health           # readiness
