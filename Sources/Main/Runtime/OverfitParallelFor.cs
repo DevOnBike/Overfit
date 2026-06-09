@@ -226,8 +226,13 @@ namespace DevOnBike.Overfit.Runtime
 
         private static bool ResolveDecodePool()
         {
+            // Default ON — measured best-of-3: Qwen3-0.6B +28% (56.7→72.3 tok/s), Phi-3.5-3.8B +3% (13.27→13.69),
+            // 0 B/token preserved, bit-identical. Bigger win on small models (dispatch overhead is a larger fraction
+            // of their small matmuls). Set OVERFIT_DECODE_POOL=0/false to opt out (the spin pool keeps ~DecodeMaxWorkers
+            // threads warm between tokens with a Sleep(1) back-off — a slight idle-CPU cost that matters only for
+            // idle multi-tenant servers, not single-stream local decode).
             var raw = Environment.GetEnvironmentVariable(DecodePoolEnvVar);
-            return raw is "1" || string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase);
+            return !(raw is "0" || string.Equals(raw, "false", StringComparison.OrdinalIgnoreCase));
         }
 
         static OverfitParallelFor()

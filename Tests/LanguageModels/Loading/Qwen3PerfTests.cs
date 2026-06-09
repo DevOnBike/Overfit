@@ -15,7 +15,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
     /// Steady-state decode throughput for Qwen3-0.6B Q8_0 — load once, warm up, then best-of-N fixed-length
     /// decode (no early stop) so each run generates the same token count. Reports min/median/max tok/s,
     /// ns/token, and per-token alloc (must stay 0 for the zero-alloc decode claim). [LongFact] — needs
-    /// C:\qwen3-06b. Flip to [Fact] to run.
+    /// C:\qwen3-06b. Flip to [LongFact] to run.
     /// </summary>
     public sealed class Qwen3PerfTests
     {

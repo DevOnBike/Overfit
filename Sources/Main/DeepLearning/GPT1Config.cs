@@ -150,6 +150,23 @@ namespace DevOnBike.Overfit.DeepLearning
         /// </summary>
         public float RopeAttnFactor { get; init; } = 1f;
 
+        // ── Gemma-specific ─────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Multiplies the token embedding after lookup (Gemma scales by <c>sqrt(d_model)</c>). 1.0 = no scaling.
+        /// </summary>
+        public float EmbeddingScale { get; init; } = 1f;
+
+        /// <summary>
+        /// Gemma-2 attention logit soft-cap: pre-softmax scores are passed through <c>tanh(s/cap)·cap</c>. 0 = off.
+        /// </summary>
+        public float AttnLogitSoftcap { get; init; }
+
+        /// <summary>
+        /// Gemma-2 final logit soft-cap: LM-head logits are passed through <c>tanh(l/cap)·cap</c>. 0 = off.
+        /// </summary>
+        public float FinalLogitSoftcap { get; init; }
+
         // ── FFN ───────────────────────────────────────────────────────────────
 
         /// <summary>

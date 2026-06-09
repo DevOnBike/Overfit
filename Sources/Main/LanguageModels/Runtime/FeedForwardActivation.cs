@@ -25,5 +25,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// dFF is typically 2/3 × 4 × dModel (rounded up to multiple of 256).
         /// </summary>
         SwiGLU = 3,
+
+        /// <summary>
+        /// GeGLU — gated FFN like <see cref="SwiGLU"/> but the gate uses GELU (tanh approximation) instead of SiLU:
+        /// <c>FFN(x) = (gelu(x·Wgate) * (x·Wup)) · Wdown</c>. Same three-matrix layout. Gemma's FFN activation.
+        /// </summary>
+        GeGLU = 4,
     }
 }
