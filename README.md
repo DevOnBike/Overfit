@@ -192,6 +192,21 @@ curl http://localhost:11434/v1/chat/completions -H "Content-Type: application/js
 Host the same API from your own code with the `DevOnBike.Overfit.Server` package — your stack doesn't change,
 only the endpoint does.
 
+**Get the `overfit` command three ways:**
+
+```bash
+dotnet tool install -g DevOnBike.Overfit.Cli      # .NET global tool (cross-platform; needs the .NET runtime)
+```
+
+```bash
+# or a ~34 MB Native-AOT Docker image — no .NET runtime, model mounted at runtime (not baked in):
+docker run -p 8080:8080 -v /host/models:/models <your-dockerhub-user>/overfit /models/model.gguf
+```
+
+…or publish the self-contained **Native-AOT binary** yourself
+(`dotnet publish Sources/Cli -r <rid> -p:PublishAot=true`). See [`docs/docker.md`](docs/docker.md) for the image,
+free-hosting options, and model-on-boot.
+
 ---
 
 ## What you can build today
@@ -283,6 +298,14 @@ Run the console walkthrough:
 
 ```bash
 dotnet run -c Release --project Demo/AgentDemo
+```
+
+Or skip the SDK entirely — install the CLI and serve an OpenAI-compatible endpoint:
+
+```bash
+dotnet tool install -g DevOnBike.Overfit.Cli
+overfit pull Qwen/Qwen2.5-0.5B-Instruct-GGUF      # or point serve at any local .gguf
+overfit serve qwen2.5-0.5b-instruct --port 8080
 ```
 
 More details:
@@ -463,7 +486,7 @@ for that.
 - **Loaders** — GGUF, HuggingFace safetensors (sharded), Overfit `.bin`, ONNX (linear + DAG). 100% Python-free; tokenizers read straight from the GGUF.
 - **Agentic & structured output** — tool calling, guaranteed JSON, **JSON-Schema & regex constrained decoding**, ReAct / critic / circuit-breaker / summarizing memory, composable sampling.
 - **RAG** — in-process vector store; MiniLM / BGE / E5 embeddings (bit-parity vs HuggingFace); multilingual via the chat model's own embeddings; **RAG Stability Harness** (recall / paraphrase / false-premise / lint, gated in CI).
-- **Integration** — **OpenAI-compatible server** (`/v1/chat/completions` + SSE, `/v1/embeddings`, `/v1/models`); **Microsoft.Extensions.AI** adapter; global **`overfit` CLI** (pull / list / chat / serve); ASP.NET starter template.
+- **Integration** — **OpenAI-compatible server** (`/v1/chat/completions` + SSE, `/v1/embeddings`, `/v1/models`); **Microsoft.Extensions.AI** adapter; **`overfit` CLI** (pull / list / chat / serve) shipped three ways — `dotnet tool install -g DevOnBike.Overfit.Cli`, a Native-AOT binary, and a ~34 MB Docker image ([`docs/docker.md`](docs/docker.md)); ASP.NET starter template.
 - **Training** — **QLoRA CPU fine-tuning** (frozen Q4_K base incl. FFN + per-head attention), gradient checkpointing, data-parallel trainer, Conv/BatchNorm/LSTM, CRNN + CTC (OCR), LR schedules.
 - **Multimodal & audio** — **Whisper speech-to-text** in pure C#; from-scratch MP3 / WAV decoders; OCR.
 - **Engineering** — Native-AOT (one ~7.8 MB self-contained binary), zero-allocation hot paths (AOT guard in CI), anomaly detection.

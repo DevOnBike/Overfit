@@ -6,19 +6,16 @@ name: Docker Hub
 #   DOCKERHUB_USERNAME   your Docker Hub account / org name (also the image namespace → <user>/overfit)
 #   DOCKERHUB_TOKEN      a Docker Hub Access Token with Read/Write (Account Settings → Security)
 #
-# Triggers: a version tag push (v1.2.3) publishes :1.2.3 + :1.2 + :latest; manual dispatch publishes a
-# chosen tag (or :latest). The model is NOT in the image — see Sources/Cli/Dockerfile.
+# Image version = the <Version> in Directory.Build.props (the same value the NuGet packages + global tool ship
+# under), so the image tag is always consistent with the source version. Each run publishes
+# :<version> + :latest + :sha-<short>. Bump with bump-version.ps1, then trigger by a `v*` tag push or a manual run.
+# The model is NOT in the image — see Sources/Cli/Dockerfile.
 
 on:
   push:
     tags:
       - 'v*.*.*'
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Image tag to publish (e.g. 0.1.0 or latest). Default: latest.'
-        required: false
-        default: 'latest'
 
 concurrency:
   group: docker-publish-${{ github.ref }}
@@ -43,16 +40,24 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      # The image version is the SINGLE-SOURCE <Version> in Directory.Build.props (same value the libraries +
+      # global tool publish under) — so the image tag is always consistent with the source version, whether the
+      # build was triggered by a `v*` tag push or a manual dispatch.
+      - name: Read version from Directory.Build.props
+        id: ver
+        run: |
+          VERSION=$(sed -n 's/.*<Version>\([0-9][^<]*\)<\/Version>.*/\1/p' Directory.Build.props | head -1)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "image version: $VERSION"
+
       - name: Derive image tags
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/overfit
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
-            type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
+            type=raw,value=${{ steps.ver.outputs.version }}
+            type=raw,value=latest
             type=sha,format=short
 
       - name: Build and push (linux/amd64)

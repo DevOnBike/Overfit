@@ -104,11 +104,14 @@ size/licence trade-off.) Spaces expects the app on port **7860**.
 ## Publishing to Docker Hub (CI)
 
 [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml) builds and pushes on a `v*.*.*`
-tag or a manual run. One-time setup:
+tag or a manual run. The **image version is read from `Directory.Build.props`** (the same `<Version>` the NuGet
+packages + global tool ship under), so the image tag is always consistent with the source version — each run
+publishes `:<version>` + `:latest` + `:sha-<short>`. One-time setup:
 
 1. Docker Hub → Account Settings → Security → create an **Access Token** (Read/Write).
 2. GitHub repo → Settings → Secrets and variables → Actions → add `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`.
-3. `git tag v0.1.0 && git push origin v0.1.0` → publishes `<user>/overfit:0.1.0`, `:0.1`, and `:latest`.
+3. `./bump-version.ps1` to set the version, then `git tag v$(version) && git push --tags` → publishes e.g.
+   `<user>/overfit:10.0.22`, `:latest`, and `:sha-abc1234`.
 
 The image is **amd64** by default. For arm64 (Oracle Ampere), add a native `ubuntu-24.04-arm` matrix job and a
 `docker manifest` merge — AOT cross-compilation from amd64 needs the arm64 clang toolchain, so a native arm runner
