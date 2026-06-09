@@ -1,22 +1,24 @@
 # Overfit
 
-**Private LLMs, RAG, C# tool calling and guaranteed JSON inside your .NET app.**
+**Private LLMs, voice, RAG and agents — entirely in your .NET app. No Python, no cloud, no model server.**
 
 <p align="center">
   <img src="docs/assets/overfit-features.png"
-       alt="Overfit at a glance — run, fine-tune and build agents on real LLMs entirely in .NET: pure-managed engine (0 B/token, Native AOT), load any GGUF/ONNX model memory-mapped, run GPT-2/Qwen/Llama, in-process agentic stack (RAG, tool calling, guaranteed JSON), LoRA fine-tuning, adaptive anomaly detection, runs in-process so data never leaves, CPU-first — no Python, no native binary, no model server."
+       alt="Overfit at a glance — run, fine-tune and build agents on real LLMs entirely in .NET: pure-managed engine (0 B/token, Native AOT), load any GGUF/ONNX model memory-mapped, run Qwen/Llama/Phi/Gemma/Mixtral, in-process agentic stack (RAG, tool calling, guaranteed JSON), speech-to-text (Whisper) and voice-cloning text-to-speech, LoRA fine-tuning, an OpenAI-compatible server, runs in-process so data never leaves, CPU-first — no Python, no native binary, no model server."
        width="560">
 </p>
 
-Overfit lets .NET teams add local AI features without Python, Ollama, a model server,
-native binaries, or data leaving the process.
+Overfit lets .NET teams add local AI features — chat, RAG, agents, and even **voice** (speech-to-text *and*
+text-to-speech) — without Python, Ollama, a model server, native binaries, or data leaving the process. It can
+also **serve an OpenAI-compatible API** from a tiny Native-AOT binary or a ~34 MB container.
 
 Use it when you need AI inside an existing ASP.NET, WPF, Blazor, desktop, on-prem
 or air-gapped .NET product — especially when external LLM APIs are blocked by
 security, compliance, latency, deployment, or supply-chain constraints.
 
 ```bash
-dotnet add package DevOnBike.Overfit
+dotnet add package DevOnBike.Overfit            # the library
+dotnet tool install -g DevOnBike.Overfit.Cli    # the CLI + OpenAI-compatible server (overfit serve)
 ```
 
 ---
