@@ -106,10 +106,24 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             // Llama/Mistral use NORM rope and llama.cpp PERMUTES Q/K at conversion into adjacent layout →
             // adjacent pairing (x[2i],x[2i+1]), which is the default. Getting this wrong leaves position 0
             // correct but corrupts every later position (attention collapses onto the current token).
-            var ropeSplitHalf = arch is "qwen2" or "qwen2moe" or "qwen3" or "qwen3moe";
+            var ropeSplitHalf = arch is "qwen2" or "qwen2moe" or "qwen3" or "qwen3moe" or "phi3" or "gemma2";
 
-            // Cap context length for memory sanity (32k+ models work but consume RAM).
+            // Gemma-2: GeGLU FFN, (1+w) RMSNorm, embedding ×√d_model, sandwich norm (post_attention/post_ffw),
+            // attn + final logit soft-capping, and alternating sliding-window attention (deferred — we cap the
+            // context at the sliding window so it's a no-op).
+            var isGemma = arch == "gemma2";
+            // (1+w) RMSNorm: the llama.cpp gemma GGUF ALREADY bakes the +1 into the stored norm weights — adding it
+            // again double-applies and produces garbage (A/B-verified: no-offset → "Paris", offset → repeated punct).
+            // So DON'T add +1 here. Embedding ×√d_model IS needed (also A/B-verified).
+            var gemmaEmbeddingScale = isGemma ? MathF.Sqrt(dModel) : 1f;
+            var attnSoftcap = isGemma ? reader.GetMeta($"{arch}.attn_logit_softcapping", 0f) : 0f;
+            var finalSoftcap = isGemma ? reader.GetMeta($"{arch}.final_logit_softcapping", 0f) : 0f;
+            var gemmaSlidingWindow = isGemma ? reader.GetMeta($"{arch}.attention.sliding_window", 4096) : 0;
+
+            // Cap context length for memory sanity (32k+ models work but consume RAM). Gemma-2: cap at the sliding
+            // window so the (deferred) alternating local/global attention is a no-op.
             if (ctxLen > 8192) { ctxLen = 8192; }
+            if (isGemma && gemmaSlidingWindow > 0 && ctxLen > gemmaSlidingWindow) { ctxLen = gemmaSlidingWindow; }
 
             // Vocab from tokenizer metadata if present, else from token_embd shape
             var vocab = reader.GetMeta($"{arch}.vocab_size", 0);
@@ -120,11 +134,34 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
             if (vocab == 0) { throw new OverfitFormatException("Cannot determine vocab size."); }
 
-            var headDim = dModel / nHeads;
-            if (headDim * nHeads != dModel)
+            // Qwen3 sets head_dim explicitly (head_dim ≠ dModel/nHeads, so the q/k/v projections are not square);
+            // every other arch we load derives it as dModel/nHeads.
+            var headDim = reader.GetMeta($"{arch}.attention.key_length", dModel / nHeads);
+            if (headDim <= 0 || (headDim == dModel / nHeads && headDim * nHeads != dModel))
             {
                 throw new OverfitFormatException(
-                    $"dModel ({dModel}) is not divisible by nHeads ({nHeads}).");
+                    $"Could not determine head_dim for arch '{arch}' (dModel {dModel}, nHeads {nHeads}).");
+            }
+            var usesQkNorm = arch is "qwen3" or "qwen3moe";
+
+            // Phi-3 packs Q/K/V into one fused `attn_qkv.weight` and gate+up into one fused `ffn_up.weight`
+            // (2×dFF wide), and uses NEOX (split-half) RoPE with a "longrope" per-dimension frequency rescale
+            // (rope_factors_short/long [head_dim/2]). We dequant-split the fused tensors at load and read the
+            // short-context factor array (exact for ≤ original_context_length; mscale = 1 in that regime).
+            var fusedQkv = arch == "phi3";
+            var fusedGateUp = arch == "phi3";
+            var ropeOriginalCtx = reader.GetMeta($"{arch}.rope.scaling.original_context_length", 0);
+            float[]? ropeFreqFactors = null;
+            if (arch == "phi3" && reader.Tensors.ContainsKey("rope_factors_short.weight"))
+            {
+                ropeFreqFactors = LoadF32Vector(reader, "rope_factors_short.weight", headDim / 2);
+                // Cap context to the short-factor regime (original training context) so the stored short
+                // factors are exact and the long-rope attention mscale stays 1.0. Long-context (long_factor +
+                // mscale) is a follow-on.
+                if (ropeOriginalCtx > 0 && ctxLen > ropeOriginalCtx)
+                {
+                    ctxLen = ropeOriginalCtx;
+                }
             }
 
             // Tied embeddings: if no separate output.weight, lm_head reuses token_embd.
@@ -158,13 +195,20 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 DModel = dModel,
                 NHeads = nHeads,
                 NKvHeads = nKvHeads,
+                HeadDim = headDim,
+                UsesQkNorm = usesQkNorm,
                 VocabSize = vocab,
                 ContextLength = ctxLen,
                 DFF = dFF,
                 UseRoPE = true,
                 RoPETheta = ropeTheta,
                 RopeSplitHalf = ropeSplitHalf,
-                FfnActivation = FeedForwardActivation.SwiGLU,
+                RopeFreqFactors = ropeFreqFactors,
+                RopeAttnFactor = 1f,
+                FfnActivation = isGemma ? FeedForwardActivation.GeGLU : FeedForwardActivation.SwiGLU,
+                EmbeddingScale = gemmaEmbeddingScale,
+                AttnLogitSoftcap = attnSoftcap,
+                FinalLogitSoftcap = finalSoftcap,
                 TieWeights = tieWeights,
                 ExpertCount = expertCount,
                 ExpertUsedCount = expertUsedCount,
@@ -202,35 +246,80 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             // A Q4_K_M file is NOT type-uniform across layers — llama.cpp varies the quant per layer (e.g. some
             // attn_v are Q8_0, others Q5_0) — so we must scan EVERY layer, not just blk.0, or a later F32-fallback
             // layer would dereference a scratch buffer that was never rented.
-            var qNeedsF32 = !attnQuantizable || AnyLayerNeedsF32(reader, "attn_q", nLayers, dModel);
-            var kNeedsF32 = !attnQuantizable || AnyLayerNeedsF32(reader, "attn_k", nLayers, dModel);
-            var vNeedsF32 = !attnQuantizable || AnyLayerNeedsF32(reader, "attn_v", nLayers, dModel);
+            // Phi-3 stores Q/K/V fused (no attn_q/k/v tensors) — skip the per-tensor scratch + scan and
+            // dequant the one fused tensor into a dedicated buffer instead.
+            var qNeedsF32 = !fusedQkv && (!attnQuantizable || AnyLayerNeedsF32(reader, "attn_q", nLayers, dModel));
+            var kNeedsF32 = !fusedQkv && (!attnQuantizable || AnyLayerNeedsF32(reader, "attn_k", nLayers, dModel));
+            var vNeedsF32 = !fusedQkv && (!attnQuantizable || AnyLayerNeedsF32(reader, "attn_v", nLayers, dModel));
             // Wo: K-quant per-head is blocked by headDim < 256, but Q8_0 per-head works (else F32 fallback).
             var oNeedsF32 = !attnQuantizable || AnyLayerOutputNeedsF32(reader, nLayers);
 
-            float[] qFull = qNeedsF32 ? PooledBuffer<float>.RentArray(qFullElems) : [];
-            float[] kFull = kNeedsF32 ? PooledBuffer<float>.RentArray(kFullElems) : [];
-            float[] vFull = vNeedsF32 ? PooledBuffer<float>.RentArray(kFullElems) : [];
-            float[] oFull = oNeedsF32 ? PooledBuffer<float>.RentArray(oFullElems) : [];
+            var qFull = qNeedsF32 ? PooledBuffer<float>.RentArray(qFullElems) : [];
+            var kFull = kNeedsF32 ? PooledBuffer<float>.RentArray(kFullElems) : [];
+            var vFull = vNeedsF32 ? PooledBuffer<float>.RentArray(kFullElems) : [];
+            var oFull = oNeedsF32 ? PooledBuffer<float>.RentArray(oFullElems) : [];
+            // Fused-tensor scratch (Phi-3): qkv = (nHeads+2·nKvHeads)·headDim × dModel; gate_up = 2·dFF × dModel.
+            var fusedQkvElems = fusedQkv ? checked((int)((long)((nHeads + (2 * nKvHeads)) * headDim) * dModel)) : 0;
+            var fusedGateUpElems = fusedGateUp ? checked((int)((long)(2 * dFF) * dModel)) : 0;
+            var qkvFused = fusedQkv ? PooledBuffer<float>.RentArray(fusedQkvElems) : [];
+            var gateUpFused = fusedGateUp ? PooledBuffer<float>.RentArray(fusedGateUpElems) : [];
             // Attention biases are always F32 in GGUF — bias scratch always needed.
             var qBiasFull = PooledBuffer<float>.RentArray(nHeads * headDim);
             var kBiasFull = PooledBuffer<float>.RentArray(nKvHeads * headDim);
             var vBiasFull = PooledBuffer<float>.RentArray(nKvHeads * headDim);
+            // Gemma's (1+w) RMSNorm offset is already baked into the GGUF weights (see note above), so this is a
+            // plain load — the wrapper is kept so all gemma norm tensors (incl. the sandwich post-norms) go through
+            // one place if the offset ever needs reinstating for a differently-converted GGUF.
+            TensorStorage<float> LoadNormGamma(string name) => AllocAndLoad(reader, name, dModel);
+
             try
             {
                 for (var l = 0; l < nLayers; l++)
                 {
                     // Attention LayerNorm gamma (RMSNorm, no beta)
-                    var attnNormGamma = AllocAndLoad(reader, $"blk.{l}.attn_norm.weight", dModel);
+                    var attnNormGamma = LoadNormGamma($"blk.{l}.attn_norm.weight");
                     var attnNormBeta = TensorStorage<float>.Unpooled(0);
+
+                    // Gemma-2 sandwich norm: extra RMSNorm after attention and after FFN (before each residual).
+                    TensorStorage<float>? postAttnNorm = null, postFfwNorm = null;
+                    if (isGemma)
+                    {
+                        postAttnNorm = LoadNormGamma($"blk.{l}.post_attention_norm.weight");
+                        postFfwNorm = LoadNormGamma($"blk.{l}.post_ffw_norm.weight");
+                    }
+
+                    // Qwen3 per-head RMSNorm weights on Q and K (over head_dim), applied before RoPE.
+                    TensorStorage<float>? qNorm = null, kNorm = null;
+                    if (usesQkNorm)
+                    {
+                        qNorm = AllocAndLoad(reader, $"blk.{l}.attn_q_norm.weight", headDim);
+                        kNorm = AllocAndLoad(reader, $"blk.{l}.attn_k_norm.weight", headDim);
+                    }
 
                     // Per-tensor dispatch (step 3.2b) — each of attn_q/k/v picks
                     // Q4_K-native / Q8_0-native / F32-fallback independently from
                     // its file format. Wo dispatches separately (Q8_0 OK per-head;
                     // K-quant not — headDim < the 256-element super-block).
-                    var wq = LoadQkvHeads(reader, $"blk.{l}.attn_q.weight", nHeads, dModel, headDim, qFull, attnQuantizable, mmap);
-                    var wk = LoadQkvHeads(reader, $"blk.{l}.attn_k.weight", nKvHeads, dModel, headDim, kFull, attnQuantizable, mmap);
-                    var wv = LoadQkvHeads(reader, $"blk.{l}.attn_v.weight", nKvHeads, dModel, headDim, vFull, attnQuantizable, mmap);
+                    DecodeWeight[] wq, wk, wv;
+                    if (fusedQkv)
+                    {
+                        // Phi-3: one fused attn_qkv [out=(nHeads+2·nKvHeads)·headDim, in=dModel], output-major
+                        // = [Q rows | K rows | V rows]. Dequant once, slice the three contiguous row ranges, and
+                        // run the same per-head split (→ per-head Q8 when attnQuantizable). Row boundaries land on
+                        // whole output neurons, so the slices are exact regardless of the on-disk quant.
+                        LoadTensor(reader, $"blk.{l}.attn_qkv.weight", qkvFused.AsSpan(0, fusedQkvElems));
+                        var qElems = nHeads * headDim * dModel;
+                        var kvElems = nKvHeads * headDim * dModel;
+                        wq = SplitQuery(qkvFused.AsSpan(0, qElems), nHeads, dModel, headDim, attnQuantizable);
+                        wk = SplitKeyValue(qkvFused.AsSpan(qElems, kvElems), nKvHeads, dModel, headDim, attnQuantizable);
+                        wv = SplitKeyValue(qkvFused.AsSpan(qElems + kvElems, kvElems), nKvHeads, dModel, headDim, attnQuantizable);
+                    }
+                    else
+                    {
+                        wq = LoadQkvHeads(reader, $"blk.{l}.attn_q.weight", nHeads, dModel, headDim, qFull, attnQuantizable, mmap);
+                        wk = LoadQkvHeads(reader, $"blk.{l}.attn_k.weight", nKvHeads, dModel, headDim, kFull, attnQuantizable, mmap);
+                        wv = LoadQkvHeads(reader, $"blk.{l}.attn_v.weight", nKvHeads, dModel, headDim, vFull, attnQuantizable, mmap);
+                    }
                     var wo = LoadOutputHeads(reader, $"blk.{l}.attn_output.weight", nHeads, dModel, headDim, oFull, attnQuantizable);
 
                     // Attention biases (optional — Qwen has them, Llama doesn't);
@@ -245,7 +334,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     for (var h = 0; h < nHeads; h++) { bo[h] = TensorStorage<float>.Unpooled(dModel); }
 
                     // FFN
-                    var ffnNormGamma = AllocAndLoad(reader, $"blk.{l}.ffn_norm.weight", dModel);
+                    var ffnNormGamma = LoadNormGamma($"blk.{l}.ffn_norm.weight");
                     var ffnNormBeta = TensorStorage<float>.Unpooled(0);
 
                     DecodeWeight ffnGate = default, ffnUp = default, ffnDown = default;
@@ -280,6 +369,17 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                             moeSharedGateInp = LoadF32Vector(reader, $"blk.{l}.ffn_gate_inp_shexp.weight", dModel);
                         }
                     }
+                    else if (fusedGateUp)
+                    {
+                        // Phi-3: one fused ffn_up [out=2·dFF, in=dModel], output-major = [gate rows | up rows]
+                        // (HF gate_up_proj → chunk(2): first half gate, second half up). Dequant, slice the two
+                        // halves, requantize each to Q8 (compact, ≥ the on-disk precision). ffn_down is separate.
+                        LoadTensor(reader, $"blk.{l}.ffn_up.weight", gateUpFused.AsSpan(0, fusedGateUpElems));
+                        var half = dFF * dModel;
+                        ffnGate = Q8Weight.QuantizeRows(gateUpFused.AsSpan(0, half), dFF, dModel);
+                        ffnUp = Q8Weight.QuantizeRows(gateUpFused.AsSpan(half, half), dFF, dModel);
+                        ffnDown = AllocAndLoadResident(reader, $"blk.{l}.ffn_down.weight", dFF, dModel, mmap);
+                    }
                     else if (quantize && dModel % Q8DotKernel.BlockSize == 0 && dFF % Q8DotKernel.BlockSize == 0)
                     {
                         ffnGate = AllocAndLoadResident(reader, $"blk.{l}.ffn_gate.weight", dModel, dFF, mmap);
@@ -296,6 +396,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     layers[l] = new LayerWeightBuffers
                     {
                         AttnNormGamma = attnNormGamma,
+                        QNorm = qNorm,
+                        KNorm = kNorm,
+                        PostAttnNorm = postAttnNorm,
+                        PostFfwNorm = postFfwNorm,
                         AttnNormBeta = attnNormBeta,
                         Wq = wq,
                         Bq = bq,
@@ -328,13 +432,15 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 if (kFull.Length > 0) { PooledBuffer<float>.ReturnArray(kFull); }
                 if (vFull.Length > 0) { PooledBuffer<float>.ReturnArray(vFull); }
                 if (oFull.Length > 0) { PooledBuffer<float>.ReturnArray(oFull); }
+                if (qkvFused.Length > 0) { PooledBuffer<float>.ReturnArray(qkvFused); }
+                if (gateUpFused.Length > 0) { PooledBuffer<float>.ReturnArray(gateUpFused); }
                 PooledBuffer<float>.ReturnArray(qBiasFull);
                 PooledBuffer<float>.ReturnArray(kBiasFull);
                 PooledBuffer<float>.ReturnArray(vBiasFull);
             }
 
             // ─── Final norm + LM head ─────────────────────────────────────
-            var finalNormGamma = AllocAndLoad(reader, "output_norm.weight", dModel);
+            var finalNormGamma = LoadNormGamma("output_norm.weight");
             var finalNormBeta = TensorStorage<float>.Unpooled(0);
 
             // LM head — step 2.3a: resident as Q8_0 (output-major). The file
@@ -1081,7 +1187,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// Mapping: Wq_h[i, j] = Q[h*headDim + j, i] = file[(h*headDim + j)*dModel + i].
         /// </summary>
         private static DecodeWeight[] SplitQuery(
-            float[] qFull, int nHeads, int dModel, int headDim, bool quantize)
+            ReadOnlySpan<float> qFull, int nHeads, int dModel, int headDim, bool quantize)
         {
             var wq = new DecodeWeight[nHeads];
             for (var h = 0; h < nHeads; h++)
@@ -1092,7 +1198,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     // each row is that output's contiguous dModel contraction
                     // vector — exactly Q8Weight's output-major layout, no transpose.
                     wq[h] = Q8Weight.QuantizeRows(
-                        qFull.AsSpan(h * headDim * dModel, headDim * dModel), headDim, dModel);
+                        qFull.Slice(h * headDim * dModel, headDim * dModel), headDim, dModel);
                 }
                 else
                 {
@@ -1113,7 +1219,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
         /// <summary>Same per-head split as SplitQuery but iterates over nKvHeads.</summary>
         private static DecodeWeight[] SplitKeyValue(
-            float[] kvFull, int nKvHeads, int dModel, int headDim, bool quantize)
+            ReadOnlySpan<float> kvFull, int nKvHeads, int dModel, int headDim, bool quantize)
         {
             var wkv = new DecodeWeight[nKvHeads];
             for (var kv = 0; kv < nKvHeads; kv++)
@@ -1121,7 +1227,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 if (quantize)
                 {
                     wkv[kv] = Q8Weight.QuantizeRows(
-                        kvFull.AsSpan(kv * headDim * dModel, headDim * dModel), headDim, dModel);
+                        kvFull.Slice(kv * headDim * dModel, headDim * dModel), headDim, dModel);
                 }
                 else
                 {

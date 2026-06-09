@@ -9,7 +9,6 @@
         <AssemblyName>DevOnBike.Overfit.Extensions.AI</AssemblyName>
         <PackageId>DevOnBike.Overfit.Extensions.AI</PackageId>
         <Title>Overfit — Microsoft.Extensions.AI adapter (IChatClient / IEmbeddingGenerator)</Title>
-        <Version>10.0.21</Version>
         <Authors>DevOnBike</Authors>
         <Copyright>Copyright (c) 2026 DevOnBike</Copyright>
         <Description>Use the in-process Overfit LLM runtime through Microsoft.Extensions.AI. Implements IChatClient and IEmbeddingGenerator, so it plugs into Semantic Kernel and any Microsoft.Extensions.AI pipeline — function calling, caching, telemetry, DI — by changing one line. Pure .NET, in-process: no Python, no model server, Native-AOT friendly. Dual-licensed (AGPL-3.0-or-later / commercial).</Description>

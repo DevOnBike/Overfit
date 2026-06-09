@@ -53,7 +53,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Activation = activation;
 
             _intermediate = new float[dFF];
-            _gate = activation == FeedForwardActivation.SwiGLU
+            _gate = activation is FeedForwardActivation.SwiGLU or FeedForwardActivation.GeGLU
                               ? new float[dFF]
                               : [];
 
@@ -141,9 +141,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rows);
 
-            if (Activation == FeedForwardActivation.SwiGLU)
+            if (Activation is FeedForwardActivation.SwiGLU or FeedForwardActivation.GeGLU)
             {
-                throw new OverfitRuntimeException("SwiGLU must use the SwiGLU batched path, not DecodeBatched.");
+                throw new OverfitRuntimeException("Gated FFN (SwiGLU/GeGLU) must use the gated batched path, not DecodeBatched.");
             }
             if (hidden.Length < (long)rows * DModel)
             {
@@ -200,7 +200,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             // gate = SiLU(hidden @ Wgate)
             SingleTokenProjectionKernel.ProjectParallel(hidden, wGate, [], _gate, DModel, DFF);
-            ApplySiLU(_gate);
+            ApplyGate(_gate, Activation);
 
             // up = hidden @ Wup
             SingleTokenProjectionKernel.ProjectParallel(hidden, wUp, [], _intermediate, DModel, DFF);
@@ -227,7 +227,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             // gate = SiLU(hidden @ Wgate)
             Q8DotKernel.ProjectParallel(hidden, wGate, [], _gate, _q8InputQuants, _q8InputScales);
-            ApplySiLU(_gate);
+            ApplyGate(_gate, Activation);
 
             // up = hidden @ Wup
             Q8DotKernel.ProjectParallel(hidden, wUp, [], _intermediate, _q8InputQuants, _q8InputScales);
@@ -266,7 +266,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 Q4KGemvKernel.GemvParallel(
                     wGate.Quantized4K.EnsureRepacked(), DFF, DModel,
                     _q8kInputQuants, _q8kInputScales, _q8kInputBsums, _gate);
-                ApplySiLU(_gate);
+                ApplyGate(_gate, Activation);
                 Q4KGemvKernel.GemvParallel(
                     wUp.Quantized4K.EnsureRepacked(), DFF, DModel,
                     _q8kInputQuants, _q8kInputScales, _q8kInputBsums, _intermediate);
@@ -279,13 +279,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 Q4KDotKernel.ProjectGateUpParallel(
                     hidden, wGate.Quantized4K, wUp.Quantized4K, _gate, _intermediate,
                     _q8kInputQuants, _q8kInputScales, _q8kInputBsums);
-                ApplySiLU(_gate);
+                ApplyGate(_gate, Activation);
             }
             else
             {
                 // gate = SiLU(hidden @ Wgate)
                 ProjectParallelDispatched(hidden, in wGate, [], _gate, DModel, DFF);
-                ApplySiLU(_gate);
+                ApplyGate(_gate, Activation);
 
                 // up = hidden @ Wup
                 ProjectParallelDispatched(hidden, in wUp, [], _intermediate, DModel, DFF);
@@ -318,7 +318,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var up = new float[rows * DFF];
 
             BatchedQuantProjection.Dispatch(hidden, rows, in wGate, [], gate, DModel, DFF);
-            ApplySiLU(gate);
+            ApplyGate(gate, Activation);
             BatchedQuantProjection.Dispatch(hidden, rows, in wUp, [], up, DModel, DFF);
             TensorPrimitives.Multiply(gate, up, up);
             BatchedQuantProjection.Dispatch(up, rows, in wDown, [], output.Slice(0, rows * DModel), DFF, DModel);
@@ -445,6 +445,19 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 var x = values[i];
                 values[i] = x / (1f + MathF.Exp(-x));
+            }
+        }
+
+        // Gated FFN activation applied to the gate branch: SiLU for SwiGLU (Llama/Qwen/Phi), GELU(tanh) for GeGLU (Gemma).
+        private static void ApplyGate(Span<float> values, FeedForwardActivation activation)
+        {
+            if (activation == FeedForwardActivation.GeGLU)
+            {
+                ApplyGeLU(values);
+            }
+            else
+            {
+                ApplySiLU(values);
             }
         }
 

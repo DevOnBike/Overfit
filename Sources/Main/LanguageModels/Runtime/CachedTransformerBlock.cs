@@ -58,13 +58,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int expertUsedCount = 0,
             int expertFeedForwardLength = 0,
             bool normalizeExpertWeights = true,
-            bool hasSharedExpert = true)
+            bool hasSharedExpert = true,
+            int headDim = 0,
+            float attnLogitSoftcap = 0f)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(dModel);
 
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(headCount);
 
-            if (dModel % headCount != 0)
+            // Qwen3 sets head_dim explicitly (head_dim ≠ dModel/headCount); only require divisibility otherwise.
+            if (headDim <= 0 && dModel % headCount != 0)
             {
                 throw new ArgumentException(
                     $"dModel ({dModel}) must be divisible by headCount ({headCount}).",
@@ -79,7 +82,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             DModel = dModel;
             HeadCount = headCount;
-            HeadDimension = dModel / headCount;
+            HeadDimension = headDim > 0 ? headDim : dModel / headCount;
             DFF = dFF;
             MaxSequenceLength = maxSequenceLength;
             LayerNormEpsilon = layerNormEpsilon;
@@ -89,7 +92,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 dModel,
                 headCount,
                 maxSequenceLength,
-                kvHeadCount: kvHeadCount > 0 ? kvHeadCount : headCount);
+                kvHeadCount: kvHeadCount > 0 ? kvHeadCount : headCount,
+                headDim: headDim,
+                attnLogitSoftcap: attnLogitSoftcap);
 
             _feedForward = new CachedFeedForwardBlock(
                 dModel,
@@ -194,6 +199,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 rope);
             DecodeProfiler.Stop(DecodeProfiler.Component.Attention, profAttn);
 
+            // Gemma-2 sandwich norm: RMSNorm the attention OUTPUT before the residual add.
+            if (weights.HasPostNorm)
+            {
+                RmsNormalize(_attentionOutput, weights.PostAttnNorm, _attentionOutput, DModel, LayerNormEpsilon);
+            }
+
             SingleTokenLayerNormKernel.AddResidual(
                 input,
                 _attentionOutput,
@@ -251,6 +262,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     _feedForwardOutput);
             }
             DecodeProfiler.Stop(DecodeProfiler.Component.Ffn, profFfn);
+
+            // Gemma-2 sandwich norm: RMSNorm the FFN OUTPUT before the residual add.
+            if (weights.HasPostNorm)
+            {
+                RmsNormalize(_feedForwardOutput, weights.PostFfwNorm, _feedForwardOutput, DModel, LayerNormEpsilon);
+            }
 
             SingleTokenLayerNormKernel.AddResidual(
                 _afterAttentionResidual,
@@ -386,8 +403,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             for (var n = 0; n < rows; n++)
             {
+                var attnRow = attnOut.AsSpan(n * dModel, dModel);
+                if (weights.HasPostNorm) // Gemma-2 sandwich norm on the attention output
+                {
+                    RmsNormalize(attnRow, weights.PostAttnNorm, attnRow, dModel, LayerNormEpsilon);
+                }
                 SingleTokenLayerNormKernel.AddResidual(
-                    input.Slice(n * dModel, dModel), attnOut.AsSpan(n * dModel, dModel),
+                    input.Slice(n * dModel, dModel), attnRow,
                     afterAttn.AsSpan(n * dModel, dModel), dModel);
             }
 
@@ -421,8 +443,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             for (var n = 0; n < rows; n++)
             {
+                var ffnRow = ffnOut.AsSpan(n * dModel, dModel);
+                if (weights.HasPostNorm) // Gemma-2 sandwich norm on the FFN output
+                {
+                    RmsNormalize(ffnRow, weights.PostFfwNorm, ffnRow, dModel, LayerNormEpsilon);
+                }
                 SingleTokenLayerNormKernel.AddResidual(
-                    afterAttn.AsSpan(n * dModel, dModel), ffnOut.AsSpan(n * dModel, dModel),
+                    afterAttn.AsSpan(n * dModel, dModel), ffnRow,
                     output.Slice(n * dModel, dModel), dModel);
             }
         }

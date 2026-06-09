@@ -30,6 +30,9 @@ namespace DevOnBike.Overfit.DeepLearning
         private readonly bool _splitHalf;
         private readonly DecodeWeight _embed;
         private readonly IDequantRowSource _lmHead;
+        // When the output vocab is restricted (e.g. audio-only for voice cloning), the LM head produces logits over
+        // [_outputStart, _outputStart+_vocab); a generated index i maps back to real token id i + _outputStart.
+        private readonly int _outputStart;
         private readonly TrainableLlamaBlock[] _blocks;
         private readonly AutogradNode[] _ln1Gamma;
         private readonly AutogradNode[] _ln2Gamma;
@@ -46,11 +49,20 @@ namespace DevOnBike.Overfit.DeepLearning
             LlamaLayerFrozenWeights[] layers,
             float[] finalNormInit,
             float ropeTheta, bool ropeSplitHalf, float eps, int maxSeqLen, RopeScaling? ropeScaling,
-            int loraRank, Random rng, bool loraOnLmHead = false)
+            int loraRank, Random rng, bool loraOnLmHead = false,
+            int outputStart = 0, int outputCount = 0)
         {
-            _dModel = dModel; _nQHeads = nQHeads; _nKVHeads = nKVHeads; _vocab = vocab;
+            // Optional output-vocab restriction: the LM head / loss / generation cover only [outputStart,
+            // outputStart+outputCount) instead of the full vocab — a big win when the model only ever emits a
+            // sub-vocabulary (audio tokens for voice cloning). outputCount == 0 means "full vocab".
+            var restricted = outputCount > 0;
+            _outputStart = restricted ? outputStart : 0;
+            var effectiveVocab = restricted ? outputCount : vocab;
+
+            _dModel = dModel; _nQHeads = nQHeads; _nKVHeads = nKVHeads; _vocab = effectiveVocab;
             _dHead = dModel / nQHeads; _halfDim = _dHead / 2; _eps = eps; _splitHalf = ropeSplitHalf;
-            _embed = embed; _lmHead = lmHead;
+            _embed = embed;
+            _lmHead = restricted ? new RangedDequantRowSource(lmHead, outputStart, outputCount) : lmHead;
             _dFF = layers[0].Gate.OutputSize;
 
             var nLayers = layers.Length;
@@ -75,7 +87,7 @@ namespace DevOnBike.Overfit.DeepLearning
             _finalNormGamma = Param(finalNormInit);
             // LoRA on the LM head is opt-in: it adds direct output capacity but on a huge vocab it is
             // high-variance, so it is OFF by default (block LoRA + norms give a stable descent).
-            _lmHeadLora = (loraRank > 0 && loraOnLmHead) ? Track(new LoRAAdapter(dModel, vocab, loraRank, rng)) : null;
+            _lmHeadLora = (loraRank > 0 && loraOnLmHead) ? Track(new LoRAAdapter(dModel, effectiveVocab, loraRank, rng)) : null;
             _ropeTable = new RopeTable(maxSeqLen, _dHead, ropeTheta, ropeScaling, ropeSplitHalf);
         }
 
@@ -86,7 +98,8 @@ namespace DevOnBike.Overfit.DeepLearning
         /// projection + embedding + LM head is the engine's frozen quantized handle (zero repack), with
         /// fresh LoRA adapters of the given rank and RMSNorm gains copied from the model.</summary>
         public static TrainableLlamaModel FromEngine(
-            CachedLlamaInferenceEngine engine, int loraRank, Random rng, int maxSeqLen, bool loraOnLmHead = false)
+            CachedLlamaInferenceEngine engine, int loraRank, Random rng, int maxSeqLen, bool loraOnLmHead = false,
+            int outputStart = 0, int outputCount = 0)
         {
             var cfg = engine.Config;
             int dModel = cfg.DModel, nHeads = cfg.NHeads, kvHeads = cfg.KvHeads, headDim = dModel / nHeads;
@@ -113,7 +126,8 @@ namespace DevOnBike.Overfit.DeepLearning
                 dModel, nHeads, kvHeads, cfg.VocabSize,
                 engine.EmbeddingWeights, engine.LmHeadWeights.AsRowSource(),
                 layers, engine.FinalNormGamma.AsReadOnlySpan().ToArray(),
-                cfg.RoPETheta, cfg.RopeSplitHalf, 1e-6f, maxSeqLen, cfg.RopeScaling, loraRank, rng, loraOnLmHead);
+                cfg.RoPETheta, cfg.RopeSplitHalf, 1e-6f, maxSeqLen, cfg.RopeScaling, loraRank, rng, loraOnLmHead,
+                outputStart, outputCount);
         }
 
         /// <summary>Forward over a token sequence → logits <c>[T, vocab]</c>, recording the tape.
@@ -232,7 +246,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
                 if (p == tokens.Count - 1)
                 {
-                    var token = LmHeadArgmax(hidden, normedB.Span, rowB.Span);
+                    var token = LmHeadArgmax(hidden, normedB.Span, rowB.Span) + _outputStart; // restricted index → real id
                     if (token == eosTokenId) { break; }
                     produced.Add(token);
                     if (produced.Count >= maxNewTokens) { break; }
@@ -241,6 +255,361 @@ namespace DevOnBike.Overfit.DeepLearning
                 p++;
             }
             return produced.ToArray();
+        }
+
+        /// <summary>
+        /// Like <see cref="GenerateCached"/> but samples (temperature + top-p nucleus + repetition penalty) instead
+        /// of greedy argmax — essential for audio-token models (Orpheus TTS), where greedy decoding drones / drags.
+        /// </summary>
+        public int[] GenerateCachedSampled(
+            int[] promptTokens, int maxNewTokens, int eosTokenId,
+            float temperature, float topP, float repeatPenalty, int repeatWindow, int seed,
+            int secondaryEosTokenId = -1)
+        {
+            var nL = _blocks.Length;
+            var kvWidth = _nKVHeads * _dHead;
+            var maxLen = promptTokens.Length + maxNewTokens;
+            var kvStride = maxLen * kvWidth;
+            var cacheK = new float[nL * kvStride];
+            var cacheV = new float[nL * kvStride];
+
+            var tokens = new List<int>(promptTokens);
+            var produced = new List<int>();
+
+            using var hiddenB = new PooledBuffer<float>(_dModel, clearMemory: false);
+            using var nextB = new PooledBuffer<float>(_dModel, false);
+            using var normedB = new PooledBuffer<float>(_dModel, false);
+            using var rowB = new PooledBuffer<float>(_dModel, false);
+            var hidden = hiddenB.Span;
+            var next = nextB.Span;
+
+            var logits = new float[_vocab];
+            var probs = new float[_vocab];
+            var order = new int[_vocab];
+            var rng = new Random(seed);
+
+            var p = 0;
+            while (true)
+            {
+                _embed.DequantizeRow(tokens[p], hidden);
+                for (var l = 0; l < nL; l++)
+                {
+                    _blocks[l].DecodeStep(hidden, p, _ropeTable, _ln1Gamma[l], _ln2Gamma[l], _lora[l],
+                        cacheK.AsSpan(l * kvStride, kvStride), cacheV.AsSpan(l * kvStride, kvStride), next);
+                    next.CopyTo(hidden);
+                }
+
+                if (p == tokens.Count - 1)
+                {
+                    FillLmHeadLogits(hidden, normedB.Span, rowB.Span, logits);
+                    var sampled = SampleToken(logits, probs, order, produced, temperature, topP, repeatPenalty, repeatWindow, rng, _outputStart);
+                    var token = sampled + _outputStart; // restricted index → real token id
+                    // Stop on either terminator: the trained text-eos OR end_of_speech (128258), which the
+                    // base model emits at the audio-stream end under the canonical prompt. Without the latter the
+                    // clone runs to maxNewTokens and tacks on garbled babble after the sentence.
+                    if (token == eosTokenId || token == secondaryEosTokenId) { break; }
+                    produced.Add(token);
+                    if (produced.Count >= maxNewTokens) { break; }
+                    tokens.Add(token);
+                }
+                p++;
+            }
+            return produced.ToArray();
+        }
+
+        /// <summary>
+        /// Diagnostic: runs the decode (ProjVec) path over <paramref name="promptTokens"/> and copies the
+        /// last token's final hidden state (post-stack, BEFORE the final RMSNorm — matching
+        /// <c>CachedLlamaSession.LastHiddenState</c>) into <paramref name="hiddenOut"/>. Used to localize where a
+        /// merged inference engine diverges from this trainable model on the same prompt.
+        /// </summary>
+        public void DecodePromptHidden(int[] promptTokens, Span<float> hiddenOut)
+        {
+            var nL = _blocks.Length;
+            var kvWidth = _nKVHeads * _dHead;
+            var kvStride = promptTokens.Length * kvWidth;
+            var cacheK = new float[nL * kvStride];
+            var cacheV = new float[nL * kvStride];
+
+            using var hiddenB = new PooledBuffer<float>(_dModel, clearMemory: false);
+            using var nextB = new PooledBuffer<float>(_dModel, false);
+            var hidden = hiddenB.Span;
+            var next = nextB.Span;
+
+            for (var p = 0; p < promptTokens.Length; p++)
+            {
+                _embed.DequantizeRow(promptTokens[p], hidden);
+                for (var l = 0; l < nL; l++)
+                {
+                    _blocks[l].DecodeStep(hidden, p, _ropeTable, _ln1Gamma[l], _ln2Gamma[l], _lora[l],
+                        cacheK.AsSpan(l * kvStride, kvStride), cacheV.AsSpan(l * kvStride, kvStride), next);
+                    next.CopyTo(hidden);
+                }
+            }
+            hidden.Slice(0, _dModel).CopyTo(hiddenOut);
+        }
+
+        /// <summary>
+        /// Bakes the trained LoRA + RMSNorm gains into the frozen base weights and returns a fresh, fully
+        /// <b>quantized</b> <see cref="CachedLlamaInferenceEngine"/> — so the fine-tuned model runs on the optimized
+        /// zero-alloc/SIMD decode path instead of the (≈2× slower) trainable autograd graph. The merge is one-time:
+        /// per projection, dequant the base rows, add the LoRA residual <c>W[o,i] += Σ_r A[i,r]·B[r,o]</c>, and
+        /// re-quantize to Q8. LM-head LoRA (off by default) is not merged. The returned engine borrows the base's
+        /// embedding / LM-head / backing, so keep <paramref name="baseEngine"/> alive for the merged engine's lifetime.
+        /// </summary>
+        public CachedLlamaInferenceEngine BuildMergedEngine(CachedLlamaInferenceEngine baseEngine, bool mergeLora = true)
+        {
+            var cfg = baseEngine.Config;
+            var nL = _blocks.Length;
+            var merged = new CachedLlamaInferenceEngine.LayerWeightBuffers[nL];
+
+            for (var l = 0; l < nL; l++)
+            {
+                var b = baseEngine.GetTrainableLayer(l);
+                var lora = mergeLora ? _lora[l] : null;
+
+                merged[l] = new CachedLlamaInferenceEngine.LayerWeightBuffers
+                {
+                    // Trained RMSNorm gains replace the base (these are the other thing QLoRA learns).
+                    AttnNormGamma = NodeToStorage(_ln1Gamma[l]),
+                    AttnNormBeta = TensorStorage<float>.Unpooled(0),
+                    FfnNormGamma = NodeToStorage(_ln2Gamma[l]),
+                    FfnNormBeta = TensorStorage<float>.Unpooled(0),
+                    QNorm = b.QNorm,
+                    KNorm = b.KNorm,
+                    // q/k/v: each per-head weight row is an OUTPUT neuron (o = h·dHead + jj), columns are dModel inputs.
+                    Wq = MergePerHeadByOutput(b.Wq, lora?.Q, _nQHeads, _dHead, _dModel),
+                    Bq = b.Bq,
+                    Wk = MergePerHeadByOutput(b.Wk, lora?.K, _nKVHeads, _dHead, _dModel),
+                    Bk = b.Bk,
+                    Wv = MergePerHeadByOutput(b.Wv, lora?.V, _nKVHeads, _dHead, _dModel),
+                    Bv = b.Bv,
+                    // o: per-head weight is the TRANSPOSED layout — row jj is the head's INPUT column (i = h·dHead+jj),
+                    // the dModel entries are OUTPUTS. So the residual indexes A by the fixed input, B by the output.
+                    Wo = MergePerHeadByInput(b.Wo, lora?.O, _nQHeads, _dHead, _dModel),
+                    Bo = b.Bo,
+                    // FFN: resident full matrices. gate/up = [dFF × dModel], down = [dModel × dFF].
+                    FfnGate = MergeResident(b.FfnGate, lora?.Gate, _dFF, _dModel),
+                    FfnUp = MergeResident(b.FfnUp, lora?.Up, _dFF, _dModel),
+                    FfnDown = MergeResident(b.FfnDown, lora?.Down, _dModel, _dFF),
+                };
+            }
+
+            return CachedLlamaInferenceEngine.CreateFromBuffers(
+                cfg, baseEngine.EmbeddingWeights, NodeToStorage(_finalNormGamma),
+                TensorStorage<float>.Unpooled(0), baseEngine.LmHeadWeights, merged);
+        }
+
+        private static TensorStorage<float> NodeToStorage(AutogradNode node)
+        {
+            var src = node.DataView.AsSpan();
+            var st = TensorStorage<float>.Unpooled(src.Length);
+            src.CopyTo(st.AsSpan());
+            return st;
+        }
+
+        // q/k/v: base[h] is [dHead × dModel], row jj = output neuron o = h·dHead+jj, cols = dModel inputs.
+        // LoRA A [dModel × rank], B [rank × (nHeads·dHead)]; delta[o,i] = Σ_r A[i,r]·B[r,o].
+        private static DecodeWeight[] MergePerHeadByOutput(DecodeWeight[] baseHeads, LoRAAdapter? lora, int nHeads, int dHead, int dModel)
+        {
+            float[]? a = null, bb = null;
+            var rank = 0;
+            var outDim = nHeads * dHead;
+            if (lora is not null) { a = lora.A.DataView.AsSpan().ToArray(); bb = lora.B.DataView.AsSpan().ToArray(); rank = lora.Rank; }
+            var result = new DecodeWeight[nHeads];
+            for (var h = 0; h < nHeads; h++)
+            {
+                var buf = new float[dHead * dModel];
+                for (var jj = 0; jj < dHead; jj++)
+                {
+                    baseHeads[h].DequantizeRow(jj, buf.AsSpan(jj * dModel, dModel));
+                }
+                if (lora is not null)
+                {
+                    System.Threading.Tasks.Parallel.For(0, dHead, jj =>
+                    {
+                        var o = (h * dHead) + jj;
+                        var row = buf.AsSpan(jj * dModel, dModel);
+                        for (var i = 0; i < dModel; i++)
+                        {
+                            var d = 0f;
+                            for (var r = 0; r < rank; r++) { d += a![(i * rank) + r] * bb![(r * outDim) + o]; }
+                            row[i] += d;
+                        }
+                    });
+                }
+                result[h] = Q8Weight.QuantizeRows(buf, dHead, dModel);
+            }
+            return result;
+        }
+
+        // o: base[h] is [dModel × dHead] — OutputSize=dModel rows, each the dHead weights for head h's attn output
+        // (= the full-O columns [h·dHead, (h+1)·dHead)). LoRA O: A [(nHeads·dHead) × rank], B [rank × dModel];
+        // for output o and head-input i (full input = h·dHead+i): delta = Σ_r A[h·dHead+i, r]·B[r, o].
+        private static DecodeWeight[] MergePerHeadByInput(DecodeWeight[] baseHeads, LoRAAdapter? lora, int nHeads, int dHead, int dModel)
+        {
+            float[]? a = null, bb = null;
+            var rank = 0;
+            if (lora is not null) { a = lora.A.DataView.AsSpan().ToArray(); bb = lora.B.DataView.AsSpan().ToArray(); rank = lora.Rank; }
+            var result = new DecodeWeight[nHeads];
+            for (var h = 0; h < nHeads; h++)
+            {
+                var buf = new float[dModel * dHead];
+                for (var o = 0; o < dModel; o++)
+                {
+                    baseHeads[h].DequantizeRow(o, buf.AsSpan(o * dHead, dHead));
+                }
+                if (lora is not null)
+                {
+                    System.Threading.Tasks.Parallel.For(0, dModel, o =>
+                    {
+                        var row = buf.AsSpan(o * dHead, dHead);
+                        for (var i = 0; i < dHead; i++)
+                        {
+                            var iIn = (h * dHead) + i;
+                            var d = 0f;
+                            for (var r = 0; r < rank; r++) { d += a![(iIn * rank) + r] * bb![(r * dModel) + o]; }
+                            row[i] += d;
+                        }
+                    });
+                }
+                result[h] = Q8Weight.QuantizeRows(buf, dModel, dHead);
+            }
+            return result;
+        }
+
+        // Resident full matrix [outDim × inDim]. LoRA A [inDim × rank], B [rank × outDim]; delta[o,i] = Σ_r A[i,r]·B[r,o].
+        private static DecodeWeight MergeResident(DecodeWeight baseW, LoRAAdapter? lora, int outDim, int inDim)
+        {
+            var buf = new float[checked(outDim * inDim)];
+            for (var o = 0; o < outDim; o++)
+            {
+                baseW.DequantizeRow(o, buf.AsSpan(o * inDim, inDim));
+            }
+            if (lora is not null)
+            {
+                var a = lora.A.DataView.AsSpan().ToArray();
+                var bb = lora.B.DataView.AsSpan().ToArray();
+                var rank = lora.Rank;
+                System.Threading.Tasks.Parallel.For(0, outDim, o =>
+                {
+                    var row = buf.AsSpan(o * inDim, inDim);
+                    for (var i = 0; i < inDim; i++)
+                    {
+                        var d = 0f;
+                        for (var r = 0; r < rank; r++) { d += a[(i * rank) + r] * bb[(r * outDim) + o]; }
+                        row[i] += d;
+                    }
+                });
+            }
+            return Q8Weight.QuantizeRows(buf, outDim, inDim);
+        }
+
+        // Computes the full LM-head logit vector for the current hidden state (RMSNorm + base + LM-head LoRA).
+        private void FillLmHeadLogits(ReadOnlySpan<float> hidden, Span<float> normed, Span<float> row, Span<float> logits)
+        {
+            var inv = 1f / MathF.Sqrt(TensorPrimitives.Dot(hidden, hidden) / _dModel + _eps);
+            var g = _finalNormGamma.DataView.AsReadOnlySpan();
+            for (var i = 0; i < _dModel; i++) { normed[i] = hidden[i] * inv * g[i]; }
+
+            _ = row; // dequant scratch is per-thread inside DequantMatVec
+            DequantMatVec.Run(normed, _lmHead, logits);
+
+            // LM-head LoRA: logits += (normed·A)·B. Small (rank·vocab); kept sequential.
+            if (_lmHeadLora is not null)
+            {
+                var rank = _lmHeadLora.Rank;
+                var a = _lmHeadLora.A.DataView.AsReadOnlySpan();
+                Span<float> tmp = stackalloc float[rank];
+                tmp.Clear();
+                for (var i = 0; i < _dModel; i++)
+                {
+                    var xi = normed[i];
+                    if (xi == 0f) { continue; }
+                    var aRow = a.Slice(i * rank, rank);
+                    for (var r = 0; r < rank; r++) { tmp[r] += xi * aRow[r]; }
+                }
+                var bSpan = _lmHeadLora.B.DataView.AsReadOnlySpan();
+                for (var r = 0; r < rank; r++)
+                {
+                    var tr = tmp[r];
+                    if (tr == 0f) { continue; }
+                    var bRow = bSpan.Slice(r * _vocab, _vocab);
+                    for (var o = 0; o < _vocab; o++) { logits[o] += tr * bRow[o]; }
+                }
+            }
+        }
+
+        // Repetition penalty → temperature → softmax → top-p nucleus → sample. Greedy when temperature <= 0.
+        private static int SampleToken(
+            Span<float> logits, float[] probs, int[] order, List<int> produced,
+            float temperature, float topP, float repeatPenalty, int repeatWindow, Random rng, int outputStart)
+        {
+            var vocab = logits.Length;
+
+            if (repeatPenalty != 1f && repeatWindow > 0)
+            {
+                var from = Math.Max(0, produced.Count - repeatWindow);
+                for (var i = from; i < produced.Count; i++)
+                {
+                    var t = produced[i] - outputStart; // real token id → restricted logit index
+                    if ((uint)t >= (uint)vocab)
+                    {
+                        continue;
+                    }
+                    var v = logits[t];
+                    logits[t] = v > 0f ? v / repeatPenalty : v * repeatPenalty;
+                }
+            }
+
+            if (temperature <= 0f)
+            {
+                var best = 0;
+                var bestVal = float.NegativeInfinity;
+                for (var o = 0; o < vocab; o++)
+                {
+                    if (logits[o] > bestVal) { bestVal = logits[o]; best = o; }
+                }
+                return best;
+            }
+
+            var maxL = float.NegativeInfinity;
+            for (var o = 0; o < vocab; o++)
+            {
+                var l = logits[o] / temperature;
+                logits[o] = l;
+                if (l > maxL) { maxL = l; }
+            }
+            double sum = 0.0;
+            for (var o = 0; o < vocab; o++)
+            {
+                var pr = MathF.Exp(logits[o] - maxL);
+                probs[o] = pr;
+                sum += pr;
+                order[o] = o;
+            }
+            var invSum = (float)(1.0 / sum);
+            for (var o = 0; o < vocab; o++) { probs[o] *= invSum; }
+
+            // Top-p: sort by probability (desc) and keep the smallest nucleus covering topP mass.
+            Array.Sort(order, (x, y) => probs[y].CompareTo(probs[x]));
+            double cumulative = 0.0;
+            var keep = 0;
+            for (var k = 0; k < vocab; k++)
+            {
+                cumulative += probs[order[k]];
+                keep++;
+                if (cumulative >= topP) { break; }
+            }
+
+            var target = rng.NextDouble() * cumulative;
+            double acc = 0.0;
+            for (var k = 0; k < keep; k++)
+            {
+                acc += probs[order[k]];
+                if (acc >= target) { return order[k]; }
+            }
+            return order[keep - 1];
         }
 
         private int LmHeadArgmax(ReadOnlySpan<float> hidden, Span<float> normed, Span<float> row)
@@ -379,6 +748,59 @@ namespace DevOnBike.Overfit.DeepLearning
         /// <summary>Next-token softmax cross-entropy: computes the mean loss over positions AND seeds
         /// <c>logits.Grad</c> with <c>softmax − onehot(target)</c> (normalized by T). Call
         /// <c>graph.BackwardFromGrad(logits)</c> afterwards. Mirrors the GPT-1 training loss.</summary>
+        /// <summary>
+        /// Completion-only variant: positions whose target equals <paramref name="ignoreIndex"/> contribute no loss
+        /// and no gradient (their grad rows are zeroed). Used for voice-clone fine-tuning, where the prompt tokens
+        /// are context and only the audio-token continuation is trained. The loss is averaged over the non-ignored
+        /// positions.
+        /// </summary>
+        public static float CrossEntropyLossAndSeed(AutogradNode logits, int[] targets, int vocab, int ignoreIndex)
+        {
+            var T = targets.Length;
+            var data = logits.DataView.AsReadOnlySpan();
+            var grad = logits.GradView.AsSpan();
+            grad.Clear(); // ignored rows must end up with zero gradient
+
+            var count = 0;
+            for (var t = 0; t < T; t++)
+            {
+                if (targets[t] != ignoreIndex)
+                {
+                    count++;
+                }
+            }
+            if (count == 0)
+            {
+                return 0f;
+            }
+
+            var totalMasked = 0.0;
+            var scaleMasked = 1f / count;
+            Span<float> probsM = vocab <= 4096 ? stackalloc float[vocab] : new float[vocab];
+            for (var t = 0; t < T; t++)
+            {
+                var tgt = targets[t];
+                if (tgt == ignoreIndex)
+                {
+                    continue;
+                }
+                var off = t * vocab;
+                var row = data.Slice(off, vocab);
+                var gradRow = grad.Slice(off, vocab);
+                var probsRow = probsM[..vocab];
+
+                var rowMax = TensorPrimitives.Max(row);
+                TensorPrimitives.Subtract(row, rowMax, probsRow);
+                TensorPrimitives.Exp(probsRow, probsRow);
+                var invSum = 1f / TensorPrimitives.Sum(probsRow);
+
+                totalMasked += -Math.Log(Math.Max(probsRow[tgt] * invSum, 1e-30f));
+                TensorPrimitives.Multiply(probsRow, invSum * scaleMasked, gradRow);
+                gradRow[tgt] -= scaleMasked;
+            }
+            return (float)(totalMasked / count);
+        }
+
         public static float CrossEntropyLossAndSeed(AutogradNode logits, int[] targets, int vocab)
         {
             var T = targets.Length;

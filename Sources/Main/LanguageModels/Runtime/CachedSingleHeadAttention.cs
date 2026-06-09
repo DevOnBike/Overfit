@@ -51,11 +51,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly float[] _q8kInputScales;
         private readonly short[] _q8kInputBsums;
         private readonly float _scale;
+        private readonly float _attnSoftcap;   // Gemma-2 pre-softmax score soft-cap; 0 = off
 
         public CachedSingleHeadAttention(
             int dModel,
             int headDimension,
-            int maxSequenceLength)
+            int maxSequenceLength,
+            float attnSoftcap = 0f)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(dModel);
 
@@ -66,6 +68,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             DModel = dModel;
             HeadDimension = headDimension;
             MaxSequenceLength = maxSequenceLength;
+            _attnSoftcap = attnSoftcap;
 
             _query = new float[headDimension];
             _key = new float[headDimension];
@@ -205,19 +208,21 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ReadOnlySpan<sbyte> hiddenQuants = default,
             ReadOnlySpan<float> hiddenScales = default,
             ReadOnlySpan<short> hiddenBsums = default,
-            bool hiddenQ8kValid = false)
+            bool hiddenQ8kValid = false,
+            ReadOnlySpan<float> qNorm = default,
+            ReadOnlySpan<float> kNorm = default)
         {
             if (projectKv)
             {
                 ProjectKvDispatched(
                     hidden, in wk, in wv, bk, bv,
                     cache, layerIndex, headIndex, position, rope,
-                    hiddenQuants, hiddenScales, hiddenBsums, hiddenQ8kValid);
+                    hiddenQuants, hiddenScales, hiddenBsums, hiddenQ8kValid, kNorm);
             }
 
             ProjectQDispatched(
                 hidden, in wq, bq, cache, position, rope,
-                hiddenQuants, hiddenScales, hiddenBsums, hiddenQ8kValid);
+                hiddenQuants, hiddenScales, hiddenBsums, hiddenQ8kValid, qNorm);
 
             AttendAndProjectO(in wo, cache, layerIndex, headIndex, position, output);
         }
@@ -244,10 +249,17 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ReadOnlySpan<sbyte> hiddenQuants,
             ReadOnlySpan<float> hiddenScales,
             ReadOnlySpan<short> hiddenBsums,
-            bool hiddenQ8kValid)
+            bool hiddenQ8kValid,
+            ReadOnlySpan<float> kNorm = default)
         {
             ProjectHiddenDispatched(hidden, in wk, bk, _key, hiddenQuants, hiddenScales, hiddenBsums, hiddenQ8kValid);
             ProjectHiddenDispatched(hidden, in wv, bv, _value, hiddenQuants, hiddenScales, hiddenBsums, hiddenQ8kValid);
+
+            // Qwen3 QK-RMSNorm: per-head normalize K over head_dim, before RoPE.
+            if (!kNorm.IsEmpty)
+            {
+                QkNormKernel.Apply(_key, kNorm, rows: 1, headDim: HeadDimension);
+            }
 
             // K is rotated and stored — cached K vectors stay permanently rotated,
             // so no re-rotation at read time.
@@ -276,9 +288,17 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ReadOnlySpan<sbyte> hiddenQuants,
             ReadOnlySpan<float> hiddenScales,
             ReadOnlySpan<short> hiddenBsums,
-            bool hiddenQ8kValid)
+            bool hiddenQ8kValid,
+            ReadOnlySpan<float> qNorm = default)
         {
             ProjectHiddenDispatched(hidden, in wq, bq, _query, hiddenQuants, hiddenScales, hiddenBsums, hiddenQ8kValid);
+
+            // Qwen3 QK-RMSNorm: per-head normalize Q over head_dim, before RoPE.
+            if (!qNorm.IsEmpty)
+            {
+                QkNormKernel.Apply(_query, qNorm, rows: 1, headDim: HeadDimension);
+            }
+
             if (rope is not null)
             {
                 RopeKernel.Apply(_query, rope, position + cache.BasePosition);
@@ -461,7 +481,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     _scoreScratch,
                     sequenceLength,
                     HeadDimension,
-                    _scale);
+                    _scale,
+                    _attnSoftcap);
                 return;
             }
 
@@ -485,7 +506,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 _scoreScratch,
                 sequenceLength,
                 HeadDimension,
-                _scale);
+                _scale,
+                _attnSoftcap);
         }
 
 

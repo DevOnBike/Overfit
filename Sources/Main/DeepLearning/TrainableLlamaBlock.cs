@@ -299,12 +299,8 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             var outDim = w.OutputSize;
             var inDim = w.InputSize;
-            var rowS = row.Slice(0, inDim);
-            for (var oIdx = 0; oIdx < outDim; oIdx++)
-            {
-                w.DecodeRow(oIdx, rowS);
-                dst[oIdx] = TensorPrimitives.Dot(rowS, x);
-            }
+            _ = row; // dequant scratch is now per-thread inside DequantMatVec
+            DequantMatVec.Run(x, w, dst.Slice(0, outDim));
 
             if (lora is null) { return; }
             var rank = lora.Rank;

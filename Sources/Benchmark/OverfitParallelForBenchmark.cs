@@ -49,6 +49,7 @@ namespace Benchmarks
             // they run with an identical worker count — a fair comparison.
             _workerCount = OverfitParallelFor.WorkerCount;
             _ = OverfitParallelForLegacy.WorkerCount;
+            _bclResults = new double[_workerCount];
         }
 
         // ─── Body ──────────────────────────────────────────────────────────
@@ -128,6 +129,24 @@ namespace Benchmarks
             OverfitParallelFor.For(0, _workerCount, &ChunkBody, &ctx);
             return ctx.Accumulator;
         }
+
+        // Head-to-head: BCL Parallel.For over the same range/work — the primitive we'd be migrating AWAY from.
+        // Crossover vs OverfitParallel tells us which call sites (by work-per-dispatch) actually benefit.
+        [Benchmark(Description = "System.Threading.Tasks.Parallel.For")]
+        public double BclParallelFor()
+        {
+            var inner = InnerIters;
+            var results = _bclResults;
+            System.Threading.Tasks.Parallel.For(0, _workerCount, c =>
+            {
+                var x = (double)(c + 1);
+                for (var k = 0; k < inner; k++) { x = x * 1.0000001 + 1e-9; }
+                results[c] = x;
+            });
+            return results[0];
+        }
+
+        private double[] _bclResults = [];
     }
 
 }

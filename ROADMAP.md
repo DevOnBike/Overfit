@@ -35,6 +35,65 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 
 ---
 
+## Audio / TTS backlog (ROI-ranked, 2026-06-08)
+
+Pure-.NET voice stack (Orpheus 3B + SNAC + voice cloning) is functional; first-word garble **root-caused & fixed**
+(prompt was missing the canonical Orpheus control/priming tokens — start_of_human + BOS + end_of_text/end_of_human/
+start_of_ai/start_of_speech; `OrpheusPrompt.BuildPromptTokens`). Validated objectively by transcribing output with our
+own Whisper. Remaining, by ROI (value ÷ effort):
+
+**🟢 Quick wins (small effort, every clip benefits)**
+1. **Trailing babble — ✅ ROOT-CAUSED 2026-06-08: it's the SAMPLING TEMPERATURE, not the stop token.** At temp 0.45
+   the model occasionally rambles ~3 s of garbled audio after the sentence before emitting the text-eos (128009);
+   **greedy (temp 0) ends cleanly** (Whisper: clip ends exactly at the last word, 1274 vs 1561 codes; "AI" also
+   cleaner). Mitigation: use low/greedy temp for the clone, or try temp ~0.2-0.3 if greedy tempo feels slow. (Added a
+   harmless safety-net: `GenerateCachedSampled` now also stops on a `secondaryEosTokenId` = end_of_speech 128258 — but
+   the model emits 128009 *after* the babble, so it wasn't the fix.) The earlier "greedy too slow" note was likely
+   confounded by the (now-fixed) prompt bug — re-judge greedy tempo.
+2. **Acronym lexicon — ✅ DONE + EMPIRICALLY VALIDATED 2026-06-09.** `TtsTextNormalizer` spells acronyms as spaced
+   capitals ("AI"→"A I", "CPU"→"C P U", +12 new: http/https/usb/ssd/hdd/dns/vm/iot/vr/ceo/cto/faq) so Orpheus says the
+   letter names. Locked in with 11 unit tests incl. substring-safety ("brain" ≠ "br A I n"). **Closed the loop the
+   user's way** (`OrpheusAcronymPronunciationE2ETests` [LongFact]): synth "The AI uses the CPU and the GPU through one
+   API." → our own Whisper transcribed it back **verbatim, 4/4 acronyms recovered** → the spaced-capitals convention
+   provably works. Suite 1248/0.
+
+**🟡 Structural (bigger effort, high value)**
+3. **Merge LoRA → fast inference engine** — clone synth runs on the trainable graph (`VoiceCloneTrainer.Generate` →
+   `TrainableLlamaModel`), preset runs on `CachedLlamaInferenceEngine` (zero-alloc/SIMD/Q4_K). **MEASURED GAP 2026-06-08
+   (same sentence, Orpheus-3B Q4): clone 6.1 tok/s (490 tok / 80.3 s) vs preset 12.9 tok/s (533 tok / 41.5 s) = 2.1×.**
+   Merge the adapter delta into the base weights → run clone on the fast engine ≈ preset speed (**~2.1×**). Merge math
+   (grounded): LoRA `Apply(x)=(x·A)·B` (NO alpha/scale), A `[in×rank]`, B `[rank×out]` →
+   `W_merged[o,i] = W_base[o,i] + Σ_r A[i,r]·B[r,o]`. Per projection: dequant base (per-head for q/k/v/o, resident for
+   gate/up/down) → add delta → requant (Q8) → rebuild `LayerWeightBuffers`; also swap in the trained RMSNorm gains
+   (`_ln1Gamma`/`_ln2Gamma`). Build a fresh engine via `CreateFromBuffers`, reuse base embed/lm_head/final-norm. Validate:
+   merged-engine output must match the trainable-model output (same words via Whisper) AND hit ~preset tok/s. LM-head
+   LoRA is off by default → no merge there. Audio-vocab restriction was training-only → irrelevant at merged inference.
+   **✅ DONE 2026-06-08 — merge correct, 2.1× speed, COHERENT with SAMPLING.** Built `TrainableLlamaModel.BuildMergedEngine`
+   (+ `VoiceCloneTrainer.BuildMergedEngine`, demo `--fast`, `AudioVocabConstraint`). **Merged clone decodes at ~12 tok/s
+   (2.1× the trainable graph's 6.1) and is COHERENT with sampling** (temp 0.6 → Whisper: "The history of computing began
+   long before the invasion of the digital computer."). **Merge proven CORRECT** via diff diagnostic
+   (`MergeDivergenceTests`): merged-vs-trainable final hidden **cos 0.99994**, and the first **6 greedy tokens are
+   bit-identical**. The earlier "garbage" was **greedy brittleness**, NOT a merge bug: tiny numerical drift between the
+   fast engine (Q8 requant + reassociated SIMD attention + batched prefill) and the trainable `ProjVec` decode flips the
+   hard argmax at ~token 6 → wrong SNAC code → derail. **Sampling avoids the hard flip → use temp 0.6 (NOT greedy) with
+   `--fast`.** Caveat: shares the base embed/lmhead/backing → keep the trainer alive while the merged engine lives (the
+   2nd `BuildMergedEngine` in one process double-disposes shared weights). Trailing-babble (ROADMAP #1) still applies to
+   the merged+sampling path. `--fast` now usable for the clone speed-up.
+
+**🟠 Medium-term**
+4. **Real-time on CPU** — smaller same-arch ~0.5B LM (RTF 2-3) or port **Kokoro 82M** (Apache, StyleTTS2, ~1-2 wk,
+   different arch) behind `ITextToSpeechEngine`. Product/moat decision (real-time is partly private — see
+   `project-moat-public-private`).
+5. **Signal-domain watermark** — inaudible waveform mark + detector (survives re-encode); current watermark is
+   metadata-only. Compliance/IP, near launch.
+
+**⚪ Low ROI / skip**
+6. Align `OrpheusTrainingSequence` to the canonical prompt — cosmetic (inference works regardless; base dominates).
+7. Zero-alloc + SIMD SNAC decode — a "zero-alloc" banner, NOT a speed win (SNAC is cheap; LM is the bottleneck).
+8. PL normalization — blocked (Orpheus is EN-only; needs a PL TTS model).
+
+---
+
 ## Adoption / launch roadmap (2026-06-04, ROI-ranked)
 
 Strategic frame: Overfit wins on **.NET in-process deployment + training moat**, NOT raw tok/s
@@ -259,7 +318,7 @@ Read the full llama.cpp source tree to map what they have that Overfit doesn't. 
 - Diffusion models — image generation is a different domain.
 - TensorFlow / JAX / MLX checkpoints — Python ecosystem formats.
 
-**Architectures Overfit doesn't load** (llama.cpp lists ~130; Overfit lists 7 families): Falcon, Gemma 1/2/3/3N, Mamba/Mamba2/Jamba, RWKV6/7, T5, Phi, GLM 1/2/3/4, Deepseek 1/2/V3, Cohere, Nemotron, Granite, LLaMA-4, Qwen3/3.5/4, Grok, Chameleon, Hunyuan/-V/-VL/-OCR, Pixtral, MiniCPM-V, InternVL, etc. Most are deferrable — Qwen2.5 + Llama-3.x + Mixtral cover the dominant Ollama deploy. Adding a new arch is typically 3-5 days *per family* (weight name mapping + arch-specific quirks like SwiGLU vs GeLU, GQA vs MHA).
+**Architectures Overfit doesn't load** (llama.cpp lists ~130; Overfit now lists 10 families — added `qwen3`, `phi3`, `gemma2`): Falcon, Gemma 1/3/3N, Mamba/Mamba2/Jamba, RWKV6/7, T5, GLM 1/2/3/4, Deepseek 1/2/V3, Cohere, Nemotron, Granite, LLaMA-4, Qwen3-MoE/3.5/4, Grok, Chameleon, Hunyuan/-V/-VL/-OCR, Pixtral, MiniCPM-V, InternVL, etc. Most are deferrable — Qwen2.5/3 + Llama-3.x + Mistral/Phi-3.5 + Gemma 2 + Mixtral cover the dominant Ollama deploy. Adding a new arch is typically 3-5 days *per family* (weight name mapping + arch-specific quirks like SwiGLU vs GeLU, GQA vs MHA, QK-norm, logit soft-caps).
 
 ---
 

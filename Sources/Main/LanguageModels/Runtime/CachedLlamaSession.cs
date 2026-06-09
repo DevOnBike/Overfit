@@ -176,7 +176,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             if (!DisableBatchedPrefillForParity
                 && promptTokens.Length >= BatchedPrefillThreshold
                 && !_slidingWindow
-                && _config.FfnActivation == FeedForwardActivation.SwiGLU
+                && _config.FfnActivation is FeedForwardActivation.SwiGLU or FeedForwardActivation.GeGLU
                 && _cache.CurrentLength + promptTokens.Length <= _cache.MaxLength)
             {
                 PrefillBatchedQuant(promptTokens);
@@ -325,7 +325,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// <summary>True when this session can run speculative decoding (SwiGLU FFN, non-sliding) — lets a
         /// generate loop pick the speculative path. <c>GenerateSpeculative</c> also falls back to a
         /// single-token step internally when this is false, so calling it is always safe.</summary>
-        public bool CanSpeculate => !_slidingWindow && _config.FfnActivation == FeedForwardActivation.SwiGLU;
+        public bool CanSpeculate => !_slidingWindow && _config.FfnActivation is FeedForwardActivation.SwiGLU or FeedForwardActivation.GeGLU;
 
         /// <summary>Greedy speculative-decode step (overload of <see cref="GenerateSpeculative(ReadOnlySpan{int}, Span{int}, in SamplingOptions, int, int, int)"/>).</summary>
         public int GenerateSpeculative(
@@ -398,7 +398,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var t0 = TokenSampler.Sample(_logits, in sampling, _random, _indexScratch, _scoreScratch);
 
             var canSpeculate = !_slidingWindow
-                && _config.FfnActivation == FeedForwardActivation.SwiGLU
+                && _config.FfnActivation is FeedForwardActivation.SwiGLU or FeedForwardActivation.GeGLU
                 && maxDraft > 0;
 
             // Adaptive gating: a verify forward only pays off if it commits enough tokens to beat its
@@ -448,9 +448,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // Embed [t0, draft…] and run ONE batched verify forward → per-row target logits.
             var hidden = new float[batch * dModel];
             _embedWeights.DequantizeRow(t0, hidden.AsSpan(0, dModel));
+            ApplyEmbeddingScale(hidden.AsSpan(0, dModel));
             for (var j = 0; j < dn; j++)
             {
                 _embedWeights.DequantizeRow(draft[j], hidden.AsSpan((1 + j) * dModel, dModel));
+                ApplyEmbeddingScale(hidden.AsSpan((1 + j) * dModel, dModel));
             }
             _cache.Advance(batch);
 
@@ -780,11 +782,26 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             for (var i = 0; i < rows; i++)
             {
                 _embedWeights.DequantizeRow(promptTokens[i], hidden.AsSpan(i * dModel, dModel));
+                ApplyEmbeddingScale(hidden.AsSpan(i * dModel, dModel));
                 _cache.Advance();
             }
 
             _stack.PrefillBatchedQuant(hidden, rows, _weights, _cache, basePosition, _rope);
             _stack.ProjectLogits(_weights, _logits);
+        }
+
+        // Gemma scales the token embedding by sqrt(d_model) after lookup; no-op (scale 1) for every other arch.
+        private void ApplyEmbeddingScale(Span<float> hidden)
+        {
+            var s = _config.EmbeddingScale;
+            if (s == 1f)
+            {
+                return;
+            }
+            for (var i = 0; i < hidden.Length; i++)
+            {
+                hidden[i] *= s;
+            }
         }
 
         private int EmbedAndAdvance(int tokenId)
@@ -797,6 +814,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // straight into _hidden. F32 backing → a plain slice-copy; K-quant backing →
             // dequantize just this one row (the per-token cost of the quantized embedding table).
             _embedWeights.DequantizeRow(tokenId, _hidden.AsSpan(0, _config.DModel));
+            ApplyEmbeddingScale(_hidden.AsSpan(0, _config.DModel));
 
             // No additive positional embedding — RoPE handles positions inside attention.
 

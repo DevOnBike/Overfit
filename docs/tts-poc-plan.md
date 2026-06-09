@@ -1,108 +1,309 @@
-# Text-to-speech in pure .NET — PoC plan
+# Overfit TTS — initiative tracker
 
-**Goal.** Synthesize speech from text entirely in managed .NET on the CPU — no Python, no GPU, no native codec —
-so Overfit closes the **voice loop**: Whisper (speech→text) + an LLM + **TTS (text→speech)**, all in one process.
+The single source of truth for the text-to-speech work: **what we're building, why, where we are, and what's
+next.** Update the status table as stages land.
 
-**Why it's tractable.** Modern TTS (2024–2026) is *LLM + neural audio codec*, and Overfit already has most of both
-halves. A transformer LM (which we run) predicts discrete **audio-codec tokens** from text; a small conv-based
-**codec decoder** (which is the same op family as our Whisper conv stem) turns those tokens into a waveform.
+---
+
+## Goal
+
+Synthesize speech from text **entirely in managed .NET, on the CPU** — no Python, no GPU, no native codec — so
+Overfit closes the **voice loop**:
+
+```
+hear:  Whisper (speech → text)   ✅ shipped
+think: Bielik / Qwen (LLM)       ✅ shipped  (RAG / tools / JSON)
+speak: TTS (text → speech)       ◀ this initiative
+```
+
+A local voice agent that **hears, thinks and speaks — in one .NET process, on-prem, no data egress.** That's the
+"wow" demo that pairs with the enterprise story.
+
+## Why (and why now)
+
+- **Strategic fit, not a detour.** Modern TTS (2024–2026) is *LLM + neural audio codec*. We already run the LLM
+  half; the new work is one small conv-based codec decoder + glue — the same op family as the Whisper conv stem.
+- **Marketing value is high** ("type text → it speaks, locally"), enterprise value is lower → sequence it **after**
+  the buyable lines (M.E.AI / OpenAI API / RAG), as the viral finale.
+- **Honest caveat:** quality is subjective (no byte-parity gate) and *voice cloning* carries real legal/abuse risk.
+  So we split the work into a safe **preset-voice** track first and a gated **voice-cloning** Phase 2 (below).
+
+## Status at a glance
+
+| # | Stage | Deliverable | Status |
+|---|---|---|:--:|
+| **S0** | **Scaffolding** | contracts + WAV-out + watermark, model-free | ✅ **Done — 2026-06-06** |
+| **S1** | **CLI + consent + enrollment** | `overfit tts` over a stub engine, consent gate, `VoiceProfile` persistence | ✅ **Done — 2026-06-06** |
+| S2 | **SNAC codec decoder** | `Snac.Decode(codes) → PCM@24k` (the bulk) | ✅ **Done — 2026-06-06 (121.5 dB vs PyTorch)** |
+| S3 | Orpheus LM glue | text → SNAC audio tokens (de-interleave) | ✅ **Done — 2026-06-06** |
+| S4 | End-to-end preset-voice TTS | `OrpheusVoiceEngine.Synthesize(text, voice) → PCM` — first real speech | ✅ **Done — 2026-06-06 (3.16 s clip on real model)** |
+| S5 | Quality & robustness | text normalization ✅, long-text chunking ✅; PL normalization / sampling polish ⬜ | 🔶 in progress |
+| S6 | Voice-loop demo + docs | `Demo/VoiceLoop`, mic → Whisper → LLM → TTS → speaker | ✅ **Done — 2026-06-06** |
+| **P2** | **Voice cloning** (zero-shot from a clip) | speaker enrollment → "my voice" — **gated on quality + legal** | ⬜ Phase 2 |
+
+**Effort:** ~3–4 weeks for preset-voice end-to-end (S2 dominates). Voice cloning (P2) is materially harder — see
+the model trade-off and the cloning note.
+
+**Cross-cutting tooling — objective quality evaluator ✅ DONE 2026-06-06.** `Sources/Main/Audio/AudioSimilarity`
+scores a candidate waveform against a reference ("ideal") one — the audio counterpart of the RAG stability harness,
+turning "does it sound right?" into a measurable gate. Two views: *waveform domain* (SNR dB / Pearson correlation /
+RMSE — sample-aligned, the right gate for a **deterministic codec decode vs. a reference decode**, i.e. the S2 gate)
+and *spectral domain* (RMS log-mel distance + **DTW-aligned** mel distance — timing/length-robust, the right gate for
+**generated speech vs. a reference clip**, i.e. S4). `AudioQualityAssert.Matches(...)` throws `AudioQualityException`
+naming the breached metric (CI guard). CLI: `overfit tts eval --reference ideal.wav --candidate gen.wav`. Pure
+managed, model-free, reuses `MelSpectrogram` + `AudioResampler`. 10 deterministic tests. **This retires the "no
+objective CI gate" risk below** — we can now *measure* how close to ideal each decode is.
+
+---
+
+## Strategy: two tracks (decided)
+
+1. **Track A — preset-voice local TTS (do first).** *"Your agent talks back, in .NET, no cloud."* A good fixed
+   voice is already a killer demo and the voice loop, with **no licensing or deepfake landmine**. This is S1–S6.
+2. **Track B — voice cloning ("my voice", P2).** Zero-shot from a short clip. The highest-wow, but: hardest port,
+   license-encumbered models, and a hard **subjective quality bar + legal exposure**. Gate it behind a quality
+   review and the consent/watermark posture — do **not** make "my voice" a product claim until it genuinely sounds
+   right.
+
+## Architecture
 
 ```
 text ──► [TTS LM: Llama/Qwen arch] ──► audio-codec tokens ──► [neural-codec DECODER] ──► PCM ──► WAV
-            (Overfit already runs this)        (de-interleave)      (the real new work)        (we have WavWriter)
+            (Overfit already runs this)        (de-interleave)      (the real new work)        (WavWriter ✅)
 ```
 
-## Recommended path: Orpheus (Llama-3.2-3B) + SNAC
-
-| Why this pair | |
-|---|---|
-| **Orpheus TTS** | a Llama-3.2-3B fine-tune that emits SNAC tokens — **Overfit loads `llama` arch today**, so the LM half is mostly reuse + glue. |
-| **SNAC** (24 kHz) | a *small* (~19M-param) **conv-only** multi-scale residual-VQ decoder — no transformer in the decoder → pure-C# friendly, reuses our Conv/residual kernels. |
-
-**Alternatives** (pick one model+codec pair and commit): **OuteTTS 0.3** (Qwen2.5/Llama) + **WavTokenizer** (single
-codebook — simpler hierarchy than SNAC); **Llasa** (Llama) + XCodec. Avoid classic **VITS / Tacotron / Kokoro**
-(StyleTTS2/ISTFT-net) — different architecture, little reuse of our engine.
-
-## Reuse map — what's already there vs new
+### Reuse map — what's already there vs new
 
 | Need | Status |
 |---|---|
 | Transformer inference for the TTS LM (Llama-3.2 arch) | ✅ ships (`OverfitClient` / GGUF loader) |
 | Tokenizer incl. the model's special audio-token vocab | ✅ GGUF embedded tokenizer handles extra vocab |
-| Greedy / sampled decode loop with custom stop token | ✅ exists; needs an audio-EOS stop + raw-token access |
-| Conv1d / transposed-conv / residual blocks | ✅ have Conv (Whisper stem); need transposed-conv + the SNAC decoder graph |
+| Greedy / sampled decode loop with a custom stop token | ✅ exists; needs an audio-EOS stop + raw-token access |
+| WAV writer @ any rate + streaming sink + watermark | ✅ **`WavWriter` / `WavAudioSink`** (S0) |
+| Conv1d / transposed-conv / residual blocks | 🔶 have Conv (Whisper stem); need transposed-conv + the decoder graph |
 | Vector-quantizer codebook lookup / dequantize | 🔶 new (small — embedding-table gather per level) |
-| WAV writer @ 24 kHz | ✅ `WavReader`/writer in `Sources/Main/Audio/` |
-| **SNAC decoder weights load + graph** | 🔴 **new — the bulk of the work** |
-| Orpheus token format ↔ SNAC frame de-interleave | 🔴 new (well-documented offset scheme) |
+| **SNAC decoder weights load + graph** | ✅ **done (S2) — `Snac.Decode`, 121.5 dB vs PyTorch** |
+| Orpheus token format ↔ SNAC frame de-interleave | 🔴 new (documented offset scheme, S3) |
+
+## Model choice (trade-off)
+
+No single model has all three of *great "my voice" cloning · easy pure-C# port · permissive license*. Pick per
+track:
+
+| Model + codec | Zero-shot "my voice" (PL) | Pure-C# port | License |
+|---|:--:|:--:|:--:|
+| **Orpheus (Llama-3.2-3B) + SNAC** ← Track A | ❌ weak zero-shot | ✅ easiest (LM already loads; SNAC small conv) | ✅ permissive |
+| **XTTS-v2** ← candidate for P2 | ✅ 6–30 s clip, Polish | ❌ heavy (DVAE + GPT + HiFi-GAN) | ❌ CPML (non-commercial) |
+| **F5-TTS** ← candidate for P2 | 🟡 | ❌ flow-matching/diffusion (iterative, slow on CPU) | 🟡 verify |
+| Piper / Kokoro | ❌ fixed voices | 🟡 (VITS / StyleTTS2 — different arch) | ✅ MIT / Apache |
+
+**Decision:** Track A on **Orpheus + SNAC** (best architectural fit — the LM is already supported, the codec is a
+small pure-managed conv decoder, permissive license). Revisit XTTS-v2 / F5 only for P2 cloning, accepting the
+heavier port and the license caveat (or "you bring the model" posture).
+
+## Decisions log
+
+- **2026-06-06 — preset-voice first, cloning is Phase 2.** Quality + legal risk of cloning make it a gated
+  follow-on, not the entry. Build the loop with a good preset voice first.
+- **2026-06-06 — Track A = Orpheus + SNAC.** Reuses the existing engine; SNAC is a small, permissive, conv-only
+  decoder.
+- **2026-06-06 — pure-managed only.** No ONNX Runtime in the product path (it breaks the "no native binary" claim).
+  An ONNX-RT prototype, if ever used, is explicitly a throwaway, not a shipped backend.
+- **2026-06-06 — watermark is mandatory (metadata-level today).** Every synthesized file carries a synthetic-speech
+  provenance marker (`SyntheticSpeechMetadata` → RIFF `LIST/INFO` `ICMT`/`ISFT`), per EU-AI-Act-style disclosure.
+  ⚠️ **This is a container-metadata label, not a signal watermark** — it is honest provenance but is stripped by
+  re-encoding / re-recording. A robust, inaudible **signal-domain** watermark is a separate roadmap item (below).
 
 ---
 
-## Session ladder
+## Stage detail
 
-Each session ends with a concrete deliverable and a validation gate. Confirm exact tensor names / token offsets
-against the model card + source at the start of each stage (TTS repos evolve).
+### S0 — scaffolding ✅ **DONE 2026-06-06** (backend-agnostic, pure-managed, no model)
+Model-independent surface so the CLI, enrollment, demos and the voice loop can be built/tested before any model is
+ported:
+- `Sources/Main/Audio/` — **`WavWriter`** (mono PCM16 / Float32; optional `LIST/INFO` provenance chunk) +
+  `WavSampleFormat`.
+- `Sources/Main/Audio/Tts/` — `ITextToSpeechEngine`, `IAudioSink` + **`WavAudioSink`** (streamed PCM → WAV),
+  `VoiceProfile` (preset vs cloned, `IsCloned`), `TtsOptions`, **`SyntheticSpeechMetadata`** (the watermark).
+- **8 model-free tests** green: PCM16 round-trips within quantization, Float32 exact, the marker embeds without
+  breaking the audio, streamed chunks concatenate, a fake engine drives the contract end-to-end.
 
-### S1 — SNAC decoder: codes → waveform *(the foundation, biggest chunk)*
-- Load SNAC weights (`model.safetensors` / the codec's checkpoint), map tensor names.
-- Build the decoder graph: per-level **codebook dequantize** → **transposed-conv upsampling** + **dilated residual
-  units** → final conv → `tanh` → 24 kHz mono PCM (the standard SNAC decoder topology).
-- New kernels as needed: `ConvTranspose1d`, dilated `Conv1d` residual unit (reuse the Conv core).
-- **Gate:** feed a *known* set of SNAC codes (from a reference encode of a test clip, or a published test vector)
-  → decoded PCM matches the reference decode within tolerance / is clean audible audio. **Get sound out of codes
-  before touching the LM.**
-- Deliverable: `SnacDecoder.Decode(codes) -> float[] (PCM@24k)` + WAV out.
+### S1 — CLI + consent + enrollment ✅ **DONE 2026-06-06** *(cheap, on-brand, no model)*
+- `overfit tts --text "…" --out out.wav [--voice <id>] [--language pl]` — drives `PlaceholderTtsEngine` (a tone
+  stand-in until S2–S4) → a **watermarked** WAV via `WavAudioSink`. Resolves an enrolled voice or falls back to a
+  preset.
+- `overfit voice enroll <id> --sample <wav> --language pl --consent` — validates the clip decodes, persists the
+  `VoiceProfile` (via `VoiceProfileStore`, reflection-free manifest + embedding blob); the embedding is computed
+  once the cloning backend (P2) lands. `overfit voice list` shows enrolled voices.
+- **Consent gate:** enrollment requires `--consent` (own the voice / have permission) — refuses otherwise.
+- **Validated live:** `tts` wrote a 24 kHz watermarked WAV; enroll-without-consent failed (exit 1); enroll-with
+  consent persisted `maciej (pl, preset)` and `voice list` showed it. New: `PlaceholderTtsEngine`,
+  `VoiceProfileStore`, CLI `tts`/`voice {enroll,list}`. 4 store + 2 engine tests green (suite 1151/0).
 
-### S2 — Orpheus LM glue: text → audio tokens
-- Load Orpheus GGUF (Llama-3.2-3B → loads today). Build the prompt format (voice id / style + text + control tokens).
-- Decode the audio-token stream greedily; stop at the audio-EOS token.
-- De-interleave the **7 tokens-per-frame** into SNAC's 3 hierarchical levels (the `<custom_token_…>` offset map).
-- **Gate:** emitted tokens are in valid range, the per-frame structure is correct, generation terminates.
-- Deliverable: `text -> int[][] snacCodesPerLevel`.
+### S2 — SNAC decoder: codes → waveform ✅ **DONE 2026-06-06 — matches PyTorch to 121.5 dB SNR**
+**The codec decoder works end-to-end in pure managed .NET.** Real `hubertsiuzdak/snac_24khz` weights decode real
+codes to a waveform bit-identical (to float32 rounding: **SNR 121.5 dB, correlation 1.000, RMSE 0.0000**) with the
+PyTorch reference noise-off decode. The whole graph is validated: codebook gather → `out_proj` → repeat-interleave +
+cross-level sum → depthwise stem → transposed-conv upsampling → dilated residual units → output conv → `tanh`.
+- **Offline convert** (`Scripts/convert_snac.py`, the only Python step): folds `weight_norm` into plain conv weights,
+  exports decode-path tensors → `snac_24khz.safetensors` (canonical names) + a deterministic noise-off reference
+  fixture (`codes.bin` + `reference_noiseoff.f32`) into `c:\snac`.
+- **Native C#** (`Sources/Main/Audio/Tts/Snac/`): `Snac.Load(dir).Decode(int[][] codes) → float[]@24k`. Kernels
+  `SnacConv` (grouped/depthwise `Conv1d` + `ConvTranspose1d`), `SnacActivations.Snake1d`, `SnacResidualVq`
+  (codebook gather + repeat-interleave); `SnacConfig`/`SnacWeights`/`SnacDecoder` wire the graph. Reflection-free,
+  loads via the existing native `SafetensorsReader`.
+- **Tests:** 30 model-free unit tests (kernels exact vs scatter/naive references, Snake closed form, VQ ops) +
+  `SnacDecoderParityTests` [LongFact] = the 121.5 dB end-to-end gate on `c:\snac`.
+- **Noise:** the parity gate runs the deterministic (noise-off) path; SNAC's stochastic NoiseBlock is wired behind
+  `Decode(codes, addNoise: true)` for real generation (its own deterministic Box–Muller RNG, not reproducible vs
+  torch by design).
+- **Building blocks** (all grounded verbatim in the real SNAC source, not assumed): `SnacConv` —
+  `ConvTranspose1d` (gather formulation → race-free parallel; 13 tests incl. fast kernel = canonical scatter
+  bit-for-bit) + grouped/depthwise `Conv1d`; `SnacActivations.Snake1d` (`x+(α+1e-9)⁻¹·sin(αx)²`); `SnacResidualVq`
+  (`DecodeCodebook` + `RepeatInterleaveTime`). 30 model-free unit tests.
+- **Gate met:** known codes → PCM matching the reference decode, measured by `AudioSimilarity` at **121.5 dB SNR**.
+  Sound comes out of codes; the LM glue (S3) is next.
 
-### S3 — End-to-end + facade
-- `TextToSpeech.Synthesize(text, voice) -> WAV`: Orpheus LM → audio tokens → de-interleave → `SnacDecoder` → PCM → WAV.
-- **Gate (subjective):** synthesize a sentence on the real model → **intelligible speech**. (No byte-parity here —
-  TTS quality is judged by listening; keep a small set of reference clips.)
-- Deliverable: one-call TTS facade, validated on a real model.
+### S3 — Orpheus LM glue: text → audio tokens ✅ **DONE 2026-06-06**
+- `Sources/Main/Audio/Tts/Orpheus/`: **`OrpheusPrompt`** (`<|audio|>{voice}: {text}<|eot_id|>` + the 8 preset
+  voices), **`OrpheusSnacBridge`** (the off-by-one-critical glue: `<custom_token_N>` → `code = N−10−(index%7)·4096`,
+  then the 7-tokens-per-frame fan-out into SNAC's 1:2:4 levels), all grounded verbatim in the Orpheus reference.
+- **Tokenizer fix (general win):** Orpheus adds ~156 k special tokens (`<custom_token_*>`); our `GgufTokenizer`
+  built a regex of all of them → blew up. Replaced with a longest-match scan (O(text·maxSpecialLen),
+  vocab-size-independent, correct HF semantics) — now any large-special-vocab GGUF tokenizes.
+- **Gate met:** 15 model-free bridge/prompt tests incl. a full round trip (levels → interleave → tokens → decode →
+  redistribute reproduces the levels); valid-range enforced (throws otherwise); real generation terminates (S4).
 
-### S4 — Quality & robustness
-- Multiple voices; punctuation / numbers / abbreviations; long text via sentence chunking + concatenation;
-  leading/trailing-silence trim; sampling (temperature/top-p) for naturalness vs greedy flatness.
-- **Gate:** a handful of sentences across voices sound natural and stable (no dropouts / runaway).
+### S4 — End-to-end preset-voice TTS ✅ **DONE 2026-06-06 — first real speech**
+- **`OrpheusVoiceEngine.Load(orpheusGguf, snacDir).Synthesize(text, voice) → float[]@24k`** — Orpheus LM (sampling
+  temp 0.6 / top-p 0.9 / repeat 1.1) → audio tokens → `OrpheusSnacBridge` → `Snac.Decode` → PCM, all pure managed
+  on the CPU. Stops at end-of-speech.
+- **Validated live:** `"Hi, this is Overfit speaking in pure dot net."` (voice *tara*) → a **3.16 s** 24 kHz clip in
+  ~24 s on CPU (`OrpheusVoiceEngineE2ETests` [LongFact], `c:\orpheus` Q4_K_M GGUF + `c:\snac`). The full voice loop
+  half — text → speech — runs end to end.
+- **CLI wired ✅ 2026-06-06:** `overfit tts --text "…" --out out.wav [--voice tara] [--model <orpheus.gguf>]
+  [--snac <dir>]` runs the real Orpheus+SNAC pipeline (resolves the models from `--model`/`--snac`,
+  `$OVERFIT_ORPHEUS_DIR`/`$OVERFIT_SNAC_DIR`, or the model cache; falls back to the placeholder tone with
+  install guidance when absent). Live: a sentence → a ~3.4 s watermarked 24 kHz WAV.
+- **Next polish:** Polish text normalization (S5); out-of-vocabulary words (e.g. brand names like "Overfit") need
+  phonetic spelling until S5; the mic→STT→LLM→TTS demo (S6).
 
-### S5 — *(optional)* Streaming + demo + the full voice loop
-- **Streaming codec decode** — emit audio as SNAC frames arrive (low latency for voice agents).
-- `Demo/TtsDemo` CLI; README / `docs/tts.md`.
-- **Full local voice loop:** mic → Whisper (STT) → LLM → **TTS** → speaker, entirely in one .NET process.
+### S5 — Quality & robustness 🔶 *(text normalization + long-text done 2026-06-06)*
+- **✅ Text normalization** — `TtsTextNormalizer` (English): numbers → words (`EnglishNumberToWords`, cardinals +
+  decimals), symbol/abbreviation expansion (`.NET`→"dot net", `e.g.`→"for example", `%`/`&`/…), and a
+  user-extendable **pronunciation lexicon** that fixes OOV/brand words — `Overfit`→"over fit" automatically (the
+  exact issue raised). Applied by default in `OrpheusVoiceEngine.Synthesize` (`normalize: false` to opt out).
+- **✅ Long text** — `SentenceSplitter` chunks normalized text into sentences; the engine synthesizes each and
+  concatenates with ~0.12 s of silence (live: a two-sentence prompt → one 10.6 s clip). 27 model-free tests.
+- **✅ Silence trim** — `AudioPostProcessing.TrimSilence` strips leading/trailing dead air (with padding) from each
+  synthesized chunk, so onsets are tight and concatenated sentences have uniform gaps. 3 tests.
+- ⬜ **Remaining:** Polish-specific normalization (only matters with a Polish TTS model — Orpheus is English),
+  prosody/sampling tuning, per-voice quality pass.
+- **Gate:** several sentences across voices sound natural and stable.
 
-**Total:** ~3–4 weeks (≈ 6–9 sessions). S1 (SNAC decoder) dominates; the LM half is largely existing inference.
+### OpenAI `/v1/audio/speech` ✅ **DONE 2026-06-06** *(TTS exposed as an API)*
+- `overfit serve <chat-model> --tts-model <orpheus.gguf> --tts-snac <dir>` adds **`POST /v1/audio/speech`** to the
+  OpenAI-compatible server (`OverfitOpenAiServer` + `SpeechRequest`): `{input, voice, response_format}` →
+  `wav` (default) or `pcm` bytes, in-process, watermarked, no data egress. 501 when no TTS model is loaded;
+  400 on unsupported formats. Live: a sentence (voice *leo*) → a 2.87 s WAV over HTTP.
+
+### S6 — Voice loop demo + docs ⬜
+- `Demo/VoiceDemo`: mic → Whisper (STT) → LLM → **TTS** → speaker, all in one .NET process. README / `docs/tts.md`.
+- Optional: streaming codec decode (emit audio as frames arrive — low latency).
+
+### P2 — Voice cloning 🔶 *(gated; enabling piece landed)*
+- **✅ SNAC encoder done 2026-06-06 — the codec is now complete both ways, both bit-exact vs PyTorch.**
+  `Snac.Encode(audio) → int[][]` (`SnacEncoder`: conv downsampling stem + dilated residual units + depthwise out
+  conv → avg-pool → in_proj → nearest-codebook → residual subtract). `SnacEncoderParityTests` [LongFact] reproduces
+  the reference `model.encode()` codes **100% exactly** (42/42). New kernels `SnacResidualVq.EncodeCodebook`
+  (nearest-by-cosine) + `AveragePoolTime`; `SnacBlocks.ResidualUnit` now shared by encoder + decoder. This unlocks
+  **pure-.NET voice-clone dataset prep** (audio → audio tokens) without Python.
+- **Chosen path = fine-tune Orpheus on the target voice via QLoRA** (Overfit's training moat, pure .NET).
+  **✅ Pipeline built 2026-06-06 (`Sources/Main/Audio/Tts/Orpheus/`, `docs/voice-cloning.md`):**
+  - `OrpheusSnacBridge.Interleave` / `CustomTokenNumber` (encode-side inverse of the decode bridge) +
+    `OrpheusTrainingSequence.Build` → (prompt → audio-token) example, mirroring the generation path; completion-only.
+  - `VoiceCloneDatasetBuilder` — folder of (clip, transcript) → `OrpheusTrainingExample[]` via `Snac.Encode` + the
+    Orpheus tokenizer (auto-transcribe via Whisper if no `.txt`). **Validated against the real tokenizer + encoder:**
+    built examples' audio tokens decode back to exactly the encoded codes.
+  - `VoiceCloneTrainer` — QLoRA on Orpheus with a **completion-only masked loss** (new
+    `CrossEntropyLossAndSeed(…, ignoreIndex)` overload), `SaveAdapter`. 16 model-free tests + a [LongFact] dataset
+    round-trip.
+  - **Remaining = the actual training run** (gated on the user's voice data; memory-heavy on CPU for a 3 B/156 k-vocab
+    model → short clips + tuning). Zero-shot models (XTTS-v2 / F5) stay out (license + heavy port).
+  - **Gate on:** a quality review ("does it actually sound like the target?") **and** the legal posture (consent
+    record + watermark + jurisdiction). Only then can "my voice" become a demo/claim.
 
 ---
 
 ## Risks & open questions
 
-- **Quality validation is subjective.** Unlike text (byte-parity) or retrieval (deterministic), "does it sound
-  right" needs listening. Mitigate with a fixed set of reference sentences + spectrogram diffs against a reference
-  decode; accept that the CI gate is weaker here.
-- **Codec weight format & tensor-name mapping** (SNAC ships PyTorch/safetensors) — straightforward but must be exact.
-- **Token offset scheme** (Orpheus' audio-token base offsets + 7-per-frame interleave) — documented, but confirm
-  against the current model release.
-- **Residual-VQ correctness** — each of SNAC's levels dequantizes from its own codebook at its own rate; an off-by-
-  one in level mapping = noise.
-- **Streaming** (S5) adds real-time buffering complexity — defer past the batch PoC.
+- **Subjective quality / uncanny valley.** A clone that's "85% you" is anti-viral. *Partly mitigated:* the
+  `AudioSimilarity` evaluator (above) gives an **objective** gate — SNR/correlation for deterministic decodes, a
+  DTW mel distance vs. reference clips for generated speech. It can't predict MOS (reference-free naturalness)
+  without a model, so the final naturalness call stays a listen — but regressions are now caught by a number.
+- **Codec weight format & tensor-name mapping** (S2) — straightforward but must be exact; an off-by-one in the
+  residual-VQ level mapping = noise.
+- **License & deepfake (P2).** Cloning models are often non-commercial (XTTS CPML); voice cloning without consent
+  is increasingly regulated. Posture: *"Overfit provides the local TTS runtime; you are responsible for the model
+  license and the voice rights."* Always watermark.
+- **Polish quality (S5).** Text normalization + prosody matter as much as the model; without it, PL output trails
+  ElevenLabs.
 
-## Out of scope (for the PoC)
+## Definition of done (preset-voice PoC)
 
-- Voice cloning / zero-shot speaker adaptation (a later capability on top).
-- Real-time / sub-200 ms latency targets (S5 streaming is a first step, not a guarantee).
-- Non-LLM TTS architectures (VITS, Tacotron, diffusion vocoders).
-- Training a TTS model — we load and run a pre-trained one.
+`overfit tts --text "Cześć, tu Overfit. Ten głos powstał lokalnie w .NET." --out demo.wav` produces an
+intelligible, watermarked 24 kHz WAV from the real Orpheus + SNAC stack, in pure managed .NET, with the full voice
+loop (`Demo/VoiceDemo`) running mic → STT → LLM → TTS → speaker on one CPU box. Voice cloning remains explicitly
+Phase 2.
 
-## Strategic note
+## Roadmap / deferred
 
-TTS is a **vertical** (call-center transcription+response, accessibility, voice assistants, on-prem voice agents),
-not a core-adoption feature — consistent with Overfit's positioning. Its unique value is the same column as the
-rest of the product: **the whole voice loop in-process in .NET, on the CPU, with no Python and no data egress.**
-Build it when a customer pulls for it; the Orpheus + SNAC path keeps the cost to "implement one small conv decoder
-+ glue", because the LM half is already shipped.
+- **Zero-alloc + SIMD SNAC decode (public banner — planned).** The decoder today is correctness-first and
+  *allocating* (per-utterance scratch `float[]` in `SnacDecoder`, `List<int>` codes, `int[][]` redistribute). Zero
+  allocation is core to Overfit's identity, so the decode path is slated to become **zero-alloc** (caller-owned /
+  `PooledBuffer<float>` scratch, reused conv buffers, no per-call arrays) and **SIMD-optimized** (TensorPrimitives /
+  hand-vectorized conv & transposed-conv inner loops) — squeeze the most out of pure-CPU code. Unlike the *real-time*
+  throughput work (private moat, below), zero-alloc + SIMD on the decode is **public identity work** we ship openly.
+  Not the inference bottleneck (the LM is), but it's a matter of principle: the engine allocates 0 B in steady state.
+  **Status: planned, public.**
+- **Real-time / live generation — intentionally NOT in the public build (private / commercial know-how).**
+  Strategic decision (2026-06-06): the open (AGPL) edition ships **offline/batch** TTS; making it *real-time* is held
+  as **proprietary know-how and a commercial differentiator**, not published. The architecture is open (and visible
+  in the code anyway) — the moat is the hard performance work, which we keep private. The analysis below is the
+  internal playbook for *if/when we build the live path commercially*, not a public roadmap item.
+  Today's pipeline is **offline/batch**: measured **real-time factor ≈ 8–9×** on CPU (server mode, model loaded once
+  — e.g. 3.27 s of audio in 27.4 s). The bottleneck is the **Orpheus 3B Q4 LM** at ~38 tok/s; live (RTF ≤ 1) needs
+  ~**328 audio-tokens/s** (46.9 SNAC frames/s × 7). The SNAC decode is cheap and not the constraint. Paths to live,
+  by how well they fit Overfit's pure-managed / no-native-binary identity:
+  - **Smaller TTS model — same stack (best identity fit, partial win).** A ~0.5 B Orpheus-style LLM→SNAC checkpoint
+    drops into the existing loader/bridge unchanged. Token rate scales ~inversely with size → ~RTF 2–3 at 0.5 B:
+    *faster, still not quite live*, and good small audio-LMs are scarce. Cheapest to try (no new code) if a
+    checkpoint exists.
+  - **Smaller TTS model — different arch (the real CPU-live answer, separate port).** **Kokoro (82 M, Apache-2.0,
+    StyleTTS2)** or **Piper (VITS, ~10–60 M)** run *real-time on CPU* and stay pure-managed — but are **not**
+    LLM+codec, so they don't reuse Orpheus/SNAC: a fresh op port (ISTFTNet / VITS decoder), ~**1–2 weeks** each.
+    Recommended path if live-on-CPU is the goal; keep both behind `ITextToSpeechEngine` (Orpheus = quality/offline,
+    Kokoro = speed/live).
+  - **GPU (strategic, identity-tension).** `ILGPU` or `ComputeSharp` (D3D12, Windows-only) let kernels stay in C#
+    but need rewriting the GEMV/attention/dequant hot path (~weeks), add a GPU-driver dependency, and complicate
+    AOT. `TorchSharp` / ONNX-RT-GPU work in days **but pull native CUDA binaries — breaking the "no native runtime"
+    claim** (explicitly out-of-scope for the product path). GPU is a kierunkowa decision, not a feature.
+  - **Streaming decode** lowers *latency-to-first-audio* (emit once ~4 frames exist) but does **not** raise
+    throughput — at RTF > 1 the playback buffer still underruns. It masks, it doesn't solve.
+  - **Existing perf levers** (repacked GEMV, SIMD from the decode perf-sprint) give ~30–50%, not the ~8× needed —
+    necessary-not-sufficient on their own.
+  - **Verdict:** for *live on CPU + pure .NET* → port **Kokoro**; to *keep Orpheus quality* → offline/batch on CPU,
+    or accept GPU's identity cost. **Status: analysis done; held as private/commercial know-how — the public build
+    stays offline/batch by design.**
+- **Signal-domain audio watermark (robust, inaudible).** Embed an imperceptible mark *in the waveform itself* that
+  survives MP3 re-encode / re-recording (cf. Meta **AudioSeal**, Google **SynthID-audio**) — a real anti-deepfake
+  provenance signal plus a detector, complementing today's metadata label. Differentiating ("local TTS that
+  watermarks its own synthetic output"), but a non-trivial DSP/ML build (~days): an embedder that perturbs
+  sub-perceptual frequency/phase content carrying a payload, and a detector robust to compression. Pure-managed,
+  no native deps. **Status: deferred / planned.**
+- **Voice cloning (P2)** — see below.
+
+## Out of scope (PoC)
+
+Voice cloning beyond the gated P2; sub-200 ms real-time targets; non-LLM TTS (VITS / Tacotron / diffusion
+vocoders); training a TTS model (we load a pre-trained one).

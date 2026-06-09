@@ -80,6 +80,29 @@ namespace DevOnBike.Overfit.Tests.TestSupport
             public static string RequireSampleMp3Path() => Require(SampleMp3Path, EnvVar, "Sample MP3 (jfk.mp3 — e.g. the JFK clip encoded to MP3)");
         }
 
+        public static class Snac
+        {
+            private const string EnvVar = "OVERFIT_SNAC_DIR";
+            public static string Dir => Resolve(EnvVar, @"c:\snac");
+            public static string SafetensorsPath => Path.Combine(Dir, "snac_24khz.safetensors");
+            public static string CodesPath => Path.Combine(Dir, "codes.bin");
+            public static string ReferenceNoiseOffPath => Path.Combine(Dir, "reference_noiseoff.f32");
+            public static string InputPath => Path.Combine(Dir, "input.f32");
+
+            public static string RequireSafetensorsPath() => Require(SafetensorsPath, EnvVar,
+                "SNAC 24 kHz decoder weights (run Scripts/convert_snac.py --out c:\\snac)");
+        }
+
+        public static class Orpheus
+        {
+            private const string EnvVar = "OVERFIT_ORPHEUS_DIR";
+            public static string Dir => Resolve(EnvVar, @"c:\orpheus");
+            public static string GgufPath => Path.Combine(Dir, "orpheus-3b-0.1-ft-q4_k_m.gguf");
+
+            public static string RequireGgufPath() => Require(GgufPath, EnvVar,
+                "Orpheus 3B TTS GGUF (isaiahbjork/orpheus-3b-0.1-ft-Q4_K_M-GGUF)");
+        }
+
         public static class Qwen3B
         {
             private const string EnvVar = "OVERFIT_QWEN3B_DIR";

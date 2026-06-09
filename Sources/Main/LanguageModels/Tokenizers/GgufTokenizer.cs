@@ -56,7 +56,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
         // Byte-level BPE.
         private readonly Dictionary<(int, int), int>? _mergeRanks;
         private readonly Regex? _bpeSplit;
-        private readonly Regex? _bpeSpecialSplit;
+        private readonly SpecialScan? _specialScan;
         private readonly char[]? _byteToChar;
         private readonly byte[]? _charToByte;
 
@@ -104,7 +104,7 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                 _charToByte = ByteLevelAlphabet.BuildCharToByte();
                 _mergeRanks = BuildMergeRanks(merges);
                 _bpeSplit = new Regex(SelectBpePattern(preType), RegexOptions.Compiled);
-                _bpeSpecialSplit = BuildSpecialSplit();
+                _specialScan = BuildSpecialScan();
             }
         }
 
@@ -366,19 +366,43 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             for (var i = 0; i < ids.Count; i++) { output.Add(ids[i]); }
         }
 
+        // Longest-match scan instead of a giant regex alternation: models like Orpheus add tens of thousands of
+        // special tokens (every <custom_token_N>), which a Regex of N escaped alternatives cannot handle. Scanning
+        // at each candidate start char and probing substring lengths against a hash set is O(text · maxSpecialLen)
+        // — independent of the special-vocab size — and longest-match is the correct (HF) semantics.
         private List<(string Text, bool IsSpecial, int Id)> SplitOnSpecialTokens(string text)
         {
             var result = new List<(string, bool, int)>();
-            if (_bpeSpecialSplit is null) { result.Add((text, false, -1)); return result; }
-
-            var pos = 0;
-            foreach (Match m in _bpeSpecialSplit.Matches(text))
+            if (_specialScan is not { } scan)
             {
-                if (m.Index > pos) { result.Add((text[pos..m.Index], false, -1)); }
-                result.Add((m.Value, true, _tokenToId[m.Value]));
-                pos = m.Index + m.Length;
+                result.Add((text, false, -1));
+                return result;
             }
-            if (pos < text.Length) { result.Add((text[pos..], false, -1)); }
+
+            var segStart = 0;
+            var pos = 0;
+            while (pos < text.Length)
+            {
+                if (scan.FirstChars.Contains(text[pos]))
+                {
+                    var maxTry = Math.Min(scan.MaxLen, text.Length - pos);
+                    for (var len = maxTry; len >= 1; len--)
+                    {
+                        var candidate = text.Substring(pos, len);
+                        if (scan.Strings.Contains(candidate))
+                        {
+                            if (pos > segStart) { result.Add((text[segStart..pos], false, -1)); }
+                            result.Add((candidate, true, _tokenToId[candidate]));
+                            pos += len;
+                            segStart = pos;
+                            goto matched;
+                        }
+                    }
+                }
+                pos++;
+            matched:;
+            }
+            if (segStart < text.Length) { result.Add((text[segStart..], false, -1)); }
             return result;
         }
 
@@ -400,17 +424,37 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             return ranks;
         }
 
-        private Regex? BuildSpecialSplit()
+        private SpecialScan? BuildSpecialScan()
         {
             if (_specialIds.Count == 0) { return null; }
-            var escaped = new List<string>(_specialIds.Count);
+            var strings = new HashSet<string>(_specialIds.Count, StringComparer.Ordinal);
+            var firstChars = new HashSet<char>();
+            var maxLen = 0;
             foreach (var id in _specialIds)
             {
                 // Only literal, matchable special strings (skip empties / unused placeholders).
-                if (!string.IsNullOrEmpty(_tokens[id])) { escaped.Add(Regex.Escape(_tokens[id])); }
+                var s = _tokens[id];
+                if (string.IsNullOrEmpty(s)) { continue; }
+                strings.Add(s);
+                firstChars.Add(s[0]);
+                if (s.Length > maxLen) { maxLen = s.Length; }
             }
-            if (escaped.Count == 0) { return null; }
-            return new Regex(string.Join("|", escaped), RegexOptions.Compiled);
+            return strings.Count == 0 ? null : new SpecialScan(strings, firstChars, maxLen);
+        }
+
+        // Precomputed structures for the longest-match special-token scan (see SplitOnSpecialTokens).
+        private readonly struct SpecialScan
+        {
+            public SpecialScan(HashSet<string> strings, HashSet<char> firstChars, int maxLen)
+            {
+                Strings = strings;
+                FirstChars = firstChars;
+                MaxLen = maxLen;
+            }
+
+            public HashSet<string> Strings { get; }
+            public HashSet<char> FirstChars { get; }
+            public int MaxLen { get; }
         }
 
         private static string SelectBpePattern(string preType)

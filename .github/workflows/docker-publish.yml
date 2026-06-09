@@ -1,0 +1,76 @@
+name: Docker Hub
+
+# Builds the Native-AOT `overfit` server image (Sources/Cli/Dockerfile) and pushes it to Docker Hub.
+#
+# One-time setup — add two repository secrets (Settings → Secrets and variables → Actions):
+#   DOCKERHUB_USERNAME   your Docker Hub account / org name (also the image namespace → <user>/overfit)
+#   DOCKERHUB_TOKEN      a Docker Hub Access Token with Read/Write (Account Settings → Security)
+#
+# MANUAL ONLY — Actions tab → "Docker Hub" → Run workflow. No git tag needed: the image version is read from
+# the <Version> in Directory.Build.props (the same value the NuGet packages + global tool ship under), so each
+# run publishes :<version> + :latest + :sha-<short>, always consistent with the source version. Bump the source
+# version with bump-version.ps1 first. The model is NOT in the image — see Sources/Cli/Dockerfile.
+#
+# NOTE (GitHub limitation): the "Run workflow" button only appears once this file is on the DEFAULT branch
+# (main). Merge the branch to main (or temporarily set it as default) to get the manual trigger in the UI.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # The image version is the SINGLE-SOURCE <Version> in Directory.Build.props (same value the libraries +
+      # global tool publish under) — so the image tag is always consistent with the source version, whether the
+      # build was triggered by a `v*` tag push or a manual dispatch.
+      - name: Read version from Directory.Build.props
+        id: ver
+        run: |
+          VERSION=$(sed -n 's/.*<Version>\([0-9][^<]*\)<\/Version>.*/\1/p' Directory.Build.props | head -1)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "image version: $VERSION"
+
+      - name: Derive image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/overfit
+          tags: |
+            type=raw,value=${{ steps.ver.outputs.version }}
+            type=raw,value=latest
+            type=sha,format=short
+
+      - name: Build and push (linux/amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Sources/Cli/Dockerfile
+          # amd64 covers HF Spaces / Cloud Run / most VMs. For arm64 (e.g. Oracle Always-Free Ampere),
+          # add `linux/arm64` here — note AOT cross-compile needs the arm64 clang toolchain, so the
+          # cleaner path is a second matrix job on a native `ubuntu-24.04-arm` runner + a manifest merge.
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

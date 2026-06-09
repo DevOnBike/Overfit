@@ -11,7 +11,6 @@
              source-gen) so it drops cleanly into the Native-AOT `overfit` CLI. No ASP.NET Core. -->
         <PackageId>DevOnBike.Overfit.Server</PackageId>
         <Title>Overfit — OpenAI-compatible server (dependency-free, Native-AOT friendly)</Title>
-        <Version>10.0.21</Version>
         <Authors>DevOnBike</Authors>
         <Copyright>Copyright (c) 2026 DevOnBike</Copyright>
         <Description>A dependency-free, OpenAI-compatible HTTP server for the in-process Overfit LLM runtime — built on System.Net.HttpListener + System.Text.Json source-gen, no ASP.NET Core, Native-AOT friendly. Point any OpenAI client at it: /v1/chat/completions (streaming and non-streaming, with JSON / JSON-Schema constrained output), /v1/models and /health. Pure .NET, in-process: no Python, no model server. Dual-licensed (AGPL-3.0-or-later / commercial).</Description>

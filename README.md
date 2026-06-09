@@ -184,13 +184,47 @@ JSON-Schema `response_format`. Dependency-free (no ASP.NET), Native-AOT-clean:
 overfit serve qwen2.5-3b --port 11434           # one self-contained binary; nothing leaves the box
 ```
 
+Call it and print the **raw response, pretty-formatted**:
+
 ```bash
-curl http://localhost:11434/v1/chat/completions -H "Content-Type: application/json" \
-     -d '{"model":"qwen2.5-3b","messages":[{"role":"user","content":"Hello"}]}'
+# bash / Linux / macOS — pipe to jq
+curl -s http://localhost:11434/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"overfit","messages":[{"role":"user","content":"Capital of France?"}],"max_tokens":200}' | jq
 ```
+
+```powershell
+# PowerShell — keep the JSON body on ONE line in SINGLE quotes, then format the response.
+# curl.exe (raw bytes) re-formatted:
+curl.exe -s http://localhost:11434/v1/chat/completions -H "Content-Type: application/json" `
+  -d '{"model":"overfit","messages":[{"role":"user","content":"Capital of France?"}],"max_tokens":200}' |
+  ConvertFrom-Json | ConvertTo-Json -Depth 10
+
+# or Invoke-RestMethod piped back through ConvertTo-Json (Invoke-RestMethod alone hides nested fields):
+Invoke-RestMethod http://localhost:11434/v1/chat/completions -Method Post -ContentType 'application/json' `
+  -Body '{"model":"overfit","messages":[{"role":"user","content":"Capital of France?"}],"max_tokens":200}' |
+  ConvertTo-Json -Depth 10
+```
+
+> Just the answer text? In PowerShell drill into `.choices[0].message.content`; in bash use `jq -r '.choices[0].message.content'`.
 
 Host the same API from your own code with the `DevOnBike.Overfit.Server` package — your stack doesn't change,
 only the endpoint does.
+
+**Get the `overfit` command three ways:**
+
+```bash
+dotnet tool install -g DevOnBike.Overfit.Cli      # .NET global tool (cross-platform; needs the .NET runtime)
+```
+
+```bash
+# or a ~34 MB Native-AOT Docker image — no .NET runtime, model mounted at runtime (not baked in):
+docker run -p 8080:8080 -v /host/models:/models <your-dockerhub-user>/overfit /models/model.gguf
+```
+
+…or publish the self-contained **Native-AOT binary** yourself
+(`dotnet publish Sources/Cli -r <rid> -p:PublishAot=true`). See [`docs/docker.md`](docs/docker.md) for the image,
+free-hosting options, and model-on-boot.
 
 ---
 
@@ -285,6 +319,14 @@ Run the console walkthrough:
 dotnet run -c Release --project Demo/AgentDemo
 ```
 
+Or skip the SDK entirely — install the CLI and serve an OpenAI-compatible endpoint:
+
+```bash
+dotnet tool install -g DevOnBike.Overfit.Cli
+overfit pull Qwen/Qwen2.5-0.5B-Instruct-GGUF      # or point serve at any local .gguf
+overfit serve qwen2.5-0.5b-instruct --port 8080
+```
+
 More details:
 
 - [`Demo/LocalAgentAspNetDemo`](Demo/LocalAgentAspNetDemo/README.md) — ASP.NET local agent
@@ -321,19 +363,23 @@ Full benchmark tables and caveats live in [`docs/TECHNICAL.md`](docs/TECHNICAL.m
 
 ## Supported model families
 
-Overfit loads by **architecture**, not by model name — so most `llama` / `qwen2` / `qwen2moe` / `mistral` GGUFs
-on Ollama and HuggingFace work, including their thousands of community fine-tunes (and the DeepSeek-R1 *distills*,
-which are Qwen/Llama architecture). **→ Full popular-models matrix: [`docs/supported-models.md`](docs/supported-models.md)** —
-exactly which models load today (Llama 3.x, Qwen2.5, Mistral, Mixtral, Bielik, R1-distills, MiniLM/BGE/E5, Whisper…)
-and which don't yet (Gemma, Phi, Qwen3, Command-R, native DeepSeek-MoE, multilingual XLM-R embedders).
+Overfit loads by **architecture**, not by model name — so most `llama` / `qwen2` / `qwen3` / `qwen2moe` /
+`mistral` / `phi3` / `gemma2` GGUFs on Ollama and HuggingFace work, including their thousands of community
+fine-tunes (and the DeepSeek-R1 *distills*, which are Qwen/Llama architecture).
+**→ Full popular-models matrix: [`docs/supported-models.md`](docs/supported-models.md)** — exactly which models
+load today (Llama 3.x, Qwen2.5, Qwen3, Mistral, Phi-3.5, Gemma 2, Mixtral, Bielik, R1-distills, MiniLM/BGE/E5,
+Whisper…) and which don't yet (Gemma 1/3, Qwen3-MoE, Command-R, native DeepSeek-MoE, multilingual XLM-R embedders).
 
 ### Language models
 
 | Family | Verified sizes / variants | Loader | Quantization / dtype |
 |---|---|---|---|
 | Qwen2.5 | 0.5B / 3B / 7B / 14B / 32B | GGUF, HF safetensors, `.bin` | F32, F16, BF16, Q8_0, Q4_K_M, Q6_K |
+| Qwen3 (dense) | 0.6B verified (0.6B–32B) | GGUF | Q8_0, Q4_K_M, Q6_K |
 | Llama-2 / Llama-3.x | Llama-3.2-1B onwards | GGUF, HF safetensors | F32, F16, BF16, Q8_0, Q4_K_M, Q6_K |
 | Mistral 7B | 7B | GGUF | F32, F16, BF16, Q8_0, Q4_K_M |
+| Phi-3.5-mini / Phi-4 | 3.8B / 14B verified | GGUF | Q8_0, Q4_K_M, Q6_K |
+| Gemma 2 | 2B verified (2B / 9B / 27B; ctx ≤ 4096) | GGUF | Q8_0, Q4_K_M, Q6_K |
 | Qwen1.5-MoE A2.7B | 14B total / 2.7B active | GGUF | Q8_0, Q4_K_M |
 | Mixtral-8x7B | 47B total / 13B active | GGUF | Q8_0, Q4_K_M |
 | GPT-2 small | 124M | `.bin`, HF safetensors | F32 |
@@ -459,14 +505,14 @@ for that.
 - **Loaders** — GGUF, HuggingFace safetensors (sharded), Overfit `.bin`, ONNX (linear + DAG). 100% Python-free; tokenizers read straight from the GGUF.
 - **Agentic & structured output** — tool calling, guaranteed JSON, **JSON-Schema & regex constrained decoding**, ReAct / critic / circuit-breaker / summarizing memory, composable sampling.
 - **RAG** — in-process vector store; MiniLM / BGE / E5 embeddings (bit-parity vs HuggingFace); multilingual via the chat model's own embeddings; **RAG Stability Harness** (recall / paraphrase / false-premise / lint, gated in CI).
-- **Integration** — **OpenAI-compatible server** (`/v1/chat/completions` + SSE, `/v1/embeddings`, `/v1/models`); **Microsoft.Extensions.AI** adapter; global **`overfit` CLI** (pull / list / chat / serve); ASP.NET starter template.
+- **Integration** — **OpenAI-compatible server** (`/v1/chat/completions` + SSE, `/v1/embeddings`, `/v1/models`); **Microsoft.Extensions.AI** adapter; **`overfit` CLI** (pull / list / chat / serve) shipped three ways — `dotnet tool install -g DevOnBike.Overfit.Cli`, a Native-AOT binary, and a ~34 MB Docker image ([`docs/docker.md`](docs/docker.md)); ASP.NET starter template.
 - **Training** — **QLoRA CPU fine-tuning** (frozen Q4_K base incl. FFN + per-head attention), gradient checkpointing, data-parallel trainer, Conv/BatchNorm/LSTM, CRNN + CTC (OCR), LR schedules.
 - **Multimodal & audio** — **Whisper speech-to-text** in pure C#; from-scratch MP3 / WAV decoders; OCR.
 - **Engineering** — Native-AOT (one ~7.8 MB self-contained binary), zero-allocation hot paths (AOT guard in CI), anomaly detection.
 
 **Current priorities:**
 
-- **More model families** — Qwen3 (closest to ship), then Gemma / Phi / Granite / Command-R; more quants (Q2_K / Q3_K).
+- **More model families** — Qwen3, Phi-3.5, and Gemma 2 now load ✅; next: Gemma 1/3, Qwen3-MoE, Granite / Command-R; more quants (Q2_K / Q3_K).
 - **Multilingual sentence-embedder** (XLM-RoBERTa / SentencePiece) for first-class multilingual RAG.
 - **Decode throughput** — the ~1.13× same-file gap vs llama.cpp is DRAM-bandwidth-bound; closing it needs structural (full-tensor attention) work, not kernel-ALU.
 - **Bulletproof structured output** — token-healing for arbitrary schemas on tiny models; GBNF grammars; NLI-based contradiction lint.

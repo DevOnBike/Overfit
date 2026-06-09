@@ -69,14 +69,21 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
                 var mlp0 = T(p + "mlp.0.weight");
                 _layers[b] = new Layer
                 {
-                    AttnLnW = T(p + "attn_ln.weight"), AttnLnB = T(p + "attn_ln.bias"),
-                    AttnQW = T(p + "attn.query.weight"), AttnQB = T(p + "attn.query.bias"),
+                    AttnLnW = T(p + "attn_ln.weight"),
+                    AttnLnB = T(p + "attn_ln.bias"),
+                    AttnQW = T(p + "attn.query.weight"),
+                    AttnQB = T(p + "attn.query.bias"),
                     AttnKW = T(p + "attn.key.weight"),
-                    AttnVW = T(p + "attn.value.weight"), AttnVB = T(p + "attn.value.bias"),
-                    AttnOW = T(p + "attn.out.weight"), AttnOB = T(p + "attn.out.bias"),
-                    MlpLnW = T(p + "mlp_ln.weight"), MlpLnB = T(p + "mlp_ln.bias"),
-                    Mlp0W = mlp0, Mlp0B = T(p + "mlp.0.bias"),
-                    Mlp2W = T(p + "mlp.2.weight"), Mlp2B = T(p + "mlp.2.bias"),
+                    AttnVW = T(p + "attn.value.weight"),
+                    AttnVB = T(p + "attn.value.bias"),
+                    AttnOW = T(p + "attn.out.weight"),
+                    AttnOB = T(p + "attn.out.bias"),
+                    MlpLnW = T(p + "mlp_ln.weight"),
+                    MlpLnB = T(p + "mlp_ln.bias"),
+                    Mlp0W = mlp0,
+                    Mlp0B = T(p + "mlp.0.bias"),
+                    Mlp2W = T(p + "mlp.2.weight"),
+                    Mlp2B = T(p + "mlp.2.bias"),
                     DFF = model.Tensors[p + "mlp.0.weight"].Shape[0],
                 };
                 if (_layers[b].DFF > _maxDFF) { _maxDFF = _layers[b].DFF; }

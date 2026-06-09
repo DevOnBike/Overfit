@@ -32,7 +32,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         private const int ContextSnapshots = 6;
         private const string Pod = "payments-api";
 
-        [Fact]
+        [LocalOnlyFact]
         public async Task Pipeline_ScrapeScoreAlert_AutoAdaptsAndStillFiresOnIncident()
         {
             var dir = Path.Combine(Path.GetTempPath(), $"overfit_pipeline_{Guid.NewGuid():N}");

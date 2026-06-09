@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<!-- Windows-only: mic capture + playback use the built-in winmm API via P/Invoke (no NuGet, no native binary shipped). -->
+		<TargetFramework>net10.0-windows</TargetFramework>
+		<Nullable>annotations</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<DebugType>embedded</DebugType>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<RootNamespace>DevOnBike.Overfit.Demo.VoiceLoop</RootNamespace>
+		<AssemblyName>VoiceLoop</AssemblyName>
+		<IsPackable>false</IsPackable>
+
+		<SonarQubeExclude>true</SonarQubeExclude>
+		<NoWarn>$(NoWarn);1591</NoWarn>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\..\Sources\Main\Main.csproj" />
+	</ItemGroup>
+
+</Project>

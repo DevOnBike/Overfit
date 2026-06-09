@@ -55,19 +55,30 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
                 var p = $"decoder.blocks.{b}.";
                 _layers[b] = new Layer
                 {
-                    AttnLnW = T(p + "attn_ln.weight"), AttnLnB = T(p + "attn_ln.bias"),
-                    AttnQW = T(p + "attn.query.weight"), AttnQB = T(p + "attn.query.bias"),
+                    AttnLnW = T(p + "attn_ln.weight"),
+                    AttnLnB = T(p + "attn_ln.bias"),
+                    AttnQW = T(p + "attn.query.weight"),
+                    AttnQB = T(p + "attn.query.bias"),
                     AttnKW = T(p + "attn.key.weight"),
-                    AttnVW = T(p + "attn.value.weight"), AttnVB = T(p + "attn.value.bias"),
-                    AttnOW = T(p + "attn.out.weight"), AttnOB = T(p + "attn.out.bias"),
-                    CrossLnW = T(p + "cross_attn_ln.weight"), CrossLnB = T(p + "cross_attn_ln.bias"),
-                    CrossQW = T(p + "cross_attn.query.weight"), CrossQB = T(p + "cross_attn.query.bias"),
+                    AttnVW = T(p + "attn.value.weight"),
+                    AttnVB = T(p + "attn.value.bias"),
+                    AttnOW = T(p + "attn.out.weight"),
+                    AttnOB = T(p + "attn.out.bias"),
+                    CrossLnW = T(p + "cross_attn_ln.weight"),
+                    CrossLnB = T(p + "cross_attn_ln.bias"),
+                    CrossQW = T(p + "cross_attn.query.weight"),
+                    CrossQB = T(p + "cross_attn.query.bias"),
                     CrossKW = T(p + "cross_attn.key.weight"),
-                    CrossVW = T(p + "cross_attn.value.weight"), CrossVB = T(p + "cross_attn.value.bias"),
-                    CrossOW = T(p + "cross_attn.out.weight"), CrossOB = T(p + "cross_attn.out.bias"),
-                    MlpLnW = T(p + "mlp_ln.weight"), MlpLnB = T(p + "mlp_ln.bias"),
-                    Mlp0W = T(p + "mlp.0.weight"), Mlp0B = T(p + "mlp.0.bias"),
-                    Mlp2W = T(p + "mlp.2.weight"), Mlp2B = T(p + "mlp.2.bias"),
+                    CrossVW = T(p + "cross_attn.value.weight"),
+                    CrossVB = T(p + "cross_attn.value.bias"),
+                    CrossOW = T(p + "cross_attn.out.weight"),
+                    CrossOB = T(p + "cross_attn.out.bias"),
+                    MlpLnW = T(p + "mlp_ln.weight"),
+                    MlpLnB = T(p + "mlp_ln.bias"),
+                    Mlp0W = T(p + "mlp.0.weight"),
+                    Mlp0B = T(p + "mlp.0.bias"),
+                    Mlp2W = T(p + "mlp.2.weight"),
+                    Mlp2B = T(p + "mlp.2.bias"),
                 };
             }
         }
@@ -225,11 +236,21 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
                 var scoreLen = Math.Max(nCtx, maxLen);
                 s = new State
                 {
-                    CrossK = new float[_nLayer * crossStride], CrossV = new float[_nLayer * crossStride],
-                    SelfK = new float[_nLayer * selfStride], SelfV = new float[_nLayer * selfStride],
-                    NCtx = nCtx, MaxLen = maxLen,
-                    X = new float[n], Ln = new float[n], Q = new float[n], K = new float[n], V = new float[n],
-                    Attn = new float[n], Proj = new float[n], Hidden = new float[_dFF], Scores = new float[scoreLen],
+                    CrossK = new float[_nLayer * crossStride],
+                    CrossV = new float[_nLayer * crossStride],
+                    SelfK = new float[_nLayer * selfStride],
+                    SelfV = new float[_nLayer * selfStride],
+                    NCtx = nCtx,
+                    MaxLen = maxLen,
+                    X = new float[n],
+                    Ln = new float[n],
+                    Q = new float[n],
+                    K = new float[n],
+                    V = new float[n],
+                    Attn = new float[n],
+                    Proj = new float[n],
+                    Hidden = new float[_dFF],
+                    Scores = new float[scoreLen],
                     Logits = new float[_nVocab],
                 };
                 _reuseState = s;

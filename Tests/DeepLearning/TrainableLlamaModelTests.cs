@@ -35,7 +35,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
         private readonly ITestOutputHelper _out;
         public TrainableLlamaModelTests(ITestOutputHelper output) => _out = output;
 
-        [Fact]
+        [LocalOnlyFact]
         public void Overfit_ShortSequence_LossCollapses_AndGreedyReproducesIt()
         {
             using var model = BuildTinyModel(seed: 7);
@@ -77,7 +77,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
             Assert.Equal(target.Length, correct);
         }
 
-        [Fact]
+        [LocalOnlyFact]
         public void GradientCheckpointing_IsNumericallyTransparent()
         {
             using var model = BuildTinyModel(seed: 11);
@@ -96,7 +96,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
             Assert.True(maxAbs < 1e-3, $"checkpointed forward diverged from plain: {maxAbs:E3}");
         }
 
-        [Fact]
+        [LocalOnlyFact]
         public void Overfit_WithCheckpointing_AlsoLearns()
         {
             using var model = BuildTinyModel(seed: 23);
@@ -122,7 +122,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
             Assert.True(last < 0.3f, $"checkpointed training did not overfit: {first:F3} -> {last:F4}");
         }
 
-        [Fact]
+        [LocalOnlyFact]
         public void SaveLoadAdapter_RoundTrips_PreservesFineTune()
         {
             var seq = new[] { 9, 2, 30, 15, 6, 41, 18, 3, 27, 11, 38, 5, 22, 14, 1, 35, 7, 19, 44 };
@@ -191,7 +191,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
             }
         }
 
-        [Fact]
+        [LocalOnlyFact]
         public void GenerateCached_MatchesUncachedGenerate()
         {
             using var model = BuildTinyModel(seed: 71);

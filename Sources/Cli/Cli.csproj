@@ -10,12 +10,27 @@
         <!-- The published native binary is `overfit` (ollama-style: a single self-contained executable, put it on PATH = a global command; no .NET runtime required). Build with
              `dotnet publish -c Release -r <rid> -p:PublishAot=true`. -->
         <AssemblyName>overfit</AssemblyName>
-        <IsPackable>false</IsPackable>
 
+        <!-- AOT/native publish settings — apply only to `dotnet publish -r <rid> -p:PublishAot=true`
+             (the Docker image + GitHub-release binary). build/pack ignore PublishAot. -->
         <PublishAot>true</PublishAot>
         <InvariantGlobalization>true</InvariantGlobalization>
         <IsTrimmable>true</IsTrimmable>
         <StripSymbols>true</StripSymbols>
+    </PropertyGroup>
+
+    <!-- Second distribution channel: a .NET global tool (`dotnet tool install -g DevOnBike.Overfit.Cli`,
+         then run `overfit`). Framework-dependent IL (needs the .NET runtime) — the cross-platform-convenience
+         counterpart to the per-RID Native-AOT binary above. Both ship from this one project: `dotnet publish -r`
+         builds the native binary; `dotnet pack` builds the tool package (PackAsTool ignores the AOT settings). -->
+    <PropertyGroup>
+        <IsPackable>true</IsPackable>
+        <PackAsTool>true</PackAsTool>
+        <ToolCommandName>overfit</ToolCommandName>
+        <PackageId>DevOnBike.Overfit.Cli</PackageId>
+        <Title>Overfit CLI</Title>
+        <Description>Overfit CLI — a pure-.NET, OpenAI-compatible local LLM server (`overfit serve`) plus model pull/chat/embed/tts. No Python, no native engine. Also distributed as a Native-AOT binary and a Docker image.</Description>
+        <PackageTags>llm;gguf;openai;cli;ai;inference;local;dotnet-tool</PackageTags>
     </PropertyGroup>
 
     <ItemGroup>

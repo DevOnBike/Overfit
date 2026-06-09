@@ -3,7 +3,11 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Globalization;
 using System.Net;
+using DevOnBike.Overfit.Audio;
+using DevOnBike.Overfit.Audio.Tts;
+using DevOnBike.Overfit.Audio.Tts.Orpheus;
 using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Embeddings;
 using DevOnBike.Overfit.Server;
@@ -138,7 +142,7 @@ namespace DevOnBike.Overfit.Cli
 
         private const string DefaultSystemPrompt = "You are a concise, helpful assistant running locally in pure .NET.";
 
-        public static int Serve(string model, string host, int port, string? embedModel)
+        public static int Serve(string model, string host, int port, string? embedModel, string? ttsModel, string? ttsSnac)
         {
             var path = ModelCache.Resolve(model);
             if (path is null)
@@ -189,6 +193,36 @@ namespace DevOnBike.Overfit.Cli
                 }
             }
 
+            // Optional in-process TTS → serves /v1/audio/speech (Orpheus LM + SNAC, pure .NET, no data egress).
+            OrpheusVoiceEngine? tts = null;
+            if (!string.IsNullOrWhiteSpace(ttsModel))
+            {
+                var orpheus = ResolveOrpheusModel(ttsModel);
+                var snac = ResolveSnacDir(ttsSnac);
+                if (orpheus is null || snac is null)
+                {
+                    Console.Error.WriteLine("TTS not started: need both an Orpheus GGUF (--tts-model) and SNAC weights (--tts-snac).");
+                    Console.Error.WriteLine(orpheus is null ? "  • Orpheus GGUF not found (pull it, or pass --tts-model <file.gguf>)." : $"  • Orpheus: {orpheus}");
+                    Console.Error.WriteLine(snac is null ? "  • SNAC weights not found (run Scripts/convert_snac.py, or pass --tts-snac <dir>)." : $"  • SNAC: {snac}");
+                    embedder?.Dispose();
+                    client.Dispose();
+                    return 1;
+                }
+
+                try
+                {
+                    tts = OrpheusVoiceEngine.Load(orpheus, snac);
+                    Console.WriteLine($"TTS: Orpheus + SNAC -> /v1/audio/speech (voices: {string.Join(", ", OrpheusPrompt.AvailableVoices)})");
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"Failed to load TTS: {ex.Message}");
+                    embedder?.Dispose();
+                    client.Dispose();
+                    return 1;
+                }
+            }
+
             using var cts = new CancellationTokenSource();
             Console.CancelKeyPress += (_, e) =>
             {
@@ -205,13 +239,15 @@ namespace DevOnBike.Overfit.Cli
                     port,
                     DefaultSystemPrompt,
                     embedder,
+                    tts,
                     onListening: baseUrl =>
                     {
                         var embedEp = embedder is null ? string.Empty : " | POST /v1/embeddings";
+                        var ttsEp = tts is null ? string.Empty : " | POST /v1/audio/speech";
                         Console.WriteLine();
                         Console.WriteLine($"OpenAI-compatible server listening on {baseUrl}");
                         Console.WriteLine($"  model id:  {modelName}");
-                        Console.WriteLine($"  endpoints: GET /v1/models | POST /v1/chat/completions (stream + non-stream){embedEp} | GET /health");
+                        Console.WriteLine($"  endpoints: GET /v1/models | POST /v1/chat/completions (stream + non-stream){embedEp}{ttsEp} | GET /health");
                         Console.WriteLine();
                         Console.WriteLine($"  curl {baseUrl}/v1/chat/completions -H \"Content-Type: application/json\" \\");
                         Console.WriteLine($"       -d '{{\"model\":\"{modelName}\",\"messages\":[{{\"role\":\"user\",\"content\":\"Hello\"}}]}}'");
@@ -228,6 +264,7 @@ namespace DevOnBike.Overfit.Cli
             }
             finally
             {
+                tts?.Dispose();
                 embedder?.Dispose();
                 client.Dispose();
             }
@@ -273,6 +310,243 @@ namespace DevOnBike.Overfit.Cli
                 return SentenceEmbedder.ForE5(dir);
             }
             return SentenceEmbedder.ForMiniLm(dir);
+        }
+
+        private static string VoicesDir() => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".overfit", "voices");
+
+        public static int Tts(string text, string voice, string outPath, string language, string? model, string? snacDir)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                Console.Error.WriteLine("--text is required.");
+                return 1;
+            }
+
+            try
+            {
+                var orpheus = ResolveOrpheusModel(model);
+                var snac = ResolveSnacDir(snacDir);
+                if (orpheus is not null && snac is not null)
+                {
+                    return TtsOrpheus(text, voice, outPath, orpheus, snac);
+                }
+
+                return TtsPlaceholder(text, voice, language, outPath, orpheus, snac);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"tts failed: {ex.Message}");
+                return 1;
+            }
+        }
+
+        // Real neural TTS: Orpheus LM → SNAC decoder → watermarked WAV, pure managed CPU.
+        private static int TtsOrpheus(string text, string voice, string outPath, string orpheusGguf, string snacDir)
+        {
+            var chosen = OrpheusPrompt.IsKnownVoice(voice) ? voice : OrpheusPrompt.DefaultVoice;
+            if (!OrpheusPrompt.IsKnownVoice(voice))
+            {
+                Console.WriteLine($"Voice '{voice}' is not an Orpheus preset; using '{chosen}'. "
+                    + $"Presets: {string.Join(", ", OrpheusPrompt.AvailableVoices)}.");
+            }
+
+            Console.WriteLine($"Synthesizing with Orpheus + SNAC on CPU (voice '{chosen}')…");
+            using var engine = OrpheusVoiceEngine.Load(orpheusGguf, snacDir);
+            var audio = engine.Synthesize(text, chosen);
+
+            var marker = SyntheticSpeechMetadata.ForNow(chosen);
+            using (var sink = new WavAudioSink(outPath, engine.SampleRate, WavSampleFormat.Pcm16, marker))
+            {
+                sink.Write(audio);
+            }
+
+            var seconds = audio.Length / (double)engine.SampleRate;
+            Console.WriteLine($"Wrote {outPath}  ({seconds:F2}s, voice '{chosen}', {engine.SampleRate} Hz, synthetic — watermarked).");
+            return 0;
+        }
+
+        // Fallback tone engine when the neural models are not installed — keeps `overfit tts` usable and explains how
+        // to enable real speech.
+        private static int TtsPlaceholder(string text, string voice, string language, string outPath, string? orpheus, string? snac)
+        {
+            var voicesDir = VoicesDir();
+            var profile = VoiceProfileStore.Exists(voice, voicesDir)
+                ? VoiceProfileStore.Load(voice, voicesDir)
+                : VoiceProfile.Preset(voice, language);
+
+            var engine = new PlaceholderTtsEngine(24000);
+            var marker = SyntheticSpeechMetadata.ForNow(profile.Id);
+            using (var sink = new WavAudioSink(outPath, engine.SampleRate, WavSampleFormat.Pcm16, marker))
+            {
+                engine.Synthesize(text, profile, sink, TtsOptions.Default);
+            }
+
+            Console.WriteLine($"Wrote {outPath}  (voice '{profile.Id}', {engine.SampleRate} Hz, placeholder tone — watermarked).");
+            Console.WriteLine();
+            Console.WriteLine("This is the placeholder tone engine — real neural speech needs two models:");
+            Console.WriteLine(orpheus is null
+                ? "  • Orpheus GGUF: overfit pull isaiahbjork/orpheus-3b-0.1-ft-Q4_K_M-GGUF   (then pass --model <file.gguf>)"
+                : $"  • Orpheus GGUF: found ({orpheus})");
+            Console.WriteLine(snac is null
+                ? "  • SNAC weights: python Scripts/convert_snac.py --out %USERPROFILE%\\.overfit\\snac   (or pass --snac <dir>)"
+                : $"  • SNAC weights: found ({snac})");
+            return 0;
+        }
+
+        // Orpheus GGUF: explicit --model (cache name or path), else $OVERFIT_ORPHEUS_DIR, else any orpheus*.gguf in the cache.
+        private static string? ResolveOrpheusModel(string? model)
+        {
+            if (!string.IsNullOrWhiteSpace(model))
+            {
+                return ModelCache.Resolve(model) ?? (File.Exists(model) ? model : null);
+            }
+
+            var envDir = Environment.GetEnvironmentVariable("OVERFIT_ORPHEUS_DIR");
+            if (!string.IsNullOrWhiteSpace(envDir) && Directory.Exists(envDir))
+            {
+                var hit = FindOrpheusGguf(envDir);
+                if (hit is not null)
+                {
+                    return hit;
+                }
+            }
+
+            return Directory.Exists(ModelCache.Dir) ? FindOrpheusGguf(ModelCache.Dir) : null;
+        }
+
+        private static string? FindOrpheusGguf(string dir)
+        {
+            foreach (var path in Directory.GetFiles(dir, "*.gguf"))
+            {
+                if (Path.GetFileName(path).Contains("orpheus", StringComparison.OrdinalIgnoreCase))
+                {
+                    return path;
+                }
+            }
+            return null;
+        }
+
+        // SNAC dir: explicit --snac, else $OVERFIT_SNAC_DIR, else ~/.overfit/snac. Must contain the converted weights.
+        private static string? ResolveSnacDir(string? snacDir)
+        {
+            var candidates = new List<string?>
+            {
+                snacDir,
+                Environment.GetEnvironmentVariable("OVERFIT_SNAC_DIR"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".overfit", "snac"),
+            };
+            foreach (var c in candidates)
+            {
+                if (!string.IsNullOrWhiteSpace(c) && File.Exists(Path.Combine(c, "snac_24khz.safetensors")))
+                {
+                    return c;
+                }
+            }
+            return null;
+        }
+
+        public static int TtsEval(string referencePath, string candidatePath)
+        {
+            try
+            {
+                if (!File.Exists(referencePath))
+                {
+                    Console.Error.WriteLine($"Reference audio not found: {referencePath}");
+                    return 1;
+                }
+                if (!File.Exists(candidatePath))
+                {
+                    Console.Error.WriteLine($"Candidate audio not found: {candidatePath}");
+                    return 1;
+                }
+
+                var reference = AudioFile.ReadMono(referencePath, out var refRate);
+                var candidate = AudioFile.ReadMono(candidatePath, out var candRate);
+
+                var report = AudioSimilarity.Compare(reference, refRate, candidate, candRate);
+
+                Console.WriteLine($"reference : {Path.GetFileName(referencePath)}  ({refRate} Hz, {reference.Length} samples)");
+                Console.WriteLine($"candidate : {Path.GetFileName(candidatePath)}  ({candRate} Hz, {candidate.Length} samples)");
+                Console.WriteLine();
+                var snr = double.IsPositiveInfinity(report.SignalToNoiseRatioDb)
+                    ? "inf (bit-identical)"
+                    : report.SignalToNoiseRatioDb.ToString("0.0", CultureInfo.InvariantCulture) + " dB";
+                Console.WriteLine($"  SNR (waveform)        {snr}");
+                Console.WriteLine($"  correlation           {report.Correlation:0.000}");
+                Console.WriteLine($"  RMSE                  {report.RootMeanSquareError:0.0000}");
+                Console.WriteLine($"  mel distance          {report.MelSpectralDistance:0.0000}");
+                Console.WriteLine($"  mel distance (DTW)    {report.MelDistanceDtw:0.0000}   <- timing-robust; lower = closer to ideal");
+                Console.WriteLine();
+                Console.WriteLine("Waveform metrics (SNR / correlation) assume the two are the same deterministic decode");
+                Console.WriteLine("(aligned sample-for-sample). For generated speech vs. a reference clip, the DTW mel");
+                Console.WriteLine("distance is the metric that matters.");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"tts eval failed: {ex.Message}");
+                return 1;
+            }
+        }
+
+        public static int VoiceEnroll(string id, string sample, string language, bool consent)
+        {
+            if (!consent)
+            {
+                Console.Error.WriteLine("Voice enrollment requires consent. Re-run with --consent to confirm you OWN");
+                Console.Error.WriteLine("this voice or have explicit permission to use it. Cloning a voice without");
+                Console.Error.WriteLine("consent may be illegal in your jurisdiction.");
+                return 1;
+            }
+
+            try
+            {
+                if (!File.Exists(sample))
+                {
+                    Console.Error.WriteLine($"Sample audio not found: {sample}");
+                    return 1;
+                }
+
+                // Validate the clip decodes; we don't compute a speaker embedding yet (gated Phase 2).
+                var pcm = AudioFile.ReadMono(sample, out var rate);
+                var seconds = pcm.Length / (double)rate;
+
+                var voicesDir = VoicesDir();
+                var profile = new VoiceProfile(id, language, speakerEmbedding: null, referenceAudioPath: Path.GetFullPath(sample));
+                VoiceProfileStore.Save(profile, voicesDir);
+
+                Console.WriteLine($"Enrolled voice '{id}' ({language}) from {Path.GetFileName(sample)} ({seconds:F1}s) -> {voicesDir}");
+                Console.WriteLine("Note: a speaker embedding is NOT computed yet — voice cloning is a gated Phase 2");
+                Console.WriteLine("(docs/tts-poc-plan.md). The reference clip is recorded for then.");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"enroll failed: {ex.Message}");
+                return 1;
+            }
+        }
+
+        public static int VoiceList()
+        {
+            var dir = VoicesDir();
+            var ids = VoiceProfileStore.List(dir);
+            if (ids.Count == 0)
+            {
+                Console.WriteLine($"No enrolled voices in {dir}.");
+                Console.WriteLine("Enroll one:  overfit voice enroll <id> --sample your.wav --consent");
+                return 0;
+            }
+
+            Console.WriteLine($"Voices in {dir}:");
+            Console.WriteLine();
+            foreach (var voiceId in ids)
+            {
+                var profile = VoiceProfileStore.Load(voiceId, dir);
+                Console.WriteLine($"  {profile.Id,-24} {profile.Language,-4} {(profile.IsCloned ? "cloned" : "preset")}");
+            }
+            return 0;
         }
 
         public static int List()

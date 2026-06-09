@@ -63,6 +63,16 @@ namespace DevOnBike.Overfit.DeepLearning
         /// <summary>Number of attention heads per block.</summary>
         public int NHeads { get; init; } = 12;
 
+        /// <summary>Per-head dimension when set explicitly (Qwen3 has <c>head_dim ≠ DModel/NHeads</c>);
+        /// 0 means derive it as <see cref="DModel"/> / <see cref="NHeads"/>.</summary>
+        public int HeadDim { get; init; }
+
+        /// <summary>The effective per-head dimension used by attention / RoPE.</summary>
+        public int AttentionHeadDim => HeadDim > 0 ? HeadDim : DModel / NHeads;
+
+        /// <summary>Whether this model applies Qwen3-style per-head RMSNorm to Q and K before RoPE.</summary>
+        public bool UsesQkNorm { get; init; }
+
         /// <summary>Number of Transformer blocks.</summary>
         public int NLayers { get; init; } = 12;
 
@@ -126,6 +136,36 @@ namespace DevOnBike.Overfit.DeepLearning
         /// <c>rope_scaling</c> block in a Llama-3.x config). Null = plain RoPE.
         /// </summary>
         public RopeScaling? RopeScaling { get; init; }
+
+        /// <summary>
+        /// Phi-3 "longrope" per-dimension RoPE frequency factors (<c>[head_dim/2]</c>). Each base frequency
+        /// <c>1/θ^(2i/d)</c> is divided by <c>RopeFreqFactors[i]</c> at table build. Null = no per-dim scaling.
+        /// Distinct from <see cref="RopeScaling"/> (the scalar llama3 NTK-by-parts rule).
+        /// </summary>
+        public float[]? RopeFreqFactors { get; init; }
+
+        /// <summary>
+        /// RoPE attention scaling (longrope "mscale") multiplying cos/sin. 1.0 in the short-context regime
+        /// (sequence ≤ original context). Default 1.0 = no scaling.
+        /// </summary>
+        public float RopeAttnFactor { get; init; } = 1f;
+
+        // ── Gemma-specific ─────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Multiplies the token embedding after lookup (Gemma scales by <c>sqrt(d_model)</c>). 1.0 = no scaling.
+        /// </summary>
+        public float EmbeddingScale { get; init; } = 1f;
+
+        /// <summary>
+        /// Gemma-2 attention logit soft-cap: pre-softmax scores are passed through <c>tanh(s/cap)·cap</c>. 0 = off.
+        /// </summary>
+        public float AttnLogitSoftcap { get; init; }
+
+        /// <summary>
+        /// Gemma-2 final logit soft-cap: LM-head logits are passed through <c>tanh(l/cap)·cap</c>. 0 = off.
+        /// </summary>
+        public float FinalLogitSoftcap { get; init; }
 
         // ── FFN ───────────────────────────────────────────────────────────────
 
