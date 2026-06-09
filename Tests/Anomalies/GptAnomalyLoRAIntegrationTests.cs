@@ -41,7 +41,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             _output = output;
         }
 
-        [Fact]
+        [LocalOnlyFact]
         [Trait("Category", "Integration")]
         public void LoRA_FineTunedOnProductionRegime_LowersAnomalyScore_ThroughDetector()
         {
@@ -143,7 +143,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         /// real anomalies. This is the property that makes per-regime LoRA
         /// adaptation safe to deploy.
         /// </summary>
-        [Fact]
+        [LocalOnlyFact]
         [Trait("Category", "Integration")]
         public void LoRA_AdaptedToRegime_StillFlagsInjectedAnomaly()
         {

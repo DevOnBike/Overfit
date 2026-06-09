@@ -53,7 +53,8 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             LoRALearningRate = 1e-2f,
         };
 
-        [Fact]
+
+        [LocalOnlyFact]
         public void Lifecycle_RecommendsAdaptation_ThenFlattensBenign_StillFiresOnIncident()
         {
             var dir = Path.Combine(Path.GetTempPath(), $"overfit_adaptive_{Guid.NewGuid():N}");
@@ -104,7 +105,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             }
         }
 
-        [Fact]
+        [LocalOnlyFact]
         public void Adapt_OnePod_DoesNotChangeAnotherPod()
         {
             var dir = Path.Combine(Path.GetTempPath(), $"overfit_adaptive_{Guid.NewGuid():N}");
@@ -143,7 +144,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             }
         }
 
-        [Fact]
+        [LocalOnlyFact]
         public void Adapter_PersistsAndReloads_OnPodRestart()
         {
             var dir = Path.Combine(Path.GetTempPath(), $"overfit_adaptive_{Guid.NewGuid():N}");

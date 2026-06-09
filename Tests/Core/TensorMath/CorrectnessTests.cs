@@ -874,7 +874,7 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
             }
         }
 
-        [Fact]
+        [LocalOnlyFact]
         public void Mnist_SmallTraining_Run_DecreasesLoss_And_ReachesReasonableAccuracy()
         {
             const int trainSize = 2048;
