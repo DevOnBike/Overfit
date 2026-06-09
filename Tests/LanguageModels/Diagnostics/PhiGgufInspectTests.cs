@@ -27,7 +27,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             using var reader = new GgufReader(Path);
 
             _out.WriteLine("=== METADATA (arch + rope + attention) ===");
-            
+
             foreach (var kv in reader.Metadata)
             {
                 var k = kv.Key;

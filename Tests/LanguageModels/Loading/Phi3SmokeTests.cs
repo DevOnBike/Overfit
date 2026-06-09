@@ -20,7 +20,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
     {
         private const string Path = @"C:\phi\Phi-3.5-mini-instruct-Q4_K_M.gguf";
         private readonly ITestOutputHelper _out;
-        
+
         public Phi3SmokeTests(ITestOutputHelper output) => _out = output;
 
         [LongFact]

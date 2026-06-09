@@ -37,16 +37,16 @@ namespace DevOnBike.Overfit.Cli
             {
                 Timeout = Timeout.InfiniteTimeSpan,   // model files are large
             };
-            
+
             client.DefaultRequestHeaders.UserAgent.ParseAdd("overfit-cli/1.0");
-            
+
             var token = Environment.GetEnvironmentVariable("HF_TOKEN");
-            
+
             if (!string.IsNullOrWhiteSpace(token))
             {
                 client.DefaultRequestHeaders.Authorization = new("Bearer", token);
             }
-            
+
             return client;
         }
 
@@ -56,24 +56,24 @@ namespace DevOnBike.Overfit.Cli
         public static async Task<string> ResolveFileAsync(string repo, string? pattern, string? explicitFile)
         {
             using var response = await Http.GetAsync($"{Endpoint}/api/models/{repo}");
-            
+
             if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
             {
                 throw new InvalidOperationException($"Repo '{repo}' is gated or private. Accept its terms on huggingface.co and set HF_TOKEN.");
             }
-            
+
             if (response.StatusCode == HttpStatusCode.NotFound)
             {
                 throw new InvalidOperationException($"HuggingFace repo '{repo}' was not found.");
             }
-            
+
             response.EnsureSuccessStatusCode();
 
             var json = await response.Content.ReadAsStringAsync();
             using var doc = JsonDocument.Parse(json);
 
             var ggufs = new List<string>();
-            
+
             if (doc.RootElement.TryGetProperty("siblings", out var siblings) && siblings.ValueKind == JsonValueKind.Array)
             {
                 foreach (var sibling in siblings.EnumerateArray())
@@ -99,7 +99,7 @@ namespace DevOnBike.Overfit.Cli
                         return g;
                     }
                 }
-                
+
                 throw new InvalidOperationException($"No .gguf matching '{explicitFile}' in '{repo}'. Available:\n  " + string.Join("\n  ", ggufs));
             }
 
@@ -113,7 +113,7 @@ namespace DevOnBike.Overfit.Cli
                     }
                 }
             }
-            
+
             return ggufs[0];
         }
 

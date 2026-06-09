@@ -26,14 +26,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 var v = buffer.Slice(n * headDim, headDim);
                 var sumSq = 0f;
-                
+
                 for (var i = 0; i < headDim; i++)
                 {
                     sumSq += v[i] * v[i];
                 }
-                
+
                 var inv = 1f / MathF.Sqrt((sumSq / headDim) + Eps);
-                
+
                 for (var i = 0; i < headDim; i++)
                 {
                     v[i] = v[i] * inv * weight[i];

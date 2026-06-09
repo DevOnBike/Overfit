@@ -4,12 +4,7 @@
     <DataCollectors>
       <DataCollector friendlyName="XPlat code coverage">
         <Configuration>
-          <!-- Exclude the numerical HOT-LOOP namespaces from coverage instrumentation. XPlat Code Coverage
-               instruments every sequence point; on tight per-element loops (matmul, dequant, autograd, the
-               QLoRA training forward/backward) that is a 10-900x slowdown ON LINUX, turning ~10 s training
-               tests into multi-minute ones — without adding meaningful coverage signal. DeepLearning.* +
-               LanguageModels.LoRA.* cover the FrozenQuantizedLinear / TrainableLlamaModel / QLoRA path. -->
-          <Exclude>[DevOnBike.Overfit]DevOnBike.Overfit.Ops.*,[DevOnBike.Overfit]DevOnBike.Overfit.Kernels.*,[DevOnBike.Overfit]DevOnBike.Overfit.Maths.*,[DevOnBike.Overfit]DevOnBike.Overfit.Intrinsics.*,[DevOnBike.Overfit]DevOnBike.Overfit.Autograd.*,[DevOnBike.Overfit]DevOnBike.Overfit.Optimizers.*,[DevOnBike.Overfit]DevOnBike.Overfit.Tensors.*,[DevOnBike.Overfit]DevOnBike.Overfit.LanguageModels.Runtime.*,[DevOnBike.Overfit]DevOnBike.Overfit.DeepLearning.*,[DevOnBike.Overfit]DevOnBike.Overfit.LanguageModels.LoRA.*</Exclude>
+          <Exclude>[DevOnBike.Overfit]DevOnBike.Overfit.Ops.*,[DevOnBike.Overfit]DevOnBike.Overfit.Kernels.*,[DevOnBike.Overfit]DevOnBike.Overfit.Maths.*,[DevOnBike.Overfit]DevOnBike.Overfit.Intrinsics.*,[DevOnBike.Overfit]DevOnBike.Overfit.Autograd.*,[DevOnBike.Overfit]DevOnBike.Overfit.Optimizers.*,[DevOnBike.Overfit]DevOnBike.Overfit.Tensors.*,[DevOnBike.Overfit]DevOnBike.Overfit.LanguageModels.Runtime.*</Exclude>
         </Configuration>
       </DataCollector>
     </DataCollectors>

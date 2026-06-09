@@ -3,5 +3,5 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-global using Xunit;
 global using DevOnBike.Overfit.Exceptions;
+global using Xunit;

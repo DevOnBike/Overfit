@@ -22,7 +22,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         private const float Threshold = 0.02f;
         private const int KeepPadding = 1_200; // 0.05 s @ 24 kHz
         private readonly ITestOutputHelper _out;
-        
+
         public MyVoiceSilenceDiagnosticTests(ITestOutputHelper output) => _out = output;
 
         [LongFact]

@@ -24,7 +24,7 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         private readonly ITestOutputHelper _out;
         public Gpt1QLoRAAnomalyTests(ITestOutputHelper output) => _out = output;
 
-        [Fact]
+        [LocalOnlyFact]
         public void QLoRA_AdaptsBenignRegime_OnFrozenQ4KBase_StillFlagsIncident()
         {
             var tps = MetricTokenizer.TokensPerSnapshot;

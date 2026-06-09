@@ -20,7 +20,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
         private readonly ITestOutputHelper _out;
         public Gpt1QLoRATests(ITestOutputHelper output) => _out = output;
 
-        [Fact]
+        [LocalOnlyFact]
         public void QLoRA_LmHead_FrozenQ4KBase_AdapterReducesLoss()
         {
             var config = new GPT1Config
@@ -55,7 +55,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
             Assert.True(last < 0.85f * first, $"loss drop too small for a trainable corpus: {first:F3} -> {last:F3}");
         }
 
-        [Fact]
+        [LocalOnlyFact]
         public void QLoRA_HeadAndFFN_FrozenQ4KBases_ReduceLoss()
         {
             var config = new GPT1Config
@@ -94,7 +94,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
             Assert.True(last < 0.85f * first, $"loss drop too small: {first:F3} -> {last:F3}");
         }
 
-        [Fact]
+        [LocalOnlyFact]
         public void QLoRA_Q8Base_HeadAndFFN_ReduceLoss()
         {
             var config = new GPT1Config
@@ -129,7 +129,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
             Assert.True(last < 0.85f * first, $"Q8-base loss drop too small: {first:F3} -> {last:F3}");
         }
 
-        [Fact]
+        [LocalOnlyFact]
         public void QLoRA_Q8Base_AllLinear_HeadFFNAttention_ReduceLoss()
         {
             var config = new GPT1Config
@@ -169,7 +169,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
             Assert.True(last < first - 0.5f, $"all-linear QLoRA did not train meaningfully: {first:F3} -> {last:F3}");
         }
 
-        [Fact]
+        [LocalOnlyFact]
         public void QLoRA_FreeQuantizedBase_StillTrains_AndDisposesF32()
         {
             var config = new GPT1Config

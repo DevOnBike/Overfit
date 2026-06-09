@@ -6,15 +6,15 @@ name: Docker Hub
 #   DOCKERHUB_USERNAME   your Docker Hub account / org name (also the image namespace → <user>/overfit)
 #   DOCKERHUB_TOKEN      a Docker Hub Access Token with Read/Write (Account Settings → Security)
 #
-# Image version = the <Version> in Directory.Build.props (the same value the NuGet packages + global tool ship
-# under), so the image tag is always consistent with the source version. Each run publishes
-# :<version> + :latest + :sha-<short>. Bump with bump-version.ps1, then trigger by a `v*` tag push or a manual run.
-# The model is NOT in the image — see Sources/Cli/Dockerfile.
+# MANUAL ONLY — Actions tab → "Docker Hub" → Run workflow. No git tag needed: the image version is read from
+# the <Version> in Directory.Build.props (the same value the NuGet packages + global tool ship under), so each
+# run publishes :<version> + :latest + :sha-<short>, always consistent with the source version. Bump the source
+# version with bump-version.ps1 first. The model is NOT in the image — see Sources/Cli/Dockerfile.
+#
+# NOTE (GitHub limitation): the "Run workflow" button only appears once this file is on the DEFAULT branch
+# (main). Merge the branch to main (or temporarily set it as default) to get the manual trigger in the UI.
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'
   workflow_dispatch:
 
 concurrency:

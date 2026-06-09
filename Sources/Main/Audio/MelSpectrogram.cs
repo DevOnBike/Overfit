@@ -107,7 +107,7 @@ namespace DevOnBike.Overfit.Audio
                 _bwRe[n] = br; _bwIm[n] = bi;
                 if (n > 0) { _bwRe[m - n] = br; _bwIm[m - n] = bi; }
             }
-            
+
             Fft(_bwRe, _bwIm, _twRe, _twIm, inverse: false);
         }
 
@@ -236,7 +236,7 @@ namespace DevOnBike.Overfit.Audio
                 var bit = n >> 1;
                 for (; (j & bit) != 0; bit >>= 1) { j ^= bit; }
                 j ^= bit;
-                
+
                 if (i < j)
                 {
                     (re[i], re[j]) = (re[j], re[i]);

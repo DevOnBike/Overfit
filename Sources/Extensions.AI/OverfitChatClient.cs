@@ -53,7 +53,7 @@ namespace DevOnBike.Overfit.Extensions.AI
             var materialized = Materialize(messages);
 
             await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-            
+
             try
             {
                 var reply = await Task.Run(() =>
@@ -63,7 +63,7 @@ namespace DevOnBike.Overfit.Extensions.AI
                 }, cancellationToken).ConfigureAwait(false);
 
                 var stats = _session.LastStats;
-                
+
                 return new ChatResponse(new ChatMessage(ChatRole.Assistant, reply))
                 {
                     ModelId = _metadata.DefaultModelId,
@@ -197,7 +197,7 @@ namespace DevOnBike.Overfit.Extensions.AI
                 else if (role == ChatRole.Assistant) { _session.AddAssistant(text); }
                 else { _session.AddUser(text); }   // user / tool / unknown → user turn
             }
-            
+
             return messages[^1].Text ?? string.Empty;
         }
     }

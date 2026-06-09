@@ -23,7 +23,7 @@ namespace DevOnBike.Overfit.Tests.Audio
     public sealed class OrpheusAcronymPronunciationE2ETests
     {
         private readonly ITestOutputHelper _out;
-        
+
         public OrpheusAcronymPronunciationE2ETests(ITestOutputHelper output)
         {
             _out = output;

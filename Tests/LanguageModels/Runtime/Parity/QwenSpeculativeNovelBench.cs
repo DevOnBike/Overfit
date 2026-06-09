@@ -28,17 +28,31 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
             const int generate = 96;
 
             int specSteps = 0, specProduced = 0;
-            { using var s = engine.CreateSession(512); s.Reset(prompt);
-              var hist = new List<int>(prompt); var buf = new int[6];
-              while (specProduced < generate) { var n = s.GenerateSpeculative(CollectionsMarshal.AsSpan(hist), buf, maxDraft: 4); for (var c=0;c<n;c++) hist.Add(buf[c]); specProduced+=n; specSteps++; } }
+            {
+                using var s = engine.CreateSession(512); s.Reset(prompt);
+                var hist = new List<int>(prompt); var buf = new int[6];
+                while (specProduced < generate) { var n = s.GenerateSpeculative(CollectionsMarshal.AsSpan(hist), buf, maxDraft: 4); for (var c = 0; c < n; c++) { hist.Add(buf[c]); } specProduced += n; specSteps++; }
+            }
 
-            double Single() { using var s = engine.CreateSession(512); s.Reset(prompt); var sa = SamplingOptions.Greedy;
-              var sw = System.Diagnostics.Stopwatch.StartNew(); for (var i=0;i<generate;i++) s.GenerateNextToken(in sa); sw.Stop(); return generate/sw.Elapsed.TotalSeconds; }
-            double Spec() { using var s = engine.CreateSession(512); s.Reset(prompt); var hist = new List<int>(prompt); var buf = new int[6]; var p=0;
-              var sw = System.Diagnostics.Stopwatch.StartNew(); while (p<generate){ var n=s.GenerateSpeculative(CollectionsMarshal.AsSpan(hist), buf, maxDraft:4); for(var c=0;c<n;c++) hist.Add(buf[c]); p+=n; } sw.Stop(); return p/sw.Elapsed.TotalSeconds; }
+            double Single()
+            {
+                using var s = engine.CreateSession(512); s.Reset(prompt); var sa = SamplingOptions.Greedy;
+                var sw = System.Diagnostics.Stopwatch.StartNew(); for (var i = 0; i < generate; i++)
+                {
+                    s.GenerateNextToken(in sa);
+                }
+
+                sw.Stop(); return generate / sw.Elapsed.TotalSeconds;
+            }
+            double Spec()
+            {
+                using var s = engine.CreateSession(512); s.Reset(prompt); var hist = new List<int>(prompt); var buf = new int[6]; var p = 0;
+                var sw = System.Diagnostics.Stopwatch.StartNew(); while (p < generate) { var n = s.GenerateSpeculative(CollectionsMarshal.AsSpan(hist), buf, maxDraft: 4); for (var c = 0; c < n; c++) { hist.Add(buf[c]); } p += n; }
+                sw.Stop(); return p / sw.Elapsed.TotalSeconds;
+            }
 
             var single = Single(); var spec = Spec();
-            _out.WriteLine($"NOVEL prompt: avg tokens/step={(double)specProduced/specSteps:F2}  single={single:F2}  speculative={spec:F2}  speedup={spec/single:F2}×");
+            _out.WriteLine($"NOVEL prompt: avg tokens/step={(double)specProduced / specSteps:F2}  single={single:F2}  speculative={spec:F2}  speedup={spec / single:F2}×");
         }
     }
 }

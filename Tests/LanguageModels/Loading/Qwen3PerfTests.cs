@@ -23,7 +23,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         private const int DecodeTokens = 128;
         private const int Runs = 3;
         private readonly ITestOutputHelper _out;
-        
+
         public Qwen3PerfTests(ITestOutputHelper output) => _out = output;
 
         [LongFact]
