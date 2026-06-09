@@ -59,7 +59,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int headCount,
             int maxSequenceLength,
             int kvHeadCount = 0,
-            int headDim = 0)
+            int headDim = 0,
+            float attnLogitSoftcap = 0f)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(dModel);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(headCount);
@@ -85,6 +86,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             KvHeadCount = resolvedKvHeads;
             HeadDimension = resolvedHeadDim;
             MaxSequenceLength = maxSequenceLength;
+            AttnLogitSoftcap = attnLogitSoftcap;
 
             _heads = new CachedSingleHeadAttention[headCount];
             _headOutputs = new float[headCount * dModel];
@@ -96,9 +98,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             for (var h = 0; h < headCount; h++)
             {
                 _heads[h] = new CachedSingleHeadAttention(
-                dModel, HeadDimension, maxSequenceLength);
+                dModel, HeadDimension, maxSequenceLength, attnLogitSoftcap);
             }
         }
+
+        /// <summary>Gemma-2 attention logit soft-cap applied to pre-softmax scores (0 = off).</summary>
+        public float AttnLogitSoftcap { get; }
 
         public int DModel { get; }
 
@@ -484,7 +489,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         }
                     }
 
-                    BatchedAttentionKernel.ComputeParallel(qh, keys, values, attn, score, rows, cacheLength, headDim, scale);
+                    BatchedAttentionKernel.ComputeParallel(qh, keys, values, attn, score, rows, cacheLength, headDim, scale, AttnLogitSoftcap);
 
                     BatchedQuantProjection.Dispatch(attn, rows, in wo, [], band, headDim, dModel);
                     for (var n = 0; n < rows; n++)

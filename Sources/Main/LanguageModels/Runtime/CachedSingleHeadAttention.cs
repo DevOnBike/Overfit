@@ -51,11 +51,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly float[] _q8kInputScales;
         private readonly short[] _q8kInputBsums;
         private readonly float _scale;
+        private readonly float _attnSoftcap;   // Gemma-2 pre-softmax score soft-cap; 0 = off
 
         public CachedSingleHeadAttention(
             int dModel,
             int headDimension,
-            int maxSequenceLength)
+            int maxSequenceLength,
+            float attnSoftcap = 0f)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(dModel);
 
@@ -66,6 +68,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             DModel = dModel;
             HeadDimension = headDimension;
             MaxSequenceLength = maxSequenceLength;
+            _attnSoftcap = attnSoftcap;
 
             _query = new float[headDimension];
             _key = new float[headDimension];
@@ -478,7 +481,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     _scoreScratch,
                     sequenceLength,
                     HeadDimension,
-                    _scale);
+                    _scale,
+                    _attnSoftcap);
                 return;
             }
 
@@ -502,7 +506,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 _scoreScratch,
                 sequenceLength,
                 HeadDimension,
-                _scale);
+                _scale,
+                _attnSoftcap);
         }
 
 

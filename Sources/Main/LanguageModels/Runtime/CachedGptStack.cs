@@ -18,6 +18,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly float[] _finalHidden;
         private readonly float[] _lastFinalHidden;  // hidden BEFORE final norm
         private readonly float[] _lastLogits;
+        private readonly float _finalLogitSoftcap;   // Gemma-2 final logit soft-cap; 0 = off
         private readonly sbyte[] _lmHeadInputQuants;   // Q8 LM-head activation scratch
         private readonly float[] _lmHeadInputScales;
         private readonly sbyte[] _lmHeadQ8KQuants;     // Q4_K LM-head activation scratch (Q8_K-quantized)
@@ -39,7 +40,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int expertFeedForwardLength = 0,
             bool normalizeExpertWeights = true,
             bool hasSharedExpert = true,
-            int headDim = 0)
+            int headDim = 0,
+            float attnLogitSoftcap = 0f,
+            float finalLogitSoftcap = 0f)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(layerCount);
 
@@ -72,6 +75,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             MaxSequenceLength = maxSequenceLength;
             LayerNormEpsilon = layerNormEpsilon;
             FeedForwardActivation = feedForwardActivation;
+            _finalLogitSoftcap = finalLogitSoftcap;
 
             _blocks = new CachedTransformerBlock[layerCount];
 
@@ -90,7 +94,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     expertFeedForwardLength,
                     normalizeExpertWeights,
                     hasSharedExpert,
-                    headDim: headDim);
+                    headDim: headDim,
+                    attnLogitSoftcap: attnLogitSoftcap);
             }
 
             _currentHidden = new float[dModel];
@@ -439,6 +444,23 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 SingleTokenProjectionKernel.ProjectParallel(
                     finalNorm, lmHead.F32, [], logits, DModel, VocabSize);
             }
+
+            // Gemma-2 final logit soft-cap: tanh(l/cap)·cap. Monotone, so it doesn't change greedy argmax, but it
+            // reshapes the distribution for temperature/top-p sampling.
+            if (_finalLogitSoftcap > 0f)
+            {
+                SoftcapInPlace(logits.Slice(0, VocabSize), _finalLogitSoftcap);
+            }
+        }
+
+        // x ← tanh(x / cap) · cap, in place.
+        internal static void SoftcapInPlace(Span<float> values, float cap)
+        {
+            var inv = 1f / cap;
+            for (var i = 0; i < values.Length; i++)
+            {
+                values[i] = MathF.Tanh(values[i] * inv) * cap;
+            }
         }
 
         /// <summary>
@@ -454,6 +476,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             BatchedQuantProjection.Dispatch(
                 finalNormAllRows, rows, weights.LmHeadWeights, [],
                 logitsAllRows, DModel, VocabSize);
+
+            if (_finalLogitSoftcap > 0f) // Gemma-2 final logit soft-cap, per row
+            {
+                for (var r = 0; r < rows; r++)
+                {
+                    SoftcapInPlace(logitsAllRows.Slice(r * VocabSize, VocabSize), _finalLogitSoftcap);
+                }
+            }
         }
 
         // Validation helpers removed — StackWeights guarantees correct dimensions

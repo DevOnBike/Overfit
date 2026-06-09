@@ -64,6 +64,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // Qwen3 per-head RMSNorm on Q and K (over head_dim), applied before RoPE. Null for every other arch.
             public TensorStorage<float>? QNorm;
             public TensorStorage<float>? KNorm;
+            public TensorStorage<float>? PostAttnNorm;   // Gemma-2 sandwich norm after attention
+            public TensorStorage<float>? PostFfwNorm;    // Gemma-2 sandwich norm after FFN
 
             public required DecodeWeight[] Wq;
             public required TensorStorage<float>[] Bq;
@@ -125,14 +127,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 config.VocabSize,
                 config.ContextLength,
                 layerNormEpsilon: 1e-6f,
-                FeedForwardActivation.SwiGLU,
+                config.FfnActivation,   // SwiGLU for Llama/Qwen/Phi; GeGLU for Gemma
                 config.KvHeads,
                 config.ExpertCount,
                 config.ExpertUsedCount,
                 config.ExpertFeedForwardLength,
                 config.NormalizeExpertWeights,
                 config.HasSharedExpert,
-                headDim: headDim);
+                headDim: headDim,
+                attnLogitSoftcap: config.AttnLogitSoftcap,
+                finalLogitSoftcap: config.FinalLogitSoftcap);
 
             _stackWeights = BuildStackWeights();
         }
@@ -480,7 +484,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     moeSharedGate: layer.MoeSharedGate,
                     moeSharedUp: layer.MoeSharedUp,
                     moeSharedDown: layer.MoeSharedDown,
-                    moeSharedGateInp: layer.MoeSharedGateInp);
+                    moeSharedGateInp: layer.MoeSharedGateInp,
+                    postAttnNorm: layer.PostAttnNorm,
+                    postFfwNorm: layer.PostFfwNorm);
             }
 
             return new StackWeights(

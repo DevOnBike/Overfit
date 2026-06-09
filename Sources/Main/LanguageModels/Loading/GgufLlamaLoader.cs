@@ -106,10 +106,24 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             // Llama/Mistral use NORM rope and llama.cpp PERMUTES Q/K at conversion into adjacent layout →
             // adjacent pairing (x[2i],x[2i+1]), which is the default. Getting this wrong leaves position 0
             // correct but corrupts every later position (attention collapses onto the current token).
-            var ropeSplitHalf = arch is "qwen2" or "qwen2moe" or "qwen3" or "qwen3moe" or "phi3";
+            var ropeSplitHalf = arch is "qwen2" or "qwen2moe" or "qwen3" or "qwen3moe" or "phi3" or "gemma2";
 
-            // Cap context length for memory sanity (32k+ models work but consume RAM).
+            // Gemma-2: GeGLU FFN, (1+w) RMSNorm, embedding ×√d_model, sandwich norm (post_attention/post_ffw),
+            // attn + final logit soft-capping, and alternating sliding-window attention (deferred — we cap the
+            // context at the sliding window so it's a no-op).
+            var isGemma = arch == "gemma2";
+            // (1+w) RMSNorm: the llama.cpp gemma GGUF ALREADY bakes the +1 into the stored norm weights — adding it
+            // again double-applies and produces garbage (A/B-verified: no-offset → "Paris", offset → repeated punct).
+            // So DON'T add +1 here. Embedding ×√d_model IS needed (also A/B-verified).
+            var gemmaEmbeddingScale = isGemma ? MathF.Sqrt(dModel) : 1f;
+            var attnSoftcap = isGemma ? reader.GetMeta($"{arch}.attn_logit_softcapping", 0f) : 0f;
+            var finalSoftcap = isGemma ? reader.GetMeta($"{arch}.final_logit_softcapping", 0f) : 0f;
+            var gemmaSlidingWindow = isGemma ? reader.GetMeta($"{arch}.attention.sliding_window", 4096) : 0;
+
+            // Cap context length for memory sanity (32k+ models work but consume RAM). Gemma-2: cap at the sliding
+            // window so the (deferred) alternating local/global attention is a no-op.
             if (ctxLen > 8192) { ctxLen = 8192; }
+            if (isGemma && gemmaSlidingWindow > 0 && ctxLen > gemmaSlidingWindow) { ctxLen = gemmaSlidingWindow; }
 
             // Vocab from tokenizer metadata if present, else from token_embd shape
             var vocab = reader.GetMeta($"{arch}.vocab_size", 0);
@@ -191,7 +205,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 RopeSplitHalf = ropeSplitHalf,
                 RopeFreqFactors = ropeFreqFactors,
                 RopeAttnFactor = 1f,
-                FfnActivation = FeedForwardActivation.SwiGLU,
+                FfnActivation = isGemma ? FeedForwardActivation.GeGLU : FeedForwardActivation.SwiGLU,
+                EmbeddingScale = gemmaEmbeddingScale,
+                AttnLogitSoftcap = attnSoftcap,
+                FinalLogitSoftcap = finalSoftcap,
                 TieWeights = tieWeights,
                 ExpertCount = expertCount,
                 ExpertUsedCount = expertUsedCount,
@@ -250,13 +267,26 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var qBiasFull = PooledBuffer<float>.RentArray(nHeads * headDim);
             var kBiasFull = PooledBuffer<float>.RentArray(nKvHeads * headDim);
             var vBiasFull = PooledBuffer<float>.RentArray(nKvHeads * headDim);
+            // Gemma's (1+w) RMSNorm offset is already baked into the GGUF weights (see note above), so this is a
+            // plain load — the wrapper is kept so all gemma norm tensors (incl. the sandwich post-norms) go through
+            // one place if the offset ever needs reinstating for a differently-converted GGUF.
+            TensorStorage<float> LoadNormGamma(string name) => AllocAndLoad(reader, name, dModel);
+
             try
             {
                 for (var l = 0; l < nLayers; l++)
                 {
                     // Attention LayerNorm gamma (RMSNorm, no beta)
-                    var attnNormGamma = AllocAndLoad(reader, $"blk.{l}.attn_norm.weight", dModel);
+                    var attnNormGamma = LoadNormGamma($"blk.{l}.attn_norm.weight");
                     var attnNormBeta = TensorStorage<float>.Unpooled(0);
+
+                    // Gemma-2 sandwich norm: extra RMSNorm after attention and after FFN (before each residual).
+                    TensorStorage<float>? postAttnNorm = null, postFfwNorm = null;
+                    if (isGemma)
+                    {
+                        postAttnNorm = LoadNormGamma($"blk.{l}.post_attention_norm.weight");
+                        postFfwNorm = LoadNormGamma($"blk.{l}.post_ffw_norm.weight");
+                    }
 
                     // Qwen3 per-head RMSNorm weights on Q and K (over head_dim), applied before RoPE.
                     TensorStorage<float>? qNorm = null, kNorm = null;
@@ -304,7 +334,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     for (var h = 0; h < nHeads; h++) { bo[h] = TensorStorage<float>.Unpooled(dModel); }
 
                     // FFN
-                    var ffnNormGamma = AllocAndLoad(reader, $"blk.{l}.ffn_norm.weight", dModel);
+                    var ffnNormGamma = LoadNormGamma($"blk.{l}.ffn_norm.weight");
                     var ffnNormBeta = TensorStorage<float>.Unpooled(0);
 
                     DecodeWeight ffnGate = default, ffnUp = default, ffnDown = default;
@@ -368,6 +398,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                         AttnNormGamma = attnNormGamma,
                         QNorm = qNorm,
                         KNorm = kNorm,
+                        PostAttnNorm = postAttnNorm,
+                        PostFfwNorm = postFfwNorm,
                         AttnNormBeta = attnNormBeta,
                         Wq = wq,
                         Bq = bq,
@@ -408,7 +440,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
 
             // ─── Final norm + LM head ─────────────────────────────────────
-            var finalNormGamma = AllocAndLoad(reader, "output_norm.weight", dModel);
+            var finalNormGamma = LoadNormGamma("output_norm.weight");
             var finalNormBeta = TensorStorage<float>.Unpooled(0);
 
             // LM head — step 2.3a: resident as Q8_0 (output-major). The file

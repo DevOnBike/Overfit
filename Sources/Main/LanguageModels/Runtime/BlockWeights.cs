@@ -26,6 +26,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly TensorStorage<float> _ln1Beta;
         private readonly TensorStorage<float> _qNorm;   // Qwen3 per-head Q RMSNorm (head_dim); empty otherwise
         private readonly TensorStorage<float> _kNorm;   // Qwen3 per-head K RMSNorm (head_dim); empty otherwise
+        private readonly TensorStorage<float> _postAttnNorm; // Gemma-2 sandwich norm after attention; empty otherwise
+        private readonly TensorStorage<float> _postFfwNorm;  // Gemma-2 sandwich norm after FFN; empty otherwise
         private readonly SingleHeadWeights[] _heads;
         private readonly KvHeadWeights[]? _kvHeads;   // null = MHA (use heads[h].Wk/Wv)
         private readonly TensorStorage<float> _attentionBias;
@@ -62,6 +64,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _ffnGate = CreateStorage([]); // GeLU — no gate
             _qNorm = CreateStorage([]);   // GPT-1/2 blocks have no QK-norm
             _kNorm = CreateStorage([]);
+            _postAttnNorm = CreateStorage([]); // GPT-1/2 have no sandwich norm
+            _postFfwNorm = CreateStorage([]);
             _kvHeads = null; // MHA — use SingleHeadWeights.Wk/Wv
 
             _heads = new SingleHeadWeights[headCount];
@@ -107,6 +111,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _ffnGate = Store(ffnGate);
             _qNorm = Store(null);
             _kNorm = Store(null);
+            _postAttnNorm = Store(null);
+            _postFfwNorm = Store(null);
 
             _heads = heads ?? [];
             _kvHeads = kvHeads;
@@ -143,12 +149,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             DecodeWeight moeSharedDown = default,
             float[]? moeSharedGateInp = null,
             TensorStorage<float>? qNorm = null,
-            TensorStorage<float>? kNorm = null)
+            TensorStorage<float>? kNorm = null,
+            TensorStorage<float>? postAttnNorm = null,
+            TensorStorage<float>? postFfwNorm = null)
         {
             static TensorStorage<float> Empty() => TensorStorage<float>.Unpooled(0);
 
             _qNorm = qNorm ?? Empty();
             _kNorm = kNorm ?? Empty();
+            _postAttnNorm = postAttnNorm ?? Empty();
+            _postFfwNorm = postFfwNorm ?? Empty();
             _ln1Gamma = ln1Gamma;
             _ln1Beta = ln1Beta ?? Empty();
             _attentionBias = attentionBias ?? Empty();
@@ -190,6 +200,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         public bool HasQkNorm => _qNorm.AsReadOnlySpan().Length > 0;
         public ReadOnlySpan<float> QkNormQ => _qNorm.AsReadOnlySpan();
         public ReadOnlySpan<float> QkNormK => _kNorm.AsReadOnlySpan();
+
+        /// <summary>Gemma-2 sandwich norm present? When true, RMSNorm the attention/FFN sublayer OUTPUT with
+        /// <see cref="PostAttnNorm"/>/<see cref="PostFfwNorm"/> before each residual add.</summary>
+        public bool HasPostNorm => _postAttnNorm.AsReadOnlySpan().Length > 0;
+        public ReadOnlySpan<float> PostAttnNorm => _postAttnNorm.AsReadOnlySpan();
+        public ReadOnlySpan<float> PostFfwNorm => _postFfwNorm.AsReadOnlySpan();
 
         /// <summary>KV heads for GQA. Null for standard MHA (GPT-1, GPT-2).</summary>
         public bool HasGqa => _kvHeads is not null;

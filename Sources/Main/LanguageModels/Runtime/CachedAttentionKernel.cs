@@ -41,7 +41,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Span<float> scoreScratch,
             int sequenceLength,
             int headDimension,
-            float scale)
+            float scale,
+            float softcap = 0f)
         {
             ValidateArguments(
                 query,
@@ -59,11 +60,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             var maxScore = float.NegativeInfinity;
+            var invCap = softcap > 0f ? 1f / softcap : 0f;
 
             for (var t = 0; t < sequenceLength; t++)
             {
                 var key = keys.Slice(t * headDimension, headDimension);
                 var score = Dot(query, key) * scale;
+                if (softcap > 0f) // Gemma-2 attn logit soft-cap: tanh(s/cap)·cap
+                {
+                    score = MathF.Tanh(score * invCap) * softcap;
+                }
 
                 scoreScratch[t] = score;
 
@@ -140,7 +146,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Span<float> scoreScratch,
             int sequenceLength,
             int headDimension,
-            float scale)
+            float scale,
+            float softcap = 0f)
         {
             ArgumentOutOfRangeException.ThrowIfNegative(sequenceLength);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(headDimension);
@@ -152,10 +159,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             var maxScore = float.NegativeInfinity;
+            var invCap = softcap > 0f ? 1f / softcap : 0f;
             for (var t = 0; t < sequenceLength; t++)
             {
                 var key = keysQ.Slice(t * headDimension, headDimension);
                 var score = DotF32I8(query, key) * keyScales[t] * scale;
+                if (softcap > 0f) // Gemma-2 attn logit soft-cap
+                {
+                    score = MathF.Tanh(score * invCap) * softcap;
+                }
                 scoreScratch[t] = score;
                 if (score > maxScore)
                 {

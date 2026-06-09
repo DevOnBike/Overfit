@@ -77,7 +77,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int rows,
             int cacheLength,
             int headDimension,
-            float scale)
+            float scale,
+            float softcap = 0f)
         {
             Validate(query, keys, values, output, scoreScratch, rows, cacheLength, headDimension);
 
@@ -98,6 +99,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     CacheLength = cacheLength,
                     HeadDimension = headDimension,
                     Scale = scale,
+                    Softcap = softcap,
                     BasePos = cacheLength - rows,
                 };
 
@@ -120,7 +122,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             for (var i = start; i < end; i++)
             {
-                ComputeQuery(query, keys, values, output, scratch, i, ctx.BasePos, cacheLength, headDim, ctx.Scale);
+                ComputeQuery(query, keys, values, output, scratch, i, ctx.BasePos, cacheLength, headDim, ctx.Scale, ctx.Softcap);
             }
         }
 
@@ -138,7 +140,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int basePos,
             int cacheLength,
             int headDimension,
-            float scale)
+            float scale,
+            float softcap = 0f)
         {
             var visibleLength = basePos + i + 1;
 
@@ -150,7 +153,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 scoreScratch.Slice(i * cacheLength, cacheLength),
                 visibleLength,
                 headDimension,
-                scale);
+                scale,
+                softcap);
         }
 
         private static void Validate(
@@ -203,6 +207,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             public int CacheLength;
             public int HeadDimension;
             public float Scale;
+            public float Softcap;
             public int BasePos;
         }
     }
