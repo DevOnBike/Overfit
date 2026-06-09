@@ -42,34 +42,85 @@ Sources\Cli\docker-run.cmd C:\qwen3-06b\Qwen3-0.6B-Q8_0.gguf 8080
 The model is **never baked into the image** — `docker-run.cmd` bind-mounts the model's folder to `/models` and
 serves it. Full hosting guide (model-on-boot, free tiers like HF Spaces / Oracle): [`../../docs/docker.md`](../../docs/docker.md).
 
-## Hitting the server with curl
+## Endpoints — curl & PowerShell
 
-Print the **raw response, pretty-formatted**:
+Examples assume the server on `http://localhost:8080` (the `docker-run.cmd` default; the bare binary defaults to
+`11434`). Responses are printed **raw, pretty-formatted**. PowerShell needs no extra tools (`ConvertTo-Json` is
+built in); the bash examples pipe to [`jq`](https://jqlang.github.io/jq/) (`winget install jqlang.jq`).
+
+> PowerShell gotchas: keep the JSON body on **one line** in **single quotes**, and use **`curl.exe`** (plain `curl`
+> is an alias for `Invoke-WebRequest`). `Invoke-RestMethod` deserializes and the console hides nested fields — pipe
+> it back through `ConvertTo-Json -Depth 10` to see everything.
+
+### `GET /health` — readiness  ·  `GET /v1/models` — loaded model id
 
 ```bash
-# bash / Git Bash / WSL — pipe to jq
-curl -s http://localhost:8080/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model":"overfit","messages":[{"role":"user","content":"Capital of France?"}],"max_tokens":200}' | jq
+curl -s http://localhost:8080/health | jq
+curl -s http://localhost:8080/v1/models | jq
 ```
 
 ```powershell
-# PowerShell — keep the JSON body on ONE line in SINGLE quotes, then format the response.
+Invoke-RestMethod http://localhost:8080/health | ConvertTo-Json
+Invoke-RestMethod http://localhost:8080/v1/models | ConvertTo-Json -Depth 6
+```
+
+### `POST /v1/chat/completions` — chat
+
+```bash
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"overfit","messages":[{"role":"system","content":"You are concise."},{"role":"user","content":"Capital of France?"}],"max_tokens":200,"temperature":0.7,"top_p":0.9}' | jq
+```
+
+```powershell
 curl.exe -s http://localhost:8080/v1/chat/completions -H "Content-Type: application/json" `
   -d '{"model":"overfit","messages":[{"role":"user","content":"Capital of France?"}],"max_tokens":200}' |
   ConvertFrom-Json | ConvertTo-Json -Depth 10
-
-# or Invoke-RestMethod (which deserializes — alone it HIDES nested fields, so pipe it back to ConvertTo-Json):
-Invoke-RestMethod http://localhost:8080/v1/chat/completions -Method Post -ContentType 'application/json' `
-  -Body '{"model":"overfit","messages":[{"role":"user","content":"Capital of France?"}],"max_tokens":200}' |
-  ConvertTo-Json -Depth 10
 ```
 
-Just the answer text: bash `... | jq -r '.choices[0].message.content'`, PowerShell `(Invoke-RestMethod ...).choices[0].message.content`.
+Just the text: bash `... | jq -r '.choices[0].message.content'` · PowerShell `(Invoke-RestMethod ...).choices[0].message.content`.
+
+### `POST /v1/chat/completions` with `"stream": true` — SSE streaming
 
 ```bash
-curl http://localhost:8080/health           # readiness
-curl http://localhost:8080/v1/models        # model id
+curl -N -s http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"overfit","messages":[{"role":"user","content":"Tell a one-line joke."}],"stream":true}'
+```
+
+```powershell
+# stream raw SSE chunks to the console
+curl.exe -N -s http://localhost:8080/v1/chat/completions -H "Content-Type: application/json" `
+  -d '{"model":"overfit","messages":[{"role":"user","content":"Tell a one-line joke."}],"stream":true}'
+```
+
+### `POST /v1/embeddings` — embeddings  *(requires `serve --embed-model <bert-dir>`, else `501`)*
+
+```bash
+curl -s http://localhost:8080/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{"model":"overfit","input":["the cat sat","a feline rested"]}' | jq '.data[].embedding | length'
+```
+
+```powershell
+curl.exe -s http://localhost:8080/v1/embeddings -H "Content-Type: application/json" `
+  -d '{"model":"overfit","input":"the cat sat on the mat"}' |
+  ConvertFrom-Json | ConvertTo-Json -Depth 6
+```
+
+### `POST /v1/audio/speech` — text-to-speech  *(requires `serve --tts-model <orpheus.gguf> --tts-snac <dir>`, else `501`; returns binary audio → save to a file)*
+
+```bash
+curl -s http://localhost:8080/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{"model":"overfit","input":"Hello from Overfit.","voice":"tara","response_format":"wav"}' \
+  -o speech.wav
+```
+
+```powershell
+Invoke-WebRequest http://localhost:8080/v1/audio/speech -Method Post -ContentType 'application/json' `
+  -Body '{"model":"overfit","input":"Hello from Overfit.","voice":"tara","response_format":"wav"}' `
+  -OutFile speech.wav
 ```
 
 ## Versioning
