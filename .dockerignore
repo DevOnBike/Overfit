@@ -1,0 +1,21 @@
+# Keep the Docker build context small + reproducible. The AOT build only needs sources.
+**/bin/
+**/obj/
+.git/
+.github/
+.vs/
+.idea/
+**/*.user
+coverage/
+TestResults/
+docs/
+Demo/
+UI/
+# Never ship models / fixtures into the image — they are large and provided at runtime.
+*.gguf
+*.bin
+*.safetensors
+*.7z
+**/test_fixtures/
+*.wav
+*.mp3

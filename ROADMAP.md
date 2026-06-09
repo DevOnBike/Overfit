@@ -50,8 +50,12 @@ own Whisper. Remaining, by ROI (value ÷ effort):
    harmless safety-net: `GenerateCachedSampled` now also stops on a `secondaryEosTokenId` = end_of_speech 128258 — but
    the model emits 128009 *after* the babble, so it wasn't the fix.) The earlier "greedy too slow" note was likely
    confounded by the (now-fixed) prompt bug — re-judge greedy tempo.
-2. **Acronym lexicon** — add "AI"→"A.I."/"ay eye" etc. to `TtsTextNormalizer` (it left "AI" raw; less critical now that
-   greedy renders "AI" cleanly, but still nice for robustness).
+2. **Acronym lexicon — ✅ DONE + EMPIRICALLY VALIDATED 2026-06-09.** `TtsTextNormalizer` spells acronyms as spaced
+   capitals ("AI"→"A I", "CPU"→"C P U", +12 new: http/https/usb/ssd/hdd/dns/vm/iot/vr/ceo/cto/faq) so Orpheus says the
+   letter names. Locked in with 11 unit tests incl. substring-safety ("brain" ≠ "br A I n"). **Closed the loop the
+   user's way** (`OrpheusAcronymPronunciationE2ETests` [LongFact]): synth "The AI uses the CPU and the GPU through one
+   API." → our own Whisper transcribed it back **verbatim, 4/4 acronyms recovered** → the spaced-capitals convention
+   provably works. Suite 1248/0.
 
 **🟡 Structural (bigger effort, high value)**
 3. **Merge LoRA → fast inference engine** — clone synth runs on the trainable graph (`VoiceCloneTrainer.Generate` →

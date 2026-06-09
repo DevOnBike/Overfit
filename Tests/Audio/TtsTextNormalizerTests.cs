@@ -86,5 +86,42 @@ namespace DevOnBike.Overfit.Tests.Audio
             var n = new TtsTextNormalizer(new Dictionary<string, string> { ["zorvex"] = "zor vex" });
             Assert.Equal("the metal zor vex", n.Normalize("the metal Zorvex"));
         }
+
+        [Theory]
+        [InlineData("AI", "A I")]
+        [InlineData("ai", "A I")]   // case-insensitive
+        [InlineData("Ai", "A I")]
+        [InlineData("GPU", "G P U")]
+        [InlineData("GGUF", "G G U F")]
+        [InlineData("LLM", "L L M")]
+        [InlineData("GPT", "G P T")]
+        [InlineData("HTTP", "H T T P")]
+        [InlineData("HTTPS", "H T T P S")]
+        [InlineData("IoT", "I O T")]
+        [InlineData("JSON", "jason")]  // pronounced, not spelled
+        public void Normalize_Acronym_SpelledOrPronounced(string input, string expected)
+        {
+            // Acronyms the model reads wrong raw — the lexicon spells them so Orpheus says the letter names.
+            Assert.Equal(expected, _n.Normalize(input));
+        }
+
+        [Fact]
+        public void Normalize_AcronymsInSentence_EachExpanded()
+        {
+            Assert.Equal(
+                "the A I runs on the C P U not the G P U",
+                _n.Normalize("the AI runs on the CPU not the GPU"));
+        }
+
+        [Theory]
+        [InlineData("brain", "brain")]     // contains "ai" but is one word — must NOT become "br A I n"
+        [InlineData("mlops", "mlops")]     // contains "ml" — whole-word only
+        [InlineData("biostatus", "biostatus")]
+        [InlineData("vmware", "vmware")]   // contains "vm" — whole-word only
+        public void Normalize_AcronymSubstringInsideWord_NotReplaced(string input, string expected)
+        {
+            // Whole-word matching: an acronym that appears as a substring of a real word is left alone.
+            Assert.Equal(expected, _n.Normalize(input));
+        }
     }
 }

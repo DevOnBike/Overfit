@@ -64,6 +64,18 @@ namespace DevOnBike.Overfit.Audio.Tts
             ("html", "H T M L"),
             ("css", "C S S"),
             ("xml", "X M L"),
+            ("http", "H T T P"),
+            ("https", "H T T P S"),
+            ("usb", "U S B"),
+            ("ssd", "S S D"),
+            ("hdd", "H D D"),
+            ("dns", "D N S"),
+            ("vm", "V M"),
+            ("iot", "I O T"),
+            ("vr", "V R"),
+            ("ceo", "C E O"),
+            ("cto", "C T O"),
+            ("faq", "F A Q"),
         ];
 
         private readonly Dictionary<string, string> _lexicon;
