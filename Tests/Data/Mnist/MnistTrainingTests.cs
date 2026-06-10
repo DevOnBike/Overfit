@@ -51,7 +51,111 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
         ///     now dominated by Conv2D and MaxPool2D, which is what we
         ///     actually want to benchmark.
         /// </summary>
-        [LongFact]
+        /// <summary>
+        /// Data-parallel twin of <see cref="Mnist_FullTrain60k_CnnBeastMode_Benchmark"/>: same model /
+        /// data / epochs, but 8 replicas through <see cref="Training.DataParallelTrainer"/> with the
+        /// linear-rule lr (0.001×8). Per-op stats are off (replicas run in parallel); the headline
+        /// epoch-time / loss / CPU-utilization lines match the beast format for side-by-side reading.
+        /// Expected vs beast: ~3-3.5× faster epochs, CPU ~50% → ~90%+.
+        /// </summary>
+        [Fact]
+        public void Mnist_FullTrain60k_CnnDataParallel8_Benchmark()
+        {
+            const int trainSize = 60_000;
+            const int batchSize = 64;
+            const int epochs = 5;
+            const int replicas = 8;
+
+            var imgs = TestModelPaths.Mnist.TrainImagesPath;
+            var lbls = TestModelPaths.Mnist.TrainLabelsPath;
+            if (!File.Exists(imgs)) { _output.WriteLine("MNIST files not found."); return; }
+            var (trainX, trainY) = MnistLoader.Load(imgs, lbls);
+
+            var convs = new ConvLayer[replicas + 1];
+            var hiddens = new LinearLayer[replicas + 1];
+            var outs = new LinearLayer[replicas + 1];
+            var graphs = new ComputationGraph[replicas + 1];
+            var xs = new TensorStorage<float>[replicas + 1];
+            var ys = new TensorStorage<float>[replicas + 1];
+            var xn = new AutogradNode[replicas + 1];
+            var yn = new AutogradNode[replicas + 1];
+            var pars = new Parameters.Parameter[replicas + 1][];
+            for (var i = 0; i <= replicas; i++)
+            {
+                convs[i] = new ConvLayer(1, 8, 28, 28, 3);
+                hiddens[i] = new LinearLayer(1352, 64);
+                outs[i] = new LinearLayer(64, 10);
+                graphs[i] = new ComputationGraph();
+                xs[i] = new TensorStorage<float>(batchSize * 784, clearMemory: false);
+                ys[i] = new TensorStorage<float>(batchSize * 10, clearMemory: false);
+                xn[i] = new AutogradNode(xs[i], new TensorShape(batchSize, 1, 28, 28), requiresGrad: false);
+                yn[i] = new AutogradNode(ys[i], new TensorShape(batchSize, 10), requiresGrad: false);
+                pars[i] = [.. convs[i].TrainableParameters(), .. hiddens[i].TrainableParameters(), .. outs[i].TrainableParameters()];
+            }
+
+            try
+            {
+                using var process2 = Process.GetCurrentProcess();
+                using var opt = new Adam(pars[0], 0.008f) { UseAdamW = true };
+                var trainer = new DevOnBike.Overfit.Training.DataParallelTrainer(
+                    pars[0], [.. Enumerable.Range(1, replicas).Select(i => (IReadOnlyList<Parameters.Parameter>)pars[i])]);
+                trainer.BroadcastParameters();
+
+                float TrainBatch(int i, int batch)
+                {
+                    graphs[i].Reset();
+                    foreach (var p in pars[i]) { p.ZeroGrad(); }
+                    trainX.AsReadOnlySpan().Slice(batch * batchSize * 784, batchSize * 784).CopyTo(xs[i].AsSpan());
+                    trainY.AsReadOnlySpan().Slice(batch * batchSize * 10, batchSize * 10).CopyTo(ys[i].AsSpan());
+                    using var h1 = convs[i].Forward(graphs[i], xn[i]);
+                    using var a1 = TensorMath.ReLU(graphs[i], h1);
+                    using var p1 = TensorMath.MaxPool2D(graphs[i], a1, 8, 26, 26, 2);
+                    using var f = TensorMath.Reshape(graphs[i], p1, batchSize, 1352);
+                    using var hd = hiddens[i].Forward(graphs[i], f);
+                    using var ha = TensorMath.ReLU(graphs[i], hd);
+                    using var lg = outs[i].Forward(graphs[i], ha);
+                    using var loss = TensorMath.SoftmaxCrossEntropy(graphs[i], lg, yn[i]);
+                    graphs[i].Backward(loss);
+                    return loss.DataView.AsReadOnlySpan()[0];
+                }
+
+                _output.WriteLine($"=== START: CNN MNIST DataParallel x{replicas} (lr 0.008) ===");
+                process2.Refresh();
+                var cpuBefore = process2.TotalProcessorTime;
+                var runWatch = ValueStopwatch.StartNew();
+                var steps = trainSize / batchSize / replicas;
+
+                for (var epoch = 0; epoch < epochs; epoch++)
+                {
+                    var epochWatch = ValueStopwatch.StartNew();
+                    var epochLoss = 0f;
+                    for (var s = 0; s < steps; s++)
+                    {
+                        var b0 = s * replicas;
+                        epochLoss += trainer.Step(opt, w => TrainBatch(1 + w, b0 + w));
+                    }
+                    process2.Refresh();
+                    var cpuNow = process2.TotalProcessorTime;
+                    var wall = runWatch.GetElapsedTime().TotalMilliseconds;
+                    var cores = (cpuNow - cpuBefore).TotalMilliseconds / wall;
+                    _output.WriteLine(
+                        $"Epoch {epoch + 1} | Loss: {epochLoss / steps:F4} | Time: {epochWatch.GetElapsedTime().TotalMilliseconds:F1}ms" +
+                        $" | CPU: {cores:F1}/{Environment.ProcessorCount} cores ({cores / Environment.ProcessorCount:P0}) | Time so far: {wall:F0}ms");
+                }
+                _output.WriteLine($"run elapsed: {runWatch.GetElapsedTime().TotalMilliseconds:F1} ms (vs beast single-replica: compare Epoch lines)");
+            }
+            finally
+            {
+                for (var i = 0; i <= replicas; i++)
+                {
+                    xn[i].Dispose(); yn[i].Dispose(); graphs[i].Dispose();
+                    convs[i].Dispose(); hiddens[i].Dispose(); outs[i].Dispose();
+                    xs[i].Dispose(); ys[i].Dispose();
+                }
+            }
+        }
+
+        [Fact]
         public void Mnist_FullTrain60k_CnnBeastMode_Benchmark()
         {
             const int trainSize = 60_000;
