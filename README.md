@@ -169,7 +169,9 @@ Point your existing tooling at Overfit by changing **one line** — no rewrite, 
 standard interface.
 
 **Already on `Microsoft.Extensions.AI`?** One call gives you a standard `IChatClient` / `IEmbeddingGenerator`
-that drops straight into Semantic Kernel and any M.E.AI pipeline (caching, telemetry, function-invocation, DI):
+that drops straight into Semantic Kernel and any M.E.AI pipeline (caching, telemetry, function-invocation, DI) —
+including **`Microsoft.Extensions.AI.Evaluation` running fully locally with an Overfit model as the LLM judge**
+(no Azure, no key, no egress — see [`docs/meai-evaluation.md`](docs/meai-evaluation.md)):
 
 ```csharp
 using DevOnBike.Overfit.Extensions.AI;          // NuGet: DevOnBike.Overfit.Extensions.AI
