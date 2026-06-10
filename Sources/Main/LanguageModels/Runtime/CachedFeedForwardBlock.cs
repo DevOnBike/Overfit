@@ -294,30 +294,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // intermediate = gate * up (element-wise)
             TensorPrimitives.Multiply(_gate, _intermediate, _intermediate);
 
-            // output = intermediate @ Wdown — repacked 8×8 GEMV when enabled (down is Q6_K in
-            // Q4_K_M files, Q4_K in some). The gate/up pass is finished with the Q8K scratch,
-            // so re-quantizing the DFF-long intermediate into the same buffers is safe (the
-            // scratch is sized max(dModel, dFF)).
-            if (Q6KGemvKernel.Enabled && wDown.IsQ6K && wDown.Quantized6K.CanRepack)
-            {
-                Q4KDotKernel.QuantizeActivationQ8K(
-                    _intermediate.AsSpan(0, DFF), _q8kInputQuants, _q8kInputScales, _q8kInputBsums);
-                Q6KGemvKernel.GemvParallel(
-                    wDown.Quantized6K.EnsureRepacked(), DModel, DFF,
-                    _q8kInputQuants, _q8kInputScales, output);
-            }
-            else if (Q4KGemvKernel.Enabled && wDown.IsQ4K && wDown.Quantized4K.CanRepack)
-            {
-                Q4KDotKernel.QuantizeActivationQ8K(
-                    _intermediate.AsSpan(0, DFF), _q8kInputQuants, _q8kInputScales, _q8kInputBsums);
-                Q4KGemvKernel.GemvParallel(
-                    wDown.Quantized4K.EnsureRepacked(), DModel, DFF,
-                    _q8kInputQuants, _q8kInputScales, _q8kInputBsums, output);
-            }
-            else
-            {
-                ProjectParallelDispatched(_intermediate, in wDown, [], output, DFF, DModel);
-            }
+            // output = intermediate @ Wdown. Stays on the original-layout kernel: A/B showed the
+            // Q6_K repacked GEMV is neutral-to-slightly-negative here (down is the biggest matmul
+            // = DRAM-bandwidth-bound; rearranged bytes saturate the same ceiling, the copy costs RAM).
+            ProjectParallelDispatched(_intermediate, in wDown, [], output, DFF, DModel);
         }
 
         /// <summary>

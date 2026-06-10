@@ -248,6 +248,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// </summary>
         private static int MainDot(ReadOnlySpan<byte> qs, ReadOnlySpan<sbyte> q8, ReadOnlySpan<byte> scales)
         {
+            // NOTE (measured 2026-06-11, do not re-attempt): an AVX-VNNI variant (vpdpbusd folding
+            // maddubs+madd, bit-identical INT32) was ≈0 here for BOTH regimes — decode (memory-bound,
+            // also ≈0 in the 2026-05-31 sprint) AND the compute-bound batched path (40.2 vs 38.9 ms on
+            // [256×2048→11008], within noise). The batched cost is per-call overhead + the F32 tail,
+            // not the integer multiply-add pair.
             if (CpuFeatures.HasAvx2)
             {
                 ref var qsRef = ref MemoryMarshal.GetReference(qs);

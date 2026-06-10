@@ -17,6 +17,8 @@ namespace DevOnBike.Overfit.Intrinsics
 
         public static readonly bool HasAvx512 = Avx512F.IsSupported;
 
+        public static readonly bool HasAvxVnni = AvxVnni.IsSupported;
+
         public static readonly bool HasSse = Sse.IsSupported;
 
         public static readonly bool HasSse3 = Sse3.IsSupported;
