@@ -421,7 +421,25 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         internal void ProjectLogitsFrom(ReadOnlySpan<float> finalNorm, StackWeights weights, Span<float> logits)
         {
             var lmHead = weights.LmHeadWeights;
-            if (lmHead.IsQ6K)
+            if (Q6KGemvKernel.Enabled && lmHead.IsQ6K && lmHead.Quantized6K.CanRepack)
+            {
+                // Repacked 8×8 GEMV (OVERFIT_REPACK_GEMV) — the LM head is the single biggest
+                // projection (vocab × dModel); 8 rows per SIMD lane, no per-row hsum.
+                Q4KDotKernel.QuantizeActivationQ8K(
+                    finalNorm.Slice(0, DModel), _lmHeadQ8KQuants, _lmHeadQ8KScales, _lmHeadQ8KBsums);
+                Q6KGemvKernel.GemvParallel(
+                    lmHead.Quantized6K.EnsureRepacked(), VocabSize, DModel,
+                    _lmHeadQ8KQuants, _lmHeadQ8KScales, logits);
+            }
+            else if (Q4KGemvKernel.Enabled && lmHead.IsQ4K && lmHead.Quantized4K.CanRepack)
+            {
+                Q4KDotKernel.QuantizeActivationQ8K(
+                    finalNorm.Slice(0, DModel), _lmHeadQ8KQuants, _lmHeadQ8KScales, _lmHeadQ8KBsums);
+                Q4KGemvKernel.GemvParallel(
+                    lmHead.Quantized4K.EnsureRepacked(), VocabSize, DModel,
+                    _lmHeadQ8KQuants, _lmHeadQ8KScales, _lmHeadQ8KBsums, logits);
+            }
+            else if (lmHead.IsQ6K)
             {
                 Q6KDotKernel.ProjectParallel(
                     finalNorm, lmHead.Quantized6K, [], logits,

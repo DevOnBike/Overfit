@@ -13,7 +13,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
     /// Decode-throughput benchmark for Overfit on Qwen2.5-3B Q4_K_M — the SAME GGUF dotLLM is measured on,
     /// so the two engines' decode tok/s are directly comparable. Reports tok/s and whether the repacked
     /// 8×8 GEMV path is active (toggle via the OVERFIT_REPACK_GEMV env var across runs).
-    /// [LongFact] — needs C:\qwen3b\qwen.q4km.gguf. Flip to [Fact] to run.
+    /// [LongFact] — needs C:\qwen3b\qwen.q4km.gguf. Flip to [LongFact] to run.
     /// </summary>
     public sealed class QwenDecodeSpeedTests
     {
