@@ -12,3 +12,5 @@ OVERFIT004 | Performance | Warning | Closure/delegate allocation in per-call cod
 OVERFIT005 | Performance | Warning | foreach over an interface-typed collection in per-call code
 OVERFIT006 | Performance | Warning | String interpolation/concatenation in per-call code (exception path exempt)
 OVERFIT007 | Performance | Warning | params call materialises a hidden array in per-call code
+OVERFIT008 | Performance | Warning | Raw Parallel.For/ForEach/Invoke — use suppress-aware OverfitParallel
+OVERFIT009 | Performance | Warning | .ToArray() in per-call code — slice or use pooled buffers

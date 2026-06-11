@@ -33,6 +33,8 @@ dotnet_diagnostic.OVERFIT004.severity = suggestion
 dotnet_diagnostic.OVERFIT005.severity = suggestion
 dotnet_diagnostic.OVERFIT006.severity = suggestion
 dotnet_diagnostic.OVERFIT007.severity = suggestion
+dotnet_diagnostic.OVERFIT008.severity = warning
+dotnet_diagnostic.OVERFIT009.severity = suggestion
 
 [Sources/Main/Kernels/**.cs]
 dotnet_diagnostic.OVERFIT001.severity = warning
@@ -42,6 +44,7 @@ dotnet_diagnostic.OVERFIT004.severity = warning
 dotnet_diagnostic.OVERFIT005.severity = warning
 dotnet_diagnostic.OVERFIT006.severity = warning
 dotnet_diagnostic.OVERFIT007.severity = warning
+dotnet_diagnostic.OVERFIT009.severity = warning
 
 [Sources/Main/Intrinsics/**.cs]
 dotnet_diagnostic.OVERFIT001.severity = warning
@@ -51,6 +54,7 @@ dotnet_diagnostic.OVERFIT004.severity = warning
 dotnet_diagnostic.OVERFIT005.severity = warning
 dotnet_diagnostic.OVERFIT006.severity = warning
 dotnet_diagnostic.OVERFIT007.severity = warning
+dotnet_diagnostic.OVERFIT009.severity = warning
 
 [Sources/Main/Ops/**.cs]
 dotnet_diagnostic.OVERFIT001.severity = warning
@@ -60,3 +64,4 @@ dotnet_diagnostic.OVERFIT004.severity = warning
 dotnet_diagnostic.OVERFIT005.severity = warning
 dotnet_diagnostic.OVERFIT006.severity = warning
 dotnet_diagnostic.OVERFIT007.severity = warning
+dotnet_diagnostic.OVERFIT009.severity = warning

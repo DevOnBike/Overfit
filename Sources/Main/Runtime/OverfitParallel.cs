@@ -160,7 +160,9 @@ namespace DevOnBike.Overfit.Runtime
                 return;
             }
 
+#pragma warning disable OVERFIT008 // this IS the sanctioned suppress-aware wrapper around raw TPL
             Parallel.For(fromInclusive, toExclusive, Options, body);
+#pragma warning restore OVERFIT008
         }
 
         private const string WorkerCountEnvVar = "OVERFIT_PARALLEL_WORKERS";
