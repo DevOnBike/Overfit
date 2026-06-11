@@ -25,8 +25,8 @@ jobs:
 
     # Scope restore/build/pack to the PACKABLE projects (+ Tests) only, NOT the whole solution. The solution
     # includes UI (WPF, net10.0-windows), which can't build on this Linux runner without EnableWindowsTargeting;
-    # packing the three libraries directly keeps the published set explicit and the runner Windows-free.
-    # Building Tests transitively builds Main + Extensions.AI (it references both); Server is built on its own.
+    # packing the libraries directly keeps the published set explicit and the runner Windows-free.
+    # Building Tests transitively builds Main + Extensions.AI + Mcp (it references them); Server is built on its own.
     - name: Restore dependencies
       run: |
         dotnet restore ./Tests/Tests.csproj
@@ -59,6 +59,7 @@ jobs:
           ./Sources/Main/Main.csproj \
           ./Sources/Extensions.AI/Extensions.AI.csproj \
           ./Sources/Server/Server.csproj \
+          ./Sources/Mcp/Mcp.csproj \
           ./Sources/Cli/Cli.csproj
         do
           dotnet pack "$proj" -c Release --no-build -p:RepositoryCommit=${{ github.sha }} -p:ContinuousIntegrationBuild=true --output ./packages $VERSION_ARG

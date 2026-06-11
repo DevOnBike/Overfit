@@ -197,12 +197,41 @@ var voiceCommand = new Command("voice", "Manage enrolled voices for TTS.")
     voiceListCommand,
 };
 
+// ── mcp: MCP (Model Context Protocol) stdio server — plug local AI tools into Claude Code / Desktop / IDEs. ──
+var mcpModel = new Argument<string>("model")
+{
+    Description = "A model name in the local store, or a path to a .gguf file (powers the 'ask' and 'rag_query' tools).",
+};
+var mcpRagDir = new Option<string?>("--rag-dir")
+{
+    Description = "Optional folder of .txt/.md documents to index at startup — enables the 'rag_query' tool "
+        + "(grounded answers with citations; embeddings come from the chat model itself, multilingual).",
+};
+var mcpWhisperModel = new Option<string?>("--whisper-model")
+{
+    Description = "Optional whisper.cpp ggml file (e.g. ggml-tiny.bin) — enables the 'transcribe' tool "
+        + "(WAV/MP3 → text, loaded lazily on first use).",
+};
+var mcpCommand = new Command("mcp",
+    "Start an MCP (Model Context Protocol) stdio server exposing local, zero-egress AI tools "
+    + "(ask, rag_query, transcribe) to hosts like Claude Code:  claude mcp add overfit -- overfit mcp <model>")
+{
+    mcpModel,
+    mcpRagDir,
+    mcpWhisperModel,
+};
+mcpCommand.SetAction(parseResult => Commands.Mcp(
+    parseResult.GetValue(mcpModel)!,
+    parseResult.GetValue(mcpRagDir),
+    parseResult.GetValue(mcpWhisperModel)));
+
 var rootCommand = new RootCommand("Overfit — run local LLMs, RAG and agents in pure .NET. No Python, no native runtime.")
 {
     pullCommand,
     listCommand,
     chatCommand,
     serveCommand,
+    mcpCommand,
     ttsCommand,
     voiceCommand,
 };

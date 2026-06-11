@@ -74,3 +74,28 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Same build, second target: the MCP stdio server (ENTRYPOINT `overfit mcp` — see docs/mcp.md).
+      # Shares every layer with the serve image via the gha cache, so this is tag-only cost.
+      - name: Derive MCP image tags
+        id: meta-mcp
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/overfit
+          tags: |
+            type=raw,value=${{ steps.ver.outputs.version }}-mcp
+            type=raw,value=mcp
+            type=sha,format=short,suffix=-mcp
+
+      - name: Build and push MCP target (linux/amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Sources/Cli/Dockerfile
+          target: mcp
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta-mcp.outputs.tags }}
+          labels: ${{ steps.meta-mcp.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

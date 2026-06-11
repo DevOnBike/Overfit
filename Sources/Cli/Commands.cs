@@ -10,6 +10,8 @@ using DevOnBike.Overfit.Audio.Tts;
 using DevOnBike.Overfit.Audio.Tts.Orpheus;
 using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Embeddings;
+using DevOnBike.Overfit.LanguageModels.Whisper;
+using DevOnBike.Overfit.Mcp;
 using DevOnBike.Overfit.Server;
 
 namespace DevOnBike.Overfit.Cli
@@ -271,6 +273,85 @@ namespace DevOnBike.Overfit.Cli
 
             Console.WriteLine("Server stopped.");
             return 0;
+        }
+
+        /// <summary>
+        /// `overfit mcp &lt;model&gt; [--rag-dir d] [--whisper-model w]` — an MCP (Model Context
+        /// Protocol) stdio server for hosts like Claude Code / Claude Desktop. stdout IS the
+        /// protocol channel (newline-delimited JSON-RPC), so every status/log line goes to stderr.
+        /// Tools: `ask` always; `rag_query` when --rag-dir is given (indexed up-front, embeddings
+        /// from the chat model itself); `transcribe` when --whisper-model is given (loaded lazily
+        /// on first call). Runs until the host closes our stdin.
+        /// </summary>
+        public static int Mcp(string model, string? ragDir, string? whisperModel)
+        {
+            var path = ModelCache.Resolve(model);
+            if (path is null)
+            {
+                Console.Error.WriteLine($"Model '{model}' not found in {ModelCache.Dir}.");
+                Console.Error.WriteLine($"Download it first:  overfit pull {model}   (or pass a .gguf path directly)");
+                return 1;
+            }
+
+            if (!string.IsNullOrWhiteSpace(whisperModel) && !File.Exists(whisperModel))
+            {
+                Console.Error.WriteLine($"Whisper model not found: {whisperModel}");
+                return 1;
+            }
+
+            Console.Error.WriteLine($"[overfit-mcp] loading {Path.GetFileName(path)} ...");
+            OverfitClient client;
+            try
+            {
+                client = OverfitClient.LoadGguf(path, mmap: true);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Failed to load '{Path.GetFileName(path)}': {ex.Message}");
+                return 1;
+            }
+
+            try
+            {
+                client.AddSystem(DefaultSystemPrompt);
+                var tools = new List<McpTool>
+                {
+                    OverfitMcpTools.CreateAsk(client),
+                };
+
+                if (!string.IsNullOrWhiteSpace(ragDir))
+                {
+                    Console.Error.WriteLine($"[overfit-mcp] indexing documents under {ragDir} ...");
+                    var index = McpRagIndex.Build(client, ragDir, Console.Error);
+                    Console.Error.WriteLine($"[overfit-mcp] rag_query ready ({index.ChunkCount} chunk(s)).");
+                    tools.Add(OverfitMcpTools.CreateRagQuery(index));
+                }
+
+                if (!string.IsNullOrWhiteSpace(whisperModel))
+                {
+                    var ggml = whisperModel;
+                    tools.Add(OverfitMcpTools.CreateTranscribe(() =>
+                    {
+                        Console.Error.WriteLine($"[overfit-mcp] loading Whisper {Path.GetFileName(ggml)} ...");
+                        return WhisperTranscriber.Load(ggml);
+                    }));
+                }
+
+                var version = typeof(Commands).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+                var server = new McpServer("overfit", version, tools, Console.Error);
+                Console.Error.WriteLine($"[overfit-mcp] serving {tools.Count} tool(s) over stdio ({Path.GetFileNameWithoutExtension(path)}). The host stops the server by closing stdin.");
+                server.Run(Console.In, Console.Out);
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[overfit-mcp] startup failed: {ex.Message}");
+                return 1;
+            }
+            finally
+            {
+                client.Dispose();
+            }
         }
 
         /// <summary>Resolves a <c>--embed-model</c> argument to an on-disk directory: an explicit path, a known
