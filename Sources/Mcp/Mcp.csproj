@@ -1,49 +1,49 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-    <PropertyGroup>
-        <TargetFramework>net10.0</TargetFramework>
-        <ImplicitUsings>enable</ImplicitUsings>
-        <Nullable>enable</Nullable>
-        <DebugType>embedded</DebugType>
-        <RootNamespace>DevOnBike.Overfit.Mcp</RootNamespace>
-        <AssemblyName>DevOnBike.Overfit.Mcp</AssemblyName>
-        <!-- A dependency-free MCP (Model Context Protocol) server over stdio (JSON-RPC 2.0, newline-delimited).
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<DebugType>embedded</DebugType>
+		<RootNamespace>DevOnBike.Overfit.Mcp</RootNamespace>
+		<AssemblyName>DevOnBike.Overfit.Mcp</AssemblyName>
+		<!-- A dependency-free MCP (Model Context Protocol) server over stdio (JSON-RPC 2.0, newline-delimited).
              Wire contracts are typed DTOs (Protocol/) serialized via a source-generated JsonSerializerContext
              (McpJsonContext — same pattern as the OpenAI server's OpenAiJsonContext): no reflection, no DI,
              so it drops cleanly into the Native-AOT `overfit` CLI. Exposes Overfit capabilities (local LLM,
              RAG, Whisper) as MCP tools for hosts like Claude Code / Claude Desktop / IDEs. -->
-        <PackageId>DevOnBike.Overfit.Mcp</PackageId>
-        <Title>Overfit — MCP server (local LLM, RAG and Whisper as MCP tools)</Title>
-        <Authors>DevOnBike</Authors>
-        <Copyright>Copyright (c) 2026 DevOnBike</Copyright>
-        <Description>A dependency-free MCP (Model Context Protocol) stdio server for the in-process Overfit LLM runtime — typed JSON-RPC 2.0 contracts with source-generated System.Text.Json serialization, no SDK dependency, no reflection, Native-AOT verified. Exposes local, zero-egress tools to MCP hosts (Claude Code, Claude Desktop, IDEs): ask a local GGUF model, query private documents with RAG citations, transcribe audio with Whisper — all in pure .NET on the CPU. Dual-licensed (AGPL-3.0-or-later / commercial).</Description>
-        <PackageTags>mcp;model-context-protocol;llm;ai;rag;whisper;json-rpc;stdio;local-ai;in-process;gguf;native-aot;dotnet;csharp</PackageTags>
-        <RepositoryUrl>https://github.com/DevOnBike/Overfit</RepositoryUrl>
-        <RepositoryType>git</RepositoryType>
-        <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
-        <PackageReadmeFile>README.md</PackageReadmeFile>
-        <PackageIcon>logo.png</PackageIcon>
-        <GenerateDocumentationFile>true</GenerateDocumentationFile>
-        <NoWarn>$(NoWarn);1591</NoWarn>
+		<PackageId>DevOnBike.Overfit.Mcp</PackageId>
+		<Title>Overfit — MCP server (local LLM, RAG and Whisper as MCP tools)</Title>
+		<Authors>DevOnBike</Authors>
+		<Copyright>Copyright (c) 2026 DevOnBike</Copyright>
+		<Description>A dependency-free MCP (Model Context Protocol) stdio server for the in-process Overfit LLM runtime — typed JSON-RPC 2.0 contracts with source-generated System.Text.Json serialization, no SDK dependency, no reflection, Native-AOT verified. Exposes local, zero-egress tools to MCP hosts (Claude Code, Claude Desktop, IDEs): ask a local GGUF model, query private documents with RAG citations, transcribe audio with Whisper — all in pure .NET on the CPU. Dual-licensed (AGPL-3.0-or-later / commercial).</Description>
+		<PackageTags>mcp;model-context-protocol;llm;ai;rag;whisper;json-rpc;stdio;local-ai;in-process;gguf;native-aot;dotnet;csharp</PackageTags>
+		<RepositoryUrl>https://github.com/DevOnBike/Overfit</RepositoryUrl>
+		<RepositoryType>git</RepositoryType>
+		<PackageLicenseFile>LICENSE.md</PackageLicenseFile>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<PackageIcon>logo.png</PackageIcon>
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+		<NoWarn>$(NoWarn);1591</NoWarn>
 
-        <!-- Source Link: embed the commit + source mapping into the (embedded) PDB for step-into debugging. -->
-        <PublishRepositoryUrl>true</PublishRepositoryUrl>
-        <EmbedUntrackedSources>true</EmbedUntrackedSources>
+		<!-- Source Link: embed the commit + source mapping into the (embedded) PDB for step-into debugging. -->
+		<PublishRepositoryUrl>true</PublishRepositoryUrl>
+		<EmbedUntrackedSources>true</EmbedUntrackedSources>
 
-        <IsAotCompatible>true</IsAotCompatible>
-        <IsTrimmable>true</IsTrimmable>
-    </PropertyGroup>
+		<IsAotCompatible>true</IsAotCompatible>
+		<IsTrimmable>true</IsTrimmable>
+	</PropertyGroup>
 
-    <ItemGroup>
-        <None Include="..\Main\logo.png" Pack="true" PackagePath="\" />
-        <None Include="README.md" Pack="true" PackagePath="\" />
-        <None Include="..\..\LICENSE.md" Pack="true" PackagePath="\" />
-        <None Include="..\..\COMMERCIAL.md" Pack="true" PackagePath="\" />
-    </ItemGroup>
+	<ItemGroup>
+		<None Include="..\Main\logo.png" Pack="true" PackagePath="\" />
+		<None Include="README.md" Pack="true" PackagePath="\" />
+		<None Include="..\..\LICENSE.md" Pack="true" PackagePath="\" />
+		<None Include="..\..\COMMERCIAL.md" Pack="true" PackagePath="\" />
+	</ItemGroup>
 
-    <ItemGroup>
-        <ProjectReference Include="..\Main\Main.csproj" />
-        <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="all" />
-    </ItemGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\Main\Main.csproj" />
+		<PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="all" />
+	</ItemGroup>
 
 </Project>
