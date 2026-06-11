@@ -58,7 +58,7 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
         /// epoch-time / loss / CPU-utilization lines match the beast format for side-by-side reading.
         /// Expected vs beast: ~3-3.5× faster epochs, CPU ~50% → ~90%+.
         /// </summary>
-        [Fact]
+        [LongFact]
         public void Mnist_FullTrain60k_CnnDataParallel8_Benchmark()
         {
             const int trainSize = 60_000;
@@ -157,7 +157,7 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
             }
         }
 
-        [Fact]
+        [LongFact]
         public void Mnist_FullTrain60k_CnnBeastMode_Benchmark()
         {
             const int trainSize = 60_000;
