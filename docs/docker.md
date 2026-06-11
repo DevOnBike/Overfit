@@ -38,7 +38,12 @@ curl -s http://localhost:8080/v1/chat/completions \
 ```
 
 (PowerShell: pipe to `ConvertFrom-Json | ConvertTo-Json -Depth 10` for the same pretty raw output — see the
-[CLI README](../Sources/Cli/README.md#hitting-the-server-with-curl).)
+[CLI README](../Sources/Cli/README.md#endpoints--curl--powershell).)
+
+A container at rest costs ~nothing: the decode worker pool **spins-then-parks**, so between requests the server
+sits at ~0% CPU (no need to set `OVERFIT_DECODE_POOL=0` — that was the workaround for the old pure-spin pool and
+costs ~28% decode throughput). Optional tuning via `-e` (see the [CLI README](../Sources/Cli/README.md#tuning-environment-variables)):
+`OVERFIT_REPACK_GEMV=1` (~+30% decode on a 3B, costs RAM), `OVERFIT_DECODE_WORKERS=<n>`.
 
 Extra server options follow the positional model path:
 

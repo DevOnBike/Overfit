@@ -182,7 +182,8 @@ var reply = await chat.GetResponseAsync("Summarize this ticket in one line.");
 
 **Have OpenAI clients / LangChain / a UI / a test harness?** Serve an **OpenAI-compatible HTTP API** in one
 command — just change the base URL. SSE streaming, `/v1/chat/completions`, `/v1/embeddings`, `/v1/models`, plus
-JSON-Schema `response_format`. Dependency-free (no ASP.NET), Native-AOT-clean:
+JSON-Schema `response_format` and llama.cpp-style `min_p` sampling. Dependency-free (no ASP.NET), Native-AOT-clean —
+and the decode worker pool **parks when idle**, so a serving container at rest sits at ~0% CPU:
 
 ```powershell
 overfit serve qwen2.5-3b --port 11434           # one self-contained binary; nothing leaves the box
@@ -349,13 +350,14 @@ Test machine for current headline numbers: AMD Ryzen 9 9950X3D, Windows 11,
 |---|---:|---:|
 | Single inference `Linear(784 -> 10)` | ~7.6x faster than ONNX Runtime | 0 B |
 | GPT-2 Small KV-cache decode | ~6.5x faster than naive O(N²), parity vs PyTorch | 0 B/token |
-| Qwen2.5-3B Q4_K_M decode | ~19 tok/s, RAM footprint in the llama.cpp range | ~1 B/token |
-| Bielik-4.5B Q4_K_M decode | ~17 tok/s, ~1.13× behind same-file llama.cpp, −36% working set | ~1 B/token |
+| Qwen2.5-3B Q4_K_M decode | ~19 tok/s default, **~24 tok/s** with opt-in repacked GEMV (`OVERFIT_REPACK_GEMV=1` + `OVERFIT_DECODE_WORKERS=16`) | ~1 B/token |
+| Bielik-4.5B Q4_K_M decode | ~17 tok/s, −36% working set vs same-file llama.cpp | ~1 B/token |
+| MNIST CNN training, 60k × 5 epochs | ~2.1 s (data-parallel ×8 + AVX2 MaxPool; was ~6.1 s) — [audit](docs/mnist-cnn-training-audit.md) | ~4 KB/batch |
 | Concurrent inference, 8 threads | ~3.6x faster than ONNX Runtime | 0 B |
 
 Honest positioning:
 
-- llama.cpp / LLamaSharp are still faster for raw CPU LLM decode (~1.13× same-file, narrowed from ~1.6× — single-stream CPU decode is DRAM-bandwidth-bound).
+- llama.cpp / LLamaSharp are still faster for raw CPU LLM decode (~1.2× same-file vs a current AVX-512 llama.cpp build with our repacked-GEMV flag on, narrowed from ~1.6× — single-stream CPU decode is DRAM-bandwidth-bound).
 - PyTorch CPU is faster for large-scale training.
 - ONNX Runtime is mature and fast if native dependencies are acceptable.
 - Overfit's axis is pure-managed .NET, in-process deployment, Native AOT,
@@ -402,7 +404,7 @@ Whisper…) and which don't yet (Gemma 1/3, Qwen3-MoE, Command-R, native DeepSee
 | Area | Status |
 |---|---|
 | ONNX import | Linear and DAG topology, ResNet-style skip connections |
-| Computer vision | MNIST CNN, Conv/BN/ReLU/Pool/FC-style networks |
+| Computer vision | MNIST CNN, Conv/BN/ReLU/Pool/FC-style networks; full 60k MNIST CNN train in ~2 s / 5 epochs on a 16-core desktop (data-parallel ×8 + AVX2 MaxPool — [audit](docs/mnist-cnn-training-audit.md)) |
 | OCR | CRNN + CTC pipeline for synthetic digits / lexicon words |
 | Speech-to-text | **Whisper (tiny/base/…) in pure C# on CPU — no GPU, no Python.** whisper.cpp ggml → log-mel (Bluestein FFT) → multi-threaded encoder → KV-cache decode; ~60× real-time on tiny, validated EN + PL. Reads WAV and MP3. See `Demo/WhisperDemo` / `Demo/MicDemo` |
 | Audio decoding | Pure-C# **MPEG-1/2/2.5 Layer III (MP3)** decoder + WAV reader — no native binaries, zero per-frame allocation, ~160× real-time; feeds Whisper directly. See [docs/mp3-decoding.md](docs/mp3-decoding.md) |
@@ -518,7 +520,7 @@ for that.
 
 - **More model families** — Qwen3, Phi-3.5, and Gemma 2 now load ✅; next: Gemma 1/3, Qwen3-MoE, Granite / Command-R; more quants (Q2_K / Q3_K).
 - **Multilingual sentence-embedder** (XLM-RoBERTa / SentencePiece) for first-class multilingual RAG.
-- **Decode throughput** — the ~1.13× same-file gap vs llama.cpp is DRAM-bandwidth-bound; closing it needs structural (full-tensor attention) work, not kernel-ALU.
+- **Decode throughput** — the opt-in repacked 8×8 GEMV (`OVERFIT_REPACK_GEMV=1`, +30% on a 3B) put the FFN + LM-head at the DRAM floor; the remaining ~1.2× same-file gap vs an AVX-512 llama.cpp build is attention memory layout (whole-matrix Q4_K attention is the next lever), not kernel-ALU.
 - **Bulletproof structured output** — token-healing for arbitrary schemas on tiny models; GBNF grammars; NLI-based contradiction lint.
 - **Deployment** — persistent vector store (SQLite), production agent template, Aspire integration.
 - **Future verticals** — text-to-speech (LLM + neural-codec), vision-language models.

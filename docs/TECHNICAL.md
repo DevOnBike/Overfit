@@ -280,11 +280,11 @@ End-to-end training step of a 4-layer GPT-1 (dModel=128, dFF=512, seqLen=128), m
 Real-workload validation on TinyShakespeare (`TinyShakespeareTrainingTests`, 2-layer GPT-1, char-level, 300 steps): **~60–120 s → ~2 s (30–60× faster)**, loss drops 5.04 → 3.23 (35.9% improvement), zero numerical regression vs sequential reference (numerical gradient check passes).
 
 Drivers:
-- **`OverfitParallelFor`** — bulk-wake dispatcher (`SemaphoreSlim.Release(N)` instead of N × `AutoResetEvent.Set`). ~5 µs warm dispatch, 0 B/call.
-- **GELU forward + backward** — re-written as `OverfitParallelFor.For` over chunks + `TensorPrimitives` SIMD pipeline (`Multiply` → `Add` → `Tanh` → …) on stackalloc'd 1024-element tiles.
+- **`OverfitParallel`** — bulk-wake dispatcher (`SemaphoreSlim.Release(N)` instead of N × `AutoResetEvent.Set`). ~5 µs warm dispatch, 0 B/call.
+- **GELU forward + backward** — re-written as `OverfitParallel.For` over chunks + `TensorPrimitives` SIMD pipeline (`Multiply` → `Add` → `Tanh` → …) on stackalloc'd 1024-element tiles.
 - **LayerNorm forward + backward** — parallel-per-row with per-worker partial accumulators for `dGamma` / `dBeta` (stackalloc'd by caller, SIMD merge after parallel pass).
 - **Scaled-Dot-Product Attention forward** — parallel-over-batch (symmetric to existing backward parallel path). For multi-head training the SDPA call sees effective batch `B × H` so even single-batch training parallelizes across heads.
-- **`LinearKernels.BackwardInput` / `AccumulateWeightGrad`** — migrated from `Parallel.For` to `OverfitParallelFor`.
+- **`LinearKernels.BackwardInput` / `AccumulateWeightGrad`** — migrated from `Parallel.For` to `OverfitParallel`.
 - **`[module: SkipLocalsInit]`** — assembly-wide; elides per-frame zero-init on 21+ `stackalloc` sites.
 
 **Where this lands vs PyTorch CPU.** The same training step in PyTorch 2.11 (CPU,
@@ -350,7 +350,7 @@ Sub-µs math at this model size — timer resolution dominates, run-to-run varia
 | Epoch | Time | Alloc/epoch | Notes |
 |------:|-----:|------------:|-------|
 | 1 | ~1.6 s | ~32 MB | JIT warmup |
-| 2–5 | **~775 ms** | **~26 MB** | steady state, post-`OverfitParallelFor` migration |
+| 2–5 | **~775 ms** | **~26 MB** | steady state, post-`OverfitParallel` migration |
 
 5-epoch run: **5551 → 4870 ms (−12% wall, −18% total CPU)** vs pre-migration baseline. Cores effective: 6.81 → 7.03 of 32 (MNIST CNN at this scale is Amdahl-limited by sequential graph/optimizer slices — the bigger win is on transformer workloads, see GPT-1 section above).
 
@@ -480,7 +480,7 @@ Kernels                     ← pure Span-based math, no AutogradNode
   LinearKernels             ← Forward, ForwardBatched, BackwardInput,
                                AccumulateWeightGrad, AccumulateBiasGrad
   PoolingKernels            ← MaxPool pool=2 SIMD fast path
-OverfitParallelFor          ← zero-alloc bulk-wake dispatcher (Runtime/)
+OverfitParallel          ← zero-alloc bulk-wake dispatcher (Runtime/)
                                replacement for Parallel.For in zero-alloc hot paths
                                ~5 µs warm dispatch, 0 B/call, configurable via
                                OVERFIT_PARALLEL_WORKERS env var

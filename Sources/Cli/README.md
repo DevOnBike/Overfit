@@ -80,6 +80,9 @@ curl.exe -s http://localhost:8080/v1/chat/completions -H "Content-Type: applicat
 
 Just the text: bash `... | jq -r '.choices[0].message.content'` · PowerShell `(Invoke-RestMethod ...).choices[0].message.content`.
 
+Sampling fields: `temperature` (≈0 → greedy), `top_p`, `min_p` (llama.cpp-style — keep tokens with
+P ≥ `min_p` × P(top); takes precedence over `top_p`), `max_tokens`.
+
 ### `POST /v1/chat/completions` with `"stream": true` — SSE streaming
 
 ```bash
@@ -122,6 +125,16 @@ Invoke-WebRequest http://localhost:8080/v1/audio/speech -Method Post -ContentTyp
   -Body '{"model":"overfit","input":"Hello from Overfit.","voice":"tara","response_format":"wav"}' `
   -OutFile speech.wav
 ```
+
+## Tuning (environment variables)
+
+The defaults are right for almost everyone — these are escape hatches:
+
+| Variable | Default | What it does |
+|---|---|---|
+| `OVERFIT_REPACK_GEMV` | off | `1` repacks Q4_K weights into the 8×8 GEMV layout at load → **~+30% decode** on a 3B (costs extra RAM for the repacked copy; pairs well with `OVERFIT_DECODE_WORKERS=16` on a 16-core box) |
+| `OVERFIT_DECODE_WORKERS` | `min(cores, 10)` | caps the decode dispatch width (per-token matmuls are dispatch-bound, not core-hungry) |
+| `OVERFIT_DECODE_POOL` | on | `0` disables the decode spin-pool (≈ −28% decode on small models). The pool **spins-then-parks**: it burns no CPU between requests, so there is no idle-cost reason to turn it off |
 
 ## Versioning
 

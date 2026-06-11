@@ -10,7 +10,8 @@ model name.
 - `OverfitOpenAiServer.Serve(client, modelName, host, port, systemMessage, …)` — a blocking, single-flight
   server exposing:
   - `POST /v1/chat/completions` — streaming (SSE) **and** non-streaming, with `response_format` →
-    JSON / JSON-Schema constrained decoding
+    JSON / JSON-Schema constrained decoding; sampling via `temperature` / `top_p` / `min_p`
+    (llama.cpp-server extension; takes precedence over `top_p`)
   - `GET /v1/models`, `GET /health`
 - `DevOnBike.Overfit.Server.OpenAi` — the OpenAI request/response DTOs + a source-generated
   `JsonSerializerContext` (`OpenAiJsonContext`) and host-agnostic `OpenAiChatMapping` (sampling /
@@ -37,6 +38,7 @@ This is exactly what the [`overfit serve`](https://github.com/DevOnBike/Overfit)
 - Requests are served **strictly one at a time** (single-tenant model session / one KV cache), like a local
   llama.cpp server. For multi-tenant use a session-per-request pool.
 - Binding to `127.0.0.1`/`localhost` needs no elevation; `0.0.0.0`/`*` may need a URL ACL / admin on Windows.
+- The decode worker pool **parks when idle** (spin-then-park) — a server waiting for requests sits at ~0% CPU.
 
 ## License
 

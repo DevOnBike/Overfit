@@ -238,7 +238,7 @@ namespace DevOnBike.Overfit.Runtime
         // sides.
         private static PaddedCounter _nextChunk;
 
-        // ── Decode spin-pool (opt-in: OVERFIT_DECODE_POOL=1) ───────────────────────
+        // ── Decode spin-pool (default ON; OVERFIT_DECODE_POOL=0 opts out) ──────────
         // A SEPARATE pool of _decodePoolSize threads (== DecodeMaxWorkers) that SPIN on
         // _decodeGen instead of parking, so the ~180 tiny FFN/attention dispatches per
         // decoded token avoid a per-op kernel semaphore wake (llama.cpp "wake once, spin
@@ -279,9 +279,8 @@ namespace DevOnBike.Overfit.Runtime
         {
             // Default ON — measured best-of-3: Qwen3-0.6B +28% (56.7→72.3 tok/s), Phi-3.5-3.8B +3% (13.27→13.69),
             // 0 B/token preserved, bit-identical. Bigger win on small models (dispatch overhead is a larger fraction
-            // of their small matmuls). Set OVERFIT_DECODE_POOL=0/false to opt out (the spin pool keeps ~DecodeMaxWorkers
-            // threads warm between tokens with a Sleep(1) back-off — a slight idle-CPU cost that matters only for
-            // idle multi-tenant servers, not single-stream local decode).
+            // of their small matmuls). Set OVERFIT_DECODE_POOL=0/false to opt out. Idle cost is ~0: the pool
+            // spins-then-parks (see _decodeParkSemaphore), so there is no idle-CPU reason to disable it.
             var raw = Environment.GetEnvironmentVariable(DecodePoolEnvVar);
             return !(raw is "0" || string.Equals(raw, "false", StringComparison.OrdinalIgnoreCase));
         }

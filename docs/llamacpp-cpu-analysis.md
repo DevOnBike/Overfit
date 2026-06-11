@@ -90,7 +90,7 @@ When the activation has many rows, work becomes compute-bound and llama.cpp swit
 - **Per-op sense-reversing atomic barrier** — no task graph; topological order + barriers.
 - **Intra-matmul work-stealing** — threads claim chunks via an atomic `fetch_add` counter; load-balances uneven chunk cost.
 
-Overfit already has the analogue: `OverfitParallelFor` (persistent threads, bulk-wake, 0-alloc dispatch).
+Overfit already has the analogue: `OverfitParallel` (persistent threads, bulk-wake, 0-alloc dispatch).
 
 ---
 
@@ -103,7 +103,7 @@ Overfit already has the analogue: `OverfitParallelFor` (persistent threads, bulk
 | VNNI single-instruction dot | **With effort, gated** | `AvxVnni.MultiplyWideningAndAdd`; detect `AvxVnni.IsSupported`, fall back to `maddubs`. |
 | F32 register-blocked GEMM (tinyBLAS) | **With effort** | `Vector256<float>` + `Fma.MultiplyAdd`. 4×3 tiles realistic; 4×6 may spill (16 YMM regs) — measure. |
 | Block-interleaved weight repacking | **As-is** | Pure memory permutation at load. |
-| Persistent pool + work-stealing chunk counter | **As-is** | `Interlocked.Add`/`CompareExchange`. Build on `OverfitParallelFor`. |
+| Persistent pool + work-stealing chunk counter | **As-is** | `Interlocked.Add`/`CompareExchange`. Build on `OverfitParallel`. |
 | Sense-reversing barrier, spin-then-wait | **As-is / with effort** | `Interlocked` + `Thread.SpinWait` + `ManualResetEventSlim`. |
 | Per-vector F16C (`vcvtph2ps`) | **Not portable — but irrelevant** | .NET 10 has no per-`Vector` Half→float. In the quantized path F16 is only sparse per-block scales → amortized via `TensorPrimitives.ConvertToSingle`. **Does not block the quantized kernel.** |
 | `_mm_prefetch`, Intel AMX | **Not portable** | No .NET intrinsic. Minor / niche; ignore. |
@@ -136,7 +136,7 @@ partly right.
   huge L2 + 3D V-cache, so the "re-streamed" output was always cache-resident.
   The earlier "~2–3×" estimate for this was simply wrong.
 - **Parallelize FFN + LM-head matmul** — `SingleTokenProjectionKernel.ProjectParallel`
-  rewritten on the zero-alloc `OverfitParallelFor` dispatcher (splits the output
+  rewritten on the zero-alloc `OverfitParallel` dispatcher (splits the output
   dimension into one band per worker), wired into `CachedFeedForwardBlock` and
   `CachedGptStack.ProjectLogits`. **Measured +31%** (2.77 → 3.63 tok/s). This was
   the real lever: the decode matmul was single-threaded, so ~33 GB/s ≈ a
@@ -159,7 +159,7 @@ stay single-threaded — attention is ~⅓ of the per-token weight streaming.
 ### Step 1b — Head-parallel attention — ✅ DONE & MEASURED
 
 `CachedMultiHeadAttention.Decode` parallelised across **KV groups** via
-`OverfitParallelFor` — one worker per KV head, each owning a disjoint KV-cache
+`OverfitParallel` — one worker per KV head, each owning a disjoint KV-cache
 slot and a contiguous run of Q heads. Splitting by KV group (not by Q head)
 keeps every cache write owned by exactly one worker → no write race, and needs
 no split of `CachedSingleHeadAttention`. Each head writes its own band of
@@ -245,7 +245,7 @@ caveat above.
 Three load optimisations landed:
 
 - **Parallel quantize** — the F32→Q8 pass (`Q8Weight.QuantizeRows`) split over
-  `OverfitParallelFor` (per-row independent, bit-identical). Load 15.4 s → 12.0 s.
+  `OverfitParallel` (per-row independent, bit-identical). Load 15.4 s → 12.0 s.
 - **2.4 — native Q8_0 read (FFN + LM-head)** — when a GGUF tensor is already
   `Q8_0`, its blocks are read straight in: `GgufReader.LoadTensorQ8_0Raw`
   de-interleaves the `block_q8_0` layout (int8 quants + F16→F32 scale) — no
