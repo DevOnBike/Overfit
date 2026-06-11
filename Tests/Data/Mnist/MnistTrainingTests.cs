@@ -62,7 +62,7 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
         public void Mnist_FullTrain60k_CnnDataParallel8_Benchmark()
         {
             const int trainSize = 60_000;
-            const int batchSize = 64;
+            const int batchSize = 128;
             const int epochs = 5;
             const int replicas = 8;
 
@@ -97,8 +97,10 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
             {
                 using var process2 = Process.GetCurrentProcess();
                 using var opt = new Adam(pars[0], 0.008f) { UseAdamW = true };
+                var inlineOps = Environment.GetEnvironmentVariable("MNIST_DP_INLINE") != "0";
                 var trainer = new DevOnBike.Overfit.Training.DataParallelTrainer(
-                    pars[0], [.. Enumerable.Range(1, replicas).Select(i => (IReadOnlyList<Parameters.Parameter>)pars[i])]);
+                    pars[0], [.. Enumerable.Range(1, replicas).Select(i => (IReadOnlyList<Parameters.Parameter>)pars[i])],
+                    runWorkerOpsInline: inlineOps);
                 trainer.BroadcastParameters();
 
                 float TrainBatch(int i, int batch)
