@@ -13,7 +13,7 @@ namespace DevOnBike.Overfit.Runtime
     /// <list type="bullet">
     ///   <item><b>Normal</b> (<c>new GCHandleScope(obj)</c>): keeps a managed object reachable and yields a stable
     ///   <see cref="Token"/> to hand to an unsafe <c>void*</c> context (e.g. an
-    ///   <see cref="OverfitParallelFor"/> worker that must call a method on it), recovered with
+    ///   <see cref="OverfitParallel"/> worker that must call a method on it), recovered with
     ///   <see cref="Recover{T}"/>.</item>
     ///   <item><b>Pinned</b> (<see cref="Pin"/>): pins the object at a fixed address (for native interop, e.g.
     ///   handing a buffer to a P/Invoke), read via <see cref="Address"/>.</item>

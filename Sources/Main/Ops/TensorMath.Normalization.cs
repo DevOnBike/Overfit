@@ -5,6 +5,7 @@
 
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Autograd;
+using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 
@@ -376,7 +377,7 @@ namespace DevOnBike.Overfit.Ops
             var meanNode = mean;
             var invStdNode = invStd;
 
-            Parallel.For(0, C, c =>
+            OverfitParallel.For(0, C, c =>
             {
                 var inLocal = inputNode.DataView.AsReadOnlySpan();
                 var ogLocal = outputNode.GradView.AsReadOnlySpan();
@@ -417,7 +418,7 @@ namespace DevOnBike.Overfit.Ops
             if (input.RequiresGrad)
             {
                 var gammaNode = gamma;
-                Parallel.For(0, C, c =>
+                OverfitParallel.For(0, C, c =>
                 {
                     var inLocal = inputNode.DataView.AsReadOnlySpan();
                     var ogLocal = outputNode.GradView.AsReadOnlySpan();

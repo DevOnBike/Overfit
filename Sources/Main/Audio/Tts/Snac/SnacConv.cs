@@ -56,7 +56,7 @@ namespace DevOnBike.Overfit.Audio.Tts.Snac
             {
                 var ctx = new Conv1dCtx(ip, wp, bias.IsEmpty ? null : bp, dp,
                     inC, tIn, outC, kSize, stride, pad, dilation, icPerGroup, ocPerGroup, tOut);
-                OverfitParallelFor.For(0, outC, &Conv1dWorker, &ctx);
+                OverfitParallel.For(0, outC, &Conv1dWorker, &ctx);
             }
         }
 
@@ -138,7 +138,7 @@ namespace DevOnBike.Overfit.Audio.Tts.Snac
             fixed (float* ip = input, wp = weight, bp = bias, dp = dst)
             {
                 var ctx = new ConvTCtx(ip, wp, bias.IsEmpty ? null : bp, dp, inC, tIn, outC, kSize, stride, pad, dilation, tOut);
-                OverfitParallelFor.For(0, outC, &ConvTWorker, &ctx);
+                OverfitParallel.For(0, outC, &ConvTWorker, &ctx);
             }
         }
 

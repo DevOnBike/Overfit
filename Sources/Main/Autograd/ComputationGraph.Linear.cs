@@ -58,7 +58,7 @@ namespace DevOnBike.Overfit.Autograd
                             K = K,
                             M = M,
                         };
-                        OverfitParallelFor.For(0, N, &LinearForwardChunk, &ctx);
+                        OverfitParallel.For(0, N, &LinearForwardChunk, &ctx);
                     }
                 }
             }

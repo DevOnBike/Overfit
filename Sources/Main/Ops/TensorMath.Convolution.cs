@@ -75,7 +75,7 @@ namespace DevOnBike.Overfit.Ops
 
                 // Each worker owns a private col-buffer slice and strides the batch, so the
                 // chunks are independent. Pin the data + the contiguous col buffer once and
-                // dispatch through OverfitParallelFor (zero-allocation, no TPL closure).
+                // dispatch through OverfitParallel (zero-allocation, no TPL closure).
                 var biasSpan = bias is not null ? bias.DataView.AsReadOnlySpan() : ReadOnlySpan<float>.Empty;
 
                 unsafe
@@ -110,7 +110,7 @@ namespace DevOnBike.Overfit.Ops
                             OutputPlaneLength = outputPlaneLength,
                         };
 
-                        OverfitParallelFor.For(0, workerCount, &Conv2DForwardChunk, &ctx);
+                        OverfitParallel.For(0, workerCount, &Conv2DForwardChunk, &ctx);
                     }
                 }
             }
@@ -240,7 +240,7 @@ namespace DevOnBike.Overfit.Ops
                         WeightsRequiresGrad = weights.RequiresGrad ? 1 : 0,
                     };
 
-                    OverfitParallelFor.For(0, workerCount, &Conv2DBackwardChunk, &ctx);
+                    OverfitParallel.For(0, workerCount, &Conv2DBackwardChunk, &ctx);
                 }
             }
 

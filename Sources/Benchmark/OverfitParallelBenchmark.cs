@@ -10,10 +10,10 @@ using DevOnBike.Overfit.Runtime;
 namespace Benchmarks
 {
     /// <summary>
-    /// Old-vs-new comparison of the <see cref="OverfitParallelFor"/> bulk-wake
+    /// Old-vs-new comparison of the <see cref="OverfitParallel"/> bulk-wake
     /// dispatcher: the current implementation (with the P1/P2/P5 tuning —
     /// workerCount fast-path, caller-participation, grain overload) against the
-    /// frozen pre-tuning <see cref="OverfitParallelForLegacy"/>, plus a
+    /// frozen pre-tuning <see cref="OverfitParallelLegacy"/>, plus a
     /// sequential baseline.
     ///
     /// <para>
@@ -34,7 +34,7 @@ namespace Benchmarks
     /// </para>
     /// </summary>
     [Config(typeof(DispatcherBenchmarkConfig))]
-    public unsafe class OverfitParallelForBenchmark
+    public unsafe class OverfitParallelBenchmark
     {
         [Params(0, 10, 1000, 100_000, 1_000_000)]
         public int InnerIters { get; set; }
@@ -47,8 +47,8 @@ namespace Benchmarks
             // Touch both dispatchers so their persistent thread pools spawn
             // before measurement starts. Both read OVERFIT_PARALLEL_WORKERS, so
             // they run with an identical worker count — a fair comparison.
-            _workerCount = OverfitParallelFor.WorkerCount;
-            _ = OverfitParallelForLegacy.WorkerCount;
+            _workerCount = OverfitParallel.WorkerCount;
+            _ = OverfitParallelLegacy.WorkerCount;
             _bclResults = new double[_workerCount];
         }
 
@@ -114,19 +114,19 @@ namespace Benchmarks
             return acc;
         }
 
-        [Benchmark(Description = "OverfitParallelFor (legacy, pre-P1/P2)")]
-        public double OverfitParallelLegacy()
+        [Benchmark(Description = "OverfitParallel (legacy, pre-P1/P2)")]
+        public double OverfitParallelLegacyDispatch()
         {
             var ctx = new WorkContext { InnerIters = InnerIters, Accumulator = 0.0 };
-            OverfitParallelForLegacy.For(0, _workerCount, &ChunkBody, &ctx);
+            OverfitParallelLegacy.For(0, _workerCount, &ChunkBody, &ctx);
             return ctx.Accumulator;
         }
 
-        [Benchmark(Description = "OverfitParallelFor (current, P1/P2/P5)")]
-        public double OverfitParallel()
+        [Benchmark(Description = "OverfitParallel (current, P1/P2/P5)")]
+        public double OverfitParallelDispatch()
         {
             var ctx = new WorkContext { InnerIters = InnerIters, Accumulator = 0.0 };
-            OverfitParallelFor.For(0, _workerCount, &ChunkBody, &ctx);
+            OverfitParallel.For(0, _workerCount, &ChunkBody, &ctx);
             return ctx.Accumulator;
         }
 

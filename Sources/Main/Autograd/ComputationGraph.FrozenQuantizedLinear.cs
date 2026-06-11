@@ -99,7 +99,7 @@ namespace DevOnBike.Overfit.Autograd
             ForwardParallel(inS, outS, weight, n, k, m);
         }
 
-        // Context for the OverfitParallelFor workers. The managed weight rides through the void*
+        // Context for the OverfitParallel workers. The managed weight rides through the void*
         // context as a GCHandleScope token (it has a DecodeRow method, so it can't be a plain float* like Conv2D).
         private unsafe struct FqlContext
         {
@@ -119,7 +119,7 @@ namespace DevOnBike.Overfit.Autograd
             fixed (float* outB = outS)
             {
                 var ctx = new FqlContext { A = inB, Out = outB, Weight = scope.Token, N = n, K = k, M = m };
-                OverfitParallelFor.For(0, m, &ForwardChunk, &ctx);
+                OverfitParallel.For(0, m, &ForwardChunk, &ctx);
             }
         }
 
@@ -171,7 +171,7 @@ namespace DevOnBike.Overfit.Autograd
             // P fixed partitions of the output rows, each with a PRIVATE partial-dx slot → no race on
             // dx[b]; reduce the P partials into dx afterwards. (Parallelising over o would race; over
             // batch would re-dequant every row P×.) Partials are pooled + zeroed.
-            var p = Math.Min(OverfitParallelFor.WorkerCount, m);
+            var p = Math.Min(OverfitParallel.WorkerCount, m);
             var partialsLength = (long)p * n * k;
             if (partialsLength > int.MaxValue)
             {
@@ -184,7 +184,7 @@ namespace DevOnBike.Overfit.Autograd
             fixed (float* partB = partials.Span)
             {
                 var ctx = new FqlContext { A = dyB, Out = partB, Weight = scope.Token, N = n, K = k, M = m, P = p };
-                OverfitParallelFor.For(0, p, &BackwardChunk, &ctx);
+                OverfitParallel.For(0, p, &BackwardChunk, &ctx);
             }
 
             // Reduce: dx += Σ_partition partial.

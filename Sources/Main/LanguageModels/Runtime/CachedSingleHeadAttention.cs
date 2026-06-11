@@ -386,7 +386,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         /// <summary>
         /// Per-weight projection dispatch (sequential — we are already inside
-        /// the head-parallel <c>OverfitParallelFor</c>, so nested parallelism
+        /// the head-parallel <c>OverfitParallel</c>, so nested parallelism
         /// would be wrong). Picks the kernel matching the weight's resident
         /// format; Q-paths use the head's owned activation scratch.
         /// </summary>

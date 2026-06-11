@@ -38,7 +38,7 @@ namespace DevOnBike.Overfit.Ops
         /// <b>Parallelization + SIMD.</b> Two layers of speedup compose here:
         /// </para>
         /// <list type="number">
-        ///   <item><b>Outer</b>: chunks dispatched via <see cref="OverfitParallelFor"/>
+        ///   <item><b>Outer</b>: chunks dispatched via <see cref="OverfitParallel"/>
         ///         above <see cref="ParallelThreshold"/> elements.</item>
         ///   <item><b>Inner</b>: within each chunk, work is processed in
         ///         <see cref="GeluTile"/>-element tiles using
@@ -67,7 +67,7 @@ namespace DevOnBike.Overfit.Ops
                     fixed (float* inPtr = inS, outPtr = outS)
                     {
                         var ctx = new GeluForwardCtx { Input = inPtr, Output = outPtr };
-                        OverfitParallelFor.For(0, inS.Length, &GeluForwardChunk, &ctx);
+                        OverfitParallel.For(0, inS.Length, &GeluForwardChunk, &ctx);
                     }
                 }
             }
@@ -115,7 +115,7 @@ namespace DevOnBike.Overfit.Ops
                             GradOutput = dOutPtr,
                             GradInput = dInPtr,
                         };
-                        OverfitParallelFor.For(0, inS.Length, &GeluBackwardChunk, &ctx);
+                        OverfitParallel.For(0, inS.Length, &GeluBackwardChunk, &ctx);
                     }
                 }
             }
@@ -244,7 +244,7 @@ namespace DevOnBike.Overfit.Ops
             return 0.5f * (1f + tanhV) + 0.5f * x * dtanh * dinner;
         }
 
-        // ── OverfitParallelFor chunk bodies + contexts ────────────────────────
+        // ── OverfitParallel chunk bodies + contexts ────────────────────────
 
         private unsafe struct GeluForwardCtx
         {

@@ -163,7 +163,7 @@ namespace DevOnBike.Overfit.Audio
                           tRe = _twRe, tIm = _twIm, bRe = _bwRe, bIm = _bwIm, pw = power)
             {
                 var ctx = new MelFrameCtx(pad, hann, cRe, cIm, tRe, tIm, bRe, bIm, pw, _fftM, NFft, HopLength, _nFreqs, frames);
-                OverfitParallelFor.For(0, frames, 16, &MelFrameWorker, &ctx);
+                OverfitParallel.For(0, frames, 16, &MelFrameWorker, &ctx);
             }
         }
 

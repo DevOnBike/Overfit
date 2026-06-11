@@ -10,15 +10,15 @@ using System.Runtime.InteropServices;
 namespace Benchmarks
 {
     /// <summary>
-    /// Frozen pre-P1/P2 copy of <c>OverfitParallelFor</c> — the bulk-wake
+    /// Frozen pre-P1/P2 copy of <c>OverfitParallel</c> — the bulk-wake
     /// dispatcher BEFORE caller-participation, the workerCount&lt;=1 fast-path
     /// and the grain overload were added. Byte-for-byte the dispatch core as it
     /// stood at <c>HEAD</c> before this session's tuning.
     ///
-    /// Exists ONLY so <see cref="OverfitParallelForBenchmark"/> can measure
+    /// Exists ONLY so <see cref="OverfitParallelBenchmark"/> can measure
     /// old-vs-new in a single run. NOT for production use.
     /// </summary>
-    public static unsafe class OverfitParallelForLegacy
+    public static unsafe class OverfitParallelLegacy
     {
         private const string WorkerCountEnvVar = "OVERFIT_PARALLEL_WORKERS";
 
@@ -46,7 +46,7 @@ namespace Benchmarks
         private static int _chunkCount;
         private static PaddedCounter _nextChunk;
 
-        static OverfitParallelForLegacy()
+        static OverfitParallelLegacy()
         {
             _startSemaphore = new SemaphoreSlim(0, _workerCount);
             _completion = new CountdownEvent(0);
@@ -147,7 +147,7 @@ namespace Benchmarks
                 }
                 else
                 {
-                    Debug.Fail($"OverfitParallelForLegacy: claim index {index} >= chunkCount {_chunkCount}.");
+                    Debug.Fail($"OverfitParallelLegacy: claim index {index} >= chunkCount {_chunkCount}.");
                 }
             }
         }

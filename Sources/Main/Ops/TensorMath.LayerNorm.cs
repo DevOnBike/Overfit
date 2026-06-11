@@ -30,7 +30,7 @@ namespace DevOnBike.Overfit.Ops
         ///   mean    [numRows]   — per-token mean, needed for backward
         ///   invStd  [numRows]   — per-token 1/sqrt(var+eps), needed for backward
         ///
-        /// Parallelized via <see cref="OverfitParallelFor"/> above
+        /// Parallelized via <see cref="OverfitParallel"/> above
         /// <see cref="ParallelThreshold"/> rows. Each row is independent —
         /// no shared writes — so the forward parallelizes trivially.
         /// </summary>
@@ -84,7 +84,7 @@ namespace DevOnBike.Overfit.Ops
                             C = C,
                             Eps = eps,
                         };
-                        OverfitParallelFor.For(0, numRows, &LayerNormForwardChunk, &ctx);
+                        OverfitParallel.For(0, numRows, &LayerNormForwardChunk, &ctx);
                     }
                 }
             }
@@ -179,7 +179,7 @@ namespace DevOnBike.Overfit.Ops
                 return;
             }
 
-            var workerCount = OverfitParallelFor.WorkerCount;
+            var workerCount = OverfitParallel.WorkerCount;
             var partialSlots = workerCount * C;
 
             unsafe
@@ -221,7 +221,7 @@ namespace DevOnBike.Overfit.Ops
                         NeedsDBeta = needsDBeta,
                     };
 
-                    OverfitParallelFor.For(0, numRows, &LayerNormBackwardChunk, &ctx);
+                    OverfitParallel.For(0, numRows, &LayerNormBackwardChunk, &ctx);
                 }
 
                 // Merge per-worker partials into final dGamma / dBeta.

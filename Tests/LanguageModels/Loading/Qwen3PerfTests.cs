@@ -36,7 +36,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             var prompt = tok.Encode("The history of computing began");
             var sampling = SamplingOptions.GreedyWithPenalty(1.1f);
 
-            _out.WriteLine($"workers={OverfitParallelForWorkerCountReflectionFree()} cpu={Environment.ProcessorCount}");
+            _out.WriteLine($"workers={OverfitParallelWorkerCountReflectionFree()} cpu={Environment.ProcessorCount}");
 
             using var session = engine.CreateSession(512);
 
@@ -81,7 +81,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         }
 
         // Avoid touching the internal worker-count field via reflection (banned); just report ProcessorCount-derived note.
-        private static string OverfitParallelForWorkerCountReflectionFree()
+        private static string OverfitParallelWorkerCountReflectionFree()
             => $"~min({Environment.ProcessorCount},10) decode";
     }
 }

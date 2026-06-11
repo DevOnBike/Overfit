@@ -100,7 +100,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     Output = o,
                     Nb = nb,
                 };
-                OverfitParallelFor.ForDecode(0, groups, &GroupChunk, &ctx);
+                OverfitParallel.ForDecode(0, groups, &GroupChunk, &ctx);
             }
         }
 

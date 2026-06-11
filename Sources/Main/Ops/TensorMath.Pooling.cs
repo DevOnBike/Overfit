@@ -94,7 +94,7 @@ namespace DevOnBike.Overfit.Ops
                             W = w,
                             Pool = pool,
                         };
-                        OverfitParallelFor.For(0, batchSize, &MaxPool2DForwardChunk, &ctx);
+                        OverfitParallel.For(0, batchSize, &MaxPool2DForwardChunk, &ctx);
                     }
                 }
             }
@@ -147,7 +147,7 @@ namespace DevOnBike.Overfit.Ops
                         Indices = idxPtr,
                         OutputPerBatch = outputPerBatch,
                     };
-                    OverfitParallelFor.For(0, batchSize, &MaxPool2DBackwardChunk, &ctx);
+                    OverfitParallel.For(0, batchSize, &MaxPool2DBackwardChunk, &ctx);
                 }
             }
         }
@@ -203,7 +203,7 @@ namespace DevOnBike.Overfit.Ops
                             SpatialSize = spatialSize,
                             Scale = scale,
                         };
-                        OverfitParallelFor.For(0, batchSize, &GlobalAvgPool2DForwardChunk, &ctx);
+                        OverfitParallel.For(0, batchSize, &GlobalAvgPool2DForwardChunk, &ctx);
                     }
                 }
             }
@@ -272,12 +272,12 @@ namespace DevOnBike.Overfit.Ops
                         SpatialSize = spatialSize,
                         Scale = scale,
                     };
-                    OverfitParallelFor.For(0, batchSize, &GlobalAvgPool2DBackwardChunk, &ctx);
+                    OverfitParallel.For(0, batchSize, &GlobalAvgPool2DBackwardChunk, &ctx);
                 }
             }
         }
 
-        // ── OverfitParallelFor chunk bodies + contexts ────────────────────────
+        // ── OverfitParallel chunk bodies + contexts ────────────────────────
 
         private unsafe struct MaxPool2DForwardCtx
         {

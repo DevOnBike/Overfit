@@ -55,7 +55,7 @@ namespace DevOnBike.Overfit.Training
         /// </param>
         /// <param name="runWorkerOpsInline">
         /// When <c>true</c> (default), each replica's inner kernels run single-threaded during
-        /// <see cref="Step"/> (via <see cref="OverfitParallelFor.SuppressParallelismOnCurrentThread"/>),
+        /// <see cref="Step"/> (via <see cref="OverfitParallel.SuppressParallelismOnCurrentThread"/>),
         /// so the replicas — not the intra-op pool — own the parallelism. This is the right choice when
         /// the replica count is near the core count (avoids N×core oversubscription + pool-lock
         /// contention; measured ~3–6× the single-replica throughput vs ~2.3× when both layers fan out).
@@ -172,11 +172,11 @@ namespace DevOnBike.Overfit.Training
                     // Keep each replica's inner kernels single-threaded so the replicas own the
                     // parallelism — N replicas × intra-op pool would oversubscribe and serialize on
                     // the pool lock. Restore the flag so the pool thread is left as we found it.
-                    var previous = OverfitParallelFor.SuppressParallelismOnCurrentThread;
+                    var previous = OverfitParallel.SuppressParallelismOnCurrentThread;
 
                     if (inline)
                     {
-                        OverfitParallelFor.SuppressParallelismOnCurrentThread = true;
+                        OverfitParallel.SuppressParallelismOnCurrentThread = true;
                     }
                     try
                     {
@@ -184,7 +184,7 @@ namespace DevOnBike.Overfit.Training
                     }
                     finally
                     {
-                        OverfitParallelFor.SuppressParallelismOnCurrentThread = previous;
+                        OverfitParallel.SuppressParallelismOnCurrentThread = previous;
                     }
                 });
             }

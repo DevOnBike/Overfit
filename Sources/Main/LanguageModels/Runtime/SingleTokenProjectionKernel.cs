@@ -153,7 +153,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         /// <summary>
         /// Minimum matmul work (<c>inputSize × outputSize</c>) for the parallel
-        /// path to pay off. Below this the <see cref="OverfitParallelFor"/>
+        /// path to pay off. Below this the <see cref="OverfitParallel"/>
         /// dispatch (~5 µs) outweighs the gain and the sequential
         /// <see cref="Project"/> runs instead. Tuned so FFN / LM-head matmuls
         /// parallelise while the small per-head attention projections stay
@@ -164,7 +164,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// <summary>
         /// Parallel projection for large matmuls (FFN, LM head). Splits the
         /// output dimension into one contiguous band per worker via the
-        /// zero-allocation <see cref="OverfitParallelFor"/> dispatcher — each
+        /// zero-allocation <see cref="OverfitParallel"/> dispatcher — each
         /// worker streams its own slice of the weight matrix from DRAM, so the
         /// decode matmul uses aggregate multi-core memory bandwidth instead of a
         /// single core. Output bands are disjoint: no reduction, no false
@@ -193,7 +193,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             if ((long)inputSize * outputSize < ParallelWorkThreshold
-                || OverfitParallelFor.WorkerCount <= 1)
+                || OverfitParallel.WorkerCount <= 1)
             {
                 Project(input, weightsInputOutput, bias, output, inputSize, outputSize);
                 return;
@@ -217,7 +217,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
                 // For() is synchronous — it blocks until every band completes,
                 // so the fixed pointers stay valid for the whole dispatch.
-                OverfitParallelFor.For(0, outputSize, &ProjectChunk, &context);
+                OverfitParallel.For(0, outputSize, &ProjectChunk, &context);
             }
         }
 

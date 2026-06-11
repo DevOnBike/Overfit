@@ -150,7 +150,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// caller-owned scratch, then each output is a single <see cref="Dot"/>.
         /// Approximates the F32 projection within Q8 quantization noise. This is
         /// the sequential reference shape; the decode path parallelises the
-        /// output loop over <c>OverfitParallelFor</c>.
+        /// output loop over <c>OverfitParallel</c>.
         /// </summary>
         public static void Project(
             ReadOnlySpan<float> input,
@@ -218,7 +218,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// <summary>
         /// <c>Project</c> overload taking a resident <see cref="Q8Weight"/>
         /// — the sequential quantized projection used by per-head attention decode
-        /// (each head already runs on its own <c>OverfitParallelFor</c> worker, so
+        /// (each head already runs on its own <c>OverfitParallel</c> worker, so
         /// the projection itself stays sequential — no nested parallelism).
         /// </summary>
         public static void Project(
@@ -244,7 +244,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         /// <summary>
         /// Parallel quantized projection — <c>Project</c> with the output
-        /// loop split across the zero-allocation <c>OverfitParallelFor</c> worker
+        /// loop split across the zero-allocation <c>OverfitParallel</c> worker
         /// pool. The activation is quantized once (sequentially) into the
         /// caller-owned scratch, then each worker computes a disjoint band of
         /// output dots. Bit-identical to <c>Project</c>.
@@ -303,7 +303,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     BlocksPerRow = blocksPerRow,
                 };
 
-                OverfitParallelFor.ForDecode(0, outputSize, &ProjectChunk, &context);
+                OverfitParallel.ForDecode(0, outputSize, &ProjectChunk, &context);
             }
         }
 
@@ -344,7 +344,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// Batched quantized projection: <paramref name="rows"/> activation rows × one weight matrix,
         /// the prefill counterpart of <see cref="ProjectParallel"/>. Each row's activation is quantized
         /// once into the caller-owned scratch; then the output loop is split across
-        /// <c>OverfitParallelFor</c> with the <b>rows loop innermost</b>, so each weight row is read from
+        /// <c>OverfitParallel</c> with the <b>rows loop innermost</b>, so each weight row is read from
         /// DRAM once and reused (hot in cache) across all <paramref name="rows"/> dots — cutting weight
         /// byte-traffic ~<paramref name="rows"/>× vs looping single-token <c>Project</c> N times
         /// (the prefill is weight-bandwidth-bound). Bit-identical to N× <c>Project</c>.
@@ -413,7 +413,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     Rows = rows,
                 };
 
-                OverfitParallelFor.For(0, outputSize, &ProjectBatchedChunk, &context);
+                OverfitParallel.For(0, outputSize, &ProjectBatchedChunk, &context);
             }
         }
 

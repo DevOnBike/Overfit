@@ -138,7 +138,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     BlocksPerRow = blocksPerRow,
                 };
 
-                OverfitParallelFor.For(0, rowCount, &QuantizeRowChunk, &context);
+                OverfitParallel.For(0, rowCount, &QuantizeRowChunk, &context);
             }
 
             return new Q8Weight(quants, scales, rowLength, rowCount);
