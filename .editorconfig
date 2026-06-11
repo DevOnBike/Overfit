@@ -20,3 +20,43 @@ csharp_prefer_braces = true:warning
 csharp_space_around_binary_operators = before_and_after
 
 file_header_template = Copyright (c) 2026 DevOnBike.\nThis file is part of DevonBike Overfit.\nDevonBike Overfit is licensed under the GNU AGPLv3.\nFor commercial licensing options, contact: devonbike@gmail.com
+# ── Overfit custom performance analyzer (Sources/Analyzers) — RATCHET rollout ──────────────
+# OVERFIT001 (per-call heap array allocation → PooledBuffer<T>/PooledArray/TensorStorage<T>/
+# stackalloc): IDE suggestion everywhere; build WARNING in the zero-alloc hot directories.
+# Policy: clean a directory → flip it to warning below. Never loosen a flipped directory.
+# Backlog at introduction (2026-06-11): 432 unique sites; Runtime 85 (mostly batched-prefill,
+# actionable), Loading 60, Audio/Tts 38, Whisper 33 — flip those as they get swept.
+dotnet_diagnostic.OVERFIT001.severity = suggestion
+dotnet_diagnostic.OVERFIT002.severity = suggestion
+dotnet_diagnostic.OVERFIT003.severity = suggestion
+dotnet_diagnostic.OVERFIT004.severity = suggestion
+dotnet_diagnostic.OVERFIT005.severity = suggestion
+dotnet_diagnostic.OVERFIT006.severity = suggestion
+dotnet_diagnostic.OVERFIT007.severity = suggestion
+
+[Sources/Main/Kernels/**.cs]
+dotnet_diagnostic.OVERFIT001.severity = warning
+dotnet_diagnostic.OVERFIT002.severity = warning
+dotnet_diagnostic.OVERFIT003.severity = warning
+dotnet_diagnostic.OVERFIT004.severity = warning
+dotnet_diagnostic.OVERFIT005.severity = warning
+dotnet_diagnostic.OVERFIT006.severity = warning
+dotnet_diagnostic.OVERFIT007.severity = warning
+
+[Sources/Main/Intrinsics/**.cs]
+dotnet_diagnostic.OVERFIT001.severity = warning
+dotnet_diagnostic.OVERFIT002.severity = warning
+dotnet_diagnostic.OVERFIT003.severity = warning
+dotnet_diagnostic.OVERFIT004.severity = warning
+dotnet_diagnostic.OVERFIT005.severity = warning
+dotnet_diagnostic.OVERFIT006.severity = warning
+dotnet_diagnostic.OVERFIT007.severity = warning
+
+[Sources/Main/Ops/**.cs]
+dotnet_diagnostic.OVERFIT001.severity = warning
+dotnet_diagnostic.OVERFIT002.severity = warning
+dotnet_diagnostic.OVERFIT003.severity = warning
+dotnet_diagnostic.OVERFIT004.severity = warning
+dotnet_diagnostic.OVERFIT005.severity = warning
+dotnet_diagnostic.OVERFIT006.severity = warning
+dotnet_diagnostic.OVERFIT007.severity = warning

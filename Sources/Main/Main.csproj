@@ -60,6 +60,15 @@
     </ItemGroup>
 
     <ItemGroup>
+        <!-- In-repo Roslyn performance analyzer (OVERFIT001: per-call heap array allocations →
+             use PooledBuffer<T>/PooledArray/TensorStorage<T>/stackalloc). Wired as an ANALYZER,
+             not a library reference — it runs inside the compiler and ships nothing. -->
+        <ProjectReference Include="..\Analyzers\Analyzers.csproj"
+                          OutputItemType="Analyzer"
+                          ReferenceOutputAssembly="false" />
+    </ItemGroup>
+
+    <ItemGroup>
         <AdditionalFiles Include="BannedSymbols.txt" />
         <Using Remove="System.Linq" />
         <!-- Overfit's exception hierarchy is available everywhere in Main (it replaces the BCL domain
