@@ -499,6 +499,15 @@ CachedSlmInferenceEngine    ← KV-cache inference engine
   KeyValueCache             ← pre-allocated K/V storage, O(N) decode
 BytePairEncoder             ← GPT-2 tokenizer (vocab.json + merges.txt)
 TokenSampler                ← greedy, top-P (heap sort, zero-alloc)
+
+OverfitOpenAiServer         ← OpenAI-compatible HTTP server (HttpListener + source-gen
+                               JSON, no ASP.NET; Sources/Server/) — /v1/chat/completions
+                               (SSE), /v1/embeddings, /v1/audio/speech
+McpServer                   ← MCP stdio server (typed JSON-RPC 2.0 DTOs + source-gen
+                               McpJsonContext, no SDK; Sources/Mcp/) — plugs local tools
+                               into Claude Code / Desktop / IDEs; see docs/mcp.md
+  OverfitMcpTools           ← ask / rag_query (citations, chat-model embeddings) /
+                               transcribe (lazy Whisper)
 ```
 
 ### Autograd ownership

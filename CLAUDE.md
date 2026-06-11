@@ -27,6 +27,15 @@ so tests can reach internals directly. Versions are pinned centrally in
 `NuGetAudit` and promotes vulnerability warnings (`NU1901-1904`) plus `CS4014`
 to errors.
 
+## Git / GitHub boundary (hard rule)
+
+Claude is **read-only** on git history and GitHub. Never run `git commit` / `git push` / `git rebase` /
+`git reset --hard`, and never run mutating `gh` or GitHub API calls — no `gh workflow run`, no
+`gh release create/edit`, no PR/issue creation. Those are the user's actions, even when a plan lists them
+as the next step. Reading is fine (`git status/diff/log`, `gh run list/view`, `gh release view`).
+Stop at a clean/staged working tree, report exact commands or UI steps for the user, and verify after
+they've run them.
+
 ## Common commands
 
 ```powershell

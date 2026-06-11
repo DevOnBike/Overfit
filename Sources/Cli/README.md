@@ -7,10 +7,14 @@ The command-line front-end for Overfit: an **OpenAI-compatible local LLM server*
 ```text
 overfit pull  <hf-owner/repo> [--file x.gguf]   download a GGUF into the local store
 overfit serve <model> [--host --port ...]       OpenAI-compatible HTTP server
+overfit mcp   <model> [--rag-dir --whisper-model]  MCP stdio server for Claude Code / Desktop / IDEs
 overfit chat  <model>                            interactive chat in the terminal
 overfit tts   --text ... --out x.wav             text-to-speech (watermarked)
 overfit list                                     list locally-cached models
 ```
+
+MCP: `claude mcp add overfit -- overfit mcp <model.gguf>` gives the host local `ask` / `rag_query`
+(private docs with citations) / `transcribe` (Whisper) tools — zero egress. See [`../../docs/mcp.md`](../../docs/mcp.md).
 
 `overfit serve` exposes `/v1/chat/completions` (streaming + non-streaming), `/v1/embeddings`, `/v1/audio/speech`,
 `/v1/models` and `/health`. See [`../Server/README.md`](../Server/README.md) for the endpoint contracts.
