@@ -35,6 +35,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\Main\Main.csproj" />
+        <ProjectReference Include="..\Mcp\Mcp.csproj" />
         <ProjectReference Include="..\Server\Server.csproj" />
         <PackageReference Include="System.CommandLine" />
     </ItemGroup>

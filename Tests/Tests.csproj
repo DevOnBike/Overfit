@@ -30,6 +30,7 @@
 	<ItemGroup>
 		<ProjectReference Include="..\Sources\Main\Main.csproj"/>
 		<ProjectReference Include="..\Sources\Extensions.AI\Extensions.AI.csproj"/>
+		<ProjectReference Include="..\Sources\Mcp\Mcp.csproj"/>
 	</ItemGroup>
 
 	<ItemGroup>
