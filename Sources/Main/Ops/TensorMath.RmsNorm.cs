@@ -28,7 +28,7 @@ namespace DevOnBike.Overfit.Ops
         /// Auxiliary output stored on tape:
         ///   invRms [numRows] — per-row 1/sqrt(mean(x²)+eps), needed for backward.
         ///
-        /// Parallelized via <see cref="OverfitParallelFor"/> above
+        /// Parallelized via <see cref="OverfitParallel"/> above
         /// <see cref="ParallelThreshold"/> total elements; each row is independent.
         /// </summary>
         public static AutogradNode RmsNorm(
@@ -70,7 +70,7 @@ namespace DevOnBike.Overfit.Ops
                             C = C,
                             Eps = eps,
                         };
-                        OverfitParallelFor.For(0, numRows, &RmsNormForwardChunk, &ctx);
+                        OverfitParallel.For(0, numRows, &RmsNormForwardChunk, &ctx);
                     }
                 }
             }
@@ -122,7 +122,7 @@ namespace DevOnBike.Overfit.Ops
                 return;
             }
 
-            var workerCount = OverfitParallelFor.WorkerCount;
+            var workerCount = OverfitParallel.WorkerCount;
             var chunkCount = Math.Min(workerCount, numRows);
             var perChunk = (numRows + chunkCount - 1) / chunkCount;
 
@@ -150,7 +150,7 @@ namespace DevOnBike.Overfit.Ops
                         NeedsDGamma = needsDGamma,
                     };
 
-                    OverfitParallelFor.For(0, numRows, &RmsNormBackwardChunk, &ctx);
+                    OverfitParallel.For(0, numRows, &RmsNormBackwardChunk, &ctx);
                 }
 
                 if (needsDGamma)
@@ -247,7 +247,7 @@ namespace DevOnBike.Overfit.Ops
             }
         }
 
-        // ── OverfitParallelFor chunk bodies + contexts ────────────────────────
+        // ── OverfitParallel chunk bodies + contexts ────────────────────────
 
         private unsafe struct RmsNormForwardCtx
         {

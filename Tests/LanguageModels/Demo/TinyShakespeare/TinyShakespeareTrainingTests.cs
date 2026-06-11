@@ -62,10 +62,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
         /// Model: 2 layers, 128d, 4 heads — approx. 422 K parameters.
         /// Time: **~2 s** on Ryzen 9 9950X3D after PR `parallel-everywhere` (previously:
         /// ~60-120 s before migrating sequential element-wise kernels to
-        /// `OverfitParallelFor` + SIMD-batched GELU). Test kept as a
+        /// `OverfitParallel` + SIMD-batched GELU). Test kept as a
         /// regression detector — if timing grows &gt;5× it signals a regression
         /// in one of the parallel paths (LinearKernels backward, LayerNorm,
-        /// GELU SIMD pipeline, or the `OverfitParallelFor` dispatcher itself).
+        /// GELU SIMD pipeline, or the `OverfitParallel` dispatcher itself).
         ///
         /// Threshold: final_loss ≤ initial_loss × 0.85 (15% improvement after 300 steps).
         /// Karpathy reaches ~1.47 on this dataset after full training (5000 steps).

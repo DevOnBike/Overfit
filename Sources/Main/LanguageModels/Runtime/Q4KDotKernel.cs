@@ -248,6 +248,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// </summary>
         private static int MainDot(ReadOnlySpan<byte> qs, ReadOnlySpan<sbyte> q8, ReadOnlySpan<byte> scales)
         {
+            // NOTE (measured 2026-06-11, do not re-attempt): an AVX-VNNI variant (vpdpbusd folding
+            // maddubs+madd, bit-identical INT32) was ≈0 here for BOTH regimes — decode (memory-bound,
+            // also ≈0 in the 2026-05-31 sprint) AND the compute-bound batched path (40.2 vs 38.9 ms on
+            // [256×2048→11008], within noise). The batched cost is per-call overhead + the F32 tail,
+            // not the integer multiply-add pair.
             if (CpuFeatures.HasAvx2)
             {
                 ref var qsRef = ref MemoryMarshal.GetReference(qs);
@@ -397,7 +402,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         /// <summary>
         /// Parallel quantized projection — <see cref="Project"/> with the output
-        /// loop split across the zero-allocation <c>OverfitParallelFor</c> worker
+        /// loop split across the zero-allocation <c>OverfitParallel</c> worker
         /// pool. The activation is quantized once (sequentially) into the
         /// caller-owned scratch, then each worker computes a disjoint band of
         /// output dots. Bit-identical to <see cref="Project"/>.
@@ -440,7 +445,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     SuperBlocksPerRow = weight.SuperBlocksPerRow,
                 };
 
-                OverfitParallelFor.ForDecode(0, outputSize, &ProjectChunk, &context);
+                OverfitParallel.ForDecode(0, outputSize, &ProjectChunk, &context);
             }
         }
 
@@ -520,7 +525,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     OutDim = outDim,
                 };
 
-                OverfitParallelFor.ForDecode(0, 2 * outDim, &GateUpChunk, &context);
+                OverfitParallel.ForDecode(0, 2 * outDim, &GateUpChunk, &context);
             }
         }
 
@@ -586,7 +591,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// <summary>
         /// Batched Q4_K projection: <paramref name="rows"/> activation rows × one weight matrix — the
         /// prefill counterpart of <see cref="ProjectParallel"/>. Each row is quantized to Q8_K once into
-        /// caller-owned scratch; the output loop is split across <c>OverfitParallelFor</c> with the
+        /// caller-owned scratch; the output loop is split across <c>OverfitParallel</c> with the
         /// <b>rows loop innermost</b>, so each weight output row's super-blocks are read from DRAM once
         /// and reused (cache-hot) across all <paramref name="rows"/> dots — cutting weight byte-traffic
         /// ~<paramref name="rows"/>× vs N× single-token <see cref="Project"/> (prefill is
@@ -661,7 +666,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     Rows = rows,
                 };
 
-                OverfitParallelFor.For(0, outputSize, &ProjectBatchedChunk, &context);
+                OverfitParallel.For(0, outputSize, &ProjectBatchedChunk, &context);
             }
         }
 

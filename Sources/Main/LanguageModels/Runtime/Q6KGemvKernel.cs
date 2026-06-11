@@ -161,7 +161,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             fixed (float* o = output)
             {
                 var ctx = new GemvContext { Rep = rep, Aq = aq, Asc = asc, Out = o, Nb = nb };
-                OverfitParallelFor.ForDecode(0, groups, &GroupChunk, &ctx);
+                OverfitParallel.ForDecode(0, groups, &GroupChunk, &ctx);
             }
         }
 

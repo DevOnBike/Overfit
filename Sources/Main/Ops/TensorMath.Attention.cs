@@ -154,7 +154,7 @@ namespace DevOnBike.Overfit.Ops
 
             // Each batch is independent (only writes to per-batch slices of
             // attnWeights/output). Parallel-over-batch when there's enough
-            // work to amortize the OverfitParallelFor dispatch (~5 µs warm).
+            // work to amortize the OverfitParallel dispatch (~5 µs warm).
             //
             // Symmetric guard to ScaledDotProductAttentionBackwardParallel:
             // batchSize > 1 AND total work above threshold.
@@ -180,7 +180,7 @@ namespace DevOnBike.Overfit.Ops
                             Scale = scale,
                             CausalMask = causalMask,
                         };
-                        OverfitParallelFor.For(0, batchSize, &SDPAForwardChunk, &ctx);
+                        OverfitParallel.For(0, batchSize, &SDPAForwardChunk, &ctx);
                     }
                 }
             }
@@ -284,7 +284,7 @@ namespace DevOnBike.Overfit.Ops
         {
             var bufferLength = seqLen * seqLen;
 
-            Parallel.For(0, batchSize, OverfitParallel.Options, b =>
+            OverfitParallel.For(0, batchSize, b =>
             {
                 using var dABuf = new PooledBuffer<float>(bufferLength, clearMemory: false);
                 using var dSBuf = new PooledBuffer<float>(bufferLength, clearMemory: false);
@@ -577,7 +577,7 @@ namespace DevOnBike.Overfit.Ops
 
             // Re-create spans from raw pointers + the OUTER batch×... lengths.
             // (Caller pinned the underlying arrays with `fixed`, so these
-            // pointers stay valid for the duration of the OverfitParallelFor call.)
+            // pointers stay valid for the duration of the OverfitParallel call.)
             //
             // We need to know the OUTER buffer length so the per-batch slicing
             // inside SDPAForwardBatch doesn't trip span bounds — chunkEnd is

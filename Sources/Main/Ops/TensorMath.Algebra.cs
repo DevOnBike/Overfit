@@ -28,7 +28,7 @@ namespace DevOnBike.Overfit.Ops
             // Sequential SIMD via TensorPrimitives.Add. Add is MEMORY-BANDWIDTH-BOUND
             // (read 2 arrays + write 1 = 3× data movement). On a typical desktop
             // memory subsystem (~50 GB/s) 2-3 cores already saturate the bus, so
-            // dispatching to OverfitParallelFor (32 workers, ~10 µs dispatch) is
+            // dispatching to OverfitParallel (32 workers, ~10 µs dispatch) is
             // pure overhead — measured ~+55% latency vs sequential on GPT-1.
             // Compute-bound element-wise ops (GELU, LayerNorm) parallelize well;
             // memcpy-like ops (Add, Subtract, Scale) don't. Keep sequential.
@@ -117,7 +117,7 @@ namespace DevOnBike.Overfit.Ops
                     fixed (float* inPtr = inSpan, bPtr = bSpan, outPtr = outSpan)
                     {
                         var ctx = new AddBiasCtx { Input = inPtr, Bias = bPtr, Output = outPtr, C = C };
-                        OverfitParallelFor.For(0, N, &AddBiasChunk, &ctx);
+                        OverfitParallel.For(0, N, &AddBiasChunk, &ctx);
                     }
                 }
             }
@@ -220,7 +220,7 @@ namespace DevOnBike.Overfit.Ops
                     fixed (float* aPtr = aSpan, bPtr = bSpan, cPtr = cSpan)
                     {
                         var ctx = new MatMulRawCtx { A = aPtr, B = bPtr, C = cPtr, AC = aC, BC = bC };
-                        OverfitParallelFor.For(0, aR, &MatMulRawChunk, &ctx);
+                        OverfitParallel.For(0, aR, &MatMulRawChunk, &ctx);
                     }
                 }
             }
@@ -317,7 +317,7 @@ namespace DevOnBike.Overfit.Ops
                     fixed (float* aPtr = aSpan, bPtr = bSpan, cPtr = cSpan)
                     {
                         var ctx = new MatMulAdd_A_BT_Ctx { A = aPtr, B = bPtr, C = cPtr, K = K, M = M };
-                        OverfitParallelFor.For(0, N, &MatMulAdd_A_BT_Chunk, &ctx);
+                        OverfitParallel.For(0, N, &MatMulAdd_A_BT_Chunk, &ctx);
                     }
                 }
             }
@@ -388,7 +388,7 @@ namespace DevOnBike.Overfit.Ops
                     fixed (float* aPtr = aSpan, bPtr = bSpan, cPtr = cSpan)
                     {
                         var ctx = new MatMulAdd_AT_B_Ctx { A = aPtr, B = bPtr, C = cPtr, K = K, N = N, M = M };
-                        OverfitParallelFor.For(0, N, &MatMulAdd_AT_B_Chunk, &ctx);
+                        OverfitParallel.For(0, N, &MatMulAdd_AT_B_Chunk, &ctx);
                     }
                 }
             }

@@ -11,13 +11,13 @@ using Xunit.Abstractions;
 namespace DevOnBike.Overfit.Tests.Core.Runtime
 {
     /// <summary>
-    /// Correctness + zero-alloc tests for <see cref="OverfitParallelFor"/>.
+    /// Correctness + zero-alloc tests for <see cref="OverfitParallel"/>.
     /// </summary>
-    public sealed class OverfitParallelForTests
+    public sealed class OverfitParallelTests
     {
         private readonly ITestOutputHelper _output;
 
-        public OverfitParallelForTests(ITestOutputHelper output)
+        public OverfitParallelTests(ITestOutputHelper output)
         {
             _output = output;
         }
@@ -46,7 +46,7 @@ namespace DevOnBike.Overfit.Tests.Core.Runtime
             fixed (int* p = buffer)
             {
                 var ctx = new SumContext { Buffer = p };
-                OverfitParallelFor.For(0, n, &SumBody, &ctx);
+                OverfitParallel.For(0, n, &SumBody, &ctx);
             }
 
             // Every index written exactly once with its own value
@@ -55,7 +55,7 @@ namespace DevOnBike.Overfit.Tests.Core.Runtime
                 Assert.Equal(i, buffer[i]);
             }
 
-            _output.WriteLine($"WorkerCount: {OverfitParallelFor.WorkerCount}");
+            _output.WriteLine($"WorkerCount: {OverfitParallel.WorkerCount}");
             _output.WriteLine($"Sum 0..{n - 1}: {buffer.Sum()} (expected {n * (n - 1) / 2})");
         }
 
@@ -68,9 +68,9 @@ namespace DevOnBike.Overfit.Tests.Core.Runtime
             fixed (int* p = buffer)
             {
                 var ctx = new SumContext { Buffer = p };
-                OverfitParallelFor.For(0, 0, &SumBody, &ctx);
-                OverfitParallelFor.For(5, 5, &SumBody, &ctx);
-                OverfitParallelFor.For(5, 3, &SumBody, &ctx); // start > end
+                OverfitParallel.For(0, 0, &SumBody, &ctx);
+                OverfitParallel.For(5, 5, &SumBody, &ctx);
+                OverfitParallel.For(5, 3, &SumBody, &ctx); // start > end
             }
 
             // Buffer untouched
@@ -88,7 +88,7 @@ namespace DevOnBike.Overfit.Tests.Core.Runtime
             fixed (int* p = buffer)
             {
                 var ctx = new SumContext { Buffer = p };
-                OverfitParallelFor.For(7, 8, &SumBody, &ctx);
+                OverfitParallel.For(7, 8, &SumBody, &ctx);
             }
 
             Assert.Equal(7, buffer[7]);
@@ -110,7 +110,7 @@ namespace DevOnBike.Overfit.Tests.Core.Runtime
             fixed (int* p = buffer)
             {
                 var ctx = new SumContext { Buffer = p };
-                OverfitParallelFor.For(0, n, &SumBody, &ctx);
+                OverfitParallel.For(0, n, &SumBody, &ctx);
             }
 
             for (var i = 0; i < n; i++) { Assert.Equal(i, buffer[i]); }
@@ -119,7 +119,7 @@ namespace DevOnBike.Overfit.Tests.Core.Runtime
         // ── Zero-allocation guarantee ─────────────────────────────────────────
 
         /// <summary>
-        /// THE headline test. <see cref="OverfitParallelFor.For"/> must allocate
+        /// THE headline test. <see cref="OverfitParallel.For"/> must allocate
         /// 0 managed bytes on the calling thread for the steady-state case (after
         /// JIT warmup). This is the whole reason this class exists vs Parallel.For.
         /// </summary>
@@ -139,7 +139,7 @@ namespace DevOnBike.Overfit.Tests.Core.Runtime
                 var ctx = new SumContext { Buffer = p };
                 for (var w = 0; w < 256; w++)
                 {
-                    OverfitParallelFor.For(0, n, &SumBody, &ctx);
+                    OverfitParallel.For(0, n, &SumBody, &ctx);
                 }
             }
 
@@ -155,7 +155,7 @@ namespace DevOnBike.Overfit.Tests.Core.Runtime
                 var allocBefore = GC.GetAllocatedBytesForCurrentThread();
                 for (var r = 0; r < repetitions; r++)
                 {
-                    OverfitParallelFor.For(0, n, &SumBody, &ctx);
+                    OverfitParallel.For(0, n, &SumBody, &ctx);
                 }
                 var allocAfter = GC.GetAllocatedBytesForCurrentThread();
 
@@ -218,7 +218,7 @@ namespace DevOnBike.Overfit.Tests.Core.Runtime
             // Warmup both paths.
             for (var w = 0; w < 10; w++)
             {
-                OverfitParallelFor.For(0, workItems, &EmptyBody, null);
+                OverfitParallel.For(0, workItems, &EmptyBody, null);
                 Parallel.For(0, workItems, _ => { });
             }
 
@@ -226,12 +226,12 @@ namespace DevOnBike.Overfit.Tests.Core.Runtime
             GC.WaitForPendingFinalizers();
             GC.Collect();
 
-            // OverfitParallelFor
+            // OverfitParallel
             var overfitAllocBefore = GC.GetAllocatedBytesForCurrentThread();
             var overfitStart = Stopwatch.GetTimestamp();
             for (var i = 0; i < iterations; i++)
             {
-                OverfitParallelFor.For(0, workItems, &EmptyBody, null);
+                OverfitParallel.For(0, workItems, &EmptyBody, null);
             }
             var overfitTicks = Stopwatch.GetTimestamp() - overfitStart;
             var overfitAllocAfter = GC.GetAllocatedBytesForCurrentThread();
@@ -250,7 +250,7 @@ namespace DevOnBike.Overfit.Tests.Core.Runtime
             var parallelUs = parallelTicks * 1_000_000.0 / Stopwatch.Frequency / iterations;
             var parallelBytes = (parallelAllocAfter - parallelAllocBefore) / (double)iterations;
 
-            _output.WriteLine($"OverfitParallelFor: {overfitUs:F2} µs/call, {overfitBytes:F1} B/call");
+            _output.WriteLine($"OverfitParallel: {overfitUs:F2} µs/call, {overfitBytes:F1} B/call");
             _output.WriteLine($"Parallel.For:       {parallelUs:F2} µs/call, {parallelBytes:F1} B/call");
             _output.WriteLine($"Dispatch ratio:     {parallelUs / overfitUs:F2}×");
             _output.WriteLine($"Alloc reduction:    {parallelBytes / Math.Max(1, overfitBytes):F0}× (or ∞ if Overfit = 0)");
@@ -262,19 +262,19 @@ namespace DevOnBike.Overfit.Tests.Core.Runtime
             // GC.GetAllocatedBytesForCurrentThread when this test runs in parallel with the sweep.
             var overfitTotalAlloc = overfitAllocAfter - overfitAllocBefore;
             Assert.True(overfitTotalAlloc <= 100,
-                $"OverfitParallelFor allocated {overfitTotalAlloc} B over {iterations} iterations (expected near 0).");
+                $"OverfitParallel allocated {overfitTotalAlloc} B over {iterations} iterations (expected near 0).");
         }
 
         [Fact]
         public unsafe void For_NoTornChunks_AllSlicesCovered()
         {
             const int n = 100_000;
-            var perChunkSum = new long[OverfitParallelFor.WorkerCount];
+            var perChunkSum = new long[OverfitParallel.WorkerCount];
 
             fixed (long* p = perChunkSum)
             {
                 var ctx = new IndependentChunkContext { PerChunkSum = p, ChunkCounter = 0 };
-                OverfitParallelFor.For(0, n, &IndependentChunkBody, &ctx);
+                OverfitParallel.For(0, n, &IndependentChunkBody, &ctx);
             }
 
             long total = 0;
@@ -284,7 +284,7 @@ namespace DevOnBike.Overfit.Tests.Core.Runtime
             var expected = (long)n * (n - 1) / 2;
             Assert.Equal(expected, total);
 
-            _output.WriteLine($"Sum 0..{n - 1} via {OverfitParallelFor.WorkerCount} workers: {total} (expected {expected})");
+            _output.WriteLine($"Sum 0..{n - 1} via {OverfitParallel.WorkerCount} workers: {total} (expected {expected})");
         }
 
         // ── Exception propagation ─────────────────────────────────────────────
@@ -305,7 +305,7 @@ namespace DevOnBike.Overfit.Tests.Core.Runtime
         {
             var ex = Assert.Throws<InvalidOperationException>(() =>
             {
-                OverfitParallelFor.For(0, 100, &AlwaysThrowsBody, null);
+                OverfitParallel.For(0, 100, &AlwaysThrowsBody, null);
             });
 
             Assert.StartsWith("body-error", ex.Message);
@@ -329,7 +329,7 @@ namespace DevOnBike.Overfit.Tests.Core.Runtime
         {
             try
             {
-                OverfitParallelFor.For(0, 100, &AlwaysThrowsBody, null);
+                OverfitParallel.For(0, 100, &AlwaysThrowsBody, null);
             }
             catch (InvalidOperationException)
             {
@@ -343,7 +343,7 @@ namespace DevOnBike.Overfit.Tests.Core.Runtime
             fixed (int* p = buffer)
             {
                 var ctx = new SumContext { Buffer = p };
-                OverfitParallelFor.For(0, n, &SumBody, &ctx);
+                OverfitParallel.For(0, n, &SumBody, &ctx);
             }
 
             for (var i = 0; i < n; i++)

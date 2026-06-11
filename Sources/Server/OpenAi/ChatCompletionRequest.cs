@@ -20,6 +20,11 @@ namespace DevOnBike.Overfit.Server.OpenAi
         [JsonPropertyName("stream")] public bool Stream { get; set; }
         [JsonPropertyName("temperature")] public float? Temperature { get; set; }
         [JsonPropertyName("top_p")] public float? TopP { get; set; }
+
+        /// <summary>Min-P sampling cutoff — a llama.cpp-server extension (not in the OpenAI spec) that common
+        /// local-AI clients send: keep tokens with probability ≥ <c>min_p</c> × P(top). 0 / absent = off.</summary>
+        [JsonPropertyName("min_p")] public float? MinP { get; set; }
+
         [JsonPropertyName("max_tokens")] public int? MaxTokens { get; set; }
 
         /// <summary>Newer OpenAI field name for the generation cap; honoured if <c>max_tokens</c> is absent.</summary>

@@ -4,6 +4,8 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Numerics.Tensors;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 
 namespace DevOnBike.Overfit.Kernels
 {
@@ -268,6 +270,30 @@ namespace DevOnBike.Overfit.Kernels
             int outW,
             int batchOffset)
         {
+            if (Avx2.IsSupported && outW >= 8)
+            {
+                MaxPool2DForwardWithIndicesPool2Avx2(
+                    input, output, maxIndices, channels, inputH, inputW, outH, outW, batchOffset);
+                return;
+            }
+
+            MaxPool2DForwardWithIndicesPool2Scalar(
+                input, output, maxIndices, channels, inputH, inputW, outH, outW, batchOffset);
+        }
+
+        /// <summary>Scalar pool=2 reference (the pre-AVX2 production path) — kept callable as the
+        /// bit-identity oracle for <see cref="MaxPool2DForwardWithIndicesPool2Avx2"/>.</summary>
+        internal static void MaxPool2DForwardWithIndicesPool2Scalar(
+            ReadOnlySpan<float> input,
+            Span<float> output,
+            Span<float> maxIndices,
+            int channels,
+            int inputH,
+            int inputW,
+            int outH,
+            int outW,
+            int batchOffset)
+        {
             var pairMax = inputW <= 128
                 ? stackalloc float[inputW]
                 : new float[inputW];
@@ -321,7 +347,128 @@ namespace DevOnBike.Overfit.Kernels
             }
         }
 
-        private static void MaxPool2DForwardWithIndicesGeneric(
+        /// <summary>
+        /// AVX2 pool=2 path — 8 outputs per iteration. Bit-identical to the scalar Pool2 path,
+        /// including the tie rules the backward scatter depends on: horizontal tie (a == b) picks the
+        /// LEFT column; vertical tie picks ROW 0. Values: vertical <c>Max(row0,row1)</c> then horizontal
+        /// <c>Max(even,odd)</c> — same numbers as the scalar compare chain (no NaNs in this path).
+        /// Index math is exact INT32, converted to float at the end (indices &lt; 2^24 by construction:
+        /// batch-tensor-relative). Trailing outputs (outW % 8) fall through to the scalar inner loop.
+        /// </summary>
+        internal static void MaxPool2DForwardWithIndicesPool2Avx2(
+            ReadOnlySpan<float> input,
+            Span<float> output,
+            Span<float> maxIndices,
+            int channels,
+            int inputH,
+            int inputW,
+            int outH,
+            int outW,
+            int batchOffset)
+        {
+            if (outW < 8)
+            {
+                MaxPool2DForwardWithIndicesPool2Scalar(
+                    input, output, maxIndices, channels, inputH, inputW, outH, outW, batchOffset);
+                return;
+            }
+
+            // Deinterleave reorder: per-128-lane Shuffle yields [a0,a2,b0,b2 | a4,a6,b4,b6];
+            // this permute restores ascending order [a0,a2,a4,a6,b0,b2,b4,b6].
+            var fix = Vector256.Create(0, 1, 4, 5, 2, 3, 6, 7);
+            var iota2 = Vector256.Create(0, 2, 4, 6, 8, 10, 12, 14);
+            var onesI = Vector256.Create(1);
+
+            for (var c = 0; c < channels; c++)
+            {
+                var inputChannelBase = c * inputH * inputW;
+                var outputChannelBase = c * outH * outW;
+
+                for (var oh = 0; oh < outH; oh++)
+                {
+                    var row0Start = inputChannelBase + oh * 2 * inputW;
+                    var row1Start = inputChannelBase + (oh * 2 + 1) * inputW;
+                    var row0 = input.Slice(row0Start, inputW);
+                    var row1 = input.Slice(row1Start, inputW);
+                    var outRowBase = outputChannelBase + oh * outW;
+
+                    var row0StartV = Vector256.Create(row0Start + batchOffset);
+                    var row1StartV = Vector256.Create(row1Start + batchOffset);
+
+                    // Overlapping-last-window: when outW % 8 != 0 the final iteration re-runs at
+                    // ow = outW-8, overwriting up to 7 already-computed lanes with identical values
+                    // (pure function of the input) — no scalar tail, still bit-identical.
+                    var ow = 0;
+                    for (; ow + 8 <= outW; ow += 8)
+                    {
+                        var col = ow * 2;
+                        var r0Lo = Vector256.Create(row0.Slice(col, 8));
+                        var r0Hi = Vector256.Create(row0.Slice(col + 8, 8));
+                        var r1Lo = Vector256.Create(row1.Slice(col, 8));
+                        var r1Hi = Vector256.Create(row1.Slice(col + 8, 8));
+
+                        // Deinterleave both rows into even/odd column lanes.
+                        var r0E = Avx2.PermuteVar8x32(Avx.Shuffle(r0Lo, r0Hi, 0b10_00_10_00), fix);
+                        var r0O = Avx2.PermuteVar8x32(Avx.Shuffle(r0Lo, r0Hi, 0b11_01_11_01), fix);
+                        var r1E = Avx2.PermuteVar8x32(Avx.Shuffle(r1Lo, r1Hi, 0b10_00_10_00), fix);
+                        var r1O = Avx2.PermuteVar8x32(Avx.Shuffle(r1Lo, r1Hi, 0b11_01_11_01), fix);
+
+                        // Vertical max per column, then horizontal winner (a = even col, b = odd col).
+                        var a = Avx.Max(r0E, r1E);
+                        var b = Avx.Max(r0O, r1O);
+                        var hMask = Avx.CompareGreaterThanOrEqual(a, b);   // true → LEFT column wins
+                        var maxVal = Avx.Max(a, b);
+
+                        // Vertical winner at the winning column: row0 wins on >= (tie → row0).
+                        var r0Win = Avx.BlendVariable(r0O, r0E, hMask);
+                        var r1Win = Avx.BlendVariable(r1O, r1E, hMask);
+                        var vMask = Avx.CompareGreaterThanOrEqual(r0Win, r1Win);
+
+                        // index = (winning row start + batchOffset) + 2·ow + (left ? 0 : 1) — exact int32.
+                        var colV = Avx2.Add(Vector256.Create(col), iota2);
+                        colV = Avx2.Add(colV, Avx2.AndNot(hMask.AsInt32(), onesI));
+                        var baseV = Avx2.BlendVariable(row1StartV, row0StartV, vMask.AsInt32());
+                        var idxF = Avx.ConvertToVector256Single(Avx2.Add(baseV, colV));
+
+                        maxVal.CopyTo(output.Slice(outRowBase + ow, 8));
+                        idxF.CopyTo(maxIndices.Slice(outRowBase + ow, 8));
+                    }
+
+                    if (ow < outW)
+                    {
+                        // Overlapping last window: redo one 8-wide pass at outW-8 — overwrites up to 7
+                        // already-written lanes with identical values (pure function) → bit-identical,
+                        // no scalar tail.
+                        ow = outW - 8;
+                        var col = ow * 2;
+                        var r0Lo = Vector256.Create(row0.Slice(col, 8));
+                        var r0Hi = Vector256.Create(row0.Slice(col + 8, 8));
+                        var r1Lo = Vector256.Create(row1.Slice(col, 8));
+                        var r1Hi = Vector256.Create(row1.Slice(col + 8, 8));
+                        var r0E = Avx2.PermuteVar8x32(Avx.Shuffle(r0Lo, r0Hi, 0b10_00_10_00), fix);
+                        var r0O = Avx2.PermuteVar8x32(Avx.Shuffle(r0Lo, r0Hi, 0b11_01_11_01), fix);
+                        var r1E = Avx2.PermuteVar8x32(Avx.Shuffle(r1Lo, r1Hi, 0b10_00_10_00), fix);
+                        var r1O = Avx2.PermuteVar8x32(Avx.Shuffle(r1Lo, r1Hi, 0b11_01_11_01), fix);
+                        var a = Avx.Max(r0E, r1E);
+                        var b = Avx.Max(r0O, r1O);
+                        var hMask = Avx.CompareGreaterThanOrEqual(a, b);
+                        var maxVal = Avx.Max(a, b);
+                        var r0Win = Avx.BlendVariable(r0O, r0E, hMask);
+                        var r1Win = Avx.BlendVariable(r1O, r1E, hMask);
+                        var vMask = Avx.CompareGreaterThanOrEqual(r0Win, r1Win);
+                        var colV = Avx2.Add(Vector256.Create(col), iota2);
+                        colV = Avx2.Add(colV, Avx2.AndNot(hMask.AsInt32(), onesI));
+                        var baseV = Avx2.BlendVariable(row1StartV, row0StartV, vMask.AsInt32());
+                        var idxF = Avx.ConvertToVector256Single(Avx2.Add(baseV, colV));
+                        maxVal.CopyTo(output.Slice(outRowBase + ow, 8));
+                        idxF.CopyTo(maxIndices.Slice(outRowBase + ow, 8));
+                    }
+
+                }
+            }
+        }
+
+        internal static void MaxPool2DForwardWithIndicesGeneric(
             ReadOnlySpan<float> input,
             Span<float> output,
             Span<float> maxIndices,

@@ -12,7 +12,7 @@ using BenchmarkDotNet.Order;
 namespace Benchmarks
 {
     /// <summary>
-    /// Config for <see cref="OverfitParallelForBenchmark"/>. Mirrors the shared
+    /// Config for <see cref="OverfitParallelBenchmark"/>. Mirrors the shared
     /// <c>BenchmarkConfig</c> but omits the <c>WithInvocationCount(1)</c> /
     /// <c>WithUnrollFactor(1)</c> pin so BDN auto-scales the invocation count —
     /// required to time a µs-scale dispatch call without noise.

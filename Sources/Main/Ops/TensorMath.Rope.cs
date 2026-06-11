@@ -33,7 +33,7 @@ namespace DevOnBike.Overfit.Ops
         /// The rotation matrix is orthogonal, so backward is the transpose = the inverse rotation
         /// (sin negated): <c>dx0 = cos·dy0 + sin·dy1,  dx1 = −sin·dy0 + cos·dy1</c>.
         ///
-        /// Parallelized over rows via <see cref="OverfitParallelFor"/> above
+        /// Parallelized over rows via <see cref="OverfitParallel"/> above
         /// <see cref="ParallelThreshold"/>; each row is independent.
         /// </summary>
         public static AutogradNode Rope(
@@ -91,7 +91,7 @@ namespace DevOnBike.Overfit.Ops
                             HeadsPerRow = headsPerRow,
                             SplitHalf = splitHalf,
                         };
-                        OverfitParallelFor.For(0, rows, &RopeForwardChunk, &ctx);
+                        OverfitParallel.For(0, rows, &RopeForwardChunk, &ctx);
                     }
                 }
             }
@@ -150,7 +150,7 @@ namespace DevOnBike.Overfit.Ops
                             HeadsPerRow = headsPerRow,
                             SplitHalf = splitHalf,
                         };
-                        OverfitParallelFor.For(0, rows, &RopeBackwardChunk, &ctx);
+                        OverfitParallel.For(0, rows, &RopeBackwardChunk, &ctx);
                     }
                 }
             }
@@ -208,7 +208,7 @@ namespace DevOnBike.Overfit.Ops
             }
         }
 
-        // ── OverfitParallelFor chunk bodies + context ─────────────────────────
+        // ── OverfitParallel chunk bodies + context ─────────────────────────
 
         private unsafe struct RopeCtx
         {

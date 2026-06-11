@@ -72,6 +72,17 @@ someone else's" story (LoRA-adaptable per deployment).
 dotnet run -c Release --project Demo/AnomalyConsoleDemo
 ```
 
+## 5. EvaluationDemo — Microsoft.Extensions.AI.Evaluation, fully local
+
+Microsoft's official LLM-as-judge evaluation framework (Coherence / Fluency / Groundedness) scoring a good
+and a bad RAG answer — with an **Overfit in-process model as the judge**. No Azure, no key, no egress.
+See [`docs/meai-evaluation.md`](../docs/meai-evaluation.md) for the calibration notes (small judges catch
+bad answers reliably; calibrated absolute scores want a ≥7B judge).
+
+```powershell
+dotnet run -c Release --project Demo/EvaluationDemo -- C:\path\to\judge.gguf   # default: C:\qwen3b\qwen.q4km.gguf
+```
+
 ---
 
 ## Speech & audio (pure C#)

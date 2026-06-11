@@ -294,7 +294,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // intermediate = gate * up (element-wise)
             TensorPrimitives.Multiply(_gate, _intermediate, _intermediate);
 
-            // output = intermediate @ Wdown
+            // output = intermediate @ Wdown. Stays on the original-layout kernel: A/B showed the
+            // Q6_K repacked GEMV is neutral-to-slightly-negative here (down is the biggest matmul
+            // = DRAM-bandwidth-bound; rearranged bytes saturate the same ceiling, the copy costs RAM).
             ProjectParallelDispatched(_intermediate, in wDown, [], output, DFF, DModel);
         }
 

@@ -12,7 +12,7 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
     /// <summary>
     /// Plain-span inference kernels for the Whisper encoder/decoder (no autograd, no graph). SIMD via
     /// TensorPrimitives; the large encoder matmuls/convs/attention are multi-threaded over independent output
-    /// rows / channels / heads via <see cref="OverfitParallelFor"/> (above a work threshold, so the decoder's
+    /// rows / channels / heads via <see cref="OverfitParallel"/> (above a work threshold, so the decoder's
     /// single-row calls stay sequential). Shared by <see cref="WhisperEncoder"/> and <see cref="WhisperDecoder"/>.
     /// </summary>
     internal static unsafe class WhisperKernels
@@ -73,7 +73,7 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             fixed (float* xp = x, wp = weight, bp = bias, dp = dst)
             {
                 var ctx = new LinearCtx(xp, wp, bias.IsEmpty ? null : bp, dp, inDim, outDim);
-                OverfitParallelFor.For(0, rows, &LinearWorker, &ctx);
+                OverfitParallel.For(0, rows, &LinearWorker, &ctx);
             }
         }
 
@@ -128,7 +128,7 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             fixed (float* ip = input, wp = weight, bp = bias, dp = dst)
             {
                 var ctx = new Conv1dCtx(ip, wp, bias.IsEmpty ? null : bp, dp, inC, tIn, kSize, stride, pad, tOut);
-                OverfitParallelFor.For(0, outC, &Conv1dWorker, &ctx);
+                OverfitParallel.For(0, outC, &Conv1dWorker, &ctx);
             }
         }
 
@@ -238,7 +238,7 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
                 fixed (float* qp = q, kp = k, vp = v, ap = attnOut)
                 {
                     var ctx = new MhaCtx(qp, kp, vp, ap, tq, tkv, dModel, dHead, scale, causal);
-                    OverfitParallelFor.For(0, nHeads, &MhaWorker, &ctx);
+                    OverfitParallel.For(0, nHeads, &MhaWorker, &ctx);
                 }
             }
 

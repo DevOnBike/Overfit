@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<TargetFramework>net10.0</TargetFramework>
+		<Nullable>annotations</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<DebugType>embedded</DebugType>
+		<RootNamespace>DevOnBike.Overfit.Demo.Evaluation</RootNamespace>
+		<AssemblyName>EvaluationDemo</AssemblyName>
+		<IsPackable>false</IsPackable>
+
+		<SonarQubeExclude>true</SonarQubeExclude>
+		<NoWarn>$(NoWarn);1591</NoWarn>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\..\Sources\Main\Main.csproj" />
+		<ProjectReference Include="..\..\Sources\Extensions.AI\Extensions.AI.csproj" />
+		<PackageReference Include="Microsoft.Extensions.AI.Evaluation" />
+		<PackageReference Include="Microsoft.Extensions.AI.Evaluation.Quality" />
+	</ItemGroup>
+
+</Project>

@@ -18,7 +18,9 @@ namespace DevOnBike.Overfit.Server.OpenAi
     /// </summary>
     public static class OpenAiChatMapping
     {
-        /// <summary>Maps OpenAI temperature / top_p / max_tokens onto Overfit sampling. temperature ≈ 0 → greedy.</summary>
+        /// <summary>Maps OpenAI temperature / top_p / min_p / max_tokens onto Overfit sampling.
+        /// temperature ≈ 0 → greedy; <c>min_p</c> &gt; 0 (llama.cpp-server extension) → Min-P strategy
+        /// (takes precedence over top_p, matching common local-client semantics).</summary>
         public static (SamplingOptions Sampling, int MaxTokens) BuildSampling(ChatCompletionRequest req)
         {
             var maxTokens = req.MaxTokens ?? req.MaxCompletionTokens ?? 512;
@@ -28,9 +30,19 @@ namespace DevOnBike.Overfit.Server.OpenAi
             }
 
             var temperature = req.Temperature ?? 1.0f;
-            var sampling = temperature <= 0.0001f
-                ? SamplingOptions.Greedy
-                : new SamplingOptions(SamplingStrategy.TopP, temperature, topK: 0, topP: req.TopP ?? 1.0f, seed: 0);
+            SamplingOptions sampling;
+            if (temperature <= 0.0001f)
+            {
+                sampling = SamplingOptions.Greedy;
+            }
+            else if (req.MinP is > 0f and < 1f)
+            {
+                sampling = SamplingOptions.WithMinP(req.MinP.Value, temperature);
+            }
+            else
+            {
+                sampling = new SamplingOptions(SamplingStrategy.TopP, temperature, topK: 0, topP: req.TopP ?? 1.0f, seed: 0);
+            }
 
             return (sampling, maxTokens);
         }

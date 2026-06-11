@@ -306,7 +306,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         /// <summary>
         /// Parallel quantized projection — <see cref="Project"/> with the output
-        /// loop split across the zero-allocation <c>OverfitParallelFor</c> worker
+        /// loop split across the zero-allocation <c>OverfitParallel</c> worker
         /// pool. The activation is quantized once (sequentially) into the
         /// caller-owned scratch, then each worker computes a disjoint band of
         /// output dots. Bit-identical to <see cref="Project"/>.
@@ -349,7 +349,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     SuperBlocksPerRow = weight.SuperBlocksPerRow,
                 };
 
-                OverfitParallelFor.ForDecode(0, outputSize, &ProjectChunk, &context);
+                OverfitParallel.ForDecode(0, outputSize, &ProjectChunk, &context);
             }
         }
 
@@ -395,7 +395,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// <summary>
         /// Batched Q6_K projection: <paramref name="rows"/> activation rows × one weight matrix — the
         /// prefill counterpart of <see cref="ProjectParallel"/>. Each row is quantized to Q8_K once;
-        /// the output loop is split across <c>OverfitParallelFor</c> with the <b>rows loop innermost</b>,
+        /// the output loop is split across <c>OverfitParallel</c> with the <b>rows loop innermost</b>,
         /// so each weight output row's super-blocks are read from DRAM once and reused (cache-hot) across
         /// all <paramref name="rows"/> dots — cutting weight byte-traffic ~<paramref name="rows"/>× vs
         /// N× single-token <see cref="Project"/>. Bit-identical to N× <see cref="Project"/>.
@@ -469,7 +469,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     Rows = rows,
                 };
 
-                OverfitParallelFor.For(0, outputSize, &ProjectBatchedChunk, &context);
+                OverfitParallel.For(0, outputSize, &ProjectBatchedChunk, &context);
             }
         }
 

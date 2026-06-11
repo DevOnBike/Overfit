@@ -16,7 +16,7 @@ namespace DevOnBike.Overfit.DeepLearning
     /// (<c>GenerateCached</c>* and the LM head). The reference decode looped over output rows on one core; this fans
     /// the rows across all cores — output-parallel, so race-free. Mirrors the training matmul's pattern
     /// (<c>ComputationGraph.FrozenQuantizedLinear</c>): SIMD <see cref="TensorPrimitives"/>,
-    /// <see cref="OverfitParallelFor"/>, per-worker <see cref="PooledBuffer{T}"/> scratch (no per-row allocation),
+    /// <see cref="OverfitParallel"/>, per-worker <see cref="PooledBuffer{T}"/> scratch (no per-row allocation),
     /// the managed weight passed through the unsafe context via a <see cref="GcHandleScope"/>.
     /// </summary>
     internal static unsafe class DequantMatVec
@@ -49,7 +49,7 @@ namespace DevOnBike.Overfit.DeepLearning
             fixed (float* xp = x, dp = dst)
             {
                 var ctx = new MatVecContext { X = xp, Dst = dp, Weight = scope.Token, K = inDim };
-                OverfitParallelFor.For(0, outDim, &Chunk, &ctx);
+                OverfitParallel.For(0, outDim, &Chunk, &ctx);
             }
         }
 

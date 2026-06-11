@@ -193,8 +193,8 @@ namespace DevOnBike.Overfit.Tests.Core.Runtime
             }
 
             _output.WriteLine($"3× LayerNormBackward calls — gamma/beta/input grads bit-identical.");
-            _output.WriteLine($"  shape: [{numRows}, {C}], workerCount={DevOnBike.Overfit.Runtime.OverfitParallelFor.WorkerCount}");
-            _output.WriteLine($"  partial buffer size per call: {DevOnBike.Overfit.Runtime.OverfitParallelFor.WorkerCount * C * 2 * 4} bytes (×2 for gamma+beta)");
+            _output.WriteLine($"  shape: [{numRows}, {C}], workerCount={DevOnBike.Overfit.Runtime.OverfitParallel.WorkerCount}");
+            _output.WriteLine($"  partial buffer size per call: {DevOnBike.Overfit.Runtime.OverfitParallel.WorkerCount * C * 2 * 4} bytes (×2 for gamma+beta)");
 
             input.Dispose();
             gamma.Dispose();

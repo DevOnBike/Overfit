@@ -64,7 +64,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         /// <summary>
         /// Parallel batched projection — the output dimension is split across the
-        /// zero-allocation <c>OverfitParallelFor</c> pool (each worker owns a
+        /// zero-allocation <c>OverfitParallel</c> pool (each worker owns a
         /// disjoint band of output columns for every row, so there are no
         /// cross-worker writes). Bit-identical to <see cref="Project"/>.
         /// </summary>
@@ -96,7 +96,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     OutputSize = outputSize,
                 };
 
-                OverfitParallelFor.For(0, outputSize, &ProjectColumnRange, &context);
+                OverfitParallel.For(0, outputSize, &ProjectColumnRange, &context);
             }
         }
 

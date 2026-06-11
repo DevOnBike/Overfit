@@ -28,7 +28,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     /// Attention is not weight-bound (no large weight matrix — just Q·K, softmax and
     /// softmax·V over the cache), so the batched win is parallelism: the <c>N</c>
     /// queries are independent (disjoint output rows + a disjoint score-scratch row
-    /// each, read-only shared K/V), so they fan out across <c>OverfitParallelFor</c>
+    /// each, read-only shared K/V), so they fan out across <c>OverfitParallel</c>
     /// with no cross-worker writes and no per-query dispatch overhead.
     /// </para>
     /// </summary>
@@ -64,7 +64,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         /// <summary>
         /// Parallel batched attention — the <c>rows</c> queries fan out across the
-        /// zero-allocation <c>OverfitParallelFor</c> pool. Bit-identical to
+        /// zero-allocation <c>OverfitParallel</c> pool. Bit-identical to
         /// <see cref="Compute"/> (each query is independent: disjoint output row,
         /// disjoint score-scratch row, read-only shared K/V).
         /// </summary>
@@ -103,7 +103,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     BasePos = cacheLength - rows,
                 };
 
-                OverfitParallelFor.For(0, rows, &ComputeQueryRange, &context);
+                OverfitParallel.For(0, rows, &ComputeQueryRange, &context);
             }
         }
 

@@ -1,7 +1,7 @@
 ﻿<Project>
     <PropertyGroup>
-        <Version>10.0.22</Version>
-        <FileVersion>10.0.22</FileVersion>
+        <Version>10.0.23</Version>
+        <FileVersion>10.0.23</FileVersion>
         <InformationalVersion>release+id</InformationalVersion>
         <Authors>DevOnBike</Authors>
         <Company>Sharp IT</Company>

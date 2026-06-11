@@ -330,13 +330,13 @@ namespace DevOnBike.Overfit.Kernels
             }
 
             // fixed pointer cannot be captured in Parallel.For lambda (CS1764).
-            // OverfitParallelFor takes a static function pointer + void* context,
+            // OverfitParallel takes a static function pointer + void* context,
             // so closures aren't a concern — but we still want fixed/pinned spans
             // for the duration of the dispatch.
             fixed (float* goPtr = gradOutput, wPtr = weights, giPtr = gradInput)
             {
                 var ctx = new BackwardInputContext(goPtr, wPtr, giPtr, inputSize, outputSize);
-                OverfitParallelFor.For(0, batchSize, &BackwardInputChunkWorker, &ctx);
+                OverfitParallel.For(0, batchSize, &BackwardInputChunkWorker, &ctx);
             }
         }
 
@@ -423,12 +423,12 @@ namespace DevOnBike.Overfit.Kernels
                 return;
             }
 
-            // OverfitParallelFor: static function pointer + void* context, zero
+            // OverfitParallel: static function pointer + void* context, zero
             // allocation per dispatch. Pin spans for the duration of For().
             fixed (float* inPtr = input, goPtr = gradOutput, gwPtr = gradWeights)
             {
                 var ctx = new AccumulateWeightGradContext(inPtr, goPtr, gwPtr, batchSize, inputSize, outputSize);
-                OverfitParallelFor.For(0, inputSize, &AccumulateWeightGradChunkWorker, &ctx);
+                OverfitParallel.For(0, inputSize, &AccumulateWeightGradChunkWorker, &ctx);
             }
         }
 

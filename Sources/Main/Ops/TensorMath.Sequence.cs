@@ -6,6 +6,7 @@
 using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Autograd;
+using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 
@@ -44,7 +45,7 @@ namespace DevOnBike.Overfit.Ops
             }
             else
             {
-                Parallel.For(0, batchSize, b => ExecuteLSTMInner(b, hS,
+                OverfitParallel.For(0, batchSize, b => ExecuteLSTMInner(b, hS,
                     gD.DataView.AsSpan(),
                     uh.DataView.AsReadOnlySpan(),
                     B.DataView.AsReadOnlySpan(),
@@ -105,9 +106,9 @@ namespace DevOnBike.Overfit.Ops
 
             using var dGNode = AllocateNode(null, new TensorShape(batchSize, 4 * hS), false, clearMemory: false);
 
-            Parallel.For(0, batchSize,
-                () => new TensorStorage<float>(hS * 4, false),
-                (b, state, arrNode) =>
+            // Body shared by the sequential (replica-suppressed) and parallel paths; arrNode is the
+            // per-thread 4·hS scratch.
+            var processBatch = (int b, TensorStorage<float> arrNode) =>
                 {
                     var dGS = dGNode.DataView.AsSpan().Slice(b * 4 * hS, 4 * hS);
                     var gs = gates.DataView.AsReadOnlySpan().Slice(b * 4 * hS, 4 * hS);
@@ -150,9 +151,27 @@ namespace DevOnBike.Overfit.Ops
                         TensorPrimitives.MultiplyAdd(dc, f, dcp, dcp);
                     }
 
-                    return arrNode;
-                },
-                arrNode => arrNode.Dispose());
+                };
+
+            if (OverfitParallel.SuppressParallelismOnCurrentThread)
+            {
+                using var scratch = new TensorStorage<float>(hS * 4, false);
+                for (var b = 0; b < batchSize; b++)
+                {
+                    processBatch(b, scratch);
+                }
+            }
+            else
+            {
+                Parallel.For(0, batchSize,
+                    () => new TensorStorage<float>(hS * 4, false),
+                    (b, state, arrNode) =>
+                    {
+                        processBatch(b, arrNode);
+                        return arrNode;
+                    },
+                    arrNode => arrNode.Dispose());
+            }
 
             if (x.RequiresGrad)
             {

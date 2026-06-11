@@ -164,7 +164,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             //    Bit-identical: K/V is fully cached before the head-parallel reads.
             var useHeadParallel = weights.HasGqa
                 && HeadCount > KvHeadCount
-                && OverfitParallelFor.WorkerCount > KvHeadCount;
+                && OverfitParallel.WorkerCount > KvHeadCount;
 
             if (useHeadParallel)
             {
@@ -183,7 +183,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 }
             }
 
-            // Heads are parallelised across KV groups via OverfitParallelFor:
+            // Heads are parallelised across KV groups via OverfitParallel:
             // one worker per KV head, each owning a disjoint KV-cache slot and a
             // disjoint contiguous run of Q heads. No cross-worker writes — the
             // result is bit-identical to the sequential head loop. Each head
@@ -221,11 +221,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 {
                     // K/V already cached above; fan Q-proj + attend + O-proj across the Q
                     // heads via the decode dispatch (capped / spin-pool per config).
-                    OverfitParallelFor.ForDecode(0, HeadCount, &DecodeHeadQao, contextPtr);
+                    OverfitParallel.ForDecode(0, HeadCount, &DecodeHeadQao, contextPtr);
                 }
-                else if (KvHeadCount > 1 && OverfitParallelFor.WorkerCount > 1)
+                else if (KvHeadCount > 1 && OverfitParallel.WorkerCount > 1)
                 {
-                    OverfitParallelFor.For(0, KvHeadCount, &DecodeKvGroup, contextPtr);
+                    OverfitParallel.For(0, KvHeadCount, &DecodeKvGroup, contextPtr);
                 }
                 else
                 {
@@ -345,9 +345,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
                 var contextPtr = Unsafe.AsPointer(ref context);
 
-                if (HeadCount > 1 && OverfitParallelFor.WorkerCount > 1)
+                if (HeadCount > 1 && OverfitParallel.WorkerCount > 1)
                 {
-                    OverfitParallelFor.For(0, HeadCount, &ProcessHeadRangeBatched, contextPtr);
+                    OverfitParallel.For(0, HeadCount, &ProcessHeadRangeBatched, contextPtr);
                 }
                 else
                 {

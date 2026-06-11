@@ -34,6 +34,9 @@ namespace DevOnBike.Overfit.Ops
 
             var i = 0;
 
+            // NOTE (measured 2026-06-11, don't re-attempt): an explicit Vector512 variant of this loop
+            // was ≈0 (444→431 ms aggregate, noise) — the op is 3-stream memory-bound (in + gradOut +
+            // gradIn r/w), so SIMD width past 256-bit buys nothing. Same verdict as ReLU forward.
             if (Vector.IsHardwareAccelerated)
             {
                 var vCount = Vector<float>.Count;

@@ -17,7 +17,7 @@ namespace DevOnBike.Overfit.Ops
     /// Each buffer type is a <b>single contiguous</b> <see cref="TensorStorage{T}"/>:
     /// worker <c>w</c> owns the slice <c>[w * length, length)</c>. Contiguity lets the
     /// kernels pin the whole buffer with one <c>fixed</c> statement and hand a base
-    /// pointer to <c>OverfitParallelFor</c> — a per-worker array-of-storages could not
+    /// pointer to <c>OverfitParallel</c> — a per-worker array-of-storages could not
     /// be pinned with a single, statically-shaped <c>fixed</c>.
     /// </summary>
     internal sealed class Conv2DWorkspace : IDisposable

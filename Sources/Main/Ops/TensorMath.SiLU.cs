@@ -25,7 +25,7 @@ namespace DevOnBike.Overfit.Ops
         ///
         /// <para>
         /// <b>Parallelization + SIMD</b> mirror <see cref="Gelu"/>: chunks above
-        /// <see cref="ParallelThreshold"/> dispatch via <see cref="OverfitParallelFor"/>,
+        /// <see cref="ParallelThreshold"/> dispatch via <see cref="OverfitParallel"/>,
         /// and within each chunk the sigmoid is computed by
         /// <see cref="TensorPrimitives.Sigmoid(ReadOnlySpan{float}, Span{float})"/>
         /// (SIMD polynomial), not a scalar <c>MathF.Exp</c> loop.
@@ -48,7 +48,7 @@ namespace DevOnBike.Overfit.Ops
                     fixed (float* inPtr = inS, outPtr = outS)
                     {
                         var ctx = new SiLUForwardCtx { Input = inPtr, Output = outPtr };
-                        OverfitParallelFor.For(0, inS.Length, &SiLUForwardChunk, &ctx);
+                        OverfitParallel.For(0, inS.Length, &SiLUForwardChunk, &ctx);
                     }
                 }
             }
@@ -93,7 +93,7 @@ namespace DevOnBike.Overfit.Ops
                             GradOutput = dOutPtr,
                             GradInput = dInPtr,
                         };
-                        OverfitParallelFor.For(0, inS.Length, &SiLUBackwardChunk, &ctx);
+                        OverfitParallel.For(0, inS.Length, &SiLUBackwardChunk, &ctx);
                     }
                 }
             }
@@ -167,7 +167,7 @@ namespace DevOnBike.Overfit.Ops
             return s * (1f + x * (1f - s));
         }
 
-        // ── OverfitParallelFor chunk bodies + contexts ────────────────────────
+        // ── OverfitParallel chunk bodies + contexts ────────────────────────
 
         private unsafe struct SiLUForwardCtx
         {
