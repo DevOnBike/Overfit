@@ -54,6 +54,12 @@ docker run --rm -p 8080:8080 -v /host/models:/models overfit:local \
   --tts-model /models/orpheus.gguf --tts-snac /models/snac
 ```
 
+### MCP variant (`:mcp` tags)
+
+The same image is published with a second entrypoint — `overfit mcp` (an **MCP stdio server** for
+Claude Code / Desktop / IDEs; no port, the host pipes stdio via `docker run -i`). Tags `:mcp` and
+`:<version>-mcp`, built from the `mcp` Dockerfile target. See [`mcp.md`](mcp.md#docker).
+
 ### Populating a volume without a model file on hand
 
 The same binary can fetch a HuggingFace GGUF into the volume (no `curl` needed in the image):

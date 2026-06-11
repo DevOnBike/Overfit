@@ -25,7 +25,15 @@ COPY . .
 RUN dotnet publish ./Sources/Cli/Cli.csproj -c Release -r linux-x64 -p:PublishAot=true -p:GenerateDocumentationFile=false -o /app
 # Result: /app/overfit — a self-contained native ELF.
 
-# ---- runtime stage: chiselled runtime-deps (glibc + zlib only; no shell, no .NET) ----
+# ---- runtime stage (MCP, build with --target mcp): same native binary, stdio MCP server ----
+# An MCP host runs this with an INTERACTIVE pipe (stdio transport - no port, no HTTP):
+#   claude mcp add overfit -- docker run -i --rm -v /host/models:/models devonbikeit/overfit:mcp #       /models/model.gguf [--rag-dir /docs] [--whisper-model /models/ggml-tiny.bin]
+FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-noble-chiseled AS mcp
+WORKDIR /app
+COPY --from=build /app/overfit /app/overfit
+ENTRYPOINT ["/app/overfit", "mcp"]
+
+# ---- runtime stage (default): chiselled runtime-deps (glibc + zlib only; no shell, no .NET) ----
 FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-noble-chiseled AS runtime
 WORKDIR /app
 COPY --from=build /app/overfit /app/overfit

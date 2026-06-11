@@ -89,6 +89,26 @@ a live session driving all three tools.
   with tools from `OverfitMcpTools` or your own `McpTool` (name + description + raw JSON Schema +
   handler). See [`Sources/Mcp/README.md`](../Sources/Mcp/README.md).
 
+## Docker
+
+The MCP server ships as a Docker image variant — same ~34 MB chiselled Native-AOT binary as the
+serve image, with `ENTRYPOINT ["overfit", "mcp"]`. The MCP host pipes stdio straight into the
+container (`docker run -i` — no port, no HTTP), so no .NET and no local build are needed:
+
+```bash
+claude mcp add overfit -- docker run -i --rm -v /host/models:/models devonbikeit/overfit:mcp \
+    /models/model.gguf --rag-dir /docs --whisper-model /models/ggml-tiny.bin
+```
+
+Tags on Docker Hub: `:mcp` (latest) and `:<version>-mcp`, published by the same "Docker Hub"
+workflow as the serve image (shared layers — the second target is tag-only cost). Build locally with
+`Sources/Cli/docker-build-mcp.cmd`; register/smoke the dockerized server with
+`Sources/Mcp/mcp-register-docker.cmd` / `mcp-smoke-docker.cmd` (they handle the volume mounts:
+model folder → `/models`, rag folder → `/docs`, whisper folder → `/whisper`).
+
+Validated: the containerized server (Linux native binary) answered the full `initialize` +
+`tools/list` handshake over `docker run -i` with a host-mounted GGUF.
+
 ## Helper scripts (`Sources/Mcp/*.cmd`)
 
 | Script | What it does |
@@ -98,6 +118,8 @@ a live session driving all three tools.
 | `mcp-status.cmd` | shows the registration + spawns a health check (`✔ Connected`) |
 | `mcp-run.cmd <model.gguf> [options]` | runs the server in the foreground for debugging (type JSON-RPC lines into the console) |
 | `mcp-smoke.cmd <model.gguf> [options]` | no-Claude smoke test: pipes a real `initialize` + `tools/list` handshake in and prints the raw responses |
+| `mcp-register-docker.cmd <model.gguf> [rag-dir] [whisper-ggml]` | registers the **dockerized** server (`devonbikeit/overfit:mcp`; override via `OVERFIT_MCP_IMAGE`) — no .NET on the machine needed |
+| `mcp-smoke-docker.cmd <model.gguf> [image]` | the same handshake smoke against the Docker image |
 
 All of them prefer the Native-AOT publish output, then the plain Release build, then a global
 `overfit` on PATH. Registration scope is the **current directory's** Claude project — run them from

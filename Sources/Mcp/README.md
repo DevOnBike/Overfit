@@ -47,6 +47,10 @@ claude mcp add overfit -- overfit mcp C:\models\model.gguf
 Or use the helper scripts next to this README: `mcp-register.cmd` / `mcp-unregister.cmd` /
 `mcp-status.cmd` / `mcp-run.cmd` (foreground debug) / `mcp-smoke.cmd` (no-Claude handshake test).
 
+No .NET on the machine? Use the **Docker image** (`devonbikeit/overfit:mcp`, ~34 MB, stdio piped via
+`docker run -i`): `mcp-register-docker.cmd` / `mcp-smoke-docker.cmd`. See
+[`docs/mcp.md`](../../docs/mcp.md#docker).
+
 ## Notes
 
 - stdio transport only (local process = on-brand zero egress). The protocol layer is host-agnostic —
