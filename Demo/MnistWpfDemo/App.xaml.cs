@@ -5,7 +5,7 @@
 
 using System.Windows;
 
-namespace DevOnBike.Overfit.UI
+namespace DevOnBike.Overfit.MnistWpfDemo
 {
     /// <summary>
     ///     Interaction logic for App.xaml

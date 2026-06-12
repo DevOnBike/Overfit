@@ -12,7 +12,7 @@ using DevOnBike.Overfit.Tensors.Core;
 
 // Added for TensorStorage and TensorShape
 
-namespace DevOnBike.Overfit.UI
+namespace DevOnBike.Overfit.MnistWpfDemo
 {
     public sealed class MnistPredictor : IDisposable
     {

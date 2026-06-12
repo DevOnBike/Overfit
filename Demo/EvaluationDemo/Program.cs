@@ -13,6 +13,7 @@
 // judgments; the evaluator prompts are tuned against GPT-4o-class models, so treat small local
 // judges (<7B) as a demo of the PLUMBING, not a calibrated quality gate.
 
+using DevOnBike.Overfit.Demo.Evaluation;
 using DevOnBike.Overfit.Extensions.AI;
 using DevOnBike.Overfit.LanguageModels;
 using Microsoft.Extensions.AI;
@@ -99,14 +100,17 @@ return 0;
 static string Truncate(string s, int max)
     => s.Length <= max ? s : s[..max] + "…";
 
-/// <summary>Ensures every judge call gets a generous output budget unless the caller set one.</summary>
-internal sealed class MaxTokensChatClient(IChatClient inner, int maxOutputTokens) : DelegatingChatClient(inner)
+namespace DevOnBike.Overfit.Demo.Evaluation
 {
-    public override Task<ChatResponse> GetResponseAsync(
-        IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+    /// <summary>Ensures every judge call gets a generous output budget unless the caller set one.</summary>
+    internal sealed class MaxTokensChatClient(IChatClient inner, int maxOutputTokens) : DelegatingChatClient(inner)
     {
-        options = options?.Clone() ?? new ChatOptions();
-        options.MaxOutputTokens ??= maxOutputTokens;
-        return base.GetResponseAsync(messages, options, cancellationToken);
+        public override Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+        {
+            options = options?.Clone() ?? new ChatOptions();
+            options.MaxOutputTokens ??= maxOutputTokens;
+            return base.GetResponseAsync(messages, options, cancellationToken);
+        }
     }
 }

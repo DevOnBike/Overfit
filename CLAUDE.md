@@ -17,7 +17,7 @@ binaries, no Python runtime, no ONNX Runtime dependency. Public NuGet ID is
 Sources/Main             DevOnBike.Overfit       library, AOT-compiled in CI
 Sources/Benchmark        Benchmarks (exe)        BenchmarkDotNet harness
 Tests                    DevOnBike.Overfit.Tests xUnit
-UI                       DevOnBike.Overfit.UI    WPF MNIST demo (net10.0-windows)
+Demo/MnistWpfDemo        MnistWpfDemo (exe)      WPF MNIST predictor demo (net10.0-windows)
 Demo/Unity               UnitySwarmServer (exe)  swarm engine demo server
 ```
 

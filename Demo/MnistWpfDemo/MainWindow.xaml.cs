@@ -9,7 +9,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using DevOnBike.Overfit.Diagnostics;
 
-namespace DevOnBike.Overfit.UI
+namespace DevOnBike.Overfit.MnistWpfDemo
 {
     public partial class MainWindow : Window
     {
