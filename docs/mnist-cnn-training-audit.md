@@ -80,12 +80,18 @@ already; "zero-alloc training" would be a banner, not a speedup.
 | 3 ep, peak 0.008 (low) | 0.088–0.101 | 1.5 s | low peaks don't work — peak 4–6× base lr is the regime |
 
 **PyTorch 2.11 CPU reference** (`Scripts/bench_mnist_torch.py`) — identical arch / data / batch 128 /
-AdamW on the same box: **~605 ms/epoch at its optimal 16 threads** (32 threads = catastrophic
-13–14 s/epoch — the same SMT-oversubscription lesson as our worker-count findings) vs Overfit DP×8
-**~500 ms/epoch** → **Overfit is ~1.2× faster per epoch on this workload**. Honest scope: a tiny
-1→8-channel conv is dispatch-bound, where oneDNN's conv kernels can't shine and Python's per-step
-overhead hurts; on large convs/transformers PyTorch would likely win. `torch.compile` untested on
-this box (Inductor needs MSVC `cl` on PATH).
+AdamW on the same box, thread-count SWEPT to find torch's true optimum (4→710 ms, 6→565, **8→524–570
+(optimum)**, 10–16→600–615, 24→685, 32→13–14 s/epoch — the same SMT-oversubscription lesson as our
+worker-count findings). Overfit side measured with **BenchmarkDotNet** (`MnistTrainingEpochBenchmark`,
+1 op = 1 full epoch, 10 iterations): **503.0 ± 4.2 ms/epoch, 1.31 MB allocated/epoch**.
+
+**Verdict: Overfit ≈ PyTorch CPU on this workload, consistently ~5–10% faster** (503 ± 4 vs ~524–570
+at torch's optimal 8 threads — the bands don't overlap, but the margin is small). ⚠️ RETRACTION of the
+first claim in this addendum's draft: an earlier "1.2× faster" compared against torch at 16 threads,
+which a later sweep showed is NOT its optimum (8 is) — always sweep BOTH sides' knobs before claiming
+a ratio (same lesson as the llama.cpp "parity" retraction). Honest scope: a tiny 1→8-channel conv is
+dispatch-bound, where oneDNN's conv kernels can't shine and Python's per-step overhead hurts; on large
+convs/transformers PyTorch would likely win. `torch.compile` untested (Inductor needs MSVC `cl`).
 
 ## Reproduce
 
@@ -96,5 +102,6 @@ dotnet test ./Tests/Tests.csproj -c Release --filter "FullyQualifiedName~CnnData
 dotnet test ./Tests/Tests.csproj -c Release --filter "FullyQualifiedName~MnistDataParallelBench"  # 5-arm sweep (single / 4 / 8 / lr rules)
 dotnet test ./Tests/Tests.csproj -c Release --filter "FullyQualifiedName~MaxPoolPool2Avx2Parity"  # bit-identity gate (fast, always on)
 dotnet test ./Tests/Tests.csproj -c Release --filter "FullyQualifiedName~OneCycle"                # one-cycle LR arms (flip [LongFact] first)
-python Scripts/bench_mnist_torch.py 16                                                            # PyTorch reference (same arch/box)
+python Scripts/bench_mnist_torch.py 8                                                             # PyTorch reference at ITS optimum (sweep showed 8 thr)
+dotnet run -c Release --project Sources/Benchmark -- --filter "*MnistTrainingEpoch*"              # BDN-grade ms/epoch for the Overfit side
 ```

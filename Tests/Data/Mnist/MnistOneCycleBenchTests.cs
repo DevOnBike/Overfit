@@ -23,8 +23,9 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
     /// epochs. Measured: baseline 5ep ≈ loss 0.036–0.049 @ ~2.8s; **3ep @ peak 0.048 ≈ 0.0397 @ 1.47s
     /// (−47% time, matches baseline band)**; **4ep @ peak 0.032 ≈ 0.0304 @ 2.0s (−28% time, BEATS the
     /// baseline band)**. Low peaks don't work (3ep @ 0.008 → 0.088); peak 4–6× base lr is the regime.
-    /// PyTorch 2.11 CPU reference on the same box/arch/batch (Scripts/bench_mnist_torch.py, 16 threads
-    /// = its optimum; 32 threads = catastrophic 13s/ep): ~605 ms/epoch vs our ~500 ms/epoch (DP×8).
+    /// PyTorch 2.11 CPU reference on the same box/arch/batch (Scripts/bench_mnist_torch.py, thread
+    /// sweep → ITS optimum is 8 threads): ~524–570 ms/epoch vs our 503 ± 4 ms (BenchmarkDotNet,
+    /// MnistTrainingEpochBenchmark) — on par, consistently ~5–10% faster. (32 torch threads = 13 s/ep.)
     /// Same DP×8 / batch-128 rig as the DataParallel8 benchmark; fresh layers per arm.
     /// </summary>
     public sealed class MnistOneCycleBenchTests
