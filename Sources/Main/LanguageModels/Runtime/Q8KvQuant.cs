@@ -6,6 +6,7 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
+using DevOnBike.Overfit.Intrinsics;
 
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
@@ -26,7 +27,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var n = src.Length;
             var maxAbs = 0f;
             var i = 0;
-            if (Avx.IsSupported && n >= 8)
+            if (CpuFeatures.HasAvx && n >= 8)
             {
                 ref var s = ref MemoryMarshal.GetReference(src);
                 var absMask = Vector256.Create(0x7FFFFFFF).AsSingle();

@@ -14,3 +14,4 @@ OVERFIT006 | Performance | Warning | String interpolation/concatenation in per-c
 OVERFIT007 | Performance | Warning | params call materialises a hidden array in per-call code
 OVERFIT008 | Performance | Warning | Raw Parallel.For/ForEach/Invoke — use suppress-aware OverfitParallel
 OVERFIT009 | Performance | Warning | .ToArray() in per-call code — slice or use pooled buffers
+OVERFIT015 | Performance | Warning | Direct intrinsics IsSupported — gate ISA paths through CpuFeatures

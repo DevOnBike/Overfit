@@ -9,6 +9,7 @@ using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.LanguageModels.Rope;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.Ops;
+using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 
@@ -426,7 +427,7 @@ namespace DevOnBike.Overfit.DeepLearning
                 }
                 if (lora is not null)
                 {
-                    System.Threading.Tasks.Parallel.For(0, dHead, jj =>
+                    OverfitParallel.For(0, dHead, jj =>
                     {
                         var o = (h * dHead) + jj;
                         var row = buf.AsSpan(jj * dModel, dModel);
@@ -461,7 +462,7 @@ namespace DevOnBike.Overfit.DeepLearning
                 }
                 if (lora is not null)
                 {
-                    System.Threading.Tasks.Parallel.For(0, dModel, o =>
+                    OverfitParallel.For(0, dModel, o =>
                     {
                         var row = buf.AsSpan(o * dHead, dHead);
                         for (var i = 0; i < dHead; i++)
@@ -491,7 +492,7 @@ namespace DevOnBike.Overfit.DeepLearning
                 var a = lora.A.DataView.AsSpan().ToArray();
                 var bb = lora.B.DataView.AsSpan().ToArray();
                 var rank = lora.Rank;
-                System.Threading.Tasks.Parallel.For(0, outDim, o =>
+                OverfitParallel.For(0, outDim, o =>
                 {
                     var row = buf.AsSpan(o * inDim, inDim);
                     for (var i = 0; i < inDim; i++)

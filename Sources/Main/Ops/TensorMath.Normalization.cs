@@ -370,87 +370,97 @@ namespace DevOnBike.Overfit.Ops
             // Closure captures: AutogradNode references (classes) — Spans rebuilt inside the lambda
             // (cannot cross a delegate boundary). Per-thread xhat/term buffers rented via PooledBuffer
             // (using-scoped, ArrayPool<T>.Shared-backed — fastest per 2026-05-29 PoolComparisonBenchmark).
-            var sumDy = new float[C];
-            var sumDyX = new float[C];
-            var inputNode = input;
-            var outputNode = output;
-            var meanNode = mean;
-            var invStdNode = invStd;
-
-            OverfitParallel.For(0, C, c =>
+            // Rented (>= C) — every slot [0, C) is ASSIGNED by the first parallel pass before any read,
+            // so no Clear() is needed and the excess tail is never touched.
+            var sumDy = PooledBuffer<float>.RentArray(C);
+            var sumDyX = PooledBuffer<float>.RentArray(C);
+            try
             {
-                var inLocal = inputNode.DataView.AsReadOnlySpan();
-                var ogLocal = outputNode.GradView.AsReadOnlySpan();
-                var meanLocal = meanNode.DataView.AsReadOnlySpan();
-                var invStdLocal = invStdNode.DataView.AsReadOnlySpan();
+                var inputNode = input;
+                var outputNode = output;
+                var meanNode = mean;
+                var invStdNode = invStd;
 
-                using var xhatBuf = new PooledBuffer<float>(hw, clearMemory: false);
-                var xhatLocal = xhatBuf.Span;
-                var meanC = meanLocal[c];
-                var invStdC = invStdLocal[c];
-                var sDy = 0f;
-                var sDyX = 0f;
-                for (var n = 0; n < N; n++)
-                {
-                    var off = (n * C + c) * hw;
-                    var gB = ogLocal.Slice(off, hw);
-                    TensorPrimitives.Subtract(inLocal.Slice(off, hw), meanC, xhatLocal);
-                    TensorPrimitives.Multiply(xhatLocal, invStdC, xhatLocal);
-                    sDy += TensorPrimitives.Sum(gB);
-                    sDyX += TensorPrimitives.Dot(gB, xhatLocal);
-                }
-
-                sumDy[c] = sDy;
-                sumDyX[c] = sDyX;
-            });
-
-            if (beta.RequiresGrad)
-            {
-                var betaGrad = beta.GradView.AsSpan();
-                for (var c = 0; c < C; c++) { betaGrad[c] += sumDy[c]; }
-            }
-            if (gamma.RequiresGrad)
-            {
-                var gammaGrad = gamma.GradView.AsSpan();
-                for (var c = 0; c < C; c++) { gammaGrad[c] += sumDyX[c]; }
-            }
-
-            if (input.RequiresGrad)
-            {
-                var gammaNode = gamma;
                 OverfitParallel.For(0, C, c =>
                 {
                     var inLocal = inputNode.DataView.AsReadOnlySpan();
                     var ogLocal = outputNode.GradView.AsReadOnlySpan();
-                    var iGLocal = inputNode.GradView.AsSpan();
                     var meanLocal = meanNode.DataView.AsReadOnlySpan();
                     var invStdLocal = invStdNode.DataView.AsReadOnlySpan();
-                    var gammaLocal = gammaNode.DataView.AsReadOnlySpan();
 
                     using var xhatBuf = new PooledBuffer<float>(hw, clearMemory: false);
-                    using var termBuf = new PooledBuffer<float>(hw, clearMemory: false);
                     var xhatLocal = xhatBuf.Span;
-                    var termLocal = termBuf.Span;
                     var meanC = meanLocal[c];
                     var invStdC = invStdLocal[c];
-                    var coeff = gammaLocal[c] * invStdC / m;
-                    var sumDyC = sumDy[c];
-                    var sumDyXC = sumDyX[c];
-
+                    var sDy = 0f;
+                    var sDyX = 0f;
                     for (var n = 0; n < N; n++)
                     {
                         var off = (n * C + c) * hw;
                         var gB = ogLocal.Slice(off, hw);
-                        var iGB = iGLocal.Slice(off, hw);
                         TensorPrimitives.Subtract(inLocal.Slice(off, hw), meanC, xhatLocal);
                         TensorPrimitives.Multiply(xhatLocal, invStdC, xhatLocal);
-                        TensorPrimitives.Multiply(gB, (float)m, termLocal);
-                        TensorPrimitives.Subtract(termLocal, sumDyC, termLocal);
-                        TensorPrimitives.Multiply(xhatLocal, sumDyXC, xhatLocal);
-                        TensorPrimitives.Subtract(termLocal, xhatLocal, termLocal);
-                        TensorPrimitives.MultiplyAdd(termLocal, coeff, iGB, iGB);
+                        sDy += TensorPrimitives.Sum(gB);
+                        sDyX += TensorPrimitives.Dot(gB, xhatLocal);
                     }
+
+                    sumDy[c] = sDy;
+                    sumDyX[c] = sDyX;
                 });
+
+                if (beta.RequiresGrad)
+                {
+                    var betaGrad = beta.GradView.AsSpan();
+                    for (var c = 0; c < C; c++) { betaGrad[c] += sumDy[c]; }
+                }
+                if (gamma.RequiresGrad)
+                {
+                    var gammaGrad = gamma.GradView.AsSpan();
+                    for (var c = 0; c < C; c++) { gammaGrad[c] += sumDyX[c]; }
+                }
+
+                if (input.RequiresGrad)
+                {
+                    var gammaNode = gamma;
+                    OverfitParallel.For(0, C, c =>
+                    {
+                        var inLocal = inputNode.DataView.AsReadOnlySpan();
+                        var ogLocal = outputNode.GradView.AsReadOnlySpan();
+                        var iGLocal = inputNode.GradView.AsSpan();
+                        var meanLocal = meanNode.DataView.AsReadOnlySpan();
+                        var invStdLocal = invStdNode.DataView.AsReadOnlySpan();
+                        var gammaLocal = gammaNode.DataView.AsReadOnlySpan();
+
+                        using var xhatBuf = new PooledBuffer<float>(hw, clearMemory: false);
+                        using var termBuf = new PooledBuffer<float>(hw, clearMemory: false);
+                        var xhatLocal = xhatBuf.Span;
+                        var termLocal = termBuf.Span;
+                        var meanC = meanLocal[c];
+                        var invStdC = invStdLocal[c];
+                        var coeff = gammaLocal[c] * invStdC / m;
+                        var sumDyC = sumDy[c];
+                        var sumDyXC = sumDyX[c];
+
+                        for (var n = 0; n < N; n++)
+                        {
+                            var off = (n * C + c) * hw;
+                            var gB = ogLocal.Slice(off, hw);
+                            var iGB = iGLocal.Slice(off, hw);
+                            TensorPrimitives.Subtract(inLocal.Slice(off, hw), meanC, xhatLocal);
+                            TensorPrimitives.Multiply(xhatLocal, invStdC, xhatLocal);
+                            TensorPrimitives.Multiply(gB, (float)m, termLocal);
+                            TensorPrimitives.Subtract(termLocal, sumDyC, termLocal);
+                            TensorPrimitives.Multiply(xhatLocal, sumDyXC, xhatLocal);
+                            TensorPrimitives.Subtract(termLocal, xhatLocal, termLocal);
+                            TensorPrimitives.MultiplyAdd(termLocal, coeff, iGB, iGB);
+                        }
+                    });
+                }
+            }
+            finally
+            {
+                PooledBuffer<float>.ReturnArray(sumDyX);
+                PooledBuffer<float>.ReturnArray(sumDy);
             }
         }
     }

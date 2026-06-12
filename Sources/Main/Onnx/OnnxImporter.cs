@@ -369,13 +369,7 @@ namespace DevOnBike.Overfit.Onnx
                 }
 
                 var raw = new byte[length];
-
-                Buffer.BlockCopy(
-                    fileBytes,
-                    offset,
-                    raw,
-                    0,
-                    length);
+                fileBytes.AsSpan(offset, length).CopyTo(raw);
 
                 model.Graph.Initializers[i] = new OnnxTensor
                 {

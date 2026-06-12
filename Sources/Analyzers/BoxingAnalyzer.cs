@@ -67,6 +67,7 @@ namespace DevOnBike.Overfit.Analyzers
 
             var from = operation.Operand.Type?.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat) ?? "?";
             var to = operation.Type?.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat) ?? "?";
+
             context.ReportDiagnostic(Diagnostic.Create(Rule, operation.Syntax.GetLocation(), from, to));
         }
     }

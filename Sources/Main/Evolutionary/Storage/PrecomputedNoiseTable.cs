@@ -71,6 +71,7 @@ namespace DevOnBike.Overfit.Evolutionary.Storage
             var partitionSize = Math.Max(MinPartitionSize, length / Math.Max(1, Environment.ProcessorCount));
             var partitioner = Partitioner.Create(0, length, partitionSize);
 
+#pragma warning disable OVERFIT008 // Partitioner + ForEach range-work (no OverfitParallel equivalent); one-time table build, never inside DP replicas
             Parallel.ForEach(partitioner, range =>
             {
                 var (from, to) = range;
@@ -83,6 +84,7 @@ namespace DevOnBike.Overfit.Evolutionary.Storage
 
                 FillRange(_buffer.AsSpan(from, to - from), partitionRng);
             });
+#pragma warning restore OVERFIT008
         }
 
         /// <summary>

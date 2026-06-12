@@ -247,7 +247,7 @@ namespace DevOnBike.Overfit.Cli
                         var embedEp = embedder is null ? string.Empty : " | POST /v1/embeddings";
                         var ttsEp = tts is null ? string.Empty : " | POST /v1/audio/speech";
                         Console.WriteLine();
-                        Console.WriteLine($"OpenAI-compatible server listening on {baseUrl}");
+                        Console.WriteLine($"Overfit OpenAI-compatible server listening on {baseUrl}");
                         Console.WriteLine($"  model id:  {modelName}");
                         Console.WriteLine($"  endpoints: GET /v1/models | POST /v1/chat/completions (stream + non-stream){embedEp}{ttsEp} | GET /health");
                         Console.WriteLine();

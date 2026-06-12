@@ -33,35 +33,56 @@ dotnet_diagnostic.OVERFIT004.severity = suggestion
 dotnet_diagnostic.OVERFIT005.severity = suggestion
 dotnet_diagnostic.OVERFIT006.severity = suggestion
 dotnet_diagnostic.OVERFIT007.severity = suggestion
-dotnet_diagnostic.OVERFIT008.severity = warning
+# PROMOTED TO ERROR (criteria: zero existing sites + unconditional rule + trivial fix/pragma + high miss-cost):
+# OVERFIT008 — a suppress leak silently breaks data-parallel training (measured 1.8x); like RS0030.
+# OVERFIT015 — CpuFeatures gating is a hard convention; the fix is a one-token change.
+dotnet_diagnostic.OVERFIT008.severity = error
+dotnet_diagnostic.OVERFIT015.severity = error
 dotnet_diagnostic.OVERFIT009.severity = suggestion
 
 [Sources/Main/Kernels/**.cs]
-dotnet_diagnostic.OVERFIT001.severity = warning
-dotnet_diagnostic.OVERFIT002.severity = warning
+# Allocation rules are ERRORS in pure kernels — per-call allocation is never right here;
+# a justified exception is an explicit #pragma with the reason.
+dotnet_diagnostic.OVERFIT001.severity = error
+dotnet_diagnostic.OVERFIT002.severity = error
 dotnet_diagnostic.OVERFIT003.severity = warning
 dotnet_diagnostic.OVERFIT004.severity = warning
 dotnet_diagnostic.OVERFIT005.severity = warning
 dotnet_diagnostic.OVERFIT006.severity = warning
 dotnet_diagnostic.OVERFIT007.severity = warning
-dotnet_diagnostic.OVERFIT009.severity = warning
+dotnet_diagnostic.OVERFIT009.severity = error
 
 [Sources/Main/Intrinsics/**.cs]
-dotnet_diagnostic.OVERFIT001.severity = warning
-dotnet_diagnostic.OVERFIT002.severity = warning
+# Allocation rules are ERRORS in pure kernels — per-call allocation is never right here;
+# a justified exception is an explicit #pragma with the reason.
+dotnet_diagnostic.OVERFIT001.severity = error
+dotnet_diagnostic.OVERFIT002.severity = error
 dotnet_diagnostic.OVERFIT003.severity = warning
 dotnet_diagnostic.OVERFIT004.severity = warning
 dotnet_diagnostic.OVERFIT005.severity = warning
 dotnet_diagnostic.OVERFIT006.severity = warning
 dotnet_diagnostic.OVERFIT007.severity = warning
-dotnet_diagnostic.OVERFIT009.severity = warning
+dotnet_diagnostic.OVERFIT009.severity = error
 
 [Sources/Main/Ops/**.cs]
 dotnet_diagnostic.OVERFIT001.severity = warning
 dotnet_diagnostic.OVERFIT002.severity = warning
 dotnet_diagnostic.OVERFIT003.severity = warning
-dotnet_diagnostic.OVERFIT004.severity = warning
+# OVERFIT004 stays at the global suggestion in Ops/: training graph-ops dispatch through
+# OverfitParallel.For(Action<int>) closures BY DESIGN (Spans cannot cross a delegate boundary —
+# see the comment in TensorMath.Normalization). The zero-alloc CONTRACT is the inference path
+# (fn-pointer ForDecode); training is allocation-quiet (~4.6 KB/batch, MNIST audit), not zero.
 dotnet_diagnostic.OVERFIT005.severity = warning
 dotnet_diagnostic.OVERFIT006.severity = warning
 dotnet_diagnostic.OVERFIT007.severity = warning
 dotnet_diagnostic.OVERFIT009.severity = warning
+
+# CTC family — known per-call-allocation backlog (beam search needs a redesign, not a mechanical
+# swap) on the OCR/training path, which is NOT serving-hot. Kept visible as IDE suggestions;
+# revisit (and re-escalate) if OCR gets productised.
+[Sources/Main/Ops/{CtcDecoder.cs,CtcLoss.cs,NGramCtcLanguageModel.cs}]
+dotnet_diagnostic.OVERFIT001.severity = suggestion
+dotnet_diagnostic.OVERFIT003.severity = suggestion
+dotnet_diagnostic.OVERFIT005.severity = suggestion
+dotnet_diagnostic.OVERFIT006.severity = suggestion
+dotnet_diagnostic.OVERFIT009.severity = suggestion

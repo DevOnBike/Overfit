@@ -61,6 +61,7 @@ namespace DevOnBike.Overfit.Analyzers
 
             var receiverType = (operation.Instance ?? (operation.Arguments.Length > 0 ? operation.Arguments[0].Value : null))?.Type;
             var display = receiverType?.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat) ?? "sequence";
+
             context.ReportDiagnostic(Diagnostic.Create(Rule, operation.Syntax.GetLocation(), display));
         }
     }

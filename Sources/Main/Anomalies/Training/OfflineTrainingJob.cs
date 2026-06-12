@@ -12,6 +12,7 @@ using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Experimental;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Parameters;
+using DevOnBike.Overfit.Runtime;
 
 namespace DevOnBike.Overfit.Anomalies.Training
 {
@@ -153,7 +154,7 @@ namespace DevOnBike.Overfit.Anomalies.Training
                 CopyParametersToWorkers(model.TrainableParameters(), workers);
 
                 // Parallel forward+backward across workers — reusing the per-worker graphs.
-                Parallel.For(0, workerCount, w =>
+                OverfitParallel.For(0, workerCount, w =>
                 {
                     Sample(trainIds, _cfg.ContextLength, workerRngs[w], sampleInputs[w], sampleTargets[w]);
                     workerGraphs[w].Reset();
@@ -274,7 +275,7 @@ namespace DevOnBike.Overfit.Anomalies.Training
             // Read logits and write gradients straight through the node's own spans —
             // each parallel iteration owns a disjoint [t*vocab, (t+1)*vocab) slice — so
             // no per-call logits copy or gradient buffer is allocated.
-            Parallel.For(0, seqLen, t =>
+            OverfitParallel.For(0, seqLen, t =>
             {
                 var data = logits.DataView.AsReadOnlySpan();
                 var grad = logits.GradView.AsSpan();

@@ -56,7 +56,9 @@ namespace DevOnBike.Overfit.Ops
 
             if (graph != null && graph.IsRecording && req)
             {
+#pragma warning disable OVERFIT001 // tape-recording array — owned by the graph until Reset(); pooling it would change the Record contract
                 graph.Record(OpCode.FusedLSTMStep, hNode, x, hPrev, nodeContext: [cPrev, W, U, B, cNode, gD]);
+#pragma warning restore OVERFIT001
             }
             else
             {
@@ -163,6 +165,7 @@ namespace DevOnBike.Overfit.Ops
             }
             else
             {
+#pragma warning disable OVERFIT008 // stateful localInit/localFinally overload (thread-local TensorStorage scratch) — no OverfitParallel equivalent; the suppress case is handled by the inline branch above
                 Parallel.For(0, batchSize,
                     () => new TensorStorage<float>(hS * 4, false),
                     (b, state, arrNode) =>
@@ -171,6 +174,7 @@ namespace DevOnBike.Overfit.Ops
                         return arrNode;
                     },
                     arrNode => arrNode.Dispose());
+#pragma warning restore OVERFIT008
             }
 
             if (x.RequiresGrad)
