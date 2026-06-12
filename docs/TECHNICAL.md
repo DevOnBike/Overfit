@@ -267,6 +267,30 @@ llama.cpp decodes ~1.5× faster (hand-tuned native AVX-512/VNNI) — stated hone
 
 (Decode tok/s drifts with thermal state; the ~1.5× ratio is the stable figure. Pre-mmap numbers from earlier in the perf sprint — 17.2 tok/s @ 4.40 GB heap-allocated — are historical and should not be cited as current; mmap-backed K-quant weights closed the RAM gap and lifted decode to ~19 tok/s on the same hardware.)
 
+### Batched prefill — allocation-free (2026-06-12)
+
+| Metric | Before | After |
+|---|---:|---:|
+| Allocated per 272-token prefill (Qwen3-0.6B, steady state) | ~748 MB | **0 B** |
+
+All per-request scratch in `LanguageModels/Runtime` is pooled (`PooledBuffer<T>` rentals with
+exact-length slices); greedy output is bit-identical. Gate: `PrefillAllocationTests`. The analyzer
+ratchet keeps the directory at warning severity so regressions fail loud.
+
+### MNIST CNN training vs PyTorch CPU (2026-06-12)
+
+Same box / arch (`Conv(1→8,3×3) → ReLU → MaxPool2 → FC(1352→64) → FC(64→10)`) / data / batch 128,
+both sides at their measured optima:
+
+| Engine | ms/epoch (60k) | Notes |
+|---|---:|---|
+| **Overfit** (DataParallel ×8) | **503.0 ± 4.2** (BenchmarkDotNet) | 1.31 MB allocated/epoch |
+| PyTorch 2.11 CPU (8 threads — its optimum from a sweep) | 524–570 | 16 thr: ~600–615; 32 thr: 13–14 s |
+
+On par, consistently ~5–10% faster — honest scope: a tiny dispatch-bound conv; large models would
+favour oneDNN. One-cycle LR (peak 4–6× base) reaches 5-epoch quality in 3 epochs (−47% wall).
+Full sweep + retraction notes: [`mnist-cnn-training-audit.md`](mnist-cnn-training-audit.md).
+
 ### GPT-1 training step — parallel runtime sprint
 
 End-to-end training step of a 4-layer GPT-1 (dModel=128, dFF=512, seqLen=128), measured by `GPT1CpuUtilizationProbeTests`:

@@ -144,7 +144,12 @@ No regex parsing of free text. No retry-on-bad-JSON loop. No prompt-and-pray.
 ### 4. Zero-allocation inference hot paths
 
 Overfit is built around predictable CPU inference, Native AOT compatibility,
-explicit memory ownership and near-zero per-token allocations on the decode path.
+explicit memory ownership and near-zero per-token allocations on the decode path —
+and, since 10.0.24+, an **allocation-free batched prefill** (0 B per request; it used
+to allocate ~748 MB of GC garbage per 272-token prompt). The discipline is enforced at
+compile time by an in-repo Roslyn analyzer suite (10 rules — per-call allocations are
+build *errors* in the kernels) with a CI tripwire that proves the analyzer itself is
+alive ([`Sources/Analyzers/README.md`](Sources/Analyzers/README.md)).
 
 The goal is not to beat hand-tuned native GPU/AVX runtimes on raw throughput.
 The goal is to make local AI deployable as a normal .NET library in environments
@@ -364,6 +369,7 @@ Test machine for current headline numbers: AMD Ryzen 9 9950X3D, Windows 11,
 | Bielik-4.5B Q4_K_M decode | ~17 tok/s, −36% working set vs same-file llama.cpp | ~1 B/token |
 | MNIST CNN training (60k) | **503 ± 4 ms/epoch** (BenchmarkDotNet) — on par with PyTorch 2.11 CPU at its optimal threads (~524–570 ms, same box/arch); full train ~1.5–2 s with one-cycle LR — [audit](docs/mnist-cnn-training-audit.md) | 1.31 MB/epoch |
 | Concurrent inference, 8 threads | ~3.6x faster than ONNX Runtime | 0 B |
+| Batched prefill (272-token prompt, 0.6B) | allocation-free per request (was ~748 MB before pooling), bit-identical output | **0 B/request** |
 
 Honest positioning:
 
@@ -524,7 +530,7 @@ for that.
 - **Integration** — **OpenAI-compatible server** (`/v1/chat/completions` + SSE, `/v1/embeddings`, `/v1/models`); **MCP server** (`overfit mcp` — local `ask` / `rag_query` / `transcribe` tools for Claude Code & co., [`docs/mcp.md`](docs/mcp.md)); **Microsoft.Extensions.AI** adapter; **`overfit` CLI** (pull / list / chat / serve / mcp) shipped three ways — `dotnet tool install -g DevOnBike.Overfit.Cli`, a Native-AOT binary, and a ~34 MB Docker image ([`docs/docker.md`](docs/docker.md)); ASP.NET starter template.
 - **Training** — **QLoRA CPU fine-tuning** (frozen Q4_K base incl. FFN + per-head attention), gradient checkpointing, data-parallel trainer, Conv/BatchNorm/LSTM, CRNN + CTC (OCR), LR schedules.
 - **Multimodal & audio** — **Whisper speech-to-text** in pure C#; from-scratch MP3 / WAV decoders; OCR.
-- **Engineering** — Native-AOT (one ~7.8 MB self-contained binary), zero-allocation hot paths (AOT guard in CI), anomaly detection.
+- **Engineering** — Native-AOT (one ~7.8 MB self-contained binary), zero-allocation hot paths (decode 0 B/token AND prefill 0 B/request); **in-repo Roslyn perf analyzer** (10 rules, error-severity in kernels, CI guard-of-the-guard); AOT guard in CI; anomaly detection.
 
 **Current priorities:**
 

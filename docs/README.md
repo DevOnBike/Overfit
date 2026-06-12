@@ -33,10 +33,13 @@ ONNX: PyTorch-exported model import into Sequential for inference
 6. `TrainingEngineFacade.md` — current training facade design.
 7. `llamacpp-cpu-analysis.md` — CPU LLM decode-kernel analysis + same-file A/B vs llama.cpp.
 8. `performance-patterns.md` — CPU/SIMD performance pattern catalog.
-9. `gp-anomaly-baseline.md` — proposed GP/EWMA baseline for the metric anomaly detector.
-10. `scenarios/` — role-specific usage guides (start with [`in-process-agents.md`](scenarios/in-process-agents.md) for the RAG + tool-calling + structured-output story).
-11. `marketing/` — non-engineering collateral (e.g. `feature-blocks.md`, the infographic source). Launch copy and LinkedIn drafts live at the repo root.
-12. `../ROADMAP.md` — planned work and priorities.
+9. `mnist-cnn-training-audit.md` — measured CNN-training audit: per-op floors, data-parallel + one-cycle LR, **503 ± 4 ms/epoch ≈ PyTorch CPU at its optimum (same box)**, allocation breakdown, dead-ends.
+10. [`../Sources/Analyzers/README.md`](../Sources/Analyzers/README.md) — the in-repo Roslyn perf analyzer (10 zero-alloc rules, severity ladder with build errors, CI guard-of-the-guard).
+11. `mcp.md` — the MCP server: plug local ask/rag_query/transcribe tools into Claude Code (spec conformance, Docker variant, helper scripts).
+12. `gp-anomaly-baseline.md` — proposed GP/EWMA baseline for the metric anomaly detector.
+13. `scenarios/` — role-specific usage guides (start with [`in-process-agents.md`](scenarios/in-process-agents.md) for the RAG + tool-calling + structured-output story).
+14. `marketing/` — non-engineering collateral (e.g. `feature-blocks.md`, the infographic source). Launch copy and LinkedIn drafts live at the repo root.
+15. `../ROADMAP.md` — planned work and priorities.
 
 ## Benchmark policy
 
