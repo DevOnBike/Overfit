@@ -180,6 +180,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         }
 
         /// <summary>Loads model weights from a BinaryReader.</summary>
+#pragma warning disable OVERFIT001 // load-time: weight/config arrays built once per model (engine lifetime), not a per-call path
         public static CachedLlamaInferenceEngine Load(BinaryReader reader)
         {
             // ── Header ────────────────────────────────────────────────────────
@@ -302,6 +303,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             return new CachedLlamaInferenceEngine(config, embedWeights, finalNormGamma, finalNormBeta, lmHead, layers);
         }
+#pragma warning restore OVERFIT001
 
         /// <summary>
         /// Creates an inference session. The caller owns the session and must dispose it.
@@ -416,6 +418,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         // ── Private helpers ───────────────────────────────────────────────────
 
+#pragma warning disable OVERFIT001 // load-time: per-layer weight handle tables built once per engine
         private StackWeights BuildStackWeights()
         {
             var kvCount = _config.KvHeads;
@@ -495,6 +498,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 TensorStorage<float>.Unpooled(0),  // RMSNorm — no final norm beta
                 _lmHead);
         }
+#pragma warning restore OVERFIT001
 
         /// <summary>
         /// Transposes LM head from file layout [vocabSize, dModel] to kernel layout [dModel, vocabSize].

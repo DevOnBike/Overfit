@@ -114,7 +114,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // GPT1Model.GenerateLogits currently requires an int[] with exact
             // sequence length. This allocation is intentional in the skeleton and
             // should disappear when the KV-cache decode path lands.
+#pragma warning disable OVERFIT001 // documented skeleton debt: GenerateLogits requires an exact-length int[]; goes away with the KV-cache decode path (see comment above)
             var context = new int[_contextLength];
+#pragma warning restore OVERFIT001
             _contextTokens.AsSpan(0, _contextLength).CopyTo(context);
 
             var logits = _model.GenerateLogits(context);

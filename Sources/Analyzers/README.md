@@ -100,9 +100,13 @@ The 45 findings at introduction were resolved deliberately, not swept:
   cross a delegate boundary; the zero-alloc CONTRACT is the inference path, training is
   allocation-quiet at ~4.6 KB/batch per the MNIST audit).
 
-Remaining suggestion-level backlog (repo-wide): OVERFIT001 ~428 sites — `LanguageModels/Runtime` 85
-(mostly batched-prefill scratch — actionable: pool it, then escalate the directory), `Loading` 60,
-`Audio/Tts` 38, `Whisper` 33.
+**`LanguageModels/Runtime` SWEPT & ESCALATED 2026-06-12** — all 85 sites resolved (batched-prefill
+scratch pooled: measured **748 MB → 0 B** allocated per 272-token prefill at steady state, greedy
+output bit-identical; load-time/by-contract sites carry justified `#pragma`s) and the directory is
+now a **warning** in the ratchet. Lesson encoded in the code comments: rented arrays are longer than
+requested — pass **exact-length slices** to any callee that reads `span.Length` (the MoE router bug
+the suite caught). Remaining suggestion-level backlog (repo-wide): OVERFIT001 ~340 sites — `Loading`
+60, `Audio/Tts` 38, `Whisper` 33, `DeepLearning` 30, …
 
 ## Authoring notes
 

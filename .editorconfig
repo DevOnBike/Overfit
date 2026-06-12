@@ -86,3 +86,10 @@ dotnet_diagnostic.OVERFIT003.severity = suggestion
 dotnet_diagnostic.OVERFIT005.severity = suggestion
 dotnet_diagnostic.OVERFIT006.severity = suggestion
 dotnet_diagnostic.OVERFIT009.severity = suggestion
+
+# Runtime/ ESCALATED 2026-06-12 after the prefill-pooling sweep (85 sites -> 0: batched-prefill
+# scratch pooled via PooledBuffer.RentArray with exact-length slices — measured 748 MB -> ~1 MB
+# allocated per 272-token prefill, greedy output bit-identical; load-time/by-contract sites carry
+# justified #pragma). Per-call heap arrays in the serving runtime are a build warning from here on.
+[Sources/Main/LanguageModels/Runtime/**.cs]
+dotnet_diagnostic.OVERFIT001.severity = warning

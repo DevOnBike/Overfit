@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
@@ -220,8 +221,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             var basePos = _cache.CurrentLength;
-            var batch = new float[n * DModel];
-
+            var batch = PooledBuffer<float>.RentArray(n * DModel);
+            try
+            {
             for (var i = 0; i < n; i++)
             {
                 _model.TokenEmbedding.LookupInference(tokens[i], _tokenEmbeddingBuffer);
@@ -238,6 +240,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             _stack.PrefillBatched(batch, n, _weights, _cache, basePos, rope: null);
             _stack.ProjectLogits(_weights, lastLogits);
+            }
+            finally
+            {
+                PooledBuffer<float>.ReturnArray(batch);
+            }
         }
 
         private int AdvanceAndEmbed(int tokenId)

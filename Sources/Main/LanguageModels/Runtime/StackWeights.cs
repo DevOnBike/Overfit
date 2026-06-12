@@ -82,6 +82,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         }
 
         /// <summary>For unit testing — creates StackWeights from a block factory.</summary>
+#pragma warning disable OVERFIT001 // test-support factory (InternalsVisibleTo), never on a runtime path
         internal static StackWeights ForTest(
             int layerCount,
             int headCount,
@@ -105,6 +106,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             return sw;
         }
+#pragma warning restore OVERFIT001
 
         public ref readonly BlockWeights Block(int layer) => ref _blocks[layer];
         public int LayerCount => _blocks.Length;

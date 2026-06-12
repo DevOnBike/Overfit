@@ -255,8 +255,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var maxSeq = MaxLength;
             var run = CurrentLength * headDim;          // contiguous run per (layer, head)
 
+#pragma warning disable OVERFIT001 // snapshot contract: returns caller-owned arrays (prefix-KV save/restore feature, not a hot path)
             var keys = new float[(long)lhCount * run];
             var values = new float[(long)lhCount * run];
+#pragma warning restore OVERFIT001
             for (var lh = 0; lh < lhCount; lh++)
             {
                 var src = (long)lh * maxSeq * headDim;

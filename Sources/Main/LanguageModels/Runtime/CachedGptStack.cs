@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.LanguageModels.Rope;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
@@ -255,49 +256,57 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     $"inputHidden length {inputHidden.Length} < rows*DModel {(long)rows * DModel}.", nameof(inputHidden));
             }
 
-            var cur = new float[rows * DModel];
+            var cur = PooledBuffer<float>.RentArray(rows * DModel);
             inputHidden.Slice(0, rows * DModel).CopyTo(cur);
-            var next = new float[rows * DModel];
-
-            for (var layer = 0; layer < LayerCount; layer++)
+            var next = PooledBuffer<float>.RentArray(rows * DModel);
+            try
             {
-                _blocks[layer].DecodeBatched(
-                    cur, rows, in weights.Block(layer), cache, layer, basePosition, next, rope);
 
-                (cur, next) = (next, cur);
-            }
-
-            // Last token's hidden BEFORE final norm (matches DecodeWithoutLogits).
-            var lastRow = cur.AsSpan((rows - 1) * DModel, DModel);
-            lastRow.CopyTo(_lastFinalHidden);
-
-            if (weights.FinalNormBeta.IsEmpty)
-            {
-                var sumSq = 0f;
-                for (var i = 0; i < DModel; i++)
+                for (var layer = 0; layer < LayerCount; layer++)
                 {
-                    sumSq += lastRow[i] * lastRow[i];
+                    _blocks[layer].DecodeBatched(
+                        cur, rows, in weights.Block(layer), cache, layer, basePosition, next, rope);
+
+                    (cur, next) = (next, cur);
                 }
-                var scale = 1f / MathF.Sqrt(sumSq / DModel + LayerNormEpsilon);
-                if (weights.FinalNormGamma.IsEmpty)
+
+                // Last token's hidden BEFORE final norm (matches DecodeWithoutLogits).
+                var lastRow = cur.AsSpan((rows - 1) * DModel, DModel);
+                lastRow.CopyTo(_lastFinalHidden);
+
+                if (weights.FinalNormBeta.IsEmpty)
                 {
+                    var sumSq = 0f;
                     for (var i = 0; i < DModel; i++)
                     {
-                        _finalHidden[i] = lastRow[i] * scale;
+                        sumSq += lastRow[i] * lastRow[i];
+                    }
+                    var scale = 1f / MathF.Sqrt(sumSq / DModel + LayerNormEpsilon);
+                    if (weights.FinalNormGamma.IsEmpty)
+                    {
+                        for (var i = 0; i < DModel; i++)
+                        {
+                            _finalHidden[i] = lastRow[i] * scale;
+                        }
+                    }
+                    else
+                    {
+                        for (var i = 0; i < DModel; i++)
+                        {
+                            _finalHidden[i] = lastRow[i] * scale * weights.FinalNormGamma[i];
+                        }
                     }
                 }
                 else
                 {
-                    for (var i = 0; i < DModel; i++)
-                    {
-                        _finalHidden[i] = lastRow[i] * scale * weights.FinalNormGamma[i];
-                    }
+                    SingleTokenLayerNormKernel.Normalize(
+                        lastRow, weights.FinalNormGamma, weights.FinalNormBeta, _finalHidden, DModel, LayerNormEpsilon);
                 }
             }
-            else
+            finally
             {
-                SingleTokenLayerNormKernel.Normalize(
-                    lastRow, weights.FinalNormGamma, weights.FinalNormBeta, _finalHidden, DModel, LayerNormEpsilon);
+                PooledBuffer<float>.ReturnArray(next);
+                PooledBuffer<float>.ReturnArray(cur);
             }
         }
 
@@ -325,11 +334,17 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             var cur = RunBatchedStack(inputHidden, rows, weights, cache, basePosition, rope);
-
-            // Last token's hidden BEFORE final norm (matches DecodeWithoutLogits).
-            var lastRow = cur.AsSpan((rows - 1) * DModel, DModel);
-            lastRow.CopyTo(_lastFinalHidden);
-            FinalNorm(lastRow, weights, _finalHidden);
+            try
+            {
+                // Last token's hidden BEFORE final norm (matches DecodeWithoutLogits).
+                var lastRow = cur.AsSpan((rows - 1) * DModel, DModel);
+                lastRow.CopyTo(_lastFinalHidden);
+                FinalNorm(lastRow, weights, _finalHidden);
+            }
+            finally
+            {
+                PooledBuffer<float>.ReturnArray(cur);
+            }
         }
 
         /// <summary>
@@ -354,20 +369,31 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             var cur = RunBatchedStack(inputHidden, rows, weights, cache, basePosition, rope);
-            for (var n = 0; n < rows; n++)
+            try
             {
-                FinalNorm(cur.AsSpan(n * DModel, DModel), weights, finalNormAllRows.Slice(n * DModel, DModel));
+                for (var n = 0; n < rows; n++)
+                {
+                    FinalNorm(cur.AsSpan(n * DModel, DModel), weights, finalNormAllRows.Slice(n * DModel, DModel));
+                }
+            }
+            finally
+            {
+                PooledBuffer<float>.ReturnArray(cur);
             }
         }
 
         /// <summary>Runs the batched layer pass, returning the all-rows post-stack hidden (pre-final-norm).</summary>
+        /// <remarks>Returns a POOLED array (length >= rows*DModel) — the caller MUST hand it back
+        /// via <c>PooledBuffer&lt;float&gt;.ReturnArray</c> (both internal callers do, in finally).</remarks>
         private float[] RunBatchedStack(
             ReadOnlySpan<float> inputHidden, int rows, StackWeights weights, KeyValueCache cache, int basePosition, RopeTable? rope)
         {
-            var cur = new float[rows * DModel];
+            var cur = PooledBuffer<float>.RentArray(rows * DModel);
             inputHidden.Slice(0, rows * DModel).CopyTo(cur);
-            var next = new float[rows * DModel];
+            var next = PooledBuffer<float>.RentArray(rows * DModel);
 
+            try
+            {
             for (var layer = 0; layer < LayerCount; layer++)
             {
                 _blocks[layer].DecodeBatchedQuant(
@@ -375,6 +401,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 (cur, next) = (next, cur);
             }
             return cur;
+            }
+            catch
+            {
+                PooledBuffer<float>.ReturnArray(cur);
+                throw;
+            }
+            finally
+            {
+                PooledBuffer<float>.ReturnArray(next);
+            }
         }
 
         /// <summary>Final norm of one row (RMSNorm when beta is empty, else standard LayerNorm).</summary>

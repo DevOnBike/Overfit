@@ -50,6 +50,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// Repacks a full output-major Q6_K weight matrix into the <c>block_q6_Kx8</c> layout.
         /// Requires <c>outputSize % 8 == 0</c> and <c>inputSize % 256 == 0</c>.
         /// </summary>
+#pragma warning disable OVERFIT001 // load-time: repacked copy built once per weight matrix (library asset, not wired into decode)
         public static byte[] RepackMatrix(ReadOnlySpan<byte> q6k, int outputSize, int inputSize)
         {
             if (outputSize % RowsInterleaved != 0)
@@ -90,6 +91,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             return dst;
         }
+#pragma warning restore OVERFIT001
 
         /// <summary>Interleaves 8 standard Q6_K super-blocks into one <c>block_q6_Kx8</c>.</summary>
         public static void MakeBlockQ6Kx8(ReadOnlySpan<byte> src8, Span<byte> dst)

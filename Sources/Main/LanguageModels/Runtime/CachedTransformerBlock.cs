@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.LanguageModels.Rope;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
@@ -312,43 +313,54 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var dModel = DModel;
 
             // Per-prefill scratch (one-time pass, not the 0-alloc decode hot path).
-            var ln1 = new float[rows * dModel];
-            var attnOut = new float[rows * dModel];
-            var afterAttn = new float[rows * dModel];
-            var ln2 = new float[rows * dModel];
-            var ffnOut = new float[rows * dModel];
-
-            for (var n = 0; n < rows; n++)
+            var ln1 = PooledBuffer<float>.RentArray(rows * dModel);
+            var attnOut = PooledBuffer<float>.RentArray(rows * dModel);
+            var afterAttn = PooledBuffer<float>.RentArray(rows * dModel);
+            var ln2 = PooledBuffer<float>.RentArray(rows * dModel);
+            var ffnOut = PooledBuffer<float>.RentArray(rows * dModel);
+            try
             {
-                SingleTokenLayerNormKernel.Normalize(
-                    input.Slice(n * dModel, dModel), weights.Ln1Gamma, weights.Ln1Beta,
-                    ln1.AsSpan(n * dModel, dModel), dModel, LayerNormEpsilon);
+
+                for (var n = 0; n < rows; n++)
+                {
+                    SingleTokenLayerNormKernel.Normalize(
+                        input.Slice(n * dModel, dModel), weights.Ln1Gamma, weights.Ln1Beta,
+                        ln1.AsSpan(n * dModel, dModel), dModel, LayerNormEpsilon);
+                }
+
+                _attention.DecodeBatched(ln1, rows, in weights, cache, layerIndex, basePosition, attnOut, rope);
+
+                for (var n = 0; n < rows; n++)
+                {
+                    SingleTokenLayerNormKernel.AddResidual(
+                        input.Slice(n * dModel, dModel), attnOut.AsSpan(n * dModel, dModel),
+                        afterAttn.AsSpan(n * dModel, dModel), dModel);
+                }
+
+                for (var n = 0; n < rows; n++)
+                {
+                    SingleTokenLayerNormKernel.Normalize(
+                        afterAttn.AsSpan(n * dModel, dModel), weights.Ln2Gamma, weights.Ln2Beta,
+                        ln2.AsSpan(n * dModel, dModel), dModel, LayerNormEpsilon);
+                }
+
+                _feedForward.DecodeBatched(
+                    ln2, rows, weights.FfnW1.F32, weights.FfnB1, weights.FfnW2.F32, weights.FfnB2, ffnOut);
+
+                for (var n = 0; n < rows; n++)
+                {
+                    SingleTokenLayerNormKernel.AddResidual(
+                        afterAttn.AsSpan(n * dModel, dModel), ffnOut.AsSpan(n * dModel, dModel),
+                        output.Slice(n * dModel, dModel), dModel);
+                }
             }
-
-            _attention.DecodeBatched(ln1, rows, in weights, cache, layerIndex, basePosition, attnOut, rope);
-
-            for (var n = 0; n < rows; n++)
+            finally
             {
-                SingleTokenLayerNormKernel.AddResidual(
-                    input.Slice(n * dModel, dModel), attnOut.AsSpan(n * dModel, dModel),
-                    afterAttn.AsSpan(n * dModel, dModel), dModel);
-            }
-
-            for (var n = 0; n < rows; n++)
-            {
-                SingleTokenLayerNormKernel.Normalize(
-                    afterAttn.AsSpan(n * dModel, dModel), weights.Ln2Gamma, weights.Ln2Beta,
-                    ln2.AsSpan(n * dModel, dModel), dModel, LayerNormEpsilon);
-            }
-
-            _feedForward.DecodeBatched(
-                ln2, rows, weights.FfnW1.F32, weights.FfnB1, weights.FfnW2.F32, weights.FfnB2, ffnOut);
-
-            for (var n = 0; n < rows; n++)
-            {
-                SingleTokenLayerNormKernel.AddResidual(
-                    afterAttn.AsSpan(n * dModel, dModel), ffnOut.AsSpan(n * dModel, dModel),
-                    output.Slice(n * dModel, dModel), dModel);
+                PooledBuffer<float>.ReturnArray(ffnOut);
+                PooledBuffer<float>.ReturnArray(ln2);
+                PooledBuffer<float>.ReturnArray(afterAttn);
+                PooledBuffer<float>.ReturnArray(attnOut);
+                PooledBuffer<float>.ReturnArray(ln1);
             }
         }
 
@@ -379,78 +391,89 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             var dModel = DModel;
-            var ln1 = new float[rows * dModel];
-            var attnOut = new float[rows * dModel];
-            var afterAttn = new float[rows * dModel];
-            var ln2 = new float[rows * dModel];
-            var ffnOut = new float[rows * dModel];
-
-            for (var n = 0; n < rows; n++)
+            var ln1 = PooledBuffer<float>.RentArray(rows * dModel);
+            var attnOut = PooledBuffer<float>.RentArray(rows * dModel);
+            var afterAttn = PooledBuffer<float>.RentArray(rows * dModel);
+            var ln2 = PooledBuffer<float>.RentArray(rows * dModel);
+            var ffnOut = PooledBuffer<float>.RentArray(rows * dModel);
+            try
             {
-                var inRow = input.Slice(n * dModel, dModel);
-                var dst = ln1.AsSpan(n * dModel, dModel);
-                if (weights.Ln1Beta.IsEmpty)
+
+                for (var n = 0; n < rows; n++)
                 {
-                    RmsNormalize(inRow, weights.Ln1Gamma, dst, dModel, LayerNormEpsilon);
+                    var inRow = input.Slice(n * dModel, dModel);
+                    var dst = ln1.AsSpan(n * dModel, dModel);
+                    if (weights.Ln1Beta.IsEmpty)
+                    {
+                        RmsNormalize(inRow, weights.Ln1Gamma, dst, dModel, LayerNormEpsilon);
+                    }
+                    else
+                    {
+                        SingleTokenLayerNormKernel.Normalize(inRow, weights.Ln1Gamma, weights.Ln1Beta, dst, dModel, LayerNormEpsilon);
+                    }
+                }
+
+                _attention.DecodeBatchedQuant(ln1, rows, in weights, cache, layerIndex, basePosition, attnOut, rope);
+
+                for (var n = 0; n < rows; n++)
+                {
+                    var attnRow = attnOut.AsSpan(n * dModel, dModel);
+                    if (weights.HasPostNorm) // Gemma-2 sandwich norm on the attention output
+                    {
+                        RmsNormalize(attnRow, weights.PostAttnNorm, attnRow, dModel, LayerNormEpsilon);
+                    }
+                    SingleTokenLayerNormKernel.AddResidual(
+                        input.Slice(n * dModel, dModel), attnRow,
+                        afterAttn.AsSpan(n * dModel, dModel), dModel);
+                }
+
+                for (var n = 0; n < rows; n++)
+                {
+                    var aRow = afterAttn.AsSpan(n * dModel, dModel);
+                    var dst = ln2.AsSpan(n * dModel, dModel);
+                    if (weights.Ln2Beta.IsEmpty)
+                    {
+                        RmsNormalize(aRow, weights.Ln2Gamma, dst, dModel, LayerNormEpsilon);
+                    }
+                    else
+                    {
+                        SingleTokenLayerNormKernel.Normalize(aRow, weights.Ln2Gamma, weights.Ln2Beta, dst, dModel, LayerNormEpsilon);
+                    }
+                }
+
+                if (weights.IsMoe)
+                {
+                    _moe!.DecodeBatched(
+                        ln2, rows,
+                        weights.MoeRouter, weights.MoeGate, weights.MoeUp, weights.MoeDown,
+                        weights.MoeSharedGateInp, weights.MoeSharedGate, weights.MoeSharedUp, weights.MoeSharedDown,
+                        ffnOut);
                 }
                 else
                 {
-                    SingleTokenLayerNormKernel.Normalize(inRow, weights.Ln1Gamma, weights.Ln1Beta, dst, dModel, LayerNormEpsilon);
+                    _feedForward.DecodeSwiGluBatchedDispatched(
+                        ln2, rows, weights.FfnGate, weights.FfnW1, weights.FfnW2, ffnOut);
                 }
-            }
 
-            _attention.DecodeBatchedQuant(ln1, rows, in weights, cache, layerIndex, basePosition, attnOut, rope);
-
-            for (var n = 0; n < rows; n++)
-            {
-                var attnRow = attnOut.AsSpan(n * dModel, dModel);
-                if (weights.HasPostNorm) // Gemma-2 sandwich norm on the attention output
+                for (var n = 0; n < rows; n++)
                 {
-                    RmsNormalize(attnRow, weights.PostAttnNorm, attnRow, dModel, LayerNormEpsilon);
-                }
-                SingleTokenLayerNormKernel.AddResidual(
-                    input.Slice(n * dModel, dModel), attnRow,
-                    afterAttn.AsSpan(n * dModel, dModel), dModel);
-            }
-
-            for (var n = 0; n < rows; n++)
-            {
-                var aRow = afterAttn.AsSpan(n * dModel, dModel);
-                var dst = ln2.AsSpan(n * dModel, dModel);
-                if (weights.Ln2Beta.IsEmpty)
-                {
-                    RmsNormalize(aRow, weights.Ln2Gamma, dst, dModel, LayerNormEpsilon);
-                }
-                else
-                {
-                    SingleTokenLayerNormKernel.Normalize(aRow, weights.Ln2Gamma, weights.Ln2Beta, dst, dModel, LayerNormEpsilon);
+                    var ffnRow = ffnOut.AsSpan(n * dModel, dModel);
+                    if (weights.HasPostNorm) // Gemma-2 sandwich norm on the FFN output
+                    {
+                        RmsNormalize(ffnRow, weights.PostFfwNorm, ffnRow, dModel, LayerNormEpsilon);
+                    }
+                    SingleTokenLayerNormKernel.AddResidual(
+                        afterAttn.AsSpan(n * dModel, dModel), ffnRow,
+                        output.Slice(n * dModel, dModel), dModel);
                 }
             }
-
-            if (weights.IsMoe)
+            finally
             {
-                _moe!.DecodeBatched(
-                    ln2, rows,
-                    weights.MoeRouter, weights.MoeGate, weights.MoeUp, weights.MoeDown,
-                    weights.MoeSharedGateInp, weights.MoeSharedGate, weights.MoeSharedUp, weights.MoeSharedDown,
-                    ffnOut);
-            }
-            else
-            {
-                _feedForward.DecodeSwiGluBatchedDispatched(
-                    ln2, rows, weights.FfnGate, weights.FfnW1, weights.FfnW2, ffnOut);
-            }
-
-            for (var n = 0; n < rows; n++)
-            {
-                var ffnRow = ffnOut.AsSpan(n * dModel, dModel);
-                if (weights.HasPostNorm) // Gemma-2 sandwich norm on the FFN output
-                {
-                    RmsNormalize(ffnRow, weights.PostFfwNorm, ffnRow, dModel, LayerNormEpsilon);
-                }
-                SingleTokenLayerNormKernel.AddResidual(
-                    afterAttn.AsSpan(n * dModel, dModel), ffnRow,
-                    output.Slice(n * dModel, dModel), dModel);
+                PooledBuffer<float>.ReturnArray(ffnOut);
+                PooledBuffer<float>.ReturnArray(ln2);
+                PooledBuffer<float>.ReturnArray(afterAttn);
+                PooledBuffer<float>.ReturnArray(attnOut);
+                PooledBuffer<float>.ReturnArray(ln1);
             }
         }
 

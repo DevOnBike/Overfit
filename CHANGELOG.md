@@ -16,7 +16,9 @@ Pre-release suffixes (e.g. `10.1.0-beta.1`) are used for surface changes that ne
 
 ## [Unreleased]
 
-_(nothing yet)_
+### Performance
+
+- **Batched prefill is now allocation-free: ~748 MB → 0 B allocated per request** (measured on Qwen3-0.6B, 272-token prompt, steady state; greedy output bit-identical before/after). The OVERFIT001 sweep of `LanguageModels/Runtime` (85 sites) pooled every per-request scratch buffer via `PooledBuffer<T>.RentArray` with **exact-length slices** wherever a callee reads `span.Length` (the discipline is load-bearing: the MoE router's `SelectTopK` iterates `logits.Length` as the expert count — the full-rented-span variant picked garbage experts and the unit suite caught it). Pooled paths: `BatchedQuantProjection.Dispatch` (the single largest allocator — 3 quant-scratch arrays per projection per layer), both `CachedMultiHeadAttention` batched variants (6+8 arrays/layer), `CachedTransformerBlock` (5/layer ×2), SwiGLU/FFN gate+up+intermediate, MoE + Qwen2-MoE routing/gather/slot buffers, `CachedGptStack` ping-pong stack buffers (`RunBatchedStack` now returns a pooled array; both internal callers return it), session prefill embedding buffer, the speculative-decoding verify path (per-step `batch×vocab` logits + probs/residual), GPT-1 adapter prefill and `SlmInferenceEngine` generate logits. Load-time/by-contract sites (engine `Load`, repackers, `KeyValueCache.Snapshot`, the convenience `Embed` overload, the documented GPT-1 skeleton) carry justified `#pragma`s. `LanguageModels/Runtime/` is now **escalated to warning** in the analyzer ratchet, so new per-request allocations on the serving runtime fail loud. Gate: `PrefillAllocationTests` (`[LongFact]`: prints B/prefill + pins the greedy output). Analyzer fix along the way: empty `[]` collection expressions lower to the cached `Array.Empty<T>()` and are no longer flagged (OVERFIT001 false positive in `KeyValueCache.Dispose`).
 
 ## [10.0.24] - 2026-06-11
 

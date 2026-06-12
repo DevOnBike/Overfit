@@ -99,6 +99,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// output's contraction vector. <paramref name="rowLength"/> must be a
         /// multiple of <see cref="Q8DotKernel.BlockSize"/>.
         /// </summary>
+#pragma warning disable OVERFIT001 // load-time: one-shot F32->Q8 quantization of a weight matrix
         public static unsafe Q8Weight QuantizeRows(ReadOnlySpan<float> rowMajor, int rowCount, int rowLength)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rowCount);
@@ -143,6 +144,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             return new Q8Weight(quants, scales, rowLength, rowCount);
         }
+#pragma warning restore OVERFIT001
 
         /// <summary>Worker body for <see cref="QuantizeRows"/> — one disjoint band of rows.</summary>
         private static unsafe void QuantizeRowChunk(int rowStart, int rowEnd, void* context)

@@ -64,9 +64,10 @@ namespace DevOnBike.Overfit.Analyzers
         {
             // `[a, b, c]` only allocates a heap array when its TARGET type is an array
             // (Span/ReadOnlySpan targets stackalloc or inline data — those are fine).
+            // An EMPTY `[]` lowers to the cached Array.Empty<T>() — zero allocation, skip.
             var operation = (ICollectionExpressionOperation)context.Operation;
 
-            if (operation.Type is not IArrayTypeSymbol arrayType)
+            if (operation.Type is not IArrayTypeSymbol arrayType || operation.Elements.IsEmpty)
             {
                 return;
             }
