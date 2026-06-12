@@ -152,3 +152,56 @@ jobs:
       # `list` exercises the CLI end-to-end (System.CommandLine parse → command action → model-store scan)
       # and exits 0 with no models present — a non-blocking smoke check (unlike `serve`, which would block).
       run: ./aot-publish-cli/overfit list
+  # ── Analyzer guard-of-the-guard ──────────────────────────────────────────────
+  # The custom perf analyzer (Sources/Analyzers, OVERFIT001-015) can die SILENTLY: if its
+  # Microsoft.CodeAnalysis.CSharp reference is NEWER than the SDK compiler's Roslyn, the compiler
+  # rejects the whole assembly (warning CS9057) and every rule stops running — while the build
+  # still "succeeds". This happened for real on 2026-06-12 (a 4.14 → 5.3 bump vs the SDK's 5.0).
+  # A normal green build therefore proves nothing about the analyzer. This job proves the rules
+  # actually FIRE: it drops a deliberate OVERFIT008 violation (an error-severity rule) into
+  # Sources/Main and REQUIRES the build to fail with exactly that diagnostic.
+  analyzer-guard:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 10.x
+    - name: Tripwire — a deliberate violation must fail the build with OVERFIT008
+      run: |
+        cat > Sources/Main/Runtime/__AnalyzerTripwire.cs <<'EOF'
+        // CI tripwire (analyzer-guard job): deliberate OVERFIT008 violation — never committed.
+        using System.Threading.Tasks;
+
+        namespace DevOnBike.Overfit.Runtime
+        {
+            internal static class __AnalyzerTripwire
+            {
+                public static void Run()
+                {
+                    Parallel.For(0, 4, i => _ = i);
+                }
+            }
+        }
+        EOF
+        set +e
+        OUTPUT=$(dotnet build ./Sources/Main/Main.csproj -c Release 2>&1)
+        STATUS=$?
+        set -e
+        rm Sources/Main/Runtime/__AnalyzerTripwire.cs
+        if [ "$STATUS" -eq 0 ]; then
+          echo "$OUTPUT" | tail -30
+          if echo "$OUTPUT" | grep -q "CS9057"; then
+            echo "::error::Analyzer assembly REJECTED by the compiler (CS9057) — the Microsoft.CodeAnalysis.CSharp pin in Directory.Packages.props is newer than the SDK's Roslyn. Every OVERFIT rule is silently OFF."
+          else
+            echo "::error::Analyzer is DEAD: the tripwire build succeeded, but error OVERFIT008 was expected."
+          fi
+          exit 1
+        fi
+        if ! echo "$OUTPUT" | grep -q "OVERFIT008"; then
+          echo "$OUTPUT" | tail -30
+          echo "::error::The tripwire build failed, but NOT with OVERFIT008 — investigate."
+          exit 1
+        fi
+        echo "Analyzer alive: the tripwire failed the build with OVERFIT008, as required."
