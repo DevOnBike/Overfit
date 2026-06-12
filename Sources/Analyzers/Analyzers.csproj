@@ -1,8 +1,12 @@
-<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk" TreatAsLocalProperty="PublishAot;PublishTrimmed;SelfContained;RuntimeIdentifier">
 
     <PropertyGroup>
         <!-- Roslyn analyzers MUST target netstandard2.0 (they run inside the compiler/IDE host). -->
         <TargetFramework>netstandard2.0</TargetFramework>
+        <PublishAot>false</PublishAot>
+        <PublishTrimmed>false</PublishTrimmed>
+        <SelfContained>false</SelfContained>
+        <RuntimeIdentifier></RuntimeIdentifier>
         <LangVersion>latest</LangVersion>
         <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
