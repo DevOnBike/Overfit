@@ -131,7 +131,7 @@ namespace DevOnBike.Overfit.Training
         {
             var master = _master;
             var workers = _workers;
-            Parallel.For(0, master.Length, p =>
+            OverfitParallel.For(0, master.Length, p =>
             {
                 var src = master[p].DataReadOnlySpan;
                 for (var w = 0; w < workers.Length; w++)
@@ -167,7 +167,7 @@ namespace DevOnBike.Overfit.Training
             if (workers.Length > 1)
             {
                 var inline = _runWorkerOpsInline;
-                Parallel.For(0, workers.Length, w =>
+                OverfitParallel.For(0, workers.Length, w =>
                 {
                     // Keep each replica's inner kernels single-threaded so the replicas own the
                     // parallelism — N replicas × intra-op pool would oversubscribe and serialize on
@@ -225,7 +225,7 @@ namespace DevOnBike.Overfit.Training
             var master = _master;
             var workers = _workers;
             var scale = _invWorkerCount;
-            Parallel.For(0, master.Length, p =>
+            OverfitParallel.For(0, master.Length, p =>
             {
                 var masterGrad = master[p].GradSpan;
                 for (var w = 0; w < workers.Length; w++)

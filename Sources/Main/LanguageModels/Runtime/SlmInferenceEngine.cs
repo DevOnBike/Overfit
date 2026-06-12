@@ -6,6 +6,7 @@
 using System.Diagnostics;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Contracts;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
@@ -131,8 +132,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             var sampling = options.Sampling;
             var generated = 0;
-            var logits = new float[VocabularySize];
-
+            var logitsArr = PooledBuffer<float>.RentArray(VocabularySize);
+            var logits = logitsArr.AsSpan(0, VocabularySize);
+            try
+            {
             while (generated < options.MaxNewTokens)
             {
                 var token = session.GenerateNextToken(in sampling);
@@ -169,6 +172,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 usedKeyValueCache: false);
 
             return _lastGenerationStats;
+            }
+            finally
+            {
+                PooledBuffer<float>.ReturnArray(logitsArr);
+            }
         }
 
         public void ResetMetrics()

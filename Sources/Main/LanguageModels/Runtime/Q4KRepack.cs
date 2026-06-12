@@ -55,6 +55,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// <c>block_q4_Kx8</c> per super-block column, in column order — exactly the order the
         /// 8×8 GEMV consumes.
         /// </summary>
+#pragma warning disable OVERFIT001 // load-time: opt-in OVERFIT_REPACK_GEMV repacked copy, built once per weight matrix
         public static byte[] RepackMatrix(ReadOnlySpan<byte> q4k, int outputSize, int inputSize)
         {
             if (outputSize % RowsInterleaved != 0)
@@ -96,6 +97,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             return dst;
         }
+#pragma warning restore OVERFIT001
 
         /// <summary>
         /// Interleaves 8 standard Q4_K super-blocks (one per row, same column) into one

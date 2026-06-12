@@ -6,6 +6,8 @@
 using System.Numerics.Tensors;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
+using DevOnBike.Overfit.Intrinsics;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Kernels
 {
@@ -226,9 +228,10 @@ namespace DevOnBike.Overfit.Kernels
             int outH,
             int outW)
         {
+            using var pooledPairMax = inputW <= 128 ? default : new PooledBuffer<float>(inputW, clearMemory: false);
             var pairMax = inputW <= 128
                 ? stackalloc float[inputW]
-                : new float[inputW];
+                : pooledPairMax.Span;
 
             for (var c = 0; c < channels; c++)
             {
@@ -270,7 +273,7 @@ namespace DevOnBike.Overfit.Kernels
             int outW,
             int batchOffset)
         {
-            if (Avx2.IsSupported && outW >= 8)
+            if (CpuFeatures.HasAvx2 && outW >= 8)
             {
                 MaxPool2DForwardWithIndicesPool2Avx2(
                     input, output, maxIndices, channels, inputH, inputW, outH, outW, batchOffset);
@@ -294,9 +297,10 @@ namespace DevOnBike.Overfit.Kernels
             int outW,
             int batchOffset)
         {
+            using var pooledPairMax = inputW <= 128 ? default : new PooledBuffer<float>(inputW, clearMemory: false);
             var pairMax = inputW <= 128
                 ? stackalloc float[inputW]
-                : new float[inputW];
+                : pooledPairMax.Span;
 
             for (var c = 0; c < channels; c++)
             {

@@ -197,10 +197,9 @@ namespace DevOnBike.Overfit.Optimizers
                 return;
             }
 
-            Parallel.For(
+            OverfitParallel.For(
                 0,
                 chunks,
-                OverfitParallel.Options,
                 chunk =>
                 {
                     GetChunkRange(size, chunks, chunk, out var start, out var end);
@@ -246,10 +245,9 @@ namespace DevOnBike.Overfit.Optimizers
 
             var chunks = GetChunkCount(size);
 
-            Parallel.For(
+            OverfitParallel.For(
                 0,
                 chunks,
-                OverfitParallel.Options,
                 chunk =>
                 {
                     GetChunkRange(size, chunks, chunk, out var start, out var end);
@@ -305,10 +303,9 @@ namespace DevOnBike.Overfit.Optimizers
 
             var chunks = GetChunkCount(size);
 
-            Parallel.For(
+            OverfitParallel.For(
                 0,
                 chunks,
-                OverfitParallel.Options,
                 chunk =>
                 {
                     GetChunkRange(size, chunks, chunk, out var start, out var end);

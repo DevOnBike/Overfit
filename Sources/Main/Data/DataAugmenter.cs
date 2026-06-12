@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Data
@@ -14,7 +15,7 @@ namespace DevOnBike.Overfit.Data
             var augmentedBatch = FastTensor<float>.SameShape(originalBatch, clearMemory: false);
             var rows = originalBatch.GetView().GetDim(0);
 
-            Parallel.For(0, rows, body: i =>
+            OverfitParallel.For(0, rows, body: i =>
             {
                 var inputRow = originalBatch.GetView().AsReadOnlySpan().Slice(i * width * height, width * height);
                 var outputRow = augmentedBatch.GetView().AsSpan().Slice(i * width * height, width * height);

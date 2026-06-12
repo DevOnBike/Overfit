@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.Data.Contracts;
+using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Data
@@ -30,7 +31,7 @@ namespace DevOnBike.Overfit.Data
 
             var trees = new FastTreeNode[_numTrees][];
 
-            Parallel.For(0, _numTrees, t =>
+            OverfitParallel.For(0, _numTrees, t =>
             {
                 var localImportance = new float[cols];
                 var nodes = new List<FastTreeNode>();

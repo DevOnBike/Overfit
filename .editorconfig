@@ -20,3 +20,76 @@ csharp_prefer_braces = true:warning
 csharp_space_around_binary_operators = before_and_after
 
 file_header_template = Copyright (c) 2026 DevOnBike.\nThis file is part of DevonBike Overfit.\nDevonBike Overfit is licensed under the GNU AGPLv3.\nFor commercial licensing options, contact: devonbike@gmail.com
+# ── Overfit custom performance analyzer (Sources/Analyzers) — RATCHET rollout ──────────────
+# OVERFIT001 (per-call heap array allocation → PooledBuffer<T>/PooledArray/TensorStorage<T>/
+# stackalloc): IDE suggestion everywhere; build WARNING in the zero-alloc hot directories.
+# Policy: clean a directory → flip it to warning below. Never loosen a flipped directory.
+# Backlog at introduction (2026-06-11): 432 unique sites; Runtime 85 (mostly batched-prefill,
+# actionable), Loading 60, Audio/Tts 38, Whisper 33 — flip those as they get swept.
+dotnet_diagnostic.OVERFIT001.severity = suggestion
+dotnet_diagnostic.OVERFIT002.severity = suggestion
+dotnet_diagnostic.OVERFIT003.severity = suggestion
+dotnet_diagnostic.OVERFIT004.severity = suggestion
+dotnet_diagnostic.OVERFIT005.severity = suggestion
+dotnet_diagnostic.OVERFIT006.severity = suggestion
+dotnet_diagnostic.OVERFIT007.severity = suggestion
+# PROMOTED TO ERROR (criteria: zero existing sites + unconditional rule + trivial fix/pragma + high miss-cost):
+# OVERFIT008 — a suppress leak silently breaks data-parallel training (measured 1.8x); like RS0030.
+# OVERFIT015 — CpuFeatures gating is a hard convention; the fix is a one-token change.
+dotnet_diagnostic.OVERFIT008.severity = error
+dotnet_diagnostic.OVERFIT015.severity = error
+dotnet_diagnostic.OVERFIT009.severity = suggestion
+
+[Sources/Main/Kernels/**.cs]
+# Allocation rules are ERRORS in pure kernels — per-call allocation is never right here;
+# a justified exception is an explicit #pragma with the reason.
+dotnet_diagnostic.OVERFIT001.severity = error
+dotnet_diagnostic.OVERFIT002.severity = error
+dotnet_diagnostic.OVERFIT003.severity = warning
+dotnet_diagnostic.OVERFIT004.severity = warning
+dotnet_diagnostic.OVERFIT005.severity = warning
+dotnet_diagnostic.OVERFIT006.severity = warning
+dotnet_diagnostic.OVERFIT007.severity = warning
+dotnet_diagnostic.OVERFIT009.severity = error
+
+[Sources/Main/Intrinsics/**.cs]
+# Allocation rules are ERRORS in pure kernels — per-call allocation is never right here;
+# a justified exception is an explicit #pragma with the reason.
+dotnet_diagnostic.OVERFIT001.severity = error
+dotnet_diagnostic.OVERFIT002.severity = error
+dotnet_diagnostic.OVERFIT003.severity = warning
+dotnet_diagnostic.OVERFIT004.severity = warning
+dotnet_diagnostic.OVERFIT005.severity = warning
+dotnet_diagnostic.OVERFIT006.severity = warning
+dotnet_diagnostic.OVERFIT007.severity = warning
+dotnet_diagnostic.OVERFIT009.severity = error
+
+[Sources/Main/Ops/**.cs]
+dotnet_diagnostic.OVERFIT001.severity = warning
+dotnet_diagnostic.OVERFIT002.severity = warning
+dotnet_diagnostic.OVERFIT003.severity = warning
+# OVERFIT004 stays at the global suggestion in Ops/: training graph-ops dispatch through
+# OverfitParallel.For(Action<int>) closures BY DESIGN (Spans cannot cross a delegate boundary —
+# see the comment in TensorMath.Normalization). The zero-alloc CONTRACT is the inference path
+# (fn-pointer ForDecode); training is allocation-quiet (~4.6 KB/batch, MNIST audit), not zero.
+dotnet_diagnostic.OVERFIT005.severity = warning
+dotnet_diagnostic.OVERFIT006.severity = warning
+dotnet_diagnostic.OVERFIT007.severity = warning
+dotnet_diagnostic.OVERFIT009.severity = warning
+
+# CTC family — known per-call-allocation backlog (beam search needs a redesign, not a mechanical
+# swap) on the OCR/training path, which is NOT serving-hot. Kept visible as IDE suggestions;
+# revisit (and re-escalate) if OCR gets productised.
+[Sources/Main/Ops/{CtcDecoder.cs,CtcLoss.cs,NGramCtcLanguageModel.cs}]
+dotnet_diagnostic.OVERFIT001.severity = suggestion
+dotnet_diagnostic.OVERFIT003.severity = suggestion
+dotnet_diagnostic.OVERFIT005.severity = suggestion
+dotnet_diagnostic.OVERFIT006.severity = suggestion
+dotnet_diagnostic.OVERFIT009.severity = suggestion
+
+# Runtime/ ESCALATED 2026-06-12 after the prefill-pooling sweep (85 sites -> 0: batched-prefill
+# scratch pooled via PooledBuffer.RentArray with exact-length slices — measured 748 MB -> ~1 MB
+# allocated per 272-token prefill, greedy output bit-identical; load-time/by-contract sites carry
+# justified #pragma). Per-call heap arrays in the serving runtime are a build warning from here on.
+[Sources/Main/LanguageModels/Runtime/**.cs]
+dotnet_diagnostic.OVERFIT001.severity = warning

@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
@@ -137,72 +138,88 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var k = ExpertUsedCount;
 
             // 1. Route every row (router projection is small; per-row is fine).
-            var selExperts = new int[rows * k];
-            var selWeights = new float[rows * k];
-            var logits = new float[ExpertCount];
-            for (var n = 0; n < rows; n++)
+            var selExperts = PooledBuffer<int>.RentArray(rows * k);
+            var selWeights = PooledBuffer<float>.RentArray(rows * k);
+            // EXACT slice is load-bearing: SelectTopK iterates logits.Length as the expert count.
+            var logitsArr = PooledBuffer<float>.RentArray(ExpertCount);
+            var rowBuf = PooledBuffer<int>.RentArray(rows);
+            var slotBuf = PooledBuffer<int>.RentArray(rows);
+            var gathered = PooledBuffer<float>.RentArray(rows * DModel);
+            var expertOut = PooledBuffer<float>.RentArray(rows * DModel);
+            var slotOut = PooledBuffer<float>.RentArray(rows * k * DModel);   // [row, slot] → that expert's output
+            try
             {
-                SingleTokenProjectionKernel.ProjectParallel(
-                    hidden.Slice(n * DModel, DModel), routerWeight, [], logits, DModel, ExpertCount);
-                MoeRouter.SelectTopK(
-                    logits, k,
-                    selExperts.AsSpan(n * k, k),
-                    selWeights.AsSpan(n * k, k),
-                    _normalizeWeights);
-            }
-
-            // 2. Group rows by expert: gather → batched SwiGLU → stash each result at the row's top-k
-            //    slot (so the final per-row sum can run in top-k order = single-token order).
-            var rowBuf = new int[rows];
-            var slotBuf = new int[rows];
-            var gathered = new float[rows * DModel];
-            var expertOut = new float[rows * DModel];
-            var slotOut = new float[rows * k * DModel];   // [row, slot] → that expert's output
-
-            for (var e = 0; e < ExpertCount; e++)
-            {
-                var count = 0;
+                var logits = logitsArr.AsSpan(0, ExpertCount);
                 for (var n = 0; n < rows; n++)
                 {
-                    for (var j = 0; j < k; j++)
+                    SingleTokenProjectionKernel.ProjectParallel(
+                        hidden.Slice(n * DModel, DModel), routerWeight, [], logits, DModel, ExpertCount);
+                    MoeRouter.SelectTopK(
+                        logits, k,
+                        selExperts.AsSpan(n * k, k),
+                        selWeights.AsSpan(n * k, k),
+                        _normalizeWeights);
+                }
+
+                // 2. Group rows by expert: gather → batched SwiGLU → stash each result at the row's top-k
+                //    slot (so the final per-row sum can run in top-k order = single-token order).
+
+                for (var e = 0; e < ExpertCount; e++)
+                {
+                    var count = 0;
+                    for (var n = 0; n < rows; n++)
                     {
-                        if (selExperts[n * k + j] == e)
+                        for (var j = 0; j < k; j++)
                         {
-                            rowBuf[count] = n;
-                            slotBuf[count] = j;
-                            count++;
-                            break;
+                            if (selExperts[n * k + j] == e)
+                            {
+                                rowBuf[count] = n;
+                                slotBuf[count] = j;
+                                count++;
+                                break;
+                            }
                         }
                     }
+                    if (count == 0) { continue; }
+
+                    for (var c = 0; c < count; c++)
+                    {
+                        hidden.Slice(rowBuf[c] * DModel, DModel).CopyTo(gathered.AsSpan(c * DModel, DModel));
+                    }
+
+                    _expert.DecodeSwiGluBatchedDispatched(
+                        gathered, count, in gateExperts[e], in upExperts[e], in downExperts[e], expertOut);
+
+                    for (var c = 0; c < count; c++)
+                    {
+                        expertOut.AsSpan(c * DModel, DModel)
+                            .CopyTo(slotOut.AsSpan((rowBuf[c] * k + slotBuf[c]) * DModel, DModel));
+                    }
                 }
-                if (count == 0) { continue; }
 
-                for (var c = 0; c < count; c++)
+                // 3. Per-row weighted sum in top-k slot order — identical accumulation order to Decode.
+                for (var n = 0; n < rows; n++)
                 {
-                    hidden.Slice(rowBuf[c] * DModel, DModel).CopyTo(gathered.AsSpan(c * DModel, DModel));
-                }
-
-                _expert.DecodeSwiGluBatchedDispatched(
-                    gathered, count, in gateExperts[e], in upExperts[e], in downExperts[e], expertOut);
-
-                for (var c = 0; c < count; c++)
-                {
-                    expertOut.AsSpan(c * DModel, DModel)
-                        .CopyTo(slotOut.AsSpan((rowBuf[c] * k + slotBuf[c]) * DModel, DModel));
+                    var dst = output.Slice(n * DModel, DModel);
+                    dst.Clear();
+                    for (var j = 0; j < k; j++)
+                    {
+                        var w = selWeights[n * k + j];
+                        var src = slotOut.AsSpan((n * k + j) * DModel, DModel);
+                        for (var d = 0; d < DModel; d++) { dst[d] += w * src[d]; }
+                    }
                 }
             }
-
-            // 3. Per-row weighted sum in top-k slot order — identical accumulation order to Decode.
-            for (var n = 0; n < rows; n++)
+            finally
             {
-                var dst = output.Slice(n * DModel, DModel);
-                dst.Clear();
-                for (var j = 0; j < k; j++)
-                {
-                    var w = selWeights[n * k + j];
-                    var src = slotOut.AsSpan((n * k + j) * DModel, DModel);
-                    for (var d = 0; d < DModel; d++) { dst[d] += w * src[d]; }
-                }
+                PooledBuffer<float>.ReturnArray(slotOut);
+                PooledBuffer<float>.ReturnArray(expertOut);
+                PooledBuffer<float>.ReturnArray(gathered);
+                PooledBuffer<int>.ReturnArray(slotBuf);
+                PooledBuffer<int>.ReturnArray(rowBuf);
+                PooledBuffer<float>.ReturnArray(logitsArr);
+                PooledBuffer<float>.ReturnArray(selWeights);
+                PooledBuffer<int>.ReturnArray(selExperts);
             }
         }
     }

@@ -7,6 +7,7 @@ using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.LanguageModels.Rope;
 using DevOnBike.Overfit.Runtime;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
@@ -314,13 +315,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // write race), then the bands are reduced into output in ascending head
             // order. (The earlier per-head ProjectParallel fan-out — ~60 tiny
             // dispatches/layer — measured 3.8× SLOWER; this restructure removes it.)
-            var q = new float[HeadCount * rows * headDim];
-            var k = new float[HeadCount * rows * headDim];
-            var v = new float[HeadCount * rows * headDim];
-            var attn = new float[HeadCount * rows * headDim];
-            var bands = new float[HeadCount * rows * dModel];
-            var scoreScratch = new float[HeadCount * rows * cacheLength];
-
+            var q = PooledBuffer<float>.RentArray(HeadCount * rows * headDim);
+            var k = PooledBuffer<float>.RentArray(HeadCount * rows * headDim);
+            var v = PooledBuffer<float>.RentArray(HeadCount * rows * headDim);
+            var attn = PooledBuffer<float>.RentArray(HeadCount * rows * headDim);
+            var bands = PooledBuffer<float>.RentArray(HeadCount * rows * dModel);
+            var scoreScratch = PooledBuffer<float>.RentArray(HeadCount * rows * cacheLength);
+            try
+            {
             fixed (float* hiddenPtr = hidden)
             {
                 var context = new BatchedHeadContext
@@ -364,6 +366,16 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     var outRow = output.Slice(n * dModel, dModel);
                     TensorPrimitives.Add(outRow, bands.AsSpan((h * rows + n) * dModel, dModel), outRow);
                 }
+            }
+            }
+            finally
+            {
+                PooledBuffer<float>.ReturnArray(scoreScratch);
+                PooledBuffer<float>.ReturnArray(bands);
+                PooledBuffer<float>.ReturnArray(attn);
+                PooledBuffer<float>.ReturnArray(v);
+                PooledBuffer<float>.ReturnArray(k);
+                PooledBuffer<float>.ReturnArray(q);
             }
         }
 
@@ -410,17 +422,19 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             // Per-call scratch (prefill is a one-time pass).
-            var qh = new float[rows * headDim];
-            var kg = new float[rows * headDim];
-            var vg = new float[rows * headDim];
-            var attn = new float[rows * headDim];
-            var band = new float[rows * dModel];
-            var score = new float[rows * cacheLength];
+            var qh = PooledBuffer<float>.RentArray(rows * headDim);
+            var kg = PooledBuffer<float>.RentArray(rows * headDim);
+            var vg = PooledBuffer<float>.RentArray(rows * headDim);
+            var attn = PooledBuffer<float>.RentArray(rows * headDim);
+            var band = PooledBuffer<float>.RentArray(rows * dModel);
+            var score = PooledBuffer<float>.RentArray(rows * cacheLength);
 
             // Q8 KV cache: the batched attend reads F32, so dequantize the cached range once per group into
-            // this scratch (prefill is allocation-tolerant; the F32 cache path skips it entirely).
-            var kf = cache.IsQuantized ? new float[cacheLength * headDim] : null;
-            var vf = cache.IsQuantized ? new float[cacheLength * headDim] : null;
+            // this scratch (rented; the F32 cache path skips it entirely).
+            var kf = cache.IsQuantized ? PooledBuffer<float>.RentArray(cacheLength * headDim) : null;
+            var vf = cache.IsQuantized ? PooledBuffer<float>.RentArray(cacheLength * headDim) : null;
+            try
+            {
 
             for (var group = 0; group < KvHeadCount; group++)
             {
@@ -458,10 +472,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 ReadOnlySpan<float> keys, values;
                 if (cache.IsQuantized)
                 {
-                    cache.DequantizeKeyRange(layerIndex, group, fromPosition: 0, length: cacheLength, kf!);
-                    cache.DequantizeValueRange(layerIndex, group, fromPosition: 0, length: cacheLength, vf!);
-                    keys = kf!;
-                    values = vf!;
+                    cache.DequantizeKeyRange(layerIndex, group, fromPosition: 0, length: cacheLength, kf.AsSpan(0, cacheLength * headDim));
+                    cache.DequantizeValueRange(layerIndex, group, fromPosition: 0, length: cacheLength, vf!.AsSpan(0, cacheLength * headDim));
+                    keys = kf.AsSpan(0, cacheLength * headDim);
+                    values = vf.AsSpan(0, cacheLength * headDim);
                 }
                 else
                 {
@@ -498,6 +512,18 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                         TensorPrimitives.Add(outRow, band.AsSpan(n * dModel, dModel), outRow);
                     }
                 }
+            }
+            }
+            finally
+            {
+                if (vf != null) { PooledBuffer<float>.ReturnArray(vf); }
+                if (kf != null) { PooledBuffer<float>.ReturnArray(kf); }
+                PooledBuffer<float>.ReturnArray(score);
+                PooledBuffer<float>.ReturnArray(band);
+                PooledBuffer<float>.ReturnArray(attn);
+                PooledBuffer<float>.ReturnArray(vg);
+                PooledBuffer<float>.ReturnArray(kg);
+                PooledBuffer<float>.ReturnArray(qh);
             }
         }
 

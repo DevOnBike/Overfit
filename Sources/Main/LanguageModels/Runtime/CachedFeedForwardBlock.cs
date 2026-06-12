@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Numerics.Tensors;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
@@ -154,13 +155,20 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 throw new ArgumentException("Output span < rows*dModel.", nameof(output));
             }
 
-            var intermediate = new float[(long)rows * DFF <= int.MaxValue ? rows * DFF : throw new ArgumentException("rows*dFF overflow.", nameof(rows))];
+            var intermediate = PooledBuffer<float>.RentArray((long)rows * DFF <= int.MaxValue ? rows * DFF : throw new ArgumentException("rows*dFF overflow.", nameof(rows)));
+            try
+            {
 
-            BatchedProjectionKernel.ProjectParallel(hidden, rows, w1, b1, intermediate, DModel, DFF);
+                BatchedProjectionKernel.ProjectParallel(hidden, rows, w1, b1, intermediate, DModel, DFF);
 
-            ApplyActivation(intermediate.AsSpan(0, rows * DFF), Activation);
+                ApplyActivation(intermediate.AsSpan(0, rows * DFF), Activation);
 
-            BatchedProjectionKernel.ProjectParallel(intermediate, rows, w2, b2, output, DFF, DModel);
+                BatchedProjectionKernel.ProjectParallel(intermediate, rows, w2, b2, output, DFF, DModel);
+            }
+            finally
+            {
+                PooledBuffer<float>.ReturnArray(intermediate);
+            }
         }
 
         /// <summary>
@@ -316,14 +324,25 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             in DecodeWeight wDown,
             Span<float> output)
         {
-            var gate = new float[rows * DFF];
-            var up = new float[rows * DFF];
+            // Rented and EXACT-sliced: Multiply requires equal-length spans, and rented arrays are >= rows*DFF.
+            var gateArr = PooledBuffer<float>.RentArray(rows * DFF);
+            var upArr = PooledBuffer<float>.RentArray(rows * DFF);
+            try
+            {
+                var gate = gateArr.AsSpan(0, rows * DFF);
+                var up = upArr.AsSpan(0, rows * DFF);
 
-            BatchedQuantProjection.Dispatch(hidden, rows, in wGate, [], gate, DModel, DFF);
-            ApplyGate(gate, Activation);
-            BatchedQuantProjection.Dispatch(hidden, rows, in wUp, [], up, DModel, DFF);
-            TensorPrimitives.Multiply(gate, up, up);
-            BatchedQuantProjection.Dispatch(up, rows, in wDown, [], output.Slice(0, rows * DModel), DFF, DModel);
+                BatchedQuantProjection.Dispatch(hidden, rows, in wGate, [], gate, DModel, DFF);
+                ApplyGate(gate, Activation);
+                BatchedQuantProjection.Dispatch(hidden, rows, in wUp, [], up, DModel, DFF);
+                TensorPrimitives.Multiply(gate, up, up);
+                BatchedQuantProjection.Dispatch(up, rows, in wDown, [], output.Slice(0, rows * DModel), DFF, DModel);
+            }
+            finally
+            {
+                PooledBuffer<float>.ReturnArray(upArr);
+                PooledBuffer<float>.ReturnArray(gateArr);
+            }
         }
 
         /// <summary>

@@ -146,6 +146,7 @@ namespace DevOnBike.Overfit.Evolutionary.Evaluators
                 var contextLocal = _contextLocal;
                 var paramCount = parameterCount;
 
+#pragma warning disable OVERFIT008 // caller-configurable ParallelOptions (no OverfitParallel overload); evolutionary eval never runs inside DP replicas
                 Parallel.For(0, populationSize, _parallelOptions, i =>
                 {
                     // Read thread-local context. First touch on a worker thread triggers the
@@ -162,6 +163,7 @@ namespace DevOnBike.Overfit.Evolutionary.Evaluators
                     // since `context` is a local copy on the worker stack).
                     contextLocal.Value = context;
                 });
+#pragma warning restore OVERFIT008
             }
         }
 

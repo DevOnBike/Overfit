@@ -66,6 +66,40 @@ already; "zero-alloc training" would be a banner, not a speedup.
 - Large-batch LR scaling on Adam: the **linear rule (lr×R) beat the √R rule on final loss** in this setup
   (0.117 vs 0.133 after one epoch; over 5 epochs lr×8 fully recovers single-replica quality).
 
+## Addendum 2026-06-12 — one-cycle LR (time-to-quality) + the PyTorch reference
+
+**One-cycle LR closes epochs, not milliseconds** (`MnistOneCycleBenchTests`, 3 runs, init noise ±0.006
+— unseeded layers, compare bands not digits). Schedule = `LearningRateSchedule.WarmupCosine` (warmup
+10% of steps → peak → cosine to 0.0005) on the DP×8 / batch-128 rig:
+
+| Arm | Final-epoch loss | Wall | vs baseline |
+|---|---:|---:|---|
+| 5 ep, const lr 0.008 (baseline) | 0.036–0.049 | ~2.8 s | — |
+| 3 ep, peak **0.048** | **0.0397** | **1.47 s** | **−47% time, matches the baseline band** |
+| 4 ep, peak **0.032** | **0.0304** | **2.0 s** | **−28% time, BEATS the baseline band** |
+| 3 ep, peak 0.008 (low) | 0.088–0.101 | 1.5 s | low peaks don't work — peak 4–6× base lr is the regime |
+
+**PyTorch 2.11 CPU reference** (`Scripts/bench_mnist_torch.py`) — identical arch / data / batch 128 /
+AdamW on the same box, thread-count SWEPT to find torch's true optimum (4→710 ms, 6→565, **8→524–570
+(optimum)**, 10–16→600–615, 24→685, 32→13–14 s/epoch — the same SMT-oversubscription lesson as our
+worker-count findings). Overfit side measured with **BenchmarkDotNet** (`MnistTrainingEpochBenchmark`,
+1 op = 1 full epoch, 10 iterations): **503.0 ± 4.2 ms/epoch, 1.31 MB allocated/epoch**.
+
+**Verdict: Overfit ≈ PyTorch CPU on this workload, consistently ~5–10% faster** (503 ± 4 vs ~524–570
+at torch's optimal 8 threads — the bands don't overlap, but the margin is small). ⚠️ RETRACTION of the
+first claim in this addendum's draft: an earlier "1.2× faster" compared against torch at 16 threads,
+which a later sweep showed is NOT its optimum (8 is) — always sweep BOTH sides' knobs before claiming
+a ratio (same lesson as the llama.cpp "parity" retraction). Honest scope: a tiny 1→8-channel conv is
+dispatch-bound, where oneDNN's conv kernels can't shine and Python's per-step overhead hurts; on large
+convs/transformers PyTorch would likely win. `torch.compile` untested (Inductor needs MSVC `cl`).
+
+**Allocation breakdown of the 1.31 MB/epoch** (`MnistAllocBreakdownTests`, GC.GetTotalAllocatedBytes,
+all threads): tape path **754 KB** (1 624 B/batch/replica — `AutogradNode`/`TapeOp` objects, ~8 ops/batch)
++ trainer/Adam/TPL dispatch **656 KB** (~11.3 KB/step). At 503 ms/epoch that is ~2.8 MB/s → ~2 gen0/epoch
+→ GC cost ≤1 ms (~0.2%), **below the benchmark's own ±4 ms stddev — full zero-alloc training would buy
+nothing measurable here** (it remains a possible "0 B/step" banner: node/tape pooling + closure-free
+dispatch, ~1–2 sessions, 0 perf).
+
 ## Reproduce
 
 ```powershell
@@ -74,4 +108,7 @@ dotnet test ./Tests/Tests.csproj -c Release --filter "FullyQualifiedName~CnnBeas
 dotnet test ./Tests/Tests.csproj -c Release --filter "FullyQualifiedName~CnnDataParallel8"    # DP×8 twin (same Epoch-line format)
 dotnet test ./Tests/Tests.csproj -c Release --filter "FullyQualifiedName~MnistDataParallelBench"  # 5-arm sweep (single / 4 / 8 / lr rules)
 dotnet test ./Tests/Tests.csproj -c Release --filter "FullyQualifiedName~MaxPoolPool2Avx2Parity"  # bit-identity gate (fast, always on)
+dotnet test ./Tests/Tests.csproj -c Release --filter "FullyQualifiedName~OneCycle"                # one-cycle LR arms (flip [LongFact] first)
+python Scripts/bench_mnist_torch.py 8                                                             # PyTorch reference at ITS optimum (sweep showed 8 thr)
+dotnet run -c Release --project Sources/Benchmark -- --filter "*MnistTrainingEpoch*"              # BDN-grade ms/epoch for the Overfit side
 ```
