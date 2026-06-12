@@ -93,6 +93,13 @@ a ratio (same lesson as the llama.cpp "parity" retraction). Honest scope: a tiny
 dispatch-bound, where oneDNN's conv kernels can't shine and Python's per-step overhead hurts; on large
 convs/transformers PyTorch would likely win. `torch.compile` untested (Inductor needs MSVC `cl`).
 
+**Allocation breakdown of the 1.31 MB/epoch** (`MnistAllocBreakdownTests`, GC.GetTotalAllocatedBytes,
+all threads): tape path **754 KB** (1 624 B/batch/replica — `AutogradNode`/`TapeOp` objects, ~8 ops/batch)
++ trainer/Adam/TPL dispatch **656 KB** (~11.3 KB/step). At 503 ms/epoch that is ~2.8 MB/s → ~2 gen0/epoch
+→ GC cost ≤1 ms (~0.2%), **below the benchmark's own ±4 ms stddev — full zero-alloc training would buy
+nothing measurable here** (it remains a possible "0 B/step" banner: node/tape pooling + closure-free
+dispatch, ~1–2 sessions, 0 perf).
+
 ## Reproduce
 
 ```powershell
