@@ -66,6 +66,27 @@ already; "zero-alloc training" would be a banner, not a speedup.
 - Large-batch LR scaling on Adam: the **linear rule (lr×R) beat the √R rule on final loss** in this setup
   (0.117 vs 0.133 after one epoch; over 5 epochs lr×8 fully recovers single-replica quality).
 
+## Addendum 2026-06-12 — one-cycle LR (time-to-quality) + the PyTorch reference
+
+**One-cycle LR closes epochs, not milliseconds** (`MnistOneCycleBenchTests`, 3 runs, init noise ±0.006
+— unseeded layers, compare bands not digits). Schedule = `LearningRateSchedule.WarmupCosine` (warmup
+10% of steps → peak → cosine to 0.0005) on the DP×8 / batch-128 rig:
+
+| Arm | Final-epoch loss | Wall | vs baseline |
+|---|---:|---:|---|
+| 5 ep, const lr 0.008 (baseline) | 0.036–0.049 | ~2.8 s | — |
+| 3 ep, peak **0.048** | **0.0397** | **1.47 s** | **−47% time, matches the baseline band** |
+| 4 ep, peak **0.032** | **0.0304** | **2.0 s** | **−28% time, BEATS the baseline band** |
+| 3 ep, peak 0.008 (low) | 0.088–0.101 | 1.5 s | low peaks don't work — peak 4–6× base lr is the regime |
+
+**PyTorch 2.11 CPU reference** (`Scripts/bench_mnist_torch.py`) — identical arch / data / batch 128 /
+AdamW on the same box: **~605 ms/epoch at its optimal 16 threads** (32 threads = catastrophic
+13–14 s/epoch — the same SMT-oversubscription lesson as our worker-count findings) vs Overfit DP×8
+**~500 ms/epoch** → **Overfit is ~1.2× faster per epoch on this workload**. Honest scope: a tiny
+1→8-channel conv is dispatch-bound, where oneDNN's conv kernels can't shine and Python's per-step
+overhead hurts; on large convs/transformers PyTorch would likely win. `torch.compile` untested on
+this box (Inductor needs MSVC `cl` on PATH).
+
 ## Reproduce
 
 ```powershell
@@ -74,4 +95,6 @@ dotnet test ./Tests/Tests.csproj -c Release --filter "FullyQualifiedName~CnnBeas
 dotnet test ./Tests/Tests.csproj -c Release --filter "FullyQualifiedName~CnnDataParallel8"    # DP×8 twin (same Epoch-line format)
 dotnet test ./Tests/Tests.csproj -c Release --filter "FullyQualifiedName~MnistDataParallelBench"  # 5-arm sweep (single / 4 / 8 / lr rules)
 dotnet test ./Tests/Tests.csproj -c Release --filter "FullyQualifiedName~MaxPoolPool2Avx2Parity"  # bit-identity gate (fast, always on)
+dotnet test ./Tests/Tests.csproj -c Release --filter "FullyQualifiedName~OneCycle"                # one-cycle LR arms (flip [LongFact] first)
+python Scripts/bench_mnist_torch.py 16                                                            # PyTorch reference (same arch/box)
 ```
