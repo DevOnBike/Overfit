@@ -43,6 +43,7 @@ break a build.
 | `OVERFIT017` | A plain (non-record) struct with ≥1 instance field where all instance fields are readonly and no settable property — declare it `readonly struct` to drop defensive copies | #2 | ✅ shipped |
 | `OVERFIT018` | `readonly` field of a **mutable** struct (a non-readonly struct with ≥1 non-readonly instance field — catches enumerators, excludes immutable BCL values like `DateTime`/`Guid`): every access is a defensive copy, mutation is silently lost | #90 (the "Do NOT make this readonly" trap) | ✅ shipped |
 | `OVERFIT019` | Non-capturing lambda without the `static` keyword — `static` makes the no-capture contract enforced (a future accidental capture becomes a compile error). Shares the capture analysis with `OVERFIT004` via `OverfitPerfAnalysis.LambdaCapturesEnclosingState` | #46h | ✅ shipped |
+| `OVERFIT020` | A primitive-array parameter (`float[]`/`int[]`/`byte[]`/…) of a **private/internal**, non-async, non-iterator, non-ctor method that is only read/indexed and **provably does not escape** (no field/return/array-argument/lambda capture) → take a `ReadOnlySpan<T>` (or `Span<T>` if it writes elements) so callers pass arrays, slices or `stackalloc` without a copy. Intra-method escape analysis via `RegisterOperationBlockAction`; conservative (skips ctors/public surface so it never suggests breaking a stored-weights API) | span-friendly APIs | ✅ shipped |
 
 **Tier C — architectural (convention/attribute):**
 

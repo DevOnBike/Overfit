@@ -24,4 +24,5 @@ OVERFIT016 | Performance | Warning | Large struct (est. > 64 B) passed by value 
 OVERFIT017 | Performance | Warning | Struct with only readonly fields is not declared `readonly struct` — defensive copies
 OVERFIT018 | Performance | Warning | readonly field of a mutable struct — defensive copy per access, mutation silently lost
 OVERFIT019 | Performance | Warning | Non-capturing lambda without `static` — guard against future accidental captures
+OVERFIT020 | Performance | Warning | Primitive-array parameter that never escapes could be a ReadOnlySpan<T>/Span<T> (accepts slices/stackalloc without copy)
 OVERFIT900 | Performance | Error | A per-call OVERFIT rule fired inside an [OverfitHotPath] member/type — escalated to a build error

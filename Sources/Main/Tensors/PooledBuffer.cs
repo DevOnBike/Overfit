@@ -65,9 +65,15 @@ namespace DevOnBike.Overfit.Tensors
         /// <paramref name="minimumLength"/>; caller slices to the exact length it needs. Pair with
         /// <see cref="ReturnArray"/> exactly once.
         /// </summary>
-        public static T[] RentArray(int minimumLength) => ArrayPool<T>.Shared.Rent(minimumLength);
+        public static T[] RentArray(int minimumLength)
+        {
+            return ArrayPool<T>.Shared.Rent(minimumLength);
+        }
 
         /// <summary>Returns an array previously obtained from <see cref="RentArray"/> to the pool.</summary>
-        public static void ReturnArray(T[] array) => ArrayPool<T>.Shared.Return(array);
+        public static void ReturnArray(T[] array)
+        {
+            ArrayPool<T>.Shared.Return(array);
+        }
     }
 }

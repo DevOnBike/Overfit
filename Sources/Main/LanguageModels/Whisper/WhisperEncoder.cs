@@ -156,7 +156,9 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             return _x;
         }
 
+#pragma warning disable OVERFIT001 // Grows a REUSED encoder scratch buffer only when too small (amortized one-time); steady-state encode reuses the pre-allocated buffers.
         private static float[] Ensure(float[] buffer, int needed)
             => buffer.Length >= needed ? buffer : new float[needed];
+#pragma warning restore OVERFIT001
     }
 }

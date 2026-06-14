@@ -47,6 +47,7 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
                 NMels: br.ReadInt32(),
                 F16: br.ReadInt32() != 0);
 
+#pragma warning disable OVERFIT001 // Load-time model parse — runs once per model load (mel filterbank, vocab, per-tensor shape + data), not on any serving path.
             // ── mel filters ──
             var melRows = br.ReadInt32();
             var melCols = br.ReadInt32();
@@ -100,6 +101,7 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             }
 
             return new WhisperModel(config, melRows, melCols, melFilters, vocab, tensors);
+#pragma warning restore OVERFIT001
         }
     }
 }

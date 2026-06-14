@@ -6,6 +6,7 @@
 using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Runtime;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.LanguageModels.Whisper
 {
@@ -196,13 +197,29 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             ReadOnlySpan<float> wo, ReadOnlySpan<float> bo,
             Span<float> dst, bool causal)
         {
-            var q = new float[tq * dModel];
-            var k = new float[tkv * dModel];
-            var v = new float[tkv * dModel];
-            var attnOut = new float[tq * dModel];
-            var scores = new float[tkv];
-            MultiHeadAttention(xq, tq, xkv, tkv, dModel, nHeads, wq, bq, wk, wv, bv, wo, bo, dst, causal,
-                q, k, v, attnOut, scores);
+            // Convenience overload: rent the q/k/v/attnOut/scores scratch from the pool (exact-length
+            // slices) and delegate to the allocation-free overload. The serving paths (encoder, cached
+            // decode) call that overload directly with their own reused scratch and never reach here.
+            var qLen = tq * dModel;
+            var kvLen = tkv * dModel;
+            var qArr = PooledBuffer<float>.RentArray(qLen);
+            var kArr = PooledBuffer<float>.RentArray(kvLen);
+            var vArr = PooledBuffer<float>.RentArray(kvLen);
+            var attnOutArr = PooledBuffer<float>.RentArray(qLen);
+            var scoresArr = PooledBuffer<float>.RentArray(tkv);
+            try
+            {
+                MultiHeadAttention(xq, tq, xkv, tkv, dModel, nHeads, wq, bq, wk, wv, bv, wo, bo, dst, causal,
+                    qArr.AsSpan(0, qLen), kArr.AsSpan(0, kvLen), vArr.AsSpan(0, kvLen), attnOutArr.AsSpan(0, qLen), scoresArr.AsSpan(0, tkv));
+            }
+            finally
+            {
+                PooledBuffer<float>.ReturnArray(qArr);
+                PooledBuffer<float>.ReturnArray(kArr);
+                PooledBuffer<float>.ReturnArray(vArr);
+                PooledBuffer<float>.ReturnArray(attnOutArr);
+                PooledBuffer<float>.ReturnArray(scoresArr);
+            }
         }
 
         /// <summary>
@@ -288,7 +305,8 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
         private static void MhaWorker(int start, int end, void* ctxPtr)
         {
             ref var c = ref Unsafe.AsRef<MhaCtx>(ctxPtr);
-            Span<float> scores = c.Tkv <= 8192 ? stackalloc float[c.Tkv] : new float[c.Tkv];
+            using var scoresPool = c.Tkv <= 8192 ? default : new PooledBuffer<float>(c.Tkv, clearMemory: false);
+            Span<float> scores = c.Tkv <= 8192 ? stackalloc float[c.Tkv] : scoresPool.Span;
             var q = new ReadOnlySpan<float>(c.Q, c.Tq * c.DModel);
             var k = new ReadOnlySpan<float>(c.K, c.Tkv * c.DModel);
             var v = new ReadOnlySpan<float>(c.V, c.Tkv * c.DModel);

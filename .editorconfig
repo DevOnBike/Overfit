@@ -55,6 +55,11 @@ dotnet_diagnostic.OVERFIT016.severity = suggestion
 dotnet_diagnostic.OVERFIT017.severity = suggestion
 dotnet_diagnostic.OVERFIT018.severity = suggestion
 dotnet_diagnostic.OVERFIT019.severity = suggestion
+# OVERFIT020 — array param could be (ReadOnly)Span<T>. Advisory like the rest of Tier B; suggestion-
+# only, does not escalate. Fires only when the array provably does not escape (no field/return/array-arg/
+# capture; ordinary private/internal non-async non-iterator methods) so it never suggests breaking a
+# stored-weights API. An API-shape change a human reviews, never a build gate.
+dotnet_diagnostic.OVERFIT020.severity = suggestion
 # OVERFIT900 — the [OverfitHotPath] escalation. Any per-call rule (001-007, 009-011, 013-014) that
 # fires inside a member or type marked [DevOnBike.Overfit.Diagnostics.OverfitHotPath] is reported as
 # this hard error INSTEAD of its directory-configured severity — the per-member ratchet. Always error;
@@ -113,4 +118,11 @@ dotnet_diagnostic.OVERFIT009.severity = suggestion
 # allocated per 272-token prefill, greedy output bit-identical; load-time/by-contract sites carry
 # justified #pragma). Per-call heap arrays in the serving runtime are a build warning from here on.
 [Sources/Main/LanguageModels/Runtime/**.cs]
+dotnet_diagnostic.OVERFIT001.severity = warning
+
+# Whisper/ ESCALATED 2026-06-13 after the speech-to-text sweep: per-call scratch in the encoder/
+# decoder/kernels (per-frame, per-token hot path) pooled via PooledBuffer.RentArray with exact-length
+# slices; load-time/by-contract sites carry justified #pragma. Validated bit-identical against the
+# real ggml-tiny + jfk.wav transcription. Per-call heap arrays here are a build warning from now on.
+[Sources/Main/LanguageModels/Whisper/**.cs]
 dotnet_diagnostic.OVERFIT001.severity = warning

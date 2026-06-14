@@ -88,6 +88,7 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
         /// (<paramref name="encoderOut"/> <c>[nCtx × nState]</c>); returns the next-token logits for the LAST
         /// position (<c>[nVocab]</c>).
         /// </summary>
+#pragma warning disable OVERFIT001 // Reference decode path (recompute-all, per-step buffers): the serving path is DecodeCached/Step, which is allocation-free. Kept simple for correctness/parity.
         public float[] Forward(ReadOnlySpan<int> tokens, ReadOnlySpan<float> encoderOut, int nCtx)
         {
             var seq = tokens.Length;
@@ -149,6 +150,7 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             WhisperKernels.Linear(last, _tokenEmbedding, ReadOnlySpan<float>.Empty, logits, 1, _nState, _nVocab);
             return logits;
         }
+#pragma warning restore OVERFIT001
 
         /// <summary>
         /// Greedy autoregressive decode: starts from <paramref name="promptTokens"/> (e.g.
@@ -234,6 +236,7 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             if (s is null || s.NCtx != nCtx || s.MaxLen != maxLen)
             {
                 var scoreLen = Math.Max(nCtx, maxLen);
+#pragma warning disable OVERFIT001 // Decode-state scratch allocated once per (reused) State — _reuseState keeps it across streaming steps; the per-token Step is allocation-free.
                 s = new State
                 {
                     CrossK = new float[_nLayer * crossStride],
@@ -253,6 +256,7 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
                     Scores = new float[scoreLen],
                     Logits = new float[_nVocab],
                 };
+#pragma warning restore OVERFIT001
                 _reuseState = s;
             }
 
