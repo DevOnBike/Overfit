@@ -19,19 +19,18 @@ nothing ships); tests and benchmarks are deliberately NOT covered.
 | `OVERFIT008` | Raw `Parallel.For/ForEach/Invoke` — ignores `SuppressParallelismOnCurrentThread` (oversubscription in data-parallel replicas, measured 1.8× slower) and allocates per dispatch (measured ~925 KB vs 0 B on the OverfitParallel pool). **Warning repo-wide in Main** (no per-call exemption — a suppress leak in a ctor breaks replicas the same way); measured exceptions keep `#pragma` + the benchmark cited | ✅ shipped |
 | `OVERFIT009` | `.ToArray()` in per-call code (explicit hot-path ban in `Sources/Main/README.md`) — slice the existing buffer or use pooled memory | ✅ shipped |
 | `OVERFIT015` | Direct `Xxx.IsSupported` on a hardware-intrinsics class outside `CpuFeatures` — gate ISA paths through `CpuFeatures.HasXxx` (one audit point, composed flags like `HasAvx2Fma`, identical JIT constant-folding; the two strays found at introduction were migrated). **Warning repo-wide in Main**, like 008 — it's a convention rule, not an allocation-context rule | ✅ shipped |
-| `OVERFIT010` | Per-call `new List<T>` / `Dictionary` / `HashSet` / `Queue` / `Stack` / `StringBuilder` / `MemoryStream` — pool it (`docs/performance-patterns.md` #1 ObjectPool, #26 ValueStringBuilder, #46p RecyclableMemoryStream) | proposed |
+| `OVERFIT010` | Per-call `new List<T>` / `Dictionary` / `HashSet` / `Queue` / `Stack` / `StringBuilder` / `MemoryStream` — pool it (`docs/performance-patterns.md` #1 ObjectPool, #26 ValueStringBuilder, #46p RecyclableMemoryStream) | ✅ shipped |
+| `OVERFIT011` | Struct used as `Dictionary<K,V>`/`HashSet<K>` key without `IEquatable<K>` / record struct — the DEFAULT `Equals`/`GetHashCode` for structs is **reflection-based** (`#46g`); a passed `IEqualityComparer<K>` silences it. Design rule, no context exemption | ✅ shipped |
+| `OVERFIT012` | Finalizer declared (`~T()`) — finalizable objects allocate slower and survive ≥2 GC generations; `IDisposable` + `GC.SuppressFinalize` instead (`#48a`) | ✅ shipped |
+| `OVERFIT013` | `.Count` read on `ConcurrentQueue`/`ConcurrentBag` (segment-walking + sync) — use `IsEmpty` or an approximate `Interlocked` counter (`#80`) | ✅ shipped |
+| `OVERFIT014` | `a.ToLower() == b.ToLower()` / `.ToUpper()` comparison — allocates a throwaway string per side; use `string.Equals(a, b, StringComparison.OrdinalIgnoreCase)` (`#46o`) | ✅ shipped |
 
 ## Extended catalog (grounded in `docs/performance-patterns.md`, 110 patterns)
 
-**Tier A — precise, low-false-positive, implement next** (each cites the pattern doc):
-
-| Id | Rule | Source pattern |
-|---|---|---|
-| `OVERFIT011` | Struct used as `Dictionary<K,V>`/`HashSet<K>` key without `IEquatable<K>` / record struct — the DEFAULT `Equals`/`GetHashCode` for structs is **reflection-based** | #46g |
-| `OVERFIT012` | Finalizer declared (`~T()`) — finalizable objects allocate slower and survive ≥2 GC generations; `IDisposable` + `GC.SuppressFinalize` instead | #48a |
-| `OVERFIT013` | `.Count` read on `ConcurrentQueue`/`ConcurrentBag` (segment-walking + sync) — use `IsEmpty` or an approximate `Interlocked` counter | #80 |
-| `OVERFIT014` | `a.ToLower() == b.ToLower()` / `.ToUpper()` comparison — allocates two strings; use `string.Equals(a, b, StringComparison.OrdinalIgnoreCase)` | #46o |
-| ~~`OVERFIT015`~~ | ~~IsSupported inside a loop~~ — **superseded & SHIPPED** as the broader rule: direct `Xxx.IsSupported` anywhere outside `CpuFeatures` → gate via `CpuFeatures.HasXxx` (one audit point; `static readonly bool` folds to a JIT constant exactly like the raw intrinsic, and hoisting falls out naturally) | #64, #67 |
+**Tier A — SHIPPED 2026-06-13** as `OVERFIT010`–`OVERFIT014` (table above). All five are precise,
+low-false-positive rules; 010 and 014 are allocation rules (one-time + exception exempt), 011/012/013
+are convention rules. `OVERFIT015` (direct `Xxx.IsSupported` → `CpuFeatures.HasXxx`, source `#64`/`#67`)
+shipped earlier as the broader form of the original "IsSupported inside a loop" idea.
 
 **Tier B — heuristic, suggestion-only severity:**
 

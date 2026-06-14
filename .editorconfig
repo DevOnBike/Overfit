@@ -39,6 +39,14 @@ dotnet_diagnostic.OVERFIT007.severity = suggestion
 dotnet_diagnostic.OVERFIT008.severity = error
 dotnet_diagnostic.OVERFIT015.severity = error
 dotnet_diagnostic.OVERFIT009.severity = suggestion
+# Tier A, added 2026-06-13 — start on the bottom rung (suggestion everywhere). Escalate a directory
+# once it is swept, exactly like 001-009. 010 (growable collections) and 014 (ToLower compare) are
+# allocation rules; 011 (struct dict key), 012 (finalizer), 013 (concurrent .Count) are convention rules.
+dotnet_diagnostic.OVERFIT010.severity = suggestion
+dotnet_diagnostic.OVERFIT011.severity = suggestion
+dotnet_diagnostic.OVERFIT012.severity = suggestion
+dotnet_diagnostic.OVERFIT013.severity = suggestion
+dotnet_diagnostic.OVERFIT014.severity = suggestion
 
 [Sources/Main/Kernels/**.cs]
 # Allocation rules are ERRORS in pure kernels — per-call allocation is never right here;

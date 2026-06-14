@@ -14,4 +14,9 @@ OVERFIT006 | Performance | Warning | String interpolation/concatenation in per-c
 OVERFIT007 | Performance | Warning | params call materialises a hidden array in per-call code
 OVERFIT008 | Performance | Warning | Raw Parallel.For/ForEach/Invoke — use suppress-aware OverfitParallel
 OVERFIT009 | Performance | Warning | .ToArray() in per-call code — slice or use pooled buffers
+OVERFIT010 | Performance | Warning | Growable collection (List/Dictionary/HashSet/Queue/Stack/StringBuilder/MemoryStream) allocated in per-call code — pool it
+OVERFIT011 | Performance | Warning | Struct dictionary/set key without IEquatable<T> — reflection-based default equality
+OVERFIT012 | Performance | Warning | Finalizer declared — slower allocation, extra GC generation; use IDisposable + GC.SuppressFinalize
+OVERFIT013 | Performance | Warning | .Count on ConcurrentQueue/ConcurrentBag — synchronized segment walk; use IsEmpty or an Interlocked counter
+OVERFIT014 | Performance | Warning | Case-folding string equality (a.ToLower() == b.ToLower()) — use string.Equals with StringComparison.OrdinalIgnoreCase
 OVERFIT015 | Performance | Warning | Direct intrinsics IsSupported — gate ISA paths through CpuFeatures
