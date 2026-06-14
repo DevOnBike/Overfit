@@ -225,6 +225,71 @@ mcpCommand.SetAction(parseResult => Commands.Mcp(
     parseResult.GetValue(mcpRagDir),
     parseResult.GetValue(mcpWhisperModel)));
 
+// ── bench: concurrent serving load test of any OpenAI-compatible streaming endpoint. Measures TTFT/
+//    ITL/throughput/goodput under N concurrent users and folds them into one holistic score, the same
+//    metric shape the GPU-serving world uses — so a pure-.NET CPU server can be compared apples-to-apples. ──
+var benchUrl = new Option<string>("--url")
+{
+    Description = "Base URL of the OpenAI-compatible API (the part before /chat/completions).",
+    DefaultValueFactory = _ => "http://127.0.0.1:11434/v1",
+};
+var benchModel = new Option<string>("--model")
+{
+    Description = "Model name to request (sent as the 'model' field).",
+    DefaultValueFactory = _ => "local",
+};
+var benchUsers = new Option<int>("--users", "-u")
+{
+    Description = "Number of concurrent virtual users.",
+    DefaultValueFactory = _ => 8,
+};
+var benchRequests = new Option<int>("--requests", "-n")
+{
+    Description = "Total requests to send in the measured window (clamped to at least --users).",
+    DefaultValueFactory = _ => 64,
+};
+var benchMaxTokens = new Option<int>("--max-tokens")
+{
+    Description = "max_tokens per request — caps decode length so ITL is measured over a real stream.",
+    DefaultValueFactory = _ => 128,
+};
+var benchPrompt = new Option<string>("--prompt")
+{
+    Description = "The user prompt every request sends.",
+    DefaultValueFactory = _ => "Explain, in a short paragraph, why running language models locally can be useful.",
+};
+var benchWarmup = new Option<int>("--warmup")
+{
+    Description = "Warm-up requests sent before the measured window (not scored) to reach steady state.",
+    DefaultValueFactory = _ => 8,
+};
+var benchCost = new Option<double>("--cost-units")
+{
+    Description = "Cost units in the score denominator (e.g. CPU cores or server count); default 1.",
+    DefaultValueFactory = _ => 1.0,
+};
+var benchCommand = new Command("bench",
+    "Load-test an OpenAI-compatible streaming endpoint (concurrent users → TTFT/ITL/throughput + a holistic score).")
+{
+    benchUrl,
+    benchModel,
+    benchUsers,
+    benchRequests,
+    benchMaxTokens,
+    benchPrompt,
+    benchWarmup,
+    benchCost,
+};
+benchCommand.SetAction(parseResult => ServingBenchmark.Run(
+    parseResult.GetValue(benchUrl)!,
+    parseResult.GetValue(benchModel)!,
+    parseResult.GetValue(benchUsers),
+    parseResult.GetValue(benchRequests),
+    parseResult.GetValue(benchMaxTokens),
+    parseResult.GetValue(benchPrompt)!,
+    parseResult.GetValue(benchWarmup),
+    parseResult.GetValue(benchCost)));
+
 var rootCommand = new RootCommand("Overfit — run local LLMs, RAG and agents in pure .NET. No Python, no native runtime.")
 {
     pullCommand,
@@ -234,6 +299,7 @@ var rootCommand = new RootCommand("Overfit — run local LLMs, RAG and agents in
     mcpCommand,
     ttsCommand,
     voiceCommand,
+    benchCommand,
 };
 
 return rootCommand.Parse(args).Invoke();
