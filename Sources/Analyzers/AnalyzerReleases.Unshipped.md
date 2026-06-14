@@ -20,4 +20,8 @@ OVERFIT012 | Performance | Warning | Finalizer declared — slower allocation, e
 OVERFIT013 | Performance | Warning | .Count on ConcurrentQueue/ConcurrentBag — synchronized segment walk; use IsEmpty or an Interlocked counter
 OVERFIT014 | Performance | Warning | Case-folding string equality (a.ToLower() == b.ToLower()) — use string.Equals with StringComparison.OrdinalIgnoreCase
 OVERFIT015 | Performance | Warning | Direct intrinsics IsSupported — gate ISA paths through CpuFeatures
+OVERFIT016 | Performance | Warning | Large struct (est. > 64 B) passed by value — pass as `in`
+OVERFIT017 | Performance | Warning | Struct with only readonly fields is not declared `readonly struct` — defensive copies
+OVERFIT018 | Performance | Warning | readonly field of a mutable struct — defensive copy per access, mutation silently lost
+OVERFIT019 | Performance | Warning | Non-capturing lambda without `static` — guard against future accidental captures
 OVERFIT900 | Performance | Error | A per-call OVERFIT rule fired inside an [OverfitHotPath] member/type — escalated to a build error

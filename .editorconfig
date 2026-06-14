@@ -47,6 +47,14 @@ dotnet_diagnostic.OVERFIT011.severity = suggestion
 dotnet_diagnostic.OVERFIT012.severity = suggestion
 dotnet_diagnostic.OVERFIT013.severity = suggestion
 dotnet_diagnostic.OVERFIT014.severity = suggestion
+# Tier B, added 2026-06-13 — HEURISTIC, advisory-only. Stay suggestion EVERYWHERE and do NOT escalate
+# under [OverfitHotPath] (they don't route through OverfitPerfAnalysis.Report) — a heuristic false
+# positive must never break a build. 016 large-struct-by-value, 017 could-be-readonly-struct,
+# 018 readonly-field-of-mutable-struct (#90 trap), 019 non-capturing-lambda-without-static.
+dotnet_diagnostic.OVERFIT016.severity = suggestion
+dotnet_diagnostic.OVERFIT017.severity = suggestion
+dotnet_diagnostic.OVERFIT018.severity = suggestion
+dotnet_diagnostic.OVERFIT019.severity = suggestion
 # OVERFIT900 — the [OverfitHotPath] escalation. Any per-call rule (001-007, 009-011, 013-014) that
 # fires inside a member or type marked [DevOnBike.Overfit.Diagnostics.OverfitHotPath] is reported as
 # this hard error INSTEAD of its directory-configured severity — the per-member ratchet. Always error;

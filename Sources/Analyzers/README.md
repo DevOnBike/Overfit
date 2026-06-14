@@ -32,14 +32,17 @@ low-false-positive rules; 010 and 014 are allocation rules (one-time + exception
 are convention rules. `OVERFIT015` (direct `Xxx.IsSupported` → `CpuFeatures.HasXxx`, source `#64`/`#67`)
 shipped earlier as the broader form of the original "IsSupported inside a loop" idea.
 
-**Tier B — heuristic, suggestion-only severity:**
+**Tier B — heuristic, suggestion-only. SHIPPED 2026-06-13.** These read code shape rather than a hard
+allocation, so they are **advisory: suggestion everywhere, and they do NOT escalate under
+`[OverfitHotPath]`** (they don't route through `OverfitPerfAnalysis.Report`) — a heuristic must never
+break a build.
 
-| Id | Rule | Source pattern |
-|---|---|---|
-| `OVERFIT016` | Large struct (est. > 64 B = cache line) passed by value — pass by `in`/`ref` | #56 principle 1 |
-| `OVERFIT017` | Struct declared without `readonly` though all fields could be — defensive copies | #2 |
-| `OVERFIT018` | `readonly` field holding a MUTABLE struct (e.g. an enumerator) — every access is a defensive copy, mutation is silently lost | #90 (the "Do NOT make this readonly" trap) |
-| `OVERFIT019` | Non-capturing lambda without the `static` keyword — `static` guards against future accidental captures | #46h |
+| Id | Rule | Source pattern | Status |
+|---|---|---|---|
+| `OVERFIT016` | Large struct (estimated > 64 B = cache line) passed by value — pass as `in`. Size is summed from the field layout (no padding → under-counts, so only clearly-large structs trip); SIMD `Vector*` and generic type params are skipped | #56 | ✅ shipped |
+| `OVERFIT017` | A plain (non-record) struct with ≥1 instance field where all instance fields are readonly and no settable property — declare it `readonly struct` to drop defensive copies | #2 | ✅ shipped |
+| `OVERFIT018` | `readonly` field of a **mutable** struct (a non-readonly struct with ≥1 non-readonly instance field — catches enumerators, excludes immutable BCL values like `DateTime`/`Guid`): every access is a defensive copy, mutation is silently lost | #90 (the "Do NOT make this readonly" trap) | ✅ shipped |
+| `OVERFIT019` | Non-capturing lambda without the `static` keyword — `static` makes the no-capture contract enforced (a future accidental capture becomes a compile error). Shares the capture analysis with `OVERFIT004` via `OverfitPerfAnalysis.LambdaCapturesEnclosingState` | #46h | ✅ shipped |
 
 **Tier C — architectural (convention/attribute):**
 

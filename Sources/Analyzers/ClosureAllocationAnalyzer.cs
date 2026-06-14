@@ -53,7 +53,7 @@ namespace DevOnBike.Overfit.Analyzers
             switch (operation.Target)
             {
                 case IAnonymousFunctionOperation lambda:
-                    if (CapturesEnclosingState(lambda))
+                    if (OverfitPerfAnalysis.LambdaCapturesEnclosingState(lambda))
                     {
                         OverfitPerfAnalysis.Report(
                             context, Rule, operation.Syntax.GetLocation(), "Lambda captures enclosing state (closure)");
@@ -70,54 +70,6 @@ namespace DevOnBike.Overfit.Analyzers
                 default:
                     return;
             }
-        }
-
-        /// <summary>A lambda captures when it references a local/parameter declared OUTSIDE itself,
-        /// or touches <c>this</c>. Symbol containment decides — references to the lambda's own
-        /// parameters/locals (including nested lambdas' own state) are not captures.</summary>
-        private static bool CapturesEnclosingState(IAnonymousFunctionOperation lambda)
-        {
-            var lambdaSymbol = lambda.Symbol;
-
-            foreach (var descendant in lambda.Descendants())
-            {
-                switch (descendant)
-                {
-                    case IInstanceReferenceOperation { ReferenceKind: InstanceReferenceKind.ContainingTypeInstance }:
-                        return true;
-
-                    case ILocalReferenceOperation localReference:
-                        if (!IsDeclaredWithin(localReference.Local.ContainingSymbol, lambdaSymbol))
-                        {
-                            return true;
-                        }
-
-                        break;
-
-                    case IParameterReferenceOperation parameterReference:
-                        if (!IsDeclaredWithin(parameterReference.Parameter.ContainingSymbol, lambdaSymbol))
-                        {
-                            return true;
-                        }
-
-                        break;
-                }
-            }
-
-            return false;
-        }
-
-        private static bool IsDeclaredWithin(ISymbol declaringSymbol, IMethodSymbol lambdaSymbol)
-        {
-            for (ISymbol? current = declaringSymbol; current is IMethodSymbol method; current = method.ContainingSymbol)
-            {
-                if (SymbolEqualityComparer.Default.Equals(method, lambdaSymbol))
-                {
-                    return true;
-                }
-            }
-
-            return false;
         }
     }
 }

@@ -131,5 +131,55 @@ namespace DevOnBike.Overfit.Analyzers
 
             return false;
         }
+
+        /// <summary>True when the lambda references a local/parameter declared OUTSIDE itself, or
+        /// touches <c>this</c> — i.e. it captures enclosing state (allocates a closure) rather than
+        /// being a pure, compiler-cacheable function. References to the lambda's own
+        /// parameters/locals (including nested lambdas' own state) are not captures. Shared by
+        /// OVERFIT004 (closure allocation) and OVERFIT019 (missing <c>static</c>).</summary>
+        internal static bool LambdaCapturesEnclosingState(IAnonymousFunctionOperation lambda)
+        {
+            var lambdaSymbol = lambda.Symbol;
+
+            foreach (var descendant in lambda.Descendants())
+            {
+                switch (descendant)
+                {
+                    case IInstanceReferenceOperation { ReferenceKind: InstanceReferenceKind.ContainingTypeInstance }:
+                        return true;
+
+                    case ILocalReferenceOperation localReference:
+                        if (!IsDeclaredWithin(localReference.Local.ContainingSymbol, lambdaSymbol))
+                        {
+                            return true;
+                        }
+
+                        break;
+
+                    case IParameterReferenceOperation parameterReference:
+                        if (!IsDeclaredWithin(parameterReference.Parameter.ContainingSymbol, lambdaSymbol))
+                        {
+                            return true;
+                        }
+
+                        break;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsDeclaredWithin(ISymbol declaringSymbol, IMethodSymbol lambdaSymbol)
+        {
+            for (ISymbol? current = declaringSymbol; current is IMethodSymbol method; current = method.ContainingSymbol)
+            {
+                if (SymbolEqualityComparer.Default.Equals(method, lambdaSymbol))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
     }
 }
