@@ -35,7 +35,7 @@ namespace DevOnBike.Overfit.Analyzers
             isEnabledByDefault: true,
             description: "Jagged arrays cost one allocation per row plus the outer array and defeat cache locality. Per-call code should use a flat array sliced per row; one-time structures (field initializers, constructors) are not flagged. float[][] is banned in Sources/Main entirely by the MSBuild guard.");
 
-        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
+        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule, OverfitPerfAnalysis.HotPathRule];
 
         public override void Initialize(AnalysisContext context)
         {
@@ -89,10 +89,11 @@ namespace DevOnBike.Overfit.Analyzers
                 return;
             }
 
-            context.ReportDiagnostic(Diagnostic.Create(
+            OverfitPerfAnalysis.Report(
+                context,
                 Rule,
                 operation.Syntax.GetLocation(),
-                elementType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)));
+                elementType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat));
         }
 
         private static bool IsOneTimeAllocationContext(ISymbol containingSymbol)

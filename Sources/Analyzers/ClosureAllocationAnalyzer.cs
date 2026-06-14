@@ -32,7 +32,7 @@ namespace DevOnBike.Overfit.Analyzers
             isEnabledByDefault: true,
             description: "Capturing lambdas allocate a closure + delegate on every execution of the creating statement; instance method groups allocate a delegate. Non-capturing lambdas and static method groups are compiler-cached and not flagged.");
 
-        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
+        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule, OverfitPerfAnalysis.HotPathRule];
 
         public override void Initialize(AnalysisContext context)
         {
@@ -55,16 +55,16 @@ namespace DevOnBike.Overfit.Analyzers
                 case IAnonymousFunctionOperation lambda:
                     if (CapturesEnclosingState(lambda))
                     {
-                        context.ReportDiagnostic(Diagnostic.Create(
-                            Rule, operation.Syntax.GetLocation(), "Lambda captures enclosing state (closure)"));
+                        OverfitPerfAnalysis.Report(
+                            context, Rule, operation.Syntax.GetLocation(), "Lambda captures enclosing state (closure)");
                     }
 
                     return;
 
                 case IMethodReferenceOperation { Method.IsStatic: false } methodReference:
-                    context.ReportDiagnostic(Diagnostic.Create(
-                        Rule, operation.Syntax.GetLocation(),
-                        $"Instance method group '{methodReference.Method.Name}' converted to a delegate"));
+                    OverfitPerfAnalysis.Report(
+                        context, Rule, operation.Syntax.GetLocation(),
+                        $"Instance method group '{methodReference.Method.Name}' converted to a delegate");
                     return;
 
                 default:

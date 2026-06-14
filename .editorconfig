@@ -47,6 +47,11 @@ dotnet_diagnostic.OVERFIT011.severity = suggestion
 dotnet_diagnostic.OVERFIT012.severity = suggestion
 dotnet_diagnostic.OVERFIT013.severity = suggestion
 dotnet_diagnostic.OVERFIT014.severity = suggestion
+# OVERFIT900 — the [OverfitHotPath] escalation. Any per-call rule (001-007, 009-011, 013-014) that
+# fires inside a member or type marked [DevOnBike.Overfit.Diagnostics.OverfitHotPath] is reported as
+# this hard error INSTEAD of its directory-configured severity — the per-member ratchet. Always error;
+# never loosen it (that would defeat the marker). Suppress a justified site with #pragma + a reason.
+dotnet_diagnostic.OVERFIT900.severity = error
 
 [Sources/Main/Kernels/**.cs]
 # Allocation rules are ERRORS in pure kernels — per-call allocation is never right here;

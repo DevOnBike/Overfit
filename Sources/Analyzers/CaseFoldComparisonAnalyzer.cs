@@ -34,7 +34,7 @@ namespace DevOnBike.Overfit.Analyzers
             isEnabledByDefault: true,
             description: "Comparing strings via ToLower()/ToUpper() allocates a new string on each side. Use string.Equals with StringComparison.OrdinalIgnoreCase for an allocation-free, culture-explicit comparison. One-time contexts and the exception path are exempt.");
 
-        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
+        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule, OverfitPerfAnalysis.HotPathRule];
 
         public override void Initialize(AnalysisContext context)
         {
@@ -69,10 +69,11 @@ namespace DevOnBike.Overfit.Analyzers
                 return;
             }
 
-            context.ReportDiagnostic(Diagnostic.Create(
+            OverfitPerfAnalysis.Report(
+                context,
                 Rule,
                 operation.Syntax.GetLocation(),
-                offender.Name));
+                offender.Name);
         }
 
         /// <summary>The <c>System.String</c> case-folding method invoked by <paramref name="operand"/>

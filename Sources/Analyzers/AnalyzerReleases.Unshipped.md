@@ -20,3 +20,4 @@ OVERFIT012 | Performance | Warning | Finalizer declared — slower allocation, e
 OVERFIT013 | Performance | Warning | .Count on ConcurrentQueue/ConcurrentBag — synchronized segment walk; use IsEmpty or an Interlocked counter
 OVERFIT014 | Performance | Warning | Case-folding string equality (a.ToLower() == b.ToLower()) — use string.Equals with StringComparison.OrdinalIgnoreCase
 OVERFIT015 | Performance | Warning | Direct intrinsics IsSupported — gate ISA paths through CpuFeatures
+OVERFIT900 | Performance | Error | A per-call OVERFIT rule fired inside an [OverfitHotPath] member/type — escalated to a build error

@@ -37,7 +37,7 @@ namespace DevOnBike.Overfit.Analyzers
             isEnabledByDefault: true,
             description: "Per-call construction of List/Dictionary/HashSet/Queue/Stack/StringBuilder/MemoryStream churns the GC on hot paths. Pool the instance, or use a value-type span builder. One-time contexts (field initializers, constructors) and the exception path are exempt.");
 
-        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
+        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule, OverfitPerfAnalysis.HotPathRule];
 
         public override void Initialize(AnalysisContext context)
         {
@@ -70,10 +70,11 @@ namespace DevOnBike.Overfit.Analyzers
                 return;
             }
 
-            context.ReportDiagnostic(Diagnostic.Create(
+            OverfitPerfAnalysis.Report(
+                context,
                 Rule,
                 operation.Syntax.GetLocation(),
-                type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)));
+                type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat));
         }
 
         /// <summary>The growable mutable collections whose per-call construction is worth a pool —

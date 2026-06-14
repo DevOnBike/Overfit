@@ -35,7 +35,7 @@ namespace DevOnBike.Overfit.Analyzers
             isEnabledByDefault: true,
             description: "ConcurrentQueue/ConcurrentBag .Count is a synchronized segment walk, not O(1). Use IsEmpty or an Interlocked counter on hot paths. One-time contexts and the exception path are exempt.");
 
-        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
+        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule, OverfitPerfAnalysis.HotPathRule];
 
         public override void Initialize(AnalysisContext context)
         {
@@ -64,10 +64,11 @@ namespace DevOnBike.Overfit.Analyzers
                 return;
             }
 
-            context.ReportDiagnostic(Diagnostic.Create(
+            OverfitPerfAnalysis.Report(
+                context,
                 Rule,
                 operation.Syntax.GetLocation(),
-                property.ContainingType.Name));
+                property.ContainingType.Name);
         }
 
         private static bool IsConcurrentSegmentCollection(INamedTypeSymbol? type)

@@ -29,7 +29,7 @@ namespace DevOnBike.Overfit.Analyzers
             isEnabledByDefault: true,
             description: "Expanded-form params calls allocate an array each time. Empty params calls (Array.Empty) and one-time contexts are not flagged.");
 
-        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
+        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule, OverfitPerfAnalysis.HotPathRule];
 
         public override void Initialize(AnalysisContext context)
         {
@@ -66,8 +66,8 @@ namespace DevOnBike.Overfit.Analyzers
                     return;
                 }
 
-                context.ReportDiagnostic(Diagnostic.Create(
-                    Rule, operation.Syntax.GetLocation(), operation.TargetMethod.Name));
+                OverfitPerfAnalysis.Report(
+                    context, Rule, operation.Syntax.GetLocation(), operation.TargetMethod.Name);
                 return;
             }
         }

@@ -37,7 +37,7 @@ namespace DevOnBike.Overfit.Analyzers
             isEnabledByDefault: true,
             description: "A struct key without IEquatable<T> triggers the reflection-based ValueType.Equals/GetHashCode on every dictionary/set operation. Implement IEquatable<T>, use a record struct, or supply an IEqualityComparer<T>.");
 
-        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
+        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule, OverfitPerfAnalysis.HotPathRule];
 
         public override void Initialize(AnalysisContext context)
         {
@@ -75,11 +75,12 @@ namespace DevOnBike.Overfit.Analyzers
                 return;
             }
 
-            context.ReportDiagnostic(Diagnostic.Create(
+            OverfitPerfAnalysis.Report(
+                context,
                 Rule,
                 operation.Syntax.GetLocation(),
                 key.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
-                kind));
+                kind);
         }
 
         /// <summary>"dictionary" / "set" if the constructed type is the BCL keyed collection, else null.</summary>

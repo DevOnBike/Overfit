@@ -41,9 +41,17 @@ shipped earlier as the broader form of the original "IsSupported inside a loop" 
 | `OVERFIT018` | `readonly` field holding a MUTABLE struct (e.g. an enumerator) — every access is a defensive copy, mutation is silently lost | #90 (the "Do NOT make this readonly" trap) |
 | `OVERFIT019` | Non-capturing lambda without the `static` keyword — `static` guards against future accidental captures | #46h |
 
-**Tier C — architectural (need a convention/attribute):**
+**Tier C — architectural (convention/attribute):**
 
-- **`[OverfitHotPath]` attribute** (Roslyn's `[PerformanceSensitive]`, #35): escalates ALL OVERFIT rules to **error** inside marked methods/types — the per-method evolution of the per-directory editorconfig ratchet.
+- **`[OverfitHotPath]` — SHIPPED 2026-06-13** (Roslyn's `[PerformanceSensitive]`, `#35`).
+  `DevOnBike.Overfit.Diagnostics.OverfitHotPathAttribute` (declared in `Sources/Main`, ships with the
+  library) marks a method / constructor / property / class / struct as zero-allocation. Inside a marked
+  member — or any member of a marked type, walking nested + outer types and accessor→property — every
+  per-call rule (`001`–`007`, `009`–`011`, `013`, `014`) reports **`OVERFIT900` (error)** instead of its
+  directory-configured severity: the per-member evolution of the per-directory editorconfig ratchet.
+  `OVERFIT900`'s message names the underlying rule. Not escalated: `008`/`015` (already error repo-wide)
+  and `012` (a type-level finalizer declaration, not a per-call op). Justify a site with
+  `#pragma warning disable OVERFIT900` + a reason, or drop the attribute — never loosen `OVERFIT900` globally.
 - `foreach` over `List<T>` in hot paths → indexed `for` / `CollectionsMarshal.AsSpan` (#46c) — too noisy globally, only under `[OverfitHotPath]`.
 
 **Handled via `BannedSymbols.txt` instead of analyzer rules** (named symbols → cheaper; added 2026-06-12):
