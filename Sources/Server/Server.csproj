@@ -43,4 +43,12 @@
         <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="all" />
     </ItemGroup>
 
+    <ItemGroup>
+        <!-- The OpenAPI contract is embedded so `GET /openapi.yaml` and the Swagger UI at `/docs` serve
+             from the single self-contained binary (one source of truth = docs/openapi.yaml). -->
+        <EmbeddedResource Include="..\..\docs\openapi.yaml">
+            <LogicalName>openapi.yaml</LogicalName>
+        </EmbeddedResource>
+    </ItemGroup>
+
 </Project>

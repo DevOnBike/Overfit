@@ -19,8 +19,9 @@ namespace DevOnBike.Overfit.Server
     /// <summary>
     /// A dependency-free, OpenAI-compatible HTTP server over <see cref="HttpListener"/> — no ASP.NET Core, so it
     /// drops cleanly into the Native-AOT <c>overfit</c> CLI. Exposes <c>/v1/chat/completions</c> (streaming SSE +
-    /// non-streaming), <c>/v1/models</c> and <c>/health</c>; point any OpenAI client at the base URL and only
-    /// change the model name. Requests are served STRICTLY ONE AT A TIME (single-tenant model session, one KV
+    /// non-streaming), <c>/v1/models</c>, <c>/v1/embeddings</c>, <c>/v1/audio/speech</c> and <c>/health</c>, plus
+    /// the self-describing <c>/openapi.yaml</c> (the API contract) and <c>/docs</c> (Swagger UI). Point any OpenAI
+    /// client at the base URL and only change the model name. Requests are served STRICTLY ONE AT A TIME (single-tenant model session, one KV
     /// cache) — exactly like a local llama.cpp server; for multi-tenant use a session-per-request pool.
     /// </summary>
     public static class OverfitOpenAiServer
@@ -124,6 +125,21 @@ namespace DevOnBike.Overfit.Server
             if (method == "GET" && path is "/health" or "/")
             {
                 WriteRaw(ctx.Response, HttpStatusCode.OK, "application/json", "{\"status\":\"ok\"}");
+                return;
+            }
+
+            if (method == "GET" && path == "/openapi.yaml")
+            {
+                // The machine-readable contract — import into Swagger UI / Postman / an OpenAPI codegen.
+                WriteRaw(ctx.Response, HttpStatusCode.OK, "application/yaml; charset=utf-8", OpenApiYaml());
+                return;
+            }
+
+            if (method == "GET" && path is "/docs" or "/docs/")
+            {
+                // Swagger UI for this server's /openapi.yaml. The viewer assets load from a CDN, so /docs
+                // needs internet to render (the API itself stays fully local — no prompt/data leaves).
+                WriteRaw(ctx.Response, HttpStatusCode.OK, "text/html; charset=utf-8", SwaggerUiHtml);
                 return;
             }
 
@@ -426,5 +442,49 @@ namespace DevOnBike.Overfit.Server
                 // headers already sent (e.g. mid-stream) — can't change the status now.
             }
         }
+
+        private static string? _openApiYaml;
+
+        /// <summary>The embedded <c>openapi.yaml</c> contract, read once and cached. The server handles one
+        /// request at a time (single-threaded accept loop), so a lock-free lazy init is safe here.</summary>
+        private static string OpenApiYaml()
+        {
+            if (_openApiYaml is null)
+            {
+                using var stream = typeof(OverfitOpenAiServer).Assembly.GetManifestResourceStream("openapi.yaml");
+                if (stream is null)
+                {
+                    _openApiYaml = "openapi: 3.0.3\ninfo:\n  title: Overfit\n  version: '1.0.0'\npaths: {}\n";
+                }
+                else
+                {
+                    using var reader = new StreamReader(stream, Encoding.UTF8);
+                    _openApiYaml = reader.ReadToEnd();
+                }
+            }
+
+            return _openApiYaml;
+        }
+
+        // Swagger UI viewer for /openapi.yaml. Lean by design: the UI bundle loads from a CDN instead of
+        // bloating the single self-contained binary with ~1.5 MB of assets. Same-origin spec fetch + "try it out".
+        private const string SwaggerUiHtml = """
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+              <meta charset="UTF-8" />
+              <meta name="viewport" content="width=device-width, initial-scale=1" />
+              <title>Overfit API — Swagger UI</title>
+              <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+            </head>
+            <body>
+              <div id="swagger-ui"></div>
+              <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" crossorigin></script>
+              <script>
+                window.ui = SwaggerUIBundle({ url: '/openapi.yaml', dom_id: '#swagger-ui' });
+              </script>
+            </body>
+            </html>
+            """;
     }
 }

@@ -37,6 +37,7 @@ ONNX: PyTorch-exported model import into Sequential for inference
 10. [`../Sources/Analyzers/README.md`](../Sources/Analyzers/README.md) — the in-repo Roslyn perf analyzer (10 zero-alloc rules, severity ladder with build errors, CI guard-of-the-guard).
 11. `mcp.md` — the MCP server: plug local ask/rag_query/transcribe tools into Claude Code (spec conformance, Docker variant, helper scripts).
 11b. `serving-benchmark.md` — `overfit bench`: concurrent load test of an OpenAI-compatible endpoint (TTFT/ITL/throughput/goodput + a holistic score in the GPU-leaderboard shape, measured on CPU).
+11c. `openapi.yaml` — OpenAPI 3.0.3 contract for the `overfit serve` HTTP API (every endpoint + request/response schemas + examples; import into Swagger UI / Postman / codegen). `overfit-api.http` — the same calls ready to run in VS Code REST Client / JetBrains HTTP Client.
 12. `gp-anomaly-baseline.md` — proposed GP/EWMA baseline for the metric anomaly detector.
 13. `scenarios/` — role-specific usage guides (start with [`in-process-agents.md`](scenarios/in-process-agents.md) for the RAG + tool-calling + structured-output story).
 14. `marketing/` — non-engineering collateral (e.g. `feature-blocks.md`, the infographic source). Launch copy and LinkedIn drafts live at the repo root.
