@@ -209,7 +209,7 @@ namespace DevOnBike.Overfit.Maths
             }
         }
 
-        private static void IndirectInsertionSort(int[] indices, ReadOnlySpan<float> values, int lo, int hi, bool ascending)
+        private static void IndirectInsertionSort(Span<int> indices, ReadOnlySpan<float> values, int lo, int hi, bool ascending)
         {
             for (var i = lo + 1; i <= hi; i++)
             {
@@ -233,7 +233,7 @@ namespace DevOnBike.Overfit.Maths
         ///     the final top-K contains the lower-indexed members of any equal-valued group.
         ///     In CompareDesc terms, "smallest in the heap" = "largest under CompareDesc".
         /// </summary>
-        private static void SiftDownMin(int[] indices, ReadOnlySpan<float> values, int start, int heapSize)
+        private static void SiftDownMin(Span<int> indices, ReadOnlySpan<float> values, int start, int heapSize)
         {
             var root = start;
 

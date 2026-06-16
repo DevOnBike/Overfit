@@ -90,7 +90,7 @@ namespace DevOnBike.Overfit.Onnx.Operators
             return layer;
         }
 
-        private static float[] Transpose2D(float[] src, int rows, int cols)
+        private static float[] Transpose2D(ReadOnlySpan<float> src, int rows, int cols)
         {
             // src layout: [rows, cols] → dst layout: [cols, rows]
             var dst = new float[src.Length];

@@ -151,7 +151,7 @@ namespace DevOnBike.Overfit.Serving
 
         /// <summary>Linearly-interpolated percentile of an ascending-sorted array (<paramref name="q"/>
         /// in 0.0–1.0). Empty → 0; single element → that element.</summary>
-        internal static double Percentile(double[] sortedAscending, double q)
+        internal static double Percentile(ReadOnlySpan<double> sortedAscending, double q)
         {
             if (sortedAscending.Length == 0)
             {

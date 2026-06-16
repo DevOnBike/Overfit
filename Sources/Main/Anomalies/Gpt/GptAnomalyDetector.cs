@@ -157,7 +157,7 @@ namespace DevOnBike.Overfit.Anomalies.Gpt
 
         // ── Private ──────────────────────────────────────────────────────────
 
-        private static float ComputeNegLogProb(float[] logits, int target)
+        private static float ComputeNegLogProb(ReadOnlySpan<float> logits, int target)
         {
             var maxVal = logits[0];
 
@@ -179,7 +179,7 @@ namespace DevOnBike.Overfit.Anomalies.Gpt
             return -(logits[target] - maxVal - MathF.Log(sumExp));
         }
 
-        private static int ArgMax(float[] logits)
+        private static int ArgMax(ReadOnlySpan<float> logits)
         {
             var best = 0;
 

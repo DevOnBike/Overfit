@@ -77,7 +77,7 @@ namespace DevOnBike.Overfit.Data.Prepare
             return context;
         }
 
-        private FastTensor<float> ExtractColumns(FastTensor<float> src, int[] indices, int rows)
+        private FastTensor<float> ExtractColumns(FastTensor<float> src, ReadOnlySpan<int> indices, int rows)
         {
             var oldCols = src.GetView().GetDim(1);
             var newCols = indices.Length;

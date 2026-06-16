@@ -151,7 +151,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         }
 
         // A length-prefixed Parameter.Load record: int32 element count + LE float payload.
-        private static byte[] BuildParam(float[] data)
+        private static byte[] BuildParam(ReadOnlySpan<float> data)
         {
             var bytes = new byte[sizeof(int) + (long)data.Length * sizeof(float)];
             BinaryPrimitives.WriteInt32LittleEndian(bytes, data.Length);
@@ -160,7 +160,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         }
 
         // wte [vocab, d] → LM head [d, vocab], transposed straight into the record bytes.
-        private static byte[] BuildTransposedLmHead(float[] wte, int vocab, int d)
+        private static byte[] BuildTransposedLmHead(ReadOnlySpan<float> wte, int vocab, int d)
         {
             var count = (long)d * vocab;
             var bytes = new byte[sizeof(int) + count * sizeof(float)];
@@ -186,7 +186,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         }
 
         // Extracts a [rows, colLen] column block from a row-major [rows, srcCols] matrix.
-        private static float[] ColBlock(float[] src, int rows, int srcCols, int colOffset, int colLen)
+        private static float[] ColBlock(ReadOnlySpan<float> src, int rows, int srcCols, int colOffset, int colLen)
         {
             var outBuf = new float[rows * colLen];
             for (var i = 0; i < rows; i++)

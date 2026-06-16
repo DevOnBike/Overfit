@@ -102,7 +102,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         }
 
         // Parses { "metadata": {...}, "weight_map": { name: shardFile, ... } }.
-        private static Dictionary<string, string> ParseWeightMap(byte[] indexBytes)
+        private static Dictionary<string, string> ParseWeightMap(ReadOnlySpan<byte> indexBytes)
         {
             var map = new Dictionary<string, string>();
             var reader = new Utf8JsonReader(indexBytes, isFinalBlock: true, state: default);

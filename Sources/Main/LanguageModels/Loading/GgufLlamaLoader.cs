@@ -1253,7 +1253,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// Mapping: Wo_h[i, j] = O[j, h*headDim + i] = file[j*nHeadsHeadDim + h*headDim + i].
         /// </summary>
         private static DecodeWeight[] SplitOutput(
-            float[] oFull, int nHeads, int dModel, int headDim, bool quantize)
+            ReadOnlySpan<float> oFull, int nHeads, int dModel, int headDim, bool quantize)
         {
             var wo = new DecodeWeight[nHeads];
             var nHeadsHeadDim = nHeads * headDim;
@@ -1292,7 +1292,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             return wo;
         }
 
-        private static TensorStorage<float>[] SplitBias(float[] biasFull, int nHeads, int headDim)
+        private static TensorStorage<float>[] SplitBias(ReadOnlySpan<float> biasFull, int nHeads, int headDim)
         {
             var bias = new TensorStorage<float>[nHeads];
             for (var h = 0; h < nHeads; h++)

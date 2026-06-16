@@ -303,7 +303,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         private static void Copy(
             ReadOnlySpan<float> source,
-            float[] destination)
+            Span<float> destination)
         {
             if (source.Length != destination.Length)
             {

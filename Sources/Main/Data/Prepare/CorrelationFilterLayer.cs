@@ -180,7 +180,7 @@ namespace DevOnBike.Overfit.Data.Prepare
             return result;
         }
 
-        private int ChooseColumnToDrop(int colA, int colB, float[] targetCorrelations)
+        private int ChooseColumnToDrop(int colA, int colB, ReadOnlySpan<float> targetCorrelations)
         {
             if (_strategy == DropStrategy.KeepFirst)
             {
@@ -193,7 +193,7 @@ namespace DevOnBike.Overfit.Data.Prepare
             return corrA >= corrB ? colB : colA;
         }
 
-        private FastTensor<float> ExtractColumns(FastTensor<float> src, int[] indices, int rows)
+        private FastTensor<float> ExtractColumns(FastTensor<float> src, ReadOnlySpan<int> indices, int rows)
         {
             var oldCols = src.GetView().GetDim(1);
             var newCols = indices.Length;

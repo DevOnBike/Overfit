@@ -433,7 +433,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private void WriteVector(
             float[] f32,
             sbyte[] q8,
-            float[] scales,
+            Span<float> scales,
             int layerIndex,
             int headIndex,
             int position,
@@ -458,8 +458,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         private void DequantizeRange(
             float[] f32,
-            sbyte[] q8,
-            float[] scales,
+            ReadOnlySpan<sbyte> q8,
+            ReadOnlySpan<float> scales,
             int layerIndex,
             int headIndex,
             int fromPosition,

@@ -123,7 +123,7 @@ namespace DevOnBike.Overfit.Audio.Mp3
             return output;
         }
 
-        private int DecodeFrame(byte[] bytes, int pos, int len, in Mp3FrameHeader h, float[] output, int writePos)
+        private int DecodeFrame(byte[] bytes, int pos, int len, in Mp3FrameHeader h, Span<float> output, int writePos)
         {
             _version = h.Version;
             _isMpeg1 = h.IsMpeg1;
@@ -179,7 +179,7 @@ namespace DevOnBike.Overfit.Audio.Mp3
             return writePos;
         }
 
-        private static int EmitSilence(float[] output, int writePos, int count)
+        private static int EmitSilence(Span<float> output, int writePos, int count)
         {
             for (var i = 0; i < count && writePos < output.Length; i++)
             {
@@ -782,7 +782,7 @@ namespace DevOnBike.Overfit.Audio.Mp3
         }
 
         // ── polyphase subband synthesis → float PCM[576] ──
-        private void SubbandSynthesis(int gr, int ch, float[] pcm)
+        private void SubbandSynthesis(int gr, int ch, Span<float> pcm)
         {
             var g = GC(gr, ch);
             var isBase = g * 576;

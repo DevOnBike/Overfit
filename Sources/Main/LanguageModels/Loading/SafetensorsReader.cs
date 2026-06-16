@@ -213,7 +213,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
         // ─── Header JSON parse (Utf8JsonReader — reflection-free) ──────────
         private static (Dictionary<string, SafetensorsTensorInfo> tensors, Dictionary<string, string> metadata)
-            ParseHeader(byte[] headerBytes)
+            ParseHeader(ReadOnlySpan<byte> headerBytes)
         {
             var tensors = new Dictionary<string, SafetensorsTensorInfo>();
             var metadata = new Dictionary<string, string>();

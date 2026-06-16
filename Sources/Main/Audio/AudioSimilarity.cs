@@ -176,7 +176,7 @@ namespace DevOnBike.Overfit.Audio
         // RMS distance over the overlapping frames, mel-major layout (index = bin*frames + frame). Cheap; assumes
         // the two are roughly time-aligned (true for a deterministic decode).
         private static double FrameAlignedMelDistance(
-            float[] refMel, int refFrames, float[] candMel, int candFrames, int nMels)
+            ReadOnlySpan<float> refMel, int refFrames, ReadOnlySpan<float> candMel, int candFrames, int nMels)
         {
             var frames = Math.Min(refFrames, candFrames);
             if (frames == 0)
@@ -200,7 +200,7 @@ namespace DevOnBike.Overfit.Audio
         // then normalizes by the path length. Timing/length-robust — the right metric for generated-vs-reference
         // speech. Rolling two-row DP (no jagged arrays), O(refFrames · candFrames).
         private static double DtwMelDistance(
-            float[] refMel, int refFrames, float[] candMel, int candFrames, int nMels)
+            ReadOnlySpan<float> refMel, int refFrames, ReadOnlySpan<float> candMel, int candFrames, int nMels)
         {
             if (refFrames == 0 || candFrames == 0)
             {
@@ -244,7 +244,7 @@ namespace DevOnBike.Overfit.Audio
         }
 
         private static double FrameDistance(
-            float[] a, int aFrames, int ai, float[] b, int bFrames, int bi, int nMels)
+            ReadOnlySpan<float> a, int aFrames, int ai, ReadOnlySpan<float> b, int bFrames, int bi, int nMels)
         {
             double sum = 0.0;
             for (var k = 0; k < nMels; k++)
