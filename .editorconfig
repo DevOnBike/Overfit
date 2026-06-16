@@ -126,3 +126,20 @@ dotnet_diagnostic.OVERFIT001.severity = warning
 # real ggml-tiny + jfk.wav transcription. Per-call heap arrays here are a build warning from now on.
 [Sources/Main/LanguageModels/Whisper/**.cs]
 dotnet_diagnostic.OVERFIT001.severity = warning
+
+# Audio/ ESCALATED 2026-06-16 after the OVERFIT001 sweep. FINDING: the audio hot paths were already
+# zero-alloc — the per-frame STFT worker (MelSpectrogram.MelFrameWorker) is stackalloc/instance-buffer
+# only, and the MP3 decoder reuses pre-allocated per-frame scratch. The 56 flagged sites were ALL
+# correct-by-design: one-time (ctors, static decode tables), by-contract outputs (decoders/resamplers
+# return a fresh array the caller owns), parity hooks, grow-only instance buffers, or eval metrics —
+# each now carries a justified #pragma. Per-call heap arrays in core audio are a build warning from here.
+[Sources/Main/Audio/**.cs]
+dotnet_diagnostic.OVERFIT001.severity = warning
+
+# SNAC codec (Snac/) + Orpheus prompt/clone (Orpheus/) — carved back to suggestion like the CTC family.
+# These are per-utterance (decode) / offline (encode, voice-clone dataset prep) correctness-first layered
+# forwards, NOT a per-token serving hot loop (the class docs say so). Pooling their ~34 short-lived
+# intermediate conv buffers would be invasive churn in a numerically-sensitive parity path for ~zero
+# serving benefit. Kept visible as IDE suggestions; re-escalate if TTS latency is ever productised.
+[Sources/Main/Audio/Tts/{Snac,Orpheus}/**.cs]
+dotnet_diagnostic.OVERFIT001.severity = suggestion

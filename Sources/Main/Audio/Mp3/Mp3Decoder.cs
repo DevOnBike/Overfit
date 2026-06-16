@@ -91,7 +91,11 @@ namespace DevOnBike.Overfit.Audio.Mp3
         {
             var info = Mp3Reader.Probe(bytes);
             sampleRate = info.SampleRate;
+            // OVERFIT001: by-contract — the decoded PCM is the return value; per-frame scratch is pre-allocated
+            // instance state (validated ~zero per-decode overhead by Mp3ReaderTests.Decode_PerFrame_ZeroAlloc).
+#pragma warning disable OVERFIT001
             var output = new float[info.SampleCount > 0 ? info.SampleCount : 0];
+#pragma warning restore OVERFIT001
             if (output.Length == 0)
             {
                 return output;

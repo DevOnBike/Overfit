@@ -16,6 +16,9 @@ namespace DevOnBike.Overfit.Audio
     /// it tolerates timing/length drift). See <see cref="AudioSimilarityReport"/> for which metric fits which case.
     /// </para>
     /// </summary>
+    // OVERFIT001: this whole type is an offline audio-quality EVAL metric (a measurable gate, not the serving
+    // path) — the log-mel snapshots and the DTW rolling rows are short-lived working buffers per comparison.
+#pragma warning disable OVERFIT001
     public static class AudioSimilarity
     {
         // MelSpectrogram is hardwired to 16 kHz; both signals are resampled to this before the spectral metrics so
@@ -255,4 +258,5 @@ namespace DevOnBike.Overfit.Audio
             return Math.Sqrt(sum);
         }
     }
+#pragma warning restore OVERFIT001
 }

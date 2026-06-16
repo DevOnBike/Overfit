@@ -148,8 +148,12 @@ namespace DevOnBike.Overfit.Audio
             return _mel;
         }
 
+        // OVERFIT001: grow-only — allocates only when a clip exceeds the largest seen so far, then the buffer
+        // is reused across calls; the per-frame STFT hot path (MelFrameWorker) is stackalloc/instance-only.
+#pragma warning disable OVERFIT001
         private static float[] EnsureCapacity(float[] buffer, int needed)
             => buffer.Length >= needed ? buffer : new float[needed];
+#pragma warning restore OVERFIT001
 
         // ── STFT power spectrum (per-frame 400-point DFT via Bluestein FFT, parallelized over frames) ──
 
@@ -297,7 +301,10 @@ namespace DevOnBike.Overfit.Audio
             frames = 1 + (padded.Length - NFft) / HopLength;
             if (frames > 0) { frames -= 1; }
             if (frames < 0) { frames = 0; }
+            // OVERFIT001: parity hook (internal, for tests) — returns a fresh spectrogram the caller owns.
+#pragma warning disable OVERFIT001
             var power = new float[_nFreqs * frames];
+#pragma warning restore OVERFIT001
             ComputePowerSpectrogram(padded, frames, power);
             return power;
         }
@@ -338,12 +345,16 @@ namespace DevOnBike.Overfit.Audio
             }
         }
 
+        // OVERFIT001: parity-only helper (the hot LogMel path pads into the reused _padded instance buffer
+        // via ReflectPadInto); returns a fresh array the caller owns.
+#pragma warning disable OVERFIT001
         private static float[] ReflectPad(ReadOnlySpan<float> x, int pad)
         {
             var outp = new float[x.Length + 2 * pad];
             ReflectPadInto(x, pad, outp);
             return outp;
         }
+#pragma warning restore OVERFIT001
 
         private static void ReflectPadInto(ReadOnlySpan<float> x, int pad, Span<float> outp)
         {
@@ -359,6 +370,9 @@ namespace DevOnBike.Overfit.Audio
 
         // ── Slaney mel filterbank (librosa default; what Whisper's mel_filters were built with) ──
 
+        // OVERFIT001: one-time filterbank construction — called once from the ctor; the band-edge / bin-center
+        // scratch and the returned filter matrix are built a single time per MelSpectrogram instance.
+#pragma warning disable OVERFIT001
         private static float[] BuildSlaneyMelFilters(int nMels, int nFreqs, int sampleRate, int nFft)
         {
             var fMin = 0.0;
@@ -399,6 +413,7 @@ namespace DevOnBike.Overfit.Audio
             }
             return filters;
         }
+#pragma warning restore OVERFIT001
 
         // Slaney mel scale (linear < 1000 Hz, log above) — librosa htk=false.
         private const double MelFSp = 200.0 / 3.0;        // Hz per mel below the break

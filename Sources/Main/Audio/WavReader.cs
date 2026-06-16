@@ -66,6 +66,9 @@ namespace DevOnBike.Overfit.Audio
             return Decode(data, audioFormat, channels, bitsPerSample);
         }
 
+        // OVERFIT001: by-contract — decodes the WAV payload into a fresh PCM array the caller owns (one
+        // allocation per file load, not a per-frame hot path); the down-mix buffer is likewise the output.
+#pragma warning disable OVERFIT001
         private static float[] Decode(byte[] data, int audioFormat, int channels, int bitsPerSample)
         {
             var span = data.AsSpan();
@@ -106,6 +109,7 @@ namespace DevOnBike.Overfit.Audio
             }
             return mono;
         }
+#pragma warning restore OVERFIT001
 
         private static string ReadTag(BinaryReader br)
         {

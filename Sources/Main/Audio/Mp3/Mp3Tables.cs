@@ -11,6 +11,9 @@ namespace DevOnBike.Overfit.Audio.Mp3
     /// cosine matrix, and the D[512] synthesis window. Pure data — computed where a closed form exists
     /// (windows, cosine matrices), tabulated where the standard tabulates (band boundaries, D[]).
     /// </summary>
+    // OVERFIT001 (per-call array alloc): every allocation in this file is a `static readonly` decode-table
+    // builder run ONCE at type initialization — pure load-time constant data, not a per-call hot path.
+#pragma warning disable OVERFIT001
     internal static class Mp3Tables
     {
         /// <summary>
@@ -162,4 +165,5 @@ namespace DevOnBike.Overfit.Audio.Mp3
         /// </summary>
         public static readonly float[] SynthWindow = Mp3SynthWindowData.D;
     }
+#pragma warning restore OVERFIT001
 }
