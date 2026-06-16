@@ -6,6 +6,7 @@
 using System.Numerics.Tensors;
 using System.Runtime.InteropServices;
 using DevOnBike.Overfit.Autograd;
+using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.Rope;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.Ops;
@@ -355,10 +356,17 @@ namespace DevOnBike.Overfit.DeepLearning
         /// <b>quantized</b> <see cref="CachedLlamaInferenceEngine"/> — so the fine-tuned model runs on the optimized
         /// zero-alloc/SIMD decode path instead of the (≈2× slower) trainable autograd graph. The merge is one-time:
         /// per projection, dequant the base rows, add the LoRA residual <c>W[o,i] += Σ_r A[i,r]·B[r,o]</c>, and
-        /// re-quantize to Q8. LM-head LoRA (off by default) is not merged. The returned engine borrows the base's
-        /// embedding / LM-head / backing, so keep <paramref name="baseEngine"/> alive for the merged engine's lifetime.
+        /// re-quantize. <paramref name="preferQ4K"/> picks the merged weight format: <b>Q8 (default)</b> preserves
+        /// the fine-tune almost exactly (measured final-hidden cos ≈ 1.0 vs the trainable model) but reads ~2× the
+        /// bytes of the base, so it decodes ~0.8× the Q4_K preset; <b>Q4_K</b> matches preset decode speed (~1.0×)
+        /// on the 256-multiple projections (q/k/v, gate/up/down) but the coarse 4-bit re-quantization erodes part
+        /// of the LoRA delta (measured cos ≈ 0.96) — verify the clone perceptually before choosing it. The per-head
+        /// O projection (row length = headDim, not a 256-multiple) is always Q8. LM-head LoRA (off by default) is
+        /// not merged. The returned engine borrows the base's embedding / LM-head / backing, so keep
+        /// <paramref name="baseEngine"/> alive for the merged engine's lifetime.
         /// </summary>
-        public CachedLlamaInferenceEngine BuildMergedEngine(CachedLlamaInferenceEngine baseEngine, bool mergeLora = true)
+        public CachedLlamaInferenceEngine BuildMergedEngine(
+            CachedLlamaInferenceEngine baseEngine, bool mergeLora = true, bool preferQ4K = false)
         {
             var cfg = baseEngine.Config;
             var nL = _blocks.Length;
@@ -379,26 +387,46 @@ namespace DevOnBike.Overfit.DeepLearning
                     QNorm = b.QNorm,
                     KNorm = b.KNorm,
                     // q/k/v: each per-head weight row is an OUTPUT neuron (o = h·dHead + jj), columns are dModel inputs.
-                    Wq = MergePerHeadByOutput(b.Wq, lora?.Q, _nQHeads, _dHead, _dModel),
+                    Wq = MergePerHeadByOutput(b.Wq, lora?.Q, _nQHeads, _dHead, _dModel, preferQ4K),
                     Bq = b.Bq,
-                    Wk = MergePerHeadByOutput(b.Wk, lora?.K, _nKVHeads, _dHead, _dModel),
+                    Wk = MergePerHeadByOutput(b.Wk, lora?.K, _nKVHeads, _dHead, _dModel, preferQ4K),
                     Bk = b.Bk,
-                    Wv = MergePerHeadByOutput(b.Wv, lora?.V, _nKVHeads, _dHead, _dModel),
+                    Wv = MergePerHeadByOutput(b.Wv, lora?.V, _nKVHeads, _dHead, _dModel, preferQ4K),
                     Bv = b.Bv,
                     // o: per-head weight is the TRANSPOSED layout — row jj is the head's INPUT column (i = h·dHead+jj),
                     // the dModel entries are OUTPUTS. So the residual indexes A by the fixed input, B by the output.
-                    Wo = MergePerHeadByInput(b.Wo, lora?.O, _nQHeads, _dHead, _dModel),
+                    Wo = MergePerHeadByInput(b.Wo, lora?.O, _nQHeads, _dHead, _dModel, preferQ4K),
                     Bo = b.Bo,
                     // FFN: resident full matrices. gate/up = [dFF × dModel], down = [dModel × dFF].
-                    FfnGate = MergeResident(b.FfnGate, lora?.Gate, _dFF, _dModel),
-                    FfnUp = MergeResident(b.FfnUp, lora?.Up, _dFF, _dModel),
-                    FfnDown = MergeResident(b.FfnDown, lora?.Down, _dModel, _dFF),
+                    FfnGate = MergeResident(b.FfnGate, lora?.Gate, _dFF, _dModel, preferQ4K),
+                    FfnUp = MergeResident(b.FfnUp, lora?.Up, _dFF, _dModel, preferQ4K),
+                    FfnDown = MergeResident(b.FfnDown, lora?.Down, _dModel, _dFF, preferQ4K),
                 };
             }
 
             return CachedLlamaInferenceEngine.CreateFromBuffers(
                 cfg, baseEngine.EmbeddingWeights, NodeToStorage(_finalNormGamma),
                 TensorStorage<float>.Unpooled(0), baseEngine.LmHeadWeights, merged);
+        }
+
+        // Q4_K super-block spans 256 elements, so a weight can only be re-quantized to Q4_K when its row length
+        // (the input dimension) is a multiple of 256.
+        private const int Q4KSuperBlock = 256;
+
+        // Re-quantizes a merged F32 weight. With preferQ4K, picks Q4_K (half the bytes of Q8 — matching the base
+        // preset's own format) when the row length is a Q4_K super-block multiple; otherwise Q8. Decode is
+        // memory-bandwidth bound, so Q4_K on the wide projections (q/k/v with in=dModel, gate/up/down) reaches
+        // preset decode speed — but its coarse 4-bit rounding erodes part of the LoRA delta (measured), so Q8 is
+        // the fidelity-preserving default. The per-head O projection has row length = headDim (not a 256-multiple)
+        // and is always Q8 — lifting that needs the whole-matrix-O layout (the same refactor as the perf lever).
+        private static DecodeWeight Requantize(float[] buf, int rowCount, int rowLength, bool preferQ4K)
+        {
+            if (preferQ4K && rowLength % Q4KSuperBlock == 0)
+            {
+                return new Q4KWeight(GgmlQuant.QuantizeQ4_K(buf, rowLength, rowCount), rowLength, rowCount);
+            }
+
+            return Q8Weight.QuantizeRows(buf, rowCount, rowLength);
         }
 
         private static TensorStorage<float> NodeToStorage(AutogradNode node)
@@ -411,7 +439,7 @@ namespace DevOnBike.Overfit.DeepLearning
 
         // q/k/v: base[h] is [dHead × dModel], row jj = output neuron o = h·dHead+jj, cols = dModel inputs.
         // LoRA A [dModel × rank], B [rank × (nHeads·dHead)]; delta[o,i] = Σ_r A[i,r]·B[r,o].
-        private static DecodeWeight[] MergePerHeadByOutput(DecodeWeight[] baseHeads, LoRAAdapter? lora, int nHeads, int dHead, int dModel)
+        private static DecodeWeight[] MergePerHeadByOutput(DecodeWeight[] baseHeads, LoRAAdapter? lora, int nHeads, int dHead, int dModel, bool preferQ4K)
         {
             float[]? a = null, bb = null;
             var rank = 0;
@@ -439,7 +467,7 @@ namespace DevOnBike.Overfit.DeepLearning
                         }
                     });
                 }
-                result[h] = Q8Weight.QuantizeRows(buf, dHead, dModel);
+                result[h] = Requantize(buf, dHead, dModel, preferQ4K);
             }
             return result;
         }
@@ -447,7 +475,7 @@ namespace DevOnBike.Overfit.DeepLearning
         // o: base[h] is [dModel × dHead] — OutputSize=dModel rows, each the dHead weights for head h's attn output
         // (= the full-O columns [h·dHead, (h+1)·dHead)). LoRA O: A [(nHeads·dHead) × rank], B [rank × dModel];
         // for output o and head-input i (full input = h·dHead+i): delta = Σ_r A[h·dHead+i, r]·B[r, o].
-        private static DecodeWeight[] MergePerHeadByInput(DecodeWeight[] baseHeads, LoRAAdapter? lora, int nHeads, int dHead, int dModel)
+        private static DecodeWeight[] MergePerHeadByInput(DecodeWeight[] baseHeads, LoRAAdapter? lora, int nHeads, int dHead, int dModel, bool preferQ4K)
         {
             float[]? a = null, bb = null;
             var rank = 0;
@@ -474,13 +502,13 @@ namespace DevOnBike.Overfit.DeepLearning
                         }
                     });
                 }
-                result[h] = Q8Weight.QuantizeRows(buf, dModel, dHead);
+                result[h] = Requantize(buf, dModel, dHead, preferQ4K);
             }
             return result;
         }
 
         // Resident full matrix [outDim × inDim]. LoRA A [inDim × rank], B [rank × outDim]; delta[o,i] = Σ_r A[i,r]·B[r,o].
-        private static DecodeWeight MergeResident(DecodeWeight baseW, LoRAAdapter? lora, int outDim, int inDim)
+        private static DecodeWeight MergeResident(DecodeWeight baseW, LoRAAdapter? lora, int outDim, int inDim, bool preferQ4K)
         {
             var buf = new float[checked(outDim * inDim)];
             for (var o = 0; o < outDim; o++)
@@ -503,7 +531,7 @@ namespace DevOnBike.Overfit.DeepLearning
                     }
                 });
             }
-            return Q8Weight.QuantizeRows(buf, outDim, inDim);
+            return Requantize(buf, outDim, inDim, preferQ4K);
         }
 
         // Computes the full LM-head logit vector for the current hidden state (RMSNorm + base + LM-head LoRA).

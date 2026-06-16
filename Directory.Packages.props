@@ -17,7 +17,7 @@
     <PackageVersion Include="Microsoft.Extensions.AI.Evaluation" Version="10.7.0" />
     <PackageVersion Include="Microsoft.Extensions.AI.Evaluation.Quality" Version="10.7.0" />
     <PackageVersion Include="Microsoft.ML" Version="5.0.0" />
-    <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.26.0" />
+    <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.27.0" />
     <PackageVersion Include="Microsoft.ML.OnnxTransformer" Version="5.0.0" />
     <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="10.0.300" />
     <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.16.0" />
