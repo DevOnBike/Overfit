@@ -29,6 +29,15 @@
         <None Update="*.onnx;*.bin">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </None>
+        <!-- Reuse the test fixture for the ONNX Runtime comparison benchmark (no duplicate copy in the repo).
+             mnist_cnn.onnx keeps its weights in the .onnx.data external sidecar (PyTorch ≥2.x) — both engines
+             need it, so copy both. -->
+        <None Include="..\..\Tests\test_fixtures\mnist_cnn.onnx" Link="mnist_cnn.onnx">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </None>
+        <None Include="..\..\Tests\test_fixtures\mnist_cnn.onnx.data" Link="mnist_cnn.onnx.data">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </None>
     </ItemGroup>
 
 </Project>
