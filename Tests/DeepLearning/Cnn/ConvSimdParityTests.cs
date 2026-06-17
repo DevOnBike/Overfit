@@ -33,6 +33,42 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Cnn
         }
 
         [Fact]
+        public void Padded7x7Stride2_GatherSimdMatchesReference()
+        {
+            // ResNet stem shape: 7x7, stride 2, pad 3 → exercises the AVX2 gather strided worker.
+            const int inC = 3, outC = 8, h = 32, w = 30, k = 7, pad = 3, stride = 2;
+            var input = Deterministic(inC * h * w, 55);
+            var kernels = Deterministic(outC * inC * k * k, 66);
+
+            var outH = (h + 2 * pad - k) / stride + 1;
+            var outW = (w + 2 * pad - k) / stride + 1;
+            var output = new float[outC * outH * outW];
+
+            Conv2DKernels.ForwardNchw(input, kernels, output, 1, inC, outC, h, w, k, pad, stride);
+
+            var reference = ReferenceConv(input, kernels, inC, outC, h, w, k, pad, stride);
+            AssertClose(reference, output, 1e-3f);
+        }
+
+        [Fact]
+        public void OneByOneStride2_GatherSimdMatchesReference()
+        {
+            // ResNet downsample shape: 1x1, stride 2, pad 0.
+            const int inC = 16, outC = 12, h = 14, w = 14, k = 1, pad = 0, stride = 2;
+            var input = Deterministic(inC * h * w, 77);
+            var kernels = Deterministic(outC * inC * k * k, 88);
+
+            var outH = (h + 2 * pad - k) / stride + 1;
+            var outW = (w + 2 * pad - k) / stride + 1;
+            var output = new float[outC * outH * outW];
+
+            Conv2DKernels.ForwardNchw(input, kernels, output, 1, inC, outC, h, w, k, pad, stride);
+
+            var reference = ReferenceConv(input, kernels, inC, outC, h, w, k, pad, stride);
+            AssertClose(reference, output, 1e-3f);
+        }
+
+        [Fact]
         public void OneByOneStride1_SimdMatchesReference()
         {
             // 1x1 conv (pad 0, stride 1) → ForwardValidNchw → rerouted to the unit-stride SIMD worker.
