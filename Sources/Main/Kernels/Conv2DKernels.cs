@@ -331,7 +331,81 @@ namespace DevOnBike.Overfit.Kernels
             {
                 var ctx = new ConvNchwCtx(
                     pIn, pK, pOut, inChannels, inputH, inputW, kernelSize, outH, outW, kernelSizePerOutput, padding, stride);
-                OverfitParallel.For(0, outChannels, 1, &ConvNchwOutputChannelWorker, &ctx);
+
+                // Unit stride → the per-(ky,ic,kx) contribution to an output ROW is a contiguous scalar·vector
+                // FMA (acc[ox] += w·in[ix0+ox]), so we SIMD-accumulate over the long output-width dimension.
+                // Strided convs gather non-contiguously, so they keep the scalar worker.
+                delegate*<int, int, void*, void> worker =
+                    stride == 1 ? &ConvNchwStride1SimdWorker : &ConvNchwOutputChannelWorker;
+                OverfitParallel.For(0, outChannels, 1, worker, &ctx);
+            }
+        }
+
+        // SIMD output-channel worker for unit-stride conv: accumulates each output row in a scratch buffer via
+        // contiguous scalar·vector FMA (TensorPrimitives.MultiplyAdd), then writes the row. The reduction order
+        // differs from the scalar worker (per-row vs per-pixel), so results match within float tolerance, not bit-
+        // identically — fine for inference (parity tests use 1e-4).
+        private static unsafe void ConvNchwStride1SimdWorker(int ocStart, int ocEnd, void* ctxPtr)
+        {
+            ref readonly var c = ref Unsafe.AsRef<ConvNchwCtx>(ctxPtr);
+            var outW = c.OutW;
+
+            using var pooled = outW <= 2048 ? default : new PooledBuffer<float>(outW, clearMemory: false);
+            var acc = outW <= 2048 ? stackalloc float[outW] : pooled.Span;
+
+            for (var oc = ocStart; oc < ocEnd; oc++)
+            {
+                var kernelBase = oc * c.KPerOut;
+                var outChanBase = oc * c.OutH * outW;
+
+                for (var oy = 0; oy < c.OutH; oy++)
+                {
+                    acc.Clear();
+                    var iyBase = oy - c.Pad; // stride == 1
+
+                    for (var ic = 0; ic < c.InC; ic++)
+                    {
+                        var inChanBase = ic * c.InputH * c.InputW;
+                        var kChanBase = kernelBase + ic * c.KSize * c.KSize;
+
+                        for (var ky = 0; ky < c.KSize; ky++)
+                        {
+                            var iy = iyBase + ky;
+                            if ((uint)iy >= (uint)c.InputH)
+                            {
+                                continue; // padded row
+                            }
+
+                            var inRowBase = inChanBase + iy * c.InputW;
+                            var kRowBase = kChanBase + ky * c.KSize;
+
+                            for (var kx = 0; kx < c.KSize; kx++)
+                            {
+                                var w = c.K[kRowBase + kx];
+                                var off = kx - c.Pad; // input x for output ox is ox + off
+
+                                // Valid ox range: ox + off in [0, inputW).
+                                var oxLo = off < 0 ? -off : 0;
+                                var oxHi = c.InputW - off;
+                                if (oxHi > outW)
+                                {
+                                    oxHi = outW;
+                                }
+                                if (oxLo >= oxHi)
+                                {
+                                    continue;
+                                }
+
+                                var len = oxHi - oxLo;
+                                var inSpan = new ReadOnlySpan<float>(c.In + inRowBase + oxLo + off, len);
+                                var accSpan = acc.Slice(oxLo, len);
+                                TensorPrimitives.MultiplyAdd(inSpan, w, accSpan, accSpan);
+                            }
+                        }
+                    }
+
+                    acc.CopyTo(new Span<float>(c.Out + outChanBase + oy * outW, outW));
+                }
             }
         }
 
