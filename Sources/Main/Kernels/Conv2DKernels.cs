@@ -4,6 +4,10 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Numerics;
+using System.Numerics.Tensors;
+using System.Runtime.CompilerServices;
+using DevOnBike.Overfit.Runtime;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.Kernels
 {
@@ -80,7 +84,10 @@ namespace DevOnBike.Overfit.Kernels
                 }
                 else
                 {
-                    ForwardValidGenericSingleBatch(
+                    // Valid conv (no padding, unit stride) is the padded path with padding=0, stride=1 — reuse the
+                    // parallel ForwardNchwSingleBatch so 1x1 / generic convs (e.g. ResNet's bottleneck 1x1 layers,
+                    // which take this branch) also fan out over output channels instead of running single-threaded.
+                    ForwardNchwSingleBatch(
                         inputBatch,
                         kernels,
                         outputBatch,
@@ -91,7 +98,9 @@ namespace DevOnBike.Overfit.Kernels
                         kernelSize,
                         outH,
                         outW,
-                        kernelSizePerOutput);
+                        kernelSizePerOutput,
+                        padding: 0,
+                        stride: 1);
                 }
             }
         }
@@ -246,52 +255,6 @@ namespace DevOnBike.Overfit.Kernels
             }
         }
 
-        private static void ForwardValidGenericSingleBatch(
-            ReadOnlySpan<float> input,
-            ReadOnlySpan<float> kernels,
-            Span<float> output,
-            int inChannels,
-            int outChannels,
-            int inputH,
-            int inputW,
-            int kernelSize,
-            int outH,
-            int outW,
-            int kernelSizePerOutput)
-        {
-            for (var oc = 0; oc < outChannels; oc++)
-            {
-                var kernelBase = oc * kernelSizePerOutput;
-                var outputChannelBase = oc * outH * outW;
-
-                for (var oy = 0; oy < outH; oy++)
-                {
-                    for (var ox = 0; ox < outW; ox++)
-                    {
-                        var sum = 0f;
-
-                        for (var ic = 0; ic < inChannels; ic++)
-                        {
-                            var inputChannelBase = ic * inputH * inputW;
-                            var kernelChannelBase = kernelBase + ic * kernelSize * kernelSize;
-
-                            for (var ky = 0; ky < kernelSize; ky++)
-                            {
-                                var inputRowBase = inputChannelBase + (oy + ky) * inputW + ox;
-                                var kernelRowBase = kernelChannelBase + ky * kernelSize;
-
-                                for (var kx = 0; kx < kernelSize; kx++)
-                                {
-                                    sum += input[inputRowBase + kx] * kernels[kernelRowBase + kx];
-                                }
-                            }
-                        }
-
-                        output[outputChannelBase + oy * outW + ox] = sum;
-                    }
-                }
-            }
-        }
 
         // ─────────────────────────────────────────────────────────────────────
         // ForwardNchw — general Conv2D with padding and stride (ONNX-4)
@@ -345,7 +308,11 @@ namespace DevOnBike.Overfit.Kernels
             }
         }
 
-        private static void ForwardNchwSingleBatch(
+        // Output channels are independent, so the conv parallelises trivially over them — a big win for the
+        // (single-threaded, scalar) ONNX CNN path. Zero managed allocations: dispatch via the fn-pointer
+        // OverfitParallel.For with a pointer context (OverfitParallel runs the body inline when parallelism is
+        // suppressed — e.g. inside a data-parallel replica — so nesting stays safe).
+        private static unsafe void ForwardNchwSingleBatch(
             ReadOnlySpan<float> input,
             ReadOnlySpan<float> kernels,
             Span<float> output,
@@ -360,50 +327,87 @@ namespace DevOnBike.Overfit.Kernels
             int padding,
             int stride)
         {
-            for (var oc = 0; oc < outChannels; oc++)
+            fixed (float* pIn = input, pK = kernels, pOut = output)
             {
-                var kernelBase = oc * kernelSizePerOutput;
-                var outputChanBase = oc * outH * outW;
+                var ctx = new ConvNchwCtx(
+                    pIn, pK, pOut, inChannels, inputH, inputW, kernelSize, outH, outW, kernelSizePerOutput, padding, stride);
+                OverfitParallel.For(0, outChannels, 1, &ConvNchwOutputChannelWorker, &ctx);
+            }
+        }
 
-                for (var oy = 0; oy < outH; oy++)
+        private readonly unsafe struct ConvNchwCtx
+        {
+            public readonly float* In;
+            public readonly float* K;
+            public readonly float* Out;
+            public readonly int InC;
+            public readonly int InputH;
+            public readonly int InputW;
+            public readonly int KSize;
+            public readonly int OutH;
+            public readonly int OutW;
+            public readonly int KPerOut;
+            public readonly int Pad;
+            public readonly int Stride;
+
+            public ConvNchwCtx(
+                float* input, float* kernels, float* output, int inC, int inputH, int inputW, int kSize,
+                int outH, int outW, int kPerOut, int pad, int stride)
+            {
+                In = input; K = kernels; Out = output;
+                InC = inC; InputH = inputH; InputW = inputW; KSize = kSize;
+                OutH = outH; OutW = outW; KPerOut = kPerOut; Pad = pad; Stride = stride;
+            }
+        }
+
+        private static unsafe void ConvNchwOutputChannelWorker(int ocStart, int ocEnd, void* ctxPtr)
+        {
+            ref readonly var c = ref Unsafe.AsRef<ConvNchwCtx>(ctxPtr);
+
+            for (var oc = ocStart; oc < ocEnd; oc++)
+            {
+                var kernelBase = oc * c.KPerOut;
+                var outputChanBase = oc * c.OutH * c.OutW;
+
+                for (var oy = 0; oy < c.OutH; oy++)
                 {
-                    var inputYBase = oy * stride - padding;
+                    var inputYBase = oy * c.Stride - c.Pad;
 
-                    for (var ox = 0; ox < outW; ox++)
+                    for (var ox = 0; ox < c.OutW; ox++)
                     {
-                        var inputXBase = ox * stride - padding;
+                        var inputXBase = ox * c.Stride - c.Pad;
                         var sum = 0f;
 
-                        for (var ic = 0; ic < inChannels; ic++)
+                        for (var ic = 0; ic < c.InC; ic++)
                         {
-                            var inputChanBase = ic * inputH * inputW;
-                            var kernelChanBase = kernelBase + ic * kernelSize * kernelSize;
+                            var inputChanBase = ic * c.InputH * c.InputW;
+                            var kernelChanBase = kernelBase + ic * c.KSize * c.KSize;
 
-                            for (var ky = 0; ky < kernelSize; ky++)
+                            for (var ky = 0; ky < c.KSize; ky++)
                             {
                                 var iy = inputYBase + ky;
-                                if ((uint)iy >= (uint)inputH)
+                                if ((uint)iy >= (uint)c.InputH)
                                 {
                                     continue; // zero-pad: skip out-of-bounds rows
                                 }
 
-                                var kernelRowBase = kernelChanBase + ky * kernelSize;
-                                var inputRowBase = inputChanBase + iy * inputW;
+                                var kernelRowBase = kernelChanBase + ky * c.KSize;
+                                var inputRowBase = inputChanBase + iy * c.InputW;
 
-                                for (var kx = 0; kx < kernelSize; kx++)
+                                for (var kx = 0; kx < c.KSize; kx++)
                                 {
                                     var ix = inputXBase + kx;
-                                    if ((uint)ix >= (uint)inputW)
+                                    if ((uint)ix >= (uint)c.InputW)
                                     {
                                         continue; // zero-pad: skip out-of-bounds cols
                                     }
 
-                                    sum += input[inputRowBase + ix] * kernels[kernelRowBase + kx];
+                                    sum += c.In[inputRowBase + ix] * c.K[kernelRowBase + kx];
                                 }
                             }
                         }
 
-                        output[outputChanBase + oy * outW + ox] = sum;
+                        c.Out[outputChanBase + oy * c.OutW + ox] = sum;
                     }
                 }
             }
