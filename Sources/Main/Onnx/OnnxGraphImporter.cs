@@ -78,7 +78,6 @@ namespace DevOnBike.Overfit.Onnx
                 // Skip no-ops
                 if (IsNoOp(onnxNode.OpType))
                 {
-                    // Propagate slot: output = input
                     if (onnxNode.Inputs.Count > 0 && onnxNode.Outputs.Count > 0)
                     {
                         var inName = onnxNode.Inputs[0];
@@ -86,7 +85,20 @@ namespace DevOnBike.Overfit.Onnx
 
                         if (slotMap.TryGetValue(inName, out var slot))
                         {
+                            // Relabels an activation tensor: output reads from the same slot.
                             slotMap[outName] = slot;
+                        }
+                        else if (initializers.TryGetValue(inName, out var initTensor))
+                        {
+                            // Relabels a CONSTANT: a folded/deduplicated weight or bias routed to its
+                            // consumer under a new name (e.g. torch's constant-folding aliases equal biases
+                            // via Identity → "features.28.bias"). Alias the output to the same initializer so
+                            // the downstream Conv/Gemm resolves it — otherwise the consumer throws KeyNotFound.
+                            initializers[outName] = initTensor;
+                            if (shapeContext.GetShape(outName) == null && shapeContext.GetShape(inName) is { } initShape)
+                            {
+                                shapeContext.SetShape(outName, initShape);
+                            }
                         }
                     }
 
@@ -97,6 +109,12 @@ namespace DevOnBike.Overfit.Onnx
 
                 if (module == null)
                 {
+                    // A mapped operator can legitimately return null when it is a pure buffer relabel — e.g. a
+                    // Reshape/Flatten whose output rank equals its input rank, so no data moves. Unlike the
+                    // structural no-ops (Identity/Dropout) handled above, the slot must still be propagated so
+                    // the downstream consumer can find this tensor; dropping it silently breaks the topology
+                    // (a GlobalAveragePool → Flatten → Gemm head fails with "input not yet computed").
+                    PropagateSlot(onnxNode, slotMap, initializers);
                     continue;
                 }
 
@@ -214,6 +232,34 @@ namespace DevOnBike.Overfit.Onnx
 
         private static bool IsNoOp(string opType)
             => opType is "Identity" or "Dropout";
+
+        // Aliases a node's output tensor to its activation input's slot, used when the operator carries no
+        // data movement (returned a null module). Picks the first non-initializer input that already has a
+        // slot — the same activation-input rule ResolveInputSlots uses.
+        private static void PropagateSlot(
+            OnnxNode node,
+            Dictionary<string, int> slotMap,
+            Dictionary<string, OnnxTensor> initializers)
+        {
+            if (node.Outputs.Count == 0)
+            {
+                return;
+            }
+
+            foreach (var inputName in node.Inputs)
+            {
+                if (string.IsNullOrEmpty(inputName) || initializers.ContainsKey(inputName))
+                {
+                    continue;
+                }
+
+                if (slotMap.TryGetValue(inputName, out var slot))
+                {
+                    slotMap[node.Outputs[0]] = slot;
+                    return;
+                }
+            }
+        }
 
         private static int ComputeSize(int[] shape)
         {
