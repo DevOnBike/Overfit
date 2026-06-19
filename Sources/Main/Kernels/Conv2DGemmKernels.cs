@@ -50,6 +50,18 @@ namespace DevOnBike.Overfit.Kernels
             var inputPlane = inChannels * inputH * inputW;
             var outputPlane = outChannels * outH * outW;
 
+            // 1×1 stride-1 unpadded conv: im2col is the identity (cols[k, pos] = input[ic, pos], k == ic,
+            // N == H·W). Skip the copy and GEMM straight on the input — a real win for ResNet's many 1×1 bottleneck
+            // layers (K = inChannels here, so no patch gathering at all).
+            if (kernelSize == 1 && padding == 0 && stride == 1)
+            {
+                for (var b = 0; b < batchSize; b++)
+                {
+                    Gemm(kernels, input.Slice(b * inputPlane, inputPlane), output.Slice(b * outputPlane, outputPlane), m, n, k);
+                }
+                return;
+            }
+
             using var colsBuf = new PooledBuffer<float>(checked(k * n), clearMemory: false);
             var cols = colsBuf.Span;
 
@@ -102,7 +114,11 @@ namespace DevOnBike.Overfit.Kernels
             }
         }
 
-        // C[M,N] = A[M,K] @ B[K,N], parallelised over N-panels (each worker packs its 8-col B panel and sweeps M).
+        // C[M,N] = A[M,K] @ B[K,N], parallelised over N-panels (each worker packs its 8-col B panel and sweeps M
+        // with the full-K register-blocked micro-kernel). NOTE: a BLIS-style K-blocked + A-packed variant was
+        // tried and MEASURED to regress on these CNN dims (deepcnn 101→125, vgg 140→189, resnet 45→118 ms) —
+        // most im2col K values are ≤ a few hundred (single K-block → no blocking benefit) while the one-time A
+        // pack adds single-threaded O(M·K) overhead. Cache-blocking pays on large dense GEMM, not CNN-shaped im2col.
         private static unsafe void Gemm(ReadOnlySpan<float> a, ReadOnlySpan<float> b, Span<float> c, int m, int n, int k)
         {
             var nPanels = (n + Nr - 1) / Nr;
@@ -135,7 +151,6 @@ namespace DevOnBike.Overfit.Kernels
             var n = c.N;
             var m = c.M;
 
-            // Packed B panel: [K × Nr] contiguous (so the micro-kernel streams it sequentially over K).
             using var packBuf = new PooledBuffer<float>(checked(k * Nr), clearMemory: false);
             var packB = packBuf.Span;
 
@@ -144,7 +159,6 @@ namespace DevOnBike.Overfit.Kernels
                 var n0 = np * Nr;
                 var nrEff = Math.Min(Nr, n - n0);
 
-                // Pack the n0..n0+Nr columns of B (cols) into contiguous [K × Nr], zero-padding the ragged tail.
                 for (var kk = 0; kk < k; kk++)
                 {
                     var srcBase = kk * n + n0;
@@ -219,6 +233,21 @@ namespace DevOnBike.Overfit.Kernels
             StoreRow(c, (long)(m0 + 7) * n + n0, acc7, nrEff);
         }
 
+        // Edge micro-kernel for the last M-panel (1..7 rows). Generic loop; small relative to the bulk.
+        private static unsafe void MicroKernelTail(float* a, int m0, int mrEff, int k, float* packB, float* c, int n, int n0, int nrEff)
+        {
+            for (var mi = 0; mi < mrEff; mi++)
+            {
+                var aRow = a + (long)(m0 + mi) * k;
+                var acc = Vector256<float>.Zero;
+                for (var kk = 0; kk < k; kk++)
+                {
+                    acc = Fma.MultiplyAdd(Vector256.Create(aRow[kk]), Avx.LoadVector256(packB + kk * Nr), acc);
+                }
+                StoreRow(c, (long)(m0 + mi) * n + n0, acc, nrEff);
+            }
+        }
+
         private static unsafe void StoreRow(float* c, long cBase, Vector256<float> acc, int nrEff)
         {
             if (nrEff == Nr)
@@ -232,21 +261,6 @@ namespace DevOnBike.Overfit.Kernels
             for (var j = 0; j < nrEff; j++)
             {
                 c[cBase + j] = tmp[j];
-            }
-        }
-
-        // Edge micro-kernel for the last M-panel (1..7 rows). Generic loop; small relative to the bulk.
-        private static unsafe void MicroKernelTail(float* a, int m0, int mrEff, int k, float* packB, float* c, int n, int n0, int nrEff)
-        {
-            for (var mi = 0; mi < mrEff; mi++)
-            {
-                var aRow = a + (long)(m0 + mi) * k;
-                var acc = Vector256<float>.Zero;
-                for (var kk = 0; kk < k; kk++)
-                {
-                    acc = Fma.MultiplyAdd(Vector256.Create(aRow[kk]), Avx.LoadVector256(packB + kk * Nr), acc);
-                }
-                StoreRow(c, (long)(m0 + mi) * n + n0, acc, nrEff);
             }
         }
     }

@@ -12,6 +12,7 @@ using DevOnBike.Overfit.Audio.Tts.Orpheus;
 using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Embeddings;
+using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Server.OpenAi;
 
 namespace DevOnBike.Overfit.Server
@@ -296,6 +297,11 @@ namespace DevOnBike.Overfit.Server
 
             try
             {
+                // The server owns its process, so it may scope the (process-wide) GC latency mode for the
+                // generation — fewer blocking gen-2 pauses → tighter tail latency on the allocating prefill / SSE
+                // marshalling. Restored automatically when the request completes.
+                using var gcScope = GcLatencyScope.SustainedLowLatency();
+
                 OpenAiChatMapping.ReplayHistory(client.Chat, req.Messages);
                 var userContent = last.Content ?? string.Empty;
 
