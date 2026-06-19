@@ -298,6 +298,14 @@ namespace DevOnBike.Overfit.Kernels
             int padding,
             int stride)
         {
+            // 3x3 stride-1 (VGG/ResNet's bulk) → Winograd F(2,3): ~2.25x fewer multiplies than im2col.
+            if (kernelSize == 3 && stride == 1 && Conv2DWinogradKernels.IsSupported)
+            {
+                Conv2DWinogradKernels.Forward(
+                    input, kernels, output, batchSize, inChannels, outChannels, inputH, inputW, padding);
+                return;
+            }
+
             // im2col + register-blocked GEMM closes most of the gap to a native conv on real-sized models;
             // it subsumes every stride/padding via the patch gather. Falls back to the direct-conv SIMD workers
             // when AVX2+FMA is unavailable (or for tiny convs where the im2col overhead would not pay).
