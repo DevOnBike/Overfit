@@ -69,6 +69,34 @@ namespace Benchmarks
             var dims = _ort.InputMetadata[inputName].Dimensions.Select(d => d <= 0 ? 1 : d).ToArray();
             var tensor = new DenseTensor<float>(_input, dims);
             _ortInputs = [NamedOnnxValue.CreateFromTensor(inputName, tensor)];
+
+            // One-time numerical PARITY check (not a benchmark): does our whole-pipeline output (DAG importer +
+            // im2col/GEMM conv + the importer fixes) match ONNX Runtime's on the same input? Correctness is
+            // independent of box thermal state, unlike the timings below.
+            _overfit.Run(_input, _output);
+            using var ortResult = _ort.Run(_ortInputs);
+            var ortOut = ortResult[0].AsTensor<float>().ToArray();
+            double dot = 0, na = 0, nb = 0;
+            var maxAbs = 0f;
+            for (var i = 0; i < OutputSize; i++)
+            {
+                var a = _output[i];
+                var b = ortOut[i];
+                maxAbs = Math.Max(maxAbs, Math.Abs(a - b));
+                dot += (double)a * b; na += (double)a * a; nb += (double)b * b;
+            }
+            var cos = dot / (Math.Sqrt(na) * Math.Sqrt(nb) + 1e-12);
+            Console.WriteLine($"[PARITY] Overfit vs ORT — maxAbsDiff {maxAbs:E3}, cosine {cos:F6}, argmax overfit {ArgMax(_output)} ort {ArgMax(ortOut)}");
+        }
+
+        private static int ArgMax(float[] v)
+        {
+            int idx = 0;
+            for (var i = 1; i < v.Length; i++)
+            {
+                if (v[i] > v[idx]) { idx = i; }
+            }
+            return idx;
         }
 
         [Benchmark(Baseline = true)]
