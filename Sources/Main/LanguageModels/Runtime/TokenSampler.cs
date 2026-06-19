@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.LanguageModels.Contracts;
+using DevOnBike.Overfit.Maths;
 
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
@@ -167,19 +168,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     nameof(logits));
             }
 
-            var maxIndex = 0;
-            var maxValue = logits[0];
-
-            for (var i = 1; i < logits.Length; i++)
-            {
-                if (logits[i] > maxValue)
-                {
-                    maxValue = logits[i];
-                    maxIndex = i;
-                }
-            }
-
-            return maxIndex;
+            return MathUtils.ArgMax(logits);
         }
 
         /// <summary>

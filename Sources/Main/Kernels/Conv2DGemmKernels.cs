@@ -119,7 +119,8 @@ namespace DevOnBike.Overfit.Kernels
         // tried and MEASURED to regress on these CNN dims (deepcnn 101→125, vgg 140→189, resnet 45→118 ms) —
         // most im2col K values are ≤ a few hundred (single K-block → no blocking benefit) while the one-time A
         // pack adds single-threaded O(M·K) overhead. Cache-blocking pays on large dense GEMM, not CNN-shaped im2col.
-        private static unsafe void Gemm(ReadOnlySpan<float> a, ReadOnlySpan<float> b, Span<float> c, int m, int n, int k)
+        // Internal so the Winograd path can reuse the same tuned micro-kernel for its 16 element-wise GEMMs.
+        internal static unsafe void Gemm(ReadOnlySpan<float> a, ReadOnlySpan<float> b, Span<float> c, int m, int n, int k)
         {
             var nPanels = (n + Nr - 1) / Nr;
             fixed (float* pa = a, pb = b, pc = c)

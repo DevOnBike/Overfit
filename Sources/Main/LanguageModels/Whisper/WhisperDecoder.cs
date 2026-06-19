@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Numerics.Tensors;
+using DevOnBike.Overfit.Maths;
 
 namespace DevOnBike.Overfit.LanguageModels.Whisper
 {
@@ -169,7 +170,7 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             for (var i = 0; i < maxNewTokens; i++)
             {
                 var logits = Forward(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(tokens), encoderOut, nCtx);
-                var next = ArgMax(logits);
+                var next = MathUtils.ArgMax(logits);
                 if (next == endOfTranscript) { break; }
                 tokens.Add(next);
                 produced.Add(next);
@@ -215,7 +216,7 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             var produced = new List<int>(maxNewTokens);
             for (var i = 0; i < maxNewTokens; i++)
             {
-                var next = ArgMax(logits);
+                var next = MathUtils.ArgMax(logits);
                 if (next == endOfTranscript) { break; }
                 produced.Add(next);
                 if (produced.Count >= maxNewTokens) { break; }
@@ -322,13 +323,6 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             WhisperKernels.Linear(x, _tokenEmbedding, ReadOnlySpan<float>.Empty, s.Logits, 1, n, _nVocab);
             s.Position++;
             return s.Logits;
-        }
-
-        private static int ArgMax(ReadOnlySpan<float> v)
-        {
-            int best = 0; var bv = v[0];
-            for (var i = 1; i < v.Length; i++) { if (v[i] > bv) { bv = v[i]; best = i; } }
-            return best;
         }
 
         private float[] T(string name)

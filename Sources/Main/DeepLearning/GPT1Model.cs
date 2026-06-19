@@ -321,7 +321,7 @@ namespace DevOnBike.Overfit.DeepLearning
                     : tokens.ToArray();
 
                 var logits = GenerateLogits(ctx);
-                var nextTok = ArgMax(logits);
+                var nextTok = MathUtils.ArgMax(logits);
 
                 tokens.Add(nextTok);
             }
@@ -589,23 +589,6 @@ namespace DevOnBike.Overfit.DeepLearning
             }
 
             return ids;
-        }
-
-        private static int ArgMax(ReadOnlySpan<float> logits)
-        {
-            var maxIdx = 0;
-            var maxVal = logits[0];
-
-            for (var i = 1; i < logits.Length; i++)
-            {
-                if (logits[i] > maxVal)
-                {
-                    maxVal = logits[i];
-                    maxIdx = i;
-                }
-            }
-
-            return maxIdx;
         }
 
         /// <summary>
