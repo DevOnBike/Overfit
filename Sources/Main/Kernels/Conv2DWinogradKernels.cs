@@ -8,13 +8,20 @@ using DevOnBike.Overfit.Tensors;
 namespace DevOnBike.Overfit.Kernels
 {
     /// <summary>
-    /// Winograd F(2×2, 3×3) convolution — the FLOP-reducing path for 3×3 stride-1 convs (VGG/ResNet's bulk). It
-    /// computes a 2×2 output tile from a 4×4 input tile with 16 element-wise products instead of the 36 (4·9) a
-    /// direct/im2col conv needs — ~2.25× fewer multiplies. The conv reduces to: transform every 3×3 filter
-    /// (U = G·g·Gᵀ, once) and every 4×4 input tile (V = Bᵀ·d·B), then for each of the 16 transform positions a
-    /// dense GEMM contracts over input channels (reusing <see cref="Conv2DGemmKernels.Gemm"/>), then the inverse
-    /// transform (Y = Aᵀ·M·A) yields the 2×2 outputs. The three constant transforms are sparse, so they are applied
-    /// as separable 1-D passes (rows then columns) without any matrix multiply.
+    /// Winograd F(2×2, 3×3) convolution for 3×3 stride-1 convs (VGG/ResNet's bulk). Computes a 2×2 output tile
+    /// from a 4×4 input tile with 16 element-wise products instead of the 36 (4·9) a direct/im2col conv needs —
+    /// ~2.25× fewer multiplies. The conv reduces to: transform every 3×3 filter (U = G·g·Gᵀ, once) and every 4×4
+    /// input tile (V = Bᵀ·d·B), then for each of the 16 transform positions a dense GEMM contracts over input
+    /// channels (reusing <see cref="Conv2DGemmKernels.Gemm"/>), then the inverse transform (Y = Aᵀ·M·A) yields the
+    /// 2×2 outputs. The three constant transforms are sparse, so they are applied as separable 1-D passes.
+    ///
+    /// NOT WIRED INTO THE HOT PATH. Kept as a parity-correct (cos 1.0 vs scalar/ORT) reference implementation.
+    /// As written it REGRESSED deepcnn 119.7→214.4 ms (+79%) vs the tuned im2col+GEMM path: the transforms here
+    /// are SEQUENTIAL SCALAR, the 16 GEMMs are small (poor per-GEMM parallelism), and the 16× U/V/M buffer
+    /// blow-up costs bandwidth — together they outweigh the FLOP cut at these channel/tile sizes. Making it win
+    /// would need (a) the input/output transforms parallelized over channels and SIMD-vectorised across
+    /// tiles/channels, and (b) the 16 GEMMs batched and parallelised over the 16·outC dimension rather than each
+    /// one parallelising over a small T. Until that is built and MEASURED to beat im2col, leave it unused.
     /// </summary>
     internal static class Conv2DWinogradKernels
     {
@@ -106,7 +113,7 @@ namespace DevOnBike.Overfit.Kernels
             }
         }
 
-        // V[ξ·inC·T + ic·T + tile] = (Bᵀ d B)[ξ] for each 4×4 input tile d (with -inf/0 padding).
+        // V[ξ·inC·T + ic·T + tile] = (Bᵀ d B)[ξ] for each 4×4 input tile d (with zero padding).
         private static void InputTransform(
             ReadOnlySpan<float> input, Span<float> v, int inC, int h, int w, int pad, int tilesH, int tilesW, int t)
         {

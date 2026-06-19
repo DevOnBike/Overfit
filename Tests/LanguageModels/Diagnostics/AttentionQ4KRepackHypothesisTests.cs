@@ -31,7 +31,7 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         public AttentionQ4KRepackHypothesisTests(ITestOutputHelper output) => _out = output;
 
         [LongFact]
-        public void Whole_Q4K_Gemv_vs_PerHead_Q8_Projection()
+        public unsafe void Whole_Q4K_Gemv_vs_PerHead_Q8_Projection()
         {
             if (!CpuFeatures.HasAvx2)
             {
@@ -110,13 +110,90 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             _out.WriteLine($"  PARALLEL ({OverfitParallel.WorkerCount} workers) — the decode-relevant case:");
             _out.WriteLine($"  per-head Q8 ‖ : {q8ParNs,8:F0} ns   {q8Bytes / (q8ParNs * 1e-9) / 1e9,5:F1} GB/s");
             _out.WriteLine($"  whole  Q4_K ‖ : {q4kParNs,8:F0} ns   {q4kBytesRead / (q4kParNs * 1e-9) / 1e9,5:F1} GB/s");
-            _out.WriteLine($"  speedup ‖     : {q8ParNs / q4kParNs:F2}×   ← THIS decides go/no-go on the refactor");
+            _out.WriteLine($"  speedup ‖     : {q8ParNs / q4kParNs:F2}×   ← vs Q8 (NOT today's path)");
+
+            // ── PER-HEAD Q4_K — TODAY'S ACTUAL decode path. The whole matrix is split into nHeads head-row
+            //    groups (the loader keeps per-head Q4KWeight for a Q4_K_M file), each projected separately via
+            //    ProjectPreQuantized over the SHARED Q8_K activation, fanned across heads by ForDecode exactly
+            //    like CachedMultiHeadAttention. This is the REAL baseline the refactor must beat: same bytes as
+            //    whole-Q4_K, so the only levers are the repacked 8×8 kernel (no per-row horizontal reduction) +
+            //    finer parallel granularity (outputSize/8 = 256 groups vs nHeads = 16 chunks). ──
+            const int nHeads = 16, headDim = 128; // Qwen-3B Q/O: 2048 = 16 × 128
+            var headBytes = q4kBytes.Length / nHeads;
+            var heads = new Q4KWeight[nHeads];
+            for (var h = 0; h < nHeads; h++)
+            {
+                var slice = new byte[headBytes];
+                Array.Copy(q4kBytes, (long)h * headBytes, slice, 0, headBytes);
+                heads[h] = new Q4KWeight(slice, inputSize, headDim);
+            }
+            var perHeadOut = new float[outputSize];
+
+            var perHeadNs = BestOf(warmup, iters, () =>
+            {
+                for (var h = 0; h < nHeads; h++)
+                {
+                    Q4KDotKernel.ProjectPreQuantized(
+                        heads[h], [], perHeadOut.AsSpan(h * headDim, headDim), actQuants, actScales, actBsums);
+                }
+            });
+
+            // Parallel per-head — mirror decode's head fan-out. A function pointer cannot be captured in a
+            // lambda, so this times ForDecode directly rather than through BestOf.
+            _phHeads = heads;
+            _phActQuants = actQuants;
+            _phActScales = actScales;
+            _phActBsums = actBsums;
+            _phOut = perHeadOut;
+            _phHeadDim = headDim;
+            for (var i = 0; i < warmup + 200; i++)
+            {
+                OverfitParallel.ForDecode(0, nHeads, &PerHeadChunk, null);
+            }
+            var bestParTicks = long.MaxValue;
+            for (var i = 0; i < iters; i++)
+            {
+                var t = Stopwatch.GetTimestamp();
+                OverfitParallel.ForDecode(0, nHeads, &PerHeadChunk, null);
+                var dt = Stopwatch.GetTimestamp() - t;
+                if (dt < bestParTicks)
+                {
+                    bestParTicks = dt;
+                }
+            }
+            var perHeadParNs = bestParTicks * (1_000_000_000.0 / Stopwatch.Frequency);
+
+            _out.WriteLine(string.Empty);
+            _out.WriteLine("  ── vs TODAY'S per-head Q4_K (the real refactor baseline) ──");
+            _out.WriteLine($"  per-head Q4_K : single {perHeadNs,8:F0} ns   ‖ {perHeadParNs,8:F0} ns");
+            _out.WriteLine($"  whole    Q4_K : single {q4kNs,8:F0} ns   ‖ {q4kParNs,8:F0} ns");
+            _out.WriteLine($"  REAL speedup single     : {perHeadNs / q4kNs:F2}×");
+            _out.WriteLine($"  REAL speedup ‖ (perHd/whole): {perHeadParNs / q4kParNs:F2}×   ← go/no-go vs CURRENT path");
 
             // Sanity: both produce a finite projection of the right size (not a correctness/parity check —
             // the kernels are parity-tested elsewhere; this probe is purely about timing).
             Assert.Equal(outputSize, outQ8.Length);
             Assert.All(outQ8, v => Assert.True(float.IsFinite(v)));
             Assert.All(outQ4k, v => Assert.True(float.IsFinite(v)));
+        }
+
+        // Per-head parallel worker state (test runs one instance, so static is safe) — ForDecode takes a
+        // function pointer, which cannot close over locals.
+        private static Q4KWeight[] _phHeads = null!;
+        private static sbyte[] _phActQuants = null!;
+        private static float[] _phActScales = null!;
+        private static short[] _phActBsums = null!;
+        private static float[] _phOut = null!;
+        private static int _phHeadDim;
+
+        private static unsafe void PerHeadChunk(int from, int to, void* _)
+        {
+            for (var h = from; h < to; h++)
+            {
+                Q4KDotKernel.ProjectPreQuantized(
+                    _phHeads[h], [], _phOut.AsSpan(h * _phHeadDim, _phHeadDim),
+                    _phActQuants, _phActScales, _phActBsums);
+            }
         }
 
         private static double BestOf(int warmup, int iters, Action body)
