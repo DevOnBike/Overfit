@@ -73,20 +73,50 @@ namespace DevOnBike.Overfit.Audio.Mp3
             }
 
             // Type 1 — start block
-            for (var i = 0; i < 18; i++) { win[1 * 36 + i] = MathF.Sin(MathF.PI / 36f * (i + 0.5f)); }
-            for (var i = 18; i < 24; i++) { win[1 * 36 + i] = 1f; }
-            for (var i = 24; i < 30; i++) { win[1 * 36 + i] = MathF.Sin(MathF.PI / 12f * (i - 18 + 0.5f)); }
-            for (var i = 30; i < 36; i++) { win[1 * 36 + i] = 0f; }
+            for (var i = 0; i < 18; i++)
+            {
+                win[1 * 36 + i] = MathF.Sin(MathF.PI / 36f * (i + 0.5f));
+            }
+            for (var i = 18; i < 24; i++)
+            {
+                win[1 * 36 + i] = 1f;
+            }
+            for (var i = 24; i < 30; i++)
+            {
+                win[1 * 36 + i] = MathF.Sin(MathF.PI / 12f * (i - 18 + 0.5f));
+            }
+            for (var i = 30; i < 36; i++)
+            {
+                win[1 * 36 + i] = 0f;
+            }
 
             // Type 3 — stop block
-            for (var i = 0; i < 6; i++) { win[3 * 36 + i] = 0f; }
-            for (var i = 6; i < 12; i++) { win[3 * 36 + i] = MathF.Sin(MathF.PI / 12f * (i - 6 + 0.5f)); }
-            for (var i = 12; i < 18; i++) { win[3 * 36 + i] = 1f; }
-            for (var i = 18; i < 36; i++) { win[3 * 36 + i] = MathF.Sin(MathF.PI / 36f * (i + 0.5f)); }
+            for (var i = 0; i < 6; i++)
+            {
+                win[3 * 36 + i] = 0f;
+            }
+            for (var i = 6; i < 12; i++)
+            {
+                win[3 * 36 + i] = MathF.Sin(MathF.PI / 12f * (i - 6 + 0.5f));
+            }
+            for (var i = 12; i < 18; i++)
+            {
+                win[3 * 36 + i] = 1f;
+            }
+            for (var i = 18; i < 36; i++)
+            {
+                win[3 * 36 + i] = MathF.Sin(MathF.PI / 36f * (i + 0.5f));
+            }
 
             // Type 2 — short: sin(pi/12*(i+0.5)) for the first 12 points, 0 after (as in the reference IMDCT).
-            for (var i = 0; i < 12; i++) { win[2 * 36 + i] = MathF.Sin(MathF.PI / 12f * (i + 0.5f)); }
-            for (var i = 12; i < 36; i++) { win[2 * 36 + i] = 0f; }
+            for (var i = 0; i < 12; i++)
+            {
+                win[2 * 36 + i] = MathF.Sin(MathF.PI / 12f * (i + 0.5f));
+            }
+            for (var i = 12; i < 36; i++)
+            {
+                win[2 * 36 + i] = 0f;
+            }
             return win;
         }
 

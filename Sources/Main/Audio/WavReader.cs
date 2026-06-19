@@ -27,9 +27,15 @@ namespace DevOnBike.Overfit.Audio
         public static float[] ReadMono(Stream stream, out int sampleRate)
         {
             using var br = new BinaryReader(stream);
-            if (ReadTag(br) != "RIFF") { throw new OverfitFormatException("Not a RIFF file."); }
+            if (ReadTag(br) != "RIFF")
+            {
+                throw new OverfitFormatException("Not a RIFF file.");
+            }
             br.ReadInt32(); // file size
-            if (ReadTag(br) != "WAVE") { throw new OverfitFormatException("Not a WAVE file."); }
+            if (ReadTag(br) != "WAVE")
+            {
+                throw new OverfitFormatException("Not a WAVE file.");
+            }
 
             int channels = 0, bitsPerSample = 0, audioFormat = 0;
             sampleRate = 0;
@@ -48,7 +54,10 @@ namespace DevOnBike.Overfit.Audio
                     br.ReadInt16();                 // block align
                     bitsPerSample = br.ReadInt16();
                     var consumed = 16;
-                    if (chunkSize > consumed) { br.ReadBytes(chunkSize - consumed); } // skip extension
+                    if (chunkSize > consumed)
+                    {
+                        br.ReadBytes(chunkSize - consumed);
+                    } // skip extension
                 }
                 else if (chunkId == "data")
                 {
@@ -57,11 +66,17 @@ namespace DevOnBike.Overfit.Audio
                 else
                 {
                     br.ReadBytes(chunkSize);        // skip unknown chunk
-                    if ((chunkSize & 1) == 1) { br.ReadByte(); } // chunks are word-aligned
+                    if ((chunkSize & 1) == 1)
+                    {
+                        br.ReadByte();
+                    } // chunks are word-aligned
                 }
             }
 
-            if (data is null || channels == 0) { throw new OverfitFormatException("WAV missing fmt/data chunk."); }
+            if (data is null || channels == 0)
+            {
+                throw new OverfitFormatException("WAV missing fmt/data chunk.");
+            }
 
             return Decode(data, audioFormat, channels, bitsPerSample);
         }
@@ -96,7 +111,10 @@ namespace DevOnBike.Overfit.Audio
                 throw new OverfitRuntimeException($"Unsupported WAV format (audioFormat={audioFormat}, bits={bitsPerSample}). Use 16-bit PCM or 32-bit float.");
             }
 
-            if (channels == 1) { return interleaved; }
+            if (channels == 1)
+            {
+                return interleaved;
+            }
 
             // Down-mix to mono by averaging channels.
             var frames = interleaved.Length / channels;
@@ -104,7 +122,10 @@ namespace DevOnBike.Overfit.Audio
             for (var i = 0; i < frames; i++)
             {
                 var acc = 0f;
-                for (var c = 0; c < channels; c++) { acc += interleaved[i * channels + c]; }
+                for (var c = 0; c < channels; c++)
+                {
+                    acc += interleaved[i * channels + c];
+                }
                 mono[i] = acc / channels;
             }
             return mono;
@@ -114,7 +135,10 @@ namespace DevOnBike.Overfit.Audio
         private static string ReadTag(BinaryReader br)
         {
             Span<byte> tag = stackalloc byte[4];
-            if (br.Read(tag) != 4) { throw new EndOfStreamException("Unexpected end of WAV."); }
+            if (br.Read(tag) != 4)
+            {
+                throw new EndOfStreamException("Unexpected end of WAV.");
+            }
             return System.Text.Encoding.ASCII.GetString(tag);
         }
     }

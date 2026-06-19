@@ -45,9 +45,15 @@ namespace DevOnBike.Overfit.Inference
             _warmupOutput = new float[outputSize];
         }
 
-        public int InputSize { get; }
+        public int InputSize
+        {
+            get;
+        }
 
-        public int OutputSize { get; }
+        public int OutputSize
+        {
+            get;
+        }
 
         public void Run(
             ReadOnlySpan<float> input,

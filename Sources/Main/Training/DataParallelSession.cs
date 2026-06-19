@@ -82,7 +82,10 @@ namespace DevOnBike.Overfit.Training
         }
 
         /// <summary>The underlying trainer (all-reduce / clip / optimizer step / broadcast).</summary>
-        public DataParallelTrainer Trainer { get; }
+        public DataParallelTrainer Trainer
+        {
+            get;
+        }
 
         /// <summary>The worker replicas (model + graph + parameters), indexed by worker.</summary>
         public IReadOnlyList<DataParallelReplica<TModel>> Replicas => _replicas;

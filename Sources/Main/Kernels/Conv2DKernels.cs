@@ -460,9 +460,18 @@ namespace DevOnBike.Overfit.Kernels
                 float* input, float* kernels, float* output, int inC, int inputH, int inputW, int kSize,
                 int outH, int outW, int kPerOut, int pad, int stride)
             {
-                In = input; K = kernels; Out = output;
-                InC = inC; InputH = inputH; InputW = inputW; KSize = kSize;
-                OutH = outH; OutW = outW; KPerOut = kPerOut; Pad = pad; Stride = stride;
+                In = input;
+                K = kernels;
+                Out = output;
+                InC = inC;
+                InputH = inputH;
+                InputW = inputW;
+                KSize = kSize;
+                OutH = outH;
+                OutW = outW;
+                KPerOut = kPerOut;
+                Pad = pad;
+                Stride = stride;
             }
         }
 

@@ -22,14 +22,21 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         [LongFact]
         public void Dump_Gemma_Metadata_And_Tensors()
         {
-            if (!File.Exists(Path)) { _out.WriteLine("missing C:\\gemma gguf"); return; }
+            if (!File.Exists(Path))
+            {
+                _out.WriteLine("missing C:\\gemma gguf");
+                return;
+            }
 
             using var reader = new GgufReader(Path);
 
             _out.WriteLine("=== SCALAR METADATA ===");
             foreach (var kv in reader.Metadata)
             {
-                if (kv.Value is object[]) { continue; } // skip big arrays (vocab/merges)
+                if (kv.Value is object[])
+                {
+                    continue;
+                } // skip big arrays (vocab/merges)
                 _out.WriteLine($"{kv.Key} = {kv.Value}");
             }
 

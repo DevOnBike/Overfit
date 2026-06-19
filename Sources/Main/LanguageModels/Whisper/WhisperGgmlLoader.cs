@@ -52,7 +52,10 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             var melRows = br.ReadInt32();
             var melCols = br.ReadInt32();
             var melFilters = new float[(long)melRows * melCols];
-            for (var i = 0; i < melFilters.Length; i++) { melFilters[i] = br.ReadSingle(); }
+            for (var i = 0; i < melFilters.Length; i++)
+            {
+                melFilters[i] = br.ReadSingle();
+            }
 
             // ── vocab (byte-level BPE strings; specials are computed at use, not stored) ──
             var nTokens = br.ReadInt32();
@@ -74,23 +77,38 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
 
                 // Dimensions are written reversed (ggml ne[]); un-reverse to logical shape.
                 var ne = new int[nDims];
-                for (var i = 0; i < nDims; i++) { ne[i] = br.ReadInt32(); }
+                for (var i = 0; i < nDims; i++)
+                {
+                    ne[i] = br.ReadInt32();
+                }
                 var shape = new int[nDims];
-                for (var i = 0; i < nDims; i++) { shape[i] = ne[nDims - 1 - i]; }
+                for (var i = 0; i < nDims; i++)
+                {
+                    shape[i] = ne[nDims - 1 - i];
+                }
 
                 var name = Encoding.UTF8.GetString(br.ReadBytes(nameLen));
 
                 long count = 1;
-                for (var i = 0; i < nDims; i++) { count *= shape[i]; }
+                for (var i = 0; i < nDims; i++)
+                {
+                    count *= shape[i];
+                }
 
                 var data = new float[count];
                 if (ftype == 0)
                 {
-                    for (var i = 0L; i < count; i++) { data[i] = br.ReadSingle(); }
+                    for (var i = 0L; i < count; i++)
+                    {
+                        data[i] = br.ReadSingle();
+                    }
                 }
                 else if (ftype == 1)
                 {
-                    for (var i = 0L; i < count; i++) { data[i] = (float)BitConverter.UInt16BitsToHalf(br.ReadUInt16()); }
+                    for (var i = 0L; i < count; i++)
+                    {
+                        data[i] = (float)BitConverter.UInt16BitsToHalf(br.ReadUInt16());
+                    }
                 }
                 else
                 {

@@ -26,10 +26,16 @@ namespace DevOnBike.Overfit.Audio.Tts
         public string GeneratedBy => "Overfit";
 
         /// <summary>Id of the voice used (null for a default/preset voice).</summary>
-        public string? VoiceProfileId { get; }
+        public string? VoiceProfileId
+        {
+            get;
+        }
 
         /// <summary>ISO-8601 UTC timestamp the caller stamped at synthesis time.</summary>
-        public string CreatedUtc { get; }
+        public string CreatedUtc
+        {
+            get;
+        }
 
         /// <summary>Always true — this audio is synthetic.</summary>
         public bool SyntheticSpeech => true;

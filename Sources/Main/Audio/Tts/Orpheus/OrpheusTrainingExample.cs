@@ -19,10 +19,16 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
         }
 
         /// <summary>Full sequence: <c>[prompt…][audio tokens…][end-of-speech]</c>.</summary>
-        public int[] InputIds { get; }
+        public int[] InputIds
+        {
+            get;
+        }
 
         /// <summary>Index where the trainable continuation (audio tokens) begins; tokens before it are masked.</summary>
-        public int PromptLength { get; }
+        public int PromptLength
+        {
+            get;
+        }
 
         /// <summary>Number of trainable (audio + end) tokens.</summary>
         public int TargetLength => InputIds.Length - PromptLength;

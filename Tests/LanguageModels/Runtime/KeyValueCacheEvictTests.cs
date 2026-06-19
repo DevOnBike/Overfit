@@ -59,7 +59,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         public void Evict_ThenAdvanceAgain_NewSlotKeepsAbsolutePosition()
         {
             using var cache = KeyValueCache.Create(1, 1, MaxSeq, HeadDim);
-            for (var p = 0; p < MaxSeq; p++) { cache.Advance(); }
+            for (var p = 0; p < MaxSeq; p++)
+            {
+                cache.Advance();
+            }
 
             cache.Evict(2);                       // length 4, base 2
             var writeSlot = cache.CurrentLength;  // next physical slot = 4
@@ -75,7 +78,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         public void Reset_ClearsBasePosition()
         {
             using var cache = KeyValueCache.Create(1, 1, MaxSeq, HeadDim);
-            for (var p = 0; p < MaxSeq; p++) { cache.Advance(); }
+            for (var p = 0; p < MaxSeq; p++)
+            {
+                cache.Advance();
+            }
             cache.Evict(3);
             Assert.Equal(3, cache.BasePosition);
 
@@ -90,13 +96,19 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         public void Evict_InvalidCount_Throws(int count)
         {
             using var cache = KeyValueCache.Create(1, 1, MaxSeq, HeadDim);
-            for (var p = 0; p < MaxSeq; p++) { cache.Advance(); }
+            for (var p = 0; p < MaxSeq; p++)
+            {
+                cache.Advance();
+            }
             Assert.Throws<ArgumentOutOfRangeException>(() => cache.Evict(count));
         }
 
         private static void Write(Span<float> dst, float baseValue)
         {
-            for (var i = 0; i < dst.Length; i++) { dst[i] = baseValue + i; }
+            for (var i = 0; i < dst.Length; i++)
+            {
+                dst[i] = baseValue + i;
+            }
         }
     }
 }

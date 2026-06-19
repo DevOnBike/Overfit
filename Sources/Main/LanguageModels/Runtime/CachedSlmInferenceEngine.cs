@@ -46,15 +46,30 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             HeadCount = model.Config.NHeads;
         }
 
-        public int VocabularySize { get; }
+        public int VocabularySize
+        {
+            get;
+        }
 
-        public int MaxContextLength { get; }
+        public int MaxContextLength
+        {
+            get;
+        }
 
-        public int DModel { get; }
+        public int DModel
+        {
+            get;
+        }
 
-        public int LayerCount { get; }
+        public int LayerCount
+        {
+            get;
+        }
 
-        public int HeadCount { get; }
+        public int HeadCount
+        {
+            get;
+        }
 
         public bool HasKeyValueCache => true;
 

@@ -18,7 +18,10 @@ namespace Benchmarks
         public StrategyCase Case { get; set; } = null!;
 
         [Params(false, true)]
-        public bool UseAdamParam { get; set; }
+        public bool UseAdamParam
+        {
+            get; set;
+        }
 
         public IEnumerable<StrategyCase> Cases()
         {

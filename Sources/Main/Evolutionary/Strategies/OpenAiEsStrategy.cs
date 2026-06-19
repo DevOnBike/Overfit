@@ -181,9 +181,18 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
                 epsilon: epsilon);
         }
 
-        public int PopulationSize { get; }
-        public int ParameterCount { get; }
-        public int Generation { get; private set; }
+        public int PopulationSize
+        {
+            get;
+        }
+        public int ParameterCount
+        {
+            get;
+        }
+        public int Generation
+        {
+            get; private set;
+        }
 
         public float BestFitness
         {

@@ -56,10 +56,16 @@ namespace DevOnBike.Overfit.LanguageModels.Memory
         public ChatSession Inner => _chat;
 
         /// <summary>True after at least one compaction pass has run on this session.</summary>
-        public bool Compacted { get; private set; }
+        public bool Compacted
+        {
+            get; private set;
+        }
 
         /// <summary>The number of summary regenerations performed (one per compaction pass).</summary>
-        public int CompactionCount { get; private set; }
+        public int CompactionCount
+        {
+            get; private set;
+        }
 
         /// <summary>
         /// Like <see cref="ChatSession.Send"/>, but first compresses old turns if the conversation
@@ -84,7 +90,10 @@ namespace DevOnBike.Overfit.LanguageModels.Memory
         private void CompactIfNeeded()
         {
             var plan = ChatHistoryCompactor.Plan(_chat.History, _summarizeAtChars, _recentTurnsToKeep);
-            if (plan.HasWork) { ApplyPlan(plan); }
+            if (plan.HasWork)
+            {
+                ApplyPlan(plan);
+            }
         }
 
         private void RunCompaction()
@@ -92,7 +101,10 @@ namespace DevOnBike.Overfit.LanguageModels.Memory
             // Force compaction with the same recent-turns budget but threshold 1 so any non-empty
             // older content triggers — useful when the host wants to compact unconditionally.
             var plan = ChatHistoryCompactor.Plan(_chat.History, summarizeAtChars: 1, _recentTurnsToKeep);
-            if (plan.HasWork) { ApplyPlan(plan); }
+            if (plan.HasWork)
+            {
+                ApplyPlan(plan);
+            }
         }
 
         private void ApplyPlan(CompactionPlan plan)
@@ -123,7 +135,10 @@ namespace DevOnBike.Overfit.LanguageModels.Memory
         private void RehydrateHistory(IReadOnlyList<ChatMessage> systemMessages, string summary, IReadOnlyList<ChatMessage> recentToKeep)
         {
             _chat.ResetConversation();
-            foreach (var s in systemMessages) { _chat.AddSystem(s.Content); }
+            foreach (var s in systemMessages)
+            {
+                _chat.AddSystem(s.Content);
+            }
             _chat.AddSystem(SummaryRoleLabel + ": " + summary);
             foreach (var m in recentToKeep)
             {
@@ -134,17 +149,27 @@ namespace DevOnBike.Overfit.LanguageModels.Memory
         private void RestoreHistory(IReadOnlyList<ChatMessage> saved)
         {
             _chat.ResetConversation();
-            foreach (var m in saved) { AppendRaw(m); }
+            foreach (var m in saved)
+            {
+                AppendRaw(m);
+            }
         }
 
         private void AppendRaw(ChatMessage m)
         {
             switch (m.Role)
             {
-                case "system": _chat.AddSystem(m.Content); break;
-                case "user": _chat.AddUser(m.Content); break;
-                case "assistant": _chat.AddAssistant(m.Content); break;
-                default: throw new OverfitRuntimeException($"Unknown chat role '{m.Role}'.");
+                case "system":
+                    _chat.AddSystem(m.Content);
+                    break;
+                case "user":
+                    _chat.AddUser(m.Content);
+                    break;
+                case "assistant":
+                    _chat.AddAssistant(m.Content);
+                    break;
+                default:
+                    throw new OverfitRuntimeException($"Unknown chat role '{m.Role}'.");
             }
         }
     }

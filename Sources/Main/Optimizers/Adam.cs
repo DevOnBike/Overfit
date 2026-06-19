@@ -574,8 +574,14 @@ namespace DevOnBike.Overfit.Optimizers
 
             public void ZeroGrad()
             {
-                if (_param != null) { _param.ZeroGrad(); }
-                else { _node!.ZeroGrad(); }
+                if (_param != null)
+                {
+                    _param.ZeroGrad();
+                }
+                else
+                {
+                    _node!.ZeroGrad();
+                }
             }
 
             public bool RequiresGrad =>

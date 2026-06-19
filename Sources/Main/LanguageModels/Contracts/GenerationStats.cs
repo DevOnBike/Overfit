@@ -21,15 +21,30 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
             UsedKeyValueCache = usedKeyValueCache;
         }
 
-        public int PromptTokens { get; }
+        public int PromptTokens
+        {
+            get;
+        }
 
-        public int GeneratedTokens { get; }
+        public int GeneratedTokens
+        {
+            get;
+        }
 
-        public long ElapsedNanoseconds { get; }
+        public long ElapsedNanoseconds
+        {
+            get;
+        }
 
-        public long AllocatedBytes { get; }
+        public long AllocatedBytes
+        {
+            get;
+        }
 
-        public bool UsedKeyValueCache { get; }
+        public bool UsedKeyValueCache
+        {
+            get;
+        }
 
         public double NanosecondsPerToken =>
             GeneratedTokens == 0 ? 0.0 : (double)ElapsedNanoseconds / GeneratedTokens;

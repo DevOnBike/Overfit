@@ -89,7 +89,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             static TensorStorage<float> Empty() => new(0);
             static DecodeWeight EmptyWeight() => new TensorStorage<float>(0);
-            _wq = wq; _bq = bq; _wo = wo;
+            _wq = wq;
+            _bq = bq;
+            _wo = wo;
             _wk = wk ?? EmptyWeight();
             _bk = bk ?? Empty();
             _wv = wv ?? EmptyWeight();

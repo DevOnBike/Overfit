@@ -23,8 +23,16 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Constraints.Schema
             var tracker = new JsonSchemaTracker(schema);
             foreach (var c in json)
             {
-                if (!tracker.IsCharAllowedBySchema(c, in machine)) { complete = false; return false; }
-                if (!machine.TryAdvance(c)) { complete = false; return false; }
+                if (!tracker.IsCharAllowedBySchema(c, in machine))
+                {
+                    complete = false;
+                    return false;
+                }
+                if (!machine.TryAdvance(c))
+                {
+                    complete = false;
+                    return false;
+                }
                 tracker.OnCharAdvanced(c, in machine);
             }
             complete = machine.IsComplete;

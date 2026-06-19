@@ -168,7 +168,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             ThrowIfDisposed();
 
-            if (promptTokens.IsEmpty) { return; }
+            if (promptTokens.IsEmpty)
+            {
+                return;
+            }
 
             // Batched (multi-token) prefill: one set of batched GEMMs per layer over the whole prompt
             // instead of N single-token passes — amortises the (weight-bandwidth-bound) weight reads
@@ -412,8 +415,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var probe = false;
             if (gated)
             {
-                if (_specProbeCountdown > 0) { _specProbeCountdown--; }
-                else { probe = true; _specProbeCountdown = SpecProbeInterval; }
+                if (_specProbeCountdown > 0)
+                {
+                    _specProbeCountdown--;
+                }
+                else
+                {
+                    probe = true;
+                    _specProbeCountdown = SpecProbeInterval;
+                }
             }
 
             var dn = 0;
@@ -457,67 +467,67 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var residualArr = PooledBuffer<float>.RentArray(vocab);
             try
             {
-            var hidden = hiddenArr.AsSpan(0, batch * dModel);
-            _embedWeights.DequantizeRow(t0, hidden.Slice(0, dModel));
-            ApplyEmbeddingScale(hidden.Slice(0, dModel));
-            for (var j = 0; j < dn; j++)
-            {
-                _embedWeights.DequantizeRow(draft[j], hidden.Slice((1 + j) * dModel, dModel));
-                ApplyEmbeddingScale(hidden.Slice((1 + j) * dModel, dModel));
-            }
-            _cache.Advance(batch);
-
-            var finalNorm = finalNormArr.AsSpan(0, batch * dModel);
-            _stack.PrefillBatchedQuantAllRows(hidden, batch, _weights, _cache, basePosition, finalNorm, _rope);
-
-            // Batched LM head — read the (large) head weights ONCE for all draft rows, else the per-row
-            // re-read cancels the batched stack's saving (measured: 1.01× before this).
-            var verifyLogits = verifyLogitsArr.AsSpan(0, batch * vocab);
-            _stack.ProjectLogitsBatched(finalNorm, batch, _weights, verifyLogits);
-
-            committed[0] = t0;
-            var accepted = 0;
-            var probs = probsArr.AsSpan(0, vocab);
-            var residual = residualArr.AsSpan(0, vocab);
-            var correction = -1;
-            for (var j = 0; j < dn; j++)
-            {
-                TokenSampler.ComputeProbabilities(
-                    verifyLogits.Slice(j * vocab, vocab), in sampling, _indexScratch, _scoreScratch, probs);
-
-                // Speculative rejection sampling: accept draft d w.p. p(d), else resample the residual.
-                var token = SpeculativeSampler.AcceptOrResample(probs, draft[j], _random, residual);
-                if (token == draft[j])
+                var hidden = hiddenArr.AsSpan(0, batch * dModel);
+                _embedWeights.DequantizeRow(t0, hidden.Slice(0, dModel));
+                ApplyEmbeddingScale(hidden.Slice(0, dModel));
+                for (var j = 0; j < dn; j++)
                 {
-                    committed[1 + j] = draft[j];
-                    accepted++;
+                    _embedWeights.DequantizeRow(draft[j], hidden.Slice((1 + j) * dModel, dModel));
+                    ApplyEmbeddingScale(hidden.Slice((1 + j) * dModel, dModel));
                 }
-                else
+                _cache.Advance(batch);
+
+                var finalNorm = finalNormArr.AsSpan(0, batch * dModel);
+                _stack.PrefillBatchedQuantAllRows(hidden, batch, _weights, _cache, basePosition, finalNorm, _rope);
+
+                // Batched LM head — read the (large) head weights ONCE for all draft rows, else the per-row
+                // re-read cancels the batched stack's saving (measured: 1.01× before this).
+                var verifyLogits = verifyLogitsArr.AsSpan(0, batch * vocab);
+                _stack.ProjectLogitsBatched(finalNorm, batch, _weights, verifyLogits);
+
+                committed[0] = t0;
+                var accepted = 0;
+                var probs = probsArr.AsSpan(0, vocab);
+                var residual = residualArr.AsSpan(0, vocab);
+                var correction = -1;
+                for (var j = 0; j < dn; j++)
                 {
-                    correction = token;
-                    break;
+                    TokenSampler.ComputeProbabilities(
+                        verifyLogits.Slice(j * vocab, vocab), in sampling, _indexScratch, _scoreScratch, probs);
+
+                    // Speculative rejection sampling: accept draft d w.p. p(d), else resample the residual.
+                    var token = SpeculativeSampler.AcceptOrResample(probs, draft[j], _random, residual);
+                    if (token == draft[j])
+                    {
+                        committed[1 + j] = draft[j];
+                        accepted++;
+                    }
+                    else
+                    {
+                        correction = token;
+                        break;
+                    }
                 }
-            }
 
-            if (correction < 0)
-            {
-                // All drafts accepted — the bonus token is sampled from the row after the last draft.
-                TokenSampler.ComputeProbabilities(
-                    verifyLogits.Slice(dn * vocab, vocab), in sampling, _indexScratch, _scoreScratch, probs);
-                correction = SpeculativeSampler.Sample(probs, _random);
-            }
+                if (correction < 0)
+                {
+                    // All drafts accepted — the bonus token is sampled from the row after the last draft.
+                    TokenSampler.ComputeProbabilities(
+                        verifyLogits.Slice(dn * vocab, vocab), in sampling, _indexScratch, _scoreScratch, probs);
+                    correction = SpeculativeSampler.Sample(probs, _random);
+                }
 
-            // Keep t0 + accepted drafts' K/V (drop rejected drafts), then forward the correction/bonus so
-            // it is cached and _logits reflects the prediction after it (the session invariant).
-            _cache.TruncateTo(basePosition + 1 + accepted);
-            committed[1 + accepted] = correction;
-            DecodeToken(correction);
+                // Keep t0 + accepted drafts' K/V (drop rejected drafts), then forward the correction/bonus so
+                // it is cached and _logits reflects the prediction after it (the session invariant).
+                _cache.TruncateTo(basePosition + 1 + accepted);
+                committed[1 + accepted] = correction;
+                DecodeToken(correction);
 
-            // Feed the verify outcome back into the adaptive gate: committed tokens this step (= 2 + accepted).
-            var committedThisStep = 2 + accepted;
-            drafter?.Sync(committed.Slice(0, committedThisStep));
-            _specAcceptEma = SpecEmaAlpha * committedThisStep + (1 - SpecEmaAlpha) * _specAcceptEma;
-            return committedThisStep;
+                // Feed the verify outcome back into the adaptive gate: committed tokens this step (= 2 + accepted).
+                var committedThisStep = 2 + accepted;
+                drafter?.Sync(committed.Slice(0, committedThisStep));
+                _specAcceptEma = SpecEmaAlpha * committedThisStep + (1 - SpecEmaAlpha) * _specAcceptEma;
+                return committedThisStep;
             }
             finally
             {
@@ -646,7 +656,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // Avoid LINQ in main code path; small list, linear scan is fine.
             for (var i = 0; i < stops.Count; i++)
             {
-                if (stops[i] == token) { return true; }
+                if (stops[i] == token)
+                {
+                    return true;
+                }
             }
             return false;
         }
@@ -678,7 +691,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             bool normalize = true)
         {
             ThrowIfDisposed();
-            if (tokens.IsEmpty) { throw new ArgumentException("Cannot embed an empty token sequence.", nameof(tokens)); }
+            if (tokens.IsEmpty)
+            {
+                throw new ArgumentException("Cannot embed an empty token sequence.", nameof(tokens));
+            }
             var d = _config.DModel;
             if (destination.Length < d)
             {
@@ -700,7 +716,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 var h = _stack.LastFinalHidden;
                 if (pooling == EmbeddingPooling.Mean)
                 {
-                    for (var j = 0; j < d; j++) { dst[j] += h[j]; }
+                    for (var j = 0; j < d; j++)
+                    {
+                        dst[j] += h[j];
+                    }
                 }
                 else if (i == tokens.Length - 1)
                 {
@@ -711,18 +730,27 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             if (pooling == EmbeddingPooling.Mean)
             {
                 var inv = 1f / tokens.Length;
-                for (var j = 0; j < d; j++) { dst[j] *= inv; }
+                for (var j = 0; j < d; j++)
+                {
+                    dst[j] *= inv;
+                }
             }
 
             if (normalize)
             {
                 var norm = 0f;
-                for (var j = 0; j < d; j++) { norm += dst[j] * dst[j]; }
+                for (var j = 0; j < d; j++)
+                {
+                    norm += dst[j] * dst[j];
+                }
                 norm = MathF.Sqrt(norm);
                 if (norm > 1e-12f)
                 {
                     var inv = 1f / norm;
-                    for (var j = 0; j < d; j++) { dst[j] *= inv; }
+                    for (var j = 0; j < d; j++)
+                    {
+                        dst[j] *= inv;
+                    }
                 }
             }
         }
@@ -787,7 +815,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private const int BatchedPrefillThreshold = 16;
 
         /// <summary>Test hook: force the single-token prefill loop (for batched-vs-single parity).</summary>
-        internal bool DisableBatchedPrefillForParity { get; set; }
+        internal bool DisableBatchedPrefillForParity
+        {
+            get; set;
+        }
 
         /// <summary>
         /// Batched prefill: embed all prompt tokens, advance the cache, run one batched pass per layer

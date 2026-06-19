@@ -9,7 +9,10 @@ namespace DevOnBike.Overfit.LanguageModels.Evolutionary
 {
     public interface ILanguageModelMutator<TCandidate>
     {
-        ISlmInferenceEngine Engine { get; }
+        ISlmInferenceEngine Engine
+        {
+            get;
+        }
 
         bool TryBuildPrompt(
             in TCandidate candidate,

@@ -45,24 +45,48 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
         }
 
         /// <summary>Model / embedding dimension (a.k.a. d_model). 384 for all-MiniLM-L6-v2.</summary>
-        public int HiddenSize { get; }
+        public int HiddenSize
+        {
+            get;
+        }
 
-        public int NumLayers { get; }
+        public int NumLayers
+        {
+            get;
+        }
 
-        public int NumHeads { get; }
+        public int NumHeads
+        {
+            get;
+        }
 
         /// <summary>FFN inner dimension (typically 4·HiddenSize). 1536 for all-MiniLM-L6-v2.</summary>
-        public int IntermediateSize { get; }
+        public int IntermediateSize
+        {
+            get;
+        }
 
-        public int MaxPositionEmbeddings { get; }
+        public int MaxPositionEmbeddings
+        {
+            get;
+        }
 
-        public int VocabSize { get; }
+        public int VocabSize
+        {
+            get;
+        }
 
         /// <summary>Segment / token-type vocabulary (2 for BERT). Single-sentence embedding uses type 0.</summary>
-        public int TypeVocabSize { get; }
+        public int TypeVocabSize
+        {
+            get;
+        }
 
         /// <summary>LayerNorm epsilon. BERT uses 1e-12 (not the 1e-5 common elsewhere).</summary>
-        public float LayerNormEps { get; }
+        public float LayerNormEps
+        {
+            get;
+        }
 
         /// <summary>
         /// sentence-transformers/all-MiniLM-L6-v2: 6 layers, hidden 384, 12 heads, FFN 1536,

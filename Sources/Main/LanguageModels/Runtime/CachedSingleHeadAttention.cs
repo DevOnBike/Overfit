@@ -89,11 +89,20 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _scale = 1f / MathF.Sqrt(headDimension);
         }
 
-        public int DModel { get; }
+        public int DModel
+        {
+            get;
+        }
 
-        public int HeadDimension { get; }
+        public int HeadDimension
+        {
+            get;
+        }
 
-        public int MaxSequenceLength { get; }
+        public int MaxSequenceLength
+        {
+            get;
+        }
 
         /// <param name="hidden">Input hidden state for the current token (length DModel).</param>
         /// <param name="wq">Query projection weights for this head.</param>

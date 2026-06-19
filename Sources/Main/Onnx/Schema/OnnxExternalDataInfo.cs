@@ -15,9 +15,15 @@ namespace DevOnBike.Overfit.Onnx.Schema
         public string Location { get; init; } = "";
 
         /// <summary>Byte offset into the external data file.</summary>
-        public long Offset { get; init; }
+        public long Offset
+        {
+            get; init;
+        }
 
         /// <summary>Number of bytes to read. Zero means read to end of file.</summary>
-        public long Length { get; init; }
+        public long Length
+        {
+            get; init;
+        }
     }
 }

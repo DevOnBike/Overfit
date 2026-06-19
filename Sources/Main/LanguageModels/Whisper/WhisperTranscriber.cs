@@ -80,12 +80,12 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             {
                 return
                 [
-                    _tokenizer.StartOfTranscript, 
-                    _tokenizer.Transcribe, 
+                    _tokenizer.StartOfTranscript,
+                    _tokenizer.Transcribe,
                     _tokenizer.NoTimestamps
                 ];
             }
-            
+
             return
             [
                 _tokenizer.StartOfTranscript,

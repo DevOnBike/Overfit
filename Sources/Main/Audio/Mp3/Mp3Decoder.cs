@@ -250,15 +250,24 @@ namespace DevOnBike.Overfit.Audio.Mp3
                     {
                         _blockType[g] = (int)br.ReadBits(2);
                         _mixedBlock[g] = (int)br.ReadBits(1);
-                        for (var r = 0; r < 2; r++) { _tableSelect[g * 3 + r] = (int)br.ReadBits(5); }
+                        for (var r = 0; r < 2; r++)
+                        {
+                            _tableSelect[g * 3 + r] = (int)br.ReadBits(5);
+                        }
                         _tableSelect[g * 3 + 2] = 0;
-                        for (var w = 0; w < 3; w++) { _subblockGain[g * 3 + w] = (int)br.ReadBits(3); }
+                        for (var w = 0; w < 3; w++)
+                        {
+                            _subblockGain[g * 3 + w] = (int)br.ReadBits(3);
+                        }
                         _region0[g] = _blockType[g] == 2 && _mixedBlock[g] == 0 ? 8 : 7;
                         _region1[g] = 20 - _region0[g];
                     }
                     else
                     {
-                        for (var r = 0; r < 3; r++) { _tableSelect[g * 3 + r] = (int)br.ReadBits(5); }
+                        for (var r = 0; r < 3; r++)
+                        {
+                            _tableSelect[g * 3 + r] = (int)br.ReadBits(5);
+                        }
                         _region0[g] = (int)br.ReadBits(4);
                         _region1[g] = (int)br.ReadBits(3);
                         _blockType[g] = 0;
@@ -304,11 +313,17 @@ namespace DevOnBike.Overfit.Audio.Mp3
             {
                 if (_mixedBlock[g] != 0)
                 {
-                    for (var sfb = 0; sfb < 8; sfb++) { _scalefacL[lBase + sfb] = (int)br.ReadBits(slen1); }
+                    for (var sfb = 0; sfb < 8; sfb++)
+                    {
+                        _scalefacL[lBase + sfb] = (int)br.ReadBits(slen1);
+                    }
                     for (var sfb = 3; sfb < 12; sfb++)
                     {
                         var nbits = sfb < 6 ? slen1 : slen2;
-                        for (var w = 0; w < 3; w++) { _scalefacS[(g * 13 + sfb) * 3 + w] = (int)br.ReadBits(nbits); }
+                        for (var w = 0; w < 3; w++)
+                        {
+                            _scalefacS[(g * 13 + sfb) * 3 + w] = (int)br.ReadBits(nbits);
+                        }
                     }
                 }
                 else
@@ -316,7 +331,10 @@ namespace DevOnBike.Overfit.Audio.Mp3
                     for (var sfb = 0; sfb < 12; sfb++)
                     {
                         var nbits = sfb < 6 ? slen1 : slen2;
-                        for (var w = 0; w < 3; w++) { _scalefacS[(g * 13 + sfb) * 3 + w] = (int)br.ReadBits(nbits); }
+                        for (var w = 0; w < 3; w++)
+                        {
+                            _scalefacS[(g * 13 + sfb) * 3 + w] = (int)br.ReadBits(nbits);
+                        }
                     }
                 }
             }
@@ -335,12 +353,18 @@ namespace DevOnBike.Overfit.Audio.Mp3
             var g = GC(gr, ch);
             if (_scfsi[ch * 4 + scfsiBand] == 0 || gr == 0)
             {
-                for (var sfb = from; sfb < to; sfb++) { _scalefacL[g * 23 + sfb] = (int)br.ReadBits(slen); }
+                for (var sfb = from; sfb < to; sfb++)
+                {
+                    _scalefacL[g * 23 + sfb] = (int)br.ReadBits(slen);
+                }
             }
             else
             {
                 var g0 = GC(0, ch);
-                for (var sfb = from; sfb < to; sfb++) { _scalefacL[g * 23 + sfb] = _scalefacL[g0 * 23 + sfb]; }
+                for (var sfb = from; sfb < to; sfb++)
+                {
+                    _scalefacL[g * 23 + sfb] = _scalefacL[g0 * 23 + sfb];
+                }
             }
         }
 
@@ -352,19 +376,28 @@ namespace DevOnBike.Overfit.Audio.Mp3
 
             if (sfc < 400)
             {
-                slen0 = (sfc >> 4) / 5; slen1 = (sfc >> 4) % 5; slen2 = (sfc & 0xf) >> 2; slen3 = sfc & 0x3;
+                slen0 = (sfc >> 4) / 5;
+                slen1 = (sfc >> 4) % 5;
+                slen2 = (sfc & 0xf) >> 2;
+                slen3 = sfc & 0x3;
                 tindex = 0;
             }
             else if (sfc < 500)
             {
                 sfc -= 400;
-                slen0 = (sfc >> 2) / 5; slen1 = (sfc >> 2) % 5; slen2 = sfc & 0x3; slen3 = 0;
+                slen0 = (sfc >> 2) / 5;
+                slen1 = (sfc >> 2) % 5;
+                slen2 = sfc & 0x3;
+                slen3 = 0;
                 tindex = 1;
             }
             else
             {
                 sfc -= 500;
-                slen0 = sfc / 3; slen1 = sfc % 3; slen2 = 0; slen3 = 0;
+                slen0 = sfc / 3;
+                slen1 = sfc % 3;
+                slen2 = 0;
+                slen3 = 0;
                 tindex = 2;
                 _preflag[g] = 1;
             }
@@ -388,7 +421,11 @@ namespace DevOnBike.Overfit.Audio.Mp3
                         {
                             _scalefacS[(g * 13 + sfb) * 3 + win] = v;
                         }
-                        if (++win == 3) { win = 0; sfb++; }
+                        if (++win == 3)
+                        {
+                            win = 0;
+                            sfb++;
+                        }
                     }
                 }
             }
@@ -401,7 +438,10 @@ namespace DevOnBike.Overfit.Audio.Mp3
                     for (var k = 0; k < nr[p]; k++)
                     {
                         var v = slen[p] > 0 ? (int)br.ReadBits(slen[p]) : 0;
-                        if (sfb < 23) { _scalefacL[g * 23 + sfb] = v; }
+                        if (sfb < 23)
+                        {
+                            _scalefacL[g * 23 + sfb] = v;
+                        }
                         sfb++;
                     }
                 }
@@ -412,7 +452,10 @@ namespace DevOnBike.Overfit.Audio.Mp3
         {
             var g = GC(gr, ch);
             var isBase = g * 576;
-            for (var i = 0; i < 576; i++) { _is[isBase + i] = 0f; }
+            for (var i = 0; i < 576; i++)
+            {
+                _is[isBase + i] = 0f;
+            }
 
             if (_part23[g] == 0)
             {
@@ -451,11 +494,20 @@ namespace DevOnBike.Overfit.Audio.Mp3
             {
                 Mp3Huffman.DecodeQuad(ref br, countTable, out var v, out var w, out var x, out var y);
                 _is[isBase + pos++] = v;
-                if (pos >= 576) { break; }
+                if (pos >= 576)
+                {
+                    break;
+                }
                 _is[isBase + pos++] = w;
-                if (pos >= 576) { break; }
+                if (pos >= 576)
+                {
+                    break;
+                }
                 _is[isBase + pos++] = x;
-                if (pos >= 576) { break; }
+                if (pos >= 576)
+                {
+                    break;
+                }
                 _is[isBase + pos++] = y;
             }
 
@@ -464,7 +516,10 @@ namespace DevOnBike.Overfit.Audio.Mp3
                 pos -= 4; // overshoot — drop the last quad
             }
             _count1[g] = pos;
-            for (; pos < 576; pos++) { _is[isBase + pos] = 0f; }
+            for (; pos < 576; pos++)
+            {
+                _is[isBase + pos] = 0f;
+            }
             br.SetBitPosition(bitPosEnd + 1);
         }
 
@@ -484,7 +539,11 @@ namespace DevOnBike.Overfit.Audio.Mp3
                     var next = bl[1];
                     for (var i = 0; i < 36; i++)
                     {
-                        if (i == next) { sfb++; next = bl[sfb + 1]; }
+                        if (i == next)
+                        {
+                            sfb++;
+                            next = bl[sfb + 1];
+                        }
                         RequantizeLong(g, i, sfb);
                     }
                     sfb = 3;
@@ -493,10 +552,19 @@ namespace DevOnBike.Overfit.Audio.Mp3
                     var ii = 36;
                     while (ii < count1)
                     {
-                        if (ii == next) { sfb++; next = bs[sfb + 1] * 3; winLen = bs[sfb + 1] - bs[sfb]; }
+                        if (ii == next)
+                        {
+                            sfb++;
+                            next = bs[sfb + 1] * 3;
+                            winLen = bs[sfb + 1] - bs[sfb];
+                        }
                         for (var w = 0; w < 3; w++)
                         {
-                            for (var j = 0; j < winLen; j++) { RequantizeShort(g, ii, sfb, w); ii++; }
+                            for (var j = 0; j < winLen; j++)
+                            {
+                                RequantizeShort(g, ii, sfb, w);
+                                ii++;
+                            }
                         }
                     }
                 }
@@ -508,10 +576,19 @@ namespace DevOnBike.Overfit.Audio.Mp3
                     var ii = 0;
                     while (ii < count1)
                     {
-                        if (ii == next) { sfb++; next = bs[sfb + 1] * 3; winLen = bs[sfb + 1] - bs[sfb]; }
+                        if (ii == next)
+                        {
+                            sfb++;
+                            next = bs[sfb + 1] * 3;
+                            winLen = bs[sfb + 1] - bs[sfb];
+                        }
                         for (var w = 0; w < 3; w++)
                         {
-                            for (var j = 0; j < winLen; j++) { RequantizeShort(g, ii, sfb, w); ii++; }
+                            for (var j = 0; j < winLen; j++)
+                            {
+                                RequantizeShort(g, ii, sfb, w);
+                                ii++;
+                            }
                         }
                     }
                 }
@@ -522,7 +599,11 @@ namespace DevOnBike.Overfit.Audio.Mp3
                 var next = bl[1];
                 for (var i = 0; i < count1; i++)
                 {
-                    if (i == next) { sfb++; next = bl[sfb + 1]; }
+                    if (i == next)
+                    {
+                        sfb++;
+                        next = bl[sfb + 1];
+                    }
                     RequantizeLong(g, i, sfb);
                 }
             }
@@ -571,18 +652,31 @@ namespace DevOnBike.Overfit.Audio.Mp3
             {
                 if (i == nextSfb)
                 {
-                    for (var j = 0; j < 3 * winLen; j++) { _is[isBase + 3 * bs[sfb] + j] = _reorder[j]; }
-                    if (i >= _count1[g]) { return; }
+                    for (var j = 0; j < 3 * winLen; j++)
+                    {
+                        _is[isBase + 3 * bs[sfb] + j] = _reorder[j];
+                    }
+                    if (i >= _count1[g])
+                    {
+                        return;
+                    }
                     sfb++;
                     nextSfb = bs[sfb + 1] * 3;
                     winLen = bs[sfb + 1] - bs[sfb];
                 }
                 for (var w = 0; w < 3; w++)
                 {
-                    for (var j = 0; j < winLen; j++) { _reorder[j * 3 + w] = _is[isBase + i]; i++; }
+                    for (var j = 0; j < winLen; j++)
+                    {
+                        _reorder[j * 3 + w] = _is[isBase + i];
+                        i++;
+                    }
                 }
             }
-            for (var j = 0; j < 3 * winLen; j++) { _is[isBase + 3 * bs[12] + j] = _reorder[j]; }
+            for (var j = 0; j < 3 * winLen; j++)
+            {
+                _is[isBase + 3 * bs[12] + j] = _reorder[j];
+            }
         }
 
         // ── stereo ──
@@ -619,18 +713,27 @@ namespace DevOnBike.Overfit.Audio.Mp3
                     {
                         for (var sfb = 0; sfb < 8; sfb++)
                         {
-                            if (bl[sfb] >= _count1[g1]) { IntensityLong(gr, sfb); }
+                            if (bl[sfb] >= _count1[g1])
+                            {
+                                IntensityLong(gr, sfb);
+                            }
                         }
                         for (var sfb = 3; sfb < 12; sfb++)
                         {
-                            if (bs[sfb] * 3 >= _count1[g1]) { IntensityShort(gr, sfb); }
+                            if (bs[sfb] * 3 >= _count1[g1])
+                            {
+                                IntensityShort(gr, sfb);
+                            }
                         }
                     }
                     else
                     {
                         for (var sfb = 0; sfb < 12; sfb++)
                         {
-                            if (bs[sfb] * 3 >= _count1[g1]) { IntensityShort(gr, sfb); }
+                            if (bs[sfb] * 3 >= _count1[g1])
+                            {
+                                IntensityShort(gr, sfb);
+                            }
                         }
                     }
                 }
@@ -638,7 +741,10 @@ namespace DevOnBike.Overfit.Audio.Mp3
                 {
                     for (var sfb = 0; sfb < 21; sfb++)
                     {
-                        if (bl[sfb] >= _count1[g1]) { IntensityLong(gr, sfb); }
+                        if (bl[sfb] >= _count1[g1])
+                        {
+                            IntensityLong(gr, sfb);
+                        }
                     }
                 }
             }
@@ -654,8 +760,16 @@ namespace DevOnBike.Overfit.Audio.Mp3
             }
             var bl = Mp3Tables.SfBandLong[_sfIndex];
             float ratioL, ratioR;
-            if (isPos == 6) { ratioL = 1f; ratioR = 0f; }
-            else { ratioL = IsRatios[isPos] / (1f + IsRatios[isPos]); ratioR = 1f / (1f + IsRatios[isPos]); }
+            if (isPos == 6)
+            {
+                ratioL = 1f;
+                ratioR = 0f;
+            }
+            else
+            {
+                ratioL = IsRatios[isPos] / (1f + IsRatios[isPos]);
+                ratioR = 1f / (1f + IsRatios[isPos]);
+            }
             var b0 = GC(gr, 0) * 576;
             var b1 = GC(gr, 1) * 576;
             for (var i = bl[sfb]; i < bl[sfb + 1]; i++)
@@ -681,8 +795,16 @@ namespace DevOnBike.Overfit.Audio.Mp3
                     continue;
                 }
                 float ratioL, ratioR;
-                if (isPos == 6) { ratioL = 1f; ratioR = 0f; }
-                else { ratioL = IsRatios[isPos] / (1f + IsRatios[isPos]); ratioR = 1f / (1f + IsRatios[isPos]); }
+                if (isPos == 6)
+                {
+                    ratioL = 1f;
+                    ratioR = 0f;
+                }
+                else
+                {
+                    ratioL = IsRatios[isPos] / (1f + IsRatios[isPos]);
+                    ratioR = 1f / (1f + IsRatios[isPos]);
+                }
                 var start = bs[sfb] * 3 + winLen * win;
                 for (var i = start; i < start + winLen; i++)
                 {
@@ -732,7 +854,10 @@ namespace DevOnBike.Overfit.Audio.Mp3
                     for (var p = 0; p < 12; p++)
                     {
                         var sum = 0f;
-                        for (var m = 0; m < 6; m++) { sum += input[i + 3 * m] * cos[m * 12 + p]; }
+                        for (var m = 0; m < 6; m++)
+                        {
+                            sum += input[i + 3 * m] * cos[m * 12 + p];
+                        }
                         outp[6 * i + p + 6] += sum * win[2 * 36 + p];
                     }
                 }
@@ -744,7 +869,10 @@ namespace DevOnBike.Overfit.Audio.Mp3
                 for (var p = 0; p < 36; p++)
                 {
                     var sum = 0f;
-                    for (var m = 0; m < 18; m++) { sum += input[m] * cos[m * 36 + p]; }
+                    for (var m = 0; m < 18; m++)
+                    {
+                        sum += input[m] * cos[m * 36 + p];
+                    }
                     outp[p] = sum * win[wb + p];
                 }
             }
@@ -801,12 +929,21 @@ namespace DevOnBike.Overfit.Audio.Mp3
 
             for (var ss = 0; ss < 18; ss++)
             {
-                for (var i = 1023; i > 63; i--) { _vVec[vBase + i] = _vVec[vBase + i - 64]; }
-                for (var i = 0; i < 32; i++) { _sVec[i] = _is[isBase + i * 18 + ss]; }
+                for (var i = 1023; i > 63; i--)
+                {
+                    _vVec[vBase + i] = _vVec[vBase + i - 64];
+                }
+                for (var i = 0; i < 32; i++)
+                {
+                    _sVec[i] = _is[isBase + i * 18 + ss];
+                }
                 for (var i = 0; i < 64; i++)
                 {
                     var sum = 0f;
-                    for (var j = 0; j < 32; j++) { sum += n[i * 32 + j] * _sVec[j]; }
+                    for (var j = 0; j < 32; j++)
+                    {
+                        sum += n[i * 32 + j] * _sVec[j];
+                    }
                     _vVec[vBase + i] = sum;
                 }
                 for (var i = 0; i < 8; i++)
@@ -817,11 +954,17 @@ namespace DevOnBike.Overfit.Audio.Mp3
                         _uVec[(i << 6) + j + 32] = _vVec[vBase + (i << 7) + j + 96];
                     }
                 }
-                for (var i = 0; i < 512; i++) { _uVec[i] *= d[i]; }
+                for (var i = 0; i < 512; i++)
+                {
+                    _uVec[i] *= d[i];
+                }
                 for (var i = 0; i < 32; i++)
                 {
                     var sum = 0f;
-                    for (var j = 0; j < 16; j++) { sum += _uVec[(j << 5) + i]; }
+                    for (var j = 0; j < 16; j++)
+                    {
+                        sum += _uVec[(j << 5) + i];
+                    }
                     pcm[32 * ss + i] = sum;
                 }
             }

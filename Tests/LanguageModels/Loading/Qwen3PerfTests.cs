@@ -29,7 +29,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         [LongFact]
         public void Qwen3_DecodeThroughput_BestOfN()
         {
-            if (!File.Exists(Path)) { _out.WriteLine("missing Qwen3-0.6B gguf"); return; }
+            if (!File.Exists(Path))
+            {
+                _out.WriteLine("missing Qwen3-0.6B gguf");
+                return;
+            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(Path);
             var tok = GgufTokenizer.Load(Path);

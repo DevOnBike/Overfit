@@ -41,7 +41,10 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Regex
         /// (a dead end: <paramref name="c"/> cannot extend any match from here).</summary>
         public int Next(int state, char c)
         {
-            if (c >= Alphabet) { return -1; }
+            if (c >= Alphabet)
+            {
+                return -1;
+            }
             return _transitions[state * Alphabet + (int)c];
         }
 
@@ -72,7 +75,11 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Regex
                 for (var c = 0; c < Alphabet; c++)
                 {
                     var move = nfa.Closure(nfa.Move(set, c));
-                    if (move.Count == 0) { row[c] = -1; continue; }
+                    if (move.Count == 0)
+                    {
+                        row[c] = -1;
+                        continue;
+                    }
 
                     var key = Key(move);
                     if (!index.TryGetValue(key, out var target))
@@ -104,7 +111,10 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Regex
         {
             var ids = new int[set.Count];
             var i = 0;
-            foreach (var v in set) { ids[i++] = v; }
+            foreach (var v in set)
+            {
+                ids[i++] = v;
+            }
             Array.Sort(ids);
             return string.Join(',', ids);
         }
@@ -138,7 +148,10 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Regex
                     var s = stack.Pop();
                     foreach (var t in _eps[s])
                     {
-                        if (result.Add(t)) { stack.Push(t); }
+                        if (result.Add(t))
+                        {
+                            stack.Push(t);
+                        }
                     }
                 }
                 return result;
@@ -153,7 +166,10 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Regex
                 {
                     foreach (var (mLo, mHi, target) in _moves[s])
                     {
-                        if ((mLo & lo) != 0 || (mHi & hi) != 0) { result.Add(target); }
+                        if ((mLo & lo) != 0 || (mHi & hi) != 0)
+                        {
+                            result.Add(target);
+                        }
                     }
                 }
                 return result;
@@ -203,11 +219,19 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Regex
                 var c = Peek();
                 switch (c)
                 {
-                    case '*': _pos++; return Star(atom, optional: true);
-                    case '+': _pos++; return Star(atom, optional: false);
-                    case '?': _pos++; return Optional(atom);
-                    case '{': return ParseCounted(atom);
-                    default: return atom;
+                    case '*':
+                        _pos++;
+                        return Star(atom, optional: true);
+                    case '+':
+                        _pos++;
+                        return Star(atom, optional: false);
+                    case '?':
+                        _pos++;
+                        return Optional(atom);
+                    case '{':
+                        return ParseCounted(atom);
+                    default:
+                        return atom;
                 }
             }
 
@@ -218,7 +242,10 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Regex
                 _eps[start].Add(atom.Start);
                 _eps[atom.End].Add(atom.Start);   // loop back
                 _eps[atom.End].Add(end);
-                if (optional) { _eps[start].Add(end); }   // '*' may match zero
+                if (optional)
+                {
+                    _eps[start].Add(end);
+                }   // '*' may match zero
                 return new Fragment(start, end);
             }
 
@@ -243,29 +270,47 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Regex
                 {
                     _pos++;
                     hasMax = true;
-                    if (Peek() == '}') { m = -1; }   // {n,} = n then star
-                    else { m = ParseInt(); }
+                    if (Peek() == '}')
+                    {
+                        m = -1;
+                    }   // {n,} = n then star
+                    else
+                    {
+                        m = ParseInt();
+                    }
                 }
-                if (Peek() != '}') { throw new ArgumentException("Unterminated '{' quantifier in regex.", nameof(first)); }
+                if (Peek() != '}')
+                {
+                    throw new ArgumentException("Unterminated '{' quantifier in regex.", nameof(first));
+                }
                 _pos++;   // consume '}'
 
                 // Pre-clone every needed copy of the atom FROM THE PRISTINE fragment first: chaining (Append)
                 // mutates a fragment's end-state epsilon list, so a later Clone would otherwise pull in the
                 // already-chained earlier copies and the count would be wrong.
                 var parts = new List<Fragment>();
-                for (var i = 0; i < n; i++) { parts.Add(i == 0 ? first : Clone(first)); }
+                for (var i = 0; i < n; i++)
+                {
+                    parts.Add(i == 0 ? first : Clone(first));
+                }
                 if (hasMax && m < 0)
                 {
                     parts.Add(Star(n == 0 ? first : Clone(first), optional: true));   // {n,} → n then star
                 }
                 else if (hasMax)
                 {
-                    for (var i = n; i < m; i++) { parts.Add(Optional(Clone(first))); }   // {n,m} → (m-n) optional
+                    for (var i = n; i < m; i++)
+                    {
+                        parts.Add(Optional(Clone(first)));
+                    }   // {n,m} → (m-n) optional
                 }
 
                 // Assemble by chaining (now that all cloning is done).
                 Fragment? chain = null;
-                foreach (var p in parts) { chain = Append(chain, p); }
+                foreach (var p in parts)
+                {
+                    chain = Append(chain, p);
+                }
                 if (chain is null)
                 {
                     var s = NewState();   // {0} → epsilon
@@ -276,7 +321,10 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Regex
 
             private Fragment Append(Fragment? chain, Fragment next)
             {
-                if (chain is null) { return next; }
+                if (chain is null)
+                {
+                    return next;
+                }
                 _eps[chain.Value.End].Add(next.Start);
                 return new Fragment(chain.Value.Start, next.End);
             }
@@ -289,7 +337,10 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Regex
                     case '(':
                         _pos++;
                         var inner = ParseAlternation();
-                        if (Peek() != ')') { throw new ArgumentException("Unbalanced '(' in regex.", nameof(inner)); }
+                        if (Peek() != ')')
+                        {
+                            throw new ArgumentException("Unbalanced '(' in regex.", nameof(inner));
+                        }
                         _pos++;
                         return inner;
                     case '[':
@@ -336,7 +387,11 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Regex
             {
                 _pos++;   // consume '['
                 var negate = false;
-                if (Peek() == '^') { negate = true; _pos++; }
+                if (Peek() == '^')
+                {
+                    negate = true;
+                    _pos++;
+                }
                 ulong lo = 0, hi = 0;
 
                 while (Peek() is not ('\0' or ']'))
@@ -355,7 +410,8 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Regex
                             'r' => SingleMask('\r'),
                             _ => SingleMask(e),
                         };
-                        lo |= elo; hi |= ehi;
+                        lo |= elo;
+                        hi |= ehi;
                         continue;
                     }
                     if (Peek() == '-' && Peek(1) is not (']' or '\0'))
@@ -369,7 +425,10 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Regex
                         SetBit(ref lo, ref hi, c);
                     }
                 }
-                if (Peek() != ']') { throw new ArgumentException("Unterminated '[' character class in regex.", nameof(negate)); }
+                if (Peek() != ']')
+                {
+                    throw new ArgumentException("Unterminated '[' character class in regex.", nameof(negate));
+                }
                 _pos++;   // consume ']'
 
                 return CharFragment(negate ? Negate((lo, hi)) : (lo, hi));
@@ -403,17 +462,31 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Regex
                     var old = stack.Pop();
                     foreach (var t in _eps[old])
                     {
-                        if (!map.TryGetValue(t, out _)) { map[t] = NewState(); stack.Push(t); }
+                        if (!map.TryGetValue(t, out _))
+                        {
+                            map[t] = NewState();
+                            stack.Push(t);
+                        }
                     }
                     foreach (var (_, _, t) in _moves[old])
                     {
-                        if (!map.TryGetValue(t, out _)) { map[t] = NewState(); stack.Push(t); }
+                        if (!map.TryGetValue(t, out _))
+                        {
+                            map[t] = NewState();
+                            stack.Push(t);
+                        }
                     }
                 }
                 foreach (var (old, fresh) in map)
                 {
-                    foreach (var t in _eps[old]) { _eps[fresh].Add(map[t]); }
-                    foreach (var (l, h, t) in _moves[old]) { _moves[fresh].Add((l, h, map[t])); }
+                    foreach (var t in _eps[old])
+                    {
+                        _eps[fresh].Add(map[t]);
+                    }
+                    foreach (var (l, h, t) in _moves[old])
+                    {
+                        _moves[fresh].Add((l, h, map[t]));
+                    }
                 }
                 return new Fragment(map[frag.Start], map[frag.End]);
             }
@@ -426,8 +499,14 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Regex
             private int ParseInt()
             {
                 var start = _pos;
-                while (Peek() is >= '0' and <= '9') { _pos++; }
-                if (_pos == start) { throw new ArgumentException("Expected a number in '{...}' quantifier.", nameof(start)); }
+                while (Peek() is >= '0' and <= '9')
+                {
+                    _pos++;
+                }
+                if (_pos == start)
+                {
+                    throw new ArgumentException("Expected a number in '{...}' quantifier.", nameof(start));
+                }
                 return int.Parse(_pattern.AsSpan(start, _pos - start));
             }
 
@@ -465,7 +544,10 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Regex
             private static (ulong, ulong) SpaceMask()
             {
                 ulong lo = 0, hi = 0;
-                foreach (var c in " \t\n\r\f\v") { SetBit(ref lo, ref hi, c); }
+                foreach (var c in " \t\n\r\f\v")
+                {
+                    SetBit(ref lo, ref hi, c);
+                }
                 return (lo, hi);
             }
 

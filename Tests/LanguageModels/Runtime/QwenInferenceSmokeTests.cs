@@ -136,7 +136,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             var maxIdx = 0;
             for (var i = 0; i < logits.Length; i++)
             {
-                if (logits[i] > maxLogit) { maxLogit = logits[i]; maxIdx = i; }
+                if (logits[i] > maxLogit)
+                {
+                    maxLogit = logits[i];
+                    maxIdx = i;
+                }
             }
 
             Console.WriteLine($"Logits OK. Max logit={maxLogit:F3} at token={maxIdx}");

@@ -65,17 +65,26 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Chat
                 _supports = supportsSliding;
             }
 
-            public bool SlidingEnabledCalled { get; private set; }
+            public bool SlidingEnabledCalled
+            {
+                get; private set;
+            }
 
             public int CurrentPosition => _pos;
-            public int MaxContextLength { get; }
+            public int MaxContextLength
+            {
+                get;
+            }
             public int VocabularySize => 16;
             public bool HasKeyValueCache => true;
             public bool SupportsSlidingWindow => _supports;
 
             public void EnableSlidingWindow(int evictBlock = 0)
             {
-                if (!_supports) { throw new OverfitRuntimeException("fake: no sliding"); }
+                if (!_supports)
+                {
+                    throw new OverfitRuntimeException("fake: no sliding");
+                }
                 SlidingEnabledCalled = true;
             }
 
@@ -93,7 +102,9 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Chat
 
             public void GetLastLogits(Span<float> destination) => throw new NotSupportedException();
 
-            public void Dispose() { }
+            public void Dispose()
+            {
+            }
         }
 
         private sealed class FakeTokenizer : ITokenizer
@@ -115,7 +126,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Chat
 
             public int Decode(ReadOnlySpan<int> tokens, Span<char> destination)
             {
-                for (var i = 0; i < tokens.Length; i++) { destination[i] = 'x'; }
+                for (var i = 0; i < tokens.Length; i++)
+                {
+                    destination[i] = 'x';
+                }
                 return tokens.Length;
             }
 

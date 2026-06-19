@@ -19,18 +19,30 @@ namespace DevOnBike.Overfit.LanguageModels.Agents
             Finished = finished;
         }
 
-        public string ToolName { get; }
+        public string ToolName
+        {
+            get;
+        }
 
         /// <summary>The raw JSON object the model emitted as the tool's arguments.</summary>
-        public string ArgumentsJson { get; }
+        public string ArgumentsJson
+        {
+            get;
+        }
 
         /// <summary>
         /// What the handler returned (the next-turn user message), or — for the <c>finish</c> step —
         /// the extracted final answer.
         /// </summary>
-        public string Observation { get; }
+        public string Observation
+        {
+            get;
+        }
 
         /// <summary>True only for the final step (the model called the synthetic <c>finish</c> tool).</summary>
-        public bool Finished { get; }
+        public bool Finished
+        {
+            get;
+        }
     }
 }

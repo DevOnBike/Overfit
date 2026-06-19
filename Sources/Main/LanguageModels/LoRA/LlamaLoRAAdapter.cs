@@ -76,8 +76,14 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
 
         // ── ILoRAAdapter ──────────────────────────────────────────────────────
 
-        public string Name { get; }
-        public LoRAOptions Options { get; }
+        public string Name
+        {
+            get;
+        }
+        public LoRAOptions Options
+        {
+            get;
+        }
         public bool IsEnabled => _enabled;
 
         public long TrainableParameterCount
@@ -320,7 +326,10 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
         /// Should equal TrainableParameterCount / (InDim+OutDim) / Rank.
         /// If 0: _baseRefs keys don't match _weights keys.
         /// </summary>
-        public int LastApplyMatchCount { get; private set; }
+        public int LastApplyMatchCount
+        {
+            get; private set;
+        }
 
         /// <summary>Number of entries in _baseRefs (should equal NLayers * targeted modules).</summary>
         public int BaseRefCount => _baseRefs.Count;

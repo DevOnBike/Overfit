@@ -86,7 +86,8 @@ namespace DevOnBike.Overfit.Data.Prepare
             {
                 if (_excludedColumns.Contains(c))
                 {
-                    _lowThresholds[c] = float.MinValue; _highThresholds[c] = float.MaxValue;
+                    _lowThresholds[c] = float.MinValue;
+                    _highThresholds[c] = float.MaxValue;
                     continue;
                 }
 
@@ -104,11 +105,13 @@ namespace DevOnBike.Overfit.Data.Prepare
 
                 if (lowVal >= highVal)
                 {
-                    _lowThresholds[c] = float.MinValue; _highThresholds[c] = float.MaxValue;
+                    _lowThresholds[c] = float.MinValue;
+                    _highThresholds[c] = float.MaxValue;
                 }
                 else
                 {
-                    _lowThresholds[c] = lowVal; _highThresholds[c] = highVal;
+                    _lowThresholds[c] = lowVal;
+                    _highThresholds[c] = highVal;
                 }
             }
 

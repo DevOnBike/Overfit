@@ -49,11 +49,26 @@ namespace DevOnBike.Overfit.DeepLearning
             _dec2 = new LstmLayer(decoderHidden, inputSize, true);
         }
 
-        public int InputSize { get; }
-        public int SeqLen { get; }
-        public int EncoderHidden { get; }
-        public int LatentSize { get; }
-        public int DecoderHidden { get; }
+        public int InputSize
+        {
+            get;
+        }
+        public int SeqLen
+        {
+            get;
+        }
+        public int EncoderHidden
+        {
+            get;
+        }
+        public int LatentSize
+        {
+            get;
+        }
+        public int DecoderHidden
+        {
+            get;
+        }
 
         public int ParameterCount
         {

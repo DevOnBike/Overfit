@@ -48,7 +48,10 @@ namespace DevOnBike.Overfit.Audio.Tts
         {
         }
 
-        public int SampleRate { get; }
+        public int SampleRate
+        {
+            get;
+        }
 
         public void Write(ReadOnlySpan<float> samples)
         {

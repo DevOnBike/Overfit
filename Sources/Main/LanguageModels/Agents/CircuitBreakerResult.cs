@@ -17,12 +17,24 @@ namespace DevOnBike.Overfit.LanguageModels.Agents
         }
 
         /// <summary>The most recent value produced by the iterate delegate (default on zero-iteration paths).</summary>
-        public T LastValue { get; }
+        public T LastValue
+        {
+            get;
+        }
 
-        public int Iterations { get; }
+        public int Iterations
+        {
+            get;
+        }
 
-        public TimeSpan Elapsed { get; }
+        public TimeSpan Elapsed
+        {
+            get;
+        }
 
-        public CircuitBreakerOutcome Outcome { get; }
+        public CircuitBreakerOutcome Outcome
+        {
+            get;
+        }
     }
 }

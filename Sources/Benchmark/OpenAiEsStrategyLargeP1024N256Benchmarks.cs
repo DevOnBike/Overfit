@@ -15,7 +15,10 @@ namespace Benchmarks
         private const int AskThenTellOperationsPerInvoke = 4_096;
 
         [Params(false, true)]
-        public bool UseAdamParam { get; set; }
+        public bool UseAdamParam
+        {
+            get; set;
+        }
 
         [GlobalSetup]
         public void Setup()

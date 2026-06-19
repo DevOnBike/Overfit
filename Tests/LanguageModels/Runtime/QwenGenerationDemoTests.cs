@@ -78,12 +78,17 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
                 // Simple loop detection: 6 identical tokens in a row → stop
                 if (token == lastTok)
                 {
-                    repCnt++; if (repCnt >= 6)
+                    repCnt++;
+                    if (repCnt >= 6)
                     {
                         break;
                     }
                 }
-                else { lastTok = token; repCnt = 0; }
+                else
+                {
+                    lastTok = token;
+                    repCnt = 0;
+                }
             }
             return sb.ToString();
         }

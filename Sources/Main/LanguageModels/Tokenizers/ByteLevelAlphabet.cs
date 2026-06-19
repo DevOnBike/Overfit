@@ -27,7 +27,10 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             var n = 0;
             for (var b = 0; b < 256; b++)
             {
-                if (map[b] == (char)0) { map[b] = (char)(256 + n++); }
+                if (map[b] == (char)0)
+                {
+                    map[b] = (char)(256 + n++);
+                }
             }
             return map;
         }
@@ -37,7 +40,10 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
         {
             var forward = BuildByteToChar();
             var reverse = new byte[65536];
-            for (var b = 0; b < 256; b++) { reverse[forward[b]] = (byte)b; }
+            for (var b = 0; b < 256; b++)
+            {
+                reverse[forward[b]] = (byte)b;
+            }
             return reverse;
         }
     }

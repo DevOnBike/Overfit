@@ -103,11 +103,17 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Cnn
                             for (var ky = 0; ky < k; ky++)
                             {
                                 var iy = oy * stride - pad + ky;
-                                if (iy < 0 || iy >= h) { continue; }
+                                if (iy < 0 || iy >= h)
+                                {
+                                    continue;
+                                }
                                 for (var kx = 0; kx < k; kx++)
                                 {
                                     var ix = ox * stride - pad + kx;
-                                    if (ix < 0 || ix >= w) { continue; }
+                                    if (ix < 0 || ix >= w)
+                                    {
+                                        continue;
+                                    }
                                     sum += (double)input[ic * h * w + iy * w + ix]
                                          * kernels[((oc * inC + ic) * k + ky) * k + kx];
                                 }

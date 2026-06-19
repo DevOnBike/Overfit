@@ -57,7 +57,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             _out.WriteLine("OVERFIT_GEN " + string.Join(",", gen));
 
             var match = 0;
-            while (match < gen.Count && match < hfGen.Length && gen[match] == hfGen[match]) { match++; }
+            while (match < gen.Count && match < hfGen.Length && gen[match] == hfGen[match])
+            {
+                match++;
+            }
             _out.WriteLine($"MATCH {match}/{hfGen.Length} leading tokens identical");
 
             Assert.True(match >= 1, $"first token diverges (Overfit {(gen.Count > 0 ? gen[0] : -1)} vs HF {hfGen[0]})");

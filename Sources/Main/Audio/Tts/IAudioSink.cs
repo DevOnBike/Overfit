@@ -13,7 +13,10 @@ namespace DevOnBike.Overfit.Audio.Tts
     public interface IAudioSink
     {
         /// <summary>Output sample rate in Hz.</summary>
-        int SampleRate { get; }
+        int SampleRate
+        {
+            get;
+        }
 
         /// <summary>Appends a chunk of mono samples. May be called many times during one synthesis.</summary>
         void Write(ReadOnlySpan<float> samples);

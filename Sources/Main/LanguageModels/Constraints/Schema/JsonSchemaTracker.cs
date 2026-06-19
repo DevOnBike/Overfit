@@ -66,20 +66,46 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
         {
             var phase = machine.CurrentPhase;
 
-            if (c == '{' && phase == Phase.ObjectStart) { PushObject(); return; }
-            if (c == '[' && phase == Phase.ExpectValueOrClose) { PushArray(); return; }
-
-            if (c == '"' && phase == Phase.InString)
+            if (c == '{' && phase == Phase.ObjectStart)
             {
-                if (machine.CurrentStringIsKey) { StartKeyString(); }
-                else { StartValueString(); }
+                PushObject();
+                return;
+            }
+            if (c == '[' && phase == Phase.ExpectValueOrClose)
+            {
+                PushArray();
                 return;
             }
 
-            if (_inKeyString && phase == Phase.InString) { AppendKeyChar(c); return; }
-            if (_inEnumString && phase == Phase.InString) { AdvanceEnumTrie(c); return; }
+            if (c == '"' && phase == Phase.InString)
+            {
+                if (machine.CurrentStringIsKey)
+                {
+                    StartKeyString();
+                }
+                else
+                {
+                    StartValueString();
+                }
+                return;
+            }
 
-            if (_inKeyString && phase == Phase.ObjectAfterKey) { FinishKeyString(); return; }
+            if (_inKeyString && phase == Phase.InString)
+            {
+                AppendKeyChar(c);
+                return;
+            }
+            if (_inEnumString && phase == Phase.InString)
+            {
+                AdvanceEnumTrie(c);
+                return;
+            }
+
+            if (_inKeyString && phase == Phase.ObjectAfterKey)
+            {
+                FinishKeyString();
+                return;
+            }
 
             // Enum value string closed (transitioned out of the string phases) — clear the flag and fall
             // through to the value-complete restore below.
@@ -88,10 +114,22 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
                 _inEnumString = false;
             }
 
-            if (c == '}' && machine.Depth < _stackDepth) { PopContainer(); return; }
-            if (c == ']' && machine.Depth < _stackDepth) { PopContainer(); return; }
+            if (c == '}' && machine.Depth < _stackDepth)
+            {
+                PopContainer();
+                return;
+            }
+            if (c == ']' && machine.Depth < _stackDepth)
+            {
+                PopContainer();
+                return;
+            }
 
-            if (c == ',' && phase == Phase.ExpectValue && machine.TopIsArray) { AdvanceArrayItem(); return; }
+            if (c == ',' && phase == Phase.ExpectValue && machine.TopIsArray)
+            {
+                AdvanceArrayItem();
+                return;
+            }
 
             // A value finished inside a container: restore the current node to the parent container so the
             // following key/comma/close is checked against the container's schema (required mask, props).
@@ -116,7 +154,10 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
         // ── Value-start type restriction ─────────────────────────────────────
         private readonly bool IsValueStartAllowed(char c, int nodeIndex)
         {
-            if (IsWhitespace(c)) { return true; }
+            if (IsWhitespace(c))
+            {
+                return true;
+            }
 
             var types = _schema.Nodes[nodeIndex].AllowedTypes;
             return c switch
@@ -135,17 +176,32 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
         // ── Object restrictions ──────────────────────────────────────────────
         private readonly bool IsObjectStartAllowed(char c)
         {
-            if (IsWhitespace(c)) { return true; }
+            if (IsWhitespace(c))
+            {
+                return true;
+            }
             ref readonly var node = ref _schema.Nodes[_currentNodeIndex];
-            if (c == '}') { return node.RequiredBitmask == 0; }                       // empty only if nothing required
-            if (c == '"') { return node.Properties != null || !node.AdditionalPropertiesForbidden; }
+            if (c == '}')
+            {
+                return node.RequiredBitmask == 0;
+            }                       // empty only if nothing required
+            if (c == '"')
+            {
+                return node.Properties != null || !node.AdditionalPropertiesForbidden;
+            }
             return false;
         }
 
         private readonly bool IsObjectNextKeyAllowed(char c)
         {
-            if (IsWhitespace(c)) { return true; }
-            if (c != '"') { return false; }
+            if (IsWhitespace(c))
+            {
+                return true;
+            }
+            if (c != '"')
+            {
+                return false;
+            }
             ref readonly var node = ref _schema.Nodes[_currentNodeIndex];
             if (node.AdditionalPropertiesForbidden && node.PropertyNames != null)
             {
@@ -156,10 +212,16 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
 
         private readonly bool IsObjectCommaOrCloseAllowed(char c)
         {
-            if (IsWhitespace(c)) { return true; }
+            if (IsWhitespace(c))
+            {
+                return true;
+            }
             ref readonly var node = ref _schema.Nodes[_currentNodeIndex];
             var emitted = _stackDepth > 0 ? _emittedProps[_stackDepth - 1] : 0;
-            if (c == '}') { return (node.RequiredBitmask & ~emitted) == 0; }          // all required emitted
+            if (c == '}')
+            {
+                return (node.RequiredBitmask & ~emitted) == 0;
+            }          // all required emitted
             if (c == ',')
             {
                 if (node.AdditionalPropertiesForbidden && node.PropertyNames != null)
@@ -185,12 +247,21 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
             if (_inKeyString)
             {
                 ref readonly var node = ref _schema.Nodes[_currentNodeIndex];
-                if (node.PropertyTrieIndex < 0) { return true; }   // no declared names — unconstrained key
+                if (node.PropertyTrieIndex < 0)
+                {
+                    return true;
+                }   // no declared names — unconstrained key
                 var trie = _schema.Tries[node.PropertyTrieIndex];
-                if (c == '\\') { return true; }
+                if (c == '\\')
+                {
+                    return true;
+                }
                 if (c == '"')
                 {
-                    if (trie.IsTerminal(_trieNodeIndex)) { return !IsKeyAlreadyEmitted(node, trie); }
+                    if (trie.IsTerminal(_trieNodeIndex))
+                    {
+                        return !IsKeyAlreadyEmitted(node, trie);
+                    }
                     return !node.AdditionalPropertiesForbidden;   // incomplete declared name only OK if extras allowed
                 }
                 if (!trie.TryGetChild(_trieNodeIndex, c, out var child))
@@ -209,10 +280,19 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
             if (_inEnumString)
             {
                 ref readonly var node = ref _schema.Nodes[_currentNodeIndex];
-                if (node.EnumTrieIndex < 0) { return true; }
+                if (node.EnumTrieIndex < 0)
+                {
+                    return true;
+                }
                 var trie = _schema.Tries[node.EnumTrieIndex];
-                if (c == '\\') { return true; }
-                if (c == '"') { return trie.IsTerminal(_enumTrieNodeIndex); }
+                if (c == '\\')
+                {
+                    return true;
+                }
+                if (c == '"')
+                {
+                    return trie.IsTerminal(_enumTrieNodeIndex);
+                }
                 return trie.TryGetChild(_enumTrieNodeIndex, c, out _);
             }
 
@@ -221,11 +301,20 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
 
         private readonly bool IsKeyAlreadyEmitted(in JsonSchemaNode node, JsonStringTrie trie)
         {
-            if (!node.AdditionalPropertiesForbidden || node.PropertyNames == null) { return false; }
+            if (!node.AdditionalPropertiesForbidden || node.PropertyNames == null)
+            {
+                return false;
+            }
             var name = trie.GetCompleteName(_trieNodeIndex);
-            if (name is null) { return false; }
+            if (name is null)
+            {
+                return false;
+            }
             var bit = Array.IndexOf(node.PropertyNames, name);
-            if (bit < 0 || bit >= 64 || _stackDepth == 0) { return false; }
+            if (bit < 0 || bit >= 64 || _stackDepth == 0)
+            {
+                return false;
+            }
             return (_emittedProps[_stackDepth - 1] & (1UL << bit)) != 0;
         }
 
@@ -239,14 +328,23 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
         {
             if (c == '}')
             {
-                if (_stackDepth == 0) { return false; }
+                if (_stackDepth == 0)
+                {
+                    return false;
+                }
                 ref readonly var obj = ref _schema.Nodes[_nodeStack[_stackDepth - 1]];
                 return (obj.RequiredBitmask & ~_emittedProps[_stackDepth - 1]) == 0;   // all required emitted
             }
-            if (c == ']') { return true; }   // closing an array after a number (no minItems in the MVP)
+            if (c == ']')
+            {
+                return true;
+            }   // closing an array after a number (no minItems in the MVP)
             if (c == ',')
             {
-                if (machine.TopIsArray || _stackDepth == 0) { return true; }
+                if (machine.TopIsArray || _stackDepth == 0)
+                {
+                    return true;
+                }
                 ref readonly var obj = ref _schema.Nodes[_nodeStack[_stackDepth - 1]];
                 if (obj.AdditionalPropertiesForbidden && obj.PropertyNames != null)
                 {
@@ -259,7 +357,10 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
             var types = _schema.Nodes[_currentNodeIndex].AllowedTypes;
             if (Has(types, JsonSchemaType.Integer) && !Has(types, JsonSchemaType.Number))
             {
-                if (c is '.' or 'e' or 'E') { return false; }
+                if (c is '.' or 'e' or 'E')
+                {
+                    return false;
+                }
             }
             return true;
         }
@@ -267,7 +368,10 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
         // ── Structural transitions ───────────────────────────────────────────
         private void PushObject()
         {
-            if (_stackDepth >= MaxDepth) { return; }
+            if (_stackDepth >= MaxDepth)
+            {
+                return;
+            }
             _nodeStack[_stackDepth] = _currentNodeIndex;
             _emittedProps[_stackDepth] = 0;
             _stackDepth++;
@@ -275,7 +379,10 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
 
         private void PushArray()
         {
-            if (_stackDepth >= MaxDepth) { return; }
+            if (_stackDepth >= MaxDepth)
+            {
+                return;
+            }
             _nodeStack[_stackDepth] = _currentNodeIndex;
             _stackDepth++;
             var items = _schema.Nodes[_currentNodeIndex].ItemsNodeIndex;
@@ -284,14 +391,20 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
 
         private void PopContainer()
         {
-            if (_stackDepth <= 0) { return; }
+            if (_stackDepth <= 0)
+            {
+                return;
+            }
             _stackDepth--;
             _currentNodeIndex = _stackDepth > 0 ? _nodeStack[_stackDepth - 1] : 0;
         }
 
         private void AdvanceArrayItem()
         {
-            if (_stackDepth <= 0) { return; }
+            if (_stackDepth <= 0)
+            {
+                return;
+            }
             var items = _schema.Nodes[_nodeStack[_stackDepth - 1]].ItemsNodeIndex;
             _currentNodeIndex = items >= 0 ? items : _schema.UnconstrainedNodeIndex;
         }
@@ -305,7 +418,10 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
 
         private void AppendKeyChar(char c)
         {
-            if (_keyLength < MaxKeyLength) { _keyBuffer[_keyLength++] = c; }
+            if (_keyLength < MaxKeyLength)
+            {
+                _keyBuffer[_keyLength++] = c;
+            }
             var trieIndex = _schema.Nodes[_currentNodeIndex].PropertyTrieIndex;
             if (trieIndex >= 0 && _schema.Tries[trieIndex].TryGetChild(_trieNodeIndex, c, out var child))
             {
@@ -324,7 +440,10 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
                 if (objectNode.PropertyNames != null)
                 {
                     var bit = Array.IndexOf(objectNode.PropertyNames, keyName);
-                    if (bit >= 0 && bit < 64 && _stackDepth > 0) { _emittedProps[_stackDepth - 1] |= 1UL << bit; }
+                    if (bit >= 0 && bit < 64 && _stackDepth > 0)
+                    {
+                        _emittedProps[_stackDepth - 1] |= 1UL << bit;
+                    }
                 }
                 _currentNodeIndex = valueNodeIndex;
             }
@@ -359,12 +478,21 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
         private static bool IsWhitespace(char c) => c is ' ' or '\t' or '\n' or '\r';
 
         [InlineArray(MaxDepth)]
-        private struct NodeIdxStack { private int _e0; }
+        private struct NodeIdxStack
+        {
+            private int _e0;
+        }
 
         [InlineArray(MaxDepth)]
-        private struct PropBitStack { private ulong _e0; }
+        private struct PropBitStack
+        {
+            private ulong _e0;
+        }
 
         [InlineArray(MaxKeyLength)]
-        private struct KeyBuffer { private char _e0; }
+        private struct KeyBuffer
+        {
+            private char _e0;
+        }
     }
 }

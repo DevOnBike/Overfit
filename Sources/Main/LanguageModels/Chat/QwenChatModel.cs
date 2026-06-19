@@ -40,7 +40,10 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
         }
 
         /// <summary>The ready-to-use chat session over the loaded model.</summary>
-        public ChatSession Chat { get; }
+        public ChatSession Chat
+        {
+            get;
+        }
 
         /// <summary>
         /// Loads a Qwen2.5 HF directory (<c>model.safetensors</c> [+ shards] + <c>config.json</c>
@@ -73,7 +76,10 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
 
         public void Dispose()
         {
-            if (_disposed) { return; }
+            if (_disposed)
+            {
+                return;
+            }
             _disposed = true;
             _session.Dispose();
             _engine.Dispose();

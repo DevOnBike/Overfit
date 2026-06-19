@@ -57,7 +57,10 @@ namespace DevOnBike.Overfit.DeepLearning
         }
 
         /// <summary>The embedding table, shape [vocabSize, embeddingDim].</summary>
-        public Parameter Weight { get; }
+        public Parameter Weight
+        {
+            get;
+        }
 
         public int VocabSize => _vocabSize;
         public int EmbeddingDim => _embeddingDim;

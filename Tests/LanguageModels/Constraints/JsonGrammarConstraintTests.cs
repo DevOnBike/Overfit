@@ -126,7 +126,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Constraints
             }
 
             public int VocabularySize => _vocab.Length;
-            public int EndOfTextTokenId { get; }
+            public int EndOfTextTokenId
+            {
+                get;
+            }
             public int UnknownTokenId => -1;
             public bool SupportsZeroAllocationEncode => false;
             public bool SupportsZeroAllocationDecode => false;
@@ -138,7 +141,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Constraints
             public string DecodeToString(ReadOnlySpan<int> tokens)
             {
                 var sb = new StringBuilder();
-                foreach (var t in tokens) { sb.Append(_vocab[t]); }
+                foreach (var t in tokens)
+                {
+                    sb.Append(_vocab[t]);
+                }
                 return sb.ToString();
             }
         }

@@ -36,7 +36,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
             var hasNonZero = false;
             foreach (var v in w.A)
             {
-                if (v != 0f) { hasNonZero = true; break; }
+                if (v != 0f)
+                {
+                    hasNonZero = true;
+                    break;
+                }
             }
             Assert.True(hasNonZero, "A must be initialized to non-zero values");
         }
@@ -48,10 +52,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
             // delta = A @ B should be roughly identity
             var w = new LoRAWeight(inDim: 4, outDim: 4, rank: 2);
             // Set A = [[1,0],[0,1],[0,0],[0,0]], B = [[1,0,0,0],[0,1,0,0]]
-            var a = w.AMutable; a.Clear();
-            a[0] = 1f; a[3] = 1f;  // row0=[1,0], row1=[0,1], row2,3 = 0
-            var b = w.BMutable; b.Clear();
-            b[0] = 1f; b[5] = 1f;  // row0=[1,0,0,0], row1=[0,1,0,0]
+            var a = w.AMutable;
+            a.Clear();
+            a[0] = 1f;
+            a[3] = 1f;  // row0=[1,0], row1=[0,1], row2,3 = 0
+            var b = w.BMutable;
+            b.Clear();
+            b[0] = 1f;
+            b[5] = 1f;  // row0=[1,0,0,0], row1=[0,1,0,0]
 
             var delta = new float[4 * 4];
             w.ComputeDelta(delta);
@@ -69,12 +77,16 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
         public void LoRAWeight_ForwardAdd_MatchesManual()
         {
             var w = new LoRAWeight(inDim: 4, outDim: 2, rank: 2);
-            var a = w.AMutable; a.Clear();
-            var b = w.BMutable; b.Clear();
+            var a = w.AMutable;
+            a.Clear();
+            var b = w.BMutable;
+            b.Clear();
             // A[0,0]=1, A[1,1]=1 → A selects x[0] and x[1] into r[0], r[1]
-            a[0] = 1f; a[3] = 1f;
+            a[0] = 1f;
+            a[3] = 1f;
             // B[0,0]=2, B[1,1]=3 → r[0]*2 → out[0], r[1]*3 → out[1]
-            b[0] = 2f; b[3] = 3f;
+            b[0] = 2f;
+            b[3] = 3f;
 
             float[] x = [5f, 7f, 0f, 0f];
             var result = new float[2];
@@ -225,8 +237,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
             // Verifies ForwardAdd produces delta without merging
             var w = new LoRAWeight(inDim: 4, outDim: 2, rank: 2);
             var b = w.BMutable;
-            b[0] = 0.1f; b[1] = 0.2f;  // B[0,:] = [0.1, 0.2]
-            b[2] = 0.3f; b[3] = 0.4f;  // B[1,:] = [0.3, 0.4]
+            b[0] = 0.1f;
+            b[1] = 0.2f;  // B[0,:] = [0.1, 0.2]
+            b[2] = 0.3f;
+            b[3] = 0.4f;  // B[1,:] = [0.3, 0.4]
 
             float[] x = [1f, 1f, 0f, 0f];
             var result = new float[2];
@@ -352,7 +366,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
 
                 // Verify delta is non-zero for first weight
                 LoRAWeight? firstW = null;
-                foreach (var ww in GetAllWeights(adapter)) { firstW = ww; break; }
+                foreach (var ww in GetAllWeights(adapter))
+                {
+                    firstW = ww;
+                    break;
+                }
                 Assert.NotNull(firstW);
                 var delta = new float[firstW.InDim * firstW.OutDim];
                 firstW.ComputeDelta(delta);

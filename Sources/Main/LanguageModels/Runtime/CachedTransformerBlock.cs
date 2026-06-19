@@ -122,19 +122,40 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _feedForwardOutput = new float[dModel];
         }
 
-        public int DModel { get; }
+        public int DModel
+        {
+            get;
+        }
 
-        public int HeadCount { get; }
+        public int HeadCount
+        {
+            get;
+        }
 
-        public int HeadDimension { get; }
+        public int HeadDimension
+        {
+            get;
+        }
 
-        public int DFF { get; }
+        public int DFF
+        {
+            get;
+        }
 
-        public int MaxSequenceLength { get; }
+        public int MaxSequenceLength
+        {
+            get;
+        }
 
-        public float LayerNormEpsilon { get; }
+        public float LayerNormEpsilon
+        {
+            get;
+        }
 
-        public FeedForwardActivation FeedForwardActivation { get; }
+        public FeedForwardActivation FeedForwardActivation
+        {
+            get;
+        }
 
         internal void Decode(
             ReadOnlySpan<float> input,

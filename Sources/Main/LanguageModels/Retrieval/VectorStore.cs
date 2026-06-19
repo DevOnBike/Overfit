@@ -39,10 +39,16 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
         }
 
         /// <summary>Embedding dimension every added vector must match.</summary>
-        public int Dimension { get; }
+        public int Dimension
+        {
+            get;
+        }
 
         /// <summary>Number of stored vectors.</summary>
-        public int Count { get; private set; }
+        public int Count
+        {
+            get; private set;
+        }
 
         /// <summary>
         /// Adds a vector under <paramref name="id"/> with an optional <paramref name="payload"/>
@@ -85,7 +91,10 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
             }
 
             var k = results.Length;
-            if (k == 0 || Count == 0) { return 0; }
+            if (k == 0 || Count == 0)
+            {
+                return 0;
+            }
 
             // Stored vectors are unit-norm, so cosine = dot(query, v) / ‖query‖. ‖query‖ is constant
             // across items, so it doesn't change ranking — apply it only to report the true cosine.
@@ -106,7 +115,10 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(topK);
             var capacity = Math.Min(topK, Count);
-            if (capacity == 0) { return []; }
+            if (capacity == 0)
+            {
+                return [];
+            }
 
             var buffer = new VectorMatch[capacity];
             var written = Search(query, buffer);
@@ -150,7 +162,10 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
         private static void InsertDescending(Span<VectorMatch> results, ref int found, int k, VectorMatch candidate)
         {
             // Reject early if the list is full and the candidate can't beat the current worst.
-            if (found == k && candidate.Score <= results[k - 1].Score) { return; }
+            if (found == k && candidate.Score <= results[k - 1].Score)
+            {
+                return;
+            }
 
             var pos = found < k ? found : k - 1;
             while (pos > 0 && results[pos - 1].Score < candidate.Score)
@@ -159,31 +174,49 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
                 pos--;
             }
             results[pos] = candidate;
-            if (found < k) { found++; }
+            if (found < k)
+            {
+                found++;
+            }
         }
 
         private static float Dot(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
         {
             var sum = 0f;
-            for (var i = 0; i < a.Length; i++) { sum += a[i] * b[i]; }
+            for (var i = 0; i < a.Length; i++)
+            {
+                sum += a[i] * b[i];
+            }
             return sum;
         }
 
         private static void Normalize(Span<float> v)
         {
             var norm = MathF.Sqrt(Dot(v, v));
-            if (norm <= NormEpsilon) { return; }
+            if (norm <= NormEpsilon)
+            {
+                return;
+            }
             var inv = 1f / norm;
-            for (var i = 0; i < v.Length; i++) { v[i] *= inv; }
+            for (var i = 0; i < v.Length; i++)
+            {
+                v[i] *= inv;
+            }
         }
 
         private void EnsureCapacity(int needed)
         {
             var capacity = _ids.Length;
-            if (needed <= capacity) { return; }
+            if (needed <= capacity)
+            {
+                return;
+            }
 
             var newCapacity = capacity * 2;
-            while (newCapacity < needed) { newCapacity *= 2; }
+            while (newCapacity < needed)
+            {
+                newCapacity *= 2;
+            }
 
             Array.Resize(ref _vectors, newCapacity * Dimension);
             Array.Resize(ref _ids, newCapacity);

@@ -7,12 +7,30 @@ namespace DevOnBike.Overfit.Diagnostics.Contracts
 {
     public readonly struct EvolutionGenerationMetrics
     {
-        public int Generation { get; }
-        public float BestFitness { get; }
-        public TimeSpan TotalElapsed { get; }
-        public TimeSpan AskElapsed { get; }
-        public TimeSpan EvaluateElapsed { get; }
-        public TimeSpan TellElapsed { get; }
+        public int Generation
+        {
+            get;
+        }
+        public float BestFitness
+        {
+            get;
+        }
+        public TimeSpan TotalElapsed
+        {
+            get;
+        }
+        public TimeSpan AskElapsed
+        {
+            get;
+        }
+        public TimeSpan EvaluateElapsed
+        {
+            get;
+        }
+        public TimeSpan TellElapsed
+        {
+            get;
+        }
 
         public EvolutionGenerationMetrics(
             int generation,

@@ -116,11 +116,17 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Prepare
             var fView = features.GetView();
 
             // Kolumna 0
-            fView[0, 0] = 10f; fView[1, 0] = 20f; fView[2, 0] = 30f;
+            fView[0, 0] = 10f;
+            fView[1, 0] = 20f;
+            fView[2, 0] = 30f;
             // Kolumna 1
-            fView[0, 1] = 100f; fView[1, 1] = 200f; fView[2, 1] = 300f;
+            fView[0, 1] = 100f;
+            fView[1, 1] = 200f;
+            fView[2, 1] = 300f;
             // Kolumna 2
-            fView[0, 2] = 500000f; fView[1, 2] = 500000f; fView[2, 2] = 500000f;
+            fView[0, 2] = 500000f;
+            fView[1, 2] = 500000f;
+            fView[2, 2] = 500000f;
 
             var ctx = new PipelineContext(features, targets);
             var scaler = new RobustScalingLayer();
@@ -181,14 +187,38 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Prepare
         // Mock data structure for testing
         private class PropertyData
         {
-            public float Powierzchnia { get; set; }
-            public float Pietro { get; set; }
-            public bool CzyKamienica { get; set; }
-            public bool CzyMaKomorke { get; set; }
-            public float PowKomorki { get; set; }
-            public string Miasto { get; set; }
-            public string NazwaAgencji { get; set; }
-            public float Cena { get; set; }
+            public float Powierzchnia
+            {
+                get; set;
+            }
+            public float Pietro
+            {
+                get; set;
+            }
+            public bool CzyKamienica
+            {
+                get; set;
+            }
+            public bool CzyMaKomorke
+            {
+                get; set;
+            }
+            public float PowKomorki
+            {
+                get; set;
+            }
+            public string Miasto
+            {
+                get; set;
+            }
+            public string NazwaAgencji
+            {
+                get; set;
+            }
+            public float Cena
+            {
+                get; set;
+            }
         }
     }
 }

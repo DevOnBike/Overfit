@@ -93,9 +93,15 @@ namespace DevOnBike.Overfit.Onnx
 
                 switch (fieldNum)
                 {
-                    case 1: domain = reader.ReadString(); break;
-                    case 2: version = reader.ReadInt64(); break;
-                    default: reader.SkipField(wireType); break;
+                    case 1:
+                        domain = reader.ReadString();
+                        break;
+                    case 2:
+                        version = reader.ReadInt64();
+                        break;
+                    default:
+                        reader.SkipField(wireType);
+                        break;
                 }
             }
 
@@ -195,16 +201,26 @@ namespace DevOnBike.Overfit.Onnx
 
                 switch (fieldNum)
                 {
-                    case 1: inputs.Add(reader.ReadString()); break;
-                    case 2: outputs.Add(reader.ReadString()); break;
-                    case 3: name = reader.ReadString(); break;
-                    case 4: opType = reader.ReadString(); break;
+                    case 1:
+                        inputs.Add(reader.ReadString());
+                        break;
+                    case 2:
+                        outputs.Add(reader.ReadString());
+                        break;
+                    case 3:
+                        name = reader.ReadString();
+                        break;
+                    case 4:
+                        opType = reader.ReadString();
+                        break;
                     case 5:
                         var attrSub = reader.ReadSubMessage();
                         var attr = ParseAttribute(ref attrSub);
                         attributes[attr.Name] = attr;
                         break;
-                    default: reader.SkipField(wireType); break;
+                    default:
+                        reader.SkipField(wireType);
+                        break;
                 }
             }
 
@@ -250,10 +266,18 @@ namespace DevOnBike.Overfit.Onnx
 
                 switch (fieldNum)
                 {
-                    case 1: name = reader.ReadString(); break;
-                    case 2: f = reader.ReadFloat(); break;
-                    case 3: i = reader.ReadInt64(); break;
-                    case 4: s = reader.ReadString(); break;
+                    case 1:
+                        name = reader.ReadString();
+                        break;
+                    case 2:
+                        f = reader.ReadFloat();
+                        break;
+                    case 3:
+                        i = reader.ReadInt64();
+                        break;
+                    case 4:
+                        s = reader.ReadString();
+                        break;
                     case 5:
                         var tSub = reader.ReadSubMessage();
                         t = ParseTensor(ref tSub);
@@ -279,8 +303,12 @@ namespace DevOnBike.Overfit.Onnx
                             ints.Add(reader.ReadInt64());
                         }
                         break;
-                    case 20: type = (OnnxAttributeType)reader.ReadInt32(); break;
-                    default: reader.SkipField(wireType); break;
+                    case 20:
+                        type = (OnnxAttributeType)reader.ReadInt32();
+                        break;
+                    default:
+                        reader.SkipField(wireType);
+                        break;
                 }
             }
 
@@ -340,7 +368,9 @@ namespace DevOnBike.Overfit.Onnx
                             dims.Add(reader.ReadInt64());
                         }
                         break;
-                    case 2: dataType = (OnnxDataType)reader.ReadInt32(); break;
+                    case 2:
+                        dataType = (OnnxDataType)reader.ReadInt32();
+                        break;
                     case 4:
                         if (wireType == WireType.LengthDelimited)
                         {
@@ -370,15 +400,23 @@ namespace DevOnBike.Overfit.Onnx
                             int64Data = newArr;
                         }
                         break;
-                    case 8: name = reader.ReadString(); break;
-                    case 9: rawData = reader.ReadBytes().ToArray(); break;
+                    case 8:
+                        name = reader.ReadString();
+                        break;
+                    case 9:
+                        rawData = reader.ReadBytes().ToArray();
+                        break;
                     case 13: // external_data: StringStringEntryProto { 1=key, 2=value }
                         var entrySub = reader.ReadSubMessage();
                         var (key, value) = ParseStringStringEntry(ref entrySub);
                         externalEntries[key] = value;
                         break;
-                    case 14: dataLocation = reader.ReadInt32(); break;
-                    default: reader.SkipField(wireType); break;
+                    case 14:
+                        dataLocation = reader.ReadInt32();
+                        break;
+                    default:
+                        reader.SkipField(wireType);
+                        break;
                 }
             }
 
@@ -430,9 +468,15 @@ namespace DevOnBike.Overfit.Onnx
 
                 switch (fieldNum)
                 {
-                    case 1: key = reader.ReadString(); break;
-                    case 2: value = reader.ReadString(); break;
-                    default: reader.SkipField(wireType); break;
+                    case 1:
+                        key = reader.ReadString();
+                        break;
+                    case 2:
+                        value = reader.ReadString();
+                        break;
+                    default:
+                        reader.SkipField(wireType);
+                        break;
                 }
             }
 
@@ -468,12 +512,16 @@ namespace DevOnBike.Overfit.Onnx
 
                 switch (fieldNum)
                 {
-                    case 1: name = reader.ReadString(); break;
+                    case 1:
+                        name = reader.ReadString();
+                        break;
                     case 2:
                         var typeSub = reader.ReadSubMessage();
                         (dataType, shape) = ParseTypeProto(ref typeSub);
                         break;
-                    default: reader.SkipField(wireType); break;
+                    default:
+                        reader.SkipField(wireType);
+                        break;
                 }
             }
 
@@ -508,12 +556,16 @@ namespace DevOnBike.Overfit.Onnx
 
                         switch (fn)
                         {
-                            case 1: dataType = (OnnxDataType)sub.ReadInt32(); break;
+                            case 1:
+                                dataType = (OnnxDataType)sub.ReadInt32();
+                                break;
                             case 2:
                                 var shapeSub = sub.ReadSubMessage();
                                 shape = ParseTensorShape(ref shapeSub);
                                 break;
-                            default: sub.SkipField(wt); break;
+                            default:
+                                sub.SkipField(wt);
+                                break;
                         }
                     }
                 }
@@ -549,9 +601,16 @@ namespace DevOnBike.Overfit.Onnx
 
                         switch (fn)
                         {
-                            case 1: dim = sub.ReadInt64(); break;     // dim_value
-                            case 2: sub.ReadString(); dim = null; break; // dim_param (symbolic)
-                            default: sub.SkipField(wt); break;
+                            case 1:
+                                dim = sub.ReadInt64();
+                                break;     // dim_value
+                            case 2:
+                                sub.ReadString();
+                                dim = null;
+                                break; // dim_param (symbolic)
+                            default:
+                                sub.SkipField(wt);
+                                break;
                         }
                     }
 

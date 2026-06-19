@@ -57,10 +57,16 @@ namespace DevOnBike.Overfit.LanguageModels.Memory
 
             var splitIndex = nonSystem.Count - recentTurnsToKeep;
             var toSummarize = new List<ChatMessage>(splitIndex);
-            for (var i = 0; i < splitIndex; i++) { toSummarize.Add(nonSystem[i]); }
+            for (var i = 0; i < splitIndex; i++)
+            {
+                toSummarize.Add(nonSystem[i]);
+            }
 
             var recent = new List<ChatMessage>(recentTurnsToKeep);
-            for (var i = splitIndex; i < nonSystem.Count; i++) { recent.Add(nonSystem[i]); }
+            for (var i = splitIndex; i < nonSystem.Count; i++)
+            {
+                recent.Add(nonSystem[i]);
+            }
 
             return new CompactionPlan(systemMessages, toSummarize, recent);
         }

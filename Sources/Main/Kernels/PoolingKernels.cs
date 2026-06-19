@@ -585,7 +585,11 @@ namespace DevOnBike.Overfit.Kernels
                             {
                                 var idx = rowBase + pw;
                                 var val = input[idx];
-                                if (val > maxVal) { maxVal = val; maxIdx = idx; }
+                                if (val > maxVal)
+                                {
+                                    maxVal = val;
+                                    maxIdx = idx;
+                                }
                             }
                         }
 

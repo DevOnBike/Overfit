@@ -51,7 +51,14 @@ namespace DevOnBike.Overfit.Tensors
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get
             {
-                return index switch { 0 => D0, 1 => D1, 2 => D2, 3 => D3, _ => 1 };
+                return index switch
+                {
+                    0 => D0,
+                    1 => D1,
+                    2 => D2,
+                    3 => D3,
+                    _ => 1
+                };
             }
         }
 

@@ -16,10 +16,16 @@ namespace DevOnBike.Overfit.Autograd
     public interface IDequantRowSource
     {
         /// <summary>Contraction-dimension length (input features).</summary>
-        int InputSize { get; }
+        int InputSize
+        {
+            get;
+        }
 
         /// <summary>Number of output rows.</summary>
-        int OutputSize { get; }
+        int OutputSize
+        {
+            get;
+        }
 
         /// <summary>Dequantizes output row <paramref name="row"/> into <paramref name="dst"/> (F32,
         /// length ≥ <see cref="InputSize"/>). No allocation; decodes straight from the resident

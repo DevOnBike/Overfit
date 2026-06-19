@@ -9,19 +9,34 @@ namespace DevOnBike.Overfit.Anomalies.Gpt
     public sealed class AnomalyScore
     {
         /// <summary>True during warmup — window not yet filled.</summary>
-        public bool IsWarmup { get; init; }
+        public bool IsWarmup
+        {
+            get; init;
+        }
 
         /// <summary>
         /// Mean negative log-probability. ~0 = normal, ~3+ = anomaly.
         /// Tune threshold on validation data.
         /// </summary>
-        public float Score { get; init; }
+        public float Score
+        {
+            get; init;
+        }
 
         public string PodName { get; init; } = string.Empty;
-        public DateTime Timestamp { get; init; }
+        public DateTime Timestamp
+        {
+            get; init;
+        }
         public string WorstMetric { get; init; } = string.Empty;
-        public float ExpectedValue { get; init; }
-        public float ActualValue { get; init; }
+        public float ExpectedValue
+        {
+            get; init;
+        }
+        public float ActualValue
+        {
+            get; init;
+        }
 
         public override string ToString() =>
             IsWarmup

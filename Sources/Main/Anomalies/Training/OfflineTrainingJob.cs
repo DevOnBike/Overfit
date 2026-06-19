@@ -364,7 +364,8 @@ namespace DevOnBike.Overfit.Anomalies.Training
             var sq = 0f;
             foreach (var p in list)
             {
-                var g = p.GradSpan; for (var i = 0; i < g.Length; i++)
+                var g = p.GradSpan;
+                for (var i = 0; i < g.Length; i++)
                 {
                     sq += g[i] * g[i];
                 }
@@ -377,7 +378,8 @@ namespace DevOnBike.Overfit.Anomalies.Training
             var s = maxNorm / (n + 1e-6f);
             foreach (var p in list)
             {
-                var g = p.GradSpan; for (var i = 0; i < g.Length; i++)
+                var g = p.GradSpan;
+                for (var i = 0; i < g.Length; i++)
                 {
                     g[i] *= s;
                 }
@@ -397,7 +399,8 @@ namespace DevOnBike.Overfit.Anomalies.Training
             for (var s = 0; s < _cfg.ValSteps; s++)
             {
                 Sample(val, _cfg.ContextLength, rng, input, target);
-                graph.Reset(); model.InvalidateAllCaches();
+                graph.Reset();
+                model.InvalidateAllCaches();
                 var l = model.Forward(graph, input, batchSize: 1, _cfg.ContextLength);
                 total += LossAndGrad(l, target, _cfg.ContextLength, config.VocabSize, lossScratch);
 

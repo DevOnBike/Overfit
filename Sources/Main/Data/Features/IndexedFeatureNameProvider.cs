@@ -33,7 +33,10 @@ namespace DevOnBike.Overfit.Data.Features
             ExpectedDimension = expectedDimension;
             _prefix = prefix;
         }
-        public int ExpectedDimension { get; }
+        public int ExpectedDimension
+        {
+            get;
+        }
 
         public string GetName(int featureIndex)
         {

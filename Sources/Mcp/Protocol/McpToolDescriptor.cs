@@ -20,6 +20,9 @@ namespace DevOnBike.Overfit.Mcp.Protocol
         public string Description { get; set; } = string.Empty;
 
         [JsonPropertyName("inputSchema")]
-        public JsonElement InputSchema { get; set; }
+        public JsonElement InputSchema
+        {
+            get; set;
+        }
     }
 }

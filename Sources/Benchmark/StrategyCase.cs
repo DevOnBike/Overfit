@@ -15,9 +15,15 @@ namespace Benchmarks
             ParameterCount = parameterCount;
         }
 
-        public int PopulationSize { get; }
+        public int PopulationSize
+        {
+            get;
+        }
 
-        public int ParameterCount { get; }
+        public int ParameterCount
+        {
+            get;
+        }
 
         public override string ToString()
         {

@@ -20,10 +20,16 @@ namespace Benchmarks
     public class OverfitKernelBenchmarks
     {
         [Params(64, 256)]
-        public int Batch { get; set; }
+        public int Batch
+        {
+            get; set;
+        }
 
         [Params(128, 512)]
-        public int Hidden { get; set; }
+        public int Hidden
+        {
+            get; set;
+        }
 
         private ComputationGraph _inferGraph = null!;
         private ComputationGraph _trainGraph = null!;

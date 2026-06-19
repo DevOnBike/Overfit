@@ -25,7 +25,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Constraints
         [LongFact]
         public void RealQwen_EmitsSchemaConformingJson()
         {
-            if (!File.Exists(Gguf)) { _out.WriteLine($"missing {Gguf}"); return; }
+            if (!File.Exists(Gguf))
+            {
+                _out.WriteLine($"missing {Gguf}");
+                return;
+            }
 
             using var client = OverfitClient.LoadGguf(Gguf, mmap: true);
 
@@ -56,7 +60,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Constraints
 
             // additionalProperties:false → exactly the one declared key.
             var count = 0;
-            foreach (var _ in root.EnumerateObject()) { count++; }
+            foreach (var _ in root.EnumerateObject())
+            {
+                count++;
+            }
             Assert.Equal(1, count);
         }
     }

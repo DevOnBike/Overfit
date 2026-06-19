@@ -86,7 +86,10 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
 
         /// <summary>The Orpheus tokenizer — pass it to <see cref="VoiceCloneDatasetBuilder"/> so prompts and audio
         /// tokens are encoded consistently with this trainer.</summary>
-        public ITokenizer Tokenizer { get; }
+        public ITokenizer Tokenizer
+        {
+            get;
+        }
 
         /// <summary>Llama end-of-text id (a reasonable default end-of-speech terminator for the dataset builder).</summary>
         public int EndOfTextTokenId => Tokenizer.EndOfTextTokenId;

@@ -35,7 +35,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// <summary>Reads <c>config.json</c> from a model directory.</summary>
         public static GPT1Config ReadFromDirectory(string modelDir)
         {
-            if (string.IsNullOrEmpty(modelDir)) { throw new ArgumentException("Directory is empty.", nameof(modelDir)); }
+            if (string.IsNullOrEmpty(modelDir))
+            {
+                throw new ArgumentException("Directory is empty.", nameof(modelDir));
+            }
             var path = Path.Combine(modelDir, "config.json");
             if (!File.Exists(path))
             {
@@ -84,15 +87,51 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 }
 
                 // Only top-level scalar keys matter; nested objects/arrays are skipped.
-                if (reader.ValueTextEquals("num_hidden_layers")) { reader.Read(); layers = reader.GetInt32(); }
-                else if (reader.ValueTextEquals("hidden_size")) { reader.Read(); dModel = reader.GetInt32(); }
-                else if (reader.ValueTextEquals("num_attention_heads")) { reader.Read(); nHeads = reader.GetInt32(); }
-                else if (reader.ValueTextEquals("num_key_value_heads")) { reader.Read(); nKvHeads = reader.GetInt32(); }
-                else if (reader.ValueTextEquals("intermediate_size")) { reader.Read(); dFF = reader.GetInt32(); }
-                else if (reader.ValueTextEquals("max_position_embeddings")) { reader.Read(); maxPos = reader.GetInt32(); }
-                else if (reader.ValueTextEquals("vocab_size")) { reader.Read(); vocab = reader.GetInt32(); }
-                else if (reader.ValueTextEquals("head_dim")) { reader.Read(); headDim = reader.GetInt32(); }
-                else if (reader.ValueTextEquals("rope_theta")) { reader.Read(); ropeTheta = (float)reader.GetDouble(); }
+                if (reader.ValueTextEquals("num_hidden_layers"))
+                {
+                    reader.Read();
+                    layers = reader.GetInt32();
+                }
+                else if (reader.ValueTextEquals("hidden_size"))
+                {
+                    reader.Read();
+                    dModel = reader.GetInt32();
+                }
+                else if (reader.ValueTextEquals("num_attention_heads"))
+                {
+                    reader.Read();
+                    nHeads = reader.GetInt32();
+                }
+                else if (reader.ValueTextEquals("num_key_value_heads"))
+                {
+                    reader.Read();
+                    nKvHeads = reader.GetInt32();
+                }
+                else if (reader.ValueTextEquals("intermediate_size"))
+                {
+                    reader.Read();
+                    dFF = reader.GetInt32();
+                }
+                else if (reader.ValueTextEquals("max_position_embeddings"))
+                {
+                    reader.Read();
+                    maxPos = reader.GetInt32();
+                }
+                else if (reader.ValueTextEquals("vocab_size"))
+                {
+                    reader.Read();
+                    vocab = reader.GetInt32();
+                }
+                else if (reader.ValueTextEquals("head_dim"))
+                {
+                    reader.Read();
+                    headDim = reader.GetInt32();
+                }
+                else if (reader.ValueTextEquals("rope_theta"))
+                {
+                    reader.Read();
+                    ropeTheta = (float)reader.GetDouble();
+                }
                 else if (reader.ValueTextEquals("tie_word_embeddings"))
                 {
                     reader.Read();
@@ -119,9 +158,18 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     "config.json missing one of num_hidden_layers / hidden_size / num_attention_heads / vocab_size.");
             }
 
-            if (nKvHeads <= 0) { nKvHeads = nHeads; }
-            if (dFF <= 0) { dFF = 4 * dModel; }
-            if (maxPos <= 0) { maxPos = ContextCap; }
+            if (nKvHeads <= 0)
+            {
+                nKvHeads = nHeads;
+            }
+            if (dFF <= 0)
+            {
+                dFF = 4 * dModel;
+            }
+            if (maxPos <= 0)
+            {
+                maxPos = ContextCap;
+            }
 
             // Overfit's runtime computes head_dim as DModel / NHeads everywhere
             // (CachedLlamaInferenceEngine), so a config.json head_dim that disagrees
@@ -162,7 +210,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         {
             if (reader.TokenType != JsonTokenType.StartObject)
             {
-                if (reader.TokenType is JsonTokenType.StartArray) { reader.Skip(); }
+                if (reader.TokenType is JsonTokenType.StartArray)
+                {
+                    reader.Skip();
+                }
                 return null;
             }
 
@@ -173,18 +224,47 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
             while (reader.Read())
             {
-                if (reader.TokenType == JsonTokenType.EndObject && reader.CurrentDepth == depth) { break; }
-                if (reader.TokenType != JsonTokenType.PropertyName) { continue; }
+                if (reader.TokenType == JsonTokenType.EndObject && reader.CurrentDepth == depth)
+                {
+                    break;
+                }
+                if (reader.TokenType != JsonTokenType.PropertyName)
+                {
+                    continue;
+                }
 
-                if (reader.ValueTextEquals("rope_type") || reader.ValueTextEquals("type")) { reader.Read(); type = reader.GetString(); }
-                else if (reader.ValueTextEquals("factor")) { reader.Read(); factor = (float)reader.GetDouble(); }
-                else if (reader.ValueTextEquals("low_freq_factor")) { reader.Read(); lowFreq = (float)reader.GetDouble(); }
-                else if (reader.ValueTextEquals("high_freq_factor")) { reader.Read(); highFreq = (float)reader.GetDouble(); }
-                else if (reader.ValueTextEquals("original_max_position_embeddings")) { reader.Read(); origCtx = reader.GetInt32(); }
+                if (reader.ValueTextEquals("rope_type") || reader.ValueTextEquals("type"))
+                {
+                    reader.Read();
+                    type = reader.GetString();
+                }
+                else if (reader.ValueTextEquals("factor"))
+                {
+                    reader.Read();
+                    factor = (float)reader.GetDouble();
+                }
+                else if (reader.ValueTextEquals("low_freq_factor"))
+                {
+                    reader.Read();
+                    lowFreq = (float)reader.GetDouble();
+                }
+                else if (reader.ValueTextEquals("high_freq_factor"))
+                {
+                    reader.Read();
+                    highFreq = (float)reader.GetDouble();
+                }
+                else if (reader.ValueTextEquals("original_max_position_embeddings"))
+                {
+                    reader.Read();
+                    origCtx = reader.GetInt32();
+                }
                 else
                 {
                     reader.Read();
-                    if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray) { reader.Skip(); }
+                    if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray)
+                    {
+                        reader.Skip();
+                    }
                 }
             }
 

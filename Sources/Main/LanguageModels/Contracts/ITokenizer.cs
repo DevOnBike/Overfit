@@ -7,15 +7,30 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
 {
     public interface ITokenizer
     {
-        int VocabularySize { get; }
+        int VocabularySize
+        {
+            get;
+        }
 
-        int EndOfTextTokenId { get; }
+        int EndOfTextTokenId
+        {
+            get;
+        }
 
-        int UnknownTokenId { get; }
+        int UnknownTokenId
+        {
+            get;
+        }
 
-        bool SupportsZeroAllocationEncode { get; }
+        bool SupportsZeroAllocationEncode
+        {
+            get;
+        }
 
-        bool SupportsZeroAllocationDecode { get; }
+        bool SupportsZeroAllocationDecode
+        {
+            get;
+        }
 
         int CountTokens(ReadOnlySpan<char> text);
 

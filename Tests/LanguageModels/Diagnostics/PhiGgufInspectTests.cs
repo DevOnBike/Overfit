@@ -22,7 +22,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         [LongFact]
         public void Dump_Phi_Metadata_And_Tensors()
         {
-            if (!File.Exists(Path)) { _out.WriteLine("missing C:\\phi gguf"); return; }
+            if (!File.Exists(Path))
+            {
+                _out.WriteLine("missing C:\\phi gguf");
+                return;
+            }
 
             using var reader = new GgufReader(Path);
 

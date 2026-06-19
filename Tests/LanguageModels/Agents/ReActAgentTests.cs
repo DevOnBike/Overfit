@@ -22,7 +22,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Agents
             params (string Name, Func<JsonElement, string> Fn)[] entries)
         {
             var d = new Dictionary<string, Func<JsonElement, string>>(StringComparer.Ordinal);
-            foreach (var (n, f) in entries) { d[n] = f; }
+            foreach (var (n, f) in entries)
+            {
+                d[n] = f;
+            }
             return d;
         }
 

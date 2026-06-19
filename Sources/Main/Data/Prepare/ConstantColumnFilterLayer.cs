@@ -111,14 +111,22 @@ namespace DevOnBike.Overfit.Data.Prepare
                 {
                     for (var r = 1; r < rows; r++)
                     {
-                        if (span[r * cols + c] != firstVal) { isConstant = false; break; }
+                        if (span[r * cols + c] != firstVal)
+                        {
+                            isConstant = false;
+                            break;
+                        }
                     }
                 }
                 else
                 {
                     for (var r = 1; r < rows; r++)
                     {
-                        if (MathF.Abs(span[r * cols + c] - firstVal) > _epsilon) { isConstant = false; break; }
+                        if (MathF.Abs(span[r * cols + c] - firstVal) > _epsilon)
+                        {
+                            isConstant = false;
+                            break;
+                        }
                     }
                 }
 
@@ -142,7 +150,11 @@ namespace DevOnBike.Overfit.Data.Prepare
                 for (var r = 0; r < rows; r++)
                 {
                     uniqueValues.Add(span[r * cols + c]);
-                    if (uniqueValues.Count > minUnique) { earlyPass = true; break; }
+                    if (uniqueValues.Count > minUnique)
+                    {
+                        earlyPass = true;
+                        break;
+                    }
                 }
 
                 if (earlyPass || uniqueValues.Count > minUnique)

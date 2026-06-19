@@ -21,16 +21,28 @@ namespace DevOnBike.Overfit.Serving
         }
 
         /// <summary>The request completed without an HTTP/transport error.</summary>
-        public bool Succeeded { get; }
+        public bool Succeeded
+        {
+            get;
+        }
 
         /// <summary>Time to first token: submission → first streamed chunk, milliseconds.</summary>
-        public double TimeToFirstTokenMs { get; }
+        public double TimeToFirstTokenMs
+        {
+            get;
+        }
 
         /// <summary>End-to-end latency: submission → last streamed chunk, milliseconds.</summary>
-        public double EndToEndMs { get; }
+        public double EndToEndMs
+        {
+            get;
+        }
 
         /// <summary>Number of output chunks/tokens streamed for this request.</summary>
-        public int OutputTokens { get; }
+        public int OutputTokens
+        {
+            get;
+        }
 
         /// <summary>Mean inter-token latency for this request = (e2e − ttft) / (tokens − 1), the
         /// per-step decode gap. Zero when fewer than two tokens were produced (no gap to measure).</summary>

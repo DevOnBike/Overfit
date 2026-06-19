@@ -35,19 +35,34 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval.Evaluation
         }
 
         /// <summary>The K used for the top-K retrieval.</summary>
-        public int TopK { get; }
+        public int TopK
+        {
+            get;
+        }
 
         /// <summary>Number of cases whose expected source appeared in the top-K.</summary>
-        public int Hits { get; }
+        public int Hits
+        {
+            get;
+        }
 
         /// <summary>Fraction of cases whose expected source was retrieved (hits / total).</summary>
-        public double RecallAtK { get; }
+        public double RecallAtK
+        {
+            get;
+        }
 
         /// <summary>Mean reciprocal rank of the first expected source (0 when missed). Rewards ranking it higher.</summary>
-        public double MeanReciprocalRank { get; }
+        public double MeanReciprocalRank
+        {
+            get;
+        }
 
         /// <summary>Per-case outcomes.</summary>
-        public IReadOnlyList<CaseResult> Cases { get; }
+        public IReadOnlyList<CaseResult> Cases
+        {
+            get;
+        }
 
         /// <summary>One case's outcome: what was expected, what was retrieved, and at which rank (if any).</summary>
         public sealed class CaseResult
@@ -60,15 +75,27 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval.Evaluation
                 Rank = rank;
             }
 
-            public string Query { get; }
+            public string Query
+            {
+                get;
+            }
 
-            public IReadOnlyList<string> ExpectedSourceIds { get; }
+            public IReadOnlyList<string> ExpectedSourceIds
+            {
+                get;
+            }
 
             /// <summary>The ids returned in the top-K, best first.</summary>
-            public IReadOnlyList<string> RetrievedIds { get; }
+            public IReadOnlyList<string> RetrievedIds
+            {
+                get;
+            }
 
             /// <summary>1-based rank of the first expected id in <see cref="RetrievedIds"/>, or 0 if none matched.</summary>
-            public int Rank { get; }
+            public int Rank
+            {
+                get;
+            }
 
             /// <summary>True when an expected source was retrieved within the top-K.</summary>
             public bool Hit => Rank > 0;

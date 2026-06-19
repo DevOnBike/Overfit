@@ -110,7 +110,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             var bias = RandomVector(rng, outputSize);
 
             var input = new float[rows * inputSize];
-            for (var i = 0; i < input.Length; i++) { input[i] = (float)(rng.NextDouble() * 2.0 - 1.0); }
+            for (var i = 0; i < input.Length; i++)
+            {
+                input[i] = (float)(rng.NextDouble() * 2.0 - 1.0);
+            }
 
             var reference = new float[rows * outputSize];
             for (var n = 0; n < rows; n++)

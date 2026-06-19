@@ -22,7 +22,10 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             Format = format;
         }
 
-        public ChatTemplateFormat Format { get; }
+        public ChatTemplateFormat Format
+        {
+            get;
+        }
 
         /// <summary>
         /// Picks a formatter by fingerprinting a GGUF <c>tokenizer.chat_template</c> Jinja
@@ -56,7 +59,10 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
         /// </summary>
         public string Render(IReadOnlyList<ChatMessage> messages, bool addGenerationPrompt = true)
         {
-            if (messages is null) { throw new ArgumentNullException(nameof(messages)); }
+            if (messages is null)
+            {
+                throw new ArgumentNullException(nameof(messages));
+            }
 
             var sb = new StringBuilder();
             switch (Format)

@@ -49,7 +49,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Retrieval
         public void Search_TopK_LimitsResults()
         {
             var store = new VectorStore(dimension: 2);
-            for (var i = 0; i < 5; i++) { store.Add($"v{i}", [i + 1f, 0f]); }
+            for (var i = 0; i < 5; i++)
+            {
+                store.Add($"v{i}", [i + 1f, 0f]);
+            }
 
             Assert.Equal(2, store.Search([1f, 0f], topK: 2).Length);
             Assert.Equal(5, store.Search([1f, 0f], topK: 50).Length);   // clamped to Count
@@ -60,7 +63,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Retrieval
         {
             var store = new VectorStore(dimension: 4, initialCapacity: 2);
             // Distinct directions (cosine ignores magnitude): v_i points along [1, i].
-            for (var i = 0; i < 10; i++) { store.Add($"v{i}", [1f, i, 0f, 0f]); }
+            for (var i = 0; i < 10; i++)
+            {
+                store.Add($"v{i}", [1f, i, 0f, 0f]);
+            }
             Assert.Equal(10, store.Count);
             Assert.Equal("v9", store.Search([1f, 9f, 0f, 0f], topK: 1)[0].Id);   // matches v9's direction
         }

@@ -61,14 +61,22 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         private static float L2(float[] v)
         {
             var s = 0f;
-            foreach (var x in v) { s += x * x; }
+            foreach (var x in v)
+            {
+                s += x * x;
+            }
             return MathF.Sqrt(s);
         }
 
         private static float Cosine(float[] a, float[] b)
         {
             float dot = 0f, na = 0f, nb = 0f;
-            for (var i = 0; i < a.Length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+            for (var i = 0; i < a.Length; i++)
+            {
+                dot += a[i] * b[i];
+                na += a[i] * a[i];
+                nb += b[i] * b[i];
+            }
             return dot / (MathF.Sqrt(na) * MathF.Sqrt(nb) + 1e-12f);
         }
     }

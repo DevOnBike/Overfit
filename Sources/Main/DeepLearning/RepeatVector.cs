@@ -53,9 +53,15 @@ namespace DevOnBike.Overfit.DeepLearning
             return [];
         }
 
-        public void Save(BinaryWriter bw) { }
-        public void Load(BinaryReader br) { }
-        public void Dispose() { }
+        public void Save(BinaryWriter bw)
+        {
+        }
+        public void Load(BinaryReader br)
+        {
+        }
+        public void Dispose()
+        {
+        }
 
         public void InvalidateParameterCaches()
         {

@@ -72,15 +72,27 @@ namespace DevOnBike.Overfit.LanguageModels.Rope
             Precompute();
         }
 
-        public int MaxSequenceLength { get; }
-        public int HeadDimension { get; }
-        public float Theta { get; }
+        public int MaxSequenceLength
+        {
+            get;
+        }
+        public int HeadDimension
+        {
+            get;
+        }
+        public float Theta
+        {
+            get;
+        }
 
         /// <summary>
         /// When true, RoPE pairs split-half dims <c>(x[i], x[i+d/2])</c> (HF rotate_half / NEOX); when
         /// false, adjacent dims <c>(x[2i], x[2i+1])</c>. See <c>GPT1Config.RopeSplitHalf</c>.
         /// </summary>
-        public bool SplitHalf { get; }
+        public bool SplitHalf
+        {
+            get;
+        }
 
         /// <summary>Returns cos values for a given position: [halfDim].</summary>
         public ReadOnlySpan<float> CosAt(int position)

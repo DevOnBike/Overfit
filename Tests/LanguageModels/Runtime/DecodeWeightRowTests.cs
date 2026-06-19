@@ -25,7 +25,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             var span = storage.AsSpan();
             for (var r = 0; r < rows; r++)
             {
-                for (var c = 0; c < cols; c++) { span[r * cols + c] = r * 100 + c; }
+                for (var c = 0; c < cols; c++)
+                {
+                    span[r * cols + c] = r * 100 + c;
+                }
             }
 
             DecodeWeight w = storage;
@@ -51,7 +54,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             var src = new float[rows * cols];
             for (var r = 0; r < rows; r++)
             {
-                for (var c = 0; c < cols; c++) { src[r * cols + c] = MathF.Sin((r + 1) * 0.3f * c) * (r + 1); }
+                for (var c = 0; c < cols; c++)
+                {
+                    src[r * cols + c] = MathF.Sin((r + 1) * 0.3f * c) * (r + 1);
+                }
             }
 
             var q8 = Q8Weight.QuantizeRows(src, rows, cols);
@@ -65,7 +71,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
                 {
                     // Q8 step is absmax/127; within one step of the source is correct round-trip.
                     var rowAbsMax = 0f;
-                    for (var k = 0; k < cols; k++) { rowAbsMax = MathF.Max(rowAbsMax, MathF.Abs(src[r * cols + k])); }
+                    for (var k = 0; k < cols; k++)
+                    {
+                        rowAbsMax = MathF.Max(rowAbsMax, MathF.Abs(src[r * cols + k]));
+                    }
                     var tol = rowAbsMax / 127f + 1e-4f;
                     Assert.True(MathF.Abs(dst[c] - src[r * cols + c]) <= tol,
                         $"row {r} col {c}: {dst[c]} vs {src[r * cols + c]} (tol {tol}).");

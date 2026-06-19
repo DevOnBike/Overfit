@@ -23,12 +23,18 @@ namespace DevOnBike.Overfit.Data.Contracts
         /// <summary>
         ///     Input features tensor.
         /// </summary>
-        public FastTensor<float> Features { get; set; }
+        public FastTensor<float> Features
+        {
+            get; set;
+        }
 
         /// <summary>
         ///     Target values tensor (labels).
         /// </summary>
-        public FastTensor<float> Targets { get; set; }
+        public FastTensor<float> Targets
+        {
+            get; set;
+        }
 
         public void Dispose()
         {

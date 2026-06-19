@@ -48,7 +48,10 @@ namespace Benchmarks
         private bool _disposed;
 
         [Params(16, 64, 256, 512)]
-        public int SequenceLength { get; set; }
+        public int SequenceLength
+        {
+            get; set;
+        }
 
         [GlobalSetup]
         public void Setup()
@@ -75,17 +78,25 @@ namespace Benchmarks
             var heads = new SingleHeadWeights[HeadCount];
             for (var h = 0; h < HeadCount; h++)
             {
-                var wq = new float[DModel * _headDimension]; FillDeterministic(wq, 1000 + h);
-                var wk = new float[DModel * _headDimension]; FillDeterministic(wk, 2000 + h);
-                var wv = new float[DModel * _headDimension]; FillDeterministic(wv, 3000 + h);
-                var wo = new float[_headDimension * DModel]; FillDeterministic(wo, 4000 + h);
+                var wq = new float[DModel * _headDimension];
+                FillDeterministic(wq, 1000 + h);
+                var wk = new float[DModel * _headDimension];
+                FillDeterministic(wk, 2000 + h);
+                var wv = new float[DModel * _headDimension];
+                FillDeterministic(wv, 3000 + h);
+                var wo = new float[_headDimension * DModel];
+                FillDeterministic(wo, 4000 + h);
                 heads[h] = new SingleHeadWeights(wq: wq, wk: wk, wv: wv, wo: wo);
             }
 
-            var ln1Gamma = new float[DModel]; FillAffineGamma(ln1Gamma);
-            var ln2Gamma = new float[DModel]; FillAffineGamma(ln2Gamma);
-            var ffnW1 = new float[DModel * DFF]; FillDeterministic(ffnW1, 501);
-            var ffnW2 = new float[DFF * DModel]; FillDeterministic(ffnW2, 701);
+            var ln1Gamma = new float[DModel];
+            FillAffineGamma(ln1Gamma);
+            var ln2Gamma = new float[DModel];
+            FillAffineGamma(ln2Gamma);
+            var ffnW1 = new float[DModel * DFF];
+            FillDeterministic(ffnW1, 501);
+            var ffnW2 = new float[DFF * DModel];
+            FillDeterministic(ffnW2, 701);
 
             _blockWeights = new BlockWeights(
                 heads: heads,

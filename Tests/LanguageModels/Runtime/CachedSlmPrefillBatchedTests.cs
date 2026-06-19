@@ -108,7 +108,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             }
 
             // Warm up (JIT) then best-of-3.
-            SingleToken(); Batched();
+            SingleToken();
+            Batched();
             var single = Math.Min(Math.Min(SingleToken(), SingleToken()), SingleToken());
             var batched = Math.Min(Math.Min(Batched(), Batched()), Batched());
 

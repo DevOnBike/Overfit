@@ -57,10 +57,13 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
                 ? t.Data
                 : throw new KeyNotFoundException($"Whisper tensor '{name}' not found in the model.");
 
-            _conv1W = T("encoder.conv1.weight"); _conv1B = T("encoder.conv1.bias");
-            _conv2W = T("encoder.conv2.weight"); _conv2B = T("encoder.conv2.bias");
+            _conv1W = T("encoder.conv1.weight");
+            _conv1B = T("encoder.conv1.bias");
+            _conv2W = T("encoder.conv2.weight");
+            _conv2B = T("encoder.conv2.bias");
             _pos = T("encoder.positional_embedding");
-            _lnPostW = T("encoder.ln_post.weight"); _lnPostB = T("encoder.ln_post.bias");
+            _lnPostW = T("encoder.ln_post.weight");
+            _lnPostB = T("encoder.ln_post.bias");
 
             _layers = new Layer[_nLayer];
             for (var b = 0; b < _nLayer; b++)
@@ -86,7 +89,10 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
                     Mlp2B = T(p + "mlp.2.bias"),
                     DFF = model.Tensors[p + "mlp.0.weight"].Shape[0],
                 };
-                if (_layers[b].DFF > _maxDFF) { _maxDFF = _layers[b].DFF; }
+                if (_layers[b].DFF > _maxDFF)
+                {
+                    _maxDFF = _layers[b].DFF;
+                }
             }
         }
 

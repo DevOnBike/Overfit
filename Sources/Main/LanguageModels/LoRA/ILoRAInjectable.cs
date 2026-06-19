@@ -7,7 +7,10 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
 {
     public interface ILoRAInjectable
     {
-        bool SupportsLoRA { get; }
+        bool SupportsLoRA
+        {
+            get;
+        }
 
         ILoRAAdapter InjectLoRA(string name, in LoRAOptions options);
 

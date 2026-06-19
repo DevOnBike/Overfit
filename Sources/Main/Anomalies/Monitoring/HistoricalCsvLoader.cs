@@ -78,7 +78,10 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
             string line;
             while ((line = reader.ReadLine()) is not null)
             {
-                if (string.IsNullOrWhiteSpace(line)) { continue; }
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    continue;
+                }
 
                 if (TryParseRow(line, columnIndex, out var snapshot))
                 {
@@ -192,7 +195,10 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring
 
         private static string Get(string[] parts, Dictionary<string, int> col, string name)
         {
-            if (!col.TryGetValue(name, out var idx) || idx >= parts.Length) { return string.Empty; }
+            if (!col.TryGetValue(name, out var idx) || idx >= parts.Length)
+            {
+                return string.Empty;
+            }
             return parts[idx].Trim();
         }
 

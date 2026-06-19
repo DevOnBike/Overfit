@@ -111,23 +111,50 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _lmHeadQ8KBsums = new short[(dModel + Q4KDotKernel.GroupSize - 1) / Q4KDotKernel.GroupSize];
         }
 
-        public int LayerCount { get; }
+        public int LayerCount
+        {
+            get;
+        }
 
-        public int DModel { get; }
+        public int DModel
+        {
+            get;
+        }
 
-        public int HeadCount { get; }
+        public int HeadCount
+        {
+            get;
+        }
 
-        public int HeadDimension { get; }
+        public int HeadDimension
+        {
+            get;
+        }
 
-        public int DFF { get; }
+        public int DFF
+        {
+            get;
+        }
 
-        public int VocabSize { get; }
+        public int VocabSize
+        {
+            get;
+        }
 
-        public int MaxSequenceLength { get; }
+        public int MaxSequenceLength
+        {
+            get;
+        }
 
-        public float LayerNormEpsilon { get; }
+        public float LayerNormEpsilon
+        {
+            get;
+        }
 
-        public FeedForwardActivation FeedForwardActivation { get; }
+        public FeedForwardActivation FeedForwardActivation
+        {
+            get;
+        }
 
         /// <summary>
         /// Decodes one token through all transformer layers + LM head using KV-cache.
@@ -394,13 +421,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             try
             {
-            for (var layer = 0; layer < LayerCount; layer++)
-            {
-                _blocks[layer].DecodeBatchedQuant(
-                    cur, rows, in weights.Block(layer), cache, layer, basePosition, next, rope);
-                (cur, next) = (next, cur);
-            }
-            return cur;
+                for (var layer = 0; layer < LayerCount; layer++)
+                {
+                    _blocks[layer].DecodeBatchedQuant(
+                        cur, rows, in weights.Block(layer), cache, layer, basePosition, next, rope);
+                    (cur, next) = (next, cur);
+                }
+                return cur;
             }
             catch
             {
@@ -419,15 +446,24 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             if (weights.FinalNormBeta.IsEmpty)
             {
                 var sumSq = 0f;
-                for (var i = 0; i < DModel; i++) { sumSq += row[i] * row[i]; }
+                for (var i = 0; i < DModel; i++)
+                {
+                    sumSq += row[i] * row[i];
+                }
                 var scale = 1f / MathF.Sqrt(sumSq / DModel + LayerNormEpsilon);
                 if (weights.FinalNormGamma.IsEmpty)
                 {
-                    for (var i = 0; i < DModel; i++) { dst[i] = row[i] * scale; }
+                    for (var i = 0; i < DModel; i++)
+                    {
+                        dst[i] = row[i] * scale;
+                    }
                 }
                 else
                 {
-                    for (var i = 0; i < DModel; i++) { dst[i] = row[i] * scale * weights.FinalNormGamma[i]; }
+                    for (var i = 0; i < DModel; i++)
+                    {
+                        dst[i] = row[i] * scale * weights.FinalNormGamma[i];
+                    }
                 }
             }
             else

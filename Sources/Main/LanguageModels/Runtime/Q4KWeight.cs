@@ -69,16 +69,25 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// <summary>Raw Q4_K super-block bytes, output-major: <c>OutputSize</c> rows
         /// of <see cref="SuperBlocksPerRow"/> × <see cref="SuperBlockBytes"/>. Backed by a managed
         /// array or a memory-mapped slice; read via <see cref="BlockSpan"/>.</summary>
-        public ReadOnlyMemory<byte> Blocks { get; }
+        public ReadOnlyMemory<byte> Blocks
+        {
+            get;
+        }
 
         /// <summary>The block bytes as a span (managed array or memory-mapped region).</summary>
         public ReadOnlySpan<byte> BlockSpan => Blocks.Span;
 
         /// <summary>Contraction-dimension length (a multiple of <see cref="SuperBlockElements"/>).</summary>
-        public int InputSize { get; }
+        public int InputSize
+        {
+            get;
+        }
 
         /// <summary>Number of outputs (rows).</summary>
-        public int OutputSize { get; }
+        public int OutputSize
+        {
+            get;
+        }
 
         /// <summary>Q4_K super-blocks per output row.</summary>
         public int SuperBlocksPerRow => InputSize / SuperBlockElements;

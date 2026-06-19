@@ -129,7 +129,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             var bestVal = arr[0];
             for (var i = 1; i < arr.Length; i++)
             {
-                if (arr[i] > bestVal) { bestVal = arr[i]; best = i; }
+                if (arr[i] > bestVal)
+                {
+                    bestVal = arr[i];
+                    best = i;
+                }
             }
             return best;
         }

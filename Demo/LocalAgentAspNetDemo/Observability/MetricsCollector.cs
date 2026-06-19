@@ -40,8 +40,14 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Observability
         // ── Static build info (set once at startup, published as observable gauges) ──
         public string ModelFile { get; init; } = "unknown";
         public string ModelFingerprint { get; init; } = "unknown";
-        public bool MmapEnabled { get; init; }
-        public double ModelLoadSeconds { get; init; }
+        public bool MmapEnabled
+        {
+            get; init;
+        }
+        public double ModelLoadSeconds
+        {
+            get; init;
+        }
 
         public MetricsCollector()
         {
@@ -119,13 +125,19 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Observability
                 var buffer = new byte[window];
 
                 var head = fs.Read(buffer, 0, window);
-                if (head > 0) { hash.AppendData(buffer, 0, head); }
+                if (head > 0)
+                {
+                    hash.AppendData(buffer, 0, head);
+                }
 
                 if (length > 2L * window)
                 {
                     fs.Seek(-window, SeekOrigin.End);
                     var tail = fs.Read(buffer, 0, window);
-                    if (tail > 0) { hash.AppendData(buffer, 0, tail); }
+                    if (tail > 0)
+                    {
+                        hash.AppendData(buffer, 0, tail);
+                    }
                 }
 
                 return Convert.ToHexString(hash.GetHashAndReset())[..16].ToLowerInvariant();

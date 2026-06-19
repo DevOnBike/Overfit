@@ -23,10 +23,16 @@ namespace Benchmarks
         private float _checksum;
 
         [Params(16, 64, 256, 512)]
-        public int SequenceLength { get; set; }
+        public int SequenceLength
+        {
+            get; set;
+        }
 
         [Params(64)]
-        public int HeadDimension { get; set; }
+        public int HeadDimension
+        {
+            get; set;
+        }
 
         [GlobalSetup]
         public void Setup()

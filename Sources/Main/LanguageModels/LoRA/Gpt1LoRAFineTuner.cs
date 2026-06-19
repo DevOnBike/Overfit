@@ -607,32 +607,56 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                     case LoRATargetModules.Query:
                         {
                             var attn = _model.Blocks[adapter.Layer].Attention;
-                            if (adapter.OutputProvider is not null) { attn.SetQueryOutputProvider(adapter.HeadIndex, adapter.OutputProvider); }
-                            else { attn.SetQueryProvider(adapter.HeadIndex, adapter.Provider); }
+                            if (adapter.OutputProvider is not null)
+                            {
+                                attn.SetQueryOutputProvider(adapter.HeadIndex, adapter.OutputProvider);
+                            }
+                            else
+                            {
+                                attn.SetQueryProvider(adapter.HeadIndex, adapter.Provider);
+                            }
                             break;
                         }
 
                     case LoRATargetModules.Key:
                         {
                             var attn = _model.Blocks[adapter.Layer].Attention;
-                            if (adapter.OutputProvider is not null) { attn.SetKeyOutputProvider(adapter.HeadIndex, adapter.OutputProvider); }
-                            else { attn.SetKeyProvider(adapter.HeadIndex, adapter.Provider); }
+                            if (adapter.OutputProvider is not null)
+                            {
+                                attn.SetKeyOutputProvider(adapter.HeadIndex, adapter.OutputProvider);
+                            }
+                            else
+                            {
+                                attn.SetKeyProvider(adapter.HeadIndex, adapter.Provider);
+                            }
                             break;
                         }
 
                     case LoRATargetModules.Value:
                         {
                             var attn = _model.Blocks[adapter.Layer].Attention;
-                            if (adapter.OutputProvider is not null) { attn.SetValueOutputProvider(adapter.HeadIndex, adapter.OutputProvider); }
-                            else { attn.SetValueProvider(adapter.HeadIndex, adapter.Provider); }
+                            if (adapter.OutputProvider is not null)
+                            {
+                                attn.SetValueOutputProvider(adapter.HeadIndex, adapter.OutputProvider);
+                            }
+                            else
+                            {
+                                attn.SetValueProvider(adapter.HeadIndex, adapter.Provider);
+                            }
                             break;
                         }
 
                     case LoRATargetModules.OutputProjection:
                         {
                             var attn = _model.Blocks[adapter.Layer].Attention;
-                            if (adapter.OutputProvider is not null) { attn.SetOutputOutputProvider(adapter.HeadIndex, adapter.OutputProvider); }
-                            else { attn.SetOutputProvider(adapter.HeadIndex, adapter.Provider); }
+                            if (adapter.OutputProvider is not null)
+                            {
+                                attn.SetOutputOutputProvider(adapter.HeadIndex, adapter.OutputProvider);
+                            }
+                            else
+                            {
+                                attn.SetOutputProvider(adapter.HeadIndex, adapter.Provider);
+                            }
                             break;
                         }
                 }
@@ -699,9 +723,15 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                         var attn = _model.Blocks[adapter.Layer].Attention;
                         if (adapter.OutputProvider is not null)
                         {
-                            if (ReferenceEquals(attn.GetQueryOutputProvider(adapter.HeadIndex), adapter.OutputProvider)) { attn.SetQueryOutputProvider(adapter.HeadIndex, null); }
+                            if (ReferenceEquals(attn.GetQueryOutputProvider(adapter.HeadIndex), adapter.OutputProvider))
+                            {
+                                attn.SetQueryOutputProvider(adapter.HeadIndex, null);
+                            }
                         }
-                        else if (ReferenceEquals(attn.GetQueryProvider(adapter.HeadIndex), adapter.Provider)) { attn.SetQueryProvider(adapter.HeadIndex, null); }
+                        else if (ReferenceEquals(attn.GetQueryProvider(adapter.HeadIndex), adapter.Provider))
+                        {
+                            attn.SetQueryProvider(adapter.HeadIndex, null);
+                        }
 
                         break;
                     }
@@ -711,9 +741,15 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                         var attn = _model.Blocks[adapter.Layer].Attention;
                         if (adapter.OutputProvider is not null)
                         {
-                            if (ReferenceEquals(attn.GetKeyOutputProvider(adapter.HeadIndex), adapter.OutputProvider)) { attn.SetKeyOutputProvider(adapter.HeadIndex, null); }
+                            if (ReferenceEquals(attn.GetKeyOutputProvider(adapter.HeadIndex), adapter.OutputProvider))
+                            {
+                                attn.SetKeyOutputProvider(adapter.HeadIndex, null);
+                            }
                         }
-                        else if (ReferenceEquals(attn.GetKeyProvider(adapter.HeadIndex), adapter.Provider)) { attn.SetKeyProvider(adapter.HeadIndex, null); }
+                        else if (ReferenceEquals(attn.GetKeyProvider(adapter.HeadIndex), adapter.Provider))
+                        {
+                            attn.SetKeyProvider(adapter.HeadIndex, null);
+                        }
 
                         break;
                     }
@@ -723,9 +759,15 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                         var attn = _model.Blocks[adapter.Layer].Attention;
                         if (adapter.OutputProvider is not null)
                         {
-                            if (ReferenceEquals(attn.GetValueOutputProvider(adapter.HeadIndex), adapter.OutputProvider)) { attn.SetValueOutputProvider(adapter.HeadIndex, null); }
+                            if (ReferenceEquals(attn.GetValueOutputProvider(adapter.HeadIndex), adapter.OutputProvider))
+                            {
+                                attn.SetValueOutputProvider(adapter.HeadIndex, null);
+                            }
                         }
-                        else if (ReferenceEquals(attn.GetValueProvider(adapter.HeadIndex), adapter.Provider)) { attn.SetValueProvider(adapter.HeadIndex, null); }
+                        else if (ReferenceEquals(attn.GetValueProvider(adapter.HeadIndex), adapter.Provider))
+                        {
+                            attn.SetValueProvider(adapter.HeadIndex, null);
+                        }
 
                         break;
                     }
@@ -735,9 +777,15 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
                         var attn = _model.Blocks[adapter.Layer].Attention;
                         if (adapter.OutputProvider is not null)
                         {
-                            if (ReferenceEquals(attn.GetOutputOutputProvider(adapter.HeadIndex), adapter.OutputProvider)) { attn.SetOutputOutputProvider(adapter.HeadIndex, null); }
+                            if (ReferenceEquals(attn.GetOutputOutputProvider(adapter.HeadIndex), adapter.OutputProvider))
+                            {
+                                attn.SetOutputOutputProvider(adapter.HeadIndex, null);
+                            }
                         }
-                        else if (ReferenceEquals(attn.GetOutputProvider(adapter.HeadIndex), adapter.Provider)) { attn.SetOutputProvider(adapter.HeadIndex, null); }
+                        else if (ReferenceEquals(attn.GetOutputProvider(adapter.HeadIndex), adapter.Provider))
+                        {
+                            attn.SetOutputProvider(adapter.HeadIndex, null);
+                        }
 
                         break;
                     }

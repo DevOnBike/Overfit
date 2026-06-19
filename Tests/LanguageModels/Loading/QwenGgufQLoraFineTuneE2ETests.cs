@@ -61,13 +61,22 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
                 graph.Reset();
                 opt.ZeroGrad();
                 var logits = model.Forward(graph, input, useCheckpoint: true);
-                if (step == 0) { probFirst = AvgTargetProb(logits.DataView.AsReadOnlySpan(), target, vocab); }
+                if (step == 0)
+                {
+                    probFirst = AvgTargetProb(logits.DataView.AsReadOnlySpan(), target, vocab);
+                }
                 last = TrainableLlamaModel.CrossEntropyLossAndSeed(logits, target, vocab);
                 graph.BackwardFromGrad(logits);
                 opt.Step();
                 peakManaged = Math.Max(peakManaged, GC.GetTotalMemory(forceFullCollection: false));
-                if (step == 0) { first = last; }
-                if (step % 10 == 0) { _out.WriteLine($"  step {step,2}: loss {last:F4}  ({sw.ElapsedMilliseconds / (step + 1)} ms/step)"); }
+                if (step == 0)
+                {
+                    first = last;
+                }
+                if (step % 10 == 0)
+                {
+                    _out.WriteLine($"  step {step,2}: loss {last:F4}  ({sw.ElapsedMilliseconds / (step + 1)} ms/step)");
+                }
             }
             sw.Stop();
 
@@ -80,13 +89,23 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             var correct = 0;
             for (var t = 0; t < target.Length; t++)
             {
-                if (ArgMax(data.Slice(t * vocab, vocab)) == target[t]) { correct++; }
+                if (ArgMax(data.Slice(t * vocab, vocab)) == target[t])
+                {
+                    correct++;
+                }
             }
 
             var baseAfter = new float[baseBefore.Length];
             layer0.FfnGate.AsRowSource().DecodeRow(0, baseAfter);
             var baseChanged = false;
-            for (var i = 0; i < baseBefore.Length; i++) { if (baseBefore[i] != baseAfter[i]) { baseChanged = true; break; } }
+            for (var i = 0; i < baseBefore.Length; i++)
+            {
+                if (baseBefore[i] != baseAfter[i])
+                {
+                    baseChanged = true;
+                    break;
+                }
+            }
 
             var procPeakGB = Process.GetCurrentProcess().PeakWorkingSet64 / (1024.0 * 1024 * 1024);
             _out.WriteLine($"loss {first:F4} -> {last:F4} over {steps} steps ({sw.ElapsedMilliseconds / steps} ms/step)");
@@ -107,9 +126,18 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             {
                 var row = logits.Slice(t * vocab, vocab);
                 var max = float.NegativeInfinity;
-                for (var v = 0; v < vocab; v++) { if (row[v] > max) { max = row[v]; } }
+                for (var v = 0; v < vocab; v++)
+                {
+                    if (row[v] > max)
+                    {
+                        max = row[v];
+                    }
+                }
                 double sum = 0;
-                for (var v = 0; v < vocab; v++) { sum += Math.Exp(row[v] - max); }
+                for (var v = 0; v < vocab; v++)
+                {
+                    sum += Math.Exp(row[v] - max);
+                }
                 total += Math.Exp(row[targets[t]] - max) / sum;
             }
             return (float)(total / targets.Length);
@@ -117,15 +145,26 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 
         private static int ArgMax(ReadOnlySpan<float> row)
         {
-            int best = 0; var bv = row[0];
-            for (var i = 1; i < row.Length; i++) { if (row[i] > bv) { bv = row[i]; best = i; } }
+            int best = 0;
+            var bv = row[0];
+            for (var i = 1; i < row.Length; i++)
+            {
+                if (row[i] > bv)
+                {
+                    bv = row[i];
+                    best = i;
+                }
+            }
             return best;
         }
 
         private static List<AutogradNode> ToList(IEnumerable<AutogradNode> e)
         {
             var l = new List<AutogradNode>();
-            foreach (var x in e) { l.Add(x); }
+            foreach (var x in e)
+            {
+                l.Add(x);
+            }
             return l;
         }
     }

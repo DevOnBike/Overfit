@@ -38,7 +38,11 @@ namespace DevOnBike.Overfit.Tests.Anomalies
         [LongFact]
         public async Task GptDetector_VsEwmaFloor_BothSeparate_OnSamePodStream()
         {
-            if (!File.Exists(CsvPath)) { _out.WriteLine($"fixture CSV not found at {CsvPath} — skipping."); return; }
+            if (!File.Exists(CsvPath))
+            {
+                _out.WriteLine($"fixture CSV not found at {CsvPath} — skipping.");
+                return;
+            }
 
             // ── One pod's real, time-ordered stream from the fixture ──
             var all = HistoricalCsvLoader.Load(CsvPath, out _);
@@ -48,9 +52,20 @@ namespace DevOnBike.Overfit.Tests.Anomalies
 
             // Injected anomalies built from a representative real normal snapshot.
             var baseSnap = stream[30];
-            var oom = baseSnap with { OomEventsRate = 4f, MemoryWorkingSetBytes = baseSnap.MemoryWorkingSetBytes * 4f };
-            var lat = baseSnap with { LatencyP99Ms = baseSnap.LatencyP99Ms * 30f + 2_000f };
-            var cpu = baseSnap with { CpuUsageRatio = 0.99f, CpuThrottleRatio = 0.7f };
+            var oom = baseSnap with
+            {
+                OomEventsRate = 4f,
+                MemoryWorkingSetBytes = baseSnap.MemoryWorkingSetBytes * 4f
+            };
+            var lat = baseSnap with
+            {
+                LatencyP99Ms = baseSnap.LatencyP99Ms * 30f + 2_000f
+            };
+            var cpu = baseSnap with
+            {
+                CpuUsageRatio = 0.99f,
+                CpuThrottleRatio = 0.7f
+            };
             (string Label, MetricSnapshot Snap)[] injected = [("OOM", oom), ("LATENCY", lat), ("CPU", cpu)];
 
             // ── Train a Quick GPT base on the full CSV ──
@@ -73,7 +88,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                     PreLayerNorm = true,
                 });
                 model.Eval();
-                using (var br = new BinaryReader(File.OpenRead(checkpoint))) { model.Load(br); }
+                using (var br = new BinaryReader(File.OpenRead(checkpoint)))
+                {
+                    model.Load(br);
+                }
 
                 var gpt = ScoreWith(MakeGpt(model), stream, injected);
                 var ewma = ScoreWith(MakeEwma(), stream, injected);
@@ -102,7 +120,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             }
             finally
             {
-                if (File.Exists(checkpoint)) { File.Delete(checkpoint); }
+                if (File.Exists(checkpoint))
+                {
+                    File.Delete(checkpoint);
+                }
             }
         }
 
@@ -118,7 +139,11 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             for (var i = 0; i < stream.Length; i++)
             {
                 var r = score(stream[i]);
-                if (!r.IsWarmup && i >= warm) { sum += r.Score; n++; }
+                if (!r.IsWarmup && i >= warm)
+                {
+                    sum += r.Score;
+                    n++;
+                }
             }
 
             var anomalies = new List<(string, float, string)>();

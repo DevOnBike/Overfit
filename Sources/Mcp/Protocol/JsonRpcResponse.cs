@@ -21,9 +21,15 @@ namespace DevOnBike.Overfit.Mcp.Protocol
         public string JsonRpc { get; set; } = "2.0";
 
         [JsonPropertyName("id")]
-        public JsonElement Id { get; set; }
+        public JsonElement Id
+        {
+            get; set;
+        }
 
         [JsonPropertyName("result")]
-        public TResult? Result { get; set; }
+        public TResult? Result
+        {
+            get; set;
+        }
     }
 }

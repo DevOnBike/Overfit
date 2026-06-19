@@ -46,8 +46,14 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
         public static GPT1Model Load(ISafetensorsSource reader, GPT1Config config)
         {
-            if (reader is null) { throw new ArgumentNullException(nameof(reader)); }
-            if (config is null) { throw new ArgumentNullException(nameof(config)); }
+            if (reader is null)
+            {
+                throw new ArgumentNullException(nameof(reader));
+            }
+            if (config is null)
+            {
+                throw new ArgumentNullException(nameof(config));
+            }
 
             var model = new GPT1Model(config);
             // Stream the mapped weights through GPT1Model.Load one block at a time —
@@ -143,9 +149,15 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         // HF GPT-2 ships these with or without the "transformer." prefix.
         private static string Resolve(ISafetensorsSource reader, string suffix)
         {
-            if (reader.Tensors.ContainsKey(suffix)) { return suffix; }
+            if (reader.Tensors.ContainsKey(suffix))
+            {
+                return suffix;
+            }
             var prefixed = "transformer." + suffix;
-            if (reader.Tensors.ContainsKey(prefixed)) { return prefixed; }
+            if (reader.Tensors.ContainsKey(prefixed))
+            {
+                return prefixed;
+            }
             throw new KeyNotFoundException(
                 $"GPT-2 tensor '{suffix}' (or 'transformer.{suffix}') not found in safetensors header.");
         }

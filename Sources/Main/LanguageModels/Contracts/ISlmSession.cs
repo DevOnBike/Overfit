@@ -7,13 +7,25 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
 {
     public interface ISlmSession : IDisposable
     {
-        int CurrentPosition { get; }
+        int CurrentPosition
+        {
+            get;
+        }
 
-        int MaxContextLength { get; }
+        int MaxContextLength
+        {
+            get;
+        }
 
-        int VocabularySize { get; }
+        int VocabularySize
+        {
+            get;
+        }
 
-        bool HasKeyValueCache { get; }
+        bool HasKeyValueCache
+        {
+            get;
+        }
 
         void Reset();
 

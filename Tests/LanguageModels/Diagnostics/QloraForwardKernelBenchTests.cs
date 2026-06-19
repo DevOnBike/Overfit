@@ -36,11 +36,17 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             // Synthesize a Q4_K weight from random F32 (the GGUF-equivalent base).
             var rnd = new Random(42);
             var f32 = new float[(long)m * k];
-            for (var i = 0; i < f32.Length; i++) { f32[i] = (float)(rnd.NextDouble() * 2 - 1) * 0.08f; }
+            for (var i = 0; i < f32.Length; i++)
+            {
+                f32[i] = (float)(rnd.NextDouble() * 2 - 1) * 0.08f;
+            }
             var weight = new Q4KWeight(GgmlQuant.QuantizeQ4_K(f32, k, m), k, m);
 
             var inputData = new float[n * k];
-            for (var i = 0; i < inputData.Length; i++) { inputData[i] = (float)(rnd.NextDouble() * 2 - 1); }
+            for (var i = 0; i < inputData.Length; i++)
+            {
+                inputData[i] = (float)(rnd.NextDouble() * 2 - 1);
+            }
 
             // ── A: training path (FrozenQuantizedLinear forward) ──
             using var graph = new ComputationGraph();
@@ -57,7 +63,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
                 sw.Stop();
                 node.DataView.AsReadOnlySpan().CopyTo(outA);
                 graph.Reset();
-                if (r > 0) { bestA = Math.Min(bestA, sw.Elapsed.TotalMilliseconds); }
+                if (r > 0)
+                {
+                    bestA = Math.Min(bestA, sw.Elapsed.TotalMilliseconds);
+                }
             }
 
             // ── B: inference batched path (int8) ──
@@ -71,7 +80,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
                 var sw = Stopwatch.StartNew();
                 Q4KDotKernel.ProjectBatched(inputData, n, weight, [], outB, aq, asc, abs);
                 sw.Stop();
-                if (r > 0) { bestB = Math.Min(bestB, sw.Elapsed.TotalMilliseconds); }
+                if (r > 0)
+                {
+                    bestB = Math.Min(bestB, sw.Elapsed.TotalMilliseconds);
+                }
             }
 
             // Numeric divergence (activation-quant noise of the int8 path).
@@ -81,7 +93,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
                 var d = Math.Abs(outA[i] - outB[i]);
                 maxAbs = Math.Max(maxAbs, d);
                 refMax = Math.Max(refMax, Math.Abs(outA[i]));
-                if (Math.Abs(outA[i]) > 1f) { maxRel = Math.Max(maxRel, d / Math.Abs(outA[i])); }
+                if (Math.Abs(outA[i]) > 1f)
+                {
+                    maxRel = Math.Max(maxRel, d / Math.Abs(outA[i]));
+                }
             }
 
             _out.WriteLine($"shapes: batch {n} × [{k}→{m}], reps {reps} (best)");

@@ -11,9 +11,18 @@ namespace DevOnBike.Overfit.Statistical
 {
     public class HmmParams
     {
-        public required float[] InitialProbs { get; init; }
-        public required float[] TransitionMatrix { get; init; }
-        public required float[] Means { get; init; }
+        public required float[] InitialProbs
+        {
+            get; init;
+        }
+        public required float[] TransitionMatrix
+        {
+            get; init;
+        }
+        public required float[] Means
+        {
+            get; init;
+        }
 
         /// <summary>
         /// All per-state covariance matrices concatenated into ONE flat row-major buffer (state-major):
@@ -21,7 +30,10 @@ namespace DevOnBike.Overfit.Statistical
         /// to stay consistent with the rest of the engine — one allocation, cache-friendly; the JSON is a
         /// single flat array. <see cref="ToFastTensors"/> splits it back into per-state matrices.
         /// </summary>
-        public required float[] Covariances { get; init; }
+        public required float[] Covariances
+        {
+            get; init;
+        }
 
         public void SaveToFile(string path)
         {

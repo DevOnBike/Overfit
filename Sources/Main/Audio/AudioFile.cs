@@ -21,7 +21,10 @@ namespace DevOnBike.Overfit.Audio
         {
             foreach (var d in Default)
             {
-                if (d.CanRead(path)) { return true; }
+                if (d.CanRead(path))
+                {
+                    return true;
+                }
             }
             return false;
         }

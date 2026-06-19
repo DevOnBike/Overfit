@@ -22,7 +22,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
         [LongFact]
         public void Embed_FullLengthPassage_DoesNotExhaustArena()
         {
-            if (!Directory.Exists(MiniLmDir)) { return; }
+            if (!Directory.Exists(MiniLmDir))
+            {
+                return;
+            }
 
             using var embedder = SentenceEmbedder.ForMiniLm(MiniLmDir);
 

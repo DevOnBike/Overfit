@@ -42,7 +42,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         [LongFact]
         public void Merged_Vs_Preset_DecodeTokensPerSecond()
         {
-            if (!File.Exists(Orpheus) || !File.Exists(Adapter)) { _out.WriteLine("missing orpheus/adapter"); return; }
+            if (!File.Exists(Orpheus) || !File.Exists(Adapter))
+            {
+                _out.WriteLine("missing orpheus/adapter");
+                return;
+            }
 
             using var trainer = new VoiceCloneTrainer(Orpheus, maxSeqLen: 256, new QLoRAOptions());
             trainer.LoadAdapter(Adapter);
@@ -98,13 +102,22 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             {
                 using var s = eng.CreateSession();
                 s.Prefill(prompt);
-                for (var i = 0; i < WarmTokens; i++) { s.GenerateNextToken(in sampling); }
+                for (var i = 0; i < WarmTokens; i++)
+                {
+                    s.GenerateNextToken(in sampling);
+                }
 
                 var t0 = Stopwatch.GetTimestamp();
-                for (var i = 0; i < TimedTokens; i++) { s.GenerateNextToken(in sampling); }
+                for (var i = 0; i < TimedTokens; i++)
+                {
+                    s.GenerateNextToken(in sampling);
+                }
                 var secs = (Stopwatch.GetTimestamp() - t0) / (double)Stopwatch.Frequency;
 
-                if (run > 0) { best = Math.Max(best, TimedTokens / secs); }
+                if (run > 0)
+                {
+                    best = Math.Max(best, TimedTokens / secs);
+                }
             }
             return best;
         }
@@ -120,7 +133,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
                 _ = trainer.Generate(prompt, TimedTokens, eosTokenId: -999, temperature: 0f, repeatPenalty: 1f, seed: 1);
                 var secs = (Stopwatch.GetTimestamp() - t0) / (double)Stopwatch.Frequency;
 
-                if (run > 0) { best = Math.Max(best, TimedTokens / secs); }
+                if (run > 0)
+                {
+                    best = Math.Max(best, TimedTokens / secs);
+                }
             }
             return best;
         }

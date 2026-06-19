@@ -19,15 +19,27 @@ namespace DevOnBike.Overfit.Mcp.Protocol
     public sealed class JsonRpcRequest
     {
         [JsonPropertyName("jsonrpc")]
-        public string? JsonRpc { get; set; }
+        public string? JsonRpc
+        {
+            get; set;
+        }
 
         [JsonPropertyName("id")]
-        public JsonElement? Id { get; set; }
+        public JsonElement? Id
+        {
+            get; set;
+        }
 
         [JsonPropertyName("method")]
-        public string? Method { get; set; }
+        public string? Method
+        {
+            get; set;
+        }
 
         [JsonPropertyName("params")]
-        public JsonElement? Params { get; set; }
+        public JsonElement? Params
+        {
+            get; set;
+        }
     }
 }

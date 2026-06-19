@@ -46,7 +46,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         [LongFact]
         public void Bielik_ToolCalling_And_Json_Work_OnSpm()
         {
-            if (!File.Exists(Path)) { _out.WriteLine("missing Bielik gguf"); return; }
+            if (!File.Exists(Path))
+            {
+                _out.WriteLine("missing Bielik gguf");
+                return;
+            }
 
             using var client = OverfitClient.LoadGguf(Path);
 

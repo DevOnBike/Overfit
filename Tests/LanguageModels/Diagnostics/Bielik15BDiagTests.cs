@@ -26,7 +26,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         [LongFact]
         public void RawCompletion_PolishPrefix()
         {
-            if (!File.Exists(Path)) { _out.WriteLine("missing gguf"); return; }
+            if (!File.Exists(Path))
+            {
+                _out.WriteLine("missing gguf");
+                return;
+            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(Path);
             var tok = GgufTokenizer.Load(Path);
@@ -53,7 +57,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             for (var i = 0; i < 40 && !session2.IsFull; i++)
             {
                 var t = session2.GenerateNextToken(in sampling);
-                if (t == 4) { break; }
+                if (t == 4)
+                {
+                    break;
+                }
                 ids2.Add(t);
             }
             _out.WriteLine($"CHAT: \"{tok.Decode(ids2.ToArray())}\"");

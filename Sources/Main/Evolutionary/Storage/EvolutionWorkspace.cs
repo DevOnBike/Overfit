@@ -45,9 +45,15 @@ namespace DevOnBike.Overfit.Evolutionary.Storage
             ResetIndices();
         }
 
-        public int PopulationSize { get; }
+        public int PopulationSize
+        {
+            get;
+        }
 
-        public int GenomeSize { get; }
+        public int GenomeSize
+        {
+            get;
+        }
 
         public int PopulationMatrixLength => PopulationSize * GenomeSize;
 
@@ -90,9 +96,15 @@ namespace DevOnBike.Overfit.Evolutionary.Storage
             private init => _shapedFitnessTensor = value;
         }
 
-        public int[] Ranking { get; }
+        public int[] Ranking
+        {
+            get;
+        }
 
-        public int[] EliteIndices { get; }
+        public int[] EliteIndices
+        {
+            get;
+        }
 
         private readonly FastTensor<float> _fitnessTensor = null!;
         private readonly FastTensor<float> _shapedFitnessTensor = null!;

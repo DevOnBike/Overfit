@@ -7,13 +7,25 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
 {
     public interface ILoRAAdapter : IDisposable
     {
-        string Name { get; }
+        string Name
+        {
+            get;
+        }
 
-        LoRAOptions Options { get; }
+        LoRAOptions Options
+        {
+            get;
+        }
 
-        long TrainableParameterCount { get; }
+        long TrainableParameterCount
+        {
+            get;
+        }
 
-        bool IsEnabled { get; }
+        bool IsEnabled
+        {
+            get;
+        }
 
         void Enable();
 

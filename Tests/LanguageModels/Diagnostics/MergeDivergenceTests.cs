@@ -27,7 +27,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         [LongFact]
         public void Merged_Vs_Trainable_FinalHidden_Diff()
         {
-            if (!File.Exists(Orpheus) || !File.Exists(Adapter)) { _out.WriteLine("missing orpheus/adapter"); return; }
+            if (!File.Exists(Orpheus) || !File.Exists(Adapter))
+            {
+                _out.WriteLine("missing orpheus/adapter");
+                return;
+            }
 
             using var trainer = new VoiceCloneTrainer(Orpheus, maxSeqLen: 256, new QLoRAOptions());
             trainer.LoadAdapter(Adapter);
@@ -65,7 +69,13 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         private static int FirstDiff(int[] a, int[] b)
         {
             var n = Math.Min(a.Length, b.Length);
-            for (var i = 0; i < n; i++) { if (a[i] != b[i]) { return i; } }
+            for (var i = 0; i < n; i++)
+            {
+                if (a[i] != b[i])
+                {
+                    return i;
+                }
+            }
             return n;
         }
 
@@ -97,24 +107,33 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             private readonly int _base;
             public MaskBelow(int b) => _base = b;
             public bool IsComplete => false;
-            public void Accept(int token) { }
+            public void Accept(int token)
+            {
+            }
             public void ApplyMask(Span<float> logits)
             {
                 var n = Math.Min(_base, logits.Length);
-                for (var i = 0; i < n; i++) { logits[i] = float.NegativeInfinity; }
+                for (var i = 0; i < n; i++)
+                {
+                    logits[i] = float.NegativeInfinity;
+                }
             }
         }
 
         private void Report(string label, ReadOnlySpan<float> a, ReadOnlySpan<float> b)
         {
             var n = Math.Min(a.Length, b.Length);
-            a = a[..n]; b = b[..n];
+            a = a[..n];
+            b = b[..n];
             var dot = TensorPrimitives.Dot(a, b);
             var na = MathF.Sqrt(TensorPrimitives.Dot(a, a));
             var nb = MathF.Sqrt(TensorPrimitives.Dot(b, b));
             var cos = dot / (na * nb + 1e-9f);
             var maxAbs = 0f;
-            for (var i = 0; i < n; i++) { maxAbs = MathF.Max(maxAbs, MathF.Abs(a[i] - b[i])); }
+            for (var i = 0; i < n; i++)
+            {
+                maxAbs = MathF.Max(maxAbs, MathF.Abs(a[i] - b[i]));
+            }
             _out.WriteLine($"  [{label}] cos={cos:F5} |a|={na:F2} |b|={nb:F2} maxAbsDiff={maxAbs:F4}");
         }
     }

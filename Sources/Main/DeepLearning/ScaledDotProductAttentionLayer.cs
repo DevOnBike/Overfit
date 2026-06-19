@@ -73,19 +73,34 @@ namespace DevOnBike.Overfit.DeepLearning
         }
 
         /// <summary>Query projection [d_model, d_k].</summary>
-        public Parameter Wq { get; }
+        public Parameter Wq
+        {
+            get;
+        }
 
         /// <summary>Key projection [d_model, d_k].</summary>
-        public Parameter Wk { get; }
+        public Parameter Wk
+        {
+            get;
+        }
 
         /// <summary>Value projection [d_model, d_v].</summary>
-        public Parameter Wv { get; }
+        public Parameter Wv
+        {
+            get;
+        }
 
         /// <summary>Output projection [d_v, d_model].</summary>
-        public Parameter Wo { get; }
+        public Parameter Wo
+        {
+            get;
+        }
 
         /// <summary>Output bias [d_model].</summary>
-        public Parameter Bo { get; }
+        public Parameter Bo
+        {
+            get;
+        }
 
         public bool IsTraining { get; private set; } = true;
 
@@ -169,19 +184,33 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void Save(BinaryWriter bw)
         {
-            Wq.Save(bw); Wk.Save(bw); Wv.Save(bw); Wo.Save(bw); Bo.Save(bw);
+            Wq.Save(bw);
+            Wk.Save(bw);
+            Wv.Save(bw);
+            Wo.Save(bw);
+            Bo.Save(bw);
         }
 
         public void Load(BinaryReader br)
         {
-            Wq.Load(br); Wk.Load(br); Wv.Load(br); Wo.Load(br); Bo.Load(br);
+            Wq.Load(br);
+            Wk.Load(br);
+            Wv.Load(br);
+            Wo.Load(br);
+            Bo.Load(br);
         }
 
         public void Dispose()
         {
-            _wqNode?.Dispose(); _wkNode?.Dispose();
-            _wvNode?.Dispose(); _woNode?.Dispose();
-            Wq.Dispose(); Wk.Dispose(); Wv.Dispose(); Wo.Dispose(); Bo.Dispose();
+            _wqNode?.Dispose();
+            _wkNode?.Dispose();
+            _wvNode?.Dispose();
+            _woNode?.Dispose();
+            Wq.Dispose();
+            Wk.Dispose();
+            Wv.Dispose();
+            Wo.Dispose();
+            Bo.Dispose();
         }
 
         // ── Helpers ──────────────────────────────────────────────────────────

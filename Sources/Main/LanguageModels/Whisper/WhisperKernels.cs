@@ -45,13 +45,23 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
                 var row = x.Slice(r * dim, dim);
                 var outRow = dst.Slice(r * dim, dim);
                 var mean = 0f;
-                for (var i = 0; i < dim; i++) { mean += row[i]; }
+                for (var i = 0; i < dim; i++)
+                {
+                    mean += row[i];
+                }
                 mean /= dim;
                 var variance = 0f;
-                for (var i = 0; i < dim; i++) { var d = row[i] - mean; variance += d * d; }
+                for (var i = 0; i < dim; i++)
+                {
+                    var d = row[i] - mean;
+                    variance += d * d;
+                }
                 variance /= dim;
                 var inv = 1f / MathF.Sqrt(variance + eps);
-                for (var i = 0; i < dim; i++) { outRow[i] = (row[i] - mean) * inv * gamma[i] + beta[i]; }
+                for (var i = 0; i < dim; i++)
+                {
+                    outRow[i] = (row[i] - mean) * inv * gamma[i] + beta[i];
+                }
             }
         }
 
@@ -95,7 +105,12 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             public readonly int InDim, OutDim;
             public LinearCtx(float* x, float* w, float* b, float* d, int inDim, int outDim)
             {
-                X = x; W = w; B = b; D = d; InDim = inDim; OutDim = outDim;
+                X = x;
+                W = w;
+                B = b;
+                D = d;
+                InDim = inDim;
+                OutDim = outDim;
             }
         }
 
@@ -164,7 +179,16 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             public readonly int InC, TIn, KSize, Stride, Pad, TOut;
             public Conv1dCtx(float* inp, float* w, float* b, float* d, int inC, int tIn, int kSize, int stride, int pad, int tOut)
             {
-                In = inp; W = w; B = b; D = d; InC = inC; TIn = tIn; KSize = kSize; Stride = stride; Pad = pad; TOut = tOut;
+                In = inp;
+                W = w;
+                B = b;
+                D = d;
+                InC = inC;
+                TIn = tIn;
+                KSize = kSize;
+                Stride = stride;
+                Pad = pad;
+                TOut = tOut;
             }
         }
 
@@ -275,10 +299,18 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
                 {
                     var s = TensorPrimitives.Dot(qi, k.Slice(j * dModel + off, dHead)) * scale;
                     scores[j] = s;
-                    if (s > max) { max = s; }
+                    if (s > max)
+                    {
+                        max = s;
+                    }
                 }
                 var sum = 0f;
-                for (var j = 0; j < valid; j++) { var e = MathF.Exp(scores[j] - max); scores[j] = e; sum += e; }
+                for (var j = 0; j < valid; j++)
+                {
+                    var e = MathF.Exp(scores[j] - max);
+                    scores[j] = e;
+                    sum += e;
+                }
                 var inv = 1f / sum;
 
                 var outRow = attnOut.Slice(i * dModel + off, dHead);
@@ -298,7 +330,16 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             public readonly bool Causal;
             public MhaCtx(float* q, float* k, float* v, float* a, int tq, int tkv, int dModel, int dHead, float scale, bool causal)
             {
-                Q = q; K = k; V = v; A = a; Tq = tq; Tkv = tkv; DModel = dModel; DHead = dHead; Scale = scale; Causal = causal;
+                Q = q;
+                K = k;
+                V = v;
+                A = a;
+                Tq = tq;
+                Tkv = tkv;
+                DModel = dModel;
+                DHead = dHead;
+                Scale = scale;
+                Causal = causal;
             }
         }
 
@@ -338,10 +379,18 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
                 {
                     var s = TensorPrimitives.Dot(qh, cacheK.Slice(j * dModel + off, dHead)) * scale;
                     scores[j] = s;
-                    if (s > max) { max = s; }
+                    if (s > max)
+                    {
+                        max = s;
+                    }
                 }
                 var sum = 0f;
-                for (var j = 0; j < len; j++) { var e = MathF.Exp(scores[j] - max); scores[j] = e; sum += e; }
+                for (var j = 0; j < len; j++)
+                {
+                    var e = MathF.Exp(scores[j] - max);
+                    scores[j] = e;
+                    sum += e;
+                }
                 var inv = 1f / sum;
 
                 var outH = dst.Slice(off, dHead);

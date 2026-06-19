@@ -43,9 +43,18 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
         public SafetensorsReader(Stream stream, bool ownsStream = false)
         {
-            if (stream is null) { throw new ArgumentNullException(nameof(stream)); }
-            if (!stream.CanRead) { throw new ArgumentException("Stream must be readable.", nameof(stream)); }
-            if (!stream.CanSeek) { throw new ArgumentException("Stream must be seekable.", nameof(stream)); }
+            if (stream is null)
+            {
+                throw new ArgumentNullException(nameof(stream));
+            }
+            if (!stream.CanRead)
+            {
+                throw new ArgumentException("Stream must be readable.", nameof(stream));
+            }
+            if (!stream.CanSeek)
+            {
+                throw new ArgumentException("Stream must be seekable.", nameof(stream));
+            }
 
             _stream = stream;
             _ownsStream = ownsStream;
@@ -73,10 +82,16 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         }
 
         /// <summary>Tensor name → dtype / shape / byte range (offsets relative to the data block).</summary>
-        public IReadOnlyDictionary<string, SafetensorsTensorInfo> Tensors { get; }
+        public IReadOnlyDictionary<string, SafetensorsTensorInfo> Tensors
+        {
+            get;
+        }
 
         /// <summary>The optional <c>__metadata__</c> string map (empty if absent).</summary>
-        public IReadOnlyDictionary<string, string> Metadata { get; }
+        public IReadOnlyDictionary<string, string> Metadata
+        {
+            get;
+        }
 
         /// <summary>Element count (product of shape dims) for a named tensor.</summary>
         public long ElementCount(string name) => Info(name).ElementCount;
@@ -128,9 +143,15 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
         public void Dispose()
         {
-            if (_disposed) { return; }
+            if (_disposed)
+            {
+                return;
+            }
             _disposed = true;
-            if (_ownsStream) { _stream.Dispose(); }
+            if (_ownsStream)
+            {
+                _stream.Dispose();
+            }
         }
 
         private SafetensorsTensorInfo Info(string name)
@@ -333,7 +354,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
         private void ThrowIfDisposed()
         {
-            if (_disposed) { throw new ObjectDisposedException(nameof(SafetensorsReader)); }
+            if (_disposed)
+            {
+                throw new ObjectDisposedException(nameof(SafetensorsReader));
+            }
         }
     }
 }

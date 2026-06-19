@@ -182,7 +182,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         {
             var rng = new Random(123);
             var result = new int[length];
-            for (var i = 0; i < length; i++) { result[i] = rng.Next(0, vocabSize); }
+            for (var i = 0; i < length; i++)
+            {
+                result[i] = rng.Next(0, vocabSize);
+            }
             return result;
         }
 
@@ -214,7 +217,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
                 var maxVal = logitsSpan[offset];
                 for (var v = 1; v < vocabSize; v++)
                 {
-                    if (logitsSpan[offset + v] > maxVal) { maxVal = logitsSpan[offset + v]; }
+                    if (logitsSpan[offset + v] > maxVal)
+                    {
+                        maxVal = logitsSpan[offset + v];
+                    }
                 }
 
                 var sumExp = 0f;
@@ -237,15 +243,24 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             foreach (var parameter in parameters)
             {
                 var grad = parameter.GradSpan;
-                for (var i = 0; i < grad.Length; i++) { totalNormSq += grad[i] * grad[i]; }
+                for (var i = 0; i < grad.Length; i++)
+                {
+                    totalNormSq += grad[i] * grad[i];
+                }
             }
             var norm = MathF.Sqrt(totalNormSq);
-            if (norm <= maxNorm) { return; }
+            if (norm <= maxNorm)
+            {
+                return;
+            }
             var scale = maxNorm / (norm + 1e-6f);
             foreach (var parameter in parameters)
             {
                 var grad = parameter.GradSpan;
-                for (var i = 0; i < grad.Length; i++) { grad[i] *= scale; }
+                for (var i = 0; i < grad.Length; i++)
+                {
+                    grad[i] *= scale;
+                }
             }
         }
 

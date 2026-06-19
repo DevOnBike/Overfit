@@ -35,7 +35,10 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
         {
             // Classes A=0, B=1, C=2, blank=3. Train a bigram that A is always followed by C.
             var lm = new NGramCtcLanguageModel(classCount: 4, order: 2, smoothing: 0.01);
-            for (var i = 0; i < 20; i++) { lm.Train(new[] { 0, 2 }); }
+            for (var i = 0; i < 20; i++)
+            {
+                lm.Train(new[] { 0, 2 });
+            }
 
             // Acoustics: step0 forces A; step1 prefers B (2.0) over C (1.5).
             const int t = 2, classes = 4, blank = 3;

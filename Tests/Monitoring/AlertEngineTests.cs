@@ -325,7 +325,10 @@ namespace DevOnBike.Overfit.Tests.Monitoring
 
             public Task SendAsync(AlertEvent alert, CancellationToken ct = default)
             {
-                lock (_received) { _received.Add(alert); }
+                lock (_received)
+                {
+                    _received.Add(alert);
+                }
                 return Task.CompletedTask;
             }
         }

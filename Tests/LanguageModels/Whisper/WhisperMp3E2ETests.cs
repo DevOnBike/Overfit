@@ -39,7 +39,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
             var overlap = 0;
             foreach (var word in mp3Words)
             {
-                if (wavWords.Contains(word)) { overlap++; }
+                if (wavWords.Contains(word))
+                {
+                    overlap++;
+                }
             }
             var ratio = mp3Words.Count == 0 ? 0.0 : (double)overlap / mp3Words.Count;
             _out.WriteLine($"word overlap: {overlap}/{mp3Words.Count} = {ratio:P0}");
@@ -70,7 +73,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
             var words = new List<string>();
             foreach (var raw in text.ToLowerInvariant().Split(' ', '\t', '\n', '\r', '.', ',', '!', '?'))
             {
-                if (raw.Length > 0) { words.Add(raw); }
+                if (raw.Length > 0)
+                {
+                    words.Add(raw);
+                }
             }
             return words;
         }

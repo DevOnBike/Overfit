@@ -21,10 +21,16 @@ namespace DevOnBike.Overfit.LanguageModels.Tools
             Arguments = arguments;
         }
 
-        public string Name { get; }
+        public string Name
+        {
+            get;
+        }
 
         /// <summary>The tool arguments as a raw JSON string (an object; <c>{}</c> when absent).</summary>
-        public string Arguments { get; }
+        public string Arguments
+        {
+            get;
+        }
 
         /// <summary>
         /// Parses a <c>{"name": ..., "arguments": ...}</c> envelope. Returns false (rather than
@@ -33,13 +39,19 @@ namespace DevOnBike.Overfit.LanguageModels.Tools
         public static bool TryParse(string json, out ToolCall call)
         {
             call = default;
-            if (string.IsNullOrWhiteSpace(json)) { return false; }
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return false;
+            }
 
             try
             {
                 using var doc = JsonDocument.Parse(json);
                 var root = doc.RootElement;
-                if (root.ValueKind != JsonValueKind.Object) { return false; }
+                if (root.ValueKind != JsonValueKind.Object)
+                {
+                    return false;
+                }
                 if (!root.TryGetProperty("name", out var nameElement) ||
                     nameElement.ValueKind != JsonValueKind.String)
                 {

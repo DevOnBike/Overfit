@@ -20,16 +20,28 @@ namespace Benchmarks
         private bool _disposed;
 
         [Params(12)]
-        public int LayerCount { get; set; }
+        public int LayerCount
+        {
+            get; set;
+        }
 
         [Params(12)]
-        public int HeadCount { get; set; }
+        public int HeadCount
+        {
+            get; set;
+        }
 
         [Params(64, 256, 512)]
-        public int MaxSequenceLength { get; set; }
+        public int MaxSequenceLength
+        {
+            get; set;
+        }
 
         [Params(64)]
-        public int HeadDimension { get; set; }
+        public int HeadDimension
+        {
+            get; set;
+        }
 
         [GlobalSetup]
         public void Setup()

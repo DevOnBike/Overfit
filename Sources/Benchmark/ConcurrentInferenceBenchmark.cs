@@ -269,13 +269,25 @@ namespace Benchmarks
                 RunOnnxOnce();
             }
 
-            public float[] Input { get; }
+            public float[] Input
+            {
+                get;
+            }
 
-            public float[] OverfitOutput { get; }
+            public float[] OverfitOutput
+            {
+                get;
+            }
 
-            public float[] OnnxOutput { get; }
+            public float[] OnnxOutput
+            {
+                get;
+            }
 
-            public double Checksum { get; set; }
+            public double Checksum
+            {
+                get; set;
+            }
 
             public void RunOverfitOnce()
             {

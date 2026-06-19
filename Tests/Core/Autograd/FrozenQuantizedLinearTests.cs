@@ -46,7 +46,10 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
                 for (var o = 0; o < M; o++)
                 {
                     var expected = 0f;
-                    for (var i = 0; i < K; i++) { expected += wF32[o * K + i] * x[b * K + i]; }
+                    for (var i = 0; i < K; i++)
+                    {
+                        expected += wF32[o * K + i] * x[b * K + i];
+                    }
                     maxAbs = Math.Max(maxAbs, Math.Abs(expected - ys[b * M + o]));
                 }
             }
@@ -84,7 +87,10 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
                 for (var i = 0; i < K; i++)
                 {
                     var expected = 0f;
-                    for (var o = 0; o < M; o++) { expected += dy[b * M + o] * wF32[o * K + i]; }
+                    for (var o = 0; o < M; o++)
+                    {
+                        expected += dy[b * M + o] * wF32[o * K + i];
+                    }
                     maxAbs = Math.Max(maxAbs, Math.Abs(expected - dx[b * K + i]));
                 }
             }
@@ -128,8 +134,10 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
             foreach (var idx in new[] { 0, 37, 128, 255, K + 5, 2 * K + 200, 3 * K + 99 })
             {
                 var orig = xs[idx];
-                xs[idx] = orig + eps; var lp = LossAt();
-                xs[idx] = orig - eps; var lm = LossAt();
+                xs[idx] = orig + eps;
+                var lp = LossAt();
+                xs[idx] = orig - eps;
+                var lm = LossAt();
                 xs[idx] = orig;
                 var fd = (lp - lm) / (2 * eps);
                 var an = dxA[idx];
@@ -168,7 +176,10 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
                 for (var o = 0; o < pm; o++)
                 {
                     var e = 0f;
-                    for (var i = 0; i < pk; i++) { e += wF32[o * pk + i] * x[b * pk + i]; }
+                    for (var i = 0; i < pk; i++)
+                    {
+                        e += wF32[o * pk + i] * x[b * pk + i];
+                    }
                     fMax = Math.Max(fMax, Math.Abs(e - ys[b * pm + o]));
                 }
             }
@@ -182,7 +193,10 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
                 for (var i = 0; i < pk; i++)
                 {
                     var e = 0f;
-                    for (var o = 0; o < pm; o++) { e += dy[b * pm + o] * wF32[o * pk + i]; }
+                    for (var o = 0; o < pm; o++)
+                    {
+                        e += dy[b * pm + o] * wF32[o * pk + i];
+                    }
                     gMax = Math.Max(gMax, Math.Abs(e - dx[b * pk + i]));
                 }
             }
@@ -199,12 +213,19 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
             const int qn = 4, qk = 64, qm = 8;
             var rng = new Random(31);
             var wf = new float[qm * qk];
-            for (var i = 0; i < wf.Length; i++) { wf[i] = (float)(rng.NextDouble() * 2 - 1) * 0.4f; }
+            for (var i = 0; i < wf.Length; i++)
+            {
+                wf[i] = (float)(rng.NextDouble() * 2 - 1) * 0.4f;
+            }
 
             var q8 = Q8Weight.QuantizeRows(wf, qm, qk);   // output-major [qm rows × qk]
             var wRef = new float[qm * qk];
             Span<float> rowScratch = new float[qk];
-            for (var o = 0; o < qm; o++) { q8.DecodeRow(o, rowScratch); rowScratch.CopyTo(wRef.AsSpan(o * qk, qk)); }
+            for (var o = 0; o < qm; o++)
+            {
+                q8.DecodeRow(o, rowScratch);
+                rowScratch.CopyTo(wRef.AsSpan(o * qk, qk));
+            }
 
             var x = RandomVector(qn * qk, seed: 32);
             using var xData = Storage(x);
@@ -219,7 +240,10 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
                 for (var o = 0; o < qm; o++)
                 {
                     var e = 0f;
-                    for (var i = 0; i < qk; i++) { e += wRef[o * qk + i] * x[b * qk + i]; }
+                    for (var i = 0; i < qk; i++)
+                    {
+                        e += wRef[o * qk + i] * x[b * qk + i];
+                    }
                     fMax = Math.Max(fMax, Math.Abs(e - ys[b * qm + o]));
                 }
             }
@@ -270,7 +294,10 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
         {
             var r = new Random(seed);
             var v = new float[n];
-            for (var i = 0; i < n; i++) { v[i] = (float)(r.NextDouble() * 2 - 1); }
+            for (var i = 0; i < n; i++)
+            {
+                v[i] = (float)(r.NextDouble() * 2 - 1);
+            }
             return v;
         }
 

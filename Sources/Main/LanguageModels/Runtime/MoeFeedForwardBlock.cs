@@ -53,10 +53,22 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _normalizeWeights = normalizeWeights;
         }
 
-        public int DModel { get; }
-        public int DFF { get; }
-        public int ExpertCount { get; }
-        public int ExpertUsedCount { get; }
+        public int DModel
+        {
+            get;
+        }
+        public int DFF
+        {
+            get;
+        }
+        public int ExpertCount
+        {
+            get;
+        }
+        public int ExpertUsedCount
+        {
+            get;
+        }
 
         /// <summary>
         /// Routes <paramref name="hidden"/> and writes the combined output of the top-k experts into
@@ -75,8 +87,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ArgumentNullException.ThrowIfNull(gateExperts);
             ArgumentNullException.ThrowIfNull(upExperts);
             ArgumentNullException.ThrowIfNull(downExperts);
-            if (hidden.Length < DModel) { throw new ArgumentException("Hidden span smaller than dModel.", nameof(hidden)); }
-            if (output.Length < DModel) { throw new ArgumentException("Output span smaller than dModel.", nameof(output)); }
+            if (hidden.Length < DModel)
+            {
+                throw new ArgumentException("Hidden span smaller than dModel.", nameof(hidden));
+            }
+            if (output.Length < DModel)
+            {
+                throw new ArgumentException("Output span smaller than dModel.", nameof(output));
+            }
             if (routerWeight.Length < DModel * ExpertCount)
             {
                 throw new ArgumentException("Router weight smaller than dModel * ExpertCount.", nameof(routerWeight));
@@ -132,8 +150,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ArgumentNullException.ThrowIfNull(upExperts);
             ArgumentNullException.ThrowIfNull(downExperts);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rows);
-            if (hidden.Length < (long)rows * DModel) { throw new ArgumentException("Hidden span smaller than rows*dModel.", nameof(hidden)); }
-            if (output.Length < (long)rows * DModel) { throw new ArgumentException("Output span smaller than rows*dModel.", nameof(output)); }
+            if (hidden.Length < (long)rows * DModel)
+            {
+                throw new ArgumentException("Hidden span smaller than rows*dModel.", nameof(hidden));
+            }
+            if (output.Length < (long)rows * DModel)
+            {
+                throw new ArgumentException("Output span smaller than rows*dModel.", nameof(output));
+            }
 
             var k = ExpertUsedCount;
 
@@ -180,7 +204,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                             }
                         }
                     }
-                    if (count == 0) { continue; }
+                    if (count == 0)
+                    {
+                        continue;
+                    }
 
                     for (var c = 0; c < count; c++)
                     {
@@ -206,7 +233,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     {
                         var w = selWeights[n * k + j];
                         var src = slotOut.AsSpan((n * k + j) * DModel, DModel);
-                        for (var d = 0; d < DModel; d++) { dst[d] += w * src[d]; }
+                        for (var d = 0; d < DModel; d++)
+                        {
+                            dst[d] += w * src[d];
+                        }
                     }
                 }
             }

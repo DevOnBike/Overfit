@@ -23,10 +23,16 @@ namespace Benchmarks
         private Random _fitnessRng = null!;
 
         [Params(256, 1024)]
-        public int PopulationSize { get; set; }
+        public int PopulationSize
+        {
+            get; set;
+        }
 
         [Params(64, 256)]
-        public int ParameterCount { get; set; }
+        public int ParameterCount
+        {
+            get; set;
+        }
 
         /// <summary>
         ///     Selects the combination of operators under test:
@@ -35,7 +41,10 @@ namespace Benchmarks
         ///     (what production pipelines actually run per generation).
         /// </summary>
         [Params(Config.Minimal, Config.Realistic)]
-        public Config Configuration { get; set; }
+        public Config Configuration
+        {
+            get; set;
+        }
 
         public enum Config
         {

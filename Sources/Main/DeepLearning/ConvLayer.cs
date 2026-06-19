@@ -94,13 +94,19 @@ namespace DevOnBike.Overfit.DeepLearning
             }
         }
 
-        public Parameter Kernels { get; }
+        public Parameter Kernels
+        {
+            get;
+        }
 
         /// <summary>
         /// Optional per-channel bias. Null for layers without bias (e.g., Conv before BN).
         /// Populated by <see cref="LoadParameters(ReadOnlySpan{float}, ReadOnlySpan{float})"/>.
         /// </summary>
-        public Parameter? Bias { get; private set; }
+        public Parameter? Bias
+        {
+            get; private set;
+        }
 
         public bool IsTraining { get; private set; } = true;
 
@@ -168,7 +174,10 @@ namespace DevOnBike.Overfit.DeepLearning
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
             _kernelsNode ??= Kernels.AsNode();
-            if (Bias is not null) { _biasNode ??= Bias.AsNode(); }
+            if (Bias is not null)
+            {
+                _biasNode ??= Bias.AsNode();
+            }
             return ComputationGraph.Conv2DOp(
                 graph, input, _kernelsNode, _inC, _outC, _h, _w, _k, _padding, _stride, _biasNode);
         }

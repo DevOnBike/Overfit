@@ -36,7 +36,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         public void QuantizedBlock_MatchesF32Dequant_Layer0()
         {
             var path = MoePath();
-            if (!File.Exists(path)) { _out.WriteLine($"missing {path}"); return; }
+            if (!File.Exists(path))
+            {
+                _out.WriteLine($"missing {path}");
+                return;
+            }
 
             using var reader = new GgufReader(path);
             var dModel = reader.GetMeta("qwen2moe.embedding_length", 0);
@@ -71,7 +75,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             var block = new Qwen2MoeFeedForwardBlock(dModel, expertDff, sharedDff, expertCount, expertUsed, normalizeExpertWeights: false);
 
             var hidden = new float[dModel];
-            for (var d = 0; d < dModel; d++) { hidden[d] = MathF.Sin(d * 0.05f) * 0.3f; }
+            for (var d = 0; d < dModel; d++)
+            {
+                hidden[d] = MathF.Sin(d * 0.05f) * 0.3f;
+            }
 
             var qOut = new float[dModel];
             var fOut = new float[dModel];
@@ -92,13 +99,33 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             // few percent (same routing, only projection quant error differs).
             Assert.True(rel < 0.05f, $"quantized MoE block diverges from F32 by {rel:P2} (> 5%).");
 
-            foreach (var w in fGate) { w.Dispose(); }
-            foreach (var w in fUp) { w.Dispose(); }
-            foreach (var w in fDown) { w.Dispose(); }
-            foreach (var w in qGate) { w.Dispose(); }
-            foreach (var w in qUp) { w.Dispose(); }
-            foreach (var w in qDown) { w.Dispose(); }
-            qShGate.Dispose(); qShUp.Dispose(); qShDown.Dispose();
+            foreach (var w in fGate)
+            {
+                w.Dispose();
+            }
+            foreach (var w in fUp)
+            {
+                w.Dispose();
+            }
+            foreach (var w in fDown)
+            {
+                w.Dispose();
+            }
+            foreach (var w in qGate)
+            {
+                w.Dispose();
+            }
+            foreach (var w in qUp)
+            {
+                w.Dispose();
+            }
+            foreach (var w in qDown)
+            {
+                w.Dispose();
+            }
+            qShGate.Dispose();
+            qShUp.Dispose();
+            qShDown.Dispose();
         }
     }
 }

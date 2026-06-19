@@ -123,9 +123,21 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// </summary>
         public void DequantizeRow(int row, Span<float> dst)
         {
-            if (_q4k is not null) { _q4k.DecodeRow(row, dst); return; }
-            if (_q6k is not null) { _q6k.DecodeRow(row, dst); return; }
-            if (_q8 is not null) { _q8.DecodeRow(row, dst); return; }
+            if (_q4k is not null)
+            {
+                _q4k.DecodeRow(row, dst);
+                return;
+            }
+            if (_q6k is not null)
+            {
+                _q6k.DecodeRow(row, dst);
+                return;
+            }
+            if (_q8 is not null)
+            {
+                _q8.DecodeRow(row, dst);
+                return;
+            }
             if (_f32 is not null)
             {
                 var rowLength = dst.Length;
@@ -144,9 +156,18 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// </summary>
         public IDequantRowSource AsRowSource()
         {
-            if (_q4k is not null) { return _q4k; }
-            if (_q6k is not null) { return _q6k; }
-            if (_q8 is not null) { return _q8; }
+            if (_q4k is not null)
+            {
+                return _q4k;
+            }
+            if (_q6k is not null)
+            {
+                return _q6k;
+            }
+            if (_q8 is not null)
+            {
+                return _q8;
+            }
             throw new OverfitRuntimeException(
                 "DecodeWeight.AsRowSource requires a quantized (Q4_K/Q6_K/Q8_0) backing; F32 is not a frozen-quant source.");
         }

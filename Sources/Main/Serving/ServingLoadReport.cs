@@ -24,38 +24,83 @@ namespace DevOnBike.Overfit.Serving
         }
 
         /// <summary>Number of concurrent virtual users that drove the test.</summary>
-        public int Concurrency { get; private init; }
+        public int Concurrency
+        {
+            get; private init;
+        }
 
         /// <summary>Wall-clock duration of the measured window, seconds.</summary>
-        public double WallClockSeconds { get; private init; }
+        public double WallClockSeconds
+        {
+            get; private init;
+        }
 
         /// <summary>Serving cost units in the score denominator — e.g. CPU cores, server count, or 1.
         /// The GPU-leaderboard analogue is <c>total_GPUs</c>; it stops "throw more hardware at it"
         /// from inflating the score.</summary>
-        public double CostUnits { get; private init; }
+        public double CostUnits
+        {
+            get; private init;
+        }
 
-        public int TotalRequests { get; private init; }
-        public int SuccessfulRequests { get; private init; }
+        public int TotalRequests
+        {
+            get; private init;
+        }
+        public int SuccessfulRequests
+        {
+            get; private init;
+        }
         public int FailedRequests => TotalRequests - SuccessfulRequests;
 
         /// <summary>Fraction of requests that failed (HTTP error, timeout, transport drop), 0.0–1.0.</summary>
         public double ErrorRate => TotalRequests == 0 ? 0.0 : (double)FailedRequests / TotalRequests;
 
-        public double TimeToFirstTokenP50Ms { get; private init; }
-        public double TimeToFirstTokenP95Ms { get; private init; }
-        public double TimeToFirstTokenP99Ms { get; private init; }
+        public double TimeToFirstTokenP50Ms
+        {
+            get; private init;
+        }
+        public double TimeToFirstTokenP95Ms
+        {
+            get; private init;
+        }
+        public double TimeToFirstTokenP99Ms
+        {
+            get; private init;
+        }
 
-        public double InterTokenLatencyP50Ms { get; private init; }
-        public double InterTokenLatencyP95Ms { get; private init; }
-        public double InterTokenLatencyP99Ms { get; private init; }
+        public double InterTokenLatencyP50Ms
+        {
+            get; private init;
+        }
+        public double InterTokenLatencyP95Ms
+        {
+            get; private init;
+        }
+        public double InterTokenLatencyP99Ms
+        {
+            get; private init;
+        }
 
-        public double EndToEndP50Ms { get; private init; }
-        public double EndToEndP95Ms { get; private init; }
-        public double EndToEndP99Ms { get; private init; }
+        public double EndToEndP50Ms
+        {
+            get; private init;
+        }
+        public double EndToEndP95Ms
+        {
+            get; private init;
+        }
+        public double EndToEndP99Ms
+        {
+            get; private init;
+        }
 
         /// <summary>Aggregate output tokens/chunks per second across all successful requests over the
         /// measured wall-clock window — the throughput term.</summary>
-        public double ThroughputTokensPerSecond { get; private init; }
+        public double ThroughputTokensPerSecond
+        {
+            get; private init;
+        }
 
         /// <summary>Effective throughput after penalising failures: <c>throughput × (1 − error_rate)</c>.</summary>
         public double Goodput => ThroughputTokensPerSecond * (1.0 - ErrorRate);

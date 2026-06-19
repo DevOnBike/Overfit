@@ -21,9 +21,15 @@ namespace DevOnBike.Overfit.Autograd
         private readonly bool _ownsGradStorage;
         private int _disposed;
 
-        public bool RequiresGrad { get; }
+        public bool RequiresGrad
+        {
+            get;
+        }
 
-        public TensorShape Shape { get; }
+        public TensorShape Shape
+        {
+            get;
+        }
 
         /// <summary>
         /// Lifecycle and ownership classification for this node.

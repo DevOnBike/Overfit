@@ -14,9 +14,15 @@ namespace DevOnBike.Overfit.Mcp
     /// </summary>
     public sealed class McpToolResult
     {
-        public string Text { get; }
+        public string Text
+        {
+            get;
+        }
 
-        public bool IsError { get; }
+        public bool IsError
+        {
+            get;
+        }
 
         private McpToolResult(string text, bool isError)
         {

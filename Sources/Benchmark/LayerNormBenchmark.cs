@@ -42,11 +42,17 @@ namespace Benchmarks
     {
         // numRows = batchSize * seqLen (we flatten to [numRows, C] in LN).
         [Params(64, 1024, 4096)]
-        public int NumRows { get; set; }
+        public int NumRows
+        {
+            get; set;
+        }
 
         // Hidden size (last dim normalized).
         [Params(128, 512)]
-        public int C { get; set; }
+        public int C
+        {
+            get; set;
+        }
 
         private TensorStorage<float> _inputStorage = null!;
         private TensorStorage<float> _gammaStorage = null!;
@@ -122,7 +128,10 @@ namespace Benchmarks
         [GlobalCleanup]
         public void Cleanup()
         {
-            if (_disposed) { return; }
+            if (_disposed)
+            {
+                return;
+            }
             _disposed = true;
 
             _input.Dispose();

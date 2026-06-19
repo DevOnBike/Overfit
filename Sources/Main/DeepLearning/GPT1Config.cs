@@ -65,13 +65,19 @@ namespace DevOnBike.Overfit.DeepLearning
 
         /// <summary>Per-head dimension when set explicitly (Qwen3 has <c>head_dim ≠ DModel/NHeads</c>);
         /// 0 means derive it as <see cref="DModel"/> / <see cref="NHeads"/>.</summary>
-        public int HeadDim { get; init; }
+        public int HeadDim
+        {
+            get; init;
+        }
 
         /// <summary>The effective per-head dimension used by attention / RoPE.</summary>
         public int AttentionHeadDim => HeadDim > 0 ? HeadDim : DModel / NHeads;
 
         /// <summary>Whether this model applies Qwen3-style per-head RMSNorm to Q and K before RoPE.</summary>
-        public bool UsesQkNorm { get; init; }
+        public bool UsesQkNorm
+        {
+            get; init;
+        }
 
         /// <summary>Number of Transformer blocks.</summary>
         public int NLayers { get; init; } = 12;
@@ -129,20 +135,29 @@ namespace DevOnBike.Overfit.DeepLearning
         /// original HF layout — Qwen2/Qwen2-MoE GGUF are NOT permuted by llama.cpp, so they need this.
         /// Getting it wrong leaves position 0 correct (identity rotation) but corrupts every later position.
         /// </summary>
-        public bool RopeSplitHalf { get; init; }
+        public bool RopeSplitHalf
+        {
+            get; init;
+        }
 
         /// <summary>
         /// Optional Llama-3 "llama3" RoPE frequency scaling for long context (the
         /// <c>rope_scaling</c> block in a Llama-3.x config). Null = plain RoPE.
         /// </summary>
-        public RopeScaling? RopeScaling { get; init; }
+        public RopeScaling? RopeScaling
+        {
+            get; init;
+        }
 
         /// <summary>
         /// Phi-3 "longrope" per-dimension RoPE frequency factors (<c>[head_dim/2]</c>). Each base frequency
         /// <c>1/θ^(2i/d)</c> is divided by <c>RopeFreqFactors[i]</c> at table build. Null = no per-dim scaling.
         /// Distinct from <see cref="RopeScaling"/> (the scalar llama3 NTK-by-parts rule).
         /// </summary>
-        public float[]? RopeFreqFactors { get; init; }
+        public float[]? RopeFreqFactors
+        {
+            get; init;
+        }
 
         /// <summary>
         /// RoPE attention scaling (longrope "mscale") multiplying cos/sin. 1.0 in the short-context regime
@@ -160,12 +175,18 @@ namespace DevOnBike.Overfit.DeepLearning
         /// <summary>
         /// Gemma-2 attention logit soft-cap: pre-softmax scores are passed through <c>tanh(s/cap)·cap</c>. 0 = off.
         /// </summary>
-        public float AttnLogitSoftcap { get; init; }
+        public float AttnLogitSoftcap
+        {
+            get; init;
+        }
 
         /// <summary>
         /// Gemma-2 final logit soft-cap: LM-head logits are passed through <c>tanh(l/cap)·cap</c>. 0 = off.
         /// </summary>
-        public float FinalLogitSoftcap { get; init; }
+        public float FinalLogitSoftcap
+        {
+            get; init;
+        }
 
         // ── FFN ───────────────────────────────────────────────────────────────
 
@@ -174,7 +195,9 @@ namespace DevOnBike.Overfit.DeepLearning
         /// GeLU for GPT-2. SwiGLU for Llama/Mistral/Phi/Qwen.
         /// </summary>
         public FeedForwardActivation FfnActivation
-        { get; init; } = FeedForwardActivation.GeLU;
+        {
+            get; init;
+        } = FeedForwardActivation.GeLU;
 
         // ── Mixture of Experts (MoE) ──────────────────────────────────────────
         // 0 ⇒ dense FFN (the default for every model loaded today). When > 0 the FFN
@@ -182,16 +205,25 @@ namespace DevOnBike.Overfit.DeepLearning
         // ExpertUsedCount of them per token (Mixtral / Qwen-MoE style).
 
         /// <summary>Number of experts in the MoE FFN. 0 ⇒ dense (no MoE).</summary>
-        public int ExpertCount { get; init; }
+        public int ExpertCount
+        {
+            get; init;
+        }
 
         /// <summary>Experts activated per token (top-k). 0 ⇒ dense; otherwise ≤ <see cref="ExpertCount"/>.</summary>
-        public int ExpertUsedCount { get; init; }
+        public int ExpertUsedCount
+        {
+            get; init;
+        }
 
         /// <summary>
         /// FFN length of each routed expert (Qwen-MoE: smaller than <see cref="DFF"/>, which is the
         /// shared expert's length). 0 ⇒ fall back to <see cref="DFF"/>.
         /// </summary>
-        public int ExpertFeedForwardLength { get; init; }
+        public int ExpertFeedForwardLength
+        {
+            get; init;
+        }
 
         /// <summary>True when this model uses a Mixture-of-Experts FFN.</summary>
         public bool IsMixtureOfExperts => ExpertCount > 0 && ExpertUsedCount > 0;

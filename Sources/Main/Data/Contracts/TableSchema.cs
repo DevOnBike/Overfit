@@ -18,6 +18,9 @@ namespace DevOnBike.Overfit.Data.Contracts
         /// <summary>
         ///     The column definition representing the target variable (label) the model aims to predict.
         /// </summary>
-        public ColumnDefinition Target { get; set; }
+        public ColumnDefinition Target
+        {
+            get; set;
+        }
     }
 }

@@ -36,7 +36,11 @@ namespace DevOnBike.Overfit.Tests.Examples
         [Trait("Category", "Demo")]
         public void TrainsCnn_OnRealMnist_ToHighAccuracy()
         {
-            if (!File.Exists(TestModelPaths.Mnist.TrainImagesPath)) { _out.WriteLine($"missing MNIST at {TestModelPaths.Mnist.Dir}"); return; }
+            if (!File.Exists(TestModelPaths.Mnist.TrainImagesPath))
+            {
+                _out.WriteLine($"missing MNIST at {TestModelPaths.Mnist.Dir}");
+                return;
+            }
 
             var (trainX, trainN) = LoadImages(TestModelPaths.Mnist.TrainImagesPath);
             var trainY = LoadLabels(TestModelPaths.Mnist.TrainLabelsPath);
@@ -56,12 +60,18 @@ namespace DevOnBike.Overfit.Tests.Examples
             using var fc1 = new LinearLayer(16 * 7 * 7, 64);
             using var fc2 = new LinearLayer(64, Classes);
             var layers = new IModule[] { conv1, bn1, conv2, bn2, fc1, fc2 };
-            foreach (var m in layers) { m.Train(); }
+            foreach (var m in layers)
+            {
+                m.Train();
+            }
 
             var parameters = new List<AutogradNode>();
             foreach (var m in layers)
             {
-                foreach (var p in m.Parameters()) { parameters.Add(p); }
+                foreach (var p in m.Parameters())
+                {
+                    parameters.Add(p);
+                }
             }
 
             using var optimizer = new Adam(parameters, lrMax);
@@ -87,7 +97,10 @@ namespace DevOnBike.Overfit.Tests.Examples
 
                 optimizer.LearningRate = LearningRateSchedule.Cosine(step, steps, lrMax, lrMin);
                 graph.Reset();
-                foreach (var m in layers) { m.InvalidateParameterCaches(); }
+                foreach (var m in layers)
+                {
+                    m.InvalidateParameterCaches();
+                }
 
                 using var input = NewNode(inputData, new TensorShape(batch, 1, Side, Side));
                 using var target = NewNode(targetData, new TensorShape(batch, Classes));
@@ -99,13 +112,22 @@ namespace DevOnBike.Overfit.Tests.Examples
                 optimizer.Step();
 
                 var l = loss.DataView.AsReadOnlySpan()[0];
-                if (step == 0) { firstLoss = l; }
+                if (step == 0)
+                {
+                    firstLoss = l;
+                }
                 lastLoss = l;
-                if (step == 0 || (step + 1) % 100 == 0) { _out.WriteLine($"step {step + 1,4}/{steps}  loss={l:F4}"); }
+                if (step == 0 || (step + 1) % 100 == 0)
+                {
+                    _out.WriteLine($"step {step + 1,4}/{steps}  loss={l:F4}");
+                }
             }
 
             // ── Test-set accuracy (BatchNorm now uses running stats) ──
-            foreach (var m in layers) { m.Eval(); }
+            foreach (var m in layers)
+            {
+                m.Eval();
+            }
             var evalCount = Math.Min(testN, 2000);
             var correct = 0;
             var evalInput = new float[batch * Pixels];
@@ -123,7 +145,10 @@ namespace DevOnBike.Overfit.Tests.Examples
                 var data = logits.DataView.AsReadOnlySpan();
                 for (var i = 0; i < b; i++)
                 {
-                    if (ArgMax(data.Slice(i * Classes, Classes)) == testY[start + i]) { correct++; }
+                    if (ArgMax(data.Slice(i * Classes, Classes)) == testY[start + i])
+                    {
+                        correct++;
+                    }
                 }
             }
 
@@ -155,7 +180,13 @@ namespace DevOnBike.Overfit.Tests.Examples
         private static int ArgMax(ReadOnlySpan<float> v)
         {
             var best = 0;
-            for (var i = 1; i < v.Length; i++) { if (v[i] > v[best]) { best = i; } }
+            for (var i = 1; i < v.Length; i++)
+            {
+                if (v[i] > v[best])
+                {
+                    best = i;
+                }
+            }
             return best;
         }
 
@@ -169,7 +200,10 @@ namespace DevOnBike.Overfit.Tests.Examples
             var n = count * rows * cols;
             var bytes = br.ReadBytes(n);
             var images = new float[n];
-            for (var i = 0; i < n; i++) { images[i] = bytes[i] / 255f; }
+            for (var i = 0; i < n; i++)
+            {
+                images[i] = bytes[i] / 255f;
+            }
             return (images, count);
         }
 
@@ -180,7 +214,10 @@ namespace DevOnBike.Overfit.Tests.Examples
             var count = ReadBigInt32(br);
             var bytes = br.ReadBytes(count);
             var labels = new int[count];
-            for (var i = 0; i < count; i++) { labels[i] = bytes[i]; }
+            for (var i = 0; i < count; i++)
+            {
+                labels[i] = bytes[i];
+            }
             return labels;
         }
 

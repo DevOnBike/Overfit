@@ -10,9 +10,15 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring.Contracts
     [StructLayout(LayoutKind.Sequential)]
     public readonly record struct PodKey
     {
-        public DataCenter DC { get; init; }
+        public DataCenter DC
+        {
+            get; init;
+        }
 
-        public string PodName { get; init; }
+        public string PodName
+        {
+            get; init;
+        }
 
         public override string ToString()
         {

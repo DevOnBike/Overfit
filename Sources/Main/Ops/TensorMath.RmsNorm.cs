@@ -130,7 +130,10 @@ namespace DevOnBike.Overfit.Ops
             {
                 // Per-worker partial dGamma avoids the cross-row shared-write race.
                 var dGammaPartial = needsDGamma ? stackalloc float[chunkCount * C] : default;
-                if (needsDGamma) { dGammaPartial.Clear(); }
+                if (needsDGamma)
+                {
+                    dGammaPartial.Clear();
+                }
 
                 fixed (float* inPtr = inS, dOutPtr = dOutS, gPtr = gammaS,
                               invPtr = invRmsS, dGammaPartialPtr = dGammaPartial)

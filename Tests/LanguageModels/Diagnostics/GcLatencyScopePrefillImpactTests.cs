@@ -33,7 +33,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         public void SustainedLowLatency_GenerationCycle_GcDelta()
         {
             var model = TestModelPaths.Qwen3B.Q4KmGgufPath;
-            if (!File.Exists(model)) { _out.WriteLine($"missing {model}"); return; }
+            if (!File.Exists(model))
+            {
+                _out.WriteLine($"missing {model}");
+                return;
+            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(model);
 

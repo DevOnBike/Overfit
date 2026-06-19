@@ -35,7 +35,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private TensorStorage<float> _finalNormBeta = null!;
         private DecodeWeight _lmHead;
 
-        private StackWeights() { }
+        private StackWeights()
+        {
+        }
 
         /// <summary>
         /// Zero-copy constructor for inference-only loaders (no GPT1Model required).

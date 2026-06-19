@@ -47,7 +47,10 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
             int[] target = [0, 1, 1, 2]; // includes a repeat (1,1) to exercise the blank-skip rule
             var rng = new Random(1234);
             var logits = new float[t * c];
-            for (var i = 0; i < logits.Length; i++) { logits[i] = (float)(rng.NextDouble() * 2 - 1); }
+            for (var i = 0; i < logits.Length; i++)
+            {
+                logits[i] = (float)(rng.NextDouble() * 2 - 1);
+            }
 
             var grad = new float[t * c];
             var loss = CtcLoss.Forward(logits, t, c, target, blank, grad);
@@ -80,7 +83,10 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
             int[] target = [0, 1, 2];
             var rng = new Random(7);
             var logits = new float[t * c];
-            for (var i = 0; i < logits.Length; i++) { logits[i] = (float)(rng.NextDouble() * 0.1); }
+            for (var i = 0; i < logits.Length; i++)
+            {
+                logits[i] = (float)(rng.NextDouble() * 0.1);
+            }
 
             var grad = new float[t * c];
             var first = CtcLoss.Forward(logits, t, c, target, blank, grad);
@@ -89,7 +95,10 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
             for (var step = 0; step < 200; step++)
             {
                 last = CtcLoss.Forward(logits, t, c, target, blank, grad);
-                for (var i = 0; i < logits.Length; i++) { logits[i] -= 1.0f * grad[i]; }
+                for (var i = 0; i < logits.Length; i++)
+                {
+                    logits[i] -= 1.0f * grad[i];
+                }
             }
 
             Assert.True(last < first, $"loss did not drop: {first} -> {last}");
@@ -109,9 +118,15 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
                 var best = 0;
                 for (var k = 1; k < c; k++)
                 {
-                    if (logits[ti * c + k] > logits[ti * c + best]) { best = k; }
+                    if (logits[ti * c + k] > logits[ti * c + best])
+                    {
+                        best = k;
+                    }
                 }
-                if (best != blank && best != prev) { outp.Add(best); }
+                if (best != blank && best != prev)
+                {
+                    outp.Add(best);
+                }
                 prev = best;
             }
             return outp.ToArray();

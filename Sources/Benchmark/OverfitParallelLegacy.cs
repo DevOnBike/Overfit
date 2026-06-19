@@ -77,7 +77,10 @@ namespace Benchmarks
             }
 
             var totalWork = rangeEnd - rangeStart;
-            if (totalWork <= 0) { return; }
+            if (totalWork <= 0)
+            {
+                return;
+            }
 
             if (totalWork == 1)
             {

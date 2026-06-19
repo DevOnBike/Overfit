@@ -47,14 +47,14 @@ namespace DevOnBike.Overfit.Runtime
         public static GcLatencyScope SustainedLowLatency()
         {
             var previous = GCSettings.LatencyMode;
-            
+
             if (previous is GCLatencyMode.SustainedLowLatency or GCLatencyMode.NoGCRegion)
             {
                 return new GcLatencyScope(previous, false);
             }
 
             GCSettings.LatencyMode = GCLatencyMode.SustainedLowLatency;
-            
+
             return new GcLatencyScope(previous, true);
         }
 

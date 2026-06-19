@@ -24,7 +24,10 @@ namespace DevOnBike.Overfit.Tensors.Core
     {
         private const nuint BaseAlignmentBytes = 64;
 
-        public int Size { get; }
+        public int Size
+        {
+            get;
+        }
 
         private void* _ptr;
         private int _offset;

@@ -60,7 +60,8 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             var dir = Path.Combine(Path.GetTempPath(), $"overfit_adaptive_{Guid.NewGuid():N}");
             try
             {
-                MathUtils.SetSeed(100); using var model = TinyModel();
+                MathUtils.SetSeed(100);
+                using var model = TinyModel();
                 using var monitor = new AdaptiveAnomalyMonitor(model, Policy(dir));
 
                 // Feed a steady benign regime — the un-adapted base scores it elevated.
@@ -68,7 +69,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 for (var i = 0; i < ContextSnapshots * 2 + 40; i++)
                 {
                     var r = monitor.Observe(Normal("payments-api"));
-                    if (!r.IsWarmup) { baseBenign = r.Score; }
+                    if (!r.IsWarmup)
+                    {
+                        baseBenign = r.Score;
+                    }
                 }
                 _out.WriteLine($"base benign={baseBenign:F3}, needsAdapt={monitor.NeedsAdaptation("payments-api")}");
 
@@ -85,7 +89,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 for (var i = 0; i < ContextSnapshots * 2; i++)
                 {
                     var r = monitor.Observe(Normal("payments-api"));
-                    if (!r.IsWarmup) { adaptedBenign = r.Score; }
+                    if (!r.IsWarmup)
+                    {
+                        adaptedBenign = r.Score;
+                    }
                 }
                 _out.WriteLine($"adapted benign={adaptedBenign:F3}");
 
@@ -101,7 +108,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             }
             finally
             {
-                if (Directory.Exists(dir)) { Directory.Delete(dir, recursive: true); }
+                if (Directory.Exists(dir))
+                {
+                    Directory.Delete(dir, recursive: true);
+                }
             }
         }
 
@@ -111,7 +121,8 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             var dir = Path.Combine(Path.GetTempPath(), $"overfit_adaptive_{Guid.NewGuid():N}");
             try
             {
-                MathUtils.SetSeed(100); using var model = TinyModel();
+                MathUtils.SetSeed(100);
+                using var model = TinyModel();
                 using var monitor = new AdaptiveAnomalyMonitor(model, Policy(dir));
 
                 // Warm + buffer benign for BOTH pods; capture pod-b's base benign.
@@ -120,8 +131,14 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 {
                     var ra = monitor.Observe(Normal("pod-a"));
                     var rb = monitor.Observe(Normal("pod-b"));
-                    if (!ra.IsWarmup) { aBenign = ra.Score; }
-                    if (!rb.IsWarmup) { bBenign = rb.Score; }
+                    if (!ra.IsWarmup)
+                    {
+                        aBenign = ra.Score;
+                    }
+                    if (!rb.IsWarmup)
+                    {
+                        bBenign = rb.Score;
+                    }
                 }
 
                 monitor.Adapt("pod-a");
@@ -140,7 +157,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             }
             finally
             {
-                if (Directory.Exists(dir)) { Directory.Delete(dir, recursive: true); }
+                if (Directory.Exists(dir))
+                {
+                    Directory.Delete(dir, recursive: true);
+                }
             }
         }
 
@@ -150,13 +170,17 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             var dir = Path.Combine(Path.GetTempPath(), $"overfit_adaptive_{Guid.NewGuid():N}");
             try
             {
-                MathUtils.SetSeed(100); using var model = TinyModel();
+                MathUtils.SetSeed(100);
+                using var model = TinyModel();
 
                 // First monitor: adapt pod-a, then dispose (un-merges, leaving the base clean;
                 // the per-pod adapter .bin stays on disk).
                 using (var monitor1 = new AdaptiveAnomalyMonitor(model, Policy(dir)))
                 {
-                    for (var i = 0; i < ContextSnapshots * 2 + 30; i++) { monitor1.Observe(Normal("pod-a")); }
+                    for (var i = 0; i < ContextSnapshots * 2 + 30; i++)
+                    {
+                        monitor1.Observe(Normal("pod-a"));
+                    }
                     monitor1.Adapt("pod-a");
                     Assert.True(monitor1.IsAdapted("pod-a"));
                 }
@@ -169,13 +193,19 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 for (var i = 0; i < ContextSnapshots * 2; i++)
                 {
                     var r = monitor2.Observe(Normal("pod-a"));
-                    if (!r.IsWarmup) { reloaded = r.Score; }
+                    if (!r.IsWarmup)
+                    {
+                        reloaded = r.Score;
+                    }
                 }
                 var fresh = 0f;
                 for (var i = 0; i < ContextSnapshots * 2; i++)
                 {
                     var r = monitor2.Observe(Normal("pod-never-seen"));
-                    if (!r.IsWarmup) { fresh = r.Score; }
+                    if (!r.IsWarmup)
+                    {
+                        fresh = r.Score;
+                    }
                 }
                 _out.WriteLine($"reloaded pod-a={reloaded:F3}, fresh pod={fresh:F3}");
 
@@ -187,7 +217,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             }
             finally
             {
-                if (Directory.Exists(dir)) { Directory.Delete(dir, recursive: true); }
+                if (Directory.Exists(dir))
+                {
+                    Directory.Delete(dir, recursive: true);
+                }
             }
         }
 

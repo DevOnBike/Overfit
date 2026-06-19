@@ -37,10 +37,16 @@ namespace Benchmarks
         private float _checksum;
 
         [Params(64, 768)]
-        public int InputSize { get; set; }
+        public int InputSize
+        {
+            get; set;
+        }
 
         [Params(64, 768)]
-        public int OutputSize { get; set; }
+        public int OutputSize
+        {
+            get; set;
+        }
 
         [GlobalSetup]
         public void Setup()

@@ -32,7 +32,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
         public SequentialChunkReadStream(IEnumerable<byte[]> chunks)
         {
-            if (chunks is null) { throw new ArgumentNullException(nameof(chunks)); }
+            if (chunks is null)
+            {
+                throw new ArgumentNullException(nameof(chunks));
+            }
             _chunks = chunks.GetEnumerator();
         }
 
@@ -59,7 +62,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             {
                 if (_offset >= _current.Length)
                 {
-                    if (!Advance()) { break; }
+                    if (!Advance())
+                    {
+                        break;
+                    }
                     continue;
                 }
 
@@ -90,7 +96,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 _chunkStart = _position;
                 _current = _chunks.Current ?? [];
                 _offset = 0;
-                if (_current.Length > 0) { return true; }
+                if (_current.Length > 0)
+                {
+                    return true;
+                }
             }
             return false;
         }
@@ -119,13 +128,18 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             return _position;
         }
 
-        public override void Flush() { }
+        public override void Flush()
+        {
+        }
         public override void SetLength(long value) => throw new OverfitRuntimeException();
         public override void Write(byte[] buffer, int offset, int count) => throw new OverfitRuntimeException();
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) { _chunks.Dispose(); }
+            if (disposing)
+            {
+                _chunks.Dispose();
+            }
             base.Dispose(disposing);
         }
     }

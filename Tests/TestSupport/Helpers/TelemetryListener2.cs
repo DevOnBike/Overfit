@@ -300,10 +300,24 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Helpers
 
         private readonly struct MetricKey : IEquatable<MetricKey>
         {
-            public MetricKey(string name, string unit, string tags) { Name = name; Unit = unit; Tags = tags; }
-            public string Name { get; }
-            public string Unit { get; }
-            public string Tags { get; }
+            public MetricKey(string name, string unit, string tags)
+            {
+                Name = name;
+                Unit = unit;
+                Tags = tags;
+            }
+            public string Name
+            {
+                get;
+            }
+            public string Unit
+            {
+                get;
+            }
+            public string Tags
+            {
+                get;
+            }
             public bool Equals(MetricKey other) => Name == other.Name && Unit == other.Unit && Tags == other.Tags;
             public override bool Equals(object? obj) => obj is MetricKey other && Equals(other);
             public override int GetHashCode() => HashCode.Combine(Name, Unit, Tags);
@@ -311,15 +325,38 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Helpers
 
         private struct MetricAggregate
         {
-            public MetricAggregate(double value) { SampleCount = 1; Sum = value; Min = value; Max = value; Last = value; }
-            public long SampleCount { get; private set; }
-            public double Sum { get; private set; }
-            public double Min { get; private set; }
-            public double Max { get; private set; }
-            public double Last { get; private set; }
+            public MetricAggregate(double value)
+            {
+                SampleCount = 1;
+                Sum = value;
+                Min = value;
+                Max = value;
+                Last = value;
+            }
+            public long SampleCount
+            {
+                get; private set;
+            }
+            public double Sum
+            {
+                get; private set;
+            }
+            public double Min
+            {
+                get; private set;
+            }
+            public double Max
+            {
+                get; private set;
+            }
+            public double Last
+            {
+                get; private set;
+            }
             public void Add(double value)
             {
-                SampleCount++; Sum += value;
+                SampleCount++;
+                Sum += value;
                 if (value < Min)
                 {
                     Min = value;
@@ -334,9 +371,19 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Helpers
 
         private readonly struct MetricRow
         {
-            public MetricRow(MetricKey key, MetricAggregate aggregate) { Key = key; Aggregate = aggregate; }
-            public MetricKey Key { get; }
-            public MetricAggregate Aggregate { get; }
+            public MetricRow(MetricKey key, MetricAggregate aggregate)
+            {
+                Key = key;
+                Aggregate = aggregate;
+            }
+            public MetricKey Key
+            {
+                get;
+            }
+            public MetricAggregate Aggregate
+            {
+                get;
+            }
         }
     }
 }

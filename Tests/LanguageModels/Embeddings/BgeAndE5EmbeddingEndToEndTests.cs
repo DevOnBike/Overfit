@@ -20,7 +20,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
         private static float Cosine(float[] a, float[] b)
         {
             var dot = 0f;
-            for (var i = 0; i < a.Length; i++) { dot += a[i] * b[i]; }
+            for (var i = 0; i < a.Length; i++)
+            {
+                dot += a[i] * b[i];
+            }
             return dot; // both L2-normalized
         }
 
@@ -55,7 +58,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
         public void RealBge_MatchesReferenceVectorWhenAvailable()
         {
             var refPath = Path.Combine(TestModelPaths.Bge.Dir, "bge_reference_embeddings.json");
-            if (!File.Exists(refPath)) { return; }
+            if (!File.Exists(refPath))
+            {
+                return;
+            }
 
             TestModelPaths.Bge.RequireConfigJsonPath();
             using var embedder = SentenceEmbedder.ForBgeEnV15(TestModelPaths.Bge.Dir);
@@ -98,7 +104,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
         public void RealE5_MatchesReferenceVectorWhenAvailable()
         {
             var refPath = Path.Combine(TestModelPaths.E5.Dir, "e5_reference_embeddings.json");
-            if (!File.Exists(refPath)) { return; }
+            if (!File.Exists(refPath))
+            {
+                return;
+            }
 
             TestModelPaths.E5.RequireConfigJsonPath();
             using var embedder = SentenceEmbedder.ForE5(TestModelPaths.E5.Dir);
@@ -120,7 +129,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
             var arr = root.GetProperty("embedding");
             var vec = new float[arr.GetArrayLength()];
             var i = 0;
-            foreach (var e in arr.EnumerateArray()) { vec[i++] = e.GetSingle(); }
+            foreach (var e in arr.EnumerateArray())
+            {
+                vec[i++] = e.GetSingle();
+            }
             return (sentence, vec);
         }
     }

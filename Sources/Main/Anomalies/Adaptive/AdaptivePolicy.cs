@@ -50,6 +50,9 @@ namespace DevOnBike.Overfit.Anomalies.Adaptive
         public float LoRALearningRate { get; init; } = 1e-2f;
 
         /// <summary>Directory where per-pod adapter <c>.bin</c> files are stored.</summary>
-        public required string AdapterDirectory { get; init; }
+        public required string AdapterDirectory
+        {
+            get; init;
+        }
     }
 }

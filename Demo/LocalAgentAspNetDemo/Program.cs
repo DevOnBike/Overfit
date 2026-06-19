@@ -156,7 +156,11 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
                     mmap = metrics.MmapEnabled,
                     runtime = ".NET " + Environment.Version,
                     privateToProcess = true,
-                    rag = new { indexed = rag.IsIndexed, chunks = rag.ChunkCount },
+                    rag = new
+                    {
+                        indexed = rag.IsIndexed,
+                        chunks = rag.ChunkCount
+                    },
                 });
             });
 
@@ -164,7 +168,10 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
             {
                 if (string.IsNullOrWhiteSpace(req.Message))
                 {
-                    return Results.BadRequest(new { error = "'message' is required and must be non-empty." });
+                    return Results.BadRequest(new
+                    {
+                        error = "'message' is required and must be non-empty."
+                    });
                 }
 
                 var reply = client.Send(req.Message);
@@ -185,7 +192,10 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
             {
                 client.Reset();
                 client.AddSystem(systemMessage);
-                return Results.Ok(new { status = "conversation cleared" });
+                return Results.Ok(new
+                {
+                    status = "conversation cleared"
+                });
             });
 
             // ── RAG endpoints (Phase 2) ───────────────────────────────────────────────
@@ -208,7 +218,10 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
             {
                 if (string.IsNullOrWhiteSpace(req.Question))
                 {
-                    return Results.BadRequest(new { error = "'question' is required and must be non-empty." });
+                    return Results.BadRequest(new
+                    {
+                        error = "'question' is required and must be non-empty."
+                    });
                 }
 
                 var topK = req.TopK is > 0 ? Math.Min(req.TopK.Value, 10) : 4;
@@ -246,7 +259,10 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
             {
                 if (string.IsNullOrWhiteSpace(req.Message))
                 {
-                    return Results.BadRequest(new { error = "'message' is required and must be non-empty." });
+                    return Results.BadRequest(new
+                    {
+                        error = "'message' is required and must be non-empty."
+                    });
                 }
 
                 var result = agent.RunToolCall(client, req.Message);
@@ -267,7 +283,10 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
             {
                 if (string.IsNullOrWhiteSpace(req.Message))
                 {
-                    return Results.BadRequest(new { error = "'message' is required and must be non-empty." });
+                    return Results.BadRequest(new
+                    {
+                        error = "'message' is required and must be non-empty."
+                    });
                 }
 
                 string json;
@@ -295,7 +314,10 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
             {
                 if (string.IsNullOrWhiteSpace(req.Message))
                 {
-                    return Results.BadRequest(new { error = "'message' is required and must be non-empty." });
+                    return Results.BadRequest(new
+                    {
+                        error = "'message' is required and must be non-empty."
+                    });
                 }
 
                 var json = agent.RunRefundDecision(client, req.Message).Json;

@@ -22,7 +22,10 @@ namespace DevOnBike.Overfit.Audio.Tts.Snac
             _encoder = new SnacEncoder(config, weights);
         }
 
-        public SnacConfig Config { get; }
+        public SnacConfig Config
+        {
+            get;
+        }
 
         public int SampleRate => Config.SampleRate;
 

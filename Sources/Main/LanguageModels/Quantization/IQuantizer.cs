@@ -7,7 +7,10 @@ namespace DevOnBike.Overfit.LanguageModels.Quantization
 {
     public interface IQuantizer
     {
-        QuantizationOptions Options { get; }
+        QuantizationOptions Options
+        {
+            get;
+        }
 
         int QuantizeWeights(
             ReadOnlySpan<float> source,

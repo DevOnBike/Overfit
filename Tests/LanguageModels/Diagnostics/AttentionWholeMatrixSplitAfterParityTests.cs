@@ -82,7 +82,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
                 for (var j = 0; j < headDim; j++)
                 {
                     var d = MathF.Abs(headOut[j] - gemvOut[h * headDim + j]);
-                    if (d > maxSplitDiff) { maxSplitDiff = d; }
+                    if (d > maxSplitDiff)
+                    {
+                        maxSplitDiff = d;
+                    }
                 }
             }
 
@@ -101,7 +104,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             for (var i = 0; i < a.Length; i++)
             {
                 var d = MathF.Abs(a[i] - b[i]);
-                if (d > m) { m = d; }
+                if (d > m)
+                {
+                    m = d;
+                }
             }
             return m;
         }
@@ -112,7 +118,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             for (var i = 0; i < a.Length; i++)
             {
                 var v = MathF.Abs(a[i]);
-                if (v > m) { m = v; }
+                if (v > m)
+                {
+                    m = v;
+                }
             }
             return m;
         }

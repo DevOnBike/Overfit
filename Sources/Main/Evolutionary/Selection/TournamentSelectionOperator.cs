@@ -52,7 +52,10 @@ namespace DevOnBike.Overfit.Evolutionary.Selection
             TournamentSize = tournamentSize;
         }
 
-        public int TournamentSize { get; }
+        public int TournamentSize
+        {
+            get;
+        }
 
         public int SelectParent(ReadOnlySpan<int> eliteIndices, IRandom rng)
         {

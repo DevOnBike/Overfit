@@ -7,23 +7,50 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
 {
     public interface ISlmModel : IDisposable
     {
-        int VocabularySize { get; }
+        int VocabularySize
+        {
+            get;
+        }
 
-        int ContextLength { get; }
+        int ContextLength
+        {
+            get;
+        }
 
-        int LayerCount { get; }
+        int LayerCount
+        {
+            get;
+        }
 
-        int HeadCount { get; }
+        int HeadCount
+        {
+            get;
+        }
 
-        int HeadDimension { get; }
+        int HeadDimension
+        {
+            get;
+        }
 
-        int EmbeddingDimension { get; }
+        int EmbeddingDimension
+        {
+            get;
+        }
 
-        long ParameterCount { get; }
+        long ParameterCount
+        {
+            get;
+        }
 
-        string ArchitectureName { get; }
+        string ArchitectureName
+        {
+            get;
+        }
 
-        bool IsTraining { get; }
+        bool IsTraining
+        {
+            get;
+        }
 
         void Train();
 

@@ -122,8 +122,14 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
             // Cap context length for memory sanity (32k+ models work but consume RAM). Gemma-2: cap at the sliding
             // window so the (deferred) alternating local/global attention is a no-op.
-            if (ctxLen > 8192) { ctxLen = 8192; }
-            if (isGemma && gemmaSlidingWindow > 0 && ctxLen > gemmaSlidingWindow) { ctxLen = gemmaSlidingWindow; }
+            if (ctxLen > 8192)
+            {
+                ctxLen = 8192;
+            }
+            if (isGemma && gemmaSlidingWindow > 0 && ctxLen > gemmaSlidingWindow)
+            {
+                ctxLen = gemmaSlidingWindow;
+            }
 
             // Vocab from tokenizer metadata if present, else from token_embd shape
             var vocab = reader.GetMeta($"{arch}.vocab_size", 0);
@@ -132,7 +138,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 // GGUF dim order: [dModel, vocab]. Last dim is vocab.
                 vocab = (int)embInfo.Dims[^1];
             }
-            if (vocab == 0) { throw new OverfitFormatException("Cannot determine vocab size."); }
+            if (vocab == 0)
+            {
+                throw new OverfitFormatException("Cannot determine vocab size.");
+            }
 
             // Qwen3 sets head_dim explicitly (head_dim ≠ dModel/nHeads, so the q/k/v projections are not square);
             // every other arch we load derives it as dModel/nHeads.
@@ -331,7 +340,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     var bk = SplitBias(kBiasFull, nKvHeads, headDim);
                     var bv = SplitBias(vBiasFull, nKvHeads, headDim);
                     var bo = new TensorStorage<float>[nHeads];
-                    for (var h = 0; h < nHeads; h++) { bo[h] = TensorStorage<float>.Unpooled(dModel); }
+                    for (var h = 0; h < nHeads; h++)
+                    {
+                        bo[h] = TensorStorage<float>.Unpooled(dModel);
+                    }
 
                     // FFN
                     var ffnNormGamma = LoadNormGamma($"blk.{l}.ffn_norm.weight");
@@ -428,12 +440,30 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             finally
             {
                 // qFull..oFull are empty sentinels on the native Q8_0 path.
-                if (qFull.Length > 0) { PooledBuffer<float>.ReturnArray(qFull); }
-                if (kFull.Length > 0) { PooledBuffer<float>.ReturnArray(kFull); }
-                if (vFull.Length > 0) { PooledBuffer<float>.ReturnArray(vFull); }
-                if (oFull.Length > 0) { PooledBuffer<float>.ReturnArray(oFull); }
-                if (qkvFused.Length > 0) { PooledBuffer<float>.ReturnArray(qkvFused); }
-                if (gateUpFused.Length > 0) { PooledBuffer<float>.ReturnArray(gateUpFused); }
+                if (qFull.Length > 0)
+                {
+                    PooledBuffer<float>.ReturnArray(qFull);
+                }
+                if (kFull.Length > 0)
+                {
+                    PooledBuffer<float>.ReturnArray(kFull);
+                }
+                if (vFull.Length > 0)
+                {
+                    PooledBuffer<float>.ReturnArray(vFull);
+                }
+                if (oFull.Length > 0)
+                {
+                    PooledBuffer<float>.ReturnArray(oFull);
+                }
+                if (qkvFused.Length > 0)
+                {
+                    PooledBuffer<float>.ReturnArray(qkvFused);
+                }
+                if (gateUpFused.Length > 0)
+                {
+                    PooledBuffer<float>.ReturnArray(gateUpFused);
+                }
                 PooledBuffer<float>.ReturnArray(qBiasFull);
                 PooledBuffer<float>.ReturnArray(kBiasFull);
                 PooledBuffer<float>.ReturnArray(vBiasFull);
@@ -613,8 +643,14 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                         var total = checked((int)((long)expertBytes * expertCount));
                         using var whole = new PooledBuffer<byte>(total, clearMemory: false);
 
-                        if (info.Type == GgmlType.Q4_K) { reader.LoadTensorQ4_KRaw(info, whole.Span); }
-                        else { reader.LoadTensorQ6_KRaw(info, whole.Span); }
+                        if (info.Type == GgmlType.Q4_K)
+                        {
+                            reader.LoadTensorQ4_KRaw(info, whole.Span);
+                        }
+                        else
+                        {
+                            reader.LoadTensorQ6_KRaw(info, whole.Span);
+                        }
 
                         for (var e = 0; e < expertCount; e++)
                         {

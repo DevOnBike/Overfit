@@ -200,11 +200,20 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
                 {
                     foreach (var pod in pods)
                     {
-                        var r = monitor.Observe(NormalSnapshot() with { PodName = pod });
-                        if (!r.IsWarmup) { baseScore[pod] = r.Score; }
+                        var r = monitor.Observe(NormalSnapshot() with
+                        {
+                            PodName = pod
+                        });
+                        if (!r.IsWarmup)
+                        {
+                            baseScore[pod] = r.Score;
+                        }
                     }
                 }
-                foreach (var pod in pods) { Console.WriteLine($"  {pod,-14} benign = {baseScore[pod],6:F2}"); }
+                foreach (var pod in pods)
+                {
+                    Console.WriteLine($"  {pod,-14} benign = {baseScore[pod],6:F2}");
+                }
                 Console.WriteLine($"  monitor recommends adapting: [{string.Join(", ", monitor.PodsNeedingAdaptation())}]");
 
                 // Phase B — operator adapts ONE pod.
@@ -221,11 +230,20 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
                 {
                     foreach (var pod in pods)
                     {
-                        var r = monitor.Observe(NormalSnapshot() with { PodName = pod });
-                        if (!r.IsWarmup) { afterScore[pod] = r.Score; }
+                        var r = monitor.Observe(NormalSnapshot() with
+                        {
+                            PodName = pod
+                        });
+                        if (!r.IsWarmup)
+                        {
+                            afterScore[pod] = r.Score;
+                        }
                     }
                 }
-                var incident = monitor.Observe(AnomalySnapshot() with { PodName = target });
+                var incident = monitor.Observe(AnomalySnapshot() with
+                {
+                    PodName = target
+                });
 
                 Console.WriteLine();
                 Console.WriteLine($"  {"pod",-14} {"benign base",11}  {"benign after",12}  {"adapted",7}");
@@ -244,7 +262,10 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
             }
             finally
             {
-                if (Directory.Exists(dir)) { Directory.Delete(dir, recursive: true); }
+                if (Directory.Exists(dir))
+                {
+                    Directory.Delete(dir, recursive: true);
+                }
             }
         }
 
@@ -259,13 +280,25 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
             for (var i = 0; i < ContextSnapshots * 2; i++)
             {
                 var r = detector.Score(NormalSnapshot());
-                if (verbose) { Report(i, r); }
-                if (!r.IsWarmup) { normal = r.Score; }
+                if (verbose)
+                {
+                    Report(i, r);
+                }
+                if (!r.IsWarmup)
+                {
+                    normal = r.Score;
+                }
             }
 
-            if (verbose) { Console.WriteLine("  ── injecting incident ──"); }
+            if (verbose)
+            {
+                Console.WriteLine("  ── injecting incident ──");
+            }
             var inc = detector.Score(AnomalySnapshot());
-            if (verbose) { Report(ContextSnapshots * 2, inc); }
+            if (verbose)
+            {
+                Report(ContextSnapshots * 2, inc);
+            }
 
             return (normal, inc.Score);
         }
@@ -315,7 +348,10 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
             }
             finally
             {
-                if (File.Exists(loraPath)) { File.Delete(loraPath); }
+                if (File.Exists(loraPath))
+                {
+                    File.Delete(loraPath);
+                }
             }
         }
 
@@ -327,7 +363,10 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
             for (var i = 0; i < ContextSnapshots * 2; i++)
             {
                 var r = detector.Score(NormalSnapshot());
-                if (!r.IsWarmup) { normal = r.Score; }
+                if (!r.IsWarmup)
+                {
+                    normal = r.Score;
+                }
             }
             return (normal, detector.Score(AnomalySnapshot()).Score);
         }
@@ -387,7 +426,10 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
         {
             for (var i = 0; i < args.Length - 1; i++)
             {
-                if (args[i] == name) { return args[i + 1]; }
+                if (args[i] == name)
+                {
+                    return args[i + 1];
+                }
             }
             return null;
         }
@@ -396,7 +438,10 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
         {
             foreach (var a in args)
             {
-                if (a == name) { return true; }
+                if (a == name)
+                {
+                    return true;
+                }
             }
             return false;
         }
@@ -413,7 +458,10 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
 
         private static string? ResolveCsv(string? explicitPath)
         {
-            if (!string.IsNullOrEmpty(explicitPath)) { return explicitPath; }
+            if (!string.IsNullOrEmpty(explicitPath))
+            {
+                return explicitPath;
+            }
 
             var dir = Environment.GetEnvironmentVariable("OVERFIT_MODEL_DIR");
             var candidates = new[]
@@ -425,7 +473,10 @@ namespace DevOnBike.Overfit.Demo.AnomalyConsole
 
             foreach (var c in candidates)
             {
-                if (c is not null && File.Exists(c)) { return c; }
+                if (c is not null && File.Exists(c))
+                {
+                    return c;
+                }
             }
 
             return null;

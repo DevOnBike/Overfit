@@ -55,10 +55,16 @@ namespace DevOnBike.Overfit.DeepLearning
         }
 
         /// <summary>Long-lived trainable weight matrix [inputSize, outputSize]. Owned by the layer.</summary>
-        public Parameter Weights { get; }
+        public Parameter Weights
+        {
+            get;
+        }
 
         /// <summary>Long-lived trainable bias vector [outputSize]. Owned by the layer.</summary>
-        public Parameter Bias { get; }
+        public Parameter Bias
+        {
+            get;
+        }
 
         public bool IsTraining { get; private set; } = true;
 

@@ -11,40 +11,76 @@ namespace DevOnBike.Overfit.Tests.Diagnostics.Tracing
     internal sealed class DiagnosticsTraceModel
     {
         [JsonPropertyName("epoch")]
-        public int Epoch { get; set; }
+        public int Epoch
+        {
+            get; set;
+        }
 
         [JsonPropertyName("graphCount")]
-        public long GraphCount { get; set; }
+        public long GraphCount
+        {
+            get; set;
+        }
 
         [JsonPropertyName("tapeOps")]
-        public long TapeOps { get; set; }
+        public long TapeOps
+        {
+            get; set;
+        }
 
         [JsonPropertyName("graphBackwardMs")]
-        public double GraphBackwardMs { get; set; }
+        public double GraphBackwardMs
+        {
+            get; set;
+        }
 
         [JsonPropertyName("graphAllocatedBytes")]
-        public long GraphAllocatedBytes { get; set; }
+        public long GraphAllocatedBytes
+        {
+            get; set;
+        }
 
         [JsonPropertyName("graphGc0")]
-        public int GraphGc0 { get; set; }
+        public int GraphGc0
+        {
+            get; set;
+        }
 
         [JsonPropertyName("graphGc1")]
-        public int GraphGc1 { get; set; }
+        public int GraphGc1
+        {
+            get; set;
+        }
 
         [JsonPropertyName("graphGc2")]
-        public int GraphGc2 { get; set; }
+        public int GraphGc2
+        {
+            get; set;
+        }
 
         [JsonPropertyName("allocationBytes")]
-        public long AllocationBytes { get; set; }
+        public long AllocationBytes
+        {
+            get; set;
+        }
 
         [JsonPropertyName("modules")]
-        public Dictionary<string, DiagnosticsTraceEntry>? Modules { get; set; }
+        public Dictionary<string, DiagnosticsTraceEntry>? Modules
+        {
+            get; set;
+        }
 
         [JsonPropertyName("kernels")]
-        public Dictionary<string, DiagnosticsTraceEntry>? Kernels { get; set; }
+        public Dictionary<string, DiagnosticsTraceEntry>? Kernels
+        {
+            get; set;
+        }
 
         [JsonPropertyName("counters")]
-        public Dictionary<string, long>? Counters { get; set; }
+        public Dictionary<string, long>? Counters
+        {
+            get; set;
+        }
 
         public static DiagnosticsTraceModel Load(string path)
         {

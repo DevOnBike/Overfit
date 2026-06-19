@@ -35,7 +35,10 @@ namespace Benchmarks
         // SeqLen=128 requires >50MB arena (GPT-1 12 blocks × dFF=3072) — exceeds default capacity.
         // Use smaller context for benchmark; real training uses BackwardFromGrad path with full seqLen.
         [Params(16, 64)]
-        public int SeqLen { get; set; }
+        public int SeqLen
+        {
+            get; set;
+        }
 
         // ── State ─────────────────────────────────────────────────────────────
 

@@ -11,10 +11,16 @@ namespace DevOnBike.Overfit.Tokenization
     public interface ITokenizer
     {
         /// <summary>Number of tokens in the vocabulary.</summary>
-        int VocabSize { get; }
+        int VocabSize
+        {
+            get;
+        }
 
         /// <summary>Token id used to represent unknown tokens.</summary>
-        int UnknownTokenId { get; }
+        int UnknownTokenId
+        {
+            get;
+        }
 
         /// <summary>Encodes a string to a sequence of token ids.</summary>
         int[] Encode(string text);

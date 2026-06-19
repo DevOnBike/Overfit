@@ -23,7 +23,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         [LongFact]
         public void Bielik_Loads_And_Generates_Polish()
         {
-            if (!File.Exists(Path)) { _out.WriteLine("missing Bielik gguf"); return; }
+            if (!File.Exists(Path))
+            {
+                _out.WriteLine("missing Bielik gguf");
+                return;
+            }
 
             using (var reader = new GgufReader(Path))
             {

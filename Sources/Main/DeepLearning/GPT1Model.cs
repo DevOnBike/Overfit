@@ -101,15 +101,30 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public GPT1Config Config => _config;
 
-        public EmbeddingLayer TokenEmbedding { get; }
+        public EmbeddingLayer TokenEmbedding
+        {
+            get;
+        }
 
-        public EmbeddingLayer PositionEmbedding { get; }
+        public EmbeddingLayer PositionEmbedding
+        {
+            get;
+        }
 
-        public TransformerBlock[] Blocks { get; }
+        public TransformerBlock[] Blocks
+        {
+            get;
+        }
 
-        public LayerNormLayer FinalNorm { get; }
+        public LayerNormLayer FinalNorm
+        {
+            get;
+        }
 
-        public Parameter LMHead { get; }
+        public Parameter LMHead
+        {
+            get;
+        }
 
         public bool IsTraining => _isTraining;
 
@@ -122,7 +137,10 @@ namespace DevOnBike.Overfit.DeepLearning
         /// supplies W_eff = LMHead(frozen) + A@B built on the current graph.
         /// Null on the production path — standard LM head, zero overhead.
         /// </summary>
-        internal Func<ComputationGraph, AutogradNode>? LMHeadWeightProvider { get; set; }
+        internal Func<ComputationGraph, AutogradNode>? LMHeadWeightProvider
+        {
+            get; set;
+        }
 
         /// <summary>
         /// Output-level LM-head hook (QLoRA): given the graph and the pre-head hidden
@@ -132,7 +150,10 @@ namespace DevOnBike.Overfit.DeepLearning
         /// <see cref="LMHeadWeightProvider"/> can't carry it). Takes precedence over both the
         /// weight-provider and the standard head. Null on the normal path.
         /// </summary>
-        internal Func<ComputationGraph, AutogradNode, AutogradNode>? LMHeadOutputProvider { get; set; }
+        internal Func<ComputationGraph, AutogradNode, AutogradNode>? LMHeadOutputProvider
+        {
+            get; set;
+        }
 
         public void Train()
         {

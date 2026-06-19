@@ -386,9 +386,15 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
             {
                 // Absolute path, or a folder name relative to the output dir (e.g. the Bielik preset's
                 // "Data-pl", copied next to the assembly).
-                if (Directory.Exists(fromSettings)) { return fromSettings; }
+                if (Directory.Exists(fromSettings))
+                {
+                    return fromSettings;
+                }
                 var relative = Path.Combine(AppContext.BaseDirectory, fromSettings);
-                if (Directory.Exists(relative)) { return relative; }
+                if (Directory.Exists(relative))
+                {
+                    return relative;
+                }
             }
 
             // Default: the Data folder copied next to the built assembly.

@@ -52,36 +52,64 @@ namespace DevOnBike.Overfit.LanguageModels.Sampling
         /// </summary>
         public int Sample(Span<float> logits, ReadOnlySpan<int> history, Random random)
         {
-            if (logits.IsEmpty) { throw new ArgumentException("Logits cannot be empty.", nameof(logits)); }
+            if (logits.IsEmpty)
+            {
+                throw new ArgumentException("Logits cannot be empty.", nameof(logits));
+            }
             ArgumentNullException.ThrowIfNull(random);
 
-            foreach (var processor in _processors) { processor.Process(logits, history); }
-            foreach (var step in _steps) { step.Apply(logits); }
+            foreach (var processor in _processors)
+            {
+                processor.Process(logits, history);
+            }
+            foreach (var step in _steps)
+            {
+                step.Apply(logits);
+            }
 
             var maxIndex = 0;
             var max = float.NegativeInfinity;
             for (var i = 0; i < logits.Length; i++)
             {
-                if (logits[i] > max) { max = logits[i]; maxIndex = i; }
+                if (logits[i] > max)
+                {
+                    max = logits[i];
+                    maxIndex = i;
+                }
             }
-            if (float.IsNegativeInfinity(max)) { return 0; }   // everything masked — degenerate
+            if (float.IsNegativeInfinity(max))
+            {
+                return 0;
+            }   // everything masked — degenerate
 
             var sum = 0.0;
             for (var i = 0; i < logits.Length; i++)
             {
-                if (!float.IsNegativeInfinity(logits[i])) { sum += Math.Exp(logits[i] - max); }
+                if (!float.IsNegativeInfinity(logits[i]))
+                {
+                    sum += Math.Exp(logits[i] - max);
+                }
             }
-            if (sum <= 0.0 || double.IsNaN(sum) || double.IsInfinity(sum)) { return maxIndex; }
+            if (sum <= 0.0 || double.IsNaN(sum) || double.IsInfinity(sum))
+            {
+                return maxIndex;
+            }
 
             var target = random.NextDouble() * sum;
             var cumulative = 0.0;
             var last = maxIndex;
             for (var i = 0; i < logits.Length; i++)
             {
-                if (float.IsNegativeInfinity(logits[i])) { continue; }
+                if (float.IsNegativeInfinity(logits[i]))
+                {
+                    continue;
+                }
                 cumulative += Math.Exp(logits[i] - max);
                 last = i;
-                if (target <= cumulative) { return i; }
+                if (target <= cumulative)
+                {
+                    return i;
+                }
             }
             return last;
         }
@@ -97,10 +125,16 @@ namespace DevOnBike.Overfit.LanguageModels.Sampling
 
             public void Apply(Span<float> logits)
             {
-                if (_inverse == 1f) { return; }
+                if (_inverse == 1f)
+                {
+                    return;
+                }
                 for (var i = 0; i < logits.Length; i++)
                 {
-                    if (!float.IsNegativeInfinity(logits[i])) { logits[i] *= _inverse; }
+                    if (!float.IsNegativeInfinity(logits[i]))
+                    {
+                        logits[i] *= _inverse;
+                    }
                 }
             }
         }
@@ -115,7 +149,10 @@ namespace DevOnBike.Overfit.LanguageModels.Sampling
             public void Apply(Span<float> logits)
             {
                 var n = logits.Length;
-                if (_k <= 0 || _k >= n) { return; }
+                if (_k <= 0 || _k >= n)
+                {
+                    return;
+                }
 
                 var copy = new float[n];
                 logits.CopyTo(copy);
@@ -123,7 +160,10 @@ namespace DevOnBike.Overfit.LanguageModels.Sampling
                 var threshold = copy[n - _k];      // the k-th largest logit
                 for (var i = 0; i < n; i++)
                 {
-                    if (logits[i] < threshold) { logits[i] = float.NegativeInfinity; }
+                    if (logits[i] < threshold)
+                    {
+                        logits[i] = float.NegativeInfinity;
+                    }
                 }
             }
         }
@@ -137,12 +177,24 @@ namespace DevOnBike.Overfit.LanguageModels.Sampling
 
             public void Apply(Span<float> logits)
             {
-                if (_p >= 1f) { return; }
+                if (_p >= 1f)
+                {
+                    return;
+                }
                 var n = logits.Length;
 
                 var max = float.NegativeInfinity;
-                for (var i = 0; i < n; i++) { if (logits[i] > max) { max = logits[i]; } }
-                if (float.IsNegativeInfinity(max)) { return; }
+                for (var i = 0; i < n; i++)
+                {
+                    if (logits[i] > max)
+                    {
+                        max = logits[i];
+                    }
+                }
+                if (float.IsNegativeInfinity(max))
+                {
+                    return;
+                }
 
                 var prob = new double[n];
                 var idx = new int[n];
@@ -154,8 +206,14 @@ namespace DevOnBike.Overfit.LanguageModels.Sampling
                     idx[i] = i;
                     sum += e;
                 }
-                if (sum <= 0.0) { return; }
-                for (var i = 0; i < n; i++) { prob[i] /= sum; }
+                if (sum <= 0.0)
+                {
+                    return;
+                }
+                for (var i = 0; i < n; i++)
+                {
+                    prob[i] /= sum;
+                }
 
                 Array.Sort(prob, idx);             // ascending by probability
                 var keep = new bool[n];
@@ -164,11 +222,17 @@ namespace DevOnBike.Overfit.LanguageModels.Sampling
                 {
                     keep[idx[i]] = true;
                     cumulative += prob[i];
-                    if (cumulative >= _p) { break; }
+                    if (cumulative >= _p)
+                    {
+                        break;
+                    }
                 }
                 for (var i = 0; i < n; i++)
                 {
-                    if (!keep[i]) { logits[i] = float.NegativeInfinity; }
+                    if (!keep[i])
+                    {
+                        logits[i] = float.NegativeInfinity;
+                    }
                 }
             }
         }
@@ -183,17 +247,32 @@ namespace DevOnBike.Overfit.LanguageModels.Sampling
 
             public void Apply(Span<float> logits)
             {
-                if (_minP <= 0f) { return; }
+                if (_minP <= 0f)
+                {
+                    return;
+                }
 
                 var max = float.NegativeInfinity;
-                for (var i = 0; i < logits.Length; i++) { if (logits[i] > max) { max = logits[i]; } }
-                if (float.IsNegativeInfinity(max)) { return; }
+                for (var i = 0; i < logits.Length; i++)
+                {
+                    if (logits[i] > max)
+                    {
+                        max = logits[i];
+                    }
+                }
+                if (float.IsNegativeInfinity(max))
+                {
+                    return;
+                }
 
                 // P(token) ≥ minP·P(top) ⇔ logit ≥ maxLogit + ln(minP).
                 var threshold = max + MathF.Log(Math.Clamp(_minP, 1e-6f, 1f));
                 for (var i = 0; i < logits.Length; i++)
                 {
-                    if (logits[i] < threshold) { logits[i] = float.NegativeInfinity; }
+                    if (logits[i] < threshold)
+                    {
+                        logits[i] = float.NegativeInfinity;
+                    }
                 }
             }
         }
@@ -213,13 +292,19 @@ namespace DevOnBike.Overfit.LanguageModels.Sampling
 
             public void Process(Span<float> logits, ReadOnlySpan<int> history)
             {
-                if (_penalty <= 1f || history.IsEmpty) { return; }
+                if (_penalty <= 1f || history.IsEmpty)
+                {
+                    return;
+                }
 
                 var start = _contextSize > 0 && history.Length > _contextSize ? history.Length - _contextSize : 0;
                 for (var i = start; i < history.Length; i++)
                 {
                     var token = history[i];
-                    if (token < 0 || token >= logits.Length) { continue; }
+                    if (token < 0 || token >= logits.Length)
+                    {
+                        continue;
+                    }
                     var logit = logits[token];
                     logits[token] = logit < 0f ? logit * _penalty : logit / _penalty;
                 }

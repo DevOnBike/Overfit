@@ -83,10 +83,15 @@ namespace DevOnBike.Overfit.Anomalies.Adaptive
         public IReadOnlyList<string> PodsNeedingAdaptation()
         {
             var list = new List<string>();
+            
             foreach (var (pod, s) in _pods)
             {
-                if (s.AdaptationRecommended) { list.Add(pod); }
+                if (s.AdaptationRecommended)
+                {
+                    list.Add(pod);
+                }
             }
+            
             return list;
         }
 
@@ -135,7 +140,10 @@ namespace DevOnBike.Overfit.Anomalies.Adaptive
 
         public void Dispose()
         {
-            if (_disposed) { return; }
+            if (_disposed)
+            {
+                return;
+            }
             _disposed = true;
 
             DeactivateAdapter();   // leave the base model clean
@@ -155,7 +163,10 @@ namespace DevOnBike.Overfit.Anomalies.Adaptive
             if (score.Score < _policy.CriticalThreshold)
             {
                 state.Benign.Enqueue(snapshot);
-                while (state.Benign.Count > _policy.BenignWindow) { state.Benign.Dequeue(); }
+                while (state.Benign.Count > _policy.BenignWindow)
+                {
+                    state.Benign.Dequeue();
+                }
             }
 
             // Sustained elevated-but-not-critical = false-positive pressure (base miscalibration).
@@ -178,7 +189,10 @@ namespace DevOnBike.Overfit.Anomalies.Adaptive
 
         private PodState GetOrCreate(string podName)
         {
-            if (_pods.TryGetValue(podName, out var existing)) { return existing; }
+            if (_pods.TryGetValue(podName, out var existing))
+            {
+                return existing;
+            }
 
             var handle = SlmRuntimeFactory.CreateGpt1(_model);
             var state = new PodState
@@ -202,7 +216,10 @@ namespace DevOnBike.Overfit.Anomalies.Adaptive
         // Ensures the shared model carries the given pod's adapter (and only it).
         private void ActivateAdapterFor(string podName)
         {
-            if (_activeAdapterPod == podName) { return; }
+            if (_activeAdapterPod == podName)
+            {
+                return;
+            }
 
             DeactivateAdapter();
             if (_pods.TryGetValue(podName, out var s) && s.Adapter is { } adapter)
@@ -229,24 +246,45 @@ namespace DevOnBike.Overfit.Anomalies.Adaptive
             var chars = podName.ToCharArray();
             for (var i = 0; i < chars.Length; i++)
             {
-                if (Array.IndexOf(Path.GetInvalidFileNameChars(), chars[i]) >= 0) { chars[i] = '_'; }
+                if (Array.IndexOf(Path.GetInvalidFileNameChars(), chars[i]) >= 0)
+                {
+                    chars[i] = '_';
+                }
             }
             return new string(chars);
         }
 
         private void ThrowIfDisposed()
         {
-            if (_disposed) { throw new ObjectDisposedException(nameof(AdaptiveAnomalyMonitor)); }
+            if (_disposed)
+            {
+                throw new ObjectDisposedException(nameof(AdaptiveAnomalyMonitor));
+            }
         }
 
         // Per-pod monitoring state (nested/private — exempt from one-type-per-file).
         private sealed class PodState
         {
-            public required GptAnomalyDetector Detector { get; init; }
-            public required Queue<MetricSnapshot> Benign { get; init; }
-            public Gpt1LoRAMergeAdapter? Adapter { get; set; }
-            public int FalsePositiveStreak { get; set; }
-            public bool AdaptationRecommended { get; set; }
+            public required GptAnomalyDetector Detector
+            {
+                get; init;
+            }
+            public required Queue<MetricSnapshot> Benign
+            {
+                get; init;
+            }
+            public Gpt1LoRAMergeAdapter? Adapter
+            {
+                get; set;
+            }
+            public int FalsePositiveStreak
+            {
+                get; set;
+            }
+            public bool AdaptationRecommended
+            {
+                get; set;
+            }
         }
     }
 }

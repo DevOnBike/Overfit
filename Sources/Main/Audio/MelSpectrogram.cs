@@ -77,7 +77,10 @@ namespace DevOnBike.Overfit.Audio
 
             // ── Bluestein tables ──
             var m = 1;
-            while (m < 2 * NFft - 1) { m <<= 1; }
+            while (m < 2 * NFft - 1)
+            {
+                m <<= 1;
+            }
             _fftM = m;
             _twRe = new float[m / 2];
             _twIm = new float[m / 2];
@@ -104,8 +107,13 @@ namespace DevOnBike.Overfit.Audio
                 var ang = Math.PI * n2 / NFft;          // B[n] = exp(+iπn²/N), symmetric: B[M−n] = B[n]
                 var br = (float)Math.Cos(ang);
                 var bi = (float)Math.Sin(ang);
-                _bwRe[n] = br; _bwIm[n] = bi;
-                if (n > 0) { _bwRe[m - n] = br; _bwIm[m - n] = bi; }
+                _bwRe[n] = br;
+                _bwIm[n] = bi;
+                if (n > 0)
+                {
+                    _bwRe[m - n] = br;
+                    _bwIm[m - n] = bi;
+                }
             }
 
             Fft(_bwRe, _bwIm, _twRe, _twIm, inverse: false);
@@ -133,8 +141,14 @@ namespace DevOnBike.Overfit.Audio
 
             // Whisper keeps stft[..., :-1] → frames = (paddedLen - nFft)/hop, which equals samples/hop.
             frames = 1 + (paddedLen - NFft) / HopLength;
-            if (frames > 0) { frames -= 1; } // drop the last frame (Whisper's stft[..., :-1])
-            if (frames < 0) { frames = 0; }
+            if (frames > 0)
+            {
+                frames -= 1;
+            } // drop the last frame (Whisper's stft[..., :-1])
+            if (frames < 0)
+            {
+                frames = 0;
+            }
 
             _power = EnsureCapacity(_power, _nFreqs * frames);
             _mel = EnsureCapacity(_mel, _nMels * frames);
@@ -178,8 +192,20 @@ namespace DevOnBike.Overfit.Audio
             public MelFrameCtx(float* pad, float* hann, float* cRe, float* cIm, float* tRe, float* tIm,
                 float* bRe, float* bIm, float* pw, int m, int nFft, int hop, int nFreqs, int frames)
             {
-                Pad = pad; Hann = hann; CRe = cRe; CIm = cIm; TRe = tRe; TIm = tIm; BRe = bRe; BIm = bIm; Pw = pw;
-                M = m; NFft = nFft; Hop = hop; NFreqs = nFreqs; Frames = frames;
+                Pad = pad;
+                Hann = hann;
+                CRe = cRe;
+                CIm = cIm;
+                TRe = tRe;
+                TIm = tIm;
+                BRe = bRe;
+                BIm = bIm;
+                Pw = pw;
+                M = m;
+                NFft = nFft;
+                Hop = hop;
+                NFreqs = nFreqs;
+                Frames = frames;
             }
         }
 
@@ -238,7 +264,10 @@ namespace DevOnBike.Overfit.Audio
             for (int i = 1, j = 0; i < n; i++)
             {
                 var bit = n >> 1;
-                for (; (j & bit) != 0; bit >>= 1) { j ^= bit; }
+                for (; (j & bit) != 0; bit >>= 1)
+                {
+                    j ^= bit;
+                }
                 j ^= bit;
 
                 if (i < j)
@@ -264,8 +293,10 @@ namespace DevOnBike.Overfit.Audio
                         var b = a + half;
                         var xr = re[b] * wr - im[b] * wi;
                         var xi = re[b] * wi + im[b] * wr;
-                        re[b] = re[a] - xr; im[b] = im[a] - xi;
-                        re[a] += xr; im[a] += xi;
+                        re[b] = re[a] - xr;
+                        im[b] = im[a] - xi;
+                        re[a] += xr;
+                        im[a] += xi;
                     }
                 }
             }
@@ -273,7 +304,11 @@ namespace DevOnBike.Overfit.Audio
             if (inverse)
             {
                 var invN = 1f / n;
-                for (var i = 0; i < n; i++) { re[i] *= invN; im[i] *= invN; }
+                for (var i = 0; i < n; i++)
+                {
+                    re[i] *= invN;
+                    im[i] *= invN;
+                }
             }
         }
 
@@ -299,8 +334,14 @@ namespace DevOnBike.Overfit.Audio
             var pad = NFft / 2;
             var padded = ReflectPad(samples, pad);
             frames = 1 + (padded.Length - NFft) / HopLength;
-            if (frames > 0) { frames -= 1; }
-            if (frames < 0) { frames = 0; }
+            if (frames > 0)
+            {
+                frames -= 1;
+            }
+            if (frames < 0)
+            {
+                frames = 0;
+            }
             // OVERFIT001: parity hook (internal, for tests) — returns a fresh spectrogram the caller owns.
 #pragma warning disable OVERFIT001
             var power = new float[_nFreqs * frames];
@@ -335,7 +376,10 @@ namespace DevOnBike.Overfit.Audio
             {
                 var v = MathF.Log10(MathF.Max(mel[i], 1e-10f));
                 mel[i] = v;
-                if (v > maxLog) { maxLog = v; }
+                if (v > maxLog)
+                {
+                    maxLog = v;
+                }
             }
             var floor = maxLog - 8f;
             for (var i = 0; i < mel.Length; i++)

@@ -50,7 +50,8 @@ namespace DevOnBike.Overfit.Data.Prepare
                 {
                     bucket = new List<int>(1);
                     hashBuckets[hash] = bucket;
-                    bucket.Add(r); keptIndices.Add(r);
+                    bucket.Add(r);
+                    keptIndices.Add(r);
                     continue;
                 }
 
@@ -59,13 +60,15 @@ namespace DevOnBike.Overfit.Data.Prepare
                 {
                     if (RowsEqual(featureSpan, targetSpan, existingRow, r, cols))
                     {
-                        isDuplicate = true; break;
+                        isDuplicate = true;
+                        break;
                     }
                 }
 
                 if (!isDuplicate)
                 {
-                    bucket.Add(r); keptIndices.Add(r);
+                    bucket.Add(r);
+                    keptIndices.Add(r);
                 }
             }
 
@@ -98,12 +101,15 @@ namespace DevOnBike.Overfit.Data.Prepare
         {
             var hash = new HashCode();
             var offset = row * cols;
-            var c = 0; var limit = cols - 3;
+            var c = 0;
+            var limit = cols - 3;
 
             for (; c < limit; c += 4)
             {
-                hash.Add(features[offset + c]); hash.Add(features[offset + c + 1]);
-                hash.Add(features[offset + c + 2]); hash.Add(features[offset + c + 3]);
+                hash.Add(features[offset + c]);
+                hash.Add(features[offset + c + 1]);
+                hash.Add(features[offset + c + 2]);
+                hash.Add(features[offset + c + 3]);
             }
             for (; c < cols; c++)
             {

@@ -25,16 +25,28 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         }
 
         /// <summary>Tensor name (e.g. "blk.0.attn_q.weight").</summary>
-        public string Name { get; }
+        public string Name
+        {
+            get;
+        }
 
         /// <summary>Dimensions in GGUF order (fastest-stride first).</summary>
-        public ulong[] Dims { get; }
+        public ulong[] Dims
+        {
+            get;
+        }
 
         /// <summary>GGML data type (F32, F16, etc.).</summary>
-        public GgmlType Type { get; }
+        public GgmlType Type
+        {
+            get;
+        }
 
         /// <summary>Byte offset from the start of the data section.</summary>
-        public ulong Offset { get; }
+        public ulong Offset
+        {
+            get;
+        }
 
         /// <summary>Total number of elements (product of all dims).</summary>
         public long ElementCount

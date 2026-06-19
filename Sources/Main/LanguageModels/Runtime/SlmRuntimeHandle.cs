@@ -34,7 +34,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _engine = engine;
         }
 
-        public SlmRuntimeMode Mode { get; }
+        public SlmRuntimeMode Mode
+        {
+            get;
+        }
 
         public ISlmSession Session
         {

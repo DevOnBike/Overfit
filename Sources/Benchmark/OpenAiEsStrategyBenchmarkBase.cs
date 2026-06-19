@@ -73,11 +73,20 @@ namespace Benchmarks
             }
         }
 
-        protected int PopulationSize { get; private set; }
+        protected int PopulationSize
+        {
+            get; private set;
+        }
 
-        protected int ParameterCount { get; private set; }
+        protected int ParameterCount
+        {
+            get; private set;
+        }
 
-        protected bool UseAdam { get; private set; }
+        protected bool UseAdam
+        {
+            get; private set;
+        }
 
         protected float AskCore(
             int iterations)

@@ -17,18 +17,33 @@ namespace DevOnBike.Overfit.Mcp
     /// </summary>
     public sealed class McpTool
     {
-        public string Name { get; }
+        public string Name
+        {
+            get;
+        }
 
-        public string Description { get; }
+        public string Description
+        {
+            get;
+        }
 
         /// <summary>A JSON Schema object as raw JSON, e.g. <c>{"type":"object","properties":{...},"required":[...]}</c>.</summary>
-        public string InputSchemaJson { get; }
+        public string InputSchemaJson
+        {
+            get;
+        }
 
         /// <summary>The schema parsed once at construction (malformed schemas fail fast, not at
         /// the first <c>tools/list</c>) — written into the tool descriptor verbatim.</summary>
-        public JsonElement InputSchema { get; }
+        public JsonElement InputSchema
+        {
+            get;
+        }
 
-        public Func<JsonElement?, McpToolResult> Handler { get; }
+        public Func<JsonElement?, McpToolResult> Handler
+        {
+            get;
+        }
 
         public McpTool(string name, string description, string inputSchemaJson, Func<JsonElement?, McpToolResult> handler)
         {

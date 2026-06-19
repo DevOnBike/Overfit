@@ -74,8 +74,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 _heads[h] = new SingleHeadWeights(block.Attention, h);
             }
 
-            _moeRouter = null; _moeGate = null; _moeUp = null; _moeDown = null;
-            _moeSharedGate = default; _moeSharedUp = default; _moeSharedDown = default; _moeSharedGateInp = null;
+            _moeRouter = null;
+            _moeGate = null;
+            _moeUp = null;
+            _moeDown = null;
+            _moeSharedGate = default;
+            _moeSharedUp = default;
+            _moeSharedDown = default;
+            _moeSharedGateInp = null;
         }
 
         /// <summary>
@@ -117,8 +123,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _heads = heads ?? [];
             _kvHeads = kvHeads;
 
-            _moeRouter = null; _moeGate = null; _moeUp = null; _moeDown = null;
-            _moeSharedGate = default; _moeSharedUp = default; _moeSharedDown = default; _moeSharedGateInp = null;
+            _moeRouter = null;
+            _moeGate = null;
+            _moeUp = null;
+            _moeDown = null;
+            _moeSharedGate = default;
+            _moeSharedUp = default;
+            _moeSharedDown = default;
+            _moeSharedGateInp = null;
         }
 
         /// <summary>

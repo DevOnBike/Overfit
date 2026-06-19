@@ -48,10 +48,16 @@ namespace DevOnBike.Overfit.DeepLearning
         }
 
         /// <summary>Learnable per-feature scale (gamma), shape [normalizedShape].</summary>
-        public Parameter Gamma { get; }
+        public Parameter Gamma
+        {
+            get;
+        }
 
         /// <summary>Learnable per-feature shift (beta), shape [normalizedShape].</summary>
-        public Parameter Beta { get; }
+        public Parameter Beta
+        {
+            get;
+        }
 
         public float Eps => _eps;
 
@@ -99,7 +105,11 @@ namespace DevOnBike.Overfit.DeepLearning
                 mu /= C;
 
                 var variance = 0f;
-                for (var i = 0; i < C; i++) { var d = inRow[i] - mu; variance += d * d; }
+                for (var i = 0; i < C; i++)
+                {
+                    var d = inRow[i] - mu;
+                    variance += d * d;
+                }
                 variance /= C;
 
                 var inv = 1f / MathF.Sqrt(variance + _eps);

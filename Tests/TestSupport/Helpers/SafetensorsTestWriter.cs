@@ -33,11 +33,17 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Helpers
             for (var i = 0; i < _tensors.Count; i++)
             {
                 var (name, shape, data) = _tensors[i];
-                if (i > 0) { sb.Append(','); }
+                if (i > 0)
+                {
+                    sb.Append(',');
+                }
                 sb.Append('"').Append(name).Append("\":{\"dtype\":\"F32\",\"shape\":[");
                 for (var s = 0; s < shape.Length; s++)
                 {
-                    if (s > 0) { sb.Append(','); }
+                    if (s > 0)
+                    {
+                        sb.Append(',');
+                    }
                     sb.Append(shape[s]);
                 }
 

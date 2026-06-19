@@ -27,10 +27,21 @@ namespace DevOnBike.Overfit.Tests.Audio
             var nan = 0;
             foreach (var s in samples)
             {
-                if (!float.IsFinite(s)) { nan++; continue; }
-                sum += s; sumSq += (double)s * s;
-                if (s < min) { min = s; }
-                if (s > max) { max = s; }
+                if (!float.IsFinite(s))
+                {
+                    nan++;
+                    continue;
+                }
+                sum += s;
+                sumSq += (double)s * s;
+                if (s < min)
+                {
+                    min = s;
+                }
+                if (s > max)
+                {
+                    max = s;
+                }
             }
             var rms = Math.Sqrt(sumSq / samples.Length);
             _out.WriteLine($"sampleRate {sr}, samples {samples.Length}, rms {rms:F4}, min {min:F4}, max {max:F4}, nan {nan}");

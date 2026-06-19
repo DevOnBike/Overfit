@@ -164,7 +164,10 @@ namespace DevOnBike.Overfit.Extensions.AI
         private static (SamplingOptions Sampling, int MaxTokens) BuildOptions(ChatOptions? options)
         {
             var maxTokens = options?.MaxOutputTokens ?? 512;
-            if (maxTokens <= 0) { maxTokens = 512; }
+            if (maxTokens <= 0)
+            {
+                maxTokens = 512;
+            }
 
             var temperature = options?.Temperature ?? 1.0f;
             var sampling = temperature <= 0.0001f
@@ -193,9 +196,18 @@ namespace DevOnBike.Overfit.Extensions.AI
             {
                 var text = messages[i].Text ?? string.Empty;
                 var role = messages[i].Role;
-                if (role == ChatRole.System) { _session.AddSystem(text); }
-                else if (role == ChatRole.Assistant) { _session.AddAssistant(text); }
-                else { _session.AddUser(text); }   // user / tool / unknown → user turn
+                if (role == ChatRole.System)
+                {
+                    _session.AddSystem(text);
+                }
+                else if (role == ChatRole.Assistant)
+                {
+                    _session.AddAssistant(text);
+                }
+                else
+                {
+                    _session.AddUser(text);
+                }   // user / tool / unknown → user turn
             }
 
             return messages[^1].Text ?? string.Empty;

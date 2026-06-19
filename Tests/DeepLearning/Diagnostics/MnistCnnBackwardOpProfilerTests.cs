@@ -49,13 +49,24 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Diagnostics
             using var fc1 = new LinearLayer(16 * 7 * 7, 64);
             using var fc2 = new LinearLayer(64, Classes);
 
-            conv1.Train(); bn1.Train(); conv2.Train(); bn2.Train(); fc1.Train(); fc2.Train();
+            conv1.Train();
+            bn1.Train();
+            conv2.Train();
+            bn2.Train();
+            fc1.Train();
+            fc2.Train();
 
             // Synthetic [B, 1, 28, 28] input and labels.
             var inputData = new float[batchSize * 1 * ImageSide * ImageSide];
-            for (var i = 0; i < inputData.Length; i++) { inputData[i] = (float)rng.NextDouble(); }
+            for (var i = 0; i < inputData.Length; i++)
+            {
+                inputData[i] = (float)rng.NextDouble();
+            }
             var labels = new int[batchSize];
-            for (var i = 0; i < labels.Length; i++) { labels[i] = rng.Next(0, Classes); }
+            for (var i = 0; i < labels.Length; i++)
+            {
+                labels[i] = rng.Next(0, Classes);
+            }
 
             using var graph = new ComputationGraph(ArenaSize);
 
@@ -125,11 +136,17 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Diagnostics
                 var maxVal = logitArr[off];
                 for (var c = 1; c < classes; c++)
                 {
-                    if (logitArr[off + c] > maxVal) { maxVal = logitArr[off + c]; }
+                    if (logitArr[off + c] > maxVal)
+                    {
+                        maxVal = logitArr[off + c];
+                    }
                 }
 
                 var sumExp = 0f;
-                for (var c = 0; c < classes; c++) { sumExp += MathF.Exp(logitArr[off + c] - maxVal); }
+                for (var c = 0; c < classes; c++)
+                {
+                    sumExp += MathF.Exp(logitArr[off + c] - maxVal);
+                }
                 losses[b] = maxVal + MathF.Log(sumExp) - logitArr[off + labels[b]];
 
                 var scale = 1f / batch;
@@ -142,7 +159,10 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Diagnostics
 
             gradArr.AsSpan().CopyTo(logits.GradView.AsSpan());
             var total = 0f;
-            for (var b = 0; b < batch; b++) { total += losses[b]; }
+            for (var b = 0; b < batch; b++)
+            {
+                total += losses[b];
+            }
             return total / batch;
         }
 
@@ -168,7 +188,10 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Diagnostics
             for (var i = opCount - 1; i >= 0; i--)
             {
                 var op = tape.GetValue(i);
-                if (op is null) { continue; }
+                if (op is null)
+                {
+                    continue;
+                }
 
                 var opCode = GetOpCodeName(op);
                 var start = Stopwatch.GetTimestamp();
@@ -188,7 +211,10 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Diagnostics
 
             var items = new BackwardProfileItem[aggregates.Count];
             var idx = 0;
-            foreach (var v in aggregates.Values) { items[idx++] = v; }
+            foreach (var v in aggregates.Values)
+            {
+                items[idx++] = v;
+            }
             return new BackwardProfile(opCount, totalTicks, items);
         }
 
@@ -196,16 +222,25 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Diagnostics
         {
             var type = tapeOp.GetType();
             var codeField = type.GetField("Code", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if (codeField is not null) { return codeField.GetValue(tapeOp)?.ToString() ?? "<null>"; }
+            if (codeField is not null)
+            {
+                return codeField.GetValue(tapeOp)?.ToString() ?? "<null>";
+            }
             var codeProperty = type.GetProperty("Code", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if (codeProperty is not null) { return codeProperty.GetValue(tapeOp)?.ToString() ?? "<null>"; }
+            if (codeProperty is not null)
+            {
+                return codeProperty.GetValue(tapeOp)?.ToString() ?? "<null>";
+            }
             throw new MissingMemberException(type.FullName, "Code");
         }
 
         private static int GetIntEnvVar(string name, int defaultValue)
         {
             var raw = Environment.GetEnvironmentVariable(name);
-            if (string.IsNullOrWhiteSpace(raw)) { return defaultValue; }
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return defaultValue;
+            }
             return int.TryParse(raw, out var v) && v > 0 ? v : defaultValue;
         }
 
@@ -218,18 +253,39 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Diagnostics
                 Items = items;
             }
 
-            public int RecordedOpCount { get; }
-            public long TotalTicks { get; }
+            public int RecordedOpCount
+            {
+                get;
+            }
+            public long TotalTicks
+            {
+                get;
+            }
             public double TotalMilliseconds => TotalTicks * 1000.0 / Stopwatch.Frequency;
-            public IReadOnlyList<BackwardProfileItem> Items { get; }
+            public IReadOnlyList<BackwardProfileItem> Items
+            {
+                get;
+            }
         }
 
         private sealed class BackwardProfileItem
         {
-            public BackwardProfileItem(string opCode) { OpCode = opCode; }
-            public string OpCode { get; }
-            public int Count { get; set; }
-            public long ElapsedTicks { get; set; }
+            public BackwardProfileItem(string opCode)
+            {
+                OpCode = opCode;
+            }
+            public string OpCode
+            {
+                get;
+            }
+            public int Count
+            {
+                get; set;
+            }
+            public long ElapsedTicks
+            {
+                get; set;
+            }
         }
     }
 }

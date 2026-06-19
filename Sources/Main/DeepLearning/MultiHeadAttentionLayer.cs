@@ -147,7 +147,10 @@ namespace DevOnBike.Overfit.DeepLearning
         public Parameter[] BkHeads => _bkHeads;
         public Parameter[] BvHeads => _bvHeads;
 
-        public Parameter Bo { get; }
+        public Parameter Bo
+        {
+            get;
+        }
 
         // Compatibility properties for existing tests and gradient checks.
         public Parameter Wq => _wqHeads[0];

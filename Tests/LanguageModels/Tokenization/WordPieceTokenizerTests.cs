@@ -27,7 +27,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenization
                 "hello", "world", ",", "!", "the", "a",  // 8..13
                 "em", "##bed", "##ding", "##s",          // 14..17
             };
-            for (var i = 0; i < tokens.Length; i++) { vocab[tokens[i]] = i; }
+            for (var i = 0; i < tokens.Length; i++)
+            {
+                vocab[tokens[i]] = i;
+            }
             return new WordPieceTokenizer(vocab, doLowerCase: true);
         }
 

@@ -62,10 +62,22 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
         public bool IsByteLevelBpe => _model == "gpt2";
         public int VocabSize => _tokens.Length;
-        public int BosId { get; }
-        public int EosId { get; }
-        public int UnknownId { get; }
-        public bool AddBosByDefault { get; }
+        public int BosId
+        {
+            get;
+        }
+        public int EosId
+        {
+            get;
+        }
+        public int UnknownId
+        {
+            get;
+        }
+        public bool AddBosByDefault
+        {
+            get;
+        }
 
         private GgufTokenizer(
             string model, string[] tokens, int[] tokenTypes, float[] scores, string[] merges,
@@ -85,7 +97,10 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             _idToByte = new int[tokens.Length];
             _byteToId = new int[256];
             _specialIds = [];
-            for (var b = 0; b < 256; b++) { _byteToId[b] = -1; }
+            for (var b = 0; b < 256; b++)
+            {
+                _byteToId[b] = -1;
+            }
 
             for (var id = 0; id < tokens.Length; id++)
             {
@@ -93,9 +108,15 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
                 var byteValue = ParseByteToken(tokens[id], tokenTypes[id]);
                 _idToByte[id] = byteValue;
-                if (byteValue >= 0) { _byteToId[byteValue] = id; }
+                if (byteValue >= 0)
+                {
+                    _byteToId[byteValue] = id;
+                }
 
-                if (tokenTypes[id] is TypeControl or TypeUserDefined) { _specialIds.Add(id); }
+                if (tokenTypes[id] is TypeControl or TypeUserDefined)
+                {
+                    _specialIds.Add(id);
+                }
             }
 
             if (_model == "gpt2")
@@ -174,10 +195,19 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             ArgumentNullException.ThrowIfNull(text);
 
             var output = new List<int>(text.Length + 1);
-            if ((addBos ?? AddBosByDefault) && BosId >= 0) { output.Add(BosId); }
+            if ((addBos ?? AddBosByDefault) && BosId >= 0)
+            {
+                output.Add(BosId);
+            }
 
-            if (_model == "gpt2") { BpeEncode(text, output); }
-            else { SpmEncode(text, output); }
+            if (_model == "gpt2")
+            {
+                BpeEncode(text, output);
+            }
+            else
+            {
+                SpmEncode(text, output);
+            }
 
             return output.ToArray();
         }
@@ -190,22 +220,40 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
             void Flush()
             {
-                if (bytes.Count > 0) { sb.Append(Encoding.UTF8.GetString(bytes.ToArray())); bytes.Clear(); }
+                if (bytes.Count > 0)
+                {
+                    sb.Append(Encoding.UTF8.GetString(bytes.ToArray()));
+                    bytes.Clear();
+                }
             }
 
             for (var i = 0; i < ids.Length; i++)
             {
                 var id = ids[i];
-                if ((uint)id >= (uint)_tokens.Length) { continue; }
+                if ((uint)id >= (uint)_tokens.Length)
+                {
+                    continue;
+                }
 
                 var type = _tokenTypes[id];
-                if (type == TypeControl) { continue; }                 // <s> / </s> / specials — drop from text
-                if (type == TypeUserDefined) { Flush(); sb.Append(_tokens[id]); continue; }   // literal special
+                if (type == TypeControl)
+                {
+                    continue;
+                }                 // <s> / </s> / specials — drop from text
+                if (type == TypeUserDefined)
+                {
+                    Flush();
+                    sb.Append(_tokens[id]);
+                    continue;
+                }   // literal special
 
                 if (_model == "gpt2")
                 {
                     var piece = _tokens[id];   // ByteLevel: each char maps back to one raw byte
-                    for (var c = 0; c < piece.Length; c++) { bytes.Add(_charToByte![piece[c]]); }
+                    for (var c = 0; c < piece.Length; c++)
+                    {
+                        bytes.Add(_charToByte![piece[c]]);
+                    }
                 }
                 else if (_idToByte[id] >= 0)
                 {
@@ -214,21 +262,30 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                 else
                 {
                     var pieceBytes = Encoding.UTF8.GetBytes(_tokens[id].Replace(SpaceMarker, ' '));
-                    for (var b = 0; b < pieceBytes.Length; b++) { bytes.Add(pieceBytes[b]); }
+                    for (var b = 0; b < pieceBytes.Length; b++)
+                    {
+                        bytes.Add(pieceBytes[b]);
+                    }
                 }
             }
 
             Flush();
             var text = sb.ToString();
             // SPM added a leading space at encode time — strip one to round-trip.
-            if (_model != "gpt2" && _addSpacePrefix && text.Length > 0 && text[0] == ' ') { text = text[1..]; }
+            if (_model != "gpt2" && _addSpacePrefix && text.Length > 0 && text[0] == ' ')
+            {
+                text = text[1..];
+            }
             return text;
         }
 
         /// <summary>Decodes a single token id to its display string (specials → empty).</summary>
         public string DecodeToken(int id)
         {
-            if ((uint)id >= (uint)_tokens.Length) { return ""; }
+            if ((uint)id >= (uint)_tokens.Length)
+            {
+                return "";
+            }
             return Decode(new[] { id });
         }
 
@@ -238,7 +295,10 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
         {
             var prepared = (_addSpacePrefix ? " " : "") + text;
             prepared = prepared.Replace(' ', SpaceMarker);
-            if (prepared.Length == 0) { return; }
+            if (prepared.Length == 0)
+            {
+                return;
+            }
             SpmMerge(prepared, output);
         }
 
@@ -259,13 +319,19 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                 next.Add(-1);
                 i += charLen;
             }
-            for (var s = 0; s < next.Count; s++) { next[s] = s + 1 < next.Count ? s + 1 : -1; }
+            for (var s = 0; s < next.Count; s++)
+            {
+                next[s] = s + 1 < next.Count ? s + 1 : -1;
+            }
 
             var queue = new PriorityQueue<(int left, int right, int size), (float score, int left)>(BigramComparer.Instance);
 
             void TryAddBigram(int left, int right)
             {
-                if (left < 0 || right < 0) { return; }
+                if (left < 0 || right < 0)
+                {
+                    return;
+                }
                 var merged = text.Substring(starts[left], lens[left] + lens[right]);
                 if (_tokenToId.TryGetValue(merged, out var id))
                 {
@@ -273,17 +339,26 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                 }
             }
 
-            for (var i = 1; i < starts.Count; i++) { TryAddBigram(i - 1, i); }
+            for (var i = 1; i < starts.Count; i++)
+            {
+                TryAddBigram(i - 1, i);
+            }
 
             while (queue.Count > 0)
             {
                 var (left, right, size) = queue.Dequeue();
-                if (lens[left] == 0 || lens[right] == 0 || lens[left] + lens[right] != size) { continue; }
+                if (lens[left] == 0 || lens[right] == 0 || lens[left] + lens[right] != size)
+                {
+                    continue;
+                }
 
                 lens[left] += lens[right];
                 lens[right] = 0;
                 next[left] = next[right];
-                if (next[right] >= 0) { prev[next[right]] = left; }
+                if (next[right] >= 0)
+                {
+                    prev[next[right]] = left;
+                }
 
                 TryAddBigram(prev[left], left);
                 TryAddBigram(left, next[left]);
@@ -291,7 +366,10 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
             for (var i = 0; i >= 0; i = next[i])
             {
-                if (lens[i] == 0) { continue; }
+                if (lens[i] == 0)
+                {
+                    continue;
+                }
                 SpmResegment(text.Substring(starts[i], lens[i]), output);
             }
         }
@@ -316,7 +394,10 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
         private void BpeEncode(string text, List<int> output)
         {
-            if (text.Length == 0) { return; }
+            if (text.Length == 0)
+            {
+                return;
+            }
 
             foreach (var (piece, isSpecial, specialId) in SplitOnSpecialTokens(text))
             {
@@ -334,7 +415,10 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
         private void BpeMerge(string text, List<int> output)
         {
-            if (text.Length == 0) { return; }
+            if (text.Length == 0)
+            {
+                return;
+            }
 
             var utf8 = Encoding.UTF8.GetBytes(text);
             var ids = new List<int>(utf8.Length);
@@ -356,14 +440,20 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                         bestIndex = i;
                     }
                 }
-                if (bestIndex < 0) { break; }
+                if (bestIndex < 0)
+                {
+                    break;
+                }
 
                 var merged = _tokens[ids[bestIndex]] + _tokens[ids[bestIndex + 1]];
                 ids[bestIndex] = _tokenToId.TryGetValue(merged, out var mid) ? mid : UnknownId;
                 ids.RemoveAt(bestIndex + 1);
             }
 
-            for (var i = 0; i < ids.Count; i++) { output.Add(ids[i]); }
+            for (var i = 0; i < ids.Count; i++)
+            {
+                output.Add(ids[i]);
+            }
         }
 
         // Longest-match scan instead of a giant regex alternation: models like Orpheus add tens of thousands of
@@ -391,7 +481,10 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                         var candidate = text.Substring(pos, len);
                         if (scan.Strings.Contains(candidate))
                         {
-                            if (pos > segStart) { result.Add((text[segStart..pos], false, -1)); }
+                            if (pos > segStart)
+                            {
+                                result.Add((text[segStart..pos], false, -1));
+                            }
                             result.Add((candidate, true, _tokenToId[candidate]));
                             pos += len;
                             segStart = pos;
@@ -400,9 +493,13 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                     }
                 }
                 pos++;
-            matched:;
+            matched:
+                ;
             }
-            if (segStart < text.Length) { result.Add((text[segStart..], false, -1)); }
+            if (segStart < text.Length)
+            {
+                result.Add((text[segStart..], false, -1));
+            }
             return result;
         }
 
@@ -413,7 +510,10 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             for (var i = 0; i < merges.Length; i++)
             {
                 var sp = merges[i].IndexOf(' ');
-                if (sp <= 0 || sp >= merges[i].Length - 1) { continue; }
+                if (sp <= 0 || sp >= merges[i].Length - 1)
+                {
+                    continue;
+                }
                 var left = merges[i][..sp];
                 var right = merges[i][(sp + 1)..];
                 if (_tokenToId.TryGetValue(left, out var a) && _tokenToId.TryGetValue(right, out var b))
@@ -426,7 +526,10 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
         private SpecialScan? BuildSpecialScan()
         {
-            if (_specialIds.Count == 0) { return null; }
+            if (_specialIds.Count == 0)
+            {
+                return null;
+            }
             var strings = new HashSet<string>(_specialIds.Count, StringComparer.Ordinal);
             var firstChars = new HashSet<char>();
             var maxLen = 0;
@@ -434,10 +537,16 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             {
                 // Only literal, matchable special strings (skip empties / unused placeholders).
                 var s = _tokens[id];
-                if (string.IsNullOrEmpty(s)) { continue; }
+                if (string.IsNullOrEmpty(s))
+                {
+                    continue;
+                }
                 strings.Add(s);
                 firstChars.Add(s[0]);
-                if (s.Length > maxLen) { maxLen = s.Length; }
+                if (s.Length > maxLen)
+                {
+                    maxLen = s.Length;
+                }
             }
             return strings.Count == 0 ? null : new SpecialScan(strings, firstChars, maxLen);
         }
@@ -452,9 +561,18 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                 MaxLen = maxLen;
             }
 
-            public HashSet<string> Strings { get; }
-            public HashSet<char> FirstChars { get; }
-            public int MaxLen { get; }
+            public HashSet<string> Strings
+            {
+                get;
+            }
+            public HashSet<char> FirstChars
+            {
+                get;
+            }
+            public int MaxLen
+            {
+                get;
+            }
         }
 
         private static string SelectBpePattern(string preType)
@@ -466,14 +584,20 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
         private static int ParseByteToken(string token, int tokenType)
         {
-            if (tokenType != TypeByte) { return -1; }
+            if (tokenType != TypeByte)
+            {
+                return -1;
+            }
             if (token.Length != 6 || token[0] != '<' || token[1] != '0' || token[2] != 'x' || token[5] != '>')
             {
                 return -1;
             }
             var hi = HexValue(token[3]);
             var lo = HexValue(token[4]);
-            if (hi < 0 || lo < 0) { return -1; }
+            if (hi < 0 || lo < 0)
+            {
+                return -1;
+            }
             return (hi << 4) | lo;
         }
 
@@ -491,7 +615,10 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
             public int Compare((float score, int left) a, (float score, int left) b)
             {
-                if (a.score != b.score) { return a.score > b.score ? -1 : 1; }
+                if (a.score != b.score)
+                {
+                    return a.score > b.score ? -1 : 1;
+                }
                 return a.left.CompareTo(b.left);
             }
         }

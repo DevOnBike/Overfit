@@ -99,7 +99,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             {
                 return;
             }
-            if (tok is null) { _out.WriteLine("SKIPPED: no tokenizer"); return; }
+            if (tok is null)
+            {
+                _out.WriteLine("SKIPPED: no tokenizer");
+                return;
+            }
             using (engine)
             {
                 var sampling = SamplingOptions.Greedy;
@@ -136,7 +140,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         public void Diag_ModelFileInfo()
         {
             var info = new FileInfo(ModelPath);
-            if (!info.Exists) { _out.WriteLine($"NOT FOUND: {ModelPath}"); return; }
+            if (!info.Exists)
+            {
+                _out.WriteLine($"NOT FOUND: {ModelPath}");
+                return;
+            }
             _out.WriteLine($"Path     : {info.FullName}");
             _out.WriteLine($"Size     : {info.Length / 1024.0 / 1024.0:F1} MB");
             _out.WriteLine($"Modified : {info.LastWriteTime:yyyy-MM-dd HH:mm:ss}");

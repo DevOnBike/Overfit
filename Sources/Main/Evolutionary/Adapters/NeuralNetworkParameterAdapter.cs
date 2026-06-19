@@ -90,7 +90,10 @@ namespace DevOnBike.Overfit.Evolutionary.Adapters
             ParameterCount = runningOffset;
         }
 
-        public int ParameterCount { get; }
+        public int ParameterCount
+        {
+            get;
+        }
 
         /// <summary>
         ///     Copies the current parameter values of the wrapped module into

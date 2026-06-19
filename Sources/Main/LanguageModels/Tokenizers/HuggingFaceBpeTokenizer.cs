@@ -172,20 +172,33 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
             foreach (var id in tokens)
             {
-                if (id < 0 || id >= _decoder.Length || _decoder[id] is null) { continue; }
+                if (id < 0 || id >= _decoder.Length || _decoder[id] is null)
+                {
+                    continue;
+                }
                 var piece = _decoder[id];
 
                 if (_specialTokenIds.Contains(id))
                 {
-                    if (bytes.Count > 0) { sb.Append(Encoding.UTF8.GetString(bytes.ToArray())); bytes.Clear(); }
+                    if (bytes.Count > 0)
+                    {
+                        sb.Append(Encoding.UTF8.GetString(bytes.ToArray()));
+                        bytes.Clear();
+                    }
                     sb.Append(piece);
                 }
                 else
                 {
-                    foreach (var ch in piece) { bytes.Add(_charToByte[ch]); }
+                    foreach (var ch in piece)
+                    {
+                        bytes.Add(_charToByte[ch]);
+                    }
                 }
             }
-            if (bytes.Count > 0) { sb.Append(Encoding.UTF8.GetString(bytes.ToArray())); }
+            if (bytes.Count > 0)
+            {
+                sb.Append(Encoding.UTF8.GetString(bytes.ToArray()));
+            }
             return sb.ToString();
         }
 
@@ -193,11 +206,17 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
         private void BpeEncode(string text, List<int> output)
         {
-            if (text.Length == 0) { return; }
+            if (text.Length == 0)
+            {
+                return;
+            }
 
             var utf8 = Encoding.UTF8.GetBytes(text);
             var charBuf = new char[utf8.Length];
-            for (var i = 0; i < utf8.Length; i++) { charBuf[i] = _byteToChar[utf8[i]]; }
+            for (var i = 0; i < utf8.Length; i++)
+            {
+                charBuf[i] = _byteToChar[utf8[i]];
+            }
 
             var ids = new List<int>(charBuf.Length);
             for (var i = 0; i < charBuf.Length; i++)
@@ -218,7 +237,10 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                         bestIndex = i;
                     }
                 }
-                if (bestIndex < 0) { break; }
+                if (bestIndex < 0)
+                {
+                    break;
+                }
 
                 var merged = _decoder[ids[bestIndex]] + _decoder[ids[bestIndex + 1]];
                 ids[bestIndex] = _vocab.TryGetValue(merged, out var mid) ? mid : _unkId;
@@ -231,21 +253,34 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
         private List<(string Text, bool IsSpecial)> SplitOnSpecialTokens(string text)
         {
             var result = new List<(string, bool)>();
-            if (_specialTokens.Count == 0) { result.Add((text, false)); return result; }
+            if (_specialTokens.Count == 0)
+            {
+                result.Add((text, false));
+                return result;
+            }
 
             var escaped = new string[_specialTokens.Count];
             var ei = 0;
-            foreach (var key in _specialTokens.Keys) { escaped[ei++] = Regex.Escape(key); }
+            foreach (var key in _specialTokens.Keys)
+            {
+                escaped[ei++] = Regex.Escape(key);
+            }
             var regex = new Regex(string.Join("|", escaped));
 
             var pos = 0;
             foreach (Match m in regex.Matches(text))
             {
-                if (m.Index > pos) { result.Add((text[pos..m.Index], false)); }
+                if (m.Index > pos)
+                {
+                    result.Add((text[pos..m.Index], false));
+                }
                 result.Add((m.Value, true));
                 pos = m.Index + m.Length;
             }
-            if (pos < text.Length) { result.Add((text[pos..], false)); }
+            if (pos < text.Length)
+            {
+                result.Add((text[pos..], false));
+            }
             return result;
         }
 
@@ -259,10 +294,16 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             {
                 var id = kv.Value.GetInt32();
                 vocab[kv.Name] = id;
-                if (id > maxId) { maxId = id; }
+                if (id > maxId)
+                {
+                    maxId = id;
+                }
             }
             decoder = new string[maxId + 1];
-            foreach (var kv in vocab) { decoder[kv.Value] = kv.Key; }
+            foreach (var kv in vocab)
+            {
+                decoder[kv.Value] = kv.Key;
+            }
             return vocab;
         }
 
@@ -357,7 +398,10 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                 foreach (var child in seq.EnumerateArray())
                 {
                     var found = FindSplitPattern(child);
-                    if (found is not null) { return found; }
+                    if (found is not null)
+                    {
+                        return found;
+                    }
                 }
             }
 
@@ -384,7 +428,10 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             {
                 foreach (var child in seq.EnumerateArray())
                 {
-                    if (FindAddPrefixSpace(child) is { } v) { return v; }
+                    if (FindAddPrefixSpace(child) is { } v)
+                    {
+                        return v;
+                    }
                 }
             }
             return null;
@@ -415,8 +462,14 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             {
                 unk = ResolveId(mu.GetString(), specialTokens, vocab, fallback: -1);
             }
-            if (eos < 0) { eos = unk >= 0 ? unk : 0; }
-            if (unk < 0) { unk = eos; }
+            if (eos < 0)
+            {
+                eos = unk >= 0 ? unk : 0;
+            }
+            if (unk < 0)
+            {
+                unk = eos;
+            }
             return (eos, unk);
         }
 
@@ -437,9 +490,18 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
         private static int ResolveId(string? token, Dictionary<string, int> specialTokens, Dictionary<string, int> vocab, int fallback)
         {
-            if (token is null) { return fallback; }
-            if (specialTokens.TryGetValue(token, out var sid)) { return sid; }
-            if (vocab.TryGetValue(token, out var vid)) { return vid; }
+            if (token is null)
+            {
+                return fallback;
+            }
+            if (specialTokens.TryGetValue(token, out var sid))
+            {
+                return sid;
+            }
+            if (vocab.TryGetValue(token, out var vid))
+            {
+                return vid;
+            }
             return fallback;
         }
 

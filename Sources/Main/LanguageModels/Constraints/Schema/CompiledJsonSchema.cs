@@ -30,13 +30,22 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
         }
 
         /// <summary>Flat node array; index 0 is the root.</summary>
-        public JsonSchemaNode[] Nodes { get; }
+        public JsonSchemaNode[] Nodes
+        {
+            get;
+        }
 
         /// <summary>Shared property-name / enum-value tries referenced by node trie indices.</summary>
-        public JsonStringTrie[] Tries { get; }
+        public JsonStringTrie[] Tries
+        {
+            get;
+        }
 
         /// <summary>Index of a shared all-types node, used for values under a key not present in the schema
         /// (an additional property when <c>additionalProperties</c> is not forbidden).</summary>
-        public int UnconstrainedNodeIndex { get; }
+        public int UnconstrainedNodeIndex
+        {
+            get;
+        }
     }
 }

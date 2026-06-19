@@ -6,8 +6,8 @@
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Diagnostics;
-using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Ops;
+using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 using DevOnBike.Overfit.Tests.TestSupport;
@@ -38,7 +38,11 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
             const int steps = 60_000 / batchSize / replicas;   // 58
 
             var imgs = TestModelPaths.Mnist.TrainImagesPath;
-            if (!File.Exists(imgs)) { _out.WriteLine("MNIST files not found."); return; }
+            if (!File.Exists(imgs))
+            {
+                _out.WriteLine("MNIST files not found.");
+                return;
+            }
             var (trainX, trainY) = MnistLoader.Load(imgs, TestModelPaths.Mnist.TrainLabelsPath);
 
             var convs = new ConvLayer[replicas + 1];
@@ -74,7 +78,10 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
                 float TrainBatch(int i, int batch)
                 {
                     graphs[i].Reset();
-                    foreach (var p in pars[i]) { p.ZeroGrad(); }
+                    foreach (var p in pars[i])
+                    {
+                        p.ZeroGrad();
+                    }
                     trainX.AsReadOnlySpan().Slice(batch * batchSize * 784, batchSize * 784).CopyTo(xs[i].AsSpan());
                     trainY.AsReadOnlySpan().Slice(batch * batchSize * 10, batchSize * 10).CopyTo(ys[i].AsSpan());
                     using var h1 = convs[i].Forward(graphs[i], xn[i]);
@@ -90,12 +97,18 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
                 }
 
                 // Warmup (JIT) — both paths.
-                for (var s = 0; s < 4; s++) { TrainBatch(1, s); }
+                for (var s = 0; s < 4; s++)
+                {
+                    TrainBatch(1, s);
+                }
                 trainer.Step(opt, w => TrainBatch(1 + w, w));
 
                 // (a) bare tape: 58 single-replica batches, no trainer/optimizer.
                 var before = GC.GetTotalAllocatedBytes(precise: true);
-                for (var s = 0; s < steps; s++) { TrainBatch(1, s); }
+                for (var s = 0; s < steps; s++)
+                {
+                    TrainBatch(1, s);
+                }
                 var tapeOnly = GC.GetTotalAllocatedBytes(precise: true) - before;
                 _out.WriteLine($"(a) tape-only, 58 batches × 1 replica:  {tapeOnly:N0} B  ({tapeOnly / steps:N0} B/batch)");
 
@@ -117,9 +130,14 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
             {
                 for (var i = 0; i <= replicas; i++)
                 {
-                    xn[i].Dispose(); yn[i].Dispose(); graphs[i].Dispose();
-                    convs[i].Dispose(); hiddens[i].Dispose(); outs[i].Dispose();
-                    xs[i].Dispose(); ys[i].Dispose();
+                    xn[i].Dispose();
+                    yn[i].Dispose();
+                    graphs[i].Dispose();
+                    convs[i].Dispose();
+                    hiddens[i].Dispose();
+                    outs[i].Dispose();
+                    xs[i].Dispose();
+                    ys[i].Dispose();
                 }
             }
         }

@@ -373,13 +373,22 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
                 Items = items;
             }
 
-            public int RecordedOpCount { get; }
+            public int RecordedOpCount
+            {
+                get;
+            }
 
-            public long TotalTicks { get; }
+            public long TotalTicks
+            {
+                get;
+            }
 
             public double TotalMilliseconds => TotalTicks * 1000.0 / Stopwatch.Frequency;
 
-            public IReadOnlyList<BackwardProfileItem> Items { get; }
+            public IReadOnlyList<BackwardProfileItem> Items
+            {
+                get;
+            }
         }
 
         private sealed class BackwardProfileItem
@@ -389,11 +398,20 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
                 OpCode = opCode;
             }
 
-            public string OpCode { get; }
+            public string OpCode
+            {
+                get;
+            }
 
-            public int Count { get; set; }
+            public int Count
+            {
+                get; set;
+            }
 
-            public long ElapsedTicks { get; set; }
+            public long ElapsedTicks
+            {
+                get; set;
+            }
         }
     }
 }

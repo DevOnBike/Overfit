@@ -20,7 +20,10 @@ namespace DevOnBike.Overfit.Tests.Audio
         public void ReadMono_Pcm16_RoundTrips()
         {
             var samples = new float[1000];
-            for (var i = 0; i < samples.Length; i++) { samples[i] = MathF.Sin(2f * MathF.PI * 5f * i / samples.Length) * 0.8f; }
+            for (var i = 0; i < samples.Length; i++)
+            {
+                samples[i] = MathF.Sin(2f * MathF.PI * 5f * i / samples.Length) * 0.8f;
+            }
 
             var wav = BuildPcm16Wav(samples, sampleRate: 16000, channels: 1);
             using var ms = new MemoryStream(wav);
@@ -39,8 +42,10 @@ namespace DevOnBike.Overfit.Tests.Audio
         {
             // Two channels: L = 1.0, R = 0.0 → mono = 0.5.
             var interleaved = new float[4]; // 2 frames × 2 ch
-            interleaved[0] = 1f; interleaved[1] = 0f;
-            interleaved[2] = 1f; interleaved[3] = 0f;
+            interleaved[0] = 1f;
+            interleaved[1] = 0f;
+            interleaved[2] = 1f;
+            interleaved[3] = 0f;
             var wav = BuildPcm16Wav(interleaved, sampleRate: 16000, channels: 2);
 
             using var ms = new MemoryStream(wav);

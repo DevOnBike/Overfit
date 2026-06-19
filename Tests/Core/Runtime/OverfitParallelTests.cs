@@ -63,7 +63,10 @@ namespace DevOnBike.Overfit.Tests.Core.Runtime
         public unsafe void For_EmptyRange_NoOp()
         {
             var buffer = new int[10];
-            for (var i = 0; i < buffer.Length; i++) { buffer[i] = -1; }
+            for (var i = 0; i < buffer.Length; i++)
+            {
+                buffer[i] = -1;
+            }
 
             fixed (int* p = buffer)
             {
@@ -94,7 +97,10 @@ namespace DevOnBike.Overfit.Tests.Core.Runtime
             Assert.Equal(7, buffer[7]);
             for (var i = 0; i < buffer.Length; i++)
             {
-                if (i == 7) { continue; }
+                if (i == 7)
+                {
+                    continue;
+                }
                 Assert.Equal(0, buffer[i]);
             }
         }
@@ -105,7 +111,10 @@ namespace DevOnBike.Overfit.Tests.Core.Runtime
             // Verifies tiny range like 3 elements doesn't lose work to chunking math.
             const int n = 3;
             var buffer = new int[n];
-            for (var i = 0; i < n; i++) { buffer[i] = -1; }
+            for (var i = 0; i < n; i++)
+            {
+                buffer[i] = -1;
+            }
 
             fixed (int* p = buffer)
             {
@@ -113,7 +122,10 @@ namespace DevOnBike.Overfit.Tests.Core.Runtime
                 OverfitParallel.For(0, n, &SumBody, &ctx);
             }
 
-            for (var i = 0; i < n; i++) { Assert.Equal(i, buffer[i]); }
+            for (var i = 0; i < n; i++)
+            {
+                Assert.Equal(i, buffer[i]);
+            }
         }
 
         // ── Zero-allocation guarantee ─────────────────────────────────────────
@@ -197,7 +209,10 @@ namespace DevOnBike.Overfit.Tests.Core.Runtime
             var slot = Interlocked.Increment(ref ctx.ChunkCounter) - 1;
 
             long sum = 0;
-            for (var i = chunkStart; i < chunkEnd; i++) { sum += i; }
+            for (var i = chunkStart; i < chunkEnd; i++)
+            {
+                sum += i;
+            }
             ctx.PerChunkSum[slot] = sum;
         }
 
@@ -278,7 +293,10 @@ namespace DevOnBike.Overfit.Tests.Core.Runtime
             }
 
             long total = 0;
-            foreach (var s in perChunkSum) { total += s; }
+            foreach (var s in perChunkSum)
+            {
+                total += s;
+            }
 
             // Σ i from 0..n-1 = n*(n-1)/2
             var expected = (long)n * (n - 1) / 2;

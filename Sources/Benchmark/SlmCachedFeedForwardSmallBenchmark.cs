@@ -44,7 +44,10 @@ namespace Benchmarks
         private float _checksum;
 
         [Params(FeedForwardActivation.ReLU, FeedForwardActivation.GeLU)]
-        public FeedForwardActivation Activation { get; set; }
+        public FeedForwardActivation Activation
+        {
+            get; set;
+        }
 
         [GlobalSetup]
         public void Setup()

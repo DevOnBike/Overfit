@@ -123,13 +123,20 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             // Simple partial selection — k is tiny (10), vocab is ~150k, no LINQ.
             var idx = new int[k];
             var val = new float[k];
-            for (var i = 0; i < k; i++) { idx[i] = -1; val[i] = float.NegativeInfinity; }
+            for (var i = 0; i < k; i++)
+            {
+                idx[i] = -1;
+                val[i] = float.NegativeInfinity;
+            }
 
             for (var i = 0; i < logits.Length; i++)
             {
                 var v = logits[i];
                 // Insert into sorted-descending top-k if v beats the current minimum.
-                if (v <= val[k - 1]) { continue; }
+                if (v <= val[k - 1])
+                {
+                    continue;
+                }
                 var pos = k - 1;
                 while (pos > 0 && val[pos - 1] < v)
                 {
@@ -150,7 +157,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             {
                 for (var j = 0; j < b.Length; j++)
                 {
-                    if (a[i] == b[j]) { n++; break; }
+                    if (a[i] == b[j])
+                    {
+                        n++;
+                        break;
+                    }
                 }
             }
             return n;
@@ -162,7 +173,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             for (var i = 0; i < indices.Length; i++)
             {
                 var d = MathF.Abs(a[indices[i]] - b[indices[i]]);
-                if (d > max) { max = d; }
+                if (d > max)
+                {
+                    max = d;
+                }
             }
             return max;
         }

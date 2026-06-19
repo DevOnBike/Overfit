@@ -17,7 +17,10 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
         public const string DefaultVoice = "tara";
 
         /// <summary>The preset voices shipped with <c>orpheus-3b-0.1-ft</c> (best-quality first).</summary>
-        public static string[] AvailableVoices { get; } =
+        public static string[] AvailableVoices
+        {
+            get;
+        } =
             ["tara", "leah", "jess", "leo", "dan", "mia", "zac", "zoe"];
 
         private const string AudioStart = "<|audio|>";

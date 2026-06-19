@@ -136,42 +136,42 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var logits = logitsArr.AsSpan(0, VocabularySize);
             try
             {
-            while (generated < options.MaxNewTokens)
-            {
-                var token = session.GenerateNextToken(in sampling);
-                session.GetLastLogits(logits);
-
-                var shouldContinue = onToken(
-                    token,
-                    session.CurrentPosition,
-                    logits);
-
-                generated++;
-
-                if (!shouldContinue)
+                while (generated < options.MaxNewTokens)
                 {
-                    break;
+                    var token = session.GenerateNextToken(in sampling);
+                    session.GetLastLogits(logits);
+
+                    var shouldContinue = onToken(
+                        token,
+                        session.CurrentPosition,
+                        logits);
+
+                    generated++;
+
+                    if (!shouldContinue)
+                    {
+                        break;
+                    }
+
+                    if (options.StopOnEndOfTextToken &&
+                        options.EndOfTextTokenId >= 0 &&
+                        token == options.EndOfTextTokenId)
+                    {
+                        break;
+                    }
                 }
 
-                if (options.StopOnEndOfTextToken &&
-                    options.EndOfTextTokenId >= 0 &&
-                    token == options.EndOfTextTokenId)
-                {
-                    break;
-                }
-            }
+                var elapsedNanoseconds = GetElapsedNanoseconds(start);
+                var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
 
-            var elapsedNanoseconds = GetElapsedNanoseconds(start);
-            var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+                _lastGenerationStats = new GenerationStats(
+                    promptTokens: promptTokens.Length,
+                    generatedTokens: generated,
+                    elapsedNanoseconds: elapsedNanoseconds,
+                    allocatedBytes: allocatedBytes,
+                    usedKeyValueCache: false);
 
-            _lastGenerationStats = new GenerationStats(
-                promptTokens: promptTokens.Length,
-                generatedTokens: generated,
-                elapsedNanoseconds: elapsedNanoseconds,
-                allocatedBytes: allocatedBytes,
-                usedKeyValueCache: false);
-
-            return _lastGenerationStats;
+                return _lastGenerationStats;
             }
             finally
             {

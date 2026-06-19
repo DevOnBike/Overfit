@@ -26,7 +26,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// <summary>Reads <c>tokenizer_config.json</c> from a model directory.</summary>
         public static ChatTemplate FromDirectory(string modelDir)
         {
-            if (string.IsNullOrEmpty(modelDir)) { throw new ArgumentException("Directory is empty.", nameof(modelDir)); }
+            if (string.IsNullOrEmpty(modelDir))
+            {
+                throw new ArgumentException("Directory is empty.", nameof(modelDir));
+            }
             var path = Path.Combine(modelDir, "tokenizer_config.json");
             if (!File.Exists(path))
             {
@@ -106,13 +109,25 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     var isName = reader.ValueTextEquals("name");
                     var isTemplate = reader.ValueTextEquals("template");
                     reader.Read();
-                    if (isName && reader.TokenType == JsonTokenType.String) { name = reader.GetString(); }
-                    else if (isTemplate && reader.TokenType == JsonTokenType.String) { template = reader.GetString(); }
-                    else if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray) { reader.Skip(); }
+                    if (isName && reader.TokenType == JsonTokenType.String)
+                    {
+                        name = reader.GetString();
+                    }
+                    else if (isTemplate && reader.TokenType == JsonTokenType.String)
+                    {
+                        template = reader.GetString();
+                    }
+                    else if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray)
+                    {
+                        reader.Skip();
+                    }
                 }
 
                 first ??= template;
-                if (string.Equals(name, "default", StringComparison.Ordinal)) { defaultTemplate = template; }
+                if (string.Equals(name, "default", StringComparison.Ordinal))
+                {
+                    defaultTemplate = template;
+                }
             }
 
             return defaultTemplate ?? first;

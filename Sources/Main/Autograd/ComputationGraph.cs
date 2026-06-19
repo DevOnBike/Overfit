@@ -156,7 +156,10 @@ namespace DevOnBike.Overfit.Autograd
             AutogradNode embeddings,
             int[] tokenIds)
         {
-            if (!IsRecording) { return; }
+            if (!IsRecording)
+            {
+                return;
+            }
 
             if (_opCount >= _tape.Length)
             {
@@ -237,7 +240,10 @@ namespace DevOnBike.Overfit.Autograd
 
         public void ResetBackwardProfile()
         {
-            if (_opTicks is null || _opCount2 is null) { return; }
+            if (_opTicks is null || _opCount2 is null)
+            {
+                return;
+            }
             Array.Clear(_opTicks);
             Array.Clear(_opCount2);
         }

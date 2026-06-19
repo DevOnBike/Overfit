@@ -57,18 +57,30 @@ namespace DevOnBike.Overfit.Parameters
         }
 
         /// <summary>Shape of the parameter tensor.</summary>
-        public TensorShape Shape { get; }
+        public TensorShape Shape
+        {
+            get;
+        }
 
         /// <summary>Whether this parameter participates in gradient computation.</summary>
-        public bool RequiresGrad { get; }
+        public bool RequiresGrad
+        {
+            get;
+        }
 
         /// <summary>Raw data buffer. Caller may read and write via <c>Span</c>.</summary>
-        public TensorStorage<float> Data { get; }
+        public TensorStorage<float> Data
+        {
+            get;
+        }
 
         /// <summary>
         /// Gradient buffer. Non-null only when <see cref="RequiresGrad"/> is <c>true</c>.
         /// </summary>
-        public TensorStorage<float>? Grad { get; }
+        public TensorStorage<float>? Grad
+        {
+            get;
+        }
 
         /// <summary>
         /// Returns a <see cref="TensorSpan{T}"/> view over this parameter's data buffer.

@@ -35,8 +35,16 @@ namespace DevOnBike.Overfit.Demo.WhisperConsole
             var wavPath = args[1];
             var language = args.Length >= 3 ? args[2] : "en";
 
-            if (!File.Exists(modelPath)) { Console.Error.WriteLine($"Model not found: {modelPath}"); return 1; }
-            if (!File.Exists(wavPath)) { Console.Error.WriteLine($"Audio not found: {wavPath}"); return 1; }
+            if (!File.Exists(modelPath))
+            {
+                Console.Error.WriteLine($"Model not found: {modelPath}");
+                return 1;
+            }
+            if (!File.Exists(wavPath))
+            {
+                Console.Error.WriteLine($"Audio not found: {wavPath}");
+                return 1;
+            }
 
             Console.WriteLine($"Loading {Path.GetFileName(modelPath)} ...");
             var sw = Stopwatch.StartNew();

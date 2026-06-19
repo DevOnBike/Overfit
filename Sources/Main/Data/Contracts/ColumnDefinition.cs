@@ -7,8 +7,14 @@ namespace DevOnBike.Overfit.Data.Contracts
 {
     public class ColumnDefinition
     {
-        public string Name { get; set; }
-        public ColumnType Type { get; set; }
+        public string Name
+        {
+            get; set;
+        }
+        public ColumnType Type
+        {
+            get; set;
+        }
     }
 
 }

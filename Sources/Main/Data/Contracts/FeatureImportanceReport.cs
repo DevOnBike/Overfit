@@ -21,9 +21,15 @@ namespace DevOnBike.Overfit.Data.Contracts
         public IReadOnlyList<FeatureImportanceResult> Rejected { get; init; } = [];
 
         /// <summary>Number of training samples used for the analysis.</summary>
-        public int SampleCount { get; init; }
+        public int SampleCount
+        {
+            get; init;
+        }
 
         /// <summary>Number of permutation iterations run per feature.</summary>
-        public int Iterations { get; init; }
+        public int Iterations
+        {
+            get; init;
+        }
     }
 }

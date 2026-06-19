@@ -7,11 +7,26 @@ namespace DevOnBike.Overfit.Tests.Diagnostics.Tracing
 {
     internal sealed class DiagnosticsTraceDiff
     {
-        public int BaselineEpoch { get; set; }
-        public int CurrentEpoch { get; set; }
-        public double GraphBackwardMsDelta { get; set; }
-        public long GraphAllocatedBytesDelta { get; set; }
-        public long TapeOpsDelta { get; set; }
+        public int BaselineEpoch
+        {
+            get; set;
+        }
+        public int CurrentEpoch
+        {
+            get; set;
+        }
+        public double GraphBackwardMsDelta
+        {
+            get; set;
+        }
+        public long GraphAllocatedBytesDelta
+        {
+            get; set;
+        }
+        public long TapeOpsDelta
+        {
+            get; set;
+        }
         public List<DiagnosticsTraceEntryDiff> ModuleDiffs { get; } = [];
         public List<DiagnosticsTraceEntryDiff> KernelDiffs { get; } = [];
     }

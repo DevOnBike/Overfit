@@ -29,7 +29,10 @@ namespace Benchmarks
         {
             _src = new float[Size];
             _dst = new float[Size];
-            for (var i = 0; i < Size; i++) { _src[i] = i * 0.5f; }
+            for (var i = 0; i < Size; i++)
+            {
+                _src[i] = i * 0.5f;
+            }
         }
 
         // ── (a) copy variants ────────────────────────────────────────────────

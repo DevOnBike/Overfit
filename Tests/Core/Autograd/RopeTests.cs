@@ -98,7 +98,10 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
             }
 
             double maxAbs = 0;
-            for (var i = 0; i < T * D; i++) { maxAbs = Math.Max(maxAbs, Math.Abs(reference[i] - ys[i])); }
+            for (var i = 0; i < T * D; i++)
+            {
+                maxAbs = Math.Max(maxAbs, Math.Abs(reference[i] - ys[i]));
+            }
             _out.WriteLine($"RoPE split-half forward maxAbs vs RopeKernel: {maxAbs:E3}");
             Assert.True(maxAbs < 1e-5, $"split-half forward differs from inference kernel: {maxAbs:E3}");
         }
@@ -142,13 +145,18 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
             foreach (var idx in new[] { 0, 3, 7, 8, 15, D + 1, 2 * D + 5, T * D - 1 })
             {
                 var orig = xs[idx];
-                xs[idx] = orig + eps; var lp = LossAt();
-                xs[idx] = orig - eps; var lm = LossAt();
+                xs[idx] = orig + eps;
+                var lp = LossAt();
+                xs[idx] = orig - eps;
+                var lm = LossAt();
                 xs[idx] = orig;
                 var fd = (lp - lm) / (2 * eps);
                 var absDiff = Math.Abs(fd - dxA[idx]);
                 var rel = absDiff / Math.Max(1e-3, Math.Abs(dxA[idx]));
-                if (absDiff > 5e-4) { maxRel = Math.Max(maxRel, rel); } // skip entries below the FD noise floor
+                if (absDiff > 5e-4)
+                {
+                    maxRel = Math.Max(maxRel, rel);
+                } // skip entries below the FD noise floor
             }
             Assert.True(maxRel < 2e-2, $"split-half RoPE finite-difference mismatch, maxRel {maxRel:E3}");
         }
@@ -192,14 +200,19 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
             foreach (var idx in new[] { 0, 3, 7, 8, 15, D + 1, 2 * D + 5, T * D - 1 })
             {
                 var orig = xs[idx];
-                xs[idx] = orig + eps; var lp = LossAt();
-                xs[idx] = orig - eps; var lm = LossAt();
+                xs[idx] = orig + eps;
+                var lp = LossAt();
+                xs[idx] = orig - eps;
+                var lm = LossAt();
                 xs[idx] = orig;
                 var fd = (lp - lm) / (2 * eps);
                 var an = dxA[idx];
                 var absDiff = Math.Abs(fd - an);
                 var rel = absDiff / Math.Max(1e-3, Math.Abs(an));
-                if (absDiff > 5e-4) { maxRel = Math.Max(maxRel, rel); } // skip entries below the FD noise floor
+                if (absDiff > 5e-4)
+                {
+                    maxRel = Math.Max(maxRel, rel);
+                } // skip entries below the FD noise floor
                 _out.WriteLine($"  dX[{idx}]: analytic {an:E4}  fd {fd:E4}  rel {rel:E3}");
             }
             Assert.True(maxRel < 2e-2, $"RoPE finite-difference mismatch, maxRel {maxRel:E3}");
@@ -265,7 +278,10 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
         {
             var r = new Random(seed);
             var v = new float[n];
-            for (var i = 0; i < n; i++) { v[i] = (float)(r.NextDouble() * 2 - 1); }
+            for (var i = 0; i < n; i++)
+            {
+                v[i] = (float)(r.NextDouble() * 2 - 1);
+            }
             return v;
         }
     }

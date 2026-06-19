@@ -7,9 +7,15 @@ namespace DevOnBike.Overfit.Inference
 {
     public interface IInferenceBackend : IDisposable
     {
-        int InputSize { get; }
+        int InputSize
+        {
+            get;
+        }
 
-        int OutputSize { get; }
+        int OutputSize
+        {
+            get;
+        }
 
         void Run(
             ReadOnlySpan<float> input,

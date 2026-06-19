@@ -201,7 +201,10 @@ namespace DevOnBike.Overfit.LanguageModels.Agents
             sb.Append("You can call tools. Tools: ");
             for (var i = 0; i < tools.Count; i++)
             {
-                if (i > 0) { sb.Append(", "); }
+                if (i > 0)
+                {
+                    sb.Append(", ");
+                }
                 sb.Append(tools[i].Name);
             }
             sb.AppendLine(".");

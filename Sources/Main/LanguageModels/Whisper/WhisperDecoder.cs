@@ -101,7 +101,10 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             {
                 var emb = _tokenEmbedding.AsSpan(tokens[t] * _nState, _nState);
                 var p = pos.AsSpan(t * _nState, _nState);
-                for (var c = 0; c < _nState; c++) { x[t * _nState + c] = emb[c] + p[c]; }
+                for (var c = 0; c < _nState; c++)
+                {
+                    x[t * _nState + c] = emb[c] + p[c];
+                }
             }
 
             var ln = new float[seq * _nState];
@@ -164,14 +167,20 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             int endOfTranscript, int maxNewTokens)
         {
             var tokens = new List<int>(promptTokens.Length + maxNewTokens);
-            for (var i = 0; i < promptTokens.Length; i++) { tokens.Add(promptTokens[i]); }
+            for (var i = 0; i < promptTokens.Length; i++)
+            {
+                tokens.Add(promptTokens[i]);
+            }
             var produced = new List<int>();
 
             for (var i = 0; i < maxNewTokens; i++)
             {
                 var logits = Forward(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(tokens), encoderOut, nCtx);
                 var next = MathUtils.ArgMax(logits);
-                if (next == endOfTranscript) { break; }
+                if (next == endOfTranscript)
+                {
+                    break;
+                }
                 tokens.Add(next);
                 produced.Add(next);
             }
@@ -211,15 +220,24 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
 
             // Prefill the prompt (last prompt token's logits start generation).
             ReadOnlySpan<float> logits = default;
-            for (var i = 0; i < promptTokens.Length; i++) { logits = Step(state, promptTokens[i]); }
+            for (var i = 0; i < promptTokens.Length; i++)
+            {
+                logits = Step(state, promptTokens[i]);
+            }
 
             var produced = new List<int>(maxNewTokens);
             for (var i = 0; i < maxNewTokens; i++)
             {
                 var next = MathUtils.ArgMax(logits);
-                if (next == endOfTranscript) { break; }
+                if (next == endOfTranscript)
+                {
+                    break;
+                }
                 produced.Add(next);
-                if (produced.Count >= maxNewTokens) { break; }
+                if (produced.Count >= maxNewTokens)
+                {
+                    break;
+                }
                 logits = Step(state, next);
             }
             return produced.ToArray();
@@ -282,7 +300,10 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             // token + positional embedding for the single new token
             var emb = _tokenEmbedding.AsSpan(tokenId * n, n);
             var pos = _posEmb.AsSpan(t * n, n);
-            for (var c = 0; c < n; c++) { x[c] = emb[c] + pos[c]; }
+            for (var c = 0; c < n; c++)
+            {
+                x[c] = emb[c] + pos[c];
+            }
 
             var crossStride = s.NCtx * n;
             var selfStride = s.MaxLen * n;

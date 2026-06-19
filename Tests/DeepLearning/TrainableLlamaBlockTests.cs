@@ -104,7 +104,10 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
                 graph.Backward(loss);
                 opt.Step();
                 lastLoss = loss.DataView.AsReadOnlySpan()[0];
-                if (step == 0) { firstLoss = lastLoss; }
+                if (step == 0)
+                {
+                    firstLoss = lastLoss;
+                }
             }
             _out.WriteLine($"TrainableLlamaBlock γ-only loss: {firstLoss:F4} -> {lastLoss:F4}");
 
@@ -129,7 +132,13 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
             public Q8Weight Wq = null!;
             private readonly List<IDisposable> _toDispose = new();
             public void Track(IDisposable d) => _toDispose.Add(d);
-            public void Dispose() { foreach (var d in _toDispose) { d.Dispose(); } }
+            public void Dispose()
+            {
+                foreach (var d in _toDispose)
+                {
+                    d.Dispose();
+                }
+            }
         }
 
         private Fixture BuildFixture(int seed)
@@ -154,8 +163,12 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
             var sinData = Storage(sinArr);
             var targetData = Storage(Rand(rng, T * DModel));
 
-            f.Track(f.InputData); f.Track(f.Ln1Data); f.Track(f.Ln2Data);
-            f.Track(cosData); f.Track(sinData); f.Track(targetData);
+            f.Track(f.InputData);
+            f.Track(f.Ln1Data);
+            f.Track(f.Ln2Data);
+            f.Track(cosData);
+            f.Track(sinData);
+            f.Track(targetData);
 
             f.Input = new AutogradNode(f.InputData, new TensorShape(T, DModel), requiresGrad: true);
             f.Ln1Gamma = new AutogradNode(f.Ln1Data, new TensorShape(DModel), requiresGrad: true);
@@ -163,8 +176,12 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
             f.Cos = new AutogradNode(cosData, new TensorShape(T, HalfDim), requiresGrad: false);
             f.Sin = new AutogradNode(sinData, new TensorShape(T, HalfDim), requiresGrad: false);
             f.Target = new AutogradNode(targetData, new TensorShape(T, DModel), requiresGrad: false);
-            f.Track(f.Input); f.Track(f.Ln1Gamma); f.Track(f.Ln2Gamma);
-            f.Track(f.Cos); f.Track(f.Sin); f.Track(f.Target);
+            f.Track(f.Input);
+            f.Track(f.Ln1Gamma);
+            f.Track(f.Ln2Gamma);
+            f.Track(f.Cos);
+            f.Track(f.Sin);
+            f.Track(f.Target);
             return f;
         }
 
@@ -189,8 +206,10 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
             foreach (var idx in indices)
             {
                 var orig = s[idx];
-                s[idx] = orig + eps; var lp = lossAt();
-                s[idx] = orig - eps; var lm = lossAt();
+                s[idx] = orig + eps;
+                var lp = lossAt();
+                s[idx] = orig - eps;
+                var lm = lossAt();
                 s[idx] = orig;
                 var fd = (lp - lm) / (2 * eps);
                 // Skip entries below the FD noise floor: a central difference (eps=1e-3) can't resolve a
@@ -198,7 +217,10 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
                 // A real gradient bug shows a large ABSOLUTE mismatch on the meaningful entries, still caught.
                 var absDiff = Math.Abs(fd - analytic[idx]);
                 var rel = absDiff / Math.Max(1e-3, Math.Abs(analytic[idx]));
-                if (absDiff > 5e-4) { maxRel = Math.Max(maxRel, rel); }
+                if (absDiff > 5e-4)
+                {
+                    maxRel = Math.Max(maxRel, rel);
+                }
                 _out.WriteLine($"  {name}[{idx}]: analytic {analytic[idx]:E4}  fd {fd:E4}  rel {rel:E3}");
             }
             Assert.True(maxRel < 3e-2, $"{name} finite-difference mismatch, maxRel {maxRel:E3}");
@@ -207,7 +229,10 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
         private static Q8Weight Q8(Random rng, int outRows, int inCols)
         {
             var wf = new float[outRows * inCols];
-            for (var i = 0; i < wf.Length; i++) { wf[i] = (float)(rng.NextDouble() * 2 - 1) * 0.3f; }
+            for (var i = 0; i < wf.Length; i++)
+            {
+                wf[i] = (float)(rng.NextDouble() * 2 - 1) * 0.3f;
+            }
             return Q8Weight.QuantizeRows(wf, outRows, inCols);
         }
 
@@ -221,14 +246,20 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
         private static float[] Rand(Random rng, int n)
         {
             var v = new float[n];
-            for (var i = 0; i < n; i++) { v[i] = (float)(rng.NextDouble() * 2 - 1); }
+            for (var i = 0; i < n; i++)
+            {
+                v[i] = (float)(rng.NextDouble() * 2 - 1);
+            }
             return v;
         }
 
         private static float[] Ones(int n)
         {
             var v = new float[n];
-            for (var i = 0; i < n; i++) { v[i] = 1f; }
+            for (var i = 0; i < n; i++)
+            {
+                v[i] = 1f;
+            }
             return v;
         }
     }

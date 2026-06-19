@@ -138,7 +138,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             }
             finally
             {
-                if (File.Exists(tmp)) { File.Delete(tmp); }
+                if (File.Exists(tmp))
+                {
+                    File.Delete(tmp);
+                }
             }
         }
 
@@ -150,10 +153,17 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             float[] Ramp(int n, float baseVal)
             {
                 var a = new float[n];
-                for (var i = 0; i < n; i++) { a[i] = baseVal + i * 0.125f; }
+                for (var i = 0; i < n; i++)
+                {
+                    a[i] = baseVal + i * 0.125f;
+                }
                 return a;
             }
-            void Add(string name, int n) { t[name] = Ramp(n, seed); seed += 1000f; }
+            void Add(string name, int n)
+            {
+                t[name] = Ramp(n, seed);
+                seed += 1000f;
+            }
 
             Add("wte.weight", Vocab * D);
             Add("wpe.weight", Ctx * D);
@@ -183,7 +193,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             var first = true;
             foreach (var kv in tensors)
             {
-                if (!first) { sb.Append(','); }
+                if (!first)
+                {
+                    sb.Append(',');
+                }
                 first = false;
                 var bytes = kv.Value.Length * 4L;
                 sb.Append('"').Append(kv.Key).Append("\":{\"dtype\":\"F32\",\"shape\":[")
@@ -226,7 +239,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             {
                 var count = br.ReadInt32();
                 var arr = new float[count];
-                for (var i = 0; i < count; i++) { arr[i] = br.ReadSingle(); }
+                for (var i = 0; i < count; i++)
+                {
+                    arr[i] = br.ReadSingle();
+                }
                 prms.Add(arr);
             }
             return prms;
@@ -260,14 +276,20 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         private static void AssertRange(float[] src, int offset, int len, float[] actual)
         {
             Assert.Equal(len, actual.Length);
-            for (var i = 0; i < len; i++) { Assert.Equal(src[offset + i], actual[i]); }
+            for (var i = 0; i < len; i++)
+            {
+                Assert.Equal(src[offset + i], actual[i]);
+            }
         }
 
         private static string? ResolveFirst(params string?[] candidates)
         {
             foreach (var c in candidates)
             {
-                if (c is not null && File.Exists(c)) { return c; }
+                if (c is not null && File.Exists(c))
+                {
+                    return c;
+                }
             }
             return null;
         }
@@ -276,7 +298,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         {
             var fa = new FileInfo(a);
             var fb = new FileInfo(b);
-            if (fa.Length != fb.Length) { return false; }
+            if (fa.Length != fb.Length)
+            {
+                return false;
+            }
 
             using var sa = fa.OpenRead();
             using var sb = fb.OpenRead();
@@ -286,7 +311,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             while ((n = sa.ReadAtLeast(bufA, bufA.Length, throwOnEndOfStream: false)) > 0)
             {
                 sb.ReadExactly(bufB, 0, n);
-                if (!bufA.AsSpan(0, n).SequenceEqual(bufB.AsSpan(0, n))) { return false; }
+                if (!bufA.AsSpan(0, n).SequenceEqual(bufB.AsSpan(0, n)))
+                {
+                    return false;
+                }
             }
             return true;
         }

@@ -26,9 +26,15 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval.Evaluation
         }
 
         /// <summary>A label for the intent this group expresses (for reporting).</summary>
-        public string Name { get; }
+        public string Name
+        {
+            get;
+        }
 
         /// <summary>Two or more rephrasings of the same question.</summary>
-        public IReadOnlyList<string> Variants { get; }
+        public IReadOnlyList<string> Variants
+        {
+            get;
+        }
     }
 }

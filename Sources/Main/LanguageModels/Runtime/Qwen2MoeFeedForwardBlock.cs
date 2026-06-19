@@ -50,7 +50,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
         }
 
-        public int DModel { get; }
+        public int DModel
+        {
+            get;
+        }
         public bool HasSharedExpert => _shared is not null;
         public int ExpertCount => _routed.ExpertCount;
         public int ExpertUsedCount => _routed.ExpertUsedCount;
@@ -75,8 +78,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             in DecodeWeight sharedDown,
             Span<float> output)
         {
-            if (hidden.Length < DModel) { throw new ArgumentException("Hidden span smaller than dModel.", nameof(hidden)); }
-            if (output.Length < DModel) { throw new ArgumentException("Output span smaller than dModel.", nameof(output)); }
+            if (hidden.Length < DModel)
+            {
+                throw new ArgumentException("Hidden span smaller than dModel.", nameof(hidden));
+            }
+            if (output.Length < DModel)
+            {
+                throw new ArgumentException("Output span smaller than dModel.", nameof(output));
+            }
 
             // Mixtral (no shared expert): the FFN is the routed sum alone — write it straight out.
             if (_shared is null)
@@ -95,7 +104,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             // Shared expert, gated by sigmoid(w_shared · x).
             var gateLogit = 0f;
-            for (var d = 0; d < DModel; d++) { gateLogit += hidden[d] * sharedGateWeight[d]; }
+            for (var d = 0; d < DModel; d++)
+            {
+                gateLogit += hidden[d] * sharedGateWeight[d];
+            }
             var gate = 1f / (1f + MathF.Exp(-gateLogit));
 
             _shared.DecodeSwiGluDispatched(hidden, in sharedGate, in sharedUp, in sharedDown, _sharedOut);
@@ -127,8 +139,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Span<float> output)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rows);
-            if (hidden.Length < (long)rows * DModel) { throw new ArgumentException("Hidden span smaller than rows*dModel.", nameof(hidden)); }
-            if (output.Length < (long)rows * DModel) { throw new ArgumentException("Output span smaller than rows*dModel.", nameof(output)); }
+            if (hidden.Length < (long)rows * DModel)
+            {
+                throw new ArgumentException("Hidden span smaller than rows*dModel.", nameof(hidden));
+            }
+            if (output.Length < (long)rows * DModel)
+            {
+                throw new ArgumentException("Output span smaller than rows*dModel.", nameof(output));
+            }
 
             // Mixtral (no shared expert): the FFN is the routed sum alone.
             if (_shared is null)
@@ -154,7 +172,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 {
                     var row = hidden.Slice(n * DModel, DModel);
                     var gateLogit = 0f;
-                    for (var d = 0; d < DModel; d++) { gateLogit += row[d] * sharedGateWeight[d]; }
+                    for (var d = 0; d < DModel; d++)
+                    {
+                        gateLogit += row[d] * sharedGateWeight[d];
+                    }
                     var gate = 1f / (1f + MathF.Exp(-gateLogit));
 
                     var dst = output.Slice(n * DModel, DModel);

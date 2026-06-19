@@ -52,10 +52,17 @@ namespace DevOnBike.Overfit.Data.Prepare
 
             switch (_mode)
             {
-                case LogMode.Log1p: ApplyLog1p(span, rows, cols); break;
-                case LogMode.SignedLog1p: ApplySignedLog1p(span, rows, cols); break;
-                case LogMode.LogEps: ApplyLogEps(span, rows, cols); break;
-                default: throw new OverfitRuntimeException($"Unsupported LogMode: {_mode}");
+                case LogMode.Log1p:
+                    ApplyLog1p(span, rows, cols);
+                    break;
+                case LogMode.SignedLog1p:
+                    ApplySignedLog1p(span, rows, cols);
+                    break;
+                case LogMode.LogEps:
+                    ApplyLogEps(span, rows, cols);
+                    break;
+                default:
+                    throw new OverfitRuntimeException($"Unsupported LogMode: {_mode}");
             }
 
             return context;
@@ -68,7 +75,11 @@ namespace DevOnBike.Overfit.Data.Prepare
                 for (var r = 0; r < rows; r++)
                 {
                     ref var val = ref span[r * cols + c];
-                    if (val < 0f) { val = 0f; continue; }
+                    if (val < 0f)
+                    {
+                        val = 0f;
+                        continue;
+                    }
                     val = MathF.Log(1f + val);
                 }
             }
@@ -97,7 +108,11 @@ namespace DevOnBike.Overfit.Data.Prepare
                 for (var r = 0; r < rows; r++)
                 {
                     ref var val = ref span[r * cols + c];
-                    if (val < 0f) { val = MathF.Log(_epsilon); continue; }
+                    if (val < 0f)
+                    {
+                        val = MathF.Log(_epsilon);
+                        continue;
+                    }
                     val = MathF.Log(val + _epsilon);
                 }
             }

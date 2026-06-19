@@ -18,7 +18,10 @@ namespace DevOnBike.Overfit.Tests.Monitoring
             "timestamp,pod_name,cpu_usage_ratio,cpu_throttle_ratio,memory_working_set_bytes," +
             "oom_events_rate,latency_p50_ms,latency_p95_ms,latency_p99_ms,requests_per_second," +
             "error_rate,gc_gen2_heap_bytes,gc_pause_ratio,thread_pool_queue_length");
-            foreach (var row in rows) { sb.AppendLine(row); }
+            foreach (var row in rows)
+            {
+                sb.AppendLine(row);
+            }
             return sb.ToString();
         }
 

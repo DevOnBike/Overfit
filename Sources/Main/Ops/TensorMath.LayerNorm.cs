@@ -189,8 +189,14 @@ namespace DevOnBike.Overfit.Ops
                 var dGammaPartial = needsDGamma ? stackalloc float[partialSlots] : default;
                 var dBetaPartial = needsDBeta ? stackalloc float[partialSlots] : default;
 
-                if (needsDGamma) { dGammaPartial.Clear(); }
-                if (needsDBeta) { dBetaPartial.Clear(); }
+                if (needsDGamma)
+                {
+                    dGammaPartial.Clear();
+                }
+                if (needsDBeta)
+                {
+                    dBetaPartial.Clear();
+                }
 
                 // Chunking math: For(0, numRows, ...) hands each worker a range
                 // [chunkStart, chunkEnd). chunkIdx = chunkStart / perChunk
@@ -314,8 +320,14 @@ namespace DevOnBike.Overfit.Ops
                     sumDOut += dOut[i] * gammaS[i];
                     sumDOutYh += dOut[i] * gammaS[i] * yHat;
 
-                    if (needsDBeta) { dBetaS[i] += dOut[i]; }
-                    if (needsDGamma) { dGammaS[i] += dOut[i] * yHat; }
+                    if (needsDBeta)
+                    {
+                        dBetaS[i] += dOut[i];
+                    }
+                    if (needsDGamma)
+                    {
+                        dGammaS[i] += dOut[i] * yHat;
+                    }
                 }
 
                 if (needsDInput)
@@ -426,8 +438,14 @@ namespace DevOnBike.Overfit.Ops
                     sumDOut += dOut[i] * gammaSpan[i];
                     sumDOutYh += dOut[i] * gammaSpan[i] * yHat;
 
-                    if (ctx.NeedsDBeta) { dBetaSlot[i] += dOut[i]; }
-                    if (ctx.NeedsDGamma) { dGammaSlot[i] += dOut[i] * yHat; }
+                    if (ctx.NeedsDBeta)
+                    {
+                        dBetaSlot[i] += dOut[i];
+                    }
+                    if (ctx.NeedsDGamma)
+                    {
+                        dGammaSlot[i] += dOut[i] * yHat;
+                    }
                 }
 
                 if (ctx.NeedsDInput)

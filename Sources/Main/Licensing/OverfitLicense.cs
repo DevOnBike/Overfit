@@ -19,13 +19,19 @@ namespace DevOnBike.Overfit.Licensing
         /// Suppresses the open-source notice completely.
         /// Useful for tests, benchmarks and other technical hosts.
         /// </summary>
-        public static bool SuppressNotice { get; set; }
+        public static bool SuppressNotice
+        {
+            get; set;
+        }
 
         /// <summary>
         /// Optional custom sink for license/info messages.
         /// If not set, Console + Debug will be used.
         /// </summary>
-        public static Action<string>? MessageSink { get; set; }
+        public static Action<string>? MessageSink
+        {
+            get; set;
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static void EnsureNotified()

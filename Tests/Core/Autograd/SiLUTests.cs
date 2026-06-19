@@ -78,8 +78,10 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
             foreach (var idx in new[] { 0, 7, 13, 31, 50, 63 })
             {
                 var orig = xs[idx];
-                xs[idx] = orig + eps; var lp = LossAt();
-                xs[idx] = orig - eps; var lm = LossAt();
+                xs[idx] = orig + eps;
+                var lp = LossAt();
+                xs[idx] = orig - eps;
+                var lm = LossAt();
                 xs[idx] = orig;
                 var fd = (lp - lm) / (2 * eps);
                 var an = dxA[idx];
@@ -101,7 +103,10 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
         {
             var r = new Random(seed);
             var v = new float[n];
-            for (var i = 0; i < n; i++) { v[i] = (float)(r.NextDouble() * 4 - 2); }
+            for (var i = 0; i < n; i++)
+            {
+                v[i] = (float)(r.NextDouble() * 4 - 2);
+            }
             return v;
         }
     }

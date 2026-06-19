@@ -25,7 +25,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         [LongFact]
         public void Qwen3_Loads_And_Generates_Coherent_English()
         {
-            if (!File.Exists(Path)) { _out.WriteLine("missing Qwen3-0.6B gguf"); return; }
+            if (!File.Exists(Path))
+            {
+                _out.WriteLine("missing Qwen3-0.6B gguf");
+                return;
+            }
 
             using (var reader = new GgufReader(Path))
             {

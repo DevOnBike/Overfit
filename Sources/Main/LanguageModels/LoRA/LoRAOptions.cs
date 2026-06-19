@@ -20,13 +20,25 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             TargetModules = targetModules;
         }
 
-        public int Rank { get; }
+        public int Rank
+        {
+            get;
+        }
 
-        public float Alpha { get; }
+        public float Alpha
+        {
+            get;
+        }
 
-        public float Dropout { get; }
+        public float Dropout
+        {
+            get;
+        }
 
-        public LoRATargetModules TargetModules { get; }
+        public LoRATargetModules TargetModules
+        {
+            get;
+        }
 
         public float Scale => Rank == 0 ? 0f : Alpha / Rank;
     }

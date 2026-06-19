@@ -84,7 +84,10 @@ namespace DevOnBike.Overfit.Tests.Examples
 
             // Train a trigram LM on the lexicon — it learns which letter sequences are real words.
             var lm = new NGramCtcLanguageModel(classCount: LetterClasses, order: 3, smoothing: 0.05);
-            foreach (var word in Lexicon) { lm.Train(Labels(word)); }
+            foreach (var word in Lexicon)
+            {
+                lm.Train(Labels(word));
+            }
 
             using var optimizer = new Adam(ocr.Parameters(), lrMax);
             using var graph = new ComputationGraph(24_000_000);
@@ -110,7 +113,10 @@ namespace DevOnBike.Overfit.Tests.Examples
                     using var input = ocr.CreateInput(image);
                     var logits = ocr.Forward(graph, input);
                     var loss = ocr.ComputeCtcLoss(logits, label);
-                    if (!float.IsFinite(loss)) { continue; }
+                    if (!float.IsFinite(loss))
+                    {
+                        continue;
+                    }
 
                     graph.BackwardFromGrad(logits);
                     batchLoss += loss;
@@ -118,8 +124,15 @@ namespace DevOnBike.Overfit.Tests.Examples
                 optimizer.Step();
 
                 batchLoss /= accumWords;
-                if (step == 0) { firstLoss = batchLoss; }
-                if (step >= optSteps - 50) { tailSum += batchLoss; tailCount++; }
+                if (step == 0)
+                {
+                    firstLoss = batchLoss;
+                }
+                if (step >= optSteps - 50)
+                {
+                    tailSum += batchLoss;
+                    tailCount++;
+                }
                 if (step == 0 || (step + 1) % 100 == 0)
                 {
                     _out.WriteLine($"step {step + 1,4}/{optSteps}  loss={batchLoss:F4}");
@@ -144,8 +157,14 @@ namespace DevOnBike.Overfit.Tests.Examples
 
                 var greedyHit = Equal(greedy, label);
                 var lmHit = Equal(lmBeam, label);
-                if (greedyHit) { greedyOk++; }
-                if (lmHit) { lmOk++; }
+                if (greedyHit)
+                {
+                    greedyOk++;
+                }
+                if (lmHit)
+                {
+                    lmOk++;
+                }
 
                 if (greedyHit != lmHit)
                 {
@@ -162,21 +181,36 @@ namespace DevOnBike.Overfit.Tests.Examples
         private static int[] Labels(string word)
         {
             var labels = new int[word.Length];
-            for (var i = 0; i < word.Length; i++) { labels[i] = word[i] - 'A'; }
+            for (var i = 0; i < word.Length; i++)
+            {
+                labels[i] = word[i] - 'A';
+            }
             return labels;
         }
 
         private static string Text(int[] labels)
         {
             var sb = new StringBuilder();
-            foreach (var l in labels) { sb.Append((char)('A' + l)); }
+            foreach (var l in labels)
+            {
+                sb.Append((char)('A' + l));
+            }
             return sb.ToString();
         }
 
         private static bool Equal(int[] a, int[] b)
         {
-            if (a.Length != b.Length) { return false; }
-            for (var i = 0; i < a.Length; i++) { if (a[i] != b[i]) { return false; } }
+            if (a.Length != b.Length)
+            {
+                return false;
+            }
+            for (var i = 0; i < a.Length; i++)
+            {
+                if (a[i] != b[i])
+                {
+                    return false;
+                }
+            }
             return true;
         }
 
@@ -192,7 +226,10 @@ namespace DevOnBike.Overfit.Tests.Examples
                 {
                     for (var r = 0; r < H; r++)
                     {
-                        if (glyph[r][gc] == '#') { image[r * Wmax + col] = 1f; }
+                        if (glyph[r][gc] == '#')
+                        {
+                            image[r * Wmax + col] = 1f;
+                        }
                     }
                     col++;
                 }

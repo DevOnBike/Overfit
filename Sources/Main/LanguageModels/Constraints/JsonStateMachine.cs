@@ -63,36 +63,88 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
             {
                 case Phase.ExpectValue:
                 case Phase.ExpectValueOrClose:
-                    if (IsWhitespace(c)) { return true; }
-                    if (c == ']' && _phase == Phase.ExpectValueOrClose) { return CloseContainer(isArray: true); }
+                    if (IsWhitespace(c))
+                    {
+                        return true;
+                    }
+                    if (c == ']' && _phase == Phase.ExpectValueOrClose)
+                    {
+                        return CloseContainer(isArray: true);
+                    }
                     return BeginValue(c);
 
                 case Phase.ObjectStart:
-                    if (IsWhitespace(c)) { return true; }
-                    if (c == '"') { _phase = Phase.InString; _stringIsKey = true; return true; }
-                    if (c == '}') { return CloseContainer(isArray: false); }
+                    if (IsWhitespace(c))
+                    {
+                        return true;
+                    }
+                    if (c == '"')
+                    {
+                        _phase = Phase.InString;
+                        _stringIsKey = true;
+                        return true;
+                    }
+                    if (c == '}')
+                    {
+                        return CloseContainer(isArray: false);
+                    }
                     return false;
 
                 case Phase.ObjectExpectKey:
-                    if (IsWhitespace(c)) { return true; }
-                    if (c == '"') { _phase = Phase.InString; _stringIsKey = true; return true; }
+                    if (IsWhitespace(c))
+                    {
+                        return true;
+                    }
+                    if (c == '"')
+                    {
+                        _phase = Phase.InString;
+                        _stringIsKey = true;
+                        return true;
+                    }
                     return false;
 
                 case Phase.ObjectAfterKey:
-                    if (IsWhitespace(c)) { return true; }
-                    if (c == ':') { _phase = Phase.ExpectValue; return true; }
+                    if (IsWhitespace(c))
+                    {
+                        return true;
+                    }
+                    if (c == ':')
+                    {
+                        _phase = Phase.ExpectValue;
+                        return true;
+                    }
                     return false;
 
                 case Phase.ObjectAfterPair:
-                    if (IsWhitespace(c)) { return true; }
-                    if (c == ',') { _phase = Phase.ObjectExpectKey; return true; }
-                    if (c == '}') { return CloseContainer(isArray: false); }
+                    if (IsWhitespace(c))
+                    {
+                        return true;
+                    }
+                    if (c == ',')
+                    {
+                        _phase = Phase.ObjectExpectKey;
+                        return true;
+                    }
+                    if (c == '}')
+                    {
+                        return CloseContainer(isArray: false);
+                    }
                     return false;
 
                 case Phase.ArrayAfterElement:
-                    if (IsWhitespace(c)) { return true; }
-                    if (c == ',') { _phase = Phase.ExpectValue; return true; }
-                    if (c == ']') { return CloseContainer(isArray: true); }
+                    if (IsWhitespace(c))
+                    {
+                        return true;
+                    }
+                    if (c == ',')
+                    {
+                        _phase = Phase.ExpectValue;
+                        return true;
+                    }
+                    if (c == ']')
+                    {
+                        return CloseContainer(isArray: true);
+                    }
                     return false;
 
                 case Phase.Done:
@@ -105,8 +157,14 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
                     return AdvanceStringEscape(c);
 
                 case Phase.StringUnicode:
-                    if (!IsHex(c)) { return false; }
-                    if (++_unicodeDigits == 4) { _phase = Phase.InString; }
+                    if (!IsHex(c))
+                    {
+                        return false;
+                    }
+                    if (++_unicodeDigits == 4)
+                    {
+                        _phase = Phase.InString;
+                    }
                     return true;
 
                 case Phase.InNumber:
@@ -127,11 +185,17 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
             switch (c)
             {
                 case '{':
-                    if (!Push(isArray: false)) { return false; }
+                    if (!Push(isArray: false))
+                    {
+                        return false;
+                    }
                     _phase = Phase.ObjectStart;
                     return true;
                 case '[':
-                    if (!Push(isArray: true)) { return false; }
+                    if (!Push(isArray: true))
+                    {
+                        return false;
+                    }
                     _phase = Phase.ExpectValueOrClose;
                     return true;
                 case '"':
@@ -149,8 +213,18 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
                 case 'n':
                     return BeginLiteral(kind: 3);
                 default:
-                    if (c == '0') { _phase = Phase.InNumber; _number = NumberState.AfterZero; return true; }
-                    if (c is >= '1' and <= '9') { _phase = Phase.InNumber; _number = NumberState.Int; return true; }
+                    if (c == '0')
+                    {
+                        _phase = Phase.InNumber;
+                        _number = NumberState.AfterZero;
+                        return true;
+                    }
+                    if (c is >= '1' and <= '9')
+                    {
+                        _phase = Phase.InNumber;
+                        _number = NumberState.Int;
+                        return true;
+                    }
                     return false;
             }
         }
@@ -164,7 +238,11 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
                 _phase = _stringIsKey ? Phase.ObjectAfterKey : PhaseAfterValue();
                 return true;
             }
-            if (c == '\\') { _phase = Phase.StringEscape; return true; }
+            if (c == '\\')
+            {
+                _phase = Phase.StringEscape;
+                return true;
+            }
             return c >= 0x20;   // control characters must be escaped
         }
 
@@ -201,42 +279,98 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
             switch (_number)
             {
                 case NumberState.AfterSign:
-                    if (c == '0') { _number = NumberState.AfterZero; return true; }
-                    if (c is >= '1' and <= '9') { _number = NumberState.Int; return true; }
+                    if (c == '0')
+                    {
+                        _number = NumberState.AfterZero;
+                        return true;
+                    }
+                    if (c is >= '1' and <= '9')
+                    {
+                        _number = NumberState.Int;
+                        return true;
+                    }
                     return false;
 
                 case NumberState.AfterZero:
-                    if (c == '.') { _number = NumberState.AfterDot; return true; }
-                    if (c is 'e' or 'E') { _number = NumberState.AfterExp; return true; }
-                    if (c is >= '0' and <= '9') { return false; }   // no leading zeros
+                    if (c == '.')
+                    {
+                        _number = NumberState.AfterDot;
+                        return true;
+                    }
+                    if (c is 'e' or 'E')
+                    {
+                        _number = NumberState.AfterExp;
+                        return true;
+                    }
+                    if (c is >= '0' and <= '9')
+                    {
+                        return false;
+                    }   // no leading zeros
                     return TerminateNumberAndReprocess(c);
 
                 case NumberState.Int:
-                    if (c is >= '0' and <= '9') { return true; }
-                    if (c == '.') { _number = NumberState.AfterDot; return true; }
-                    if (c is 'e' or 'E') { _number = NumberState.AfterExp; return true; }
+                    if (c is >= '0' and <= '9')
+                    {
+                        return true;
+                    }
+                    if (c == '.')
+                    {
+                        _number = NumberState.AfterDot;
+                        return true;
+                    }
+                    if (c is 'e' or 'E')
+                    {
+                        _number = NumberState.AfterExp;
+                        return true;
+                    }
                     return TerminateNumberAndReprocess(c);
 
                 case NumberState.AfterDot:
-                    if (c is >= '0' and <= '9') { _number = NumberState.Frac; return true; }
+                    if (c is >= '0' and <= '9')
+                    {
+                        _number = NumberState.Frac;
+                        return true;
+                    }
                     return false;
 
                 case NumberState.Frac:
-                    if (c is >= '0' and <= '9') { return true; }
-                    if (c is 'e' or 'E') { _number = NumberState.AfterExp; return true; }
+                    if (c is >= '0' and <= '9')
+                    {
+                        return true;
+                    }
+                    if (c is 'e' or 'E')
+                    {
+                        _number = NumberState.AfterExp;
+                        return true;
+                    }
                     return TerminateNumberAndReprocess(c);
 
                 case NumberState.AfterExp:
-                    if (c is '+' or '-') { _number = NumberState.AfterExpSign; return true; }
-                    if (c is >= '0' and <= '9') { _number = NumberState.Exp; return true; }
+                    if (c is '+' or '-')
+                    {
+                        _number = NumberState.AfterExpSign;
+                        return true;
+                    }
+                    if (c is >= '0' and <= '9')
+                    {
+                        _number = NumberState.Exp;
+                        return true;
+                    }
                     return false;
 
                 case NumberState.AfterExpSign:
-                    if (c is >= '0' and <= '9') { _number = NumberState.Exp; return true; }
+                    if (c is >= '0' and <= '9')
+                    {
+                        _number = NumberState.Exp;
+                        return true;
+                    }
                     return false;
 
                 case NumberState.Exp:
-                    if (c is >= '0' and <= '9') { return true; }
+                    if (c is >= '0' and <= '9')
+                    {
+                        return true;
+                    }
                     return TerminateNumberAndReprocess(c);
 
                 default:
@@ -248,7 +382,10 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
         // valid in the post-value context, so finalize the number and re-dispatch the character.
         private bool TerminateNumberAndReprocess(char c)
         {
-            if (!IsTerminalNumber) { return false; }
+            if (!IsTerminalNumber)
+            {
+                return false;
+            }
             _phase = PhaseAfterValue();
             return TryAdvance(c);
         }
@@ -265,9 +402,20 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
 
         private bool AdvanceLiteral(char c)
         {
-            var text = _literalKind switch { 1 => "true", 2 => "false", _ => "null" };
-            if (_literalIndex >= text.Length || c != text[_literalIndex]) { return false; }
-            if (++_literalIndex == text.Length) { _phase = PhaseAfterValue(); }
+            var text = _literalKind switch
+            {
+                1 => "true",
+                2 => "false",
+                _ => "null"
+            };
+            if (_literalIndex >= text.Length || c != text[_literalIndex])
+            {
+                return false;
+            }
+            if (++_literalIndex == text.Length)
+            {
+                _phase = PhaseAfterValue();
+            }
             return true;
         }
 
@@ -275,18 +423,33 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
 
         private bool Push(bool isArray)
         {
-            if (_depth >= MaxDepth) { return false; }
-            if (isArray) { _stack |= 1UL << _depth; }
-            else { _stack &= ~(1UL << _depth); }
+            if (_depth >= MaxDepth)
+            {
+                return false;
+            }
+            if (isArray)
+            {
+                _stack |= 1UL << _depth;
+            }
+            else
+            {
+                _stack &= ~(1UL << _depth);
+            }
             _depth++;
             return true;
         }
 
         private bool CloseContainer(bool isArray)
         {
-            if (_depth == 0) { return false; }
+            if (_depth == 0)
+            {
+                return false;
+            }
             var topIsArray = (_stack & (1UL << (_depth - 1))) != 0;
-            if (topIsArray != isArray) { return false; }
+            if (topIsArray != isArray)
+            {
+                return false;
+            }
             _depth--;
             _phase = PhaseAfterValue();   // the closed container is itself a completed value
             return true;
@@ -295,7 +458,10 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
         // Where to go after a value completes: depends on the now-current container (or root).
         private readonly Phase PhaseAfterValue()
         {
-            if (_depth == 0) { return Phase.Done; }
+            if (_depth == 0)
+            {
+                return Phase.Done;
+            }
             var topIsArray = (_stack & (1UL << (_depth - 1))) != 0;
             return topIsArray ? Phase.ArrayAfterElement : Phase.ObjectAfterPair;
         }

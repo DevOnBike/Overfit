@@ -14,7 +14,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
     public interface ISafetensorsSource : IDisposable
     {
         /// <summary>Tensor name → dtype / shape / byte range (across all shards).</summary>
-        IReadOnlyDictionary<string, SafetensorsTensorInfo> Tensors { get; }
+        IReadOnlyDictionary<string, SafetensorsTensorInfo> Tensors
+        {
+            get;
+        }
 
         /// <summary>Element count (product of shape dims) for a named tensor.</summary>
         long ElementCount(string name);

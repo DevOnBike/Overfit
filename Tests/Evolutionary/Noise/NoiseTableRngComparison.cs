@@ -60,7 +60,10 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Noise
             while (i + 1 < target.Length)
             {
                 float u1;
-                do { u1 = rng.NextSingle(); } while (u1 == 0f);
+                do
+                {
+                    u1 = rng.NextSingle();
+                } while (u1 == 0f);
                 var u2 = rng.NextSingle();
                 var mag = MathF.Sqrt(-2f * MathF.Log(u1));
                 var (sin, cos) = MathF.SinCos(2f * MathF.PI * u2);
@@ -71,7 +74,10 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Noise
             if (i < target.Length)
             {
                 float u1;
-                do { u1 = rng.NextSingle(); } while (u1 == 0f);
+                do
+                {
+                    u1 = rng.NextSingle();
+                } while (u1 == 0f);
                 var u2 = rng.NextSingle();
                 target[i] = MathF.Sqrt(-2f * MathF.Log(u1)) * MathF.Cos(2f * MathF.PI * u2);
             }
@@ -85,7 +91,10 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Noise
             while (i + 1 < target.Length)
             {
                 float u1;
-                do { u1 = rng.NextSingle(); } while (u1 == 0f);
+                do
+                {
+                    u1 = rng.NextSingle();
+                } while (u1 == 0f);
                 var u2 = rng.NextSingle();
                 var mag = MathF.Sqrt(-2f * MathF.Log(u1));
                 var (sin, cos) = MathF.SinCos(2f * MathF.PI * u2);
@@ -96,7 +105,10 @@ namespace DevOnBike.Overfit.Tests.Evolutionary.Noise
             if (i < target.Length)
             {
                 float u1;
-                do { u1 = rng.NextSingle(); } while (u1 == 0f);
+                do
+                {
+                    u1 = rng.NextSingle();
+                } while (u1 == 0f);
                 var u2 = rng.NextSingle();
                 target[i] = MathF.Sqrt(-2f * MathF.Log(u1)) * MathF.Cos(2f * MathF.PI * u2);
             }

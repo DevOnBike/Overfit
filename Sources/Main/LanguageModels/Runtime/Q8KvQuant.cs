@@ -62,8 +62,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             for (var d = 0; d < n; d++)
             {
                 var q = MathF.Round(src[d] * inv);
-                if (q > 127f) { q = 127f; }
-                else if (q < -127f) { q = -127f; }
+                if (q > 127f)
+                {
+                    q = 127f;
+                }
+                else if (q < -127f)
+                {
+                    q = -127f;
+                }
                 dst[d] = (sbyte)q;
             }
             return scale;

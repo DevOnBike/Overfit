@@ -273,16 +273,28 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             foreach (var conv in _convs)
             {
-                foreach (var p in conv.Parameters()) { yield return p; }
+                foreach (var p in conv.Parameters())
+                {
+                    yield return p;
+                }
             }
-            foreach (var p in _lstm.Parameters()) { yield return p; }
-            foreach (var p in _classifier.Parameters()) { yield return p; }
+            foreach (var p in _lstm.Parameters())
+            {
+                yield return p;
+            }
+            foreach (var p in _classifier.Parameters())
+            {
+                yield return p;
+            }
         }
 
         public void Train()
         {
             _isTraining = true;
-            foreach (var conv in _convs) { conv.Train(); }
+            foreach (var conv in _convs)
+            {
+                conv.Train();
+            }
             _lstm.Train();
             _classifier.Train();
         }
@@ -290,14 +302,20 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Eval()
         {
             _isTraining = false;
-            foreach (var conv in _convs) { conv.Eval(); }
+            foreach (var conv in _convs)
+            {
+                conv.Eval();
+            }
             _lstm.Eval();
             _classifier.Eval();
         }
 
         public void InvalidateParameterCaches()
         {
-            foreach (var conv in _convs) { conv.InvalidateParameterCaches(); }
+            foreach (var conv in _convs)
+            {
+                conv.InvalidateParameterCaches();
+            }
             _lstm.InvalidateParameterCaches();
             _classifier.InvalidateParameterCaches();
         }
@@ -305,7 +323,10 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Save(BinaryWriter bw)
         {
             ArgumentNullException.ThrowIfNull(bw);
-            foreach (var conv in _convs) { conv.Save(bw); }
+            foreach (var conv in _convs)
+            {
+                conv.Save(bw);
+            }
             _lstm.Save(bw);
             _classifier.Save(bw);
         }
@@ -313,7 +334,10 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Load(BinaryReader br)
         {
             ArgumentNullException.ThrowIfNull(br);
-            foreach (var conv in _convs) { conv.Load(br); }
+            foreach (var conv in _convs)
+            {
+                conv.Load(br);
+            }
             _lstm.Load(br);
             _classifier.Load(br);
         }
@@ -321,7 +345,10 @@ namespace DevOnBike.Overfit.DeepLearning
         public void Dispose()
         {
             _inferenceGraph?.Dispose();
-            foreach (var conv in _convs) { conv.Dispose(); }
+            foreach (var conv in _convs)
+            {
+                conv.Dispose();
+            }
             _lstm.Dispose();
             _classifier.Dispose();
         }

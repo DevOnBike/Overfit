@@ -129,13 +129,25 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Training
                 _loss = loss;
             }
 
-            public int BatchSize { get; }
+            public int BatchSize
+            {
+                get;
+            }
 
-            public int InputSize { get; }
+            public int InputSize
+            {
+                get;
+            }
 
-            public int TargetSize { get; }
+            public int TargetSize
+            {
+                get;
+            }
 
-            public int TrainBatchCalls { get; private set; }
+            public int TrainBatchCalls
+            {
+                get; private set;
+            }
 
             public TrainingStepResult TrainBatch(
                 ReadOnlySpan<float> input,

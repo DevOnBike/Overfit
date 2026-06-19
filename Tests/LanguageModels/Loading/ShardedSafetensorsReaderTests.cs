@@ -134,7 +134,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             void Add(string name, int n)
             {
                 var a = new float[n];
-                for (var i = 0; i < n; i++) { a[i] = seed + i * 0.125f; }
+                for (var i = 0; i < n; i++)
+                {
+                    a[i] = seed + i * 0.125f;
+                }
                 seed += 1000f;
                 t[name] = a;
             }
@@ -180,7 +183,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
                 File.WriteAllBytes(Path.Combine(dir, file), BuildSafetensors(tensors));
                 foreach (var name in tensors.Keys)
                 {
-                    if (!first) { weightMap.Append(','); }
+                    if (!first)
+                    {
+                        weightMap.Append(',');
+                    }
                     first = false;
                     weightMap.Append('"').Append(name).Append("\":\"").Append(file).Append('"');
                 }
@@ -198,7 +204,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             var first = true;
             foreach (var kv in tensors)
             {
-                if (!first) { sb.Append(','); }
+                if (!first)
+                {
+                    sb.Append(',');
+                }
                 first = false;
                 var bytes = kv.Value.Length * 4L;
                 sb.Append('"').Append(kv.Key).Append("\":{\"dtype\":\"F32\",\"shape\":[")

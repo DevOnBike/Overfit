@@ -73,7 +73,10 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
                 if (t == _eosTokenId)
                 {
                     // The end-of-text token is allowed only once the JSON is complete.
-                    if (!_committed.IsComplete) { logits[t] = float.NegativeInfinity; }
+                    if (!_committed.IsComplete)
+                    {
+                        logits[t] = float.NegativeInfinity;
+                    }
                     continue;
                 }
 
@@ -103,15 +106,24 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
 
         public void Accept(int token)
         {
-            if (token == _eosTokenId) { return; }
-            if ((uint)token >= (uint)_tokenText.Length) { return; }
+            if (token == _eosTokenId)
+            {
+                return;
+            }
+            if ((uint)token >= (uint)_tokenText.Length)
+            {
+                return;
+            }
 
             var text = _tokenText[token];
             for (var i = 0; i < text.Length; i++)
             {
                 // The token was unmasked, so every character must advance the committed machine.
                 _committed.TryAdvance(text[i]);
-                if (!IsJsonWhitespace(text[i])) { _rootStarted = true; }
+                if (!IsJsonWhitespace(text[i]))
+                {
+                    _rootStarted = true;
+                }
             }
         }
 
@@ -121,7 +133,10 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
         {
             foreach (var c in text)
             {
-                if (IsJsonWhitespace(c)) { continue; }
+                if (IsJsonWhitespace(c))
+                {
+                    continue;
+                }
                 return c == '{';
             }
             return true;
@@ -135,7 +150,10 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
             var probe = _committed;   // value-type copy — speculative, no allocation
             for (var i = 0; i < text.Length; i++)
             {
-                if (!probe.TryAdvance(text[i])) { return false; }
+                if (!probe.TryAdvance(text[i]))
+                {
+                    return false;
+                }
             }
             return true;
         }

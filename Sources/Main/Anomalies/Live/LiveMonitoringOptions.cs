@@ -12,10 +12,16 @@ namespace DevOnBike.Overfit.Anomalies.Live
     public sealed class LiveMonitoringOptions
     {
         /// <summary>Prometheus HTTP API base URL, e.g. "http://prometheus:9090".</summary>
-        public required string PrometheusBaseUrl { get; init; }
+        public required string PrometheusBaseUrl
+        {
+            get; init;
+        }
 
         /// <summary>PromQL regex matching pods to monitor, e.g. "my-service-.*".</summary>
-        public required string PodRegex { get; init; }
+        public required string PodRegex
+        {
+            get; init;
+        }
 
         /// <summary>
         /// Per-pod adaptive policy — drives scoring window (<see cref="AdaptivePolicy.ContextSnapshots"/>),
@@ -26,7 +32,10 @@ namespace DevOnBike.Overfit.Anomalies.Live
         /// thresholds below — a cross-pod base's benign can sit above the alert threshold yet
         /// still be adaptable, so the critical (real-incident) cutoff for adaptation is usually higher.
         /// </summary>
-        public required AdaptivePolicy Adaptation { get; init; }
+        public required AdaptivePolicy Adaptation
+        {
+            get; init;
+        }
 
         public TimeSpan ScrapeInterval { get; init; } = TimeSpan.FromSeconds(15);
 
@@ -45,15 +54,27 @@ namespace DevOnBike.Overfit.Anomalies.Live
         /// moderate real incident online); use <see cref="OnAdaptationRecommended"/> + the
         /// pipeline's <c>Adapt</c> to review first.
         /// </summary>
-        public bool AutoAdapt { get; init; }
+        public bool AutoAdapt
+        {
+            get; init;
+        }
 
         /// <summary>Called for every scored snapshot (logging, metrics export).</summary>
-        public Action<AnomalyScore>? OnScore { get; init; }
+        public Action<AnomalyScore>? OnScore
+        {
+            get; init;
+        }
 
         /// <summary>Called (once per scrape it newly applies) with the pod name when the monitor recommends adapting it.</summary>
-        public Action<string>? OnAdaptationRecommended { get; init; }
+        public Action<string>? OnAdaptationRecommended
+        {
+            get; init;
+        }
 
         /// <summary>Called on non-cancellation errors in the scrape loop.</summary>
-        public Action<Exception>? OnError { get; init; }
+        public Action<Exception>? OnError
+        {
+            get; init;
+        }
     }
 }

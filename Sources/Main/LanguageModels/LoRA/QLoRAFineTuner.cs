@@ -147,7 +147,10 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             for (var start = 0; start + 2 <= ids.Length; start += chunkLength)
             {
                 var len = Math.Min(window, ids.Length - start);
-                if (len < 2) { break; }
+                if (len < 2)
+                {
+                    break;
+                }
                 chunks.Add(ids[start..(start + len)].ToArray());
             }
             return chunks;
@@ -156,7 +159,10 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
         private List<AutogradNode> MaterializeParams()
         {
             var list = new List<AutogradNode>();
-            foreach (var p in _model.TrainableParameters()) { list.Add(p); }
+            foreach (var p in _model.TrainableParameters())
+            {
+                list.Add(p);
+            }
             return list;
         }
 
@@ -166,15 +172,24 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             foreach (var p in parameters)
             {
                 var g = p.GradView.AsReadOnlySpan();
-                for (var i = 0; i < g.Length; i++) { sq += (double)g[i] * g[i]; }
+                for (var i = 0; i < g.Length; i++)
+                {
+                    sq += (double)g[i] * g[i];
+                }
             }
             var norm = Math.Sqrt(sq);
-            if (norm <= maxNorm) { return; }
+            if (norm <= maxNorm)
+            {
+                return;
+            }
             var scale = (float)(maxNorm / (norm + 1e-6));
             foreach (var p in parameters)
             {
                 var g = p.GradView.AsSpan();
-                for (var i = 0; i < g.Length; i++) { g[i] *= scale; }
+                for (var i = 0; i < g.Length; i++)
+                {
+                    g[i] *= scale;
+                }
             }
         }
 

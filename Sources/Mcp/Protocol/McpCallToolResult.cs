@@ -16,7 +16,10 @@ namespace DevOnBike.Overfit.Mcp.Protocol
         public TextContentBody[] Content { get; set; } = [];
 
         [JsonPropertyName("isError")]
-        public bool IsError { get; set; }
+        public bool IsError
+        {
+            get; set;
+        }
 
         public sealed class TextContentBody
         {

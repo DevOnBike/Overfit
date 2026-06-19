@@ -373,7 +373,11 @@ namespace DevOnBike.Overfit.Onnx
                     for (var i = 0; i < input.Shape.Length; i++)
                     {
                         var v = input.Shape[i];
-                        if (!v.HasValue || v.Value <= 0) { valid = false; break; }
+                        if (!v.HasValue || v.Value <= 0)
+                        {
+                            valid = false;
+                            break;
+                        }
                         shape[i] = (int)v.Value;
                     }
 

@@ -66,7 +66,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
                 s.Reset(promptArr);
                 var g = SamplingOptions.Greedy;
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                for (var i = 0; i < generate; i++) { refSeq.Add(s.GenerateNextToken(in g)); }
+                for (var i = 0; i < generate; i++)
+                {
+                    refSeq.Add(s.GenerateNextToken(in g));
+                }
                 sw.Stop();
                 singleTokPerSec = generate / sw.Elapsed.TotalSeconds;
             }
@@ -90,7 +93,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
                     while (specSeq.Count < generate)
                     {
                         var n = s.GenerateSpeculative(CollectionsMarshal.AsSpan(history), committed, in g, maxDraft, drafter);
-                        for (var c = 0; c < n; c++) { specSeq.Add(committed[c]); history.Add(committed[c]); }
+                        for (var c = 0; c < n; c++)
+                        {
+                            specSeq.Add(committed[c]);
+                            history.Add(committed[c]);
+                        }
                         steps++;
                     }
                     sw.Stop();

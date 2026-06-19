@@ -26,13 +26,22 @@ namespace DevOnBike.Overfit.Training
         }
 
         /// <summary>The replica model (already switched to training mode).</summary>
-        public TModel Model { get; }
+        public TModel Model
+        {
+            get;
+        }
 
         /// <summary>This replica's private autograd tape — never shared with other replicas.</summary>
-        public ComputationGraph Graph { get; }
+        public ComputationGraph Graph
+        {
+            get;
+        }
 
         /// <summary>This replica's trainable parameters, aligned 1:1 with the master.</summary>
-        public IReadOnlyList<Parameter> Parameters { get; }
+        public IReadOnlyList<Parameter> Parameters
+        {
+            get;
+        }
 
         public void Dispose()
         {

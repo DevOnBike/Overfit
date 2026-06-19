@@ -17,6 +17,14 @@ dotnet_separate_import_directive_groups = false
 
 csharp_prefer_braces = true:warning
 
+# Fully-expanded Allman: brace on its own line after if/else/for/etc., and never collapse a block or its
+# body onto one line — so `if (u <= cumulative) { return i; }` is reformatted to the brace-on-newline,
+# body-on-newline, closing-brace-on-newline form. Enforced by IDE0055 (=warning above) and auto-applied
+# by `dotnet format` / update-code-headers.cmd.
+csharp_new_line_before_open_brace = all
+csharp_preserve_single_line_blocks = false
+csharp_preserve_single_line_statements = false
+
 csharp_space_around_binary_operators = before_and_after
 
 file_header_template = Copyright (c) 2026 DevOnBike.\nThis file is part of DevonBike Overfit.\nDevonBike Overfit is licensed under the GNU AGPLv3.\nFor commercial licensing options, contact: devonbike@gmail.com

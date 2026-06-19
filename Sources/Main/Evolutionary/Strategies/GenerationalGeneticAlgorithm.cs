@@ -156,11 +156,20 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
                 crossoverOperator: crossoverOperator);
         }
 
-        public int PopulationSize { get; }
+        public int PopulationSize
+        {
+            get;
+        }
 
-        public int ParameterCount { get; }
+        public int ParameterCount
+        {
+            get;
+        }
 
-        public int Generation { get; private set; }
+        public int Generation
+        {
+            get; private set;
+        }
 
         public float BestFitness
         {

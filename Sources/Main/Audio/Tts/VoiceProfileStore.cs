@@ -73,10 +73,18 @@ namespace DevOnBike.Overfit.Audio.Tts
                 var value = line[(eq + 1)..];
                 switch (key)
                 {
-                    case "id": realId = value; break;
-                    case "language": language = value; break;
-                    case "referenceAudio": reference = value; break;
-                    case "embeddingDim": _ = int.TryParse(value, out embeddingDim); break;
+                    case "id":
+                        realId = value;
+                        break;
+                    case "language":
+                        language = value;
+                        break;
+                    case "referenceAudio":
+                        reference = value;
+                        break;
+                    case "embeddingDim":
+                        _ = int.TryParse(value, out embeddingDim);
+                        break;
                 }
             }
 

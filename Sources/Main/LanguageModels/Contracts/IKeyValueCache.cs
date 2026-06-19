@@ -8,13 +8,25 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
 
     public interface IKeyValueCache : IDisposable
     {
-        KeyValueCacheShape Shape { get; }
+        KeyValueCacheShape Shape
+        {
+            get;
+        }
 
-        int CurrentLength { get; }
+        int CurrentLength
+        {
+            get;
+        }
 
-        int MaxLength { get; }
+        int MaxLength
+        {
+            get;
+        }
 
-        bool IsFull { get; }
+        bool IsFull
+        {
+            get;
+        }
 
         void Reset();
 

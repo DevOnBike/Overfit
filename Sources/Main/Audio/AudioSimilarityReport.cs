@@ -43,27 +43,48 @@ namespace DevOnBike.Overfit.Audio
 
         /// <summary>Sample-aligned signal-to-noise ratio in dB: <c>10·log10(Σref² / Σ(ref−cand)²)</c>. Higher is
         /// closer; <see cref="double.PositiveInfinity"/> means bit-identical (zero residual).</summary>
-        public double SignalToNoiseRatioDb { get; }
+        public double SignalToNoiseRatioDb
+        {
+            get;
+        }
 
         /// <summary>Pearson correlation of the sample-aligned waveforms, in <c>[-1, 1]</c>; <c>1</c> = identical
         /// shape. Sensitive to phase/timing, so it is most meaningful for aligned decodes.</summary>
-        public double Correlation { get; }
+        public double Correlation
+        {
+            get;
+        }
 
         /// <summary>Root-mean-square error of the sample-aligned waveforms (amplitude units). <c>0</c> =
         /// identical.</summary>
-        public double RootMeanSquareError { get; }
+        public double RootMeanSquareError
+        {
+            get;
+        }
 
         /// <summary>Frame-aligned RMS distance in the log-mel domain (over the overlapping frames). Cheap and
         /// timing-tolerant to within a frame; <c>0</c> = identical spectra.</summary>
-        public double MelSpectralDistance { get; }
+        public double MelSpectralDistance
+        {
+            get;
+        }
 
         /// <summary>DTW-aligned (dynamic-time-warping) mean log-mel frame distance — the timing-robust spectral
         /// metric. Warps the two mel sequences onto a common path before measuring, so a duration or onset drift
         /// between generated and reference speech does not dominate. Lower = closer; <c>0</c> = identical.</summary>
-        public double MelDistanceDtw { get; }
+        public double MelDistanceDtw
+        {
+            get;
+        }
 
-        public int ReferenceSampleCount { get; }
-        public int CandidateSampleCount { get; }
+        public int ReferenceSampleCount
+        {
+            get;
+        }
+        public int CandidateSampleCount
+        {
+            get;
+        }
 
         /// <summary>True when the candidate is (numerically) the reference: zero residual and an identical length.
         /// A convenience for bit-parity-style gates.</summary>

@@ -46,10 +46,22 @@ namespace DevOnBike.Overfit.DeepLearning
             _inferenceShift = new TensorStorage<float>(channels, clearMemory: false);
         }
 
-        public Parameter Gamma { get; }
-        public Parameter Beta { get; }
-        public TensorStorage<float> RunningMean { get; }
-        public TensorStorage<float> RunningVar { get; }
+        public Parameter Gamma
+        {
+            get;
+        }
+        public Parameter Beta
+        {
+            get;
+        }
+        public TensorStorage<float> RunningMean
+        {
+            get;
+        }
+        public TensorStorage<float> RunningVar
+        {
+            get;
+        }
         public float Momentum { get; set; } = 0.1f;
         public float Eps { get; set; } = 1e-5f;
         public bool IsTraining { get; private set; } = true;
@@ -68,7 +80,10 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void PrepareInference()
         {
-            if (_inferenceCacheValid) { return; }
+            if (_inferenceCacheValid)
+            {
+                return;
+            }
 
             var scale = _inferenceScale.AsSpan();
             var shift = _inferenceShift.AsSpan();
@@ -97,7 +112,10 @@ namespace DevOnBike.Overfit.DeepLearning
         /// </summary>
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
-            if (!_inferenceCacheValid) { PrepareInference(); }
+            if (!_inferenceCacheValid)
+            {
+                PrepareInference();
+            }
             if (input.Length % _channels != 0)
             {
                 throw new ArgumentException("Input length is not divisible by the channel count.", nameof(input));
@@ -133,32 +151,69 @@ namespace DevOnBike.Overfit.DeepLearning
         public void InvalidateParameterCaches()
         {
             _inferenceCacheValid = false;
-            if (!IsTraining) { PrepareInference(); }
+            if (!IsTraining)
+            {
+                PrepareInference();
+            }
         }
 
         public void Save(BinaryWriter bw)
         {
             ArgumentNullException.ThrowIfNull(bw);
             bw.Write(_channels);
-            foreach (var v in Gamma.DataReadOnlySpan) { bw.Write(v); }
-            foreach (var v in Beta.DataReadOnlySpan) { bw.Write(v); }
-            foreach (var v in RunningMean.AsReadOnlySpan()) { bw.Write(v); }
-            foreach (var v in RunningVar.AsReadOnlySpan()) { bw.Write(v); }
+            foreach (var v in Gamma.DataReadOnlySpan)
+            {
+                bw.Write(v);
+            }
+            foreach (var v in Beta.DataReadOnlySpan)
+            {
+                bw.Write(v);
+            }
+            foreach (var v in RunningMean.AsReadOnlySpan())
+            {
+                bw.Write(v);
+            }
+            foreach (var v in RunningVar.AsReadOnlySpan())
+            {
+                bw.Write(v);
+            }
         }
 
         public void Load(BinaryReader br)
         {
             ArgumentNullException.ThrowIfNull(br);
             var c = br.ReadInt32();
-            if (c != _channels) { throw new Exception($"Channel count mismatch: {c} vs {_channels}"); }
+            if (c != _channels)
+            {
+                throw new Exception($"Channel count mismatch: {c} vs {_channels}");
+            }
 
-            var g = Gamma.DataSpan; for (var i = 0; i < _channels; i++) { g[i] = br.ReadSingle(); }
-            var b = Beta.DataSpan; for (var i = 0; i < _channels; i++) { b[i] = br.ReadSingle(); }
-            var rm = RunningMean.AsSpan(); for (var i = 0; i < _channels; i++) { rm[i] = br.ReadSingle(); }
-            var rv = RunningVar.AsSpan(); for (var i = 0; i < _channels; i++) { rv[i] = br.ReadSingle(); }
+            var g = Gamma.DataSpan;
+            for (var i = 0; i < _channels; i++)
+            {
+                g[i] = br.ReadSingle();
+            }
+            var b = Beta.DataSpan;
+            for (var i = 0; i < _channels; i++)
+            {
+                b[i] = br.ReadSingle();
+            }
+            var rm = RunningMean.AsSpan();
+            for (var i = 0; i < _channels; i++)
+            {
+                rm[i] = br.ReadSingle();
+            }
+            var rv = RunningVar.AsSpan();
+            for (var i = 0; i < _channels; i++)
+            {
+                rv[i] = br.ReadSingle();
+            }
 
             _inferenceCacheValid = false;
-            if (!IsTraining) { PrepareInference(); }
+            if (!IsTraining)
+            {
+                PrepareInference();
+            }
         }
 
         public void Dispose()

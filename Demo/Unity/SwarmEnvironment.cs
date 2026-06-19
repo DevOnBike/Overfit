@@ -72,7 +72,10 @@ namespace DevOnBike.Overfit.Demo.Unity.Server
         ///     blocks: bots [0..BotsPerGenome) → genome 0, next block → genome 1, and so on.
         ///     Kept constant across the life of the environment.
         /// </summary>
-        public int BotsPerGenome { get; }
+        public int BotsPerGenome
+        {
+            get;
+        }
 
         public ReadOnlySpan<Vector2> Positions => _positions;
 

@@ -11,19 +11,28 @@ namespace DevOnBike.Overfit.Training.Contracts
         /// If true, input spans are checked for NaN/Infinity.
         /// Useful for debugging, not recommended for max-performance training.
         /// </summary>
-        public bool ValidateFiniteInput { get; init; }
+        public bool ValidateFiniteInput
+        {
+            get; init;
+        }
 
         /// <summary>
         /// If true, target spans are checked for NaN/Infinity.
         /// Useful for debugging, not recommended for max-performance training.
         /// </summary>
-        public bool ValidateFiniteTarget { get; init; }
+        public bool ValidateFiniteTarget
+        {
+            get; init;
+        }
 
         /// <summary>
         /// If true, backend disposes the model when the engine is disposed.
         /// Default false, because model ownership usually belongs to caller.
         /// </summary>
-        public bool DisposeModelWithEngine { get; init; }
+        public bool DisposeModelWithEngine
+        {
+            get; init;
+        }
 
         /// <summary>
         /// If true, graph.Reset() is called after every training step.

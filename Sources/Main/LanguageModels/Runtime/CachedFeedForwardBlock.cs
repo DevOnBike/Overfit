@@ -69,11 +69,20 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _q8kInputBsums = new short[(scratch + Q4KDotKernel.GroupSize - 1) / Q4KDotKernel.GroupSize];
         }
 
-        public int DModel { get; }
+        public int DModel
+        {
+            get;
+        }
 
-        public int DFF { get; }
+        public int DFF
+        {
+            get;
+        }
 
-        public FeedForwardActivation Activation { get; }
+        public FeedForwardActivation Activation
+        {
+            get;
+        }
 
         public void Decode(
             ReadOnlySpan<float> hidden,

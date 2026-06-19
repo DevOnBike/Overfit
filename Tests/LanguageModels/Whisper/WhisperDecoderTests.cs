@@ -83,7 +83,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
         {
             var rng = new Random(seed);
             var enc = new float[NCtx * NState];
-            for (var i = 0; i < enc.Length; i++) { enc[i] = (float)(rng.NextDouble() * 2 - 1); }
+            for (var i = 0; i < enc.Length; i++)
+            {
+                enc[i] = (float)(rng.NextDouble() * 2 - 1);
+            }
             return enc;
         }
 
@@ -95,9 +98,15 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
             void Add(string name, params int[] shape)
             {
                 long n = 1;
-                foreach (var d in shape) { n *= d; }
+                foreach (var d in shape)
+                {
+                    n *= d;
+                }
                 var data = new float[n];
-                for (var i = 0; i < n; i++) { data[i] = (float)(rng.NextDouble() * 2 - 1) * 0.2f; }
+                for (var i = 0; i < n; i++)
+                {
+                    data[i] = (float)(rng.NextDouble() * 2 - 1) * 0.2f;
+                }
                 t[name] = new WhisperTensor(shape, data);
             }
 
@@ -106,21 +115,33 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
             for (var b = 0; b < NLayer; b++)
             {
                 var p = $"decoder.blocks.{b}.";
-                Add(p + "attn_ln.weight", NState); Add(p + "attn_ln.bias", NState);
-                Add(p + "attn.query.weight", NState, NState); Add(p + "attn.query.bias", NState);
+                Add(p + "attn_ln.weight", NState);
+                Add(p + "attn_ln.bias", NState);
+                Add(p + "attn.query.weight", NState, NState);
+                Add(p + "attn.query.bias", NState);
                 Add(p + "attn.key.weight", NState, NState);
-                Add(p + "attn.value.weight", NState, NState); Add(p + "attn.value.bias", NState);
-                Add(p + "attn.out.weight", NState, NState); Add(p + "attn.out.bias", NState);
-                Add(p + "cross_attn_ln.weight", NState); Add(p + "cross_attn_ln.bias", NState);
-                Add(p + "cross_attn.query.weight", NState, NState); Add(p + "cross_attn.query.bias", NState);
+                Add(p + "attn.value.weight", NState, NState);
+                Add(p + "attn.value.bias", NState);
+                Add(p + "attn.out.weight", NState, NState);
+                Add(p + "attn.out.bias", NState);
+                Add(p + "cross_attn_ln.weight", NState);
+                Add(p + "cross_attn_ln.bias", NState);
+                Add(p + "cross_attn.query.weight", NState, NState);
+                Add(p + "cross_attn.query.bias", NState);
                 Add(p + "cross_attn.key.weight", NState, NState);
-                Add(p + "cross_attn.value.weight", NState, NState); Add(p + "cross_attn.value.bias", NState);
-                Add(p + "cross_attn.out.weight", NState, NState); Add(p + "cross_attn.out.bias", NState);
-                Add(p + "mlp_ln.weight", NState); Add(p + "mlp_ln.bias", NState);
-                Add(p + "mlp.0.weight", DFF, NState); Add(p + "mlp.0.bias", DFF);
-                Add(p + "mlp.2.weight", NState, DFF); Add(p + "mlp.2.bias", NState);
+                Add(p + "cross_attn.value.weight", NState, NState);
+                Add(p + "cross_attn.value.bias", NState);
+                Add(p + "cross_attn.out.weight", NState, NState);
+                Add(p + "cross_attn.out.bias", NState);
+                Add(p + "mlp_ln.weight", NState);
+                Add(p + "mlp_ln.bias", NState);
+                Add(p + "mlp.0.weight", DFF, NState);
+                Add(p + "mlp.0.bias", DFF);
+                Add(p + "mlp.2.weight", NState, DFF);
+                Add(p + "mlp.2.bias", NState);
             }
-            Add("decoder.ln.weight", NState); Add("decoder.ln.bias", NState);
+            Add("decoder.ln.weight", NState);
+            Add("decoder.ln.bias", NState);
 
             var config = new WhisperConfig(NVocab, NCtx, NState, NHead, NLayer, NTextCtx, NState, NHead, NLayer, 80, false);
             return new WhisperModel(config, 80, 1, new float[80], Array.Empty<string>(), t);

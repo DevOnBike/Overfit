@@ -27,7 +27,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         [LongFact]
         public void Gemma2_Loads_And_Generates_Coherent_English()
         {
-            if (!File.Exists(Path)) { _out.WriteLine("missing Gemma-2 gguf"); return; }
+            if (!File.Exists(Path))
+            {
+                _out.WriteLine("missing Gemma-2 gguf");
+                return;
+            }
 
             using (var reader = new GgufReader(Path))
             {
@@ -50,7 +54,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             for (var i = 0; i < 32 && !session.IsFull; i++)
             {
                 var t = session.GenerateNextToken(in sampling);
-                if (t == 1 || t == 107) { break; } // <eos> / <end_of_turn>
+                if (t == 1 || t == 107)
+                {
+                    break;
+                } // <eos> / <end_of_turn>
                 sb.Append(tok.DecodeToken(t));
             }
 

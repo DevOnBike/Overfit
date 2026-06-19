@@ -10,7 +10,10 @@ namespace DevOnBike.Overfit.Data.Abstractions
     /// </summary>
     public interface IFeatureNormalizer
     {
-        bool IsFrozen { get; }
+        bool IsFrozen
+        {
+            get;
+        }
 
         /// <summary>
         /// Trains the normalizer on historical data (Offline).

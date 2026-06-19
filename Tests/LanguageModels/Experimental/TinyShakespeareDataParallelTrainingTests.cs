@@ -483,15 +483,30 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Experimental
                 Rng = new Random(rngSeed);
             }
 
-            public int LocalBatchSize { get; }
+            public int LocalBatchSize
+            {
+                get;
+            }
 
-            public int SeqLen { get; }
+            public int SeqLen
+            {
+                get;
+            }
 
-            public int[] InputIds { get; }
+            public int[] InputIds
+            {
+                get;
+            }
 
-            public int[] TargetIds { get; }
+            public int[] TargetIds
+            {
+                get;
+            }
 
-            public Random Rng { get; }
+            public Random Rng
+            {
+                get;
+            }
         }
     }
 }

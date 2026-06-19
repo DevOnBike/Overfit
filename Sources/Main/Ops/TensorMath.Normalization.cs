@@ -201,7 +201,10 @@ namespace DevOnBike.Overfit.Ops
                         meanS[c] += TensorPrimitives.Sum(inS.Slice((n * C + c) * hw, hw));
                     }
                 }
-                for (var c = 0; c < C; c++) { meanS[c] /= m; }
+                for (var c = 0; c < C; c++)
+                {
+                    meanS[c] /= m;
+                }
 
                 using var varBuf = new PooledBuffer<float>(C);          // cleared
                 using var tmpBuf = new PooledBuffer<float>(hw, false);
@@ -231,7 +234,10 @@ namespace DevOnBike.Overfit.Ops
             {
                 runningMean.AsReadOnlySpan().CopyTo(meanS);
                 var rv = runningVar.AsReadOnlySpan();
-                for (var c = 0; c < C; c++) { invStdS[c] = 1f / MathF.Sqrt(rv[c] + eps); }
+                for (var c = 0; c < C; c++)
+                {
+                    invStdS[c] = 1f / MathF.Sqrt(rv[c] + eps);
+                }
             }
 
             var gS = gamma.DataView.AsReadOnlySpan();
@@ -331,12 +337,18 @@ namespace DevOnBike.Overfit.Ops
             if (beta.RequiresGrad)
             {
                 var betaGrad = beta.GradView.AsSpan();
-                for (var c = 0; c < C; c++) { betaGrad[c] += sumDy[c]; }
+                for (var c = 0; c < C; c++)
+                {
+                    betaGrad[c] += sumDy[c];
+                }
             }
             if (gamma.RequiresGrad)
             {
                 var gammaGrad = gamma.GradView.AsSpan();
-                for (var c = 0; c < C; c++) { gammaGrad[c] += sumDyX[c]; }
+                for (var c = 0; c < C; c++)
+                {
+                    gammaGrad[c] += sumDyX[c];
+                }
             }
 
             if (input.RequiresGrad)
@@ -411,12 +423,18 @@ namespace DevOnBike.Overfit.Ops
                 if (beta.RequiresGrad)
                 {
                     var betaGrad = beta.GradView.AsSpan();
-                    for (var c = 0; c < C; c++) { betaGrad[c] += sumDy[c]; }
+                    for (var c = 0; c < C; c++)
+                    {
+                        betaGrad[c] += sumDy[c];
+                    }
                 }
                 if (gamma.RequiresGrad)
                 {
                     var gammaGrad = gamma.GradView.AsSpan();
-                    for (var c = 0; c < C; c++) { gammaGrad[c] += sumDyX[c]; }
+                    for (var c = 0; c < C; c++)
+                    {
+                        gammaGrad[c] += sumDyX[c];
+                    }
                 }
 
                 if (input.RequiresGrad)

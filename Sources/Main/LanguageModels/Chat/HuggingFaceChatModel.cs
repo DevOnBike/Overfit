@@ -42,10 +42,16 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
         }
 
         /// <summary>The ready-to-use chat session over the loaded model.</summary>
-        public ChatSession Chat { get; }
+        public ChatSession Chat
+        {
+            get;
+        }
 
         /// <summary>The detected chat-prompt format (drives rendering + stop sequences).</summary>
-        public ChatTemplateFormat Format { get; private set; }
+        public ChatTemplateFormat Format
+        {
+            get; private set;
+        }
 
         /// <summary>
         /// Loads a HuggingFace model directory (<c>model.safetensors</c> [+ shards] +
@@ -83,7 +89,10 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
 
         public void Dispose()
         {
-            if (_disposed) { return; }
+            if (_disposed)
+            {
+                return;
+            }
             _disposed = true;
             _session.Dispose();
             _engine.Dispose();

@@ -16,7 +16,10 @@ namespace Benchmarks
     public class RandomizationBenchmarks
     {
         [Params(256, 1024, 8192, 65536)]
-        public int Count { get; set; }
+        public int Count
+        {
+            get; set;
+        }
 
         private float[] _buffer = null!;
         private Random _random = null!;

@@ -107,14 +107,20 @@ namespace Benchmarks
         {
             [VectorType(InputSize)]
             [ColumnName("input")]
-            public float[] Input { get; set; }
+            public float[] Input
+            {
+                get; set;
+            }
         }
 
         public sealed class OnnxOutput
         {
             [VectorType(OutputSize)]
             [ColumnName("output")]
-            public float[] Output { get; set; }
+            public float[] Output
+            {
+                get; set;
+            }
         }
     }
 }

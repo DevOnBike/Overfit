@@ -30,7 +30,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         [LongFact]
         public void Phi4_DecodeThroughput_BestOfN()
         {
-            if (!File.Exists(Path)) { _out.WriteLine("missing Phi-4 gguf"); return; }
+            if (!File.Exists(Path))
+            {
+                _out.WriteLine("missing Phi-4 gguf");
+                return;
+            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(Path);
             var tok = GgufTokenizer.Load(Path);

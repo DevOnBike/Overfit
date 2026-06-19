@@ -80,11 +80,20 @@ namespace DevOnBike.Overfit.Demo.Unity.Server
             OutputSize = outputSize;
         }
 
-        public int InputSize { get; }
+        public int InputSize
+        {
+            get;
+        }
 
-        public int HiddenSize { get; }
+        public int HiddenSize
+        {
+            get;
+        }
 
-        public int OutputSize { get; }
+        public int OutputSize
+        {
+            get;
+        }
 
         public int ParameterCount => _adapter.ParameterCount;
 

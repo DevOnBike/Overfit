@@ -31,7 +31,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         [LongFact]
         public void LoadsRoutedOnlyMoE_AndDecodesCoherently()
         {
-            if (!File.Exists(MixtralPath)) { _out.WriteLine($"missing {MixtralPath}"); return; }
+            if (!File.Exists(MixtralPath))
+            {
+                _out.WriteLine($"missing {MixtralPath}");
+                return;
+            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(MixtralPath);
 
@@ -66,7 +70,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 
                 var token = session.GenerateNextToken(in sampling);
                 Assert.InRange(token, 0, engine.Config.VocabSize - 1);
-                if (token == tok.EosId) { break; }
+                if (token == tok.EosId)
+                {
+                    break;
+                }
                 generated.Add(token);
             }
 

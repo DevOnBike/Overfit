@@ -40,7 +40,9 @@ namespace DevOnBike.Overfit.Tests.Examples.TicTacToe
             var epsilon = 1.0f;
             var epsilonDecay = 0.99991f;
 
-            var wins = 0; var draws = 0; var losses = 0;
+            var wins = 0;
+            var draws = 0;
+            var losses = 0;
 
             for (var game = 0; game < totalGames; game++)
             {
@@ -60,7 +62,10 @@ namespace DevOnBike.Overfit.Tests.Examples.TicTacToe
                     var action = -1;
                     if (_rng.NextSingle() < epsilon)
                     {
-                        do { action = _rng.Next(9); } while (board[action] != 0); // Tylko legalne w exploracji
+                        do
+                        {
+                            action = _rng.Next(9);
+                        } while (board[action] != 0); // Tylko legalne w exploracji
                     }
                     else
                     {
@@ -69,7 +74,8 @@ namespace DevOnBike.Overfit.Tests.Examples.TicTacToe
                         {
                             if (board[i] == 0 && qValues[i] > maxQ)
                             {
-                                maxQ = qValues[i]; action = i;
+                                maxQ = qValues[i];
+                                action = i;
                             }
                         }
                         if (action == -1)
@@ -144,7 +150,11 @@ namespace DevOnBike.Overfit.Tests.Examples.TicTacToe
 
         private float ExecuteAction(float[] b, int action, out bool over, float player = 1.0f)
         {
-            if (b[action] != 0f) { over = true; return -2.0f; }
+            if (b[action] != 0f)
+            {
+                over = true;
+                return -2.0f;
+            }
             b[action] = player;
             over = CheckWin(b, player) || !b.Contains(0.0f);
             if (CheckWin(b, player))

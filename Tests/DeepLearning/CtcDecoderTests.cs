@@ -18,7 +18,10 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
         private static float[] FromArgmax(params int[] classes)
         {
             var logits = new float[classes.Length * C];
-            for (var t = 0; t < classes.Length; t++) { logits[t * C + classes[t]] = 12f; }
+            for (var t = 0; t < classes.Length; t++)
+            {
+                logits[t * C + classes[t]] = 12f;
+            }
             return logits;
         }
 
@@ -86,8 +89,14 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
             {
                 if (prefix.Length > 0 && prefix[^1] == 0)
                 {
-                    if (nextLabel == 2) { return 0.0; }     // log 1
-                    if (nextLabel == 1) { return -20.0; }   // ~forbidden
+                    if (nextLabel == 2)
+                    {
+                        return 0.0;
+                    }     // log 1
+                    if (nextLabel == 1)
+                    {
+                        return -20.0;
+                    }   // ~forbidden
                 }
                 return -1.0;
             }

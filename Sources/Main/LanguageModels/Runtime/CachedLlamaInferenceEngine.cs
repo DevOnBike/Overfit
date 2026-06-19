@@ -369,9 +369,18 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
                 if (layer.MoeGate is not null)
                 {
-                    foreach (var w in layer.MoeGate) { w.Dispose(); }
-                    foreach (var w in layer.MoeUp!) { w.Dispose(); }
-                    foreach (var w in layer.MoeDown!) { w.Dispose(); }
+                    foreach (var w in layer.MoeGate)
+                    {
+                        w.Dispose();
+                    }
+                    foreach (var w in layer.MoeUp!)
+                    {
+                        w.Dispose();
+                    }
+                    foreach (var w in layer.MoeDown!)
+                    {
+                        w.Dispose();
+                    }
                     layer.MoeSharedGate.Dispose();
                     layer.MoeSharedUp.Dispose();
                     layer.MoeSharedDown.Dispose();
@@ -591,7 +600,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// (<see cref="DevOnBike.Overfit.DeepLearning.TrainableLlamaBlock"/>).</summary>
         internal int TrainableLayerCount
         {
-            get { ThrowIfDisposed(); return _layers.Length; }
+            get
+            {
+                ThrowIfDisposed();
+                return _layers.Length;
+            }
         }
 
         /// <summary>The frozen quantized weights of layer <paramref name="layer"/>, exposed for the
@@ -609,20 +622,32 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// training bridge — look rows up via <see cref="DecodeWeight.DequantizeRow"/>.</summary>
         internal DecodeWeight EmbeddingWeights
         {
-            get { ThrowIfDisposed(); return _embedWeights; }
+            get
+            {
+                ThrowIfDisposed();
+                return _embedWeights;
+            }
         }
 
         /// <summary>Trainable final-RMSNorm gain <c>[dModel]</c> (F32) for the QLoRA training bridge.</summary>
         internal TensorStorage<float> FinalNormGamma
         {
-            get { ThrowIfDisposed(); return _finalNormGamma; }
+            get
+            {
+                ThrowIfDisposed();
+                return _finalNormGamma;
+            }
         }
 
         /// <summary>Frozen LM-head <c>[vocab, dModel]</c> (separate handle even when tied) for the
         /// QLoRA training bridge — feed via <see cref="DecodeWeight.AsRowSource"/>.</summary>
         internal DecodeWeight LmHeadWeights
         {
-            get { ThrowIfDisposed(); return _lmHead; }
+            get
+            {
+                ThrowIfDisposed();
+                return _lmHead;
+            }
         }
 
         /// <summary>Read Wq via _layers path (the path LoRA modifies).</summary>

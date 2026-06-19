@@ -21,7 +21,10 @@ namespace DevOnBike.Overfit.Data.Normalizers
         private bool _hasClipMax;
         private float _clipMax;
 
-        public bool ClipToRange { get; init; }
+        public bool ClipToRange
+        {
+            get; init;
+        }
 
         public bool IsFrozen => _frozen;
         public float FrozenMin => _frozenMin;

@@ -83,7 +83,9 @@ namespace Benchmarks
                 var a = _output[i];
                 var b = ortOut[i];
                 maxAbs = Math.Max(maxAbs, Math.Abs(a - b));
-                dot += (double)a * b; na += (double)a * a; nb += (double)b * b;
+                dot += (double)a * b;
+                na += (double)a * a;
+                nb += (double)b * b;
             }
             var cos = dot / (Math.Sqrt(na) * Math.Sqrt(nb) + 1e-12);
             Console.WriteLine($"[PARITY] Overfit vs ORT — maxAbsDiff {maxAbs:E3}, cosine {cos:F6}, argmax overfit {ArgMax(_output)} ort {ArgMax(ortOut)}");
@@ -94,7 +96,10 @@ namespace Benchmarks
             int idx = 0;
             for (var i = 1; i < v.Length; i++)
             {
-                if (v[i] > v[idx]) { idx = i; }
+                if (v[i] > v[idx])
+                {
+                    idx = i;
+                }
             }
             return idx;
         }
