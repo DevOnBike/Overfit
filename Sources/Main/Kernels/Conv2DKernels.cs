@@ -16,6 +16,11 @@ namespace DevOnBike.Overfit.Kernels
 {
     internal static class Conv2DKernels
     {
+        // NOTE: Winograd F(2,3) for 3x3 stride-1 was implemented and measured here — it REGRESSED deepcnn
+        // 119.7 -> 214.4 ms (+79%, ORT canary stable both runs) despite being parity-correct (cos 1.0). The
+        // sequential scalar input/output transforms plus 16 small GEMMs (poor parallelism) and the 16x U/V/M
+        // buffer blow-up outweigh the 2.25x FLOP cut at these channel/tile sizes — the same "obvious move
+        // regressed" pattern as register-blocking / K-blocking. Reverted to the tuned im2col+GEMM path below.
         public static void ForwardValidNchw(
             ReadOnlySpan<float> input,
             ReadOnlySpan<float> kernels,
@@ -298,14 +303,6 @@ namespace DevOnBike.Overfit.Kernels
             int padding,
             int stride)
         {
-            // 3x3 stride-1 (VGG/ResNet's bulk) → Winograd F(2,3): ~2.25x fewer multiplies than im2col.
-            if (kernelSize == 3 && stride == 1 && Conv2DWinogradKernels.IsSupported)
-            {
-                Conv2DWinogradKernels.Forward(
-                    input, kernels, output, batchSize, inChannels, outChannels, inputH, inputW, padding);
-                return;
-            }
-
             // im2col + register-blocked GEMM closes most of the gap to a native conv on real-sized models;
             // it subsumes every stride/padding via the patch gather. Falls back to the direct-conv SIMD workers
             // when AVX2+FMA is unavailable (or for tiny convs where the im2col overhead would not pay).

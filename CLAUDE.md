@@ -189,7 +189,9 @@ hand-rolled in `Sources/Main/Onnx/`. Unsupported operators throw a clear
 Every perf change is a **hypothesis until measured**. Benchmark before/after with BenchmarkDotNet +
 `MemoryDiagnoser`, **best-of-N on BOTH sides**, and A/B-isolate the one lever you changed. Document
 **negative results** honestly — they are the most valuable output: in this codebase
-register-blocking (direct-conv), K-blocking + A-packing (im2col GEMM), the AVX-512 decode port, and
+register-blocking (direct-conv), K-blocking + A-packing (im2col GEMM), Winograd F(2,3) for 3x3 stride-1
+convs (parity-correct cos 1.0 but +79% slower on deepcnn, 119.7→214.4 ms — sequential scalar transforms +
+16 small GEMMs + 16x U/V/M blow-up beat the 2.25x FLOP cut), the AVX-512 decode port, and
 `OverfitPool<T>` all **regressed or tied and were reverted**; the wins were the *opposite* of the
 "obvious" move (`TensorPrimitives` bulk-SIMD beat a hand micro-kernel; the simple register-blocked
 GEMM beat the cache-blocked one — structure of the data around the technique decides, not the
