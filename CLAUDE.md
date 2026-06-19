@@ -186,6 +186,15 @@ hand-rolled in `Sources/Main/Onnx/`. Unsupported operators throw a clear
 
 ## Performance work — measure, don't assume
 
+**Two passes, never one.** Write the correct algorithm first — the clearest expression that gets the math
+right — and pin it with tests (parity against a reference / known-good output, ideally box-independent like
+a cosine-vs-ORT or FD check). Only once correctness is green do you make a **second, separate** iteration
+for performance, keeping the validated version as the baseline you A/B against and the parity test as the
+guard that the fast path still matches. Do not fuse the two: a clever kernel written before its correctness
+is proven is unverifiable, and a perf change that also alters behaviour can't be A/B-isolated. This is how
+Winograd (parity cos 1.0 first, *then* measured → reverted as a negative) and whole-matrix Q4_K attention
+(split-after parity pinned, *then* a go/no-go micro-bench before any refactor) were done.
+
 Every perf change is a **hypothesis until measured**. Benchmark before/after with BenchmarkDotNet +
 `MemoryDiagnoser`, **best-of-N on BOTH sides**, and A/B-isolate the one lever you changed. Document
 **negative results** honestly — they are the most valuable output: in this codebase
