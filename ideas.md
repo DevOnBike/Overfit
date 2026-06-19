@@ -40,20 +40,3 @@
 
 ---
 
-## Takeaways from dotLLM (dotllm.dev) — near-identical competitor (pure-C# .NET LLM engine, GPLv3, experimental)
-
-**Most of dotLLM we already match or lead:** all model families + GGUF mmap, speculative decode, prompt caching, OpenAI-compat API, structured output (JSON/Schema/regex/grammar), tool calling, zero-alloc hot path, AOT, LoRA. **We LEAD on: QLoRA training/fine-tuning + merge, multimodal (Whisper/TTS/CNN/embeddings), RAG-testability harness, build-time perf analyzer** — none of which dotLLM has.
-
-**Worth taking (ranked value/effort):**
-- 🟢 **GCSettings.LatencyMode = SustainedLowLatency during generation** — trivial, cuts GC tail-latency (prefill/training/mixed paths). ~5 min.
-- 🟢 **Built-in browser chat UI** at root — onboarding/demo polish (static HTML + our /v1). Low effort.
-- 🟡 **Paged KV-cache (vLLM-style: refcount + copy-on-write)** — long-context / multi-request memory efficiency. Serving feature.
-- 🟡 **Continuous batching** (dotLLM: "planned") — interleave requests = throughput; fits our serving-bench thesis.
-- 🟡 **Composable sampler pipeline (reorderable ISamplerStep)** — cleaner sampling API than ILogitProcessor.
-- 🟡 **Per-model tool-call templates** (Hermes/Mistral/Llama) — agent reliability.
-- 🟡 **More quants** (Q5_K, Q4_0/1, Q5_0/1) — broader GGUF coverage (low priority; Q4_K_M dominates).
-- 🔵 **Interpretability hooks** (activation capture, logit lens, sparse autoencoders) — plays to "pure-managed = fully inspectable"; dotLLM only has it "planned" → we could ship first. Novel differentiator.
-
-**Skip (moat tension):** GPU/CUDA backend — dotLLM's big edge, but breaks our "no native binary" identity (CUDA = native dep). They chose the opposite; off-moat for us.
-
-**Strategic:** dotLLM leans "vLLM for .NET" (GPU + paged-KV + serving throughput). We lean broader (training + multimodal + analysis + embeddable in-process agent). Differentiation is clear — take their cheap wins (GC, chat-UI), consider paged-KV/continuous-batching only if deliberately pursuing serving, ship interpretability hooks as a novel moat-feature, do NOT chase GPU.

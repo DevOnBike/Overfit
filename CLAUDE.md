@@ -184,6 +184,21 @@ automatically. There is no `Google.Protobuf` dependency — protobuf parsing is
 hand-rolled in `Sources/Main/Onnx/`. Unsupported operators throw a clear
 `NotSupportedException` naming the operator.
 
+## Performance work — measure, don't assume
+
+Every perf change is a **hypothesis until measured**. Benchmark before/after with BenchmarkDotNet +
+`MemoryDiagnoser`, **best-of-N on BOTH sides**, and A/B-isolate the one lever you changed. Document
+**negative results** honestly — they are the most valuable output: in this codebase
+register-blocking (direct-conv), K-blocking + A-packing (im2col GEMM), the AVX-512 decode port, and
+`OverfitPool<T>` all **regressed or tied and were reverted**; the wins were the *opposite* of the
+"obvious" move (`TensorPrimitives` bulk-SIMD beat a hand micro-kernel; the simple register-blocked
+GEMM beat the cache-blocked one — structure of the data around the technique decides, not the
+technique). Mind the **measurement environment**: a thermally-throttled or loaded box invalidates
+A/B (detect it with a *canary* — re-measure an unchanged code path; if it shifted, the box did, not
+your change). The decode spin-pool assumes dedicated cores, so it is sensitive to background load.
+Never ship, claim, or commit a perf "win" you have not measured on a stable box — and prefer
+measuring over reasoning even when the reasoning feels airtight.
+
 ## Test discipline
 
 Read `Tests/README.md` and `Tests/LanguageModels/README.md` before adding

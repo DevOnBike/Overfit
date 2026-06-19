@@ -20,6 +20,14 @@ namespace DevOnBike.Overfit.Runtime
     /// only from a component that OWNS the process (the <c>overfit serve</c> server, a CLI, a benchmark). It is a
     /// no-op when the current mode is already as aggressive or more so.
     /// </para>
+    /// <para>
+    /// <b>Measured note.</b> On Overfit's own generation path this buys nothing — decode is zero-allocation and
+    /// prefill scratch is pooled, so 150 prefill+decode cycles trigger 0 GCs / 0 B and there is no gen-2 pause to
+    /// suppress (<c>GcLatencyScopePrefillImpactTests</c>). It is therefore <b>not</b> applied by default anywhere;
+    /// it is kept as an opt-in primitive for a host whose OWN per-request work allocates enough to feel gen-2
+    /// pauses. Reach for it only where you have measured a benefit — flipping it costs heap headroom for nothing
+    /// otherwise.
+    /// </para>
     /// </summary>
     public readonly ref struct GcLatencyScope
     {

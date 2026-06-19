@@ -172,6 +172,31 @@ to disk = resume a conversation after process restart — a genuine novelty from
 the embeddable identity); QLoRA "teach your model a fact" marketing showpiece (already works — the "Tarnholm" demo);
 inference hooks / pure-.NET-CPU interpretability (dotLLM's is a stub → lead, credibility play).
 
+### UPDATE 2026-06-17 — dotllm.dev re-review (site, not source) + what's NEW to take
+
+Re-read the public site. Confirms the split: **dotLLM leans "vLLM for .NET"** (GPU/CUDA PTX, paged-KV refcount+COW,
+continuous batching "planned", browser chat UI, more quants). **We lead on what they LACK: QLoRA training/fine-tune +
+merge, multimodal (Whisper/TTS/CNN/embeddings), RAG-testability harness, build-time perf analyzer.** Net: don't chase
+their serving depth — lead where they're thin. Genuinely-new takeaways (moved here from `ideas.md`), in adoption order:
+- **🟢 `GcLatencyScope` (SustainedLowLatency during generation) — ✅ DONE 2026-06-17.** `Sources/Main/Runtime/GcLatencyScope.cs`
+  (`readonly ref struct`, embeddable-safe — process-wide knob only flipped by a process-OWNER), wired into
+  `OverfitOpenAiServer.HandleChatCompletions`. Trims gen-2 pauses on the allocating prefill / SSE marshalling.
+- **🟢 Built-in browser chat UI** at the server root — onboarding/demo polish (static HTML over our `/v1`). Low effort;
+  pairs with the `overfit serve` + global-tool (#8) onboarding play.
+- **🟡 Paged KV-cache (vLLM-style refcount + copy-on-write)** — beyond our `KvCacheSnapshot`/prefix reuse: eliminates
+  fragmentation for long contexts / multi-request. A real serving feature IF we deliberately pursue serving.
+- **🟡 Per-model tool-call templates** (Hermes / Mistral / Llama formats) — agent-routing reliability beyond our
+  generic constraint.
+- **🟡 More GGUF quants** (Q5_K, Q4_0/1, Q5_0/1) — broader coverage; LOW priority (Q4_K_M dominates real models).
+- **🔵 Interpretability hooks** (activation capture, logit lens, sparse autoencoders) — dotLLM has this only as a
+  *stub/planned*, so we can **ship first**; plays directly to "pure-managed = fully inspectable in a debugger" +
+  the COMMERCIAL.md "Zero-GC inference audit" credibility. Strongest novel-differentiator candidate.
+- **🔴 SKIP: GPU/CUDA backend** — dotLLM's big edge, but CUDA is a native dependency that breaks our "no native binary"
+  identity. Deliberate non-goal (perf/GPU stays the private moat per [[project-moat-public-private]]).
+**Recommended order:** browser chat-UI (cheap onboarding) → interpretability hooks (novel lead) → per-model tool
+templates → paged-KV/continuous-batching ONLY if serving becomes a deliberate track. But the highest-leverage move
+remains #0 SHIP (both projects risk infinite feature-build; we're feature-complete — launch beats another feature).
+
 ---
 
 ## Nearest plan — llama.cpp competitive gaps (2026-05-25)
