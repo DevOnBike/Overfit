@@ -136,6 +136,14 @@ dotnet_diagnostic.OVERFIT001.severity = warning
 [Sources/Main/Audio/**.cs]
 dotnet_diagnostic.OVERFIT001.severity = warning
 
+# Loading/ STAYS at suggestion — examined in the OVERFIT001 sweep (2026-06-17) and deliberately NOT
+# escalated. The ~50 hits are ALL load-time-by-design: persistent model weights (DecodeWeight[] /
+# weight float[] that live for the model's lifetime) and by-contract reads (loaded tensors + tokenizer
+# metadata arrays the caller owns) — neither is poolable, and the genuine load scratch was already
+# pooled in the peak-RAM work (e.g. GgufLlamaLoader.LoadRouter's PooledBuffer, GPT-2 lazy chunk stream).
+# Loading is the load path, not a serving hot loop, so escalating would mean ~50 #pragmas for zero
+# benefit. Kept as IDE suggestions; revisit only if a decode-hot path is ever added under Loading/.
+
 # SNAC codec (Snac/) + Orpheus prompt/clone (Orpheus/) — carved back to suggestion like the CTC family.
 # These are per-utterance (decode) / offline (encode, voice-clone dataset prep) correctness-first layered
 # forwards, NOT a per-token serving hot loop (the class docs say so). Pooling their ~34 short-lived
