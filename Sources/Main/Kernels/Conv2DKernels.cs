@@ -68,6 +68,15 @@ namespace DevOnBike.Overfit.Kernels
                     nameof(output));
             }
 
+            // Generic valid conv (incl. ResNet's 1x1 bottlenecks) → im2col + GEMM. The single-channel 3x3 case
+            // keeps its dedicated vectorized fast path below.
+            if (Conv2DGemmKernels.IsSupported && !(inChannels == 1 && kernelSize == 3))
+            {
+                Conv2DGemmKernels.Forward(
+                    input, kernels, output, batchSize, inChannels, outChannels, inputH, inputW, kernelSize, 0, 1);
+                return;
+            }
+
             for (var n = 0; n < batchSize; n++)
             {
                 var inputBatch = input.Slice(n * inputSize, inputSize);
@@ -289,6 +298,16 @@ namespace DevOnBike.Overfit.Kernels
             int padding,
             int stride)
         {
+            // im2col + register-blocked GEMM closes most of the gap to a native conv on real-sized models;
+            // it subsumes every stride/padding via the patch gather. Falls back to the direct-conv SIMD workers
+            // when AVX2+FMA is unavailable (or for tiny convs where the im2col overhead would not pay).
+            if (Conv2DGemmKernels.IsSupported)
+            {
+                Conv2DGemmKernels.Forward(
+                    input, kernels, output, batchSize, inChannels, outChannels, inputH, inputW, kernelSize, padding, stride);
+                return;
+            }
+
             var outH = (inputH + 2 * padding - kernelSize) / stride + 1;
             var outW = (inputW + 2 * padding - kernelSize) / stride + 1;
             var inputPlaneSize = inChannels * inputH * inputW;
