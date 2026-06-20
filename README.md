@@ -49,6 +49,8 @@ on today versus what is still hardening. (Model-by-model support is in [Supporte
 | **Preview** — works and tested, newer / heavier / advanced | CPU QLoRA fine-tuning *(advanced moat)* · local preset-voice TTS · large MoE models (Qwen1.5-MoE, Mixtral-8x7B) · serving benchmark (`overfit bench`) · interpretability hooks (activation capture + logit lens) |
 | **Experimental** — opt-in / gated / incomplete | Voice cloning (consent + watermark gated) · whole-matrix Q4_K attention (`OVERFIT_REPACK_ATTN`, off by default) · multilingual / XLM-R (SentencePiece) embedders *(not yet)* · Qwen3-MoE & other new-arch loaders *(not yet)* |
 
+Every claim above maps to a runnable test, benchmark, demo, or CI guard — see [`docs/claim-to-test.md`](docs/claim-to-test.md) (the audit trail for regulated teams).
+
 ---
 
 ## Start here: run the ASP.NET local agent demo
