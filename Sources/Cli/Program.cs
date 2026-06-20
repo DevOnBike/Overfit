@@ -290,12 +290,24 @@ benchCommand.SetAction(parseResult => ServingBenchmark.Run(
     parseResult.GetValue(benchWarmup),
     parseResult.GetValue(benchCost)));
 
+var doctorModel = new Argument<string>("model")
+{
+    Description = "A model name in the local store, or a path to a .gguf file.",
+};
+var doctorCommand = new Command("doctor",
+    "Inspect a GGUF — architecture, quant, tokenizer, chat template, context, support, recommended flags + warnings.")
+{
+    doctorModel,
+};
+doctorCommand.SetAction(parseResult => Commands.Doctor(parseResult.GetValue(doctorModel)!));
+
 var rootCommand = new RootCommand("Overfit — run local LLMs, RAG and agents in pure .NET. No Python, no native runtime.")
 {
     pullCommand,
     listCommand,
     chatCommand,
     serveCommand,
+    doctorCommand,
     mcpCommand,
     ttsCommand,
     voiceCommand,

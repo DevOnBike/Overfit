@@ -31,7 +31,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// default — it allocates a repacked weight copy per Q4_K FFN tensor (adds RAM) and is
         /// AVX2-only. When on, the decode FFN gate/up projections route here.
         /// </summary>
-        public static readonly bool Enabled = ResolveFlag("OVERFIT_REPACK_GEMV");
+        public static readonly bool Enabled = ResolveFlag(OverfitEnvironment.RepackGemv);
 
         /// <summary>
         /// Opt-in (<c>OVERFIT_REPACK_ATTN=1</c>) for the whole-matrix Q4_K attention decode path (M3): the
@@ -41,7 +41,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// validated by E2E coherence, not byte-parity. AVX2-only. K stays per-head (cheap under GQA), V stays
         /// per-head (Q6_K under Q4_K_M).
         /// </summary>
-        public static readonly bool AttnEnabled = ResolveFlag("OVERFIT_REPACK_ATTN");
+        public static readonly bool AttnEnabled = ResolveFlag(OverfitEnvironment.RepackAttn);
 
         private static bool ResolveFlag(string envVar)
         {

@@ -8,6 +8,7 @@ using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.LoRA;
 using DevOnBike.Overfit.LanguageModels.Rope;
+using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.LanguageModels.Runtime
@@ -380,7 +381,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// otherwise <see cref="KvCacheDType.F32"/> (the default — no behaviour change unless explicitly set).</summary>
         private static KvCacheDType ResolveKvDtypeFromEnv()
         {
-            var raw = Environment.GetEnvironmentVariable("OVERFIT_KV_DTYPE");
+            var raw = Environment.GetEnvironmentVariable(OverfitEnvironment.KvDType);
             return string.Equals(raw, "q8", StringComparison.OrdinalIgnoreCase) ? KvCacheDType.Q8 : KvCacheDType.F32;
         }
 

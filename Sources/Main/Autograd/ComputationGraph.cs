@@ -8,6 +8,7 @@ using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.Ops;
+using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.Autograd
@@ -24,7 +25,7 @@ namespace DevOnBike.Overfit.Autograd
         // many short-lived ComputationGraph instances without disposing them immediately.
         private const int DefaultTapeBufferElements = 50_000_000;
         private const int CiTapeBufferElements = 1_048_576;
-        private const string TapeBufferElementsEnvironmentVariable = "OVERFIT_GRAPH_TAPE_BUFFER_ELEMENTS";
+        private const string TapeBufferElementsEnvironmentVariable = OverfitEnvironment.GraphTapeBufferElements;
 
         private static readonly int OpCodeCount = Enum.GetValues<OpCode>().Length;
 

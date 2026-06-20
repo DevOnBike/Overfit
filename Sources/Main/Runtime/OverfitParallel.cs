@@ -165,8 +165,8 @@ namespace DevOnBike.Overfit.Runtime
 #pragma warning restore OVERFIT008
         }
 
-        private const string WorkerCountEnvVar = "OVERFIT_PARALLEL_WORKERS";
-        private const string DecodeWorkersEnvVar = "OVERFIT_DECODE_WORKERS";
+        private const string WorkerCountEnvVar = OverfitEnvironment.ParallelWorkers;
+        private const string DecodeWorkersEnvVar = OverfitEnvironment.DecodeWorkers;
 
         private static readonly int _workerCount = ResolveWorkerCount();
 
@@ -251,7 +251,7 @@ namespace DevOnBike.Overfit.Runtime
         // SpinWait backs off (hot-spin → yield → Sleep(1)), so the pool cools between
         // tokens / when decode is idle. One-claim-per-generation = race-free (a worker only
         // claims after observing a fresh _decodeGen, published after the descriptors).
-        private const string DecodePoolEnvVar = "OVERFIT_DECODE_POOL";
+        private const string DecodePoolEnvVar = OverfitEnvironment.DecodePool;
         private static readonly bool _decodePool = ResolveDecodePool();
         private static readonly int _decodePoolSize = ResolveDecodeMaxWorkers();
         private static readonly Lock _decodeGate = new();
