@@ -85,5 +85,79 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Retrieval
             var buf = new VectorMatch[4];
             Assert.Equal(0, store.Search([1f, 0f, 0f], buf));
         }
+
+        [Fact]
+        public void SaveLoad_RoundTrips_VectorsIdsPayloads_AndSearch()
+        {
+            var store = new VectorStore(dimension: 3);
+            store.Add("a", [3f, 0f, 0f], "alpha");          // un-normalised input — store normalises
+            store.Add("b", [0f, 5f, 0f], null);             // null payload survives
+            store.Add("c", [0f, 0f, 1f], "gamma");
+
+            var path = Path.Combine(Path.GetTempPath(), $"ovs-{Guid.NewGuid():N}.bin");
+            try
+            {
+                store.Save(path);
+                var loaded = VectorStore.Load(path);
+
+                Assert.Equal(store.Dimension, loaded.Dimension);
+                Assert.Equal(store.Count, loaded.Count);
+
+                for (var i = 0; i < store.Count; i++)
+                {
+                    Assert.Equal(store.GetId(i), loaded.GetId(i));
+                    Assert.Equal(store.GetPayload(i), loaded.GetPayload(i));
+                    // Vectors were stored unit-normalised; the reload is byte-verbatim.
+                    Assert.True(store.GetVector(i).SequenceEqual(loaded.GetVector(i)));
+                }
+
+                // Search behaves identically after a reload (the index-once-restart-query guarantee).
+                var before = store.Search([1f, 0f, 0f], topK: 3);
+                var after = loaded.Search([1f, 0f, 0f], topK: 3);
+                Assert.Equal(before.Length, after.Length);
+                for (var i = 0; i < before.Length; i++)
+                {
+                    Assert.Equal(before[i].Id, after[i].Id);
+                    Assert.Equal(before[i].Score, after[i].Score, precision: 6);
+                }
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Fact]
+        public void SaveLoad_EmptyStore_RoundTrips()
+        {
+            var store = new VectorStore(dimension: 8);
+            var path = Path.Combine(Path.GetTempPath(), $"ovs-{Guid.NewGuid():N}.bin");
+            try
+            {
+                store.Save(path);
+                var loaded = VectorStore.Load(path);
+                Assert.Equal(8, loaded.Dimension);
+                Assert.Equal(0, loaded.Count);
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Fact]
+        public void Load_NonVectorStoreFile_Throws()
+        {
+            var path = Path.Combine(Path.GetTempPath(), $"ovs-{Guid.NewGuid():N}.bin");
+            try
+            {
+                File.WriteAllBytes(path, [1, 2, 3, 4, 5, 6, 7, 8]);
+                Assert.Throws<OverfitFormatException>(() => VectorStore.Load(path));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
     }
 }
