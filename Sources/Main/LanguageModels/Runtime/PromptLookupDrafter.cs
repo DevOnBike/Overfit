@@ -27,9 +27,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             int ngramMin = 1,
             int ngramMax = 3)
         {
-            if (draft.IsEmpty) { return 0; }
+            if (draft.IsEmpty)
+            {
+                return 0;
+            }
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(ngramMin);
-            if (ngramMax < ngramMin) { ngramMax = ngramMin; }
+            if (ngramMax < ngramMin)
+            {
+                ngramMax = ngramMin;
+            }
 
             var len = history.Length;
             var maxN = Math.Min(ngramMax, len - 1);   // need at least one token before the suffix to match
@@ -43,15 +49,25 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     var match = true;
                     for (var j = 0; j < n; j++)
                     {
-                        if (history[i + j] != history[suffixStart + j]) { match = false; break; }
+                        if (history[i + j] != history[suffixStart + j])
+                        {
+                            match = false;
+                            break;
+                        }
                     }
-                    if (!match) { continue; }
+                    if (!match)
+                    {
+                        continue;
+                    }
 
                     // Propose the tokens that followed this occurrence (bounded by what exists + draft room).
                     var followStart = i + n;
                     var available = len - followStart;
                     var count = Math.Min(draft.Length, available);
-                    for (var c = 0; c < count; c++) { draft[c] = history[followStart + c]; }
+                    for (var c = 0; c < count; c++)
+                    {
+                        draft[c] = history[followStart + c];
+                    }
                     return count;
                 }
             }

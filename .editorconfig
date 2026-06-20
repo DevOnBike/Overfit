@@ -17,6 +17,14 @@ dotnet_separate_import_directive_groups = false
 
 csharp_prefer_braces = true:warning
 
+# Fully-expanded Allman: brace on its own line after if/else/for/etc., and never collapse a block or its
+# body onto one line — so `if (u <= cumulative) { return i; }` is reformatted to the brace-on-newline,
+# body-on-newline, closing-brace-on-newline form. Enforced by IDE0055 (=warning above) and auto-applied
+# by `dotnet format` / update-code-headers.cmd.
+csharp_new_line_before_open_brace = all
+csharp_preserve_single_line_blocks = false
+csharp_preserve_single_line_statements = false
+
 csharp_space_around_binary_operators = before_and_after
 
 file_header_template = Copyright (c) 2026 DevOnBike.\nThis file is part of DevonBike Overfit.\nDevonBike Overfit is licensed under the GNU AGPLv3.\nFor commercial licensing options, contact: devonbike@gmail.com
@@ -39,6 +47,32 @@ dotnet_diagnostic.OVERFIT007.severity = suggestion
 dotnet_diagnostic.OVERFIT008.severity = error
 dotnet_diagnostic.OVERFIT015.severity = error
 dotnet_diagnostic.OVERFIT009.severity = suggestion
+# Tier A, added 2026-06-13 — start on the bottom rung (suggestion everywhere). Escalate a directory
+# once it is swept, exactly like 001-009. 010 (growable collections) and 014 (ToLower compare) are
+# allocation rules; 011 (struct dict key), 012 (finalizer), 013 (concurrent .Count) are convention rules.
+dotnet_diagnostic.OVERFIT010.severity = suggestion
+dotnet_diagnostic.OVERFIT011.severity = suggestion
+dotnet_diagnostic.OVERFIT012.severity = suggestion
+dotnet_diagnostic.OVERFIT013.severity = suggestion
+dotnet_diagnostic.OVERFIT014.severity = suggestion
+# Tier B, added 2026-06-13 — HEURISTIC, advisory-only. Stay suggestion EVERYWHERE and do NOT escalate
+# under [OverfitHotPath] (they don't route through OverfitPerfAnalysis.Report) — a heuristic false
+# positive must never break a build. 016 large-struct-by-value, 017 could-be-readonly-struct,
+# 018 readonly-field-of-mutable-struct (#90 trap), 019 non-capturing-lambda-without-static.
+dotnet_diagnostic.OVERFIT016.severity = suggestion
+dotnet_diagnostic.OVERFIT017.severity = suggestion
+dotnet_diagnostic.OVERFIT018.severity = suggestion
+dotnet_diagnostic.OVERFIT019.severity = suggestion
+# OVERFIT020 — array param could be (ReadOnly)Span<T>. Advisory like the rest of Tier B; suggestion-
+# only, does not escalate. Fires only when the array provably does not escape (no field/return/array-arg/
+# capture; ordinary private/internal non-async non-iterator methods) so it never suggests breaking a
+# stored-weights API. An API-shape change a human reviews, never a build gate.
+dotnet_diagnostic.OVERFIT020.severity = suggestion
+# OVERFIT900 — the [OverfitHotPath] escalation. Any per-call rule (001-007, 009-011, 013-014) that
+# fires inside a member or type marked [DevOnBike.Overfit.Diagnostics.OverfitHotPath] is reported as
+# this hard error INSTEAD of its directory-configured severity — the per-member ratchet. Always error;
+# never loosen it (that would defeat the marker). Suppress a justified site with #pragma + a reason.
+dotnet_diagnostic.OVERFIT900.severity = error
 
 [Sources/Main/Kernels/**.cs]
 # Allocation rules are ERRORS in pure kernels — per-call allocation is never right here;
@@ -93,3 +127,35 @@ dotnet_diagnostic.OVERFIT009.severity = suggestion
 # justified #pragma). Per-call heap arrays in the serving runtime are a build warning from here on.
 [Sources/Main/LanguageModels/Runtime/**.cs]
 dotnet_diagnostic.OVERFIT001.severity = warning
+
+# Whisper/ ESCALATED 2026-06-13 after the speech-to-text sweep: per-call scratch in the encoder/
+# decoder/kernels (per-frame, per-token hot path) pooled via PooledBuffer.RentArray with exact-length
+# slices; load-time/by-contract sites carry justified #pragma. Validated bit-identical against the
+# real ggml-tiny + jfk.wav transcription. Per-call heap arrays here are a build warning from now on.
+[Sources/Main/LanguageModels/Whisper/**.cs]
+dotnet_diagnostic.OVERFIT001.severity = warning
+
+# Audio/ ESCALATED 2026-06-16 after the OVERFIT001 sweep. FINDING: the audio hot paths were already
+# zero-alloc — the per-frame STFT worker (MelSpectrogram.MelFrameWorker) is stackalloc/instance-buffer
+# only, and the MP3 decoder reuses pre-allocated per-frame scratch. The 56 flagged sites were ALL
+# correct-by-design: one-time (ctors, static decode tables), by-contract outputs (decoders/resamplers
+# return a fresh array the caller owns), parity hooks, grow-only instance buffers, or eval metrics —
+# each now carries a justified #pragma. Per-call heap arrays in core audio are a build warning from here.
+[Sources/Main/Audio/**.cs]
+dotnet_diagnostic.OVERFIT001.severity = warning
+
+# Loading/ STAYS at suggestion — examined in the OVERFIT001 sweep (2026-06-17) and deliberately NOT
+# escalated. The ~50 hits are ALL load-time-by-design: persistent model weights (DecodeWeight[] /
+# weight float[] that live for the model's lifetime) and by-contract reads (loaded tensors + tokenizer
+# metadata arrays the caller owns) — neither is poolable, and the genuine load scratch was already
+# pooled in the peak-RAM work (e.g. GgufLlamaLoader.LoadRouter's PooledBuffer, GPT-2 lazy chunk stream).
+# Loading is the load path, not a serving hot loop, so escalating would mean ~50 #pragmas for zero
+# benefit. Kept as IDE suggestions; revisit only if a decode-hot path is ever added under Loading/.
+
+# SNAC codec (Snac/) + Orpheus prompt/clone (Orpheus/) — carved back to suggestion like the CTC family.
+# These are per-utterance (decode) / offline (encode, voice-clone dataset prep) correctness-first layered
+# forwards, NOT a per-token serving hot loop (the class docs say so). Pooling their ~34 short-lived
+# intermediate conv buffers would be invasive churn in a numerically-sensitive parity path for ~zero
+# serving benefit. Kept visible as IDE suggestions; re-escalate if TTS latency is ever productised.
+[Sources/Main/Audio/Tts/{Snac,Orpheus}/**.cs]
+dotnet_diagnostic.OVERFIT001.severity = suggestion

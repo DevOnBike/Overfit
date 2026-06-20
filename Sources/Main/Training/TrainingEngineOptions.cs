@@ -7,11 +7,20 @@ namespace DevOnBike.Overfit.Training
 {
     public sealed class TrainingEngineOptions
     {
-        public bool ValidateFiniteInput { get; init; }
+        public bool ValidateFiniteInput
+        {
+            get; init;
+        }
 
-        public bool ValidateFiniteTarget { get; init; }
+        public bool ValidateFiniteTarget
+        {
+            get; init;
+        }
 
-        public bool DisposeModelWithEngine { get; init; }
+        public bool DisposeModelWithEngine
+        {
+            get; init;
+        }
 
         public bool ResetGraphAfterStep { get; init; } = true;
     }

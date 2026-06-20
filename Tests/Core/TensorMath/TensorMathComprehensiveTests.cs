@@ -147,10 +147,14 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
             using var targets = new AutogradNode(targetsTensor, new TensorShape(1, 3), requiresGrad: false);
 
             var lSpan = logits.DataView.AsSpan();
-            lSpan[0] = 2.0f; lSpan[1] = 1.0f; lSpan[2] = 0.1f;
+            lSpan[0] = 2.0f;
+            lSpan[1] = 1.0f;
+            lSpan[2] = 0.1f;
 
             var tSpan = targets.DataView.AsSpan();
-            tSpan[0] = 1.0f; tSpan[1] = 0.0f; tSpan[2] = 0.0f; // Target class 0
+            tSpan[0] = 1.0f;
+            tSpan[1] = 0.0f;
+            tSpan[2] = 0.0f; // Target class 0
 
             using var loss = Ops.TensorMath.SoftmaxCrossEntropy(_graph, logits, targets);
             Assert.True(loss.DataView.AsReadOnlySpan()[0] > 0f);
@@ -176,9 +180,15 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
             var inSpan = input.DataView.AsSpan();
 
             // Channel 0
-            inSpan[0] = 1f; inSpan[1] = 3f; inSpan[2] = 5f; inSpan[3] = 7f; // Mean: 4
+            inSpan[0] = 1f;
+            inSpan[1] = 3f;
+            inSpan[2] = 5f;
+            inSpan[3] = 7f; // Mean: 4
             // Channel 1
-            inSpan[4] = 10f; inSpan[5] = 10f; inSpan[6] = 20f; inSpan[7] = 0f; // Mean: 10
+            inSpan[4] = 10f;
+            inSpan[5] = 10f;
+            inSpan[6] = 20f;
+            inSpan[7] = 0f; // Mean: 10
 
             using var output = Ops.TensorMath.GlobalAveragePool2D(_graph, input, channels, h, w);
             var outSpan = output.DataView.AsSpan();
@@ -258,7 +268,10 @@ namespace DevOnBike.Overfit.Tests.Core.TensorMath
             // Input values are "away from zero" so the numerical test f(x+e)-f(x-e) runs smoothly
             // away from the mathematical discontinuity of ReLU.
             var span = input.DataView.AsSpan();
-            span[0] = 1.5f; span[1] = -0.5f; span[2] = 2.0f; span[3] = -1.0f;
+            span[0] = 1.5f;
+            span[1] = -0.5f;
+            span[2] = 2.0f;
+            span[3] = -1.0f;
 
             VerifyGradients(input, () => Ops.TensorMath.ReLU(_graph, input));
         }

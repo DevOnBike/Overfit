@@ -7,8 +7,8 @@ using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Engines;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
-using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Ops;
+using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Parameters;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
@@ -100,7 +100,10 @@ namespace Benchmarks
         private float TrainBatch(int i, int batch)
         {
             _graphs[i].Reset();
-            foreach (var p in _pars[i]) { p.ZeroGrad(); }
+            foreach (var p in _pars[i])
+            {
+                p.ZeroGrad();
+            }
             _trainX.AsReadOnlySpan().Slice(batch * BatchSize * 784, BatchSize * 784).CopyTo(_xs[i].AsSpan());
             _trainY.AsReadOnlySpan().Slice(batch * BatchSize * 10, BatchSize * 10).CopyTo(_ys[i].AsSpan());
             using var h1 = _convs[i].Forward(_graphs[i], _xn[i]);
@@ -129,7 +132,10 @@ namespace Benchmarks
             for (var i = 0; i < TrainSize; i++)
             {
                 var pixels = imgReader.ReadBytes(784);
-                for (var j = 0; j < 784; j++) { imgSpan[i * 784 + j] = pixels[j] / 255f; }
+                for (var j = 0; j < 784; j++)
+                {
+                    imgSpan[i * 784 + j] = pixels[j] / 255f;
+                }
                 lblSpan[i * 10 + lblReader.ReadByte()] = 1f;
             }
             return (images, labels);

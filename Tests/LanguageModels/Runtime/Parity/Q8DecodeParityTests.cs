@@ -169,7 +169,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
                 var sf = subjLogits[i];
 
                 var headDiff = MathF.Abs(rf[refTok] - sf[refTok]);
-                if (headDiff > maxHeadDiff) { maxHeadDiff = headDiff; }
+                if (headDiff > maxHeadDiff)
+                {
+                    maxHeadDiff = headDiff;
+                }
 
                 if (subjTok == refTok)
                 {
@@ -180,7 +183,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
                     var refMargin = rf[refTok] - rf[subjTok];
                     var subjMargin = sf[subjTok] - sf[refTok];
                     var swing = refMargin + subjMargin;
-                    if (swing > worstSwing) { worstSwing = swing; }
+                    if (swing > worstSwing)
+                    {
+                        worstSwing = swing;
+                    }
                     mismatches.Add(
                         $"step {i,2}: ref→{refTok} subj→{subjTok}  " +
                         $"ref-margin={refMargin:F3}  subj-margin={subjMargin:F3}  swing={swing:F3}");

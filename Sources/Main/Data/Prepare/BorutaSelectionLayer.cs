@@ -31,7 +31,10 @@ namespace DevOnBike.Overfit.Data.Prepare
                 throw new ArgumentOutOfRangeException(nameof(confirmationRatio), "Confirmation ratio must be in the range (0, 1).");
             }
 
-            _numIterations = iterations; _numTrees = numTrees; _maxDepth = maxDepth; _confirmationRatio = confirmationRatio;
+            _numIterations = iterations;
+            _numTrees = numTrees;
+            _maxDepth = maxDepth;
+            _confirmationRatio = confirmationRatio;
         }
 
         public PipelineContext Process(PipelineContext context)

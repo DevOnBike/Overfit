@@ -24,15 +24,23 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenization
             var types = new int[264];
             var scores = new float[264];
 
-            tokens[0] = "<unk>"; types[0] = 2;
-            tokens[1] = "<s>"; types[1] = 3;
-            tokens[2] = "</s>"; types[2] = 3;
+            tokens[0] = "<unk>";
+            types[0] = 2;
+            tokens[1] = "<s>";
+            types[1] = 3;
+            tokens[2] = "</s>";
+            types[2] = 3;
             for (var bv = 0; bv < 256; bv++)
             {
                 tokens[ByteBase + bv] = $"<0x{bv:X2}>";
                 types[ByteBase + bv] = 6;   // BYTE
             }
-            void Norm(int id, string s, float score) { tokens[id] = s; types[id] = 1; scores[id] = score; }
+            void Norm(int id, string s, float score)
+            {
+                tokens[id] = s;
+                types[id] = 1;
+                scores[id] = score;
+            }
             Norm(IdSpace, "▁", -2f);
             Norm(IdA, "a", -2f);
             Norm(IdB, "b", -2f);
@@ -160,7 +168,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenization
         public void RealMixtralVocab_RoundTrips()
         {
             const string path = @"C:\mixtral\mixtral-8x7b-instruct-v0.1.Q4_K_M.gguf";
-            if (!File.Exists(path)) { return; }
+            if (!File.Exists(path))
+            {
+                return;
+            }
 
             var tok = GgufTokenizer.Load(path);
             Assert.Equal(32000, tok.VocabSize);
@@ -185,7 +196,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenization
         [LongFact]
         public void RealQwenVocab_BpeRoundTrips()
         {
-            if (!File.Exists(QwenMoeGguf)) { return; }
+            if (!File.Exists(QwenMoeGguf))
+            {
+                return;
+            }
 
             var tok = GgufTokenizer.Load(QwenMoeGguf);
             Assert.True(tok.IsByteLevelBpe);
@@ -208,12 +222,21 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tokenization
         {
             // Gold cross-check: the GGUF-embedded vocab must tokenise identically to the validated
             // tokenizer.json-based QwenTokenizer — when both describe the same Qwen tokenizer.
-            if (!File.Exists(QwenMoeGguf)) { return; }
-            if (!File.Exists(@"C:\qwen3b\tokenizer.json") && !File.Exists(@"C:\qwen3b\vocab.json")) { return; }
+            if (!File.Exists(QwenMoeGguf))
+            {
+                return;
+            }
+            if (!File.Exists(@"C:\qwen3b\tokenizer.json") && !File.Exists(@"C:\qwen3b\vocab.json"))
+            {
+                return;
+            }
 
             var gguf = GgufTokenizer.Load(QwenMoeGguf);
             var reference = QwenTokenizer.Load(@"C:\qwen3b");
-            if (gguf.VocabSize != reference.VocabSize) { return; }   // different tokenizer revision
+            if (gguf.VocabSize != reference.VocabSize)
+            {
+                return;
+            }   // different tokenizer revision
 
             foreach (var text in new[]
             {

@@ -15,13 +15,34 @@ namespace DevOnBike.Overfit.DeepLearning
     /// </summary>
     public sealed class LlamaBlockLoRA : IDisposable
     {
-        public LoRAAdapter? Q { get; init; }
-        public LoRAAdapter? K { get; init; }
-        public LoRAAdapter? V { get; init; }
-        public LoRAAdapter? O { get; init; }
-        public LoRAAdapter? Gate { get; init; }
-        public LoRAAdapter? Up { get; init; }
-        public LoRAAdapter? Down { get; init; }
+        public LoRAAdapter? Q
+        {
+            get; init;
+        }
+        public LoRAAdapter? K
+        {
+            get; init;
+        }
+        public LoRAAdapter? V
+        {
+            get; init;
+        }
+        public LoRAAdapter? O
+        {
+            get; init;
+        }
+        public LoRAAdapter? Gate
+        {
+            get; init;
+        }
+        public LoRAAdapter? Up
+        {
+            get; init;
+        }
+        public LoRAAdapter? Down
+        {
+            get; init;
+        }
 
         /// <summary>Creates LoRA on ALL seven projections at the given rank.</summary>
         public static LlamaBlockLoRA CreateAll(
@@ -43,14 +64,23 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             foreach (var a in new[] { Q, K, V, O, Gate, Up, Down })
             {
-                if (a is not null) { yield return a.A; yield return a.B; }
+                if (a is not null)
+                {
+                    yield return a.A;
+                    yield return a.B;
+                }
             }
         }
 
         public void Dispose()
         {
-            Q?.Dispose(); K?.Dispose(); V?.Dispose(); O?.Dispose();
-            Gate?.Dispose(); Up?.Dispose(); Down?.Dispose();
+            Q?.Dispose();
+            K?.Dispose();
+            V?.Dispose();
+            O?.Dispose();
+            Gate?.Dispose();
+            Up?.Dispose();
+            Down?.Dispose();
         }
     }
 }

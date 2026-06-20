@@ -1,0 +1,485 @@
+# OpenAPI 3.0.3 contract for the Overfit OpenAI-compatible HTTP server (`overfit serve`).
+#
+# Import this into Swagger UI / Postman / Insomnia / an OpenAPI code generator to discover every
+# endpoint and call it with the right request/response shape. The server speaks a subset of the OpenAI
+# API, so any OpenAI client/SDK works by pointing its base URL here and only changing the model name.
+#
+# Generated from the typed contracts in Sources/Server/OpenAi/*.cs — keep in sync when those change.
+
+openapi: 3.0.3
+info:
+  title: Overfit — OpenAI-compatible local LLM server
+  version: "1.0.0"
+  description: >-
+    Pure-.NET, in-process, OpenAI-compatible HTTP server (`overfit serve <model>`). No Python, no
+    GPU, no data egress. Implements `/v1/chat/completions` (streaming + non-streaming), `/v1/models`,
+    `/v1/embeddings` (when started with an embedding model) and `/v1/audio/speech` (when started with a
+    TTS model), plus `/health`. Requests are served strictly one at a time (single model session / one
+    KV cache), like a local llama.cpp server.
+  license:
+    name: AGPL-3.0-or-later OR Commercial
+    url: https://github.com/DevOnBike/Overfit
+
+servers:
+  - url: http://127.0.0.1:11434
+    description: Default local bind (overfit serve --port 11434)
+
+tags:
+  - name: chat
+    description: Chat completions
+  - name: models
+    description: Model discovery
+  - name: embeddings
+    description: Sentence embeddings (requires --embed-model)
+  - name: audio
+    description: Text-to-speech (requires --tts-model)
+  - name: health
+    description: Liveness
+
+paths:
+  /health:
+    get:
+      tags: [health]
+      summary: Liveness probe
+      description: Returns `{"status":"ok"}` once the server is up. `GET /` behaves identically.
+      responses:
+        "200":
+          description: Server is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /v1/models:
+    get:
+      tags: [models]
+      summary: List available models
+      description: Reports the single loaded model (this is a single-model server).
+      responses:
+        "200":
+          description: The loaded model.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelsResponse"
+              example:
+                object: list
+                data:
+                  - id: qwen2.5-3b
+                    object: model
+                    created: 1781300000
+                    owned_by: overfit
+
+  /v1/chat/completions:
+    post:
+      tags: [chat]
+      summary: Create a chat completion (streaming or non-streaming)
+      description: >-
+        Replays the full `messages[]` each call (stateless per request, OpenAI-style); the last message
+        must have role `user`. Set `stream: true` for Server-Sent Events. `temperature` ≤ 0.0001 forces
+        greedy decoding. `min_p` (a llama.cpp-server extension) takes precedence over `top_p` when > 0.
+        `response_format` can pin the output to valid JSON or a JSON Schema.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatCompletionRequest"
+            examples:
+              simple:
+                summary: Minimal non-streaming request
+                value:
+                  model: qwen2.5-3b
+                  messages:
+                    - role: user
+                      content: What is the capital of Poland?
+              streaming:
+                summary: Streaming with a system prompt and a token cap
+                value:
+                  model: qwen2.5-3b
+                  stream: true
+                  max_tokens: 256
+                  temperature: 0.7
+                  messages:
+                    - role: system
+                      content: You are a concise assistant.
+                    - role: user
+                      content: Explain RAG in two sentences.
+              json_schema:
+                summary: Constrained JSON output
+                value:
+                  model: qwen2.5-3b
+                  messages:
+                    - role: user
+                      content: "Give me a person as JSON."
+                  response_format:
+                    type: json_schema
+                    json_schema:
+                      schema:
+                        type: object
+                        properties:
+                          name: { type: string }
+                          age: { type: integer }
+                        required: [name, age]
+      responses:
+        "200":
+          description: >-
+            A chat completion. When `stream` is false the body is a `ChatCompletionResponse` JSON object;
+            when `stream` is true the body is an SSE stream of `data: {ChatCompletionChunk}` lines
+            terminated by `data: [DONE]`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatCompletionResponse"
+              example:
+                id: chatcmpl-3f2a...
+                object: chat.completion
+                created: 1781300000
+                model: qwen2.5-3b
+                choices:
+                  - index: 0
+                    message:
+                      role: assistant
+                      content: The capital of Poland is Warsaw.
+                    finish_reason: stop
+                usage:
+                  prompt_tokens: 18
+                  completion_tokens: 8
+                  total_tokens: 26
+            text/event-stream:
+              schema:
+                type: string
+                description: >-
+                  Newline-delimited SSE. Each event is `data: <json>` where `<json>` is a
+                  `ChatCompletionChunk`; the stream ends with `data: [DONE]`.
+              example: |
+                data: {"id":"chatcmpl-3f2a","object":"chat.completion.chunk","created":1781300000,"model":"qwen2.5-3b","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
+
+                data: {"id":"chatcmpl-3f2a","object":"chat.completion.chunk","created":1781300000,"model":"qwen2.5-3b","choices":[{"index":0,"delta":{"content":"The capital"},"finish_reason":null}]}
+
+                data: {"id":"chatcmpl-3f2a","object":"chat.completion.chunk","created":1781300000,"model":"qwen2.5-3b","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+                data: [DONE]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  /v1/embeddings:
+    post:
+      tags: [embeddings]
+      summary: Create embeddings for one or more strings
+      description: >-
+        In-process sentence embeddings (pure .NET, no egress). Returns **501** unless the server was
+        started with an embedding model (`overfit serve <model> --embed-model <dir>`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmbeddingsRequest"
+            examples:
+              single:
+                value:
+                  model: all-minilm-l6-v2
+                  input: A quick brown fox.
+              batch:
+                value:
+                  model: all-minilm-l6-v2
+                  input:
+                    - first sentence
+                    - second sentence
+      responses:
+        "200":
+          description: One embedding vector per input, in order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmbeddingsResponse"
+              example:
+                object: list
+                model: all-minilm-l6-v2
+                data:
+                  - object: embedding
+                    index: 0
+                    embedding: [0.0123, -0.0456, 0.0789]
+                usage:
+                  prompt_tokens: 5
+                  total_tokens: 5
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+
+  /v1/audio/speech:
+    post:
+      tags: [audio]
+      summary: Synthesize speech from text (text-to-speech)
+      description: >-
+        In-process neural TTS (Orpheus + SNAC), watermarked, no egress. Returns **501** unless the
+        server was started with a TTS model (`--tts-model <orpheus.gguf> --tts-snac <dir>`). The
+        response body is raw audio bytes (`audio/wav` or `audio/pcm`), not JSON.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SpeechRequest"
+            example:
+              model: orpheus
+              input: Hello from a local, private text-to-speech engine.
+              voice: tara
+              response_format: wav
+      responses:
+        "200":
+          description: The synthesized audio.
+          content:
+            audio/wav:
+              schema:
+                type: string
+                format: binary
+            audio/pcm:
+              schema:
+                type: string
+                format: binary
+                description: Raw 16-bit little-endian PCM at 24 kHz, mono.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+
+components:
+  responses:
+    BadRequest:
+      description: Malformed request (bad JSON, missing/invalid fields).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              message: "'messages' is required and must be non-empty."
+              type: invalid_request_error
+    NotImplemented:
+      description: The route needs a capability the server was not started with.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              message: "embeddings are not served — start with an embedding model (e.g. 'overfit serve <model> --embed-model <dir>')."
+              type: invalid_request_error
+    ServerError:
+      description: Unexpected server error.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  schemas:
+    Message:
+      type: object
+      properties:
+        role:
+          type: string
+          enum: [system, user, assistant]
+          example: user
+        content:
+          type: string
+          example: Hello!
+
+    ChatCompletionRequest:
+      type: object
+      required: [messages]
+      properties:
+        model:
+          type: string
+          description: Echoed back in the response; the server loads a single model regardless.
+        messages:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/Message"
+          description: Full conversation; the last message must have role `user`.
+        stream:
+          type: boolean
+          default: false
+          description: "When true, the response is an SSE stream ending with `data: [DONE]`."
+        temperature:
+          type: number
+          format: float
+          description: "≤ 0.0001 forces greedy decoding; otherwise samples. Default 1.0."
+        top_p:
+          type: number
+          format: float
+          description: Nucleus sampling cutoff. Default 1.0.
+        min_p:
+          type: number
+          format: float
+          description: "llama.cpp-server extension: keep tokens with P ≥ min_p × P(top). Takes precedence over top_p when > 0."
+        max_tokens:
+          type: integer
+          description: Generation cap. Default 512.
+        max_completion_tokens:
+          type: integer
+          description: Newer OpenAI name; honoured only if max_tokens is absent.
+        response_format:
+          $ref: "#/components/schemas/ResponseFormat"
+
+    ResponseFormat:
+      type: object
+      description: >-
+        Pins the output. `{"type":"text"}` (or absent) = unconstrained. `{"type":"json_object"}` =
+        guaranteed well-formed JSON. `{"type":"json_schema","json_schema":{"schema":{...}}}` =
+        output constrained to the given JSON Schema.
+      properties:
+        type:
+          type: string
+          enum: [text, json_object, json_schema]
+        json_schema:
+          type: object
+          properties:
+            schema:
+              type: object
+              description: A JSON-Schema object the output must conform to.
+
+    ChatCompletionResponse:
+      type: object
+      properties:
+        id: { type: string, example: chatcmpl-3f2a }
+        object: { type: string, example: chat.completion }
+        created: { type: integer, format: int64, description: Unix seconds. }
+        model: { type: string }
+        choices:
+          type: array
+          items:
+            $ref: "#/components/schemas/Choice"
+        usage:
+          $ref: "#/components/schemas/Usage"
+
+    ChatCompletionChunk:
+      type: object
+      description: One SSE event payload during streaming.
+      properties:
+        id: { type: string }
+        object: { type: string, example: chat.completion.chunk }
+        created: { type: integer, format: int64 }
+        model: { type: string }
+        choices:
+          type: array
+          items:
+            $ref: "#/components/schemas/Choice"
+
+    Choice:
+      type: object
+      properties:
+        index: { type: integer }
+        message:
+          $ref: "#/components/schemas/Message"
+          description: Present on non-streaming responses.
+        delta:
+          $ref: "#/components/schemas/Message"
+          description: Present on streaming chunks (incremental).
+        finish_reason:
+          type: string
+          nullable: true
+          enum: [stop, length, null]
+          description: "`stop` (end-of-text) or `length` (hit max_tokens); null mid-stream."
+
+    Usage:
+      type: object
+      properties:
+        prompt_tokens: { type: integer }
+        completion_tokens: { type: integer, nullable: true }
+        total_tokens: { type: integer }
+
+    ModelsResponse:
+      type: object
+      properties:
+        object: { type: string, example: list }
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelInfo"
+
+    ModelInfo:
+      type: object
+      properties:
+        id: { type: string }
+        object: { type: string, example: model }
+        created: { type: integer, format: int64 }
+        owned_by: { type: string, example: overfit }
+
+    EmbeddingsRequest:
+      type: object
+      required: [input]
+      properties:
+        model:
+          type: string
+        input:
+          description: A single string or an array of strings.
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: string
+
+    EmbeddingsResponse:
+      type: object
+      properties:
+        object: { type: string, example: list }
+        model: { type: string }
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/EmbeddingData"
+        usage:
+          $ref: "#/components/schemas/Usage"
+
+    EmbeddingData:
+      type: object
+      properties:
+        object: { type: string, example: embedding }
+        index: { type: integer }
+        embedding:
+          type: array
+          items:
+            type: number
+            format: float
+
+    SpeechRequest:
+      type: object
+      required: [input]
+      properties:
+        model:
+          type: string
+        input:
+          type: string
+          description: The text to synthesize.
+        voice:
+          type: string
+          description: "Orpheus preset: tara, leah, jess, leo, dan, mia, zac, zoe. Default tara."
+          example: tara
+        response_format:
+          type: string
+          enum: [wav, pcm]
+          default: wav
+          description: "`wav` (default) or `pcm` (raw 16-bit LE @ 24 kHz)."
+        speed:
+          type: number
+          format: float
+
+    ErrorResponse:
+      type: object
+      description: OpenAI-style error envelope.
+      properties:
+        error:
+          type: object
+          properties:
+            message: { type: string }
+            type: { type: string, example: invalid_request_error }

@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Numerics.Tensors;
+using DevOnBike.Overfit.Maths;
 
 namespace DevOnBike.Overfit.LanguageModels.Whisper
 {
@@ -88,6 +89,7 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
         /// (<paramref name="encoderOut"/> <c>[nCtx × nState]</c>); returns the next-token logits for the LAST
         /// position (<c>[nVocab]</c>).
         /// </summary>
+#pragma warning disable OVERFIT001 // Reference decode path (recompute-all, per-step buffers): the serving path is DecodeCached/Step, which is allocation-free. Kept simple for correctness/parity.
         public float[] Forward(ReadOnlySpan<int> tokens, ReadOnlySpan<float> encoderOut, int nCtx)
         {
             var seq = tokens.Length;
@@ -99,7 +101,10 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             {
                 var emb = _tokenEmbedding.AsSpan(tokens[t] * _nState, _nState);
                 var p = pos.AsSpan(t * _nState, _nState);
-                for (var c = 0; c < _nState; c++) { x[t * _nState + c] = emb[c] + p[c]; }
+                for (var c = 0; c < _nState; c++)
+                {
+                    x[t * _nState + c] = emb[c] + p[c];
+                }
             }
 
             var ln = new float[seq * _nState];
@@ -149,6 +154,7 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             WhisperKernels.Linear(last, _tokenEmbedding, ReadOnlySpan<float>.Empty, logits, 1, _nState, _nVocab);
             return logits;
         }
+#pragma warning restore OVERFIT001
 
         /// <summary>
         /// Greedy autoregressive decode: starts from <paramref name="promptTokens"/> (e.g.
@@ -161,14 +167,20 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             int endOfTranscript, int maxNewTokens)
         {
             var tokens = new List<int>(promptTokens.Length + maxNewTokens);
-            for (var i = 0; i < promptTokens.Length; i++) { tokens.Add(promptTokens[i]); }
+            for (var i = 0; i < promptTokens.Length; i++)
+            {
+                tokens.Add(promptTokens[i]);
+            }
             var produced = new List<int>();
 
             for (var i = 0; i < maxNewTokens; i++)
             {
                 var logits = Forward(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(tokens), encoderOut, nCtx);
-                var next = ArgMax(logits);
-                if (next == endOfTranscript) { break; }
+                var next = MathUtils.ArgMax(logits);
+                if (next == endOfTranscript)
+                {
+                    break;
+                }
                 tokens.Add(next);
                 produced.Add(next);
             }
@@ -208,15 +220,24 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
 
             // Prefill the prompt (last prompt token's logits start generation).
             ReadOnlySpan<float> logits = default;
-            for (var i = 0; i < promptTokens.Length; i++) { logits = Step(state, promptTokens[i]); }
+            for (var i = 0; i < promptTokens.Length; i++)
+            {
+                logits = Step(state, promptTokens[i]);
+            }
 
             var produced = new List<int>(maxNewTokens);
             for (var i = 0; i < maxNewTokens; i++)
             {
-                var next = ArgMax(logits);
-                if (next == endOfTranscript) { break; }
+                var next = MathUtils.ArgMax(logits);
+                if (next == endOfTranscript)
+                {
+                    break;
+                }
                 produced.Add(next);
-                if (produced.Count >= maxNewTokens) { break; }
+                if (produced.Count >= maxNewTokens)
+                {
+                    break;
+                }
                 logits = Step(state, next);
             }
             return produced.ToArray();
@@ -234,6 +255,7 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             if (s is null || s.NCtx != nCtx || s.MaxLen != maxLen)
             {
                 var scoreLen = Math.Max(nCtx, maxLen);
+#pragma warning disable OVERFIT001 // Decode-state scratch allocated once per (reused) State — _reuseState keeps it across streaming steps; the per-token Step is allocation-free.
                 s = new State
                 {
                     CrossK = new float[_nLayer * crossStride],
@@ -253,6 +275,7 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
                     Scores = new float[scoreLen],
                     Logits = new float[_nVocab],
                 };
+#pragma warning restore OVERFIT001
                 _reuseState = s;
             }
 
@@ -277,7 +300,10 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             // token + positional embedding for the single new token
             var emb = _tokenEmbedding.AsSpan(tokenId * n, n);
             var pos = _posEmb.AsSpan(t * n, n);
-            for (var c = 0; c < n; c++) { x[c] = emb[c] + pos[c]; }
+            for (var c = 0; c < n; c++)
+            {
+                x[c] = emb[c] + pos[c];
+            }
 
             var crossStride = s.NCtx * n;
             var selfStride = s.MaxLen * n;
@@ -318,13 +344,6 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             WhisperKernels.Linear(x, _tokenEmbedding, ReadOnlySpan<float>.Empty, s.Logits, 1, n, _nVocab);
             s.Position++;
             return s.Logits;
-        }
-
-        private static int ArgMax(ReadOnlySpan<float> v)
-        {
-            int best = 0; var bv = v[0];
-            for (var i = 1; i < v.Length; i++) { if (v[i] > bv) { bv = v[i]; best = i; } }
-            return best;
         }
 
         private float[] T(string name)

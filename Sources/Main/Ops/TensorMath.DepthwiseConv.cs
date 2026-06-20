@@ -49,7 +49,10 @@ namespace DevOnBike.Overfit.Ops
                 for (var c = 0; c < channels; c++)
                 {
                     var outPlane = outS.Slice((ni * channels + c) * outHW, outHW);
-                    if (hasBias) { outPlane.Fill(bS[c]); }
+                    if (hasBias)
+                    {
+                        outPlane.Fill(bS[c]);
+                    }
 
                     var inPlane = inS.Slice((ni * channels + c) * hw, hw);
                     var kBase = c * kk;
@@ -62,7 +65,10 @@ namespace DevOnBike.Overfit.Ops
                             for (var oy = 0; oy < outH; oy++)
                             {
                                 var inY = oy * stride - padding + ky;
-                                if (inY < 0 || inY >= h) { continue; }
+                                if (inY < 0 || inY >= h)
+                                {
+                                    continue;
+                                }
 
                                 var outRow = outPlane.Slice(oy * outW, outW);
                                 var inRow = inPlane.Slice(inY * w, w);
@@ -81,7 +87,10 @@ namespace DevOnBike.Overfit.Ops
                                     for (var ox = 0; ox < outW; ox++)
                                     {
                                         var inX = ox * stride - padding + kx;
-                                        if (inX >= 0 && inX < w) { outRow[ox] += kVal * inRow[inX]; }
+                                        if (inX >= 0 && inX < w)
+                                        {
+                                            outRow[ox] += kVal * inRow[inX];
+                                        }
                                     }
                                 }
                             }
@@ -133,7 +142,10 @@ namespace DevOnBike.Overfit.Ops
 
             var wantInput = input.RequiresGrad;
             var wantKernel = kernel.RequiresGrad;
-            if (!wantInput && !wantKernel) { return; }
+            if (!wantInput && !wantKernel)
+            {
+                return;
+            }
 
             var inGradS = wantInput ? input.GradView.AsSpan() : default;
             var kGradS = wantKernel ? kernel.GradView.AsSpan() : default;
@@ -157,7 +169,10 @@ namespace DevOnBike.Overfit.Ops
                             for (var oy = 0; oy < outH; oy++)
                             {
                                 var inY = oy * stride - padding + ky;
-                                if (inY < 0 || inY >= h) { continue; }
+                                if (inY < 0 || inY >= h)
+                                {
+                                    continue;
+                                }
 
                                 var ogRow = outGradPlane.Slice(oy * outW, outW);
                                 var inRow = inPlane.Slice(inY * w, w);
@@ -166,7 +181,10 @@ namespace DevOnBike.Overfit.Ops
                                 {
                                     var lo = Math.Max(0, padding - kx);
                                     var hi = Math.Min(outW, w + padding - kx);
-                                    if (hi <= lo) { continue; }
+                                    if (hi <= lo)
+                                    {
+                                        continue;
+                                    }
                                     var len = hi - lo;
                                     var inOff = inY * w + (lo - padding + kx);
                                     if (wantKernel)
@@ -183,9 +201,18 @@ namespace DevOnBike.Overfit.Ops
                                     for (var ox = 0; ox < outW; ox++)
                                     {
                                         var inX = ox * stride - padding + kx;
-                                        if (inX < 0 || inX >= w) { continue; }
-                                        if (wantKernel) { kGradS[kIdx] += ogRow[ox] * inRow[inX]; }
-                                        if (wantInput) { inGradPlane[inY * w + inX] += kVal * ogRow[ox]; }
+                                        if (inX < 0 || inX >= w)
+                                        {
+                                            continue;
+                                        }
+                                        if (wantKernel)
+                                        {
+                                            kGradS[kIdx] += ogRow[ox] * inRow[inX];
+                                        }
+                                        if (wantInput)
+                                        {
+                                            inGradPlane[inY * w + inX] += kVal * ogRow[ox];
+                                        }
                                     }
                                 }
                             }

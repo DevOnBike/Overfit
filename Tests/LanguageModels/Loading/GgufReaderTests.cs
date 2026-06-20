@@ -165,7 +165,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
                     {
                         WriteString(bw, name);
                         bw.Write((uint)dims.Length);
-                        foreach (var d in dims) { bw.Write(d); }
+                        foreach (var d in dims)
+                        {
+                            bw.Write(d);
+                        }
                         bw.Write((uint)type);
                         bw.Write(offset);
                         sizes[name] = (ulong)data.Length;
@@ -176,7 +179,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
                     var pos = ms.Position;
                     var aligned = (pos + 31) & ~31L;
                     var padding = aligned - pos;
-                    for (var i = 0; i < padding; i++) { bw.Write((byte)0); }
+                    for (var i = 0; i < padding; i++)
+                    {
+                        bw.Write((byte)0);
+                    }
 
                     // Data section
                     foreach (var (_, (_, _, data)) in tensors)
@@ -217,13 +223,26 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         {
             switch (vtype)
             {
-                case GgufValueType.UInt32: bw.Write((uint)value); break;
-                case GgufValueType.Int32: bw.Write((int)value); break;
-                case GgufValueType.Float32: bw.Write((float)value); break;
-                case GgufValueType.String: WriteString(bw, (string)value); break;
-                case GgufValueType.UInt64: bw.Write((ulong)value); break;
-                case GgufValueType.Bool: bw.Write((bool)value); break;
-                default: throw new NotImplementedException($"WriteValue: {vtype}");
+                case GgufValueType.UInt32:
+                    bw.Write((uint)value);
+                    break;
+                case GgufValueType.Int32:
+                    bw.Write((int)value);
+                    break;
+                case GgufValueType.Float32:
+                    bw.Write((float)value);
+                    break;
+                case GgufValueType.String:
+                    WriteString(bw, (string)value);
+                    break;
+                case GgufValueType.UInt64:
+                    bw.Write((ulong)value);
+                    break;
+                case GgufValueType.Bool:
+                    bw.Write((bool)value);
+                    break;
+                default:
+                    throw new NotImplementedException($"WriteValue: {vtype}");
             }
         }
     }

@@ -18,11 +18,20 @@ namespace DevOnBike.Overfit.LanguageModels.Agents
         }
 
         /// <summary>The final answer (from the <c>finish</c> tool), or an exhaustion message on step-cap exit.</summary>
-        public string Answer { get; }
+        public string Answer
+        {
+            get;
+        }
 
         /// <summary>Per-turn trace: each tool call + observation. Useful for debugging / audit logs.</summary>
-        public IReadOnlyList<ReActStep> Steps { get; }
+        public IReadOnlyList<ReActStep> Steps
+        {
+            get;
+        }
 
-        public ReActCompletion Completion { get; }
+        public ReActCompletion Completion
+        {
+            get;
+        }
     }
 }

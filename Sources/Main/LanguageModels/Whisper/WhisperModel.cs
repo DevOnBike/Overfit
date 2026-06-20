@@ -27,22 +27,40 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             Tensors = tensors;
         }
 
-        public WhisperConfig Config { get; }
+        public WhisperConfig Config
+        {
+            get;
+        }
 
         /// <summary>Mel filterbank rows (<c>n_mel</c>, e.g. 80).</summary>
-        public int MelFilterRows { get; }
+        public int MelFilterRows
+        {
+            get;
+        }
 
         /// <summary>Mel filterbank cols (<c>1 + n_fft/2</c>, e.g. 201).</summary>
-        public int MelFilterCols { get; }
+        public int MelFilterCols
+        {
+            get;
+        }
 
         /// <summary>The model's own mel filterbank <c>[MelFilterRows × MelFilterCols]</c> — use for bit-parity
         /// with whisper.cpp instead of computing the Slaney filterbank.</summary>
-        public float[] MelFilters { get; }
+        public float[] MelFilters
+        {
+            get;
+        }
 
         /// <summary>Token id → byte-level BPE string (as stored in the file).</summary>
-        public IReadOnlyList<string> Vocab { get; }
+        public IReadOnlyList<string> Vocab
+        {
+            get;
+        }
 
         /// <summary>Weight tensors by name.</summary>
-        public IReadOnlyDictionary<string, WhisperTensor> Tensors { get; }
+        public IReadOnlyDictionary<string, WhisperTensor> Tensors
+        {
+            get;
+        }
     }
 }

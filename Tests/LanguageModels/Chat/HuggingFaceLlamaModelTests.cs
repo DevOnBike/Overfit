@@ -79,7 +79,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Chat
             for (var i = 0; i < 6 && !session.IsFull; i++)
             {
                 var t = session.GenerateNextToken(in sampling);
-                if (t == tok.EndOfTextTokenId) { break; }
+                if (t == tok.EndOfTextTokenId)
+                {
+                    break;
+                }
                 generated.Add(t);
             }
             var completion = tok.DecodeToString(CollectionsMarshal.AsSpan(generated));

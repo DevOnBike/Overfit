@@ -7,7 +7,10 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
 {
     public readonly struct SamplingOptions
     {
-        public static SamplingOptions Greedy { get; } = new(
+        public static SamplingOptions Greedy
+        {
+            get;
+        } = new(
             strategy: SamplingStrategy.Greedy,
             temperature: 1.0f,
             topK: 0,
@@ -70,15 +73,30 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
             MinP = minP;
         }
 
-        public SamplingStrategy Strategy { get; }
+        public SamplingStrategy Strategy
+        {
+            get;
+        }
 
-        public float Temperature { get; }
+        public float Temperature
+        {
+            get;
+        }
 
-        public int TopK { get; }
+        public int TopK
+        {
+            get;
+        }
 
-        public float TopP { get; }
+        public float TopP
+        {
+            get;
+        }
 
-        public int Seed { get; }
+        public int Seed
+        {
+            get;
+        }
 
         /// <summary>
         /// Repetition penalty applied to logits of recently-used tokens.
@@ -88,19 +106,28 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
         /// Default 1.0 = disabled. Typical values: 1.1 (moderate), 1.3 (aggressive).
         /// Penalty &lt;= 1.0 disables the feature.
         /// </summary>
-        public float RepetitionPenalty { get; }
+        public float RepetitionPenalty
+        {
+            get;
+        }
 
         /// <summary>
         /// Window of recent tokens considered for repetition penalty.
         /// 0 = unlimited (all tokens since Reset). Positive N = last N tokens only.
         /// Smaller windows let the model repeat tokens after some distance.
         /// </summary>
-        public int RepetitionPenaltyContextSize { get; }
+        public int RepetitionPenaltyContextSize
+        {
+            get;
+        }
 
         /// <summary>
         /// Min-P threshold ∈ (0, 1): a token survives if its probability ≥ <c>MinP × P(top)</c>.
         /// Used by <see cref="SamplingStrategy.MinP"/>. 0 = disabled. Typical: 0.05–0.1.
         /// </summary>
-        public float MinP { get; }
+        public float MinP
+        {
+            get;
+        }
     }
 }

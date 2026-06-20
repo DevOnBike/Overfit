@@ -57,10 +57,16 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 PreLayerNorm = true,
             });
             model.Eval();
-            using (var br = new BinaryReader(File.OpenRead(path))) { model.Load(br); }
+            using (var br = new BinaryReader(File.OpenRead(path)))
+            {
+                model.Load(br);
+            }
 
             var regime = new MetricSnapshot[48];
-            for (var i = 0; i < regime.Length; i++) { regime[i] = MakeNormalSnapshot("payments-api"); }
+            for (var i = 0; i < regime.Length; i++)
+            {
+                regime[i] = MakeNormalSnapshot("payments-api");
+            }
             var incident = MakeAnomalySnapshot("payments-api");
             var corpus = new MetricTokenizer().EncodeSequence(regime);
 
@@ -129,7 +135,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             }
             finally
             {
-                if (File.Exists(loraPath)) { File.Delete(loraPath); }
+                if (File.Exists(loraPath))
+                {
+                    File.Delete(loraPath);
+                }
             }
         }
 
@@ -142,7 +151,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             for (var i = 0; i < ContextSnapshots * 2; i++)
             {
                 var r = detector.Score(regime[i % regime.Length]);
-                if (!r.IsWarmup) { normal = r.Score; }
+                if (!r.IsWarmup)
+                {
+                    normal = r.Score;
+                }
             }
             return (normal, detector.Score(incident).Score);
         }
@@ -158,7 +170,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             };
             foreach (var c in candidates)
             {
-                if (c is not null && File.Exists(c)) { return c; }
+                if (c is not null && File.Exists(c))
+                {
+                    return c;
+                }
             }
             return null;
         }

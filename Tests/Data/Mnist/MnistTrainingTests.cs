@@ -68,7 +68,11 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
 
             var imgs = TestModelPaths.Mnist.TrainImagesPath;
             var lbls = TestModelPaths.Mnist.TrainLabelsPath;
-            if (!File.Exists(imgs)) { _output.WriteLine("MNIST files not found."); return; }
+            if (!File.Exists(imgs))
+            {
+                _output.WriteLine("MNIST files not found.");
+                return;
+            }
             var (trainX, trainY) = MnistLoader.Load(imgs, lbls);
 
             var convs = new ConvLayer[replicas + 1];
@@ -106,7 +110,10 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
                 float TrainBatch(int i, int batch)
                 {
                     graphs[i].Reset();
-                    foreach (var p in pars[i]) { p.ZeroGrad(); }
+                    foreach (var p in pars[i])
+                    {
+                        p.ZeroGrad();
+                    }
                     trainX.AsReadOnlySpan().Slice(batch * batchSize * 784, batchSize * 784).CopyTo(xs[i].AsSpan());
                     trainY.AsReadOnlySpan().Slice(batch * batchSize * 10, batchSize * 10).CopyTo(ys[i].AsSpan());
                     using var h1 = convs[i].Forward(graphs[i], xn[i]);
@@ -150,9 +157,14 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
             {
                 for (var i = 0; i <= replicas; i++)
                 {
-                    xn[i].Dispose(); yn[i].Dispose(); graphs[i].Dispose();
-                    convs[i].Dispose(); hiddens[i].Dispose(); outs[i].Dispose();
-                    xs[i].Dispose(); ys[i].Dispose();
+                    xn[i].Dispose();
+                    yn[i].Dispose();
+                    graphs[i].Dispose();
+                    convs[i].Dispose();
+                    hiddens[i].Dispose();
+                    outs[i].Dispose();
+                    xs[i].Dispose();
+                    ys[i].Dispose();
                 }
             }
         }
@@ -548,13 +560,25 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
                 Calls = 0;
             }
 
-            public string Name { get; }
+            public string Name
+            {
+                get;
+            }
 
-            public long Ticks { get; private set; }
+            public long Ticks
+            {
+                get; private set;
+            }
 
-            public long AllocatedBytes { get; private set; }
+            public long AllocatedBytes
+            {
+                get; private set;
+            }
 
-            public int Calls { get; private set; }
+            public int Calls
+            {
+                get; private set;
+            }
 
             public void Add(TimeSpan elapsed, long allocatedBytes)
             {

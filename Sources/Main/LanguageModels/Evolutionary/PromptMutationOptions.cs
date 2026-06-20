@@ -21,14 +21,29 @@ namespace DevOnBike.Overfit.LanguageModels.Evolutionary
             Seed = seed;
         }
 
-        public int MaxPromptTokens { get; }
+        public int MaxPromptTokens
+        {
+            get;
+        }
 
-        public int MaxGeneratedTokens { get; }
+        public int MaxGeneratedTokens
+        {
+            get;
+        }
 
-        public float Temperature { get; }
+        public float Temperature
+        {
+            get;
+        }
 
-        public int TopK { get; }
+        public int TopK
+        {
+            get;
+        }
 
-        public int Seed { get; }
+        public int Seed
+        {
+            get;
+        }
     }
 }

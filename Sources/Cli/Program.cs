@@ -70,6 +70,12 @@ var serveTtsSnac = new Option<string?>("--tts-snac")
     Description = "SNAC decoder weights directory for TTS (snac_24khz.safetensors). Default: $OVERFIT_SNAC_DIR or "
         + "~/.overfit/snac.",
 };
+var serveSessions = new Option<int>("--sessions")
+{
+    Description = "Number of concurrent chat sessions (one KV cache each; weights shared via mmap). Default 1 "
+        + "(serialized, like llama.cpp). N>1 decodes N chats at once at the cost of N× KV-cache RAM.",
+    DefaultValueFactory = _ => 1,
+};
 var serveCommand = new Command("serve", "Start an OpenAI-compatible HTTP server for a model.")
 {
     serveModel,
@@ -78,6 +84,7 @@ var serveCommand = new Command("serve", "Start an OpenAI-compatible HTTP server 
     serveEmbedModel,
     serveTtsModel,
     serveTtsSnac,
+    serveSessions,
 };
 serveCommand.SetAction(parseResult => Commands.Serve(
     parseResult.GetValue(serveModel)!,
@@ -85,7 +92,8 @@ serveCommand.SetAction(parseResult => Commands.Serve(
     parseResult.GetValue(servePort),
     parseResult.GetValue(serveEmbedModel),
     parseResult.GetValue(serveTtsModel),
-    parseResult.GetValue(serveTtsSnac)));
+    parseResult.GetValue(serveTtsSnac),
+    parseResult.GetValue(serveSessions)));
 
 // ── tts: text → speech (WAV), in-process, watermarked. Placeholder engine until the neural backend lands. ──
 var ttsText = new Option<string>("--text")
@@ -225,15 +233,93 @@ mcpCommand.SetAction(parseResult => Commands.Mcp(
     parseResult.GetValue(mcpRagDir),
     parseResult.GetValue(mcpWhisperModel)));
 
+// ── bench: concurrent serving load test of any OpenAI-compatible streaming endpoint. Measures TTFT/
+//    ITL/throughput/goodput under N concurrent users and folds them into one holistic score, the same
+//    metric shape the GPU-serving world uses — so a pure-.NET CPU server can be compared apples-to-apples. ──
+var benchUrl = new Option<string>("--url")
+{
+    Description = "Base URL of the OpenAI-compatible API (the part before /chat/completions).",
+    DefaultValueFactory = _ => "http://127.0.0.1:11434/v1",
+};
+var benchModel = new Option<string>("--model")
+{
+    Description = "Model name to request (sent as the 'model' field).",
+    DefaultValueFactory = _ => "local",
+};
+var benchUsers = new Option<int>("--users", "-u")
+{
+    Description = "Number of concurrent virtual users.",
+    DefaultValueFactory = _ => 8,
+};
+var benchRequests = new Option<int>("--requests", "-n")
+{
+    Description = "Total requests to send in the measured window (clamped to at least --users).",
+    DefaultValueFactory = _ => 64,
+};
+var benchMaxTokens = new Option<int>("--max-tokens")
+{
+    Description = "max_tokens per request — caps decode length so ITL is measured over a real stream.",
+    DefaultValueFactory = _ => 128,
+};
+var benchPrompt = new Option<string>("--prompt")
+{
+    Description = "The user prompt every request sends.",
+    DefaultValueFactory = _ => "Explain, in a short paragraph, why running language models locally can be useful.",
+};
+var benchWarmup = new Option<int>("--warmup")
+{
+    Description = "Warm-up requests sent before the measured window (not scored) to reach steady state.",
+    DefaultValueFactory = _ => 8,
+};
+var benchCost = new Option<double>("--cost-units")
+{
+    Description = "Cost units in the score denominator (e.g. CPU cores or server count); default 1.",
+    DefaultValueFactory = _ => 1.0,
+};
+var benchCommand = new Command("bench",
+    "Load-test an OpenAI-compatible streaming endpoint (concurrent users → TTFT/ITL/throughput + a holistic score).")
+{
+    benchUrl,
+    benchModel,
+    benchUsers,
+    benchRequests,
+    benchMaxTokens,
+    benchPrompt,
+    benchWarmup,
+    benchCost,
+};
+benchCommand.SetAction(parseResult => ServingBenchmark.Run(
+    parseResult.GetValue(benchUrl)!,
+    parseResult.GetValue(benchModel)!,
+    parseResult.GetValue(benchUsers),
+    parseResult.GetValue(benchRequests),
+    parseResult.GetValue(benchMaxTokens),
+    parseResult.GetValue(benchPrompt)!,
+    parseResult.GetValue(benchWarmup),
+    parseResult.GetValue(benchCost)));
+
+var doctorModel = new Argument<string>("model")
+{
+    Description = "A model name in the local store, or a path to a .gguf file.",
+};
+var doctorCommand = new Command("doctor",
+    "Inspect a GGUF — architecture, quant, tokenizer, chat template, context, support, recommended flags + warnings.")
+{
+    doctorModel,
+};
+doctorCommand.SetAction(parseResult => Commands.Doctor(parseResult.GetValue(doctorModel)!));
+
 var rootCommand = new RootCommand("Overfit — run local LLMs, RAG and agents in pure .NET. No Python, no native runtime.")
 {
     pullCommand,
     listCommand,
     chatCommand,
     serveCommand,
+    doctorCommand,
     mcpCommand,
     ttsCommand,
     voiceCommand,
+    benchCommand,
 };
 
 return rootCommand.Parse(args).Invoke();

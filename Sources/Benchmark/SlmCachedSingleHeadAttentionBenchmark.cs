@@ -35,13 +35,22 @@ namespace Benchmarks
         private bool _disposed;
 
         [Params(64, 768)]
-        public int DModel { get; set; }
+        public int DModel
+        {
+            get; set;
+        }
 
         [Params(64)]
-        public int HeadDimension { get; set; }
+        public int HeadDimension
+        {
+            get; set;
+        }
 
         [Params(16, 64, 256, 512)]
-        public int SequenceLength { get; set; }
+        public int SequenceLength
+        {
+            get; set;
+        }
 
         [GlobalSetup]
         public void Setup()
@@ -63,10 +72,14 @@ namespace Benchmarks
                 headDimension: HeadDimension);
 
             _hidden = new float[DModel];
-            var wq = new float[DModel * HeadDimension]; FillDeterministic(wq, 101);
-            var wk = new float[DModel * HeadDimension]; FillDeterministic(wk, 201);
-            var wv = new float[DModel * HeadDimension]; FillDeterministic(wv, 301);
-            var wo = new float[HeadDimension * DModel]; FillDeterministic(wo, 401);
+            var wq = new float[DModel * HeadDimension];
+            FillDeterministic(wq, 101);
+            var wk = new float[DModel * HeadDimension];
+            FillDeterministic(wk, 201);
+            var wv = new float[DModel * HeadDimension];
+            FillDeterministic(wv, 301);
+            var wo = new float[HeadDimension * DModel];
+            FillDeterministic(wo, 401);
             _headWeights = new SingleHeadWeights(wq: wq, wk: wk, wv: wv, wo: wo);
             _output = new float[DModel];
 

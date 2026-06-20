@@ -37,8 +37,14 @@ namespace DevOnBike.Overfit.LanguageModels.Tools
         {
             ArgumentNullException.ThrowIfNull(tools);
             ArgumentNullException.ThrowIfNull(tokenizer);
-            if (tools.Count == 0) { throw new ArgumentException("At least one tool is required.", nameof(tools)); }
-            if (tools.Count > 64) { throw new ArgumentException("At most 64 tools are supported.", nameof(tools)); }
+            if (tools.Count == 0)
+            {
+                throw new ArgumentException("At least one tool is required.", nameof(tools));
+            }
+            if (tools.Count > 64)
+            {
+                throw new ArgumentException("At most 64 tools are supported.", nameof(tools));
+            }
 
             _names = new string[tools.Count];
             _schemas = new CompiledSchema?[tools.Count];
@@ -79,7 +85,10 @@ namespace DevOnBike.Overfit.LanguageModels.Tools
             {
                 if (t == _eosTokenId)
                 {
-                    if (!_state.IsComplete) { logits[t] = float.NegativeInfinity; }
+                    if (!_state.IsComplete)
+                    {
+                        logits[t] = float.NegativeInfinity;
+                    }
                     continue;
                 }
 
@@ -93,8 +102,14 @@ namespace DevOnBike.Overfit.LanguageModels.Tools
 
         public void Accept(int token)
         {
-            if (token == _eosTokenId) { return; }
-            if ((uint)token >= (uint)_tokenText.Length) { return; }
+            if (token == _eosTokenId)
+            {
+                return;
+            }
+            if ((uint)token >= (uint)_tokenText.Length)
+            {
+                return;
+            }
 
             var text = _tokenText[token];
             for (var i = 0; i < text.Length; i++)
@@ -108,7 +123,10 @@ namespace DevOnBike.Overfit.LanguageModels.Tools
             var probe = _state;   // value-type copy (struct, incl. the inner JSON machine)
             for (var i = 0; i < text.Length; i++)
             {
-                if (!probe.TryAdvance(text[i], _names, _schemas)) { return false; }
+                if (!probe.TryAdvance(text[i], _names, _schemas))
+                {
+                    return false;
+                }
             }
             return true;
         }
@@ -124,7 +142,10 @@ namespace DevOnBike.Overfit.LanguageModels.Tools
 
             public static CompiledSchema? From(IReadOnlyList<ToolParameter> parameters)
             {
-                if (parameters.Count == 0) { return null; }
+                if (parameters.Count == 0)
+                {
+                    return null;
+                }
 
                 var literals = new string[parameters.Count + 1];
                 var kinds = new ToolParameterKind[parameters.Count];
@@ -175,8 +196,14 @@ namespace DevOnBike.Overfit.LanguageModels.Tools
                 switch (_stage)
                 {
                     case Stage.Open:
-                        if (c != Open[_openIndex]) { return false; }
-                        if (++_openIndex == Open.Length) { _stage = Stage.Name; }
+                        if (c != Open[_openIndex])
+                        {
+                            return false;
+                        }
+                        if (++_openIndex == Open.Length)
+                        {
+                            _stage = Stage.Name;
+                        }
                         return true;
 
                     case Stage.Name:
@@ -184,7 +211,10 @@ namespace DevOnBike.Overfit.LanguageModels.Tools
                         {
                             // Close the name only if it exactly equals some registered tool.
                             _toolIndex = ResolveName(names);
-                            if (_toolIndex < 0) { return false; }
+                            if (_toolIndex < 0)
+                            {
+                                return false;
+                            }
                             _stage = Stage.Mid;
                             _midIndex = 1;   // the '"' just consumed is Mid[0]
                             return true;
@@ -192,7 +222,10 @@ namespace DevOnBike.Overfit.LanguageModels.Tools
                         return ExtendName(c, names);
 
                     case Stage.Mid:
-                        if (c != Mid[_midIndex]) { return false; }
+                        if (c != Mid[_midIndex])
+                        {
+                            return false;
+                        }
                         if (++_midIndex == Mid.Length)
                         {
                             // Switch to schema-driven arguments when the chosen tool declares them.
@@ -213,8 +246,16 @@ namespace DevOnBike.Overfit.LanguageModels.Tools
 
                     case Stage.Args:
                         var probe = _args;
-                        if (probe.TryAdvance(c)) { _args = probe; return true; }
-                        if (_args.IsComplete && c == '}') { _stage = Stage.Done; return true; }
+                        if (probe.TryAdvance(c))
+                        {
+                            _args = probe;
+                            return true;
+                        }
+                        if (_args.IsComplete && c == '}')
+                        {
+                            _stage = Stage.Done;
+                            return true;
+                        }
                         return false;
 
                     case Stage.ArgsSchema:
@@ -222,7 +263,11 @@ namespace DevOnBike.Overfit.LanguageModels.Tools
 
                     case Stage.EnvelopeClose:
                         // The schema closed the arguments object; the envelope needs its own '}'.
-                        if (c == '}') { _stage = Stage.Done; return true; }
+                        if (c == '}')
+                        {
+                            _stage = Stage.Done;
+                            return true;
+                        }
                         return false;
 
                     case Stage.Done:
@@ -241,18 +286,28 @@ namespace DevOnBike.Overfit.LanguageModels.Tools
                     if (!_valueStarted)
                     {
                         // The value's first character pins its JSON type — reject a wrong-typed start.
-                        if (!ValueFirstCharOk(_valueKind, c)) { return false; }
+                        if (!ValueFirstCharOk(_valueKind, c))
+                        {
+                            return false;
+                        }
                         _valueStarted = true;
                         _args = default;
                         return _args.TryAdvance(c);
                     }
 
                     var probe = _args;
-                    if (probe.TryAdvance(c)) { _args = probe; return true; }
+                    if (probe.TryAdvance(c))
+                    {
+                        _args = probe;
+                        return true;
+                    }
 
                     // The value can't extend. If it is a complete JSON value, this character must
                     // begin the next literal segment (a ',' between pairs, or the closing '}').
-                    if (!_args.IsComplete) { return false; }
+                    if (!_args.IsComplete)
+                    {
+                        return false;
+                    }
                     _inValue = false;
                     _segIndex++;
                     _segPos = 0;
@@ -260,7 +315,10 @@ namespace DevOnBike.Overfit.LanguageModels.Tools
                 }
 
                 var lit = schema.Literals[_segIndex];
-                if (_segPos >= lit.Length || c != lit[_segPos]) { return false; }
+                if (_segPos >= lit.Length || c != lit[_segPos])
+                {
+                    return false;
+                }
                 if (++_segPos == lit.Length)
                 {
                     if (_segIndex < schema.Kinds.Length)
@@ -291,11 +349,20 @@ namespace DevOnBike.Overfit.LanguageModels.Tools
                 ulong next = 0;
                 for (var i = 0; i < names.Length; i++)
                 {
-                    if ((_nameMask & (1UL << i)) == 0) { continue; }
+                    if ((_nameMask & (1UL << i)) == 0)
+                    {
+                        continue;
+                    }
                     var name = names[i];
-                    if (name.Length > _nameLen && name[_nameLen] == c) { next |= 1UL << i; }
+                    if (name.Length > _nameLen && name[_nameLen] == c)
+                    {
+                        next |= 1UL << i;
+                    }
                 }
-                if (next == 0) { return false; }
+                if (next == 0)
+                {
+                    return false;
+                }
                 _nameMask = next;
                 _nameLen++;
                 return true;
@@ -306,7 +373,10 @@ namespace DevOnBike.Overfit.LanguageModels.Tools
             {
                 for (var i = 0; i < names.Length; i++)
                 {
-                    if ((_nameMask & (1UL << i)) != 0 && names[i].Length == _nameLen) { return i; }
+                    if ((_nameMask & (1UL << i)) != 0 && names[i].Length == _nameLen)
+                    {
+                        return i;
+                    }
                 }
                 return -1;
             }

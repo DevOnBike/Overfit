@@ -52,7 +52,10 @@ namespace DevOnBike.Overfit.Tests.TestSupport
                 get
                 {
                     var dirCopy = Path.Combine(Dir, "gpt2_reference_small.json");
-                    if (File.Exists(dirCopy)) { return dirCopy; }
+                    if (File.Exists(dirCopy))
+                    {
+                        return dirCopy;
+                    }
                     return Path.Combine(AppContext.BaseDirectory, "test_fixtures", "gpt2_reference_small.json");
                 }
             }

@@ -96,20 +96,29 @@ namespace DevOnBike.Overfit.Tests.Adapters
 
             public int Encode(ReadOnlySpan<char> text, Span<int> destination)
             {
-                for (var i = 0; i < text.Length; i++) { destination[i] = text[i]; }
+                for (var i = 0; i < text.Length; i++)
+                {
+                    destination[i] = text[i];
+                }
                 return text.Length;
             }
 
             public int Decode(ReadOnlySpan<int> tokens, Span<char> destination)
             {
-                for (var i = 0; i < tokens.Length; i++) { destination[i] = (char)tokens[i]; }
+                for (var i = 0; i < tokens.Length; i++)
+                {
+                    destination[i] = (char)tokens[i];
+                }
                 return tokens.Length;
             }
 
             public string DecodeToString(ReadOnlySpan<int> tokens)
             {
                 var sb = new StringBuilder(tokens.Length);
-                foreach (var t in tokens) { sb.Append((char)t); }
+                foreach (var t in tokens)
+                {
+                    sb.Append((char)t);
+                }
                 return sb.ToString();
             }
         }
@@ -120,15 +129,23 @@ namespace DevOnBike.Overfit.Tests.Adapters
 
             public FakeSession(string output)
             {
-                foreach (var c in output) { _tokens.Enqueue(c); }
+                foreach (var c in output)
+                {
+                    _tokens.Enqueue(c);
+                }
             }
 
-            public int CurrentPosition { get; private set; }
+            public int CurrentPosition
+            {
+                get; private set;
+            }
             public int MaxContextLength => 4096;
             public int VocabularySize => 0x10000;
             public bool HasKeyValueCache => true;
 
-            public void Reset() { }
+            public void Reset()
+            {
+            }
 
             public void Reset(ReadOnlySpan<int> promptTokens) => CurrentPosition = promptTokens.Length;
 
@@ -143,7 +160,9 @@ namespace DevOnBike.Overfit.Tests.Adapters
 
             public void GetLastLogits(Span<float> destination) => throw new NotSupportedException();
 
-            public void Dispose() { }
+            public void Dispose()
+            {
+            }
         }
     }
 }

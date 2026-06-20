@@ -48,7 +48,8 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             const int contextSnapshots = 6;
             var tps = MetricTokenizer.TokensPerSnapshot;
 
-            MathUtils.SetSeed(100); using var model = new GPT1Model(new GPT1Config
+            MathUtils.SetSeed(100);
+            using var model = new GPT1Model(new GPT1Config
             {
                 VocabSize = MetricTokenizer.VocabSize,
                 ContextLength = 16 * tps,
@@ -150,7 +151,8 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             const int contextSnapshots = 6;
             var tps = MetricTokenizer.TokensPerSnapshot;
 
-            MathUtils.SetSeed(100); using var model = new GPT1Model(new GPT1Config
+            MathUtils.SetSeed(100);
+            using var model = new GPT1Model(new GPT1Config
             {
                 VocabSize = MetricTokenizer.VocabSize,
                 ContextLength = 16 * tps,

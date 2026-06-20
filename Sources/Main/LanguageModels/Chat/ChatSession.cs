@@ -60,7 +60,10 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             {
                 foreach (var s in stopSequences)
                 {
-                    if (!string.IsNullOrEmpty(s)) { stops.Add(s); }
+                    if (!string.IsNullOrEmpty(s))
+                    {
+                        stops.Add(s);
+                    }
                 }
             }
             _stopSequences = stops.ToArray();
@@ -81,7 +84,10 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
         /// decode time, exposing <see cref="GenerationStats.TokensPerSecond"/>. Timed over the
         /// decode loop only (prompt prefill excluded), so it reflects steady-state throughput.
         /// </summary>
-        public GenerationStats LastStats { get; private set; }
+        public GenerationStats LastStats
+        {
+            get; private set;
+        }
 
         public void AddSystem(string content) => _history.Add(ChatMessage.System(content));
 
@@ -121,7 +127,10 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             Action<string>? onText = null,
             ITokenConstraint? constraint = null)
         {
-            if (userMessage is null) { throw new ArgumentNullException(nameof(userMessage)); }
+            if (userMessage is null)
+            {
+                throw new ArgumentNullException(nameof(userMessage));
+            }
 
             _history.Add(ChatMessage.User(userMessage));
             var reply = GenerateFor(_history, in options, onText, constraint);
@@ -143,13 +152,19 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             Action<string>? onText = null,
             ITokenConstraint? constraint = null)
         {
-            if (userMessage is null) { throw new ArgumentNullException(nameof(userMessage)); }
+            if (userMessage is null)
+            {
+                throw new ArgumentNullException(nameof(userMessage));
+            }
 
             // [system turns] + this single user turn — no prior user/assistant turns, nothing retained.
             var oneShot = new List<ChatMessage>();
             foreach (var message in _history)
             {
-                if (string.Equals(message.Role, "system", StringComparison.Ordinal)) { oneShot.Add(message); }
+                if (string.Equals(message.Role, "system", StringComparison.Ordinal))
+                {
+                    oneShot.Add(message);
+                }
             }
             oneShot.Add(ChatMessage.User(userMessage));
 

@@ -38,7 +38,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
 
             // Repeating, learnable corpus (period 5) so next-token loss can drop.
             var corpus = new int[256];
-            for (var i = 0; i < corpus.Length; i++) { corpus[i] = (i * 7 + (i / 5)) % 64; }
+            for (var i = 0; i < corpus.Length; i++)
+            {
+                corpus[i] = (i * 7 + (i / 5)) % 64;
+            }
 
             using var tuner = new Gpt1LoRAFineTuner(
                 model, rank: 8, LoRATargetModules.LanguageModelHead, seed: 7, quantizeBase: true);
@@ -72,7 +75,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
             using var model = new GPT1Model(config);
 
             var corpus = new int[256];
-            for (var i = 0; i < corpus.Length; i++) { corpus[i] = (i * 7 + (i / 5)) % 64; }
+            for (var i = 0; i < corpus.Length; i++)
+            {
+                corpus[i] = (i * 7 + (i / 5)) % 64;
+            }
 
             using var tuner = new Gpt1LoRAFineTuner(
                 model, rank: 8,
@@ -110,7 +116,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
 
             using var model = new GPT1Model(config);
             var corpus = new int[256];
-            for (var i = 0; i < corpus.Length; i++) { corpus[i] = (i * 7 + (i / 5)) % 64; }
+            for (var i = 0; i < corpus.Length; i++)
+            {
+                corpus[i] = (i * 7 + (i / 5)) % 64;
+            }
 
             // Q8 frozen base (higher fidelity than Q4_K; 32-element blocks).
             using var tuner = new Gpt1LoRAFineTuner(
@@ -145,7 +154,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
 
             using var model = new GPT1Model(config);
             var corpus = new int[256];
-            for (var i = 0; i < corpus.Length; i++) { corpus[i] = (i * 7 + (i / 5)) % 64; }
+            for (var i = 0; i < corpus.Length; i++)
+            {
+                corpus[i] = (i * 7 + (i / 5)) % 64;
+            }
 
             // The WHOLE quantizable base: LM head + FFN + per-head attention Q/K/V/O, all frozen Q8.
             var targets = LoRATargetModules.LanguageModelHead | LoRATargetModules.FeedForward | LoRATargetModules.Attention;
@@ -184,7 +196,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
             };
             using var model = new GPT1Model(config);
             var corpus = new int[256];
-            for (var i = 0; i < corpus.Length; i++) { corpus[i] = (i * 7 + (i / 5)) % 64; }
+            for (var i = 0; i < corpus.Length; i++)
+            {
+                corpus[i] = (i * 7 + (i / 5)) % 64;
+            }
 
             using var tuner = new Gpt1LoRAFineTuner(
                 model, rank: 8,
@@ -205,15 +220,23 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.LoRA
 
         private static float AvgFirst(IReadOnlyList<float> h, int n)
         {
-            float s = 0; var c = Math.Min(n, h.Count);
-            for (var i = 0; i < c; i++) { s += h[i]; }
+            float s = 0;
+            var c = Math.Min(n, h.Count);
+            for (var i = 0; i < c; i++)
+            {
+                s += h[i];
+            }
             return s / c;
         }
 
         private static float AvgLast(IReadOnlyList<float> h, int n)
         {
-            float s = 0; var c = Math.Min(n, h.Count);
-            for (var i = 0; i < c; i++) { s += h[h.Count - 1 - i]; }
+            float s = 0;
+            var c = Math.Min(n, h.Count);
+            for (var i = 0; i < c; i++)
+            {
+                s += h[h.Count - 1 - i];
+            }
             return s / c;
         }
     }

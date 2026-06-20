@@ -69,13 +69,18 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
             for (var idx = 0; idx < kvHeads * block; idx++)
             {
                 var orig = xs[idx];
-                xs[idx] = orig + eps; var lp = ExpandLossAt(graph, xNode, tNode, kvHeads, groupSize);
-                xs[idx] = orig - eps; var lm = ExpandLossAt(graph, xNode, tNode, kvHeads, groupSize);
+                xs[idx] = orig + eps;
+                var lp = ExpandLossAt(graph, xNode, tNode, kvHeads, groupSize);
+                xs[idx] = orig - eps;
+                var lm = ExpandLossAt(graph, xNode, tNode, kvHeads, groupSize);
                 xs[idx] = orig;
                 var fd = (lp - lm) / (2 * eps);
                 var absDiff = Math.Abs(fd - dxA[idx]);
                 var rel = absDiff / Math.Max(1e-3, Math.Abs(dxA[idx]));
-                if (absDiff > 5e-4) { maxRel = Math.Max(maxRel, rel); } // skip entries below the FD noise floor
+                if (absDiff > 5e-4)
+                {
+                    maxRel = Math.Max(maxRel, rel);
+                } // skip entries below the FD noise floor
             }
             _out.WriteLine($"ExpandKvHeads dInput FD maxRel: {maxRel:E3}");
             Assert.True(maxRel < 2e-2, $"ExpandKvHeads finite-difference mismatch, maxRel {maxRel:E3}");
@@ -146,13 +151,18 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
             foreach (var idx in indices)
             {
                 var orig = s[idx];
-                s[idx] = orig + eps; var lp = lossAt();
-                s[idx] = orig - eps; var lm = lossAt();
+                s[idx] = orig + eps;
+                var lp = lossAt();
+                s[idx] = orig - eps;
+                var lm = lossAt();
                 s[idx] = orig;
                 var fd = (lp - lm) / (2 * eps);
                 var absDiff = Math.Abs(fd - analytic[idx]);
                 var rel = absDiff / Math.Max(1e-3, Math.Abs(analytic[idx]));
-                if (absDiff > 5e-4) { maxRel = Math.Max(maxRel, rel); } // skip entries below the FD noise floor
+                if (absDiff > 5e-4)
+                {
+                    maxRel = Math.Max(maxRel, rel);
+                } // skip entries below the FD noise floor
                 _out.WriteLine($"  {name}[{idx}]: analytic {analytic[idx]:E4}  fd {fd:E4}  rel {rel:E3}");
             }
             Assert.True(maxRel < 3e-2, $"{name} finite-difference mismatch, maxRel {maxRel:E3}");
@@ -189,7 +199,10 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
         {
             var r = new Random(seed);
             var v = new float[n];
-            for (var i = 0; i < n; i++) { v[i] = (float)(r.NextDouble() * 2 - 1); }
+            for (var i = 0; i < n; i++)
+            {
+                v[i] = (float)(r.NextDouble() * 2 - 1);
+            }
             return v;
         }
     }

@@ -51,7 +51,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         }
 
         /// <summary>Mapped file length in bytes.</summary>
-        public long Length { get; }
+        public long Length
+        {
+            get;
+        }
 
         /// <summary>
         /// A zero-copy <see cref="ReadOnlyMemory{T}"/> over <c>[offset, offset+length)</c>
@@ -79,7 +82,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
         public void Dispose()
         {
-            if (_disposed) { return; }
+            if (_disposed)
+            {
+                return;
+            }
             _disposed = true;
 
             _view.SafeMemoryMappedViewHandle.ReleasePointer();

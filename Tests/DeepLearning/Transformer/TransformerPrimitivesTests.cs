@@ -32,10 +32,14 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Transformer
 
             var storage = new TensorStorage<float>(8, clearMemory: false);
             // Two rows: [1, 2, 3, 4] and [10, 20, 30, 40]
-            storage.AsSpan()[0] = 1f; storage.AsSpan()[1] = 2f;
-            storage.AsSpan()[2] = 3f; storage.AsSpan()[3] = 4f;
-            storage.AsSpan()[4] = 10f; storage.AsSpan()[5] = 20f;
-            storage.AsSpan()[6] = 30f; storage.AsSpan()[7] = 40f;
+            storage.AsSpan()[0] = 1f;
+            storage.AsSpan()[1] = 2f;
+            storage.AsSpan()[2] = 3f;
+            storage.AsSpan()[3] = 4f;
+            storage.AsSpan()[4] = 10f;
+            storage.AsSpan()[5] = 20f;
+            storage.AsSpan()[6] = 30f;
+            storage.AsSpan()[7] = 40f;
 
             using var input = new AutogradNode(storage, new TensorShape(2, 4), requiresGrad: false);
             using var output = ln.Forward(graph, input);

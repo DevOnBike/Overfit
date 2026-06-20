@@ -97,15 +97,33 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
         }
 
         /// <summary>The maximum token sequence length the arena is sized for; longer inputs throw.</summary>
-        public int MaxSequenceLength { get; }
+        public int MaxSequenceLength
+        {
+            get;
+        }
 
         public BertConfig Config => _config;
 
-        public EmbeddingLayer WordEmbeddings { get; }
-        public EmbeddingLayer PositionEmbeddings { get; }
-        public EmbeddingLayer TokenTypeEmbeddings { get; }
-        public LayerNormLayer EmbeddingLayerNorm { get; }
-        public TransformerBlock[] Layers { get; }
+        public EmbeddingLayer WordEmbeddings
+        {
+            get;
+        }
+        public EmbeddingLayer PositionEmbeddings
+        {
+            get;
+        }
+        public EmbeddingLayer TokenTypeEmbeddings
+        {
+            get;
+        }
+        public LayerNormLayer EmbeddingLayerNorm
+        {
+            get;
+        }
+        public TransformerBlock[] Layers
+        {
+            get;
+        }
 
         /// <summary>Puts every sub-layer into eval mode (no dropout, no train-time stats).</summary>
         public void Eval()
@@ -114,7 +132,10 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
             PositionEmbeddings.Eval();
             TokenTypeEmbeddings.Eval();
             EmbeddingLayerNorm.Eval();
-            foreach (var layer in Layers) { layer.Eval(); }
+            foreach (var layer in Layers)
+            {
+                layer.Eval();
+            }
         }
 
         /// <summary>
@@ -168,7 +189,10 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
             tokenIds.CopyTo(tokens);
             var positions = new int[t];
             var types = new int[t]; // all zeros → segment 0
-            for (var i = 0; i < t; i++) { positions[i] = i; }
+            for (var i = 0; i < t; i++)
+            {
+                positions[i] = i;
+            }
 
             // emb = LayerNorm(word[ids] + position[0..T] + tokenType[0])
             var wordEmb = WordEmbeddings.Forward(_graph, tokens);          // [T, d]
@@ -197,11 +221,17 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
                         for (var i = 0; i < t; i++)
                         {
                             var row = hidden.Slice(i * d, d);
-                            for (var j = 0; j < d; j++) { dst[j] += row[j]; }
+                            for (var j = 0; j < d; j++)
+                            {
+                                dst[j] += row[j];
+                            }
                         }
 
                         var inv = 1f / t;
-                        for (var j = 0; j < d; j++) { dst[j] *= inv; }
+                        for (var j = 0; j < d; j++)
+                        {
+                            dst[j] *= inv;
+                        }
                         break;
                     }
 
@@ -226,12 +256,18 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
         private static void Normalize(Span<float> v)
         {
             var norm = 0f;
-            for (var j = 0; j < v.Length; j++) { norm += v[j] * v[j]; }
+            for (var j = 0; j < v.Length; j++)
+            {
+                norm += v[j] * v[j];
+            }
             norm = MathF.Sqrt(norm);
             if (norm > 1e-12f)
             {
                 var inv = 1f / norm;
-                for (var j = 0; j < v.Length; j++) { v[j] *= inv; }
+                for (var j = 0; j < v.Length; j++)
+                {
+                    v[j] *= inv;
+                }
             }
         }
 
@@ -242,7 +278,10 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
             PositionEmbeddings.Dispose();
             TokenTypeEmbeddings.Dispose();
             EmbeddingLayerNorm.Dispose();
-            foreach (var layer in Layers) { layer.Dispose(); }
+            foreach (var layer in Layers)
+            {
+                layer.Dispose();
+            }
         }
     }
 }

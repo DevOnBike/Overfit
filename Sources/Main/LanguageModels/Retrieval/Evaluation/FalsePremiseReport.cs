@@ -31,12 +31,21 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval.Evaluation
         }
 
         /// <summary>The top-similarity above which a false-premise query is considered (dangerously) grounded.</summary>
-        public double GroundedThreshold { get; }
+        public double GroundedThreshold
+        {
+            get;
+        }
 
         /// <summary>How many trap queries found a match at or above the threshold (want 0).</summary>
-        public int TrapsSprung { get; }
+        public int TrapsSprung
+        {
+            get;
+        }
 
-        public IReadOnlyList<CaseResult> Cases { get; }
+        public IReadOnlyList<CaseResult> Cases
+        {
+            get;
+        }
 
         /// <summary>One trap query's outcome: its top similarity, the matched id, and whether it tripped the trap.</summary>
         public sealed class CaseResult
@@ -50,18 +59,33 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval.Evaluation
                 Note = note;
             }
 
-            public string Query { get; }
+            public string Query
+            {
+                get;
+            }
 
             /// <summary>Id of the top match (null if the store was empty).</summary>
-            public string? TopId { get; }
+            public string? TopId
+            {
+                get;
+            }
 
             /// <summary>Cosine similarity of the top match.</summary>
-            public float TopScore { get; }
+            public float TopScore
+            {
+                get;
+            }
 
             /// <summary>True when <see cref="TopScore"/> ≥ the grounded threshold — a sprung trap.</summary>
-            public bool Grounded { get; }
+            public bool Grounded
+            {
+                get;
+            }
 
-            public string? Note { get; }
+            public string? Note
+            {
+                get;
+            }
         }
     }
 }

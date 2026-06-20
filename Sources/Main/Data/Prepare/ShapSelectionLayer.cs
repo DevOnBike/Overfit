@@ -80,7 +80,7 @@ namespace DevOnBike.Overfit.Data.Prepare
             return kept.Length == 0 ? null : kept;
         }
 
-        private void CalculateMeans(FastTensor<float> tensor, float[] output)
+        private void CalculateMeans(FastTensor<float> tensor, Span<float> output)
         {
             var rows = tensor.GetView().GetDim(0);
             var cols = tensor.GetView().GetDim(1);
@@ -97,7 +97,7 @@ namespace DevOnBike.Overfit.Data.Prepare
             }
         }
 
-        private FastTensor<float> ExtractColumns(FastTensor<float> src, int[] indices)
+        private FastTensor<float> ExtractColumns(FastTensor<float> src, ReadOnlySpan<int> indices)
         {
             var rows = src.GetView().GetDim(0);
             var oldCols = src.GetView().GetDim(1);

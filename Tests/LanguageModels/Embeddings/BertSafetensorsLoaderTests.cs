@@ -28,7 +28,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
             var a = new float[rows * cols];
             for (var r = 0; r < rows; r++)
             {
-                for (var c = 0; c < cols; c++) { a[r * cols + c] = r * 1000 + c; }
+                for (var c = 0; c < cols; c++)
+                {
+                    a[r * cols + c] = r * 1000 + c;
+                }
             }
 
             return a;
@@ -37,7 +40,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
         private static float[] Iota(int n)
         {
             var a = new float[n];
-            for (var i = 0; i < n; i++) { a[i] = i; }
+            for (var i = 0; i < n; i++)
+            {
+                a[i] = i;
+            }
             return a;
         }
 
@@ -112,7 +118,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
 
                     // Q bias per head: BqHeads[h][j] = HF query.bias[h*dHead + j].
                     var bq = attn.BqHeads[h].DataReadOnlySpan;
-                    for (var j = 0; j < DHead; j++) { Assert.Equal(h * DHead + j, bq[j]); }
+                    for (var j = 0; j < DHead; j++)
+                    {
+                        Assert.Equal(h * DHead + j, bq[j]);
+                    }
                 }
 
                 // Output projection: WoHeads[h][r, c] from HF dense.weight[out=c, in=h*dHead+r] = c*1000 + (h*dHead+r).
@@ -130,20 +139,29 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
 
                 // Output bias → single Bo [D].
                 var bo = attn.Bo.DataReadOnlySpan;
-                for (var c = 0; c < D; c++) { Assert.Equal(c, bo[c]); }
+                for (var c = 0; c < D; c++)
+                {
+                    Assert.Equal(c, bo[c]);
+                }
 
                 // FFN W1 [d, dFF]: W1[i, j] from HF intermediate.weight[out=j, in=i] = j*1000 + i.
                 var w1 = block.FFN.W1.DataReadOnlySpan;
                 for (var i = 0; i < D; i++)
                 {
-                    for (var j = 0; j < DFF; j++) { Assert.Equal(j * 1000 + i, w1[i * DFF + j]); }
+                    for (var j = 0; j < DFF; j++)
+                    {
+                        Assert.Equal(j * 1000 + i, w1[i * DFF + j]);
+                    }
                 }
 
                 // FFN W2 [dFF, d]: W2[i, j] from HF output.weight[out=j, in=i] = j*1000 + i.
                 var w2 = block.FFN.W2.DataReadOnlySpan;
                 for (var i = 0; i < DFF; i++)
                 {
-                    for (var j = 0; j < D; j++) { Assert.Equal(j * 1000 + i, w2[i * D + j]); }
+                    for (var j = 0; j < D; j++)
+                    {
+                        Assert.Equal(j * 1000 + i, w2[i * D + j]);
+                    }
                 }
             }
             finally
@@ -177,7 +195,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
                 using var enc = BertSafetensorsLoader.Load(path, Config());
                 var v = enc.Embed(new[] { 2, 5, 9, 3 });
                 var norm = 0f;
-                foreach (var x in v) { norm += x * x; }
+                foreach (var x in v)
+                {
+                    norm += x * x;
+                }
                 Assert.True(MathF.Abs(MathF.Sqrt(norm) - 1f) < 1e-4f);
             }
             finally

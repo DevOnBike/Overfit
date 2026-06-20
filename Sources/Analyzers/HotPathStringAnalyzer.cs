@@ -30,7 +30,7 @@ namespace DevOnBike.Overfit.Analyzers
             isEnabledByDefault: true,
             description: "String interpolation/concatenation allocates per execution. Exempt: exception construction, ToString overrides, one-time contexts, constant folds.");
 
-        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
+        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule, OverfitPerfAnalysis.HotPathRule];
 
         public override void Initialize(AnalysisContext context)
         {
@@ -85,7 +85,7 @@ namespace DevOnBike.Overfit.Analyzers
                 return;
             }
 
-            context.ReportDiagnostic(Diagnostic.Create(Rule, operation.Syntax.GetLocation(), kind));
+            OverfitPerfAnalysis.Report(context, Rule, operation.Syntax.GetLocation(), kind);
         }
 
         private static bool IsToStringOverride(ISymbol containingSymbol)

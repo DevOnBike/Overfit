@@ -54,7 +54,10 @@ namespace DevOnBike.Overfit.DeepLearning
             Kernels = new Parameter(new TensorShape(channels, kSize * kSize), requiresGrad: true, clearData: false);
             var stdDev = MathF.Sqrt(2f / (kSize * kSize));
             var span = Kernels.DataSpan;
-            for (var i = 0; i < span.Length; i++) { span[i] = MathUtils.NextGaussian() * stdDev; }
+            for (var i = 0; i < span.Length; i++)
+            {
+                span[i] = MathUtils.NextGaussian() * stdDev;
+            }
 
             if (useBias)
             {
@@ -62,8 +65,14 @@ namespace DevOnBike.Overfit.DeepLearning
             }
         }
 
-        public Parameter Kernels { get; }
-        public Parameter? Bias { get; }
+        public Parameter Kernels
+        {
+            get;
+        }
+        public Parameter? Bias
+        {
+            get;
+        }
         public bool IsTraining { get; private set; } = true;
 
         public void Train() => IsTraining = true;
@@ -72,7 +81,10 @@ namespace DevOnBike.Overfit.DeepLearning
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
             _kernelsNode ??= Kernels.AsNode();
-            if (Bias is not null) { _biasNode ??= Bias.AsNode(); }
+            if (Bias is not null)
+            {
+                _biasNode ??= Bias.AsNode();
+            }
             return ComputationGraph.DepthwiseConv2DOp(
                 graph, input, _kernelsNode, _channels, _h, _w, _k, _padding, _stride, _biasNode);
         }
@@ -82,7 +94,10 @@ namespace DevOnBike.Overfit.DeepLearning
             _inferenceGraph ??= new ComputationGraph(checked(_channels * _outH * _outW * 4 + 1024));
             _inferenceGraph.Reset();
             _kernelsNode ??= Kernels.AsNode();
-            if (Bias is not null) { _biasNode ??= Bias.AsNode(); }
+            if (Bias is not null)
+            {
+                _biasNode ??= Bias.AsNode();
+            }
 
             var store = new TensorStorage<float>(input.Length, clearMemory: false);
             input.CopyTo(store.AsSpan());
@@ -95,27 +110,41 @@ namespace DevOnBike.Overfit.DeepLearning
         public IEnumerable<AutogradNode> Parameters()
         {
             yield return Kernels.AsNode();
-            if (Bias is not null) { yield return Bias.AsNode(); }
+            if (Bias is not null)
+            {
+                yield return Bias.AsNode();
+            }
         }
 
         public IEnumerable<Parameter> TrainableParameters()
         {
             yield return Kernels;
-            if (Bias is not null) { yield return Bias; }
+            if (Bias is not null)
+            {
+                yield return Bias;
+            }
         }
 
-        public void InvalidateParameterCaches() { }
+        public void InvalidateParameterCaches()
+        {
+        }
 
         public void Save(BinaryWriter bw)
         {
             ArgumentNullException.ThrowIfNull(bw);
             bw.Write(Kernels.Shape.D0);
             bw.Write(Kernels.Shape.D1);
-            foreach (var v in Kernels.DataReadOnlySpan) { bw.Write(v); }
+            foreach (var v in Kernels.DataReadOnlySpan)
+            {
+                bw.Write(v);
+            }
             bw.Write(Bias is not null ? 1 : 0);
             if (Bias is not null)
             {
-                foreach (var v in Bias.DataReadOnlySpan) { bw.Write(v); }
+                foreach (var v in Bias.DataReadOnlySpan)
+                {
+                    bw.Write(v);
+                }
             }
         }
 
@@ -129,12 +158,18 @@ namespace DevOnBike.Overfit.DeepLearning
                 throw new Exception("Depthwise kernel dimensions in file do not match the layer.");
             }
             var kSpan = Kernels.DataSpan;
-            for (var i = 0; i < kSpan.Length; i++) { kSpan[i] = br.ReadSingle(); }
+            for (var i = 0; i < kSpan.Length; i++)
+            {
+                kSpan[i] = br.ReadSingle();
+            }
 
             if (br.ReadInt32() == 1 && Bias is not null)
             {
                 var bSpan = Bias.DataSpan;
-                for (var i = 0; i < bSpan.Length; i++) { bSpan[i] = br.ReadSingle(); }
+                for (var i = 0; i < bSpan.Length; i++)
+                {
+                    bSpan[i] = br.ReadSingle();
+                }
             }
         }
 

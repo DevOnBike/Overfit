@@ -49,9 +49,18 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
             // B stays zero — standard LoRA initialization
         }
 
-        public int InDim { get; }
-        public int OutDim { get; }
-        public int Rank { get; }
+        public int InDim
+        {
+            get;
+        }
+        public int OutDim
+        {
+            get;
+        }
+        public int Rank
+        {
+            get;
+        }
         public long ParameterCount => (long)(InDim + OutDim) * Rank;
 
         public ReadOnlySpan<float> A => _a.AsSpan();

@@ -48,16 +48,28 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         }
 
         /// <summary>Q8 quants, output-major: <c>[OutputSize * InputSize]</c>.</summary>
-        public sbyte[] Quants { get; }
+        public sbyte[] Quants
+        {
+            get;
+        }
 
         /// <summary>Per-block scales, output-major: <c>[OutputSize * InputSize / BlockSize]</c>.</summary>
-        public float[] Scales { get; }
+        public float[] Scales
+        {
+            get;
+        }
 
         /// <summary>Contraction-dimension length (a multiple of <c>Q8DotKernel.BlockSize</c>).</summary>
-        public int InputSize { get; }
+        public int InputSize
+        {
+            get;
+        }
 
         /// <summary>Number of outputs (rows).</summary>
-        public int OutputSize { get; }
+        public int OutputSize
+        {
+            get;
+        }
 
         /// <summary>Resident size in bytes — quants + scales.</summary>
         public long ByteCount => Quants.Length + (long)Scales.Length * sizeof(float);

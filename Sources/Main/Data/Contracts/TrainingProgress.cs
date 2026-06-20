@@ -9,13 +9,22 @@ namespace DevOnBike.Overfit.Data.Contracts
     public sealed record TrainingProgress
     {
         /// <summary>Current epoch number (1-based).</summary>
-        public int Epoch { get; init; }
+        public int Epoch
+        {
+            get; init;
+        }
 
         /// <summary>Total number of epochs configured.</summary>
-        public int TotalEpochs { get; init; }
+        public int TotalEpochs
+        {
+            get; init;
+        }
 
         /// <summary>Average MSE loss across all samples in this epoch.</summary>
-        public float EpochLoss { get; init; }
+        public float EpochLoss
+        {
+            get; init;
+        }
 
         /// <summary>Completion percentage in [0, 100].</summary>
         public float ProgressPct => (float)Epoch / TotalEpochs * 100f;

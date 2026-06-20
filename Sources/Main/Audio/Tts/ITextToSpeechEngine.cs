@@ -15,7 +15,10 @@ namespace DevOnBike.Overfit.Audio.Tts
     public interface ITextToSpeechEngine
     {
         /// <summary>The engine's native output sample rate in Hz.</summary>
-        int SampleRate { get; }
+        int SampleRate
+        {
+            get;
+        }
 
         /// <summary>Synthesizes <paramref name="text"/> in <paramref name="voice"/> into <paramref name="output"/>.</summary>
         void Synthesize(ReadOnlySpan<char> text, VoiceProfile voice, IAudioSink output, TtsOptions options);

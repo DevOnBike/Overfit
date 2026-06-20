@@ -46,15 +46,20 @@ namespace Benchmarks
         [GlobalSetup]
         public void Prime()
         {
-            var a1 = ArrayPool<float>.Shared.Rent(Size); ArrayPool<float>.Shared.Return(a1);
-            var a2 = _configurablePool.Rent(Size); _configurablePool.Return(a2);
+            var a1 = ArrayPool<float>.Shared.Rent(Size);
+            ArrayPool<float>.Shared.Return(a1);
+            var a2 = _configurablePool.Rent(Size);
+            _configurablePool.Return(a2);
         }
 
         [Benchmark(Baseline = true, Description = "ArrayPool<float>.Shared (.NET default)")]
         public float ArrayPoolShared()
         {
             var a = ArrayPool<float>.Shared.Rent(Size);
-            try { return a[0]; }
+            try
+            {
+                return a[0];
+            }
             finally { ArrayPool<float>.Shared.Return(a); }
         }
 
@@ -62,7 +67,10 @@ namespace Benchmarks
         public float ConfigurablePool()
         {
             var a = _configurablePool.Rent(Size);
-            try { return a[0]; }
+            try
+            {
+                return a[0];
+            }
             finally { _configurablePool.Return(a); }
         }
 

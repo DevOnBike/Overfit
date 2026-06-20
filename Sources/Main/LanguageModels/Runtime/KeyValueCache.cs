@@ -90,17 +90,29 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
         }
 
-        public KeyValueCacheShape Shape { get; }
+        public KeyValueCacheShape Shape
+        {
+            get;
+        }
 
-        public KvCacheDType Dtype { get; }
+        public KvCacheDType Dtype
+        {
+            get;
+        }
 
         /// <summary>True when K/V are stored as int8 (<see cref="KvCacheDType.Q8"/>) — attend via
         /// <see cref="CachedAttentionKernel.ComputeSingleHeadQ8"/> / dequantize for the batched path.</summary>
         public bool IsQuantized => Dtype == KvCacheDType.Q8;
 
-        public int CurrentLength { get; private set; }
+        public int CurrentLength
+        {
+            get; private set;
+        }
 
-        public int MaxLength { get; }
+        public int MaxLength
+        {
+            get;
+        }
 
         public bool IsFull => CurrentLength >= MaxLength;
 
@@ -111,7 +123,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// position even after the physical slots have shifted down. 0 until the first
         /// <see cref="Evict"/>.
         /// </summary>
-        public int BasePosition { get; private set; }
+        public int BasePosition
+        {
+            get; private set;
+        }
 
         /// <summary>
         /// Creates a KV cache. For GQA: pass the KV head count (smaller than Q head count).
@@ -433,7 +448,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private void WriteVector(
             float[] f32,
             sbyte[] q8,
-            float[] scales,
+            Span<float> scales,
             int layerIndex,
             int headIndex,
             int position,
@@ -458,8 +473,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         private void DequantizeRange(
             float[] f32,
-            sbyte[] q8,
-            float[] scales,
+            ReadOnlySpan<sbyte> q8,
+            ReadOnlySpan<float> scales,
             int layerIndex,
             int headIndex,
             int fromPosition,

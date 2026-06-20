@@ -6,6 +6,7 @@
 using DevOnBike.Overfit.Anomalies.Monitoring.Contracts;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Runtime;
+using DevOnBike.Overfit.Maths;
 
 namespace DevOnBike.Overfit.Anomalies.Gpt
 {
@@ -120,7 +121,7 @@ namespace DevOnBike.Overfit.Anomalies.Gpt
                     worstScore = score;
                     worstMetric = m;
                     worstActual = actual;
-                    worstExpected = ArgMax(logitBuf);
+                    worstExpected = MathUtils.ArgMax(logitBuf);
                 }
 
                 // Feed actual token to advance position (teacher forcing during scoring)
@@ -157,7 +158,7 @@ namespace DevOnBike.Overfit.Anomalies.Gpt
 
         // ── Private ──────────────────────────────────────────────────────────
 
-        private static float ComputeNegLogProb(float[] logits, int target)
+        private static float ComputeNegLogProb(ReadOnlySpan<float> logits, int target)
         {
             var maxVal = logits[0];
 
@@ -179,19 +180,5 @@ namespace DevOnBike.Overfit.Anomalies.Gpt
             return -(logits[target] - maxVal - MathF.Log(sumExp));
         }
 
-        private static int ArgMax(float[] logits)
-        {
-            var best = 0;
-
-            for (var i = 1; i < logits.Length; i++)
-            {
-                if (logits[i] > logits[best])
-                {
-                    best = i;
-                }
-            }
-
-            return best;
-        }
     }
 }

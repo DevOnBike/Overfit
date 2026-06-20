@@ -27,9 +27,18 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         private readonly long _dataStart;
         private bool _disposed;
 
-        public uint Version { get; }
-        public IReadOnlyDictionary<string, object> Metadata { get; }
-        public IReadOnlyDictionary<string, GgufTensorInfo> Tensors { get; }
+        public uint Version
+        {
+            get;
+        }
+        public IReadOnlyDictionary<string, object> Metadata
+        {
+            get;
+        }
+        public IReadOnlyDictionary<string, GgufTensorInfo> Tensors
+        {
+            get;
+        }
 
         /// <summary>
         /// Byte offset (from the start of the file) of the 32-byte-aligned tensor data
@@ -46,9 +55,18 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
         public GgufReader(Stream stream)
         {
-            if (stream is null) { throw new ArgumentNullException(nameof(stream)); }
-            if (!stream.CanRead) { throw new ArgumentException("Stream must be readable.", nameof(stream)); }
-            if (!stream.CanSeek) { throw new ArgumentException("Stream must be seekable.", nameof(stream)); }
+            if (stream is null)
+            {
+                throw new ArgumentNullException(nameof(stream));
+            }
+            if (!stream.CanRead)
+            {
+                throw new ArgumentException("Stream must be readable.", nameof(stream));
+            }
+            if (!stream.CanSeek)
+            {
+                throw new ArgumentException("Stream must be seekable.", nameof(stream));
+            }
 
             _stream = stream;
             _reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: false);
@@ -109,7 +127,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// </summary>
         public void LoadTensorAsF32(GgufTensorInfo info, Span<float> destination)
         {
-            if (info is null) { throw new ArgumentNullException(nameof(info)); }
+            if (info is null)
+            {
+                throw new ArgumentNullException(nameof(info));
+            }
 
             var elementCount = info.ElementCount;
             if (destination.Length < elementCount)
@@ -176,7 +197,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// </summary>
         public void LoadTensorQ8_0Raw(GgufTensorInfo info, Span<sbyte> quants, Span<float> scales)
         {
-            if (info is null) { throw new ArgumentNullException(nameof(info)); }
+            if (info is null)
+            {
+                throw new ArgumentNullException(nameof(info));
+            }
             if (info.Type != GgmlType.Q8_0)
             {
                 throw new OverfitRuntimeException(
@@ -220,7 +244,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 while (read < bytesToRead)
                 {
                     var n = _stream.Read(buf, read, bytesToRead - read);
-                    if (n == 0) { throw new EndOfStreamException("Unexpected EOF reading Q8_0 tensor."); }
+                    if (n == 0)
+                    {
+                        throw new EndOfStreamException("Unexpected EOF reading Q8_0 tensor.");
+                    }
                     read += n;
                 }
 
@@ -248,7 +275,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// </summary>
         public void LoadTensorQ4_KRaw(GgufTensorInfo info, Span<byte> destination)
         {
-            if (info is null) { throw new ArgumentNullException(nameof(info)); }
+            if (info is null)
+            {
+                throw new ArgumentNullException(nameof(info));
+            }
             if (info.Type != GgmlType.Q4_K)
             {
                 throw new OverfitRuntimeException(
@@ -284,7 +314,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// </summary>
         public void LoadTensorQ6_KRaw(GgufTensorInfo info, Span<byte> destination)
         {
-            if (info is null) { throw new ArgumentNullException(nameof(info)); }
+            if (info is null)
+            {
+                throw new ArgumentNullException(nameof(info));
+            }
             if (info.Type != GgmlType.Q6_K)
             {
                 throw new OverfitRuntimeException(
@@ -313,11 +346,20 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// <summary>Reads a metadata value or returns the default if the key is absent.</summary>
         public T GetMeta<T>(string key, T defaultValue)
         {
-            if (!Metadata.TryGetValue(key, out var value)) { return defaultValue; }
-            if (value is T typed) { return typed; }
+            if (!Metadata.TryGetValue(key, out var value))
+            {
+                return defaultValue;
+            }
+            if (value is T typed)
+            {
+                return typed;
+            }
 
             // Common widening: GGUF may store small ints as uint32, but C# default int is int32.
-            try { return (T)Convert.ChangeType(value, typeof(T))!; }
+            try
+            {
+                return (T)Convert.ChangeType(value, typeof(T))!;
+            }
             catch { return defaultValue; }
         }
 
@@ -345,7 +387,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         {
             var raw = GetMetaArray(key);
             var result = new float[raw.Length];
-            for (var i = 0; i < raw.Length; i++) { result[i] = Convert.ToSingle(raw[i]); }
+            for (var i = 0; i < raw.Length; i++)
+            {
+                result[i] = Convert.ToSingle(raw[i]);
+            }
             return result;
         }
 
@@ -354,7 +399,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         {
             var raw = GetMetaArray(key);
             var result = new int[raw.Length];
-            for (var i = 0; i < raw.Length; i++) { result[i] = Convert.ToInt32(raw[i]); }
+            for (var i = 0; i < raw.Length; i++)
+            {
+                result[i] = Convert.ToInt32(raw[i]);
+            }
             return result;
         }
 
@@ -370,7 +418,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
         public void Dispose()
         {
-            if (_disposed) { return; }
+            if (_disposed)
+            {
+                return;
+            }
             _disposed = true;
             _reader.Dispose();
         }
@@ -380,7 +431,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         private string ReadString()
         {
             var n = _reader.ReadUInt64();
-            if (n > int.MaxValue) { throw new OverfitFormatException($"String length {n} exceeds int.MaxValue."); }
+            if (n > int.MaxValue)
+            {
+                throw new OverfitFormatException($"String length {n} exceeds int.MaxValue.");
+            }
             var bytes = _reader.ReadBytes((int)n);
             return Encoding.UTF8.GetString(bytes);
         }
@@ -389,25 +443,43 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         {
             switch (vtype)
             {
-                case GgufValueType.UInt8: return _reader.ReadByte();
-                case GgufValueType.Int8: return _reader.ReadSByte();
-                case GgufValueType.UInt16: return _reader.ReadUInt16();
-                case GgufValueType.Int16: return _reader.ReadInt16();
-                case GgufValueType.UInt32: return _reader.ReadUInt32();
-                case GgufValueType.Int32: return _reader.ReadInt32();
-                case GgufValueType.Float32: return _reader.ReadSingle();
-                case GgufValueType.Bool: return _reader.ReadBoolean();
-                case GgufValueType.String: return ReadString();
-                case GgufValueType.UInt64: return _reader.ReadUInt64();
-                case GgufValueType.Int64: return _reader.ReadInt64();
-                case GgufValueType.Float64: return _reader.ReadDouble();
+                case GgufValueType.UInt8:
+                    return _reader.ReadByte();
+                case GgufValueType.Int8:
+                    return _reader.ReadSByte();
+                case GgufValueType.UInt16:
+                    return _reader.ReadUInt16();
+                case GgufValueType.Int16:
+                    return _reader.ReadInt16();
+                case GgufValueType.UInt32:
+                    return _reader.ReadUInt32();
+                case GgufValueType.Int32:
+                    return _reader.ReadInt32();
+                case GgufValueType.Float32:
+                    return _reader.ReadSingle();
+                case GgufValueType.Bool:
+                    return _reader.ReadBoolean();
+                case GgufValueType.String:
+                    return ReadString();
+                case GgufValueType.UInt64:
+                    return _reader.ReadUInt64();
+                case GgufValueType.Int64:
+                    return _reader.ReadInt64();
+                case GgufValueType.Float64:
+                    return _reader.ReadDouble();
                 case GgufValueType.Array:
                     {
                         var elemType = (GgufValueType)_reader.ReadUInt32();
                         var count = _reader.ReadUInt64();
-                        if (count > int.MaxValue) { throw new OverfitFormatException("Array too large."); }
+                        if (count > int.MaxValue)
+                        {
+                            throw new OverfitFormatException("Array too large.");
+                        }
                         var arr = new object[(int)count];
-                        for (var i = 0; i < arr.Length; i++) { arr[i] = ReadValue(elemType); }
+                        for (var i = 0; i < arr.Length; i++)
+                        {
+                            arr[i] = ReadValue(elemType);
+                        }
                         return arr;
                     }
                 default:
@@ -422,7 +494,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             while (read < bytes.Length)
             {
                 var n = _stream.Read(bytes[read..]);
-                if (n == 0) { throw new EndOfStreamException("Unexpected EOF reading tensor data."); }
+                if (n == 0)
+                {
+                    throw new EndOfStreamException("Unexpected EOF reading tensor data.");
+                }
                 read += n;
             }
         }
@@ -441,7 +516,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 while (read < bytesToRead)
                 {
                     var n = _stream.Read(buf, read, bytesToRead - read);
-                    if (n == 0) { throw new EndOfStreamException("Unexpected EOF reading F16 tensor."); }
+                    if (n == 0)
+                    {
+                        throw new EndOfStreamException("Unexpected EOF reading F16 tensor.");
+                    }
                     read += n;
                 }
                 for (var k = 0; k < take; k++)
@@ -467,7 +545,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 while (read < bytesToRead)
                 {
                     var n = _stream.Read(buf, read, bytesToRead - read);
-                    if (n == 0) { throw new EndOfStreamException("Unexpected EOF reading BF16 tensor."); }
+                    if (n == 0)
+                    {
+                        throw new EndOfStreamException("Unexpected EOF reading BF16 tensor.");
+                    }
                     read += n;
                 }
                 for (var k = 0; k < take; k++)
@@ -595,7 +676,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// </summary>
         internal void LoadQ5RegionAsF32(GgufTensorInfo info, long elementOffset, Span<float> dst)
         {
-            if (info is null) { throw new ArgumentNullException(nameof(info)); }
+            if (info is null)
+            {
+                throw new ArgumentNullException(nameof(info));
+            }
 
             int blockElems;
             int blockBytes;
@@ -679,7 +763,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 while (read < BlockBytes)
                 {
                     var n = _stream.Read(buf, read, BlockBytes - read);
-                    if (n == 0) { throw new EndOfStreamException("Unexpected EOF reading Q8_0 block."); }
+                    if (n == 0)
+                    {
+                        throw new EndOfStreamException("Unexpected EOF reading Q8_0 block.");
+                    }
                     read += n;
                 }
 

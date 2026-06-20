@@ -668,7 +668,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Demo.TinyShakespeare
                 IsActive = isActive;
             }
 
-            public bool IsActive { get; }
+            public bool IsActive
+            {
+                get;
+            }
 
             public static SingleLogicalProcessorScope TryEnter(
                 ITestOutputHelper output)

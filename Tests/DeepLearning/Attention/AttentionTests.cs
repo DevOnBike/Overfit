@@ -36,7 +36,9 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Attention
             // [B=2, T=4, dk=8] Q,K ; [B=2, T=4, dv=16] V → output [B=2, T=4, dv=16]
             using var g = new ComputationGraph();
             var (q, k, v) = MakeQKV(batch: 2, seq: 4, dk: 8, dv: 16);
-            using var q_ = q; using var k_ = k; using var v_ = v;
+            using var q_ = q;
+            using var k_ = k;
+            using var v_ = v;
 
             using var out_ = TensorMath.ScaledDotProductAttention(g, q, k, v, causalMask: false);
 
@@ -50,7 +52,9 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Attention
         {
             using var g = new ComputationGraph();
             var (q, k, v) = MakeQKV(batch: 1, seq: 6, dk: 4, dv: 4);
-            using var q_ = q; using var k_ = k; using var v_ = v;
+            using var q_ = q;
+            using var k_ = k;
+            using var v_ = v;
 
             using var out_ = TensorMath.ScaledDotProductAttention(g, q, k, v, causalMask: true);
 
@@ -83,8 +87,10 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Attention
             }
 
             // Q = K = ones (uniform attention without mask)
-            var qData = new float[seq * dk]; qData.AsSpan().Fill(1f);
-            var kData = new float[seq * dk]; kData.AsSpan().Fill(1f);
+            var qData = new float[seq * dk];
+            qData.AsSpan().Fill(1f);
+            var kData = new float[seq * dk];
+            kData.AsSpan().Fill(1f);
 
             using var q = MakeNode(qData, 1, seq, dk, true);
             using var k = MakeNode(kData, 1, seq, dk, true);
@@ -113,9 +119,12 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Attention
 
             using var g = new ComputationGraph();
 
-            var qData = new float[seq * dk]; new Random(42).NextFloats(qData);
-            var kData = new float[seq * dk]; new Random(13).NextFloats(kData);
-            var vData = new float[seq * dv]; vData.AsSpan().Fill(1f); // all-ones V
+            var qData = new float[seq * dk];
+            new Random(42).NextFloats(qData);
+            var kData = new float[seq * dk];
+            new Random(13).NextFloats(kData);
+            var vData = new float[seq * dv];
+            vData.AsSpan().Fill(1f); // all-ones V
 
             using var q = MakeNode(qData, 1, seq, dk, false);
             using var k = MakeNode(kData, 1, seq, dk, false);
@@ -150,7 +159,9 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Attention
             var qData = new float[batch * seq * dk];
             var kData = new float[batch * seq * dk];
             var vData = new float[batch * seq * dv];
-            rng.NextFloats(qData); rng.NextFloats(kData); rng.NextFloats(vData);
+            rng.NextFloats(qData);
+            rng.NextFloats(kData);
+            rng.NextFloats(vData);
 
             Func<float[], float[], float[], float> lossFunc = (qD, kD, vD) =>
             {
@@ -218,9 +229,12 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Attention
             // byte-identical row-major layout and the same flat kernels, so
             // forward output AND backward gradients must be BIT-identical.
             var rng = new Random(7);
-            var qData = new float[batch * seq * dk]; rng.NextFloats(qData);
-            var kData = new float[batch * seq * dk]; rng.NextFloats(kData);
-            var vData = new float[batch * seq * dv]; rng.NextFloats(vData);
+            var qData = new float[batch * seq * dk];
+            rng.NextFloats(qData);
+            var kData = new float[batch * seq * dk];
+            rng.NextFloats(kData);
+            var vData = new float[batch * seq * dv];
+            rng.NextFloats(vData);
 
             // 3-D reference path.
             using var g3 = new ComputationGraph();
@@ -299,9 +313,12 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Attention
             int batch, int seq, int dk, int dv)
         {
             var rng = new Random(42);
-            var qData = new float[batch * seq * dk]; rng.NextFloats(qData);
-            var kData = new float[batch * seq * dk]; rng.NextFloats(kData);
-            var vData = new float[batch * seq * dv]; rng.NextFloats(vData);
+            var qData = new float[batch * seq * dk];
+            rng.NextFloats(qData);
+            var kData = new float[batch * seq * dk];
+            rng.NextFloats(kData);
+            var vData = new float[batch * seq * dv];
+            rng.NextFloats(vData);
 
             return (MakeNode(qData, batch, seq, dk, true),
                     MakeNode(kData, batch, seq, dk, true),

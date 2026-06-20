@@ -15,10 +15,16 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
         }
 
         /// <summary>Logical dimensions (ggml stores them reversed; the loader un-reverses).</summary>
-        public int[] Shape { get; }
+        public int[] Shape
+        {
+            get;
+        }
 
         /// <summary>F32 weight values (row-major over <see cref="Shape"/>).</summary>
-        public float[] Data { get; }
+        public float[] Data
+        {
+            get;
+        }
 
         public long ElementCount => Data.Length;
     }

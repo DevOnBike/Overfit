@@ -19,10 +19,19 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
             Payload = payload;
         }
 
-        public string Id { get; }
+        public string Id
+        {
+            get;
+        }
 
-        public float Score { get; }
+        public float Score
+        {
+            get;
+        }
 
-        public string? Payload { get; }
+        public string? Payload
+        {
+            get;
+        }
     }
 }

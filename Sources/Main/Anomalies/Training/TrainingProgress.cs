@@ -9,11 +9,26 @@ namespace DevOnBike.Overfit.Anomalies.Training
     public sealed class TrainingProgress
     {
         public string Phase { get; init; } = string.Empty;
-        public int Step { get; init; }
-        public int TotalSteps { get; init; }
-        public float TrainLoss { get; init; }
-        public float ValLoss { get; init; }
-        public TimeSpan Elapsed { get; init; }
+        public int Step
+        {
+            get; init;
+        }
+        public int TotalSteps
+        {
+            get; init;
+        }
+        public float TrainLoss
+        {
+            get; init;
+        }
+        public float ValLoss
+        {
+            get; init;
+        }
+        public TimeSpan Elapsed
+        {
+            get; init;
+        }
 
         public override string ToString() =>
             $"[{Phase}] {Step}/{TotalSteps} train={TrainLoss:F4} val={ValLoss:F4} {Elapsed:mm\\:ss}";

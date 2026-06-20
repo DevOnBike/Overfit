@@ -13,14 +13,41 @@ namespace DevOnBike.Overfit.DeepLearning
     /// </summary>
     public sealed class LlamaLayerFrozenWeights
     {
-        public required IDequantRowSource Wq { get; init; }
-        public required IDequantRowSource Wk { get; init; }
-        public required IDequantRowSource Wv { get; init; }
-        public required IDequantRowSource Wo { get; init; }
-        public required IDequantRowSource Gate { get; init; }
-        public required IDequantRowSource Up { get; init; }
-        public required IDequantRowSource Down { get; init; }
-        public required float[] Ln1GammaInit { get; init; }
-        public required float[] Ln2GammaInit { get; init; }
+        public required IDequantRowSource Wq
+        {
+            get; init;
+        }
+        public required IDequantRowSource Wk
+        {
+            get; init;
+        }
+        public required IDequantRowSource Wv
+        {
+            get; init;
+        }
+        public required IDequantRowSource Wo
+        {
+            get; init;
+        }
+        public required IDequantRowSource Gate
+        {
+            get; init;
+        }
+        public required IDequantRowSource Up
+        {
+            get; init;
+        }
+        public required IDequantRowSource Down
+        {
+            get; init;
+        }
+        public required float[] Ln1GammaInit
+        {
+            get; init;
+        }
+        public required float[] Ln2GammaInit
+        {
+            get; init;
+        }
     }
 }

@@ -14,7 +14,10 @@ namespace DevOnBike.Overfit.Optimizers.Abstractions
         /// <summary>
         ///     Gets or sets the learning rate, determining the step size taken towards the minimum of the loss function.
         /// </summary>
-        float LearningRate { get; set; }
+        float LearningRate
+        {
+            get; set;
+        }
 
         /// <summary>
         ///     Performs a single optimization step.

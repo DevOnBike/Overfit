@@ -21,9 +21,15 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval.Evaluation
         }
 
         /// <summary>The un-grounded / false-premise question.</summary>
-        public string Query { get; }
+        public string Query
+        {
+            get;
+        }
 
         /// <summary>Optional human note on why this premise is false (for the report).</summary>
-        public string? Note { get; }
+        public string? Note
+        {
+            get;
+        }
     }
 }

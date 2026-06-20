@@ -62,7 +62,10 @@ namespace DevOnBike.Overfit.DeepLearning
         /// <summary>
         /// When true, padding zeros count toward the average divisor (ONNX default: false).
         /// </summary>
-        public bool CountIncludePad { get; }
+        public bool CountIncludePad
+        {
+            get;
+        }
 
         public bool IsTraining { get; private set; } = true;
 
@@ -73,7 +76,9 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void Eval() => IsTraining = false;
 
-        public void PrepareInference() { }
+        public void PrepareInference()
+        {
+        }
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
             => throw new OverfitRuntimeException(
@@ -92,12 +97,20 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public IEnumerable<AutogradNode> Parameters() => [];
 
-        public void InvalidateParameterCaches() { }
+        public void InvalidateParameterCaches()
+        {
+        }
 
-        public void Save(BinaryWriter bw) { }
+        public void Save(BinaryWriter bw)
+        {
+        }
 
-        public void Load(BinaryReader br) { }
+        public void Load(BinaryReader br)
+        {
+        }
 
-        public void Dispose() { }
+        public void Dispose()
+        {
+        }
     }
 }

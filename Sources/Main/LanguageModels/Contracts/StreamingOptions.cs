@@ -19,19 +19,28 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
         /// Stream will end naturally if a stop-token is sampled first.
         /// Default: 256.
         /// </summary>
-        public int MaxTokens { get; init; }
+        public int MaxTokens
+        {
+            get; init;
+        }
 
         /// <summary>
         /// Token IDs that terminate generation when sampled.
         /// The stop token itself is NOT yielded to the consumer.
         /// Default for Qwen-family: empty (caller should set explicit EOS).
         /// </summary>
-        public IReadOnlyList<int> StopTokens { get; init; }
+        public IReadOnlyList<int> StopTokens
+        {
+            get; init;
+        }
 
         /// <summary>
         /// Sampling configuration (temperature, top-p, repetition penalty etc.).
         /// </summary>
-        public SamplingOptions Sampling { get; init; }
+        public SamplingOptions Sampling
+        {
+            get; init;
+        }
 
         public StreamingOptions(
             int maxTokens,

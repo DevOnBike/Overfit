@@ -38,7 +38,8 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             var dir = Path.Combine(Path.GetTempPath(), $"overfit_pipeline_{Guid.NewGuid():N}");
             try
             {
-                MathUtils.SetSeed(100); using var model = new GPT1Model(new GPT1Config
+                MathUtils.SetSeed(100);
+                using var model = new GPT1Model(new GPT1Config
                 {
                     VocabSize = MetricTokenizer.VocabSize,
                     ContextLength = 16 * MetricTokenizer.TokensPerSnapshot,
@@ -52,8 +53,14 @@ namespace DevOnBike.Overfit.Tests.Anomalies
 
                 // Scripted scrapes: ~50 benign, then 5 incidents.
                 var batches = new List<List<RawMetricSeries>>();
-                for (var i = 0; i < 50; i++) { batches.Add(Batch(Normal())); }
-                for (var i = 0; i < 5; i++) { batches.Add(Batch(Anomaly())); }
+                for (var i = 0; i < 50; i++)
+                {
+                    batches.Add(Batch(Normal()));
+                }
+                for (var i = 0; i < 5; i++)
+                {
+                    batches.Add(Batch(Anomaly()));
+                }
 
                 using var cts = new CancellationTokenSource();
                 var source = new ScriptedRawMetricSource(batches, cts);
@@ -106,7 +113,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             }
             finally
             {
-                if (Directory.Exists(dir)) { Directory.Delete(dir, recursive: true); }
+                if (Directory.Exists(dir))
+                {
+                    Directory.Delete(dir, recursive: true);
+                }
             }
         }
 
@@ -185,7 +195,9 @@ namespace DevOnBike.Overfit.Tests.Anomalies
                 return Task.FromResult(_batches.Dequeue());
             }
 
-            public void Dispose() { }
+            public void Dispose()
+            {
+            }
         }
 
         private sealed class CapturingSink : IAlertSink

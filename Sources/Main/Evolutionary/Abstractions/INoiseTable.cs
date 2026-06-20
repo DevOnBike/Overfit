@@ -17,7 +17,10 @@ namespace DevOnBike.Overfit.Evolutionary.Abstractions
         /// <summary>
         ///     Total number of samples in the table.
         /// </summary>
-        int Length { get; }
+        int Length
+        {
+            get;
+        }
 
         /// <summary>
         ///     Returns a zero-allocation view over <paramref name="length"/> consecutive

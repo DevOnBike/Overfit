@@ -9,13 +9,19 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring.Contracts
     public sealed record PrometheusHistoricalSourceConfig
     {
         /// <summary>Prometheus HTTP API base URL, e.g. "http://prometheus:9090".</summary>
-        public required string PrometheusBaseUrl { get; init; }
+        public required string PrometheusBaseUrl
+        {
+            get; init;
+        }
 
         /// <summary>
         ///     PromQL regex matching all pods to monitor, e.g. "my-service-.*".
         ///     Used as pod=~"{PodRegex}" in all queries.
         /// </summary>
-        public required string PodRegex { get; init; }
+        public required string PodRegex
+        {
+            get; init;
+        }
 
         /// <summary>Prometheus dc label value for DataCenter.West.</summary>
         public string DcWestLabel { get; init; } = "west";
@@ -24,10 +30,16 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring.Contracts
         public string DcEastLabel { get; init; } = "east";
 
         /// <summary>Start of the Golden Window to fetch.</summary>
-        public required DateTime RangeStart { get; init; }
+        public required DateTime RangeStart
+        {
+            get; init;
+        }
 
         /// <summary>End of the Golden Window to fetch.</summary>
-        public required DateTime RangeEnd { get; init; }
+        public required DateTime RangeEnd
+        {
+            get; init;
+        }
 
         /// <summary>
         ///     Step between samples — must match Prometheus scrape_interval.

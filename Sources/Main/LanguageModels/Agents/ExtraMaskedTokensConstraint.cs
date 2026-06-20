@@ -33,7 +33,10 @@ namespace DevOnBike.Overfit.LanguageModels.Agents
         public void ApplyMask(Span<float> logits)
         {
             _inner.ApplyMask(logits);
-            if (_inner.IsComplete) { return; }
+            if (_inner.IsComplete)
+            {
+                return;
+            }
 
             foreach (var id in _extra)
             {

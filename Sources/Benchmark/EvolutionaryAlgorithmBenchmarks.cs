@@ -54,13 +54,22 @@ namespace Benchmarks
         private Random _fitnessRng = null!;
 
         [Params(256, 1024)]
-        public int PopulationSize { get; set; }
+        public int PopulationSize
+        {
+            get; set;
+        }
 
         [Params(64, 256)]
-        public int ParameterCount { get; set; }
+        public int ParameterCount
+        {
+            get; set;
+        }
 
         [Params(Algorithm.GA, Algorithm.ES)]
-        public Algorithm Strategy { get; set; }
+        public Algorithm Strategy
+        {
+            get; set;
+        }
 
         public enum Algorithm
         {

@@ -10,8 +10,14 @@ namespace DevOnBike.Overfit.Statistical
 {
     public sealed class GaussianHMM : IDisposable
     {
-        public int StateCount { get; }
-        public int FeatureCount { get; }
+        public int StateCount
+        {
+            get;
+        }
+        public int FeatureCount
+        {
+            get;
+        }
 
         private readonly FastTensor<float> _logPi;
         private readonly FastTensor<float> _logA;

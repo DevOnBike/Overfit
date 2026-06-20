@@ -21,9 +21,15 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval.Evaluation
         }
 
         /// <summary>The user question to embed and search with.</summary>
-        public string Query { get; }
+        public string Query
+        {
+            get;
+        }
 
         /// <summary>The document id(s) a correct retriever must surface in the top-K (any one counts as a hit).</summary>
-        public IReadOnlyList<string> ExpectedSourceIds { get; }
+        public IReadOnlyList<string> ExpectedSourceIds
+        {
+            get;
+        }
     }
 }

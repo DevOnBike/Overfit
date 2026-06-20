@@ -51,12 +51,23 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
                 {
                     var a = f32[o * inputSize + i];
                     var b = row[i];
-                    dot += a * b; na += a * (double)a; nb += b * (double)b;
+                    dot += a * b;
+                    na += a * (double)a;
+                    nb += b * (double)b;
                     var e = Math.Abs(a - b);
-                    if (e > maxAbs) { maxAbs = e; }
+                    if (e > maxAbs)
+                    {
+                        maxAbs = e;
+                    }
                     sumSq += e * (double)e;
-                    if (a < lo) { lo = a; }
-                    if (a > hi) { hi = a; }
+                    if (a < lo)
+                    {
+                        lo = a;
+                    }
+                    if (a > hi)
+                    {
+                        hi = a;
+                    }
                 }
                 sumRange += hi - lo;
             }
@@ -87,7 +98,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             weight.DecodeRow(0, row);
 
             double maxAbs = 0;
-            for (var i = 0; i < inputSize; i++) { maxAbs = Math.Max(maxAbs, Math.Abs(0.37f - row[i])); }
+            for (var i = 0; i < inputSize; i++)
+            {
+                maxAbs = Math.Max(maxAbs, Math.Abs(0.37f - row[i]));
+            }
             _out.WriteLine($"constant-row maxAbs {maxAbs:E3}");
             // A constant sub-block has zero range → quantizes to a single min; near-exact.
             Assert.True(maxAbs < 1e-3, $"constant row not reproduced: {maxAbs:E3}");

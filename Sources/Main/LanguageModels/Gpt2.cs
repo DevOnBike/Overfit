@@ -43,7 +43,10 @@ namespace DevOnBike.Overfit.LanguageModels
         private bool _disposed;
 
         /// <summary>Configuration this instance was loaded with (Small / Medium / Large / XL).</summary>
-        public GPT1Config Config { get; }
+        public GPT1Config Config
+        {
+            get;
+        }
 
         /// <summary>GPT-2 BPE tokenizer loaded from the supplied vocab.json + merges.txt.</summary>
         public ITokenizer Tokenizer => _tokenizer;
@@ -156,7 +159,10 @@ namespace DevOnBike.Overfit.LanguageModels
 
         public void Dispose()
         {
-            if (_disposed) { return; }
+            if (_disposed)
+            {
+                return;
+            }
             _disposed = true;
 
             // Engine first — it holds references to weights/storage owned by the
@@ -167,7 +173,10 @@ namespace DevOnBike.Overfit.LanguageModels
 
         private void ThrowIfDisposed()
         {
-            if (_disposed) { throw new ObjectDisposedException(nameof(Gpt2)); }
+            if (_disposed)
+            {
+                throw new ObjectDisposedException(nameof(Gpt2));
+            }
         }
 
         private static Gpt2 LoadFromDir(string modelDir, string sizeSuffix, GPT1Config config)

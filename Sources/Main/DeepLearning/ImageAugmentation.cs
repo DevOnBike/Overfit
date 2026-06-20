@@ -38,11 +38,17 @@ namespace DevOnBike.Overfit.DeepLearning
                 for (var y = 0; y < height; y++)
                 {
                     var sy = y - dy;
-                    if (sy < 0 || sy >= height) { continue; }
+                    if (sy < 0 || sy >= height)
+                    {
+                        continue;
+                    }
                     for (var x = 0; x < width; x++)
                     {
                         var sx = x - dx;
-                        if (sx < 0 || sx >= width) { continue; }
+                        if (sx < 0 || sx >= width)
+                        {
+                            continue;
+                        }
                         destination[plane + y * width + x] = source[plane + sy * width + sx];
                     }
                 }
@@ -53,7 +59,10 @@ namespace DevOnBike.Overfit.DeepLearning
         public static void AddGaussianNoise(Span<float> image, float sigma, Random rng)
         {
             ArgumentNullException.ThrowIfNull(rng);
-            if (sigma <= 0f) { return; }
+            if (sigma <= 0f)
+            {
+                return;
+            }
             for (var i = 0; i < image.Length; i++)
             {
                 image[i] += sigma * NextGaussian(rng);

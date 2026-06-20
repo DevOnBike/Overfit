@@ -16,7 +16,10 @@ namespace DevOnBike.Overfit.Mcp.Protocol
         public string JsonRpc { get; set; } = "2.0";
 
         [JsonPropertyName("id")]
-        public JsonElement Id { get; set; }
+        public JsonElement Id
+        {
+            get; set;
+        }
 
         [JsonPropertyName("error")]
         public ErrorBody Error { get; set; } = new();
@@ -24,7 +27,10 @@ namespace DevOnBike.Overfit.Mcp.Protocol
         public sealed class ErrorBody
         {
             [JsonPropertyName("code")]
-            public int Code { get; set; }
+            public int Code
+            {
+                get; set;
+            }
 
             [JsonPropertyName("message")]
             public string Message { get; set; } = string.Empty;

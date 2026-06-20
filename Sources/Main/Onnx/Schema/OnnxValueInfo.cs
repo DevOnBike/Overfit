@@ -8,7 +8,10 @@ namespace DevOnBike.Overfit.Onnx.Schema
     public sealed class OnnxValueInfo
     {
         public string Name { get; init; } = "";
-        public OnnxDataType DataType { get; init; }
+        public OnnxDataType DataType
+        {
+            get; init;
+        }
 
         /// <summary>
         /// Per-dimension sizes. Null entry = dynamic/symbolic dimension.

@@ -96,9 +96,20 @@ namespace DevOnBike.Overfit.Audio.Tts.Snac
             public Conv1dCtx(float* inp, float* w, float* b, float* d, int inC, int tIn, int outC,
                 int kSize, int stride, int pad, int dilation, int icPerGroup, int ocPerGroup, int tOut)
             {
-                In = inp; W = w; B = b; D = d;
-                InC = inC; TIn = tIn; OutC = outC; KSize = kSize; Stride = stride; Pad = pad; Dilation = dilation;
-                IcPerGroup = icPerGroup; OcPerGroup = ocPerGroup; TOut = tOut;
+                In = inp;
+                W = w;
+                B = b;
+                D = d;
+                InC = inC;
+                TIn = tIn;
+                OutC = outC;
+                KSize = kSize;
+                Stride = stride;
+                Pad = pad;
+                Dilation = dilation;
+                IcPerGroup = icPerGroup;
+                OcPerGroup = ocPerGroup;
+                TOut = tOut;
             }
         }
 
@@ -179,8 +190,18 @@ namespace DevOnBike.Overfit.Audio.Tts.Snac
             public ConvTCtx(float* inp, float* w, float* b, float* d,
                 int inC, int tIn, int outC, int kSize, int stride, int pad, int dilation, int tOut)
             {
-                In = inp; W = w; B = b; D = d;
-                InC = inC; TIn = tIn; OutC = outC; KSize = kSize; Stride = stride; Pad = pad; Dilation = dilation; TOut = tOut;
+                In = inp;
+                W = w;
+                B = b;
+                D = d;
+                InC = inC;
+                TIn = tIn;
+                OutC = outC;
+                KSize = kSize;
+                Stride = stride;
+                Pad = pad;
+                Dilation = dilation;
+                TOut = tOut;
             }
         }
 

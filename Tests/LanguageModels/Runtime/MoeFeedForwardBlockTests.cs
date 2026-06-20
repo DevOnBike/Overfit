@@ -39,7 +39,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             var expected = new float[DModel];
             reference.DecodeSwiGlu(hidden, gate[1].F32, up[1].F32, down[1].F32, expected);
 
-            for (var d = 0; d < DModel; d++) { Assert.Equal(expected[d], actual[d], 4); }
+            for (var d = 0; d < DModel; d++)
+            {
+                Assert.Equal(expected[d], actual[d], 4);
+            }
         }
 
         [Fact]
@@ -66,12 +69,18 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             for (var i = 0; i < 2; i++)
             {
                 reference.DecodeSwiGlu(hidden, gate[idx[i]].F32, up[idx[i]].F32, down[idx[i]].F32, scratch);
-                for (var d = 0; d < DModel; d++) { expected[d] += w[i] * scratch[d]; }
+                for (var d = 0; d < DModel; d++)
+                {
+                    expected[d] += w[i] * scratch[d];
+                }
             }
 
             // The two experts must actually differ, or the test proves nothing about selection.
             Assert.NotEqual(idx[0], idx[1]);
-            for (var d = 0; d < DModel; d++) { Assert.Equal(expected[d], actual[d], 4); }
+            for (var d = 0; d < DModel; d++)
+            {
+                Assert.Equal(expected[d], actual[d], 4);
+            }
         }
 
         // ── helpers ───────────────────────────────────────────────────────────
@@ -94,14 +103,20 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         {
             var storage = TensorStorage<float>.Unpooled(n);
             var span = storage.AsSpan();
-            for (var i = 0; i < n; i++) { span[i] = MathF.Sin(seed * 0.1f + i * 0.37f) * 0.2f; }
+            for (var i = 0; i < n; i++)
+            {
+                span[i] = MathF.Sin(seed * 0.1f + i * 0.37f) * 0.2f;
+            }
             return storage;
         }
 
         private static float[] Vector(int n, int seed)
         {
             var v = new float[n];
-            for (var i = 0; i < n; i++) { v[i] = MathF.Cos(seed * 0.2f + i * 0.5f) * 0.5f; }
+            for (var i = 0; i < n; i++)
+            {
+                v[i] = MathF.Cos(seed * 0.2f + i * 0.5f) * 0.5f;
+            }
             return v;
         }
 
@@ -109,7 +124,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         private static float[] RouterFavouring(int expert)
         {
             var w = new float[DModel * ExpertCount];
-            for (var d = 0; d < DModel; d++) { w[d * ExpertCount + expert] = 10f; }
+            for (var d = 0; d < DModel; d++)
+            {
+                w[d * ExpertCount + expert] = 10f;
+            }
             return w;
         }
 
@@ -119,7 +137,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             var w = new float[DModel * ExpertCount];
             for (var d = 0; d < DModel; d++)
             {
-                for (var e = 0; e < ExpertCount; e++) { w[d * ExpertCount + e] = cols[e]; }
+                for (var e = 0; e < ExpertCount; e++)
+                {
+                    w[d * ExpertCount + e] = cols[e];
+                }
             }
             return w;
         }

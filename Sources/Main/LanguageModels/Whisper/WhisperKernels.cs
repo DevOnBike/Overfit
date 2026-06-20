@@ -6,6 +6,7 @@
 using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Runtime;
+using DevOnBike.Overfit.Tensors;
 
 namespace DevOnBike.Overfit.LanguageModels.Whisper
 {
@@ -44,13 +45,23 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
                 var row = x.Slice(r * dim, dim);
                 var outRow = dst.Slice(r * dim, dim);
                 var mean = 0f;
-                for (var i = 0; i < dim; i++) { mean += row[i]; }
+                for (var i = 0; i < dim; i++)
+                {
+                    mean += row[i];
+                }
                 mean /= dim;
                 var variance = 0f;
-                for (var i = 0; i < dim; i++) { var d = row[i] - mean; variance += d * d; }
+                for (var i = 0; i < dim; i++)
+                {
+                    var d = row[i] - mean;
+                    variance += d * d;
+                }
                 variance /= dim;
                 var inv = 1f / MathF.Sqrt(variance + eps);
-                for (var i = 0; i < dim; i++) { outRow[i] = (row[i] - mean) * inv * gamma[i] + beta[i]; }
+                for (var i = 0; i < dim; i++)
+                {
+                    outRow[i] = (row[i] - mean) * inv * gamma[i] + beta[i];
+                }
             }
         }
 
@@ -94,7 +105,12 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             public readonly int InDim, OutDim;
             public LinearCtx(float* x, float* w, float* b, float* d, int inDim, int outDim)
             {
-                X = x; W = w; B = b; D = d; InDim = inDim; OutDim = outDim;
+                X = x;
+                W = w;
+                B = b;
+                D = d;
+                InDim = inDim;
+                OutDim = outDim;
             }
         }
 
@@ -163,7 +179,16 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             public readonly int InC, TIn, KSize, Stride, Pad, TOut;
             public Conv1dCtx(float* inp, float* w, float* b, float* d, int inC, int tIn, int kSize, int stride, int pad, int tOut)
             {
-                In = inp; W = w; B = b; D = d; InC = inC; TIn = tIn; KSize = kSize; Stride = stride; Pad = pad; TOut = tOut;
+                In = inp;
+                W = w;
+                B = b;
+                D = d;
+                InC = inC;
+                TIn = tIn;
+                KSize = kSize;
+                Stride = stride;
+                Pad = pad;
+                TOut = tOut;
             }
         }
 
@@ -196,13 +221,29 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             ReadOnlySpan<float> wo, ReadOnlySpan<float> bo,
             Span<float> dst, bool causal)
         {
-            var q = new float[tq * dModel];
-            var k = new float[tkv * dModel];
-            var v = new float[tkv * dModel];
-            var attnOut = new float[tq * dModel];
-            var scores = new float[tkv];
-            MultiHeadAttention(xq, tq, xkv, tkv, dModel, nHeads, wq, bq, wk, wv, bv, wo, bo, dst, causal,
-                q, k, v, attnOut, scores);
+            // Convenience overload: rent the q/k/v/attnOut/scores scratch from the pool (exact-length
+            // slices) and delegate to the allocation-free overload. The serving paths (encoder, cached
+            // decode) call that overload directly with their own reused scratch and never reach here.
+            var qLen = tq * dModel;
+            var kvLen = tkv * dModel;
+            var qArr = PooledBuffer<float>.RentArray(qLen);
+            var kArr = PooledBuffer<float>.RentArray(kvLen);
+            var vArr = PooledBuffer<float>.RentArray(kvLen);
+            var attnOutArr = PooledBuffer<float>.RentArray(qLen);
+            var scoresArr = PooledBuffer<float>.RentArray(tkv);
+            try
+            {
+                MultiHeadAttention(xq, tq, xkv, tkv, dModel, nHeads, wq, bq, wk, wv, bv, wo, bo, dst, causal,
+                    qArr.AsSpan(0, qLen), kArr.AsSpan(0, kvLen), vArr.AsSpan(0, kvLen), attnOutArr.AsSpan(0, qLen), scoresArr.AsSpan(0, tkv));
+            }
+            finally
+            {
+                PooledBuffer<float>.ReturnArray(qArr);
+                PooledBuffer<float>.ReturnArray(kArr);
+                PooledBuffer<float>.ReturnArray(vArr);
+                PooledBuffer<float>.ReturnArray(attnOutArr);
+                PooledBuffer<float>.ReturnArray(scoresArr);
+            }
         }
 
         /// <summary>
@@ -258,10 +299,18 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
                 {
                     var s = TensorPrimitives.Dot(qi, k.Slice(j * dModel + off, dHead)) * scale;
                     scores[j] = s;
-                    if (s > max) { max = s; }
+                    if (s > max)
+                    {
+                        max = s;
+                    }
                 }
                 var sum = 0f;
-                for (var j = 0; j < valid; j++) { var e = MathF.Exp(scores[j] - max); scores[j] = e; sum += e; }
+                for (var j = 0; j < valid; j++)
+                {
+                    var e = MathF.Exp(scores[j] - max);
+                    scores[j] = e;
+                    sum += e;
+                }
                 var inv = 1f / sum;
 
                 var outRow = attnOut.Slice(i * dModel + off, dHead);
@@ -281,14 +330,24 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             public readonly bool Causal;
             public MhaCtx(float* q, float* k, float* v, float* a, int tq, int tkv, int dModel, int dHead, float scale, bool causal)
             {
-                Q = q; K = k; V = v; A = a; Tq = tq; Tkv = tkv; DModel = dModel; DHead = dHead; Scale = scale; Causal = causal;
+                Q = q;
+                K = k;
+                V = v;
+                A = a;
+                Tq = tq;
+                Tkv = tkv;
+                DModel = dModel;
+                DHead = dHead;
+                Scale = scale;
+                Causal = causal;
             }
         }
 
         private static void MhaWorker(int start, int end, void* ctxPtr)
         {
             ref var c = ref Unsafe.AsRef<MhaCtx>(ctxPtr);
-            Span<float> scores = c.Tkv <= 8192 ? stackalloc float[c.Tkv] : new float[c.Tkv];
+            using var scoresPool = c.Tkv <= 8192 ? default : new PooledBuffer<float>(c.Tkv, clearMemory: false);
+            Span<float> scores = c.Tkv <= 8192 ? stackalloc float[c.Tkv] : scoresPool.Span;
             var q = new ReadOnlySpan<float>(c.Q, c.Tq * c.DModel);
             var k = new ReadOnlySpan<float>(c.K, c.Tkv * c.DModel);
             var v = new ReadOnlySpan<float>(c.V, c.Tkv * c.DModel);
@@ -320,10 +379,18 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
                 {
                     var s = TensorPrimitives.Dot(qh, cacheK.Slice(j * dModel + off, dHead)) * scale;
                     scores[j] = s;
-                    if (s > max) { max = s; }
+                    if (s > max)
+                    {
+                        max = s;
+                    }
                 }
                 var sum = 0f;
-                for (var j = 0; j < len; j++) { var e = MathF.Exp(scores[j] - max); scores[j] = e; sum += e; }
+                for (var j = 0; j < len; j++)
+                {
+                    var e = MathF.Exp(scores[j] - max);
+                    scores[j] = e;
+                    sum += e;
+                }
                 var inv = 1f / sum;
 
                 var outH = dst.Slice(off, dHead);

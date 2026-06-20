@@ -184,6 +184,32 @@ automatically. There is no `Google.Protobuf` dependency — protobuf parsing is
 hand-rolled in `Sources/Main/Onnx/`. Unsupported operators throw a clear
 `NotSupportedException` naming the operator.
 
+## Performance work — measure, don't assume
+
+**Two passes, never one.** Write the correct algorithm first — the clearest expression that gets the math
+right — and pin it with tests (parity against a reference / known-good output, ideally box-independent like
+a cosine-vs-ORT or FD check). Only once correctness is green do you make a **second, separate** iteration
+for performance, keeping the validated version as the baseline you A/B against and the parity test as the
+guard that the fast path still matches. Do not fuse the two: a clever kernel written before its correctness
+is proven is unverifiable, and a perf change that also alters behaviour can't be A/B-isolated. This is how
+Winograd (parity cos 1.0 first, *then* measured → reverted as a negative) and whole-matrix Q4_K attention
+(split-after parity pinned, *then* a go/no-go micro-bench before any refactor) were done.
+
+Every perf change is a **hypothesis until measured**. Benchmark before/after with BenchmarkDotNet +
+`MemoryDiagnoser`, **best-of-N on BOTH sides**, and A/B-isolate the one lever you changed. Document
+**negative results** honestly — they are the most valuable output: in this codebase
+register-blocking (direct-conv), K-blocking + A-packing (im2col GEMM), Winograd F(2,3) for 3x3 stride-1
+convs (parity-correct cos 1.0 but +79% slower on deepcnn, 119.7→214.4 ms — sequential scalar transforms +
+16 small GEMMs + 16x U/V/M blow-up beat the 2.25x FLOP cut), the AVX-512 decode port, and
+`OverfitPool<T>` all **regressed or tied and were reverted**; the wins were the *opposite* of the
+"obvious" move (`TensorPrimitives` bulk-SIMD beat a hand micro-kernel; the simple register-blocked
+GEMM beat the cache-blocked one — structure of the data around the technique decides, not the
+technique). Mind the **measurement environment**: a thermally-throttled or loaded box invalidates
+A/B (detect it with a *canary* — re-measure an unchanged code path; if it shifted, the box did, not
+your change). The decode spin-pool assumes dedicated cores, so it is sensitive to background load.
+Never ship, claim, or commit a perf "win" you have not measured on a stable box — and prefer
+measuring over reasoning even when the reasoning feels airtight.
+
 ## Test discipline
 
 Read `Tests/README.md` and `Tests/LanguageModels/README.md` before adding

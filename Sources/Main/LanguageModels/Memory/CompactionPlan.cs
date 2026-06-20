@@ -25,11 +25,20 @@ namespace DevOnBike.Overfit.LanguageModels.Memory
             RecentToKeep = recentToKeep;
         }
 
-        public IReadOnlyList<ChatMessage> SystemMessages { get; }
+        public IReadOnlyList<ChatMessage> SystemMessages
+        {
+            get;
+        }
 
-        public IReadOnlyList<ChatMessage> ToSummarize { get; }
+        public IReadOnlyList<ChatMessage> ToSummarize
+        {
+            get;
+        }
 
-        public IReadOnlyList<ChatMessage> RecentToKeep { get; }
+        public IReadOnlyList<ChatMessage> RecentToKeep
+        {
+            get;
+        }
 
         /// <summary>True when the plan actually reduces history (there is something to summarize).</summary>
         public bool HasWork => ToSummarize.Count > 0;

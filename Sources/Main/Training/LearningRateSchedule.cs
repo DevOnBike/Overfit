@@ -22,7 +22,10 @@ namespace DevOnBike.Overfit.Training
         {
             ArgumentOutOfRangeException.ThrowIfNegative(step);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(totalSteps);
-            if (totalSteps == 1) { return minLr; }
+            if (totalSteps == 1)
+            {
+                return minLr;
+            }
 
             var progress = Math.Clamp(step / (float)(totalSteps - 1), 0f, 1f);
             return minLr + 0.5f * (maxLr - minLr) * (1f + MathF.Cos(MathF.PI * progress));

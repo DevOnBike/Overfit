@@ -37,7 +37,10 @@ namespace DevOnBike.Overfit.Demo.Gpt2Console
             try
             {
                 var opts = CliOptions.Parse(args);
-                if (opts is null) { return 0; }  // --help was printed
+                if (opts is null)
+                {
+                    return 0;
+                }  // --help was printed
 
                 Run(opts);
                 return 0;
@@ -194,9 +197,18 @@ namespace DevOnBike.Overfit.Demo.Gpt2Console
 
         private sealed class CliOptions
         {
-            public string? ModelPath { get; set; }
-            public string? VocabPath { get; set; }
-            public string? MergesPath { get; set; }
+            public string? ModelPath
+            {
+                get; set;
+            }
+            public string? VocabPath
+            {
+                get; set;
+            }
+            public string? MergesPath
+            {
+                get; set;
+            }
             public string Prompt { get; set; } = "The future of software development is";
             public int MaxTokens { get; set; } = 32;
             public string Size { get; set; } = "Small";
@@ -212,12 +224,24 @@ namespace DevOnBike.Overfit.Demo.Gpt2Console
                         case "--help":
                             PrintHelp();
                             return null;
-                        case "--model": o.ModelPath = Take(args, ref i); break;
-                        case "--vocab": o.VocabPath = Take(args, ref i); break;
-                        case "--merges": o.MergesPath = Take(args, ref i); break;
-                        case "--prompt": o.Prompt = Take(args, ref i); break;
-                        case "--tokens": o.MaxTokens = int.Parse(Take(args, ref i)); break;
-                        case "--size": o.Size = Take(args, ref i); break;
+                        case "--model":
+                            o.ModelPath = Take(args, ref i);
+                            break;
+                        case "--vocab":
+                            o.VocabPath = Take(args, ref i);
+                            break;
+                        case "--merges":
+                            o.MergesPath = Take(args, ref i);
+                            break;
+                        case "--prompt":
+                            o.Prompt = Take(args, ref i);
+                            break;
+                        case "--tokens":
+                            o.MaxTokens = int.Parse(Take(args, ref i));
+                            break;
+                        case "--size":
+                            o.Size = Take(args, ref i);
+                            break;
                         default:
                             throw new ArgumentException($"Unknown argument: {args[i]}");
                     }

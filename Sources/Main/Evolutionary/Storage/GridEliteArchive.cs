@@ -99,11 +99,17 @@ namespace DevOnBike.Overfit.Evolutionary.Storage
             _qdScore = 0f;
         }
 
-        public int DescriptorDimensions { get; }
+        public int DescriptorDimensions
+        {
+            get;
+        }
 
         public int ParameterCount => _parameterCount;
 
-        public int CellCount { get; }
+        public int CellCount
+        {
+            get;
+        }
 
         public int OccupiedCount
         {

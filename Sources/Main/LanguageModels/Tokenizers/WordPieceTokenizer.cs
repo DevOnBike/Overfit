@@ -55,13 +55,19 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             foreach (var kv in vocab)
             {
                 _vocab[kv.Key] = kv.Value;
-                if (kv.Value > maxId) { maxId = kv.Value; }
+                if (kv.Value > maxId)
+                {
+                    maxId = kv.Value;
+                }
             }
 
             _inverse = new string[maxId + 1];
             foreach (var kv in _vocab)
             {
-                if ((uint)kv.Value < (uint)_inverse.Length) { _inverse[kv.Value] = kv.Key; }
+                if ((uint)kv.Value < (uint)_inverse.Length)
+                {
+                    _inverse[kv.Value] = kv.Key;
+                }
             }
 
             _doLowerCase = doLowerCase;
@@ -128,9 +134,15 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
         {
             ArgumentNullException.ThrowIfNull(text);
             var ids = new List<int>(text.Length + 2);
-            if (addSpecialTokens) { ids.Add(_clsId); }
+            if (addSpecialTokens)
+            {
+                ids.Add(_clsId);
+            }
             TokenizeInto(text, ids);
-            if (addSpecialTokens) { ids.Add(_sepId); }
+            if (addSpecialTokens)
+            {
+                ids.Add(_sepId);
+            }
             return ids.ToArray();
         }
 
@@ -174,9 +186,15 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             var sb = new StringBuilder();
             foreach (var id in tokens)
             {
-                if ((uint)id >= (uint)_inverse.Length) { continue; }
+                if ((uint)id >= (uint)_inverse.Length)
+                {
+                    continue;
+                }
                 var tok = _inverse[id];
-                if (tok is null || id == _clsId || id == _sepId || id == _padId) { continue; }
+                if (tok is null || id == _clsId || id == _sepId || id == _padId)
+                {
+                    continue;
+                }
 
                 if (tok.StartsWith(ContinuationPrefix, StringComparison.Ordinal))
                 {
@@ -184,7 +202,10 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
                 }
                 else
                 {
-                    if (sb.Length > 0) { sb.Append(' '); }
+                    if (sb.Length > 0)
+                    {
+                        sb.Append(' ');
+                    }
                     sb.Append(tok);
                 }
             }
@@ -209,7 +230,10 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
             var cleaned = new StringBuilder(text.Length);
             foreach (var ch in text)
             {
-                if (ch == '\0' || ch == '�' || IsControl(ch)) { continue; }
+                if (ch == '\0' || ch == '�' || IsControl(ch))
+                {
+                    continue;
+                }
                 cleaned.Append(IsWhitespace(ch) ? ' ' : ch);
             }
 
@@ -328,13 +352,19 @@ namespace DevOnBike.Overfit.LanguageModels.Tokenizers
 
         private static bool IsWhitespace(char ch)
         {
-            if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') { return true; }
+            if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r')
+            {
+                return true;
+            }
             return CharUnicodeInfo.GetUnicodeCategory(ch) == UnicodeCategory.SpaceSeparator;
         }
 
         private static bool IsControl(char ch)
         {
-            if (ch == '\t' || ch == '\n' || ch == '\r') { return false; }
+            if (ch == '\t' || ch == '\n' || ch == '\r')
+            {
+                return false;
+            }
             var cat = CharUnicodeInfo.GetUnicodeCategory(ch);
             return cat == UnicodeCategory.Control || cat == UnicodeCategory.Format;
         }

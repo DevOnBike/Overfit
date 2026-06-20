@@ -28,7 +28,10 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
         {
             for (var i = 0; i < Codes.Length; i++)
             {
-                if (string.Equals(Codes[i], code, StringComparison.OrdinalIgnoreCase)) { return i; }
+                if (string.Equals(Codes[i], code, StringComparison.OrdinalIgnoreCase))
+                {
+                    return i;
+                }
             }
             return -1;
         }

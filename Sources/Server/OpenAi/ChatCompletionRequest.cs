@@ -15,25 +15,57 @@ namespace DevOnBike.Overfit.Server.OpenAi
 
     public sealed class ChatCompletionRequest
     {
-        [JsonPropertyName("model")] public string? Model { get; set; }
+        [JsonPropertyName("model")]
+        public string? Model
+        {
+            get; set;
+        }
         [JsonPropertyName("messages")] public List<OpenAiMessage> Messages { get; set; } = [];
-        [JsonPropertyName("stream")] public bool Stream { get; set; }
-        [JsonPropertyName("temperature")] public float? Temperature { get; set; }
-        [JsonPropertyName("top_p")] public float? TopP { get; set; }
+        [JsonPropertyName("stream")]
+        public bool Stream
+        {
+            get; set;
+        }
+        [JsonPropertyName("temperature")]
+        public float? Temperature
+        {
+            get; set;
+        }
+        [JsonPropertyName("top_p")]
+        public float? TopP
+        {
+            get; set;
+        }
 
         /// <summary>Min-P sampling cutoff — a llama.cpp-server extension (not in the OpenAI spec) that common
         /// local-AI clients send: keep tokens with probability ≥ <c>min_p</c> × P(top). 0 / absent = off.</summary>
-        [JsonPropertyName("min_p")] public float? MinP { get; set; }
+        [JsonPropertyName("min_p")]
+        public float? MinP
+        {
+            get; set;
+        }
 
-        [JsonPropertyName("max_tokens")] public int? MaxTokens { get; set; }
+        [JsonPropertyName("max_tokens")]
+        public int? MaxTokens
+        {
+            get; set;
+        }
 
         /// <summary>Newer OpenAI field name for the generation cap; honoured if <c>max_tokens</c> is absent.</summary>
-        [JsonPropertyName("max_completion_tokens")] public int? MaxCompletionTokens { get; set; }
+        [JsonPropertyName("max_completion_tokens")]
+        public int? MaxCompletionTokens
+        {
+            get; set;
+        }
 
         /// <summary><c>{"type":"json_object"}</c> → guaranteed well-formed JSON;
         /// <c>{"type":"json_schema","json_schema":{"schema":{...}}}</c> → output constrained to conform to the
         /// schema; absent / <c>{"type":"text"}</c> → unconstrained.</summary>
-        [JsonPropertyName("response_format")] public JsonElement? ResponseFormat { get; set; }
+        [JsonPropertyName("response_format")]
+        public JsonElement? ResponseFormat
+        {
+            get; set;
+        }
     }
 
 }

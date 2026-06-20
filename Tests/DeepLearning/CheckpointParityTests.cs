@@ -39,9 +39,15 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
 
             // Source data as plain arrays (AutogradNode.Dispose frees its storage, so each run gets a copy).
             var xData = new float[n * inDim];
-            for (var i = 0; i < xData.Length; i++) { xData[i] = (float)(rng.NextDouble() - 0.5); }
+            for (var i = 0; i < xData.Length; i++)
+            {
+                xData[i] = (float)(rng.NextDouble() - 0.5);
+            }
             var yData = new float[n * outDim];
-            for (var b = 0; b < n; b++) { yData[b * outDim + (b % outDim)] = 1f; }
+            for (var b = 0; b < n; b++)
+            {
+                yData[b * outDim + (b % outDim)] = 1f;
+            }
 
             AutogradNode Segment(ComputationGraph g, AutogradNode input)
                 => fc2.Forward(g, TensorMath.ReLU(g, fc1.Forward(g, input)));
@@ -90,15 +96,24 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
 
             // A deep MLP: depth × (Linear dim→dim + ReLU). Each layer's hidden is a kept activation.
             var layers = new LinearLayer[depth];
-            for (var l = 0; l < depth; l++) { layers[l] = new LinearLayer(dim, dim); }
+            for (var l = 0; l < depth; l++)
+            {
+                layers[l] = new LinearLayer(dim, dim);
+            }
 
             var xData = new float[n * dim];
-            for (var i = 0; i < xData.Length; i++) { xData[i] = (float)(rng.NextDouble() - 0.5); }
+            for (var i = 0; i < xData.Length; i++)
+            {
+                xData[i] = (float)(rng.NextDouble() - 0.5);
+            }
 
             AutogradNode Segment(ComputationGraph g, AutogradNode input)
             {
                 var h = input;
-                for (var l = 0; l < depth; l++) { h = TensorMath.ReLU(g, layers[l].Forward(g, h)); }
+                for (var l = 0; l < depth; l++)
+                {
+                    h = TensorMath.ReLU(g, layers[l].Forward(g, h));
+                }
                 return h;
             }
 
@@ -139,9 +154,15 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
             };
 
             var tokenIds = new int[b * t];
-            for (var i = 0; i < tokenIds.Length; i++) { tokenIds[i] = (i * 7) % vocab; }
+            for (var i = 0; i < tokenIds.Length; i++)
+            {
+                tokenIds[i] = (i * 7) % vocab;
+            }
             var targets = new float[b * t * vocab];
-            for (var r = 0; r < b * t; r++) { targets[r * vocab + ((r * 3) % vocab)] = 1f; }
+            for (var r = 0; r < b * t; r++)
+            {
+                targets[r * vocab + ((r * 3) % vocab)] = 1f;
+            }
 
             (float[] logits, float[] blk0Grad, long arenaAfterForward) Run(bool checkpoint)
             {
@@ -179,9 +200,15 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
             const int n = 8, inDim = 16, hid = 48, outDim = 10;
             var xData = new float[n * inDim];
             var rng = new Random(5);
-            for (var i = 0; i < xData.Length; i++) { xData[i] = (float)(rng.NextDouble() - 0.5); }
+            for (var i = 0; i < xData.Length; i++)
+            {
+                xData[i] = (float)(rng.NextDouble() - 0.5);
+            }
             var yData = new float[n * outDim];
-            for (var b = 0; b < n; b++) { yData[b * outDim + (b % outDim)] = 1f; }
+            for (var b = 0; b < n; b++)
+            {
+                yData[b * outDim + (b % outDim)] = 1f;
+            }
 
             // Two Sequentials with identical init (same seed → same weight draws, same construction order);
             // the second wraps its final Linear in a CheckpointedModule.
@@ -242,7 +269,10 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
             };
 
             var tokenIds = new int[b * t];
-            for (var i = 0; i < tokenIds.Length; i++) { tokenIds[i] = (i * 7) % vocab; }
+            for (var i = 0; i < tokenIds.Length; i++)
+            {
+                tokenIds[i] = (i * 7) % vocab;
+            }
 
             // Read the live-activation high-water (arena CurrentOffset) after a forward pass.
             long ArenaUsedFloats(bool checkpoint)

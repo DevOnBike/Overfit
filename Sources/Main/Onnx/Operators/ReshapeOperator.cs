@@ -43,7 +43,11 @@ namespace DevOnBike.Overfit.Onnx.Operators
                     var negIdx = -1;
                     for (var i = 0; i < targetShape.Length; i++)
                     {
-                        if (targetShape[i] == -1) { negIdx = i; break; }
+                        if (targetShape[i] == -1)
+                        {
+                            negIdx = i;
+                            break;
+                        }
                     }
 
                     if (negIdx >= 0 && inputShape != null)

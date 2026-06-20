@@ -68,15 +68,24 @@ namespace DevOnBike.Overfit.Tests.Examples
                 using var input = ocr.CreateInput(image);
                 var logits = ocr.Forward(graph, input);
                 var loss = ocr.ComputeCtcLoss(logits, digits);
-                if (!float.IsFinite(loss)) { continue; }
+                if (!float.IsFinite(loss))
+                {
+                    continue;
+                }
 
                 optimizer.ZeroGrad();
                 graph.BackwardFromGrad(logits);
                 optimizer.Step();
 
-                if (step == 0) { firstLoss = loss; }
+                if (step == 0)
+                {
+                    firstLoss = loss;
+                }
                 lastLoss = loss;
-                if (converged < 0 && loss < 0.1f) { converged = step + 1; }
+                if (converged < 0 && loss < 0.1f)
+                {
+                    converged = step + 1;
+                }
 
                 if (step == 0 || (step + 1) % 100 == 0)
                 {
@@ -98,7 +107,10 @@ namespace DevOnBike.Overfit.Tests.Examples
                 var decoded = ocr.Recognize(graph, image);
 
                 var ok = decoded.SequenceEqual(digits);
-                if (ok) { correct++; }
+                if (ok)
+                {
+                    correct++;
+                }
                 _out.WriteLine($"target=[{string.Join("", digits)}] decoded=[{string.Join("", decoded)}] {(ok ? "OK" : "x")}");
             }
 
@@ -110,7 +122,10 @@ namespace DevOnBike.Overfit.Tests.Examples
         {
             var len = rng.Next(minLen, maxLen + 1);
             var word = new int[len];
-            for (var i = 0; i < len; i++) { word[i] = rng.Next(0, 10); }
+            for (var i = 0; i < len; i++)
+            {
+                word[i] = rng.Next(0, 10);
+            }
             return word;
         }
 
@@ -126,7 +141,10 @@ namespace DevOnBike.Overfit.Tests.Examples
                 {
                     for (var r = 0; r < H; r++)
                     {
-                        if (glyph[r][gc] == '#') { image[r * Wmax + col] = 1f; }
+                        if (glyph[r][gc] == '#')
+                        {
+                            image[r * Wmax + col] = 1f;
+                        }
                     }
                     col++;
                 }

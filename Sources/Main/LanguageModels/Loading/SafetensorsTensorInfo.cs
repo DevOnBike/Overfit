@@ -17,15 +17,36 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             End = end;
 
             var count = 1L;
-            for (var i = 0; i < shape.Length; i++) { count *= shape[i]; }
+            for (var i = 0; i < shape.Length; i++)
+            {
+                count *= shape[i];
+            }
             ElementCount = shape.Length == 0 ? 0 : count;
         }
 
-        public string Name { get; }
-        public SafetensorsDType DType { get; }
-        public long[] Shape { get; }
-        public long Begin { get; }
-        public long End { get; }
-        public long ElementCount { get; }
+        public string Name
+        {
+            get;
+        }
+        public SafetensorsDType DType
+        {
+            get;
+        }
+        public long[] Shape
+        {
+            get;
+        }
+        public long Begin
+        {
+            get;
+        }
+        public long End
+        {
+            get;
+        }
+        public long ElementCount
+        {
+            get;
+        }
     }
 }

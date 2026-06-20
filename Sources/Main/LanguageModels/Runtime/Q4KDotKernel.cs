@@ -558,8 +558,14 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     sum += Dot(block, q8, ctx.ActivationScales[sb], bsums);
                 }
 
-                if (isUp) { ctx.UpOutput[row] = sum; }
-                else { ctx.GateOutput[row] = sum; }
+                if (isUp)
+                {
+                    ctx.UpOutput[row] = sum;
+                }
+                else
+                {
+                    ctx.GateOutput[row] = sum;
+                }
             }
         }
 

@@ -16,15 +16,36 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     /// </summary>
     public sealed class KvCacheSnapshot
     {
-        internal float[] Keys { get; }
-        internal float[] Values { get; }
-        internal int BasePosition { get; }
-        internal int LayerCount { get; }
-        internal int KvHeadCount { get; }
-        internal int HeadDimension { get; }
+        internal float[] Keys
+        {
+            get;
+        }
+        internal float[] Values
+        {
+            get;
+        }
+        internal int BasePosition
+        {
+            get;
+        }
+        internal int LayerCount
+        {
+            get;
+        }
+        internal int KvHeadCount
+        {
+            get;
+        }
+        internal int HeadDimension
+        {
+            get;
+        }
 
         /// <summary>Number of cached positions (the prefix length).</summary>
-        public int Length { get; }
+        public int Length
+        {
+            get;
+        }
 
         internal KvCacheSnapshot(
             float[] keys, float[] values, int length, int basePosition,

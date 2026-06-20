@@ -20,7 +20,10 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
 
         private static void Fill(Span<float> s, Random rng)
         {
-            for (var i = 0; i < s.Length; i++) { s[i] = (float)(rng.NextDouble() * 2 - 1); }
+            for (var i = 0; i < s.Length; i++)
+            {
+                s[i] = (float)(rng.NextDouble() * 2 - 1);
+            }
         }
 
         private static AutogradNode NewNode(float[] data, TensorShape shape, bool grad)
@@ -87,7 +90,10 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
             Assert.Equal(reference.Length, outNode.DataView.AsReadOnlySpan().Length);
             var got = outNode.DataView.AsReadOnlySpan();
             var maxDiff = 0f;
-            for (var i = 0; i < reference.Length; i++) { maxDiff = MathF.Max(maxDiff, MathF.Abs(got[i] - reference[i])); }
+            for (var i = 0; i < reference.Length; i++)
+            {
+                maxDiff = MathF.Max(maxDiff, MathF.Abs(got[i] - reference[i]));
+            }
             Assert.True(maxDiff < 1e-4f, $"depthwise forward vs reference differ by {maxDiff} (p={padding}, s={stride})");
         }
 
@@ -110,7 +116,10 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
                 using var input = NewNode(data, new TensorShape(N, C, H, W), false);
                 var outp = dw.Forward(graph, input);
                 var s = 0f;
-                foreach (var v in outp.DataView.AsReadOnlySpan()) { s += v; }
+                foreach (var v in outp.DataView.AsReadOnlySpan())
+                {
+                    s += v;
+                }
                 return s;
             }
 
@@ -139,8 +148,10 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
             for (var i = 0; i < values.Length; i++)
             {
                 var saved = values[i];
-                values[i] = saved + eps; var lp = loss();
-                values[i] = saved - eps; var lm = loss();
+                values[i] = saved + eps;
+                var lp = loss();
+                values[i] = saved - eps;
+                var lm = loss();
                 values[i] = saved;
                 var fd = (lp - lm) / (2 * eps);
                 maxErr = MathF.Max(maxErr, MathF.Abs(fd - analytic[i]));

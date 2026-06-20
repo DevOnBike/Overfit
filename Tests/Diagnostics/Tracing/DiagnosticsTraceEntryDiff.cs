@@ -8,10 +8,25 @@ namespace DevOnBike.Overfit.Tests.Diagnostics.Tracing
     internal sealed class DiagnosticsTraceEntryDiff
     {
         public string Name { get; set; } = string.Empty;
-        public long CountDelta { get; set; }
-        public double DurationMsDelta { get; set; }
-        public long AllocatedBytesDelta { get; set; }
-        public double CurrentDurationMs { get; set; }
-        public long CurrentAllocatedBytes { get; set; }
+        public long CountDelta
+        {
+            get; set;
+        }
+        public double DurationMsDelta
+        {
+            get; set;
+        }
+        public long AllocatedBytesDelta
+        {
+            get; set;
+        }
+        public double CurrentDurationMs
+        {
+            get; set;
+        }
+        public long CurrentAllocatedBytes
+        {
+            get; set;
+        }
     }
 }

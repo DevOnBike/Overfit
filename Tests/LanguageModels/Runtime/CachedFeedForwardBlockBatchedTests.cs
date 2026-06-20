@@ -91,7 +91,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         {
             var storage = TensorStorage<float>.Unpooled(n);
             var span = storage.AsSpan();
-            for (var i = 0; i < n; i++) { span[i] = (rng.NextSingle() * 2f - 1f) * 0.05f; }
+            for (var i = 0; i < n; i++)
+            {
+                span[i] = (rng.NextSingle() * 2f - 1f) * 0.05f;
+            }
             return new DecodeWeight(storage);
         }
 

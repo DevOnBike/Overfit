@@ -44,8 +44,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             for (var l = 0; l < nLayers; l++)
             {
                 var lw = engine.GetTrainableLayer(l);
-                for (var h = 0; h < nHeads; h++) { layerQuantBytes += ResidentBytes(lw.Wq[h]) + ResidentBytes(lw.Wo[h]); }
-                for (var h = 0; h < kvHeads; h++) { layerQuantBytes += ResidentBytes(lw.Wk[h]) + ResidentBytes(lw.Wv[h]); }
+                for (var h = 0; h < nHeads; h++)
+                {
+                    layerQuantBytes += ResidentBytes(lw.Wq[h]) + ResidentBytes(lw.Wo[h]);
+                }
+                for (var h = 0; h < kvHeads; h++)
+                {
+                    layerQuantBytes += ResidentBytes(lw.Wk[h]) + ResidentBytes(lw.Wv[h]);
+                }
                 layerQuantBytes += ResidentBytes(lw.FfnGate) + ResidentBytes(lw.FfnUp) + ResidentBytes(lw.FfnDown);
             }
             _out.WriteLine($"model: dModel={dModel} heads={nHeads}:{kvHeads} headDim={headDim} dFF={engine.GetTrainableLayer(0).FfnGate.ElementCount / dModel} layers={nLayers} vocab={cfg.VocabSize}");
@@ -141,14 +147,20 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         private static ConcatRowsDequantSource ConcatRows(DecodeWeight[] heads, int count)
         {
             var parts = new IDequantRowSource[count];
-            for (var h = 0; h < count; h++) { parts[h] = heads[h].AsRowSource(); }
+            for (var h = 0; h < count; h++)
+            {
+                parts[h] = heads[h].AsRowSource();
+            }
             return new ConcatRowsDequantSource(parts);
         }
 
         private static ConcatColsDequantSource ConcatCols(DecodeWeight[] heads, int count)
         {
             var parts = new IDequantRowSource[count];
-            for (var h = 0; h < count; h++) { parts[h] = heads[h].AsRowSource(); }
+            for (var h = 0; h < count; h++)
+            {
+                parts[h] = heads[h].AsRowSource();
+            }
             return new ConcatColsDequantSource(parts);
         }
 
@@ -172,7 +184,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         {
             var s = new TensorStorage<float>(n, clearMemory: false);
             var span = s.AsSpan();
-            for (var i = 0; i < n; i++) { span[i] = (float)(rng.NextDouble() * 2 - 1) * 0.1f; }
+            for (var i = 0; i < n; i++)
+            {
+                span[i] = (float)(rng.NextDouble() * 2 - 1) * 0.1f;
+            }
             return s;
         }
     }

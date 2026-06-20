@@ -9,6 +9,9 @@ namespace DevOnBike.Overfit.Onnx.Schema
     {
         /// <summary>Empty string means default ai.onnx domain.</summary>
         public string Domain { get; init; } = "";
-        public long Version { get; init; }
+        public long Version
+        {
+            get; init;
+        }
     }
 }

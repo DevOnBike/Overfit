@@ -42,7 +42,10 @@ namespace DevOnBike.Overfit.Anomalies.Baseline
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(warmupSnapshots);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(decay);
-            if (decay > 1f) { throw new ArgumentOutOfRangeException(nameof(decay), "Decay must be in (0, 1]."); }
+            if (decay > 1f)
+            {
+                throw new ArgumentOutOfRangeException(nameof(decay), "Decay must be in (0, 1].");
+            }
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(zCap);
 
             _warmup = warmupSnapshots;
@@ -61,7 +64,11 @@ namespace DevOnBike.Overfit.Anomalies.Baseline
 
             if (_seen == 0)
             {
-                for (var m = 0; m < FeatureCount; m++) { _mean[m] = x[m]; _var[m] = 0f; }
+                for (var m = 0; m < FeatureCount; m++)
+                {
+                    _mean[m] = x[m];
+                    _var[m] = 0f;
+                }
                 _seen = 1;
                 return Warmup(snapshot);
             }
@@ -87,7 +94,10 @@ namespace DevOnBike.Overfit.Anomalies.Baseline
                 var sigmaEff = MathF.Max(sigma, floor);
 
                 var absZ = MathF.Abs((x[m] - _mean[m]) / sigmaEff);
-                if (absZ > _zCap) { absZ = _zCap; }
+                if (absZ > _zCap)
+                {
+                    absZ = _zCap;
+                }
 
                 total += 0.5f * absZ * absZ;
                 if (absZ > worstAbsZ)

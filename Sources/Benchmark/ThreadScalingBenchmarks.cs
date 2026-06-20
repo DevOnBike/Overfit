@@ -20,13 +20,22 @@ namespace Benchmarks
         private const int OperationsPerInvoke = 32;
 
         [Params(1, 2, 4, 8, 16)]
-        public int Threads { get; set; }
+        public int Threads
+        {
+            get; set;
+        }
 
         [Params(256)]
-        public int Batch { get; set; }
+        public int Batch
+        {
+            get; set;
+        }
 
         [Params(512)]
-        public int Hidden { get; set; }
+        public int Hidden
+        {
+            get; set;
+        }
 
         private ComputationGraph _inferGraph = null!;
         private ComputationGraph _trainGraph = null!;

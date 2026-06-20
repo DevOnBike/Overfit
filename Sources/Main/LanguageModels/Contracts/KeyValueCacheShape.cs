@@ -27,20 +27,35 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
             HeadDimension = headDimension;
         }
 
-        public int LayerCount { get; }
+        public int LayerCount
+        {
+            get;
+        }
 
         /// <summary>Alias for KvHeadCount. Kept for backward compatibility.</summary>
-        public int HeadCount { get; }
+        public int HeadCount
+        {
+            get;
+        }
 
         /// <summary>
         /// Number of KV heads stored per layer.
         /// For MHA equals QHeadCount. For GQA is smaller.
         /// </summary>
-        public int KvHeadCount { get; }
+        public int KvHeadCount
+        {
+            get;
+        }
 
-        public int MaxSequenceLength { get; }
+        public int MaxSequenceLength
+        {
+            get;
+        }
 
-        public int HeadDimension { get; }
+        public int HeadDimension
+        {
+            get;
+        }
 
         public long ElementsPerCache =>
             (long)LayerCount * KvHeadCount * MaxSequenceLength * HeadDimension;

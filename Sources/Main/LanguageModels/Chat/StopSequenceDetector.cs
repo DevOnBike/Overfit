@@ -39,14 +39,20 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             {
                 foreach (var s in stopSequences)
                 {
-                    if (!string.IsNullOrEmpty(s)) { kept.Add(s); }
+                    if (!string.IsNullOrEmpty(s))
+                    {
+                        kept.Add(s);
+                    }
                 }
             }
             _stops = kept.ToArray();
         }
 
         /// <summary>True once a stop sequence has completed; further <see cref="Append"/> calls no-op.</summary>
-        public bool Stopped { get; private set; }
+        public bool Stopped
+        {
+            get; private set;
+        }
 
         /// <summary>
         /// Appends a decoded <paramref name="piece"/> and returns the text that is now safe
@@ -120,7 +126,10 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
                 {
                     if (EndsWithPrefix(buf, s, k))
                     {
-                        if (k > best) { best = k; }
+                        if (k > best)
+                        {
+                            best = k;
+                        }
                         break;
                     }
                 }
@@ -133,7 +142,10 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             var offset = buf.Length - k;
             for (var i = 0; i < k; i++)
             {
-                if (buf[offset + i] != stop[i]) { return false; }
+                if (buf[offset + i] != stop[i])
+                {
+                    return false;
+                }
             }
             return true;
         }

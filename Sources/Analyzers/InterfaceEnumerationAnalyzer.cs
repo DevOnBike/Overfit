@@ -31,7 +31,7 @@ namespace DevOnBike.Overfit.Analyzers
             isEnabledByDefault: true,
             description: "Enumerating via an interface type boxes the enumerator and virtualizes MoveNext/Current. Hot code should iterate concrete types or use indexed loops.");
 
-        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
+        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule, OverfitPerfAnalysis.HotPathRule];
 
         public override void Initialize(AnalysisContext context)
         {
@@ -65,10 +65,11 @@ namespace DevOnBike.Overfit.Analyzers
                 return;
             }
 
-            context.ReportDiagnostic(Diagnostic.Create(
+            OverfitPerfAnalysis.Report(
+                context,
                 Rule,
                 collection.Syntax.GetLocation(),
-                interfaceType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)));
+                interfaceType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat));
         }
     }
 }

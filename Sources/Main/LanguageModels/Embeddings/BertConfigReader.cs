@@ -59,14 +59,46 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
                     continue;
                 }
 
-                if (reader.ValueTextEquals("hidden_size")) { reader.Read(); hidden = reader.GetInt32(); }
-                else if (reader.ValueTextEquals("num_hidden_layers")) { reader.Read(); layers = reader.GetInt32(); }
-                else if (reader.ValueTextEquals("num_attention_heads")) { reader.Read(); heads = reader.GetInt32(); }
-                else if (reader.ValueTextEquals("intermediate_size")) { reader.Read(); ffn = reader.GetInt32(); }
-                else if (reader.ValueTextEquals("max_position_embeddings")) { reader.Read(); maxPos = reader.GetInt32(); }
-                else if (reader.ValueTextEquals("vocab_size")) { reader.Read(); vocab = reader.GetInt32(); }
-                else if (reader.ValueTextEquals("type_vocab_size")) { reader.Read(); typeVocab = reader.GetInt32(); }
-                else if (reader.ValueTextEquals("layer_norm_eps")) { reader.Read(); eps = (float)reader.GetDouble(); }
+                if (reader.ValueTextEquals("hidden_size"))
+                {
+                    reader.Read();
+                    hidden = reader.GetInt32();
+                }
+                else if (reader.ValueTextEquals("num_hidden_layers"))
+                {
+                    reader.Read();
+                    layers = reader.GetInt32();
+                }
+                else if (reader.ValueTextEquals("num_attention_heads"))
+                {
+                    reader.Read();
+                    heads = reader.GetInt32();
+                }
+                else if (reader.ValueTextEquals("intermediate_size"))
+                {
+                    reader.Read();
+                    ffn = reader.GetInt32();
+                }
+                else if (reader.ValueTextEquals("max_position_embeddings"))
+                {
+                    reader.Read();
+                    maxPos = reader.GetInt32();
+                }
+                else if (reader.ValueTextEquals("vocab_size"))
+                {
+                    reader.Read();
+                    vocab = reader.GetInt32();
+                }
+                else if (reader.ValueTextEquals("type_vocab_size"))
+                {
+                    reader.Read();
+                    typeVocab = reader.GetInt32();
+                }
+                else if (reader.ValueTextEquals("layer_norm_eps"))
+                {
+                    reader.Read();
+                    eps = (float)reader.GetDouble();
+                }
             }
 
             if (hidden < 0 || layers < 0 || heads < 0 || ffn < 0 || maxPos < 0 || vocab < 0)

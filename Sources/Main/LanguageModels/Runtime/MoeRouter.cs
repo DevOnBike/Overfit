@@ -62,12 +62,19 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             // ── Top-k selection by logit (softmax is monotonic, so this is top-k by probability).
             // Insertion into a descending [index, logit] list of size k; ties keep the lower index.
-            for (var i = 0; i < k; i++) { expertIndices[i] = -1; expertWeights[i] = float.NegativeInfinity; }
+            for (var i = 0; i < k; i++)
+            {
+                expertIndices[i] = -1;
+                expertWeights[i] = float.NegativeInfinity;
+            }
             var filled = 0;
             for (var e = 0; e < logits.Length; e++)
             {
                 var l = logits[e];
-                if (filled == k && l <= expertWeights[k - 1]) { continue; }
+                if (filled == k && l <= expertWeights[k - 1])
+                {
+                    continue;
+                }
 
                 var pos = filled < k ? filled : k - 1;
                 while (pos > 0 && expertWeights[pos - 1] < l)
@@ -78,7 +85,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 }
                 expertWeights[pos] = l;
                 expertIndices[pos] = e;
-                if (filled < k) { filled++; }
+                if (filled < k)
+                {
+                    filled++;
+                }
             }
 
             var max = expertWeights[0];   // sorted descending ⇒ [0] is the global max logit
@@ -94,15 +104,24 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     sum += w;
                 }
                 var inv = sum > 0f ? 1f / sum : 0f;
-                for (var i = 0; i < k; i++) { expertWeights[i] *= inv; }
+                for (var i = 0; i < k; i++)
+                {
+                    expertWeights[i] *= inv;
+                }
             }
             else
             {
                 // Full softmax over ALL experts; keep the top-k probabilities un-renormalised.
                 var total = 0f;
-                for (var e = 0; e < logits.Length; e++) { total += MathF.Exp(logits[e] - max); }
+                for (var e = 0; e < logits.Length; e++)
+                {
+                    total += MathF.Exp(logits[e] - max);
+                }
                 var inv = total > 0f ? 1f / total : 0f;
-                for (var i = 0; i < k; i++) { expertWeights[i] = MathF.Exp(expertWeights[i] - max) * inv; }
+                for (var i = 0; i < k; i++)
+                {
+                    expertWeights[i] = MathF.Exp(expertWeights[i] - max) * inv;
+                }
             }
 
             return k;

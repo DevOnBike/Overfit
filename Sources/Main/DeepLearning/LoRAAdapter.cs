@@ -28,16 +28,28 @@ namespace DevOnBike.Overfit.DeepLearning
             _aStore = new TensorStorage<float>(inDim * rank, clearMemory: false);
             var a = _aStore.AsSpan();
             var scale = (float)(1.0 / Math.Sqrt(inDim));
-            for (var i = 0; i < a.Length; i++) { a[i] = (float)(rng.NextDouble() * 2 - 1) * scale; }
+            for (var i = 0; i < a.Length; i++)
+            {
+                a[i] = (float)(rng.NextDouble() * 2 - 1) * scale;
+            }
 
             _bStore = new TensorStorage<float>(rank * outDim, clearMemory: true); // zeros
             A = new AutogradNode(_aStore, new TensorShape(inDim, rank), requiresGrad: true);
             B = new AutogradNode(_bStore, new TensorShape(rank, outDim), requiresGrad: true);
         }
 
-        public int Rank { get; }
-        public AutogradNode A { get; }
-        public AutogradNode B { get; }
+        public int Rank
+        {
+            get;
+        }
+        public AutogradNode A
+        {
+            get;
+        }
+        public AutogradNode B
+        {
+            get;
+        }
 
         /// <summary>The LoRA residual for input <paramref name="x"/> (<c>[T, inDim]</c>): <c>(x·A)·B</c>.</summary>
         public AutogradNode Apply(ComputationGraph graph, AutogradNode x)

@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Numerics.Tensors;
+
 namespace DevOnBike.Overfit.Maths
 {
     /// <summary>
@@ -11,6 +13,19 @@ namespace DevOnBike.Overfit.Maths
     public static class MathUtils
     {
         const float twoPi = 2.0f * MathF.PI;
+
+        /// <summary>
+        ///     Index of the maximum value in <paramref name="values" /> — the single, vectorized source of truth for
+        ///     argmax (greedy decoding, MNIST / classification heads, anomaly scoring). Delegates to
+        ///     <see cref="TensorPrimitives.IndexOfMax{T}(ReadOnlySpan{T})" /> (AVX2/AVX-512, far faster than a scalar
+        ///     scan on cache-resident vectors). On ties it returns the FIRST maximum — matching the scalar <c>&gt;</c>
+        ///     scans this replaced. (NaN follows IEEE / TensorPrimitives semantics, which only diverges from those
+        ///     scalar scans on NaN input — i.e. an already-broken model.)
+        /// </summary>
+        public static int ArgMax(ReadOnlySpan<float> values)
+        {
+            return TensorPrimitives.IndexOfMax(values);
+        }
 
         [ThreadStatic]
         private static Random _rng;

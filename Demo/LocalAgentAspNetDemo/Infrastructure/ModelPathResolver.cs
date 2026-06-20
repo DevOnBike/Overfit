@@ -29,8 +29,14 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Infrastructure
             if (!string.IsNullOrWhiteSpace(fromEnv) && Directory.Exists(fromEnv))
             {
                 var ggufs = Directory.GetFiles(fromEnv, "*.gguf");
-                if (ggufs.Length > 0) { return ggufs[0]; }
-                if (File.Exists(Path.Combine(fromEnv, "model.safetensors"))) { return fromEnv; }
+                if (ggufs.Length > 0)
+                {
+                    return ggufs[0];
+                }
+                if (File.Exists(Path.Combine(fromEnv, "model.safetensors")))
+                {
+                    return fromEnv;
+                }
             }
 
             throw new InvalidOperationException(

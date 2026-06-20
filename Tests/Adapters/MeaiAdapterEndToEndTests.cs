@@ -30,7 +30,11 @@ namespace DevOnBike.Overfit.Tests.Adapters
         [LongFact]
         public async Task IChatClient_OnRealQwen_AnswersCoherently_AndStreams()
         {
-            if (!File.Exists(Gguf)) { _out.WriteLine($"missing {Gguf}"); return; }
+            if (!File.Exists(Gguf))
+            {
+                _out.WriteLine($"missing {Gguf}");
+                return;
+            }
 
             using var overfit = OverfitClient.LoadGguf(Gguf, mmap: true);
             using var chat = overfit.AsChatClient("qwen2.5-3b");
@@ -60,7 +64,11 @@ namespace DevOnBike.Overfit.Tests.Adapters
         [LongFact]
         public async Task IEmbeddingGenerator_OnRealMiniLm_Produces384DimVectors()
         {
-            if (!Directory.Exists(MiniLm)) { _out.WriteLine($"missing {MiniLm}"); return; }
+            if (!Directory.Exists(MiniLm))
+            {
+                _out.WriteLine($"missing {MiniLm}");
+                return;
+            }
 
             using var embedder = SentenceEmbedder.ForMiniLm(MiniLm);
             using var gen = embedder.AsEmbeddingGenerator("all-minilm-l6-v2", dimensions: 384);

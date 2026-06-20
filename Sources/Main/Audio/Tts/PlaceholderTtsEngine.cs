@@ -22,7 +22,10 @@ namespace DevOnBike.Overfit.Audio.Tts
             _scratch = new float[sampleRate];   // up to ~1 s per tone
         }
 
-        public int SampleRate { get; }
+        public int SampleRate
+        {
+            get;
+        }
 
         public void Synthesize(ReadOnlySpan<char> text, VoiceProfile voice, IAudioSink output, TtsOptions options)
         {

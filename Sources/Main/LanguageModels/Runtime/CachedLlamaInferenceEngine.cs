@@ -8,6 +8,7 @@ using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.LoRA;
 using DevOnBike.Overfit.LanguageModels.Rope;
+using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Tensors.Core;
 
 namespace DevOnBike.Overfit.LanguageModels.Runtime
@@ -75,6 +76,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             public required TensorStorage<float>[] Bv;
             public required DecodeWeight[] Wo;
             public required TensorStorage<float>[] Bo;
+
+            // Whole-matrix Q4_K attention handles (M2 plumbing for the OVERFIT_REPACK_ATTN decode lever, M3).
+            // Empty (default) unless the on-disk Q/K/V/O tensor is Q4_K + memory-mapped + repackable for the
+            // 8×8 GEMV — then each is a SECOND zero-copy view of the same mmap bytes the per-head Wq/Wk/Wv/Wo
+            // above slice. The per-head arrays stay the active decode path; M3 consumes these when present.
+            public DecodeWeight WqWhole;
+            public DecodeWeight WkWhole;
+            public DecodeWeight WvWhole;
+            public DecodeWeight WoWhole;
             public required TensorStorage<float> FfnNormGamma;
             public required TensorStorage<float> FfnNormBeta;
             public required DecodeWeight FfnGate;
@@ -170,6 +180,37 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         }
 
         public GPT1Config Config => _config;
+
+        // ── Interpretability (activation capture + logit lens) ────────────────────
+        // Pure-managed tensors mean the residual stream at every layer is directly readable — no PyTorch
+        // hooks, no ONNX graph surgery, no FFI. Enable capture, decode/generate as usual, then read each
+        // layer's hidden and project it through the head with the logit lens to see the prediction form.
+
+        /// <summary>Turns on/off per-layer residual-stream capture for subsequent decodes. Off by default
+        /// (zero hot-path cost). See <see cref="GetLayerActivation"/> / <see cref="LogitLens"/>.</summary>
+        public void EnableActivationCapture(bool enabled)
+        {
+            ThrowIfDisposed();
+            _stack.EnableActivationCapture(enabled);
+        }
+
+        /// <summary>Copies the captured residual stream after transformer <paramref name="layer"/> (0-based,
+        /// pre-final-norm) for the most recent decoded token into <paramref name="destination"/> (length DModel).
+        /// Requires <see cref="EnableActivationCapture"/>(true) before the decode.</summary>
+        public void GetLayerActivation(int layer, Span<float> destination)
+        {
+            ThrowIfDisposed();
+            _stack.GetLayerActivation(layer, destination);
+        }
+
+        /// <summary>Logit lens: projects an intermediate hidden (e.g. from <see cref="GetLayerActivation"/>)
+        /// through the final norm + LM head into <paramref name="logits"/> (length VocabSize) — the tokens the
+        /// model would predict if it stopped at that depth. At the last layer it equals the real logits.</summary>
+        public void LogitLens(ReadOnlySpan<float> layerHidden, Span<float> logits)
+        {
+            ThrowIfDisposed();
+            _stack.LogitLensFromHidden(layerHidden, _stackWeights, logits);
+        }
 
         /// <summary>Loads model weights from an Overfit binary file.</summary>
         public static CachedLlamaInferenceEngine Load(string path)
@@ -340,7 +381,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// otherwise <see cref="KvCacheDType.F32"/> (the default — no behaviour change unless explicitly set).</summary>
         private static KvCacheDType ResolveKvDtypeFromEnv()
         {
-            var raw = Environment.GetEnvironmentVariable("OVERFIT_KV_DTYPE");
+            var raw = Environment.GetEnvironmentVariable(OverfitEnvironment.KvDType);
             return string.Equals(raw, "q8", StringComparison.OrdinalIgnoreCase) ? KvCacheDType.Q8 : KvCacheDType.F32;
         }
 
@@ -369,9 +410,18 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
                 if (layer.MoeGate is not null)
                 {
-                    foreach (var w in layer.MoeGate) { w.Dispose(); }
-                    foreach (var w in layer.MoeUp!) { w.Dispose(); }
-                    foreach (var w in layer.MoeDown!) { w.Dispose(); }
+                    foreach (var w in layer.MoeGate)
+                    {
+                        w.Dispose();
+                    }
+                    foreach (var w in layer.MoeUp!)
+                    {
+                        w.Dispose();
+                    }
+                    foreach (var w in layer.MoeDown!)
+                    {
+                        w.Dispose();
+                    }
                     layer.MoeSharedGate.Dispose();
                     layer.MoeSharedUp.Dispose();
                     layer.MoeSharedDown.Dispose();
@@ -489,7 +539,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     moeSharedDown: layer.MoeSharedDown,
                     moeSharedGateInp: layer.MoeSharedGateInp,
                     postAttnNorm: layer.PostAttnNorm,
-                    postFfwNorm: layer.PostFfwNorm);
+                    postFfwNorm: layer.PostFfwNorm,
+                    wqWhole: layer.WqWhole,
+                    wkWhole: layer.WkWhole,
+                    wvWhole: layer.WvWhole,
+                    woWhole: layer.WoWhole);
             }
 
             return new StackWeights(
@@ -557,6 +611,25 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// If this differs from LlamaLoRAAdapter.ReadBaseWeightNorm, then
         /// _baseRefs and _stackWeights point to different TensorStorage objects.
         /// </summary>
+        /// <summary>Diagnostic hook (M2): true when block <paramref name="layer"/> carries ALL FOUR whole-matrix
+        /// Q4_K attention handles. Note Q4_K_M is a MIXED quant (V / O are usually Q6_K) so this is often false on
+        /// a real model even when Q/K are present — use <see cref="BlockWholeAttnPresence"/> for per-projection.</summary>
+        internal bool BlockHasWholeAttnQ4K(int layer)
+        {
+            ThrowIfDisposed();
+            return _stackWeights.Block(layer).HasWholeAttnQ4K;
+        }
+
+        /// <summary>Diagnostic hook (M2): per-projection presence of the whole-matrix Q4_K attention handles
+        /// (q, k, v, o) for block <paramref name="layer"/> — each true when that projection was Q4_K + mmap +
+        /// repackable. M3 applies the repacked GEMV per-projection (a Q6_K V/O keeps the per-head path).</summary>
+        internal (bool Q, bool K, bool V, bool O) BlockWholeAttnPresence(int layer)
+        {
+            ThrowIfDisposed();
+            ref readonly var b = ref _stackWeights.Block(layer);
+            return (b.WqWhole.IsQ4K, b.WkWhole.IsQ4K, b.WvWhole.IsQ4K, b.WoWhole.IsQ4K);
+        }
+
         public float ReadInferenceWeightNorm(int layer, int head)
         {
             ThrowIfDisposed();
@@ -591,7 +664,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// (<see cref="DevOnBike.Overfit.DeepLearning.TrainableLlamaBlock"/>).</summary>
         internal int TrainableLayerCount
         {
-            get { ThrowIfDisposed(); return _layers.Length; }
+            get
+            {
+                ThrowIfDisposed();
+                return _layers.Length;
+            }
         }
 
         /// <summary>The frozen quantized weights of layer <paramref name="layer"/>, exposed for the
@@ -609,20 +686,32 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// training bridge — look rows up via <see cref="DecodeWeight.DequantizeRow"/>.</summary>
         internal DecodeWeight EmbeddingWeights
         {
-            get { ThrowIfDisposed(); return _embedWeights; }
+            get
+            {
+                ThrowIfDisposed();
+                return _embedWeights;
+            }
         }
 
         /// <summary>Trainable final-RMSNorm gain <c>[dModel]</c> (F32) for the QLoRA training bridge.</summary>
         internal TensorStorage<float> FinalNormGamma
         {
-            get { ThrowIfDisposed(); return _finalNormGamma; }
+            get
+            {
+                ThrowIfDisposed();
+                return _finalNormGamma;
+            }
         }
 
         /// <summary>Frozen LM-head <c>[vocab, dModel]</c> (separate handle even when tied) for the
         /// QLoRA training bridge — feed via <see cref="DecodeWeight.AsRowSource"/>.</summary>
         internal DecodeWeight LmHeadWeights
         {
-            get { ThrowIfDisposed(); return _lmHead; }
+            get
+            {
+                ThrowIfDisposed();
+                return _lmHead;
+            }
         }
 
         /// <summary>Read Wq via _layers path (the path LoRA modifies).</summary>

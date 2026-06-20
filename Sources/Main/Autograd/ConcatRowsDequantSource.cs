@@ -48,8 +48,14 @@ namespace DevOnBike.Overfit.Autograd
             OutputSize = offset;
         }
 
-        public int InputSize { get; }
-        public int OutputSize { get; }
+        public int InputSize
+        {
+            get;
+        }
+        public int OutputSize
+        {
+            get;
+        }
 
         public void DecodeRow(int row, Span<float> dst)
         {

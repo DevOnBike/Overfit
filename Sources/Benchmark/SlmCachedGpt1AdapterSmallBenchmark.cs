@@ -48,7 +48,10 @@ namespace Benchmarks
         private bool _disposed;
 
         [Params(1, 10, 100)]
-        public int TokenCount { get; set; }
+        public int TokenCount
+        {
+            get; set;
+        }
 
         [GlobalSetup]
         public void Setup()

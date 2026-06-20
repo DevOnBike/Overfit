@@ -128,7 +128,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         public void DequantizeRange_MatchesInt8ReadSurface()
         {
             using var cache = CreateQ8();
-            for (var p = 0; p < 4; p++) { cache.WriteKey(0, 0, p, Vector(HeadDim, seed: p + 1)); }
+            for (var p = 0; p < 4; p++)
+            {
+                cache.WriteKey(0, 0, p, Vector(HeadDim, seed: p + 1));
+            }
             cache.Advance(4);
 
             var dq = new float[4 * HeadDim];

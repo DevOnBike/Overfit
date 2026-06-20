@@ -101,7 +101,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Constraints
 
         private static void AcceptAll(JsonSchemaConstraint c, string text)
         {
-            foreach (var ch in text) { c.Accept(ch); }
+            foreach (var ch in text)
+            {
+                c.Accept(ch);
+            }
         }
 
         // One token per ASCII char (token id == char code); 127 is the end-of-text sentinel (decodes to "").
@@ -117,13 +120,19 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Constraints
 
             public int Encode(ReadOnlySpan<char> text, Span<int> destination)
             {
-                for (var i = 0; i < text.Length; i++) { destination[i] = text[i]; }
+                for (var i = 0; i < text.Length; i++)
+                {
+                    destination[i] = text[i];
+                }
                 return text.Length;
             }
 
             public int Decode(ReadOnlySpan<int> tokens, Span<char> destination)
             {
-                for (var i = 0; i < tokens.Length; i++) { destination[i] = (char)tokens[i]; }
+                for (var i = 0; i < tokens.Length; i++)
+                {
+                    destination[i] = (char)tokens[i];
+                }
                 return tokens.Length;
             }
 
@@ -132,7 +141,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Constraints
                 var sb = new StringBuilder(tokens.Length);
                 foreach (var t in tokens)
                 {
-                    if (t is >= 0 and < 127) { sb.Append((char)t); }   // 127 = EOS → empty
+                    if (t is >= 0 and < 127)
+                    {
+                        sb.Append((char)t);
+                    }   // 127 = EOS → empty
                 }
                 return sb.ToString();
             }

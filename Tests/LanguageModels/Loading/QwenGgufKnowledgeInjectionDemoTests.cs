@@ -75,8 +75,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
                 graph.BackwardFromGrad(logits);
                 ClipGradNorm(trainable, maxNorm: 0.5f);
                 opt.Step();
-                if (step == 0) { first = last; }
-                if (step % 25 == 0) { _out.WriteLine($"  step {step,3}: loss {last:F4}"); }
+                if (step == 0)
+                {
+                    first = last;
+                }
+                if (step % 25 == 0)
+                {
+                    _out.WriteLine($"  step {step,3}: loss {last:F4}");
+                }
             }
             _out.WriteLine($"  loss {first:F3} -> {last:F4}");
 
@@ -94,22 +100,34 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             foreach (var p in ps)
             {
                 var g = p.GradView.AsReadOnlySpan();
-                for (var i = 0; i < g.Length; i++) { sq += (double)g[i] * g[i]; }
+                for (var i = 0; i < g.Length; i++)
+                {
+                    sq += (double)g[i] * g[i];
+                }
             }
             var n = Math.Sqrt(sq);
-            if (n <= maxNorm) { return; }
+            if (n <= maxNorm)
+            {
+                return;
+            }
             var s = (float)(maxNorm / (n + 1e-6));
             foreach (var p in ps)
             {
                 var g = p.GradView.AsSpan();
-                for (var i = 0; i < g.Length; i++) { g[i] *= s; }
+                for (var i = 0; i < g.Length; i++)
+                {
+                    g[i] *= s;
+                }
             }
         }
 
         private static List<AutogradNode> ToList(IEnumerable<AutogradNode> e)
         {
             var l = new List<AutogradNode>();
-            foreach (var x in e) { l.Add(x); }
+            foreach (var x in e)
+            {
+                l.Add(x);
+            }
             return l;
         }
     }

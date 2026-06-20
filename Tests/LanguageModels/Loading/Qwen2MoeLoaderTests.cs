@@ -28,7 +28,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         [LongFact]
         public void Layer0_LoadsAndDecodes_ThroughQwen2MoeBlock()
         {
-            if (!File.Exists(MoePath)) { _out.WriteLine($"missing {MoePath}"); return; }
+            if (!File.Exists(MoePath))
+            {
+                _out.WriteLine($"missing {MoePath}");
+                return;
+            }
 
             using var reader = new GgufReader(MoePath);
             Assert.Equal("qwen2moe", reader.GetMeta("general.architecture", ""));
@@ -65,7 +69,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             var block = new Qwen2MoeFeedForwardBlock(dModel, expertDff, sharedDff, expertCount, expertUsed);
 
             var hidden = new float[dModel];
-            for (var d = 0; d < dModel; d++) { hidden[d] = MathF.Sin(d * 0.05f) * 0.3f; }
+            for (var d = 0; d < dModel; d++)
+            {
+                hidden[d] = MathF.Sin(d * 0.05f) * 0.3f;
+            }
             var output = new float[dModel];
 
             block.Decode(hidden, router, gate, up, down, sGateInp.AsReadOnlySpan(), sGate, sUp, sDown, output);
@@ -75,7 +82,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             foreach (var v in output)
             {
                 Assert.True(float.IsFinite(v), "non-finite output element");
-                if (v != 0f) { nonZero++; }
+                if (v != 0f)
+                {
+                    nonZero++;
+                }
                 max = MathF.Max(max, MathF.Abs(v));
             }
             _out.WriteLine($"output: nonZero={nonZero}/{dModel}  maxAbs={max:G4}");

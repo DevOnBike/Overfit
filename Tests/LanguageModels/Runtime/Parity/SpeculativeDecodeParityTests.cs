@@ -30,13 +30,20 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         [LongFact]
         public void Speculative_ProducesIdenticalSequence_ToGreedy()
         {
-            if (!File.Exists(ModelPath)) { _out.WriteLine($"missing {ModelPath}"); return; }
+            if (!File.Exists(ModelPath))
+            {
+                _out.WriteLine($"missing {ModelPath}");
+                return;
+            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(ModelPath);
 
             // Repetitive prompt → the n-gram drafter finds matches and accepts drafts.
             var prompt = new List<int>();
-            for (var r = 0; r < 8; r++) { prompt.AddRange([10, 11, 12, 13, 14, 15]); }
+            for (var r = 0; r < 8; r++)
+            {
+                prompt.AddRange([10, 11, 12, 13, 14, 15]);
+            }
             var promptArr = prompt.ToArray();
             const int generate = 40;
 
@@ -46,7 +53,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
             {
                 s.Reset(promptArr);
                 var sampling = SamplingOptions.Greedy;
-                for (var i = 0; i < generate; i++) { greedy.Add(s.GenerateNextToken(in sampling)); }
+                for (var i = 0; i < generate; i++)
+                {
+                    greedy.Add(s.GenerateNextToken(in sampling));
+                }
             }
 
             // Speculative greedy: commits ≥1 token per batched verify.
@@ -60,8 +70,15 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
                 while (spec.Count < generate)
                 {
                     var n = s.GenerateSpeculative(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(history), committed, maxDraft: 4);
-                    if (n > 1) { anyMultiCommit = true; }
-                    for (var c = 0; c < n; c++) { spec.Add(committed[c]); history.Add(committed[c]); }
+                    if (n > 1)
+                    {
+                        anyMultiCommit = true;
+                    }
+                    for (var c = 0; c < n; c++)
+                    {
+                        spec.Add(committed[c]);
+                        history.Add(committed[c]);
+                    }
                 }
             }
 
@@ -78,8 +95,16 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         [LongFact]
         public void Speculative_DecodeSpeedup_OnRepetitiveText()
         {
-            if (!File.Exists(ModelPath)) { _out.WriteLine($"missing {ModelPath}"); return; }
-            if (!File.Exists(@"C:\qwen3b\tokenizer.json")) { _out.WriteLine("no tokenizer"); return; }
+            if (!File.Exists(ModelPath))
+            {
+                _out.WriteLine($"missing {ModelPath}");
+                return;
+            }
+            if (!File.Exists(@"C:\qwen3b\tokenizer.json"))
+            {
+                _out.WriteLine("no tokenizer");
+                return;
+            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(ModelPath);
             var tok = QwenTokenizer.Load(@"C:\qwen3b");
@@ -103,8 +128,12 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
                 while (produced < generate)
                 {
                     var n = s.GenerateSpeculative(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(hist), buf, maxDraft: 4);
-                    for (var c = 0; c < n; c++) { hist.Add(buf[c]); }
-                    produced += n; steps++;
+                    for (var c = 0; c < n; c++)
+                    {
+                        hist.Add(buf[c]);
+                    }
+                    produced += n;
+                    steps++;
                 }
                 _out.WriteLine($"avg tokens/step = {(double)produced / steps:F2} ({produced} in {steps} steps)");
             }
@@ -115,7 +144,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
                 s.Reset(promptArr);
                 var sampling = SamplingOptions.Greedy;
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                for (var i = 0; i < generate; i++) { s.GenerateNextToken(in sampling); }
+                for (var i = 0; i < generate; i++)
+                {
+                    s.GenerateNextToken(in sampling);
+                }
                 sw.Stop();
                 return generate / sw.Elapsed.TotalSeconds;
             }
@@ -131,7 +163,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
                 while (produced < generate)
                 {
                     var n = s.GenerateSpeculative(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(history), committed, maxDraft: 4);
-                    for (var c = 0; c < n; c++) { history.Add(committed[c]); }
+                    for (var c = 0; c < n; c++)
+                    {
+                        history.Add(committed[c]);
+                    }
                     produced += n;
                 }
                 sw.Stop();
@@ -153,9 +188,17 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         [LongFact]
         public void ChatSession_SpeculativePath_MatchesSingleToken_Greedy()
         {
-            if (!File.Exists(ModelPath)) { _out.WriteLine($"missing {ModelPath}"); return; }
+            if (!File.Exists(ModelPath))
+            {
+                _out.WriteLine($"missing {ModelPath}");
+                return;
+            }
             const string dir = @"C:\qwen3b";
-            if (!File.Exists(Path.Combine(dir, "tokenizer.json"))) { _out.WriteLine("no tokenizer"); return; }
+            if (!File.Exists(Path.Combine(dir, "tokenizer.json")))
+            {
+                _out.WriteLine("no tokenizer");
+                return;
+            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(ModelPath);
             var tok = new QwenChatTokenizer(QwenTokenizer.Load(dir));

@@ -17,7 +17,10 @@ namespace DevOnBike.Overfit.DeepLearning.Abstractions
         ///     Gets a value indicating whether the module is currently in training mode.
         ///     This state affects layers like <c>Dropout</c> or <c>BatchNorm</c>.
         /// </summary>
-        bool IsTraining { get; }
+        bool IsTraining
+        {
+            get;
+        }
 
         /// <summary>
         ///     Sets the module (and its sub-modules) to training mode.

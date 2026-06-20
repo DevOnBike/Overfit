@@ -52,14 +52,19 @@ namespace Benchmarks
                 }
             }
 
-            _gradOutput2048x1024 = new float[2048 * 1024]; Fill(_gradOutput2048x1024);
-            _weights256x1024 = new float[256 * 1024]; Fill(_weights256x1024);
+            _gradOutput2048x1024 = new float[2048 * 1024];
+            Fill(_gradOutput2048x1024);
+            _weights256x1024 = new float[256 * 1024];
+            Fill(_weights256x1024);
             _gradInput2048x256 = new float[2048 * 256];
-            _input2048x256 = new float[2048 * 256]; Fill(_input2048x256);
+            _input2048x256 = new float[2048 * 256];
+            Fill(_input2048x256);
             _gradWeights256x1024 = new float[256 * 1024];
 
-            _gradOutput2048x32 = new float[2048 * 32]; Fill(_gradOutput2048x32);
-            _weights256x32 = new float[256 * 32]; Fill(_weights256x32);
+            _gradOutput2048x32 = new float[2048 * 32];
+            Fill(_gradOutput2048x32);
+            _weights256x32 = new float[256 * 32];
+            Fill(_weights256x32);
             _gradInput2048x256b = new float[2048 * 256];
             _gradWeights256x32 = new float[256 * 32];
         }

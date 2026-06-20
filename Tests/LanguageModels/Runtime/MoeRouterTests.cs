@@ -53,7 +53,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             var k = MoeRouter.SelectTopK(logits, topK: 3, idx, w);
 
             var sum = 0f;
-            for (var i = 0; i < k; i++) { sum += w[i]; }
+            for (var i = 0; i < k; i++)
+            {
+                sum += w[i];
+            }
             Assert.Equal(1f, sum, 5);
         }
 
@@ -66,11 +69,21 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
 
             // Reference: full softmax → top-k → renormalise.
             var max = float.NegativeInfinity;
-            foreach (var l in logits) { max = MathF.Max(max, l); }
+            foreach (var l in logits)
+            {
+                max = MathF.Max(max, l);
+            }
             var full = new float[logits.Length];
             var z = 0f;
-            for (var i = 0; i < logits.Length; i++) { full[i] = MathF.Exp(logits[i] - max); z += full[i]; }
-            for (var i = 0; i < logits.Length; i++) { full[i] /= z; }
+            for (var i = 0; i < logits.Length; i++)
+            {
+                full[i] = MathF.Exp(logits[i] - max);
+                z += full[i];
+            }
+            for (var i = 0; i < logits.Length; i++)
+            {
+                full[i] /= z;
+            }
             // top-2 = experts 1 (2.0) and 3 (1.8); renormalise their probs
             var pair = full[1] + full[3];
             var refW1 = full[1] / pair;
@@ -96,9 +109,15 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
 
             // Reference: full softmax, then read the top-2 probs (no renorm).
             var max = float.NegativeInfinity;
-            foreach (var l in logits) { max = MathF.Max(max, l); }
+            foreach (var l in logits)
+            {
+                max = MathF.Max(max, l);
+            }
             var z = 0f;
-            foreach (var l in logits) { z += MathF.Exp(l - max); }
+            foreach (var l in logits)
+            {
+                z += MathF.Exp(l - max);
+            }
             var refW1 = MathF.Exp(logits[1] - max) / z;   // expert 1 (2.0)
             var refW3 = MathF.Exp(logits[3] - max) / z;   // expert 3 (1.8)
 

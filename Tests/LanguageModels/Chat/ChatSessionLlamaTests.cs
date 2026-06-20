@@ -88,27 +88,45 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Chat
             {
                 bw.Write(0x4F565246u);                          // magic
                 bw.Write(2);                                    // version
-                bw.Write(Layers); bw.Write(D); bw.Write(Heads); bw.Write(Kv);
-                bw.Write(Vocab); bw.Write(Ctx); bw.Write(DFF);
+                bw.Write(Layers);
+                bw.Write(D);
+                bw.Write(Heads);
+                bw.Write(Kv);
+                bw.Write(Vocab);
+                bw.Write(Ctx);
+                bw.Write(DFF);
                 bw.Write(1);                                    // use_rope
                 bw.Write(10_000f);                              // rope_theta
                 bw.Write((int)FeedForwardActivation.SwiGLU);
                 bw.Write(0);                                    // tie_weights = false
 
                 Rand(bw, rng, Vocab * D);                       // embed
-                Rand(bw, rng, D); Zeros(bw, D);                 // attn norm gamma/beta
-                for (var h = 0; h < Heads; h++) { Rand(bw, rng, D * Hd); Zeros(bw, Hd); }       // wq/bq
+                Rand(bw, rng, D);
+                Zeros(bw, D);                 // attn norm gamma/beta
+                for (var h = 0; h < Heads; h++)
+                {
+                    Rand(bw, rng, D * Hd);
+                    Zeros(bw, Hd);
+                }       // wq/bq
                 for (var k = 0; k < Kv; k++)
                 {
-                    Rand(bw, rng, D * Hd); Zeros(bw, Hd);       // wk/bk
-                    Rand(bw, rng, D * Hd); Zeros(bw, Hd);       // wv/bv
+                    Rand(bw, rng, D * Hd);
+                    Zeros(bw, Hd);       // wk/bk
+                    Rand(bw, rng, D * Hd);
+                    Zeros(bw, Hd);       // wv/bv
                 }
-                for (var h = 0; h < Heads; h++) { Rand(bw, rng, Hd * D); Zeros(bw, D); }        // wo/bo
-                Rand(bw, rng, D); Zeros(bw, D);                 // ffn norm gamma/beta
+                for (var h = 0; h < Heads; h++)
+                {
+                    Rand(bw, rng, Hd * D);
+                    Zeros(bw, D);
+                }        // wo/bo
+                Rand(bw, rng, D);
+                Zeros(bw, D);                 // ffn norm gamma/beta
                 Rand(bw, rng, D * DFF);                         // gate
                 Rand(bw, rng, D * DFF);                         // up
                 Rand(bw, rng, DFF * D);                         // down
-                Rand(bw, rng, D); Zeros(bw, D);                 // final norm gamma/beta
+                Rand(bw, rng, D);
+                Zeros(bw, D);                 // final norm gamma/beta
                 Rand(bw, rng, Vocab * D);                       // lm head
             }
 
@@ -119,12 +137,18 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Chat
 
         private static void Rand(BinaryWriter bw, Random rng, int n)
         {
-            for (var i = 0; i < n; i++) { bw.Write((float)(rng.NextDouble() - 0.5) * 0.2f); }
+            for (var i = 0; i < n; i++)
+            {
+                bw.Write((float)(rng.NextDouble() - 0.5) * 0.2f);
+            }
         }
 
         private static void Zeros(BinaryWriter bw, int n)
         {
-            for (var i = 0; i < n; i++) { bw.Write(0f); }
+            for (var i = 0; i < n; i++)
+            {
+                bw.Write(0f);
+            }
         }
 
         // Char-level identity tokenizer: one token per char in [1, Vocab-2]; never emits
@@ -160,7 +184,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Chat
             public string DecodeToString(ReadOnlySpan<int> tokens)
             {
                 var sb = new StringBuilder(tokens.Length);
-                foreach (var t in tokens) { sb.Append((char)('a' + (t % 26))); }
+                foreach (var t in tokens)
+                {
+                    sb.Append((char)('a' + (t % 26)));
+                }
                 return sb.ToString();
             }
         }

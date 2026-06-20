@@ -30,7 +30,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         [LongFact]
         public void LoadsMixedQuantQ4KM_AndDecodesCoherently()
         {
-            if (!File.Exists(Q4KmPath)) { _out.WriteLine($"missing {Q4KmPath}"); return; }
+            if (!File.Exists(Q4KmPath))
+            {
+                _out.WriteLine($"missing {Q4KmPath}");
+                return;
+            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(Q4KmPath);   // must NOT throw on Q5_0
             Assert.True(engine.Config.IsMixtureOfExperts);
@@ -52,7 +56,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             {
                 var token = session.GenerateNextToken(in sampling);
                 Assert.InRange(token, 0, engine.Config.VocabSize - 1);
-                if (token == QwenTokenizer.ImEnd || token == QwenTokenizer.EndOfText) { break; }
+                if (token == QwenTokenizer.ImEnd || token == QwenTokenizer.EndOfText)
+                {
+                    break;
+                }
                 generated.Add(token);
             }
 
@@ -73,7 +80,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             {
                 if (File.Exists(Path.Combine(dir, "tokenizer.json")) || File.Exists(Path.Combine(dir, "vocab.json")))
                 {
-                    try { return QwenTokenizer.Load(dir); } catch { /* fall through */ }
+                    try
+                    {
+                        return QwenTokenizer.Load(dir);
+                    }
+                    catch { /* fall through */ }
                 }
             }
             return null;

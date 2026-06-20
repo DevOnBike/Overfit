@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Runtime.InteropServices;
+
 namespace DevOnBike.Overfit.LanguageModels.Retrieval
 {
     /// <summary>
@@ -39,10 +41,16 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
         }
 
         /// <summary>Embedding dimension every added vector must match.</summary>
-        public int Dimension { get; }
+        public int Dimension
+        {
+            get;
+        }
 
         /// <summary>Number of stored vectors.</summary>
-        public int Count { get; private set; }
+        public int Count
+        {
+            get; private set;
+        }
 
         /// <summary>
         /// Adds a vector under <paramref name="id"/> with an optional <paramref name="payload"/>
@@ -85,7 +93,10 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
             }
 
             var k = results.Length;
-            if (k == 0 || Count == 0) { return 0; }
+            if (k == 0 || Count == 0)
+            {
+                return 0;
+            }
 
             // Stored vectors are unit-norm, so cosine = dot(query, v) / ‖query‖. ‖query‖ is constant
             // across items, so it doesn't change ranking — apply it only to report the true cosine.
@@ -106,7 +117,10 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(topK);
             var capacity = Math.Min(topK, Count);
-            if (capacity == 0) { return []; }
+            if (capacity == 0)
+            {
+                return [];
+            }
 
             var buffer = new VectorMatch[capacity];
             var written = Search(query, buffer);
@@ -147,10 +161,118 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
             return _vectors.AsSpan(index * Dimension, Dimension);
         }
 
+        // ── Persistence (pure-managed, no native/SQLite dependency — index once, restart, query without
+        //    re-embedding) ──────────────────────────────────────────────────────────────────────────────
+        private const uint FileMagic = 0x3153_564F; // "OVS1" little-endian
+        private const int FileVersion = 1;
+
+        /// <summary>
+        /// Writes the store to a single binary file so it can be reloaded without re-embedding the corpus.
+        /// Pure-managed (`BinaryWriter` + a contiguous vector blob) — no SQLite, no native dependency, so it
+        /// keeps the Native-AOT / no-native-binary identity. The vector blob is written in host byte order; the
+        /// file is a local cache (re-buildable from the source documents), not a cross-architecture interchange
+        /// format. Pairs with <see cref="Load"/>.
+        /// </summary>
+        public void Save(string path)
+        {
+            ArgumentNullException.ThrowIfNull(path);
+
+            using var stream = new FileStream(path, FileMode.Create, FileAccess.Write);
+            using var writer = new BinaryWriter(stream);
+            WriteTo(writer);
+        }
+
+        /// <summary>
+        /// Serialises the store into an open <see cref="BinaryWriter"/> — the building block <see cref="Save"/>
+        /// uses, and the one a higher-level store (e.g. one that adds a source-document manifest) embeds in its
+        /// own file. Writes magic + version + dimension + count + the contiguous vector blob + id/payload pairs.
+        /// </summary>
+        internal void WriteTo(BinaryWriter writer)
+        {
+            writer.Write(FileMagic);
+            writer.Write(FileVersion);
+            writer.Write(Dimension);
+            writer.Write(Count);
+
+            // Contiguous unit-normalised vectors (only the populated rows, not the spare capacity).
+            var vectorBytes = MemoryMarshal.AsBytes(_vectors.AsSpan(0, Count * Dimension));
+            writer.Write(vectorBytes);
+
+            for (var i = 0; i < Count; i++)
+            {
+                writer.Write(_ids[i]);
+                var payload = _payloads[i];
+                writer.Write(payload is not null);
+                if (payload is not null)
+                {
+                    writer.Write(payload);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Reloads a store written by <see cref="Save"/> — the index-once-restart-query path. Vectors are read
+        /// back already unit-normalised (verbatim), so no re-normalisation pass is needed. Throws
+        /// <see cref="OverfitFormatException"/> if the file is not a recognised Overfit vector-store file.
+        /// </summary>
+        public static VectorStore Load(string path)
+        {
+            ArgumentNullException.ThrowIfNull(path);
+
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read);
+            using var reader = new BinaryReader(stream);
+            return ReadFrom(reader);
+        }
+
+        /// <summary>
+        /// Reads a store written by <see cref="WriteTo"/> from an open <see cref="BinaryReader"/>. Vectors come
+        /// back already unit-normalised (verbatim) — no re-normalisation pass. Throws
+        /// <see cref="OverfitFormatException"/> if the stream is not at a recognised vector-store record.
+        /// </summary>
+        internal static VectorStore ReadFrom(BinaryReader reader)
+        {
+            if (reader.ReadUInt32() != FileMagic)
+            {
+                throw new OverfitFormatException("Not an Overfit vector-store record (bad magic).");
+            }
+            var version = reader.ReadInt32();
+            if (version != FileVersion)
+            {
+                throw new OverfitFormatException($"Unsupported vector-store record version {version} (expected {FileVersion}).");
+            }
+
+            var dimension = reader.ReadInt32();
+            var count = reader.ReadInt32();
+            if (dimension <= 0 || count < 0)
+            {
+                throw new OverfitFormatException($"Corrupt vector-store header (dimension {dimension}, count {count}).");
+            }
+
+            var store = new VectorStore(dimension, Math.Max(count, 1));
+
+            if (count > 0)
+            {
+                var vectorBytes = MemoryMarshal.AsBytes(store._vectors.AsSpan(0, count * dimension));
+                reader.BaseStream.ReadExactly(vectorBytes);
+
+                for (var i = 0; i < count; i++)
+                {
+                    store._ids[i] = reader.ReadString();
+                    store._payloads[i] = reader.ReadBoolean() ? reader.ReadString() : null;
+                }
+            }
+
+            store.Count = count;
+            return store;
+        }
+
         private static void InsertDescending(Span<VectorMatch> results, ref int found, int k, VectorMatch candidate)
         {
             // Reject early if the list is full and the candidate can't beat the current worst.
-            if (found == k && candidate.Score <= results[k - 1].Score) { return; }
+            if (found == k && candidate.Score <= results[k - 1].Score)
+            {
+                return;
+            }
 
             var pos = found < k ? found : k - 1;
             while (pos > 0 && results[pos - 1].Score < candidate.Score)
@@ -159,31 +281,49 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
                 pos--;
             }
             results[pos] = candidate;
-            if (found < k) { found++; }
+            if (found < k)
+            {
+                found++;
+            }
         }
 
         private static float Dot(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
         {
             var sum = 0f;
-            for (var i = 0; i < a.Length; i++) { sum += a[i] * b[i]; }
+            for (var i = 0; i < a.Length; i++)
+            {
+                sum += a[i] * b[i];
+            }
             return sum;
         }
 
         private static void Normalize(Span<float> v)
         {
             var norm = MathF.Sqrt(Dot(v, v));
-            if (norm <= NormEpsilon) { return; }
+            if (norm <= NormEpsilon)
+            {
+                return;
+            }
             var inv = 1f / norm;
-            for (var i = 0; i < v.Length; i++) { v[i] *= inv; }
+            for (var i = 0; i < v.Length; i++)
+            {
+                v[i] *= inv;
+            }
         }
 
         private void EnsureCapacity(int needed)
         {
             var capacity = _ids.Length;
-            if (needed <= capacity) { return; }
+            if (needed <= capacity)
+            {
+                return;
+            }
 
             var newCapacity = capacity * 2;
-            while (newCapacity < needed) { newCapacity *= 2; }
+            while (newCapacity < needed)
+            {
+                newCapacity *= 2;
+            }
 
             Array.Resize(ref _vectors, newCapacity * Dimension);
             Array.Resize(ref _ids, newCapacity);

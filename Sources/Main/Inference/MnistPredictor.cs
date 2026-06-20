@@ -5,6 +5,7 @@
 
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.Maths;
 using DevOnBike.Overfit.Ops;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
@@ -77,22 +78,7 @@ namespace DevOnBike.Overfit.Inference
 
             using var output = _fcOut.Forward(null, gapOut);
 
-            return GetArgMax(output.DataView.AsReadOnlySpan());
-        }
-
-        private int GetArgMax(ReadOnlySpan<float> span)
-        {
-            var maxIdx = 0;
-
-            for (var j = 1; j < span.Length; j++)
-            {
-                if (span[j] > span[maxIdx])
-                {
-                    maxIdx = j;
-                }
-            }
-
-            return maxIdx;
+            return MathUtils.ArgMax(output.DataView.AsReadOnlySpan());
         }
     }
 }

@@ -10,7 +10,10 @@ namespace DevOnBike.Overfit.Cli
     internal static class ModelCache
     {
         /// <summary>The models directory (created on first download).</summary>
-        public static string Dir { get; } = Path.Combine(
+        public static string Dir
+        {
+            get;
+        } = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".overfit", "models");
 
         public static void Ensure() => Directory.CreateDirectory(Dir);
@@ -18,9 +21,15 @@ namespace DevOnBike.Overfit.Cli
         /// <summary>The cached <c>*.gguf</c> files, largest last.</summary>
         public static IReadOnlyList<FileInfo> List()
         {
-            if (!Directory.Exists(Dir)) { return []; }
+            if (!Directory.Exists(Dir))
+            {
+                return [];
+            }
             var files = new List<FileInfo>();
-            foreach (var path in Directory.GetFiles(Dir, "*.gguf")) { files.Add(new FileInfo(path)); }
+            foreach (var path in Directory.GetFiles(Dir, "*.gguf"))
+            {
+                files.Add(new FileInfo(path));
+            }
             files.Sort((a, b) => string.CompareOrdinal(a.Name, b.Name));
             return files;
         }
@@ -32,14 +41,23 @@ namespace DevOnBike.Overfit.Cli
         /// </summary>
         public static string? Resolve(string model)
         {
-            if (File.Exists(model)) { return model; }
+            if (File.Exists(model))
+            {
+                return model;
+            }
 
             var direct = Path.Combine(Dir, model);
-            if (File.Exists(direct)) { return direct; }
+            if (File.Exists(direct))
+            {
+                return direct;
+            }
 
             var withExt = model.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase) ? model : model + ".gguf";
             var directExt = Path.Combine(Dir, withExt);
-            if (File.Exists(directExt)) { return directExt; }
+            if (File.Exists(directExt))
+            {
+                return directExt;
+            }
 
             foreach (var file in List())
             {

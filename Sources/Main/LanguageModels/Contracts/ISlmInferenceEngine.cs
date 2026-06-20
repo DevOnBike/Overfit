@@ -8,15 +8,30 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
 
     public interface ISlmInferenceEngine : IDisposable
     {
-        ISlmModel Model { get; }
+        ISlmModel Model
+        {
+            get;
+        }
 
-        int VocabularySize { get; }
+        int VocabularySize
+        {
+            get;
+        }
 
-        int MaxContextLength { get; }
+        int MaxContextLength
+        {
+            get;
+        }
 
-        bool SupportsKeyValueCache { get; }
+        bool SupportsKeyValueCache
+        {
+            get;
+        }
 
-        bool SupportsStreaming { get; }
+        bool SupportsStreaming
+        {
+            get;
+        }
 
         ISlmSession CreateSession();
 

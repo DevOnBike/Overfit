@@ -7,11 +7,20 @@ namespace DevOnBike.Overfit.Training
 {
     public interface ITrainingBackend : IDisposable
     {
-        int BatchSize { get; }
+        int BatchSize
+        {
+            get;
+        }
 
-        int InputSize { get; }
+        int InputSize
+        {
+            get;
+        }
 
-        int TargetSize { get; }
+        int TargetSize
+        {
+            get;
+        }
 
         TrainingStepResult TrainBatch(ReadOnlySpan<float> input, ReadOnlySpan<float> target);
     }

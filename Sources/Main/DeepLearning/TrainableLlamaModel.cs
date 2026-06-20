@@ -6,6 +6,7 @@
 using System.Numerics.Tensors;
 using System.Runtime.InteropServices;
 using DevOnBike.Overfit.Autograd;
+using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.Rope;
 using DevOnBike.Overfit.LanguageModels.Runtime;
 using DevOnBike.Overfit.Ops;
@@ -60,8 +61,14 @@ namespace DevOnBike.Overfit.DeepLearning
             _outputStart = restricted ? outputStart : 0;
             var effectiveVocab = restricted ? outputCount : vocab;
 
-            _dModel = dModel; _nQHeads = nQHeads; _nKVHeads = nKVHeads; _vocab = effectiveVocab;
-            _dHead = dModel / nQHeads; _halfDim = _dHead / 2; _eps = eps; _splitHalf = ropeSplitHalf;
+            _dModel = dModel;
+            _nQHeads = nQHeads;
+            _nKVHeads = nKVHeads;
+            _vocab = effectiveVocab;
+            _dHead = dModel / nQHeads;
+            _halfDim = _dHead / 2;
+            _eps = eps;
+            _splitHalf = ropeSplitHalf;
             _embed = embed;
             _lmHead = restricted ? new RangedDequantRowSource(lmHead, outputStart, outputCount) : lmHead;
             _dFF = layers[0].Gate.OutputSize;
@@ -161,7 +168,10 @@ namespace DevOnBike.Overfit.DeepLearning
             }
             var cosN = new AutogradNode(cosStore, new TensorShape(T, _halfDim), requiresGrad: false);
             var sinN = new AutogradNode(sinStore, new TensorShape(T, _halfDim), requiresGrad: false);
-            _scratch.Add(cosStore); _scratch.Add(sinStore); _scratch.Add(cosN); _scratch.Add(sinN);
+            _scratch.Add(cosStore);
+            _scratch.Add(sinStore);
+            _scratch.Add(cosN);
+            _scratch.Add(sinN);
 
             var subArena = CheckpointArena(T);
             var h = hidden;
@@ -169,7 +179,9 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 var li = l; // capture a per-iteration copy for the deferred checkpoint recompute
                 var block = _blocks[li];
-                var g1 = _ln1Gamma[li]; var g2 = _ln2Gamma[li]; var lora = _lora[li];
+                var g1 = _ln1Gamma[li];
+                var g2 = _ln2Gamma[li];
+                var lora = _lora[li];
                 h = useCheckpoint
                     ? graph.Checkpoint((sub, x) => block.Forward(sub, x, cosN, sinN, g1, g2, lora), h, subArena)
                     : block.Forward(graph, h, cosN, sinN, g1, g2, lora);
@@ -195,9 +207,20 @@ namespace DevOnBike.Overfit.DeepLearning
                 var logits = Forward(graph, tokens.ToArray(), useCheckpoint: true);
                 var T = tokens.Count;
                 var lastRow = logits.DataView.AsReadOnlySpan().Slice((T - 1) * _vocab, _vocab);
-                var next = 0; var bv = lastRow[0];
-                for (var v = 1; v < _vocab; v++) { if (lastRow[v] > bv) { bv = lastRow[v]; next = v; } }
-                if (next == eosTokenId) { break; }
+                var next = 0;
+                var bv = lastRow[0];
+                for (var v = 1; v < _vocab; v++)
+                {
+                    if (lastRow[v] > bv)
+                    {
+                        bv = lastRow[v];
+                        next = v;
+                    }
+                }
+                if (next == eosTokenId)
+                {
+                    break;
+                }
                 tokens.Add(next);
                 produced.Add(next);
             }
@@ -248,9 +271,15 @@ namespace DevOnBike.Overfit.DeepLearning
                 if (p == tokens.Count - 1)
                 {
                     var token = LmHeadArgmax(hidden, normedB.Span, rowB.Span) + _outputStart; // restricted index → real id
-                    if (token == eosTokenId) { break; }
+                    if (token == eosTokenId)
+                    {
+                        break;
+                    }
                     produced.Add(token);
-                    if (produced.Count >= maxNewTokens) { break; }
+                    if (produced.Count >= maxNewTokens)
+                    {
+                        break;
+                    }
                     tokens.Add(token);
                 }
                 p++;
@@ -308,9 +337,15 @@ namespace DevOnBike.Overfit.DeepLearning
                     // Stop on either terminator: the trained text-eos OR end_of_speech (128258), which the
                     // base model emits at the audio-stream end under the canonical prompt. Without the latter the
                     // clone runs to maxNewTokens and tacks on garbled babble after the sentence.
-                    if (token == eosTokenId || token == secondaryEosTokenId) { break; }
+                    if (token == eosTokenId || token == secondaryEosTokenId)
+                    {
+                        break;
+                    }
                     produced.Add(token);
-                    if (produced.Count >= maxNewTokens) { break; }
+                    if (produced.Count >= maxNewTokens)
+                    {
+                        break;
+                    }
                     tokens.Add(token);
                 }
                 p++;
@@ -355,10 +390,17 @@ namespace DevOnBike.Overfit.DeepLearning
         /// <b>quantized</b> <see cref="CachedLlamaInferenceEngine"/> — so the fine-tuned model runs on the optimized
         /// zero-alloc/SIMD decode path instead of the (≈2× slower) trainable autograd graph. The merge is one-time:
         /// per projection, dequant the base rows, add the LoRA residual <c>W[o,i] += Σ_r A[i,r]·B[r,o]</c>, and
-        /// re-quantize to Q8. LM-head LoRA (off by default) is not merged. The returned engine borrows the base's
-        /// embedding / LM-head / backing, so keep <paramref name="baseEngine"/> alive for the merged engine's lifetime.
+        /// re-quantize. <paramref name="preferQ4K"/> picks the merged weight format: <b>Q8 (default)</b> preserves
+        /// the fine-tune almost exactly (measured final-hidden cos ≈ 1.0 vs the trainable model) but reads ~2× the
+        /// bytes of the base, so it decodes ~0.8× the Q4_K preset; <b>Q4_K</b> matches preset decode speed (~1.0×)
+        /// on the 256-multiple projections (q/k/v, gate/up/down) but the coarse 4-bit re-quantization erodes part
+        /// of the LoRA delta (measured cos ≈ 0.96) — verify the clone perceptually before choosing it. The per-head
+        /// O projection (row length = headDim, not a 256-multiple) is always Q8. LM-head LoRA (off by default) is
+        /// not merged. The returned engine borrows the base's embedding / LM-head / backing, so keep
+        /// <paramref name="baseEngine"/> alive for the merged engine's lifetime.
         /// </summary>
-        public CachedLlamaInferenceEngine BuildMergedEngine(CachedLlamaInferenceEngine baseEngine, bool mergeLora = true)
+        public CachedLlamaInferenceEngine BuildMergedEngine(
+            CachedLlamaInferenceEngine baseEngine, bool mergeLora = true, bool preferQ4K = false)
         {
             var cfg = baseEngine.Config;
             var nL = _blocks.Length;
@@ -379,26 +421,46 @@ namespace DevOnBike.Overfit.DeepLearning
                     QNorm = b.QNorm,
                     KNorm = b.KNorm,
                     // q/k/v: each per-head weight row is an OUTPUT neuron (o = h·dHead + jj), columns are dModel inputs.
-                    Wq = MergePerHeadByOutput(b.Wq, lora?.Q, _nQHeads, _dHead, _dModel),
+                    Wq = MergePerHeadByOutput(b.Wq, lora?.Q, _nQHeads, _dHead, _dModel, preferQ4K),
                     Bq = b.Bq,
-                    Wk = MergePerHeadByOutput(b.Wk, lora?.K, _nKVHeads, _dHead, _dModel),
+                    Wk = MergePerHeadByOutput(b.Wk, lora?.K, _nKVHeads, _dHead, _dModel, preferQ4K),
                     Bk = b.Bk,
-                    Wv = MergePerHeadByOutput(b.Wv, lora?.V, _nKVHeads, _dHead, _dModel),
+                    Wv = MergePerHeadByOutput(b.Wv, lora?.V, _nKVHeads, _dHead, _dModel, preferQ4K),
                     Bv = b.Bv,
                     // o: per-head weight is the TRANSPOSED layout — row jj is the head's INPUT column (i = h·dHead+jj),
                     // the dModel entries are OUTPUTS. So the residual indexes A by the fixed input, B by the output.
-                    Wo = MergePerHeadByInput(b.Wo, lora?.O, _nQHeads, _dHead, _dModel),
+                    Wo = MergePerHeadByInput(b.Wo, lora?.O, _nQHeads, _dHead, _dModel, preferQ4K),
                     Bo = b.Bo,
                     // FFN: resident full matrices. gate/up = [dFF × dModel], down = [dModel × dFF].
-                    FfnGate = MergeResident(b.FfnGate, lora?.Gate, _dFF, _dModel),
-                    FfnUp = MergeResident(b.FfnUp, lora?.Up, _dFF, _dModel),
-                    FfnDown = MergeResident(b.FfnDown, lora?.Down, _dModel, _dFF),
+                    FfnGate = MergeResident(b.FfnGate, lora?.Gate, _dFF, _dModel, preferQ4K),
+                    FfnUp = MergeResident(b.FfnUp, lora?.Up, _dFF, _dModel, preferQ4K),
+                    FfnDown = MergeResident(b.FfnDown, lora?.Down, _dModel, _dFF, preferQ4K),
                 };
             }
 
             return CachedLlamaInferenceEngine.CreateFromBuffers(
                 cfg, baseEngine.EmbeddingWeights, NodeToStorage(_finalNormGamma),
                 TensorStorage<float>.Unpooled(0), baseEngine.LmHeadWeights, merged);
+        }
+
+        // Q4_K super-block spans 256 elements, so a weight can only be re-quantized to Q4_K when its row length
+        // (the input dimension) is a multiple of 256.
+        private const int Q4KSuperBlock = 256;
+
+        // Re-quantizes a merged F32 weight. With preferQ4K, picks Q4_K (half the bytes of Q8 — matching the base
+        // preset's own format) when the row length is a Q4_K super-block multiple; otherwise Q8. Decode is
+        // memory-bandwidth bound, so Q4_K on the wide projections (q/k/v with in=dModel, gate/up/down) reaches
+        // preset decode speed — but its coarse 4-bit rounding erodes part of the LoRA delta (measured), so Q8 is
+        // the fidelity-preserving default. The per-head O projection has row length = headDim (not a 256-multiple)
+        // and is always Q8 — lifting that needs the whole-matrix-O layout (the same refactor as the perf lever).
+        private static DecodeWeight Requantize(float[] buf, int rowCount, int rowLength, bool preferQ4K)
+        {
+            if (preferQ4K && rowLength % Q4KSuperBlock == 0)
+            {
+                return new Q4KWeight(GgmlQuant.QuantizeQ4_K(buf, rowLength, rowCount), rowLength, rowCount);
+            }
+
+            return Q8Weight.QuantizeRows(buf, rowCount, rowLength);
         }
 
         private static TensorStorage<float> NodeToStorage(AutogradNode node)
@@ -411,12 +473,17 @@ namespace DevOnBike.Overfit.DeepLearning
 
         // q/k/v: base[h] is [dHead × dModel], row jj = output neuron o = h·dHead+jj, cols = dModel inputs.
         // LoRA A [dModel × rank], B [rank × (nHeads·dHead)]; delta[o,i] = Σ_r A[i,r]·B[r,o].
-        private static DecodeWeight[] MergePerHeadByOutput(DecodeWeight[] baseHeads, LoRAAdapter? lora, int nHeads, int dHead, int dModel)
+        private static DecodeWeight[] MergePerHeadByOutput(DecodeWeight[] baseHeads, LoRAAdapter? lora, int nHeads, int dHead, int dModel, bool preferQ4K)
         {
             float[]? a = null, bb = null;
             var rank = 0;
             var outDim = nHeads * dHead;
-            if (lora is not null) { a = lora.A.DataView.AsSpan().ToArray(); bb = lora.B.DataView.AsSpan().ToArray(); rank = lora.Rank; }
+            if (lora is not null)
+            {
+                a = lora.A.DataView.AsSpan().ToArray();
+                bb = lora.B.DataView.AsSpan().ToArray();
+                rank = lora.Rank;
+            }
             var result = new DecodeWeight[nHeads];
             for (var h = 0; h < nHeads; h++)
             {
@@ -434,12 +501,15 @@ namespace DevOnBike.Overfit.DeepLearning
                         for (var i = 0; i < dModel; i++)
                         {
                             var d = 0f;
-                            for (var r = 0; r < rank; r++) { d += a![(i * rank) + r] * bb![(r * outDim) + o]; }
+                            for (var r = 0; r < rank; r++)
+                            {
+                                d += a![(i * rank) + r] * bb![(r * outDim) + o];
+                            }
                             row[i] += d;
                         }
                     });
                 }
-                result[h] = Q8Weight.QuantizeRows(buf, dHead, dModel);
+                result[h] = Requantize(buf, dHead, dModel, preferQ4K);
             }
             return result;
         }
@@ -447,11 +517,16 @@ namespace DevOnBike.Overfit.DeepLearning
         // o: base[h] is [dModel × dHead] — OutputSize=dModel rows, each the dHead weights for head h's attn output
         // (= the full-O columns [h·dHead, (h+1)·dHead)). LoRA O: A [(nHeads·dHead) × rank], B [rank × dModel];
         // for output o and head-input i (full input = h·dHead+i): delta = Σ_r A[h·dHead+i, r]·B[r, o].
-        private static DecodeWeight[] MergePerHeadByInput(DecodeWeight[] baseHeads, LoRAAdapter? lora, int nHeads, int dHead, int dModel)
+        private static DecodeWeight[] MergePerHeadByInput(DecodeWeight[] baseHeads, LoRAAdapter? lora, int nHeads, int dHead, int dModel, bool preferQ4K)
         {
             float[]? a = null, bb = null;
             var rank = 0;
-            if (lora is not null) { a = lora.A.DataView.AsSpan().ToArray(); bb = lora.B.DataView.AsSpan().ToArray(); rank = lora.Rank; }
+            if (lora is not null)
+            {
+                a = lora.A.DataView.AsSpan().ToArray();
+                bb = lora.B.DataView.AsSpan().ToArray();
+                rank = lora.Rank;
+            }
             var result = new DecodeWeight[nHeads];
             for (var h = 0; h < nHeads; h++)
             {
@@ -469,18 +544,21 @@ namespace DevOnBike.Overfit.DeepLearning
                         {
                             var iIn = (h * dHead) + i;
                             var d = 0f;
-                            for (var r = 0; r < rank; r++) { d += a![(iIn * rank) + r] * bb![(r * dModel) + o]; }
+                            for (var r = 0; r < rank; r++)
+                            {
+                                d += a![(iIn * rank) + r] * bb![(r * dModel) + o];
+                            }
                             row[i] += d;
                         }
                     });
                 }
-                result[h] = Q8Weight.QuantizeRows(buf, dModel, dHead);
+                result[h] = Requantize(buf, dModel, dHead, preferQ4K);
             }
             return result;
         }
 
         // Resident full matrix [outDim × inDim]. LoRA A [inDim × rank], B [rank × outDim]; delta[o,i] = Σ_r A[i,r]·B[r,o].
-        private static DecodeWeight MergeResident(DecodeWeight baseW, LoRAAdapter? lora, int outDim, int inDim)
+        private static DecodeWeight MergeResident(DecodeWeight baseW, LoRAAdapter? lora, int outDim, int inDim, bool preferQ4K)
         {
             var buf = new float[checked(outDim * inDim)];
             for (var o = 0; o < outDim; o++)
@@ -498,12 +576,15 @@ namespace DevOnBike.Overfit.DeepLearning
                     for (var i = 0; i < inDim; i++)
                     {
                         var d = 0f;
-                        for (var r = 0; r < rank; r++) { d += a[(i * rank) + r] * bb[(r * outDim) + o]; }
+                        for (var r = 0; r < rank; r++)
+                        {
+                            d += a[(i * rank) + r] * bb[(r * outDim) + o];
+                        }
                         row[i] += d;
                     }
                 });
             }
-            return Q8Weight.QuantizeRows(buf, outDim, inDim);
+            return Requantize(buf, outDim, inDim, preferQ4K);
         }
 
         // Computes the full LM-head logit vector for the current hidden state (RMSNorm + base + LM-head LoRA).
@@ -511,7 +592,10 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             var inv = 1f / MathF.Sqrt(TensorPrimitives.Dot(hidden, hidden) / _dModel + _eps);
             var g = _finalNormGamma.DataView.AsReadOnlySpan();
-            for (var i = 0; i < _dModel; i++) { normed[i] = hidden[i] * inv * g[i]; }
+            for (var i = 0; i < _dModel; i++)
+            {
+                normed[i] = hidden[i] * inv * g[i];
+            }
 
             _ = row; // dequant scratch is per-thread inside DequantMatVec
             DequantMatVec.Run(normed, _lmHead, logits);
@@ -526,17 +610,29 @@ namespace DevOnBike.Overfit.DeepLearning
                 for (var i = 0; i < _dModel; i++)
                 {
                     var xi = normed[i];
-                    if (xi == 0f) { continue; }
+                    if (xi == 0f)
+                    {
+                        continue;
+                    }
                     var aRow = a.Slice(i * rank, rank);
-                    for (var r = 0; r < rank; r++) { tmp[r] += xi * aRow[r]; }
+                    for (var r = 0; r < rank; r++)
+                    {
+                        tmp[r] += xi * aRow[r];
+                    }
                 }
                 var bSpan = _lmHeadLora.B.DataView.AsReadOnlySpan();
                 for (var r = 0; r < rank; r++)
                 {
                     var tr = tmp[r];
-                    if (tr == 0f) { continue; }
+                    if (tr == 0f)
+                    {
+                        continue;
+                    }
                     var bRow = bSpan.Slice(r * _vocab, _vocab);
-                    for (var o = 0; o < _vocab; o++) { logits[o] += tr * bRow[o]; }
+                    for (var o = 0; o < _vocab; o++)
+                    {
+                        logits[o] += tr * bRow[o];
+                    }
                 }
             }
         }
@@ -569,7 +665,11 @@ namespace DevOnBike.Overfit.DeepLearning
                 var bestVal = float.NegativeInfinity;
                 for (var o = 0; o < vocab; o++)
                 {
-                    if (logits[o] > bestVal) { bestVal = logits[o]; best = o; }
+                    if (logits[o] > bestVal)
+                    {
+                        bestVal = logits[o];
+                        best = o;
+                    }
                 }
                 return best;
             }
@@ -579,7 +679,10 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 var l = logits[o] / temperature;
                 logits[o] = l;
-                if (l > maxL) { maxL = l; }
+                if (l > maxL)
+                {
+                    maxL = l;
+                }
             }
             double sum = 0.0;
             for (var o = 0; o < vocab; o++)
@@ -590,7 +693,10 @@ namespace DevOnBike.Overfit.DeepLearning
                 order[o] = o;
             }
             var invSum = (float)(1.0 / sum);
-            for (var o = 0; o < vocab; o++) { probs[o] *= invSum; }
+            for (var o = 0; o < vocab; o++)
+            {
+                probs[o] *= invSum;
+            }
 
             // Top-p: sort by probability (desc) and keep the smallest nucleus covering topP mass.
             Array.Sort(order, (x, y) => probs[y].CompareTo(probs[x]));
@@ -600,7 +706,10 @@ namespace DevOnBike.Overfit.DeepLearning
             {
                 cumulative += probs[order[k]];
                 keep++;
-                if (cumulative >= topP) { break; }
+                if (cumulative >= topP)
+                {
+                    break;
+                }
             }
 
             var target = rng.NextDouble() * cumulative;
@@ -608,7 +717,10 @@ namespace DevOnBike.Overfit.DeepLearning
             for (var k = 0; k < keep; k++)
             {
                 acc += probs[order[k]];
-                if (acc >= target) { return order[k]; }
+                if (acc >= target)
+                {
+                    return order[k];
+                }
             }
             return order[keep - 1];
         }
@@ -617,7 +729,10 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             var inv = 1f / MathF.Sqrt(TensorPrimitives.Dot(hidden, hidden) / _dModel + _eps);
             var g = _finalNormGamma.DataView.AsReadOnlySpan();
-            for (var i = 0; i < _dModel; i++) { normed[i] = hidden[i] * inv * g[i]; }
+            for (var i = 0; i < _dModel; i++)
+            {
+                normed[i] = hidden[i] * inv * g[i];
+            }
 
             // LoRA pre-projection tmp[r] = Σ_i normed[i]·A[i,r], if an LM-head adapter is present.
             var rank = _lmHeadLora?.Rank ?? 0;
@@ -630,9 +745,15 @@ namespace DevOnBike.Overfit.DeepLearning
                 for (var i = 0; i < _dModel; i++)
                 {
                     var xi = normed[i];
-                    if (xi == 0f) { continue; }
+                    if (xi == 0f)
+                    {
+                        continue;
+                    }
                     var aRow = a.Slice(i * rank, rank);
-                    for (var r = 0; r < rank; r++) { tmp[r] += xi * aRow[r]; }
+                    for (var r = 0; r < rank; r++)
+                    {
+                        tmp[r] += xi * aRow[r];
+                    }
                 }
                 bSpan = _lmHeadLora.B.DataView.AsReadOnlySpan(); // [rank, vocab]
             }
@@ -645,9 +766,16 @@ namespace DevOnBike.Overfit.DeepLearning
                 var logit = TensorPrimitives.Dot(row, normed);
                 if (_lmHeadLora is not null)
                 {
-                    for (var r = 0; r < tmp.Length; r++) { logit += tmp[r] * bSpan[r * _vocab + o]; }
+                    for (var r = 0; r < tmp.Length; r++)
+                    {
+                        logit += tmp[r] * bSpan[r * _vocab + o];
+                    }
                 }
-                if (logit > bestVal) { bestVal = logit; best = o; }
+                if (logit > bestVal)
+                {
+                    bestVal = logit;
+                    best = o;
+                }
             }
             return best;
         }
@@ -662,11 +790,18 @@ namespace DevOnBike.Overfit.DeepLearning
                 yield return _ln2Gamma[l];
                 if (_lora[l] is { } lora)
                 {
-                    foreach (var p in lora.Parameters()) { yield return p; }
+                    foreach (var p in lora.Parameters())
+                    {
+                        yield return p;
+                    }
                 }
             }
             yield return _finalNormGamma;
-            if (_lmHeadLora is not null) { yield return _lmHeadLora.A; yield return _lmHeadLora.B; }
+            if (_lmHeadLora is not null)
+            {
+                yield return _lmHeadLora.A;
+                yield return _lmHeadLora.B;
+            }
         }
 
         // ── Adapter save / load (the trained delta only; the frozen base is never written) ──
@@ -709,9 +844,15 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             using var fs = File.OpenRead(path);
             using var br = new BinaryReader(fs);
-            if (br.ReadUInt32() != AdapterMagic) { throw new OverfitFormatException("Not an Overfit Llama adapter file."); }
+            if (br.ReadUInt32() != AdapterMagic)
+            {
+                throw new OverfitFormatException("Not an Overfit Llama adapter file.");
+            }
             var version = br.ReadInt32();
-            if (version != AdapterVersion) { throw new OverfitFormatException($"Unsupported adapter version {version}."); }
+            if (version != AdapterVersion)
+            {
+                throw new OverfitFormatException($"Unsupported adapter version {version}.");
+            }
             var nLayers = br.ReadInt32();
             var dModel = br.ReadInt32();
             var vocab = br.ReadInt32();
@@ -742,7 +883,10 @@ namespace DevOnBike.Overfit.DeepLearning
         private List<AutogradNode> MaterializeParams()
         {
             var ps = new List<AutogradNode>();
-            foreach (var p in TrainableParameters()) { ps.Add(p); }
+            foreach (var p in TrainableParameters())
+            {
+                ps.Add(p);
+            }
             return ps;
         }
 
@@ -851,36 +995,53 @@ namespace DevOnBike.Overfit.DeepLearning
             var store = new TensorStorage<float>(init.Length, clearMemory: false);
             init.CopyTo(store.AsSpan());
             var node = new AutogradNode(store, new TensorShape(init.Length), requiresGrad: true);
-            _owned.Add(store); _owned.Add(node);
+            _owned.Add(store);
+            _owned.Add(node);
             return node;
         }
 
-        private T Track<T>(T d) where T : IDisposable { _owned.Add(d); return d; }
+        private T Track<T>(T d) where T : IDisposable
+        {
+            _owned.Add(d);
+            return d;
+        }
 
         private static ConcatRowsDequantSource ConcatRows(DecodeWeight[] heads, int count)
         {
             var parts = new IDequantRowSource[count];
-            for (var h = 0; h < count; h++) { parts[h] = heads[h].AsRowSource(); }
+            for (var h = 0; h < count; h++)
+            {
+                parts[h] = heads[h].AsRowSource();
+            }
             return new ConcatRowsDequantSource(parts);
         }
 
         private static ConcatColsDequantSource ConcatCols(DecodeWeight[] heads, int count)
         {
             var parts = new IDequantRowSource[count];
-            for (var h = 0; h < count; h++) { parts[h] = heads[h].AsRowSource(); }
+            for (var h = 0; h < count; h++)
+            {
+                parts[h] = heads[h].AsRowSource();
+            }
             return new ConcatColsDequantSource(parts);
         }
 
         private void DisposeScratch()
         {
-            for (var i = _scratch.Count - 1; i >= 0; i--) { _scratch[i].Dispose(); }
+            for (var i = _scratch.Count - 1; i >= 0; i--)
+            {
+                _scratch[i].Dispose();
+            }
             _scratch.Clear();
         }
 
         public void Dispose()
         {
             DisposeScratch();
-            for (var i = _owned.Count - 1; i >= 0; i--) { _owned[i].Dispose(); }
+            for (var i = _owned.Count - 1; i >= 0; i--)
+            {
+                _owned[i].Dispose();
+            }
             _owned.Clear();
         }
     }

@@ -37,7 +37,10 @@ namespace Benchmarks
     public unsafe class OverfitParallelBenchmark
     {
         [Params(0, 10, 1000, 100_000, 1_000_000)]
-        public int InnerIters { get; set; }
+        public int InnerIters
+        {
+            get; set;
+        }
 
         private int _workerCount;
 
@@ -140,7 +143,10 @@ namespace Benchmarks
             System.Threading.Tasks.Parallel.For(0, _workerCount, c =>
             {
                 var x = (double)(c + 1);
-                for (var k = 0; k < inner; k++) { x = x * 1.0000001 + 1e-9; }
+                for (var k = 0; k < inner; k++)
+                {
+                    x = x * 1.0000001 + 1e-9;
+                }
                 results[c] = x;
             });
             return results[0];

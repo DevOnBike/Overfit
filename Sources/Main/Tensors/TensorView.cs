@@ -50,9 +50,19 @@ namespace DevOnBike.Overfit.Tensors
                            int s0, int s1, int s2, int s3,
                            int st0, int st1, int st2, int st3)
         {
-            _data = data; Rank = rank; Size = size; Offset = offset; IsContiguous = isContiguous;
-            _s0 = s0; _s1 = s1; _s2 = s2; _s3 = s3;
-            _st0 = st0; _st1 = st1; _st2 = st2; _st3 = st3;
+            _data = data;
+            Rank = rank;
+            Size = size;
+            Offset = offset;
+            IsContiguous = isContiguous;
+            _s0 = s0;
+            _s1 = s1;
+            _s2 = s2;
+            _s3 = s3;
+            _st0 = st0;
+            _st1 = st1;
+            _st2 = st2;
+            _st3 = st3;
         }
 
         // ========================================================================
@@ -74,13 +84,27 @@ namespace DevOnBike.Overfit.Tensors
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public int GetDim(int index)
         {
-            return index switch { 0 => _s0, 1 => _s1, 2 => _s2, 3 => _s3, _ => 0 };
+            return index switch
+            {
+                0 => _s0,
+                1 => _s1,
+                2 => _s2,
+                3 => _s3,
+                _ => 0
+            };
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public int GetStride(int index)
         {
-            return index switch { 0 => _st0, 1 => _st1, 2 => _st2, 3 => _st3, _ => 0 };
+            return index switch
+            {
+                0 => _st0,
+                1 => _st1,
+                2 => _st2,
+                3 => _st3,
+                _ => 0
+            };
         }
 
         // Indexers migrated from FastTensor

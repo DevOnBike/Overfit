@@ -81,10 +81,16 @@ namespace Benchmarks
         private bool _disposed;
 
         [Params(8, 16, 32)]
-        public int BatchSize { get; set; }
+        public int BatchSize
+        {
+            get; set;
+        }
 
         [Params(128)]
-        public int SeqLen { get; set; }
+        public int SeqLen
+        {
+            get; set;
+        }
 
         [GlobalSetup]
         public void Setup()

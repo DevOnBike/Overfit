@@ -95,7 +95,7 @@ namespace DevOnBike.Overfit.Audio.Tts.Snac
         }
 
         // ── Decoder.model: depthwise stem → blocks → snake → out conv → tanh ──
-        private float[] RunDecoder(float[] zq, int frames, bool addNoise)
+        private float[] RunDecoder(ReadOnlySpan<float> zq, int frames, bool addNoise)
         {
             var latent = _cfg.LatentDim;
 
@@ -131,7 +131,7 @@ namespace DevOnBike.Overfit.Audio.Tts.Snac
         }
 
         // DecoderBlock: Snake → ConvTranspose1d(k=2·stride, pad=⌈stride/2⌉, output_padding=stride%2) → [noise] → 3 ResidualUnits
-        private float[] DecoderBlock(float[] x, int inDim, int tIn, int b, bool addNoise, out int outDim, out int outT)
+        private float[] DecoderBlock(Span<float> x, int inDim, int tIn, int b, bool addNoise, out int outDim, out int outT)
         {
             outDim = inDim / 2;
             var stride = _cfg.DecoderRates[b];
@@ -159,7 +159,7 @@ namespace DevOnBike.Overfit.Audio.Tts.Snac
         }
 
         // NoiseBlock: x += randn(1,T) ⊙ (1×1 conv of x). Random by design; only used when addNoise is requested.
-        private static void ApplyNoise(float[] x, float[] noiseWeight, int dim, int t, int seedOffset)
+        private static void ApplyNoise(Span<float> x, ReadOnlySpan<float> noiseWeight, int dim, int t, int seedOffset)
         {
             var h = new float[dim * t];
             SnacConv.Conv1d(x, noiseWeight, ReadOnlySpan<float>.Empty, h,

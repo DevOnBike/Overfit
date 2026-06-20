@@ -17,10 +17,16 @@ namespace DevOnBike.Overfit.LanguageModels.Agents
             Feedback = feedback ?? string.Empty;
         }
 
-        public bool Approved { get; }
+        public bool Approved
+        {
+            get;
+        }
 
         /// <summary>Free-form critique fed back to the generator on revision. Empty when approved.</summary>
-        public string Feedback { get; }
+        public string Feedback
+        {
+            get;
+        }
 
         public static CriticVerdict Approve() => new(true, string.Empty);
 

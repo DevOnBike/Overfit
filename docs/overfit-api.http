@@ -1,0 +1,112 @@
+####################################################################################################
+# Overfit OpenAI-compatible server — ready-to-run example requests.
+#
+# Open in VS Code (REST Client extension) or JetBrains (HTTP Client) and click "Send Request" above
+# each block, or translate to curl. Start the server first:
+#
+#   overfit serve qwen2.5-3b --port 11434
+#   overfit serve qwen2.5-3b --port 11434 --embed-model C:\minilm      # also /v1/embeddings
+#   overfit serve qwen2.5-3b --port 11434 --tts-model orpheus.gguf --tts-snac C:\snac   # also /v1/audio/speech
+#
+# Machine-readable contract: docs/openapi.yaml
+####################################################################################################
+
+@base = http://127.0.0.1:11434
+@model = qwen2.5-3b
+
+### Health probe
+GET {{base}}/health
+
+### List the loaded model
+GET {{base}}/v1/models
+
+### Chat completion — non-streaming
+POST {{base}}/v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "{{model}}",
+  "messages": [
+    { "role": "user", "content": "What is the capital of Poland?" }
+  ]
+}
+
+### Chat completion — streaming (Server-Sent Events, ends with `data: [DONE]`)
+POST {{base}}/v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "{{model}}",
+  "stream": true,
+  "max_tokens": 256,
+  "temperature": 0.7,
+  "messages": [
+    { "role": "system", "content": "You are a concise assistant." },
+    { "role": "user", "content": "Explain retrieval-augmented generation in two sentences." }
+  ]
+}
+
+### Chat completion — greedy (deterministic) via temperature 0
+POST {{base}}/v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "{{model}}",
+  "temperature": 0,
+  "messages": [
+    { "role": "user", "content": "2 + 2 = ?" }
+  ]
+}
+
+### Chat completion — constrained to a JSON Schema
+POST {{base}}/v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "{{model}}",
+  "messages": [
+    { "role": "user", "content": "Invent a person and return it as JSON." }
+  ],
+  "response_format": {
+    "type": "json_schema",
+    "json_schema": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "age":  { "type": "integer" }
+        },
+        "required": ["name", "age"]
+      }
+    }
+  }
+}
+
+### Embeddings — single string   (server must be started with --embed-model, else 501)
+POST {{base}}/v1/embeddings
+Content-Type: application/json
+
+{
+  "model": "all-minilm-l6-v2",
+  "input": "A quick brown fox."
+}
+
+### Embeddings — batch of strings
+POST {{base}}/v1/embeddings
+Content-Type: application/json
+
+{
+  "model": "all-minilm-l6-v2",
+  "input": ["first sentence", "second sentence"]
+}
+
+### Text-to-speech → WAV bytes   (server must be started with --tts-model, else 501)
+POST {{base}}/v1/audio/speech
+Content-Type: application/json
+
+{
+  "model": "orpheus",
+  "input": "Hello from a local, private text-to-speech engine.",
+  "voice": "tara",
+  "response_format": "wav"
+}

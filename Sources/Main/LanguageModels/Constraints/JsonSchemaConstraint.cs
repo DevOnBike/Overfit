@@ -77,7 +77,10 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
             var anyAllowed = false;
             for (var t = 0; t < logits.Length; t++)
             {
-                if (t == _eosTokenId) { continue; }   // handled after the loop (needs anyAllowed)
+                if (t == _eosTokenId)
+                {
+                    continue;
+                }   // handled after the loop (needs anyAllowed)
 
                 var text = t < _tokenText.Length ? _tokenText[t] : string.Empty;
                 if (text.Length == 0)
@@ -109,8 +112,14 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
 
         public void Accept(int token)
         {
-            if (token == _eosTokenId) { return; }
-            if ((uint)token >= (uint)_tokenText.Length) { return; }
+            if (token == _eosTokenId)
+            {
+                return;
+            }
+            if ((uint)token >= (uint)_tokenText.Length)
+            {
+                return;
+            }
 
             var text = _tokenText[token];
             for (var i = 0; i < text.Length; i++)
@@ -129,8 +138,14 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
             for (var i = 0; i < text.Length; i++)
             {
                 var c = text[i];
-                if (!tracker.IsCharAllowedBySchema(c, in machine)) { return false; }
-                if (!machine.TryAdvance(c)) { return false; }
+                if (!tracker.IsCharAllowedBySchema(c, in machine))
+                {
+                    return false;
+                }
+                if (!machine.TryAdvance(c))
+                {
+                    return false;
+                }
                 tracker.OnCharAdvanced(c, in machine);
             }
             return true;

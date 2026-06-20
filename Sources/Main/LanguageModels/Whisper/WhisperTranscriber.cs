@@ -72,20 +72,28 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             return _tokenizer.Decode(produced).Trim();
         }
 
+#pragma warning disable OVERFIT001 // Prompt token list built once per transcription (3-4 special ids), not per token.
         private int[] BuildPrompt(string language)
         {
             // English-only models have no language token; multilingual prepend it.
             if (!_model.Config.IsMultilingual)
             {
-                return new[] { _tokenizer.StartOfTranscript, _tokenizer.Transcribe, _tokenizer.NoTimestamps };
+                return
+                [
+                    _tokenizer.StartOfTranscript,
+                    _tokenizer.Transcribe,
+                    _tokenizer.NoTimestamps
+                ];
             }
-            return new[]
-            {
+
+            return
+            [
                 _tokenizer.StartOfTranscript,
                 _tokenizer.LanguageToken(language),
                 _tokenizer.Transcribe,
-                _tokenizer.NoTimestamps,
-            };
+                _tokenizer.NoTimestamps
+            ];
         }
+#pragma warning restore OVERFIT001
     }
 }

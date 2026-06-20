@@ -91,19 +91,40 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _weights = new StackWeights(model);
         }
 
-        public int LayerCount { get; }
+        public int LayerCount
+        {
+            get;
+        }
 
-        public int DModel { get; }
+        public int DModel
+        {
+            get;
+        }
 
-        public int HeadCount { get; }
+        public int HeadCount
+        {
+            get;
+        }
 
-        public int HeadDimension { get; }
+        public int HeadDimension
+        {
+            get;
+        }
 
-        public int DFF { get; }
+        public int DFF
+        {
+            get;
+        }
 
-        public int VocabSize { get; }
+        public int VocabSize
+        {
+            get;
+        }
 
-        public int MaxContextLength { get; }
+        public int MaxContextLength
+        {
+            get;
+        }
 
         public int CurrentPosition => _cache.CurrentLength;
 
@@ -224,22 +245,22 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var batch = PooledBuffer<float>.RentArray(n * DModel);
             try
             {
-            for (var i = 0; i < n; i++)
-            {
-                _model.TokenEmbedding.LookupInference(tokens[i], _tokenEmbeddingBuffer);
-                _model.PositionEmbedding.LookupInference(basePos + i, _positionEmbeddingBuffer);
-
-                var dst = batch.AsSpan(i * DModel, DModel);
-                for (var d = 0; d < DModel; d++)
+                for (var i = 0; i < n; i++)
                 {
-                    dst[d] = _tokenEmbeddingBuffer[d] + _positionEmbeddingBuffer[d];
+                    _model.TokenEmbedding.LookupInference(tokens[i], _tokenEmbeddingBuffer);
+                    _model.PositionEmbedding.LookupInference(basePos + i, _positionEmbeddingBuffer);
+
+                    var dst = batch.AsSpan(i * DModel, DModel);
+                    for (var d = 0; d < DModel; d++)
+                    {
+                        dst[d] = _tokenEmbeddingBuffer[d] + _positionEmbeddingBuffer[d];
+                    }
+
+                    _cache.Advance();
                 }
 
-                _cache.Advance();
-            }
-
-            _stack.PrefillBatched(batch, n, _weights, _cache, basePos, rope: null);
-            _stack.ProjectLogits(_weights, lastLogits);
+                _stack.PrefillBatched(batch, n, _weights, _cache, basePos, rope: null);
+                _stack.ProjectLogits(_weights, lastLogits);
             }
             finally
             {
@@ -303,7 +324,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         private static void Copy(
             ReadOnlySpan<float> source,
-            float[] destination)
+            Span<float> destination)
         {
             if (source.Length != destination.Length)
             {

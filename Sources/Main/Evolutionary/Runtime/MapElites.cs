@@ -121,10 +121,22 @@ namespace DevOnBike.Overfit.Evolutionary.Runtime
             Iteration = 0;
         }
 
-        public int ParameterCount { get; }
-        public int BatchSize { get; }
-        public int DescriptorDimensions { get; }
-        public int Iteration { get; private set; }
+        public int ParameterCount
+        {
+            get;
+        }
+        public int BatchSize
+        {
+            get;
+        }
+        public int DescriptorDimensions
+        {
+            get;
+        }
+        public int Iteration
+        {
+            get; private set;
+        }
 
         public GridEliteArchive Archive
         {

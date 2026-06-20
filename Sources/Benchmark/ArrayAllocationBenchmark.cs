@@ -15,7 +15,10 @@ namespace Benchmarks
         // Array size parameterization:
         // 1024 (1 KB), 65 536 (64 KB), 1 048 576 (1 MB), 10 485 760 (10 MB)
         [Params(1024, 65536, 1_048_576, 10_485_760)]
-        public int Size { get; set; }
+        public int Size
+        {
+            get; set;
+        }
 
         [Benchmark(Baseline = true)]
         public float[] StandardNew()

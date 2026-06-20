@@ -14,16 +14,32 @@ namespace DevOnBike.Overfit.DeepLearning
 {
     public sealed class LstmCell : IModule
     {
-        public int InputSize { get; }
-        public int HiddenSize { get; }
-        public AutogradNode W { get; }
-        public AutogradNode U { get; }
-        public AutogradNode B { get; }
+        public int InputSize
+        {
+            get;
+        }
+        public int HiddenSize
+        {
+            get;
+        }
+        public AutogradNode W
+        {
+            get;
+        }
+        public AutogradNode U
+        {
+            get;
+        }
+        public AutogradNode B
+        {
+            get;
+        }
         public bool IsTraining { get; private set; } = true;
 
         public LstmCell(int inputSize, int hiddenSize)
         {
-            InputSize = inputSize; HiddenSize = hiddenSize;
+            InputSize = inputSize;
+            HiddenSize = hiddenSize;
             var limit = MathF.Sqrt(6f / (inputSize + hiddenSize));
 
             W = new AutogradNode(new TensorStorage<float>(inputSize * 4 * hiddenSize, clearMemory: false), new TensorShape(inputSize, 4 * hiddenSize), true);
@@ -130,9 +146,15 @@ namespace DevOnBike.Overfit.DeepLearning
             yield return B;
         }
 
-        public void InvalidateParameterCaches() { }
-        public void Save(BinaryWriter bw) { }
-        public void Load(BinaryReader br) { }
+        public void InvalidateParameterCaches()
+        {
+        }
+        public void Save(BinaryWriter bw)
+        {
+        }
+        public void Load(BinaryReader br)
+        {
+        }
         public void Dispose()
         {
             W?.Dispose();

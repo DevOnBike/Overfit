@@ -47,8 +47,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             for (var i = 0; i < copyLogits.Length; i++)
             {
                 var d = MathF.Abs(copyLogits[i] - mmapLogits[i]);
-                if (d > maxDiff) { maxDiff = d; }
-                if (d != 0f && firstMismatch < 0) { firstMismatch = i; }
+                if (d > maxDiff)
+                {
+                    maxDiff = d;
+                }
+                if (d != 0f && firstMismatch < 0)
+                {
+                    firstMismatch = i;
+                }
             }
 
             _out.WriteLine($"vocab = {copyLogits.Length}, max abs logit diff = {maxDiff:G9}");
@@ -94,7 +100,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             for (var i = 0; i < copyLogits.Length; i++)
             {
                 var d = MathF.Abs(copyLogits[i] - mmapLogits[i]);
-                if (d > maxDiff) { maxDiff = d; }
+                if (d > maxDiff)
+                {
+                    maxDiff = d;
+                }
             }
 
             _out.WriteLine($"{Path.GetFileName(path)}: vocab = {copyLogits.Length}, max abs logit diff = {maxDiff:G9}");

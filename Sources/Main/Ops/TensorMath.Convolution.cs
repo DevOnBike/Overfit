@@ -176,7 +176,10 @@ namespace DevOnBike.Overfit.Ops
                     {
                         var channel = outGrad.Slice(n * outputPlaneLength + oc * spatialOut, spatialOut);
                         var sum = 0f;
-                        for (var i = 0; i < channel.Length; i++) { sum += channel[i]; }
+                        for (var i = 0; i < channel.Length; i++)
+                        {
+                            sum += channel[i];
+                        }
                         biasGrad[oc] += sum;
                     }
                 }
@@ -312,7 +315,10 @@ namespace DevOnBike.Overfit.Ops
                         {
                             var b = ctx.Bias[oc];
                             var channel = outputSlice.Slice(oc * ctx.SpatialOut, ctx.SpatialOut);
-                            for (var i = 0; i < channel.Length; i++) { channel[i] += b; }
+                            for (var i = 0; i < channel.Length; i++)
+                            {
+                                channel[i] += b;
+                            }
                         }
                     }
                 }

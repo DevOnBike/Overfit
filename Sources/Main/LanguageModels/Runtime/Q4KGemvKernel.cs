@@ -31,16 +31,26 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// default — it allocates a repacked weight copy per Q4_K FFN tensor (adds RAM) and is
         /// AVX2-only. When on, the decode FFN gate/up projections route here.
         /// </summary>
-        public static readonly bool Enabled = ResolveEnabled();
+        public static readonly bool Enabled = ResolveFlag(OverfitEnvironment.RepackGemv);
 
-        private static bool ResolveEnabled()
+        /// <summary>
+        /// Opt-in (<c>OVERFIT_REPACK_ATTN=1</c>) for the whole-matrix Q4_K attention decode path (M3): the
+        /// Q and O projections run as one repacked 8×8 GEMV over all heads (split per head AFTER), replacing
+        /// the per-head Q4_K projections (measured 2.55× ‖ per projection). Off by default — it repacks the
+        /// whole Q/O attention tensors (adds RAM) and reassociates the reduction (not bit-identical), so it is
+        /// validated by E2E coherence, not byte-parity. AVX2-only. K stays per-head (cheap under GQA), V stays
+        /// per-head (Q6_K under Q4_K_M).
+        /// </summary>
+        public static readonly bool AttnEnabled = ResolveFlag(OverfitEnvironment.RepackAttn);
+
+        private static bool ResolveFlag(string envVar)
         {
             if (!CpuFeatures.HasAvx2)
             {
                 return false;
             }
 
-            var raw = Environment.GetEnvironmentVariable("OVERFIT_REPACK_GEMV");
+            var raw = Environment.GetEnvironmentVariable(envVar);
             return raw is "1" || string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase);
         }
 

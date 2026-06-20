@@ -63,7 +63,10 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
             var anyAllowed = false;
             for (var t = 0; t < logits.Length; t++)
             {
-                if (t == _eosTokenId) { continue; }   // handled after the loop (needs anyAllowed)
+                if (t == _eosTokenId)
+                {
+                    continue;
+                }   // handled after the loop (needs anyAllowed)
 
                 var text = t < _tokenText.Length ? _tokenText[t] : string.Empty;
                 if (text.Length == 0)
@@ -94,8 +97,14 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
 
         public void Accept(int token)
         {
-            if (token == _eosTokenId) { return; }
-            if ((uint)token >= (uint)_tokenText.Length) { return; }
+            if (token == _eosTokenId)
+            {
+                return;
+            }
+            if ((uint)token >= (uint)_tokenText.Length)
+            {
+                return;
+            }
 
             var text = _tokenText[token];
             for (var i = 0; i < text.Length; i++)
@@ -112,7 +121,10 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints
             for (var i = 0; i < text.Length; i++)
             {
                 state = _dfa.Next(state, text[i]);
-                if (state < 0) { return false; }
+                if (state < 0)
+                {
+                    return false;
+                }
             }
             return true;
         }

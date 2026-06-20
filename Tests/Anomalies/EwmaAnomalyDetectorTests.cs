@@ -43,7 +43,12 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             for (var i = 0; i < 80; i++)
             {
                 var r = d.Score(NoisyNormal(rng));
-                if (!r.IsWarmup) { maxPostWarmup = MathF.Max(maxPostWarmup, r.Score); sum += r.Score; n++; }
+                if (!r.IsWarmup)
+                {
+                    maxPostWarmup = MathF.Max(maxPostWarmup, r.Score);
+                    sum += r.Score;
+                    n++;
+                }
             }
 
             // Small Gaussian jitter → per-metric z ≈ 1 → mean ½z² is low on average. EWMA is
@@ -63,10 +68,16 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             for (var i = 0; i < 40; i++)
             {
                 var r = d.Score(NoisyNormal(rng));
-                if (!r.IsWarmup) { normal = r.Score; }
+                if (!r.IsWarmup)
+                {
+                    normal = r.Score;
+                }
             }
 
-            var oom = NormalBaseline() with { OomEventsRate = 4f };  // normally a hard 0 — maximal surprise
+            var oom = NormalBaseline() with
+            {
+                OomEventsRate = 4f
+            };  // normally a hard 0 — maximal surprise
             var result = d.Score(oom);
 
             Assert.False(result.IsWarmup);
@@ -81,9 +92,15 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             var d = new EwmaAnomalyDetector(warmupSnapshots: Warmup);
             var rng = new Random(5);
 
-            for (var i = 0; i < 40; i++) { d.Score(NoisyNormal(rng)); }
+            for (var i = 0; i < 40; i++)
+            {
+                d.Score(NoisyNormal(rng));
+            }
 
-            var spike = NormalBaseline() with { LatencyP99Ms = 3_000f };  // ~38× the normal p99
+            var spike = NormalBaseline() with
+            {
+                LatencyP99Ms = 3_000f
+            };  // ~38× the normal p99
             var result = d.Score(spike);
 
             Assert.False(result.IsWarmup);

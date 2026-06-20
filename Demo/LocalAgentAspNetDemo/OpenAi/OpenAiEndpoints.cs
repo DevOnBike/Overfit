@@ -45,13 +45,19 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.OpenAi
             {
                 if (req.Messages is not { Count: > 0 })
                 {
-                    return Results.BadRequest(new { error = "'messages' is required and must be non-empty." });
+                    return Results.BadRequest(new
+                    {
+                        error = "'messages' is required and must be non-empty."
+                    });
                 }
 
                 var last = req.Messages[^1];
                 if (!string.Equals(last.Role, "user", StringComparison.OrdinalIgnoreCase))
                 {
-                    return Results.BadRequest(new { error = "the last message must have role 'user'." });
+                    return Results.BadRequest(new
+                    {
+                        error = "the last message must have role 'user'."
+                    });
                 }
 
                 var (sampling, maxTokens) = OpenAiChatMapping.BuildSampling(req);
@@ -67,7 +73,10 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.OpenAi
                 }
                 catch (JsonException ex)
                 {
-                    return Results.BadRequest(new { error = $"invalid response_format: {ex.Message}" });
+                    return Results.BadRequest(new
+                    {
+                        error = $"invalid response_format: {ex.Message}"
+                    });
                 }
 
                 await Gate.WaitAsync(ctx.RequestAborted);
@@ -111,7 +120,10 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.OpenAi
                     ctx.Response.Headers.ContentType = "text/event-stream";
                     ctx.Response.Headers.CacheControl = "no-cache";
                     var bodyControl = ctx.Features.Get<IHttpBodyControlFeature>();
-                    if (bodyControl is not null) { bodyControl.AllowSynchronousIO = true; }
+                    if (bodyControl is not null)
+                    {
+                        bodyControl.AllowSynchronousIO = true;
+                    }
 
                     WriteChunk(ctx, id, ts, modelName, new OpenAiMessage { Role = "assistant" }, finishReason: null);
                     client.Chat.Send(userContent, in options,
@@ -139,7 +151,10 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.OpenAi
                 var inputs = OpenAiChatMapping.ParseInputs(req.Input);
                 if (inputs.Count == 0)
                 {
-                    return Results.BadRequest(new { error = "'input' is required (a string or array of strings)." });
+                    return Results.BadRequest(new
+                    {
+                        error = "'input' is required (a string or array of strings)."
+                    });
                 }
 
                 try
@@ -152,7 +167,10 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.OpenAi
                     }
 
                     var approxTokens = 0;
-                    foreach (var t in inputs) { approxTokens += Math.Max(1, t.Length / 4); }   // rough proxy
+                    foreach (var t in inputs)
+                    {
+                        approxTokens += Math.Max(1, t.Length / 4);
+                    }   // rough proxy
 
                     return Results.Json(new EmbeddingsResponse
                     {

@@ -20,12 +20,24 @@ namespace DevOnBike.Overfit.LanguageModels.Quantization
             Symmetric = symmetric;
         }
 
-        public QuantizationKind Kind { get; }
+        public QuantizationKind Kind
+        {
+            get;
+        }
 
-        public QuantizationScaleKind ScaleKind { get; }
+        public QuantizationScaleKind ScaleKind
+        {
+            get;
+        }
 
-        public int GroupSize { get; }
+        public int GroupSize
+        {
+            get;
+        }
 
-        public bool Symmetric { get; }
+        public bool Symmetric
+        {
+            get;
+        }
     }
 }

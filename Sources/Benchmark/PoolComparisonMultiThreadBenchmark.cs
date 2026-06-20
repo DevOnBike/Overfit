@@ -50,8 +50,10 @@ namespace Benchmarks
         public void Prime()
         {
             // Warm both pools at the configured size so the first Rent in the benchmark body is hot.
-            var a1 = ArrayPool<float>.Shared.Rent(Size); ArrayPool<float>.Shared.Return(a1);
-            var a2 = _configurablePool.Rent(Size); _configurablePool.Return(a2);
+            var a1 = ArrayPool<float>.Shared.Rent(Size);
+            ArrayPool<float>.Shared.Return(a1);
+            var a2 = _configurablePool.Rent(Size);
+            _configurablePool.Return(a2);
         }
 
         [Benchmark(Baseline = true, Description = "ArrayPool<float>.Shared (TLS per-CPU)")]

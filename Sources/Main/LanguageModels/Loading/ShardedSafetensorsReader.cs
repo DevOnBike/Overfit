@@ -61,7 +61,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
             catch
             {
-                foreach (var s in shardByFile.Values) { s.Dispose(); }
+                foreach (var s in shardByFile.Values)
+                {
+                    s.Dispose();
+                }
                 throw;
             }
 
@@ -71,7 +74,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             Tensors = tensors;
         }
 
-        public IReadOnlyDictionary<string, SafetensorsTensorInfo> Tensors { get; }
+        public IReadOnlyDictionary<string, SafetensorsTensorInfo> Tensors
+        {
+            get;
+        }
 
         public int ShardCount => _shards.Length;
 
@@ -96,13 +102,19 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
         public void Dispose()
         {
-            if (_disposed) { return; }
+            if (_disposed)
+            {
+                return;
+            }
             _disposed = true;
-            foreach (var s in _shards) { s.Dispose(); }
+            foreach (var s in _shards)
+            {
+                s.Dispose();
+            }
         }
 
         // Parses { "metadata": {...}, "weight_map": { name: shardFile, ... } }.
-        private static Dictionary<string, string> ParseWeightMap(byte[] indexBytes)
+        private static Dictionary<string, string> ParseWeightMap(ReadOnlySpan<byte> indexBytes)
         {
             var map = new Dictionary<string, string>();
             var reader = new Utf8JsonReader(indexBytes, isFinalBlock: true, state: default);
@@ -140,7 +152,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
         private void ThrowIfDisposed()
         {
-            if (_disposed) { throw new ObjectDisposedException(nameof(ShardedSafetensorsReader)); }
+            if (_disposed)
+            {
+                throw new ObjectDisposedException(nameof(ShardedSafetensorsReader));
+            }
         }
     }
 }

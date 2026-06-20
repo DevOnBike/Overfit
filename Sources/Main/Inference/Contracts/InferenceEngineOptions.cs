@@ -13,7 +13,10 @@ namespace DevOnBike.Overfit.Inference.Contracts
         /// Explicit workspace size used by Sequential.PrepareInference(...).
         /// If null, the engine uses a conservative default.
         /// </summary>
-        public int? MaxIntermediateElements { get; init; }
+        public int? MaxIntermediateElements
+        {
+            get; init;
+        }
 
         /// <summary>
         /// Number of dry runs executed during engine initialization.
@@ -25,13 +28,19 @@ namespace DevOnBike.Overfit.Inference.Contracts
         /// If true, disposing the backend also disposes the wrapped Sequential model.
         /// Default is false to avoid surprising ownership transfer.
         /// </summary>
-        public bool DisposeModelWithEngine { get; init; }
+        public bool DisposeModelWithEngine
+        {
+            get; init;
+        }
 
         /// <summary>
         /// If true, Run/Predict validates that the input does not contain NaN/Infinity.
         /// This is useful in debug scenarios but costs CPU.
         /// </summary>
-        public bool ValidateFiniteInput { get; init; }
+        public bool ValidateFiniteInput
+        {
+            get; init;
+        }
 
         internal int ResolveWorkspaceElements(
             int inputSize,

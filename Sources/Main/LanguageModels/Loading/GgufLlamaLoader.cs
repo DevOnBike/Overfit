@@ -122,8 +122,14 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
             // Cap context length for memory sanity (32k+ models work but consume RAM). Gemma-2: cap at the sliding
             // window so the (deferred) alternating local/global attention is a no-op.
-            if (ctxLen > 8192) { ctxLen = 8192; }
-            if (isGemma && gemmaSlidingWindow > 0 && ctxLen > gemmaSlidingWindow) { ctxLen = gemmaSlidingWindow; }
+            if (ctxLen > 8192)
+            {
+                ctxLen = 8192;
+            }
+            if (isGemma && gemmaSlidingWindow > 0 && ctxLen > gemmaSlidingWindow)
+            {
+                ctxLen = gemmaSlidingWindow;
+            }
 
             // Vocab from tokenizer metadata if present, else from token_embd shape
             var vocab = reader.GetMeta($"{arch}.vocab_size", 0);
@@ -132,7 +138,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 // GGUF dim order: [dModel, vocab]. Last dim is vocab.
                 vocab = (int)embInfo.Dims[^1];
             }
-            if (vocab == 0) { throw new OverfitFormatException("Cannot determine vocab size."); }
+            if (vocab == 0)
+            {
+                throw new OverfitFormatException("Cannot determine vocab size.");
+            }
 
             // Qwen3 sets head_dim explicitly (head_dim ≠ dModel/nHeads, so the q/k/v projections are not square);
             // every other arch we load derives it as dModel/nHeads.
@@ -322,6 +331,15 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     }
                     var wo = LoadOutputHeads(reader, $"blk.{l}.attn_output.weight", nHeads, dModel, headDim, oFull, attnQuantizable);
 
+                    // Whole-matrix Q4_K attention handles (M2 plumbing; empty unless Q4_K + mmap + repackable).
+                    // Output-major dims: Q/K/V contract over dModel; O contracts over nHeads·headDim. Dormant
+                    // until the M3 OVERFIT_REPACK_ATTN decode path; the per-head wq/wk/wv/wo above stay active.
+                    // (Note: whole-O reads the on-disk Q4_K bytes directly even though per-head O is dequantized.)
+                    var wqWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_q.weight", nHeads * headDim, dModel, mmap);
+                    var wkWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_k.weight", nKvHeads * headDim, dModel, mmap);
+                    var wvWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_v.weight", nKvHeads * headDim, dModel, mmap);
+                    var woWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_output.weight", dModel, nHeads * headDim, mmap);
+
                     // Attention biases (optional — Qwen has them, Llama doesn't);
                     // always F32 in GGUF, never quantized.
                     LoadTensorOrZeros(reader, $"blk.{l}.attn_q.bias", qBiasFull.AsSpan(0, nHeads * headDim));
@@ -331,7 +349,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     var bk = SplitBias(kBiasFull, nKvHeads, headDim);
                     var bv = SplitBias(vBiasFull, nKvHeads, headDim);
                     var bo = new TensorStorage<float>[nHeads];
-                    for (var h = 0; h < nHeads; h++) { bo[h] = TensorStorage<float>.Unpooled(dModel); }
+                    for (var h = 0; h < nHeads; h++)
+                    {
+                        bo[h] = TensorStorage<float>.Unpooled(dModel);
+                    }
 
                     // FFN
                     var ffnNormGamma = LoadNormGamma($"blk.{l}.ffn_norm.weight");
@@ -409,6 +430,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                         Bv = bv,
                         Wo = wo,
                         Bo = bo,
+                        WqWhole = wqWhole,
+                        WkWhole = wkWhole,
+                        WvWhole = wvWhole,
+                        WoWhole = woWhole,
                         FfnNormGamma = ffnNormGamma,
                         FfnNormBeta = ffnNormBeta,
                         FfnGate = ffnGate,
@@ -428,12 +453,30 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             finally
             {
                 // qFull..oFull are empty sentinels on the native Q8_0 path.
-                if (qFull.Length > 0) { PooledBuffer<float>.ReturnArray(qFull); }
-                if (kFull.Length > 0) { PooledBuffer<float>.ReturnArray(kFull); }
-                if (vFull.Length > 0) { PooledBuffer<float>.ReturnArray(vFull); }
-                if (oFull.Length > 0) { PooledBuffer<float>.ReturnArray(oFull); }
-                if (qkvFused.Length > 0) { PooledBuffer<float>.ReturnArray(qkvFused); }
-                if (gateUpFused.Length > 0) { PooledBuffer<float>.ReturnArray(gateUpFused); }
+                if (qFull.Length > 0)
+                {
+                    PooledBuffer<float>.ReturnArray(qFull);
+                }
+                if (kFull.Length > 0)
+                {
+                    PooledBuffer<float>.ReturnArray(kFull);
+                }
+                if (vFull.Length > 0)
+                {
+                    PooledBuffer<float>.ReturnArray(vFull);
+                }
+                if (oFull.Length > 0)
+                {
+                    PooledBuffer<float>.ReturnArray(oFull);
+                }
+                if (qkvFused.Length > 0)
+                {
+                    PooledBuffer<float>.ReturnArray(qkvFused);
+                }
+                if (gateUpFused.Length > 0)
+                {
+                    PooledBuffer<float>.ReturnArray(gateUpFused);
+                }
                 PooledBuffer<float>.ReturnArray(qBiasFull);
                 PooledBuffer<float>.ReturnArray(kBiasFull);
                 PooledBuffer<float>.ReturnArray(vBiasFull);
@@ -613,8 +656,14 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                         var total = checked((int)((long)expertBytes * expertCount));
                         using var whole = new PooledBuffer<byte>(total, clearMemory: false);
 
-                        if (info.Type == GgmlType.Q4_K) { reader.LoadTensorQ4_KRaw(info, whole.Span); }
-                        else { reader.LoadTensorQ6_KRaw(info, whole.Span); }
+                        if (info.Type == GgmlType.Q4_K)
+                        {
+                            reader.LoadTensorQ4_KRaw(info, whole.Span);
+                        }
+                        else
+                        {
+                            reader.LoadTensorQ6_KRaw(info, whole.Span);
+                        }
 
                         for (var e = 0; e < expertCount; e++)
                         {
@@ -1024,6 +1073,34 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         }
 
         /// <summary>
+        /// Builds the WHOLE-matrix Q4_K attention handle (M2 plumbing for the M3 <c>OVERFIT_REPACK_ATTN</c>
+        /// decode lever) — a single repacked 8×8 GEMV over Q/K/V/O beats today's per-head Q4_K projections
+        /// (measured 2.55× ‖). Returns empty unless the on-disk tensor is Q4_K AND memory-mapped (so the
+        /// whole output-row range is one contiguous, zero-copy byte slice) AND the dims are repackable for
+        /// the GEMV (<c>inputSize % 256 == 0</c>, <c>outputSize % 8 == 0</c>). It is a SECOND read-only view
+        /// of the same mmap bytes the per-head loaders slice — additive, owns nothing, the mmap (disposed
+        /// last) outlives it. Empty for fused-QKV (Phi-3), non-mmap, or non-Q4_K tensors → decode keeps the
+        /// per-head path. Output-major dims: Q/K/V are [nHeads·headDim, dModel]; O is [dModel, nHeads·headDim].
+        /// </summary>
+        private static DecodeWeight TryLoadWholeAttnQ4K(
+            GgufReader reader, string name, int outputSize, int inputSize, MemoryMappedModelFile? mmap)
+        {
+            if (mmap is null
+                || !reader.Tensors.TryGetValue(name, out var info)
+                || info.Type != GgmlType.Q4_K
+                || inputSize % Q4KWeight.SuperBlockElements != 0
+                || outputSize % Q4KRepack.RowsInterleaved != 0)
+            {
+                return default;
+            }
+
+            var bytesPerRow = inputSize / Q4KWeight.SuperBlockElements * Q4KWeight.SuperBlockBytes;
+            var totalBytes = checked((int)((long)outputSize * bytesPerRow));
+            var baseOffset = reader.DataStart + (long)info.Offset;
+            return new Q4KWeight(mmap.Slice(baseOffset, totalBytes), inputSize, outputSize);
+        }
+
+        /// <summary>
         /// Loads a weight as Q6_K-resident — the file's <c>block_q6_K</c> bytes
         /// are kept verbatim (no de-interleave; Q6_K's layout matches
         /// <see cref="Q6KWeight"/>'s exactly, like Q4_K). The file stores it
@@ -1253,7 +1330,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// Mapping: Wo_h[i, j] = O[j, h*headDim + i] = file[j*nHeadsHeadDim + h*headDim + i].
         /// </summary>
         private static DecodeWeight[] SplitOutput(
-            float[] oFull, int nHeads, int dModel, int headDim, bool quantize)
+            ReadOnlySpan<float> oFull, int nHeads, int dModel, int headDim, bool quantize)
         {
             var wo = new DecodeWeight[nHeads];
             var nHeadsHeadDim = nHeads * headDim;
@@ -1292,7 +1369,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             return wo;
         }
 
-        private static TensorStorage<float>[] SplitBias(float[] biasFull, int nHeads, int headDim)
+        private static TensorStorage<float>[] SplitBias(ReadOnlySpan<float> biasFull, int nHeads, int headDim)
         {
             var bias = new TensorStorage<float>[nHeads];
             for (var h = 0; h < nHeads; h++)

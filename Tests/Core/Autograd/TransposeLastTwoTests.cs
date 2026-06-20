@@ -21,7 +21,10 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
             using var graph = new ComputationGraph(1 << 16);
             var store = new TensorStorage<float>(6, clearMemory: false);
             // [2,3] = [[1,2,3],[4,5,6]]
-            for (var i = 0; i < 6; i++) { store.AsSpan()[i] = i + 1; }
+            for (var i = 0; i < 6; i++)
+            {
+                store.AsSpan()[i] = i + 1;
+            }
             using var x = new AutogradNode(store, new TensorShape(2, 3), requiresGrad: true);
 
             var y = graph.TransposeLastTwo(x);   // [3,2] = [[1,4],[2,5],[3,6]]
@@ -39,7 +42,10 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
             var y = graph.TransposeLastTwo(x);   // [3,2]
             // Seed dL/dy = [[10,20],[30,40],[50,60]] (shape [3,2]).
             var g = y.GradView.AsSpan();
-            for (var i = 0; i < 6; i++) { g[i] = (i + 1) * 10f; }
+            for (var i = 0; i < 6; i++)
+            {
+                g[i] = (i + 1) * 10f;
+            }
 
             graph.BackwardFromGrad(y);
 
@@ -53,7 +59,10 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
             using var graph = new ComputationGraph(1 << 16);
             var store = new TensorStorage<float>(12, clearMemory: false);
             // [2,2,3]: batch0 = [[1,2,3],[4,5,6]], batch1 = [[7,8,9],[10,11,12]]
-            for (var i = 0; i < 12; i++) { store.AsSpan()[i] = i + 1; }
+            for (var i = 0; i < 12; i++)
+            {
+                store.AsSpan()[i] = i + 1;
+            }
             using var x = new AutogradNode(store, new TensorShape(2, 2, 3), requiresGrad: true);
 
             var y = graph.TransposeLastTwo(x);   // [2,3,2]

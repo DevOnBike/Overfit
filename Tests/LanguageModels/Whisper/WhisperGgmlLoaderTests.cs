@@ -64,12 +64,19 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
             using var bw = new BinaryWriter(ms);
             bw.Write(0x67676d6c);                 // magic
             // 10 hparams
-            foreach (var h in new[] { 51865, 1500, 384, 6, 4, 448, 384, 6, 4, 80 }) { bw.Write(h); }
+            foreach (var h in new[] { 51865, 1500, 384, 6, 4, 448, 384, 6, 4, 80 })
+            {
+                bw.Write(h);
+            }
             bw.Write(1);                          // f16 flag
 
             // mel filters
-            bw.Write(2); bw.Write(3);
-            foreach (var f in new[] { 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f }) { bw.Write(f); }
+            bw.Write(2);
+            bw.Write(3);
+            foreach (var f in new[] { 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f })
+            {
+                bw.Write(f);
+            }
 
             // vocab
             bw.Write(2);
@@ -78,7 +85,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
 
             // tensor a.weight [2,3] f32 — dims written reversed (ne = [3,2])
             WriteTensorHeader(bw, dimsReversed: new[] { 3, 2 }, name: "a.weight", ftype: 0);
-            foreach (var v in new[] { 1f, 2f, 3f, 4f, 5f, 6f }) { bw.Write(v); }
+            foreach (var v in new[] { 1f, 2f, 3f, 4f, 5f, 6f })
+            {
+                bw.Write(v);
+            }
 
             // tensor b.weight [2] f16
             WriteTensorHeader(bw, dimsReversed: new[] { 2 }, name: "b.weight", ftype: 1);
@@ -102,7 +112,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
             bw.Write(dimsReversed.Length); // n_dims
             bw.Write(nameBytes.Length);    // name length
             bw.Write(ftype);
-            foreach (var d in dimsReversed) { bw.Write(d); }
+            foreach (var d in dimsReversed)
+            {
+                bw.Write(d);
+            }
             bw.Write(nameBytes);
         }
     }

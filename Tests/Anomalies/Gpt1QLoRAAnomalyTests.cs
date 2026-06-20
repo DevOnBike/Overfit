@@ -48,12 +48,21 @@ namespace DevOnBike.Overfit.Tests.Anomalies
 
             // Benign regime (one pod, stable) + a benign-primed incident sequence.
             var benign = new MetricSnapshot[48];
-            for (var i = 0; i < benign.Length; i++) { benign[i] = MakeNormalSnapshot("payments-api"); }
+            for (var i = 0; i < benign.Length; i++)
+            {
+                benign[i] = MakeNormalSnapshot("payments-api");
+            }
             var benignCorpus = tokenizer.EncodeSequence(benign);
 
             var incident = new MetricSnapshot[contextSnapshots + 8];
-            for (var i = 0; i < contextSnapshots; i++) { incident[i] = MakeNormalSnapshot("payments-api"); }
-            for (var i = contextSnapshots; i < incident.Length; i++) { incident[i] = MakeAnomalySnapshot("payments-api"); }
+            for (var i = 0; i < contextSnapshots; i++)
+            {
+                incident[i] = MakeNormalSnapshot("payments-api");
+            }
+            for (var i = contextSnapshots; i < incident.Length; i++)
+            {
+                incident[i] = MakeAnomalySnapshot("payments-api");
+            }
             var incidentCorpus = tokenizer.EncodeSequence(incident);
 
             using var tuner = new Gpt1LoRAFineTuner(

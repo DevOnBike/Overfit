@@ -27,14 +27,24 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         [LongFact]
         public void RestoredPrefix_MatchesFullPrefill_AndReusesAcrossRequests()
         {
-            if (!File.Exists(ModelPath)) { _out.WriteLine($"missing {ModelPath}"); return; }
+            if (!File.Exists(ModelPath))
+            {
+                _out.WriteLine($"missing {ModelPath}");
+                return;
+            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(ModelPath);
 
             var prefix = new int[24];   // "system prompt"
-            for (var i = 0; i < prefix.Length; i++) { prefix[i] = 50 + i * 17; }
+            for (var i = 0; i < prefix.Length; i++)
+            {
+                prefix[i] = 50 + i * 17;
+            }
             var turn = new int[8];      // "user turn"
-            for (var i = 0; i < turn.Length; i++) { turn[i] = 900 + i * 5; }
+            for (var i = 0; i < turn.Length; i++)
+            {
+                turn[i] = 900 + i * 5;
+            }
             const int generate = 16;
             var sampling = SamplingOptions.Greedy;
 
@@ -46,7 +56,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
                 prefix.CopyTo(both, 0);
                 turn.CopyTo(both, prefix.Length);
                 s.Reset(both);
-                for (var i = 0; i < generate; i++) { reference.Add(s.GenerateNextToken(in sampling)); }
+                for (var i = 0; i < generate; i++)
+                {
+                    reference.Add(s.GenerateNextToken(in sampling));
+                }
             }
 
             // Prefix reuse: prefill the prefix ONCE, snapshot it, then restore + append the turn.
@@ -58,7 +71,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
             var viaPrefix = new List<int>();
             session.RestorePrefix(snapshot);
             session.Prefill(turn);
-            for (var i = 0; i < generate; i++) { viaPrefix.Add(session.GenerateNextToken(in sampling)); }
+            for (var i = 0; i < generate; i++)
+            {
+                viaPrefix.Add(session.GenerateNextToken(in sampling));
+            }
 
             for (var i = 0; i < generate; i++)
             {
@@ -67,7 +83,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
 
             // Second request reuses the SAME prefix without re-encoding it — a different turn.
             var turn2 = new int[6];
-            for (var i = 0; i < turn2.Length; i++) { turn2[i] = 1200 + i * 9; }
+            for (var i = 0; i < turn2.Length; i++)
+            {
+                turn2[i] = 1200 + i * 9;
+            }
             using var session2 = engine.CreateSession(128);
             var reference2 = new List<int>();
             {
@@ -75,7 +94,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
                 prefix.CopyTo(both, 0);
                 turn2.CopyTo(both, prefix.Length);
                 session2.Reset(both);
-                for (var i = 0; i < generate; i++) { reference2.Add(session2.GenerateNextToken(in sampling)); }
+                for (var i = 0; i < generate; i++)
+                {
+                    reference2.Add(session2.GenerateNextToken(in sampling));
+                }
             }
 
             using var reuse = engine.CreateSession(128);

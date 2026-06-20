@@ -19,7 +19,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// </summary>
         public static ISafetensorsSource Open(string path)
         {
-            if (string.IsNullOrEmpty(path)) { throw new ArgumentException("Path is empty.", nameof(path)); }
+            if (string.IsNullOrEmpty(path))
+            {
+                throw new ArgumentException("Path is empty.", nameof(path));
+            }
 
             if (path.EndsWith(".index.json", StringComparison.OrdinalIgnoreCase) && File.Exists(path))
             {
@@ -29,10 +32,16 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             if (Directory.Exists(path))
             {
                 var index = Path.Combine(path, "model.safetensors.index.json");
-                if (File.Exists(index)) { return new ShardedSafetensorsReader(index); }
+                if (File.Exists(index))
+                {
+                    return new ShardedSafetensorsReader(index);
+                }
 
                 var single = Path.Combine(path, "model.safetensors");
-                if (File.Exists(single)) { return new SafetensorsReader(single); }
+                if (File.Exists(single))
+                {
+                    return new SafetensorsReader(single);
+                }
 
                 throw new FileNotFoundException(
                     $"No 'model.safetensors' or 'model.safetensors.index.json' in directory '{path}'.");

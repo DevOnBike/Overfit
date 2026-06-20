@@ -4,7 +4,7 @@
 
 A reference template a .NET developer can drop into an existing service to add a private agent. Loads a local GGUF model (Qwen / Llama / Mistral family) via `OverfitClient.LoadGguf`, exposes Minimal-API endpoints, and runs entirely in your .NET process.
 
-> **Status.** Phases 1–5 shipped — Phase 1 (chat: `/health`, `/chat`, `/reset`), Phase 2 (RAG: `/documents/index`, `/rag/query`), Phase 3 (agent: `/agent` forced C# tool call, `/chat/json` guaranteed JSON), Phase 4 (observability: `/metrics` in Prometheus format, `Dockerfile` + `compose.yaml`), **Phase 5 (OpenAI-compatible API: `/v1/chat/completions` with SSE streaming, `/v1/embeddings`, `/v1/models`).** A Microsoft.Extensions.AI adapter (`IChatClient` / `IEmbeddingGenerator`) and Phase 6 (Aspire dashboard) are next.
+> **Status.** Phases 1–5 shipped — Phase 1 (chat: `/health`, `/chat`, `/reset`), Phase 2 (RAG: `/documents/index`, `/rag/query`), Phase 3 (agent: `/agent` forced C# tool call, `/chat/json` guaranteed JSON — well-formed, or schema-conforming with an optional `schema`), Phase 4 (observability: `/metrics` in Prometheus format, `Dockerfile` + `compose.yaml`), **Phase 5 (OpenAI-compatible API: `/v1/chat/completions` with SSE streaming, `/v1/embeddings`, `/v1/models`).** The Microsoft.Extensions.AI adapter (`Overfit.Extensions.AI` — `OverfitChatClient : IChatClient`, `OverfitEmbeddingGenerator : IEmbeddingGenerator`) ships as a separate package; a .NET Aspire dashboard variant is the remaining optional phase.
 >
 > **OpenAI compatibility.** The `/v1/*` surface follows the **de-facto OpenAI Chat Completions / Embeddings / Models shapes** (the same ones ollama / vLLM / llama.cpp-server expose) — point any OpenAI client/SDK at the base URL. `response_format` is honoured: `{"type":"json_object"}` guarantees well-formed JSON and `{"type":"json_schema","json_schema":{"schema":{…}}}` constrains the output to **conform** to that JSON-Schema (typed / required / enum fields) — by construction, no retries. It is a pragmatic subset otherwise: text content only (no multimodal arrays), no `tools` / `n>1` / `logprobs` / `logit_bias`; chat completions are stateless per request and serialized through a single-flight gate (the demo shares one model session — single-tenant).
 >
@@ -173,15 +173,21 @@ The tool name and the JSON arguments envelope are forced at the logit level by `
 
 ### 7. Get guaranteed-valid JSON
 
-`/chat/json` constrains the output to well-formed JSON by construction (`JsonGrammarConstraint`). Describe the shape you want in the message:
+`/chat/json` constrains the output to **well-formed JSON by construction** (`JsonGrammarConstraint`). Pass an optional **`schema`** (JSON-Schema text) and it constrains the output to **conform to that schema** instead (`JsonSchemaConstraint` — value types, all `required` properties present, only declared keys under `additionalProperties:false`, string `enum` values, nested objects, simple arrays). Describe the shape you want in the message:
 
 ```powershell
+# well-formed JSON (no schema)
 curl -X POST http://localhost:5234/chat/json `
   -H "Content-Type: application/json" `
   -d '{ "message": "Extract intent and email as JSON from: I want to cancel, reach me at jo@tinkergarden.example" }'
+
+# schema-conforming JSON (typed / required / enum) — enforced at the logit level, no retries
+curl -X POST http://localhost:5234/chat/json `
+  -H "Content-Type: application/json" `
+  -d '{ "message": "Classify the sentiment of: the support was fantastic.", "schema": "{\"type\":\"object\",\"properties\":{\"sentiment\":{\"type\":\"string\",\"enum\":[\"positive\",\"negative\",\"neutral\"]}},\"required\":[\"sentiment\"],\"additionalProperties\":false}" }'
 ```
 
-The response is returned with `Content-Type: application/json` and is guaranteed to parse. (Field-level schema typing — required keys, enums — is the JSON-Schema follow-on; today the guarantee is well-formedness.)
+The response is returned with `Content-Type: application/json` and is guaranteed to parse; with a `schema` it is also guaranteed to satisfy that schema (the same constraint backs `/v1` `response_format: json_schema`). The schema subset is documented at `JsonSchemaCompiler`; the open follow-ons are a per-state mask cache (throughput) and token healing (rare dead-end repair on weak models with multiple free-form string keys).
 
 ### 8. Watch the metrics
 
@@ -263,7 +269,7 @@ Expected `/chat` response shape:
 | `POST` | `/documents/index` | Chunks + embeds every `*.md` in the data directory into the in-process vector store. Returns per-file chunk counts |
 | `POST` | `/rag/query` | `{ question: "…", topK?: 4 }` → `{ reply, sources[], stats }`. Retrieves top-K chunks and answers from them |
 | `POST` | `/agent` | `{ message: "…" }` → `{ toolName, arguments, result }`. Forces one registered C# tool call and dispatches it |
-| `POST` | `/chat/json` | `{ message: "…" }` → guaranteed well-formed JSON (`application/json`) |
+| `POST` | `/chat/json` | `{ message: "…", schema?: "…" }` → guaranteed JSON (`application/json`): well-formed, or schema-conforming when `schema` is supplied |
 | `GET` | `/metrics` | Prometheus text exposition — requests, tokens, allocations/token, tok/s, tool calls, RAG latency |
 
 System message comes from `SystemMessage` in `appsettings.json` (override per environment via `appsettings.Development.json`).
@@ -276,10 +282,11 @@ RAG is optional: `/chat` works with no embedding model configured. `/documents/i
 
 - ✅ **Phase 1** — `/health`, `/chat`, `/reset` over a singleton `OverfitClient`.
 - ✅ **Phase 2** — RAG over your documents (`/documents/index`, `/rag/query`) via `VectorStore` + `SentenceEmbedder.ForMiniLm` over the `Data/` folder.
-- ✅ **Phase 3** — C# tool calling (`Tools/ToolRegistry.cs`: `lookup_customer`, `create_ticket`) via `ToolCallConstraint`, dispatched to C# handlers, plus a guaranteed-JSON endpoint (`/chat/json`) via `JsonGrammarConstraint`.
+- ✅ **Phase 3** — C# tool calling (`Tools/ToolRegistry.cs`: `lookup_customer`, `create_ticket`) via `ToolCallConstraint`, dispatched to C# handlers, plus a guaranteed-JSON endpoint (`/chat/json`): well-formed via `JsonGrammarConstraint`, or schema-conforming via `JsonSchemaConstraint` when an optional `schema` is passed.
 - ✅ **Phase 4** — `/metrics` (Prometheus: requests, tokens, allocations/token, tok/s, tool calls, RAG latency, model fingerprint) + `Dockerfile` + `compose.yaml` (agent + Prometheus) + `Observability/`.
-- ❌ **Phase 5** (optional) — Microsoft.Extensions.AI adapter (`OverfitChatClient : IChatClient`); lets Overfit slot in as a drop-in local backend wherever `IChatClient` is expected.
-- ❌ **Phase 6** (optional) — .NET Aspire dashboard variant.
+- ✅ **Phase 5** — OpenAI-compatible API (`/v1/chat/completions` + SSE streaming, `/v1/embeddings`, `/v1/models`); `response_format` honoured (`json_object` → well-formed, `json_schema` → schema-conforming).
+- ✅ **Phase 6** — Microsoft.Extensions.AI adapter, shipped as the separate `Overfit.Extensions.AI` package (`OverfitChatClient : IChatClient`, `OverfitEmbeddingGenerator : IEmbeddingGenerator`) — slot Overfit in as a drop-in local backend wherever `IChatClient` / `IEmbeddingGenerator` is expected. (The demo's `/v1` surface uses the engine directly; the adapter is for in-process `IChatClient` consumers.)
+- ❌ **Phase 7** (optional) — .NET Aspire dashboard variant.
 
 ---
 

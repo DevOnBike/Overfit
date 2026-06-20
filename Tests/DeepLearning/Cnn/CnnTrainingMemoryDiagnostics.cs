@@ -45,9 +45,15 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Cnn
             using var xBuf = new TensorStorage<float>(batch * inC * hw * hw, clearMemory: false);
             using var yBuf = new TensorStorage<float>(batch * 10, clearMemory: false);
             var xs = xBuf.AsSpan();
-            for (var i = 0; i < xs.Length; i++) { xs[i] = (float)(rng.NextDouble() - 0.5); }
+            for (var i = 0; i < xs.Length; i++)
+            {
+                xs[i] = (float)(rng.NextDouble() - 0.5);
+            }
             yBuf.AsSpan().Clear();
-            for (var b = 0; b < batch; b++) { yBuf.AsSpan()[b * 10 + (b % 10)] = 1f; }
+            for (var b = 0; b < batch; b++)
+            {
+                yBuf.AsSpan()[b * 10 + (b % 10)] = 1f;
+            }
 
             using var graph = new ComputationGraph();
             using var xNode = new AutogradNode(xBuf, new TensorShape(batch, inC, hw, hw));

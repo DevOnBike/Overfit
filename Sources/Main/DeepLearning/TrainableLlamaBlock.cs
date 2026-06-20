@@ -107,8 +107,13 @@ namespace DevOnBike.Overfit.DeepLearning
             }
             ValidateSource(nameof(wDown), wDown, dModel, wGate.OutputSize);
 
-            _wq = wq; _wk = wk; _wv = wv; _wo = wo;
-            _wGate = wGate; _wUp = wUp; _wDown = wDown;
+            _wq = wq;
+            _wk = wk;
+            _wv = wv;
+            _wo = wo;
+            _wGate = wGate;
+            _wUp = wUp;
+            _wDown = wDown;
         }
 
         public int DModel => _dModel;
@@ -251,8 +256,14 @@ namespace DevOnBike.Overfit.DeepLearning
             ProjVec(ln1, _wk, lora?.K, k, row);
             ProjVec(ln1, _wv, lora?.V, v, row);
 
-            for (var h = 0; h < _nQHeads; h++) { RopeKernel.Apply(q.Slice(h * dHead, dHead), rope, position); }
-            for (var h = 0; h < _nKVHeads; h++) { RopeKernel.Apply(k.Slice(h * dHead, dHead), rope, position); }
+            for (var h = 0; h < _nQHeads; h++)
+            {
+                RopeKernel.Apply(q.Slice(h * dHead, dHead), rope, position);
+            }
+            for (var h = 0; h < _nKVHeads; h++)
+            {
+                RopeKernel.Apply(k.Slice(h * dHead, dHead), rope, position);
+            }
 
             k.CopyTo(cacheK.Slice(position * kvDim, kvDim));
             v.CopyTo(cacheV.Slice(position * kvDim, kvDim));
@@ -281,7 +292,10 @@ namespace DevOnBike.Overfit.DeepLearning
             RmsNormVec(afterAttn, ln2Gamma.DataView.AsReadOnlySpan(), ln2, _eps);
             ProjVec(ln2, _wGate, lora?.Gate, gate, row);
             ProjVec(ln2, _wUp, lora?.Up, up, row);
-            for (var i = 0; i < dFF; i++) { gate[i] = gate[i] / (1f + MathF.Exp(-gate[i])) * up[i]; }
+            for (var i = 0; i < dFF; i++)
+            {
+                gate[i] = gate[i] / (1f + MathF.Exp(-gate[i])) * up[i];
+            }
             ProjVec(gate, _wDown, lora?.Down, down, row);
             TensorPrimitives.Add(afterAttn, down, output);
         }
@@ -291,7 +305,10 @@ namespace DevOnBike.Overfit.DeepLearning
         private static void RmsNormVec(ReadOnlySpan<float> x, ReadOnlySpan<float> gamma, Span<float> dst, float eps)
         {
             var inv = 1f / MathF.Sqrt(TensorPrimitives.Dot(x, x) / x.Length + eps);
-            for (var i = 0; i < x.Length; i++) { dst[i] = x[i] * inv * gamma[i]; }
+            for (var i = 0; i < x.Length; i++)
+            {
+                dst[i] = x[i] * inv * gamma[i];
+            }
         }
 
         /// <summary>out[o] = Σ_i dequant(W)[o,i]·x[i] (+ optional (x·A)·B). <paramref name="row"/> is dequant scratch.</summary>
@@ -302,7 +319,10 @@ namespace DevOnBike.Overfit.DeepLearning
             _ = row; // dequant scratch is now per-thread inside DequantMatVec
             DequantMatVec.Run(x, w, dst.Slice(0, outDim));
 
-            if (lora is null) { return; }
+            if (lora is null)
+            {
+                return;
+            }
             var rank = lora.Rank;
             var a = lora.A.DataView.AsReadOnlySpan(); // [inDim, rank]
             var b = lora.B.DataView.AsReadOnlySpan(); // [rank, outDim]
@@ -311,14 +331,23 @@ namespace DevOnBike.Overfit.DeepLearning
             for (var i = 0; i < inDim; i++)
             {
                 var xi = x[i];
-                if (xi == 0f) { continue; }
+                if (xi == 0f)
+                {
+                    continue;
+                }
                 var aRow = a.Slice(i * rank, rank);
-                for (var r = 0; r < rank; r++) { tmp[r] += xi * aRow[r]; }
+                for (var r = 0; r < rank; r++)
+                {
+                    tmp[r] += xi * aRow[r];
+                }
             }
             for (var r = 0; r < rank; r++)
             {
                 var tr = tmp[r];
-                if (tr == 0f) { continue; }
+                if (tr == 0f)
+                {
+                    continue;
+                }
                 TensorPrimitives.MultiplyAdd(b.Slice(r * outDim, outDim), tr, dst, dst);
             }
         }
@@ -326,11 +355,24 @@ namespace DevOnBike.Overfit.DeepLearning
         private static void Softmax(Span<float> s)
         {
             var max = float.NegativeInfinity;
-            for (var i = 0; i < s.Length; i++) { if (s[i] > max) { max = s[i]; } }
+            for (var i = 0; i < s.Length; i++)
+            {
+                if (s[i] > max)
+                {
+                    max = s[i];
+                }
+            }
             var sum = 0f;
-            for (var i = 0; i < s.Length; i++) { s[i] = MathF.Exp(s[i] - max); sum += s[i]; }
+            for (var i = 0; i < s.Length; i++)
+            {
+                s[i] = MathF.Exp(s[i] - max);
+                sum += s[i];
+            }
             var inv = 1f / sum;
-            for (var i = 0; i < s.Length; i++) { s[i] *= inv; }
+            for (var i = 0; i < s.Length; i++)
+            {
+                s[i] *= inv;
+            }
         }
 
         private static void ValidateSource(string name, IDequantRowSource src, int expectedOut, int expectedIn)

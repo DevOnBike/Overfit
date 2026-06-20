@@ -23,7 +23,10 @@ namespace DevOnBike.Overfit.Data.Abstractions
         ///     Used for validation — the analyzer will warn if vector length != this value.
         ///     Return 0 to skip dimension validation.
         /// </summary>
-        int ExpectedDimension { get; }
+        int ExpectedDimension
+        {
+            get;
+        }
         /// <summary>
         ///     Returns the human-readable name for the feature at <paramref name="featureIndex" />.
         ///     Must never return null or empty string.

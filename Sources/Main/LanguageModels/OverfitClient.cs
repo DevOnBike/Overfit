@@ -200,7 +200,10 @@ namespace DevOnBike.Overfit.LanguageModels
         private static string ReadChatTemplate(string modelDir)
         {
             var path = Path.Combine(modelDir, "tokenizer_config.json");
-            if (!File.Exists(path)) { return string.Empty; }
+            if (!File.Exists(path))
+            {
+                return string.Empty;
+            }
             try
             {
                 using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path));
@@ -214,7 +217,10 @@ namespace DevOnBike.Overfit.LanguageModels
         /// <summary>True when the directory ships tokenizer files (tokenizer.json, or vocab.json + merges.txt).</summary>
         private static bool HasSiblingTokenizer(string modelDir)
         {
-            if (File.Exists(Path.Combine(modelDir, "tokenizer.json"))) { return true; }
+            if (File.Exists(Path.Combine(modelDir, "tokenizer.json")))
+            {
+                return true;
+            }
             return File.Exists(Path.Combine(modelDir, "vocab.json"))
                 && File.Exists(Path.Combine(modelDir, "merges.txt"));
         }
@@ -226,7 +232,10 @@ namespace DevOnBike.Overfit.LanguageModels
                 && File.Exists(Path.Combine(modelDir, "merges.txt"));
             if (hasQwenVocab)
             {
-                try { return new QwenChatTokenizer(QwenTokenizer.Load(modelDir)); }
+                try
+                {
+                    return new QwenChatTokenizer(QwenTokenizer.Load(modelDir));
+                }
                 catch { return HuggingFaceBpeTokenizer.Load(modelDir); }
             }
             return HuggingFaceBpeTokenizer.Load(modelDir);
@@ -323,7 +332,10 @@ namespace DevOnBike.Overfit.LanguageModels
 
         public void Dispose()
         {
-            if (_disposed) { return; }
+            if (_disposed)
+            {
+                return;
+            }
             _disposed = true;
             _embedSession?.Dispose();
             _session.Dispose();

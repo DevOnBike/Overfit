@@ -42,13 +42,25 @@ namespace DevOnBike.Overfit.DeepLearning
             _inferenceShift = new TensorStorage<float>(numFeatures, clearMemory: false);
         }
 
-        public Parameter Gamma { get; }
+        public Parameter Gamma
+        {
+            get;
+        }
 
-        public Parameter Beta { get; }
+        public Parameter Beta
+        {
+            get;
+        }
 
-        public TensorStorage<float> RunningMean { get; }
+        public TensorStorage<float> RunningMean
+        {
+            get;
+        }
 
-        public TensorStorage<float> RunningVar { get; }
+        public TensorStorage<float> RunningVar
+        {
+            get;
+        }
 
         public float Momentum { get; set; } = 0.1f;
 

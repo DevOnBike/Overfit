@@ -12,23 +12,35 @@ namespace DevOnBike.Overfit.Onnx.Schema
     public sealed class OnnxTensor
     {
         public string Name { get; init; } = "";
-        public OnnxDataType DataType { get; init; }
+        public OnnxDataType DataType
+        {
+            get; init;
+        }
         public long[] Dims { get; init; } = [];
 
         /// <summary>Raw little-endian bytes. Populated after ResolveExternalData.</summary>
         public byte[] RawData { get; init; } = [];
 
         /// <summary>Float data when stored unpacked in the protobuf (alternative to RawData).</summary>
-        public float[]? FloatData { get; init; }
+        public float[]? FloatData
+        {
+            get; init;
+        }
 
         /// <summary>Int64 data when stored unpacked.</summary>
-        public long[]? Int64Data { get; init; }
+        public long[]? Int64Data
+        {
+            get; init;
+        }
 
         /// <summary>
         /// Non-null when data lives in a separate .data file (PyTorch ≥ 2.x default).
         /// Resolved to RawData by OnnxImporter before operator mapping begins.
         /// </summary>
-        public OnnxExternalDataInfo? ExternalData { get; init; }
+        public OnnxExternalDataInfo? ExternalData
+        {
+            get; init;
+        }
 
         public int ElementCount
         {

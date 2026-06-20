@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using DevOnBike.Overfit.LanguageModels.Contracts;
+using DevOnBike.Overfit.Maths;
 
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
@@ -116,7 +117,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Span<float> scoreScratch,
             Span<float> probabilities)
         {
-            if (logits.IsEmpty) { throw new ArgumentException("Logits cannot be empty.", nameof(logits)); }
+            if (logits.IsEmpty)
+            {
+                throw new ArgumentException("Logits cannot be empty.", nameof(logits));
+            }
             if (probabilities.Length < logits.Length)
             {
                 throw new ArgumentException("Probabilities span is smaller than the logits span.", nameof(probabilities));
@@ -134,7 +138,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var count = SelectSurvivors(logits, in options, temperature, indexScratch, scoreScratch);
 
             var maxScore = scoreScratch[0];
-            for (var i = 1; i < count; i++) { if (scoreScratch[i] > maxScore) { maxScore = scoreScratch[i]; } }
+            for (var i = 1; i < count; i++)
+            {
+                if (scoreScratch[i] > maxScore)
+                {
+                    maxScore = scoreScratch[i];
+                }
+            }
 
             var inverseTemperature = 1.0 / temperature;
             var sum = 0.0;
@@ -167,19 +177,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     nameof(logits));
             }
 
-            var maxIndex = 0;
-            var maxValue = logits[0];
-
-            for (var i = 1; i < logits.Length; i++)
-            {
-                if (logits[i] > maxValue)
-                {
-                    maxValue = logits[i];
-                    maxIndex = i;
-                }
-            }
-
-            return maxIndex;
+            return MathUtils.ArgMax(logits);
         }
 
         /// <summary>
@@ -240,7 +238,10 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var maxLogit = logits[0];
             for (var i = 1; i < logits.Length; i++)
             {
-                if (logits[i] > maxLogit) { maxLogit = logits[i]; }
+                if (logits[i] > maxLogit)
+                {
+                    maxLogit = logits[i];
+                }
             }
 
             var threshold = maxLogit + (temperature * MathF.Log(Math.Clamp(minP, 1e-6f, 1f)));

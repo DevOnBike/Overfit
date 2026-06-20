@@ -28,7 +28,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         [LongFact]
         public void Report_LeadingSilence_PerClip()
         {
-            if (!Directory.Exists(Dir)) { _out.WriteLine("missing C:\\myvoice"); return; }
+            if (!Directory.Exists(Dir))
+            {
+                _out.WriteLine("missing C:\\myvoice");
+                return;
+            }
 
             var wavs = Directory.GetFiles(Dir, "*.wav");
             Array.Sort(wavs, StringComparer.Ordinal);
@@ -45,7 +49,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
                 // Leading silence = first sample above threshold.
                 var first = 0;
-                while (first < norm.Length && MathF.Abs(norm[first]) < Threshold) { first++; }
+                while (first < norm.Length && MathF.Abs(norm[first]) < Threshold)
+                {
+                    first++;
+                }
                 var leadMs = first / (double)Rate24 * 1000.0;
 
                 var trimmed = AudioPostProcessing.TrimSilence(norm, Threshold, KeepPadding);
@@ -54,7 +61,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
                 sumLeadMs += leadMs;
                 maxLeadMs = Math.Max(maxLeadMs, leadMs);
                 sumTrimPct += trimPct;
-                if (leadMs > 500) { overHalfSecond++; }
+                if (leadMs > 500)
+                {
+                    overHalfSecond++;
+                }
                 count++;
 
                 if (leadMs > 300 || trimPct > 25)

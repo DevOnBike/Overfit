@@ -10,12 +10,21 @@ namespace DevOnBike.Overfit.Tests.Diagnostics.Tracing
     internal sealed class DiagnosticsTraceEntry
     {
         [JsonPropertyName("count")]
-        public long Count { get; set; }
+        public long Count
+        {
+            get; set;
+        }
 
         [JsonPropertyName("durationMs")]
-        public double DurationMs { get; set; }
+        public double DurationMs
+        {
+            get; set;
+        }
 
         [JsonPropertyName("allocatedBytes")]
-        public long AllocatedBytes { get; set; }
+        public long AllocatedBytes
+        {
+            get; set;
+        }
     }
 }

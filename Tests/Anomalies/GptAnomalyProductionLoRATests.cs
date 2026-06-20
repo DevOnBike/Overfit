@@ -125,7 +125,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             }
             finally
             {
-                if (File.Exists(loraPath)) { File.Delete(loraPath); }
+                if (File.Exists(loraPath))
+                {
+                    File.Delete(loraPath);
+                }
             }
         }
 
@@ -141,7 +144,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             for (var i = 0; i < ContextSnapshots * 2; i++)
             {
                 var r = detector.Score(regime[i % regime.Length]);
-                if (!r.IsWarmup) { normal = r.Score; }
+                if (!r.IsWarmup)
+                {
+                    normal = r.Score;
+                }
             }
             var inc = detector.Score(incident);
             return (normal, inc.Score);
@@ -159,7 +165,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
 
             foreach (var c in candidates)
             {
-                if (c is not null && File.Exists(c)) { return c; }
+                if (c is not null && File.Exists(c))
+                {
+                    return c;
+                }
             }
             return null;
         }

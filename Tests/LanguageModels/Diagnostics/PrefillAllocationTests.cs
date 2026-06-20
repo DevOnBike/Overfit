@@ -27,7 +27,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         [LongFact]
         public void Prefill_AllocationsPerRequest_AndGreedyPin()
         {
-            if (!File.Exists(Path)) { _out.WriteLine("missing gguf"); return; }
+            if (!File.Exists(Path))
+            {
+                _out.WriteLine("missing gguf");
+                return;
+            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(Path);
             var tok = GgufTokenizer.Load(Path);

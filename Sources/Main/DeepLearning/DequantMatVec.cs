@@ -49,6 +49,7 @@ namespace DevOnBike.Overfit.DeepLearning
             fixed (float* xp = x, dp = dst)
             {
                 var ctx = new MatVecContext { X = xp, Dst = dp, Weight = scope.Token, K = inDim };
+
                 OverfitParallel.For(0, outDim, &Chunk, &ctx);
             }
         }

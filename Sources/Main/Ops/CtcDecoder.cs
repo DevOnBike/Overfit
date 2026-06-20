@@ -48,7 +48,11 @@ namespace DevOnBike.Overfit.Ops
                 for (var k = 1; k < classCount; k++)
                 {
                     var v = logits[baseT + k];
-                    if (v > bestVal) { bestVal = v; best = k; }
+                    if (v > bestVal)
+                    {
+                        bestVal = v;
+                        best = k;
+                    }
                 }
 
                 // CTC collapse: emit only when the class changes and is not the blank. A repeated label
@@ -133,7 +137,10 @@ namespace DevOnBike.Overfit.Ops
                     // (c) extend by each non-blank class.
                     for (var c = 0; c < classCount; c++)
                     {
-                        if (c == blankIndex) { continue; }
+                        if (c == blankIndex)
+                        {
+                            continue;
+                        }
 
                         var lp = logp[baseT + c];
                         // A repeat of the last label can only follow a blank (else it would merge).
@@ -160,7 +167,11 @@ namespace DevOnBike.Overfit.Ops
             foreach (var e in beam.Values)
             {
                 var score = Score(e, insertionBonus);
-                if (score > bestScore) { bestScore = score; best = e.Labels; }
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    best = e.Labels;
+                }
             }
             return best;
         }
@@ -184,14 +195,23 @@ namespace DevOnBike.Overfit.Ops
 
         private static Dictionary<string, Beam> Prune(Dictionary<string, Beam> beams, int width, double insertionBonus)
         {
-            if (beams.Count <= width) { return beams; }
+            if (beams.Count <= width)
+            {
+                return beams;
+            }
 
             var ordered = new List<KeyValuePair<string, Beam>>(beams.Count);
-            foreach (var kv in beams) { ordered.Add(kv); }
+            foreach (var kv in beams)
+            {
+                ordered.Add(kv);
+            }
             ordered.Sort((a, b) => Score(b.Value, insertionBonus).CompareTo(Score(a.Value, insertionBonus)));
 
             var result = new Dictionary<string, Beam>(width);
-            for (var i = 0; i < width; i++) { result[ordered[i].Key] = ordered[i].Value; }
+            for (var i = 0; i < width; i++)
+            {
+                result[ordered[i].Key] = ordered[i].Value;
+            }
             return result;
         }
 
@@ -215,7 +235,10 @@ namespace DevOnBike.Overfit.Ops
                 var max = float.NegativeInfinity;
                 for (var k = 0; k < classCount; k++)
                 {
-                    if (logits[baseT + k] > max) { max = logits[baseT + k]; }
+                    if (logits[baseT + k] > max)
+                    {
+                        max = logits[baseT + k];
+                    }
                 }
                 var sum = 0.0;
                 for (var k = 0; k < classCount; k++)
@@ -233,8 +256,14 @@ namespace DevOnBike.Overfit.Ops
 
         private static double LogSumExp(double a, double b)
         {
-            if (double.IsNegativeInfinity(a)) { return b; }
-            if (double.IsNegativeInfinity(b)) { return a; }
+            if (double.IsNegativeInfinity(a))
+            {
+                return b;
+            }
+            if (double.IsNegativeInfinity(b))
+            {
+                return a;
+            }
             var max = a > b ? a : b;
             return max + Math.Log(Math.Exp(a - max) + Math.Exp(b - max));
         }

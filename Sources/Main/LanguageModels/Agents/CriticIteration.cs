@@ -14,8 +14,14 @@ namespace DevOnBike.Overfit.LanguageModels.Agents
             Verdict = verdict;
         }
 
-        public string Candidate { get; }
+        public string Candidate
+        {
+            get;
+        }
 
-        public CriticVerdict Verdict { get; }
+        public CriticVerdict Verdict
+        {
+            get;
+        }
     }
 }

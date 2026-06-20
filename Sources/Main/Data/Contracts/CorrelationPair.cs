@@ -11,12 +11,21 @@ namespace DevOnBike.Overfit.Data.Contracts
     /// </summary>
     public sealed record CorrelationPair
     {
-        public int FeatureIndexA { get; init; }
-        public int FeatureIndexB { get; init; }
+        public int FeatureIndexA
+        {
+            get; init;
+        }
+        public int FeatureIndexB
+        {
+            get; init;
+        }
         public string FeatureNameA { get; init; } = string.Empty;
         public string FeatureNameB { get; init; } = string.Empty;
 
         /// <summary>Pearson r ∈ [-1, 1].</summary>
-        public float Correlation { get; init; }
+        public float Correlation
+        {
+            get; init;
+        }
     }
 }

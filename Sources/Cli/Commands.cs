@@ -10,9 +10,12 @@ using DevOnBike.Overfit.Audio.Tts;
 using DevOnBike.Overfit.Audio.Tts.Orpheus;
 using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Embeddings;
+using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.Whisper;
 using DevOnBike.Overfit.Mcp;
+using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Server;
+using DevOnBike.Overfit.Serving;
 
 namespace DevOnBike.Overfit.Cli
 {
@@ -144,7 +147,7 @@ namespace DevOnBike.Overfit.Cli
 
         private const string DefaultSystemPrompt = "You are a concise, helpful assistant running locally in pure .NET.";
 
-        public static int Serve(string model, string host, int port, string? embedModel, string? ttsModel, string? ttsSnac)
+        public static int Serve(string model, string host, int port, string? embedModel, string? ttsModel, string? ttsSnac, int sessions = 1)
         {
             var path = ModelCache.Resolve(model);
             if (path is null)
@@ -154,19 +157,37 @@ namespace DevOnBike.Overfit.Cli
                 return 1;
             }
 
-            Console.WriteLine($"Loading {Path.GetFileName(path)} ...");
-            OverfitClient client;
+            if (sessions < 1)
+            {
+                sessions = 1;
+            }
+
+            // One client per session — each owns its KV cache (extra RAM); the model weights are shared via
+            // mmap (the OS page cache de-duplicates them), so N sessions ≈ 1× weights + N× KV.
+            Console.WriteLine(sessions == 1
+                ? $"Loading {Path.GetFileName(path)} ..."
+                : $"Loading {Path.GetFileName(path)} into {sessions} sessions ...");
+            var clients = new List<OverfitClient>(sessions);
             try
             {
-                client = OverfitClient.LoadGguf(path, mmap: true);
+                for (var i = 0; i < sessions; i++)
+                {
+                    var c = OverfitClient.LoadGguf(path, mmap: true);
+                    c.AddSystem(DefaultSystemPrompt);
+                    clients.Add(c);
+                }
             }
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"Failed to load '{Path.GetFileName(path)}': {ex.Message}");
+                foreach (var c in clients)
+                {
+                    c.Dispose();
+                }
                 return 1;
             }
 
-            client.AddSystem(DefaultSystemPrompt);
+            var pool = new OverfitResourcePool<OverfitClient>(clients);
             var modelName = Path.GetFileNameWithoutExtension(path);
 
             // Optional in-process sentence embedder → serves /v1/embeddings (pure .NET, no data egress).
@@ -178,7 +199,7 @@ namespace DevOnBike.Overfit.Cli
                 {
                     Console.Error.WriteLine($"Embedding model '{embedModel}' not found.");
                     Console.Error.WriteLine($"Pull it first:  overfit pull minilm   (or pass a directory path with config.json + vocab.txt + model.safetensors)");
-                    client.Dispose();
+                    pool.Dispose();
                     return 1;
                 }
 
@@ -190,7 +211,7 @@ namespace DevOnBike.Overfit.Cli
                 catch (Exception ex)
                 {
                     Console.Error.WriteLine($"Failed to load embedding model '{embedDir}': {ex.Message}");
-                    client.Dispose();
+                    pool.Dispose();
                     return 1;
                 }
             }
@@ -207,7 +228,7 @@ namespace DevOnBike.Overfit.Cli
                     Console.Error.WriteLine(orpheus is null ? "  • Orpheus GGUF not found (pull it, or pass --tts-model <file.gguf>)." : $"  • Orpheus: {orpheus}");
                     Console.Error.WriteLine(snac is null ? "  • SNAC weights not found (run Scripts/convert_snac.py, or pass --tts-snac <dir>)." : $"  • SNAC: {snac}");
                     embedder?.Dispose();
-                    client.Dispose();
+                    pool.Dispose();
                     return 1;
                 }
 
@@ -220,7 +241,7 @@ namespace DevOnBike.Overfit.Cli
                 {
                     Console.Error.WriteLine($"Failed to load TTS: {ex.Message}");
                     embedder?.Dispose();
-                    client.Dispose();
+                    pool.Dispose();
                     return 1;
                 }
             }
@@ -235,7 +256,7 @@ namespace DevOnBike.Overfit.Cli
             try
             {
                 OverfitOpenAiServer.Serve(
-                    client,
+                    pool,
                     modelName,
                     host,
                     port,
@@ -268,11 +289,185 @@ namespace DevOnBike.Overfit.Cli
             {
                 tts?.Dispose();
                 embedder?.Dispose();
-                client.Dispose();
+                pool.Dispose();
             }
 
             Console.WriteLine("Server stopped.");
             return 0;
+        }
+
+        /// <summary>
+        /// `overfit doctor &lt;model&gt;` — inspect a GGUF and report what Overfit sees: architecture, quant,
+        /// tokenizer, chat template, context, whether the arch is supported, recommended tuning flags, and
+        /// warnings. Read-only (parses metadata + tensor headers; does not load weights) — answers the #1
+        /// adoption question, "why doesn't my model work / is the tokenizer + template detected".
+        /// </summary>
+        public static int Doctor(string model)
+        {
+            var path = ModelCache.Resolve(model);
+            if (path is null)
+            {
+                Console.Error.WriteLine($"Model '{model}' not found in {ModelCache.Dir}.");
+                Console.Error.WriteLine($"Download it first:  overfit pull {model}   (or pass a .gguf path directly)");
+                return 1;
+            }
+
+            GgufReader reader;
+            try
+            {
+                reader = new GgufReader(path);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Failed to read '{Path.GetFileName(path)}' as GGUF: {ex.Message}");
+                return 1;
+            }
+
+            using (reader)
+            {
+                var arch = reader.GetMeta("general.architecture", "?");
+                var name = reader.GetMeta("general.name", string.Empty);
+                var layers = reader.GetMeta($"{arch}.block_count", 0);
+                var hidden = reader.GetMeta($"{arch}.embedding_length", 0);
+                var heads = reader.GetMeta($"{arch}.attention.head_count", 0);
+                var kvHeads = reader.GetMeta($"{arch}.attention.head_count_kv", heads);
+                var ctx = reader.GetMeta($"{arch}.context_length", 0);
+                var experts = reader.GetMeta($"{arch}.expert_count", 0);
+                var tokModel = reader.GetMeta("tokenizer.ggml.model", "?");
+                var hasTemplate = reader.Metadata.ContainsKey("tokenizer.chat_template");
+
+                var (quant, quantMixed, quantizedFraction) = DescribeQuant(reader);
+                var (supported, supportNote) = DescribeSupport(arch, experts);
+
+                Console.WriteLine();
+                Console.WriteLine($"overfit doctor — {path}");
+                Console.WriteLine();
+                Console.WriteLine($"  architecture   : {arch}{(string.IsNullOrEmpty(name) ? string.Empty : $"  ({name})")}");
+                if (layers > 0)
+                {
+                    var gqa = kvHeads > 0 && kvHeads < heads ? $", GQA {heads}:{kvHeads}" : string.Empty;
+                    var moe = experts > 0 ? $", MoE ×{experts} experts" : string.Empty;
+                    Console.WriteLine($"  parameters     : {layers} layers · {hidden} hidden · {heads} heads{gqa}{moe}");
+                }
+                Console.WriteLine($"  quantization   : {quant}{(quantMixed ? "  (mixed)" : string.Empty)}  —  {quantizedFraction:P0} of weight tensors quantized");
+                Console.WriteLine($"  tokenizer      : {DescribeTokenizer(tokModel)} (embedded in GGUF)");
+                Console.WriteLine($"  chat template  : {(hasTemplate ? "found" : "MISSING — chat formatting falls back to a generic template")}");
+                Console.WriteLine($"  context length : {(ctx > 0 ? ctx.ToString(CultureInfo.InvariantCulture) : "unknown")}");
+                Console.WriteLine($"  supported      : {supported} — {supportNote}");
+
+                Console.WriteLine();
+                Console.WriteLine("  recommended flags:");
+                if (quant.StartsWith("Q4_K", StringComparison.Ordinal))
+                {
+                    Console.WriteLine($"    {OverfitEnvironment.RepackGemv}=1      # ~+30% decode on Q4_K (FFN + LM-head repacked 8×8 GEMV)");
+                }
+                Console.WriteLine($"    {OverfitEnvironment.DecodeWorkers}=<n>   # match physical cores (16 was optimal with repack on a 16-core box)");
+
+                var warnings = CollectWarnings(arch, hasTemplate, supported, tokModel);
+                if (warnings.Count > 0)
+                {
+                    Console.WriteLine();
+                    Console.WriteLine("  warnings:");
+                    foreach (var w in warnings)
+                    {
+                        Console.WriteLine($"    • {w}");
+                    }
+                }
+
+                Console.WriteLine();
+            }
+
+            return 0;
+        }
+
+        // Dominant weight-tensor quant: the type most of the model's bytes are in. Q4_K_M files mix Q4_K + Q6_K,
+        // so we report the dominant type and flag the mix, plus the fraction of weight tensors that are quantized.
+        private static (string Quant, bool Mixed, double QuantizedFraction) DescribeQuant(GgufReader reader)
+        {
+            var counts = new Dictionary<GgmlType, int>();
+            var total = 0;
+            var quantized = 0;
+            foreach (var t in reader.Tensors.Values)
+            {
+                if (!t.Name.EndsWith(".weight", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                total++;
+                counts[t.Type] = counts.GetValueOrDefault(t.Type) + 1;
+                if (t.Type is not (GgmlType.F32 or GgmlType.F16 or GgmlType.BF16))
+                {
+                    quantized++;
+                }
+            }
+
+            if (total == 0)
+            {
+                return ("unknown", false, 0d);
+            }
+
+            var dominant = GgmlType.F32;
+            var best = -1;
+            foreach (var (type, count) in counts)
+            {
+                if (count > best)
+                {
+                    best = count;
+                    dominant = type;
+                }
+            }
+
+            var distinctQuant = 0;
+            foreach (var type in counts.Keys)
+            {
+                if (type is not (GgmlType.F32 or GgmlType.F16 or GgmlType.BF16))
+                {
+                    distinctQuant++;
+                }
+            }
+
+            return (dominant.ToString(), distinctQuant > 1, (double)quantized / total);
+        }
+
+        private static string DescribeTokenizer(string ggmlModel) => ggmlModel switch
+        {
+            "gpt2" => "BPE (GPT-2 byte-level)",
+            "llama" => "SentencePiece / BPE (Llama-family)",
+            "bert" => "WordPiece (BERT)",
+            "?" => "not declared",
+            _ => ggmlModel,
+        };
+
+        // Mirrors the validated arch list in the README "Supported model families". Metadata-driven loader, so
+        // an unknown arch may still load — we say so honestly rather than claim a hard yes/no.
+        private static (string Supported, string Note) DescribeSupport(string arch, int experts) => arch switch
+        {
+            "qwen2" or "qwen3" or "llama" or "phi3" or "gemma2"
+                => ("yes", "validated coherent on real models"),
+            "qwen2moe" => ("yes", "MoE validated coherent (Qwen1.5-MoE)"),
+            "gemma" or "gemma3" or "qwen3moe" or "command-r" or "deepseek2"
+                => ("not yet", "architecture not implemented — will throw a clear NotSupportedException on load"),
+            _ when experts > 0 => ("likely", "MoE arch — Mixtral-style loads; unvalidated for this exact arch, try it"),
+            _ => ("unknown", "metadata-driven loader will attempt it; not on the validated list — try it"),
+        };
+
+        private static List<string> CollectWarnings(string arch, bool hasTemplate, string supported, string tokModel)
+        {
+            var warnings = new List<string>();
+            if (!hasTemplate)
+            {
+                warnings.Add("no chat template in the GGUF — multi-turn formatting uses a generic fallback; quality may suffer.");
+            }
+            if (tokModel == "?")
+            {
+                warnings.Add("tokenizer model not declared in metadata — tokenization may be wrong.");
+            }
+            if (supported == "not yet")
+            {
+                warnings.Add($"architecture '{arch}' is not implemented yet — loading will fail.");
+            }
+            warnings.Add("RAG needs a separate embedding model — pass `--embed-model` to `overfit serve` (e.g. `overfit pull minilm`).");
+            return warnings;
         }
 
         /// <summary>
@@ -483,7 +678,7 @@ namespace DevOnBike.Overfit.Cli
                 return ModelCache.Resolve(model) ?? (File.Exists(model) ? model : null);
             }
 
-            var envDir = Environment.GetEnvironmentVariable("OVERFIT_ORPHEUS_DIR");
+            var envDir = Environment.GetEnvironmentVariable(OverfitEnvironment.OrpheusDir);
             if (!string.IsNullOrWhiteSpace(envDir) && Directory.Exists(envDir))
             {
                 var hit = FindOrpheusGguf(envDir);
@@ -514,7 +709,7 @@ namespace DevOnBike.Overfit.Cli
             var candidates = new List<string?>
             {
                 snacDir,
-                Environment.GetEnvironmentVariable("OVERFIT_SNAC_DIR"),
+                Environment.GetEnvironmentVariable(OverfitEnvironment.SnacDir),
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".overfit", "snac"),
             };
             foreach (var c in candidates)

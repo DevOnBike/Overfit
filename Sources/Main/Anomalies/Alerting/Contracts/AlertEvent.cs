@@ -15,18 +15,33 @@ namespace DevOnBike.Overfit.Anomalies.Alerting.Contracts
     public sealed record AlertEvent
     {
         /// <summary>Name of the K8s pod that triggered the alert.</summary>
-        public required string PodName { get; init; }
+        public required string PodName
+        {
+            get; init;
+        }
 
         /// <summary>Normalised anomaly score ∈ [0, 1] from <c>ReconstructionScorer</c>.</summary>
-        public float AnomalyScore { get; init; }
+        public float AnomalyScore
+        {
+            get; init;
+        }
 
         /// <summary>Raw MSE(input, reconstruction) before threshold normalisation.</summary>
-        public float ReconstructionMse { get; init; }
+        public float ReconstructionMse
+        {
+            get; init;
+        }
 
         /// <summary>UTC timestamp when the alert was detected.</summary>
-        public DateTime DetectedAt { get; init; }
+        public DateTime DetectedAt
+        {
+            get; init;
+        }
 
         /// <summary>Warning or Critical based on score vs configured thresholds.</summary>
-        public AlertSeverity Severity { get; init; }
+        public AlertSeverity Severity
+        {
+            get; init;
+        }
     }
 }

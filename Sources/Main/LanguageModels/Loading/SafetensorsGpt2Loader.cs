@@ -46,8 +46,14 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
         public static GPT1Model Load(ISafetensorsSource reader, GPT1Config config)
         {
-            if (reader is null) { throw new ArgumentNullException(nameof(reader)); }
-            if (config is null) { throw new ArgumentNullException(nameof(config)); }
+            if (reader is null)
+            {
+                throw new ArgumentNullException(nameof(reader));
+            }
+            if (config is null)
+            {
+                throw new ArgumentNullException(nameof(config));
+            }
 
             var model = new GPT1Model(config);
             // Stream the mapped weights through GPT1Model.Load one block at a time —
@@ -143,15 +149,21 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         // HF GPT-2 ships these with or without the "transformer." prefix.
         private static string Resolve(ISafetensorsSource reader, string suffix)
         {
-            if (reader.Tensors.ContainsKey(suffix)) { return suffix; }
+            if (reader.Tensors.ContainsKey(suffix))
+            {
+                return suffix;
+            }
             var prefixed = "transformer." + suffix;
-            if (reader.Tensors.ContainsKey(prefixed)) { return prefixed; }
+            if (reader.Tensors.ContainsKey(prefixed))
+            {
+                return prefixed;
+            }
             throw new KeyNotFoundException(
                 $"GPT-2 tensor '{suffix}' (or 'transformer.{suffix}') not found in safetensors header.");
         }
 
         // A length-prefixed Parameter.Load record: int32 element count + LE float payload.
-        private static byte[] BuildParam(float[] data)
+        private static byte[] BuildParam(ReadOnlySpan<float> data)
         {
             var bytes = new byte[sizeof(int) + (long)data.Length * sizeof(float)];
             BinaryPrimitives.WriteInt32LittleEndian(bytes, data.Length);
@@ -160,7 +172,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         }
 
         // wte [vocab, d] → LM head [d, vocab], transposed straight into the record bytes.
-        private static byte[] BuildTransposedLmHead(float[] wte, int vocab, int d)
+        private static byte[] BuildTransposedLmHead(ReadOnlySpan<float> wte, int vocab, int d)
         {
             var count = (long)d * vocab;
             var bytes = new byte[sizeof(int) + count * sizeof(float)];
@@ -186,7 +198,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         }
 
         // Extracts a [rows, colLen] column block from a row-major [rows, srcCols] matrix.
-        private static float[] ColBlock(float[] src, int rows, int srcCols, int colOffset, int colLen)
+        private static float[] ColBlock(ReadOnlySpan<float> src, int rows, int srcCols, int colOffset, int colLen)
         {
             var outBuf = new float[rows * colLen];
             for (var i = 0; i < rows; i++)

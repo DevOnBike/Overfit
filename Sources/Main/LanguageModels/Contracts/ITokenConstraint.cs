@@ -31,6 +31,9 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
         /// constraint). The end-of-text token is only left unmasked by <see cref="ApplyMask"/> when
         /// this is true.
         /// </summary>
-        bool IsComplete { get; }
+        bool IsComplete
+        {
+            get;
+        }
     }
 }

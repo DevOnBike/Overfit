@@ -170,7 +170,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Tools
                 var sb = new StringBuilder();
                 foreach (var t in tokens)
                 {
-                    if (t >= 0 && t < _alphabet.Length) { sb.Append(_alphabet[t]); }
+                    if (t >= 0 && t < _alphabet.Length)
+                    {
+                        sb.Append(_alphabet[t]);
+                    }
                 }
                 return sb.ToString();
             }

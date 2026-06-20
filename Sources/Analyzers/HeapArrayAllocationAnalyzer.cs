@@ -38,7 +38,7 @@ namespace DevOnBike.Overfit.Analyzers
             isEnabledByDefault: true,
             description: "Per-call heap array allocations cause GC pressure on hot paths. Rent pooled memory or stackalloc instead; one-time allocations (field initializers, constructors, static constructors) are not flagged.");
 
-        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
+        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule, OverfitPerfAnalysis.HotPathRule];
 
         public override void Initialize(AnalysisContext context)
         {
@@ -94,10 +94,11 @@ namespace DevOnBike.Overfit.Analyzers
                 return;
             }
 
-            context.ReportDiagnostic(Diagnostic.Create(
+            OverfitPerfAnalysis.Report(
+                context,
                 Rule,
                 operation.Syntax.GetLocation(),
-                elementType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)));
+                elementType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat));
         }
 
         /// <summary>One-time-per-lifetime contexts that may allocate freely: field and property

@@ -47,7 +47,9 @@ namespace DevOnBike.Overfit.DeepLearning
             }
         }
 
-        public void PrepareInference() { }
+        public void PrepareInference()
+        {
+        }
 
         public bool IsTraining { get; private set; } = true;
 
@@ -75,13 +77,21 @@ namespace DevOnBike.Overfit.DeepLearning
                 _inputW);
         }
 
-        public void InvalidateParameterCaches() { }
+        public void InvalidateParameterCaches()
+        {
+        }
         public IEnumerable<AutogradNode> Parameters()
         {
             return [];
         }
-        public void Save(BinaryWriter bw) { }
-        public void Load(BinaryReader br) { }
-        public void Dispose() { }
+        public void Save(BinaryWriter bw)
+        {
+        }
+        public void Load(BinaryReader br)
+        {
+        }
+        public void Dispose()
+        {
+        }
     }
 }

@@ -27,14 +27,21 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         [LongFact]
         public void Pool_Parks_WhenIdle()
         {
-            if (!File.Exists(Path)) { _out.WriteLine("missing gguf"); return; }
+            if (!File.Exists(Path))
+            {
+                _out.WriteLine("missing gguf");
+                return;
+            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(Path);
             var tok = GgufTokenizer.Load(Path);
             using var session = engine.CreateSession(128);
             session.Reset(tok.Encode("Hello"));
             var sampling = SamplingOptions.Greedy;
-            for (var i = 0; i < 8; i++) { session.GenerateNextToken(in sampling); }   // pool is hot now
+            for (var i = 0; i < 8; i++)
+            {
+                session.GenerateNextToken(in sampling);
+            }   // pool is hot now
 
             using var process = Process.GetCurrentProcess();
             process.Refresh();

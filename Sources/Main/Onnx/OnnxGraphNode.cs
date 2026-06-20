@@ -33,18 +33,30 @@ namespace DevOnBike.Overfit.Onnx
         }
 
         /// <summary>The layer that computes this node's output.</summary>
-        public IModule Module { get; }
+        public IModule Module
+        {
+            get;
+        }
 
         /// <summary>
         /// Indices into the buffer array for this node's inputs.
         /// Length 1 for regular layers. Length 2 for Add (skip connection).
         /// </summary>
-        public int[] InputSlots { get; }
+        public int[] InputSlots
+        {
+            get;
+        }
 
         /// <summary>Index into the buffer array where this node writes its output.</summary>
-        public int OutputSlot { get; }
+        public int OutputSlot
+        {
+            get;
+        }
 
         /// <summary>Number of floats in this node's output (for buffer sizing).</summary>
-        public int OutputSize { get; }
+        public int OutputSize
+        {
+            get;
+        }
     }
 }

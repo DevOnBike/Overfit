@@ -71,6 +71,88 @@ namespace DevOnBike.Overfit.Kernels
         }
 
         // ─────────────────────────────────────────────────────────────────────
+        // MaxPool2D forward — general windowed inference (overlapping stride + padding)
+        //
+        // The non-overlapping overload above is the fast path (TensorPrimitives pool=2). This one is the
+        // ONNX-general case: stride may be < kernel (overlapping, e.g. ResNet's 3x3 stride-2) and the window
+        // may extend into zero-padding. ONNX pads MaxPool with -inf, so out-of-bounds positions are simply
+        // skipped — they never win the max (every valid output window has at least one in-bounds element).
+        //
+        //   outH = (inputH + 2*padding - kernelSize) / stride + 1
+        //   outW = (inputW + 2*padding - kernelSize) / stride + 1
+        // ─────────────────────────────────────────────────────────────────────
+
+        public static void MaxPool2DForwardNchw(
+            ReadOnlySpan<float> input,
+            Span<float> output,
+            int batchSize,
+            int channels,
+            int inputH,
+            int inputW,
+            int kernelSize,
+            int padding,
+            int stride)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(stride);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(kernelSize);
+
+            var outH = (inputH + 2 * padding - kernelSize) / stride + 1;
+            var outW = (inputW + 2 * padding - kernelSize) / stride + 1;
+            var inputPlane = channels * inputH * inputW;
+            var outputPlane = channels * outH * outW;
+
+            for (var n = 0; n < batchSize; n++)
+            {
+                var inB = input.Slice(n * inputPlane, inputPlane);
+                var outB = output.Slice(n * outputPlane, outputPlane);
+
+                for (var c = 0; c < channels; c++)
+                {
+                    var inChan = c * inputH * inputW;
+                    var outChan = c * outH * outW;
+
+                    for (var oy = 0; oy < outH; oy++)
+                    {
+                        var iyBase = oy * stride - padding;
+
+                        for (var ox = 0; ox < outW; ox++)
+                        {
+                            var ixBase = ox * stride - padding;
+                            var max = float.MinValue;
+
+                            for (var ky = 0; ky < kernelSize; ky++)
+                            {
+                                var iy = iyBase + ky;
+                                if ((uint)iy >= (uint)inputH)
+                                {
+                                    continue;
+                                }
+
+                                var rowBase = inChan + iy * inputW;
+                                for (var kx = 0; kx < kernelSize; kx++)
+                                {
+                                    var ix = ixBase + kx;
+                                    if ((uint)ix >= (uint)inputW)
+                                    {
+                                        continue;
+                                    }
+
+                                    var v = inB[rowBase + ix];
+                                    if (v > max)
+                                    {
+                                        max = v;
+                                    }
+                                }
+                            }
+
+                            outB[outChan + oy * outW + ox] = max;
+                        }
+                    }
+                }
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
         // MaxPool2D forward — training path (with index tracking)
         // Fills output values + flat maxIndices for backward scatter.
         // batchOffset is the flat offset of this batch's input start in the
@@ -503,7 +585,11 @@ namespace DevOnBike.Overfit.Kernels
                             {
                                 var idx = rowBase + pw;
                                 var val = input[idx];
-                                if (val > maxVal) { maxVal = val; maxIdx = idx; }
+                                if (val > maxVal)
+                                {
+                                    maxVal = val;
+                                    maxIdx = idx;
+                                }
                             }
                         }
 

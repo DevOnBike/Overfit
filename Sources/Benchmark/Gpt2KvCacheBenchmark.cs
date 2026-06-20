@@ -43,7 +43,10 @@ namespace Benchmarks
         private bool _disposed;
 
         [Params(16, 64, 128)]
-        public int MaxNewTokens { get; set; }
+        public int MaxNewTokens
+        {
+            get; set;
+        }
 
         [GlobalSetup]
         public void Setup()

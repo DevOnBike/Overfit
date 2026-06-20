@@ -143,7 +143,7 @@ namespace DevOnBike.Overfit.LanguageModels.Embeddings
         /// </summary>
         private static void LoadHeadProjection(
             SafetensorsReader reader, string name, int d, int dHead, int nHeads,
-            Parameter[] heads, float[] raw, float[] transposed)
+            Parameter[] heads, float[] raw, Span<float> transposed)
         {
             var count = reader.ElementCount(name);
             if (count != (long)d * d)

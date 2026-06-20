@@ -335,10 +335,16 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
             public int[] Tokens { get; set; } = [];
 
             [JsonPropertyName("vocab_size")]
-            public int VocabSize { get; set; }
+            public int VocabSize
+            {
+                get; set;
+            }
 
             [JsonPropertyName("next_token")]
-            public int NextToken { get; set; }
+            public int NextToken
+            {
+                get; set;
+            }
 
             [JsonPropertyName("next_token_text")]
             public string NextTokenText { get; set; } = string.Empty;
@@ -353,10 +359,16 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         private sealed class TopLogit
         {
             [JsonPropertyName("token")]
-            public int Token { get; set; }
+            public int Token
+            {
+                get; set;
+            }
 
             [JsonPropertyName("logit")]
-            public float Logit { get; set; }
+            public float Logit
+            {
+                get; set;
+            }
         }
     }
 }

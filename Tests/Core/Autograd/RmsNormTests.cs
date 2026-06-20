@@ -43,7 +43,10 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
             for (var r = 0; r < rows; r++)
             {
                 var ms = 0f;
-                for (var i = 0; i < c; i++) { ms += x[r * c + i] * x[r * c + i]; }
+                for (var i = 0; i < c; i++)
+                {
+                    ms += x[r * c + i] * x[r * c + i];
+                }
                 ms /= c;
                 var inv = 1f / MathF.Sqrt(ms + Eps);
                 for (var i = 0; i < c; i++)
@@ -80,8 +83,10 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
             foreach (var idx in new[] { 0, 5, 16, 31, 50, 80, rows * c - 1 })
             {
                 var orig = xs[idx];
-                xs[idx] = orig + eps; var lp = LossAt(graph, xNode, gNode, tNode);
-                xs[idx] = orig - eps; var lm = LossAt(graph, xNode, gNode, tNode);
+                xs[idx] = orig + eps;
+                var lp = LossAt(graph, xNode, gNode, tNode);
+                xs[idx] = orig - eps;
+                var lm = LossAt(graph, xNode, gNode, tNode);
                 xs[idx] = orig;
                 var fd = (lp - lm) / (2 * eps);
                 var an = dxA[idx];
@@ -91,7 +96,10 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
                 // bug shows a large absolute mismatch on the meaningful (~1e-2) entries, which this still catches.
                 var absDiff = Math.Abs(fd - an);
                 var rel = absDiff / Math.Max(1e-3, Math.Abs(an));
-                if (absDiff > 5e-4) { maxRel = Math.Max(maxRel, rel); }
+                if (absDiff > 5e-4)
+                {
+                    maxRel = Math.Max(maxRel, rel);
+                }
                 _out.WriteLine($"  dX[{idx}]: analytic {an:E4}  fd {fd:E4}  rel {rel:E3}");
             }
             Assert.True(maxRel < 3e-2, $"RMSNorm dInput finite-difference mismatch, maxRel {maxRel:E3}");
@@ -121,8 +129,10 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
             for (var idx = 0; idx < c; idx++)
             {
                 var orig = gs[idx];
-                gs[idx] = orig + eps; var lp = LossAt(graph, xNode, gNode, tNode);
-                gs[idx] = orig - eps; var lm = LossAt(graph, xNode, gNode, tNode);
+                gs[idx] = orig + eps;
+                var lp = LossAt(graph, xNode, gNode, tNode);
+                gs[idx] = orig - eps;
+                var lm = LossAt(graph, xNode, gNode, tNode);
                 gs[idx] = orig;
                 var fd = (lp - lm) / (2 * eps);
                 var an = dgA[idx];
@@ -168,7 +178,10 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
         {
             var r = new Random(seed);
             var v = new float[n];
-            for (var i = 0; i < n; i++) { v[i] = (float)(r.NextDouble() * 2 - 1); }
+            for (var i = 0; i < n; i++)
+            {
+                v[i] = (float)(r.NextDouble() * 2 - 1);
+            }
             return v;
         }
     }

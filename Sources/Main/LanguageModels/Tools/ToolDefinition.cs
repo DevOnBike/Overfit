@@ -35,15 +35,24 @@ namespace DevOnBike.Overfit.LanguageModels.Tools
         }
 
         /// <summary>The tool's identifier — the model is forced to emit exactly one of these.</summary>
-        public string Name { get; }
+        public string Name
+        {
+            get;
+        }
 
         /// <summary>What the tool does / when to use it. Used in the prompt, not enforced.</summary>
-        public string Description { get; }
+        public string Description
+        {
+            get;
+        }
 
         /// <summary>
         /// The required, ordered arguments. When non-empty, the constraint forces the exact key set,
         /// order and value types; when empty, the arguments are only constrained to well-formed JSON.
         /// </summary>
-        public IReadOnlyList<ToolParameter> Parameters { get; }
+        public IReadOnlyList<ToolParameter> Parameters
+        {
+            get;
+        }
     }
 }

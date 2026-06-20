@@ -22,9 +22,15 @@ namespace DevOnBike.Overfit.LanguageModels.Tools
         }
 
         /// <summary>The argument's JSON key — emitted verbatim by the constraint.</summary>
-        public string Name { get; }
+        public string Name
+        {
+            get;
+        }
 
         /// <summary>The JSON type the value is constrained to.</summary>
-        public ToolParameterKind Kind { get; }
+        public ToolParameterKind Kind
+        {
+            get;
+        }
     }
 }

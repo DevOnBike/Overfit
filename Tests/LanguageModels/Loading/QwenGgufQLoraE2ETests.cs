@@ -126,7 +126,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             // The frozen quantized base is bit-identical after the backward pass.
             var baseAfter = new float[wq.InputSize];
             wq.DecodeRow(0, baseAfter);
-            for (var i = 0; i < baseBefore.Length; i++) { Assert.Equal(baseBefore[i], baseAfter[i]); }
+            for (var i = 0; i < baseBefore.Length; i++)
+            {
+                Assert.Equal(baseBefore[i], baseAfter[i]);
+            }
         }
 
         // ── helpers ──
@@ -134,14 +137,20 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         private static ConcatRowsDequantSource ConcatRows(DecodeWeight[] heads, int count)
         {
             var parts = new IDequantRowSource[count];
-            for (var h = 0; h < count; h++) { parts[h] = heads[h].AsRowSource(); }
+            for (var h = 0; h < count; h++)
+            {
+                parts[h] = heads[h].AsRowSource();
+            }
             return new ConcatRowsDequantSource(parts);
         }
 
         private static ConcatColsDequantSource ConcatCols(DecodeWeight[] heads, int count)
         {
             var parts = new IDequantRowSource[count];
-            for (var h = 0; h < count; h++) { parts[h] = heads[h].AsRowSource(); }
+            for (var h = 0; h < count; h++)
+            {
+                parts[h] = heads[h].AsRowSource();
+            }
             return new ConcatColsDequantSource(parts);
         }
 
@@ -151,7 +160,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             for (var i = 0; i < g.Length; i++)
             {
                 Assert.True(float.IsFinite(g[i]), $"{name}[{i}] not finite");
-                if (g[i] != 0f) { any = true; }
+                if (g[i] != 0f)
+                {
+                    any = true;
+                }
             }
             Assert.True(any, $"{name} is all zero — gradient did not flow");
         }
@@ -173,7 +185,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         private static float[] Rand(Random rng, int n, float scale)
         {
             var v = new float[n];
-            for (var i = 0; i < n; i++) { v[i] = (float)(rng.NextDouble() * 2 - 1) * scale; }
+            for (var i = 0; i < n; i++)
+            {
+                v[i] = (float)(rng.NextDouble() * 2 - 1) * scale;
+            }
             return v;
         }
     }

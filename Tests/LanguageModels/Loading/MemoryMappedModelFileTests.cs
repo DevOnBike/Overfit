@@ -22,7 +22,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             try
             {
                 var data = new byte[256];
-                for (var i = 0; i < data.Length; i++) { data[i] = (byte)i; }
+                for (var i = 0; i < data.Length; i++)
+                {
+                    data[i] = (byte)i;
+                }
                 File.WriteAllBytes(path, data);
 
                 using var map = new MemoryMappedModelFile(path);
@@ -37,7 +40,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 
                 // Whole-file slice round-trips every byte.
                 var all = map.Slice(0, 256).Span;
-                for (var i = 0; i < 256; i++) { Assert.Equal((byte)i, all[i]); }
+                for (var i = 0; i < 256; i++)
+                {
+                    Assert.Equal((byte)i, all[i]);
+                }
             }
             finally
             {

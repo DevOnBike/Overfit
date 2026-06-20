@@ -120,7 +120,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Streaming
                 await foreach (var t in session.StreamGenerate(opts, cts.Token))
                 {
                     produced++;
-                    if (produced == 3) { cts.Cancel(); }
+                    if (produced == 3)
+                    {
+                        cts.Cancel();
+                    }
                 }
             });
 

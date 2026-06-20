@@ -210,11 +210,20 @@ namespace DevOnBike.Overfit.Evolutionary.Strategies
             return 4 + (int)(3.0 * Math.Log(parameterCount));
         }
 
-        public int PopulationSize { get; }
+        public int PopulationSize
+        {
+            get;
+        }
 
-        public int ParameterCount { get; }
+        public int ParameterCount
+        {
+            get;
+        }
 
-        public int Generation { get; private set; }
+        public int Generation
+        {
+            get; private set;
+        }
 
         public float BestFitness
         {

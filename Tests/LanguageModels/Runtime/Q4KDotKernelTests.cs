@@ -110,7 +110,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             var bias = RandomVector(rng, outputSize);
 
             var input = new float[rows * inputSize];
-            for (var i = 0; i < input.Length; i++) { input[i] = (float)(rng.NextDouble() * 2.0 - 1.0); }
+            for (var i = 0; i < input.Length; i++)
+            {
+                input[i] = (float)(rng.NextDouble() * 2.0 - 1.0);
+            }
 
             var reference = new float[rows * outputSize];
             for (var n = 0; n < rows; n++)
@@ -202,8 +205,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             Q4KDotKernel.QuantizeActivationQ8K(new float[SuperBlockElements], quants, scales, bsums);
 
             Assert.Equal(0f, scales[0]);
-            foreach (var q in quants) { Assert.Equal(0, q); }
-            foreach (var s in bsums) { Assert.Equal(0, s); }
+            foreach (var q in quants)
+            {
+                Assert.Equal(0, q);
+            }
+            foreach (var s in bsums)
+            {
+                Assert.Equal(0, s);
+            }
         }
 
         // ── Helpers ──────────────────────────────────────────────────────────

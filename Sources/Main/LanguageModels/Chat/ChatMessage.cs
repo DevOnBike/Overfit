@@ -14,8 +14,14 @@ namespace DevOnBike.Overfit.LanguageModels.Chat
             Content = content ?? throw new ArgumentNullException(nameof(content));
         }
 
-        public string Role { get; }
-        public string Content { get; }
+        public string Role
+        {
+            get;
+        }
+        public string Content
+        {
+            get;
+        }
 
         public static ChatMessage System(string content) => new("system", content);
         public static ChatMessage User(string content) => new("user", content);

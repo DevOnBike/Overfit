@@ -25,7 +25,10 @@ namespace DevOnBike.Overfit.Tests.Training
             public float LearningRate { get; set; } = 1f;
             public void ZeroGrad()
             {
-                foreach (var p in _parameters) { p.GradSpan.Clear(); }
+                foreach (var p in _parameters)
+                {
+                    p.GradSpan.Clear();
+                }
             }
             public void Step()
             {
@@ -33,7 +36,10 @@ namespace DevOnBike.Overfit.Tests.Training
                 {
                     var d = p.DataSpan;
                     var g = p.GradSpan;
-                    for (var i = 0; i < d.Length; i++) { d[i] -= LearningRate * g[i]; }
+                    for (var i = 0; i < d.Length; i++)
+                    {
+                        d[i] -= LearningRate * g[i];
+                    }
                 }
             }
         }
@@ -63,14 +69,28 @@ namespace DevOnBike.Overfit.Tests.Training
             var loss = trainer.Step(optimizer, w =>
             {
                 var g = workers[w][0].GradSpan;
-                if (w == 0) { g[0] = 2; g[1] = 4; g[2] = 6; }
-                else { g[0] = 4; g[1] = 8; g[2] = 12; }
+                if (w == 0)
+                {
+                    g[0] = 2;
+                    g[1] = 4;
+                    g[2] = 6;
+                }
+                else
+                {
+                    g[0] = 4;
+                    g[1] = 8;
+                    g[2] = 12;
+                }
                 return w == 0 ? 1.0f : 3.0f;
             });
 
             // Master grad = average; master data = 1 - 1·avg.
-            Assert.Equal(3f, m0.GradSpan[0]); Assert.Equal(6f, m0.GradSpan[1]); Assert.Equal(9f, m0.GradSpan[2]);
-            Assert.Equal(-2f, m0.DataSpan[0]); Assert.Equal(-5f, m0.DataSpan[1]); Assert.Equal(-8f, m0.DataSpan[2]);
+            Assert.Equal(3f, m0.GradSpan[0]);
+            Assert.Equal(6f, m0.GradSpan[1]);
+            Assert.Equal(9f, m0.GradSpan[2]);
+            Assert.Equal(-2f, m0.DataSpan[0]);
+            Assert.Equal(-5f, m0.DataSpan[1]);
+            Assert.Equal(-8f, m0.DataSpan[2]);
 
             // Workers were re-broadcast to the updated master.
             for (var w = 0; w < workers.Length; w++)
@@ -99,7 +119,8 @@ namespace DevOnBike.Overfit.Tests.Training
             trainer.Step(optimizer, w =>
             {
                 var g = workers[w][0].GradSpan;
-                g[0] = 3; g[1] = 4;
+                g[0] = 3;
+                g[1] = 4;
                 return 0f;
             }, maxGradNorm: 1f);
 

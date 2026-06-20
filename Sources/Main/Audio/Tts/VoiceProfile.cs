@@ -28,16 +28,28 @@ namespace DevOnBike.Overfit.Audio.Tts
         }
 
         /// <summary>Stable identifier for the voice (also stamped into the synthetic-speech marker).</summary>
-        public string Id { get; }
+        public string Id
+        {
+            get;
+        }
 
         /// <summary>BCP-47-ish language tag the text is in (e.g. <c>"pl"</c>, <c>"en"</c>).</summary>
-        public string Language { get; }
+        public string Language
+        {
+            get;
+        }
 
         /// <summary>Speaker-conditioning vector for a cloned voice; null for a preset voice.</summary>
-        public float[]? SpeakerEmbedding { get; }
+        public float[]? SpeakerEmbedding
+        {
+            get;
+        }
 
         /// <summary>Path to the reference clip the embedding was enrolled from, if any.</summary>
-        public string? ReferenceAudioPath { get; }
+        public string? ReferenceAudioPath
+        {
+            get;
+        }
 
         /// <summary>True when this profile carries cloning conditioning (an enrolled speaker embedding).</summary>
         public bool IsCloned => SpeakerEmbedding is { Length: > 0 };

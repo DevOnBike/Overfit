@@ -13,10 +13,16 @@ namespace DevOnBike.Overfit.Data.Contracts
     public sealed record TrainingDataReport
     {
         /// <summary>Number of training vectors analysed.</summary>
-        public int SampleCount { get; init; }
+        public int SampleCount
+        {
+            get; init;
+        }
 
         /// <summary>Dimensionality of each vector.</summary>
-        public int FeatureDimension { get; init; }
+        public int FeatureDimension
+        {
+            get; init;
+        }
 
         /// <summary>Per-dimension statistics. Length == FeatureDimension.</summary>
         public IReadOnlyList<FeatureReport> FeatureReports { get; init; } = [];

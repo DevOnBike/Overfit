@@ -38,7 +38,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             {
                 var input = new int[T];
                 var target = new int[T];
-                for (var i = 0; i < T; i++) { input[i] = rng.Next(vocab); target[i] = rng.Next(vocab); }
+                for (var i = 0; i < T; i++)
+                {
+                    input[i] = rng.Next(vocab);
+                    target[i] = rng.Next(vocab);
+                }
 
                 // 1 warm-up + 3 timed steps.
                 double totalMs = 0;
@@ -52,7 +56,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
                     graph.BackwardFromGrad(logits);
                     opt.Step();
                     sw.Stop();
-                    if (step > 0) { totalMs += sw.ElapsedMilliseconds; }
+                    if (step > 0)
+                    {
+                        totalMs += sw.ElapsedMilliseconds;
+                    }
                 }
                 _out.WriteLine($"T={T,4}: {totalMs / 3.0 / 1000.0:F2} s/step (avg of 3)");
             }
@@ -61,7 +68,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         private static List<AutogradNode> ToList(IEnumerable<AutogradNode> e)
         {
             var l = new List<AutogradNode>();
-            foreach (var x in e) { l.Add(x); }
+            foreach (var x in e)
+            {
+                l.Add(x);
+            }
             return l;
         }
     }

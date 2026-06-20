@@ -73,13 +73,17 @@ namespace DevOnBike.Overfit.Data.Prepare
 
             for (var c = 0; c < cols; c++)
             {
-                double sum = 0; double sumSq = 0;
+                double sum = 0;
+                double sumSq = 0;
                 for (var r = 0; r < rows; r++)
                 {
                     double val = featureSpan[r * cols + c];
-                    sum += val; sumSq += val * val;
+                    sum += val;
+                    sumSq += val * val;
                 }
-                sumSpan[c] = sum; sumSqSpan[c] = sumSq; meanSpan[c] = sum / rows;
+                sumSpan[c] = sum;
+                sumSqSpan[c] = sumSq;
+                meanSpan[c] = sum / rows;
             }
 
             float[] targetCorrelations = null;
@@ -154,11 +158,13 @@ namespace DevOnBike.Overfit.Data.Prepare
         {
             var result = new float[cols];
 
-            double tSum = 0; double tSumSq = 0;
+            double tSum = 0;
+            double tSumSq = 0;
             for (var r = 0; r < rows; r++)
             {
                 double val = targetSpan[r];
-                tSum += val; tSumSq += val * val;
+                tSum += val;
+                tSumSq += val * val;
             }
 
             for (var c = 0; c < cols; c++)
@@ -180,7 +186,7 @@ namespace DevOnBike.Overfit.Data.Prepare
             return result;
         }
 
-        private int ChooseColumnToDrop(int colA, int colB, float[] targetCorrelations)
+        private int ChooseColumnToDrop(int colA, int colB, ReadOnlySpan<float> targetCorrelations)
         {
             if (_strategy == DropStrategy.KeepFirst)
             {
@@ -193,7 +199,7 @@ namespace DevOnBike.Overfit.Data.Prepare
             return corrA >= corrB ? colB : colA;
         }
 
-        private FastTensor<float> ExtractColumns(FastTensor<float> src, int[] indices, int rows)
+        private FastTensor<float> ExtractColumns(FastTensor<float> src, ReadOnlySpan<int> indices, int rows)
         {
             var oldCols = src.GetView().GetDim(1);
             var newCols = indices.Length;

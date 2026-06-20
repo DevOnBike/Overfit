@@ -320,8 +320,14 @@ namespace DevOnBike.Overfit.Demo.Unity.Server
                     continue;
                 }
 
-                if (f > best) { best = f; }
-                if (f < worst) { worst = f; }
+                if (f > best)
+                {
+                    best = f;
+                }
+                if (f < worst)
+                {
+                    worst = f;
+                }
                 sum += f;
                 count++;
             }

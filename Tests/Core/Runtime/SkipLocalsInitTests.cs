@@ -73,10 +73,14 @@ namespace DevOnBike.Overfit.Tests.Core.Runtime
         public void LoRAWeight_ForwardAdd_StableAcrossRepeatedCalls()
         {
             var w = new LoRAWeight(inDim: 4, outDim: 2, rank: 2);
-            var a = w.AMutable; a.Clear();
-            var b = w.BMutable; b.Clear();
-            a[0] = 1f; a[3] = 1f;
-            b[0] = 2f; b[3] = 3f;
+            var a = w.AMutable;
+            a.Clear();
+            var b = w.BMutable;
+            b.Clear();
+            a[0] = 1f;
+            a[3] = 1f;
+            b[0] = 2f;
+            b[3] = 3f;
 
             float[] x = [5f, 7f, 0f, 0f];
 
@@ -140,9 +144,18 @@ namespace DevOnBike.Overfit.Tests.Core.Runtime
             using var betaStorage = new TensorStorage<float>(C);
 
             var rng = new Random(42);
-            for (var i = 0; i < numRows * C; i++) { inputStorage.AsSpan()[i] = (float)(rng.NextDouble() * 2 - 1); }
-            for (var i = 0; i < C; i++) { gammaStorage.AsSpan()[i] = 1f + (float)(rng.NextDouble() * 0.1); }
-            for (var i = 0; i < C; i++) { betaStorage.AsSpan()[i] = (float)(rng.NextDouble() * 0.01); }
+            for (var i = 0; i < numRows * C; i++)
+            {
+                inputStorage.AsSpan()[i] = (float)(rng.NextDouble() * 2 - 1);
+            }
+            for (var i = 0; i < C; i++)
+            {
+                gammaStorage.AsSpan()[i] = 1f + (float)(rng.NextDouble() * 0.1);
+            }
+            for (var i = 0; i < C; i++)
+            {
+                betaStorage.AsSpan()[i] = (float)(rng.NextDouble() * 0.01);
+            }
 
             var input = new DevOnBike.Overfit.Autograd.AutogradNode(inputStorage, new TensorShape(numRows, C), requiresGrad: true);
             var gamma = new DevOnBike.Overfit.Autograd.AutogradNode(gammaStorage, new TensorShape(C), requiresGrad: true);

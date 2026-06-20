@@ -63,7 +63,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             const int trials = 200_000;
             var rng = new Random(99);
             var counts = new int[p.Length];
-            for (var t = 0; t < trials; t++) { counts[SpeculativeSampler.Sample(p, rng)]++; }
+            for (var t = 0; t < trials; t++)
+            {
+                counts[SpeculativeSampler.Sample(p, rng)]++;
+            }
 
             Assert.True(MathF.Abs((float)counts[0] / trials - 0.2f) < 0.01f);
             Assert.Equal(0, counts[1]);   // zero-probability token never drawn

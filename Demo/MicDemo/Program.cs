@@ -35,7 +35,11 @@ namespace DevOnBike.Overfit.Demo.MicConsole
             var modelPath = args[0];
             var language = args.Length >= 2 ? args[1] : "en";
             var seconds = args.Length >= 3 && int.TryParse(args[2], out var s) ? s : 5;
-            if (!File.Exists(modelPath)) { Console.Error.WriteLine($"Model not found: {modelPath}"); return 1; }
+            if (!File.Exists(modelPath))
+            {
+                Console.Error.WriteLine($"Model not found: {modelPath}");
+                return 1;
+            }
 
             Console.WriteLine($"Loading {Path.GetFileName(modelPath)} ...");
             var whisper = WhisperTranscriber.Load(modelPath);

@@ -73,9 +73,15 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
                 {
                     foreach (var r in required.EnumerateArray())
                     {
-                        if (r.ValueKind != JsonValueKind.String) { continue; }
+                        if (r.ValueKind != JsonValueKind.String)
+                        {
+                            continue;
+                        }
                         var bit = names.IndexOf(r.GetString() ?? string.Empty);
-                        if (bit >= 0 && bit < 64) { requiredMask |= 1UL << bit; }
+                        if (bit >= 0 && bit < 64)
+                        {
+                            requiredMask |= 1UL << bit;
+                        }
                     }
                 }
 
@@ -90,7 +96,10 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
                     tries.Add(new JsonStringTrie(names));
                 }
 
-                if (types == JsonSchemaType.None) { types = JsonSchemaType.Object; }
+                if (types == JsonSchemaType.None)
+                {
+                    types = JsonSchemaType.Object;
+                }
             }
 
             if (isObject && el.TryGetProperty("enum", out var en) && en.ValueKind == JsonValueKind.Array)
@@ -99,25 +108,40 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
                 var allStrings = true;
                 foreach (var e in en.EnumerateArray())
                 {
-                    if (e.ValueKind == JsonValueKind.String) { values.Add(e.GetString() ?? string.Empty); }
-                    else { allStrings = false; }
+                    if (e.ValueKind == JsonValueKind.String)
+                    {
+                        values.Add(e.GetString() ?? string.Empty);
+                    }
+                    else
+                    {
+                        allStrings = false;
+                    }
                 }
                 if (values.Count > 0 && allStrings)
                 {
                     enumValues = values.ToArray();
                     enumTrieIndex = tries.Count;
                     tries.Add(new JsonStringTrie(values));
-                    if (types == JsonSchemaType.None) { types = JsonSchemaType.String; }
+                    if (types == JsonSchemaType.None)
+                    {
+                        types = JsonSchemaType.String;
+                    }
                 }
             }
 
             if (isObject && el.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Object)
             {
                 itemsIndex = CompileNode(items, nodes, tries);
-                if (types == JsonSchemaType.None) { types = JsonSchemaType.Array; }
+                if (types == JsonSchemaType.None)
+                {
+                    types = JsonSchemaType.Array;
+                }
             }
 
-            if (types == JsonSchemaType.None) { types = JsonSchemaType.Any; }
+            if (types == JsonSchemaType.None)
+            {
+                types = JsonSchemaType.Any;
+            }
 
             nodes[idx] = new JsonSchemaNode
             {
@@ -149,7 +173,10 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
                 var types = JsonSchemaType.None;
                 foreach (var e in t.EnumerateArray())
                 {
-                    if (e.ValueKind == JsonValueKind.String) { types |= MapType(e.GetString()); }
+                    if (e.ValueKind == JsonValueKind.String)
+                    {
+                        types |= MapType(e.GetString());
+                    }
                 }
                 return types;
             }

@@ -67,30 +67,66 @@ namespace DevOnBike.Overfit.Diagnostics.Contracts
             TellElapsed = tellElapsed;
         }
 
-        public int Iteration { get; }
-        public int InsertedNewCells { get; }
-        public int ReplacedExistingCells { get; }
-        public int RejectedCount { get; }
-        public int OutOfBoundsCount { get; }
-        public int InvalidFitnessCount { get; }
-        public int OccupiedCells { get; }
-        public int CellCount { get; }
-        public float Coverage { get; }
-        public float QdScore { get; }
+        public int Iteration
+        {
+            get;
+        }
+        public int InsertedNewCells
+        {
+            get;
+        }
+        public int ReplacedExistingCells
+        {
+            get;
+        }
+        public int RejectedCount
+        {
+            get;
+        }
+        public int OutOfBoundsCount
+        {
+            get;
+        }
+        public int InvalidFitnessCount
+        {
+            get;
+        }
+        public int OccupiedCells
+        {
+            get;
+        }
+        public int CellCount
+        {
+            get;
+        }
+        public float Coverage
+        {
+            get;
+        }
+        public float QdScore
+        {
+            get;
+        }
 
         /// <summary>
         ///     Strongest fitness ever produced by the evaluator across all iterations,
         ///     regardless of archive admission. Reflects the raw search progress of the
         ///     emitter and the evaluator working together.
         /// </summary>
-        public float BestEvaluatedFitness { get; }
+        public float BestEvaluatedFitness
+        {
+            get;
+        }
 
         /// <summary>
         ///     Strongest fitness currently held in the archive. Monotone non-decreasing
         ///     in the current implementation because <c>Insert</c> only replaces when the
         ///     new fitness is strictly higher than the existing elite.
         /// </summary>
-        public float BestEliteFitness { get; }
+        public float BestEliteFitness
+        {
+            get;
+        }
 
         /// <summary>
         ///     Wall-clock duration of one full iteration (Ask + Evaluate + Tell).
@@ -98,10 +134,22 @@ namespace DevOnBike.Overfit.Diagnostics.Contracts
         ///     Ask/Evaluate/Tell manually via <see cref="MapElites{TContext}.Tell"/>,
         ///     this is <see cref="TimeSpan.Zero"/>.
         /// </summary>
-        public TimeSpan TotalElapsed { get; }
+        public TimeSpan TotalElapsed
+        {
+            get;
+        }
 
-        public TimeSpan AskElapsed { get; }
-        public TimeSpan EvaluateElapsed { get; }
-        public TimeSpan TellElapsed { get; }
+        public TimeSpan AskElapsed
+        {
+            get;
+        }
+        public TimeSpan EvaluateElapsed
+        {
+            get;
+        }
+        public TimeSpan TellElapsed
+        {
+            get;
+        }
     }
 }

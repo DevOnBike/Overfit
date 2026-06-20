@@ -35,6 +35,9 @@ namespace DevOnBike.Overfit.Data.Contracts
         public float RejectThreshold { get; init; } = -2.0f;
 
         /// <summary>Random seed for permutation reproducibility. null = non-deterministic.</summary>
-        public int? Seed { get; init; }
+        public int? Seed
+        {
+            get; init;
+        }
     }
 }

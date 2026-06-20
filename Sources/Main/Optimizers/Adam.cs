@@ -92,7 +92,10 @@ namespace DevOnBike.Overfit.Optimizers
 
         public bool UseAdamW { get; set; } = true;
 
-        public float LearningRate { get; set; }
+        public float LearningRate
+        {
+            get; set;
+        }
 
         public void Dispose()
         {
@@ -574,8 +577,14 @@ namespace DevOnBike.Overfit.Optimizers
 
             public void ZeroGrad()
             {
-                if (_param != null) { _param.ZeroGrad(); }
-                else { _node!.ZeroGrad(); }
+                if (_param != null)
+                {
+                    _param.ZeroGrad();
+                }
+                else
+                {
+                    _node!.ZeroGrad();
+                }
             }
 
             public bool RequiresGrad =>

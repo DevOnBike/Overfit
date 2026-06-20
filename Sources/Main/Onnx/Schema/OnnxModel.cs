@@ -11,7 +11,10 @@ namespace DevOnBike.Overfit.Onnx.Schema
     /// </summary>
     public sealed class OnnxModel
     {
-        public long IrVersion { get; init; }
+        public long IrVersion
+        {
+            get; init;
+        }
         public string ProducerName { get; init; } = "";
         public string ProducerVersion { get; init; } = "";
         public List<OnnxOpsetImport> OpsetImports { get; init; } = [];

@@ -57,8 +57,14 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
                 last = TrainableLlamaModel.CrossEntropyLossAndSeed(logits, target, Vocab);
                 graph.BackwardFromGrad(logits);
                 opt.Step();
-                if (step == 0) { first = last; }
-                if (step % 80 == 0) { _out.WriteLine($"step {step,3}: loss {last:F4}"); }
+                if (step == 0)
+                {
+                    first = last;
+                }
+                if (step % 80 == 0)
+                {
+                    _out.WriteLine($"step {step,3}: loss {last:F4}");
+                }
             }
             _out.WriteLine($"loss {first:F3} -> {last:F4}  (random baseline ≈ ln {Vocab} = {Math.Log(Vocab):F3})");
 
@@ -71,7 +77,10 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
             var correct = 0;
             for (var t = 0; t < target.Length; t++)
             {
-                if (ArgMax(data.Slice(t * Vocab, Vocab)) == target[t]) { correct++; }
+                if (ArgMax(data.Slice(t * Vocab, Vocab)) == target[t])
+                {
+                    correct++;
+                }
             }
             _out.WriteLine($"greedy reproduction: {correct}/{target.Length} next-tokens correct");
             Assert.Equal(target.Length, correct);
@@ -91,7 +100,10 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
             var ckpt = model.Forward(graph, input, useCheckpoint: true).DataView.AsReadOnlySpan().ToArray();
 
             double maxAbs = 0;
-            for (var i = 0; i < plain.Length; i++) { maxAbs = Math.Max(maxAbs, Math.Abs(plain[i] - ckpt[i])); }
+            for (var i = 0; i < plain.Length; i++)
+            {
+                maxAbs = Math.Max(maxAbs, Math.Abs(plain[i] - ckpt[i]));
+            }
             _out.WriteLine($"checkpoint vs plain forward maxAbs: {maxAbs:E3}");
             Assert.True(maxAbs < 1e-3, $"checkpointed forward diverged from plain: {maxAbs:E3}");
         }
@@ -116,7 +128,10 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
                 last = TrainableLlamaModel.CrossEntropyLossAndSeed(logits, target, Vocab);
                 graph.BackwardFromGrad(logits);
                 opt.Step();
-                if (step == 0) { first = last; }
+                if (step == 0)
+                {
+                    first = last;
+                }
             }
             _out.WriteLine($"checkpointed training loss {first:F3} -> {last:F4}");
             Assert.True(last < 0.3f, $"checkpointed training did not overfit: {first:F3} -> {last:F4}");
@@ -180,14 +195,20 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
                 var correct = 0;
                 for (var t = 0; t < target.Length; t++)
                 {
-                    if (ArgMax(afterLoad.AsSpan(t * Vocab, Vocab)) == target[t]) { correct++; }
+                    if (ArgMax(afterLoad.AsSpan(t * Vocab, Vocab)) == target[t])
+                    {
+                        correct++;
+                    }
                 }
                 _out.WriteLine($"loaded model greedy reproduction: {correct}/{target.Length}");
                 Assert.Equal(target.Length, correct);
             }
             finally
             {
-                if (File.Exists(path)) { File.Delete(path); }
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
             }
         }
 
@@ -258,28 +279,45 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
         private static IDequantRowSource Q8(Random rng, int outRows, int inCols)
         {
             var w = new float[outRows * inCols];
-            for (var i = 0; i < w.Length; i++) { w[i] = (float)(rng.NextDouble() * 2 - 1) * 0.3f; }
+            for (var i = 0; i < w.Length; i++)
+            {
+                w[i] = (float)(rng.NextDouble() * 2 - 1) * 0.3f;
+            }
             return Q8Weight.QuantizeRows(w, outRows, inCols);
         }
 
         private static int ArgMax(ReadOnlySpan<float> row)
         {
-            int best = 0; var bv = row[0];
-            for (var i = 1; i < row.Length; i++) { if (row[i] > bv) { bv = row[i]; best = i; } }
+            int best = 0;
+            var bv = row[0];
+            for (var i = 1; i < row.Length; i++)
+            {
+                if (row[i] > bv)
+                {
+                    bv = row[i];
+                    best = i;
+                }
+            }
             return best;
         }
 
         private static List<AutogradNode> ToList(IEnumerable<AutogradNode> e)
         {
             var l = new List<AutogradNode>();
-            foreach (var x in e) { l.Add(x); }
+            foreach (var x in e)
+            {
+                l.Add(x);
+            }
             return l;
         }
 
         private static float[] Ones(int n)
         {
             var v = new float[n];
-            for (var i = 0; i < n; i++) { v[i] = 1f; }
+            for (var i = 0; i < n; i++)
+            {
+                v[i] = 1f;
+            }
             return v;
         }
     }

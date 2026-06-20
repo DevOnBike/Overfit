@@ -21,7 +21,10 @@ namespace DevOnBike.Overfit.Audio
             }
 
             var outLen = (int)((long)src.Length * dstRate / srcRate);
+            // OVERFIT001: by-contract — the resampled signal is the return value the caller owns.
+#pragma warning disable OVERFIT001
             var dst = new float[outLen];
+#pragma warning restore OVERFIT001
             var ratio = (double)srcRate / dstRate;
             for (var i = 0; i < outLen; i++)
             {

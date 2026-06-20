@@ -60,7 +60,10 @@ namespace Benchmarks
         private bool _disposed;
 
         [Params(16, 64, 256, 512)]
-        public int SequenceLength { get; set; }
+        public int SequenceLength
+        {
+            get; set;
+        }
 
         [GlobalSetup]
         public void Setup()
@@ -198,10 +201,14 @@ namespace Benchmarks
             var heads = new SingleHeadWeights[headCount];
             for (var h = 0; h < headCount; h++)
             {
-                var wq = new float[dModel * headDim]; FillDeterministic(wq, 10_000 + layer * 100 + h);
-                var wk = new float[dModel * headDim]; FillDeterministic(wk, 20_000 + layer * 100 + h);
-                var wv = new float[dModel * headDim]; FillDeterministic(wv, 30_000 + layer * 100 + h);
-                var wo = new float[headDim * dModel]; FillDeterministic(wo, 40_000 + layer * 100 + h);
+                var wq = new float[dModel * headDim];
+                FillDeterministic(wq, 10_000 + layer * 100 + h);
+                var wk = new float[dModel * headDim];
+                FillDeterministic(wk, 20_000 + layer * 100 + h);
+                var wv = new float[dModel * headDim];
+                FillDeterministic(wv, 30_000 + layer * 100 + h);
+                var wo = new float[headDim * dModel];
+                FillDeterministic(wo, 40_000 + layer * 100 + h);
                 heads[h] = new SingleHeadWeights(wq: wq, wk: wk, wv: wv, wo: wo);
             }
             return heads;

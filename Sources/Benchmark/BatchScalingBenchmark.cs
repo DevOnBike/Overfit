@@ -353,23 +353,50 @@ namespace Benchmarks
                 RunOptions = new RunOptions();
             }
 
-            public int BatchSize { get; }
+            public int BatchSize
+            {
+                get;
+            }
 
-            public float[] Input { get; }
+            public float[] Input
+            {
+                get;
+            }
 
-            public float[] OverfitOutput { get; }
+            public float[] OverfitOutput
+            {
+                get;
+            }
 
-            public float[] OnnxOutput { get; }
+            public float[] OnnxOutput
+            {
+                get;
+            }
 
-            public string[] InputNames { get; }
+            public string[] InputNames
+            {
+                get;
+            }
 
-            public string[] OutputNames { get; }
+            public string[] OutputNames
+            {
+                get;
+            }
 
-            public OrtValue[] InputValues { get; }
+            public OrtValue[] InputValues
+            {
+                get;
+            }
 
-            public OrtValue[] OutputValues { get; }
+            public OrtValue[] OutputValues
+            {
+                get;
+            }
 
-            public RunOptions RunOptions { get; }
+            public RunOptions RunOptions
+            {
+                get;
+            }
 
             public void Dispose()
             {

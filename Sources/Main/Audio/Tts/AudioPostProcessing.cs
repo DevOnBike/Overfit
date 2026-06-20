@@ -28,7 +28,10 @@ namespace DevOnBike.Overfit.Audio.Tts
                     peak = a;
                 }
             }
+            // OVERFIT001: by-contract — the normalized signal is the return value the caller owns.
+#pragma warning disable OVERFIT001
             var output = new float[samples.Length];
+#pragma warning restore OVERFIT001
             if (peak <= 1e-9f)
             {
                 samples.CopyTo(output);

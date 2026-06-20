@@ -89,11 +89,20 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _scale = 1f / MathF.Sqrt(headDimension);
         }
 
-        public int DModel { get; }
+        public int DModel
+        {
+            get;
+        }
 
-        public int HeadDimension { get; }
+        public int HeadDimension
+        {
+            get;
+        }
 
-        public int MaxSequenceLength { get; }
+        public int MaxSequenceLength
+        {
+            get;
+        }
 
         /// <param name="hidden">Input hidden state for the current token (length DModel).</param>
         /// <param name="wq">Query projection weights for this head.</param>
@@ -325,6 +334,54 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // always quantizes its own activation.
             ProjectSequentialDispatched(
                 _attentionOutput, in wo, ReadOnlySpan<float>.Empty, output, HeadDimension, DModel);
+        }
+
+        /// <summary>
+        /// M3 whole-matrix attention, phase 1: load this head's query from <paramref name="qWholeSlice"/> —
+        /// the head's <c>headDim</c> band of the whole-matrix Q projection that one repacked GEMV already
+        /// produced for every head — then apply Qwen3 QK-RMSNorm (when present) and RoPE into <c>_query</c>.
+        /// Replaces the per-head Q projection of <see cref="ProjectQDispatched"/>; everything downstream
+        /// (attend, O) is unchanged, so the result tracks the per-head path within Q4_K-GEMV reassociation
+        /// tolerance (pinned by AttentionWholeMatrixSplitAfterParityTests).
+        /// </summary>
+        internal void LoadQueryAndRope(
+            ReadOnlySpan<float> qWholeSlice, ReadOnlySpan<float> bias, ReadOnlySpan<float> qNorm,
+            RopeTable? rope, int ropePosition)
+        {
+            qWholeSlice.Slice(0, HeadDimension).CopyTo(_query);
+
+            // The whole-Q GEMV omits the bias (GemvParallel has no bias term), but the per-head Q projection
+            // adds it before QK-norm/RoPE — so apply this head's Q bias here to match (Qwen has q/k/v biases).
+            if (!bias.IsEmpty)
+            {
+                for (var i = 0; i < HeadDimension; i++)
+                {
+                    _query[i] += bias[i];
+                }
+            }
+
+            if (!qNorm.IsEmpty)
+            {
+                QkNormKernel.Apply(_query, qNorm, rows: 1, headDim: HeadDimension);
+            }
+
+            if (rope is not null)
+            {
+                RopeKernel.Apply(_query, rope, ropePosition);
+            }
+        }
+
+        /// <summary>
+        /// M3 whole-matrix attention, phase 2: attend over the cache using the already-loaded <c>_query</c>
+        /// (from <see cref="LoadQueryAndRope"/>) and copy this head's attention output into
+        /// <paramref name="attnBand"/> — the head's band of the gathered buffer the single whole-matrix O
+        /// GEMV then consumes. Replaces the per-head O projection of <see cref="AttendAndProjectO"/>.
+        /// </summary>
+        internal void AttendIntoBand(
+            KeyValueCache cache, int layerIndex, int headIndex, int position, Span<float> attnBand)
+        {
+            AttendFromCache(cache, layerIndex, headIndex, position);
+            _attentionOutput.AsSpan(0, HeadDimension).CopyTo(attnBand);
         }
 
         /// <summary>

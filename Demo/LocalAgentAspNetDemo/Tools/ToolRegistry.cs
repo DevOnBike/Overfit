@@ -105,7 +105,11 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Tools
 
             if (!_customersByEmail.TryGetValue(email.Trim().ToLowerInvariant(), out var customer))
             {
-                return JsonSerializer.Serialize(new { found = false, email });
+                return JsonSerializer.Serialize(new
+                {
+                    found = false,
+                    email
+                });
             }
 
             return JsonSerializer.Serialize(new
@@ -177,13 +181,19 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Tools
             }
 
             var s = prop.GetString();
-            if (string.IsNullOrWhiteSpace(s)) { return false; }
+            if (string.IsNullOrWhiteSpace(s))
+            {
+                return false;
+            }
             value = s;
             return true;
         }
 
         private static string JsonError(string message) =>
-            JsonSerializer.Serialize(new { error = message });
+            JsonSerializer.Serialize(new
+            {
+                error = message
+            });
 
         private static Dictionary<string, Customer> SeedCustomers() => new(StringComparer.Ordinal)
         {

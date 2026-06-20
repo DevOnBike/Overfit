@@ -40,7 +40,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         [LongFact]
         public void Engine_GeneratesCoherentText_ForLongSystemPrompt()
         {
-            if (!File.Exists(ModelPath)) { _out.WriteLine($"missing {ModelPath}"); return; }
+            if (!File.Exists(ModelPath))
+            {
+                _out.WriteLine($"missing {ModelPath}");
+                return;
+            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(ModelPath);
 
@@ -66,7 +70,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
             for (var i = 0; i < 20; i++)
             {
                 var t = gen.GenerateNextToken(in greedy);
-                if (t == QwenTokenizer.EndOfText || t == 151645) { break; } // <|endoftext|> or <|im_end|>
+                if (t == QwenTokenizer.EndOfText || t == 151645)
+                {
+                    break;
+                } // <|endoftext|> or <|im_end|>
                 outTokens.Add(t);
             }
             var text = tokenizer.Decode(outTokens.ToArray());
@@ -87,7 +94,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         public void IncrementalDecode_PreservesSpaces_LikeChatSession()
         {
             const string dir = @"C:\qwen3b";
-            if (!Directory.Exists(dir)) { _out.WriteLine($"missing {dir}"); return; }
+            if (!Directory.Exists(dir))
+            {
+                _out.WriteLine($"missing {dir}");
+                return;
+            }
 
             var tok = QwenTokenizer.Load(dir);
             const string phrase = "The capital of France is Paris.";
@@ -102,7 +113,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
             {
                 gen.Add(id);
                 var full = tok.Decode(CollectionsMarshal.AsSpan(gen));
-                if (full.Length <= prev.Length || !full.StartsWith(prev, StringComparison.Ordinal)) { continue; }
+                if (full.Length <= prev.Length || !full.StartsWith(prev, StringComparison.Ordinal))
+                {
+                    continue;
+                }
                 sb.Append(full[prev.Length..]);
                 prev = full;
             }
@@ -114,13 +128,20 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         [LongFact]
         public void BatchedPrefill_MatchesSingleToken_OnRealQwen()
         {
-            if (!File.Exists(ModelPath)) { _out.WriteLine($"missing {ModelPath}"); return; }
+            if (!File.Exists(ModelPath))
+            {
+                _out.WriteLine($"missing {ModelPath}");
+                return;
+            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(ModelPath);
 
             // A ≥16-token prompt to trigger the batched path; arbitrary in-vocab ids.
             var prompt = new int[40];
-            for (var i = 0; i < prompt.Length; i++) { prompt[i] = 100 + i * 37; }
+            for (var i = 0; i < prompt.Length; i++)
+            {
+                prompt[i] = 100 + i * 37;
+            }
 
             // Batched (default eligibility kicks in for this length).
             using var batched = engine.CreateSession(256);
@@ -138,8 +159,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
             for (var i = 0; i < sLogits.Length; i++)
             {
                 maxDiff = MathF.Max(maxDiff, MathF.Abs(bLogits[i] - sLogits[i]));
-                if (bLogits[i] > bLogits[argB]) { argB = i; }
-                if (sLogits[i] > sLogits[argS]) { argS = i; }
+                if (bLogits[i] > bLogits[argB])
+                {
+                    argB = i;
+                }
+                if (sLogits[i] > sLogits[argS])
+                {
+                    argS = i;
+                }
             }
 
             _out.WriteLine($"argmax batched={argB} single={argS}  maxAbsLogitDiff={maxDiff:G4}");
@@ -153,13 +180,20 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         public void BatchedPrefill_MatchesSingleToken_OnRealQwenMoE()
         {
             const string moePath = @"C:\qwen-moe\Qwen1.5-MoE-A2.7B-Chat.Q8_0.gguf";
-            if (!File.Exists(moePath)) { _out.WriteLine($"missing {moePath}"); return; }
+            if (!File.Exists(moePath))
+            {
+                _out.WriteLine($"missing {moePath}");
+                return;
+            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(moePath);
             Assert.True(engine.Config.IsMixtureOfExperts);
 
             var prompt = new int[32];
-            for (var i = 0; i < prompt.Length; i++) { prompt[i] = 100 + i * 53; }
+            for (var i = 0; i < prompt.Length; i++)
+            {
+                prompt[i] = 100 + i * 53;
+            }
 
             using var batched = engine.CreateSession(128);
             batched.Reset(prompt);
@@ -175,8 +209,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
             for (var i = 0; i < sLogits.Length; i++)
             {
                 moeMaxDiff = MathF.Max(moeMaxDiff, MathF.Abs(bLogits[i] - sLogits[i]));
-                if (bLogits[i] > bLogits[moeArgB]) { moeArgB = i; }
-                if (sLogits[i] > sLogits[moeArgS]) { moeArgS = i; }
+                if (bLogits[i] > bLogits[moeArgB])
+                {
+                    moeArgB = i;
+                }
+                if (sLogits[i] > sLogits[moeArgS])
+                {
+                    moeArgS = i;
+                }
             }
             _out.WriteLine($"MoE argmax batched={moeArgB} single={moeArgS}  maxAbsLogitDiff={moeMaxDiff:G4}");
 
@@ -189,12 +229,19 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         [LongFact]
         public void BatchedPrefill_TtftSpeedup_OnRealQwen()
         {
-            if (!File.Exists(ModelPath)) { _out.WriteLine($"missing {ModelPath}"); return; }
+            if (!File.Exists(ModelPath))
+            {
+                _out.WriteLine($"missing {ModelPath}");
+                return;
+            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(ModelPath);
 
             var prompt = new int[256];
-            for (var i = 0; i < prompt.Length; i++) { prompt[i] = 100 + i * 11; }
+            for (var i = 0; i < prompt.Length; i++)
+            {
+                prompt[i] = 100 + i * 11;
+            }
 
             double Time(bool disableBatched)
             {

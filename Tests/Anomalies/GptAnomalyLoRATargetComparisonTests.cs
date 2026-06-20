@@ -52,7 +52,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             });
 
             var regime = new MetricSnapshot[48];
-            for (var i = 0; i < regime.Length; i++) { regime[i] = MakeNormalSnapshot("payments-api"); }
+            for (var i = 0; i < regime.Length; i++)
+            {
+                regime[i] = MakeNormalSnapshot("payments-api");
+            }
             var corpus = new MetricTokenizer().EncodeSequence(regime);
 
             // Base (un-adapted) reference.
@@ -133,7 +136,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             }
             finally
             {
-                if (File.Exists(loraPath)) { File.Delete(loraPath); }
+                if (File.Exists(loraPath))
+                {
+                    File.Delete(loraPath);
+                }
             }
         }
 
@@ -147,7 +153,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             for (var i = 0; i < feed; i++)
             {
                 var r = detector.Score(regime[i]);
-                if (!r.IsWarmup) { score = r.Score; }
+                if (!r.IsWarmup)
+                {
+                    score = r.Score;
+                }
             }
             return score;
         }
@@ -158,7 +167,10 @@ namespace DevOnBike.Overfit.Tests.Anomalies
             using var handle = SlmRuntimeFactory.CreateGpt1(model);
             using var detector = new GptAnomalyDetector(handle, ContextSnapshots);
             var warm = ContextSnapshots * 2;
-            for (var i = 0; i < warm; i++) { detector.Score(regime[i]); }
+            for (var i = 0; i < warm; i++)
+            {
+                detector.Score(regime[i]);
+            }
             return detector.Score(MakeAnomalySnapshot("payments-api")).Score;
         }
 

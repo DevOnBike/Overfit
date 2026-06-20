@@ -13,7 +13,10 @@ namespace DevOnBike.Overfit.Anomalies.Monitoring.Abstractions
     /// </summary>
     public interface IMetricSource : IDisposable
     {
-        string PodName { get; }
+        string PodName
+        {
+            get;
+        }
 
         /// <summary>
         ///     Reads the current metric sample.

@@ -38,7 +38,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         [LongFact]
         public void LoadsFullModel_AndDecodesCoherently()
         {
-            if (!File.Exists(MoePath)) { _out.WriteLine($"missing {MoePath}"); return; }
+            if (!File.Exists(MoePath))
+            {
+                _out.WriteLine($"missing {MoePath}");
+                return;
+            }
 
             CachedLlamaInferenceEngine engine;
             try
@@ -76,7 +80,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
                 AssertFiniteLogits(session);
                 var token = session.GenerateNextToken(in sampling);
                 Assert.InRange(token, 0, engine.Config.VocabSize - 1);
-                if (token == QwenTokenizer.ImEnd || token == QwenTokenizer.EndOfText) { break; }
+                if (token == QwenTokenizer.ImEnd || token == QwenTokenizer.EndOfText)
+                {
+                    break;
+                }
                 generated.Add(token);
             }
 
@@ -107,7 +114,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             {
                 if (File.Exists(Path.Combine(dir, "tokenizer.json")) || File.Exists(Path.Combine(dir, "vocab.json")))
                 {
-                    try { return QwenTokenizer.Load(dir); } catch { /* fall through */ }
+                    try
+                    {
+                        return QwenTokenizer.Load(dir);
+                    }
+                    catch { /* fall through */ }
                 }
             }
             return null;

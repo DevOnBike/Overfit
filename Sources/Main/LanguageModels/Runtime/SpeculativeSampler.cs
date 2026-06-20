@@ -3,6 +3,8 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using DevOnBike.Overfit.Maths;
+
 namespace DevOnBike.Overfit.LanguageModels.Runtime
 {
     /// <summary>
@@ -48,27 +50,27 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             ArgumentNullException.ThrowIfNull(random);
 
             var sum = 0.0;
-            for (var i = 0; i < probabilities.Length; i++) { sum += probabilities[i]; }
-            if (sum <= 0.0) { return ArgMax(probabilities); }
+            for (var i = 0; i < probabilities.Length; i++)
+            {
+                sum += probabilities[i];
+            }
+            if (sum <= 0.0)
+            {
+                return MathUtils.ArgMax(probabilities);
+            }
 
             var u = random.NextDouble() * sum;
             var cumulative = 0.0;
             for (var i = 0; i < probabilities.Length; i++)
             {
                 cumulative += probabilities[i];
-                if (u <= cumulative) { return i; }
+                if (u <= cumulative)
+                {
+                    return i;
+                }
             }
             return probabilities.Length - 1;
         }
 
-        private static int ArgMax(ReadOnlySpan<float> values)
-        {
-            var best = 0;
-            for (var i = 1; i < values.Length; i++)
-            {
-                if (values[i] > values[best]) { best = i; }
-            }
-            return best;
-        }
     }
 }

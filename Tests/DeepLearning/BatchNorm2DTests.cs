@@ -22,7 +22,10 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
 
         private static void Fill(Span<float> s, Random rng)
         {
-            for (var i = 0; i < s.Length; i++) { s[i] = (float)(rng.NextDouble() * 4 - 2); }
+            for (var i = 0; i < s.Length; i++)
+            {
+                s[i] = (float)(rng.NextDouble() * 4 - 2);
+            }
         }
 
         private static AutogradNode NewNode(float[] data, TensorShape shape, bool grad)
@@ -54,7 +57,8 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
                     for (var i = 0; i < Hw; i++)
                     {
                         var v = o[(n * C + c) * Hw + i];
-                        sum += v; sumSq += (double)v * v;
+                        sum += v;
+                        sumSq += (double)v * v;
                     }
                 }
                 var m = N * Hw;
@@ -84,7 +88,10 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
                 using var input = NewNode(data, new TensorShape(N, C, H, W), false);
                 var outp = bn.Forward(graph, input);
                 var s = 0f;
-                foreach (var v in outp.DataView.AsReadOnlySpan()) { s += v; }
+                foreach (var v in outp.DataView.AsReadOnlySpan())
+                {
+                    s += v;
+                }
                 return s;
             }
 
@@ -113,8 +120,10 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
             for (var i = 0; i < values.Length; i++)
             {
                 var saved = values[i];
-                values[i] = saved + eps; var lp = loss();
-                values[i] = saved - eps; var lm = loss();
+                values[i] = saved + eps;
+                var lp = loss();
+                values[i] = saved - eps;
+                var lm = loss();
                 values[i] = saved;
                 var fd = (lp - lm) / (2 * eps);
                 maxErr = MathF.Max(maxErr, MathF.Abs(fd - analytic[i]));

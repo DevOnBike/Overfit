@@ -68,7 +68,10 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
             using var graph = new ComputationGraph(1 << 18);
             using var input = NewNode(1.5f, grad: false);
             var outNode = graph.Dropout2D(input, probability: 0.5f, isTraining: false);
-            foreach (var v in outNode.DataView.AsReadOnlySpan()) { Assert.Equal(1.5f, v, 5); }
+            foreach (var v in outNode.DataView.AsReadOnlySpan())
+            {
+                Assert.Equal(1.5f, v, 5);
+            }
         }
 
         [Fact]
@@ -76,7 +79,10 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
         {
             var rng = new Random(9);
             var src = new float[1 * 4 * 4];
-            for (var i = 0; i < src.Length; i++) { src[i] = i; }
+            for (var i = 0; i < src.Length; i++)
+            {
+                src[i] = i;
+            }
             var dst = new float[src.Length];
 
             ImageAugmentation.RandomShift(src, dst, channels: 1, height: 4, width: 4, maxShift: 0, rng);
@@ -91,7 +97,10 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
             for (var i = 0; i < src.Length; i++)
             {
                 Assert.True(float.IsFinite(noisy[i]));
-                if (MathF.Abs(noisy[i] - src[i]) > 1e-6f) { changed++; }
+                if (MathF.Abs(noisy[i] - src[i]) > 1e-6f)
+                {
+                    changed++;
+                }
             }
             Assert.True(changed > 0, "Gaussian noise changed nothing");
         }

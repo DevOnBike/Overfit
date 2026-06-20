@@ -18,13 +18,22 @@ namespace DevOnBike.Overfit.LanguageModels.Agents
         }
 
         /// <summary>The last candidate produced — approved on Accepted, best-effort on MaxIterations / Timeout.</summary>
-        public string FinalCandidate { get; }
+        public string FinalCandidate
+        {
+            get;
+        }
 
         /// <summary>True when the critic approved the final candidate.</summary>
         public bool Approved => Outcome == CircuitBreakerOutcome.Accepted;
 
-        public IReadOnlyList<CriticIteration> Trace { get; }
+        public IReadOnlyList<CriticIteration> Trace
+        {
+            get;
+        }
 
-        public CircuitBreakerOutcome Outcome { get; }
+        public CircuitBreakerOutcome Outcome
+        {
+            get;
+        }
     }
 }

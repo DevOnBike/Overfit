@@ -29,7 +29,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
 
             var rng = new Random(9);
             var mel = new float[NMels * Frames];
-            for (var i = 0; i < mel.Length; i++) { mel[i] = (float)(rng.NextDouble() * 2 - 1); }
+            for (var i = 0; i < mel.Length; i++)
+            {
+                mel[i] = (float)(rng.NextDouble() * 2 - 1);
+            }
 
             var outA = encoder.Encode(mel, Frames, out var nCtx);
             var outB = encoder.Encode(mel, Frames, out _);
@@ -54,9 +57,15 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
             void Add(string name, params int[] shape)
             {
                 long n = 1;
-                foreach (var d in shape) { n *= d; }
+                foreach (var d in shape)
+                {
+                    n *= d;
+                }
                 var data = new float[n];
-                for (var i = 0; i < n; i++) { data[i] = (float)(rng.NextDouble() * 2 - 1) * 0.2f; }
+                for (var i = 0; i < n; i++)
+                {
+                    data[i] = (float)(rng.NextDouble() * 2 - 1) * 0.2f;
+                }
                 t[name] = new WhisperTensor(shape, data);
             }
 
@@ -69,16 +78,24 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
             for (var b = 0; b < NLayer; b++)
             {
                 var p = $"encoder.blocks.{b}.";
-                Add(p + "attn_ln.weight", NState); Add(p + "attn_ln.bias", NState);
-                Add(p + "attn.query.weight", NState, NState); Add(p + "attn.query.bias", NState);
+                Add(p + "attn_ln.weight", NState);
+                Add(p + "attn_ln.bias", NState);
+                Add(p + "attn.query.weight", NState, NState);
+                Add(p + "attn.query.bias", NState);
                 Add(p + "attn.key.weight", NState, NState);
-                Add(p + "attn.value.weight", NState, NState); Add(p + "attn.value.bias", NState);
-                Add(p + "attn.out.weight", NState, NState); Add(p + "attn.out.bias", NState);
-                Add(p + "mlp_ln.weight", NState); Add(p + "mlp_ln.bias", NState);
-                Add(p + "mlp.0.weight", DFF, NState); Add(p + "mlp.0.bias", DFF);
-                Add(p + "mlp.2.weight", NState, DFF); Add(p + "mlp.2.bias", NState);
+                Add(p + "attn.value.weight", NState, NState);
+                Add(p + "attn.value.bias", NState);
+                Add(p + "attn.out.weight", NState, NState);
+                Add(p + "attn.out.bias", NState);
+                Add(p + "mlp_ln.weight", NState);
+                Add(p + "mlp_ln.bias", NState);
+                Add(p + "mlp.0.weight", DFF, NState);
+                Add(p + "mlp.0.bias", DFF);
+                Add(p + "mlp.2.weight", NState, DFF);
+                Add(p + "mlp.2.bias", NState);
             }
-            Add("encoder.ln_post.weight", NState); Add("encoder.ln_post.bias", NState);
+            Add("encoder.ln_post.weight", NState);
+            Add("encoder.ln_post.bias", NState);
 
             var config = new WhisperConfig(51865, nCtx, NState, NHead, NLayer, 448, NState, NHead, NLayer, NMels, false);
             return new WhisperModel(config, NMels, 1, new float[NMels], Array.Empty<string>(), t);

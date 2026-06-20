@@ -37,8 +37,14 @@ namespace DevOnBike.Overfit.Tests.Audio
         private sealed class CountingSink(int sampleRate) : IAudioSink
         {
             public int SampleRate { get; } = sampleRate;
-            public int Count { get; private set; }
-            public float MaxAbs { get; private set; }
+            public int Count
+            {
+                get; private set;
+            }
+            public float MaxAbs
+            {
+                get; private set;
+            }
 
             public void Write(ReadOnlySpan<float> samples)
             {

@@ -21,14 +21,29 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
             EndOfTextTokenId = endOfTextTokenId;
         }
 
-        public int MaxNewTokens { get; }
+        public int MaxNewTokens
+        {
+            get;
+        }
 
-        public int MaxContextLength { get; }
+        public int MaxContextLength
+        {
+            get;
+        }
 
-        public SamplingOptions Sampling { get; }
+        public SamplingOptions Sampling
+        {
+            get;
+        }
 
-        public bool StopOnEndOfTextToken { get; }
+        public bool StopOnEndOfTextToken
+        {
+            get;
+        }
 
-        public int EndOfTextTokenId { get; }
+        public int EndOfTextTokenId
+        {
+            get;
+        }
     }
 }

@@ -55,8 +55,14 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// </summary>
         public static CachedLlamaInferenceEngine Load(ISafetensorsSource source, GPT1Config config, bool quantize = true)
         {
-            if (source is null) { throw new ArgumentNullException(nameof(source)); }
-            if (config is null) { throw new ArgumentNullException(nameof(config)); }
+            if (source is null)
+            {
+                throw new ArgumentNullException(nameof(source));
+            }
+            if (config is null)
+            {
+                throw new ArgumentNullException(nameof(config));
+            }
 
             int d = config.DModel, nHeads = config.NHeads, nKv = config.KvHeads;
             int layers = config.NLayers, vocab = config.VocabSize, dff = config.DFF;
@@ -95,7 +101,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 var bv = LoadBias(source, $"{p}.self_attn.v_proj.bias", nKv, headDim, ropePermute: false);
                 // o_proj has no per-head bias in the Llama/Qwen family — zeros per head.
                 var bo = new TensorStorage<float>[nHeads];
-                for (var h = 0; h < nHeads; h++) { bo[h] = TensorStorage<float>.Unpooled(d); }
+                for (var h = 0; h < nHeads; h++)
+                {
+                    bo[h] = TensorStorage<float>.Unpooled(d);
+                }
 
                 var ffnNormGamma = AllocAndLoad(source, $"{p}.post_attention_layernorm.weight", d);
 
@@ -197,7 +206,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             finally
             {
                 PooledBuffer<float>.ReturnArray(scratch);
-                if (permuted.Length > 0) { PooledBuffer<float>.ReturnArray(permuted); }
+                if (permuted.Length > 0)
+                {
+                    PooledBuffer<float>.ReturnArray(permuted);
+                }
             }
         }
 
@@ -370,7 +382,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var bias = new TensorStorage<float>[headCount];
             if (!source.Tensors.ContainsKey(name))
             {
-                for (var h = 0; h < headCount; h++) { bias[h] = TensorStorage<float>.Unpooled(headDim); }
+                for (var h = 0; h < headCount; h++)
+                {
+                    bias[h] = TensorStorage<float>.Unpooled(headDim);
+                }
                 return bias;
             }
 

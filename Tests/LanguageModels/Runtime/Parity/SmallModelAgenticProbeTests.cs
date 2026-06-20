@@ -31,7 +31,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
         [LongFact]
         public void Qwen05B_Agentic_Probe()
         {
-            if (!File.Exists(Path.Combine(Dir, "model.safetensors"))) { _out.WriteLine("missing 0.5B"); return; }
+            if (!File.Exists(Path.Combine(Dir, "model.safetensors")))
+            {
+                _out.WriteLine("missing 0.5B");
+                return;
+            }
 
             using var engine = SafetensorsLlamaLoader.Load(Dir);
             using var session = engine.CreateSession(2048);
@@ -73,7 +77,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Parity
             foreach (var (msg, expect) in cases)
             {
                 var got = SelectedTool(msg);
-                if (got == expect) { correct++; }
+                if (got == expect)
+                {
+                    correct++;
+                }
                 lines.Append(got == expect ? "OK  " : "XX  ").Append("want=").Append(expect).Append(" got=").Append(got).Append("  | ").AppendLine(msg);
             }
             // Reported, not asserted: this is a capability probe, not a regression gate. Observed ~4/8 —

@@ -16,6 +16,9 @@ namespace DevOnBike.Overfit.Audio
     /// it tolerates timing/length drift). See <see cref="AudioSimilarityReport"/> for which metric fits which case.
     /// </para>
     /// </summary>
+    // OVERFIT001: this whole type is an offline audio-quality EVAL metric (a measurable gate, not the serving
+    // path) — the log-mel snapshots and the DTW rolling rows are short-lived working buffers per comparison.
+#pragma warning disable OVERFIT001
     public static class AudioSimilarity
     {
         // MelSpectrogram is hardwired to 16 kHz; both signals are resampled to this before the spectral metrics so
@@ -176,7 +179,7 @@ namespace DevOnBike.Overfit.Audio
         // RMS distance over the overlapping frames, mel-major layout (index = bin*frames + frame). Cheap; assumes
         // the two are roughly time-aligned (true for a deterministic decode).
         private static double FrameAlignedMelDistance(
-            float[] refMel, int refFrames, float[] candMel, int candFrames, int nMels)
+            ReadOnlySpan<float> refMel, int refFrames, ReadOnlySpan<float> candMel, int candFrames, int nMels)
         {
             var frames = Math.Min(refFrames, candFrames);
             if (frames == 0)
@@ -200,7 +203,7 @@ namespace DevOnBike.Overfit.Audio
         // then normalizes by the path length. Timing/length-robust — the right metric for generated-vs-reference
         // speech. Rolling two-row DP (no jagged arrays), O(refFrames · candFrames).
         private static double DtwMelDistance(
-            float[] refMel, int refFrames, float[] candMel, int candFrames, int nMels)
+            ReadOnlySpan<float> refMel, int refFrames, ReadOnlySpan<float> candMel, int candFrames, int nMels)
         {
             if (refFrames == 0 || candFrames == 0)
             {
@@ -244,7 +247,7 @@ namespace DevOnBike.Overfit.Audio
         }
 
         private static double FrameDistance(
-            float[] a, int aFrames, int ai, float[] b, int bFrames, int bi, int nMels)
+            ReadOnlySpan<float> a, int aFrames, int ai, ReadOnlySpan<float> b, int bFrames, int bi, int nMels)
         {
             double sum = 0.0;
             for (var k = 0; k < nMels; k++)
@@ -255,4 +258,5 @@ namespace DevOnBike.Overfit.Audio
             return Math.Sqrt(sum);
         }
     }
+#pragma warning restore OVERFIT001
 }

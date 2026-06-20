@@ -12,12 +12,24 @@ namespace DevOnBike.Overfit.Onnx.Schema
     public sealed class OnnxAttribute
     {
         public string Name { get; init; } = "";
-        public OnnxAttributeType Type { get; init; }
-        public long IntValue { get; init; }
-        public float FloatValue { get; init; }
+        public OnnxAttributeType Type
+        {
+            get; init;
+        }
+        public long IntValue
+        {
+            get; init;
+        }
+        public float FloatValue
+        {
+            get; init;
+        }
         public string StringValue { get; init; } = "";
         public long[] IntArray { get; init; } = [];
         public float[] FloatArray { get; init; } = [];
-        public OnnxTensor? TensorValue { get; init; }
+        public OnnxTensor? TensorValue
+        {
+            get; init;
+        }
     }
 }

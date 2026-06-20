@@ -72,11 +72,20 @@ namespace DevOnBike.Overfit.Training
             _model.Train();
         }
 
-        public int BatchSize { get; }
+        public int BatchSize
+        {
+            get;
+        }
 
-        public int InputSize { get; }
+        public int InputSize
+        {
+            get;
+        }
 
-        public int TargetSize { get; }
+        public int TargetSize
+        {
+            get;
+        }
 
         public TrainingStepResult TrainBatch(
             ReadOnlySpan<float> input,

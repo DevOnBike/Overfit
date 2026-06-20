@@ -283,11 +283,17 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
                 var end = offset + (long)data.Length * 4;
                 offset = end;
 
-                if (e > 0) { sb.Append(','); }
+                if (e > 0)
+                {
+                    sb.Append(',');
+                }
                 sb.Append('"').Append(name).Append("\":{\"dtype\":\"F32\",\"shape\":[");
                 for (var s = 0; s < shape.Length; s++)
                 {
-                    if (s > 0) { sb.Append(','); }
+                    if (s > 0)
+                    {
+                        sb.Append(',');
+                    }
                     sb.Append(shape[s]);
                 }
                 sb.Append("],\"data_offsets\":[").Append(begin).Append(',').Append(end).Append("]}");
@@ -363,7 +369,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             private static float[][] Heads(Random rng, int count, int size)
             {
                 var heads = new float[count][];
-                for (var h = 0; h < count; h++) { heads[h] = Rand(rng, size); }
+                for (var h = 0; h < count; h++)
+                {
+                    heads[h] = Rand(rng, size);
+                }
                 return heads;
             }
 
@@ -371,14 +380,20 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             private static float[] Norm(Random rng)
             {
                 var arr = new float[D];
-                for (var i = 0; i < D; i++) { arr[i] = 1f + (float)(rng.NextDouble() - 0.5) * 0.1f; }
+                for (var i = 0; i < D; i++)
+                {
+                    arr[i] = 1f + (float)(rng.NextDouble() - 0.5) * 0.1f;
+                }
                 return arr;
             }
 
             private static float[] Rand(Random rng, int n)
             {
                 var arr = new float[n];
-                for (var i = 0; i < n; i++) { arr[i] = (float)(rng.NextDouble() - 0.5) * 0.2f; }
+                for (var i = 0; i < n; i++)
+                {
+                    arr[i] = (float)(rng.NextDouble() - 0.5) * 0.2f;
+                }
                 return arr;
             }
         }

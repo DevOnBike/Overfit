@@ -3,7 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Linq;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
 using DevOnBike.Overfit.Onnx.Schema;
@@ -13,10 +12,10 @@ namespace DevOnBike.Overfit.Onnx.Operators
     /// <summary>
     /// Maps ONNX <c>MaxPool</c> to <see cref="MaxPool2DLayer"/>.
     ///
-    /// MVP constraints (clear error thrown otherwise):
-    ///   - Square kernel (kH == kW)
-    ///   - Stride equals pool size (non-overlapping)
-    ///   - Zero padding
+    /// Supported (clear error thrown otherwise):
+    ///   - Square kernel (kH == kW) and square stride
+    ///   - Overlapping pools (stride may be &lt; kernel, e.g. ResNet's 3x3 stride-2)
+    ///   - Symmetric square zero-padding (all four pads equal, e.g. ResNet's [1,1,1,1])
     ///   - ceil_mode = 0
     /// </summary>
     internal static class MaxPoolOperator
@@ -48,16 +47,22 @@ namespace DevOnBike.Overfit.Onnx.Operators
                     $"MaxPool: only square kernels supported, got [{string.Join(",", kernelShape)}].");
             }
 
-            if (strides[0] != strides[1] || strides[0] != kernelShape[0])
+            if (strides[0] != strides[1])
             {
                 throw new OverfitRuntimeException(
-                    $"MaxPool: stride must equal kernel size for non-overlapping pool " +
-                    $"(kernel={kernelShape[0]}, stride={strides[0]}).");
+                    $"MaxPool: only square strides supported, got [{string.Join(",", strides)}].");
             }
 
-            if (pads.Any(pd => pd != 0))
+            // ONNX pads = [H_begin, W_begin, H_end, W_end]. We support fully-symmetric square padding (all
+            // four equal — covers ResNet's [1,1,1,1]); the kernel pads with -inf, so it just widens the window.
+            var padding = pads.Length > 0 ? (int)pads[0] : 0;
+            for (var pi = 0; pi < pads.Length; pi++)
             {
-                throw new OverfitRuntimeException("MaxPool padding not yet supported.");
+                if (pads[pi] != padding)
+                {
+                    throw new OverfitRuntimeException(
+                        $"MaxPool: only symmetric square padding supported (all pads equal), got [{string.Join(",", pads)}].");
+                }
             }
 
             if (ceilMode != 0)
@@ -66,6 +71,7 @@ namespace DevOnBike.Overfit.Onnx.Operators
             }
 
             var poolSize = (int)kernelShape[0];
+            var stride = (int)strides[0];
 
             var inputShape = shapes.GetShape(node.Inputs[0])
                 ?? throw new OverfitFormatException(
@@ -79,9 +85,12 @@ namespace DevOnBike.Overfit.Onnx.Operators
 
             int batch = inputShape[0], channels = inputShape[1], h = inputShape[2], w = inputShape[3];
 
-            shapes.SetShape(node.Outputs[0], [batch, channels, h / poolSize, w / poolSize]);
+            var outH = (h + 2 * padding - poolSize) / stride + 1;
+            var outW = (w + 2 * padding - poolSize) / stride + 1;
 
-            return new MaxPool2DLayer(channels, h, w, poolSize);
+            shapes.SetShape(node.Outputs[0], [batch, channels, outH, outW]);
+
+            return new MaxPool2DLayer(channels, h, w, poolSize, stride, padding);
         }
     }
 }

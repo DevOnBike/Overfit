@@ -52,7 +52,10 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
             public float TrainBatch(ReadOnlySpan<float> trainX, ReadOnlySpan<float> trainY, int batch)
             {
                 Graph.Reset();
-                foreach (var p in Parameters()) { p.ZeroGrad(); }
+                foreach (var p in Parameters())
+                {
+                    p.ZeroGrad();
+                }
 
                 trainX.Slice(batch * BatchSize * 784, BatchSize * 784).CopyTo(XData.AsSpan());
                 trainY.Slice(batch * BatchSize * 10, BatchSize * 10).CopyTo(YData.AsSpan());
@@ -71,9 +74,14 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
 
             public void Dispose()
             {
-                X.Dispose(); Y.Dispose();
-                Graph.Dispose(); Conv.Dispose(); Hidden.Dispose(); Out.Dispose();
-                XData.Dispose(); YData.Dispose();
+                X.Dispose();
+                Y.Dispose();
+                Graph.Dispose();
+                Conv.Dispose();
+                Hidden.Dispose();
+                Out.Dispose();
+                XData.Dispose();
+                YData.Dispose();
             }
         }
 
@@ -82,7 +90,11 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
         {
             var imgs = TestSupport.TestModelPaths.Mnist.TrainImagesPath;
             var lbls = TestSupport.TestModelPaths.Mnist.TrainLabelsPath;
-            if (!File.Exists(imgs)) { _out.WriteLine("MNIST files not found"); return; }
+            if (!File.Exists(imgs))
+            {
+                _out.WriteLine("MNIST files not found");
+                return;
+            }
             var (trainX, trainY) = MnistLoader.Load(imgs, lbls);
             var batches = TrainSize / BatchSize;
 
@@ -90,14 +102,19 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
             {
                 using var r = new Replica();
                 using var opt = new Adam(r.Parameters()) { UseAdamW = true };
-                var sw = Stopwatch.StartNew(); var lossSum = 0f; var tailSum = 0f;
+                var sw = Stopwatch.StartNew();
+                var lossSum = 0f;
+                var tailSum = 0f;
                 var tailStart = batches - batches / 10;
                 for (var b = 0; b < batches; b++)
                 {
                     opt.ZeroGrad();
                     var l = r.TrainBatch(trainX.AsReadOnlySpan(), trainY.AsReadOnlySpan(), b);
                     lossSum += l;
-                    if (b >= tailStart) { tailSum += l; }
+                    if (b >= tailStart)
+                    {
+                        tailSum += l;
+                    }
                     opt.Step();
                 }
                 sw.Stop();
@@ -114,7 +131,10 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
             {
                 using var master = new Replica();
                 var workers = new Replica[replicas];
-                for (var w = 0; w < replicas; w++) { workers[w] = new Replica(); }
+                for (var w = 0; w < replicas; w++)
+                {
+                    workers[w] = new Replica();
+                }
                 try
                 {
                     using var opt = new Adam(master.Parameters(), lr) { UseAdamW = true };
@@ -124,21 +144,29 @@ namespace DevOnBike.Overfit.Tests.Data.Mnist
 
                     var steps = batches / replicas;
                     var tailStart = steps - Math.Max(1, steps / 10);
-                    var sw = Stopwatch.StartNew(); var lossSum = 0f; var tailSum = 0f;
+                    var sw = Stopwatch.StartNew();
+                    var lossSum = 0f;
+                    var tailSum = 0f;
                     for (var s = 0; s < steps; s++)
                     {
                         var baseBatch = s * replicas;
                         var l = trainer.Step(opt, w =>
                             workers[w].TrainBatch(trainX.AsReadOnlySpan(), trainY.AsReadOnlySpan(), baseBatch + w));
                         lossSum += l;
-                        if (s >= tailStart) { tailSum += l; }
+                        if (s >= tailStart)
+                        {
+                            tailSum += l;
+                        }
                     }
                     sw.Stop();
                     _out.WriteLine($"replicas {replicas} lr={lr}: {sw.Elapsed.TotalSeconds,6:F1}s  avgLoss {lossSum / steps:F4}  finalLoss {tailSum / (steps - tailStart):F4}  (steps {steps})");
                 }
                 finally
                 {
-                    foreach (var w in workers) { w.Dispose(); }
+                    foreach (var w in workers)
+                    {
+                        w.Dispose();
+                    }
                 }
             }
         }

@@ -50,10 +50,22 @@ namespace DevOnBike.Overfit.DeepLearning
             B2 = new Parameter(new TensorShape(dModel), requiresGrad: true, clearData: true);
         }
 
-        public Parameter W1 { get; }
-        public Parameter B1 { get; }
-        public Parameter W2 { get; }
-        public Parameter B2 { get; }
+        public Parameter W1
+        {
+            get;
+        }
+        public Parameter B1
+        {
+            get;
+        }
+        public Parameter W2
+        {
+            get;
+        }
+        public Parameter B2
+        {
+            get;
+        }
 
         /// <summary>
         /// Optional per-forward override for the W1 (up-projection) weight node —
@@ -63,13 +75,19 @@ namespace DevOnBike.Overfit.DeepLearning
         /// W_eff = W1(frozen) + A@B built on the current graph. Null on the
         /// production path — plain weight, zero overhead.
         /// </summary>
-        internal Func<ComputationGraph, AutogradNode>? W1WeightProvider { get; set; }
+        internal Func<ComputationGraph, AutogradNode>? W1WeightProvider
+        {
+            get; set;
+        }
 
         /// <summary>
         /// Optional per-forward override for the W2 (down-projection) weight node.
         /// See <see cref="W1WeightProvider"/>.
         /// </summary>
-        internal Func<ComputationGraph, AutogradNode>? W2WeightProvider { get; set; }
+        internal Func<ComputationGraph, AutogradNode>? W2WeightProvider
+        {
+            get; set;
+        }
 
         /// <summary>
         /// Output-level QLoRA hooks (see Gpt1LoRAFineTuner, quantizeBase). When set, replace the
@@ -78,10 +96,16 @@ namespace DevOnBike.Overfit.DeepLearning
         /// can't be a single F32 weight node, so the weight-level providers above can't carry it.
         /// Take precedence over the weight providers. Null on the normal path.
         /// </summary>
-        internal Func<ComputationGraph, AutogradNode, AutogradNode>? W1OutputProvider { get; set; }
+        internal Func<ComputationGraph, AutogradNode, AutogradNode>? W1OutputProvider
+        {
+            get; set;
+        }
 
         /// <summary>Output-level QLoRA hook for W2 (down-projection). See <see cref="W1OutputProvider"/>.</summary>
-        internal Func<ComputationGraph, AutogradNode, AutogradNode>? W2OutputProvider { get; set; }
+        internal Func<ComputationGraph, AutogradNode, AutogradNode>? W2OutputProvider
+        {
+            get; set;
+        }
 
         public bool IsTraining { get; private set; } = true;
 
@@ -167,13 +191,18 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public IEnumerable<AutogradNode> Parameters()
         {
-            yield return W1.AsNode(); yield return B1.AsNode();
-            yield return W2.AsNode(); yield return B2.AsNode();
+            yield return W1.AsNode();
+            yield return B1.AsNode();
+            yield return W2.AsNode();
+            yield return B2.AsNode();
         }
 
         public IEnumerable<Parameter> TrainableParameters()
         {
-            yield return W1; yield return B1; yield return W2; yield return B2;
+            yield return W1;
+            yield return B1;
+            yield return W2;
+            yield return B2;
         }
 
         public void InvalidateParameterCaches()
@@ -192,12 +221,18 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void Save(BinaryWriter bw)
         {
-            W1.Save(bw); B1.Save(bw); W2.Save(bw); B2.Save(bw);
+            W1.Save(bw);
+            B1.Save(bw);
+            W2.Save(bw);
+            B2.Save(bw);
         }
 
         public void Load(BinaryReader br)
         {
-            W1.Load(br); B1.Load(br); W2.Load(br); B2.Load(br);
+            W1.Load(br);
+            B1.Load(br);
+            W2.Load(br);
+            B2.Load(br);
         }
 
         public void Dispose()

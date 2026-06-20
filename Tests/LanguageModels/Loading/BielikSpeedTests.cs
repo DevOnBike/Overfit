@@ -32,7 +32,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
 
         private void Bench(string path, string label)
         {
-            if (!File.Exists(path)) { _out.WriteLine($"{label}: missing {path}"); return; }
+            if (!File.Exists(path))
+            {
+                _out.WriteLine($"{label}: missing {path}");
+                return;
+            }
 
             using var client = OverfitClient.LoadGguf(path, mmap: true);
             client.AddSystem("Jesteś zwięzłym asystentem. Odpowiadaj po polsku.");
@@ -46,7 +50,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             var s = client.Chat.LastStats;
 
             var snippet = reply.Replace("\n", " ");
-            if (snippet.Length > 110) { snippet = snippet[..110] + "…"; }
+            if (snippet.Length > 110)
+            {
+                snippet = snippet[..110] + "…";
+            }
             _out.WriteLine($"{label}: {s.TokensPerSecond,5:F1} tok/s | gen {s.GeneratedTokens} | alloc {s.AllocatedBytes} B | {snippet}");
 
             Assert.False(string.IsNullOrWhiteSpace(reply));

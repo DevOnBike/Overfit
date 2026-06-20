@@ -27,13 +27,34 @@ namespace DevOnBike.Overfit.Audio.Mp3
             new[] { 44100, 48000, 32000, 0 }, // MPEG 1
         };
 
-        public MpegVersion Version { get; }
-        public bool CrcProtected { get; }
-        public int BitrateIndex { get; }
-        public int SampleRateIndex { get; }
-        public bool Padding { get; }
-        public ChannelMode Mode { get; }
-        public int ModeExtension { get; }
+        public MpegVersion Version
+        {
+            get;
+        }
+        public bool CrcProtected
+        {
+            get;
+        }
+        public int BitrateIndex
+        {
+            get;
+        }
+        public int SampleRateIndex
+        {
+            get;
+        }
+        public bool Padding
+        {
+            get;
+        }
+        public ChannelMode Mode
+        {
+            get;
+        }
+        public int ModeExtension
+        {
+            get;
+        }
 
         private Mp3FrameHeader(MpegVersion version, bool crc, int bitrateIndex, int srIndex, bool padding, ChannelMode mode, int modeExt)
         {

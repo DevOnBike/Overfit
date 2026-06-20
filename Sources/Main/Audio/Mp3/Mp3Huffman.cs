@@ -67,10 +67,22 @@ namespace DevOnBike.Overfit.Audio.Mp3
             }
 
             var linbits = LinBits[tableSelect];
-            if (linbits > 0 && x == 15) { x += (int)br.ReadBits(linbits); }
-            if (x > 0 && br.ReadBit()) { x = -x; }
-            if (linbits > 0 && y == 15) { y += (int)br.ReadBits(linbits); }
-            if (y > 0 && br.ReadBit()) { y = -y; }
+            if (linbits > 0 && x == 15)
+            {
+                x += (int)br.ReadBits(linbits);
+            }
+            if (x > 0 && br.ReadBit())
+            {
+                x = -x;
+            }
+            if (linbits > 0 && y == 15)
+            {
+                y += (int)br.ReadBits(linbits);
+            }
+            if (y > 0 && br.ReadBit())
+            {
+                y = -y;
+            }
         }
 
         /// <summary>Decodes one count1 quadruple (v, w, x, y) for table A (<paramref name="tableSelect"/>=32)
@@ -82,10 +94,22 @@ namespace DevOnBike.Overfit.Audio.Mp3
             w = (q >> 2) & 1;
             x = (q >> 1) & 1;
             y = q & 1;
-            if (v > 0 && br.ReadBit()) { v = -v; }
-            if (w > 0 && br.ReadBit()) { w = -w; }
-            if (x > 0 && br.ReadBit()) { x = -x; }
-            if (y > 0 && br.ReadBit()) { y = -y; }
+            if (v > 0 && br.ReadBit())
+            {
+                v = -v;
+            }
+            if (w > 0 && br.ReadBit())
+            {
+                w = -w;
+            }
+            if (x > 0 && br.ReadBit())
+            {
+                x = -x;
+            }
+            if (y > 0 && br.ReadBit())
+            {
+                y = -y;
+            }
         }
 
         private static bool Walk(ref Mp3BitReader br, int tableSelect, out int x, out int y)
@@ -113,12 +137,18 @@ namespace DevOnBike.Overfit.Audio.Mp3
                 }
                 if (br.ReadBit())
                 {
-                    while ((ht[off + point] & 0xff) >= 250) { point += ht[off + point] & 0xff; }
+                    while ((ht[off + point] & 0xff) >= 250)
+                    {
+                        point += ht[off + point] & 0xff;
+                    }
                     point += ht[off + point] & 0xff;
                 }
                 else
                 {
-                    while ((ht[off + point] >> 8) >= 250) { point += ht[off + point] >> 8; }
+                    while ((ht[off + point] >> 8) >= 250)
+                    {
+                        point += ht[off + point] >> 8;
+                    }
                     point += ht[off + point] >> 8;
                 }
             }

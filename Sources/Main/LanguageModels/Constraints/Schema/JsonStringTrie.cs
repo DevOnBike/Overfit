@@ -59,7 +59,10 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
             {
                 var sorted = new (char Key, int Child)[children[i].Count];
                 var j = 0;
-                foreach (var kvp in children[i]) { sorted[j++] = (kvp.Key, kvp.Value); }
+                foreach (var kvp in children[i])
+                {
+                    sorted[j++] = (kvp.Key, kvp.Value);
+                }
                 Array.Sort(sorted, static (a, b) => a.Key.CompareTo(b.Key));
                 _nodes[i] = new TrieNode(sorted, terminal[i], names[i]);
             }
@@ -91,8 +94,15 @@ namespace DevOnBike.Overfit.LanguageModels.Constraints.Schema
             var children = _nodes[nodeIndex].Children;
             for (var i = 0; i < children.Length; i++)
             {
-                if (children[i].Key == c) { childIndex = children[i].Child; return true; }
-                if (children[i].Key > c) { break; }   // sorted — no later match possible
+                if (children[i].Key == c)
+                {
+                    childIndex = children[i].Child;
+                    return true;
+                }
+                if (children[i].Key > c)
+                {
+                    break;
+                }   // sorted — no later match possible
             }
             childIndex = 0;
             return false;

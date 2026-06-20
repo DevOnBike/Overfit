@@ -49,13 +49,22 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 for (var e = 0; e < 32; e++)
                 {
                     var v = src256[j * 32 + e];
-                    if (v < lo) { lo = v; }
-                    if (v > hi) { hi = v; }
+                    if (v < lo)
+                    {
+                        lo = v;
+                    }
+                    if (v > hi)
+                    {
+                        hi = v;
+                    }
                 }
 
                 // The reconstruction y = scale·q − min spans [−min, 15·scale − min]; the offset can
                 // only be ≥ 0, so the smallest representable value is ≤ 0 → clamp lo to ≤ 0.
-                if (lo > 0f) { lo = 0f; }
+                if (lo > 0f)
+                {
+                    lo = 0f;
+                }
                 subScale[j] = (hi - lo) / 15f;
                 subMin[j] = -lo;
             }
@@ -65,8 +74,14 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var maxMin = 0f;
             for (var j = 0; j < 8; j++)
             {
-                if (subScale[j] > maxScale) { maxScale = subScale[j]; }
-                if (subMin[j] > maxMin) { maxMin = subMin[j]; }
+                if (subScale[j] > maxScale)
+                {
+                    maxScale = subScale[j];
+                }
+                if (subMin[j] > maxMin)
+                {
+                    maxMin = subMin[j];
+                }
             }
 
             var invScale = maxScale > 0f ? 63f / maxScale : 0f;

@@ -65,15 +65,24 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
 
             // ── Zero-alloc: drive the per-token Step directly and measure thread-local allocations ──
             var state = decoder.CreateState(encoderOut, nCtx, prompt.Length + maxNew);
-            for (var i = 0; i < prompt.Length; i++) { decoder.Step(state, prompt[i]); }
+            for (var i = 0; i < prompt.Length; i++)
+            {
+                decoder.Step(state, prompt[i]);
+            }
             // Warm up a handful of generated steps (JIT, first-touch) before measuring.
             var warm = Math.Min(5, fast.Length);
-            for (var i = 0; i < warm; i++) { decoder.Step(state, fast[i]); }
+            for (var i = 0; i < warm; i++)
+            {
+                decoder.Step(state, fast[i]);
+            }
 
             var measured = fast.Length - warm;
             Assert.True(measured >= 10, "need enough generated tokens to measure");
             var before = GC.GetAllocatedBytesForCurrentThread();
-            for (var i = warm; i < fast.Length; i++) { decoder.Step(state, fast[i]); }
+            for (var i = warm; i < fast.Length; i++)
+            {
+                decoder.Step(state, fast[i]);
+            }
             var after = GC.GetAllocatedBytesForCurrentThread();
 
             var perStep = (double)(after - before) / measured;
@@ -91,7 +100,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Whisper
                 var sw = Stopwatch.StartNew();
                 run();
                 sw.Stop();
-                if (sw.Elapsed.TotalMilliseconds < best) { best = sw.Elapsed.TotalMilliseconds; }
+                if (sw.Elapsed.TotalMilliseconds < best)
+                {
+                    best = sw.Elapsed.TotalMilliseconds;
+                }
             }
             return best;
         }

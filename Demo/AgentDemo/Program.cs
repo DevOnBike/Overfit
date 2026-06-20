@@ -170,9 +170,15 @@ namespace DevOnBike.Overfit.Demo.Agent
 
         private static string? ResolveGguf(string dir)
         {
-            if (!Directory.Exists(dir)) { return null; }
+            if (!Directory.Exists(dir))
+            {
+                return null;
+            }
             var preferred = Path.Combine(dir, "qwen.q4km.gguf");
-            if (File.Exists(preferred)) { return preferred; }
+            if (File.Exists(preferred))
+            {
+                return preferred;
+            }
             var any = Directory.GetFiles(dir, "*.gguf");
             return any.Length > 0 ? any[0] : null;
         }

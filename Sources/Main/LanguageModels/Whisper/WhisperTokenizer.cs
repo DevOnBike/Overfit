@@ -34,7 +34,13 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
                 eot++;
                 sot++;
                 var dt = config.NumLanguages - 98;
-                translate += dt; transcribe += dt; solm += dt; prev += dt; nosp += dt; not_ += dt; beg += dt;
+                translate += dt;
+                transcribe += dt;
+                solm += dt;
+                prev += dt;
+                nosp += dt;
+                not_ += dt;
+                beg += dt;
             }
 
             EndOfTranscript = eot;
@@ -49,19 +55,49 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             LanguageCount = config.NumLanguages;
         }
 
-        public int EndOfTranscript { get; }
-        public int StartOfTranscript { get; }
-        public int Translate { get; }
-        public int Transcribe { get; }
-        public int StartOfLm { get; }
-        public int StartOfPrev { get; }
-        public int NoSpeech { get; }
-        public int NoTimestamps { get; }
+        public int EndOfTranscript
+        {
+            get;
+        }
+        public int StartOfTranscript
+        {
+            get;
+        }
+        public int Translate
+        {
+            get;
+        }
+        public int Transcribe
+        {
+            get;
+        }
+        public int StartOfLm
+        {
+            get;
+        }
+        public int StartOfPrev
+        {
+            get;
+        }
+        public int NoSpeech
+        {
+            get;
+        }
+        public int NoTimestamps
+        {
+            get;
+        }
 
         /// <summary>First timestamp token (<c>&lt;|0.00|&gt;</c>); subsequent timestamps are this + n.</summary>
-        public int TimestampBegin { get; }
+        public int TimestampBegin
+        {
+            get;
+        }
 
-        public int LanguageCount { get; }
+        public int LanguageCount
+        {
+            get;
+        }
 
         /// <summary>Language token for the language at <paramref name="index"/> in Whisper's fixed language
         /// order (index 0 = English). Tokens sit at <c>StartOfTranscript + 1 + index</c>.</summary>
@@ -76,7 +112,10 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
         public int LanguageToken(string code)
         {
             var idx = WhisperLanguages.IndexOf(code);
-            if (idx < 0) { throw new ArgumentException($"Unknown Whisper language code '{code}'.", nameof(code)); }
+            if (idx < 0)
+            {
+                throw new ArgumentException($"Unknown Whisper language code '{code}'.", nameof(code));
+            }
             return LanguageTokenAt(idx);
         }
 
@@ -95,7 +134,10 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             {
                 if (IsSpecial(id))
                 {
-                    if (skipSpecial) { continue; }
+                    if (skipSpecial)
+                    {
+                        continue;
+                    }
                     continue; // markers aren't real text
                 }
                 // The token's raw UTF-8 bytes (round-tripped from the stored piece); concatenate and decode once.

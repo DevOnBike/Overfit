@@ -24,7 +24,10 @@ namespace DevOnBike.Overfit.Tensors.Core
     {
         private const nuint BaseAlignmentBytes = 64;
 
-        public int Size { get; }
+        public int Size
+        {
+            get;
+        }
 
         private void* _ptr;
         private int _offset;
@@ -174,6 +177,7 @@ namespace DevOnBike.Overfit.Tensors.Core
             GC.SuppressFinalize(this);
         }
 
+#pragma warning disable OVERFIT012 // Safety-net finalizer for an unmanaged AlignedAlloc — the sanctioned use of a finalizer; Dispose calls GC.SuppressFinalize so the common path never pays for it.
         ~NativeBufferManaged()
         {
             if (_ptr != null)
@@ -182,6 +186,7 @@ namespace DevOnBike.Overfit.Tensors.Core
                 _ptr = null;
             }
         }
+#pragma warning restore OVERFIT012
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void ThrowIfDisposed()

@@ -34,7 +34,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
 
             Assert.Equal(16, v.Length);
             var norm = 0f;
-            foreach (var x in v) { norm += x * x; }
+            foreach (var x in v)
+            {
+                norm += x * x;
+            }
             Assert.True(MathF.Abs(MathF.Sqrt(norm) - 1f) < 1e-4f, $"expected unit norm, got {MathF.Sqrt(norm)}");
         }
 
@@ -55,7 +58,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
             var b = enc.Embed(new[] { 2, 11, 23, 3 });
 
             var same = true;
-            for (var i = 0; i < a.Length; i++) { if (MathF.Abs(a[i] - b[i]) > 1e-6f) { same = false; break; } }
+            for (var i = 0; i < a.Length; i++)
+            {
+                if (MathF.Abs(a[i] - b[i]) > 1e-6f)
+                {
+                    same = false;
+                    break;
+                }
+            }
             Assert.False(same, "different token sequences should produce different embeddings");
         }
 
@@ -68,7 +78,14 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
 
             Assert.Equal(16, last.Length);
             var same = true;
-            for (var i = 0; i < mean.Length; i++) { if (MathF.Abs(mean[i] - last[i]) > 1e-6f) { same = false; break; } }
+            for (var i = 0; i < mean.Length; i++)
+            {
+                if (MathF.Abs(mean[i] - last[i]) > 1e-6f)
+                {
+                    same = false;
+                    break;
+                }
+            }
             Assert.False(same, "mean and last-token pooling should differ");
         }
 
@@ -85,7 +102,13 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
 
             bool DiffersFrom(float[] a, float[] b)
             {
-                for (var i = 0; i < a.Length; i++) { if (MathF.Abs(a[i] - b[i]) > 1e-6f) { return true; } }
+                for (var i = 0; i < a.Length; i++)
+                {
+                    if (MathF.Abs(a[i] - b[i]) > 1e-6f)
+                    {
+                        return true;
+                    }
+                }
                 return false;
             }
 
@@ -94,7 +117,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Embeddings
 
             // CLS must equal the first token's hidden state, L2-normalized.
             var norm = 0f;
-            foreach (var x in cls) { norm += x * x; }
+            foreach (var x in cls)
+            {
+                norm += x * x;
+            }
             Assert.True(MathF.Abs(MathF.Sqrt(norm) - 1f) < 1e-4f);
         }
 

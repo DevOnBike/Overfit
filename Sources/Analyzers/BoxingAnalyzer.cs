@@ -31,7 +31,7 @@ namespace DevOnBike.Overfit.Analyzers
             isEnabledByDefault: true,
             description: "Boxing allocates a heap object per conversion and costs an indirection on every later use. Exempt: one-time contexts (field initializers, constructors) and exception construction.");
 
-        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
+        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule, OverfitPerfAnalysis.HotPathRule];
 
         public override void Initialize(AnalysisContext context)
         {
@@ -68,7 +68,7 @@ namespace DevOnBike.Overfit.Analyzers
             var from = operation.Operand.Type?.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat) ?? "?";
             var to = operation.Type?.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat) ?? "?";
 
-            context.ReportDiagnostic(Diagnostic.Create(Rule, operation.Syntax.GetLocation(), from, to));
+            OverfitPerfAnalysis.Report(context, Rule, operation.Syntax.GetLocation(), from, to);
         }
     }
 }

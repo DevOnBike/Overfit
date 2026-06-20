@@ -69,7 +69,7 @@ namespace DevOnBike.Overfit.Audio.Mp3
         }
 
         /// <summary>Skips an ID3v2 tag if present (10-byte header + syncsafe size), returning the audio offset.</summary>
-        internal static int SkipId3(byte[] bytes)
+        internal static int SkipId3(ReadOnlySpan<byte> bytes)
         {
             if (bytes.Length >= 10 && bytes[0] == (byte)'I' && bytes[1] == (byte)'D' && bytes[2] == (byte)'3')
             {

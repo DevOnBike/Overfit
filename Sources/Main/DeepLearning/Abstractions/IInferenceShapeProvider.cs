@@ -14,9 +14,15 @@ namespace DevOnBike.Overfit.DeepLearning.Abstractions
     /// </summary>
     public interface IInferenceShapeProvider
     {
-        int InferenceInputSize { get; }
+        int InferenceInputSize
+        {
+            get;
+        }
 
-        int InferenceOutputSize { get; }
+        int InferenceOutputSize
+        {
+            get;
+        }
 
         /// <summary>
         /// Prepares reusable inference caches outside the hot path.

@@ -91,7 +91,10 @@ namespace DevOnBike.Overfit.Ops
                 for (var k = 0; k < classCount; k++)
                 {
                     var v = logits[baseT + k];
-                    if (v > max) { max = v; }
+                    if (v > max)
+                    {
+                        max = v;
+                    }
                 }
                 var sum = 0f;
                 for (var k = 0; k < classCount; k++)
@@ -124,7 +127,10 @@ namespace DevOnBike.Overfit.Ops
             var alpha = new float[timeSteps * s];
             alpha.AsSpan().Fill(NegInf);
             alpha[0] = logp[ext[0]];                 // blank at s=0
-            if (s > 1) { alpha[1] = logp[ext[1]]; }  // first real label
+            if (s > 1)
+            {
+                alpha[1] = logp[ext[1]];
+            }  // first real label
 
             for (var t = 1; t < timeSteps; t++)
             {
@@ -137,7 +143,10 @@ namespace DevOnBike.Overfit.Ops
                 for (var si = sStart; si < s; si++)
                 {
                     var a = alpha[prev + si];
-                    if (si >= 1) { a = LogSumExp(a, alpha[prev + si - 1]); }
+                    if (si >= 1)
+                    {
+                        a = LogSumExp(a, alpha[prev + si - 1]);
+                    }
                     if (si >= 2 && ext[si] != blankIndex && ext[si] != ext[si - 2])
                     {
                         a = LogSumExp(a, alpha[prev + si - 2]);
@@ -154,7 +163,10 @@ namespace DevOnBike.Overfit.Ops
                 // No alignment fits T timesteps. Fall back to plain softmax gradient.
                 if (wantGrad)
                 {
-                    for (var i = 0; i < tc; i++) { logitGradients[i] = MathF.Exp(logp[i]); }
+                    for (var i = 0; i < tc; i++)
+                    {
+                        logitGradients[i] = MathF.Exp(logp[i]);
+                    }
                 }
                 return float.PositiveInfinity;
             }
@@ -169,7 +181,10 @@ namespace DevOnBike.Overfit.Ops
             beta.AsSpan().Fill(NegInf);
             var lastBase = (timeSteps - 1) * classCount;
             beta[last + s - 1] = logp[lastBase + ext[s - 1]];
-            if (s > 1) { beta[last + s - 2] = logp[lastBase + ext[s - 2]]; }
+            if (s > 1)
+            {
+                beta[last + s - 2] = logp[lastBase + ext[s - 2]];
+            }
 
             for (var t = timeSteps - 2; t >= 0; t--)
             {
@@ -180,7 +195,10 @@ namespace DevOnBike.Overfit.Ops
                 for (var si = sEnd; si >= 0; si--)
                 {
                     var b = beta[next + si];
-                    if (si + 1 < s) { b = LogSumExp(b, beta[next + si + 1]); }
+                    if (si + 1 < s)
+                    {
+                        b = LogSumExp(b, beta[next + si + 1]);
+                    }
                     if (si + 2 < s && ext[si] != blankIndex && ext[si] != ext[si + 2])
                     {
                         b = LogSumExp(b, beta[next + si + 2]);
@@ -198,7 +216,10 @@ namespace DevOnBike.Overfit.Ops
             {
                 var cur = t * s;
                 var baseT = t * classCount;
-                for (var k = 0; k < classCount; k++) { classAcc[k] = NegInf; }
+                for (var k = 0; k < classCount; k++)
+                {
+                    classAcc[k] = NegInf;
+                }
 
                 for (var si = 0; si < s; si++)
                 {
@@ -225,8 +246,14 @@ namespace DevOnBike.Overfit.Ops
 
         private static float LogSumExp(float a, float b)
         {
-            if (float.IsNegativeInfinity(a)) { return b; }
-            if (float.IsNegativeInfinity(b)) { return a; }
+            if (float.IsNegativeInfinity(a))
+            {
+                return b;
+            }
+            if (float.IsNegativeInfinity(b))
+            {
+                return a;
+            }
             var max = a > b ? a : b;
             return max + MathF.Log(MathF.Exp(a - max) + MathF.Exp(b - max));
         }

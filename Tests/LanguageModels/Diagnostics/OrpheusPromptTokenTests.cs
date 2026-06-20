@@ -24,7 +24,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         [LongFact]
         public void Dump_Control_Token_Ids()
         {
-            if (!File.Exists(Path)) { _out.WriteLine("missing orpheus gguf"); return; }
+            if (!File.Exists(Path))
+            {
+                _out.WriteLine("missing orpheus gguf");
+                return;
+            }
 
             var tok = GgufTokenizer.Load(Path);
 

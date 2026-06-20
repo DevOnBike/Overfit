@@ -61,9 +61,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         public int CurrentPosition => _totalPosition;
 
-        public int MaxContextLength { get; }
+        public int MaxContextLength
+        {
+            get;
+        }
 
-        public int VocabularySize { get; }
+        public int VocabularySize
+        {
+            get;
+        }
 
         public bool HasKeyValueCache => false;
 

@@ -16,10 +16,16 @@ namespace DevOnBike.Overfit.Data.Prepare
     public sealed class ScalerParams
     {
         /// <summary>Median per column. Length = MetricCount.</summary>
-        public required float[] Medians { get; init; }
+        public required float[] Medians
+        {
+            get; init;
+        }
 
         /// <summary>IQR per column. Length = MetricCount.</summary>
-        public required float[] Iqrs { get; init; }
+        public required float[] Iqrs
+        {
+            get; init;
+        }
 
         /// <summary>Saves params to a JSON file.</summary>
         public void SaveToFile(string path)

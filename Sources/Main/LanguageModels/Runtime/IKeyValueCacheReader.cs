@@ -14,9 +14,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     /// </summary>
     public interface IKeyValueCacheReader
     {
-        int CurrentLength { get; }
+        int CurrentLength
+        {
+            get;
+        }
 
-        int HeadDimension { get; }
+        int HeadDimension
+        {
+            get;
+        }
 
         ReadOnlySpan<float> GetKeyReadSpan(
             int layerIndex,

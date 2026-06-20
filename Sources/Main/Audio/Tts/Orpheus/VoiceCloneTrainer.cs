@@ -86,7 +86,10 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
 
         /// <summary>The Orpheus tokenizer — pass it to <see cref="VoiceCloneDatasetBuilder"/> so prompts and audio
         /// tokens are encoded consistently with this trainer.</summary>
-        public ITokenizer Tokenizer { get; }
+        public ITokenizer Tokenizer
+        {
+            get;
+        }
 
         /// <summary>Llama end-of-text id (a reasonable default end-of-speech terminator for the dataset builder).</summary>
         public int EndOfTextTokenId => Tokenizer.EndOfTextTokenId;
@@ -177,10 +180,13 @@ namespace DevOnBike.Overfit.Audio.Tts.Orpheus
         /// <summary>
         /// Bakes the trained LoRA + RMSNorm gains into the base and returns a fast, fully-quantized
         /// <see cref="CachedLlamaInferenceEngine"/> — the fine-tuned voice now decodes on the optimized
-        /// zero-alloc/SIMD path (~2× the trainable graph). Keep this trainer alive for the engine's lifetime
-        /// (it borrows the base embedding / LM-head handles).
+        /// zero-alloc/SIMD path (measured ~3.5–5× the trainable graph). Keep this trainer alive for the engine's
+        /// lifetime (it borrows the base embedding / LM-head handles). <paramref name="preferQ4K"/> trades fidelity
+        /// for speed: Q8 (default) keeps the clone faithful (~0.8× preset decode); Q4_K reaches preset decode speed
+        /// but the 4-bit re-quant erodes part of the fine-tune (verify the cloned voice perceptually first).
         /// </summary>
-        public CachedLlamaInferenceEngine BuildMergedEngine(bool mergeLora = true) => _model.BuildMergedEngine(_engine, mergeLora);
+        public CachedLlamaInferenceEngine BuildMergedEngine(bool mergeLora = true, bool preferQ4K = false)
+            => _model.BuildMergedEngine(_engine, mergeLora, preferQ4K);
 
         /// <summary>Diagnostic: the trainable model's decode-path final hidden state for a prompt (to diff against a
         /// merged inference engine and localize divergence).</summary>

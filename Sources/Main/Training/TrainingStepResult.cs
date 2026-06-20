@@ -19,13 +19,25 @@ namespace DevOnBike.Overfit.Training
             TargetLength = targetLength;
         }
 
-        public float Loss { get; }
+        public float Loss
+        {
+            get;
+        }
 
-        public int BatchSize { get; }
+        public int BatchSize
+        {
+            get;
+        }
 
-        public int InputLength { get; }
+        public int InputLength
+        {
+            get;
+        }
 
-        public int TargetLength { get; }
+        public int TargetLength
+        {
+            get;
+        }
 
         public override string ToString()
         {

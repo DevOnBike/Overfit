@@ -31,7 +31,7 @@ namespace DevOnBike.Overfit.Analyzers
             isEnabledByDefault: true,
             description: "ToArray allocates and copies on every call. Hot paths should operate on existing buffers (Span slicing, PooledBuffer<T>). One-time contexts and exception construction are exempt.");
 
-        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
+        public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule, OverfitPerfAnalysis.HotPathRule];
 
         public override void Initialize(AnalysisContext context)
         {
@@ -62,7 +62,7 @@ namespace DevOnBike.Overfit.Analyzers
             var receiverType = (operation.Instance ?? (operation.Arguments.Length > 0 ? operation.Arguments[0].Value : null))?.Type;
             var display = receiverType?.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat) ?? "sequence";
 
-            context.ReportDiagnostic(Diagnostic.Create(Rule, operation.Syntax.GetLocation(), display));
+            OverfitPerfAnalysis.Report(context, Rule, operation.Syntax.GetLocation(), display);
         }
     }
 }

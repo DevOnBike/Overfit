@@ -362,8 +362,11 @@ namespace DevOnBike.Overfit.Kernels
 
             public BackwardInputContext(float* go, float* w, float* gi, int inputSize, int outputSize)
             {
-                GradOutput = go; Weights = w; GradInput = gi;
-                InputSize = inputSize; OutputSize = outputSize;
+                GradOutput = go;
+                Weights = w;
+                GradInput = gi;
+                InputSize = inputSize;
+                OutputSize = outputSize;
             }
         }
 
@@ -455,8 +458,12 @@ namespace DevOnBike.Overfit.Kernels
 
             public AccumulateWeightGradContext(float* inp, float* go, float* gw, int b, int n, int m)
             {
-                Input = inp; GradOutput = go; GradWeights = gw;
-                BatchSize = b; InputSize = n; OutputSize = m;
+                Input = inp;
+                GradOutput = go;
+                GradWeights = gw;
+                BatchSize = b;
+                InputSize = n;
+                OutputSize = m;
             }
         }
 

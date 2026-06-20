@@ -19,35 +19,58 @@ namespace DevOnBike.Overfit.DeepLearning
         private readonly int _inputH;
         private readonly int _inputW;
         private readonly int _poolSize;
+        private readonly int _stride;
+        private readonly int _padding;
 
-        public MaxPool2DLayer(int channels, int inputH, int inputW, int poolSize)
+        /// <param name="stride">Window step. <c>0</c> (the default) means "equal to <paramref name="poolSize"/>"
+        /// — the classic non-overlapping pool. A smaller value gives an overlapping pool (e.g. ResNet's 3x3
+        /// stride-2).</param>
+        /// <param name="padding">Symmetric zero-padding on each spatial edge (ONNX pads with -inf for max).</param>
+        public MaxPool2DLayer(int channels, int inputH, int inputW, int poolSize, int stride = 0, int padding = 0)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(channels);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(inputH);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(inputW);
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(poolSize);
+            ArgumentOutOfRangeException.ThrowIfNegative(padding);
 
-            if (inputH % poolSize != 0)
+            if (stride == 0)
             {
-                throw new ArgumentException($"inputH ({inputH}) must be divisible by poolSize ({poolSize}).");
+                stride = poolSize;
             }
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(stride);
 
-            if (inputW % poolSize != 0)
+            // The fast non-overlapping path requires exact tiling; the general (overlapping / padded) path uses
+            // the ONNX output-size formula and has no divisibility constraint.
+            if (IsSimple(poolSize, stride, padding))
             {
-                throw new ArgumentException($"inputW ({inputW}) must be divisible by poolSize ({poolSize}).");
+                if (inputH % poolSize != 0)
+                {
+                    throw new ArgumentException($"inputH ({inputH}) must be divisible by poolSize ({poolSize}).");
+                }
+
+                if (inputW % poolSize != 0)
+                {
+                    throw new ArgumentException($"inputW ({inputW}) must be divisible by poolSize ({poolSize}).");
+                }
             }
 
             _channels = channels;
             _inputH = inputH;
             _inputW = inputW;
             _poolSize = poolSize;
+            _stride = stride;
+            _padding = padding;
         }
+
+        private static bool IsSimple(int poolSize, int stride, int padding)
+            => stride == poolSize && padding == 0;
 
         public int OutputH
         {
             get
             {
-                return _inputH / _poolSize;
+                return (_inputH + 2 * _padding - _poolSize) / _stride + 1;
             }
         }
 
@@ -55,7 +78,7 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             get
             {
-                return _inputW / _poolSize;
+                return (_inputW + 2 * _padding - _poolSize) / _stride + 1;
             }
         }
 
@@ -75,7 +98,9 @@ namespace DevOnBike.Overfit.DeepLearning
             }
         }
 
-        public void PrepareInference() { }
+        public void PrepareInference()
+        {
+        }
 
         public bool IsTraining { get; private set; } = true;
 
@@ -90,27 +115,58 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public AutogradNode Forward(ComputationGraph graph, AutogradNode input)
         {
+            if (!IsSimple(_poolSize, _stride, _padding))
+            {
+                throw new OverfitRuntimeException(
+                    "Training-graph MaxPool only supports non-overlapping, unpadded pooling (stride == poolSize, "
+                    + "padding == 0). The overlapping / padded path is inference-only (ONNX import).");
+            }
+
             return ComputationGraph.MaxPool2DOp(graph, input, _channels, _inputH, _inputW, _poolSize);
         }
 
         public void ForwardInference(ReadOnlySpan<float> input, Span<float> output)
         {
+            if (IsSimple(_poolSize, _stride, _padding))
+            {
+                PoolingKernels.MaxPool2DForwardNchw(
+                    input,
+                    output,
+                    _channels,
+                    _inputH,
+                    _inputW,
+                    _poolSize);
+                return;
+            }
+
+            var batchSize = input.Length / InferenceInputSize;
             PoolingKernels.MaxPool2DForwardNchw(
                 input,
                 output,
+                batchSize,
                 _channels,
                 _inputH,
                 _inputW,
-                _poolSize);
+                kernelSize: _poolSize,
+                padding: _padding,
+                stride: _stride);
         }
 
-        public void InvalidateParameterCaches() { }
+        public void InvalidateParameterCaches()
+        {
+        }
         public IEnumerable<AutogradNode> Parameters()
         {
             return [];
         }
-        public void Save(BinaryWriter bw) { }
-        public void Load(BinaryReader br) { }
-        public void Dispose() { }
+        public void Save(BinaryWriter bw)
+        {
+        }
+        public void Load(BinaryReader br)
+        {
+        }
+        public void Dispose()
+        {
+        }
     }
 }

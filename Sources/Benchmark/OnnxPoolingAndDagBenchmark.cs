@@ -56,7 +56,9 @@ namespace Benchmarks
                 avgModel.Eval();
                 _avgPoolEngine = InferenceEngine.FromSequential(avgModel, 256, 10,
                     new InferenceEngineOptions
-                    { WarmupIterations = 256 });
+                    {
+                        WarmupIterations = 256
+                    });
                 _avgPoolInput = new float[256];
                 _avgPoolOutput = new float[10];
                 Fill(rng, _avgPoolInput);

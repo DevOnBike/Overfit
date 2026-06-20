@@ -28,7 +28,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         [LongFact]
         public void Qwen3B_Q4KM_DecodeSpeed()
         {
-            if (!File.Exists(Model)) { _out.WriteLine($"missing {Model}"); return; }
+            if (!File.Exists(Model))
+            {
+                _out.WriteLine($"missing {Model}");
+                return;
+            }
 
             using var client = OverfitClient.LoadGguf(Model, maxContextLength: 2048, mmap: true, maxNewTokens: 128);
 
@@ -43,7 +47,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
                 client.Reset();
                 client.Send(Prompt);
                 var s = client.Chat.LastStats;
-                if (s.TokensPerSecond > best) { best = s.TokensPerSecond; }
+                if (s.TokensPerSecond > best)
+                {
+                    best = s.TokensPerSecond;
+                }
                 lastGen = s.GeneratedTokens;
             }
 

@@ -21,10 +21,16 @@ namespace Benchmarks
         private SimpleDescriptorEvaluator _evaluator = null!;
 
         [Params(64, 256)]
-        public int ParameterCount { get; set; }
+        public int ParameterCount
+        {
+            get; set;
+        }
 
         [Params(64, 256)]
-        public int BatchSize { get; set; }
+        public int BatchSize
+        {
+            get; set;
+        }
 
         [GlobalSetup]
         public void Setup()

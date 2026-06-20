@@ -76,7 +76,10 @@ namespace DevOnBike.Overfit.Optimizers
         /// <summary>
         /// Learning rate used by the optimizer.
         /// </summary>
-        public float LearningRate { get; set; }
+        public float LearningRate
+        {
+            get; set;
+        }
 
         /// <summary>
         /// Performs a single optimization step.
@@ -131,8 +134,14 @@ namespace DevOnBike.Overfit.Optimizers
         {
             for (var i = 0; i < _count; i++)
             {
-                if (_params[i] != null) { _params[i]!.ZeroGrad(); }
-                else { _nodes[i]!.ZeroGrad(); }
+                if (_params[i] != null)
+                {
+                    _params[i]!.ZeroGrad();
+                }
+                else
+                {
+                    _nodes[i]!.ZeroGrad();
+                }
             }
         }
     }

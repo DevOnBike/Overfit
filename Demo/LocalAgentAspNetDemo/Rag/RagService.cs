@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text;
 using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Embeddings;
@@ -109,8 +110,12 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
         public int ChunkCount => _store?.Count ?? 0;
 
         /// <summary>
-        /// Rebuilds the index from every <c>*.md</c> file in the data directory. Idempotent — each
-        /// call discards the previous index and builds a fresh one.
+        /// Indexes every <c>*.md</c> file in the data directory. <b>Index once, restart, query without
+        /// re-embedding</b>: a persisted <see cref="PersistentVectorStore"/> (a pure-managed binary file next to
+        /// the documents — no SQLite, no native dependency) is reloaded when the source set and per-file content
+        /// hashes still match, skipping all embedding. Any change to the corpus triggers a full rebuild (the
+        /// model-embedding anisotropy mean is corpus-wide, so it must be recomputed when the corpus changes), and
+        /// the fresh index is persisted for next time.
         /// </summary>
         public IndexSummary IndexDocuments()
         {
@@ -128,40 +133,181 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
                 }
 
                 var dim = EmbeddingDim;
-                var store = new VectorStore(dim, initialCapacity: 64);
-                var perFile = new List<FileIndexInfo>(files.Length);
+                var cachePath = Path.Combine(dataDir, ".overfit-rag-index.bin");
 
-                // Pass 1: embed every chunk (raw) so the corpus mean is known before anything is stored.
-                var ids = new List<string>();
-                var texts = new List<string>();
-                var raw = new List<float[]>();
+                // Content hash per file (name → hash) — the "reload unchanged, re-embed changed" decision.
+                var hashByName = new Dictionary<string, string>(StringComparer.Ordinal);
+                foreach (var file in files)
+                {
+                    hashByName[Path.GetFileName(file)] = ComputeFileHash(file);
+                }
+
+                // Fast path: a persisted index whose sources + hashes exactly match → reload, no embedding.
+                var summaryFromCache = TryReloadFromCache(cachePath, dim, hashByName, files.Length);
+                if (summaryFromCache is not null)
+                {
+                    return summaryFromCache;
+                }
+
+                // Rebuild: embed everything (no cache, or the corpus changed).
+                var perFile = new List<FileIndexInfo>(files.Length);
+                var fileChunks = new List<FileChunks>(files.Length);
+                var allRaw = new List<float[]>();
                 foreach (var file in files)
                 {
                     var name = Path.GetFileName(file);
                     var chunks = Chunk(File.ReadAllText(file));
+                    var fc = new FileChunks(name, new List<VectorChunk>(chunks.Count));
                     for (var i = 0; i < chunks.Count; i++)
                     {
-                        ids.Add($"{name}#{i}");
-                        texts.Add(chunks[i]);
-                        raw.Add(EmbedDocumentRaw(chunks[i]));
+                        var rawVector = EmbedDocumentRaw(chunks[i]);
+                        allRaw.Add(rawVector);
+                        fc.Raw.Add(new VectorChunk($"{name}#{i}", rawVector, chunks[i]));
                     }
+                    fileChunks.Add(fc);
                     perFile.Add(new FileIndexInfo(name, chunks.Count));
                 }
 
                 // Mean-center model embeddings (anisotropy fix). MiniLM is already isotropic-ish — leave it alone.
-                _embeddingMean = _useModelEmbeddings && raw.Count > 0 ? ComputeMean(raw, dim) : null;
+                _embeddingMean = _useModelEmbeddings && allRaw.Count > 0 ? ComputeMean(allRaw, dim) : null;
 
-                // Pass 2: center (no-op when _embeddingMean is null) and store with the chunk text as payload.
-                for (var i = 0; i < ids.Count; i++)
+                var collection = Path.GetFileName(dataDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+                var persistent = new PersistentVectorStore(dim, string.IsNullOrEmpty(collection) ? "rag" : collection);
+                foreach (var fc in fileChunks)
                 {
-                    store.Add(ids[i], Center(raw[i]), texts[i]);
+                    // Center (no-op when no mean) the raw vectors, then index the file under its content hash.
+                    var centered = new List<VectorChunk>(fc.Raw.Count);
+                    foreach (var c in fc.Raw)
+                    {
+                        centered.Add(new VectorChunk(c.Id, Center(c.Vector), c.Payload));
+                    }
+                    persistent.IndexSource(fc.Name, hashByName[fc.Name], centered);
                 }
 
-                _store = store;
-                _logger.LogInformation("Indexed {Chunks} chunks from {Files} documents.", store.Count, files.Length);
-                return new IndexSummary(store.Count, perFile);
+                _store = persistent.Store;
+                TrySaveCache(persistent, cachePath, _embeddingMean);
+                _logger.LogInformation("Indexed {Chunks} chunks from {Files} documents (persisted to cache).", persistent.Count, files.Length);
+                return new IndexSummary(persistent.Count, perFile);
             }
         }
+
+        private IndexSummary? TryReloadFromCache(string cachePath, int dim, Dictionary<string, string> hashByName, int fileCount)
+        {
+            if (!File.Exists(cachePath))
+            {
+                return null;
+            }
+
+            PersistentVectorStore loaded;
+            try
+            {
+                loaded = PersistentVectorStore.Load(cachePath);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Ignoring unreadable RAG index cache at {Path}; rebuilding.", cachePath);
+                return null;
+            }
+
+            // Exact match: same dimension, same source set, every file's hash unchanged.
+            if (loaded.Dimension != dim || loaded.SourceCount != fileCount)
+            {
+                return null;
+            }
+            foreach (var (name, hash) in hashByName)
+            {
+                if (loaded.NeedsReindex(name, hash))
+                {
+                    return null;
+                }
+            }
+
+            // Model-embedding mode needs the corpus mean restored, or query centering would be wrong.
+            var mean = _useModelEmbeddings ? LoadMean(cachePath, dim) : null;
+            if (_useModelEmbeddings && mean is null)
+            {
+                _logger.LogWarning("RAG index cache is missing its mean vector; rebuilding.");
+                return null;
+            }
+
+            _store = loaded.Store;
+            _embeddingMean = mean;
+            var perFile = new List<FileIndexInfo>(fileCount);
+            foreach (var name in hashByName.Keys)
+            {
+                perFile.Add(new FileIndexInfo(name, loaded.GetSourceChunkCount(name)));
+            }
+            _logger.LogInformation("Loaded {Chunks} chunks from cache ({Files} documents, no re-embedding).", loaded.Count, fileCount);
+            return new IndexSummary(loaded.Count, perFile);
+        }
+
+        private static string ComputeFileHash(string path)
+        {
+            using var stream = File.OpenRead(path);
+            return Convert.ToHexString(SHA256.HashData(stream));
+        }
+
+        private void TrySaveCache(PersistentVectorStore store, string cachePath, float[]? mean)
+        {
+            var meanPath = cachePath + ".mean";
+            try
+            {
+                store.Save(cachePath);
+                if (mean is null)
+                {
+                    if (File.Exists(meanPath))
+                    {
+                        File.Delete(meanPath);
+                    }
+                }
+                else
+                {
+                    using var stream = new FileStream(meanPath, FileMode.Create, FileAccess.Write);
+                    using var writer = new BinaryWriter(stream);
+                    writer.Write(mean.Length);
+                    foreach (var v in mean)
+                    {
+                        writer.Write(v);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not persist the RAG index cache to {Path}; it will rebuild next run.", cachePath);
+            }
+        }
+
+        private float[]? LoadMean(string cachePath, int dim)
+        {
+            var path = cachePath + ".mean";
+            if (!File.Exists(path))
+            {
+                return null;
+            }
+            try
+            {
+                using var stream = File.OpenRead(path);
+                using var reader = new BinaryReader(stream);
+                var n = reader.ReadInt32();
+                if (n != dim)
+                {
+                    return null;
+                }
+                var mean = new float[n];
+                for (var i = 0; i < n; i++)
+                {
+                    mean[i] = reader.ReadSingle();
+                }
+                return mean;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Ignoring unreadable RAG mean sidecar at {Path}.", path);
+                return null;
+            }
+        }
+
+        private readonly record struct FileChunks(string Name, List<VectorChunk> Raw);
 
         /// <summary>
         /// Answers <paramref name="question"/> by retrieving the top-<paramref name="topK"/> chunks and
@@ -386,9 +532,15 @@ namespace DevOnBike.Overfit.Demo.LocalAgent.Rag
             {
                 // Absolute path, or a folder name relative to the output dir (e.g. the Bielik preset's
                 // "Data-pl", copied next to the assembly).
-                if (Directory.Exists(fromSettings)) { return fromSettings; }
+                if (Directory.Exists(fromSettings))
+                {
+                    return fromSettings;
+                }
                 var relative = Path.Combine(AppContext.BaseDirectory, fromSettings);
-                if (Directory.Exists(relative)) { return relative; }
+                if (Directory.Exists(relative))
+                {
+                    return relative;
+                }
             }
 
             // Default: the Data folder copied next to the built assembly.

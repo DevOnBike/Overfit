@@ -59,25 +59,46 @@ namespace DevOnBike.Overfit.DeepLearning
         }
 
         /// <summary>Pre-LayerNorm (true) or Post-LayerNorm (false, original GPT-1).</summary>
-        public bool PreLayerNorm { get; }
+        public bool PreLayerNorm
+        {
+            get;
+        }
 
-        public LayerNormLayer Norm1 { get; }
-        public MultiHeadAttentionLayer Attention { get; }
-        public LayerNormLayer Norm2 { get; }
-        public FeedForwardLayer FFN { get; }
+        public LayerNormLayer Norm1
+        {
+            get;
+        }
+        public MultiHeadAttentionLayer Attention
+        {
+            get;
+        }
+        public LayerNormLayer Norm2
+        {
+            get;
+        }
+        public FeedForwardLayer FFN
+        {
+            get;
+        }
 
         public bool IsTraining { get; private set; } = true;
 
         public void Train()
         {
             IsTraining = true;
-            Norm1.Train(); Attention.Train(); Norm2.Train(); FFN.Train();
+            Norm1.Train();
+            Attention.Train();
+            Norm2.Train();
+            FFN.Train();
         }
 
         public void Eval()
         {
             IsTraining = false;
-            Norm1.Eval(); Attention.Eval(); Norm2.Eval(); FFN.Eval();
+            Norm1.Eval();
+            Attention.Eval();
+            Norm2.Eval();
+            FFN.Eval();
         }
 
         /// <summary>
@@ -210,17 +231,26 @@ namespace DevOnBike.Overfit.DeepLearning
 
         public void Save(BinaryWriter bw)
         {
-            Norm1.Save(bw); Attention.Save(bw); Norm2.Save(bw); FFN.Save(bw);
+            Norm1.Save(bw);
+            Attention.Save(bw);
+            Norm2.Save(bw);
+            FFN.Save(bw);
         }
 
         public void Load(BinaryReader br)
         {
-            Norm1.Load(br); Attention.Load(br); Norm2.Load(br); FFN.Load(br);
+            Norm1.Load(br);
+            Attention.Load(br);
+            Norm2.Load(br);
+            FFN.Load(br);
         }
 
         public void Dispose()
         {
-            Norm1.Dispose(); Attention.Dispose(); Norm2.Dispose(); FFN.Dispose();
+            Norm1.Dispose();
+            Attention.Dispose();
+            Norm2.Dispose();
+            FFN.Dispose();
         }
     }
 }

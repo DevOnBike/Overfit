@@ -47,7 +47,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
 
             // shared(x): SwiGLU FFN, scaled by sigmoid(sharedGateInp · hidden).
             var logit = 0f;
-            for (var d = 0; d < DModel; d++) { logit += hidden[d] * sharedGateInp[d]; }
+            for (var d = 0; d < DModel; d++)
+            {
+                logit += hidden[d] * sharedGateInp[d];
+            }
             var g = 1f / (1f + MathF.Exp(-logit));
 
             var sharedFfn = new CachedFeedForwardBlock(DModel, SharedDff, FeedForwardActivation.SwiGLU);
@@ -108,7 +111,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             var hidden = new float[rows * DModel];
             for (var n = 0; n < rows; n++)
             {
-                for (var d = 0; d < DModel; d++) { hidden[n * DModel + d] = MathF.Sin((n + 1) * 0.7f + d * 0.9f) * 0.6f; }
+                for (var d = 0; d < DModel; d++)
+                {
+                    hidden[n * DModel + d] = MathF.Sin((n + 1) * 0.7f + d * 0.9f) * 0.6f;
+                }
             }
 
             // Reference: per-row single-token Decode.
@@ -138,7 +144,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         {
             var rng = new Random(seed);
             var w = new float[DModel * ExpertCount];
-            for (var i = 0; i < w.Length; i++) { w[i] = (float)(rng.NextDouble() * 2.0 - 1.0); }
+            for (var i = 0; i < w.Length; i++)
+            {
+                w[i] = (float)(rng.NextDouble() * 2.0 - 1.0);
+            }
             return w;
         }
 
@@ -160,14 +169,20 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
         {
             var s = TensorStorage<float>.Unpooled(n);
             var span = s.AsSpan();
-            for (var i = 0; i < n; i++) { span[i] = MathF.Sin(seed * 0.1f + i * 0.37f) * 0.2f; }
+            for (var i = 0; i < n; i++)
+            {
+                span[i] = MathF.Sin(seed * 0.1f + i * 0.37f) * 0.2f;
+            }
             return s;
         }
 
         private static float[] Vector(int n, int seed)
         {
             var v = new float[n];
-            for (var i = 0; i < n; i++) { v[i] = MathF.Cos(seed * 0.2f + i * 0.5f) * 0.5f; }
+            for (var i = 0; i < n; i++)
+            {
+                v[i] = MathF.Cos(seed * 0.2f + i * 0.5f) * 0.5f;
+            }
             return v;
         }
 
@@ -177,7 +192,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime
             var w = new float[DModel * ExpertCount];
             for (var d = 0; d < DModel; d++)
             {
-                for (var e = 0; e < ExpertCount; e++) { w[d * ExpertCount + e] = cols[e]; }
+                for (var e = 0; e < ExpertCount; e++)
+                {
+                    w[d * ExpertCount + e] = cols[e];
+                }
             }
             return w;
         }

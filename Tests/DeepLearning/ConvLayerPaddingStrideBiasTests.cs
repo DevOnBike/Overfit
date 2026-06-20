@@ -21,7 +21,10 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
 
         private static void Fill(Span<float> span, Random rng)
         {
-            for (var i = 0; i < span.Length; i++) { span[i] = (float)(rng.NextDouble() * 2 - 1); }
+            for (var i = 0; i < span.Length; i++)
+            {
+                span[i] = (float)(rng.NextDouble() * 2 - 1);
+            }
         }
 
         private static ConvLayer MakeConv(Random rng)
@@ -85,7 +88,10 @@ namespace DevOnBike.Overfit.Tests.DeepLearning
                 using var input = new AutogradNode(store, new TensorShape(1, InC, Hh, Ww), requiresGrad: false);
                 var outp = conv.Forward(graph, input);
                 var s = 0f;
-                foreach (var v in outp.DataView.AsReadOnlySpan()) { s += v; }
+                foreach (var v in outp.DataView.AsReadOnlySpan())
+                {
+                    s += v;
+                }
                 return s;
             }
 

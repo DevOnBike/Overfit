@@ -205,3 +205,41 @@ jobs:
           exit 1
         fi
         echo "Analyzer alive: the tripwire failed the build with OVERFIT008, as required."
+    # Second tripwire: the [OverfitHotPath] escalation (OVERFIT900) can rot independently of the
+    # rules themselves (a bad SupportedDiagnostics/Report wiring stops the error firing while every
+    # rule still reports its warning). Drop a per-call allocation inside a [OverfitHotPath] method and
+    # REQUIRE the build to fail with OVERFIT900.
+    - name: Tripwire — [OverfitHotPath] must escalate a per-call rule to OVERFIT900
+      run: |
+        cat > Sources/Main/Runtime/__HotPathTripwire.cs <<'EOF'
+        // CI tripwire (analyzer-guard job): [OverfitHotPath] escalation — never committed.
+        using DevOnBike.Overfit.Diagnostics;
+
+        namespace DevOnBike.Overfit.Runtime
+        {
+            internal static class __HotPathTripwire
+            {
+                [OverfitHotPath]
+                public static int[] Run()
+                {
+                    return new int[4];
+                }
+            }
+        }
+        EOF
+        set +e
+        OUTPUT=$(dotnet build ./Sources/Main/Main.csproj -c Release 2>&1)
+        STATUS=$?
+        set -e
+        rm Sources/Main/Runtime/__HotPathTripwire.cs
+        if [ "$STATUS" -eq 0 ]; then
+          echo "$OUTPUT" | tail -30
+          echo "::error::[OverfitHotPath] escalation is DEAD: a per-call allocation inside a marked method did NOT fail the build with OVERFIT900."
+          exit 1
+        fi
+        if ! echo "$OUTPUT" | grep -q "OVERFIT900"; then
+          echo "$OUTPUT" | tail -30
+          echo "::error::The hot-path tripwire build failed, but NOT with OVERFIT900 — investigate."
+          exit 1
+        fi
+        echo "Hot-path escalation alive: the tripwire failed the build with OVERFIT900, as required."

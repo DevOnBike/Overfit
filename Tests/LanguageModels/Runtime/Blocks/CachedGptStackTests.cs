@@ -397,7 +397,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     [[]], [new float[2 * 2]], [[]], [new float[2 * 2]], [[]], new float[2 * 2]);
                 stack.Decode([1f, -1f], _sw, cache, 0, // position
                         logits: new float[2]);
-            }); ;
+            });
+            ;
         }
 
         [Fact]
@@ -434,7 +435,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     [[]], [new float[2 * 2]], [[]], [new float[2 * 2]], [[]], new float[2 * 2]);
                 stack.Decode(new float[1], _sw, cache, 0, // position
                         logits: new float[2]);
-            }); ;
+            });
+            ;
 
             Assert.Throws<ArgumentException>(() =>
             {
@@ -443,7 +445,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     [[]], [new float[1]], [[]], [new float[2 * 2]], [[]], new float[2 * 2]);
                 stack.Decode(new float[2], _sw, cache, 0, // position
                         logits: new float[2]);
-            }); ;
+            });
+            ;
 
             Assert.Throws<ArgumentException>(() =>
             {
@@ -452,7 +455,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     [[]], [new float[2 * 2]], [[]], [new float[2 * 2]], [[]], new float[1]);
                 stack.Decode(new float[2], _sw, cache, 0, // position
                         logits: new float[2]);
-            }); ;
+            });
+            ;
 
             Assert.Throws<ArgumentException>(() =>
             {
@@ -461,7 +465,8 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Runtime.Blocks
                     [[]], [new float[2 * 2]], [[]], [new float[2 * 2]], [[]], new float[2 * 2]);
                 stack.Decode(new float[2], _sw, cache, 0, // position
                         logits: new float[1]);
-            }); ;
+            });
+            ;
         }
 
         [Fact]

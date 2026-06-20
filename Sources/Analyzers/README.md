@@ -19,32 +19,43 @@ nothing ships); tests and benchmarks are deliberately NOT covered.
 | `OVERFIT008` | Raw `Parallel.For/ForEach/Invoke` — ignores `SuppressParallelismOnCurrentThread` (oversubscription in data-parallel replicas, measured 1.8× slower) and allocates per dispatch (measured ~925 KB vs 0 B on the OverfitParallel pool). **Warning repo-wide in Main** (no per-call exemption — a suppress leak in a ctor breaks replicas the same way); measured exceptions keep `#pragma` + the benchmark cited | ✅ shipped |
 | `OVERFIT009` | `.ToArray()` in per-call code (explicit hot-path ban in `Sources/Main/README.md`) — slice the existing buffer or use pooled memory | ✅ shipped |
 | `OVERFIT015` | Direct `Xxx.IsSupported` on a hardware-intrinsics class outside `CpuFeatures` — gate ISA paths through `CpuFeatures.HasXxx` (one audit point, composed flags like `HasAvx2Fma`, identical JIT constant-folding; the two strays found at introduction were migrated). **Warning repo-wide in Main**, like 008 — it's a convention rule, not an allocation-context rule | ✅ shipped |
-| `OVERFIT010` | Per-call `new List<T>` / `Dictionary` / `HashSet` / `Queue` / `Stack` / `StringBuilder` / `MemoryStream` — pool it (`docs/performance-patterns.md` #1 ObjectPool, #26 ValueStringBuilder, #46p RecyclableMemoryStream) | proposed |
+| `OVERFIT010` | Per-call `new List<T>` / `Dictionary` / `HashSet` / `Queue` / `Stack` / `StringBuilder` / `MemoryStream` — pool it (`docs/performance-patterns.md` #1 ObjectPool, #26 ValueStringBuilder, #46p RecyclableMemoryStream) | ✅ shipped |
+| `OVERFIT011` | Struct used as `Dictionary<K,V>`/`HashSet<K>` key without `IEquatable<K>` / record struct — the DEFAULT `Equals`/`GetHashCode` for structs is **reflection-based** (`#46g`); a passed `IEqualityComparer<K>` silences it. Design rule, no context exemption | ✅ shipped |
+| `OVERFIT012` | Finalizer declared (`~T()`) — finalizable objects allocate slower and survive ≥2 GC generations; `IDisposable` + `GC.SuppressFinalize` instead (`#48a`) | ✅ shipped |
+| `OVERFIT013` | `.Count` read on `ConcurrentQueue`/`ConcurrentBag` (segment-walking + sync) — use `IsEmpty` or an approximate `Interlocked` counter (`#80`) | ✅ shipped |
+| `OVERFIT014` | `a.ToLower() == b.ToLower()` / `.ToUpper()` comparison — allocates a throwaway string per side; use `string.Equals(a, b, StringComparison.OrdinalIgnoreCase)` (`#46o`) | ✅ shipped |
 
 ## Extended catalog (grounded in `docs/performance-patterns.md`, 110 patterns)
 
-**Tier A — precise, low-false-positive, implement next** (each cites the pattern doc):
+**Tier A — SHIPPED 2026-06-13** as `OVERFIT010`–`OVERFIT014` (table above). All five are precise,
+low-false-positive rules; 010 and 014 are allocation rules (one-time + exception exempt), 011/012/013
+are convention rules. `OVERFIT015` (direct `Xxx.IsSupported` → `CpuFeatures.HasXxx`, source `#64`/`#67`)
+shipped earlier as the broader form of the original "IsSupported inside a loop" idea.
 
-| Id | Rule | Source pattern |
-|---|---|---|
-| `OVERFIT011` | Struct used as `Dictionary<K,V>`/`HashSet<K>` key without `IEquatable<K>` / record struct — the DEFAULT `Equals`/`GetHashCode` for structs is **reflection-based** | #46g |
-| `OVERFIT012` | Finalizer declared (`~T()`) — finalizable objects allocate slower and survive ≥2 GC generations; `IDisposable` + `GC.SuppressFinalize` instead | #48a |
-| `OVERFIT013` | `.Count` read on `ConcurrentQueue`/`ConcurrentBag` (segment-walking + sync) — use `IsEmpty` or an approximate `Interlocked` counter | #80 |
-| `OVERFIT014` | `a.ToLower() == b.ToLower()` / `.ToUpper()` comparison — allocates two strings; use `string.Equals(a, b, StringComparison.OrdinalIgnoreCase)` | #46o |
-| ~~`OVERFIT015`~~ | ~~IsSupported inside a loop~~ — **superseded & SHIPPED** as the broader rule: direct `Xxx.IsSupported` anywhere outside `CpuFeatures` → gate via `CpuFeatures.HasXxx` (one audit point; `static readonly bool` folds to a JIT constant exactly like the raw intrinsic, and hoisting falls out naturally) | #64, #67 |
+**Tier B — heuristic, suggestion-only. SHIPPED 2026-06-13.** These read code shape rather than a hard
+allocation, so they are **advisory: suggestion everywhere, and they do NOT escalate under
+`[OverfitHotPath]`** (they don't route through `OverfitPerfAnalysis.Report`) — a heuristic must never
+break a build.
 
-**Tier B — heuristic, suggestion-only severity:**
+| Id | Rule | Source pattern | Status |
+|---|---|---|---|
+| `OVERFIT016` | Large struct (estimated > 64 B = cache line) passed by value — pass as `in`. Size is summed from the field layout (no padding → under-counts, so only clearly-large structs trip); SIMD `Vector*` and generic type params are skipped | #56 | ✅ shipped |
+| `OVERFIT017` | A plain (non-record) struct with ≥1 instance field where all instance fields are readonly and no settable property — declare it `readonly struct` to drop defensive copies | #2 | ✅ shipped |
+| `OVERFIT018` | `readonly` field of a **mutable** struct (a non-readonly struct with ≥1 non-readonly instance field — catches enumerators, excludes immutable BCL values like `DateTime`/`Guid`): every access is a defensive copy, mutation is silently lost | #90 (the "Do NOT make this readonly" trap) | ✅ shipped |
+| `OVERFIT019` | Non-capturing lambda without the `static` keyword — `static` makes the no-capture contract enforced (a future accidental capture becomes a compile error). Shares the capture analysis with `OVERFIT004` via `OverfitPerfAnalysis.LambdaCapturesEnclosingState` | #46h | ✅ shipped |
+| `OVERFIT020` | A primitive-array parameter (`float[]`/`int[]`/`byte[]`/…) of a **private/internal**, non-async, non-iterator, non-ctor method that is only read/indexed and **provably does not escape** (no field/return/array-argument/lambda capture) → take a `ReadOnlySpan<T>` (or `Span<T>` if it writes elements) so callers pass arrays, slices or `stackalloc` without a copy. Intra-method escape analysis via `RegisterOperationBlockAction`; conservative (skips ctors/public surface so it never suggests breaking a stored-weights API) | span-friendly APIs | ✅ shipped |
 
-| Id | Rule | Source pattern |
-|---|---|---|
-| `OVERFIT016` | Large struct (est. > 64 B = cache line) passed by value — pass by `in`/`ref` | #56 principle 1 |
-| `OVERFIT017` | Struct declared without `readonly` though all fields could be — defensive copies | #2 |
-| `OVERFIT018` | `readonly` field holding a MUTABLE struct (e.g. an enumerator) — every access is a defensive copy, mutation is silently lost | #90 (the "Do NOT make this readonly" trap) |
-| `OVERFIT019` | Non-capturing lambda without the `static` keyword — `static` guards against future accidental captures | #46h |
+**Tier C — architectural (convention/attribute):**
 
-**Tier C — architectural (need a convention/attribute):**
-
-- **`[OverfitHotPath]` attribute** (Roslyn's `[PerformanceSensitive]`, #35): escalates ALL OVERFIT rules to **error** inside marked methods/types — the per-method evolution of the per-directory editorconfig ratchet.
+- **`[OverfitHotPath]` — SHIPPED 2026-06-13** (Roslyn's `[PerformanceSensitive]`, `#35`).
+  `DevOnBike.Overfit.Diagnostics.OverfitHotPathAttribute` (declared in `Sources/Main`, ships with the
+  library) marks a method / constructor / property / class / struct as zero-allocation. Inside a marked
+  member — or any member of a marked type, walking nested + outer types and accessor→property — every
+  per-call rule (`001`–`007`, `009`–`011`, `013`, `014`) reports **`OVERFIT900` (error)** instead of its
+  directory-configured severity: the per-member evolution of the per-directory editorconfig ratchet.
+  `OVERFIT900`'s message names the underlying rule. Not escalated: `008`/`015` (already error repo-wide)
+  and `012` (a type-level finalizer declaration, not a per-call op). Justify a site with
+  `#pragma warning disable OVERFIT900` + a reason, or drop the attribute — never loosen `OVERFIT900` globally.
 - `foreach` over `List<T>` in hot paths → indexed `for` / `CollectionsMarshal.AsSpan` (#46c) — too noisy globally, only under `[OverfitHotPath]`.
 
 **Handled via `BannedSymbols.txt` instead of analyzer rules** (named symbols → cheaper; added 2026-06-12):

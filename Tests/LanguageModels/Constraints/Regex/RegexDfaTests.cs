@@ -22,7 +22,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Constraints.Regex
             foreach (var c in input)
             {
                 state = dfa.Next(state, c);
-                if (state < 0) { return false; }
+                if (state < 0)
+                {
+                    return false;
+                }
             }
 
             return dfa.IsAccepting(state);

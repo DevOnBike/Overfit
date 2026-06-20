@@ -34,18 +34,33 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval.Evaluation
             UnstableCount = unstable;
         }
 
-        public int TopK { get; }
+        public int TopK
+        {
+            get;
+        }
 
         /// <summary>The minimum mean Jaccard for a group to count as stable.</summary>
-        public double MinJaccard { get; }
+        public double MinJaccard
+        {
+            get;
+        }
 
         /// <summary>Mean stability across all groups.</summary>
-        public double MeanStability { get; }
+        public double MeanStability
+        {
+            get;
+        }
 
         /// <summary>How many groups fell below <see cref="MinJaccard"/>.</summary>
-        public int UnstableCount { get; }
+        public int UnstableCount
+        {
+            get;
+        }
 
-        public IReadOnlyList<GroupResult> Groups { get; }
+        public IReadOnlyList<GroupResult> Groups
+        {
+            get;
+        }
 
         /// <summary>One paraphrase group's stability: the mean pairwise overlap and the per-variant retrieved ids.</summary>
         public sealed class GroupResult
@@ -58,15 +73,27 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval.Evaluation
                 RetrievedPerVariant = retrievedPerVariant;
             }
 
-            public string Name { get; }
+            public string Name
+            {
+                get;
+            }
 
             /// <summary>Mean pairwise Jaccard overlap of the retrieved id sets across the group's variants (0..1).</summary>
-            public double MeanJaccard { get; }
+            public double MeanJaccard
+            {
+                get;
+            }
 
-            public bool IsStable { get; }
+            public bool IsStable
+            {
+                get;
+            }
 
             /// <summary>The retrieved top-K id list for each variant, in variant order.</summary>
-            public IReadOnlyList<IReadOnlyList<string>> RetrievedPerVariant { get; }
+            public IReadOnlyList<IReadOnlyList<string>> RetrievedPerVariant
+            {
+                get;
+            }
         }
     }
 }

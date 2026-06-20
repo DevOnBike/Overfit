@@ -25,7 +25,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
         [LongFact]
         public void Profile_Decode_PerComponent()
         {
-            if (!File.Exists(Path)) { _out.WriteLine("missing gguf"); return; }
+            if (!File.Exists(Path))
+            {
+                _out.WriteLine("missing gguf");
+                return;
+            }
 
             using var engine = CachedLlamaInferenceEngine.LoadGguf(Path);
             var tok = GgufTokenizer.Load(Path);
@@ -34,7 +38,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Diagnostics
 
             using var session = engine.CreateSession(256);
             session.Reset(prompt);
-            for (var i = 0; i < 8; i++) { session.GenerateNextToken(in sampling); }   // warm-up
+            for (var i = 0; i < 8; i++)
+            {
+                session.GenerateNextToken(in sampling);
+            }   // warm-up
 
             DecodeProfiler.Enabled = true;
             try

@@ -73,7 +73,10 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
                 var loss = Ops.TensorMath.MSELoss(graph, pred, tNode);
 
                 var l = loss.DataView.AsReadOnlySpan()[0];
-                if (step == 0) { first = l; }
+                if (step == 0)
+                {
+                    first = l;
+                }
                 last = l;
 
                 graph.Backward(loss);
@@ -95,7 +98,11 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
         {
             var wF32 = new float[(long)M * K];
             Span<float> row = new float[K];
-            for (var o = 0; o < M; o++) { w.DecodeRow(o, row); row.CopyTo(wF32.AsSpan(o * K, K)); }
+            for (var o = 0; o < M; o++)
+            {
+                w.DecodeRow(o, row);
+                row.CopyTo(wF32.AsSpan(o * K, K));
+            }
 
             var y = new float[N * M];
             Span<float> xa = stackalloc float[R]; // hoisted out of the loop (CA2014); fully overwritten each row
@@ -105,20 +112,29 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
                 for (var o = 0; o < M; o++)
                 {
                     var acc = 0f;
-                    for (var i = 0; i < K; i++) { acc += wF32[o * K + i] * x[s * K + i]; }
+                    for (var i = 0; i < K; i++)
+                    {
+                        acc += wF32[o * K + i] * x[s * K + i];
+                    }
                     y[s * M + o] = acc;
                 }
                 // + (x·Atrue)·Btrue
                 for (var r = 0; r < R; r++)
                 {
                     var acc = 0f;
-                    for (var i = 0; i < K; i++) { acc += x[s * K + i] * aTrue[i * R + r]; }
+                    for (var i = 0; i < K; i++)
+                    {
+                        acc += x[s * K + i] * aTrue[i * R + r];
+                    }
                     xa[r] = acc;
                 }
                 for (var o = 0; o < M; o++)
                 {
                     var acc = 0f;
-                    for (var r = 0; r < R; r++) { acc += xa[r] * bTrue[r * M + o]; }
+                    for (var r = 0; r < R; r++)
+                    {
+                        acc += xa[r] * bTrue[r * M + o];
+                    }
                     y[s * M + o] += acc;
                 }
             }
@@ -136,7 +152,10 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
         {
             var r = new Random(seed);
             var v = new float[n];
-            for (var i = 0; i < n; i++) { v[i] = (float)(r.NextDouble() * 2 - 1) * 0.3f; }
+            for (var i = 0; i < n; i++)
+            {
+                v[i] = (float)(r.NextDouble() * 2 - 1) * 0.3f;
+            }
             return v;
         }
 
@@ -145,7 +164,10 @@ namespace DevOnBike.Overfit.Tests.Core.Autograd
             var rng = new Random(seed);
             var bound = 1f / MathF.Sqrt(R);
             var d = p.DataSpan;
-            for (var i = 0; i < d.Length; i++) { d[i] = ((float)rng.NextDouble() * 2f - 1f) * bound; }
+            for (var i = 0; i < d.Length; i++)
+            {
+                d[i] = ((float)rng.NextDouble() * 2f - 1f) * bound;
+            }
         }
 
         private static Q4KWeight BuildRandomQ4K(int seed)

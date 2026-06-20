@@ -73,10 +73,18 @@ namespace DevOnBike.Overfit.Audio.Tts
                 var value = line[(eq + 1)..];
                 switch (key)
                 {
-                    case "id": realId = value; break;
-                    case "language": language = value; break;
-                    case "referenceAudio": reference = value; break;
-                    case "embeddingDim": _ = int.TryParse(value, out embeddingDim); break;
+                    case "id":
+                        realId = value;
+                        break;
+                    case "language":
+                        language = value;
+                        break;
+                    case "referenceAudio":
+                        reference = value;
+                        break;
+                    case "embeddingDim":
+                        _ = int.TryParse(value, out embeddingDim);
+                        break;
                 }
             }
 
@@ -84,7 +92,11 @@ namespace DevOnBike.Overfit.Audio.Tts
             var binPath = Path.Combine(directory, baseName + ".embedding.bin");
             if (embeddingDim > 0 && File.Exists(binPath))
             {
+                // OVERFIT001: load-time — reads a persisted voice-profile embedding from disk once; the array
+                // is stored on the returned VoiceProfile, not per-call scratch.
+#pragma warning disable OVERFIT001
                 embedding = new float[embeddingDim];
+#pragma warning restore OVERFIT001
                 using var br = new BinaryReader(File.OpenRead(binPath));
                 for (var k = 0; k < embeddingDim; k++)
                 {

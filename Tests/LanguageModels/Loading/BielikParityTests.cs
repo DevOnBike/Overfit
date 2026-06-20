@@ -31,7 +31,11 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
         [LongFact]
         public void Bielik_GreedyParity_PrintTokens()
         {
-            if (!File.Exists(Fp16Path)) { _out.WriteLine($"missing {Fp16Path}"); return; }
+            if (!File.Exists(Fp16Path))
+            {
+                _out.WriteLine($"missing {Fp16Path}");
+                return;
+            }
 
             using var engine = GgufLlamaLoader.Load(Fp16Path, quantize: false, mmap: false);
             var tok = GgufTokenizer.Load(Fp16Path);
@@ -47,7 +51,10 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Loading
             for (var i = 0; i < MaxNew && !session.IsFull; i++)
             {
                 var t = session.GenerateNextToken(in sampling);
-                if (t == tok.EosId) { break; }
+                if (t == tok.EosId)
+                {
+                    break;
+                }
                 gen.Add(t);
             }
 
