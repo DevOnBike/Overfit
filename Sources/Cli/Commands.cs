@@ -15,6 +15,7 @@ using DevOnBike.Overfit.LanguageModels.Whisper;
 using DevOnBike.Overfit.Mcp;
 using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Server;
+using DevOnBike.Overfit.Serving;
 
 namespace DevOnBike.Overfit.Cli
 {
@@ -146,7 +147,7 @@ namespace DevOnBike.Overfit.Cli
 
         private const string DefaultSystemPrompt = "You are a concise, helpful assistant running locally in pure .NET.";
 
-        public static int Serve(string model, string host, int port, string? embedModel, string? ttsModel, string? ttsSnac)
+        public static int Serve(string model, string host, int port, string? embedModel, string? ttsModel, string? ttsSnac, int sessions = 1)
         {
             var path = ModelCache.Resolve(model);
             if (path is null)
@@ -156,19 +157,37 @@ namespace DevOnBike.Overfit.Cli
                 return 1;
             }
 
-            Console.WriteLine($"Loading {Path.GetFileName(path)} ...");
-            OverfitClient client;
+            if (sessions < 1)
+            {
+                sessions = 1;
+            }
+
+            // One client per session — each owns its KV cache (extra RAM); the model weights are shared via
+            // mmap (the OS page cache de-duplicates them), so N sessions ≈ 1× weights + N× KV.
+            Console.WriteLine(sessions == 1
+                ? $"Loading {Path.GetFileName(path)} ..."
+                : $"Loading {Path.GetFileName(path)} into {sessions} sessions ...");
+            var clients = new List<OverfitClient>(sessions);
             try
             {
-                client = OverfitClient.LoadGguf(path, mmap: true);
+                for (var i = 0; i < sessions; i++)
+                {
+                    var c = OverfitClient.LoadGguf(path, mmap: true);
+                    c.AddSystem(DefaultSystemPrompt);
+                    clients.Add(c);
+                }
             }
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"Failed to load '{Path.GetFileName(path)}': {ex.Message}");
+                foreach (var c in clients)
+                {
+                    c.Dispose();
+                }
                 return 1;
             }
 
-            client.AddSystem(DefaultSystemPrompt);
+            var pool = new OverfitResourcePool<OverfitClient>(clients);
             var modelName = Path.GetFileNameWithoutExtension(path);
 
             // Optional in-process sentence embedder → serves /v1/embeddings (pure .NET, no data egress).
@@ -180,7 +199,7 @@ namespace DevOnBike.Overfit.Cli
                 {
                     Console.Error.WriteLine($"Embedding model '{embedModel}' not found.");
                     Console.Error.WriteLine($"Pull it first:  overfit pull minilm   (or pass a directory path with config.json + vocab.txt + model.safetensors)");
-                    client.Dispose();
+                    pool.Dispose();
                     return 1;
                 }
 
@@ -192,7 +211,7 @@ namespace DevOnBike.Overfit.Cli
                 catch (Exception ex)
                 {
                     Console.Error.WriteLine($"Failed to load embedding model '{embedDir}': {ex.Message}");
-                    client.Dispose();
+                    pool.Dispose();
                     return 1;
                 }
             }
@@ -209,7 +228,7 @@ namespace DevOnBike.Overfit.Cli
                     Console.Error.WriteLine(orpheus is null ? "  • Orpheus GGUF not found (pull it, or pass --tts-model <file.gguf>)." : $"  • Orpheus: {orpheus}");
                     Console.Error.WriteLine(snac is null ? "  • SNAC weights not found (run Scripts/convert_snac.py, or pass --tts-snac <dir>)." : $"  • SNAC: {snac}");
                     embedder?.Dispose();
-                    client.Dispose();
+                    pool.Dispose();
                     return 1;
                 }
 
@@ -222,7 +241,7 @@ namespace DevOnBike.Overfit.Cli
                 {
                     Console.Error.WriteLine($"Failed to load TTS: {ex.Message}");
                     embedder?.Dispose();
-                    client.Dispose();
+                    pool.Dispose();
                     return 1;
                 }
             }
@@ -237,7 +256,7 @@ namespace DevOnBike.Overfit.Cli
             try
             {
                 OverfitOpenAiServer.Serve(
-                    client,
+                    pool,
                     modelName,
                     host,
                     port,
@@ -270,7 +289,7 @@ namespace DevOnBike.Overfit.Cli
             {
                 tts?.Dispose();
                 embedder?.Dispose();
-                client.Dispose();
+                pool.Dispose();
             }
 
             Console.WriteLine("Server stopped.");

@@ -26,6 +26,7 @@ namespace DevOnBike.Overfit.Serving
         private readonly ConcurrentBag<T> _available;
         private readonly SemaphoreSlim _slots;
 
+        private readonly bool _ownsItems;
         private long _totalRented;
         private long _totalRejected;
         private long _waitTicksTotal;
@@ -33,15 +34,19 @@ namespace DevOnBike.Overfit.Serving
         private int _peakActive;
         private bool _disposed;
 
-        /// <summary>Creates a pool that owns <paramref name="items"/> (each disposed with the pool if it is
-        /// <see cref="IDisposable"/>). The item count is the maximum concurrency.</summary>
-        public OverfitResourcePool(IReadOnlyList<T> items)
+        /// <summary>Creates a pool over <paramref name="items"/>. The item count is the maximum concurrency.
+        /// When <paramref name="ownsItems"/> is true (default) each <see cref="IDisposable"/> item is disposed
+        /// with the pool; pass false to wrap caller-owned items (e.g. a pool-of-1 around an externally-owned
+        /// client) without taking over their lifetime.</summary>
+        public OverfitResourcePool(IReadOnlyList<T> items, bool ownsItems = true)
         {
             ArgumentNullException.ThrowIfNull(items);
             if (items.Count == 0)
             {
                 throw new ArgumentException("A resource pool needs at least one item.", nameof(items));
             }
+
+            _ownsItems = ownsItems;
 
             _items = new T[items.Count];
             _available = [];
@@ -141,11 +146,14 @@ namespace DevOnBike.Overfit.Serving
             }
             _disposed = true;
 
-            foreach (var item in _items)
+            if (_ownsItems)
             {
-                if (item is IDisposable disposable)
+                foreach (var item in _items)
                 {
-                    disposable.Dispose();
+                    if (item is IDisposable disposable)
+                    {
+                        disposable.Dispose();
+                    }
                 }
             }
             _slots.Dispose();

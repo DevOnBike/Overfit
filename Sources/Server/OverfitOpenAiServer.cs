@@ -13,6 +13,7 @@ using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Embeddings;
 using DevOnBike.Overfit.Server.OpenAi;
+using DevOnBike.Overfit.Serving;
 
 namespace DevOnBike.Overfit.Server
 {
@@ -21,11 +22,17 @@ namespace DevOnBike.Overfit.Server
     /// drops cleanly into the Native-AOT <c>overfit</c> CLI. Exposes <c>/v1/chat/completions</c> (streaming SSE +
     /// non-streaming), <c>/v1/models</c>, <c>/v1/embeddings</c>, <c>/v1/audio/speech</c> and <c>/health</c>, plus
     /// the self-describing <c>/openapi.yaml</c> (the API contract) and <c>/docs</c> (Swagger UI). Point any OpenAI
-    /// client at the base URL and only change the model name. Requests are served STRICTLY ONE AT A TIME (single-tenant model session, one KV
-    /// cache) — exactly like a local llama.cpp server; for multi-tenant use a session-per-request pool.
+    /// client at the base URL and only change the model name. Concurrency is bounded by the client pool: the
+    /// single-client <see cref="Serve(OverfitClient, string, string, int, string, SentenceEmbedder, OrpheusVoiceEngine, Action{string}, CancellationToken)"/>
+    /// overload serialises requests through one session (like a local llama.cpp server); the
+    /// <see cref="Serve(OverfitResourcePool{OverfitClient}, string, string, int, string, SentenceEmbedder, OrpheusVoiceEngine, Action{string}, CancellationToken)"/>
+    /// overload decodes up to <c>pool.Size</c> chat requests at once and sheds excess load with HTTP 503.
     /// </summary>
     public static class OverfitOpenAiServer
     {
+        // How long a chat request waits for a free session before the server sheds it with HTTP 503.
+        private const int RentTimeoutSeconds = 30;
+
         /// <summary>
         /// Binds an <see cref="HttpListener"/> on <paramref name="host"/>:<paramref name="port"/> and serves
         /// requests until <paramref name="cancellationToken"/> is cancelled. Blocks the calling thread. Each
@@ -54,6 +61,31 @@ namespace DevOnBike.Overfit.Server
         {
             ArgumentNullException.ThrowIfNull(client);
 
+            // Single caller-owned client → a pool-of-1 that does NOT own it (the caller still disposes it).
+            // Behaviour is identical to before: one session, requests serialised through the single client.
+            using var pool = new OverfitResourcePool<OverfitClient>([client], ownsItems: false);
+            Serve(pool, modelName, host, port, systemMessage, embedder, tts, onListening, cancellationToken);
+        }
+
+        /// <summary>
+        /// Multi-session overload: serves requests across a <see cref="OverfitResourcePool{T}"/> of clients so up
+        /// to <c>pool.Size</c> chat completions decode concurrently (each client owns its KV cache; the weights are
+        /// shared via mmap). Requests beyond the pool wait up to a timeout and are otherwise shed with HTTP 503.
+        /// Embeddings and TTS use single shared engines and are serialised. <c>/health</c> reports pool load.
+        /// </summary>
+        public static void Serve(
+            OverfitResourcePool<OverfitClient> pool,
+            string modelName,
+            string host,
+            int port,
+            string systemMessage,
+            SentenceEmbedder? embedder = null,
+            OrpheusVoiceEngine? tts = null,
+            Action<string>? onListening = null,
+            CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(pool);
+
             var bindHost = host is "0.0.0.0" or "*" or "+" ? "+" : host;
             var prefix = $"http://{bindHost}:{port}/";
 
@@ -76,8 +108,21 @@ namespace DevOnBike.Overfit.Server
                 }
             });
 
-            var created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            var state = new ServerState
+            {
+                Pool = pool,
+                ModelName = modelName,
+                SystemMessage = systemMessage,
+                Embedder = embedder,
+                Tts = tts,
+                Created = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                EmbedGate = new SemaphoreSlim(1, 1),
+                TtsGate = new SemaphoreSlim(1, 1),
+                RentTimeout = TimeSpan.FromSeconds(RentTimeoutSeconds),
+                StopToken = cancellationToken,
+            };
 
+            var inFlight = 0;
             while (!cancellationToken.IsCancellationRequested)
             {
                 HttpListenerContext ctx;
@@ -94,97 +139,180 @@ namespace DevOnBike.Overfit.Server
                     break;   // listener disposed.
                 }
 
-                try
-                {
-                    Handle(ctx, client, modelName, systemMessage, embedder, tts, created);
-                }
-                catch (Exception ex)
-                {
-                    TryWriteError(ctx.Response, HttpStatusCode.InternalServerError, ex.Message);
-                }
-                finally
+                // One task per request: up to pool.Size chat decodes run concurrently; the rest wait/shed.
+                Interlocked.Increment(ref inFlight);
+                _ = Task.Run(() =>
                 {
                     try
                     {
-                        ctx.Response.Close();
+                        HandleRequest(ctx, state);
                     }
-                    catch
+                    finally
                     {
-                        // client may have already disconnected (e.g. aborted a stream).
+                        Interlocked.Decrement(ref inFlight);
                     }
+                });
+            }
+
+            // Drain in-flight requests (bounded) so pooled clients aren't disposed mid-decode by the caller.
+            for (var i = 0; i < 200 && Volatile.Read(ref inFlight) > 0; i++)
+            {
+                Thread.Sleep(50);
+            }
+
+            state.EmbedGate.Dispose();
+            state.TtsGate.Dispose();
+        }
+
+        private static void HandleRequest(HttpListenerContext ctx, ServerState s)
+        {
+            try
+            {
+                var req = ctx.Request;
+                var path = req.Url?.AbsolutePath ?? "/";
+                var method = req.HttpMethod;
+
+                if (method == "GET" && path is "/health" or "/")
+                {
+                    var m = s.Pool.Metrics;
+                    WriteRaw(ctx.Response, HttpStatusCode.OK, "application/json",
+                        $"{{\"status\":\"ok\",\"sessions\":{{\"size\":{m.Size},\"active\":{m.Active},"
+                        + $"\"available\":{m.Available},\"rented\":{m.TotalRented},\"rejected\":{m.TotalRejected},"
+                        + $"\"peak\":{m.PeakActive}}}}}");
+                    return;
+                }
+
+                if (method == "GET" && path == "/openapi.yaml")
+                {
+                    // The machine-readable contract — import into Swagger UI / Postman / an OpenAPI codegen.
+                    WriteRaw(ctx.Response, HttpStatusCode.OK, "application/yaml; charset=utf-8", OpenApiYaml());
+                    return;
+                }
+
+                if (method == "GET" && path is "/docs" or "/docs/")
+                {
+                    // Swagger UI for this server's /openapi.yaml. The viewer assets load from a CDN, so /docs
+                    // needs internet to render (the API itself stays fully local — no prompt/data leaves).
+                    WriteRaw(ctx.Response, HttpStatusCode.OK, "text/html; charset=utf-8", SwaggerUiHtml);
+                    return;
+                }
+
+                if (method == "GET" && path == "/v1/models")
+                {
+                    var models = new ModelsResponse { Data = [new ModelInfo { Id = s.ModelName, Created = s.Created }] };
+                    WriteJson(ctx.Response, HttpStatusCode.OK, models, OpenAiJsonContext.Default.ModelsResponse);
+                    return;
+                }
+
+                if (method == "POST" && path == "/v1/chat/completions")
+                {
+                    // Rent a session for the duration of the decode. Full pool → wait up to RentTimeout, then shed
+                    // load with 503 rather than queue unboundedly. A cancelled wait (server stopping) is also a 503.
+                    OverfitResourcePool<OverfitClient>.Lease lease;
+                    try
+                    {
+                        if (!s.Pool.TryRent(s.RentTimeout, s.StopToken, out lease))
+                        {
+                            TryWriteError(ctx.Response, HttpStatusCode.ServiceUnavailable,
+                                $"server busy — all {s.Pool.Size} sessions in use; retry shortly.");
+                            return;
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        TryWriteError(ctx.Response, HttpStatusCode.ServiceUnavailable, "server is shutting down.");
+                        return;
+                    }
+
+                    using (lease)
+                    {
+                        HandleChatCompletions(ctx, lease.Value, s.ModelName, s.SystemMessage);
+                    }
+                    return;
+                }
+
+                if (method == "POST" && path == "/v1/embeddings")
+                {
+                    if (s.Embedder is null)
+                    {
+                        // No embedder loaded — a chat GGUF alone can't serve sentence embeddings. Clear, actionable 501.
+                        TryWriteError(ctx.Response, HttpStatusCode.NotImplemented,
+                            "embeddings are not served — start with an embedding model (e.g. 'overfit serve <model> --embed-model <dir>').");
+                        return;
+                    }
+
+                    // SentenceEmbedder holds a single scratch arena — serialise concurrent embedding calls.
+                    s.EmbedGate.Wait(s.StopToken);
+                    try
+                    {
+                        HandleEmbeddings(ctx, s.Embedder, s.ModelName);
+                    }
+                    finally
+                    {
+                        s.EmbedGate.Release();
+                    }
+                    return;
+                }
+
+                if (method == "POST" && path == "/v1/audio/speech")
+                {
+                    if (s.Tts is null)
+                    {
+                        TryWriteError(ctx.Response, HttpStatusCode.NotImplemented,
+                            "text-to-speech is not served — start with a TTS model (e.g. 'overfit serve <model> "
+                            + "--tts-model <orpheus.gguf> --tts-snac <dir>').");
+                        return;
+                    }
+
+                    // Single TTS engine — serialise.
+                    s.TtsGate.Wait(s.StopToken);
+                    try
+                    {
+                        HandleAudioSpeech(ctx, s.Tts);
+                    }
+                    finally
+                    {
+                        s.TtsGate.Release();
+                    }
+                    return;
+                }
+
+                TryWriteError(ctx.Response, HttpStatusCode.NotFound, $"no route for {method} {path}");
+            }
+            catch (OperationCanceledException)
+            {
+                TryWriteError(ctx.Response, HttpStatusCode.ServiceUnavailable, "server is shutting down.");
+            }
+            catch (Exception ex)
+            {
+                TryWriteError(ctx.Response, HttpStatusCode.InternalServerError, ex.Message);
+            }
+            finally
+            {
+                try
+                {
+                    ctx.Response.Close();
+                }
+                catch
+                {
+                    // client may have already disconnected (e.g. aborted a stream).
                 }
             }
         }
 
-        private static void Handle(HttpListenerContext ctx, OverfitClient client, string modelName, string systemMessage, SentenceEmbedder? embedder, OrpheusVoiceEngine? tts, long created)
+        /// <summary>Per-server shared state handed to each request task.</summary>
+        private sealed class ServerState
         {
-            var req = ctx.Request;
-            var path = req.Url?.AbsolutePath ?? "/";
-            var method = req.HttpMethod;
-
-            if (method == "GET" && path is "/health" or "/")
-            {
-                WriteRaw(ctx.Response, HttpStatusCode.OK, "application/json", "{\"status\":\"ok\"}");
-                return;
-            }
-
-            if (method == "GET" && path == "/openapi.yaml")
-            {
-                // The machine-readable contract — import into Swagger UI / Postman / an OpenAPI codegen.
-                WriteRaw(ctx.Response, HttpStatusCode.OK, "application/yaml; charset=utf-8", OpenApiYaml());
-                return;
-            }
-
-            if (method == "GET" && path is "/docs" or "/docs/")
-            {
-                // Swagger UI for this server's /openapi.yaml. The viewer assets load from a CDN, so /docs
-                // needs internet to render (the API itself stays fully local — no prompt/data leaves).
-                WriteRaw(ctx.Response, HttpStatusCode.OK, "text/html; charset=utf-8", SwaggerUiHtml);
-                return;
-            }
-
-            if (method == "GET" && path == "/v1/models")
-            {
-                var models = new ModelsResponse { Data = [new ModelInfo { Id = modelName, Created = created }] };
-                WriteJson(ctx.Response, HttpStatusCode.OK, models, OpenAiJsonContext.Default.ModelsResponse);
-                return;
-            }
-
-            if (method == "POST" && path == "/v1/chat/completions")
-            {
-                HandleChatCompletions(ctx, client, modelName, systemMessage);
-                return;
-            }
-
-            if (method == "POST" && path == "/v1/embeddings")
-            {
-                if (embedder is null)
-                {
-                    // No embedder loaded — a chat GGUF alone can't serve sentence embeddings. Clear, actionable 501.
-                    TryWriteError(ctx.Response, HttpStatusCode.NotImplemented,
-                        "embeddings are not served — start with an embedding model (e.g. 'overfit serve <model> --embed-model <dir>').");
-                    return;
-                }
-
-                HandleEmbeddings(ctx, embedder, modelName);
-                return;
-            }
-
-            if (method == "POST" && path == "/v1/audio/speech")
-            {
-                if (tts is null)
-                {
-                    TryWriteError(ctx.Response, HttpStatusCode.NotImplemented,
-                        "text-to-speech is not served — start with a TTS model (e.g. 'overfit serve <model> "
-                        + "--tts-model <orpheus.gguf> --tts-snac <dir>').");
-                    return;
-                }
-
-                HandleAudioSpeech(ctx, tts);
-                return;
-            }
-
-            TryWriteError(ctx.Response, HttpStatusCode.NotFound, $"no route for {method} {path}");
+            public required OverfitResourcePool<OverfitClient> Pool;
+            public required string ModelName;
+            public required string SystemMessage;
+            public SentenceEmbedder? Embedder;
+            public OrpheusVoiceEngine? Tts;
+            public long Created;
+            public required SemaphoreSlim EmbedGate;
+            public required SemaphoreSlim TtsGate;
+            public TimeSpan RentTimeout;
+            public CancellationToken StopToken;
         }
 
         private static void HandleAudioSpeech(HttpListenerContext ctx, OrpheusVoiceEngine tts)

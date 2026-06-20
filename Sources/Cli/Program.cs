@@ -70,6 +70,12 @@ var serveTtsSnac = new Option<string?>("--tts-snac")
     Description = "SNAC decoder weights directory for TTS (snac_24khz.safetensors). Default: $OVERFIT_SNAC_DIR or "
         + "~/.overfit/snac.",
 };
+var serveSessions = new Option<int>("--sessions")
+{
+    Description = "Number of concurrent chat sessions (one KV cache each; weights shared via mmap). Default 1 "
+        + "(serialized, like llama.cpp). N>1 decodes N chats at once at the cost of N× KV-cache RAM.",
+    DefaultValueFactory = _ => 1,
+};
 var serveCommand = new Command("serve", "Start an OpenAI-compatible HTTP server for a model.")
 {
     serveModel,
@@ -78,6 +84,7 @@ var serveCommand = new Command("serve", "Start an OpenAI-compatible HTTP server 
     serveEmbedModel,
     serveTtsModel,
     serveTtsSnac,
+    serveSessions,
 };
 serveCommand.SetAction(parseResult => Commands.Serve(
     parseResult.GetValue(serveModel)!,
@@ -85,7 +92,8 @@ serveCommand.SetAction(parseResult => Commands.Serve(
     parseResult.GetValue(servePort),
     parseResult.GetValue(serveEmbedModel),
     parseResult.GetValue(serveTtsModel),
-    parseResult.GetValue(serveTtsSnac)));
+    parseResult.GetValue(serveTtsSnac),
+    parseResult.GetValue(serveSessions)));
 
 // ── tts: text → speech (WAV), in-process, watermarked. Placeholder engine until the neural backend lands. ──
 var ttsText = new Option<string>("--text")
