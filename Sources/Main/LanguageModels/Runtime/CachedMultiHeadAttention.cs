@@ -49,6 +49,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly float[] _hiddenScales;
         private readonly short[] _hiddenBsums;
 
+        // Whole-matrix Q4_K attention scratch (M3, OVERFIT_REPACK_ATTN). Allocated only when the flag is on
+        // (off by default → no RAM cost): _qWhole holds the whole-Q GEMV output for every head (head-contiguous);
+        // _attnBands gathers every head's attention output for the single whole-O GEMV; _attn* is its Q8_K activation.
+        private readonly float[] _qWhole;
+        private readonly float[] _attnBands;
+        private readonly sbyte[] _attnQuants;
+        private readonly float[] _attnScales;
+        private readonly short[] _attnBsums;
+
         /// <param name="dModel">Model embedding dimension; must be divisible by <paramref name="headCount"/>.</param>
         /// <param name="headCount">Number of attention (query) heads.</param>
         /// <param name="maxSequenceLength">Maximum sequence length (context window) the KV cache is sized for.</param>
@@ -101,6 +110,25 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 _heads[h] = new CachedSingleHeadAttention(
                 dModel, HeadDimension, maxSequenceLength, attnLogitSoftcap);
             }
+
+            // Whole-matrix attention scratch only when OVERFIT_REPACK_ATTN is on (else empty, no RAM cost).
+            if (Q4KGemvKernel.AttnEnabled)
+            {
+                var wholeSize = headCount * HeadDimension;
+                _qWhole = new float[wholeSize];
+                _attnBands = new float[wholeSize];
+                _attnQuants = new sbyte[wholeSize];
+                _attnScales = new float[(wholeSize + Q4KDotKernel.SuperBlockElements - 1) / Q4KDotKernel.SuperBlockElements];
+                _attnBsums = new short[(wholeSize + Q4KDotKernel.GroupSize - 1) / Q4KDotKernel.GroupSize];
+            }
+            else
+            {
+                _qWhole = [];
+                _attnBands = [];
+                _attnQuants = [];
+                _attnScales = [];
+                _attnBsums = [];
+            }
         }
 
         /// <summary>Gemma-2 attention logit soft-cap applied to pre-softmax scores (0 = off).</summary>
@@ -144,6 +172,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             Span<float> output,
             RopeTable? rope = null)
         {
+            // M3 whole-matrix Q4_K attention (OVERFIT_REPACK_ATTN): when the block carries repackable whole
+            // Q/O handles, decode Q and O as single 8×8 GEMVs over all heads (split per head after). Returns
+            // false (and falls through to the per-head path below) for non-GQA / non-Q4_K / non-repackable blocks.
+            if (Q4KGemvKernel.AttnEnabled
+                && TryDecodeWholeMatrix(hidden, in weights, cache, layerIndex, position, output, rope))
+            {
+                return;
+            }
+
             // Output starts as the attention bias (or zero); each head's
             // projected contribution is summed in afterwards.
             var bo = weights.AttentionBias;
@@ -258,6 +295,148 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 AddInPlace(_headOutputs.AsSpan(h * DModel, DModel), output, DModel);
             }
+        }
+
+        /// <summary>
+        /// M3 whole-matrix Q4_K attention decode (OVERFIT_REPACK_ATTN). Projects Q and O as ONE repacked 8×8
+        /// GEMV over every head (split per head AFTER) instead of the per-head Q4_K projections — measured
+        /// 2.55× ‖ per projection, the Q (and biggest, O) 2048×2048 matmuls. K/V stay per-head: K is cheap
+        /// under GQA, V is Q6_K under Q4_K_M (no whole handle). Returns <c>false</c> — leaving the caller on
+        /// the per-head path — unless the block is GQA with repackable whole Q and O handles. Not bit-identical
+        /// to the per-head path (Q4_K-GEMV reassociation + O's Q4_K-vs-Q8 weight rounding), so it is gated and
+        /// validated by E2E coherence. Mirrors the GQA decomposition of <see cref="Decode"/>: K/V projected
+        /// once per group on the calling thread, then Q-load + attend fanned across all Q heads.
+        /// </summary>
+        private bool TryDecodeWholeMatrix(
+            ReadOnlySpan<float> hidden,
+            in BlockWeights weights,
+            KeyValueCache cache,
+            int layerIndex,
+            int position,
+            Span<float> output,
+            RopeTable? rope)
+        {
+            if (!weights.HasGqa
+                || !weights.WqWhole.IsQ4K || !weights.WoWhole.IsQ4K
+                || !weights.WqWhole.Quantized4K.CanRepack || !weights.WoWhole.Quantized4K.CanRepack)
+            {
+                return false;
+            }
+
+            var dModel = DModel;
+            var headDim = HeadDimension;
+            var wholeSize = HeadCount * headDim;
+
+            // 1. Quantize hidden once (Q8_K) — the shared activation for the whole-Q GEMV (and per-head K/V).
+            Q4KDotKernel.QuantizeActivationQ8K(hidden.Slice(0, dModel), _hiddenQuants, _hiddenScales, _hiddenBsums);
+
+            // 2. Whole-matrix Q: one repacked 8×8 GEMV over ALL heads → _qWhole (head-contiguous, [nHeads·headDim]).
+            Q4KGemvKernel.GemvParallel(
+                weights.WqWhole.Quantized4K.EnsureRepacked(), wholeSize, dModel,
+                _hiddenQuants, _hiddenScales, _hiddenBsums, _qWhole);
+
+            // 3. K/V per KV group on the calling thread (unchanged per-head path) — K is Q4_K, V is Q6_K; both
+            //    RoPE-rotated (K) and written to the group's cache slot before the head-parallel attend reads it.
+            var groupSize = HeadCount / KvHeadCount;
+            for (var group = 0; group < KvHeadCount; group++)
+            {
+                ref readonly var kv = ref weights.KvHead(group);
+                _heads[group * groupSize].ProjectKvDispatched(
+                    hidden, kv.Wk, kv.Wv, kv.Bk, kv.Bv,
+                    cache, layerIndex, group, position, rope,
+                    _hiddenQuants, _hiddenScales, _hiddenBsums, true,
+                    weights.HasQkNorm ? weights.QkNormK : default);
+            }
+
+            // 4. Per Q head: load its Q band from _qWhole (+ QK-RMSNorm + RoPE), attend its group's cache slot,
+            //    write the attention output into its band of _attnBands — disjoint per head, no cross-write.
+            fixed (float* qWholePtr = _qWhole)
+            fixed (float* attnBandsPtr = _attnBands)
+            {
+                var ctx = new WholeHeadContext
+                {
+                    Heads = _heads,
+                    Weights = weights,
+                    Cache = cache,
+                    Rope = rope,
+                    QWhole = qWholePtr,
+                    AttnBands = attnBandsPtr,
+                    Position = position,
+                    RopeBase = cache.BasePosition,
+                    HeadDim = headDim,
+                    GroupSize = groupSize,
+                    LayerIndex = layerIndex,
+                    HasQkNorm = weights.HasQkNorm,
+                };
+                var ctxPtr = Unsafe.AsPointer(ref ctx);
+
+                if (OverfitParallel.WorkerCount > 1)
+                {
+                    OverfitParallel.ForDecode(0, HeadCount, &DecodeHeadWhole, ctxPtr);
+                }
+                else
+                {
+                    DecodeHeadWhole(0, HeadCount, ctxPtr);
+                }
+            }
+
+            // 5. Whole-matrix O: quantize the gathered attention outputs once, one repacked GEMV → output.
+            //    Mathematically Σ_h Wo_h @ attn_h, but as a single contiguous matmul (no per-head reduction).
+            Q4KDotKernel.QuantizeActivationQ8K(_attnBands.AsSpan(0, wholeSize), _attnQuants, _attnScales, _attnBsums);
+            Q4KGemvKernel.GemvParallel(
+                weights.WoWhole.Quantized4K.EnsureRepacked(), dModel, wholeSize,
+                _attnQuants, _attnScales, _attnBsums, output);
+
+            // 6. Attention bias (the per-head path seeds output with it; whole-O overwrote output, so add it now).
+            var bo = weights.AttentionBias;
+            if (!bo.IsEmpty)
+            {
+                TensorPrimitives.Add(output.Slice(0, dModel), bo.Slice(0, dModel), output.Slice(0, dModel));
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Head-parallel worker for <see cref="TryDecodeWholeMatrix"/>: each head loads its pre-projected Q band
+        /// (+ QK-RMSNorm + RoPE), attends its KV group's cache slot, and writes its attention output into its
+        /// disjoint band of <c>_attnBands</c>. K/V are already cached; this only reads them. Bit-identical
+        /// decomposition to <see cref="DecodeHeadQao"/> minus the per-head O projection (done once, whole, after).
+        /// </summary>
+        private static void DecodeHeadWhole(int headStart, int headEnd, void* context)
+        {
+            ref var ctx = ref Unsafe.AsRef<WholeHeadContext>(context);
+
+            var headDim = ctx.HeadDim;
+            var qNorm = ctx.HasQkNorm ? ctx.Weights.QkNormQ : default;
+            var ropePos = ctx.Position + ctx.RopeBase;
+
+            for (var h = headStart; h < headEnd; h++)
+            {
+                var group = h / ctx.GroupSize;
+                var qBand = new ReadOnlySpan<float>(ctx.QWhole + h * headDim, headDim);
+                var attnBand = new Span<float>(ctx.AttnBands + h * headDim, headDim);
+
+                ctx.Heads[h].LoadQueryAndRope(qBand, ctx.Weights.Head(h).Bq, qNorm, ctx.Rope, ropePos);
+                ctx.Heads[h].AttendIntoBand(ctx.Cache, ctx.LayerIndex, group, ctx.Position, attnBand);
+            }
+        }
+
+        /// <summary>State handed to <see cref="DecodeHeadWhole"/> workers via a stack pointer.</summary>
+        private struct WholeHeadContext
+        {
+            public CachedSingleHeadAttention[] Heads;
+            public BlockWeights Weights;
+            public KeyValueCache Cache;
+            public RopeTable? Rope;
+            public float* QWhole;
+            public float* AttnBands;
+            public int Position;
+            public int RopeBase;
+            public int HeadDim;
+            public int GroupSize;
+            public int LayerIndex;
+            public bool HasQkNorm;
         }
 
         /// <summary>
