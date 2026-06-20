@@ -59,6 +59,16 @@ namespace DevOnBike.Overfit.LanguageModels.Retrieval
         /// <summary>Number of distinct source documents indexed.</summary>
         public int SourceCount => _sources.Count;
 
+        /// <summary>The source ids currently indexed.</summary>
+        public IReadOnlyCollection<string> SourceIds => _sources.Keys;
+
+        /// <summary>How many chunks the given source contributed, or 0 if it is not indexed.</summary>
+        public int GetSourceChunkCount(string sourceId)
+        {
+            ArgumentNullException.ThrowIfNull(sourceId);
+            return _sources.TryGetValue(sourceId, out var entry) ? entry.Ids.Length : 0;
+        }
+
         /// <summary>The underlying vector store, for retrieval / corpus analysis.</summary>
         public VectorStore Store => _store;
 
