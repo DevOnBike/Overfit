@@ -30,8 +30,8 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         // hot-path cost. When on, DecodeWithoutLogits copies each layer's output hidden into _layerActivations
         // [LayerCount × DModel], so a caller can read the residual stream at every depth (logit lens, probing).
         private bool _captureActivations;
-        private float[] _layerActivations = [];
-        private float[] _lensScratch = [];   // logit-lens normalized-hidden scratch (lazy)
+        private readonly float[] _layerActivations;   // [LayerCount × DModel] residual-stream capture (opt-in via the flag)
+        private readonly float[] _lensScratch;        // [DModel] logit-lens normalized-hidden scratch
 
         public CachedGptStack(
             int layerCount,
@@ -116,6 +116,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _lmHeadQ8KQuants = new sbyte[dModel];
             _lmHeadQ8KScales = new float[(dModel + Q4KDotKernel.SuperBlockElements - 1) / Q4KDotKernel.SuperBlockElements];
             _lmHeadQ8KBsums = new short[(dModel + Q4KDotKernel.GroupSize - 1) / Q4KDotKernel.GroupSize];
+
+            // Interpretability scratch — allocated up front like every other buffer here (small: ~LayerCount·DModel
+            // + DModel floats). Capture stays opt-in via the flag; the buffer just exists so the tap is a plain copy.
+            _layerActivations = new float[(long)layerCount * dModel];
+            _lensScratch = new float[dModel];
         }
 
         public int LayerCount
@@ -610,14 +615,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// <see cref="GetLayerActivation"/>. Off by default and the buffer is unallocated, so there is zero
         /// hot-path cost unless a caller opts in (pure-managed tensors → no FFI / graph surgery to tap them).
         /// </summary>
-        public void EnableActivationCapture(bool enabled)
-        {
-            if (enabled && _layerActivations.Length == 0)
-            {
-                _layerActivations = new float[(long)LayerCount * DModel];
-            }
-            _captureActivations = enabled;
-        }
+        public void EnableActivationCapture(bool enabled) => _captureActivations = enabled;
 
         /// <summary>
         /// Copies the captured residual stream AFTER transformer layer <paramref name="layer"/> (its output
@@ -627,7 +625,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// </summary>
         public void GetLayerActivation(int layer, Span<float> destination)
         {
-            if (!_captureActivations || _layerActivations.Length == 0)
+            if (!_captureActivations)
             {
                 throw new OverfitRuntimeException("Activation capture is not enabled — call EnableActivationCapture(true) before decoding.");
             }
@@ -651,10 +649,6 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         {
             // Normalize into the lens scratch (never the live _finalHidden, which holds the real last state),
             // then run the same head projection the real next-token logits use.
-            if (_lensScratch.Length == 0)
-            {
-                _lensScratch = new float[DModel];
-            }
             ApplyFinalNorm(layerHidden, weights, _lensScratch);
             ProjectLogitsFrom(_lensScratch, weights, logits);
         }

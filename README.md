@@ -45,7 +45,7 @@ on today versus what is still hardening. (Model-by-model support is in [Supporte
 
 | Tier | Capabilities |
 |---|---|
-| **Stable** — validated end-to-end, build a PoC on it | LocalAgent ASP.NET demo (chat · RAG · tools · JSON · metrics · Docker) · GGUF chat (Qwen 2/3, Llama, Mistral, Phi-3.5/4, Gemma-2, Mixtral, Bielik) · in-process RAG + `VectorStore` · guaranteed JSON (grammar **and** JSON-Schema subset) · OpenAI-compatible server (`overfit serve`) · `Microsoft.Extensions.AI` adapter (`IChatClient` / `IEmbeddingGenerator`) · MCP tools profile · Whisper STT (tiny/base, EN + PL) · BERT embeddings (MiniLM / BGE / E5) |
+| **Stable** — validated end-to-end, build a PoC on it | LocalAgent ASP.NET demo (chat · RAG · tools · JSON · metrics · Docker) · GGUF chat (Qwen 2/3, Llama, Mistral, Phi-3.5/4, Gemma-2, Mixtral, Bielik) · in-process RAG + `VectorStore` + **persistent index** (`PersistentVectorStore`) · guaranteed JSON (grammar **and** JSON-Schema subset) · OpenAI-compatible server (`overfit serve`, multi-session pool via `--sessions N`) · `Microsoft.Extensions.AI` adapter (`IChatClient` / `IEmbeddingGenerator`) · MCP tools profile · Whisper STT (tiny/base, EN + PL) · BERT embeddings (MiniLM / BGE / E5) · `overfit doctor` model inspector |
 | **Preview** — works and tested, newer / heavier / advanced | CPU QLoRA fine-tuning *(advanced moat)* · local preset-voice TTS · large MoE models (Qwen1.5-MoE, Mixtral-8x7B) · serving benchmark (`overfit bench`) · interpretability hooks (activation capture + logit lens) |
 | **Experimental** — opt-in / gated / incomplete | Voice cloning (consent + watermark gated) · whole-matrix Q4_K attention (`OVERFIT_REPACK_ATTN`, off by default) · multilingual / XLM-R (SentencePiece) embedders *(not yet)* · Qwen3-MoE & other new-arch loaders *(not yet)* |
 
@@ -138,6 +138,10 @@ sidecar process.
 Supported embedding paths include MiniLM, BGE and E5-style BERT encoders, with
 vectors validated against HuggingFace / PyTorch reference outputs.
 
+The vector store **persists to a single pure-managed file** (no SQLite, no native
+dependency) — index once, restart the service, query without re-embedding, and on a
+re-run only re-embed the documents whose content hash changed (`PersistentVectorStore`).
+
 ### 3. C# tool calling and guaranteed JSON
 
 Constrained decoding forces valid JSON and valid tool-call envelopes, then
@@ -206,7 +210,9 @@ JSON-Schema `response_format` and llama.cpp-style `min_p` sampling. Dependency-f
 and the decode worker pool **parks when idle**, so a serving container at rest sits at ~0% CPU:
 
 ```powershell
-overfit serve qwen2.5-3b --port 11434           # one self-contained binary; nothing leaves the box
+overfit serve qwen2.5-3b --port 11434              # one self-contained binary; nothing leaves the box
+overfit serve qwen2.5-3b --port 11434 --sessions 4 # 4 concurrent sessions (shared weights, N× KV cache)
+overfit doctor C:\models\model.gguf                # inspect a GGUF: arch, quant, tokenizer, chat template, supported?
 ```
 
 Call it and print the **raw response, pretty-formatted**:

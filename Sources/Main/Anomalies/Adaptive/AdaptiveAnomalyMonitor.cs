@@ -83,7 +83,7 @@ namespace DevOnBike.Overfit.Anomalies.Adaptive
         public IReadOnlyList<string> PodsNeedingAdaptation()
         {
             var list = new List<string>();
-            
+
             foreach (var (pod, s) in _pods)
             {
                 if (s.AdaptationRecommended)
@@ -91,7 +91,7 @@ namespace DevOnBike.Overfit.Anomalies.Adaptive
                     list.Add(pod);
                 }
             }
-            
+
             return list;
         }
 

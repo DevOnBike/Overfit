@@ -92,7 +92,10 @@ namespace DevOnBike.Overfit.Optimizers
 
         public bool UseAdamW { get; set; } = true;
 
-        public float LearningRate { get; set; }
+        public float LearningRate
+        {
+            get; set;
+        }
 
         public void Dispose()
         {
