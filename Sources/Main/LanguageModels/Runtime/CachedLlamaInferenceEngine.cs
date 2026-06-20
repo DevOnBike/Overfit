@@ -75,6 +75,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             public required TensorStorage<float>[] Bv;
             public required DecodeWeight[] Wo;
             public required TensorStorage<float>[] Bo;
+
+            // Whole-matrix Q4_K attention handles (M2 plumbing for the OVERFIT_REPACK_ATTN decode lever, M3).
+            // Empty (default) unless the on-disk Q/K/V/O tensor is Q4_K + memory-mapped + repackable for the
+            // 8×8 GEMV — then each is a SECOND zero-copy view of the same mmap bytes the per-head Wq/Wk/Wv/Wo
+            // above slice. The per-head arrays stay the active decode path; M3 consumes these when present.
+            public DecodeWeight WqWhole;
+            public DecodeWeight WkWhole;
+            public DecodeWeight WvWhole;
+            public DecodeWeight WoWhole;
             public required TensorStorage<float> FfnNormGamma;
             public required TensorStorage<float> FfnNormBeta;
             public required DecodeWeight FfnGate;
@@ -498,7 +507,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     moeSharedDown: layer.MoeSharedDown,
                     moeSharedGateInp: layer.MoeSharedGateInp,
                     postAttnNorm: layer.PostAttnNorm,
-                    postFfwNorm: layer.PostFfwNorm);
+                    postFfwNorm: layer.PostFfwNorm,
+                    wqWhole: layer.WqWhole,
+                    wkWhole: layer.WkWhole,
+                    wvWhole: layer.WvWhole,
+                    woWhole: layer.WoWhole);
             }
 
             return new StackWeights(
@@ -566,6 +579,25 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// If this differs from LlamaLoRAAdapter.ReadBaseWeightNorm, then
         /// _baseRefs and _stackWeights point to different TensorStorage objects.
         /// </summary>
+        /// <summary>Diagnostic hook (M2): true when block <paramref name="layer"/> carries ALL FOUR whole-matrix
+        /// Q4_K attention handles. Note Q4_K_M is a MIXED quant (V / O are usually Q6_K) so this is often false on
+        /// a real model even when Q/K are present — use <see cref="BlockWholeAttnPresence"/> for per-projection.</summary>
+        internal bool BlockHasWholeAttnQ4K(int layer)
+        {
+            ThrowIfDisposed();
+            return _stackWeights.Block(layer).HasWholeAttnQ4K;
+        }
+
+        /// <summary>Diagnostic hook (M2): per-projection presence of the whole-matrix Q4_K attention handles
+        /// (q, k, v, o) for block <paramref name="layer"/> — each true when that projection was Q4_K + mmap +
+        /// repackable. M3 applies the repacked GEMV per-projection (a Q6_K V/O keeps the per-head path).</summary>
+        internal (bool Q, bool K, bool V, bool O) BlockWholeAttnPresence(int layer)
+        {
+            ThrowIfDisposed();
+            ref readonly var b = ref _stackWeights.Block(layer);
+            return (b.WqWhole.IsQ4K, b.WkWhole.IsQ4K, b.WvWhole.IsQ4K, b.WoWhole.IsQ4K);
+        }
+
         public float ReadInferenceWeightNorm(int layer, int head)
         {
             ThrowIfDisposed();

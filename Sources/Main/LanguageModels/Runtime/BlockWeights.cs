@@ -30,6 +30,15 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly TensorStorage<float> _postFfwNorm;  // Gemma-2 sandwich norm after FFN; empty otherwise
         private readonly SingleHeadWeights[] _heads;
         private readonly KvHeadWeights[]? _kvHeads;   // null = MHA (use heads[h].Wk/Wv)
+
+        // Whole-matrix Q4_K attention handles (M2 plumbing for the M3 OVERFIT_REPACK_ATTN decode lever).
+        // Empty unless the loader found Q4_K + mmap + repackable Q/K/V/O — then a single repacked 8×8 GEMV
+        // per projection replaces the per-head loop (split heads AFTER). All-or-nothing: the M3 path only
+        // fires when all four are present (HasWholeAttnQ4K); otherwise decode uses the per-head _heads above.
+        private readonly DecodeWeight _wqWhole;
+        private readonly DecodeWeight _wkWhole;
+        private readonly DecodeWeight _wvWhole;
+        private readonly DecodeWeight _woWhole;
         private readonly TensorStorage<float> _attentionBias;
         private readonly TensorStorage<float> _ln2Gamma;
         private readonly TensorStorage<float> _ln2Beta;
@@ -82,6 +91,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _moeSharedUp = default;
             _moeSharedDown = default;
             _moeSharedGateInp = null;
+
+            _wqWhole = default;
+            _wkWhole = default;
+            _wvWhole = default;
+            _woWhole = default;
         }
 
         /// <summary>
@@ -131,6 +145,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _moeSharedUp = default;
             _moeSharedDown = default;
             _moeSharedGateInp = null;
+
+            _wqWhole = default;
+            _wkWhole = default;
+            _wvWhole = default;
+            _woWhole = default;
         }
 
         /// <summary>
@@ -163,7 +182,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             TensorStorage<float>? qNorm = null,
             TensorStorage<float>? kNorm = null,
             TensorStorage<float>? postAttnNorm = null,
-            TensorStorage<float>? postFfwNorm = null)
+            TensorStorage<float>? postFfwNorm = null,
+            DecodeWeight wqWhole = default,
+            DecodeWeight wkWhole = default,
+            DecodeWeight wvWhole = default,
+            DecodeWeight woWhole = default)
         {
             static TensorStorage<float> Empty() => TensorStorage<float>.Unpooled(0);
 
@@ -192,6 +215,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             _moeSharedUp = moeSharedUp;
             _moeSharedDown = moeSharedDown;
             _moeSharedGateInp = moeSharedGateInp;
+
+            _wqWhole = wqWhole;
+            _wkWhole = wkWhole;
+            _wvWhole = wvWhole;
+            _woWhole = woWhole;
         }
 
         public ReadOnlySpan<float> Ln1Gamma => _ln1Gamma.AsReadOnlySpan();
@@ -223,6 +251,20 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         public bool HasGqa => _kvHeads is not null;
         public int KvHeadCount => _kvHeads?.Length ?? _heads.Length;
         public ref readonly KvHeadWeights KvHead(int kvH) => ref _kvHeads![kvH];
+
+        /// <summary>True when all four whole-matrix Q4_K attention handles are present — the M3
+        /// OVERFIT_REPACK_ATTN decode path's gate. Empty on every non-Q4_K / non-mmap / fused-QKV block.</summary>
+        public bool HasWholeAttnQ4K =>
+            _wqWhole.IsQ4K && _wkWhole.IsQ4K && _wvWhole.IsQ4K && _woWhole.IsQ4K;
+
+        /// <summary>Whole-matrix Q4_K Q projection [nHeads·headDim, dModel]. Valid when <see cref="HasWholeAttnQ4K"/>.</summary>
+        public DecodeWeight WqWhole => _wqWhole;
+        /// <summary>Whole-matrix Q4_K K projection [nKvHeads·headDim, dModel]. Valid when <see cref="HasWholeAttnQ4K"/>.</summary>
+        public DecodeWeight WkWhole => _wkWhole;
+        /// <summary>Whole-matrix Q4_K V projection [nKvHeads·headDim, dModel]. Valid when <see cref="HasWholeAttnQ4K"/>.</summary>
+        public DecodeWeight WvWhole => _wvWhole;
+        /// <summary>Whole-matrix Q4_K O projection [dModel, nHeads·headDim]. Valid when <see cref="HasWholeAttnQ4K"/>.</summary>
+        public DecodeWeight WoWhole => _woWhole;
 
         /// <summary>SwiGLU gate weight. Empty for GeLU/ReLU FFN.</summary>
         public DecodeWeight FfnGate => _ffnGate;

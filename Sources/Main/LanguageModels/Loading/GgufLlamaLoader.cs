@@ -331,6 +331,15 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                     }
                     var wo = LoadOutputHeads(reader, $"blk.{l}.attn_output.weight", nHeads, dModel, headDim, oFull, attnQuantizable);
 
+                    // Whole-matrix Q4_K attention handles (M2 plumbing; empty unless Q4_K + mmap + repackable).
+                    // Output-major dims: Q/K/V contract over dModel; O contracts over nHeads·headDim. Dormant
+                    // until the M3 OVERFIT_REPACK_ATTN decode path; the per-head wq/wk/wv/wo above stay active.
+                    // (Note: whole-O reads the on-disk Q4_K bytes directly even though per-head O is dequantized.)
+                    var wqWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_q.weight", nHeads * headDim, dModel, mmap);
+                    var wkWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_k.weight", nKvHeads * headDim, dModel, mmap);
+                    var wvWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_v.weight", nKvHeads * headDim, dModel, mmap);
+                    var woWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_output.weight", dModel, nHeads * headDim, mmap);
+
                     // Attention biases (optional — Qwen has them, Llama doesn't);
                     // always F32 in GGUF, never quantized.
                     LoadTensorOrZeros(reader, $"blk.{l}.attn_q.bias", qBiasFull.AsSpan(0, nHeads * headDim));
@@ -421,6 +430,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                         Bv = bv,
                         Wo = wo,
                         Bo = bo,
+                        WqWhole = wqWhole,
+                        WkWhole = wkWhole,
+                        WvWhole = wvWhole,
+                        WoWhole = woWhole,
                         FfnNormGamma = ffnNormGamma,
                         FfnNormBeta = ffnNormBeta,
                         FfnGate = ffnGate,
@@ -1057,6 +1070,34 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 result[h] = new Q4KWeight(bytes, dModel, headDim);
             }
             return result;
+        }
+
+        /// <summary>
+        /// Builds the WHOLE-matrix Q4_K attention handle (M2 plumbing for the M3 <c>OVERFIT_REPACK_ATTN</c>
+        /// decode lever) — a single repacked 8×8 GEMV over Q/K/V/O beats today's per-head Q4_K projections
+        /// (measured 2.55× ‖). Returns empty unless the on-disk tensor is Q4_K AND memory-mapped (so the
+        /// whole output-row range is one contiguous, zero-copy byte slice) AND the dims are repackable for
+        /// the GEMV (<c>inputSize % 256 == 0</c>, <c>outputSize % 8 == 0</c>). It is a SECOND read-only view
+        /// of the same mmap bytes the per-head loaders slice — additive, owns nothing, the mmap (disposed
+        /// last) outlives it. Empty for fused-QKV (Phi-3), non-mmap, or non-Q4_K tensors → decode keeps the
+        /// per-head path. Output-major dims: Q/K/V are [nHeads·headDim, dModel]; O is [dModel, nHeads·headDim].
+        /// </summary>
+        private static DecodeWeight TryLoadWholeAttnQ4K(
+            GgufReader reader, string name, int outputSize, int inputSize, MemoryMappedModelFile? mmap)
+        {
+            if (mmap is null
+                || !reader.Tensors.TryGetValue(name, out var info)
+                || info.Type != GgmlType.Q4_K
+                || inputSize % Q4KWeight.SuperBlockElements != 0
+                || outputSize % Q4KRepack.RowsInterleaved != 0)
+            {
+                return default;
+            }
+
+            var bytesPerRow = inputSize / Q4KWeight.SuperBlockElements * Q4KWeight.SuperBlockBytes;
+            var totalBytes = checked((int)((long)outputSize * bytesPerRow));
+            var baseOffset = reader.DataStart + (long)info.Offset;
+            return new Q4KWeight(mmap.Slice(baseOffset, totalBytes), inputSize, outputSize);
         }
 
         /// <summary>
