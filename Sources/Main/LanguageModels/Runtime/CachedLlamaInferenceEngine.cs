@@ -180,6 +180,37 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         public GPT1Config Config => _config;
 
+        // ── Interpretability (activation capture + logit lens) ────────────────────
+        // Pure-managed tensors mean the residual stream at every layer is directly readable — no PyTorch
+        // hooks, no ONNX graph surgery, no FFI. Enable capture, decode/generate as usual, then read each
+        // layer's hidden and project it through the head with the logit lens to see the prediction form.
+
+        /// <summary>Turns on/off per-layer residual-stream capture for subsequent decodes. Off by default
+        /// (zero hot-path cost). See <see cref="GetLayerActivation"/> / <see cref="LogitLens"/>.</summary>
+        public void EnableActivationCapture(bool enabled)
+        {
+            ThrowIfDisposed();
+            _stack.EnableActivationCapture(enabled);
+        }
+
+        /// <summary>Copies the captured residual stream after transformer <paramref name="layer"/> (0-based,
+        /// pre-final-norm) for the most recent decoded token into <paramref name="destination"/> (length DModel).
+        /// Requires <see cref="EnableActivationCapture"/>(true) before the decode.</summary>
+        public void GetLayerActivation(int layer, Span<float> destination)
+        {
+            ThrowIfDisposed();
+            _stack.GetLayerActivation(layer, destination);
+        }
+
+        /// <summary>Logit lens: projects an intermediate hidden (e.g. from <see cref="GetLayerActivation"/>)
+        /// through the final norm + LM head into <paramref name="logits"/> (length VocabSize) — the tokens the
+        /// model would predict if it stopped at that depth. At the last layer it equals the real logits.</summary>
+        public void LogitLens(ReadOnlySpan<float> layerHidden, Span<float> logits)
+        {
+            ThrowIfDisposed();
+            _stack.LogitLensFromHidden(layerHidden, _stackWeights, logits);
+        }
+
         /// <summary>Loads model weights from an Overfit binary file.</summary>
         public static CachedLlamaInferenceEngine Load(string path)
         {

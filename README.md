@@ -4,7 +4,7 @@
 
 <p align="center">
   <img src="docs/assets/overfit-features.png"
-       alt="Overfit at a glance — run, fine-tune and build agents on real LLMs entirely in .NET: pure-managed engine (0 B/token, Native AOT), load any GGUF/ONNX model memory-mapped, run Qwen/Llama/Phi/Gemma/Mixtral, in-process agentic stack (RAG, tool calling, guaranteed JSON), speech-to-text (Whisper) and voice-cloning text-to-speech, LoRA fine-tuning, an OpenAI-compatible server, runs in-process so data never leaves, CPU-first — no Python, no native binary, no model server."
+       alt="Overfit at a glance — run, fine-tune and build agents on real LLMs entirely in .NET: pure-managed engine (0 B/token, Native AOT), load any GGUF/ONNX model memory-mapped, run Qwen/Llama/Phi/Gemma/Mixtral, in-process agentic stack (RAG, tool calling, guaranteed JSON), speech-to-text (Whisper) and local preset-voice text-to-speech, LoRA fine-tuning, an OpenAI-compatible server, runs in-process so data never leaves, CPU-first — no Python, no native binary, no model server."
        width="560">
 </p>
 
@@ -35,6 +35,19 @@ is nearly empty on the market.
 4. **CPU QLoRA fine-tuning** *(advanced moat)* — teach a model your private data on a CPU, no GPU, no Python.
 
 → Full market analysis and ten buyer cases: [`docs/use-cases-2026.md`](docs/use-cases-2026.md).
+
+---
+
+## Maturity
+
+Overfit covers a lot of surface; this is the honest tier for each capability so you know what to build a PoC
+on today versus what is still hardening. (Model-by-model support is in [Supported model families](#supported-model-families).)
+
+| Tier | Capabilities |
+|---|---|
+| **Stable** — validated end-to-end, build a PoC on it | LocalAgent ASP.NET demo (chat · RAG · tools · JSON · metrics · Docker) · GGUF chat (Qwen 2/3, Llama, Mistral, Phi-3.5/4, Gemma-2, Mixtral, Bielik) · in-process RAG + `VectorStore` · guaranteed JSON (grammar **and** JSON-Schema subset) · OpenAI-compatible server (`overfit serve`) · `Microsoft.Extensions.AI` adapter (`IChatClient` / `IEmbeddingGenerator`) · MCP tools profile · Whisper STT (tiny/base, EN + PL) · BERT embeddings (MiniLM / BGE / E5) |
+| **Preview** — works and tested, newer / heavier / advanced | CPU QLoRA fine-tuning *(advanced moat)* · local preset-voice TTS · large MoE models (Qwen1.5-MoE, Mixtral-8x7B) · serving benchmark (`overfit bench`) · interpretability hooks (activation capture + logit lens) |
+| **Experimental** — opt-in / gated / incomplete | Voice cloning (consent + watermark gated) · whole-matrix Q4_K attention (`OVERFIT_REPACK_ATTN`, off by default) · multilingual / XLM-R (SentencePiece) embedders *(not yet)* · Qwen3-MoE & other new-arch loaders *(not yet)* |
 
 ---
 

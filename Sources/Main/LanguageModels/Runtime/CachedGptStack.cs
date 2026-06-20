@@ -26,6 +26,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         private readonly float[] _lmHeadQ8KScales;
         private readonly short[] _lmHeadQ8KBsums;
 
+        // Interpretability: opt-in per-layer residual-stream capture. Off (and unallocated) by default — no
+        // hot-path cost. When on, DecodeWithoutLogits copies each layer's output hidden into _layerActivations
+        // [LayerCount × DModel], so a caller can read the residual stream at every depth (logit lens, probing).
+        private bool _captureActivations;
+        private float[] _layerActivations = [];
+        private float[] _lensScratch = [];   // logit-lens normalized-hidden scratch (lazy)
+
         public CachedGptStack(
             int layerCount,
             int dModel,
@@ -218,6 +225,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                     next,
                     rope);
 
+                // Interpretability tap: `next` now holds this layer's output residual stream (before the swap).
+                if (_captureActivations)
+                {
+                    new ReadOnlySpan<float>(next, 0, DModel).CopyTo(_layerActivations.AsSpan(layer * DModel, DModel));
+                }
+
                 (current, next) = (next, current);
             }
 
@@ -225,33 +238,44 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // LastFinalHidden matches Python: x before rms_norm(x, fg2, eps).
             new ReadOnlySpan<float>(current, 0, DModel).CopyTo(_lastFinalHidden);
 
+            ApplyFinalNorm(current, weights, _finalHidden);
+        }
+
+        /// <summary>
+        /// Applies the model's final norm (RMSNorm for Llama/Qwen/Mistral, LayerNorm when a beta is present)
+        /// to <paramref name="input"/> → <paramref name="output"/>. Extracted so the decode path and the logit
+        /// lens (<see cref="LogitLensFromHidden"/>) normalize identically — the lens must reproduce the exact
+        /// final-norm the real next-token projection uses, or its last-layer output would not match the logits.
+        /// </summary>
+        private void ApplyFinalNorm(ReadOnlySpan<float> input, StackWeights weights, Span<float> output)
+        {
             if (weights.FinalNormBeta.IsEmpty)
             {
                 // RMSNorm (Llama/Qwen/Mistral)
                 var sumSq = 0f;
                 for (var i = 0; i < DModel; i++)
                 {
-                    sumSq += current[i] * current[i];
+                    sumSq += input[i] * input[i];
                 }
                 var scale = 1f / MathF.Sqrt(sumSq / DModel + LayerNormEpsilon);
                 if (weights.FinalNormGamma.IsEmpty)
                 {
                     for (var i = 0; i < DModel; i++)
                     {
-                        _finalHidden[i] = current[i] * scale;
+                        output[i] = input[i] * scale;
                     }
                 }
                 else
                 {
                     for (var i = 0; i < DModel; i++)
                     {
-                        _finalHidden[i] = current[i] * scale * weights.FinalNormGamma[i];
+                        output[i] = input[i] * scale * weights.FinalNormGamma[i];
                     }
                 }
             }
             else
             {
-                SingleTokenLayerNormKernel.Normalize(current, weights.FinalNormGamma, weights.FinalNormBeta, _finalHidden, DModel, LayerNormEpsilon);
+                SingleTokenLayerNormKernel.Normalize(input, weights.FinalNormGamma, weights.FinalNormBeta, output, DModel, LayerNormEpsilon);
             }
         }
 
@@ -574,6 +598,66 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         public void GetLastLogits(Span<float> destination)
             => _lastLogits.AsSpan(0, VocabSize).CopyTo(destination);
+
+        // ── Interpretability: activation capture + logit lens ─────────────────────
+
+        /// <summary>Whether per-layer residual-stream capture is active.</summary>
+        public bool ActivationCaptureEnabled => _captureActivations;
+
+        /// <summary>
+        /// Turns per-layer residual-stream capture on/off. While on, each <see cref="DecodeWithoutLogits"/>
+        /// records the output hidden of every transformer layer into an internal buffer readable via
+        /// <see cref="GetLayerActivation"/>. Off by default and the buffer is unallocated, so there is zero
+        /// hot-path cost unless a caller opts in (pure-managed tensors → no FFI / graph surgery to tap them).
+        /// </summary>
+        public void EnableActivationCapture(bool enabled)
+        {
+            if (enabled && _layerActivations.Length == 0)
+            {
+                _layerActivations = new float[(long)LayerCount * DModel];
+            }
+            _captureActivations = enabled;
+        }
+
+        /// <summary>
+        /// Copies the captured residual stream AFTER transformer layer <paramref name="layer"/> (its output
+        /// hidden, before the final norm) into <paramref name="destination"/>. Requires capture to have been
+        /// enabled before the decode. <paramref name="layer"/> is 0-based; layer <c>LayerCount-1</c> is the
+        /// last layer, whose value equals <see cref="LastFinalHidden"/>.
+        /// </summary>
+        public void GetLayerActivation(int layer, Span<float> destination)
+        {
+            if (!_captureActivations || _layerActivations.Length == 0)
+            {
+                throw new OverfitRuntimeException("Activation capture is not enabled — call EnableActivationCapture(true) before decoding.");
+            }
+            if ((uint)layer >= (uint)LayerCount)
+            {
+                throw new ArgumentOutOfRangeException(nameof(layer));
+            }
+            _layerActivations.AsSpan(layer * DModel, DModel).CopyTo(destination);
+        }
+
+        /// <summary>
+        /// Logit lens: projects an intermediate residual-stream hidden (e.g. one captured by
+        /// <see cref="GetLayerActivation"/>) through the model's final norm + LM head, yielding the token
+        /// distribution the model would emit if it stopped at that depth. Applied at the last layer it
+        /// reproduces the real next-token logits exactly (same final-norm + head as the decode), so the
+        /// lens is anchored; at earlier layers it shows how the prediction forms across depth.
+        /// <paramref name="layerHidden"/> is a PRE-final-norm hidden (length DModel); <paramref name="logits"/>
+        /// receives VocabSize values.
+        /// </summary>
+        internal void LogitLensFromHidden(ReadOnlySpan<float> layerHidden, StackWeights weights, Span<float> logits)
+        {
+            // Normalize into the lens scratch (never the live _finalHidden, which holds the real last state),
+            // then run the same head projection the real next-token logits use.
+            if (_lensScratch.Length == 0)
+            {
+                _lensScratch = new float[DModel];
+            }
+            ApplyFinalNorm(layerHidden, weights, _lensScratch);
+            ProjectLogitsFrom(_lensScratch, weights, logits);
+        }
 
         /// <summary>Exposes internal blocks for testing.</summary>
         internal CachedTransformerBlock[] Blocks => _blocks;
