@@ -120,3 +120,37 @@ Confirm the defaults you like; override the rest.
    scanning.
 3. **Phase 2c — production rules:** the real pattern set + validators (PL PII, vendor secrets, entropy), allowlist.
 4. **Phase 3 (follow-ups):** streaming SSE redaction, free-text NER, multi-tenant, SIEM sink, per-model routing.
+
+---
+
+## Deployment & TLS (client → gateway hop)
+
+The gateway serves **plaintext HTTP** (`HttpListener`). The client → gateway hop carries the very PII/secrets the
+gateway exists to protect, so that hop **must be encrypted in production**. In-process HTTPS via `HttpListener`
+needs an OS-level certificate binding (`netsh http add sslcert` on Windows) and is effectively unavailable on
+Linux/containers — so the supported, standard pattern is **TLS termination at the edge**:
+
+```text
+client ──HTTPS──▶ TLS-terminating proxy / sidecar ──HTTP(loopback)──▶ overfit gateway ──HTTPS──▶ upstream LLM
+                  (nginx · Caddy · Envoy · cloud LB)   127.0.0.1:8080
+```
+
+- Bind the gateway to **loopback** (`--host 127.0.0.1`, the default) and let nginx/Caddy/Envoy/a cloud load
+  balancer terminate TLS and forward to it. The gateway → upstream hop is already HTTPS (the upstream base URL).
+- **Guard (enforced in code):** the CLI **refuses to bind plaintext HTTP to a non-loopback host** (`0.0.0.0`, a
+  LAN IP, etc.) unless you pass `--insecure`. This prevents accidentally exposing an unencrypted PII-bearing port.
+  Use `--insecure` only when the hop to clients is already encrypted by other means (service-mesh mTLS, a TLS load
+  balancer on a private network). A loopback bind never needs it.
+
+Example (Caddy in front):
+
+```caddyfile
+gateway.internal.corp {
+    reverse_proxy 127.0.0.1:8080
+}
+```
+```powershell
+$env:OPENAI_API_KEY = "sk-real-upstream-key"
+$env:OVERFIT_GATEWAY_KEYS = "sk-gw-team-a,sk-gw-team-b"
+overfit gateway --upstream https://api.openai.com/v1 --host 127.0.0.1 --port 8080
+```

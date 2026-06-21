@@ -383,8 +383,30 @@ namespace DevOnBike.Overfit.Cli
         }
 
         // ── gateway: LLM egress firewall — redact outbound PII/secrets, forward upstream (gateway holds the key). ──
-        public static int Gateway(string upstream, string keyEnv, string host, int port, string auditPath)
+        public static int Gateway(string? upstream, string keyEnv, string host, int port, string auditPath, string? configPath, string clientKeysEnv, bool insecure, bool scanResponses)
         {
+            // TLS guard: HttpListener serves plaintext HTTP. Binding that to a non-loopback interface would send the
+            // very PII/secrets this gateway protects across the network unencrypted. Refuse unless explicitly waived —
+            // the supported pattern is a TLS-terminating proxy/sidecar in front, with the gateway bound to loopback.
+            if (!IsLoopbackHost(host))
+            {
+                if (!insecure)
+                {
+                    Console.Error.WriteLine(
+                        $"Refusing to bind a plaintext HTTP gateway to non-loopback host '{host}': client→gateway "
+                        + "traffic carries the PII/secrets this gateway exists to protect and would be unencrypted.");
+                    Console.Error.WriteLine(
+                        "Put a TLS-terminating reverse proxy / sidecar (nginx, Caddy, Envoy, a cloud load balancer) in "
+                        + "front and bind --host 127.0.0.1, OR pass --insecure if the hop to clients is already "
+                        + "encrypted (service-mesh mTLS, TLS load balancer on a private network).");
+                    return 1;
+                }
+
+                Console.WriteLine(
+                    $"WARNING: --insecure — serving plaintext HTTP on '{host}'. Ensure the network hop to clients is "
+                    + "encrypted (TLS proxy/sidecar or mesh); otherwise redacted-away secrets still travel in the clear.");
+            }
+
             var key = Environment.GetEnvironmentVariable(keyEnv);
             if (string.IsNullOrEmpty(key))
             {
@@ -394,22 +416,95 @@ namespace DevOnBike.Overfit.Cli
                 return 1;
             }
 
+            // Hardening: drop the secret from the process environment now that we hold it — so it can't be re-read
+            // via /proc/<pid>/environ, inherited by child processes, or dumped from the env later.
+            Environment.SetEnvironmentVariable(keyEnv, null);
+
+            Redactor redactor;
+            RedactionPolicy policy;
+            string? configUpstream = null;
+            IReadOnlyList<string> configClientKeys = [];
+            var configScanResponses = false;
+
+            if (!string.IsNullOrEmpty(configPath))
+            {
+                if (!File.Exists(configPath))
+                {
+                    Console.Error.WriteLine($"Config file not found: {configPath}");
+                    return 1;
+                }
+                try
+                {
+                    (redactor, policy, configUpstream, configClientKeys, configScanResponses) = GatewayConfig.Load(configPath);
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"Failed to load gateway config '{configPath}': {ex.Message}");
+                    return 1;
+                }
+                Console.WriteLine($"config: {Path.GetFullPath(configPath)}");
+            }
+            else
+            {
+                // Built-in: international + Polish (checksum-validated PESEL/NIP/REGON/IBAN) detectors, default policy.
+                var intl = DefaultRedactionRules.All();
+                var pl = PolishRedactionRules.All();
+                var rules = new RedactionRule[intl.Length + pl.Length];
+                intl.CopyTo(rules, 0);
+                pl.CopyTo(rules, intl.Length);
+                redactor = new Redactor(rules);
+                policy = RedactionPolicy.Default();
+                Console.WriteLine("policy: secrets (API/AWS keys, JWT, private key) BLOCK · PII (email, card+Luhn, SSN, IPv4, PL PESEL/NIP/REGON/IBAN) REDACT");
+            }
+
+            // CLI --upstream overrides the config's upstream.
+            var resolvedUpstream = !string.IsNullOrEmpty(upstream) ? upstream : configUpstream;
+            if (string.IsNullOrEmpty(resolvedUpstream))
+            {
+                Console.Error.WriteLine("No upstream set. Pass --upstream <url> or set \"upstream\" in --config.");
+                return 1;
+            }
+
+            // Client keys: env var (preferred for secrets — comma/whitespace separated) merged with any in --config.
+            var clientKeys = new List<string>(configClientKeys);
+            var keysFromEnv = Environment.GetEnvironmentVariable(clientKeysEnv);
+            if (!string.IsNullOrEmpty(keysFromEnv))
+            {
+                foreach (var part in keysFromEnv.Split([',', ' ', ';', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    clientKeys.Add(part);
+                }
+                Environment.SetEnvironmentVariable(clientKeysEnv, null);
+            }
+
+            if (clientKeys.Count > 0)
+            {
+                Console.WriteLine($"client auth: ON ({clientKeys.Count} gateway key(s)) — callers must send 'Authorization: Bearer <key>'");
+            }
+            else
+            {
+                Console.WriteLine($"client auth: OFF — set ${clientKeysEnv} (or \"clientKeys\" in --config) before exposing the gateway.");
+            }
+
+            // Response scanning: enabled by the CLI flag OR the config.
+            var resolvedScanResponses = scanResponses || configScanResponses;
+            if (resolvedScanResponses)
+            {
+                Console.WriteLine("response scan: ON — model-generated secrets/PII masked on non-streaming responses (your own values still restored).");
+            }
+
             using var audit = new JsonLinesAuditSink(auditPath);
-
-            // International + Polish (checksum-validated PESEL/NIP/REGON/IBAN) detectors.
-            var intl = DefaultRedactionRules.All();
-            var pl = PolishRedactionRules.All();
-            var rules = new RedactionRule[intl.Length + pl.Length];
-            intl.CopyTo(rules, 0);
-            pl.CopyTo(rules, intl.Length);
-
-            var redactor = new Redactor(rules);
-            var policy = RedactionPolicy.Default();
-
             Console.WriteLine($"audit log: {Path.GetFullPath(auditPath)}");
-            Console.WriteLine("policy: secrets (API/AWS keys, JWT, private key) BLOCK · PII (email, card+Luhn, SSN, IPv4, PL PESEL/NIP/REGON/IBAN) REDACT");
-            RedactionGateway.Serve(host, port, upstream, key, redactor, audit, policy);
+            RedactionGateway.Serve(host, port, resolvedUpstream, key, redactor, audit, policy, clientKeys, resolvedScanResponses);
             return 0;
+        }
+
+        // True for the loopback interface (127.0.0.0/8, localhost, ::1) — safe to serve plaintext HTTP on, because a
+        // TLS-terminating proxy/sidecar fronts it. Anything else is a network-exposed bind and needs --insecure.
+        private static bool IsLoopbackHost(string host)
+        {
+            return host is "localhost" or "::1" or "[::1]"
+                || host.StartsWith("127.", StringComparison.Ordinal);
         }
 
         // ── score: run a trained XGBoost model (JSON) over a CSV of feature rows, pure-managed + zero-egress. ──

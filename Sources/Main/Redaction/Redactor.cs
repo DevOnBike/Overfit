@@ -140,6 +140,67 @@ namespace DevOnBike.Overfit.Redaction
             return new RedactionDecision(builder.ToString(), redacted, blockedCategories.Count > 0, blockedCategories);
         }
 
+        /// <summary>
+        /// Scans a model <em>response</em> for sensitive content the model itself produced (a leaked secret, an
+        /// echoed document from RAG, a hallucinated identifier) and masks every span whose policy action is
+        /// <see cref="RedactionAction.Redact"/> or <see cref="RedactionAction.Block"/> — what is not allowed to leave
+        /// the box is not allowed back in either. Allow/Alert spans are left in place.
+        ///
+        /// <para>Run this <strong>before</strong> <see cref="Restore"/>: at that point the caller's own values are
+        /// still placeholders, so only genuinely model-generated content is detected. The mask token
+        /// (<c>[REDACTED-RESPONSE-…]</c>) is deliberately distinct from the request placeholder format so a later
+        /// <see cref="Restore"/> never rewrites it.</para>
+        /// </summary>
+        public RedactionResult ScanResponse(string input, RedactionPolicy policy)
+        {
+            ArgumentNullException.ThrowIfNull(input);
+            ArgumentNullException.ThrowIfNull(policy);
+
+            if (input.Length == 0)
+            {
+                return new RedactionResult(input, []);
+            }
+
+            var spans = CollectSpans(input);
+
+            if (spans.Count == 0)
+            {
+                return new RedactionResult(input, []);
+            }
+
+            var builder = new StringBuilder(input.Length);
+            var masked = new List<RedactionMatch>();
+            var counters = new Dictionary<string, int>(StringComparer.Ordinal);
+            var cursor = 0;
+
+            foreach (var span in spans)
+            {
+                if (span.Start < cursor)
+                {
+                    continue;
+                }
+
+                var action = policy.ActionFor(span.Category);
+
+                // Mask anything the policy would Redact or Block; leave Allow/Alert content visible to the client.
+                if (action == RedactionAction.Redact || action == RedactionAction.Block)
+                {
+                    builder.Append(input, cursor, span.Start - cursor);
+
+                    var index = counters.GetValueOrDefault(span.Category);
+                    counters[span.Category] = index + 1;
+                    var placeholder = $"[REDACTED-RESPONSE-{span.Category}-{index}]";
+
+                    builder.Append(placeholder);
+                    masked.Add(new RedactionMatch(span.Category, span.Value, placeholder, span.Start, span.Length));
+                    cursor = span.Start + span.Length;
+                }
+            }
+
+            builder.Append(input, cursor, input.Length - cursor);
+            return new RedactionResult(builder.ToString(), masked);
+        }
+
         // Detects every rule match, sorted deterministically (earliest start first, longer span first on a tie).
         // Overlap resolution happens at substitution time via the cursor.
         private List<Span> CollectSpans(string input)

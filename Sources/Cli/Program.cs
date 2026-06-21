@@ -343,10 +343,15 @@ scoreCommand.SetAction(parseResult => Commands.Score(
     parseResult.GetValue(scoreMargin)));
 
 // ── gateway: LLM egress firewall — OpenAI-compatible proxy redacting outbound PII/secrets, zero data leaves raw. ──
-var gwUpstream = new Option<string>("--upstream")
+var gwUpstream = new Option<string?>("--upstream")
 {
-    Description = "Upstream OpenAI-compatible base URL to forward to, e.g. https://api.openai.com/v1.",
-    Required = true,
+    Description = "Upstream OpenAI-compatible base URL to forward to, e.g. https://api.openai.com/v1. "
+        + "Required unless set in --config; the CLI value overrides the config.",
+};
+var gwConfig = new Option<string?>("--config")
+{
+    Description = "Optional JSON config (rules, policy, upstream) so a deployment configures the gateway without "
+        + "recompiling. See docs; CLI flags override config values.",
 };
 var gwKeyEnv = new Option<string>("--upstream-key-env")
 {
@@ -369,23 +374,49 @@ var gwAudit = new Option<string>("--audit")
     Description = "JSON-lines audit log path (records per-category redaction counts, never the values).",
     DefaultValueFactory = _ => "redaction-audit.jsonl",
 };
+var gwClientKeysEnv = new Option<string>("--client-keys-env")
+{
+    Description = "Name of the env var holding gateway client key(s) (comma/space separated). When set, callers "
+        + "must present one as 'Authorization: Bearer <key>'. Unset = open gateway (warns at startup).",
+    DefaultValueFactory = _ => "OVERFIT_GATEWAY_KEYS",
+};
+var gwInsecure = new Option<bool>("--insecure")
+{
+    Description = "Allow binding plaintext HTTP to a non-loopback host. Without this, the gateway refuses to expose "
+        + "an unencrypted port (client→gateway traffic carries the PII it protects). Use only when the hop to "
+        + "clients is already encrypted (TLS-terminating proxy/sidecar, service-mesh mTLS, private TLS load balancer).",
+};
+var gwScanResponses = new Option<bool>("--scan-responses")
+{
+    Description = "Also scan model responses and mask any secrets/PII the model itself produced (leaked system "
+        + "prompt, RAG-echoed document). Applies to non-streaming responses. The caller's own redacted values are "
+        + "still restored — only genuinely model-generated content is masked. Default off.",
+};
 var gatewayCommand = new Command("gateway",
     "LLM egress firewall: an OpenAI-compatible proxy that redacts outbound PII/secrets before forwarding to an "
     + "upstream LLM (the gateway holds the key, clients never see it), restores the response, and audits. "
     + "Point your OpenAI client's base_url at it — change one URL.")
 {
     gwUpstream,
+    gwConfig,
     gwKeyEnv,
     gwHost,
     gwPort,
     gwAudit,
+    gwClientKeysEnv,
+    gwInsecure,
+    gwScanResponses,
 };
 gatewayCommand.SetAction(parseResult => Commands.Gateway(
-    parseResult.GetValue(gwUpstream)!,
+    parseResult.GetValue(gwUpstream),
     parseResult.GetValue(gwKeyEnv)!,
     parseResult.GetValue(gwHost)!,
     parseResult.GetValue(gwPort),
-    parseResult.GetValue(gwAudit)!));
+    parseResult.GetValue(gwAudit)!,
+    parseResult.GetValue(gwConfig),
+    parseResult.GetValue(gwClientKeysEnv)!,
+    parseResult.GetValue(gwInsecure),
+    parseResult.GetValue(gwScanResponses)));
 
 var rootCommand = new RootCommand("Overfit — run local LLMs, RAG and agents in pure .NET. No Python, no native runtime.")
 {
