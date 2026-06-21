@@ -559,7 +559,7 @@ for that.
 - **Integration** — **OpenAI-compatible server** (`/v1/chat/completions` + SSE, `/v1/embeddings`, `/v1/models`); **MCP server** (`overfit mcp` — local `ask` / `rag_query` / `transcribe` tools for Claude Code & co., [`docs/mcp.md`](docs/mcp.md)); **Microsoft.Extensions.AI** adapter; **`overfit` CLI** (pull / list / chat / serve / mcp) shipped three ways — `dotnet tool install -g DevOnBike.Overfit.Cli`, a Native-AOT binary, and a ~34 MB Docker image ([`docs/docker.md`](docs/docker.md)); ASP.NET starter template.
 - **Training** — **QLoRA CPU fine-tuning** (frozen Q4_K base incl. FFN + per-head attention), gradient checkpointing, data-parallel trainer, Conv/BatchNorm/LSTM, CRNN + CTC (OCR), LR schedules.
 - **Multimodal & audio** — **Whisper speech-to-text** in pure C#; from-scratch MP3 / WAV decoders; OCR.
-- **Engineering** — Native-AOT (one ~7.8 MB self-contained binary), zero-allocation hot paths (decode 0 B/token AND prefill 0 B/request); **in-repo Roslyn perf analyzer** (10 rules, error-severity in kernels, CI guard-of-the-guard); AOT guard in CI; anomaly detection.
+- **Engineering** — Native-AOT (one ~7.8 MB self-contained binary, AVX2 codegen so the AOT binary / Docker image decodes at JIT parity); zero-allocation hot paths (decode 0 B/token AND prefill 0 B/request); **in-repo Roslyn perf analyzer** (10 rules, error-severity in kernels, CI guard-of-the-guard); AOT guard in CI; anomaly detection.
 
 **Current priorities:**
 

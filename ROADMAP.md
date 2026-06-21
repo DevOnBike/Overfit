@@ -38,8 +38,7 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 ## Agentic / interop / vision backlog (2026-06-21)
 
 Deferred ideas captured while shipping the XGBoost tabular predictor; ranked, on-moat, all build on existing
-primitives (autograd, agentic stack, MEAI adapter, the XGBoost predictor). The **Redaction Gateway spike** is the
-active post-release initiative and is tracked separately.
+primitives (autograd, agentic stack, MEAI adapter, the XGBoost predictor).
 
 1. **Vision-XAI — Grad-CAM + saliency maps.** Extends the interpretability-hooks initiative (today: LLM activation
    capture + logit lens) to CNN/ONNX explainability: Grad-CAM = gradient of the output w.r.t. conv feature maps,
