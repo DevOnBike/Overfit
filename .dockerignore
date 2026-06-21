@@ -8,7 +8,11 @@
 **/*.user
 coverage/
 TestResults/
-docs/
+# Exclude docs from the image context EXCEPT openapi.yaml, which Server.csproj embeds at compile time
+# (GET /openapi.yaml + Swagger UI serve it from the self-contained binary). Without the negation the AOT
+# publish fails: CS1566 "Could not find /src/docs/openapi.yaml".
+docs/*
+!docs/openapi.yaml
 Demo/
 UI/
 # Never ship models / fixtures into the image — they are large and provided at runtime.
