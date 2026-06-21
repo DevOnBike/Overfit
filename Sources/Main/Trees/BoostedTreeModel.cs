@@ -30,6 +30,11 @@ namespace DevOnBike.Overfit.Trees
         private readonly int[] _treeGroup;
         private readonly float[] _baseMargin;
 
+        // Array-of-structs node view (one 16-byte struct per node) — built lazily ONLY when the AoS A/B
+        // kernel is exercised, so the shipping path (Branchless) never pays its ~16 B/node memory cost.
+        // AoS measured NEGATIVE (see BatchKernel.Aos); kept solely as a documented reference.
+        private TreeNode[]? _nodes;
+
         public BoostedTreeModel(
             int numFeatures,
             int numGroups,
@@ -79,6 +84,24 @@ namespace DevOnBike.Overfit.Trees
             _defaultLeft = defaultLeft;
             _treeRoot = treeRoot;
             _treeGroup = treeGroup;
+        }
+
+        // Packs the SoA node arrays into the 16-byte AoS layout. The default-left flag rides in the sign bit
+        // of the feature index (indices are small and non-negative, so the MSB is free). Lazy — AoS-only.
+        private TreeNode[] BuildNodes()
+        {
+            var nodes = new TreeNode[_featureIndex.Length];
+
+            for (var i = 0; i < nodes.Length; i++)
+            {
+                var packedFeature = _defaultLeft[i] != 0
+                    ? _featureIndex[i] | unchecked((int)0x80000000)
+                    : _featureIndex[i];
+
+                nodes[i] = new TreeNode(_threshold[i], packedFeature, _left[i], _right[i]);
+            }
+
+            return nodes;
         }
 
         /// <summary>Number of input features each row must supply.</summary>
@@ -240,7 +263,7 @@ namespace DevOnBike.Overfit.Trees
         public void PredictBatchParallel(ReadOnlySpan<float> featuresFlat, int rowCount, Span<float> outputFlat)
             => PredictBatchParallel(featuresFlat, rowCount, outputFlat, BatchKernel.Branchless);
 
-        /// <summary>Traversal body for <see cref="PredictBatchParallel"/> — the A/B perf lever. All
+        /// <summary>Traversal body for <see cref="PredictBatchParallel(ReadOnlySpan{float}, int, Span{float}, BatchKernel)"/> — the A/B perf lever. All
         /// produce bit-identical output.</summary>
         internal enum BatchKernel
         {
@@ -255,7 +278,14 @@ namespace DevOnBike.Overfit.Trees
             /// overlap (ILP). MEASURED NEGATIVE here (0.94× vs Branchless, 351 vs 330 ns/row): our input is
             /// already dense (XGBoost needs it to densify sparse CSR into FVec) and a 300×6 model fits L2, so
             /// the reordering only adds loop overhead. Kept as a documented reference negative; Branchless ships.</summary>
-            Blocked
+            Blocked,
+
+            /// <summary>Array-of-structs node layout: each node visit loads one packed 16-byte struct (4 per
+            /// cache line) instead of five separate SoA array lookups. Same branchless decision. MEASURED
+            /// NEGATIVE here (~0.85× vs Branchless, 446 vs 370 ns/row): a 300×6 model already fits L2, so the
+            /// bottleneck is compute/latency, not cache lines — and unpacking the default-left flag out of the
+            /// feature word adds per-node ALU. Kept as a documented reference negative; Branchless ships.</summary>
+            Aos
         }
 
         /// <summary>
@@ -289,9 +319,16 @@ namespace DevOnBike.Overfit.Trees
                 return;
             }
 
+            // Lazily materialize the AoS layout only when its kernel is requested (A/B / reference only).
+            if (kernel == BatchKernel.Aos)
+            {
+                _nodes ??= BuildNodes();
+            }
+
             fixed (float* features = featuresFlat, output = outputFlat, threshold = _threshold, baseMargin = _baseMargin)
             fixed (int* featureIndex = _featureIndex, left = _left, right = _right, treeRoot = _treeRoot, treeGroup = _treeGroup)
             fixed (byte* defaultLeft = _defaultLeft)
+            fixed (TreeNode* nodes = _nodes)
             {
                 var context = new BatchContext
                 {
@@ -305,6 +342,7 @@ namespace DevOnBike.Overfit.Trees
                     TreeRoot = treeRoot,
                     TreeGroup = treeGroup,
                     BaseMargin = baseMargin,
+                    Nodes = nodes,
                     NumFeatures = NumFeatures,
                     NumGroups = NumGroups,
                     NumTrees = _treeRoot.Length,
@@ -323,8 +361,15 @@ namespace DevOnBike.Overfit.Trees
                         break;
 
                     case BatchKernel.Blocked:
-                    default:
                         OverfitParallel.For(0, rowCount, 256, &ScoreRowsBlocked, &context);
+                        break;
+
+                    case BatchKernel.Aos:
+                        OverfitParallel.For(0, rowCount, 256, &ScoreRowsAos, &context);
+                        break;
+
+                    default:
+                        OverfitParallel.For(0, rowCount, 256, &ScoreRowsBranchless, &context);
                         break;
                 }
             }
@@ -483,6 +528,48 @@ namespace DevOnBike.Overfit.Trees
             }
         }
 
+        // Array-of-structs traversal: one packed 16-byte node load per visit (4 nodes/cache line) instead of
+        // five separate SoA array lookups. Same branchless decision; bit-identical output.
+        private static unsafe void ScoreRowsAos(int rowStart, int rowEnd, void* context)
+        {
+            ref var ctx = ref Unsafe.AsRef<BatchContext>(context);
+            var nodes = ctx.Nodes;
+            var numGroups = ctx.NumGroups;
+            var numFeatures = ctx.NumFeatures;
+            var numTrees = ctx.NumTrees;
+
+            for (var r = rowStart; r < rowEnd; r++)
+            {
+                var features = ctx.Features + (long)r * numFeatures;
+                var output = ctx.Output + (long)r * numGroups;
+
+                for (var g = 0; g < numGroups; g++)
+                {
+                    output[g] = ctx.BaseMargin[g];
+                }
+
+                for (var t = 0; t < numTrees; t++)
+                {
+                    var node = nodes + ctx.TreeRoot[t];
+
+                    while (node->Left >= 0)
+                    {
+                        var packed = node->FeaturePacked;
+                        var value = features[packed & 0x7FFFFFFF];
+
+                        // packed < 0 ⇒ default-left (the flag rides in the sign bit). Non-short-circuit ⇒ no branch.
+                        var goLeft = (value < node->Threshold) | (float.IsNaN(value) & (packed < 0));
+                        var goLeftBit = Unsafe.As<bool, byte>(ref goLeft);
+                        node = nodes + (node->Right + ((node->Left - node->Right) * goLeftBit));
+                    }
+
+                    output[ctx.TreeGroup[t]] += node->Threshold;
+                }
+
+                Transform(output, numGroups, ctx.Objective);
+            }
+        }
+
         private static unsafe void Transform(float* output, int numGroups, TreeObjective objective)
         {
             switch (objective)
@@ -571,10 +658,30 @@ namespace DevOnBike.Overfit.Trees
             public int* TreeRoot;
             public int* TreeGroup;
             public float* BaseMargin;
+            public TreeNode* Nodes;
             public int NumFeatures;
             public int NumGroups;
             public int NumTrees;
             public TreeObjective Objective;
+        }
+
+        // Packed node, 16 bytes (4 per 64-byte cache line). FeaturePacked carries the split feature index in
+        // its low 31 bits and the default-left (missing-value direction) flag in its sign bit. For a leaf
+        // (Left &lt; 0) Threshold holds the leaf value.
+        private readonly struct TreeNode
+        {
+            public readonly float Threshold;
+            public readonly int FeaturePacked;
+            public readonly int Left;
+            public readonly int Right;
+
+            public TreeNode(float threshold, int featurePacked, int left, int right)
+            {
+                Threshold = threshold;
+                FeaturePacked = featurePacked;
+                Left = left;
+                Right = right;
+            }
         }
     }
 }

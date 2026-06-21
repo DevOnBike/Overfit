@@ -46,7 +46,7 @@ on today versus what is still hardening. (Model-by-model support is in [Supporte
 | Tier | Capabilities |
 |---|---|
 | **Stable** — validated end-to-end, build a PoC on it | LocalAgent ASP.NET demo (chat · RAG · tools · JSON · metrics · Docker) · GGUF chat (Qwen 2/3, Llama, Mistral, Phi-3.5/4, Gemma-2, Mixtral, Bielik) · in-process RAG + `VectorStore` + **persistent index** (`PersistentVectorStore`) · guaranteed JSON (grammar **and** JSON-Schema subset) · OpenAI-compatible server (`overfit serve`, multi-session pool via `--sessions N`) · `Microsoft.Extensions.AI` adapter (`IChatClient` / `IEmbeddingGenerator`) · MCP tools profile · Whisper STT (tiny/base, EN + PL) · BERT embeddings (MiniLM / BGE / E5) · `overfit doctor` model inspector |
-| **Preview** — works and tested, newer / heavier / advanced | CPU QLoRA fine-tuning *(advanced moat)* · local preset-voice TTS · large MoE models (Qwen1.5-MoE, Mixtral-8x7B) · serving benchmark (`overfit bench`) · interpretability hooks (activation capture + logit lens) |
+| **Preview** — works and tested, newer / heavier / advanced | CPU QLoRA fine-tuning *(advanced moat)* · local preset-voice TTS · large MoE models (Qwen1.5-MoE, Mixtral-8x7B) · serving benchmark (`overfit bench`) · interpretability hooks (activation capture + logit lens) · XGBoost tabular scoring (read-only predictor, parity-validated vs XGBoost 3.3.0, zero-alloc) |
 | **Experimental** — opt-in / gated / incomplete | Voice cloning (consent + watermark gated) · whole-matrix Q4_K attention (`OVERFIT_REPACK_ATTN`, off by default) · multilingual / XLM-R (SentencePiece) embedders *(not yet)* · Qwen3-MoE & other new-arch loaders *(not yet)* |
 
 Every claim above maps to a runnable test, benchmark, demo, or CI guard — see [`docs/claim-to-test.md`](docs/claim-to-test.md) (the audit trail for regulated teams).
@@ -391,12 +391,14 @@ Test machine for current headline numbers: AMD Ryzen 9 9950X3D, Windows 11,
 | MNIST CNN training (60k) | **503 ± 4 ms/epoch** (BenchmarkDotNet) — on par with PyTorch 2.11 CPU at its optimal threads (~524–570 ms, same box/arch); full train ~1.5–2 s with one-cycle LR — [audit](docs/mnist-cnn-training-audit.md) | 1.31 MB/epoch |
 | Concurrent inference, 8 threads | ~3.6x faster than ONNX Runtime | 0 B |
 | Batched prefill (272-token prompt, 0.6B) | allocation-free per request (was ~748 MB before pooling), bit-identical output | **0 B/request** |
+| XGBoost tabular scoring (300×6, vs XGBoost 3.3.0) | online single-row **~18.7x faster** (8.4 µs vs 157 µs — no Python/DMatrix tax); batch ~6.5x faster than XGBoost single-thread, ~1.5x slower than its all-cores; bit-identical, parity-validated | 0 B |
 
 Honest positioning:
 
 - llama.cpp / LLamaSharp are still faster for raw CPU LLM decode (~1.2× same-file vs a current AVX-512 llama.cpp build with our repacked-GEMV flag on, narrowed from ~1.6× — single-stream CPU decode is DRAM-bandwidth-bound).
 - PyTorch CPU is faster for large-scale training.
 - ONNX Runtime is mature and fast if native dependencies are acceptable.
+- XGBoost's C++ kernel is still ~1.5× faster for raw batch tree scoring; Overfit wins decisively on in-process online (per-request) latency where the Python/native marshalling tax dominates.
 - Overfit's axis is pure-managed .NET, in-process deployment, Native AOT,
   low allocation pressure and no native model server.
 

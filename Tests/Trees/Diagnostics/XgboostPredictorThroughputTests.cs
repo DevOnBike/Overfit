@@ -74,14 +74,16 @@ namespace DevOnBike.Overfit.Tests.Trees.Diagnostics
             // ── Batch parallel A/B: branchy vs branchless vs block-of-rows, best-of-N each ──
             var bestBranchyMs = MeasureParallel(model, data, rows, output, BoostedTreeModel.BatchKernel.Branchy);
             var bestBranchlessMs = MeasureParallel(model, data, rows, output, BoostedTreeModel.BatchKernel.Branchless);
-            var bestParMs = MeasureParallel(model, data, rows, output, BoostedTreeModel.BatchKernel.Blocked);
+            var bestBlockedMs = MeasureParallel(model, data, rows, output, BoostedTreeModel.BatchKernel.Blocked);
+            var bestParMs = MeasureParallel(model, data, rows, output, BoostedTreeModel.BatchKernel.Aos);
 
             var nsPerRowPar = bestParMs * 1e6 / rows;
             var nsPerRowBranchy = bestBranchyMs * 1e6 / rows;
             var nsPerRowBranchless = bestBranchlessMs * 1e6 / rows;
+            var nsPerRowBlocked = bestBlockedMs * 1e6 / rows;
             var rowsPerSecPar = rows / (bestParMs / 1000.0);
             var speedup = bestBatchMs / bestParMs;
-            var blockedGain = bestBranchlessMs / bestParMs;
+            var aosGain = bestBranchlessMs / bestParMs;
 
             // ── Online single-row latency: best-of-N over a full sweep ──────────────
             var single = new float[model.NumGroups];
@@ -104,7 +106,8 @@ namespace DevOnBike.Overfit.Tests.Trees.Diagnostics
             _output.WriteLine($"BATCH  single-thread     : {bestBatchMs:F2} ms / {rows:N0} rows  ->  {nsPerRow:F0} ns/row  ({rowsPerSec:N0} rows/s)");
             _output.WriteLine($"BATCH  parallel branchy   : {bestBranchyMs:F2} ms  ->  {nsPerRowBranchy:F0} ns/row");
             _output.WriteLine($"BATCH  parallel branchless: {bestBranchlessMs:F2} ms  ->  {nsPerRowBranchless:F0} ns/row");
-            _output.WriteLine($"BATCH  parallel BLOCKED   : {bestParMs:F2} ms  ->  {nsPerRowPar:F0} ns/row  ({rowsPerSecPar:N0} rows/s)   block gain vs branchless {blockedGain:F2}x   total speedup {speedup:F1}x");
+            _output.WriteLine($"BATCH  parallel blocked   : {bestBlockedMs:F2} ms  ->  {nsPerRowBlocked:F0} ns/row");
+            _output.WriteLine($"BATCH  parallel AoS       : {bestParMs:F2} ms  ->  {nsPerRowPar:F0} ns/row  ({rowsPerSecPar:N0} rows/s)   AoS gain vs branchless {aosGain:F2}x   total speedup {speedup:F1}x");
             _output.WriteLine($"ONLINE single-row        : {bestOnlineNs:F0} ns/row  ({bestOnlineNs / 1000.0:F2} us/row)");
             _output.WriteLine("XGBoost reference (same 300x6): batch 1-thread 2177 ns/row, all-cores 217 ns/row, online 157 us/row (Python+DMatrix).");
 

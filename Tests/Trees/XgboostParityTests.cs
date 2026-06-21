@@ -101,7 +101,8 @@ namespace DevOnBike.Overfit.Tests.Trees
             {
                 BoostedTreeModel.BatchKernel.Branchy,
                 BoostedTreeModel.BatchKernel.Branchless,
-                BoostedTreeModel.BatchKernel.Blocked
+                BoostedTreeModel.BatchKernel.Blocked,
+                BoostedTreeModel.BatchKernel.Aos
             })
             {
                 var parallel = new float[rows * model.NumGroups];
