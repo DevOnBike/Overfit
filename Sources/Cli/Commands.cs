@@ -395,11 +395,19 @@ namespace DevOnBike.Overfit.Cli
             }
 
             using var audit = new JsonLinesAuditSink(auditPath);
-            var redactor = Redactor.CreateDefault();
+
+            // International + Polish (checksum-validated PESEL/NIP/REGON/IBAN) detectors.
+            var intl = DefaultRedactionRules.All();
+            var pl = PolishRedactionRules.All();
+            var rules = new RedactionRule[intl.Length + pl.Length];
+            intl.CopyTo(rules, 0);
+            pl.CopyTo(rules, intl.Length);
+
+            var redactor = new Redactor(rules);
             var policy = RedactionPolicy.Default();
 
             Console.WriteLine($"audit log: {Path.GetFullPath(auditPath)}");
-            Console.WriteLine("policy: secrets (API/AWS keys, JWT, private key) BLOCK · PII (email, card, SSN, IPv4) REDACT");
+            Console.WriteLine("policy: secrets (API/AWS keys, JWT, private key) BLOCK · PII (email, card+Luhn, SSN, IPv4, PL PESEL/NIP/REGON/IBAN) REDACT");
             RedactionGateway.Serve(host, port, upstream, key, redactor, audit, policy);
             return 0;
         }

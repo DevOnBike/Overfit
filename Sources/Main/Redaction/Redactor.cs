@@ -150,10 +150,18 @@ namespace DevOnBike.Overfit.Redaction
             {
                 foreach (Match match in rule.Pattern.Matches(input))
                 {
-                    if (match.Length > 0)
+                    if (match.Length == 0)
                     {
-                        spans.Add(new Span(match.Index, match.Length, rule.Category, match.Value));
+                        continue;
                     }
+
+                    // Precision gate: a checksum-validated rule (PESEL, NIP, Luhn…) only counts if the value passes.
+                    if (rule.Validator is not null && !rule.Validator(match.Value))
+                    {
+                        continue;
+                    }
+
+                    spans.Add(new Span(match.Index, match.Length, rule.Category, match.Value));
                 }
             }
 

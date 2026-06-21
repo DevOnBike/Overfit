@@ -18,7 +18,7 @@ namespace DevOnBike.Overfit.Redaction
         public static RedactionRule[] All() =>
         [
             new RedactionRule("EMAIL", EmailRegex()),
-            new RedactionRule("CREDIT_CARD", CreditCardRegex()),
+            new RedactionRule("CREDIT_CARD", CreditCardRegex(), RedactionValidators.Luhn),
             new RedactionRule("SSN", SsnRegex()),
             new RedactionRule("AWS_KEY", AwsKeyRegex()),
             new RedactionRule("API_KEY", ApiKeyRegex()),

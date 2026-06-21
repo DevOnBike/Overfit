@@ -55,7 +55,12 @@ namespace DevOnBike.Overfit.Redaction
                 ["EMAIL"] = RedactionAction.Redact,
                 ["CREDIT_CARD"] = RedactionAction.Redact,
                 ["SSN"] = RedactionAction.Redact,
-                ["IPV4"] = RedactionAction.Redact
+                ["IPV4"] = RedactionAction.Redact,
+                // Polish national identifiers (checksum-validated) — PII, redacted.
+                ["PESEL"] = RedactionAction.Redact,
+                ["NIP"] = RedactionAction.Redact,
+                ["REGON"] = RedactionAction.Redact,
+                ["IBAN_PL"] = RedactionAction.Redact
             };
 
             return new RedactionPolicy(map, RedactionAction.Redact);
