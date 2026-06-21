@@ -162,94 +162,81 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var k = ExpertUsedCount;
 
             // 1. Route every row (router projection is small; per-row is fine).
-            var selExperts = PooledBuffer<int>.RentArray(rows * k);
-            var selWeights = PooledBuffer<float>.RentArray(rows * k);
+            using var selExperts = new PooledBuffer<int>(rows * k, clearMemory: false);
+            using var selWeights = new PooledBuffer<float>(rows * k, clearMemory: false);
             // EXACT slice is load-bearing: SelectTopK iterates logits.Length as the expert count.
-            var logitsArr = PooledBuffer<float>.RentArray(ExpertCount);
-            var rowBuf = PooledBuffer<int>.RentArray(rows);
-            var slotBuf = PooledBuffer<int>.RentArray(rows);
-            var gathered = PooledBuffer<float>.RentArray(rows * DModel);
-            var expertOut = PooledBuffer<float>.RentArray(rows * DModel);
-            var slotOut = PooledBuffer<float>.RentArray(rows * k * DModel);   // [row, slot] → that expert's output
-            try
+            using var logitsArr = new PooledBuffer<float>(ExpertCount, clearMemory: false);
+            using var rowBuf = new PooledBuffer<int>(rows, clearMemory: false);
+            using var slotBuf = new PooledBuffer<int>(rows, clearMemory: false);
+            using var gathered = new PooledBuffer<float>(rows * DModel, clearMemory: false);
+            using var expertOut = new PooledBuffer<float>(rows * DModel, clearMemory: false);
+            using var slotOut = new PooledBuffer<float>(rows * k * DModel, clearMemory: false);   // [row, slot] → that expert's output
+
+            var logits = logitsArr.Span;
+            for (var n = 0; n < rows; n++)
             {
-                var logits = logitsArr.AsSpan(0, ExpertCount);
+                SingleTokenProjectionKernel.ProjectParallel(
+                    hidden.Slice(n * DModel, DModel), routerWeight, [], logits, DModel, ExpertCount);
+                MoeRouter.SelectTopK(
+                    logits, k,
+                    selExperts.Span.Slice(n * k, k),
+                    selWeights.Span.Slice(n * k, k),
+                    _normalizeWeights);
+            }
+
+            // 2. Group rows by expert: gather → batched SwiGLU → stash each result at the row's top-k
+            //    slot (so the final per-row sum can run in top-k order = single-token order).
+
+            for (var e = 0; e < ExpertCount; e++)
+            {
+                var count = 0;
                 for (var n = 0; n < rows; n++)
                 {
-                    SingleTokenProjectionKernel.ProjectParallel(
-                        hidden.Slice(n * DModel, DModel), routerWeight, [], logits, DModel, ExpertCount);
-                    MoeRouter.SelectTopK(
-                        logits, k,
-                        selExperts.AsSpan(n * k, k),
-                        selWeights.AsSpan(n * k, k),
-                        _normalizeWeights);
-                }
-
-                // 2. Group rows by expert: gather → batched SwiGLU → stash each result at the row's top-k
-                //    slot (so the final per-row sum can run in top-k order = single-token order).
-
-                for (var e = 0; e < ExpertCount; e++)
-                {
-                    var count = 0;
-                    for (var n = 0; n < rows; n++)
-                    {
-                        for (var j = 0; j < k; j++)
-                        {
-                            if (selExperts[n * k + j] == e)
-                            {
-                                rowBuf[count] = n;
-                                slotBuf[count] = j;
-                                count++;
-                                break;
-                            }
-                        }
-                    }
-                    if (count == 0)
-                    {
-                        continue;
-                    }
-
-                    for (var c = 0; c < count; c++)
-                    {
-                        hidden.Slice(rowBuf[c] * DModel, DModel).CopyTo(gathered.AsSpan(c * DModel, DModel));
-                    }
-
-                    _expert.DecodeSwiGluBatchedDispatched(
-                        gathered, count, in gateExperts[e], in upExperts[e], in downExperts[e], expertOut);
-
-                    for (var c = 0; c < count; c++)
-                    {
-                        expertOut.AsSpan(c * DModel, DModel)
-                            .CopyTo(slotOut.AsSpan((rowBuf[c] * k + slotBuf[c]) * DModel, DModel));
-                    }
-                }
-
-                // 3. Per-row weighted sum in top-k slot order — identical accumulation order to Decode.
-                for (var n = 0; n < rows; n++)
-                {
-                    var dst = output.Slice(n * DModel, DModel);
-                    dst.Clear();
                     for (var j = 0; j < k; j++)
                     {
-                        var w = selWeights[n * k + j];
-                        var src = slotOut.AsSpan((n * k + j) * DModel, DModel);
-                        for (var d = 0; d < DModel; d++)
+                        if (selExperts.Span[n * k + j] == e)
                         {
-                            dst[d] += w * src[d];
+                            rowBuf.Span[count] = n;
+                            slotBuf.Span[count] = j;
+                            count++;
+                            break;
                         }
                     }
                 }
+                if (count == 0)
+                {
+                    continue;
+                }
+
+                for (var c = 0; c < count; c++)
+                {
+                    hidden.Slice(rowBuf.Span[c] * DModel, DModel).CopyTo(gathered.Span.Slice(c * DModel, DModel));
+                }
+
+                _expert.DecodeSwiGluBatchedDispatched(
+                    gathered.Span, count, in gateExperts[e], in upExperts[e], in downExperts[e], expertOut.Span);
+
+                for (var c = 0; c < count; c++)
+                {
+                    expertOut.Span.Slice(c * DModel, DModel)
+                        .CopyTo(slotOut.Span.Slice((rowBuf.Span[c] * k + slotBuf.Span[c]) * DModel, DModel));
+                }
             }
-            finally
+
+            // 3. Per-row weighted sum in top-k slot order — identical accumulation order to Decode.
+            for (var n = 0; n < rows; n++)
             {
-                PooledBuffer<float>.ReturnArray(slotOut);
-                PooledBuffer<float>.ReturnArray(expertOut);
-                PooledBuffer<float>.ReturnArray(gathered);
-                PooledBuffer<int>.ReturnArray(slotBuf);
-                PooledBuffer<int>.ReturnArray(rowBuf);
-                PooledBuffer<float>.ReturnArray(logitsArr);
-                PooledBuffer<float>.ReturnArray(selWeights);
-                PooledBuffer<int>.ReturnArray(selExperts);
+                var dst = output.Slice(n * DModel, DModel);
+                dst.Clear();
+                for (var j = 0; j < k; j++)
+                {
+                    var w = selWeights.Span[n * k + j];
+                    var src = slotOut.Span.Slice((n * k + j) * DModel, DModel);
+                    for (var d = 0; d < DModel; d++)
+                    {
+                        dst[d] += w * src[d];
+                    }
+                }
             }
         }
     }

@@ -512,67 +512,56 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // write race), then the bands are reduced into output in ascending head
             // order. (The earlier per-head ProjectParallel fan-out — ~60 tiny
             // dispatches/layer — measured 3.8× SLOWER; this restructure removes it.)
-            var q = PooledBuffer<float>.RentArray(HeadCount * rows * headDim);
-            var k = PooledBuffer<float>.RentArray(HeadCount * rows * headDim);
-            var v = PooledBuffer<float>.RentArray(HeadCount * rows * headDim);
-            var attn = PooledBuffer<float>.RentArray(HeadCount * rows * headDim);
-            var bands = PooledBuffer<float>.RentArray(HeadCount * rows * dModel);
-            var scoreScratch = PooledBuffer<float>.RentArray(HeadCount * rows * cacheLength);
-            try
+            using var q = new PooledBuffer<float>(HeadCount * rows * headDim, clearMemory: false);
+            using var k = new PooledBuffer<float>(HeadCount * rows * headDim, clearMemory: false);
+            using var v = new PooledBuffer<float>(HeadCount * rows * headDim, clearMemory: false);
+            using var attn = new PooledBuffer<float>(HeadCount * rows * headDim, clearMemory: false);
+            using var bands = new PooledBuffer<float>(HeadCount * rows * dModel, clearMemory: false);
+            using var scoreScratch = new PooledBuffer<float>(HeadCount * rows * cacheLength, clearMemory: false);
+
+            fixed (float* hiddenPtr = hidden)
             {
-                fixed (float* hiddenPtr = hidden)
+                var context = new BatchedHeadContext
                 {
-                    var context = new BatchedHeadContext
-                    {
-                        Weights = weights,
-                        Cache = cache,
-                        Hidden = hiddenPtr,
-                        Q = q,
-                        K = k,
-                        V = v,
-                        Attn = attn,
-                        Bands = bands,
-                        ScoreScratch = scoreScratch,
-                        Rows = rows,
-                        DModel = dModel,
-                        HeadDim = headDim,
-                        CacheLength = cacheLength,
-                        LayerIndex = layerIndex,
-                        BasePos = basePosition,
-                        Scale = scale,
-                    };
+                    Weights = weights,
+                    Cache = cache,
+                    Hidden = hiddenPtr,
+                    Q = q,
+                    K = k,
+                    V = v,
+                    Attn = attn,
+                    Bands = bands,
+                    ScoreScratch = scoreScratch,
+                    Rows = rows,
+                    DModel = dModel,
+                    HeadDim = headDim,
+                    CacheLength = cacheLength,
+                    LayerIndex = layerIndex,
+                    BasePos = basePosition,
+                    Scale = scale,
+                };
 
-                    var contextPtr = Unsafe.AsPointer(ref context);
+                var contextPtr = Unsafe.AsPointer(ref context);
 
-                    if (HeadCount > 1 && OverfitParallel.WorkerCount > 1)
-                    {
-                        OverfitParallel.For(0, HeadCount, &ProcessHeadRangeBatched, contextPtr);
-                    }
-                    else
-                    {
-                        ProcessHeadRangeBatched(0, HeadCount, contextPtr);
-                    }
+                if (HeadCount > 1 && OverfitParallel.WorkerCount > 1)
+                {
+                    OverfitParallel.For(0, HeadCount, &ProcessHeadRangeBatched, contextPtr);
                 }
-
-                // Reduce: output += Σ head bands, ascending head order — matches the
-                // single-token reduction exactly.
-                for (var h = 0; h < HeadCount; h++)
+                else
                 {
-                    for (var n = 0; n < rows; n++)
-                    {
-                        var outRow = output.Slice(n * dModel, dModel);
-                        TensorPrimitives.Add(outRow, bands.AsSpan((h * rows + n) * dModel, dModel), outRow);
-                    }
+                    ProcessHeadRangeBatched(0, HeadCount, contextPtr);
                 }
             }
-            finally
+
+            // Reduce: output += Σ head bands, ascending head order — matches the
+            // single-token reduction exactly.
+            for (var h = 0; h < HeadCount; h++)
             {
-                PooledBuffer<float>.ReturnArray(scoreScratch);
-                PooledBuffer<float>.ReturnArray(bands);
-                PooledBuffer<float>.ReturnArray(attn);
-                PooledBuffer<float>.ReturnArray(v);
-                PooledBuffer<float>.ReturnArray(k);
-                PooledBuffer<float>.ReturnArray(q);
+                for (var n = 0; n < rows; n++)
+                {
+                    var outRow = output.Slice(n * dModel, dModel);
+                    TensorPrimitives.Add(outRow, bands.Span.Slice((h * rows + n) * dModel, dModel), outRow);
+                }
             }
         }
 
@@ -625,120 +614,100 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             // Per-call scratch (prefill is a one-time pass).
-            var qh = PooledBuffer<float>.RentArray(rows * headDim);
-            var kg = PooledBuffer<float>.RentArray(rows * headDim);
-            var vg = PooledBuffer<float>.RentArray(rows * headDim);
-            var attn = PooledBuffer<float>.RentArray(rows * headDim);
-            var band = PooledBuffer<float>.RentArray(rows * dModel);
-            var score = PooledBuffer<float>.RentArray(rows * cacheLength);
+            using var qh = new PooledBuffer<float>(rows * headDim, clearMemory: false);
+            using var kg = new PooledBuffer<float>(rows * headDim, clearMemory: false);
+            using var vg = new PooledBuffer<float>(rows * headDim, clearMemory: false);
+            using var attn = new PooledBuffer<float>(rows * headDim, clearMemory: false);
+            using var band = new PooledBuffer<float>(rows * dModel, clearMemory: false);
+            using var score = new PooledBuffer<float>(rows * cacheLength, clearMemory: false);
 
             // Q8 KV cache: the batched attend reads F32, so dequantize the cached range once per group into
-            // this scratch (rented; the F32 cache path skips it entirely).
-            var kf = cache.IsQuantized ? PooledBuffer<float>.RentArray(cacheLength * headDim) : null;
-            var vf = cache.IsQuantized ? PooledBuffer<float>.RentArray(cacheLength * headDim) : null;
-            try
+            // this scratch (rented; the F32 cache path uses a 0-length buffer and never touches it).
+            using var kf = new PooledBuffer<float>(cache.IsQuantized ? cacheLength * headDim : 0, clearMemory: false);
+            using var vf = new PooledBuffer<float>(cache.IsQuantized ? cacheLength * headDim : 0, clearMemory: false);
+
+            for (var group = 0; group < KvHeadCount; group++)
             {
-
-                for (var group = 0; group < KvHeadCount; group++)
+                // K/V weights: GQA shares one KV head per group; MHA uses the head's own.
+                DecodeWeight wk, wv;
+                ReadOnlySpan<float> bk, bv;
+                if (weights.HasGqa)
                 {
-                    // K/V weights: GQA shares one KV head per group; MHA uses the head's own.
-                    DecodeWeight wk, wv;
-                    ReadOnlySpan<float> bk, bv;
-                    if (weights.HasGqa)
-                    {
-                        ref readonly var kv = ref weights.KvHead(group);
-                        wk = kv.Wk;
-                        wv = kv.Wv;
-                        bk = kv.Bk;
-                        bv = kv.Bv;
-                    }
-                    else
-                    {
-                        ref readonly var h0 = ref weights.Head(group);
-                        wk = h0.Wk;
-                        wv = h0.Wv;
-                        bk = h0.Bk;
-                        bv = h0.Bv;
-                    }
+                    ref readonly var kv = ref weights.KvHead(group);
+                    wk = kv.Wk;
+                    wv = kv.Wv;
+                    bk = kv.Bk;
+                    bv = kv.Bv;
+                }
+                else
+                {
+                    ref readonly var h0 = ref weights.Head(group);
+                    wk = h0.Wk;
+                    wv = h0.Wv;
+                    bk = h0.Bk;
+                    bv = h0.Bv;
+                }
 
-                    // K/V projected once per group, RoPE-rotated, stored — every Q head reads the cache.
-                    BatchedQuantProjection.Dispatch(hidden, rows, in wk, bk, kg, dModel, headDim);
-                    BatchedQuantProjection.Dispatch(hidden, rows, in wv, bv, vg, dModel, headDim);
+                // K/V projected once per group, RoPE-rotated, stored — every Q head reads the cache.
+                BatchedQuantProjection.Dispatch(hidden, rows, in wk, bk, kg.Span, dModel, headDim);
+                BatchedQuantProjection.Dispatch(hidden, rows, in wv, bv, vg.Span, dModel, headDim);
+                if (weights.HasQkNorm)
+                {
+                    QkNormKernel.Apply(kg.Span, weights.QkNormK, rows, headDim);
+                }
+                for (var n = 0; n < rows; n++)
+                {
+                    if (rope is not null)
+                    {
+                        RopeKernel.Apply(kg.Span.Slice(n * headDim, headDim), rope, basePosition + n + ropeBase);
+                    }
+                    cache.WriteKey(layerIndex, group, basePosition + n, kg.Span.Slice(n * headDim, headDim));
+                    cache.WriteValue(layerIndex, group, basePosition + n, vg.Span.Slice(n * headDim, headDim));
+                }
+
+                ReadOnlySpan<float> keys, values;
+                if (cache.IsQuantized)
+                {
+                    cache.DequantizeKeyRange(layerIndex, group, fromPosition: 0, length: cacheLength, kf.Span.Slice(0, cacheLength * headDim));
+                    cache.DequantizeValueRange(layerIndex, group, fromPosition: 0, length: cacheLength, vf.Span.Slice(0, cacheLength * headDim));
+                    keys = kf.Span.Slice(0, cacheLength * headDim);
+                    values = vf.Span.Slice(0, cacheLength * headDim);
+                }
+                else
+                {
+                    keys = cache.GetKeyReadSpan(layerIndex, group, fromPosition: 0, length: cacheLength);
+                    values = cache.GetValueReadSpan(layerIndex, group, fromPosition: 0, length: cacheLength);
+                }
+
+                for (var hg = 0; hg < groupSize; hg++)
+                {
+                    var h = group * groupSize + hg;
+                    ref readonly var hw = ref weights.Head(h);
+                    var wq = hw.Wq;
+                    var wo = hw.Wo;
+
+                    BatchedQuantProjection.Dispatch(hidden, rows, in wq, hw.Bq, qh.Span, dModel, headDim);
                     if (weights.HasQkNorm)
                     {
-                        QkNormKernel.Apply(kg, weights.QkNormK, rows, headDim);
+                        QkNormKernel.Apply(qh.Span, weights.QkNormQ, rows, headDim);
                     }
-                    for (var n = 0; n < rows; n++)
+                    if (rope is not null)
                     {
-                        if (rope is not null)
-                        {
-                            RopeKernel.Apply(kg.AsSpan(n * headDim, headDim), rope, basePosition + n + ropeBase);
-                        }
-                        cache.WriteKey(layerIndex, group, basePosition + n, kg.AsSpan(n * headDim, headDim));
-                        cache.WriteValue(layerIndex, group, basePosition + n, vg.AsSpan(n * headDim, headDim));
-                    }
-
-                    ReadOnlySpan<float> keys, values;
-                    if (cache.IsQuantized)
-                    {
-                        cache.DequantizeKeyRange(layerIndex, group, fromPosition: 0, length: cacheLength, kf.AsSpan(0, cacheLength * headDim));
-                        cache.DequantizeValueRange(layerIndex, group, fromPosition: 0, length: cacheLength, vf!.AsSpan(0, cacheLength * headDim));
-                        keys = kf.AsSpan(0, cacheLength * headDim);
-                        values = vf.AsSpan(0, cacheLength * headDim);
-                    }
-                    else
-                    {
-                        keys = cache.GetKeyReadSpan(layerIndex, group, fromPosition: 0, length: cacheLength);
-                        values = cache.GetValueReadSpan(layerIndex, group, fromPosition: 0, length: cacheLength);
-                    }
-
-                    for (var hg = 0; hg < groupSize; hg++)
-                    {
-                        var h = group * groupSize + hg;
-                        ref readonly var hw = ref weights.Head(h);
-                        var wq = hw.Wq;
-                        var wo = hw.Wo;
-
-                        BatchedQuantProjection.Dispatch(hidden, rows, in wq, hw.Bq, qh, dModel, headDim);
-                        if (weights.HasQkNorm)
-                        {
-                            QkNormKernel.Apply(qh, weights.QkNormQ, rows, headDim);
-                        }
-                        if (rope is not null)
-                        {
-                            for (var n = 0; n < rows; n++)
-                            {
-                                RopeKernel.Apply(qh.AsSpan(n * headDim, headDim), rope, basePosition + n + ropeBase);
-                            }
-                        }
-
-                        BatchedAttentionKernel.ComputeParallel(qh, keys, values, attn, score, rows, cacheLength, headDim, scale, AttnLogitSoftcap);
-
-                        BatchedQuantProjection.Dispatch(attn, rows, in wo, [], band, headDim, dModel);
                         for (var n = 0; n < rows; n++)
                         {
-                            var outRow = output.Slice(n * dModel, dModel);
-                            TensorPrimitives.Add(outRow, band.AsSpan(n * dModel, dModel), outRow);
+                            RopeKernel.Apply(qh.Span.Slice(n * headDim, headDim), rope, basePosition + n + ropeBase);
                         }
                     }
+
+                    BatchedAttentionKernel.ComputeParallel(qh.Span, keys, values, attn.Span, score.Span, rows, cacheLength, headDim, scale, AttnLogitSoftcap);
+
+                    BatchedQuantProjection.Dispatch(attn.Span, rows, in wo, [], band.Span, headDim, dModel);
+                    for (var n = 0; n < rows; n++)
+                    {
+                        var outRow = output.Slice(n * dModel, dModel);
+                        TensorPrimitives.Add(outRow, band.Span.Slice(n * dModel, dModel), outRow);
+                    }
                 }
-            }
-            finally
-            {
-                if (vf != null)
-                {
-                    PooledBuffer<float>.ReturnArray(vf);
-                }
-                if (kf != null)
-                {
-                    PooledBuffer<float>.ReturnArray(kf);
-                }
-                PooledBuffer<float>.ReturnArray(score);
-                PooledBuffer<float>.ReturnArray(band);
-                PooledBuffer<float>.ReturnArray(attn);
-                PooledBuffer<float>.ReturnArray(vg);
-                PooledBuffer<float>.ReturnArray(kg);
-                PooledBuffer<float>.ReturnArray(qh);
             }
         }
 
@@ -761,12 +730,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             {
                 ref readonly var hw = ref ctx.Weights.Head(h);
 
-                var qh = ctx.Q.AsSpan(h * rows * headDim, rows * headDim);
-                var kh = ctx.K.AsSpan(h * rows * headDim, rows * headDim);
-                var vh = ctx.V.AsSpan(h * rows * headDim, rows * headDim);
-                var attnh = ctx.Attn.AsSpan(h * rows * headDim, rows * headDim);
-                var scoreh = ctx.ScoreScratch.AsSpan(h * rows * cacheLength, rows * cacheLength);
-                var bandh = ctx.Bands.AsSpan(h * rows * dModel, rows * dModel);
+                var qh = ctx.Q.Span.Slice(h * rows * headDim, rows * headDim);
+                var kh = ctx.K.Span.Slice(h * rows * headDim, rows * headDim);
+                var vh = ctx.V.Span.Slice(h * rows * headDim, rows * headDim);
+                var attnh = ctx.Attn.Span.Slice(h * rows * headDim, rows * headDim);
+                var scoreh = ctx.ScoreScratch.Span.Slice(h * rows * cacheLength, rows * cacheLength);
+                var bandh = ctx.Bands.Span.Slice(h * rows * dModel, rows * dModel);
 
                 // Sequential per-head projections (parallelism is across heads above).
                 BatchedProjectionKernel.Project(hidden, rows, hw.Wq.F32, hw.Bq, qh, dModel, headDim);
@@ -794,12 +763,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             public BlockWeights Weights;
             public KeyValueCache Cache;
             public float* Hidden;
-            public float[] Q;
-            public float[] K;
-            public float[] V;
-            public float[] Attn;
-            public float[] Bands;
-            public float[] ScoreScratch;
+            public PooledBuffer<float> Q;
+            public PooledBuffer<float> K;
+            public PooledBuffer<float> V;
+            public PooledBuffer<float> Attn;
+            public PooledBuffer<float> Bands;
+            public PooledBuffer<float> ScoreScratch;
             public int Rows;
             public int DModel;
             public int HeadDim;

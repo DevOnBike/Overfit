@@ -12,7 +12,7 @@ namespace DevOnBike.Overfit.Runtime
     /// duration of a generation, restoring the previous mode on dispose — it suppresses blocking gen-2 collections
     /// (trading some memory headroom for fewer GC pauses), which trims tail latency on the allocating paths
     /// (prefill, the server's per-request marshalling) even though steady-state decode is already zero-allocation.
-    /// A <c>ref struct</c> (like <see cref="GcHandleScope"/> / <see cref="PooledArray"/>), so it can't escape its
+    /// A <c>ref struct</c> (like <see cref="GcHandleScope"/>), so it can't escape its
     /// scope or be boxed — the latency mode is restored exactly when the <c>using</c> ends.
     /// <para>
     /// <b>Process-wide by design.</b> <see cref="GCSettings.LatencyMode"/> is a process-global knob, so the library

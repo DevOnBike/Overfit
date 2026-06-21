@@ -460,83 +460,73 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             // Embed [t0, draft…] and run ONE batched verify forward → per-row target logits.
             // Pooled per-step scratch; probs/residual are EXACT slices (the samplers read .Length).
-            var hiddenArr = PooledBuffer<float>.RentArray(batch * dModel);
-            var finalNormArr = PooledBuffer<float>.RentArray(batch * dModel);
-            var verifyLogitsArr = PooledBuffer<float>.RentArray(batch * vocab);
-            var probsArr = PooledBuffer<float>.RentArray(vocab);
-            var residualArr = PooledBuffer<float>.RentArray(vocab);
-            try
+            using var hiddenArr = new PooledBuffer<float>(batch * dModel, clearMemory: false);
+            using var finalNormArr = new PooledBuffer<float>(batch * dModel, clearMemory: false);
+            using var verifyLogitsArr = new PooledBuffer<float>(batch * vocab, clearMemory: false);
+            using var probsArr = new PooledBuffer<float>(vocab, clearMemory: false);
+            using var residualArr = new PooledBuffer<float>(vocab, clearMemory: false);
+
+            var hidden = hiddenArr.Span;
+            _embedWeights.DequantizeRow(t0, hidden.Slice(0, dModel));
+            ApplyEmbeddingScale(hidden.Slice(0, dModel));
+            for (var j = 0; j < dn; j++)
             {
-                var hidden = hiddenArr.AsSpan(0, batch * dModel);
-                _embedWeights.DequantizeRow(t0, hidden.Slice(0, dModel));
-                ApplyEmbeddingScale(hidden.Slice(0, dModel));
-                for (var j = 0; j < dn; j++)
-                {
-                    _embedWeights.DequantizeRow(draft[j], hidden.Slice((1 + j) * dModel, dModel));
-                    ApplyEmbeddingScale(hidden.Slice((1 + j) * dModel, dModel));
-                }
-                _cache.Advance(batch);
-
-                var finalNorm = finalNormArr.AsSpan(0, batch * dModel);
-                _stack.PrefillBatchedQuantAllRows(hidden, batch, _weights, _cache, basePosition, finalNorm, _rope);
-
-                // Batched LM head — read the (large) head weights ONCE for all draft rows, else the per-row
-                // re-read cancels the batched stack's saving (measured: 1.01× before this).
-                var verifyLogits = verifyLogitsArr.AsSpan(0, batch * vocab);
-                _stack.ProjectLogitsBatched(finalNorm, batch, _weights, verifyLogits);
-
-                committed[0] = t0;
-                var accepted = 0;
-                var probs = probsArr.AsSpan(0, vocab);
-                var residual = residualArr.AsSpan(0, vocab);
-                var correction = -1;
-                for (var j = 0; j < dn; j++)
-                {
-                    TokenSampler.ComputeProbabilities(
-                        verifyLogits.Slice(j * vocab, vocab), in sampling, _indexScratch, _scoreScratch, probs);
-
-                    // Speculative rejection sampling: accept draft d w.p. p(d), else resample the residual.
-                    var token = SpeculativeSampler.AcceptOrResample(probs, draft[j], _random, residual);
-                    if (token == draft[j])
-                    {
-                        committed[1 + j] = draft[j];
-                        accepted++;
-                    }
-                    else
-                    {
-                        correction = token;
-                        break;
-                    }
-                }
-
-                if (correction < 0)
-                {
-                    // All drafts accepted — the bonus token is sampled from the row after the last draft.
-                    TokenSampler.ComputeProbabilities(
-                        verifyLogits.Slice(dn * vocab, vocab), in sampling, _indexScratch, _scoreScratch, probs);
-                    correction = SpeculativeSampler.Sample(probs, _random);
-                }
-
-                // Keep t0 + accepted drafts' K/V (drop rejected drafts), then forward the correction/bonus so
-                // it is cached and _logits reflects the prediction after it (the session invariant).
-                _cache.TruncateTo(basePosition + 1 + accepted);
-                committed[1 + accepted] = correction;
-                DecodeToken(correction);
-
-                // Feed the verify outcome back into the adaptive gate: committed tokens this step (= 2 + accepted).
-                var committedThisStep = 2 + accepted;
-                drafter?.Sync(committed.Slice(0, committedThisStep));
-                _specAcceptEma = SpecEmaAlpha * committedThisStep + (1 - SpecEmaAlpha) * _specAcceptEma;
-                return committedThisStep;
+                _embedWeights.DequantizeRow(draft[j], hidden.Slice((1 + j) * dModel, dModel));
+                ApplyEmbeddingScale(hidden.Slice((1 + j) * dModel, dModel));
             }
-            finally
+            _cache.Advance(batch);
+
+            var finalNorm = finalNormArr.Span;
+            _stack.PrefillBatchedQuantAllRows(hidden, batch, _weights, _cache, basePosition, finalNorm, _rope);
+
+            // Batched LM head — read the (large) head weights ONCE for all draft rows, else the per-row
+            // re-read cancels the batched stack's saving (measured: 1.01× before this).
+            var verifyLogits = verifyLogitsArr.Span;
+            _stack.ProjectLogitsBatched(finalNorm, batch, _weights, verifyLogits);
+
+            committed[0] = t0;
+            var accepted = 0;
+            var probs = probsArr.Span;
+            var residual = residualArr.Span;
+            var correction = -1;
+            for (var j = 0; j < dn; j++)
             {
-                PooledBuffer<float>.ReturnArray(residualArr);
-                PooledBuffer<float>.ReturnArray(probsArr);
-                PooledBuffer<float>.ReturnArray(verifyLogitsArr);
-                PooledBuffer<float>.ReturnArray(finalNormArr);
-                PooledBuffer<float>.ReturnArray(hiddenArr);
+                TokenSampler.ComputeProbabilities(
+                    verifyLogits.Slice(j * vocab, vocab), in sampling, _indexScratch, _scoreScratch, probs);
+
+                // Speculative rejection sampling: accept draft d w.p. p(d), else resample the residual.
+                var token = SpeculativeSampler.AcceptOrResample(probs, draft[j], _random, residual);
+                if (token == draft[j])
+                {
+                    committed[1 + j] = draft[j];
+                    accepted++;
+                }
+                else
+                {
+                    correction = token;
+                    break;
+                }
             }
+
+            if (correction < 0)
+            {
+                // All drafts accepted — the bonus token is sampled from the row after the last draft.
+                TokenSampler.ComputeProbabilities(
+                    verifyLogits.Slice(dn * vocab, vocab), in sampling, _indexScratch, _scoreScratch, probs);
+                correction = SpeculativeSampler.Sample(probs, _random);
+            }
+
+            // Keep t0 + accepted drafts' K/V (drop rejected drafts), then forward the correction/bonus so
+            // it is cached and _logits reflects the prediction after it (the session invariant).
+            _cache.TruncateTo(basePosition + 1 + accepted);
+            committed[1 + accepted] = correction;
+            DecodeToken(correction);
+
+            // Feed the verify outcome back into the adaptive gate: committed tokens this step (= 2 + accepted).
+            var committedThisStep = 2 + accepted;
+            drafter?.Sync(committed.Slice(0, committedThisStep));
+            _specAcceptEma = SpecEmaAlpha * committedThisStep + (1 - SpecEmaAlpha) * _specAcceptEma;
+            return committedThisStep;
         }
 
         /// <summary>
@@ -831,23 +821,17 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             var dModel = _config.DModel;
             var basePosition = _cache.CurrentLength;
 
-            var hidden = PooledBuffer<float>.RentArray(rows * dModel);
-            try
-            {
-                for (var i = 0; i < rows; i++)
-                {
-                    _embedWeights.DequantizeRow(promptTokens[i], hidden.AsSpan(i * dModel, dModel));
-                    ApplyEmbeddingScale(hidden.AsSpan(i * dModel, dModel));
-                    _cache.Advance();
-                }
+            using var hidden = new PooledBuffer<float>(rows * dModel, clearMemory: false);
 
-                _stack.PrefillBatchedQuant(hidden, rows, _weights, _cache, basePosition, _rope);
-                _stack.ProjectLogits(_weights, _logits);
-            }
-            finally
+            for (var i = 0; i < rows; i++)
             {
-                PooledBuffer<float>.ReturnArray(hidden);
+                _embedWeights.DequantizeRow(promptTokens[i], hidden.Span.Slice(i * dModel, dModel));
+                ApplyEmbeddingScale(hidden.Span.Slice(i * dModel, dModel));
+                _cache.Advance();
             }
+
+            _stack.PrefillBatchedQuant(hidden.Span, rows, _weights, _cache, basePosition, _rope);
+            _stack.ProjectLogits(_weights, _logits);
         }
 
         // Gemma scales the token embedding by sqrt(d_model) after lookup; no-op (scale 1) for every other arch.

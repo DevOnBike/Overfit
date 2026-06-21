@@ -180,11 +180,13 @@ namespace DevOnBike.Overfit.Tensors.Core
 #pragma warning disable OVERFIT012 // Safety-net finalizer for an unmanaged AlignedAlloc — the sanctioned use of a finalizer; Dispose calls GC.SuppressFinalize so the common path never pays for it.
         ~NativeBufferManaged()
         {
-            if (_ptr != null)
+            if (_ptr == null)
             {
-                NativeMemory.AlignedFree(_ptr);
-                _ptr = null;
+                return;
             }
+            
+            NativeMemory.AlignedFree(_ptr);
+            _ptr = null;
         }
 #pragma warning restore OVERFIT012
 

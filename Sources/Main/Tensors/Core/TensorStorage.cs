@@ -6,6 +6,7 @@
 using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Diagnostics;
 
+
 namespace DevOnBike.Overfit.Tensors.Core
 {
     /// <summary>
@@ -15,6 +16,9 @@ namespace DevOnBike.Overfit.Tensors.Core
     public sealed unsafe class TensorStorage<T> : IDisposable
         where T : unmanaged
     {
+        // _pooledBuf backs the pooled ctor; _data backs the Unpooled (GC-owned) ctor; _nativePtr the borrowed
+        // ctor. Exactly one is live per instance, selected by _pooled / _isBorrowedMemory.
+        private PooledBuffer<T> _pooledBuf;
         private T[]? _data;
         private int _disposed;
         private void* _nativePtr;
@@ -35,13 +39,8 @@ namespace DevOnBike.Overfit.Tensors.Core
             ArgumentOutOfRangeException.ThrowIfNegative(length);
 
             Length = length;
-            _data = PooledBuffer<T>.RentArray(length);
+            _pooledBuf = new PooledBuffer<T>(length, clearMemory);
             _pooled = true;
-
-            if (clearMemory)
-            {
-                _data.AsSpan(0, length).Clear();
-            }
 
             OverfitTelemetry.RecordTensorStorageCreated(length, Unsafe.SizeOf<T>(), borrowed: false);
         }
@@ -106,7 +105,12 @@ namespace DevOnBike.Overfit.Tensors.Core
         {
             ObjectDisposedException.ThrowIf(_disposed == 1, this);
 
-            return _isBorrowedMemory ? new Span<T>(_nativePtr, Length) : _data!.AsSpan(0, Length);
+            if (_isBorrowedMemory)
+            {
+                return new Span<T>(_nativePtr, Length);
+            }
+
+            return _pooled ? _pooledBuf.Span : _data!.AsSpan(0, Length);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -120,7 +124,7 @@ namespace DevOnBike.Overfit.Tensors.Core
         /// </summary>
         public Memory<T> AsMemory()
         {
-            return _data!.AsMemory(0, Length);
+            return _pooled ? _pooledBuf.Memory : _data!.AsMemory(0, Length);
         }
 
         /// <summary>
@@ -143,9 +147,9 @@ namespace DevOnBike.Overfit.Tensors.Core
                 OverfitTelemetry.RecordTensorStorageDisposed(_isBorrowedMemory);
 
                 // Only return to pool if rented from pool. Unpooled storage is GC-managed.
-                if (!_isBorrowedMemory && _pooled && _data != null)
+                if (!_isBorrowedMemory && _pooled)
                 {
-                    PooledBuffer<T>.ReturnArray(_data);
+                    _pooledBuf.Dispose();
                 }
 
                 _data = null;

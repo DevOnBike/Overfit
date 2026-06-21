@@ -160,35 +160,27 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 throw new ArgumentException("Shared gate weight smaller than dModel.", nameof(sharedGateWeight));
             }
 
-            var routedOut = PooledBuffer<float>.RentArray(rows * DModel);
-            var sharedOut = PooledBuffer<float>.RentArray(rows * DModel);
-            try
+            using var routedOut = new PooledBuffer<float>(rows * DModel, clearMemory: false);
+            using var sharedOut = new PooledBuffer<float>(rows * DModel, clearMemory: false);
+
+            _routed.DecodeBatched(hidden, rows, routerWeight, gateExperts, upExperts, downExperts, routedOut.Span);
+            _shared.DecodeSwiGluBatchedDispatched(hidden, rows, in sharedGate, in sharedUp, in sharedDown, sharedOut.Span);
+
+            for (var n = 0; n < rows; n++)
             {
-
-                _routed.DecodeBatched(hidden, rows, routerWeight, gateExperts, upExperts, downExperts, routedOut);
-                _shared.DecodeSwiGluBatchedDispatched(hidden, rows, in sharedGate, in sharedUp, in sharedDown, sharedOut);
-
-                for (var n = 0; n < rows; n++)
+                var row = hidden.Slice(n * DModel, DModel);
+                var gateLogit = 0f;
+                for (var d = 0; d < DModel; d++)
                 {
-                    var row = hidden.Slice(n * DModel, DModel);
-                    var gateLogit = 0f;
-                    for (var d = 0; d < DModel; d++)
-                    {
-                        gateLogit += row[d] * sharedGateWeight[d];
-                    }
-                    var gate = 1f / (1f + MathF.Exp(-gateLogit));
-
-                    var dst = output.Slice(n * DModel, DModel);
-                    for (var d = 0; d < DModel; d++)
-                    {
-                        dst[d] = (gate * sharedOut[n * DModel + d]) + routedOut[n * DModel + d];
-                    }
+                    gateLogit += row[d] * sharedGateWeight[d];
                 }
-            }
-            finally
-            {
-                PooledBuffer<float>.ReturnArray(sharedOut);
-                PooledBuffer<float>.ReturnArray(routedOut);
+                var gate = 1f / (1f + MathF.Exp(-gateLogit));
+
+                var dst = output.Slice(n * DModel, DModel);
+                for (var d = 0; d < DModel; d++)
+                {
+                    dst[d] = (gate * sharedOut.Span[n * DModel + d]) + routedOut.Span[n * DModel + d];
+                }
             }
         }
     }

@@ -32,62 +32,36 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 var w = weight.Quantized6K;
                 var spr = w.SuperBlocksPerRow;
                 var groups = rows * spr * Q6KDotKernel.GroupsPerSuperBlock;
-                var qBytes = PooledBuffer<sbyte>.RentArray(rows * inputSize);
-                var scales = PooledBuffer<float>.RentArray(rows * spr);
-                var sums = PooledBuffer<short>.RentArray(groups);
-                try
-                {
-                    Q6KDotKernel.ProjectBatched(
-                        input, rows, w, bias, output,
-                        qBytes.AsSpan(0, rows * inputSize), scales.AsSpan(0, rows * spr),
-                        sums.AsSpan(0, groups));
-                }
-                finally
-                {
-                    PooledBuffer<short>.ReturnArray(sums);
-                    PooledBuffer<float>.ReturnArray(scales);
-                    PooledBuffer<sbyte>.ReturnArray(qBytes);
-                }
+                using var qBytes = new PooledBuffer<sbyte>(rows * inputSize, clearMemory: false);
+                using var scales = new PooledBuffer<float>(rows * spr, clearMemory: false);
+                using var sums = new PooledBuffer<short>(groups, clearMemory: false);
+                Q6KDotKernel.ProjectBatched(
+                    input, rows, w, bias, output,
+                    qBytes.Span.Slice(0, rows * inputSize), scales.Span.Slice(0, rows * spr),
+                    sums.Span.Slice(0, groups));
             }
             else if (weight.IsQ4K)
             {
                 var w = weight.Quantized4K;
                 var spr = w.SuperBlocksPerRow;
                 var groups = rows * spr * Q4KDotKernel.GroupsPerSuperBlock;
-                var qBytes = PooledBuffer<sbyte>.RentArray(rows * inputSize);
-                var scales = PooledBuffer<float>.RentArray(rows * spr);
-                var sums = PooledBuffer<short>.RentArray(groups);
-                try
-                {
-                    Q4KDotKernel.ProjectBatched(
-                        input, rows, w, bias, output,
-                        qBytes.AsSpan(0, rows * inputSize), scales.AsSpan(0, rows * spr),
-                        sums.AsSpan(0, groups));
-                }
-                finally
-                {
-                    PooledBuffer<short>.ReturnArray(sums);
-                    PooledBuffer<float>.ReturnArray(scales);
-                    PooledBuffer<sbyte>.ReturnArray(qBytes);
-                }
+                using var qBytes = new PooledBuffer<sbyte>(rows * inputSize, clearMemory: false);
+                using var scales = new PooledBuffer<float>(rows * spr, clearMemory: false);
+                using var sums = new PooledBuffer<short>(groups, clearMemory: false);
+                Q4KDotKernel.ProjectBatched(
+                    input, rows, w, bias, output,
+                    qBytes.Span.Slice(0, rows * inputSize), scales.Span.Slice(0, rows * spr),
+                    sums.Span.Slice(0, groups));
             }
             else if (weight.IsQuantized)
             {
                 var w = weight.Quantized;
                 var bpr = inputSize / Q8DotKernel.BlockSize;
-                var qBytes = PooledBuffer<sbyte>.RentArray(rows * inputSize);
-                var scales = PooledBuffer<float>.RentArray(rows * bpr);
-                try
-                {
-                    Q8DotKernel.ProjectBatched(
-                        input, rows, w, bias, output,
-                        qBytes.AsSpan(0, rows * inputSize), scales.AsSpan(0, rows * bpr));
-                }
-                finally
-                {
-                    PooledBuffer<float>.ReturnArray(scales);
-                    PooledBuffer<sbyte>.ReturnArray(qBytes);
-                }
+                using var qBytes = new PooledBuffer<sbyte>(rows * inputSize, clearMemory: false);
+                using var scales = new PooledBuffer<float>(rows * bpr, clearMemory: false);
+                Q8DotKernel.ProjectBatched(
+                    input, rows, w, bias, output,
+                    qBytes.Span.Slice(0, rows * inputSize), scales.Span.Slice(0, rows * bpr));
             }
             else
             {

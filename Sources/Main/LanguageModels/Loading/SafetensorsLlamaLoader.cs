@@ -165,52 +165,41 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         {
             var elems = checked((int)((long)headCount * headDim * dModel));
             ExpectCount(source, name, elems);
-            var scratch = PooledBuffer<float>.RentArray(elems);
+            using var scratch = new PooledBuffer<float>(elems, clearMemory: false);
             // RoPE-rotated weights (Q/K) need their headDim rows reordered from HF's
             // rotate-half layout to the adjacent-pair layout RopeKernel uses; the
             // permuted rows are staged here, one head at a time.
-            var permuted = ropePermute ? PooledBuffer<float>.RentArray(headDim * dModel) : [];
-            try
+            using var permuted = ropePermute ? new PooledBuffer<float>(headDim * dModel, clearMemory: false) : default;
+            source.LoadF32(name, scratch.Span);
+            var heads = new DecodeWeight[headCount];
+            for (var h = 0; h < headCount; h++)
             {
-                source.LoadF32(name, scratch.AsSpan(0, elems));
-                var heads = new DecodeWeight[headCount];
-                for (var h = 0; h < headCount; h++)
+                var rowMajor = scratch.Span.Slice(h * headDim * dModel, headDim * dModel);
+                if (ropePermute)
                 {
-                    var rowMajor = scratch.AsSpan(h * headDim * dModel, headDim * dModel);
-                    if (ropePermute)
-                    {
-                        PermuteRopeRows(rowMajor, permuted.AsSpan(0, headDim * dModel), headDim, dModel);
-                        rowMajor = permuted.AsSpan(0, headDim * dModel);
-                    }
+                    PermuteRopeRows(rowMajor, permuted.Span.Slice(0, headDim * dModel), headDim, dModel);
+                    rowMajor = permuted.Span.Slice(0, headDim * dModel);
+                }
 
-                    if (quantize)
-                    {
-                        heads[h] = Q8Weight.QuantizeRows(rowMajor, headDim, dModel);
-                    }
-                    else
-                    {
-                        var storage = TensorStorage<float>.Unpooled(dModel * headDim);
-                        var dst = storage.AsSpan();
-                        for (var i = 0; i < dModel; i++)
-                        {
-                            for (var j = 0; j < headDim; j++)
-                            {
-                                dst[i * headDim + j] = rowMajor[j * dModel + i];
-                            }
-                        }
-                        heads[h] = storage;
-                    }
-                }
-                return heads;
-            }
-            finally
-            {
-                PooledBuffer<float>.ReturnArray(scratch);
-                if (permuted.Length > 0)
+                if (quantize)
                 {
-                    PooledBuffer<float>.ReturnArray(permuted);
+                    heads[h] = Q8Weight.QuantizeRows(rowMajor, headDim, dModel);
+                }
+                else
+                {
+                    var storage = TensorStorage<float>.Unpooled(dModel * headDim);
+                    var dst = storage.AsSpan();
+                    for (var i = 0; i < dModel; i++)
+                    {
+                        for (var j = 0; j < headDim; j++)
+                        {
+                            dst[i * headDim + j] = rowMajor[j * dModel + i];
+                        }
+                    }
+                    heads[h] = storage;
                 }
             }
+            return heads;
         }
 
         // HF→adjacent-pair row permute for a per-head [headDim, width] block:
@@ -239,53 +228,39 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var nHeadsHeadDim = nHeads * headDim;
             var elems = checked((int)((long)dModel * nHeadsHeadDim));
             ExpectCount(source, name, elems);
-            var scratch = PooledBuffer<float>.RentArray(elems);
-            try
+            using var scratch = new PooledBuffer<float>(elems, clearMemory: false);
+            source.LoadF32(name, scratch.Span);
+            var heads = new DecodeWeight[nHeads];
+            for (var h = 0; h < nHeads; h++)
             {
-                source.LoadF32(name, scratch.AsSpan(0, elems));
-                var heads = new DecodeWeight[nHeads];
-                for (var h = 0; h < nHeads; h++)
+                if (quantize)
                 {
-                    if (quantize)
+                    var gatherElems = dModel * headDim;
+                    using var gather = new PooledBuffer<float>(gatherElems, clearMemory: false);
+                    for (var o = 0; o < dModel; o++)
                     {
-                        var gatherElems = dModel * headDim;
-                        var gather = PooledBuffer<float>.RentArray(gatherElems);
-                        try
-                        {
-                            for (var o = 0; o < dModel; o++)
-                            {
-                                for (var i = 0; i < headDim; i++)
-                                {
-                                    gather[o * headDim + i] = scratch[o * nHeadsHeadDim + h * headDim + i];
-                                }
-                            }
-                            heads[h] = Q8Weight.QuantizeRows(gather.AsSpan(0, gatherElems), dModel, headDim);
-                        }
-                        finally
-                        {
-                            PooledBuffer<float>.ReturnArray(gather);
-                        }
-                    }
-                    else
-                    {
-                        var storage = TensorStorage<float>.Unpooled(headDim * dModel);
-                        var dst = storage.AsSpan();
                         for (var i = 0; i < headDim; i++)
                         {
-                            for (var j = 0; j < dModel; j++)
-                            {
-                                dst[i * dModel + j] = scratch[j * nHeadsHeadDim + h * headDim + i];
-                            }
+                            gather.Span[o * headDim + i] = scratch.Span[o * nHeadsHeadDim + h * headDim + i];
                         }
-                        heads[h] = storage;
                     }
+                    heads[h] = Q8Weight.QuantizeRows(gather.Span, dModel, headDim);
                 }
-                return heads;
+                else
+                {
+                    var storage = TensorStorage<float>.Unpooled(headDim * dModel);
+                    var dst = storage.AsSpan();
+                    for (var i = 0; i < headDim; i++)
+                    {
+                        for (var j = 0; j < dModel; j++)
+                        {
+                            dst[i * dModel + j] = scratch.Span[j * nHeadsHeadDim + h * headDim + i];
+                        }
+                    }
+                    heads[h] = storage;
+                }
             }
-            finally
-            {
-                PooledBuffer<float>.ReturnArray(scratch);
-            }
+            return heads;
         }
 
         /// <summary>
@@ -298,29 +273,22 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         {
             var elems = checked((int)((long)inDim * outDim));
             ExpectCount(source, name, elems);
-            var scratch = PooledBuffer<float>.RentArray(elems);
-            try
+            using var scratch = new PooledBuffer<float>(elems, clearMemory: false);
+            source.LoadF32(name, scratch.Span);
+            if (quantize)
             {
-                source.LoadF32(name, scratch.AsSpan(0, elems));
-                if (quantize)
-                {
-                    return Q8Weight.QuantizeRows(scratch.AsSpan(0, elems), outDim, inDim);
-                }
-                var storage = TensorStorage<float>.Unpooled(elems);
-                var dst = storage.AsSpan();
-                for (var i = 0; i < inDim; i++)
-                {
-                    for (var o = 0; o < outDim; o++)
-                    {
-                        dst[i * outDim + o] = scratch[o * inDim + i];
-                    }
-                }
-                return storage;
+                return Q8Weight.QuantizeRows(scratch.Span, outDim, inDim);
             }
-            finally
+            var storage = TensorStorage<float>.Unpooled(elems);
+            var dst = storage.AsSpan();
+            for (var i = 0; i < inDim; i++)
             {
-                PooledBuffer<float>.ReturnArray(scratch);
+                for (var o = 0; o < outDim; o++)
+                {
+                    dst[i * outDim + o] = scratch.Span[o * inDim + i];
+                }
             }
+            return storage;
         }
 
         /// <summary>
@@ -344,18 +312,11 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
             var elems = checked((int)((long)vocab * d));
             ExpectCount(source, "lm_head.weight", elems);
-            var scratch = PooledBuffer<float>.RentArray(elems);
-            try
-            {
-                source.LoadF32("lm_head.weight", scratch.AsSpan(0, elems));
-                return quantize
-                    ? Q8Weight.QuantizeRows(scratch.AsSpan(0, elems), vocab, d)
-                    : TransposeToInputMajor(scratch.AsSpan(0, elems), vocab, d);
-            }
-            finally
-            {
-                PooledBuffer<float>.ReturnArray(scratch);
-            }
+            using var scratch = new PooledBuffer<float>(elems, clearMemory: false);
+            source.LoadF32("lm_head.weight", scratch.Span);
+            return quantize
+                ? Q8Weight.QuantizeRows(scratch.Span, vocab, d)
+                : TransposeToInputMajor(scratch.Span, vocab, d);
         }
 
         // [vocab, dModel] row-major → [dModel, vocab] (the kernel's input-major LM head).
@@ -391,30 +352,23 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
             var elems = headCount * headDim;
             ExpectCount(source, name, elems);
-            var scratch = PooledBuffer<float>.RentArray(elems);
-            try
+            using var scratch = new PooledBuffer<float>(elems, clearMemory: false);
+            source.LoadF32(name, scratch.Span);
+            for (var h = 0; h < headCount; h++)
             {
-                source.LoadF32(name, scratch.AsSpan(0, elems));
-                for (var h = 0; h < headCount; h++)
+                bias[h] = TensorStorage<float>.Unpooled(headDim);
+                var src = scratch.Span.Slice(h * headDim, headDim);
+                var dst = bias[h].AsSpan();
+                if (ropePermute)
                 {
-                    bias[h] = TensorStorage<float>.Unpooled(headDim);
-                    var src = scratch.AsSpan(h * headDim, headDim);
-                    var dst = bias[h].AsSpan();
-                    if (ropePermute)
-                    {
-                        PermuteRopeRows(src, dst, headDim, width: 1);
-                    }
-                    else
-                    {
-                        src.CopyTo(dst);
-                    }
+                    PermuteRopeRows(src, dst, headDim, width: 1);
                 }
-                return bias;
+                else
+                {
+                    src.CopyTo(dst);
+                }
             }
-            finally
-            {
-                PooledBuffer<float>.ReturnArray(scratch);
-            }
+            return bias;
         }
 
         private static void ExpectCount(ISafetensorsSource source, string name, long expected)

@@ -263,223 +263,189 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             // Wo: K-quant per-head is blocked by headDim < 256, but Q8_0 per-head works (else F32 fallback).
             var oNeedsF32 = !attnQuantizable || AnyLayerOutputNeedsF32(reader, nLayers);
 
-            var qFull = qNeedsF32 ? PooledBuffer<float>.RentArray(qFullElems) : [];
-            var kFull = kNeedsF32 ? PooledBuffer<float>.RentArray(kFullElems) : [];
-            var vFull = vNeedsF32 ? PooledBuffer<float>.RentArray(kFullElems) : [];
-            var oFull = oNeedsF32 ? PooledBuffer<float>.RentArray(oFullElems) : [];
+            using var qFull = qNeedsF32 ? new PooledBuffer<float>(qFullElems, clearMemory: false) : default;
+            using var kFull = kNeedsF32 ? new PooledBuffer<float>(kFullElems, clearMemory: false) : default;
+            using var vFull = vNeedsF32 ? new PooledBuffer<float>(kFullElems, clearMemory: false) : default;
+            using var oFull = oNeedsF32 ? new PooledBuffer<float>(oFullElems, clearMemory: false) : default;
             // Fused-tensor scratch (Phi-3): qkv = (nHeads+2·nKvHeads)·headDim × dModel; gate_up = 2·dFF × dModel.
             var fusedQkvElems = fusedQkv ? checked((int)((long)((nHeads + (2 * nKvHeads)) * headDim) * dModel)) : 0;
             var fusedGateUpElems = fusedGateUp ? checked((int)((long)(2 * dFF) * dModel)) : 0;
-            var qkvFused = fusedQkv ? PooledBuffer<float>.RentArray(fusedQkvElems) : [];
-            var gateUpFused = fusedGateUp ? PooledBuffer<float>.RentArray(fusedGateUpElems) : [];
+            using var qkvFused = fusedQkv ? new PooledBuffer<float>(fusedQkvElems, clearMemory: false) : default;
+            using var gateUpFused = fusedGateUp ? new PooledBuffer<float>(fusedGateUpElems, clearMemory: false) : default;
             // Attention biases are always F32 in GGUF — bias scratch always needed.
-            var qBiasFull = PooledBuffer<float>.RentArray(nHeads * headDim);
-            var kBiasFull = PooledBuffer<float>.RentArray(nKvHeads * headDim);
-            var vBiasFull = PooledBuffer<float>.RentArray(nKvHeads * headDim);
+            using var qBiasFull = new PooledBuffer<float>(nHeads * headDim, clearMemory: false);
+            using var kBiasFull = new PooledBuffer<float>(nKvHeads * headDim, clearMemory: false);
+            using var vBiasFull = new PooledBuffer<float>(nKvHeads * headDim, clearMemory: false);
             // Gemma's (1+w) RMSNorm offset is already baked into the GGUF weights (see note above), so this is a
             // plain load — the wrapper is kept so all gemma norm tensors (incl. the sandwich post-norms) go through
             // one place if the offset ever needs reinstating for a differently-converted GGUF.
             TensorStorage<float> LoadNormGamma(string name) => AllocAndLoad(reader, name, dModel);
 
-            try
+            for (var l = 0; l < nLayers; l++)
             {
-                for (var l = 0; l < nLayers; l++)
+                // Attention LayerNorm gamma (RMSNorm, no beta)
+                var attnNormGamma = LoadNormGamma($"blk.{l}.attn_norm.weight");
+                var attnNormBeta = TensorStorage<float>.Unpooled(0);
+
+                // Gemma-2 sandwich norm: extra RMSNorm after attention and after FFN (before each residual).
+                TensorStorage<float>? postAttnNorm = null, postFfwNorm = null;
+                if (isGemma)
                 {
-                    // Attention LayerNorm gamma (RMSNorm, no beta)
-                    var attnNormGamma = LoadNormGamma($"blk.{l}.attn_norm.weight");
-                    var attnNormBeta = TensorStorage<float>.Unpooled(0);
+                    postAttnNorm = LoadNormGamma($"blk.{l}.post_attention_norm.weight");
+                    postFfwNorm = LoadNormGamma($"blk.{l}.post_ffw_norm.weight");
+                }
 
-                    // Gemma-2 sandwich norm: extra RMSNorm after attention and after FFN (before each residual).
-                    TensorStorage<float>? postAttnNorm = null, postFfwNorm = null;
-                    if (isGemma)
-                    {
-                        postAttnNorm = LoadNormGamma($"blk.{l}.post_attention_norm.weight");
-                        postFfwNorm = LoadNormGamma($"blk.{l}.post_ffw_norm.weight");
-                    }
+                // Qwen3 per-head RMSNorm weights on Q and K (over head_dim), applied before RoPE.
+                TensorStorage<float>? qNorm = null, kNorm = null;
+                if (usesQkNorm)
+                {
+                    qNorm = AllocAndLoad(reader, $"blk.{l}.attn_q_norm.weight", headDim);
+                    kNorm = AllocAndLoad(reader, $"blk.{l}.attn_k_norm.weight", headDim);
+                }
 
-                    // Qwen3 per-head RMSNorm weights on Q and K (over head_dim), applied before RoPE.
-                    TensorStorage<float>? qNorm = null, kNorm = null;
-                    if (usesQkNorm)
-                    {
-                        qNorm = AllocAndLoad(reader, $"blk.{l}.attn_q_norm.weight", headDim);
-                        kNorm = AllocAndLoad(reader, $"blk.{l}.attn_k_norm.weight", headDim);
-                    }
+                // Per-tensor dispatch (step 3.2b) — each of attn_q/k/v picks
+                // Q4_K-native / Q8_0-native / F32-fallback independently from
+                // its file format. Wo dispatches separately (Q8_0 OK per-head;
+                // K-quant not — headDim < the 256-element super-block).
+                DecodeWeight[] wq, wk, wv;
+                if (fusedQkv)
+                {
+                    // Phi-3: one fused attn_qkv [out=(nHeads+2·nKvHeads)·headDim, in=dModel], output-major
+                    // = [Q rows | K rows | V rows]. Dequant once, slice the three contiguous row ranges, and
+                    // run the same per-head split (→ per-head Q8 when attnQuantizable). Row boundaries land on
+                    // whole output neurons, so the slices are exact regardless of the on-disk quant.
+                    LoadTensor(reader, $"blk.{l}.attn_qkv.weight", qkvFused.Span.Slice(0, fusedQkvElems));
+                    var qElems = nHeads * headDim * dModel;
+                    var kvElems = nKvHeads * headDim * dModel;
+                    wq = SplitQuery(qkvFused.Span.Slice(0, qElems), nHeads, dModel, headDim, attnQuantizable);
+                    wk = SplitKeyValue(qkvFused.Span.Slice(qElems, kvElems), nKvHeads, dModel, headDim, attnQuantizable);
+                    wv = SplitKeyValue(qkvFused.Span.Slice(qElems + kvElems, kvElems), nKvHeads, dModel, headDim, attnQuantizable);
+                }
+                else
+                {
+                    wq = LoadQkvHeads(reader, $"blk.{l}.attn_q.weight", nHeads, dModel, headDim, qFull.Span, attnQuantizable, mmap);
+                    wk = LoadQkvHeads(reader, $"blk.{l}.attn_k.weight", nKvHeads, dModel, headDim, kFull.Span, attnQuantizable, mmap);
+                    wv = LoadQkvHeads(reader, $"blk.{l}.attn_v.weight", nKvHeads, dModel, headDim, vFull.Span, attnQuantizable, mmap);
+                }
+                var wo = LoadOutputHeads(reader, $"blk.{l}.attn_output.weight", nHeads, dModel, headDim, oFull.Span, attnQuantizable);
 
-                    // Per-tensor dispatch (step 3.2b) — each of attn_q/k/v picks
-                    // Q4_K-native / Q8_0-native / F32-fallback independently from
-                    // its file format. Wo dispatches separately (Q8_0 OK per-head;
-                    // K-quant not — headDim < the 256-element super-block).
-                    DecodeWeight[] wq, wk, wv;
-                    if (fusedQkv)
+                // Whole-matrix Q4_K attention handles (M2 plumbing; empty unless Q4_K + mmap + repackable).
+                // Output-major dims: Q/K/V contract over dModel; O contracts over nHeads·headDim. Dormant
+                // until the M3 OVERFIT_REPACK_ATTN decode path; the per-head wq/wk/wv/wo above stay active.
+                // (Note: whole-O reads the on-disk Q4_K bytes directly even though per-head O is dequantized.)
+                var wqWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_q.weight", nHeads * headDim, dModel, mmap);
+                var wkWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_k.weight", nKvHeads * headDim, dModel, mmap);
+                var wvWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_v.weight", nKvHeads * headDim, dModel, mmap);
+                var woWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_output.weight", dModel, nHeads * headDim, mmap);
+
+                // Attention biases (optional — Qwen has them, Llama doesn't);
+                // always F32 in GGUF, never quantized.
+                LoadTensorOrZeros(reader, $"blk.{l}.attn_q.bias", qBiasFull.Span.Slice(0, nHeads * headDim));
+                LoadTensorOrZeros(reader, $"blk.{l}.attn_k.bias", kBiasFull.Span.Slice(0, nKvHeads * headDim));
+                LoadTensorOrZeros(reader, $"blk.{l}.attn_v.bias", vBiasFull.Span.Slice(0, nKvHeads * headDim));
+                var bq = SplitBias(qBiasFull.Span, nHeads, headDim);
+                var bk = SplitBias(kBiasFull.Span, nKvHeads, headDim);
+                var bv = SplitBias(vBiasFull.Span, nKvHeads, headDim);
+                var bo = new TensorStorage<float>[nHeads];
+                for (var h = 0; h < nHeads; h++)
+                {
+                    bo[h] = TensorStorage<float>.Unpooled(dModel);
+                }
+
+                // FFN
+                var ffnNormGamma = LoadNormGamma($"blk.{l}.ffn_norm.weight");
+                var ffnNormBeta = TensorStorage<float>.Unpooled(0);
+
+                DecodeWeight ffnGate = default, ffnUp = default, ffnDown = default;
+                float[]? moeRouter = null, moeSharedGateInp = null;
+                DecodeWeight[]? moeGate = null, moeUp = null, moeDown = null;
+                DecodeWeight moeShGate = default, moeShUp = default, moeShDown = default;
+
+                if (isMoe)
+                {
+                    // Router + routed experts (3-D tensors). Qwen-MoE additionally has a
+                    // sigmoid-gated shared expert; Mixtral does not (hasSharedExpert == false).
+                    moeRouter = LoadRouter(reader, reader.Tensors[$"blk.{l}.ffn_gate_inp.weight"], dModel, expertCount);
+                    if (mergedExperts)
                     {
-                        // Phi-3: one fused attn_qkv [out=(nHeads+2·nKvHeads)·headDim, in=dModel], output-major
-                        // = [Q rows | K rows | V rows]. Dequant once, slice the three contiguous row ranges, and
-                        // run the same per-head split (→ per-head Q8 when attnQuantizable). Row boundaries land on
-                        // whole output neurons, so the slices are exact regardless of the on-disk quant.
-                        LoadTensor(reader, $"blk.{l}.attn_qkv.weight", qkvFused.AsSpan(0, fusedQkvElems));
-                        var qElems = nHeads * headDim * dModel;
-                        var kvElems = nKvHeads * headDim * dModel;
-                        wq = SplitQuery(qkvFused.AsSpan(0, qElems), nHeads, dModel, headDim, attnQuantizable);
-                        wk = SplitKeyValue(qkvFused.AsSpan(qElems, kvElems), nKvHeads, dModel, headDim, attnQuantizable);
-                        wv = SplitKeyValue(qkvFused.AsSpan(qElems + kvElems, kvElems), nKvHeads, dModel, headDim, attnQuantizable);
+                        moeGate = LoadExperts(reader, reader.Tensors[$"blk.{l}.ffn_gate_exps.weight"]);
+                        moeUp = LoadExperts(reader, reader.Tensors[$"blk.{l}.ffn_up_exps.weight"]);
+                        moeDown = LoadExperts(reader, reader.Tensors[$"blk.{l}.ffn_down_exps.weight"]);
                     }
                     else
                     {
-                        wq = LoadQkvHeads(reader, $"blk.{l}.attn_q.weight", nHeads, dModel, headDim, qFull, attnQuantizable, mmap);
-                        wk = LoadQkvHeads(reader, $"blk.{l}.attn_k.weight", nKvHeads, dModel, headDim, kFull, attnQuantizable, mmap);
-                        wv = LoadQkvHeads(reader, $"blk.{l}.attn_v.weight", nKvHeads, dModel, headDim, vFull, attnQuantizable, mmap);
+                        // Older Mixtral: one 2-D weight per expert, loaded with the same resident
+                        // dispatch as a dense FFN (Q4_K verbatim/mmap, Q5/Q6/Q8/F32).
+                        moeGate = LoadExpertsSplit(reader, l, "ffn_gate", dModel, expertDff, expertCount, mmap);
+                        moeUp = LoadExpertsSplit(reader, l, "ffn_up", dModel, expertDff, expertCount, mmap);
+                        moeDown = LoadExpertsSplit(reader, l, "ffn_down", expertDff, dModel, expertCount, mmap);
                     }
-                    var wo = LoadOutputHeads(reader, $"blk.{l}.attn_output.weight", nHeads, dModel, headDim, oFull, attnQuantizable);
-
-                    // Whole-matrix Q4_K attention handles (M2 plumbing; empty unless Q4_K + mmap + repackable).
-                    // Output-major dims: Q/K/V contract over dModel; O contracts over nHeads·headDim. Dormant
-                    // until the M3 OVERFIT_REPACK_ATTN decode path; the per-head wq/wk/wv/wo above stay active.
-                    // (Note: whole-O reads the on-disk Q4_K bytes directly even though per-head O is dequantized.)
-                    var wqWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_q.weight", nHeads * headDim, dModel, mmap);
-                    var wkWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_k.weight", nKvHeads * headDim, dModel, mmap);
-                    var wvWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_v.weight", nKvHeads * headDim, dModel, mmap);
-                    var woWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_output.weight", dModel, nHeads * headDim, mmap);
-
-                    // Attention biases (optional — Qwen has them, Llama doesn't);
-                    // always F32 in GGUF, never quantized.
-                    LoadTensorOrZeros(reader, $"blk.{l}.attn_q.bias", qBiasFull.AsSpan(0, nHeads * headDim));
-                    LoadTensorOrZeros(reader, $"blk.{l}.attn_k.bias", kBiasFull.AsSpan(0, nKvHeads * headDim));
-                    LoadTensorOrZeros(reader, $"blk.{l}.attn_v.bias", vBiasFull.AsSpan(0, nKvHeads * headDim));
-                    var bq = SplitBias(qBiasFull, nHeads, headDim);
-                    var bk = SplitBias(kBiasFull, nKvHeads, headDim);
-                    var bv = SplitBias(vBiasFull, nKvHeads, headDim);
-                    var bo = new TensorStorage<float>[nHeads];
-                    for (var h = 0; h < nHeads; h++)
+                    if (hasSharedExpert)
                     {
-                        bo[h] = TensorStorage<float>.Unpooled(dModel);
+                        moeShGate = AllocAndLoadResident(reader, $"blk.{l}.ffn_gate_shexp.weight", dModel, dFF, mmap);
+                        moeShUp = AllocAndLoadResident(reader, $"blk.{l}.ffn_up_shexp.weight", dModel, dFF, mmap);
+                        moeShDown = AllocAndLoadResident(reader, $"blk.{l}.ffn_down_shexp.weight", dFF, dModel, mmap);
+                        moeSharedGateInp = LoadF32Vector(reader, $"blk.{l}.ffn_gate_inp_shexp.weight", dModel);
                     }
+                }
+                else if (fusedGateUp)
+                {
+                    // Phi-3: one fused ffn_up [out=2·dFF, in=dModel], output-major = [gate rows | up rows]
+                    // (HF gate_up_proj → chunk(2): first half gate, second half up). Dequant, slice the two
+                    // halves, requantize each to Q8 (compact, ≥ the on-disk precision). ffn_down is separate.
+                    LoadTensor(reader, $"blk.{l}.ffn_up.weight", gateUpFused.Span.Slice(0, fusedGateUpElems));
+                    var half = dFF * dModel;
+                    ffnGate = Q8Weight.QuantizeRows(gateUpFused.Span.Slice(0, half), dFF, dModel);
+                    ffnUp = Q8Weight.QuantizeRows(gateUpFused.Span.Slice(half, half), dFF, dModel);
+                    ffnDown = AllocAndLoadResident(reader, $"blk.{l}.ffn_down.weight", dFF, dModel, mmap);
+                }
+                else if (quantize && dModel % Q8DotKernel.BlockSize == 0 && dFF % Q8DotKernel.BlockSize == 0)
+                {
+                    ffnGate = AllocAndLoadResident(reader, $"blk.{l}.ffn_gate.weight", dModel, dFF, mmap);
+                    ffnUp = AllocAndLoadResident(reader, $"blk.{l}.ffn_up.weight", dModel, dFF, mmap);
+                    ffnDown = AllocAndLoadResident(reader, $"blk.{l}.ffn_down.weight", dFF, dModel, mmap);
+                }
+                else
+                {
+                    ffnGate = AllocAndLoadTransposed(reader, $"blk.{l}.ffn_gate.weight", dModel, dFF);
+                    ffnUp = AllocAndLoadTransposed(reader, $"blk.{l}.ffn_up.weight", dModel, dFF);
+                    ffnDown = AllocAndLoadTransposed(reader, $"blk.{l}.ffn_down.weight", dFF, dModel);
+                }
 
-                    // FFN
-                    var ffnNormGamma = LoadNormGamma($"blk.{l}.ffn_norm.weight");
-                    var ffnNormBeta = TensorStorage<float>.Unpooled(0);
-
-                    DecodeWeight ffnGate = default, ffnUp = default, ffnDown = default;
-                    float[]? moeRouter = null, moeSharedGateInp = null;
-                    DecodeWeight[]? moeGate = null, moeUp = null, moeDown = null;
-                    DecodeWeight moeShGate = default, moeShUp = default, moeShDown = default;
-
-                    if (isMoe)
-                    {
-                        // Router + routed experts (3-D tensors). Qwen-MoE additionally has a
-                        // sigmoid-gated shared expert; Mixtral does not (hasSharedExpert == false).
-                        moeRouter = LoadRouter(reader, reader.Tensors[$"blk.{l}.ffn_gate_inp.weight"], dModel, expertCount);
-                        if (mergedExperts)
-                        {
-                            moeGate = LoadExperts(reader, reader.Tensors[$"blk.{l}.ffn_gate_exps.weight"]);
-                            moeUp = LoadExperts(reader, reader.Tensors[$"blk.{l}.ffn_up_exps.weight"]);
-                            moeDown = LoadExperts(reader, reader.Tensors[$"blk.{l}.ffn_down_exps.weight"]);
-                        }
-                        else
-                        {
-                            // Older Mixtral: one 2-D weight per expert, loaded with the same resident
-                            // dispatch as a dense FFN (Q4_K verbatim/mmap, Q5/Q6/Q8/F32).
-                            moeGate = LoadExpertsSplit(reader, l, "ffn_gate", dModel, expertDff, expertCount, mmap);
-                            moeUp = LoadExpertsSplit(reader, l, "ffn_up", dModel, expertDff, expertCount, mmap);
-                            moeDown = LoadExpertsSplit(reader, l, "ffn_down", expertDff, dModel, expertCount, mmap);
-                        }
-                        if (hasSharedExpert)
-                        {
-                            moeShGate = AllocAndLoadResident(reader, $"blk.{l}.ffn_gate_shexp.weight", dModel, dFF, mmap);
-                            moeShUp = AllocAndLoadResident(reader, $"blk.{l}.ffn_up_shexp.weight", dModel, dFF, mmap);
-                            moeShDown = AllocAndLoadResident(reader, $"blk.{l}.ffn_down_shexp.weight", dFF, dModel, mmap);
-                            moeSharedGateInp = LoadF32Vector(reader, $"blk.{l}.ffn_gate_inp_shexp.weight", dModel);
-                        }
-                    }
-                    else if (fusedGateUp)
-                    {
-                        // Phi-3: one fused ffn_up [out=2·dFF, in=dModel], output-major = [gate rows | up rows]
-                        // (HF gate_up_proj → chunk(2): first half gate, second half up). Dequant, slice the two
-                        // halves, requantize each to Q8 (compact, ≥ the on-disk precision). ffn_down is separate.
-                        LoadTensor(reader, $"blk.{l}.ffn_up.weight", gateUpFused.AsSpan(0, fusedGateUpElems));
-                        var half = dFF * dModel;
-                        ffnGate = Q8Weight.QuantizeRows(gateUpFused.AsSpan(0, half), dFF, dModel);
-                        ffnUp = Q8Weight.QuantizeRows(gateUpFused.AsSpan(half, half), dFF, dModel);
-                        ffnDown = AllocAndLoadResident(reader, $"blk.{l}.ffn_down.weight", dFF, dModel, mmap);
-                    }
-                    else if (quantize && dModel % Q8DotKernel.BlockSize == 0 && dFF % Q8DotKernel.BlockSize == 0)
-                    {
-                        ffnGate = AllocAndLoadResident(reader, $"blk.{l}.ffn_gate.weight", dModel, dFF, mmap);
-                        ffnUp = AllocAndLoadResident(reader, $"blk.{l}.ffn_up.weight", dModel, dFF, mmap);
-                        ffnDown = AllocAndLoadResident(reader, $"blk.{l}.ffn_down.weight", dFF, dModel, mmap);
-                    }
-                    else
-                    {
-                        ffnGate = AllocAndLoadTransposed(reader, $"blk.{l}.ffn_gate.weight", dModel, dFF);
-                        ffnUp = AllocAndLoadTransposed(reader, $"blk.{l}.ffn_up.weight", dModel, dFF);
-                        ffnDown = AllocAndLoadTransposed(reader, $"blk.{l}.ffn_down.weight", dFF, dModel);
-                    }
-
-                    layers[l] = new LayerWeightBuffers
-                    {
-                        AttnNormGamma = attnNormGamma,
-                        QNorm = qNorm,
-                        KNorm = kNorm,
-                        PostAttnNorm = postAttnNorm,
-                        PostFfwNorm = postFfwNorm,
-                        AttnNormBeta = attnNormBeta,
-                        Wq = wq,
-                        Bq = bq,
-                        Wk = wk,
-                        Bk = bk,
-                        Wv = wv,
-                        Bv = bv,
-                        Wo = wo,
-                        Bo = bo,
-                        WqWhole = wqWhole,
-                        WkWhole = wkWhole,
-                        WvWhole = wvWhole,
-                        WoWhole = woWhole,
-                        FfnNormGamma = ffnNormGamma,
-                        FfnNormBeta = ffnNormBeta,
-                        FfnGate = ffnGate,
-                        FfnUp = ffnUp,
-                        FfnDown = ffnDown,
-                        MoeRouter = moeRouter,
-                        MoeGate = moeGate,
-                        MoeUp = moeUp,
-                        MoeDown = moeDown,
-                        MoeSharedGate = moeShGate,
-                        MoeSharedUp = moeShUp,
-                        MoeSharedDown = moeShDown,
-                        MoeSharedGateInp = moeSharedGateInp,
-                    };
-                }
-            }
-            finally
-            {
-                // qFull..oFull are empty sentinels on the native Q8_0 path.
-                if (qFull.Length > 0)
+                layers[l] = new LayerWeightBuffers
                 {
-                    PooledBuffer<float>.ReturnArray(qFull);
-                }
-                if (kFull.Length > 0)
-                {
-                    PooledBuffer<float>.ReturnArray(kFull);
-                }
-                if (vFull.Length > 0)
-                {
-                    PooledBuffer<float>.ReturnArray(vFull);
-                }
-                if (oFull.Length > 0)
-                {
-                    PooledBuffer<float>.ReturnArray(oFull);
-                }
-                if (qkvFused.Length > 0)
-                {
-                    PooledBuffer<float>.ReturnArray(qkvFused);
-                }
-                if (gateUpFused.Length > 0)
-                {
-                    PooledBuffer<float>.ReturnArray(gateUpFused);
-                }
-                PooledBuffer<float>.ReturnArray(qBiasFull);
-                PooledBuffer<float>.ReturnArray(kBiasFull);
-                PooledBuffer<float>.ReturnArray(vBiasFull);
+                    AttnNormGamma = attnNormGamma,
+                    QNorm = qNorm,
+                    KNorm = kNorm,
+                    PostAttnNorm = postAttnNorm,
+                    PostFfwNorm = postFfwNorm,
+                    AttnNormBeta = attnNormBeta,
+                    Wq = wq,
+                    Bq = bq,
+                    Wk = wk,
+                    Bk = bk,
+                    Wv = wv,
+                    Bv = bv,
+                    Wo = wo,
+                    Bo = bo,
+                    WqWhole = wqWhole,
+                    WkWhole = wkWhole,
+                    WvWhole = wvWhole,
+                    WoWhole = woWhole,
+                    FfnNormGamma = ffnNormGamma,
+                    FfnNormBeta = ffnNormBeta,
+                    FfnGate = ffnGate,
+                    FfnUp = ffnUp,
+                    FfnDown = ffnDown,
+                    MoeRouter = moeRouter,
+                    MoeGate = moeGate,
+                    MoeUp = moeUp,
+                    MoeDown = moeDown,
+                    MoeSharedGate = moeShGate,
+                    MoeSharedUp = moeShUp,
+                    MoeSharedDown = moeShDown,
+                    MoeSharedGateInp = moeSharedGateInp,
+                };
             }
 
             // ─── Final norm + LM head ─────────────────────────────────────
@@ -974,7 +940,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// </summary>
         private static DecodeWeight[] LoadQkvHeads(
             GgufReader reader, string name, int headCount, int dModel, int headDim,
-            float[] f32Scratch, bool quantizable, MemoryMappedModelFile? mmap)
+            Span<float> f32Scratch, bool quantizable, MemoryMappedModelFile? mmap)
         {
             if (!reader.Tensors.TryGetValue(name, out var info))
             {
@@ -998,7 +964,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             // SplitQuery and SplitKeyValue have identical bodies (differ only in
             // the head-count parameter name) — SplitQuery serves both here.
             var elems = checked((int)((long)headCount * dModel * headDim));
-            LoadTensor(reader, name, f32Scratch.AsSpan(0, elems));
+            LoadTensor(reader, name, f32Scratch.Slice(0, elems));
             return SplitQuery(f32Scratch, headCount, dModel, headDim, quantizable);
         }
 
@@ -1010,7 +976,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// </summary>
         private static DecodeWeight[] LoadOutputHeads(
             GgufReader reader, string name, int nHeads, int dModel, int headDim,
-            float[] oFullScratch, bool quantizable)
+            Span<float> oFullScratch, bool quantizable)
         {
             if (!reader.Tensors.TryGetValue(name, out var info))
             {
@@ -1024,7 +990,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
             // F32 fallback (F16 / F32 / BF16 / Q4_K / Q6_K → LoadTensorAsF32 dequantizes).
             var elems = checked((int)((long)dModel * nHeads * headDim));
-            LoadTensor(reader, name, oFullScratch.AsSpan(0, elems));
+            LoadTensor(reader, name, oFullScratch.Slice(0, elems));
             return SplitOutput(oFullScratch, nHeads, dModel, headDim, quantizable);
         }
 
