@@ -71,25 +71,15 @@ namespace DevOnBike.Overfit.Tests.Trees.Diagnostics
             var nsPerRow = bestBatchMs * 1e6 / rows;
             var rowsPerSec = rows / (bestBatchMs / 1000.0);
 
-            // ── Batch (parallel via OverfitParallel): best-of-N ─────────────────────
-            for (var w = 0; w < 3; w++)
-            {
-                model.PredictBatchParallel(data, rows, output);
-            }
-
-            var bestParMs = double.MaxValue;
-
-            for (var rep = 0; rep < 10; rep++)
-            {
-                var sw = Stopwatch.StartNew();
-                model.PredictBatchParallel(data, rows, output);
-                sw.Stop();
-                bestParMs = Math.Min(bestParMs, sw.Elapsed.TotalMilliseconds);
-            }
+            // ── Batch parallel A/B: branchy vs branchless body, best-of-N each ──────
+            var bestBranchyMs = MeasureParallel(model, data, rows, output, branchless: false);
+            var bestParMs = MeasureParallel(model, data, rows, output, branchless: true);
 
             var nsPerRowPar = bestParMs * 1e6 / rows;
+            var nsPerRowBranchy = bestBranchyMs * 1e6 / rows;
             var rowsPerSecPar = rows / (bestParMs / 1000.0);
             var speedup = bestBatchMs / bestParMs;
+            var branchlessGain = bestBranchyMs / bestParMs;
 
             // ── Online single-row latency: best-of-N over a full sweep ──────────────
             var single = new float[model.NumGroups];
@@ -109,15 +99,41 @@ namespace DevOnBike.Overfit.Tests.Trees.Diagnostics
             }
 
             _output.WriteLine($"model: {model.NumTrees} trees, {model.NumFeatures} features, {model.NumGroups} group(s)  ({OverfitParallel.WorkerCount} workers)");
-            _output.WriteLine($"BATCH  single-thread: {bestBatchMs:F2} ms / {rows:N0} rows  ->  {nsPerRow:F0} ns/row  ({rowsPerSec:N0} rows/s)");
-            _output.WriteLine($"BATCH  parallel     : {bestParMs:F2} ms / {rows:N0} rows  ->  {nsPerRowPar:F0} ns/row  ({rowsPerSecPar:N0} rows/s)   speedup {speedup:F1}x");
-            _output.WriteLine($"ONLINE single-row   : {bestOnlineNs:F0} ns/row  ({bestOnlineNs / 1000.0:F2} us/row)");
+            _output.WriteLine($"BATCH  single-thread     : {bestBatchMs:F2} ms / {rows:N0} rows  ->  {nsPerRow:F0} ns/row  ({rowsPerSec:N0} rows/s)");
+            _output.WriteLine($"BATCH  parallel branchy  : {bestBranchyMs:F2} ms  ->  {nsPerRowBranchy:F0} ns/row");
+            _output.WriteLine($"BATCH  parallel branchless: {bestParMs:F2} ms  ->  {nsPerRowPar:F0} ns/row  ({rowsPerSecPar:N0} rows/s)   branchless gain {branchlessGain:F2}x   total speedup {speedup:F1}x");
+            _output.WriteLine($"ONLINE single-row        : {bestOnlineNs:F0} ns/row  ({bestOnlineNs / 1000.0:F2} us/row)");
             _output.WriteLine("XGBoost reference (same 300x6): batch 1-thread 2177 ns/row, all-cores 217 ns/row, online 157 us/row (Python+DMatrix).");
 
             // Smoke guards — generous; this is a measurement, not a tight regression gate.
             Assert.True(nsPerRow < 20_000, $"batch {nsPerRow:F0} ns/row unexpectedly slow");
             Assert.True(nsPerRowPar <= nsPerRow, $"parallel {nsPerRowPar:F0} ns/row not faster than sequential {nsPerRow:F0}");
             Assert.True(bestOnlineNs < 50_000, $"online {bestOnlineNs:F0} ns/row unexpectedly slow");
+        }
+
+        private static double MeasureParallel(
+            BoostedTreeModel model,
+            float[] data,
+            int rows,
+            float[] output,
+            bool branchless)
+        {
+            for (var w = 0; w < 3; w++)
+            {
+                model.PredictBatchParallel(data, rows, output, branchless);
+            }
+
+            var best = double.MaxValue;
+
+            for (var rep = 0; rep < 10; rep++)
+            {
+                var sw = Stopwatch.StartNew();
+                model.PredictBatchParallel(data, rows, output, branchless);
+                sw.Stop();
+                best = Math.Min(best, sw.Elapsed.TotalMilliseconds);
+            }
+
+            return best;
         }
     }
 }

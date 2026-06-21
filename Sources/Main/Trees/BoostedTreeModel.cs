@@ -237,7 +237,19 @@ namespace DevOnBike.Overfit.Trees
         /// the sequential path (its parity guard). Zero managed allocation per call (the flat model arrays
         /// and the caller's buffers are pinned; the body runs over raw pointers).
         /// </summary>
-        public unsafe void PredictBatchParallel(ReadOnlySpan<float> featuresFlat, int rowCount, Span<float> outputFlat)
+        public void PredictBatchParallel(ReadOnlySpan<float> featuresFlat, int rowCount, Span<float> outputFlat)
+            => PredictBatchParallel(featuresFlat, rowCount, outputFlat, branchless: true);
+
+        /// <summary>
+        /// A/B hook for the perf measurement: <paramref name="branchless"/> selects the branchless
+        /// traversal body (production default) vs the original branchy one. Both produce bit-identical
+        /// output — the lever is purely how the per-node go-left decision and child select compile.
+        /// </summary>
+        internal unsafe void PredictBatchParallel(
+            ReadOnlySpan<float> featuresFlat,
+            int rowCount,
+            Span<float> outputFlat,
+            bool branchless)
         {
             ArgumentOutOfRangeException.ThrowIfNegative(rowCount);
 
@@ -283,7 +295,14 @@ namespace DevOnBike.Overfit.Trees
                 };
 
                 // Grain of 256 rows/worker — below 512 rows it runs inline (no dispatch).
-                OverfitParallel.For(0, rowCount, 256, &ScoreRows, &context);
+                if (branchless)
+                {
+                    OverfitParallel.For(0, rowCount, 256, &ScoreRowsBranchless, &context);
+                }
+                else
+                {
+                    OverfitParallel.For(0, rowCount, 256, &ScoreRows, &context);
+                }
             }
         }
 
@@ -320,6 +339,49 @@ namespace DevOnBike.Overfit.Trees
                         }
 
                         node = goLeft ? ctx.Left[node] : ctx.Right[node];
+                    }
+
+                    output[ctx.TreeGroup[t]] += ctx.Threshold[node];
+                }
+
+                Transform(output, ctx.NumGroups, ctx.Objective);
+            }
+        }
+
+        // Branchless variant of ScoreRows: the per-node go-left decision is a bitwise bool expression
+        // (no NaN if-branch) and the child select is arithmetic (no data-dependent branch on the ~50/50
+        // split outcome — the dominant misprediction source in tree traversal). Bit-identical to ScoreRows.
+        private static unsafe void ScoreRowsBranchless(int rowStart, int rowEnd, void* context)
+        {
+            ref var ctx = ref Unsafe.AsRef<BatchContext>(context);
+
+            for (var r = rowStart; r < rowEnd; r++)
+            {
+                var features = ctx.Features + (long)r * ctx.NumFeatures;
+                var output = ctx.Output + (long)r * ctx.NumGroups;
+
+                for (var g = 0; g < ctx.NumGroups; g++)
+                {
+                    output[g] = ctx.BaseMargin[g];
+                }
+
+                for (var t = 0; t < ctx.NumTrees; t++)
+                {
+                    var node = ctx.TreeRoot[t];
+                    int leftChild;
+
+                    while ((leftChild = ctx.Left[node]) >= 0)
+                    {
+                        var value = features[ctx.FeatureIndex[node]];
+
+                        // value < threshold is false for NaN (any compare with NaN is false), so a NaN
+                        // falls through to the default-direction term. Non-short-circuit | / & ⇒ no branch.
+                        var goLeft = (value < ctx.Threshold[node]) | (float.IsNaN(value) & (ctx.DefaultLeft[node] != 0));
+                        var goLeftBit = Unsafe.As<bool, byte>(ref goLeft);
+                        var rightChild = ctx.Right[node];
+
+                        // goLeftBit == 1 ⇒ leftChild, == 0 ⇒ rightChild. Arithmetic select, no branch.
+                        node = rightChild + ((leftChild - rightChild) * goLeftBit);
                     }
 
                     output[ctx.TreeGroup[t]] += ctx.Threshold[node];
