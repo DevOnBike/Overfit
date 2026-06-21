@@ -14,8 +14,10 @@ using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.Whisper;
 using DevOnBike.Overfit.Mcp;
 using DevOnBike.Overfit.Runtime;
+using DevOnBike.Overfit.Redaction;
 using DevOnBike.Overfit.Server;
 using DevOnBike.Overfit.Serving;
+using DevOnBike.Overfit.Trees;
 
 namespace DevOnBike.Overfit.Cli
 {
@@ -378,6 +380,322 @@ namespace DevOnBike.Overfit.Cli
             }
 
             return 0;
+        }
+
+        // ── gateway: LLM egress firewall — redact outbound PII/secrets, forward upstream (gateway holds the key). ──
+        public static int Gateway(string? upstream, string keyEnv, string host, int port, string auditPath, string? configPath, string clientKeysEnv, bool insecure, bool scanResponses)
+        {
+            // TLS guard: HttpListener serves plaintext HTTP. Binding that to a non-loopback interface would send the
+            // very PII/secrets this gateway protects across the network unencrypted. Refuse unless explicitly waived —
+            // the supported pattern is a TLS-terminating proxy/sidecar in front, with the gateway bound to loopback.
+            if (!IsLoopbackHost(host))
+            {
+                if (!insecure)
+                {
+                    Console.Error.WriteLine(
+                        $"Refusing to bind a plaintext HTTP gateway to non-loopback host '{host}': client→gateway "
+                        + "traffic carries the PII/secrets this gateway exists to protect and would be unencrypted.");
+                    Console.Error.WriteLine(
+                        "Put a TLS-terminating reverse proxy / sidecar (nginx, Caddy, Envoy, a cloud load balancer) in "
+                        + "front and bind --host 127.0.0.1, OR pass --insecure if the hop to clients is already "
+                        + "encrypted (service-mesh mTLS, TLS load balancer on a private network).");
+                    return 1;
+                }
+
+                Console.WriteLine(
+                    $"WARNING: --insecure — serving plaintext HTTP on '{host}'. Ensure the network hop to clients is "
+                    + "encrypted (TLS proxy/sidecar or mesh); otherwise redacted-away secrets still travel in the clear.");
+            }
+
+            var key = Environment.GetEnvironmentVariable(keyEnv);
+            if (string.IsNullOrEmpty(key))
+            {
+                Console.Error.WriteLine(
+                    $"Upstream API key env var '{keyEnv}' is not set. The gateway holds the real upstream key so "
+                    + $"clients never see it — set it first (e.g.  $env:{keyEnv}=\"sk-...\"  /  export {keyEnv}=sk-...).");
+                return 1;
+            }
+
+            // Hardening: drop the secret from the process environment now that we hold it — so it can't be re-read
+            // via /proc/<pid>/environ, inherited by child processes, or dumped from the env later.
+            Environment.SetEnvironmentVariable(keyEnv, null);
+
+            Redactor redactor;
+            RedactionPolicy policy;
+            string? configUpstream = null;
+            IReadOnlyList<string> configClientKeys = [];
+            var configScanResponses = false;
+
+            if (!string.IsNullOrEmpty(configPath))
+            {
+                if (!File.Exists(configPath))
+                {
+                    Console.Error.WriteLine($"Config file not found: {configPath}");
+                    return 1;
+                }
+                try
+                {
+                    (redactor, policy, configUpstream, configClientKeys, configScanResponses) = GatewayConfig.Load(configPath);
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"Failed to load gateway config '{configPath}': {ex.Message}");
+                    return 1;
+                }
+                Console.WriteLine($"config: {Path.GetFullPath(configPath)}");
+            }
+            else
+            {
+                // Built-in: international + Polish (checksum-validated PESEL/NIP/REGON/IBAN) detectors, default policy.
+                var intl = DefaultRedactionRules.All();
+                var pl = PolishRedactionRules.All();
+                var rules = new RedactionRule[intl.Length + pl.Length];
+                intl.CopyTo(rules, 0);
+                pl.CopyTo(rules, intl.Length);
+                redactor = new Redactor(rules);
+                policy = RedactionPolicy.Default();
+                Console.WriteLine("policy: secrets (API/AWS keys, JWT, private key) BLOCK · PII (email, card+Luhn, SSN, IPv4, PL PESEL/NIP/REGON/IBAN) REDACT");
+            }
+
+            // CLI --upstream overrides the config's upstream.
+            var resolvedUpstream = !string.IsNullOrEmpty(upstream) ? upstream : configUpstream;
+            if (string.IsNullOrEmpty(resolvedUpstream))
+            {
+                Console.Error.WriteLine("No upstream set. Pass --upstream <url> or set \"upstream\" in --config.");
+                return 1;
+            }
+
+            // Client keys: env var (preferred for secrets — comma/whitespace separated) merged with any in --config.
+            var clientKeys = new List<string>(configClientKeys);
+            var keysFromEnv = Environment.GetEnvironmentVariable(clientKeysEnv);
+            if (!string.IsNullOrEmpty(keysFromEnv))
+            {
+                foreach (var part in keysFromEnv.Split([',', ' ', ';', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    clientKeys.Add(part);
+                }
+                Environment.SetEnvironmentVariable(clientKeysEnv, null);
+            }
+
+            if (clientKeys.Count > 0)
+            {
+                Console.WriteLine($"client auth: ON ({clientKeys.Count} gateway key(s)) — callers must send 'Authorization: Bearer <key>'");
+            }
+            else
+            {
+                Console.WriteLine($"client auth: OFF — set ${clientKeysEnv} (or \"clientKeys\" in --config) before exposing the gateway.");
+            }
+
+            // Response scanning: enabled by the CLI flag OR the config.
+            var resolvedScanResponses = scanResponses || configScanResponses;
+            if (resolvedScanResponses)
+            {
+                Console.WriteLine("response scan: ON — model-generated secrets/PII masked on non-streaming responses (your own values still restored).");
+            }
+
+            using var audit = new JsonLinesAuditSink(auditPath);
+            Console.WriteLine($"audit log: {Path.GetFullPath(auditPath)}");
+            RedactionGateway.Serve(host, port, resolvedUpstream, key, redactor, audit, policy, clientKeys, resolvedScanResponses);
+            return 0;
+        }
+
+        // True for the loopback interface (127.0.0.0/8, localhost, ::1) — safe to serve plaintext HTTP on, because a
+        // TLS-terminating proxy/sidecar fronts it. Anything else is a network-exposed bind and needs --insecure.
+        private static bool IsLoopbackHost(string host)
+        {
+            return host is "localhost" or "::1" or "[::1]"
+                || host.StartsWith("127.", StringComparison.Ordinal);
+        }
+
+        // ── score: run a trained XGBoost model (JSON) over a CSV of feature rows, pure-managed + zero-egress. ──
+        public static int Score(string modelPath, string inputPath, string? outputPath, bool margin)
+        {
+            if (!File.Exists(modelPath))
+            {
+                Console.Error.WriteLine($"Model file not found: {modelPath}");
+                Console.Error.WriteLine("Pass the path to an XGBoost model saved as JSON (booster.save_model(\"model.json\")).");
+                return 1;
+            }
+
+            if (!File.Exists(inputPath))
+            {
+                Console.Error.WriteLine($"Input CSV not found: {inputPath}");
+                return 1;
+            }
+
+            BoostedTreeModel model;
+            try
+            {
+                model = XgboostModelLoader.Load(modelPath);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Failed to load '{Path.GetFileName(modelPath)}' as an XGBoost JSON model: {ex.Message}");
+                return 1;
+            }
+
+            var rows = new List<float[]>();
+            var lineNumber = 0;
+            foreach (var raw in File.ReadLines(inputPath))
+            {
+                lineNumber++;
+                var line = raw.Trim();
+                if (line.Length == 0)
+                {
+                    continue;
+                }
+
+                var cells = line.Split(',');
+
+                // A first row that does not parse fully as numbers is treated as a header and skipped.
+                if (rows.Count == 0 && lineNumber == 1 && !LooksNumeric(cells))
+                {
+                    continue;
+                }
+
+                if (cells.Length != model.NumFeatures)
+                {
+                    Console.Error.WriteLine(
+                        $"Line {lineNumber}: expected {model.NumFeatures} feature columns, got {cells.Length}.");
+                    return 1;
+                }
+
+                var row = new float[model.NumFeatures];
+                for (var c = 0; c < cells.Length; c++)
+                {
+                    if (!TryParseCell(cells[c], out row[c]))
+                    {
+                        Console.Error.WriteLine($"Line {lineNumber}, column {c + 1}: '{cells[c].Trim()}' is not a number.");
+                        return 1;
+                    }
+                }
+
+                rows.Add(row);
+            }
+
+            if (rows.Count == 0)
+            {
+                Console.Error.WriteLine("No feature rows found in the input CSV.");
+                return 1;
+            }
+
+            // Flatten and score in one batch through the parallel, zero-allocation predictor.
+            var groups = model.NumGroups;
+            var flat = new float[(long)rows.Count * model.NumFeatures];
+            for (var r = 0; r < rows.Count; r++)
+            {
+                rows[r].CopyTo(flat.AsSpan(r * model.NumFeatures, model.NumFeatures));
+            }
+
+            var outputs = new float[(long)rows.Count * groups];
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            if (margin)
+            {
+                // Raw, pre-transform margins (XGBoost output_margin=True).
+                for (var r = 0; r < rows.Count; r++)
+                {
+                    model.PredictRawMargins(rows[r], outputs.AsSpan(r * groups, groups));
+                }
+            }
+            else
+            {
+                model.PredictBatchParallel(flat, rows.Count, outputs);
+            }
+            sw.Stop();
+
+            using var writer = outputPath is null ? null : new StreamWriter(outputPath);
+            void Emit(string text)
+            {
+                if (writer is null)
+                {
+                    Console.Out.WriteLine(text);
+                }
+                else
+                {
+                    writer.WriteLine(text);
+                }
+            }
+
+            Emit(HeaderLine(groups, margin));
+            for (var r = 0; r < rows.Count; r++)
+            {
+                Emit(FormatRow(outputs.AsSpan(r * groups, groups)));
+            }
+
+            var nsPerRow = sw.Elapsed.TotalMilliseconds * 1e6 / rows.Count;
+            Console.Error.WriteLine(
+                $"Scored {rows.Count:N0} rows · {model.NumTrees} trees · {model.Objective} · "
+                + $"{model.NumGroups} output(s) · {sw.Elapsed.TotalMilliseconds:F1} ms ({nsPerRow:F0} ns/row)"
+                + (outputPath is null ? string.Empty : $" → {outputPath}"));
+            return 0;
+        }
+
+        private static bool LooksNumeric(string[] cells)
+        {
+            foreach (var cell in cells)
+            {
+                if (!TryParseCell(cell, out _))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private static bool TryParseCell(string cell, out float value)
+        {
+            var token = cell.Trim();
+            if (token.Length == 0
+                || token.Equals("nan", StringComparison.OrdinalIgnoreCase)
+                || token.Equals("na", StringComparison.OrdinalIgnoreCase)
+                || token.Equals("null", StringComparison.OrdinalIgnoreCase)
+                || token == "?")
+            {
+                // Missing value — XGBoost routes it via each node's default direction.
+                value = float.NaN;
+                return true;
+            }
+
+            return float.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+        }
+
+        private static string HeaderLine(int groups, bool margin)
+        {
+            if (groups == 1)
+            {
+                return margin ? "margin" : "prediction";
+            }
+
+            var prefix = margin ? "margin_" : "p_";
+            var sb = new System.Text.StringBuilder();
+            for (var g = 0; g < groups; g++)
+            {
+                if (g > 0)
+                {
+                    sb.Append(',');
+                }
+                sb.Append(prefix).Append(g.ToString(CultureInfo.InvariantCulture));
+            }
+            return sb.ToString();
+        }
+
+        private static string FormatRow(ReadOnlySpan<float> values)
+        {
+            if (values.Length == 1)
+            {
+                return values[0].ToString(CultureInfo.InvariantCulture);
+            }
+
+            var sb = new System.Text.StringBuilder();
+            for (var i = 0; i < values.Length; i++)
+            {
+                if (i > 0)
+                {
+                    sb.Append(',');
+                }
+                sb.Append(values[i].ToString(CultureInfo.InvariantCulture));
+            }
+            return sb.ToString();
         }
 
         // Dominant weight-tensor quant: the type most of the model's bytes are in. Q4_K_M files mix Q4_K + Q6_K,

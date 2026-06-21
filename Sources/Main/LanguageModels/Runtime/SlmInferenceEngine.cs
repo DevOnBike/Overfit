@@ -132,51 +132,45 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             var sampling = options.Sampling;
             var generated = 0;
-            var logitsArr = PooledBuffer<float>.RentArray(VocabularySize);
-            var logits = logitsArr.AsSpan(0, VocabularySize);
-            try
+            using var logitsArr = new PooledBuffer<float>(VocabularySize, clearMemory: false);
+            var logits = logitsArr.Span;
+
+            while (generated < options.MaxNewTokens)
             {
-                while (generated < options.MaxNewTokens)
+                var token = session.GenerateNextToken(in sampling);
+                session.GetLastLogits(logits);
+
+                var shouldContinue = onToken(
+                    token,
+                    session.CurrentPosition,
+                    logits);
+
+                generated++;
+
+                if (!shouldContinue)
                 {
-                    var token = session.GenerateNextToken(in sampling);
-                    session.GetLastLogits(logits);
-
-                    var shouldContinue = onToken(
-                        token,
-                        session.CurrentPosition,
-                        logits);
-
-                    generated++;
-
-                    if (!shouldContinue)
-                    {
-                        break;
-                    }
-
-                    if (options.StopOnEndOfTextToken &&
-                        options.EndOfTextTokenId >= 0 &&
-                        token == options.EndOfTextTokenId)
-                    {
-                        break;
-                    }
+                    break;
                 }
 
-                var elapsedNanoseconds = GetElapsedNanoseconds(start);
-                var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
-
-                _lastGenerationStats = new GenerationStats(
-                    promptTokens: promptTokens.Length,
-                    generatedTokens: generated,
-                    elapsedNanoseconds: elapsedNanoseconds,
-                    allocatedBytes: allocatedBytes,
-                    usedKeyValueCache: false);
-
-                return _lastGenerationStats;
+                if (options.StopOnEndOfTextToken &&
+                    options.EndOfTextTokenId >= 0 &&
+                    token == options.EndOfTextTokenId)
+                {
+                    break;
+                }
             }
-            finally
-            {
-                PooledBuffer<float>.ReturnArray(logitsArr);
-            }
+
+            var elapsedNanoseconds = GetElapsedNanoseconds(start);
+            var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+            _lastGenerationStats = new GenerationStats(
+                promptTokens: promptTokens.Length,
+                generatedTokens: generated,
+                elapsedNanoseconds: elapsedNanoseconds,
+                allocatedBytes: allocatedBytes,
+                usedKeyValueCache: false);
+
+            return _lastGenerationStats;
         }
 
         public void ResetMetrics()

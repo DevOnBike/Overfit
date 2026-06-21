@@ -382,10 +382,11 @@ namespace DevOnBike.Overfit.Ops
             // Closure captures: AutogradNode references (classes) — Spans rebuilt inside the lambda
             // (cannot cross a delegate boundary). Per-thread xhat/term buffers rented via PooledBuffer
             // (using-scoped, ArrayPool<T>.Shared-backed — fastest per 2026-05-29 PoolComparisonBenchmark).
-            // Rented (>= C) — every slot [0, C) is ASSIGNED by the first parallel pass before any read,
-            // so no Clear() is needed and the excess tail is never touched.
-            var sumDy = PooledBuffer<float>.RentArray(C);
-            var sumDyX = PooledBuffer<float>.RentArray(C);
+            // sumDy / sumDyX are WRITTEN from the parallel workers (captured by the For lambda). PooledBuffer is a
+            // plain struct, so it can be captured and cross the delegate boundary (a Span field could not).
+            // No Clear() needed: every slot [0, C) is assigned by the first pass before any read.
+            var sumDy = new PooledBuffer<float>(C, clearMemory: false);
+            var sumDyX = new PooledBuffer<float>(C, clearMemory: false);
             try
             {
                 var inputNode = input;
@@ -416,8 +417,8 @@ namespace DevOnBike.Overfit.Ops
                         sDyX += TensorPrimitives.Dot(gB, xhatLocal);
                     }
 
-                    sumDy[c] = sDy;
-                    sumDyX[c] = sDyX;
+                    sumDy.Span[c] = sDy;
+                    sumDyX.Span[c] = sDyX;
                 });
 
                 if (beta.RequiresGrad)
@@ -425,7 +426,7 @@ namespace DevOnBike.Overfit.Ops
                     var betaGrad = beta.GradView.AsSpan();
                     for (var c = 0; c < C; c++)
                     {
-                        betaGrad[c] += sumDy[c];
+                        betaGrad[c] += sumDy.Span[c];
                     }
                 }
                 if (gamma.RequiresGrad)
@@ -433,7 +434,7 @@ namespace DevOnBike.Overfit.Ops
                     var gammaGrad = gamma.GradView.AsSpan();
                     for (var c = 0; c < C; c++)
                     {
-                        gammaGrad[c] += sumDyX[c];
+                        gammaGrad[c] += sumDyX.Span[c];
                     }
                 }
 
@@ -456,8 +457,8 @@ namespace DevOnBike.Overfit.Ops
                         var meanC = meanLocal[c];
                         var invStdC = invStdLocal[c];
                         var coeff = gammaLocal[c] * invStdC / m;
-                        var sumDyC = sumDy[c];
-                        var sumDyXC = sumDyX[c];
+                        var sumDyC = sumDy.Span[c];
+                        var sumDyXC = sumDyX.Span[c];
 
                         for (var n = 0; n < N; n++)
                         {
@@ -477,8 +478,8 @@ namespace DevOnBike.Overfit.Ops
             }
             finally
             {
-                PooledBuffer<float>.ReturnArray(sumDyX);
-                PooledBuffer<float>.ReturnArray(sumDy);
+                sumDyX.Dispose();
+                sumDy.Dispose();
             }
         }
     }

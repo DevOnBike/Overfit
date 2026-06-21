@@ -5,75 +5,81 @@
 
 using System.Buffers;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 
 namespace DevOnBike.Overfit.Tensors
 {
     /// <summary>
-    /// The project's sanctioned interface to <see cref="ArrayPool{T}.Shared"/>. Raw
-    /// <c>ArrayPool&lt;T&gt;.Shared</c> elsewhere in Main is banned (RS0030, see
-    /// <c>BannedSymbols.txt</c>) so all rentals go through this single audit point — gives one swap
-    /// point across the codebase.
-    ///
-    /// <para>Two usage modes:</para>
-    /// <list type="number">
-    /// <item><b>Scoped (default)</b>: <c>using var buf = new PooledBuffer&lt;float&gt;(n, clearMemory: false);</c>
-    /// — ref-struct, can't escape its scope, auto-returns. Works inside <c>Parallel.For</c> lambdas
-    /// (a local ref struct inside a lambda body is allowed; only capturing one from outside is not).</item>
-    /// <item><b>Class-lifetime</b>: <see cref="RentArray"/> + <see cref="ReturnArray"/> for callers
-    /// that rent in a constructor / method and return in <c>Dispose</c> (e.g. <c>FastTensor</c>,
-    /// <c>TensorStorage</c>, complex loader patterns). Same pool, no scope wrapper.</item>
-    /// </list>
-    ///
-    /// <para><b>Benchmark (2026-05-29, Ryzen 9 9950X3D, .NET 10):</b></para>
+    /// The project's single pooled-buffer wrapper over <c>ArrayPool&lt;T&gt;.Shared</c> (raw <c>.Shared</c>
+    /// elsewhere in Main is RS0030-banned — this is the one sanctioned audit point). A plain struct, so the same
+    /// type serves every lifetime:
     /// <list type="bullet">
-    /// <item>Single-thread Rent+Return: <c>.Shared</c> ~4 ns regardless of size (pools to 16M+ floats
-    /// at 0 alloc). Wrapper overhead 0% (matches raw <c>.Shared</c> to noise).</item>
-    /// <item>Multi-thread (16–32 threads): <c>.Shared</c> scales linearly via TLS per-CPU caches
-    /// (4.9 ns/op at 32 threads — same as single-thread). <see cref="PooledBuffer{T}"/> wrapper
-    /// overhead 1.03–1.14× — also linear.</item>
+    /// <item><b>method-local scratch</b>: <c>using var buf = new PooledBuffer&lt;float&gt;(n, clearMemory: false);</c>
+    /// — auto-returns at scope end (works inside a <c>Parallel.For</c> lambda body too);</item>
+    /// <item><b>class field</b>: rent in a constructor, <c>Dispose()</c> in the owner's Dispose (e.g.
+    /// <c>FastTensor</c>, <c>TensorStorage</c>);</item>
+    /// <item><b>closure-captured</b>: written from a worker lambda — capture the struct, take its
+    /// <see cref="Span"/> inside the lambda body.</item>
     /// </list>
+    ///
+    /// <para>Exposes <see cref="Span"/> / <see cref="Memory"/>; returns the rented array to the pool on
+    /// <see cref="Dispose"/> (idempotent / null-safe; <c>default</c> is a valid empty instance).</para>
+    ///
+    /// <para><b>Ownership discipline:</b> keep it in ONE owning field/local and dispose exactly once. Never copy it
+    /// by value (a copy shares the same array, and disposing both would double-return and corrupt the pool).</para>
+    ///
+    /// <para><b>Span is a property</b> (a non-ref struct can't hold a <c>Span&lt;T&gt;</c> field). The JIT folds the
+    /// getter to a plain field-read — measured identical to a cached Span field (~0.99×) — so just use
+    /// <c>buf.Span</c>; if you touch it in a very tight inner loop, cache <c>var s = buf.Span;</c> once.</para>
+    ///
+    /// <para><b>Benchmark (2026-05-29, Ryzen 9 9950X3D):</b> Rent+Return on <c>ArrayPool.Shared</c> ~4 ns regardless
+    /// of size (pools to 16M+ floats at 0 alloc); scales linearly across 16–32 threads via TLS per-CPU caches.</para>
     /// </summary>
     [SuppressMessage("ApiDesign", "RS0030", Justification = "Project wrapper around ArrayPool<T>.Shared — the ban targets direct callers in Main.")]
-    public readonly ref struct PooledBuffer<T> where T : struct
+    public struct PooledBuffer<T> : IDisposable
+        where T : struct
     {
-        public readonly Span<T> Span;
+        private T[]? _rented;
+        private readonly int _length;
 
-        private readonly T[] _rented;
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public PooledBuffer(int requiredSize, bool clearMemory = true)
         {
             _rented = ArrayPool<T>.Shared.Rent(requiredSize);
-            Span = _rented.AsSpan(0, requiredSize);
+            _length = requiredSize;
 
             if (clearMemory)
             {
-                Span.Clear();
+                _rented.AsSpan(0, requiredSize).Clear();
             }
         }
 
+        /// <summary>The buffer as a span of exactly the requested size (empty once disposed).</summary>
+        public readonly Span<T> Span
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => _rented is null ? default : _rented.AsSpan(0, _length);
+        }
+
+        /// <summary>The buffer as memory of exactly the requested size (empty once disposed).</summary>
+        public readonly Memory<T> Memory => _rented is null ? default : _rented.AsMemory(0, _length);
+
+        /// <summary>Logical length (what was requested), not the pool's possibly-larger rented length.</summary>
+        public readonly int Length => _length;
+
+        /// <summary>False once disposed (or for a <c>default</c> instance).</summary>
+        public readonly bool IsAllocated => _rented is not null;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Dispose()
         {
-            if (_rented != null)
+            var array = _rented;
+            _rented = null;
+
+            if (array is not null)
             {
-                ArrayPool<T>.Shared.Return(_rented);
+                ArrayPool<T>.Shared.Return(array);
             }
-        }
-
-        /// <summary>
-        /// Class-lifetime rental — call when the ref-struct <c>using</c> scope doesn't fit (e.g.
-        /// rent in a ctor, return in Dispose). The returned array length is at least
-        /// <paramref name="minimumLength"/>; caller slices to the exact length it needs. Pair with
-        /// <see cref="ReturnArray"/> exactly once.
-        /// </summary>
-        public static T[] RentArray(int minimumLength)
-        {
-            return ArrayPool<T>.Shared.Rent(minimumLength);
-        }
-
-        /// <summary>Returns an array previously obtained from <see cref="RentArray"/> to the pool.</summary>
-        public static void ReturnArray(T[] array)
-        {
-            ArrayPool<T>.Shared.Return(array);
         }
     }
 }

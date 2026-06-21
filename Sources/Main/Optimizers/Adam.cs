@@ -101,8 +101,7 @@ namespace DevOnBike.Overfit.Optimizers
         {
             foreach (var state in _states)
             {
-                state.M.Dispose();
-                state.V.Dispose();
+                state.Dispose();
             }
         }
 
@@ -535,7 +534,7 @@ namespace DevOnBike.Overfit.Optimizers
             end = (int)((long)size * (chunk + 1) / chunks);
         }
 
-        private readonly struct ParamState
+        private readonly struct ParamState : IDisposable
         {
             private readonly Parameter? _param;
             private readonly AutogradNode? _node;
@@ -589,6 +588,15 @@ namespace DevOnBike.Overfit.Optimizers
 
             public bool RequiresGrad =>
                 _param != null ? _param.RequiresGrad : _node!.RequiresGrad;
+
+            // M and V are created (and therefore owned) by this struct — the moment/velocity
+            // accumulators. The Parameter/AutogradNode they shadow are borrowed (owned elsewhere)
+            // and are deliberately NOT disposed here.
+            public void Dispose()
+            {
+                M.Dispose();
+                V.Dispose();
+            }
         }
     }
 }

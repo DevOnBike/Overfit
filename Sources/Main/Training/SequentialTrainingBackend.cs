@@ -151,7 +151,7 @@ namespace DevOnBike.Overfit.Training
                 return;
             }
 
-            _graph.Reset();
+            _graph.Dispose();   // frees the tape arena + conv workspace (Reset only rewinds the offset → leak)
             _inputNode.Dispose();
             _targetNode.Dispose();
 

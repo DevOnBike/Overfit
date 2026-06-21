@@ -226,24 +226,13 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
             // decode) call that overload directly with their own reused scratch and never reach here.
             var qLen = tq * dModel;
             var kvLen = tkv * dModel;
-            var qArr = PooledBuffer<float>.RentArray(qLen);
-            var kArr = PooledBuffer<float>.RentArray(kvLen);
-            var vArr = PooledBuffer<float>.RentArray(kvLen);
-            var attnOutArr = PooledBuffer<float>.RentArray(qLen);
-            var scoresArr = PooledBuffer<float>.RentArray(tkv);
-            try
-            {
-                MultiHeadAttention(xq, tq, xkv, tkv, dModel, nHeads, wq, bq, wk, wv, bv, wo, bo, dst, causal,
-                    qArr.AsSpan(0, qLen), kArr.AsSpan(0, kvLen), vArr.AsSpan(0, kvLen), attnOutArr.AsSpan(0, qLen), scoresArr.AsSpan(0, tkv));
-            }
-            finally
-            {
-                PooledBuffer<float>.ReturnArray(qArr);
-                PooledBuffer<float>.ReturnArray(kArr);
-                PooledBuffer<float>.ReturnArray(vArr);
-                PooledBuffer<float>.ReturnArray(attnOutArr);
-                PooledBuffer<float>.ReturnArray(scoresArr);
-            }
+            using var qArr = new PooledBuffer<float>(qLen, clearMemory: false);
+            using var kArr = new PooledBuffer<float>(kvLen, clearMemory: false);
+            using var vArr = new PooledBuffer<float>(kvLen, clearMemory: false);
+            using var attnOutArr = new PooledBuffer<float>(qLen, clearMemory: false);
+            using var scoresArr = new PooledBuffer<float>(tkv, clearMemory: false);
+            MultiHeadAttention(xq, tq, xkv, tkv, dModel, nHeads, wq, bq, wk, wv, bv, wo, bo, dst, causal,
+                qArr.Span, kArr.Span, vArr.Span, attnOutArr.Span, scoresArr.Span);
         }
 
         /// <summary>

@@ -242,9 +242,9 @@ namespace DevOnBike.Overfit.DeepLearning
         private static AutogradNode AllocateBias(ComputationGraph graph, int size)
         {
             // Zero bias — projection layers in attention typically use no bias,
-            // or the bias is part of the output projection (Bo).
-            var storage = new TensorStorage<float>(size, clearMemory: true);
-            return AutogradNode.CreateBorrowed(storage, new TensorShape(size), requiresGrad: false);
+            // or the bias is part of the output projection (Bo). Arena-backed (graph.Reset() reclaims it);
+            // the previous `new TensorStorage` + CreateBorrowed leaked its pooled array (nobody disposed it).
+            return graph.CreateAuxiliary(new TensorShape(size), clearMemory: true);
         }
 
         private static AutogradNode AddBiasBatched(
@@ -257,8 +257,10 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             var inS = input.DataView.AsReadOnlySpan();
             var bS = bias.DataView.AsReadOnlySpan();
-            var outStorage = new TensorStorage<float>(batchSize * seqLen * dModel, clearMemory: false);
-            var outS = outStorage.AsSpan();
+            // Arena-backed (graph.Reset() reclaims it); every element is overwritten below so no clear needed.
+            // The previous `new TensorStorage` + CreateBorrowed leaked its pooled array (nobody disposed it).
+            var node = graph.CreateAuxiliary(new TensorShape(batchSize, seqLen, dModel));
+            var outS = node.DataView.AsSpan();
 
             for (var bt = 0; bt < batchSize * seqLen; bt++)
             {
@@ -267,7 +269,6 @@ namespace DevOnBike.Overfit.DeepLearning
                 TensorPrimitives.Add(row, bS, row);
             }
 
-            var node = AutogradNode.CreateBorrowed(outStorage, new TensorShape(batchSize, seqLen, dModel), requiresGrad: false);
             return node;
         }
 

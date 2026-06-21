@@ -10,16 +10,19 @@ namespace DevOnBike.Overfit.Tensors
         public static FastTensor<float> Randomize(this FastTensor<float> tensor, float scale = 0.01f)
         {
             var span = tensor.GetView().AsSpan();
+            
             for (var i = 0; i < span.Length; i++)
             {
                 span[i] = (Random.Shared.NextSingle() * 2f - 1f) * scale;
             }
+            
             return tensor;
         }
 
         public static FastTensor<float> Fill(this FastTensor<float> tensor, float value)
         {
             tensor.GetView().AsSpan().Fill(value);
+            
             return tensor;
         }
     }

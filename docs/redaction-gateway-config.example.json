@@ -1,0 +1,41 @@
+{
+  "_comment": "Example redaction-gateway config. Run: overfit gateway --config this-file.json (set the upstream key in $OPENAI_API_KEY). CLI flags (--upstream/--port/...) override these values.",
+
+  "upstream": "https://api.openai.com/v1",
+
+  "_clientKeys_comment": "Gateway-issued keys callers must send as 'Authorization: Bearer <key>'. Prefer the env var $OVERFIT_GATEWAY_KEYS for real secrets; keys here are merged with it. Omit/empty = open gateway (dev only).",
+  "clientKeys": [ "sk-gw-team-a", "sk-gw-team-b" ],
+
+  "_scanResponses_comment": "Also scan model responses and mask secrets/PII the model itself produced (leaked system prompt, RAG-echoed doc). Non-streaming only; the caller's own redacted values are still restored. Default false.",
+  "scanResponses": true,
+
+  "rules": {
+    "international": true,
+    "polish": true,
+    "custom": [
+      { "category": "EMPLOYEE_ID", "pattern": "\\bEMP\\d{6}\\b" },
+      { "category": "INTERNAL_HOST", "pattern": "\\b[a-z0-9-]+\\.internal\\.corp\\b" }
+    ]
+  },
+
+  "policy": {
+    "_comment": "Per-category action: Block (refuse the request), Redact (replace + restore), Alert (forward but log), Allow (ignore). Unknown categories fall back to default.",
+    "default": "Redact",
+    "categories": {
+      "PRIVATE_KEY": "Block",
+      "AWS_KEY": "Block",
+      "API_KEY": "Block",
+      "JWT": "Block",
+      "EMAIL": "Redact",
+      "CREDIT_CARD": "Redact",
+      "SSN": "Redact",
+      "PESEL": "Redact",
+      "NIP": "Redact",
+      "REGON": "Redact",
+      "IBAN_PL": "Redact",
+      "EMPLOYEE_ID": "Redact",
+      "INTERNAL_HOST": "Redact",
+      "IPV4": "Alert"
+    }
+  }
+}

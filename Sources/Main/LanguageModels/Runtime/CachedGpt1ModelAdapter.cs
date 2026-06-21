@@ -242,30 +242,24 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             }
 
             var basePos = _cache.CurrentLength;
-            var batch = PooledBuffer<float>.RentArray(n * DModel);
-            try
+            using var batch = new PooledBuffer<float>(n * DModel, clearMemory: false);
+
+            for (var i = 0; i < n; i++)
             {
-                for (var i = 0; i < n; i++)
+                _model.TokenEmbedding.LookupInference(tokens[i], _tokenEmbeddingBuffer);
+                _model.PositionEmbedding.LookupInference(basePos + i, _positionEmbeddingBuffer);
+
+                var dst = batch.Span.Slice(i * DModel, DModel);
+                for (var d = 0; d < DModel; d++)
                 {
-                    _model.TokenEmbedding.LookupInference(tokens[i], _tokenEmbeddingBuffer);
-                    _model.PositionEmbedding.LookupInference(basePos + i, _positionEmbeddingBuffer);
-
-                    var dst = batch.AsSpan(i * DModel, DModel);
-                    for (var d = 0; d < DModel; d++)
-                    {
-                        dst[d] = _tokenEmbeddingBuffer[d] + _positionEmbeddingBuffer[d];
-                    }
-
-                    _cache.Advance();
+                    dst[d] = _tokenEmbeddingBuffer[d] + _positionEmbeddingBuffer[d];
                 }
 
-                _stack.PrefillBatched(batch, n, _weights, _cache, basePos, rope: null);
-                _stack.ProjectLogits(_weights, lastLogits);
+                _cache.Advance();
             }
-            finally
-            {
-                PooledBuffer<float>.ReturnArray(batch);
-            }
+
+            _stack.PrefillBatched(batch.Span, n, _weights, _cache, basePos, rope: null);
+            _stack.ProjectLogits(_weights, lastLogits);
         }
 
         private int AdvanceAndEmbed(int tokenId)

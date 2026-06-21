@@ -3,7 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Buffers;
 using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -17,7 +16,7 @@ namespace DevOnBike.Overfit.Tensors
     public sealed class FastTensor<T> : IDisposable
         where T : struct
     {
-        private T[]? _data;
+        private PooledBuffer<T> _data;
         private int _disposed;
 
         public readonly int Rank;
@@ -93,12 +92,7 @@ namespace DevOnBike.Overfit.Tensors
         private void Allocate(
             bool clearMemory)
         {
-            _data = PooledBuffer<T>.RentArray(Size);
-
-            if (clearMemory)
-            {
-                _data.AsSpan(0, Size).Clear();
-            }
+            _data = new PooledBuffer<T>(Size, clearMemory);
         }
 
         // ========================================================================
@@ -116,9 +110,7 @@ namespace DevOnBike.Overfit.Tensors
                 _disposed == 1,
                 this);
 
-            return _data!.AsSpan(
-                0,
-                Size);
+            return _data.Span;
         }
 
         /// <summary>
@@ -132,9 +124,7 @@ namespace DevOnBike.Overfit.Tensors
                 _disposed == 1,
                 this);
 
-            return _data!.AsSpan(
-                0,
-                Size);
+            return _data.Span;
         }
 
         // ========================================================================
@@ -151,29 +141,28 @@ namespace DevOnBike.Overfit.Tensors
             return Rank switch
             {
                 1 => new TensorView<T>(
-                    _data!.AsSpan(0, Size),
+                    _data.Span,
                     _s0),
 
                 2 => new TensorView<T>(
-                    _data!.AsSpan(0, Size),
+                    _data.Span,
                     _s0,
                     _s1),
 
                 3 => new TensorView<T>(
-                    _data!.AsSpan(0, Size),
+                    _data.Span,
                     _s0,
                     _s1,
                     _s2),
 
                 4 => new TensorView<T>(
-                    _data!.AsSpan(0, Size),
+                    _data.Span,
                     _s0,
                     _s1,
                     _s2,
                     _s3),
 
-                _ => throw new NotImplementedException(
-                    "Obsługa max 4 wymiarów")
+                _ => throw new NotImplementedException("Obsługa max 4 wymiarów")
             };
         }
 
@@ -197,7 +186,7 @@ namespace DevOnBike.Overfit.Tensors
             }
 
             return new TensorView<T>(
-                _data!.AsSpan(0, Size),
+                _data.Span,
                 s0,
                 s1);
         }
@@ -209,10 +198,9 @@ namespace DevOnBike.Overfit.Tensors
         public void Dispose()
         {
             if (Interlocked.Exchange(ref _disposed, 1) == 0 &&
-                _data != null)
+                _data.IsAllocated)
             {
-                PooledBuffer<T>.ReturnArray(_data);
-                _data = null;
+                _data.Dispose();
             }
         }
 
