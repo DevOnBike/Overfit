@@ -114,6 +114,8 @@ namespace DevOnBike.Overfit.DeepLearning
 
             if (output.RequiresGrad)
             {
+                // Tape temporary: graph.Reset() reclaims its pooled storage after backward (was Unknown → leaked).
+                output.Ownership = AutogradNodeOwnership.GraphTemporary;
                 graph?.Record(OpCode.TimestepSlice, output, input, null, t, seqLen, inputSize);
             }
 
@@ -151,6 +153,8 @@ namespace DevOnBike.Overfit.DeepLearning
 
             if (output.RequiresGrad)
             {
+                // Tape temporary: graph.Reset() reclaims its pooled storage after backward (was Unknown → leaked).
+                output.Ownership = AutogradNodeOwnership.GraphTemporary;
                 graph?.Record(
                 OpCode.StackTimesteps,
                 output,

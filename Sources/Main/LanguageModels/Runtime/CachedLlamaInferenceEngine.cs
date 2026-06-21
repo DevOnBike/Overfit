@@ -340,7 +340,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // Transpose at load time — happens once, no effect on inference speed.
             var lmHeadRaw = ReadTensor(reader, vocabSize * dModel);
             var lmHead = TransposeLmHead(lmHeadRaw, vocabSize, dModel);
+#pragma warning disable IDISP017 // Deliberate early dispose, NOT `using`: free the raw [vocab×dModel] buffer
+            // right after the transpose — before constructing the engine — to keep the load-time peak at ~1×
+            // (a `using` would hold it alive until method end). See the peak-vs-steady RAM discipline.
             lmHeadRaw.Dispose();
+#pragma warning restore IDISP017
 
             return new CachedLlamaInferenceEngine(config, embedWeights, finalNormGamma, finalNormBeta, lmHead, layers);
         }
