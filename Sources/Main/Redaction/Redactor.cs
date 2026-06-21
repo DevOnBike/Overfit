@@ -1,0 +1,152 @@
+// Copyright (c) 2026 DevOnBike.
+// This file is part of DevonBike Overfit.
+// DevonBike Overfit is licensed under the GNU AGPLv3.
+// For commercial licensing options, contact: devonbike@gmail.com
+
+using System.Text;
+using System.Text.RegularExpressions;
+
+namespace DevOnBike.Overfit.Redaction
+{
+    /// <summary>
+    /// Removes sensitive spans from text by applying a set of <see cref="RedactionRule"/>s, replacing each match
+    /// with a stable placeholder and reporting what was removed. The core of the outbound redaction gateway:
+    /// scan a payload before it leaves the box, forward the cleaned text, audit the findings, optionally
+    /// <see cref="Restore"/> the originals on the response coming back.
+    ///
+    /// Overlapping matches are resolved deterministically — earliest start wins, and the longer span wins on a tie —
+    /// so the result is stable regardless of rule order.
+    /// </summary>
+    public sealed class Redactor
+    {
+        private readonly RedactionRule[] _rules;
+
+        public Redactor(RedactionRule[] rules)
+        {
+            ArgumentNullException.ThrowIfNull(rules);
+            _rules = rules;
+        }
+
+        /// <summary>A redactor preloaded with the conservative <see cref="DefaultRedactionRules"/> starter set.</summary>
+        public static Redactor CreateDefault() => new(DefaultRedactionRules.All());
+
+        /// <summary>
+        /// Redacts <paramref name="input"/>: returns the cleaned text plus the ordered list of removed spans.
+        /// </summary>
+        public RedactionResult Redact(string input)
+        {
+            ArgumentNullException.ThrowIfNull(input);
+
+            if (input.Length == 0)
+            {
+                return new RedactionResult(input, []);
+            }
+
+            // Collect every candidate span from every rule.
+            var spans = new List<Span>();
+
+            foreach (var rule in _rules)
+            {
+                foreach (Match match in rule.Pattern.Matches(input))
+                {
+                    if (match.Length > 0)
+                    {
+                        spans.Add(new Span(match.Index, match.Length, rule.Category, match.Value));
+                    }
+                }
+            }
+
+            if (spans.Count == 0)
+            {
+                return new RedactionResult(input, []);
+            }
+
+            // Deterministic order: earliest start first, longer span first on a tie.
+            spans.Sort(static (a, b) =>
+                a.Start != b.Start ? a.Start.CompareTo(b.Start) : b.Length.CompareTo(a.Length));
+
+            var builder = new StringBuilder(input.Length);
+            var matches = new List<RedactionMatch>();
+            var counters = new Dictionary<string, int>(StringComparer.Ordinal);
+            var cursor = 0;
+
+            foreach (var span in spans)
+            {
+                // Skip spans that overlap one we already took.
+                if (span.Start < cursor)
+                {
+                    continue;
+                }
+
+                builder.Append(input, cursor, span.Start - cursor);
+
+                var index = counters.GetValueOrDefault(span.Category);
+                counters[span.Category] = index + 1;
+                var placeholder = $"[REDACTED_{span.Category}_{index}]";
+
+                builder.Append(placeholder);
+                matches.Add(new RedactionMatch(span.Category, span.Value, placeholder, span.Start, span.Length));
+                cursor = span.Start + span.Length;
+            }
+
+            builder.Append(input, cursor, input.Length - cursor);
+            return new RedactionResult(builder.ToString(), matches);
+        }
+
+        /// <summary>
+        /// Reverses redaction: substitutes each placeholder in <paramref name="redacted"/> back to its original
+        /// value. Used to re-hydrate a model response so the caller sees a coherent answer about the entities that
+        /// were hidden from the upstream. Whether a deployment restores or keeps the redaction is a policy choice.
+        /// </summary>
+        public static string Restore(string redacted, IReadOnlyList<RedactionMatch> matches)
+        {
+            ArgumentNullException.ThrowIfNull(redacted);
+            ArgumentNullException.ThrowIfNull(matches);
+
+            if (matches.Count == 0)
+            {
+                return redacted;
+            }
+
+            var result = redacted;
+
+            foreach (var match in matches)
+            {
+                result = result.Replace(match.Placeholder, match.Original, StringComparison.Ordinal);
+            }
+
+            return result;
+        }
+
+        private readonly struct Span
+        {
+            public Span(int start, int length, string category, string value)
+            {
+                Start = start;
+                Length = length;
+                Category = category;
+                Value = value;
+            }
+
+            public int Start
+            {
+                get;
+            }
+
+            public int Length
+            {
+                get;
+            }
+
+            public string Category
+            {
+                get;
+            }
+
+            public string Value
+            {
+                get;
+            }
+        }
+    }
+}

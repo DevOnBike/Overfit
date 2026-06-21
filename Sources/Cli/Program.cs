@@ -309,6 +309,39 @@ var doctorCommand = new Command("doctor",
 };
 doctorCommand.SetAction(parseResult => Commands.Doctor(parseResult.GetValue(doctorModel)!));
 
+// ── score: run a trained XGBoost model (JSON) over a CSV of feature rows, pure-managed, zero-egress. ──
+var scoreModel = new Argument<string>("model")
+{
+    Description = "Path to an XGBoost model saved as JSON (booster.save_model(\"model.json\")).",
+};
+var scoreInput = new Option<string>("--input", "-i")
+{
+    Description = "CSV of feature rows (one row per line, NumFeatures columns; an optional header row is "
+        + "auto-detected and skipped; an empty cell or 'nan'/'na'/'?' is a missing value).",
+    Required = true,
+};
+var scoreOutput = new Option<string?>("--output", "-o")
+{
+    Description = "Write predictions here as CSV; default writes to stdout.",
+};
+var scoreMargin = new Option<bool>("--margin")
+{
+    Description = "Emit raw pre-transform margins (XGBoost output_margin=True) instead of probabilities.",
+};
+var scoreCommand = new Command("score",
+    "Score a CSV with a trained XGBoost model (JSON) — pure-managed, zero-allocation, in-process, no Python.")
+{
+    scoreModel,
+    scoreInput,
+    scoreOutput,
+    scoreMargin,
+};
+scoreCommand.SetAction(parseResult => Commands.Score(
+    parseResult.GetValue(scoreModel)!,
+    parseResult.GetValue(scoreInput)!,
+    parseResult.GetValue(scoreOutput),
+    parseResult.GetValue(scoreMargin)));
+
 var rootCommand = new RootCommand("Overfit — run local LLMs, RAG and agents in pure .NET. No Python, no native runtime.")
 {
     pullCommand,
@@ -320,6 +353,7 @@ var rootCommand = new RootCommand("Overfit — run local LLMs, RAG and agents in
     ttsCommand,
     voiceCommand,
     benchCommand,
+    scoreCommand,
 };
 
 return rootCommand.Parse(args).Invoke();

@@ -35,6 +35,33 @@ Zero-allocation, pure C# deep-learning framework targeting high-performance CPU 
 
 ---
 
+## Agentic / interop / vision backlog (2026-06-21)
+
+Deferred ideas captured while shipping the XGBoost tabular predictor; ranked, on-moat, all build on existing
+primitives (autograd, agentic stack, MEAI adapter, the XGBoost predictor). The **Redaction Gateway spike** is the
+active post-release initiative and is tracked separately.
+
+1. **Vision-XAI — Grad-CAM + saliency maps.** Extends the interpretability-hooks initiative (today: LLM activation
+   capture + logit lens) to CNN/ONNX explainability: Grad-CAM = gradient of the output w.r.t. conv feature maps,
+   saliency = gradient w.r.t. the input. We already have the autograd to compute both — pure-managed, in-process,
+   no Python. On-moat ("pure-managed = inspectable"); strong for regulated/medical/audit ("explainable predictions,
+   zero data egress"). Origin: a breast-ultrasound segmentation + XAI workshop.
+2. **SkillOpt loop — text-space self-improving agent skills.** A weight-free adaptation loop: an optimizer model turns
+   scored rollouts into bounded add/delete/replace edits on a single skill document, accepted only when a held-out
+   validation score strictly improves (selection gate + textual "learning-rate" budget + rejected-edit buffer). Rides
+   on primitives we already have (local generation, scoring, guaranteed-JSON edits, the ReAct/ChatSession stack) — it
+   is orchestration, not new kernels. Complements QLoRA (weight-space) with a fully on-prem text-space moat. Caveat:
+   edit/scoring quality wants a 7B+ local optimizer model. Origin: arXiv:2605.23904 (SkillOpt, Microsoft, 2026).
+3. **`overfit score` as a server endpoint.** The XGBoost predictor ships as a library + `overfit score` CLI; expose it
+   over the OpenAI-compatible server (or a small dedicated route) for tabular scoring as a service. Small, reuses the
+   hardened server + zero-alloc predictor.
+4. **Semantic Kernel recipe (docs, not code).** SK can already consume Overfit two ways — point SK's OpenAI connector
+   at `overfit serve`, or bridge our `Microsoft.Extensions.AI` `IChatClient` (recent SK builds on MEAI). A dedicated SK
+   connector is **not** worth building (redundant with the MEAI adapter, which is the forward-looking interop point);
+   the only move is a short "Use Overfit from Semantic Kernel" sample showing both paths.
+
+---
+
 ## Audio / TTS backlog (ROI-ranked, 2026-06-08)
 
 Pure-.NET voice stack (Orpheus 3B + SNAC + voice cloning) is functional; first-word garble **root-caused & fixed**

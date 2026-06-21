@@ -213,7 +213,13 @@ and the decode worker pool **parks when idle**, so a serving container at rest s
 overfit serve qwen2.5-3b --port 11434              # one self-contained binary; nothing leaves the box
 overfit serve qwen2.5-3b --port 11434 --sessions 4 # 4 concurrent sessions (shared weights, N× KV cache)
 overfit doctor C:\models\model.gguf                # inspect a GGUF: arch, quant, tokenizer, chat template, supported?
+overfit score model.json --input rows.csv          # score a CSV with a trained XGBoost model (JSON), pure-managed, zero-alloc
 ```
+
+`overfit score` runs a model trained elsewhere (XGBoost `booster.save_model("model.json")`) over a CSV of
+feature rows — header auto-detected, an empty cell or `nan`/`na`/`?` is a missing value, `--margin` emits raw
+scores. In-process, no Python, no native dependency; online single-row latency is ~18× lower than calling
+XGBoost from Python (no DMatrix/marshalling tax).
 
 Call it and print the **raw response, pretty-formatted**:
 

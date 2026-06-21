@@ -16,6 +16,7 @@ using DevOnBike.Overfit.Mcp;
 using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Server;
 using DevOnBike.Overfit.Serving;
+using DevOnBike.Overfit.Trees;
 
 namespace DevOnBike.Overfit.Cli
 {
@@ -378,6 +379,197 @@ namespace DevOnBike.Overfit.Cli
             }
 
             return 0;
+        }
+
+        // ── score: run a trained XGBoost model (JSON) over a CSV of feature rows, pure-managed + zero-egress. ──
+        public static int Score(string modelPath, string inputPath, string? outputPath, bool margin)
+        {
+            if (!File.Exists(modelPath))
+            {
+                Console.Error.WriteLine($"Model file not found: {modelPath}");
+                Console.Error.WriteLine("Pass the path to an XGBoost model saved as JSON (booster.save_model(\"model.json\")).");
+                return 1;
+            }
+
+            if (!File.Exists(inputPath))
+            {
+                Console.Error.WriteLine($"Input CSV not found: {inputPath}");
+                return 1;
+            }
+
+            BoostedTreeModel model;
+            try
+            {
+                model = XgboostModelLoader.Load(modelPath);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Failed to load '{Path.GetFileName(modelPath)}' as an XGBoost JSON model: {ex.Message}");
+                return 1;
+            }
+
+            var rows = new List<float[]>();
+            var lineNumber = 0;
+            foreach (var raw in File.ReadLines(inputPath))
+            {
+                lineNumber++;
+                var line = raw.Trim();
+                if (line.Length == 0)
+                {
+                    continue;
+                }
+
+                var cells = line.Split(',');
+
+                // A first row that does not parse fully as numbers is treated as a header and skipped.
+                if (rows.Count == 0 && lineNumber == 1 && !LooksNumeric(cells))
+                {
+                    continue;
+                }
+
+                if (cells.Length != model.NumFeatures)
+                {
+                    Console.Error.WriteLine(
+                        $"Line {lineNumber}: expected {model.NumFeatures} feature columns, got {cells.Length}.");
+                    return 1;
+                }
+
+                var row = new float[model.NumFeatures];
+                for (var c = 0; c < cells.Length; c++)
+                {
+                    if (!TryParseCell(cells[c], out row[c]))
+                    {
+                        Console.Error.WriteLine($"Line {lineNumber}, column {c + 1}: '{cells[c].Trim()}' is not a number.");
+                        return 1;
+                    }
+                }
+
+                rows.Add(row);
+            }
+
+            if (rows.Count == 0)
+            {
+                Console.Error.WriteLine("No feature rows found in the input CSV.");
+                return 1;
+            }
+
+            // Flatten and score in one batch through the parallel, zero-allocation predictor.
+            var groups = model.NumGroups;
+            var flat = new float[(long)rows.Count * model.NumFeatures];
+            for (var r = 0; r < rows.Count; r++)
+            {
+                rows[r].CopyTo(flat.AsSpan(r * model.NumFeatures, model.NumFeatures));
+            }
+
+            var outputs = new float[(long)rows.Count * groups];
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            if (margin)
+            {
+                // Raw, pre-transform margins (XGBoost output_margin=True).
+                for (var r = 0; r < rows.Count; r++)
+                {
+                    model.PredictRawMargins(rows[r], outputs.AsSpan(r * groups, groups));
+                }
+            }
+            else
+            {
+                model.PredictBatchParallel(flat, rows.Count, outputs);
+            }
+            sw.Stop();
+
+            using var writer = outputPath is null ? null : new StreamWriter(outputPath);
+            void Emit(string text)
+            {
+                if (writer is null)
+                {
+                    Console.Out.WriteLine(text);
+                }
+                else
+                {
+                    writer.WriteLine(text);
+                }
+            }
+
+            Emit(HeaderLine(groups, margin));
+            for (var r = 0; r < rows.Count; r++)
+            {
+                Emit(FormatRow(outputs.AsSpan(r * groups, groups)));
+            }
+
+            var nsPerRow = sw.Elapsed.TotalMilliseconds * 1e6 / rows.Count;
+            Console.Error.WriteLine(
+                $"Scored {rows.Count:N0} rows · {model.NumTrees} trees · {model.Objective} · "
+                + $"{model.NumGroups} output(s) · {sw.Elapsed.TotalMilliseconds:F1} ms ({nsPerRow:F0} ns/row)"
+                + (outputPath is null ? string.Empty : $" → {outputPath}"));
+            return 0;
+        }
+
+        private static bool LooksNumeric(string[] cells)
+        {
+            foreach (var cell in cells)
+            {
+                if (!TryParseCell(cell, out _))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private static bool TryParseCell(string cell, out float value)
+        {
+            var token = cell.Trim();
+            if (token.Length == 0
+                || token.Equals("nan", StringComparison.OrdinalIgnoreCase)
+                || token.Equals("na", StringComparison.OrdinalIgnoreCase)
+                || token.Equals("null", StringComparison.OrdinalIgnoreCase)
+                || token == "?")
+            {
+                // Missing value — XGBoost routes it via each node's default direction.
+                value = float.NaN;
+                return true;
+            }
+
+            return float.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+        }
+
+        private static string HeaderLine(int groups, bool margin)
+        {
+            if (groups == 1)
+            {
+                return margin ? "margin" : "prediction";
+            }
+
+            var prefix = margin ? "margin_" : "p_";
+            var sb = new System.Text.StringBuilder();
+            for (var g = 0; g < groups; g++)
+            {
+                if (g > 0)
+                {
+                    sb.Append(',');
+                }
+                sb.Append(prefix).Append(g.ToString(CultureInfo.InvariantCulture));
+            }
+            return sb.ToString();
+        }
+
+        private static string FormatRow(ReadOnlySpan<float> values)
+        {
+            if (values.Length == 1)
+            {
+                return values[0].ToString(CultureInfo.InvariantCulture);
+            }
+
+            var sb = new System.Text.StringBuilder();
+            for (var i = 0; i < values.Length; i++)
+            {
+                if (i > 0)
+                {
+                    sb.Append(',');
+                }
+                sb.Append(values[i].ToString(CultureInfo.InvariantCulture));
+            }
+            return sb.ToString();
         }
 
         // Dominant weight-tensor quant: the type most of the model's bytes are in. Q4_K_M files mix Q4_K + Q6_K,
