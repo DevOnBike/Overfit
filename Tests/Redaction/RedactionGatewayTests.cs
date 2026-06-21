@@ -18,6 +18,10 @@ namespace DevOnBike.Overfit.Tests.Redaction
     {
         private static readonly Redactor _redactor = Redactor.CreateDefault();
 
+        // Redact-everything policy: exercises the redaction transform itself (the BLOCK policy is tested separately).
+        private static readonly RedactionPolicy _redactAll =
+            new(new Dictionary<string, RedactionAction>(), RedactionAction.Redact);
+
         [Fact]
         public void RedactRequest_ScrubsOutboundMessages_AndReportsCounts()
         {
@@ -31,7 +35,7 @@ namespace DevOnBike.Overfit.Tests.Redaction
                 ]
             };
 
-            var (matches, counts) = RedactionGateway.RedactRequest(req, _redactor);
+            var (matches, counts, _, _) = RedactionGateway.RedactRequest(req, _redactor, _redactAll);
 
             // The outbound payload no longer contains the secrets.
             Assert.DoesNotContain("jane@acme.com", req.Messages[1].Content);
@@ -53,7 +57,7 @@ namespace DevOnBike.Overfit.Tests.Redaction
             {
                 Messages = [new OpenAiMessage { Role = "user", Content = "Confirm the address admin@corp.io please." }]
             };
-            var (matches, _) = RedactionGateway.RedactRequest(req, _redactor);
+            var (matches, _, _, _) = RedactionGateway.RedactRequest(req, _redactor, _redactAll);
             var placeholder = matches[0].Placeholder;
 
             // Upstream answered referring to the placeholder it was given.
@@ -76,11 +80,37 @@ namespace DevOnBike.Overfit.Tests.Redaction
                 Messages = [new OpenAiMessage { Role = "user", Content = "What is the capital of France?" }]
             };
 
-            var (matches, counts) = RedactionGateway.RedactRequest(req, _redactor);
+            var (matches, counts, blocked, _) = RedactionGateway.RedactRequest(req, _redactor, _redactAll);
 
             Assert.Empty(matches);
             Assert.Empty(counts);
+            Assert.False(blocked);
             Assert.Equal("What is the capital of France?", req.Messages[0].Content);
+        }
+
+        [Fact]
+        public void DefaultPolicy_BlocksSecrets_RedactsPii()
+        {
+            var policy = RedactionPolicy.Default();
+
+            // A secret (API key) → BLOCK: the whole request is refused, nothing forwarded.
+            var withSecret = new ChatCompletionRequest
+            {
+                Messages = [new OpenAiMessage { Role = "user", Content = "deploy with key sk-ABCDEFGHIJKLMNOPQRSTUVWX now" }]
+            };
+            var (_, _, blocked, blockedCategories) = RedactionGateway.RedactRequest(withSecret, _redactor, policy);
+            Assert.True(blocked);
+            Assert.Contains("API_KEY", blockedCategories);
+
+            // PII only (email) → REDACT + forward, not blocked.
+            var withPii = new ChatCompletionRequest
+            {
+                Messages = [new OpenAiMessage { Role = "user", Content = "summarize the thread from bob@corp.io" }]
+            };
+            var (matches, counts, blocked2, _) = RedactionGateway.RedactRequest(withPii, _redactor, policy);
+            Assert.False(blocked2);
+            Assert.Equal(1, counts["EMAIL"]);
+            Assert.DoesNotContain("bob@corp.io", withPii.Messages[0].Content);
         }
     }
 }

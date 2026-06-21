@@ -42,28 +42,12 @@ namespace DevOnBike.Overfit.Redaction
                 return new RedactionResult(input, []);
             }
 
-            // Collect every candidate span from every rule.
-            var spans = new List<Span>();
-
-            foreach (var rule in _rules)
-            {
-                foreach (Match match in rule.Pattern.Matches(input))
-                {
-                    if (match.Length > 0)
-                    {
-                        spans.Add(new Span(match.Index, match.Length, rule.Category, match.Value));
-                    }
-                }
-            }
+            var spans = CollectSpans(input);
 
             if (spans.Count == 0)
             {
                 return new RedactionResult(input, []);
             }
-
-            // Deterministic order: earliest start first, longer span first on a tie.
-            spans.Sort(static (a, b) =>
-                a.Start != b.Start ? a.Start.CompareTo(b.Start) : b.Length.CompareTo(a.Length));
 
             var builder = new StringBuilder(input.Length);
             var matches = new List<RedactionMatch>();
@@ -91,6 +75,92 @@ namespace DevOnBike.Overfit.Redaction
 
             builder.Append(input, cursor, input.Length - cursor);
             return new RedactionResult(builder.ToString(), matches);
+        }
+
+        /// <summary>
+        /// Applies a <see cref="RedactionPolicy"/>: detects all spans, then — per the policy's action for each
+        /// category — replaces <see cref="RedactionAction.Redact"/> spans with placeholders, leaves Allow/Alert
+        /// spans untouched, and flags the request as <see cref="RedactionDecision.Blocked"/> if any span's category
+        /// is <see cref="RedactionAction.Block"/> (the gateway then refuses it).
+        /// </summary>
+        public RedactionDecision Redact(string input, RedactionPolicy policy)
+        {
+            ArgumentNullException.ThrowIfNull(input);
+            ArgumentNullException.ThrowIfNull(policy);
+
+            if (input.Length == 0)
+            {
+                return new RedactionDecision(input, [], false, []);
+            }
+
+            var spans = CollectSpans(input);
+
+            if (spans.Count == 0)
+            {
+                return new RedactionDecision(input, [], false, []);
+            }
+
+            var builder = new StringBuilder(input.Length);
+            var redacted = new List<RedactionMatch>();
+            var blockedCategories = new List<string>();
+            var counters = new Dictionary<string, int>(StringComparer.Ordinal);
+            var cursor = 0;
+
+            foreach (var span in spans)
+            {
+                if (span.Start < cursor)
+                {
+                    continue;
+                }
+
+                var action = policy.ActionFor(span.Category);
+
+                if (action == RedactionAction.Block && !blockedCategories.Contains(span.Category))
+                {
+                    blockedCategories.Add(span.Category);
+                }
+
+                // Only Redact substitutes; Allow / Alert / Block leave the original in place (a Block refuses the
+                // whole request upstream, so its text is never forwarded anyway).
+                if (action == RedactionAction.Redact)
+                {
+                    builder.Append(input, cursor, span.Start - cursor);
+
+                    var index = counters.GetValueOrDefault(span.Category);
+                    counters[span.Category] = index + 1;
+                    var placeholder = $"[REDACTED_{span.Category}_{index}]";
+
+                    builder.Append(placeholder);
+                    redacted.Add(new RedactionMatch(span.Category, span.Value, placeholder, span.Start, span.Length));
+                    cursor = span.Start + span.Length;
+                }
+            }
+
+            builder.Append(input, cursor, input.Length - cursor);
+            return new RedactionDecision(builder.ToString(), redacted, blockedCategories.Count > 0, blockedCategories);
+        }
+
+        // Detects every rule match, sorted deterministically (earliest start first, longer span first on a tie).
+        // Overlap resolution happens at substitution time via the cursor.
+        private List<Span> CollectSpans(string input)
+        {
+            var spans = new List<Span>();
+
+            foreach (var rule in _rules)
+            {
+                foreach (Match match in rule.Pattern.Matches(input))
+                {
+                    if (match.Length > 0)
+                    {
+                        spans.Add(new Span(match.Index, match.Length, rule.Category, match.Value));
+                    }
+                }
+            }
+
+            spans.Sort(static (a, b) =>
+                a.Start != b.Start ? a.Start.CompareTo(b.Start) : b.Length.CompareTo(a.Length));
+
+            return spans;
         }
 
         /// <summary>

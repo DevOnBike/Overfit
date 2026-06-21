@@ -34,11 +34,13 @@ namespace DevOnBike.Overfit.Server
             string upstreamBaseUrl,
             string? upstreamApiKey,
             Redactor redactor,
-            IRedactionAuditSink audit)
+            IRedactionAuditSink audit,
+            RedactionPolicy policy)
         {
             ArgumentException.ThrowIfNullOrEmpty(upstreamBaseUrl);
             ArgumentNullException.ThrowIfNull(redactor);
             ArgumentNullException.ThrowIfNull(audit);
+            ArgumentNullException.ThrowIfNull(policy);
 
             var upstream = upstreamBaseUrl.TrimEnd('/');
 
@@ -67,7 +69,7 @@ namespace DevOnBike.Overfit.Server
                     break;
                 }
 
-                HandleRequest(ctx, upstream, upstreamApiKey, redactor, audit, http);
+                HandleRequest(ctx, upstream, upstreamApiKey, redactor, audit, policy, http);
             }
         }
 
@@ -75,15 +77,19 @@ namespace DevOnBike.Overfit.Server
         /// Redacts every message's content in <paramref name="req"/> in place, returning the removed spans (for
         /// restoring the response) and per-category counts (for the audit). Pure — the testable core of the proxy.
         /// </summary>
-        public static (List<RedactionMatch> Matches, Dictionary<string, int> Counts) RedactRequest(
+        public static (List<RedactionMatch> Matches, Dictionary<string, int> Counts, bool Blocked, List<string> BlockedCategories) RedactRequest(
             ChatCompletionRequest req,
-            Redactor redactor)
+            Redactor redactor,
+            RedactionPolicy policy)
         {
             ArgumentNullException.ThrowIfNull(req);
             ArgumentNullException.ThrowIfNull(redactor);
+            ArgumentNullException.ThrowIfNull(policy);
 
             var matches = new List<RedactionMatch>();
             var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+            var blocked = false;
+            var blockedCategories = new List<string>();
 
             foreach (var message in req.Messages)
             {
@@ -92,21 +98,34 @@ namespace DevOnBike.Overfit.Server
                     continue;
                 }
 
-                var result = redactor.Redact(message.Content);
-                if (!result.HasRedactions)
+                var decision = redactor.Redact(message.Content, policy);
+
+                if (decision.Blocked)
+                {
+                    blocked = true;
+                    foreach (var category in decision.BlockedCategories)
+                    {
+                        if (!blockedCategories.Contains(category))
+                        {
+                            blockedCategories.Add(category);
+                        }
+                    }
+                }
+
+                if (decision.RedactedMatches.Count == 0)
                 {
                     continue;
                 }
 
-                message.Content = result.Text;
-                foreach (var match in result.Matches)
+                message.Content = decision.Text;
+                foreach (var match in decision.RedactedMatches)
                 {
                     matches.Add(match);
                     counts[match.Category] = counts.GetValueOrDefault(match.Category) + 1;
                 }
             }
 
-            return (matches, counts);
+            return (matches, counts, blocked, blockedCategories);
         }
 
         /// <summary>Restores the original values for any placeholder a response echoed back (default policy).</summary>
@@ -135,6 +154,7 @@ namespace DevOnBike.Overfit.Server
             string? upstreamApiKey,
             Redactor redactor,
             IRedactionAuditSink audit,
+            RedactionPolicy policy,
             HttpClient http)
         {
             try
@@ -150,7 +170,7 @@ namespace DevOnBike.Overfit.Server
 
                 if (method == "POST" && path == "/v1/chat/completions")
                 {
-                    HandleChatCompletions(ctx, upstream, upstreamApiKey, redactor, audit, http);
+                    HandleChatCompletions(ctx, upstream, upstreamApiKey, redactor, audit, policy, http);
                     return;
                 }
 
@@ -175,6 +195,7 @@ namespace DevOnBike.Overfit.Server
             string? upstreamApiKey,
             Redactor redactor,
             IRedactionAuditSink audit,
+            RedactionPolicy policy,
             HttpClient http)
         {
             var req = JsonSerializer.Deserialize(ctx.Request.InputStream, OpenAiJsonContext.Default.ChatCompletionRequest);
@@ -184,8 +205,25 @@ namespace DevOnBike.Overfit.Server
                 return;
             }
 
-            // ── Redact every message's content; keep the matches for restore + audit. ──
-            var (matches, counts) = RedactRequest(req, redactor);
+            // ── Detect + apply the policy across every message. ──
+            var (matches, counts, blocked, blockedCategories) = RedactRequest(req, redactor, policy);
+
+            // ── BLOCK policy: a forbidden category must never leave the box — refuse, don't forward. ──
+            if (blocked)
+            {
+                var blockCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+                foreach (var category in blockedCategories)
+                {
+                    blockCounts["BLOCKED:" + category] = 1;
+                }
+                audit.Record(new RedactionAuditRecord(
+                    Guid.NewGuid().ToString("N"), DateTimeOffset.UtcNow, blockedCategories.Count, blockCounts));
+
+                WriteText(ctx.Response, HttpStatusCode.Forbidden,
+                    $"Request refused by the redaction gateway: it contains forbidden category(ies) "
+                    + $"[{string.Join(", ", blockedCategories)}] that must not leave the box. Nothing was forwarded.");
+                return;
+            }
 
             // Phase 2a: non-streaming (redacting a token stream across chunk boundaries is a follow-on).
             req.Stream = false;

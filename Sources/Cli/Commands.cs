@@ -396,9 +396,11 @@ namespace DevOnBike.Overfit.Cli
 
             using var audit = new JsonLinesAuditSink(auditPath);
             var redactor = Redactor.CreateDefault();
+            var policy = RedactionPolicy.Default();
 
             Console.WriteLine($"audit log: {Path.GetFullPath(auditPath)}");
-            RedactionGateway.Serve(host, port, upstream, key, redactor, audit);
+            Console.WriteLine("policy: secrets (API/AWS keys, JWT, private key) BLOCK · PII (email, card, SSN, IPv4) REDACT");
+            RedactionGateway.Serve(host, port, upstream, key, redactor, audit, policy);
             return 0;
         }
 
