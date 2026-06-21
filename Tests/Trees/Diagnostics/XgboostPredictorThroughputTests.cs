@@ -71,15 +71,17 @@ namespace DevOnBike.Overfit.Tests.Trees.Diagnostics
             var nsPerRow = bestBatchMs * 1e6 / rows;
             var rowsPerSec = rows / (bestBatchMs / 1000.0);
 
-            // ── Batch parallel A/B: branchy vs branchless body, best-of-N each ──────
-            var bestBranchyMs = MeasureParallel(model, data, rows, output, branchless: false);
-            var bestParMs = MeasureParallel(model, data, rows, output, branchless: true);
+            // ── Batch parallel A/B: branchy vs branchless vs block-of-rows, best-of-N each ──
+            var bestBranchyMs = MeasureParallel(model, data, rows, output, BoostedTreeModel.BatchKernel.Branchy);
+            var bestBranchlessMs = MeasureParallel(model, data, rows, output, BoostedTreeModel.BatchKernel.Branchless);
+            var bestParMs = MeasureParallel(model, data, rows, output, BoostedTreeModel.BatchKernel.Blocked);
 
             var nsPerRowPar = bestParMs * 1e6 / rows;
             var nsPerRowBranchy = bestBranchyMs * 1e6 / rows;
+            var nsPerRowBranchless = bestBranchlessMs * 1e6 / rows;
             var rowsPerSecPar = rows / (bestParMs / 1000.0);
             var speedup = bestBatchMs / bestParMs;
-            var branchlessGain = bestBranchyMs / bestParMs;
+            var blockedGain = bestBranchlessMs / bestParMs;
 
             // ── Online single-row latency: best-of-N over a full sweep ──────────────
             var single = new float[model.NumGroups];
@@ -100,8 +102,9 @@ namespace DevOnBike.Overfit.Tests.Trees.Diagnostics
 
             _output.WriteLine($"model: {model.NumTrees} trees, {model.NumFeatures} features, {model.NumGroups} group(s)  ({OverfitParallel.WorkerCount} workers)");
             _output.WriteLine($"BATCH  single-thread     : {bestBatchMs:F2} ms / {rows:N0} rows  ->  {nsPerRow:F0} ns/row  ({rowsPerSec:N0} rows/s)");
-            _output.WriteLine($"BATCH  parallel branchy  : {bestBranchyMs:F2} ms  ->  {nsPerRowBranchy:F0} ns/row");
-            _output.WriteLine($"BATCH  parallel branchless: {bestParMs:F2} ms  ->  {nsPerRowPar:F0} ns/row  ({rowsPerSecPar:N0} rows/s)   branchless gain {branchlessGain:F2}x   total speedup {speedup:F1}x");
+            _output.WriteLine($"BATCH  parallel branchy   : {bestBranchyMs:F2} ms  ->  {nsPerRowBranchy:F0} ns/row");
+            _output.WriteLine($"BATCH  parallel branchless: {bestBranchlessMs:F2} ms  ->  {nsPerRowBranchless:F0} ns/row");
+            _output.WriteLine($"BATCH  parallel BLOCKED   : {bestParMs:F2} ms  ->  {nsPerRowPar:F0} ns/row  ({rowsPerSecPar:N0} rows/s)   block gain vs branchless {blockedGain:F2}x   total speedup {speedup:F1}x");
             _output.WriteLine($"ONLINE single-row        : {bestOnlineNs:F0} ns/row  ({bestOnlineNs / 1000.0:F2} us/row)");
             _output.WriteLine("XGBoost reference (same 300x6): batch 1-thread 2177 ns/row, all-cores 217 ns/row, online 157 us/row (Python+DMatrix).");
 
@@ -116,11 +119,11 @@ namespace DevOnBike.Overfit.Tests.Trees.Diagnostics
             float[] data,
             int rows,
             float[] output,
-            bool branchless)
+            BoostedTreeModel.BatchKernel kernel)
         {
             for (var w = 0; w < 3; w++)
             {
-                model.PredictBatchParallel(data, rows, output, branchless);
+                model.PredictBatchParallel(data, rows, output, kernel);
             }
 
             var best = double.MaxValue;
@@ -128,7 +131,7 @@ namespace DevOnBike.Overfit.Tests.Trees.Diagnostics
             for (var rep = 0; rep < 10; rep++)
             {
                 var sw = Stopwatch.StartNew();
-                model.PredictBatchParallel(data, rows, output, branchless);
+                model.PredictBatchParallel(data, rows, output, kernel);
                 sw.Stop();
                 best = Math.Min(best, sw.Elapsed.TotalMilliseconds);
             }

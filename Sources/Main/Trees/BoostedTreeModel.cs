@@ -238,18 +238,35 @@ namespace DevOnBike.Overfit.Trees
         /// and the caller's buffers are pinned; the body runs over raw pointers).
         /// </summary>
         public void PredictBatchParallel(ReadOnlySpan<float> featuresFlat, int rowCount, Span<float> outputFlat)
-            => PredictBatchParallel(featuresFlat, rowCount, outputFlat, branchless: true);
+            => PredictBatchParallel(featuresFlat, rowCount, outputFlat, BatchKernel.Branchless);
+
+        /// <summary>Traversal body for <see cref="PredictBatchParallel"/> — the A/B perf lever. All
+        /// produce bit-identical output.</summary>
+        internal enum BatchKernel
+        {
+            /// <summary>One row at a time; branchy go-left / child select.</summary>
+            Branchy,
+
+            /// <summary>One row at a time; branchless go-left + arithmetic child select.</summary>
+            Branchless,
+
+            /// <summary>Block-of-rows (XGBoost cpu_predictor strategy): per block, loop trees outer / rows
+            /// inner so a tree's nodes stay hot in cache across the block and the independent row chains
+            /// overlap (ILP). MEASURED NEGATIVE here (0.94× vs Branchless, 351 vs 330 ns/row): our input is
+            /// already dense (XGBoost needs it to densify sparse CSR into FVec) and a 300×6 model fits L2, so
+            /// the reordering only adds loop overhead. Kept as a documented reference negative; Branchless ships.</summary>
+            Blocked
+        }
 
         /// <summary>
-        /// A/B hook for the perf measurement: <paramref name="branchless"/> selects the branchless
-        /// traversal body (production default) vs the original branchy one. Both produce bit-identical
-        /// output — the lever is purely how the per-node go-left decision and child select compile.
+        /// A/B hook for the perf measurement: <paramref name="kernel"/> selects the traversal body. All
+        /// three produce bit-identical output — the lever is purely the traversal schedule / branch shape.
         /// </summary>
         internal unsafe void PredictBatchParallel(
             ReadOnlySpan<float> featuresFlat,
             int rowCount,
             Span<float> outputFlat,
-            bool branchless)
+            BatchKernel kernel)
         {
             ArgumentOutOfRangeException.ThrowIfNegative(rowCount);
 
@@ -295,13 +312,20 @@ namespace DevOnBike.Overfit.Trees
                 };
 
                 // Grain of 256 rows/worker — below 512 rows it runs inline (no dispatch).
-                if (branchless)
+                switch (kernel)
                 {
-                    OverfitParallel.For(0, rowCount, 256, &ScoreRowsBranchless, &context);
-                }
-                else
-                {
-                    OverfitParallel.For(0, rowCount, 256, &ScoreRows, &context);
+                    case BatchKernel.Branchy:
+                        OverfitParallel.For(0, rowCount, 256, &ScoreRows, &context);
+                        break;
+
+                    case BatchKernel.Branchless:
+                        OverfitParallel.For(0, rowCount, 256, &ScoreRowsBranchless, &context);
+                        break;
+
+                    case BatchKernel.Blocked:
+                    default:
+                        OverfitParallel.For(0, rowCount, 256, &ScoreRowsBlocked, &context);
+                        break;
                 }
             }
         }
@@ -388,6 +412,74 @@ namespace DevOnBike.Overfit.Trees
                 }
 
                 Transform(output, ctx.NumGroups, ctx.Objective);
+            }
+        }
+
+        // Block-of-rows traversal (XGBoost cpu_predictor strategy). For each block of BlockRows rows we loop
+        // trees on the OUTSIDE and rows on the INSIDE: a single tree's nodes stay hot in L1 across the whole
+        // block, and the BlockRows independent pointer-chases overlap (instruction/memory-level parallelism)
+        // instead of serializing one row's dependency chain at a time. Inner step is the branchless decision.
+        // Bit-identical to the per-row paths (same decisions, same per-row tree-order accumulation).
+        private const int BlockRows = 64;
+
+        private static unsafe void ScoreRowsBlocked(int rowStart, int rowEnd, void* context)
+        {
+            ref var ctx = ref Unsafe.AsRef<BatchContext>(context);
+            var numGroups = ctx.NumGroups;
+            var numFeatures = ctx.NumFeatures;
+            var numTrees = ctx.NumTrees;
+
+            for (var blockStart = rowStart; blockStart < rowEnd; blockStart += BlockRows)
+            {
+                var blockEnd = blockStart + BlockRows;
+
+                if (blockEnd > rowEnd)
+                {
+                    blockEnd = rowEnd;
+                }
+
+                // Seed every row in the block with the base margin.
+                for (var r = blockStart; r < blockEnd; r++)
+                {
+                    var output = ctx.Output + (long)r * numGroups;
+
+                    for (var g = 0; g < numGroups; g++)
+                    {
+                        output[g] = ctx.BaseMargin[g];
+                    }
+                }
+
+                // Trees outer, rows inner: the tree's nodes are reused across the block (cache-hot) and the
+                // row chains are mutually independent (ILP).
+                for (var t = 0; t < numTrees; t++)
+                {
+                    var root = ctx.TreeRoot[t];
+                    var group = ctx.TreeGroup[t];
+
+                    for (var r = blockStart; r < blockEnd; r++)
+                    {
+                        var features = ctx.Features + (long)r * numFeatures;
+                        var node = root;
+                        int leftChild;
+
+                        while ((leftChild = ctx.Left[node]) >= 0)
+                        {
+                            var value = features[ctx.FeatureIndex[node]];
+                            var goLeft = (value < ctx.Threshold[node]) | (float.IsNaN(value) & (ctx.DefaultLeft[node] != 0));
+                            var goLeftBit = Unsafe.As<bool, byte>(ref goLeft);
+                            var rightChild = ctx.Right[node];
+                            node = rightChild + ((leftChild - rightChild) * goLeftBit);
+                        }
+
+                        ctx.Output[(long)r * numGroups + group] += ctx.Threshold[node];
+                    }
+                }
+
+                // Transform the block's accumulated margins in place.
+                for (var r = blockStart; r < blockEnd; r++)
+                {
+                    Transform(ctx.Output + (long)r * numGroups, numGroups, ctx.Objective);
+                }
             }
         }
 

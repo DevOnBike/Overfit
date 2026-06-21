@@ -93,15 +93,24 @@ namespace DevOnBike.Overfit.Tests.Trees
             }
 
             var sequential = new float[rows * model.NumGroups];
-            var parallel = new float[rows * model.NumGroups];
-
             model.PredictBatch(flat, rows, sequential);
-            model.PredictBatchParallel(flat, rows, parallel);
 
-            // Rows are independent and summed in the same order ⇒ bit-identical, not just close.
-            for (var i = 0; i < sequential.Length; i++)
+            // Every parallel kernel must be bit-identical to the sequential reference (same decisions,
+            // same per-row tree-order accumulation) — not just close.
+            foreach (var kernel in new[]
             {
-                Assert.Equal(sequential[i], parallel[i]);
+                BoostedTreeModel.BatchKernel.Branchy,
+                BoostedTreeModel.BatchKernel.Branchless,
+                BoostedTreeModel.BatchKernel.Blocked
+            })
+            {
+                var parallel = new float[rows * model.NumGroups];
+                model.PredictBatchParallel(flat, rows, parallel, kernel);
+
+                for (var i = 0; i < sequential.Length; i++)
+                {
+                    Assert.Equal(sequential[i], parallel[i]);
+                }
             }
         }
 
