@@ -456,12 +456,12 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         private static void ApplySiLU(Span<float> values)
         {
-            // SiLU(x) = x * sigmoid(x) = x / (1 + exp(-x))
-            for (var i = 0; i < values.Length; i++)
-            {
-                var x = values[i];
-                values[i] = x / (1f + MathF.Exp(-x));
-            }
+            // SiLU(x) = x * sigmoid(x). TensorPrimitives has no fused SiLU, so vectorize sigmoid into a scratch
+            // then multiply — both SIMD in .NET 9+ (the scalar path's per-element MathF.Exp was the bottleneck).
+            // Differs within a few ULP from scalar; decode coherence unaffected (not a byte-parity loader path).
+            using var scratch = new PooledBuffer<float>(values.Length, clearMemory: false);
+            TensorPrimitives.Sigmoid(values, scratch.Span);
+            TensorPrimitives.Multiply(values, scratch.Span, values);
         }
 
         // Gated FFN activation applied to the gate branch: SiLU for SwiGLU (Llama/Qwen/Phi), GELU(tanh) for GeGLU (Gemma).

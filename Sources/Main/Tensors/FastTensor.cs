@@ -162,8 +162,7 @@ namespace DevOnBike.Overfit.Tensors
                     _s2,
                     _s3),
 
-                _ => throw new NotImplementedException(
-                    "Obsługa max 4 wymiarów")
+                _ => throw new NotImplementedException("Obsługa max 4 wymiarów")
             };
         }
 

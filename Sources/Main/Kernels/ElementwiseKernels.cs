@@ -204,10 +204,17 @@ namespace DevOnBike.Overfit.Kernels
                 destination,
                 nameof(Sigmoid));
 
-            for (var i = 0; i < input.Length; i++)
+            if (input.Length < TensorPrimitivesThreshold)
             {
-                destination[i] = 1f / (1f + MathF.Exp(-input[i]));
+                for (var i = 0; i < input.Length; i++)
+                {
+                    destination[i] = 1f / (1f + MathF.Exp(-input[i]));
+                }
+                return;
             }
+
+            // .NET 9+ vectorizes Sigmoid; differs from the scalar path within a few ULP (not bit-identical).
+            TensorPrimitives.Sigmoid(input, destination);
         }
 
         public static void Tanh(
@@ -219,10 +226,16 @@ namespace DevOnBike.Overfit.Kernels
                 destination,
                 nameof(Tanh));
 
-            for (var i = 0; i < input.Length; i++)
+            if (input.Length < TensorPrimitivesThreshold)
             {
-                destination[i] = MathF.Tanh(input[i]);
+                for (var i = 0; i < input.Length; i++)
+                {
+                    destination[i] = MathF.Tanh(input[i]);
+                }
+                return;
             }
+
+            TensorPrimitives.Tanh(input, destination);
         }
 
         public static float Dot(

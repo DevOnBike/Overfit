@@ -17,6 +17,13 @@
         <InvariantGlobalization>true</InvariantGlobalization>
         <IsTrimmable>true</IsTrimmable>
         <StripSymbols>true</StripSymbols>
+        <!-- CRITICAL for decode speed: Native AOT defaults to the BASELINE ISA (SSE2 only), so the SIMD decode
+             kernels and TensorPrimitives fall back to scalar and run ~6× SLOWER than JIT (measured: 251 vs 41
+             ms/token on Qwen-3B Q4_K). avx2,fma (Haswell, ~2013+ — every modern server) restores AOT decode to
+             JIT parity (~41 ms/token). NOTE: in AOT these become COMPILE-TIME constants, so the binary REQUIRES
+             AVX2+FMA (no runtime fallback) — standard for LLM inference. Add ,avx512f for AVX-512-only fleets
+             (marginal: decode is DRAM-bandwidth-bound). x64 RIDs only; ARM64 uses its own default. -->
+        <IlcInstructionSet Condition="$(RuntimeIdentifier.Contains('x64'))">avx2</IlcInstructionSet>
     </PropertyGroup>
 
     <!-- Second distribution channel: a .NET global tool (`dotnet tool install -g DevOnBike.Overfit.Cli`,

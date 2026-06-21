@@ -342,6 +342,51 @@ scoreCommand.SetAction(parseResult => Commands.Score(
     parseResult.GetValue(scoreOutput),
     parseResult.GetValue(scoreMargin)));
 
+// ── gateway: LLM egress firewall — OpenAI-compatible proxy redacting outbound PII/secrets, zero data leaves raw. ──
+var gwUpstream = new Option<string>("--upstream")
+{
+    Description = "Upstream OpenAI-compatible base URL to forward to, e.g. https://api.openai.com/v1.",
+    Required = true,
+};
+var gwKeyEnv = new Option<string>("--upstream-key-env")
+{
+    Description = "Name of the env var holding the upstream API key. The gateway injects it as the upstream "
+        + "Authorization — clients authenticate to the gateway and never see the real key.",
+    DefaultValueFactory = _ => "OPENAI_API_KEY",
+};
+var gwHost = new Option<string>("--host")
+{
+    Description = "Bind host. Default 127.0.0.1 (local only); use 0.0.0.0 to expose on the network.",
+    DefaultValueFactory = _ => "127.0.0.1",
+};
+var gwPort = new Option<int>("--port", "-p")
+{
+    Description = "TCP port to listen on.",
+    DefaultValueFactory = _ => 8080,
+};
+var gwAudit = new Option<string>("--audit")
+{
+    Description = "JSON-lines audit log path (records per-category redaction counts, never the values).",
+    DefaultValueFactory = _ => "redaction-audit.jsonl",
+};
+var gatewayCommand = new Command("gateway",
+    "LLM egress firewall: an OpenAI-compatible proxy that redacts outbound PII/secrets before forwarding to an "
+    + "upstream LLM (the gateway holds the key, clients never see it), restores the response, and audits. "
+    + "Point your OpenAI client's base_url at it — change one URL.")
+{
+    gwUpstream,
+    gwKeyEnv,
+    gwHost,
+    gwPort,
+    gwAudit,
+};
+gatewayCommand.SetAction(parseResult => Commands.Gateway(
+    parseResult.GetValue(gwUpstream)!,
+    parseResult.GetValue(gwKeyEnv)!,
+    parseResult.GetValue(gwHost)!,
+    parseResult.GetValue(gwPort),
+    parseResult.GetValue(gwAudit)!));
+
 var rootCommand = new RootCommand("Overfit — run local LLMs, RAG and agents in pure .NET. No Python, no native runtime.")
 {
     pullCommand,
@@ -354,6 +399,7 @@ var rootCommand = new RootCommand("Overfit — run local LLMs, RAG and agents in
     voiceCommand,
     benchCommand,
     scoreCommand,
+    gatewayCommand,
 };
 
 return rootCommand.Parse(args).Invoke();

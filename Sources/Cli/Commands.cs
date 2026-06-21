@@ -14,6 +14,7 @@ using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.Whisper;
 using DevOnBike.Overfit.Mcp;
 using DevOnBike.Overfit.Runtime;
+using DevOnBike.Overfit.Redaction;
 using DevOnBike.Overfit.Server;
 using DevOnBike.Overfit.Serving;
 using DevOnBike.Overfit.Trees;
@@ -378,6 +379,26 @@ namespace DevOnBike.Overfit.Cli
                 Console.WriteLine();
             }
 
+            return 0;
+        }
+
+        // ── gateway: LLM egress firewall — redact outbound PII/secrets, forward upstream (gateway holds the key). ──
+        public static int Gateway(string upstream, string keyEnv, string host, int port, string auditPath)
+        {
+            var key = Environment.GetEnvironmentVariable(keyEnv);
+            if (string.IsNullOrEmpty(key))
+            {
+                Console.Error.WriteLine(
+                    $"Upstream API key env var '{keyEnv}' is not set. The gateway holds the real upstream key so "
+                    + $"clients never see it — set it first (e.g.  $env:{keyEnv}=\"sk-...\"  /  export {keyEnv}=sk-...).");
+                return 1;
+            }
+
+            using var audit = new JsonLinesAuditSink(auditPath);
+            var redactor = Redactor.CreateDefault();
+
+            Console.WriteLine($"audit log: {Path.GetFullPath(auditPath)}");
+            RedactionGateway.Serve(host, port, upstream, key, redactor, audit);
             return 0;
         }
 
