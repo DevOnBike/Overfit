@@ -7,6 +7,7 @@ using System.Buffers.Binary;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Inference;
 using DevOnBike.Overfit.Onnx;
+using DevOnBike.Overfit.Tests.TestSupport.Helpers;
 
 namespace DevOnBike.Overfit.Tests.Integrations.Onnx
 {
@@ -97,7 +98,7 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
             }
             var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
-            Assert.Equal(0L, allocated);
+            AllocationAssert.NoPerCallAllocation(allocated, "avgpool sequential inference");
         }
 
         [Fact]
@@ -253,7 +254,7 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
             }
             var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
-            Assert.Equal(0L, allocated);
+            AllocationAssert.NoPerCallAllocation(allocated, "dag graph inference");
         }
 
         // ─────────────────────────────────────────────────────────────────────

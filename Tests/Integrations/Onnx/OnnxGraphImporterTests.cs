@@ -6,6 +6,7 @@
 using System.Buffers.Binary;
 using DevOnBike.Overfit.Inference;
 using DevOnBike.Overfit.Onnx;
+using DevOnBike.Overfit.Tests.TestSupport.Helpers;
 
 namespace DevOnBike.Overfit.Tests.Integrations.Onnx
 {
@@ -168,22 +169,30 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
             var input = new float[InputSize];
             var output = new float[OutputSize];
 
-            // Warmup
+            AssertZeroAllocPerInference(() => model.RunInference(input, output), "tiny_resnet inference");
+        }
+
+        // Asserts ZERO per-inference allocation. A genuine per-call leak allocates a whole object (>= ~24 B) every
+        // iteration, scaling to hundreds of KB over the loop; some runtimes instead charge a single one-time JIT
+        // tier-up / PGO / OSR bookkeeping allocation (observed ~280 B) to this thread inside the measured window —
+        // it lands on whichever inference test the tier-up happens during, hence the cross-platform flakiness. That
+        // is runtime infrastructure, not the inference path, so tolerate a strict sub-1-byte-per-call floor.
+        private static void AssertZeroAllocPerInference(Action runInference, string label)
+        {
             for (var i = 0; i < 256; i++)
             {
-                model.RunInference(input, output);
+                runInference();
             }
 
+            const int iterations = 10_000;
             var before = GC.GetAllocatedBytesForCurrentThread();
-
-            for (var i = 0; i < 10_000; i++)
+            for (var i = 0; i < iterations; i++)
             {
-                model.RunInference(input, output);
+                runInference();
             }
-
             var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
-            Assert.Equal(0L, allocated);
+            AllocationAssert.NoPerCallAllocation(allocated, label);
         }
 
         // ─────────────────────────────────────────────────────────────────────
@@ -253,19 +262,7 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
             var input = new float[AvgPoolIn];
             var output = new float[AvgPoolOut];
 
-            for (var i = 0; i < 256; i++)
-            {
-                engine.Run(input, output);
-            }
-
-            var before = GC.GetAllocatedBytesForCurrentThread();
-            for (var i = 0; i < 10_000; i++)
-            {
-                engine.Run(input, output);
-            }
-            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-
-            Assert.Equal(0L, allocated);
+            AssertZeroAllocPerInference(() => engine.Run(input, output), "avgpool inference");
         }
 
         // ─────────────────────────────────────────────────────────────────────
@@ -350,27 +347,7 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
             var input = new float[ResNetFlat];
             var output = new float[ResNetFlat];
 
-            for (var i = 0; i < 256; i++)
-            {
-                model.RunInference(input, output);
-            }
-
-            const int iterations = 10_000;
-            var before = GC.GetAllocatedBytesForCurrentThread();
-            for (var i = 0; i < iterations; i++)
-            {
-                model.RunInference(input, output);
-            }
-            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-
-            // The guarantee is ZERO per-inference allocation. Some runtimes (observed on Linux CI) charge a one-time
-            // JIT tier-up / PGO / OSR bookkeeping allocation to this thread inside the measured window — that is
-            // runtime infrastructure, not the inference path. A genuine per-inference leak scales with the loop
-            // (>= iterations bytes); a one-time blip stays tiny. Assert the per-inference cost is zero (< 1 B/call).
-            Assert.True(
-                allocated < iterations,
-                $"resnet_block inference allocated {allocated} B over {iterations} iterations " +
-                $"({(double)allocated / iterations:F4} B/inference) — expected 0 B per inference.");
+            AssertZeroAllocPerInference(() => model.RunInference(input, output), "resnet_block inference");
         }
 
         private static float[] LoadFloatBin(string path)

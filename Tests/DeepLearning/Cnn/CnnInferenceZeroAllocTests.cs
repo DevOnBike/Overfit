@@ -5,6 +5,7 @@
 
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Licensing;
+using DevOnBike.Overfit.Tests.TestSupport.Helpers;
 
 namespace DevOnBike.Overfit.Tests.DeepLearning.Cnn
 {
@@ -64,9 +65,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Cnn
             var after = GC.GetAllocatedBytesForCurrentThread();
             var allocated = after - before;
 
-            Assert.True(
-                allocated == 0,
-                $"Expected zero allocations, got {allocated} B over {iterations} CNN inference calls.");
+            AllocationAssert.NoPerCallAllocation(allocated, "CNN inference");
         }
 
         private static void FillDeterministic(float[] data)

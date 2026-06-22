@@ -7,6 +7,7 @@ using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Inference;
 using DevOnBike.Overfit.Inference.Contracts;
 using DevOnBike.Overfit.Licensing;
+using DevOnBike.Overfit.Tests.TestSupport.Helpers;
 
 namespace DevOnBike.Overfit.Tests.DeepLearning.Inference
 {
@@ -51,9 +52,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Inference
             var after = GC.GetAllocatedBytesForCurrentThread();
             var allocated = after - before;
 
-            Assert.True(
-                allocated == 0,
-                $"Expected zero allocations, got {allocated} B over {iterations} inference calls.");
+            AllocationAssert.NoPerCallAllocation(allocated, "engine inference");
         }
 
         [Fact]
@@ -97,9 +96,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Inference
             var after = GC.GetAllocatedBytesForCurrentThread();
             var allocated = after - before;
 
-            Assert.True(
-                allocated == 0,
-                $"Expected zero allocations, got {allocated} B over {iterations} Predict calls. Checksum={checksum}");
+            AllocationAssert.NoPerCallAllocation(allocated, $"engine Predict (checksum={checksum})");
         }
 
         [Fact]
@@ -160,9 +157,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Inference
             var after = GC.GetAllocatedBytesForCurrentThread();
             var allocated = after - before;
 
-            Assert.True(
-                allocated == 0,
-                $"Expected zero allocations, got {allocated} B over {iterations} CNN inference calls.");
+            AllocationAssert.NoPerCallAllocation(allocated, "engine CNN inference");
         }
 
         [Fact]

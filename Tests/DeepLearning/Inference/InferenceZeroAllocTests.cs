@@ -5,6 +5,7 @@
 
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Licensing;
+using DevOnBike.Overfit.Tests.TestSupport.Helpers;
 
 namespace DevOnBike.Overfit.Tests.DeepLearning.Inference
 {
@@ -48,9 +49,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Inference
             var after = GC.GetAllocatedBytesForCurrentThread();
             var allocated = after - before;
 
-            Assert.True(
-                allocated == 0,
-                $"Expected zero allocations, got {allocated} B over {iterations} inference calls.");
+            AllocationAssert.NoPerCallAllocation(allocated, "inference");
         }
 
         [Fact]
@@ -94,9 +93,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Inference
             var after = GC.GetAllocatedBytesForCurrentThread();
             var allocated = after - before;
 
-            Assert.True(
-                allocated == 0,
-                $"Expected zero allocations, got {allocated} B over {iterations} inference calls.");
+            AllocationAssert.NoPerCallAllocation(allocated, "inference");
         }
 
         private static void FillDeterministic(float[] data)

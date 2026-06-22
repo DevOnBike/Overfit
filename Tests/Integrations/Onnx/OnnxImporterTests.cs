@@ -6,6 +6,7 @@
 using System.Buffers.Binary;
 using DevOnBike.Overfit.Inference;
 using DevOnBike.Overfit.Onnx;
+using DevOnBike.Overfit.Tests.TestSupport.Helpers;
 
 namespace DevOnBike.Overfit.Tests.Integrations.Onnx
 {
@@ -161,9 +162,7 @@ namespace DevOnBike.Overfit.Tests.Integrations.Onnx
                 allocated = after - before;
             }
 
-            Assert.True(
-                allocated == 0,
-                $"Expected a zero-allocation window, got {allocated} B over 1024 Run calls on the last of 3 attempts.");
+            AllocationAssert.NoPerCallAllocation(allocated, "importer Run (last of 3 attempts, 1024 calls)");
         }
 
         private static void ForceFullGc()
