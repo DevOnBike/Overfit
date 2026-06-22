@@ -51,20 +51,29 @@ namespace DevOnBike.Overfit.Tests.Redaction
                     try { c = upstream.GetContext(); }
                     catch { break; }
 
-                    using (var reader = new StreamReader(c.Request.InputStream))
+                    // Guard the whole response: the test's finally{} stops the listener, which can dispose this
+                    // response mid-write on this background thread — that must never become an unhandled crash.
+                    try
                     {
-                        upstreamReceived = reader.ReadToEnd();
-                    }
+                        using (var reader = new StreamReader(c.Request.InputStream))
+                        {
+                            upstreamReceived = reader.ReadToEnd();
+                        }
 
-                    const string body =
-                        "{\"id\":\"x\",\"object\":\"chat.completion\",\"created\":0,\"model\":\"m\",\"choices\":"
-                        + "[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":\"stop\"}],"
-                        + "\"usage\":{}}";
-                    var bytes = Encoding.UTF8.GetBytes(body);
-                    c.Response.ContentType = "application/json";
-                    c.Response.ContentLength64 = bytes.Length;
-                    c.Response.OutputStream.Write(bytes, 0, bytes.Length);
-                    c.Response.OutputStream.Close();
+                        const string body =
+                            "{\"id\":\"x\",\"object\":\"chat.completion\",\"created\":0,\"model\":\"m\",\"choices\":"
+                            + "[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":\"stop\"}],"
+                            + "\"usage\":{}}";
+                        var bytes = Encoding.UTF8.GetBytes(body);
+                        c.Response.ContentType = "application/json";
+                        c.Response.ContentLength64 = bytes.Length;
+                        c.Response.OutputStream.Write(bytes, 0, bytes.Length);
+                        c.Response.OutputStream.Close();
+                    }
+                    catch
+                    {
+                        // listener stopped / client gone during teardown — ignore on this background thread.
+                    }
                 }
             })
             { IsBackground = true };

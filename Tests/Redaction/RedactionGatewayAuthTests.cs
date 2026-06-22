@@ -26,15 +26,22 @@ namespace DevOnBike.Overfit.Tests.Redaction
             var gatewayPort = FreePort();
             var gatewayThread = new Thread(() =>
             {
-                RedactionGateway.Serve(
-                    "127.0.0.1",
-                    gatewayPort,
-                    "http://127.0.0.1:1/v1", // unreachable upstream — auth must reject before we ever touch it
-                    "sk-upstream-not-leaked",
-                    Redactor.CreateDefault(),
-                    new NullAuditSink(),
-                    RedactionPolicy.Default(),
-                    new[] { "sk-gateway-client" });
+                try
+                {
+                    RedactionGateway.Serve(
+                        "127.0.0.1",
+                        gatewayPort,
+                        "http://127.0.0.1:1/v1", // unreachable upstream — auth must reject before we ever touch it
+                        "sk-upstream-not-leaked",
+                        Redactor.CreateDefault(),
+                        new NullAuditSink(),
+                        RedactionPolicy.Default(),
+                        new[] { "sk-gateway-client" });
+                }
+                catch
+                {
+                    // bind race / listener torn down at test end — never crash the test host from this thread.
+                }
             })
             { IsBackground = true };
             gatewayThread.Start();

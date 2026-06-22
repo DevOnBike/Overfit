@@ -36,24 +36,33 @@ namespace DevOnBike.Overfit.Tests.Redaction
                     try { c = upstream.GetContext(); }
                     catch { break; }
 
-                    using (var reader = new StreamReader(c.Request.InputStream))
+                    // Guard the whole response: the test's finally{} stops the listener, which can dispose this
+                    // response mid-write on this background thread — that must never become an unhandled crash.
+                    try
                     {
-                        _ = reader.ReadToEnd();
-                    }
+                        using (var reader = new StreamReader(c.Request.InputStream))
+                        {
+                            _ = reader.ReadToEnd();
+                        }
 
-                    // Assistant content echoes the caller's placeholder ([REDACTED_EMAIL_0], deterministic for the
-                    // first e-mail) AND leaks a different, model-generated address.
-                    const string content =
-                        "Confirmed [REDACTED_EMAIL_0]; our internal contact is leaked@internal.corp.";
-                    var body =
-                        "{\"id\":\"x\",\"object\":\"chat.completion\",\"created\":0,\"model\":\"m\",\"choices\":"
-                        + "[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"" + content + "\"},"
-                        + "\"finish_reason\":\"stop\"}],\"usage\":{}}";
-                    var bytes = Encoding.UTF8.GetBytes(body);
-                    c.Response.ContentType = "application/json";
-                    c.Response.ContentLength64 = bytes.Length;
-                    c.Response.OutputStream.Write(bytes, 0, bytes.Length);
-                    c.Response.OutputStream.Close();
+                        // Assistant content echoes the caller's placeholder ([REDACTED_EMAIL_0], deterministic for the
+                        // first e-mail) AND leaks a different, model-generated address.
+                        const string content =
+                            "Confirmed [REDACTED_EMAIL_0]; our internal contact is leaked@internal.corp.";
+                        var body =
+                            "{\"id\":\"x\",\"object\":\"chat.completion\",\"created\":0,\"model\":\"m\",\"choices\":"
+                            + "[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"" + content + "\"},"
+                            + "\"finish_reason\":\"stop\"}],\"usage\":{}}";
+                        var bytes = Encoding.UTF8.GetBytes(body);
+                        c.Response.ContentType = "application/json";
+                        c.Response.ContentLength64 = bytes.Length;
+                        c.Response.OutputStream.Write(bytes, 0, bytes.Length);
+                        c.Response.OutputStream.Close();
+                    }
+                    catch
+                    {
+                        // listener stopped / client gone during teardown — ignore on this background thread.
+                    }
                 }
             })
             { IsBackground = true };
@@ -62,16 +71,23 @@ namespace DevOnBike.Overfit.Tests.Redaction
             var gatewayPort = FreePort();
             var gatewayThread = new Thread(() =>
             {
-                RedactionGateway.Serve(
-                    "127.0.0.1",
-                    gatewayPort,
-                    $"http://127.0.0.1:{upstreamPort}/v1",
-                    "sk-not-leaked",
-                    Redactor.CreateDefault(),
-                    new NullAuditSink(),
-                    RedactionPolicy.Default(),
-                    clientKeys: null,
-                    scanResponses: true);
+                try
+                {
+                    RedactionGateway.Serve(
+                        "127.0.0.1",
+                        gatewayPort,
+                        $"http://127.0.0.1:{upstreamPort}/v1",
+                        "sk-not-leaked",
+                        Redactor.CreateDefault(),
+                        new NullAuditSink(),
+                        RedactionPolicy.Default(),
+                        clientKeys: null,
+                        scanResponses: true);
+                }
+                catch
+                {
+                    // bind race / listener torn down at test end — never crash the test host from this thread.
+                }
             })
             { IsBackground = true };
             gatewayThread.Start();
