@@ -19,10 +19,12 @@ namespace DevOnBike.Overfit.Tests.TestSupport.Helpers
     public static class AllocationAssert
     {
         /// <summary>
-        /// Upper bound for one-time JIT/tier-up/OSR/PGO bookkeeping charged to the measuring thread. Far below a real
-        /// per-call leak (≥ ~24 B × loop count = hundreds of KB), so the two never overlap.
+        /// Upper bound for one-time JIT/tier-up/OSR/PGO bookkeeping charged to the measuring thread (observed ~280 B).
+        /// Kept tight (1 KB) so it still catches a real per-call leak even on short measured loops: the smallest .NET
+        /// heap object is ~24 B, so a genuine per-call allocation over even a 50-iteration loop is ≥ ~1200 B — above
+        /// this floor — while a per-call leak over a 10k loop is hundreds of KB.
         /// </summary>
-        public const long OneTimeJitNoiseFloorBytes = 4096;
+        public const long OneTimeJitNoiseFloorBytes = 1024;
 
         /// <summary>
         /// Asserts that <paramref name="allocatedBytes"/> measured over a hot loop reflects no per-call allocation —

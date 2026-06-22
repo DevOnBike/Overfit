@@ -5,6 +5,7 @@
 
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.Evolutionary.Adapters;
+using DevOnBike.Overfit.Tests.TestSupport.Helpers;
 
 namespace DevOnBike.Overfit.Tests.DeepLearning.Modules
 {
@@ -106,7 +107,7 @@ namespace DevOnBike.Overfit.Tests.DeepLearning.Modules
             var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
             // Zero-allocation is expected for parameter reading/writing.
-            Assert.Equal(0, allocated);
+            AllocationAssert.NoPerCallAllocation(allocated, "parameter adapter read/write");
         }
     }
 }

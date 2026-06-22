@@ -5,6 +5,7 @@
 
 using System.Globalization;
 using System.Text.Json;
+using DevOnBike.Overfit.Tests.TestSupport.Helpers;
 using DevOnBike.Overfit.Trees;
 
 namespace DevOnBike.Overfit.Tests.Trees
@@ -153,7 +154,7 @@ namespace DevOnBike.Overfit.Tests.Trees
             }
 
             var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-            Assert.Equal(0, allocated);
+            AllocationAssert.NoPerCallAllocation(allocated, "XGBoost batch + parallel + single predict");
         }
 
         [Fact]

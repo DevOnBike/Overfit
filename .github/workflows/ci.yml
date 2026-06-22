@@ -16,16 +16,6 @@ jobs:
 
     runs-on: ${{ matrix.os }}
 
-    # Determinism for the zero-allocation tests. They measure GC.GetAllocatedBytesForCurrentThread() over a hot loop
-    # and assert ~0. Tiered JIT (tier-up / OSR / PGO instrumentation) charges a one-time ~280 B bookkeeping
-    # allocation to the measuring thread the moment a method is promoted — and on the slower, shared CI runners that
-    # promotion lands INSIDE the measured window, on whichever zero-alloc test happens to be running (it jumped
-    # between ResNet/AvgPool/XGBoost across runs). Compiling straight to optimized code removes the mid-loop re-jit,
-    # so the measurement reflects only the inference path. (Local dev boxes rarely hit it — promotion finishes during
-    # warmup there.)
-    env:
-      DOTNET_TieredCompilation: 0
-
     steps:
     - name: Checkout code
       uses: actions/checkout@v4

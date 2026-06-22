@@ -7,6 +7,7 @@ using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
+using DevOnBike.Overfit.Tests.TestSupport.Helpers;
 
 namespace DevOnBike.Overfit.Tests.Optimizers
 {
@@ -65,7 +66,7 @@ namespace DevOnBike.Overfit.Tests.Optimizers
 
             var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
-            Assert.Equal(0, allocated);
+            AllocationAssert.NoPerCallAllocation(allocated, "Adam step");
         }
 
         [Fact]
