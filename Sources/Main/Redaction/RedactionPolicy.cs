@@ -52,6 +52,8 @@ namespace DevOnBike.Overfit.Redaction
                 ["AWS_KEY"] = RedactionAction.Block,
                 ["API_KEY"] = RedactionAction.Block,
                 ["JWT"] = RedactionAction.Block,
+                // Generic high-entropy secret (opt-in entropy detector) — a credential, blocked like the named keys.
+                ["SECRET"] = RedactionAction.Block,
                 ["EMAIL"] = RedactionAction.Redact,
                 ["CREDIT_CARD"] = RedactionAction.Redact,
                 ["SSN"] = RedactionAction.Redact,

@@ -68,7 +68,26 @@ namespace DevOnBike.Overfit.Server
                 }
             }
 
-            return new Redactor(list.ToArray());
+            // Opt-in generic secret detector (high-entropy long tokens — catches keys no named regex enumerates).
+            if (rules.EntropyDetector)
+            {
+                list.AddRange(SecretRedactionRules.All());
+            }
+
+            // Allowlist: known-good values that must never be redacted (own domain, test data) — cuts over-redaction.
+            var allowlist = new List<Regex>();
+            if (rules.Allowlist is not null)
+            {
+                foreach (var pattern in rules.Allowlist)
+                {
+                    if (!string.IsNullOrEmpty(pattern))
+                    {
+                        allowlist.Add(new Regex(pattern));
+                    }
+                }
+            }
+
+            return new Redactor(list.ToArray(), allowlist.ToArray());
         }
 
         private static RedactionPolicy BuildPolicy(PolicyConfig? policy)
@@ -119,6 +138,12 @@ namespace DevOnBike.Overfit.Server
         [JsonPropertyName("international")] public bool International { get; set; } = true;
         [JsonPropertyName("polish")] public bool Polish { get; set; }
         [JsonPropertyName("custom")] public List<CustomRuleConfig>? Custom { get; set; }
+
+        /// <summary>Opt-in generic high-entropy secret detector (catches keys no named pattern enumerates).</summary>
+        [JsonPropertyName("entropyDetector")] public bool EntropyDetector { get; set; }
+
+        /// <summary>Regex patterns for known-good values that must never be redacted (own domain, test data).</summary>
+        [JsonPropertyName("allowlist")] public List<string>? Allowlist { get; set; }
     }
 
     public sealed class CustomRuleConfig

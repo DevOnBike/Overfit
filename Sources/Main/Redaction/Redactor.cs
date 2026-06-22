@@ -20,11 +20,24 @@ namespace DevOnBike.Overfit.Redaction
     public sealed class Redactor
     {
         private readonly RedactionRule[] _rules;
+        private readonly Regex[] _allowlist;
 
         public Redactor(RedactionRule[] rules)
+            : this(rules, null)
+        {
+        }
+
+        /// <summary>
+        /// Creates a redactor with an optional <paramref name="allowlist"/>: any detected value that fully matches an
+        /// allowlist pattern is left untouched (not redacted). This is the precision lever against over-redaction —
+        /// e.g. allow your own corporate domain (<c>.*@acme\.com</c>) or a known test IP so coherent prompts aren't
+        /// shredded into placeholders.
+        /// </summary>
+        public Redactor(RedactionRule[] rules, Regex[]? allowlist)
         {
             ArgumentNullException.ThrowIfNull(rules);
             _rules = rules;
+            _allowlist = allowlist ?? [];
         }
 
         /// <summary>A redactor preloaded with the conservative <see cref="DefaultRedactionRules"/> starter set.</summary>
@@ -222,6 +235,12 @@ namespace DevOnBike.Overfit.Redaction
                         continue;
                     }
 
+                    // Allowlist gate: a known-good value (own domain, test data…) is never redacted.
+                    if (IsAllowlisted(match.Value))
+                    {
+                        continue;
+                    }
+
                     spans.Add(new Span(match.Index, match.Length, rule.Category, match.Value));
                 }
             }
@@ -230,6 +249,20 @@ namespace DevOnBike.Overfit.Redaction
                 a.Start != b.Start ? a.Start.CompareTo(b.Start) : b.Length.CompareTo(a.Length));
 
             return spans;
+        }
+
+        // True when the detected value matches any allowlist pattern (anywhere) — anchor the pattern for exact match.
+        private bool IsAllowlisted(string value)
+        {
+            foreach (var pattern in _allowlist)
+            {
+                if (pattern.IsMatch(value))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>

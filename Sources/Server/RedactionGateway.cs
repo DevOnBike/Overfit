@@ -254,6 +254,7 @@ namespace DevOnBike.Overfit.Server
             {
                 Content = new StringContent(requestJson, Encoding.UTF8, "application/json")
             };
+            ForwardRequestHeaders(ctx.Request, upstreamRequest);
             if (!string.IsNullOrEmpty(upstreamApiKey))
             {
                 upstreamRequest.Headers.TryAddWithoutValidation("Authorization", $"Bearer {upstreamApiKey}");
@@ -271,7 +272,7 @@ namespace DevOnBike.Overfit.Server
 
             if (streaming)
             {
-                StreamResponse(ctx, upstreamRequest, matches, http);
+                StreamResponse(ctx, upstreamRequest, matches, redactor, policy, audit, scanResponses, http);
                 return;
             }
 
@@ -296,6 +297,7 @@ namespace DevOnBike.Overfit.Server
                 }
             }
 
+            ForwardResponseHeaders(upstreamResponse, ctx.Response);
             WriteRaw(ctx.Response, (int)upstreamResponse.StatusCode, responseJson);
         }
 
@@ -315,21 +317,28 @@ namespace DevOnBike.Overfit.Server
         }
 
         /// <summary>
-        /// Streams the upstream's Server-Sent-Events response back to the client, re-hydrating redaction placeholders
-        /// on the fly. Each <c>data:</c> chunk's <c>delta.content</c> is fed through a per-choice
-        /// <see cref="StreamingRestorer"/> so a placeholder split across SSE chunks is still restored. The token
+        /// Streams the upstream's Server-Sent-Events response back to the client. Each <c>data:</c> chunk's
+        /// <c>delta.content</c> is (optionally) scanned for model-generated secrets via a per-choice
+        /// <see cref="StreamingResponseScanner"/>, then fed through a per-choice <see cref="StreamingRestorer"/> so a
+        /// placeholder split across SSE chunks is still restored. Both detect across chunk boundaries; the token
         /// stream is never fully buffered — chunks are rewritten and forwarded as they arrive.
         /// </summary>
         private static void StreamResponse(
             HttpListenerContext ctx,
             HttpRequestMessage upstreamRequest,
             IReadOnlyList<RedactionMatch> matches,
+            Redactor redactor,
+            RedactionPolicy policy,
+            IRedactionAuditSink audit,
+            bool scanResponses,
             HttpClient http)
         {
             using var upstreamResponse = http.Send(upstreamRequest, HttpCompletionOption.ResponseHeadersRead);
 
             var clientResponse = ctx.Response;
             clientResponse.StatusCode = (int)upstreamResponse.StatusCode;
+            ForwardResponseHeaders(upstreamResponse, clientResponse);
+            // Set the SSE-framing headers AFTER forwarding so the gateway's values win over any upstream duplicates.
             clientResponse.ContentType = "text/event-stream";
             clientResponse.Headers["Cache-Control"] = "no-cache";
             clientResponse.SendChunked = true;
@@ -338,8 +347,11 @@ namespace DevOnBike.Overfit.Server
             using var reader = new StreamReader(upstreamStream, Encoding.UTF8);
             var output = clientResponse.OutputStream;
 
-            // One restorer per choice index — streaming responses are usually single-choice, but n>1 is legal.
+            // Per choice index (usually one, but n>1 is legal): a response scanner (mask model-generated secrets) and
+            // a restorer (re-hydrate the caller's own placeholders). The scanner runs first while the caller's values
+            // are still placeholders, so only genuinely model-generated content is masked.
             var restorers = new Dictionary<int, StreamingRestorer>();
+            var scanners = scanResponses ? new Dictionary<int, StreamingResponseScanner>() : null;
 
             string? line;
             while ((line = reader.ReadLine()) is not null)
@@ -355,21 +367,25 @@ namespace DevOnBike.Overfit.Server
 
                 if (payload == "[DONE]")
                 {
-                    // Release any held-back tails before closing the stream.
-                    FlushRestorers(output, restorers);
+                    // Release any held-back tails before closing the stream, then audit what the scanner masked.
+                    FlushStreams(output, scanners, restorers);
+                    if (scanners is not null)
+                    {
+                        AuditStreamScanned(audit, scanners);
+                    }
                     WriteLine(output, "data: [DONE]");
                     WriteLine(output, string.Empty);
                     break;
                 }
 
-                if (matches.Count == 0)
+                if (matches.Count == 0 && !scanResponses)
                 {
                     WriteLine(output, line);
                     WriteLine(output, string.Empty);
                     continue;
                 }
 
-                var rewritten = RewriteChunk(payload, matches, restorers);
+                var rewritten = RewriteChunk(payload, matches, redactor, policy, scanners, restorers);
                 WriteLine(output, "data: " + rewritten);
                 WriteLine(output, string.Empty);
                 output.Flush();
@@ -378,11 +394,14 @@ namespace DevOnBike.Overfit.Server
             output.Close();
         }
 
-        // Restores placeholders in a single SSE chunk's delta content (per choice), returning the chunk re-serialized.
-        // Falls back to the original payload if it is not a parseable chunk (keeps the stream intact on surprises).
+        // Scans (model secrets) then restores (caller placeholders) a single SSE chunk's delta content per choice,
+        // returning the chunk re-serialized. Falls back to the raw payload if it is not a parseable chunk.
         private static string RewriteChunk(
             string payload,
             IReadOnlyList<RedactionMatch> matches,
+            Redactor redactor,
+            RedactionPolicy policy,
+            Dictionary<int, StreamingResponseScanner>? scanners,
             Dictionary<int, StreamingRestorer> restorers)
         {
             ChatCompletionChunk? chunk;
@@ -407,6 +426,16 @@ namespace DevOnBike.Overfit.Server
                     continue;
                 }
 
+                if (scanners is not null)
+                {
+                    if (!scanners.TryGetValue(choice.Index, out var scanner))
+                    {
+                        scanner = new StreamingResponseScanner(redactor, policy);
+                        scanners[choice.Index] = scanner;
+                    }
+                    content = scanner.Push(content);
+                }
+
                 if (!restorers.TryGetValue(choice.Index, out var restorer))
                 {
                     restorer = new StreamingRestorer(matches);
@@ -419,12 +448,25 @@ namespace DevOnBike.Overfit.Server
             return JsonSerializer.Serialize(chunk, OpenAiJsonContext.Default.ChatCompletionChunk);
         }
 
-        // Emits any text each restorer held back, as a final synthetic chunk per choice, before [DONE].
-        private static void FlushRestorers(System.IO.Stream output, Dictionary<int, StreamingRestorer> restorers)
+        // Emits any text the scanners/restorers held back, as a final synthetic chunk per choice, before [DONE].
+        // Per choice: flush the scanner (mask remaining model secrets) → feed through the restorer → flush it.
+        private static void FlushStreams(
+            System.IO.Stream output,
+            Dictionary<int, StreamingResponseScanner>? scanners,
+            Dictionary<int, StreamingRestorer> restorers)
         {
             foreach (var pair in restorers)
             {
-                var tail = pair.Value.Flush();
+                var restorer = pair.Value;
+                var tail = string.Empty;
+
+                if (scanners is not null && scanners.TryGetValue(pair.Key, out var scanner))
+                {
+                    tail = restorer.Push(scanner.Flush());
+                }
+
+                tail += restorer.Flush();
+
                 if (tail.Length == 0)
                 {
                     continue;
@@ -437,6 +479,18 @@ namespace DevOnBike.Overfit.Server
                 WriteLine(output, "data: " + JsonSerializer.Serialize(chunk, OpenAiJsonContext.Default.ChatCompletionChunk));
                 WriteLine(output, string.Empty);
             }
+        }
+
+        // Audits (counts only) everything the streaming scanners masked across the whole response.
+        private static void AuditStreamScanned(IRedactionAuditSink audit, Dictionary<int, StreamingResponseScanner> scanners)
+        {
+            var masked = new List<RedactionMatch>();
+            foreach (var scanner in scanners.Values)
+            {
+                masked.AddRange(scanner.MaskedMatches);
+            }
+
+            AuditRedactions(audit, masked);
         }
 
         private static void WriteLine(System.IO.Stream output, string text)
@@ -502,6 +556,7 @@ namespace DevOnBike.Overfit.Server
                 upstreamRequest.Content = new StringContent(body, Encoding.UTF8, isJson ? "application/json" : contentType);
             }
 
+            ForwardRequestHeaders(request, upstreamRequest);
             if (!string.IsNullOrEmpty(upstreamApiKey))
             {
                 upstreamRequest.Headers.TryAddWithoutValidation("Authorization", $"Bearer {upstreamApiKey}");
@@ -522,6 +577,7 @@ namespace DevOnBike.Overfit.Server
                 responseBody = Redactor.Restore(responseBody, matches);
             }
 
+            ForwardResponseHeaders(upstreamResponse, ctx.Response);
             var responseContentType = upstreamResponse.Content.Headers.ContentType?.ToString() ?? "application/json";
             WriteRaw(ctx.Response, (int)upstreamResponse.StatusCode, responseBody, responseContentType);
         }
@@ -532,6 +588,76 @@ namespace DevOnBike.Overfit.Server
         {
             var sub = path.StartsWith("/v1/", StringComparison.Ordinal) ? path.Substring("/v1".Length) : path;
             return upstream + sub;
+        }
+
+        // Headers never forwarded upstream: the caller's gateway key (the real upstream key is injected instead),
+        // hop-by-hop framing headers, and content/encoding headers owned by the rewritten body. Accept-Encoding is
+        // dropped so the upstream replies in identity encoding — the body is read and re-serialized as text.
+        private static readonly HashSet<string> NonForwardableRequestHeaders = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "Host", "Authorization", "Content-Length", "Content-Type", "Connection", "Keep-Alive",
+            "Proxy-Connection", "Proxy-Authorization", "Transfer-Encoding", "Upgrade", "TE", "Trailer",
+            "Expect", "Accept-Encoding",
+        };
+
+        // Upstream response headers the gateway sets itself, or that describe a body we re-encode as identity text.
+        private static readonly HashSet<string> NonForwardableResponseHeaders = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "Content-Length", "Content-Type", "Content-Encoding", "Transfer-Encoding", "Connection",
+            "Keep-Alive", "Trailer", "Upgrade",
+        };
+
+        // Passes the caller's request headers (OpenAI-Beta, OpenAI-Organization/Project, X-*, User-Agent, Accept, …)
+        // through to the upstream so client features keep working — minus the security/framing denylist. The client's
+        // Authorization (its gateway key) is dropped here; the real upstream key is injected separately by the caller.
+        private static void ForwardRequestHeaders(HttpListenerRequest src, HttpRequestMessage dst)
+        {
+            var headers = src.Headers;
+            for (var i = 0; i < headers.Count; i++)
+            {
+                var name = headers.GetKey(i);
+                if (name is null || NonForwardableRequestHeaders.Contains(name))
+                {
+                    continue;
+                }
+
+                var values = headers.GetValues(i);
+                if (values is not null)
+                {
+                    dst.Headers.TryAddWithoutValidation(name, values);
+                }
+            }
+        }
+
+        // Passes upstream response headers (x-request-id, x-ratelimit-*, openai-*, …) back to the caller so clients
+        // can see rate limits and request ids — minus headers the gateway manages itself.
+        private static void ForwardResponseHeaders(HttpResponseMessage upstream, HttpListenerResponse client)
+        {
+            CopyResponseHeaders(upstream.Headers, client);
+            if (upstream.Content is not null)
+            {
+                CopyResponseHeaders(upstream.Content.Headers, client);
+            }
+        }
+
+        private static void CopyResponseHeaders(System.Net.Http.Headers.HttpHeaders headers, HttpListenerResponse client)
+        {
+            foreach (var header in headers)
+            {
+                if (NonForwardableResponseHeaders.Contains(header.Key))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    client.Headers[header.Key] = string.Join(", ", header.Value);
+                }
+                catch (ArgumentException)
+                {
+                    // Restricted header the HttpListener manages itself — skip it.
+                }
+            }
         }
 
         // Records a redaction audit entry (per-category counts only — never the values).
