@@ -728,6 +728,157 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             public int Rows;
         }
 
+        /// <summary>Row-tile width for the weight-stationary batched kernel: the weight super-block is decoded once
+        /// and reused across a tile of this many activation rows. Small + fixed → bounded stack, no per-iteration
+        /// stackalloc.</summary>
+        private const int WeightStationaryTile = 64;
+
+        /// <summary>
+        /// Weight-stationary batched Q4_K projection — same contract as <see cref="ProjectBatched"/> but each weight
+        /// super-block is DECODED ONCE (d / dmin / the 8 scales+mins unpack) and reused across a tile of rows, instead
+        /// of re-decoding per row. The current <see cref="ProjectBatched"/> amortises the weight BYTES (cache-hot
+        /// across rows) but repeats the decode rows× — this hoists that decode out of the rows loop. Accumulation
+        /// order per row is unchanged (Σ over super-blocks ascending), so this is <b>bit-identical</b> to
+        /// <see cref="ProjectBatched"/>. Used by prefill / speculative-verify where rows &gt; 1.
+        /// </summary>
+        public static void ProjectBatchedWeightStationary(
+            ReadOnlySpan<float> input,
+            int rows,
+            Q4KWeight weight,
+            ReadOnlySpan<float> bias,
+            Span<float> output,
+            Span<sbyte> activationQuants,
+            Span<float> activationScales,
+            Span<short> activationBsums)
+        {
+            ArgumentNullException.ThrowIfNull(weight);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rows);
+
+            var inputSize = weight.InputSize;
+            var outputSize = weight.OutputSize;
+            var superBlocksPerRow = weight.SuperBlocksPerRow;
+            var bsumsPerRow = superBlocksPerRow * GroupsPerSuperBlock;
+
+            if (input.Length < (long)rows * inputSize)
+            {
+                throw new ArgumentException("Input span is smaller than rows * inputSize.", nameof(input));
+            }
+            if (output.Length < (long)rows * outputSize)
+            {
+                throw new ArgumentException("Output span is smaller than rows * outputSize.", nameof(output));
+            }
+            if (!bias.IsEmpty && bias.Length < outputSize)
+            {
+                throw new ArgumentException("Bias span is smaller than outputSize.", nameof(bias));
+            }
+            if (activationQuants.Length < (long)rows * inputSize
+                || activationScales.Length < (long)rows * superBlocksPerRow
+                || activationBsums.Length < (long)rows * bsumsPerRow)
+            {
+                throw new ArgumentException("Activation quantization scratch is too small for rows.");
+            }
+
+            for (var n = 0; n < rows; n++)
+            {
+                QuantizeActivationQ8K(
+                    input.Slice(n * inputSize, inputSize),
+                    activationQuants.Slice(n * inputSize, inputSize),
+                    activationScales.Slice(n * superBlocksPerRow, superBlocksPerRow),
+                    activationBsums.Slice(n * bsumsPerRow, bsumsPerRow));
+            }
+
+            fixed (byte* blocksPtr = weight.BlockSpan)
+            fixed (sbyte* actQuants = activationQuants)
+            fixed (float* actScales = activationScales)
+            fixed (short* actBsums = activationBsums)
+            fixed (float* biasPtr = bias)
+            fixed (float* outputPtr = output)
+            {
+                var context = new Q4KBatchedContext
+                {
+                    Blocks = blocksPtr,
+                    ActivationQuants = actQuants,
+                    ActivationScales = actScales,
+                    ActivationBsums = actBsums,
+                    Bias = biasPtr,
+                    BiasLength = bias.Length,
+                    Output = outputPtr,
+                    SuperBlocksPerRow = superBlocksPerRow,
+                    InputSize = inputSize,
+                    OutputSize = outputSize,
+                    BsumsPerRow = bsumsPerRow,
+                    Rows = rows,
+                };
+
+                OverfitParallel.For(0, outputSize, &WeightStationaryChunk, &context);
+            }
+        }
+
+        /// <summary>Worker for <see cref="ProjectBatchedWeightStationary"/> — a band of output cols. For each col it
+        /// walks the super-blocks, decoding each ONCE and contracting it against a tile of rows.</summary>
+        private static void WeightStationaryChunk(int chunkStart, int chunkEnd, void* context)
+        {
+            ref var ctx = ref Unsafe.AsRef<Q4KBatchedContext>(context);
+            var spr = ctx.SuperBlocksPerRow;
+            var rows = ctx.Rows;
+
+            Span<float> acc = stackalloc float[WeightStationaryTile];
+            Span<byte> scales = stackalloc byte[8];
+            Span<byte> mins = stackalloc byte[8];
+
+            for (var o = chunkStart; o < chunkEnd; o++)
+            {
+                var rowBase = (long)o * spr * Q4KWeight.SuperBlockBytes;
+                var biasO = ctx.BiasLength == 0 ? 0f : ctx.Bias[o];
+
+                for (var tileStart = 0; tileStart < rows; tileStart += WeightStationaryTile)
+                {
+                    var tileRows = Math.Min(WeightStationaryTile, rows - tileStart);
+                    acc.Slice(0, tileRows).Clear(); // [SkipLocalsInit]: stackalloc is not zeroed — clear per tile.
+
+                    for (var sb = 0; sb < spr; sb++)
+                    {
+                        var block = new ReadOnlySpan<byte>(
+                            ctx.Blocks + rowBase + (long)sb * Q4KWeight.SuperBlockBytes, Q4KWeight.SuperBlockBytes);
+
+                        // ── Decode the weight super-block ONCE (hoisted out of the rows loop). ──
+                        var d = (float)BitConverter.UInt16BitsToHalf(
+                            BinaryPrimitives.ReadUInt16LittleEndian(block[..2]));
+                        var dmin = (float)BitConverter.UInt16BitsToHalf(
+                            BinaryPrimitives.ReadUInt16LittleEndian(block.Slice(2, 2)));
+                        GgmlDequant.UnpackQ4_KScalesMins(block.Slice(4, 12), scales, mins);
+                        var qs = block.Slice(16, 128);
+
+                        // ── Contract against each row in the tile (the per-row integer dot + F32 tail). ──
+                        for (var t = 0; t < tileRows; t++)
+                        {
+                            var n = tileStart + t;
+                            var q8 = new ReadOnlySpan<sbyte>(
+                                ctx.ActivationQuants + (long)n * ctx.InputSize + sb * SuperBlockElements,
+                                SuperBlockElements);
+
+                            var mainAcc = MainDot(qs, q8, scales);
+
+                            var minAcc = 0;
+                            var bsumBase = ctx.ActivationBsums + (long)n * ctx.BsumsPerRow + sb * GroupsPerSuperBlock;
+                            for (var s = 0; s < 8; s++)
+                            {
+                                minAcc += mins[s] * (bsumBase[2 * s] + bsumBase[2 * s + 1]);
+                            }
+
+                            acc[t] += ctx.ActivationScales[(long)n * spr + sb] * (d * mainAcc - dmin * minAcc);
+                        }
+                    }
+
+                    for (var t = 0; t < tileRows; t++)
+                    {
+                        var n = tileStart + t;
+                        ctx.Output[(long)n * ctx.OutputSize + o] = biasO + acc[t];
+                    }
+                }
+            }
+        }
+
         private static void ValidateProjectArguments(
             ReadOnlySpan<float> input,
             ReadOnlySpan<float> bias,

@@ -394,6 +394,7 @@ Test machine for current headline numbers: AMD Ryzen 9 9950X3D, Windows 11,
 | GPT-2 Small KV-cache decode | ~6.5x faster than naive O(N²), parity vs PyTorch | 0 B/token |
 | Qwen2.5-3B Q4_K_M decode | ~19 tok/s default, **~24 tok/s** with opt-in repacked GEMV (`OVERFIT_REPACK_GEMV=1` + `OVERFIT_DECODE_WORKERS=16`) | ~1 B/token |
 | Bielik-4.5B Q4_K_M decode | ~17 tok/s, −36% working set vs same-file llama.cpp | ~1 B/token |
+| Bielik-4.5B Q4_K_M prefill / TTFT (410-token prompt) | **1.44× faster** with the weight-stationary Q4_K matmul (10.7 → 7.5 s, bit-identical) | 0 B/request |
 | MNIST CNN training (60k) | **503 ± 4 ms/epoch** (BenchmarkDotNet) — on par with PyTorch 2.11 CPU at its optimal threads (~524–570 ms, same box/arch); full train ~1.5–2 s with one-cycle LR — [audit](docs/mnist-cnn-training-audit.md) | 1.31 MB/epoch |
 | Concurrent inference, 8 threads | ~3.6x faster than ONNX Runtime | 0 B |
 | Batched prefill (272-token prompt, 0.6B) | allocation-free per request (was ~748 MB before pooling), bit-identical output | **0 B/request** |
