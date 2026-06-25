@@ -3,6 +3,7 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
 
 namespace DevOnBike.Overfit.Intrinsics
@@ -10,6 +11,9 @@ namespace DevOnBike.Overfit.Intrinsics
     internal static class CpuFeatures
     {
         public static readonly bool HasFma = Fma.IsSupported;
+
+        // arm64 dot-product extension (SDOT/UDOT, ARMv8.2 FEAT_DotProd) — drives the NEON quant kernels.
+        public static readonly bool HasDp = Dp.IsSupported;
 
         public static readonly bool HasAvx = Avx.IsSupported;
 

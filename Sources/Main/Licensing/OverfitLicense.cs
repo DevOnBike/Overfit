@@ -89,16 +89,24 @@ namespace DevOnBike.Overfit.Licensing
                 }
             }
 
-            var originalColor = Console.ForegroundColor;
-
-            try
+            // Console color is unsupported on Android (no console) — write plain there.
+            if (OperatingSystem.IsAndroid())
             {
-                Console.ForegroundColor = color;
                 Console.WriteLine(message);
             }
-            finally
+            else
             {
-                Console.ForegroundColor = originalColor;
+                var originalColor = Console.ForegroundColor;
+
+                try
+                {
+                    Console.ForegroundColor = color;
+                    Console.WriteLine(message);
+                }
+                finally
+                {
+                    Console.ForegroundColor = originalColor;
+                }
             }
 
             Debug.WriteLine(message);

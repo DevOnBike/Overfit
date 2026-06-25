@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    DecodeBench — UI-agnostic decode benchmark library (load Q4_K_M GGUF, self-test SIMD==scalar token
+    equality, A/B tok/s NEON-vs-forced-scalar). Consumed by the .NET-for-Android APK in
+    Demo/AndroidBenchApp. Plain net10.0 library (no Android.* deps) so it runs on the .NET-for-Android BCL
+    unchanged. (The headless linux-bionic-arm64 console route is blocked: NativeAOT can't cross-OS compile
+    from Windows — so this is a library, not an exe, and the APK is the on-device vehicle.)
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Main\Main.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -9,6 +9,9 @@ using System.Runtime.CompilerServices;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.Diagnostics.Contracts;
 
+// Disambiguate from Android.App.Activity, which implicit usings pull into scope on the net10.0-android TFM.
+using Activity = System.Diagnostics.Activity;
+
 namespace DevOnBike.Overfit.Diagnostics
 {
     public static class OverfitTelemetry

@@ -7,6 +7,7 @@ using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
 using DevOnBike.Overfit.Intrinsics;
 using DevOnBike.Overfit.LanguageModels.Loading;
@@ -46,6 +47,19 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         /// <summary>Q8_K group sums per super-block: 256 / 16.</summary>
         public const int GroupsPerSuperBlock = SuperBlockElements / GroupSize;
+
+        /// <summary>
+        /// Diagnostics A/B switch: when true, <see cref="MainDot"/> skips the SIMD (AVX2/NEON) paths and
+        /// uses the scalar oracle. Lets a bench measure NEON-vs-scalar decode on the same process/device
+        /// (flip between interleaved runs). Defaults from <c>OVERFIT_FORCE_SCALAR</c>. Not for production.
+        /// </summary>
+        public static bool ForceScalar = ResolveForceScalar();
+
+        private static bool ResolveForceScalar()
+        {
+            var raw = Environment.GetEnvironmentVariable(OverfitEnvironment.ForceScalar);
+            return raw is "1" || string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase);
+        }
 
         /// <summary>
         /// Quantizes an F32 activation (length a multiple of
@@ -253,7 +267,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // also ≈0 in the 2026-05-31 sprint) AND the compute-bound batched path (40.2 vs 38.9 ms on
             // [256×2048→11008], within noise). The batched cost is per-call overhead + the F32 tail,
             // not the integer multiply-add pair.
-            if (CpuFeatures.HasAvx2)
+            if (!ForceScalar && CpuFeatures.HasAvx2)
             {
                 ref var qsRef = ref MemoryMarshal.GetReference(qs);
                 ref var q8Ref = ref MemoryMarshal.GetReference(q8);
@@ -288,6 +302,67 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 return Vector256.Sum(accVec);
             }
 
+            // NEON (AdvSimd + dotprod) on arm64 — same INT32 reduction, so bit-identical to the
+            // scalar oracle. Guarded by HasDp (false off-arm → never JIT-executed there).
+            if (!ForceScalar && CpuFeatures.HasDp)
+            {
+                return MainDotNeon(qs, q8, scales);
+            }
+
+            return MainDotScalar(qs, q8, scales);
+        }
+
+        /// <summary>
+        /// NEON path for <see cref="MainDot"/> — <c>Σₛ scale[s]·intdotₛ</c> via the ARMv8.2
+        /// dot-product extension (<c>SDOT</c>, <c>vdotq_s32</c>). The 4-bit weight nibbles are
+        /// unsigned [0,15] so they fit the signed SDOT operand directly; each 32-element sub-block
+        /// is two 16-lane SDOT accumulations into INT32 lanes, reduced once and scaled. Bit-identical
+        /// to <see cref="MainDotScalar"/> (pure INT32 — SDOT sums the same integer products in a
+        /// different grouping, and integer addition is exact). UNVALIDATED off-arm: it only executes
+        /// where <see cref="Dp.IsSupported"/>, and is parity-pinned against the scalar on arm64.
+        /// </summary>
+        internal static int MainDotNeon(ReadOnlySpan<byte> qs, ReadOnlySpan<sbyte> q8, ReadOnlySpan<byte> scales)
+        {
+            ref var qsRef = ref MemoryMarshal.GetReference(qs);
+            ref var q8Ref = ref MemoryMarshal.GetReference(q8);
+            var maskLow = Vector128.Create((byte)0x0F);
+            var sum = 0;
+
+            // Four 32-byte nibble runs; each carries sub-block 2p (low nibbles) and 2p+1 (high
+            // nibbles), mirroring MainDotScalar's qsBase = 32*(s>>1) / q8Base = 32*s addressing.
+            for (var p = 0; p < 4; p++)
+            {
+                var packed0 = Vector128.LoadUnsafe(ref qsRef, (nuint)(32 * p));
+                var packed1 = Vector128.LoadUnsafe(ref qsRef, (nuint)(32 * p + 16));
+
+                var low0 = AdvSimd.And(packed0, maskLow).AsSByte();
+                var low1 = AdvSimd.And(packed1, maskLow).AsSByte();
+                var high0 = AdvSimd.ShiftRightLogical(packed0, 4).AsSByte();
+                var high1 = AdvSimd.ShiftRightLogical(packed1, 4).AsSByte();
+
+                var q8Low0 = Vector128.LoadUnsafe(ref q8Ref, (nuint)(64 * p));
+                var q8Low1 = Vector128.LoadUnsafe(ref q8Ref, (nuint)(64 * p + 16));
+                var q8High0 = Vector128.LoadUnsafe(ref q8Ref, (nuint)(64 * p + 32));
+                var q8High1 = Vector128.LoadUnsafe(ref q8Ref, (nuint)(64 * p + 48));
+
+                var accLow = Dp.DotProduct(Vector128<int>.Zero, low0, q8Low0);
+                accLow = Dp.DotProduct(accLow, low1, q8Low1);
+                var accHigh = Dp.DotProduct(Vector128<int>.Zero, high0, q8High0);
+                accHigh = Dp.DotProduct(accHigh, high1, q8High1);
+
+                sum += scales[2 * p] * Vector128.Sum(accLow);
+                sum += scales[2 * p + 1] * Vector128.Sum(accHigh);
+            }
+
+            return sum;
+        }
+
+        /// <summary>
+        /// Scalar reference for <c>Σₛ scale[s]·intdotₛ</c> — the bit-identity oracle for both the
+        /// AVX2 and NEON paths (INT32 arithmetic throughout).
+        /// </summary>
+        internal static int MainDotScalar(ReadOnlySpan<byte> qs, ReadOnlySpan<sbyte> q8, ReadOnlySpan<byte> scales)
+        {
             var sum = 0;
             for (var s = 0; s < 8; s++)
             {
