@@ -1,0 +1,111 @@
+# Overfit on Kubernetes — single-file manifest for the OpenAI-compatible server (`overfit serve`).
+#
+#   kubectl apply -f docs/overfit.k8s.yaml
+#   kubectl port-forward svc/overfit 8080:8080      # then curl http://localhost:8080/v1/chat/completions
+#
+# The image is the same Native-AOT server as `docs/docker.md` (entrypoint `overfit serve --host 0.0.0.0
+# --port 8080`); the model is NOT in the image. This manifest provisions a PersistentVolumeClaim and, on first
+# start, an initContainer downloads a small default GGUF into it (Qwen2.5-0.5B, Apache-2.0). Edit the 4 marked
+# spots — IMAGE, MODEL_REPO, MODEL_FILE, resources — for your model.
+#
+# Pre-populated PVC instead of auto-download? Delete the `initContainers:` block and copy your `.gguf` onto the
+# claim at  $HOME/.overfit/models/  (HOME is set to /models below, so: /models/.overfit/models/<file>.gguf).
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: overfit-models
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 8Gi            # ← room for the GGUF; raise for larger models
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: overfit
+  labels:
+    app: overfit
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: overfit
+  template:
+    metadata:
+      labels:
+        app: overfit
+    spec:
+      # The chiselled image runs as non-root (UID/GID 1654, user "app"). fsGroup makes the mounted
+      # PVC group-writable so the initContainer can download into it (the image has no shell to chown).
+      securityContext:
+        fsGroup: 1654
+      # ── Downloads the model into the PVC on first start. HOME=/models puts overfit's model cache
+      #    (~/.overfit/models) on the volume → the file lands at /models/.overfit/models/<MODEL_FILE>.
+      #    Remove this block if you pre-populate the PVC. ──
+      initContainers:
+        - name: pull-model
+          image: <your-dockerhub-user>/overfit:latest          # ← IMAGE
+          command:
+            - /app/overfit
+            - pull
+            - Qwen/Qwen2.5-0.5B-Instruct-GGUF                   # ← MODEL_REPO (HuggingFace owner/repo)
+            - --file
+            - qwen2.5-0.5b-instruct-q4_k_m.gguf                 # ← MODEL_FILE
+          env:
+            - name: HOME
+              value: /models
+          volumeMounts:
+            - name: models
+              mountPath: /models
+      containers:
+        - name: overfit
+          image: <your-dockerhub-user>/overfit:latest          # ← IMAGE (same as above; pin :<version> in prod)
+          # Entrypoint is `overfit serve --host 0.0.0.0 --port 8080`; args append the positional model path.
+          args:
+            - /models/.overfit/models/qwen2.5-0.5b-instruct-q4_k_m.gguf   # ← MODEL_FILE (must match above)
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30      # ← raise for large models (weight mmap on first request)
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "2"
+              memory: 1500Mi             # ← 0.5B-Q4 ≈ 1 GB; a 3B ≈ 4 GB — size per your model
+            limits:
+              cpu: "4"
+              memory: 2Gi
+          volumeMounts:
+            - name: models
+              mountPath: /models
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: overfit-models
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: overfit
+  labels:
+    app: overfit
+spec:
+  # ClusterIP (in-cluster). For external access switch to: type: LoadBalancer (cloud) or type: NodePort.
+  selector:
+    app: overfit
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
