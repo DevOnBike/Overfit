@@ -23,7 +23,15 @@ To use a **different** model: tap **Load model** → pick a `.gguf` from Downloa
 
 ## Rebuild & redeploy later (after code changes)
 
-Run these from the repo root (`D:\Overfit`) in **PowerShell**. `adb` lives at
+**Shortcut:** `deploy.cmd` in this folder does build + install + launch in one go:
+
+```bat
+Demo\OverfitChatApp\deploy.cmd                       :: device already connected (USB / prior wireless)
+Demo\OverfitChatApp\deploy.cmd 192.168.1.174:PORT    :: connect wireless first (PORT from the phone)
+Demo\OverfitChatApp\deploy.cmd 192.168.1.174:PORT aot :: + AOT (slower build, faster decode)
+```
+
+Or the manual steps below. Run these from the repo root (`D:\Overfit`) in **PowerShell**. `adb` lives at
 `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe` — alias it for convenience:
 
 ```powershell
