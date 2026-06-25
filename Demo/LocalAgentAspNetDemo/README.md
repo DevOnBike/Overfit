@@ -258,12 +258,31 @@ Expected `/chat` response shape:
 
 ---
 
+## Production hardening (auth · audit · probes)
+
+Three config switches turn the demo into a deployable PoC — all **off by default** so it still runs out of the box.
+
+- **API-key auth.** Set `ApiKey` (config or the `ApiKey` env var) and every call must present it as `X-API-Key: <key>`
+  or `Authorization: Bearer <key>`; missing/wrong → `401` **before the model is touched**. The key is stored only as a
+  SHA-256 hash and compared in constant time (never logged). Probe + Swagger paths stay open.
+- **Audit trail.** Every handled request appends one JSON line — `{ ts, id, method, path, status, ms, client, model,
+  sources, tool }` — **metadata only, never the prompt or the answer**, so it honours "data never leaves the process".
+  `client` is a pseudonymous key fingerprint; `model` is the loaded model's fingerprint; `sources` / `tool` record
+  which documents a RAG query retrieved and which C# tool the agent invoked. Streams to the structured log by default;
+  set `AuditLogPath` for an append-only JSONL file you can retain and tail.
+- **Kubernetes-style probes.** `/healthz` (liveness — never touches the model, so a long generation can't fail it) and
+  `/readyz` (readiness — `200` once the model is loaded). The container `HEALTHCHECK` uses `/readyz`; the rich
+  `/health` stays for humans. The Deployment + Service + model-PVC pattern in
+  [`docs/overfit.k8s.yaml`](../../docs/overfit.k8s.yaml) applies — point it at this image and probe `/readyz`.
+
 ## Endpoints
 
 | Method | Path | What it does |
 |---|---|---|
 | `GET` | `/` | Redirects to `/health` |
-| `GET` | `/health` | `200 OK` with model filename, runtime, process privacy flag, RAG index status |
+| `GET` | `/health` | `200 OK` with model filename, fingerprint, runtime, process privacy flag, RAG index status |
+| `GET` | `/healthz` | Liveness probe — `200` while the process is up (never touches the model) |
+| `GET` | `/readyz` | Readiness probe — `200` once the model is loaded, `503` while loading |
 | `POST` | `/chat` | `{ message: "…" }` → `{ reply, stats }`. Conversation persists in the singleton client |
 | `POST` | `/reset` | Clears conversation history; re-applies the system message |
 | `POST` | `/documents/index` | Chunks + embeds every `*.md` in the data directory into the in-process vector store. Returns per-file chunk counts |
@@ -286,6 +305,7 @@ RAG is optional: `/chat` works with no embedding model configured. `/documents/i
 - ✅ **Phase 4** — `/metrics` (Prometheus: requests, tokens, allocations/token, tok/s, tool calls, RAG latency, model fingerprint) + `Dockerfile` + `compose.yaml` (agent + Prometheus) + `Observability/`.
 - ✅ **Phase 5** — OpenAI-compatible API (`/v1/chat/completions` + SSE streaming, `/v1/embeddings`, `/v1/models`); `response_format` honoured (`json_object` → well-formed, `json_schema` → schema-conforming).
 - ✅ **Phase 6** — Microsoft.Extensions.AI adapter, shipped as the separate `Overfit.Extensions.AI` package (`OverfitChatClient : IChatClient`, `OverfitEmbeddingGenerator : IEmbeddingGenerator`) — slot Overfit in as a drop-in local backend wherever `IChatClient` / `IEmbeddingGenerator` is expected. (The demo's `/v1` surface uses the engine directly; the adapter is for in-process `IChatClient` consumers.)
+- ✅ **Phase 7 (production hardening)** — API-key auth (SHA-256 + constant-time, `401` before the model), append-only metadata-only audit trail (`AuditLogPath`), Kubernetes-style `/healthz` + `/readyz` probes, non-root container + `HEALTHCHECK`, single-file k8s manifest. Turns the starter into a deployable, auditable PoC (maps to the "Private .NET RAG/Agent PoC" in [`COMMERCIAL.md`](../../COMMERCIAL.md)).
 - ❌ **Phase 7** (optional) — .NET Aspire dashboard variant.
 
 ---

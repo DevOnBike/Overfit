@@ -20,10 +20,22 @@ RUN dotnet publish Demo/LocalAgentAspNetDemo/LocalAgent.AspNet.csproj \
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
+# curl backs the Docker/Compose HEALTHCHECK below (Kubernetes uses HTTP probes on /healthz + /readyz directly and
+# needs no in-image tool — see docs/overfit.k8s.yaml).
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 COPY --from=build /app .
 
 ENV ASPNETCORE_URLS=http://+:8080
 EXPOSE 8080
+
+# Least privilege: run as the image's non-root user (APP_UID=1654). The app only needs to read the mounted model
+# and bind :8080 (>1024) — both fine for non-root. To persist the audit log to a file, mount a volume the user can
+# write (UID 1654) and set AuditLogPath; otherwise the audit stream goes to stdout (docker logs).
+USER $APP_UID
+
+# Liveness/readiness for plain Docker / Compose. /readyz returns 200 once the model is loaded.
+HEALTHCHECK --interval=15s --timeout=3s --start-period=90s --retries=3 \
+  CMD curl -fsS http://localhost:8080/readyz || exit 1
 
 # Model + embedder are provided at runtime via mounted volumes (see compose.yaml).
 ENTRYPOINT ["dotnet", "Overfit.LocalAgent.AspNet.dll"]

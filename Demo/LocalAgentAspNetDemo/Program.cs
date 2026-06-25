@@ -106,6 +106,10 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
                 metrics.AddPrometheusExporter();
             });
 
+            // Audit trail (production gate): append-only metadata log of every request — never prompt/response
+            // content. Mirrors to the structured logger; writes JSONL to 'AuditLogPath' when configured.
+            builder.Services.AddSingleton<AuditLog>();
+
             // RAG over local documents (Phase 2). Loads its embedder lazily on first /documents/index,
             // so a run without an embedding model still serves /chat — RAG just returns a clear error.
             builder.Services.AddSingleton<RagService>();
@@ -133,11 +137,17 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
                 o.RoutePrefix = "swagger";
             });
 
+            // Audit OUTERMOST so it records 401s too; then the API-key gate. Both no-op on probe/docs paths and
+            // when unconfigured, so the demo still runs out of the box.
+            app.UseMiddleware<AuditMiddleware>();
+            app.UseMiddleware<ApiKeyAuthMiddleware>();
+
             // Dispose the engine + session cleanly on shutdown so file-mapped weights and
             // KV-cache buffers release before the process exits. Without this, a hosted
             // run that re-binds the port can leak the underlying engine for a moment.
             app.Lifetime.ApplicationStopping.Register(() =>
             {
+                app.Services.GetService<AuditLog>()?.Dispose();
                 app.Services.GetService<RagService>()?.Dispose();
                 app.Services.GetService<OverfitClient>()?.Dispose();
             });
@@ -163,6 +173,15 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
                     },
                 });
             });
+
+            // Kubernetes-style split probes (the rich /health above stays for humans):
+            //   /healthz = liveness  — the process is up (never touches the model, so a long generation can't fail it).
+            //   /readyz  = readiness — the model is loaded and the host can serve (loaded eagerly at startup).
+            app.MapGet("/healthz", () => Results.Ok(new { status = "live" }));
+            app.MapGet("/readyz", (OverfitClient client) =>
+                client is not null
+                    ? Results.Ok(new { status = "ready" })
+                    : Results.Json(new { status = "loading" }, statusCode: StatusCodes.Status503ServiceUnavailable));
 
             app.MapPost("/chat", (ChatRequest req, OverfitClient client, MetricsCollector metrics) =>
             {
@@ -214,7 +233,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
                 }
             });
 
-            app.MapPost("/rag/query", (RagQueryRequest req, OverfitClient client, RagService rag, MetricsCollector metrics) =>
+            app.MapPost("/rag/query", (RagQueryRequest req, HttpContext httpContext, OverfitClient client, RagService rag, MetricsCollector metrics) =>
             {
                 if (string.IsNullOrWhiteSpace(req.Question))
                 {
@@ -229,6 +248,8 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
                 try
                 {
                     var answer = rag.Query(client, req.Question, topK);
+                    // Audit which sources were retrieved (ids only — never the snippet content).
+                    httpContext.Items["audit.sources"] = answer.Sources.Select(s => s.Id).ToArray();
                     metrics.RecordRagSearch(answer.SearchSeconds);
                     metrics.RecordGeneration("rag", client.Chat.LastStats);
                     return Results.Ok(answer);
@@ -255,7 +276,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
 
             // ── Agent endpoints (Phase 3): tool calling + guaranteed JSON ──────────────
 
-            app.MapPost("/agent", (ToolCallRequest req, OverfitClient client, AgentService agent, MetricsCollector metrics) =>
+            app.MapPost("/agent", (ToolCallRequest req, HttpContext httpContext, OverfitClient client, AgentService agent, MetricsCollector metrics) =>
             {
                 if (string.IsNullOrWhiteSpace(req.Message))
                 {
@@ -266,6 +287,7 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
                 }
 
                 var result = agent.RunToolCall(client, req.Message);
+                httpContext.Items["audit.tool"] = result.ToolName;   // audit which C# tool the model invoked
                 metrics.RecordGeneration("agent", client.Chat.LastStats);
                 metrics.RecordToolCall(result.ToolName);
 
