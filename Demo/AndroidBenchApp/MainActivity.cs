@@ -77,7 +77,7 @@ namespace DevOnBike.OverfitBench
                             return;
                         }
 
-                        DecodeBench.Run(modelPath, genTokens: 48, repeats: 2, warmup: 3, log: Log);
+                        DecodeBench.Run(modelPath, genTokens: 32, repeats: 1, warmup: 2, log: Log);
                     }
                     catch (System.Exception ex)
                     {

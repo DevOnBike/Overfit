@@ -47,7 +47,12 @@ namespace DevOnBike.Overfit.AndroidBench
 
             log($"logical cores={Environment.ProcessorCount}");
 
-            using var client = OverfitClient.LoadGguf(modelPath, mmap: true);
+            // quantize:false keeps the Q4_K weights Q4_K-resident so the FFN/attention decode runs through
+            // Q4KDotKernel.MainDot — the kernel we NEON-ported. With quantize:true (the facade default) those
+            // tensors are re-quantized to Q8_0 and dispatch to Q8DotKernel instead, leaving MainDot (and the
+            // ForceScalar toggle) off the hot path — which makes the NEON-vs-scalar A/B a no-op.
+            log("load: quantize=false (Q4_K-resident -> exercises Q4KDotKernel.MainDot / NEON)");
+            using var client = OverfitClient.LoadGguf(modelPath, mmap: true, quantize: false);
             var tokenizer = client.Tokenizer;
 
             log($"RAM after load (RSS)={ReadVmRssMb()} MB  threads={ReadThreadCount()}");
@@ -94,6 +99,27 @@ namespace DevOnBike.Overfit.AndroidBench
             log($"{fast,-12}: {bestFast:F2} tok/s");
             log($"{"scalar",-12}: {bestScalar:F2} tok/s");
             log($"speedup     : {(bestScalar > 0 ? bestFast / bestScalar : 0):F2}x  ({fast} vs forced-scalar, same device)");
+
+            // Component breakdown: where does single-token decode actually spend time on THIS device?
+            // Settles whether the F32 lm-head, the Q4_K FFN, or attention dominates (i.e. which lever pays).
+            log("--- decode profile (NEON, one pass) ---");
+            DecodeProfiler.Enabled = true;
+            DecodeProfiler.Reset();
+            Q4KDotKernel.ForceScalar = false;
+            session.Reset(promptIds);
+            for (var i = 0; i < genTokens; i++)
+            {
+                session.GenerateNextToken(in sampling);
+            }
+            foreach (var line in DecodeProfiler.Report().Split('\n'))
+            {
+                var trimmed = line.TrimEnd();
+                if (trimmed.Length > 0)
+                {
+                    log(trimmed);
+                }
+            }
+            DecodeProfiler.Enabled = false;
         }
 
         private static int[] DecodeSequence(

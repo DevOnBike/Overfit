@@ -268,6 +268,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // Repacked 8×8 GEMV path (OVERFIT_REPACK_GEMV): quantize hidden once, then run
             // gate + up through the repacked kernel (8 rows/lane, no per-row hsum — ~2× the
             // per-core throughput of the 1-row kernel). Q4_K gate/up only; down stays Q6_K.
+            var sGateUp = DecodeProfiler.Start();
             if (Q4KGemvKernel.Enabled && wGate.IsQ4K && wUp.IsQ4K
                 && wGate.Quantized4K.CanRepack && wUp.Quantized4K.CanRepack)
             {
@@ -301,13 +302,19 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 ProjectParallelDispatched(hidden, in wUp, [], _intermediate, DModel, DFF);
             }
 
+            DecodeProfiler.Stop(DecodeProfiler.Component.FfnGateUp, sGateUp);
+
             // intermediate = gate * up (element-wise)
+            var sMul = DecodeProfiler.Start();
             TensorPrimitives.Multiply(_gate, _intermediate, _intermediate);
+            DecodeProfiler.Stop(DecodeProfiler.Component.FfnMultiply, sMul);
 
             // output = intermediate @ Wdown. Stays on the original-layout kernel: A/B showed the
             // Q6_K repacked GEMV is neutral-to-slightly-negative here (down is the biggest matmul
             // = DRAM-bandwidth-bound; rearranged bytes saturate the same ceiling, the copy costs RAM).
+            var sDown = DecodeProfiler.Start();
             ProjectParallelDispatched(_intermediate, in wDown, [], output, DFF, DModel);
+            DecodeProfiler.Stop(DecodeProfiler.Component.FfnDown, sDown);
         }
 
         /// <summary>

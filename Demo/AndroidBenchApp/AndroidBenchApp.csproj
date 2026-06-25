@@ -27,10 +27,19 @@
     <ApplicationVersion>1</ApplicationVersion>
     <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
 
-    <!-- JIT (no AOT) keeps the build simple for a bench; the kernel under test is the same IL either way. -->
-    <RunAOTCompilation>false</RunAOTCompilation>
+    <!-- Mono AOT: precompile the IL to native arm64 so the FFN matmul loop isn't left to the
+         experimental CoreCLR-Android JIT (~150 cycles/MAC). Mono runtime (not CoreCLR) — loses the Dp
+         intrinsic so MainDot runs scalar, but AOT scalar (~2 cyc/MAC) still ~75× over the JIT floor. -->
+    <RunAOTCompilation>true</RunAOTCompilation>
+    <AndroidEnableProfiledAot>false</AndroidEnableProfiledAot>
     <AndroidPackageFormat>apk</AndroidPackageFormat>
     <RuntimeIdentifier>android-arm64</RuntimeIdentifier>
+
+    <!-- Diagnosis: CoreCLR's tiered JIT may be leaving the hot decode loop stuck in unoptimized Tier0 on the
+         experimental Android port (broken background Tier1 promotion). Force full optimization from the start
+         to test that hypothesis BEFORE the NDK/AOT route. -->
+    <TieredCompilation>false</TieredCompilation>
+    <TieredPGO>false</TieredPGO>
   </PropertyGroup>
 
   <ItemGroup>
