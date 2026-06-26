@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive-icon background: the app's violet→blue gradient. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <gradient
+        android:startColor="#7C3AED"
+        android:endColor="#2563EB"
+        android:angle="135" />
+</shape>

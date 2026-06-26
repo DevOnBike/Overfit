@@ -1,0 +1,85 @@
+# Build OverThink as a signed AAB and publish it to Google Play.
+#
+# TEMPLATE — review it, add the secrets below, then commit. It only runs when you push a version tag
+# (e.g. `git tag v1.0.0 && git push --tags`) or trigger it manually. The very FIRST upload of an app
+# usually has to be done by hand in the Play Console (create the app + first release); after that this
+# workflow pushes updates automatically.
+#
+# Required GitHub Secrets (Settings → Secrets and variables → Actions):
+#   ANDROID_KEYSTORE_BASE64    base64 of your upload keystore  (base64 -w0 upload.keystore)
+#   ANDROID_KEYSTORE_PASSWORD  the keystore (store) password
+#   ANDROID_KEY_ALIAS          the key alias (e.g. overthink)
+#   ANDROID_KEY_PASSWORD       the key password
+#   PLAY_SERVICE_ACCOUNT_JSON  the Play Console service-account JSON (API access → grant release rights)
+
+name: OverThink → Google Play
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      PROJECT: Demo/OverfitChatApp/OverfitChatApp.csproj
+      PACKAGE: com.devonbike.overthink
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install the Android workload
+        run: dotnet workload install android
+
+      # Fetch the bundled model into Assets at build time so the ~101 MB binary isn't committed to git.
+      # (Remove this step if you instead track the model with Git LFS.)
+      - name: Fetch bundled model
+        run: |
+          curl -L -f --retry 3 -o Demo/OverfitChatApp/Assets/smollm2-135m.gguf \
+            https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q4_K_M.gguf
+
+      - name: Decode upload keystore
+        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/upload.keystore"
+
+      - name: Publish signed AAB
+        run: |
+          dotnet publish "$PROJECT" -c Release -f net10.0-android \
+            -p:AndroidPackageFormat=aab \
+            -p:RunAOTCompilation=true \
+            -p:AcceptAndroidSdkLicenses=true \
+            -p:ApplicationVersion=${{ github.run_number }} \
+            -p:AndroidKeyStore=true \
+            -p:AndroidSigningKeyStore="$RUNNER_TEMP/upload.keystore" \
+            -p:AndroidSigningKeyAlias="${{ secrets.ANDROID_KEY_ALIAS }}" \
+            -p:AndroidSigningStorePass="${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
+            -p:AndroidSigningKeyPass="${{ secrets.ANDROID_KEY_PASSWORD }}"
+
+      - name: Locate the AAB
+        id: aab
+        run: |
+          path="$(find Demo/OverfitChatApp/bin/Release/net10.0-android -name '*-Signed.aab' | head -1)"
+          echo "Found: $path"
+          echo "path=$path" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to Google Play (internal track)
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: com.devonbike.overthink
+          releaseFiles: ${{ steps.aab.outputs.path }}
+          track: internal
+          status: completed

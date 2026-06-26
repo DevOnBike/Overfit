@@ -83,6 +83,8 @@ namespace DevOnBike.Overfit.LanguageModels
         /// <param name="maxNewTokens">Default maximum response length in tokens (overridable via <see cref="Options"/>).</param>
         /// <param name="stopSequences">Override string stop sequences; defaults to ChatML markers.</param>
         /// <param name="sampling"></param>
+        /// <param name="slidingWindow">When true, the oldest turns are evicted as the KV cache fills instead
+        /// of throwing — keeps long multi-turn chats going past <paramref name="maxContextLength"/>.</param>
         public static OverfitClient LoadGguf(
             string ggufPath,
             int maxContextLength = 2048,
@@ -90,7 +92,8 @@ namespace DevOnBike.Overfit.LanguageModels
             bool quantize = true,
             int maxNewTokens = 256,
             IReadOnlyList<string>? stopSequences = null,
-            SamplingOptions? sampling = null)
+            SamplingOptions? sampling = null,
+            bool slidingWindow = false)
         {
             ArgumentException.ThrowIfNullOrEmpty(ggufPath);
             if (!File.Exists(ggufPath))
@@ -122,7 +125,7 @@ namespace DevOnBike.Overfit.LanguageModels
                 var session = engine.CreateSession(maxContextLength);
                 try
                 {
-                    var chat = new ChatSession(session, tokenizer, template, stopSequences ?? _defaultStopSequences);
+                    var chat = new ChatSession(session, tokenizer, template, stopSequences ?? _defaultStopSequences, slidingWindow);
 
                     var options = new GenerationOptions(
                         maxNewTokens: maxNewTokens,

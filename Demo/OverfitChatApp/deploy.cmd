@@ -16,8 +16,8 @@ rem ============================================================================
 set "SDK=%LOCALAPPDATA%\Android\Sdk"
 set "ADB=%SDK%\platform-tools\adb.exe"
 set "PROJ=%~dp0OverfitChatApp.csproj"
-set "APK=%~dp0bin\Release\net10.0-android\android-arm64\com.devonbike.overfitchat-Signed.apk"
-set "PKG=com.devonbike.overfitchat"
+set "APK=%~dp0bin\Release\net10.0-android\android-arm64\com.devonbike.overthink-Signed.apk"
+set "PKG=com.devonbike.overthink"
 
 rem --- optional AOT flag (2nd arg = aot) ---
 set "AOT="
@@ -29,6 +29,13 @@ if not "%~1"=="" (
     "%ADB%" connect %~1
 ) else (
     echo [1/4] Using already-connected device.
+)
+
+rem The bundled model is git-ignored (over GitHub's 100 MB limit) — fetch it if it's not on disk.
+if not exist "%~dp0Assets\smollm2-135m.gguf" (
+    echo.
+    echo Fetching bundled model ^(~101 MB^) ...
+    curl -L -f -o "%~dp0Assets\smollm2-135m.gguf" https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q4_K_M.gguf
 )
 
 echo.
@@ -60,7 +67,7 @@ if errorlevel 1 (
 "%ADB%" shell monkey -p %PKG% -c android.intent.category.LAUNCHER 1 >nul 2>&1
 
 echo.
-echo Done - "Overfit" is running on the phone.
+echo Done - "OverThink" is running on the phone.
 rem  To pre-load a model so it auto-loads on launch:
 rem    "%ADB%" push C:\path\to\model.gguf /sdcard/Android/data/%PKG%/files/model.gguf
 endlocal
