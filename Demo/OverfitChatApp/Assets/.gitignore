@@ -1,0 +1,3 @@
+# The bundled model is fetched at build time (CI workflow / deploy.cmd) — NOT committed:
+# it's ~101 MB, over GitHub's 100 MB per-file limit. Keep the Assets folder tracked, ignore the model.
+*.gguf

@@ -144,6 +144,52 @@ namespace DevOnBike.Overfit.Redaction
             return remainder == 1;
         }
 
+        /// <summary>
+        /// Heuristic secret gate for the entropy detector: true when <paramref name="value"/> is long and looks
+        /// random — i.e. its Shannon entropy per character clears <paramref name="minBitsPerChar"/>. Random API keys
+        /// and tokens sit around 4–6 bits/char; even long natural-language words stay below ~3.7, so the default 3.8
+        /// separates "an unknown secret" from "a long ordinary word" while a regex pre-filter supplies the candidate.
+        /// Zero-allocation (ASCII histogram on the stack); non-ASCII chars are ignored.
+        /// </summary>
+        public static bool HasHighEntropy(string value, int minLength = 20, double minBitsPerChar = 3.8)
+        {
+            if (value.Length < minLength)
+            {
+                return false;
+            }
+
+            Span<int> counts = stackalloc int[128];
+            counts.Clear(); // Main is [SkipLocalsInit]: stackalloc is NOT zero-initialized, so clear the histogram.
+            var total = 0;
+            foreach (var c in value)
+            {
+                if (c < 128)
+                {
+                    counts[c]++;
+                    total++;
+                }
+            }
+
+            if (total < minLength)
+            {
+                return false;
+            }
+
+            var entropy = 0.0;
+            for (var i = 0; i < counts.Length; i++)
+            {
+                if (counts[i] == 0)
+                {
+                    continue;
+                }
+
+                var p = (double)counts[i] / total;
+                entropy -= p * Math.Log2(p);
+            }
+
+            return entropy >= minBitsPerChar;
+        }
+
         private static string Digits(string value)
         {
             var sb = new StringBuilder(value.Length);

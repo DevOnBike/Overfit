@@ -69,6 +69,26 @@ docker run --rm -v /host/models:/models --entrypoint /app/overfit overfit:local 
   pull <hf-owner/repo> --file <file.gguf>
 ```
 
+## Kubernetes
+
+A single-file manifest stands the same server up on a cluster — Deployment + Service + a model
+PersistentVolumeClaim (an initContainer downloads the GGUF into it on first start, so `kubectl apply` works
+end-to-end):
+
+```bash
+kubectl apply -f docs/overfit.k8s.yaml
+kubectl port-forward svc/overfit 8080:8080
+curl -s http://localhost:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"overfit","messages":[{"role":"user","content":"Say hi in one word."}]}' | jq
+```
+
+Edit the four marked spots in [`overfit.k8s.yaml`](overfit.k8s.yaml) — image, HuggingFace model repo/file, and
+resources (a 0.5B-Q4 needs ~1 GB RAM, a 3B ~4 GB). Liveness/readiness use the server's `/health`; the chiselled
+image runs non-root so `fsGroup` makes the volume writable. For external traffic switch the Service to
+`type: LoadBalancer` (cloud) or `NodePort`. To skip the download, pre-populate the claim and drop the
+initContainer (notes in the file).
+
 ## Choosing a model
 
 The server loads any architecture Overfit supports (see [`supported-models.md`](supported-models.md)). For a

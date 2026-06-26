@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Minimal .NET-for-Android APK that drives the headless DecodeBench on-device (Route B — the headless
+    linux-bionic-arm64 AOT route is blocked by "Cross-OS native compilation is not supported" from Windows).
+    Only the thin UI layer is net10.0-android; Main + AndroidBench are referenced as plain net10.0 libraries
+    (they call no Android.* APIs), so they run on the .NET-for-Android BCL unchanged.
+
+    Build (writable SDK provisioned at %LOCALAPPDATA%\Android\Sdk with android-36):
+      dotnet build Demo/AndroidBenchApp/AndroidBenchApp.csproj -c Release -f net10.0-android \
+        -p:AndroidSdkDirectory="%LOCALAPPDATA%\Android\Sdk" -p:AcceptAndroidSDKLicenses=true
+
+    Deploy + run:
+      adb install -r bin/Release/net10.0-android/com.devonbike.overfitbench-Signed.apk
+      adb push qwen-0.5b-q4km.gguf /sdcard/Android/data/com.devonbike.overfitbench/files/model.gguf
+      # tap RUN in the app; or watch results:  adb logcat -s OverfitBench
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-android</TargetFramework>
+    <SupportedOSPlatformVersion>24</SupportedOSPlatformVersion>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <ApplicationId>com.devonbike.overfitbench</ApplicationId>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+
+    <!-- Mono AOT: precompile the IL to native arm64 so the FFN matmul loop isn't left to the
+         experimental CoreCLR-Android JIT (~150 cycles/MAC). Mono runtime (not CoreCLR) — loses the Dp
+         intrinsic so MainDot runs scalar, but AOT scalar (~2 cyc/MAC) still ~75× over the JIT floor. -->
+    <RunAOTCompilation>true</RunAOTCompilation>
+    <AndroidEnableProfiledAot>false</AndroidEnableProfiledAot>
+    <AndroidPackageFormat>apk</AndroidPackageFormat>
+    <RuntimeIdentifier>android-arm64</RuntimeIdentifier>
+
+    <!-- Diagnosis: CoreCLR's tiered JIT may be leaving the hot decode loop stuck in unoptimized Tier0 on the
+         experimental Android port (broken background Tier1 promotion). Force full optimization from the start
+         to test that hypothesis BEFORE the NDK/AOT route. -->
+    <TieredCompilation>false</TieredCompilation>
+    <TieredPGO>false</TieredPGO>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Sources\Main\Main.csproj" />
+    <ProjectReference Include="..\..\Sources\AndroidBench\AndroidBench.csproj" />
+  </ItemGroup>
+
+</Project>

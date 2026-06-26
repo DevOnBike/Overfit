@@ -22,9 +22,21 @@ services:
       OVERFIT_MODEL_DIR: /models
       # Optional: a MiniLM directory for RAG (config.json + vocab.txt + model.safetensors).
       OVERFIT_EMBEDDING_DIR: /models/minilm
+      # Production gate: set a key — callers must then send 'X-API-Key' / 'Authorization: Bearer'.
+      # Empty = open (dev only). Probe + Swagger paths stay open regardless.
+      ApiKey: ""
+      # Audit: empty → metadata-only audit streams to stdout (docker compose logs). To persist as an
+      # append-only JSONL file, set a path on a volume writable by UID 1654 (see the Dockerfile note).
+      AuditLogPath: ""
     volumes:
       # EDIT the left-hand (host) path to your local model directory.
       - "C:/qwen3b:/models:ro"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/readyz"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 90s
     restart: unless-stopped
 
   prometheus:

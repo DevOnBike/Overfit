@@ -38,9 +38,19 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
             /// <summary>Token selection (greedy / sampling / constraint mask + accept).</summary>
             Sampler = 3,
+
+            /// <summary>FFN gate+up projection (matmul, incl. fused activation-quantize) + gate activation.
+            /// A sub-slice of <see cref="Ffn"/> — overlaps it, so it inflates the report's "other" remainder.</summary>
+            FfnGateUp = 4,
+
+            /// <summary>FFN down projection (the single biggest matmul). Sub-slice of <see cref="Ffn"/>.</summary>
+            FfnDown = 5,
+
+            /// <summary>FFN gate*up element-wise multiply. Sub-slice of <see cref="Ffn"/>.</summary>
+            FfnMultiply = 6,
         }
 
-        private const int ComponentCount = 4;
+        private const int ComponentCount = 7;
 
         private static readonly long[] _ticks = new long[ComponentCount];
         private static readonly long[] _calls = new long[ComponentCount];
@@ -143,6 +153,9 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             1 => "ffn",
             2 => "lm_head",
             3 => "sampler",
+            4 => "ffn_gateup",
+            5 => "ffn_down",
+            6 => "ffn_multiply",
             _ => "?",
         };
     }

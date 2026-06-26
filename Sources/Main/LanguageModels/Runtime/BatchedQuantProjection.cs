@@ -18,6 +18,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
     /// </summary>
     internal static class BatchedQuantProjection
     {
+        /// <summary>Test-only A/B toggle for the Q4_K batched kernel (weight-stationary vs the original
+        /// re-decode-per-row <see cref="Q4KDotKernel.ProjectBatched"/>). Default true (the validated faster path);
+        /// flipped by perf benches to measure the end-to-end delta. Not a runtime knob.</summary>
+        internal static bool UseWeightStationaryQ4K = true;
+
         public static void Dispatch(
             ReadOnlySpan<float> input,
             int rows,
@@ -48,10 +53,22 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 using var qBytes = new PooledBuffer<sbyte>(rows * inputSize, clearMemory: false);
                 using var scales = new PooledBuffer<float>(rows * spr, clearMemory: false);
                 using var sums = new PooledBuffer<short>(groups, clearMemory: false);
-                Q4KDotKernel.ProjectBatched(
-                    input, rows, w, bias, output,
-                    qBytes.Span.Slice(0, rows * inputSize), scales.Span.Slice(0, rows * spr),
-                    sums.Span.Slice(0, groups));
+                // Weight-stationary: decode each Q4_K super-block once and reuse across the row tile (bit-identical
+                // to ProjectBatched, measured ~1.3–1.7× on the prefill / speculative-verify batched matmul).
+                if (UseWeightStationaryQ4K)
+                {
+                    Q4KDotKernel.ProjectBatchedWeightStationary(
+                        input, rows, w, bias, output,
+                        qBytes.Span.Slice(0, rows * inputSize), scales.Span.Slice(0, rows * spr),
+                        sums.Span.Slice(0, groups));
+                }
+                else
+                {
+                    Q4KDotKernel.ProjectBatched(
+                        input, rows, w, bias, output,
+                        qBytes.Span.Slice(0, rows * inputSize), scales.Span.Slice(0, rows * spr),
+                        sums.Span.Slice(0, groups));
+                }
             }
             else if (weight.IsQuantized)
             {

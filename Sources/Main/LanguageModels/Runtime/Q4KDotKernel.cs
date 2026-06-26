@@ -7,6 +7,7 @@ using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
 using DevOnBike.Overfit.Intrinsics;
 using DevOnBike.Overfit.LanguageModels.Loading;
@@ -46,6 +47,19 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
 
         /// <summary>Q8_K group sums per super-block: 256 / 16.</summary>
         public const int GroupsPerSuperBlock = SuperBlockElements / GroupSize;
+
+        /// <summary>
+        /// Diagnostics A/B switch: when true, <see cref="MainDot"/> skips the SIMD (AVX2/NEON) paths and
+        /// uses the scalar oracle. Lets a bench measure NEON-vs-scalar decode on the same process/device
+        /// (flip between interleaved runs). Defaults from <c>OVERFIT_FORCE_SCALAR</c>. Not for production.
+        /// </summary>
+        public static bool ForceScalar = ResolveForceScalar();
+
+        private static bool ResolveForceScalar()
+        {
+            var raw = Environment.GetEnvironmentVariable(OverfitEnvironment.ForceScalar);
+            return raw is "1" || string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase);
+        }
 
         /// <summary>
         /// Quantizes an F32 activation (length a multiple of
@@ -253,7 +267,7 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             // also ≈0 in the 2026-05-31 sprint) AND the compute-bound batched path (40.2 vs 38.9 ms on
             // [256×2048→11008], within noise). The batched cost is per-call overhead + the F32 tail,
             // not the integer multiply-add pair.
-            if (CpuFeatures.HasAvx2)
+            if (!ForceScalar && CpuFeatures.HasAvx2)
             {
                 ref var qsRef = ref MemoryMarshal.GetReference(qs);
                 ref var q8Ref = ref MemoryMarshal.GetReference(q8);
@@ -288,6 +302,67 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 return Vector256.Sum(accVec);
             }
 
+            // NEON (AdvSimd + dotprod) on arm64 — same INT32 reduction, so bit-identical to the
+            // scalar oracle. Guarded by HasDp (false off-arm → never JIT-executed there).
+            if (!ForceScalar && CpuFeatures.HasDp)
+            {
+                return MainDotNeon(qs, q8, scales);
+            }
+
+            return MainDotScalar(qs, q8, scales);
+        }
+
+        /// <summary>
+        /// NEON path for <see cref="MainDot"/> — <c>Σₛ scale[s]·intdotₛ</c> via the ARMv8.2
+        /// dot-product extension (<c>SDOT</c>, <c>vdotq_s32</c>). The 4-bit weight nibbles are
+        /// unsigned [0,15] so they fit the signed SDOT operand directly; each 32-element sub-block
+        /// is two 16-lane SDOT accumulations into INT32 lanes, reduced once and scaled. Bit-identical
+        /// to <see cref="MainDotScalar"/> (pure INT32 — SDOT sums the same integer products in a
+        /// different grouping, and integer addition is exact). UNVALIDATED off-arm: it only executes
+        /// where <see cref="Dp.IsSupported"/>, and is parity-pinned against the scalar on arm64.
+        /// </summary>
+        internal static int MainDotNeon(ReadOnlySpan<byte> qs, ReadOnlySpan<sbyte> q8, ReadOnlySpan<byte> scales)
+        {
+            ref var qsRef = ref MemoryMarshal.GetReference(qs);
+            ref var q8Ref = ref MemoryMarshal.GetReference(q8);
+            var maskLow = Vector128.Create((byte)0x0F);
+            var sum = 0;
+
+            // Four 32-byte nibble runs; each carries sub-block 2p (low nibbles) and 2p+1 (high
+            // nibbles), mirroring MainDotScalar's qsBase = 32*(s>>1) / q8Base = 32*s addressing.
+            for (var p = 0; p < 4; p++)
+            {
+                var packed0 = Vector128.LoadUnsafe(ref qsRef, (nuint)(32 * p));
+                var packed1 = Vector128.LoadUnsafe(ref qsRef, (nuint)(32 * p + 16));
+
+                var low0 = AdvSimd.And(packed0, maskLow).AsSByte();
+                var low1 = AdvSimd.And(packed1, maskLow).AsSByte();
+                var high0 = AdvSimd.ShiftRightLogical(packed0, 4).AsSByte();
+                var high1 = AdvSimd.ShiftRightLogical(packed1, 4).AsSByte();
+
+                var q8Low0 = Vector128.LoadUnsafe(ref q8Ref, (nuint)(64 * p));
+                var q8Low1 = Vector128.LoadUnsafe(ref q8Ref, (nuint)(64 * p + 16));
+                var q8High0 = Vector128.LoadUnsafe(ref q8Ref, (nuint)(64 * p + 32));
+                var q8High1 = Vector128.LoadUnsafe(ref q8Ref, (nuint)(64 * p + 48));
+
+                var accLow = Dp.DotProduct(Vector128<int>.Zero, low0, q8Low0);
+                accLow = Dp.DotProduct(accLow, low1, q8Low1);
+                var accHigh = Dp.DotProduct(Vector128<int>.Zero, high0, q8High0);
+                accHigh = Dp.DotProduct(accHigh, high1, q8High1);
+
+                sum += scales[2 * p] * Vector128.Sum(accLow);
+                sum += scales[2 * p + 1] * Vector128.Sum(accHigh);
+            }
+
+            return sum;
+        }
+
+        /// <summary>
+        /// Scalar reference for <c>Σₛ scale[s]·intdotₛ</c> — the bit-identity oracle for both the
+        /// AVX2 and NEON paths (INT32 arithmetic throughout).
+        /// </summary>
+        internal static int MainDotScalar(ReadOnlySpan<byte> qs, ReadOnlySpan<sbyte> q8, ReadOnlySpan<byte> scales)
+        {
             var sum = 0;
             for (var s = 0; s < 8; s++)
             {
@@ -726,6 +801,157 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
             public int OutputSize;
             public int BsumsPerRow;
             public int Rows;
+        }
+
+        /// <summary>Row-tile width for the weight-stationary batched kernel: the weight super-block is decoded once
+        /// and reused across a tile of this many activation rows. Small + fixed → bounded stack, no per-iteration
+        /// stackalloc.</summary>
+        private const int WeightStationaryTile = 64;
+
+        /// <summary>
+        /// Weight-stationary batched Q4_K projection — same contract as <see cref="ProjectBatched"/> but each weight
+        /// super-block is DECODED ONCE (d / dmin / the 8 scales+mins unpack) and reused across a tile of rows, instead
+        /// of re-decoding per row. The current <see cref="ProjectBatched"/> amortises the weight BYTES (cache-hot
+        /// across rows) but repeats the decode rows× — this hoists that decode out of the rows loop. Accumulation
+        /// order per row is unchanged (Σ over super-blocks ascending), so this is <b>bit-identical</b> to
+        /// <see cref="ProjectBatched"/>. Used by prefill / speculative-verify where rows &gt; 1.
+        /// </summary>
+        public static void ProjectBatchedWeightStationary(
+            ReadOnlySpan<float> input,
+            int rows,
+            Q4KWeight weight,
+            ReadOnlySpan<float> bias,
+            Span<float> output,
+            Span<sbyte> activationQuants,
+            Span<float> activationScales,
+            Span<short> activationBsums)
+        {
+            ArgumentNullException.ThrowIfNull(weight);
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rows);
+
+            var inputSize = weight.InputSize;
+            var outputSize = weight.OutputSize;
+            var superBlocksPerRow = weight.SuperBlocksPerRow;
+            var bsumsPerRow = superBlocksPerRow * GroupsPerSuperBlock;
+
+            if (input.Length < (long)rows * inputSize)
+            {
+                throw new ArgumentException("Input span is smaller than rows * inputSize.", nameof(input));
+            }
+            if (output.Length < (long)rows * outputSize)
+            {
+                throw new ArgumentException("Output span is smaller than rows * outputSize.", nameof(output));
+            }
+            if (!bias.IsEmpty && bias.Length < outputSize)
+            {
+                throw new ArgumentException("Bias span is smaller than outputSize.", nameof(bias));
+            }
+            if (activationQuants.Length < (long)rows * inputSize
+                || activationScales.Length < (long)rows * superBlocksPerRow
+                || activationBsums.Length < (long)rows * bsumsPerRow)
+            {
+                throw new ArgumentException("Activation quantization scratch is too small for rows.");
+            }
+
+            for (var n = 0; n < rows; n++)
+            {
+                QuantizeActivationQ8K(
+                    input.Slice(n * inputSize, inputSize),
+                    activationQuants.Slice(n * inputSize, inputSize),
+                    activationScales.Slice(n * superBlocksPerRow, superBlocksPerRow),
+                    activationBsums.Slice(n * bsumsPerRow, bsumsPerRow));
+            }
+
+            fixed (byte* blocksPtr = weight.BlockSpan)
+            fixed (sbyte* actQuants = activationQuants)
+            fixed (float* actScales = activationScales)
+            fixed (short* actBsums = activationBsums)
+            fixed (float* biasPtr = bias)
+            fixed (float* outputPtr = output)
+            {
+                var context = new Q4KBatchedContext
+                {
+                    Blocks = blocksPtr,
+                    ActivationQuants = actQuants,
+                    ActivationScales = actScales,
+                    ActivationBsums = actBsums,
+                    Bias = biasPtr,
+                    BiasLength = bias.Length,
+                    Output = outputPtr,
+                    SuperBlocksPerRow = superBlocksPerRow,
+                    InputSize = inputSize,
+                    OutputSize = outputSize,
+                    BsumsPerRow = bsumsPerRow,
+                    Rows = rows,
+                };
+
+                OverfitParallel.For(0, outputSize, &WeightStationaryChunk, &context);
+            }
+        }
+
+        /// <summary>Worker for <see cref="ProjectBatchedWeightStationary"/> — a band of output cols. For each col it
+        /// walks the super-blocks, decoding each ONCE and contracting it against a tile of rows.</summary>
+        private static void WeightStationaryChunk(int chunkStart, int chunkEnd, void* context)
+        {
+            ref var ctx = ref Unsafe.AsRef<Q4KBatchedContext>(context);
+            var spr = ctx.SuperBlocksPerRow;
+            var rows = ctx.Rows;
+
+            Span<float> acc = stackalloc float[WeightStationaryTile];
+            Span<byte> scales = stackalloc byte[8];
+            Span<byte> mins = stackalloc byte[8];
+
+            for (var o = chunkStart; o < chunkEnd; o++)
+            {
+                var rowBase = (long)o * spr * Q4KWeight.SuperBlockBytes;
+                var biasO = ctx.BiasLength == 0 ? 0f : ctx.Bias[o];
+
+                for (var tileStart = 0; tileStart < rows; tileStart += WeightStationaryTile)
+                {
+                    var tileRows = Math.Min(WeightStationaryTile, rows - tileStart);
+                    acc.Slice(0, tileRows).Clear(); // [SkipLocalsInit]: stackalloc is not zeroed — clear per tile.
+
+                    for (var sb = 0; sb < spr; sb++)
+                    {
+                        var block = new ReadOnlySpan<byte>(
+                            ctx.Blocks + rowBase + (long)sb * Q4KWeight.SuperBlockBytes, Q4KWeight.SuperBlockBytes);
+
+                        // ── Decode the weight super-block ONCE (hoisted out of the rows loop). ──
+                        var d = (float)BitConverter.UInt16BitsToHalf(
+                            BinaryPrimitives.ReadUInt16LittleEndian(block[..2]));
+                        var dmin = (float)BitConverter.UInt16BitsToHalf(
+                            BinaryPrimitives.ReadUInt16LittleEndian(block.Slice(2, 2)));
+                        GgmlDequant.UnpackQ4_KScalesMins(block.Slice(4, 12), scales, mins);
+                        var qs = block.Slice(16, 128);
+
+                        // ── Contract against each row in the tile (the per-row integer dot + F32 tail). ──
+                        for (var t = 0; t < tileRows; t++)
+                        {
+                            var n = tileStart + t;
+                            var q8 = new ReadOnlySpan<sbyte>(
+                                ctx.ActivationQuants + (long)n * ctx.InputSize + sb * SuperBlockElements,
+                                SuperBlockElements);
+
+                            var mainAcc = MainDot(qs, q8, scales);
+
+                            var minAcc = 0;
+                            var bsumBase = ctx.ActivationBsums + (long)n * ctx.BsumsPerRow + sb * GroupsPerSuperBlock;
+                            for (var s = 0; s < 8; s++)
+                            {
+                                minAcc += mins[s] * (bsumBase[2 * s] + bsumBase[2 * s + 1]);
+                            }
+
+                            acc[t] += ctx.ActivationScales[(long)n * spr + sb] * (d * mainAcc - dmin * minAcc);
+                        }
+                    }
+
+                    for (var t = 0; t < tileRows; t++)
+                    {
+                        var n = tileStart + t;
+                        ctx.Output[(long)n * ctx.OutputSize + o] = biasO + acc[t];
+                    }
+                }
+            }
         }
 
         private static void ValidateProjectArguments(

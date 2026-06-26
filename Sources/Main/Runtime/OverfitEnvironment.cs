@@ -35,6 +35,10 @@ namespace DevOnBike.Overfit.Runtime
         /// <summary>KV-cache element type — e.g. <c>q8</c> for the int8 KV cache (default F32).</summary>
         public const string KvDType = "OVERFIT_KV_DTYPE";
 
+        /// <summary>Diagnostics A/B switch: set to 1/true to force the scalar Q4_K main-dot (skip AVX2/NEON).
+        /// For measuring SIMD-vs-scalar on one device — not a production tuning knob.</summary>
+        public const string ForceScalar = "OVERFIT_FORCE_SCALAR";
+
         // ── Training (Sources/Main/Autograd/ComputationGraph.cs) ──────────────────
 
         /// <summary>Override the autograd tape buffer size (elements).</summary>
