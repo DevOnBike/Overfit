@@ -1,0 +1,5 @@
+# NEVER commit signing material — keep it in a password manager + GitHub Secrets only.
+*.keystore
+*.jks
+*.base64.txt
+*-service-account*.json
