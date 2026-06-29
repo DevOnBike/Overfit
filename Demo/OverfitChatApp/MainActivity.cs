@@ -16,6 +16,8 @@ using Android.Widget;
 using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Loading;
 
+using DevOnBike.Overfit.LanguageModels.Whisper;
+
 namespace DevOnBike.OverfitChat
 {
     /// <summary>
@@ -32,6 +34,8 @@ namespace DevOnBike.OverfitChat
     public class MainActivity : Activity
     {
         private const int RequestPickModel = 42;
+        private const int RequestRecordPermission = 43;
+        private const int RequestPickWhisper = 44;
         private const int MaxMessageChars = 200;
 
         private AnimatedGradientView _gradient = null!;
@@ -42,8 +46,16 @@ namespace DevOnBike.OverfitChat
         private ScrollView _scroll = null!;
         private EditText _input = null!;
         private Button _send = null!;
+        private Button _mic = null!;
         private TextView _counter = null!;
         private TextView _subtitle = null!;
+
+        // Voice input: on-device Whisper speech-to-text (nothing leaves the phone).
+        private VoiceRecorder? _recorder;
+        private WhisperTranscriber? _whisper;
+        private volatile bool _transcribing;
+        private Android.Animation.ObjectAnimator? _micPulse;
+        private readonly Android.OS.Handler _recHandler = new(Android.OS.Looper.MainLooper!);
 
         // Welcome-screen controls — the model loads HERE; we only enter chat once it's ready.
         private LinearLayout _modelSelectField = null!;
@@ -369,6 +381,16 @@ namespace DevOnBike.OverfitChat
             var row = new LinearLayout(this) { Orientation = Orientation.Horizontal };
             row.SetGravity(GravityFlags.CenterVertical);
 
+            _mic = new Button(this) { Text = "🎤" };
+            _mic.SetTextColor(Color.White);
+            _mic.TextSize = 17f;
+            _mic.SetAllCaps(false);
+            _mic.Background = OvalFill(Color.Argb(54, 255, 255, 255));
+            var micLp = new LinearLayout.LayoutParams(Dp(50), Dp(50));
+            micLp.SetMargins(0, 0, Dp(8), 0);
+            _mic.Click += (_, _) => OnMicTapped();
+            row.AddView(_mic, micLp);
+
             _input = new EditText(this) { Hint = "Message…" };
             _input.SetTextColor(Color.White);
             _input.SetHintTextColor(Color.ParseColor("#94A3B8"));
@@ -486,6 +508,11 @@ namespace DevOnBike.OverfitChat
             _input.Alpha = enabled ? 1f : 0.55f;
             _send.Enabled = enabled;
             _send.Alpha = enabled ? 1f : 0.45f;
+            if (_mic is not null)
+            {
+                _mic.Enabled = enabled;
+                _mic.Alpha = enabled ? 1f : 0.45f;
+            }
         }
 
         private void AddUserBubble(string text)
@@ -578,6 +605,36 @@ namespace DevOnBike.OverfitChat
         protected override void OnActivityResult(int requestCode, Result resultCode, Intent? data)
         {
             base.OnActivityResult(requestCode, resultCode, data);
+
+            if (requestCode == RequestPickWhisper && resultCode == Result.Ok && data?.Data is { } wuri)
+            {
+                var wname = GetDisplayName(wuri) ?? "whisper.bin";
+                System.IO.Directory.CreateDirectory(WhisperDir);
+                var wdest = System.IO.Path.Combine(WhisperDir, SafeFileName(wname, ".bin"));
+                Toast.MakeText(this, "Adding voice model…", ToastLength.Short)!.Show();
+                System.Threading.Tasks.Task.Run(() =>
+                {
+                    try
+                    {
+                        using (var input = ContentResolver!.OpenInputStream(wuri))
+                        using (var output = System.IO.File.Create(wdest))
+                        {
+                            input!.CopyTo(output);
+                        }
+                        _whisper = null; // pick up the new model on next transcription
+                        RunOnUiThread(() =>
+                            Toast.MakeText(this, "Voice model added — tap 🎤 to talk.", ToastLength.Short)!.Show());
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLog.Write("Whisper model copy failed", ex);
+                        RunOnUiThread(() =>
+                            Toast.MakeText(this, "Couldn't add model: " + ex.Message, ToastLength.Short)!.Show());
+                    }
+                });
+                return;
+            }
+
             if (requestCode == RequestPickModel && resultCode == Result.Ok && data?.Data is { } uri)
             {
                 var name = GetDisplayName(uri) ?? "model.gguf";
@@ -733,6 +790,7 @@ namespace DevOnBike.OverfitChat
             _client.Dispose();
             _client = null;
             _modelInfo = null;
+            _whisper = null; // free the speech model's RAM too
             ShowWelcome();
         }
 
@@ -757,6 +815,296 @@ namespace DevOnBike.OverfitChat
 
             return new ModelInfo(name, arch, layers, ctx, emb, client.Tokenizer.VocabularySize,
                 new System.IO.FileInfo(path).Length);
+        }
+
+        // ─────────────────────────── voice input (on-device Whisper) ───────────────────────────
+
+        private enum MicState
+        {
+            Idle,
+            Recording,
+            Transcribing
+        }
+
+        private string WhisperDir => System.IO.Path.Combine(GetExternalFilesDir(null)!.AbsolutePath, "whisper");
+
+        // The first whisper.cpp ggml model the user has added (null if none yet).
+        private string? WhisperModelPath()
+        {
+            try
+            {
+                if (System.IO.Directory.Exists(WhisperDir))
+                {
+                    var bins = System.IO.Directory.GetFiles(WhisperDir, "*.bin");
+                    if (bins.Length > 0)
+                    {
+                        Array.Sort(bins);
+                        return bins[0];
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                AppLog.Write("WhisperModelPath failed", ex);
+            }
+            return null;
+        }
+
+        private void OnMicTapped()
+        {
+            if (_transcribing)
+            {
+                return;
+            }
+
+            // Second tap = stop + transcribe.
+            if (_recorder is { IsRecording: true })
+            {
+                StopAndTranscribe();
+                return;
+            }
+
+            // No speech model yet → offer to add one (no network, nothing bundled).
+            if (WhisperModelPath() is null)
+            {
+                PromptAddWhisperModel();
+                return;
+            }
+
+            // Microphone permission (runtime).
+            if (CheckSelfPermission(Android.Manifest.Permission.RecordAudio) != Permission.Granted)
+            {
+                RequestPermissions(new[] { Android.Manifest.Permission.RecordAudio }, RequestRecordPermission);
+                return;
+            }
+
+            StartRecording();
+        }
+
+        private void StartRecording()
+        {
+            try
+            {
+                _recorder ??= new VoiceRecorder();
+                _recorder.Start();
+                _idleHandler.RemoveCallbacksAndMessages(null); // don't unload mid-recording
+                SetMicState(MicState.Recording);
+            }
+            catch (Exception ex)
+            {
+                AppLog.Write("Recording start failed", ex);
+                Toast.MakeText(this, "Couldn't start recording: " + ex.Message, ToastLength.Short)!.Show();
+                SetMicState(MicState.Idle);
+            }
+        }
+
+        private void StopAndTranscribe()
+        {
+            float[] samples;
+            try
+            {
+                samples = _recorder!.Stop();
+            }
+            catch (Exception ex)
+            {
+                AppLog.Write("Recording stop failed", ex);
+                SetMicState(MicState.Idle);
+                return;
+            }
+
+            // Ignore an accidental quick tap (<0.4 s of audio).
+            if (samples.Length < (VoiceRecorder.SampleRate * 2) / 5)
+            {
+                Toast.MakeText(this, "Too short — tap 🎤, speak, then tap ■.", ToastLength.Short)!.Show();
+                SetMicState(MicState.Idle);
+                return;
+            }
+
+            _transcribing = true;
+            SetMicState(MicState.Transcribing);
+
+            var modelPath = WhisperModelPath()!;
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                try
+                {
+                    // Lazy-load the transcriber once; reused across utterances.
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    _whisper ??= WhisperTranscriber.Load(modelPath);
+                    var loadMs = sw.ElapsedMilliseconds;
+                    var text = _whisper.Transcribe(samples, language: "en").Trim();
+                    sw.Stop();
+                    AppLog.Write(
+                        $"Whisper: {samples.Length / (double)VoiceRecorder.SampleRate:F1}s audio, "
+                        + $"load {loadMs}ms, total {sw.ElapsedMilliseconds}ms -> \"{text}\"");
+                    RunOnUiThread(() => InsertTranscript(text));
+                }
+                catch (Exception ex)
+                {
+                    AppLog.Write("Transcription failed", ex);
+                    RunOnUiThread(() =>
+                        Toast.MakeText(this, "Transcription failed: " + ex.Message, ToastLength.Short)!.Show());
+                }
+                finally
+                {
+                    RunOnUiThread(() =>
+                    {
+                        _transcribing = false;
+                        SetMicState(MicState.Idle);
+                        ScheduleIdleUnload();
+                    });
+                }
+            });
+        }
+
+        // Appends the recognised text into the composer (capped at the message limit), ready to edit/send.
+        private void InsertTranscript(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                Toast.MakeText(this, "Didn't catch that — try again.", ToastLength.Short)!.Show();
+                return;
+            }
+
+            var existing = _input.Text ?? string.Empty;
+            var combined = string.IsNullOrEmpty(existing) ? text : existing.TrimEnd() + " " + text;
+            if (combined.Length > MaxMessageChars)
+            {
+                combined = combined.Substring(0, MaxMessageChars);
+            }
+            _input.Text = combined;
+            _input.SetSelection(_input.Text!.Length);
+        }
+
+        private void SetMicState(MicState state)
+        {
+            _recHandler.RemoveCallbacksAndMessages(null);
+            StopMicPulse();
+
+            switch (state)
+            {
+                case MicState.Recording:
+                    _mic.Text = "■";
+                    _mic.Enabled = true;
+                    _mic.Alpha = 1f;
+                    _mic.Background = OvalFill(Color.ParseColor("#EF4444"));
+                    // Can't send (or type) while recording.
+                    _send.Enabled = false;
+                    _send.Alpha = 0.4f;
+                    _input.Enabled = false;
+                    StartMicPulse();
+                    UpdateRecHint();
+                    break;
+                case MicState.Transcribing:
+                    _mic.Text = "…";
+                    _mic.Enabled = false;
+                    _mic.Alpha = 0.6f;
+                    _mic.Background = OvalFill(Color.Argb(54, 255, 255, 255));
+                    _send.Enabled = false;
+                    _send.Alpha = 0.4f;
+                    _input.Enabled = false;
+                    _input.Hint = "Transcribing…";
+                    break;
+                default: // Idle
+                    _mic.Text = "🎤";
+                    _mic.Enabled = true;
+                    _mic.Alpha = 1f;
+                    _mic.Background = OvalFill(Color.Argb(54, 255, 255, 255));
+                    _send.Enabled = true;
+                    _send.Alpha = 1f;
+                    _input.Enabled = true;
+                    _input.Hint = "Message…";
+                    break;
+            }
+        }
+
+        // Pulsing scale on the mic button while recording — a clear "we're listening" cue.
+        private void StartMicPulse()
+        {
+            _micPulse = Android.Animation.ObjectAnimator.OfPropertyValuesHolder(_mic,
+                Android.Animation.PropertyValuesHolder.OfFloat("scaleX", 1f, 1.18f)!,
+                Android.Animation.PropertyValuesHolder.OfFloat("scaleY", 1f, 1.18f)!)!;
+            _micPulse.SetDuration(560);
+            _micPulse.RepeatCount = Android.Animation.ValueAnimator.Infinite;
+            _micPulse.RepeatMode = Android.Animation.ValueAnimatorRepeatMode.Reverse;
+            _micPulse.Start();
+        }
+
+        private void StopMicPulse()
+        {
+            _micPulse?.Cancel();
+            _micPulse = null;
+            if (_mic is not null)
+            {
+                _mic.ScaleX = 1f;
+                _mic.ScaleY = 1f;
+            }
+        }
+
+        // Silence-based auto-stop (endpointing): how long after speech ends before we cut, and a hard cap.
+        private const double EndpointSilenceSeconds = 1.2;
+        private const double MaxRecordSeconds = 30.0;
+
+        // Live "● Recording m:ss" while capturing + auto-stop once the user stops talking.
+        private void UpdateRecHint()
+        {
+            if (_recorder is not { IsRecording: true } rec)
+            {
+                return;
+            }
+
+            var s = (int)rec.Seconds;
+            _input.Hint = $"●  Recording  {s / 60}:{s % 60:D2}  —  tap ■ to stop";
+
+            // Stop automatically ~1.2 s after the speech tails off (only once we've actually heard speech, so
+            // leading silence doesn't trigger it), or at the hard cap.
+            var endBySilence = rec.SpeechDetected && rec.SilenceSeconds >= EndpointSilenceSeconds && rec.Seconds >= 0.8;
+            if (endBySilence || rec.Seconds >= MaxRecordSeconds)
+            {
+                StopAndTranscribe();
+                return;
+            }
+
+            _recHandler.PostDelayed(UpdateRecHint, 250);
+        }
+
+        private void PromptAddWhisperModel()
+        {
+            new AlertDialog.Builder(this)!
+                .SetTitle("Voice input")!
+                .SetMessage(
+                    "Voice input transcribes your speech entirely on-device with Whisper — fully offline, "
+                    + "nothing is uploaded.\n\nIt needs a Whisper speech model: a whisper.cpp ggml .bin file "
+                    + "(e.g. ggml-tiny.bin, ~75 MB). Add one from your files?")!
+                .SetPositiveButton("Add model file", (_, _) => PickWhisperModel())!
+                .SetNegativeButton("Cancel", (_, _) => { })!
+                .Show();
+        }
+
+        private void PickWhisperModel()
+        {
+            var intent = new Intent(Intent.ActionOpenDocument);
+            intent.AddCategory(Intent.CategoryOpenable!);
+            intent.SetType("*/*");
+            StartActivityForResult(Intent.CreateChooser(intent, "Pick a Whisper ggml .bin"), RequestPickWhisper);
+        }
+
+        public override void OnRequestPermissionsResult(
+            int requestCode, string[] permissions, Permission[] grantResults)
+        {
+            base.OnRequestPermissionsResult(requestCode, permissions, grantResults);
+            if (requestCode == RequestRecordPermission)
+            {
+                if (grantResults.Length > 0 && grantResults[0] == Permission.Granted)
+                {
+                    StartRecording();
+                }
+                else
+                {
+                    Toast.MakeText(this, "Microphone permission is needed for voice input.",
+                        ToastLength.Short)!.Show();
+                }
+            }
         }
 
         private const string GitHubUrl = "https://github.com/DevOnBike/Overfit";
@@ -871,6 +1219,11 @@ namespace DevOnBike.OverfitChat
         protected override void OnDestroy()
         {
             _idleHandler.RemoveCallbacksAndMessages(null);
+            _recHandler.RemoveCallbacksAndMessages(null);
+            StopMicPulse();
+            _recorder?.Cancel();
+            _recorder = null;
+            _whisper = null;
             _client?.Dispose();
             _client = null;
             base.OnDestroy();
@@ -942,6 +1295,24 @@ namespace DevOnBike.OverfitChat
                 new[] { Color.ParseColor("#7C3AED").ToArgb(), Color.ParseColor("#2563EB").ToArgb() });
             d.SetShape(ShapeType.Oval);
             return d;
+        }
+
+        private GradientDrawable OvalFill(Color fill)
+        {
+            var d = new GradientDrawable();
+            d.SetShape(ShapeType.Oval);
+            d.SetColor(fill);
+            return d;
+        }
+
+        private static string SafeFileName(string name, string ext)
+        {
+            var safe = string.Join("_", name.Split(System.IO.Path.GetInvalidFileNameChars()));
+            if (!safe.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
+            {
+                safe += ext;
+            }
+            return safe;
         }
     }
 

@@ -213,7 +213,7 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
         /// </summary>
         public int[] DecodeCached(
             ReadOnlySpan<float> encoderOut, int nCtx, ReadOnlySpan<int> promptTokens,
-            int endOfTranscript, int maxNewTokens)
+            int endOfTranscript, int maxNewTokens, int minRepeatPeriod = 0)
         {
             var maxLen = promptTokens.Length + maxNewTokens;
             var state = CreateState(encoderOut, nCtx, maxLen);
@@ -234,6 +234,14 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
                     break;
                 }
                 produced.Add(next);
+
+                // Anti-loop: a short clip can make Whisper re-emit the same phrase instead of emitting EOT. As
+                // soon as the tail is an exact back-to-back repeat (period >= minRepeatPeriod), drop the
+                // duplicate copy and stop — far more robust than fighting it with token bans.
+                if (minRepeatPeriod > 0 && TrimTailRepeat(produced, minRepeatPeriod))
+                {
+                    break;
+                }
                 if (produced.Count >= maxNewTokens)
                 {
                     break;
@@ -241,6 +249,32 @@ namespace DevOnBike.Overfit.LanguageModels.Whisper
                 logits = Step(state, next);
             }
             return produced.ToArray();
+        }
+
+        // If the last p tokens exactly equal the p tokens before them (an immediate phrase repeat) for some
+        // p >= minPeriod, remove that duplicate tail and report it — the decoder then stops. Smallest period
+        // wins, so "P P" trims back to a single "P".
+        private static bool TrimTailRepeat(List<int> produced, int minPeriod)
+        {
+            var n = produced.Count;
+            for (var p = minPeriod; p <= n / 2; p++)
+            {
+                var repeat = true;
+                for (var j = 0; j < p; j++)
+                {
+                    if (produced[n - 1 - j] != produced[n - 1 - p - j])
+                    {
+                        repeat = false;
+                        break;
+                    }
+                }
+                if (repeat)
+                {
+                    produced.RemoveRange(n - p, p);
+                    return true;
+                }
+            }
+            return false;
         }
 
         private State? _reuseState; // reused across DecodeCached calls (streaming) when dims match

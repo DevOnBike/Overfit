@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <!-- Voice input records audio for on-device Whisper transcription; the audio never leaves the phone. -->
+  <uses-permission android:name="android.permission.RECORD_AUDIO" />
+  <uses-feature android:name="android.hardware.microphone" android:required="false" />
   <application
     android:icon="@mipmap/appicon"
     android:roundIcon="@mipmap/appicon"
