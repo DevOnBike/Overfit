@@ -72,6 +72,12 @@ namespace DevOnBike.OverfitChat
         private const int IdleUnloadMs = 30_000;
         private readonly Android.OS.Handler _idleHandler = new(Android.OS.Looper.MainLooper!);
 
+        // Live on-device CPU/RAM/tok-per-sec readout shown in the header subtitle while the model generates.
+        private readonly Android.OS.Handler _statsHandler = new(Android.OS.Looper.MainLooper!);
+        private readonly CpuRamSampler _sampler = new();
+        private int _genTokens;          // streamed tokens this turn (one onText callback ≈ one token)
+        private long _genFirstTokenMs;   // timestamp of the first token, so tok/s excludes the prefill wait
+
         // Models live as individual *.gguf files here (the bundled SmolLM2 + any the user added).
         private string ModelsDir => System.IO.Path.Combine(GetExternalFilesDir(null)!.AbsolutePath, "models");
         private const string BuiltInAsset = "smollm2-135m.gguf";
@@ -466,6 +472,9 @@ namespace DevOnBike.OverfitChat
             _input.Text = string.Empty;
             SetComposerEnabled(false);
             _idleHandler.RemoveCallbacksAndMessages(null);
+            _genTokens = 0;
+            _genFirstTokenMs = 0;
+            StartStatsUpdater();
 
             AddUserBubble(text);
             var update = AddStreamingAssistantBubble();
@@ -478,6 +487,10 @@ namespace DevOnBike.OverfitChat
                 {
                     client.Send(text, onText: token =>
                     {
+                        if (System.Threading.Interlocked.Increment(ref _genTokens) == 1)
+                        {
+                            _genFirstTokenMs = Android.OS.SystemClock.ElapsedRealtime();
+                        }
                         sb.Append(token);
                         RunOnUiThread(() => update(sb.ToString()));
                     });
@@ -493,12 +506,53 @@ namespace DevOnBike.OverfitChat
                     RunOnUiThread(() =>
                     {
                         _busy = false;
+                        StopStatsUpdater();
                         _gradient.Resume();
                         SetComposerEnabled(true);
                         ScheduleIdleUnload();
                     });
                 }
             });
+        }
+
+        // Live CPU/RAM readout in the header subtitle while generating — "it's really running on your phone".
+        private void StartStatsUpdater()
+        {
+            _sampler.Sample(); // prime the CPU delta baseline (first reading would otherwise be 0)
+            _statsHandler.RemoveCallbacksAndMessages(null);
+            _statsHandler.PostDelayed(UpdateStats, 600);
+        }
+
+        private void UpdateStats()
+        {
+            if (!_busy)
+            {
+                return;
+            }
+            var (cores, rssMb) = _sampler.Sample();
+
+            var tps = 0.0;
+            var first = _genFirstTokenMs;
+            if (first > 0)
+            {
+                var secs = (Android.OS.SystemClock.ElapsedRealtime() - first) / 1000.0;
+                var toks = _genTokens - 1; // measure from the first token (prefill excluded)
+                if (secs > 0 && toks > 0)
+                {
+                    tps = toks / secs;
+                }
+            }
+
+            _subtitle.Text = tps > 0
+                ? $"⚡ {tps:F1} tok/s · {cores:F1} cores · {rssMb / 1024.0:F1} GB"
+                : $"⚡ {cores:F1} cores · {rssMb / 1024.0:F1} GB";
+            _statsHandler.PostDelayed(UpdateStats, 600);
+        }
+
+        private void StopStatsUpdater()
+        {
+            _statsHandler.RemoveCallbacksAndMessages(null);
+            _subtitle.Text = _modelInfo is { } mi ? mi.Name : "ready";
         }
 
         // Disable the input + send button while the model is generating (and dim them), re-enable after.
@@ -669,8 +723,10 @@ namespace DevOnBike.OverfitChat
             {
                 // quantize:false keeps Q4_K resident (measured ~4× faster on-device than the Q8 requant path);
                 // 4096 context + sliding window so long multi-turn chats don't error on "context full".
+                // maxNewTokens is a SAFETY cap, not the expected length — a well-behaved chat model stops at its
+                // end-of-turn token well before this. 160 was too low and chopped longer answers mid-sentence.
                 var client = OverfitClient.LoadGguf(
-                    path, maxContextLength: 4096, mmap: true, quantize: false, maxNewTokens: 160, slidingWindow: true);
+                    path, maxContextLength: 4096, mmap: true, quantize: false, maxNewTokens: 512, slidingWindow: true);
                 var info = BuildInfo(path, client, displayName);
                 RunOnUiThread(() =>
                 {
@@ -1220,6 +1276,7 @@ namespace DevOnBike.OverfitChat
         {
             _idleHandler.RemoveCallbacksAndMessages(null);
             _recHandler.RemoveCallbacksAndMessages(null);
+            _statsHandler.RemoveCallbacksAndMessages(null);
             StopMicPulse();
             _recorder?.Cancel();
             _recorder = null;
