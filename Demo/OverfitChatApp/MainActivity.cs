@@ -503,6 +503,11 @@ namespace DevOnBike.OverfitChat
                 }
                 finally
                 {
+                    var toks = _genTokens;
+                    var genMs = _genFirstTokenMs > 0 ? Android.OS.SystemClock.ElapsedRealtime() - _genFirstTokenMs : 0;
+                    var tps = genMs > 0 && toks > 1 ? (toks - 1) * 1000.0 / genMs : 0;
+                    var (_, rssMb) = _sampler.Sample();
+                    AppLog.Write($"LLM gen: {toks} tok, {tps:F1} tok/s, RSS {rssMb} MB");
                     RunOnUiThread(() =>
                     {
                         _busy = false;
@@ -723,10 +728,19 @@ namespace DevOnBike.OverfitChat
             {
                 // quantize:false keeps Q4_K resident (measured ~4× faster on-device than the Q8 requant path);
                 // 4096 context + sliding window so long multi-turn chats don't error on "context full".
+                // RAM vs speed, chosen by model size. quantize:false = every weight F32 → ~8× the Q4_K file
+                // size in RAM, but the F32 matmul is faster on mobile (it beats the quantized kernels under
+                // Mono/CoreCLR's weaker codegen). quantize:true = Q4_K/Q6_K mmap'd zero-copy (low, reclaimable
+                // working set) + Q8 for the rest. So keep F32 for models small enough to fit comfortably, and
+                // switch big models to the quantized/mmap path so they don't OOM the phone.
+                var fileBytes = new System.IO.FileInfo(path).Length;
+                var quantize = fileBytes >= 550_000_000; // ~>0.7B Q4_K → mmap/quantized; smaller → fast F32
+
                 // maxNewTokens is a SAFETY cap, not the expected length — a well-behaved chat model stops at its
                 // end-of-turn token well before this. 160 was too low and chopped longer answers mid-sentence.
                 var client = OverfitClient.LoadGguf(
-                    path, maxContextLength: 4096, mmap: true, quantize: false, maxNewTokens: 512, slidingWindow: true);
+                    path, maxContextLength: 4096, mmap: true, quantize: quantize, maxNewTokens: 512, slidingWindow: true);
+                AppLog.Write($"Model load: {System.IO.Path.GetFileName(path)} ({fileBytes / (1024 * 1024)} MB, quantize={quantize})");
                 var info = BuildInfo(path, client, displayName);
                 RunOnUiThread(() =>
                 {
