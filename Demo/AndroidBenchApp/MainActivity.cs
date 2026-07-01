@@ -66,6 +66,9 @@ namespace DevOnBike.OverfitBench
                 {
                     try
                     {
+                        // FP16-resident spike — pure array math, no model needed, runs first.
+                        Fp16GemvBench.Run(Log);
+
                         var filesDir = GetExternalFilesDir(null)?.AbsolutePath
                             ?? throw new System.IO.DirectoryNotFoundException("No external files dir.");
                         var modelPath = System.IO.Path.Combine(filesDir, ModelFileName);
@@ -73,7 +76,7 @@ namespace DevOnBike.OverfitBench
 
                         if (!System.IO.File.Exists(modelPath))
                         {
-                            Log($"!! model not found. adb push <model>.gguf {modelPath}");
+                            Log($"(decode bench skipped — no model at {modelPath})");
                             return;
                         }
 
