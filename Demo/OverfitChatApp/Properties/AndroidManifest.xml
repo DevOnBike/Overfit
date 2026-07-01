@@ -6,5 +6,6 @@
   <application
     android:icon="@mipmap/appicon"
     android:roundIcon="@mipmap/appicon"
+    android:enableOnBackInvokedCallback="true"
     android:label="OverThink" />
 </manifest>

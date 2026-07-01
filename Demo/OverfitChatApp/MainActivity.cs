@@ -67,6 +67,7 @@ namespace DevOnBike.OverfitChat
         private OverfitClient? _client;
         private ModelInfo? _modelInfo;
         private volatile bool _busy;
+        private bool _inChat; // true while the chat screen is shown (drives Back → welcome instead of exit)
 
         // After this much idle time the model is unloaded (frees ~RAM) and the user returns to model select.
         private const int IdleUnloadMs = 30_000;
@@ -207,6 +208,8 @@ namespace DevOnBike.OverfitChat
 
         private void ShowWelcome()
         {
+            _inChat = false;
+            DisableChatBackHandling();
             var col = new LinearLayout(this) { Orientation = Orientation.Vertical };
             col.SetGravity(GravityFlags.Center);
             col.SetPadding(Dp(36), 0, Dp(36), 0);
@@ -280,7 +283,7 @@ namespace DevOnBike.OverfitChat
             stLp.SetMargins(Dp(24), Dp(14), Dp(24), 0);
             col.AddView(_welcomeStatus, stLp);
 
-            _welcomeAddLink = new TextView(this) { Text = "＋  Add a model from file" };
+            _welcomeAddLink = new TextView(this) { Text = "＋  Add .gguf model from file" };
             _welcomeAddLink.SetTextColor(Color.ParseColor("#A78BFA"));
             _welcomeAddLink.TextSize = 14f;
             _welcomeAddLink.Gravity = GravityFlags.Center;
@@ -291,6 +294,19 @@ namespace DevOnBike.OverfitChat
                 ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
             addLp.SetMargins(0, Dp(14), 0, 0);
             col.AddView(_welcomeAddLink, addLp);
+
+            // Optional voice input: adding a Whisper model here is what makes the 🎤 button appear in chat.
+            var voiceLink = new TextView(this) { Text = "＋  Add .bin voice model (Whisper)" };
+            voiceLink.SetTextColor(Color.ParseColor("#A78BFA"));
+            voiceLink.TextSize = 13f;
+            voiceLink.Gravity = GravityFlags.Center;
+            voiceLink.SetPadding(Dp(12), Dp(8), Dp(12), Dp(8));
+            voiceLink.Clickable = true;
+            voiceLink.Click += (_, _) => PickWhisperModel();
+            var voiceLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+            voiceLp.SetMargins(0, Dp(6), 0, 0);
+            col.AddView(voiceLink, voiceLp);
 
             var about = new TextView(this) { Text = "About  ·  GitHub" };
             about.SetTextColor(Color.ParseColor("#A78BFA"));
@@ -320,6 +336,8 @@ namespace DevOnBike.OverfitChat
 
         private void ShowChat()
         {
+            _inChat = true;
+            EnableChatBackHandling();
             var column = new LinearLayout(this) { Orientation = Orientation.Vertical };
 
             column.AddView(BuildChatHeader());
@@ -396,6 +414,7 @@ namespace DevOnBike.OverfitChat
             micLp.SetMargins(0, 0, Dp(8), 0);
             _mic.Click += (_, _) => OnMicTapped();
             row.AddView(_mic, micLp);
+            UpdateMicVisibility(); // only show 🎤 once a Whisper model is available
 
             _input = new EditText(this) { Hint = "Message…" };
             _input.SetTextColor(Color.White);
@@ -682,7 +701,10 @@ namespace DevOnBike.OverfitChat
                         }
                         _whisper = null; // pick up the new model on next transcription
                         RunOnUiThread(() =>
-                            Toast.MakeText(this, "Voice model added — tap 🎤 to talk.", ToastLength.Short)!.Show());
+                        {
+                            UpdateMicVisibility(); // the 🎤 button can appear now that a model exists
+                            Toast.MakeText(this, "Voice model added — tap 🎤 to talk.", ToastLength.Short)!.Show();
+                        });
                     }
                     catch (Exception ex)
                     {
@@ -918,6 +940,17 @@ namespace DevOnBike.OverfitChat
                 AppLog.Write("WhisperModelPath failed", ex);
             }
             return null;
+        }
+
+        // The mic button only appears once a Whisper speech model is present (added via the About dialog or a
+        // prior pick) — no point showing a voice button that can't transcribe.
+        private void UpdateMicVisibility()
+        {
+            if (_mic is null)
+            {
+                return;
+            }
+            _mic.Visibility = WhisperModelPath() is not null ? ViewStates.Visible : ViewStates.Gone;
         }
 
         private void OnMicTapped()
@@ -1186,7 +1219,10 @@ namespace DevOnBike.OverfitChat
                 + "leaves the device.\n\n"
                 + "It's powered by Overfit: an open-source, pure-C# / .NET deep-learning & inference engine "
                 + "(zero-allocation CPU inference, GGUF models, no Python runtime).\n\n"
-                + "Pick any GGUF model and chat with streaming tokens, fully offline.";
+                + "Pick any GGUF model and chat with streaming tokens, fully offline.\n\n"
+                + "Voice input (optional): add a Whisper speech model (a whisper.cpp ggml .bin file) from the "
+                + "start screen to enable the 🎤 button — speech is transcribed entirely on your device and "
+                + "the audio is never uploaded.";
 
             new AlertDialog.Builder(this)!
                 .SetTitle("About OverThink")!
@@ -1284,6 +1320,51 @@ namespace DevOnBike.OverfitChat
             }
 
             return uri.LastPathSegment;
+        }
+
+        // Single-Activity with screen-swapping (no fragment/activity back-stack): Back from the chat screen
+        // should return to the model-select (welcome) screen, not exit the app. Modern Android (API 33+) routes
+        // Back through the predictive-back dispatcher and does NOT call OnBackPressed, so on the chat screen we
+        // register an OnBackInvokedCallback (→ welcome) and unregister it on welcome (so Back there exits, the
+        // default). OnBackPressed is kept for API < 33 devices.
+        private Java.Lang.Object? _backCallback;
+
+        private void EnableChatBackHandling()
+        {
+            if (!OperatingSystem.IsAndroidVersionAtLeast(33) || _backCallback is not null)
+            {
+                return;
+            }
+            var cb = new BackToWelcomeCallback(() => ShowWelcome());
+            OnBackInvokedDispatcher!.RegisterOnBackInvokedCallback(0 /* PRIORITY_DEFAULT */, cb);
+            _backCallback = cb;
+        }
+
+        private void DisableChatBackHandling()
+        {
+            if (!OperatingSystem.IsAndroidVersionAtLeast(33) || _backCallback is not Android.Window.IOnBackInvokedCallback cb)
+            {
+                return;
+            }
+            OnBackInvokedDispatcher!.UnregisterOnBackInvokedCallback(cb);
+            _backCallback = null;
+        }
+
+        public override void OnBackPressed()
+        {
+            if (_inChat)
+            {
+                ShowWelcome(); // legacy path (API < 33)
+                return;
+            }
+            base.OnBackPressed();
+        }
+
+        private sealed class BackToWelcomeCallback : Java.Lang.Object, Android.Window.IOnBackInvokedCallback
+        {
+            private readonly Action _action;
+            public BackToWelcomeCallback(Action action) => _action = action;
+            public void OnBackInvoked() => _action();
         }
 
         protected override void OnDestroy()

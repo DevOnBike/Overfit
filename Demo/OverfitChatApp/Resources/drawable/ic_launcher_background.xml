@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Adaptive-icon background: the app's violet→blue gradient. -->
+<!-- Adaptive-icon background: dark navy with a subtle violet-tinted center glow, so the colorful
+     swirl-bubble logo (the foreground) pops. Matches store/icon-512.png. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
     <gradient
-        android:startColor="#7C3AED"
-        android:endColor="#2563EB"
-        android:angle="135" />
+        android:type="radial"
+        android:gradientRadius="65%"
+        android:startColor="#241B4A"
+        android:endColor="#12121F" />
 </shape>

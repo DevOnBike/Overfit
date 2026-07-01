@@ -12,6 +12,7 @@
 
 using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Skills.Evaluation;
+using DevOnBike.Overfit.LanguageModels.Skills.Optimization;
 
 var modelPath = args.Length > 0 ? args[0] : Environment.GetEnvironmentVariable("OVERFIT_MODEL");
 if (string.IsNullOrWhiteSpace(modelPath) || !File.Exists(modelPath))
@@ -22,6 +23,40 @@ if (string.IsNullOrWhiteSpace(modelPath) || !File.Exists(modelPath))
 
 Console.WriteLine($"Loading {Path.GetFileName(modelPath)} (greedy → reproducible) ...");
 using var client = OverfitClient.LoadGguf(modelPath, maxContextLength: 2048, maxNewTokens: 128);
+
+// ── SkillOpt mode: self-improve a weak instruction, keeping only edits that raise the held-out score ──
+if (args.Contains("optimize", StringComparer.OrdinalIgnoreCase))
+{
+    var optRegistry = new CheckRegistry().Register(new ShortAnswerGrader());
+    var train = new List<SkillEvalCase>
+    {
+        new("t1", "What is the capital of France?", ShouldTrigger: true, new[] { "short_answer" }),
+        new("t2", "What is the capital of Japan?", ShouldTrigger: true, new[] { "short_answer" }),
+    };
+    var val = new List<SkillEvalCase>
+    {
+        new("v1", "What is the capital of Italy?", ShouldTrigger: true, new[] { "short_answer" }),
+        new("v2", "What is the capital of Spain?", ShouldTrigger: true, new[] { "short_answer" }),
+    };
+
+    Console.WriteLine("SkillOpt: improving a weak instruction from failures (held-out gate) ...\n");
+    var opt = SkillOptimizer.Optimize(
+        initialInstructions: "Answer the question.",
+        runnerFactory: i => new OverfitSkillRunner(client, "concise_answer", "Answer with just the answer.", i, measureTrigger: false),
+        editor: new OverfitSkillEditor(client),
+        registry: optRegistry,
+        trainCases: train,
+        validationCases: val,
+        rounds: 3);
+
+    foreach (var s in opt.Steps)
+    {
+        Console.WriteLine($"  round {s.Round}: val={s.ValidationScore:P0}  {(s.Accepted ? "ACCEPT" : "reject")}  \"{Trim(s.Instructions)}\"");
+    }
+    Console.WriteLine($"\n  best val score  : {opt.BestValidationScore:P0}");
+    Console.WriteLine($"  best instructions: \"{Trim(opt.BestInstructions)}\"");
+    return 0;
+}
 
 // ── the skill under test ──
 var runner = new OverfitSkillRunner(

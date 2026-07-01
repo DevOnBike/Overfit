@@ -275,6 +275,20 @@ free-hosting options, and model-on-boot.
 
 ---
 
+### 7. Test — and self-improve — agent skills, locally
+
+Prompts and agent skills are code, so Overfit lets you **evaluate them like code** — offline, deterministically
+(greedy/seeded → byte-reproducible), at zero per-eval API cost, with a rubric grader whose JSON is *guaranteed
+valid*. A small dataset runs a skill **ON vs OFF** on a local model; deterministic C# checks answer "did it do the
+basics?", a schema-locked local judge answers "is it good?", and the report's **lift** (pass-rate ON − OFF) is the
+real signal — a near-zero lift means the bare model already does it, so the skill can be retired. Trigger accuracy
+is graded deterministically via constrained tool-selection. On top of that, **SkillOpt** self-improves a skill's
+instructions in text space (no weights touched): an optimizer model proposes bounded edits from the failures, and
+each edit is kept **only when it strictly raises a held-out score** — so the loop can improve a prompt but never
+regress it. All of it rides on primitives you already have (local generation, `SkillEvaluator`, guaranteed JSON).
+See [`Sources/Main/LanguageModels/Skills/README.md`](Sources/Main/LanguageModels/Skills/README.md),
+[docs/skill-eval.md](docs/skill-eval.md) and `Demo/SkillEvalConsole`.
+
 ## What you can build today
 
 ### Private AI assistant inside your app

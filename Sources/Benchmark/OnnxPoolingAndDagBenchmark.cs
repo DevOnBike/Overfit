@@ -17,7 +17,7 @@ namespace Benchmarks
     /// Fixtures:
     ///   Sources/Benchmark/Helpers/tiny_avgpool.onnx   — Conv→AvgPool→Linear
     ///   Sources/Benchmark/Helpers/resnet_block.onnx   — Conv+BN(folded)+ReLU+skip
-    ///   Sources/Benchmark/Helpers/tiny_resnet.onnx    — Linear+skip+Linear (from fixture_resnet.py)
+    ///   Sources/Benchmark/Helpers/tiny_resnet.onnx    — Linear+skip+Linear (from Scripts/fixture_resnet.py)
     ///
     /// Run:
     ///   dotnet run -c Release --project Sources/Benchmark --filter "*AvgPool*|*ResNet*|*OnnxGraph*"
