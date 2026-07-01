@@ -9,6 +9,7 @@ using DevOnBike.Overfit.Anomalies.Gpt;
 using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning;
+using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.LanguageModels.Experimental;
 using DevOnBike.Overfit.Optimizers;
 using DevOnBike.Overfit.Parameters;
@@ -95,7 +96,7 @@ namespace DevOnBike.Overfit.Anomalies.Training
             // System.Random is not thread-safe (concurrent Next() races corrupt its
             // internal state and can return 0 / skew the sample distribution).
             var evalRng = new Random(_cfg.Seed);
-            var sw = Stopwatch.StartNew();
+            var sw = ValueStopwatch.StartNew();
 
             var initialLoss = 0f;
             var finalValLoss = 0f;
@@ -213,7 +214,7 @@ namespace DevOnBike.Overfit.Anomalies.Training
                         TotalSteps = _cfg.Steps,
                         TrainLoss = avg,
                         ValLoss = valLoss,
-                        Elapsed = sw.Elapsed,
+                        Elapsed = sw.GetElapsedTime(),
                     });
                 }
             }
@@ -246,7 +247,7 @@ namespace DevOnBike.Overfit.Anomalies.Training
                 InitialLoss = initialLoss,
                 FinalValLoss = finalValLoss,
                 CheckpointPath = checkpointPath,
-                TrainingTime = sw.Elapsed,
+                TrainingTime = sw.GetElapsedTime(),
             };
         }
 
