@@ -42,5 +42,13 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
         /// is the single most important non-obvious setting — change it only if you know why.
         /// </summary>
         public float AdamEpsilon { get; init; } = 1e-4f;
+
+        /// <summary>
+        /// Write a resume checkpoint (adapter + Adam state + position) every N training steps when a
+        /// <c>checkpointPath</c> is passed to <see cref="QLoRAFineTuner.FineTune"/>. 0 (default) = only the
+        /// final save. Enables a long/overnight fine-tune to survive an interruption and resume EXACTLY
+        /// (see <see cref="QLoRAFineTuner.FineTune"/>'s <c>resume</c> flag).
+        /// </summary>
+        public int CheckpointEvery { get; init; }
     }
 }
