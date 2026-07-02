@@ -8,6 +8,7 @@ using System.Net;
 using DevOnBike.Overfit.Audio;
 using DevOnBike.Overfit.Audio.Tts;
 using DevOnBike.Overfit.Audio.Tts.Orpheus;
+using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.LanguageModels;
 using DevOnBike.Overfit.LanguageModels.Embeddings;
 using DevOnBike.Overfit.LanguageModels.Loading;
@@ -588,7 +589,7 @@ namespace DevOnBike.Overfit.Cli
             }
 
             var outputs = new float[(long)rows.Count * groups];
-            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var sw = ValueStopwatch.StartNew();
             if (margin)
             {
                 // Raw, pre-transform margins (XGBoost output_margin=True).
@@ -601,7 +602,6 @@ namespace DevOnBike.Overfit.Cli
             {
                 model.PredictBatchParallel(flat, rows.Count, outputs);
             }
-            sw.Stop();
 
             using var writer = outputPath is null ? null : new StreamWriter(outputPath);
             void Emit(string text)
@@ -622,10 +622,10 @@ namespace DevOnBike.Overfit.Cli
                 Emit(FormatRow(outputs.AsSpan(r * groups, groups)));
             }
 
-            var nsPerRow = sw.Elapsed.TotalMilliseconds * 1e6 / rows.Count;
+            var nsPerRow = sw.GetElapsedTime().TotalMilliseconds * 1e6 / rows.Count;
             Console.Error.WriteLine(
                 $"Scored {rows.Count:N0} rows · {model.NumTrees} trees · {model.Objective} · "
-                + $"{model.NumGroups} output(s) · {sw.Elapsed.TotalMilliseconds:F1} ms ({nsPerRow:F0} ns/row)"
+                + $"{model.NumGroups} output(s) · {sw.GetElapsedTime().TotalMilliseconds:F1} ms ({nsPerRow:F0} ns/row)"
                 + (outputPath is null ? string.Empty : $" → {outputPath}"));
             return 0;
         }

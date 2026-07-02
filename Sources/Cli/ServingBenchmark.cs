@@ -4,10 +4,10 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Buffers;
-using System.Diagnostics;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.Serving;
 
 namespace DevOnBike.Overfit.Cli
@@ -80,7 +80,7 @@ namespace DevOnBike.Overfit.Cli
             var completed = 0;
 
             Console.Write($"running {requests} requests at {users} concurrent users...");
-            var clock = Stopwatch.StartNew();
+            var clock = ValueStopwatch.StartNew();
 
             var workers = new Task[users];
             for (var w = 0; w < users; w++)
@@ -101,11 +101,10 @@ namespace DevOnBike.Overfit.Cli
             }
 
             await Task.WhenAll(workers);
-            clock.Stop();
-            Console.WriteLine($" {completed} done in {clock.Elapsed.TotalSeconds:F1}s.");
+            Console.WriteLine($" {completed} done in {clock.GetElapsedTime().TotalSeconds:F1}s.");
             Console.WriteLine();
 
-            var report = ServingLoadReport.From(samples, users, clock.Elapsed.TotalSeconds, costUnits);
+            var report = ServingLoadReport.From(samples, users, clock.GetElapsedTime().TotalSeconds, costUnits);
             PrintReport(report);
             return report.SuccessfulRequests > 0 ? 0 : 1;
         }
@@ -118,7 +117,7 @@ namespace DevOnBike.Overfit.Cli
                 using var content = BuildRequestBody(model, prompt, maxTokens);
                 using var request = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = content };
 
-                var sw = Stopwatch.StartNew();
+                var sw = ValueStopwatch.StartNew();
                 using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
 
                 if (!response.IsSuccessStatusCode)
@@ -150,19 +149,17 @@ namespace DevOnBike.Overfit.Cli
                     {
                         if (firstTokenMs < 0.0)
                         {
-                            firstTokenMs = sw.Elapsed.TotalMilliseconds;
+                            firstTokenMs = sw.GetElapsedTime().TotalMilliseconds;
                         }
 
                         tokens++;
                     }
                 }
 
-                sw.Stop();
-
                 // No content streamed at all → treat as a failed request, not a 0-token success.
                 return firstTokenMs < 0.0
                     ? ServingRequestSample.Failure()
-                    : ServingRequestSample.Success(firstTokenMs, sw.Elapsed.TotalMilliseconds, tokens);
+                    : ServingRequestSample.Success(firstTokenMs, sw.GetElapsedTime().TotalMilliseconds, tokens);
             }
             catch
             {

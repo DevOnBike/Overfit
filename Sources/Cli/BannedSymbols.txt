@@ -1,0 +1,2 @@
+M:System.Diagnostics.Stopwatch.StartNew; Allocates a Stopwatch object. Use the alloc-free ValueStopwatch (DevOnBike.Overfit.Diagnostics): var sw = ValueStopwatch.StartNew(); ... sw.GetElapsedTime(). Static Stopwatch.GetTimestamp()/.Frequency stay allowed.
+M:System.Diagnostics.Stopwatch.#ctor; Allocates a Stopwatch object. Use the alloc-free ValueStopwatch (DevOnBike.Overfit.Diagnostics) — StartNew() + GetElapsedTime(). Static Stopwatch.GetTimestamp()/.Frequency remain allowed.

@@ -3,11 +3,11 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text.Json;
+using DevOnBike.Overfit.Diagnostics;
 
 namespace DevOnBike.Overfit.Cli
 {
@@ -276,20 +276,25 @@ namespace DevOnBike.Overfit.Cli
                     var buffer = new byte[1 << 20];
                     var read = existing;
                     var lastReport = existing;
-                    var stopwatch = Stopwatch.StartNew();
+                    var stopwatch = ValueStopwatch.StartNew();
+                    
                     int n;
+                    
                     while ((n = await source.ReadAsync(buffer)) > 0)
                     {
                         await dest.WriteAsync(buffer.AsMemory(0, n));
                         hasher.AppendData(buffer, 0, n);
                         read += n;
+                        
                         if (read - lastReport >= (4L << 20))
                         {
-                            Report(file, read, total, read - existing, stopwatch.Elapsed.TotalSeconds);
+                            Report(file, read, total, read - existing, stopwatch.GetElapsedTime().TotalSeconds);
+                            
                             lastReport = read;
                         }
                     }
-                    Report(file, read, total, read - existing, stopwatch.Elapsed.TotalSeconds);
+                    
+                    Report(file, read, total, read - existing, stopwatch.GetElapsedTime().TotalSeconds);
                 }
                 Console.WriteLine();
             }
