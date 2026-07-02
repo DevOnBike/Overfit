@@ -63,6 +63,7 @@ namespace DevOnBike.OverfitChat
         private TextView _welcomeStatus = null!;
         private TextView _welcomeAddLink = null!;
         private ProgressBar _welcomeSpinner = null!;
+        private readonly List<Android.Animation.Animator> _logoAnim = new(); // welcome-screen looping logo
 
         private OverfitClient? _client;
         private ModelInfo? _modelInfo;
@@ -214,6 +215,14 @@ namespace DevOnBike.OverfitChat
             col.SetGravity(GravityFlags.Center);
             col.SetPadding(Dp(36), 0, Dp(36), 0);
 
+            var mark = new ImageView(this);
+            mark.SetImageResource(OverfitChatApp.Resource.Drawable.welcome_logo);
+            mark.SetAdjustViewBounds(true);
+            var markLp = new LinearLayout.LayoutParams(Dp(132), Dp(132));
+            markLp.SetMargins(0, 0, 0, Dp(10));
+            col.AddView(mark, markLp);
+            AnimateWelcomeLogo(mark);
+
             var logo = new ShimmerTextView(this) { Text = "OverThink" };
             logo.SetTextColor(Color.White);
             logo.TextSize = 46f;
@@ -295,18 +304,22 @@ namespace DevOnBike.OverfitChat
             addLp.SetMargins(0, Dp(14), 0, 0);
             col.AddView(_welcomeAddLink, addLp);
 
-            // Optional voice input: adding a Whisper model here is what makes the 🎤 button appear in chat.
-            var voiceLink = new TextView(this) { Text = "＋  Add .bin voice model (Whisper)" };
-            voiceLink.SetTextColor(Color.ParseColor("#A78BFA"));
-            voiceLink.TextSize = 13f;
-            voiceLink.Gravity = GravityFlags.Center;
-            voiceLink.SetPadding(Dp(12), Dp(8), Dp(12), Dp(8));
-            voiceLink.Clickable = true;
-            voiceLink.Click += (_, _) => PickWhisperModel();
-            var voiceLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
-            voiceLp.SetMargins(0, Dp(6), 0, 0);
-            col.AddView(voiceLink, voiceLp);
+            // Voice input (on-device Whisper) is temporarily hidden from the UI while it's being polished.
+            // The whole pipeline still works — re-enable by uncommenting this link (and the About mention
+            // below). Without a Whisper model present the 🎤 button in chat stays hidden (UpdateMicVisibility),
+            // so with no loading entry-point the mic never appears — exactly the "not for now" state.
+            //
+            // var voiceLink = new TextView(this) { Text = "＋  Add .bin voice model (Whisper)" };
+            // voiceLink.SetTextColor(Color.ParseColor("#A78BFA"));
+            // voiceLink.TextSize = 13f;
+            // voiceLink.Gravity = GravityFlags.Center;
+            // voiceLink.SetPadding(Dp(12), Dp(8), Dp(12), Dp(8));
+            // voiceLink.Clickable = true;
+            // voiceLink.Click += (_, _) => PickWhisperModel();
+            // var voiceLp = new LinearLayout.LayoutParams(
+            //     ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+            // voiceLp.SetMargins(0, Dp(6), 0, 0);
+            // col.AddView(voiceLink, voiceLp);
 
             var about = new TextView(this) { Text = "About  ·  GitHub" };
             about.SetTextColor(Color.ParseColor("#A78BFA"));
@@ -334,8 +347,52 @@ namespace DevOnBike.OverfitChat
                 ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
         }
 
+        // Gives the welcome logo a gentle "alive" feel over the animated gradient: a soft breathing scale, a
+        // slow vertical bob, and a lazy sway rotation. Each is its OWN infinite ObjectAnimator (not wrapped in
+        // an AnimatorSet — those don't reliably keep infinite children looping across all devices), so the mark
+        // animates forever while the model-selection screen is up. Different periods keep the loops from lining
+        // up into an obvious repeat. Entrance is a quick overshoot fade+scale. Cancelled when we leave.
+        private void AnimateWelcomeLogo(View mark)
+        {
+            StopWelcomeLogo();
+
+            // Entrance.
+            mark.Alpha = 0f;
+            mark.ScaleX = 0.7f;
+            mark.ScaleY = 0.7f;
+            mark.Animate()!.Alpha(1f).ScaleX(1f).ScaleY(1f).SetDuration(650)!
+                .SetInterpolator(new OvershootInterpolator(1.6f))!.Start();
+
+            void Loop(string prop, float a, float b, long ms)
+            {
+                var an = Android.Animation.ObjectAnimator.OfFloat(mark, prop, a, b);
+                an.SetDuration(ms);
+                an.RepeatCount = Android.Animation.ValueAnimator.Infinite;
+                an.RepeatMode = Android.Animation.ValueAnimatorRepeatMode.Reverse;
+                an.SetInterpolator(new Android.Views.Animations.AccelerateDecelerateInterpolator());
+                an.StartDelay = 650; // let the entrance finish first
+                an.Start();
+                _logoAnim.Add(an);
+            }
+
+            Loop("scaleX", 1f, 1.06f, 2200);
+            Loop("scaleY", 1f, 1.06f, 2200);
+            Loop("translationY", 0f, -Dp(9), 2800);
+            Loop("rotation", -5f, 5f, 5200);
+        }
+
+        private void StopWelcomeLogo()
+        {
+            foreach (var an in _logoAnim)
+            {
+                an.Cancel();
+            }
+            _logoAnim.Clear();
+        }
+
         private void ShowChat()
         {
+            StopWelcomeLogo();
             _inChat = true;
             EnableChatBackHandling();
             var column = new LinearLayout(this) { Orientation = Orientation.Vertical };
@@ -942,15 +999,22 @@ namespace DevOnBike.OverfitChat
             return null;
         }
 
-        // The mic button only appears once a Whisper speech model is present (added via the About dialog or a
-        // prior pick) — no point showing a voice button that can't transcribe.
+        // Master switch for the whole voice-input feature. Off for now while it's polished: the loading
+        // entry-points (welcome link + About mention) are commented out and this keeps the 🎤 button hidden
+        // even if a Whisper model was left on the device by earlier testing. Flip to true (and uncomment the
+        // two loading UI spots) to bring voice back — all the transcription code stays intact.
+        private const bool VoiceInputEnabled = false;
+
+        // The mic button only appears once voice input is enabled AND a Whisper speech model is present —
+        // no point showing a voice button that can't transcribe.
         private void UpdateMicVisibility()
         {
             if (_mic is null)
             {
                 return;
             }
-            _mic.Visibility = WhisperModelPath() is not null ? ViewStates.Visible : ViewStates.Gone;
+            var show = VoiceInputEnabled && WhisperModelPath() is not null;
+            _mic.Visibility = show ? ViewStates.Visible : ViewStates.Gone;
         }
 
         private void OnMicTapped()
@@ -1219,10 +1283,11 @@ namespace DevOnBike.OverfitChat
                 + "leaves the device.\n\n"
                 + "It's powered by Overfit: an open-source, pure-C# / .NET deep-learning & inference engine "
                 + "(zero-allocation CPU inference, GGUF models, no Python runtime).\n\n"
-                + "Pick any GGUF model and chat with streaming tokens, fully offline.\n\n"
-                + "Voice input (optional): add a Whisper speech model (a whisper.cpp ggml .bin file) from the "
-                + "start screen to enable the 🎤 button — speech is transcribed entirely on your device and "
-                + "the audio is never uploaded.";
+                + "Pick any GGUF model and chat with streaming tokens, fully offline.";
+            // Voice input (on-device Whisper) is temporarily hidden from the UI while it's being polished;
+            // when re-enabled, restore this line: "Voice input (optional): add a Whisper speech model
+            // (a whisper.cpp ggml .bin file) from the start screen to enable the 🎤 button — speech is
+            // transcribed entirely on your device and the audio is never uploaded."
 
             new AlertDialog.Builder(this)!
                 .SetTitle("About OverThink")!
