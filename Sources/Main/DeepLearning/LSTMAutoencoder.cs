@@ -3,7 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Linq;
 using System.Numerics.Tensors;
 using DevOnBike.Overfit.Autograd;
 using DevOnBike.Overfit.DeepLearning.Abstractions;
@@ -74,7 +73,12 @@ namespace DevOnBike.Overfit.DeepLearning
         {
             get
             {
-                return Parameters().Sum(p => p.DataView.Size);
+                var total = 0;
+                foreach (var p in Parameters())
+                {
+                    total += p.DataView.Size;
+                }
+                return total;
             }
         }
 

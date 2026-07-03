@@ -412,8 +412,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             {
                 throw new OverfitFormatException($"Metadata key '{key}' is absent.");
             }
+#pragma warning disable RS0030 // Type.Name = compile-time-safe type name for a diagnostic, not runtime reflection (AOT-safe)
             return value as object[]
                 ?? throw new OverfitFormatException($"Metadata '{key}' is not an array (got {value?.GetType().Name}).");
+#pragma warning restore RS0030
         }
 
         public void Dispose()

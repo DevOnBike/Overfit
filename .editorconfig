@@ -2,6 +2,12 @@ root = true
 
 [*.cs]
 dotnet_diagnostic.RS0030.severity = error
+
+# Generated code under obj/ (SDK AssemblyInfo, the System.Text.Json JsonSerializerContext, GlobalUsings, …)
+# is not ours to change and legitimately uses System.Reflection — exempt it from the banned-API rule.
+# BannedApiAnalyzers 3.3.4 skipped generated files automatically; 5.6.0 analyses them, so scope RS0030 off.
+[**/obj/**]
+dotnet_diagnostic.RS0030.severity = none
 dotnet_diagnostic.CA2014.severity = error
 dotnet_diagnostic.IDE0073.severity = warning
 dotnet_diagnostic.IDE0055.severity = warning

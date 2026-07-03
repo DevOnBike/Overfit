@@ -44,7 +44,8 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
             var builder = WebApplication.CreateBuilder(args);
 
             // Resolve the model before building services so a misconfigured run fails fast with a clear
-            // message. Accepts either a *.gguf file or a HuggingFace directory (model.safetensors). The demo
+            // message. Accepts either a *.gguf file or a HuggingF
+            // ace directory (model.safetensors). The demo
             // defaults to Qwen2.5-3B Q4_K_M because it routes tools RELIABLY; a 0.5B is ~2x faster and does
             // chat/RAG/JSON, but its tool selection is below par (see README "Model choice").
             var modelPath = ModelPathResolver.Resolve(builder.Configuration);

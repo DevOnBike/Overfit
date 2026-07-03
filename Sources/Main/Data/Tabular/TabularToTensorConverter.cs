@@ -3,7 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Linq;
 using DevOnBike.Overfit.Data.Contracts;
 using DevOnBike.Overfit.Tensors;
 
@@ -47,7 +46,9 @@ namespace DevOnBike.Overfit.Data.Tabular
                         }
                     }
 
-                    var categories = uniqueValues.OrderBy(x => x).ToArray();
+                    var categoriesList = new List<string>(uniqueValues);
+                    categoriesList.Sort();
+                    var categories = categoriesList.ToArray();
                     _categoryMaps[col.Name] = categories;
                     _featureWidth += categories.Length;
                 }

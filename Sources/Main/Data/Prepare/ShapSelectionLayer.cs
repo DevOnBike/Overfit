@@ -3,7 +3,6 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
-using System.Linq;
 using DevOnBike.Overfit.Data.Abstractions;
 using DevOnBike.Overfit.Data.Contracts;
 using DevOnBike.Overfit.Statistical;
@@ -74,8 +73,33 @@ namespace DevOnBike.Overfit.Data.Prepare
             var analyzer = new GlobalShapAnalyzer(shap, cols);
             var importanceRanking = analyzer.AnalyzeImportance(features);
 
-            var selected = _targetFeatureCount > 0 ? importanceRanking.Take(_targetFeatureCount) : importanceRanking.Where(x => x.ImportanceScore >= _minImportanceThreshold);
-            var kept = selected.Select(x => x.FeatureIndex).OrderBy(x => x).ToArray();
+            // Keep either the top N features by importance, or every feature above the threshold.
+            var keptList = new List<int>();
+            if (_targetFeatureCount > 0)
+            {
+                var taken = 0;
+                foreach (var x in importanceRanking)
+                {
+                    if (taken >= _targetFeatureCount)
+                    {
+                        break;
+                    }
+                    keptList.Add(x.FeatureIndex);
+                    taken++;
+                }
+            }
+            else
+            {
+                foreach (var x in importanceRanking)
+                {
+                    if (x.ImportanceScore >= _minImportanceThreshold)
+                    {
+                        keptList.Add(x.FeatureIndex);
+                    }
+                }
+            }
+            keptList.Sort();
+            var kept = keptList.ToArray();
 
             return kept.Length == 0 ? null : kept;
         }

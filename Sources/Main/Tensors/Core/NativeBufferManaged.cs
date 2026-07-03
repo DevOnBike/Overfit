@@ -211,7 +211,9 @@ namespace DevOnBike.Overfit.Tensors.Core
 
             if (alignmentBytes % sizeof(T) != 0)
             {
+#pragma warning disable RS0030 // typeof(T).Name = compile-time-safe type name for a diagnostic, not runtime reflection (AOT-safe)
                 throw new ArgumentException($"Alignment must be a multiple of sizeof({typeof(T).Name}) = {sizeof(T)}.", nameof(alignmentBytes));
+#pragma warning restore RS0030
             }
         }
 

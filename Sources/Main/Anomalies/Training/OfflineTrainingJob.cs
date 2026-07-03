@@ -4,7 +4,6 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Diagnostics;
-using System.Linq;
 using DevOnBike.Overfit.Anomalies.Gpt;
 using DevOnBike.Overfit.Anomalies.Monitoring;
 using DevOnBike.Overfit.Autograd;
@@ -113,9 +112,11 @@ namespace DevOnBike.Overfit.Anomalies.Training
             var lrMin = _cfg.LearningRateMin * lrScale;
 
             // Worker models share weights with master — each has its own graph and gradients.
-            var workers = Enumerable.Range(0, workerCount)
-                .Select(_ => new GPT1Model(gptConfig))
-                .ToList();
+            var workers = new List<GPT1Model>(workerCount);
+            for (var w = 0; w < workerCount; w++)
+            {
+                workers.Add(new GPT1Model(gptConfig));
+            }
 
             using var graph = new ComputationGraph(_cfg.ArenaSize);
 
@@ -325,10 +326,10 @@ namespace DevOnBike.Overfit.Anomalies.Training
             IEnumerable<Parameter> masterParams,
             List<GPT1Model> workers)
         {
-            var master = masterParams.ToList();
+            var master = new List<Parameter>(masterParams);
             foreach (var worker in workers)
             {
-                var wp = worker.TrainableParameters().ToList();
+                var wp = new List<Parameter>(worker.TrainableParameters());
                 for (var i = 0; i < master.Count && i < wp.Count; i++)
                 {
                     master[i].DataReadOnlySpan.CopyTo(wp[i].DataSpan);
@@ -341,12 +342,15 @@ namespace DevOnBike.Overfit.Anomalies.Training
             List<GPT1Model> workers,
             float scale)
         {
-            var master = masterParams.ToList();
-            master.ForEach(p => p.GradSpan.Clear());
+            var master = new List<Parameter>(masterParams);
+            foreach (var p in master)
+            {
+                p.GradSpan.Clear();
+            }
 
             foreach (var worker in workers)
             {
-                var wp = worker.TrainableParameters().ToList();
+                var wp = new List<Parameter>(worker.TrainableParameters());
                 for (var i = 0; i < master.Count && i < wp.Count; i++)
                 {
                     var mg = master[i].GradSpan;
@@ -361,7 +365,7 @@ namespace DevOnBike.Overfit.Anomalies.Training
 
         private static void ClipGradNorm(IEnumerable<Parameter> parameters, float maxNorm)
         {
-            var list = parameters.ToList();
+            var list = new List<Parameter>(parameters);
             var sq = 0f;
             foreach (var p in list)
             {
