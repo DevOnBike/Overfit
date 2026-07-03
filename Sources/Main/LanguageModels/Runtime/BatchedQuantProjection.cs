@@ -4,6 +4,7 @@
 // For commercial licensing options, contact: devonbike@gmail.com
 
 using System.Runtime.CompilerServices;
+using DevOnBike.Overfit.Intrinsics;
 using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Tensors;
 
@@ -64,8 +65,11 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
                 // tile of NR columns — measured ~3× vs weight-stationary under parallelism, 1.61× end-to-end
                 // prefill. Default-on when the weight is already prepacked (an offline sidecar mmap'd it → zero
                 // extra RAM); otherwise opt-in via OVERFIT_TILED_PREFILL since repacking copies the weight.
-                // No-bias only (GemmTiled applies none).
-                if ((w.IsPrepacked || UseTiledPrefillQ4K) && bias.IsEmpty && w.CanRepack)
+                // No-bias only (GemmTiled applies none). AVX2/FMA required — the kernel is x86-only, so on ARM
+                // (e.g. the Android app) this falls through to the weight-stationary path even if a sidecar
+                // mmap'd a prepacked layout (IsPrepacked would otherwise bypass the env flag's AVX2 gate).
+                if ((w.IsPrepacked || UseTiledPrefillQ4K) && bias.IsEmpty && w.CanRepack
+                    && CpuFeatures.HasAvx2 && CpuFeatures.HasFma)
                 {
                     DispatchTiledQ4K(
                         input, rows, w, output,
