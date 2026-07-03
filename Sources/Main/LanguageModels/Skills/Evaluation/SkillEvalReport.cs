@@ -24,20 +24,32 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Evaluation
             bool OffPass,
             bool TriggerCorrect);
 
-        public IReadOnlyList<CaseResult> Cases { get; }
+        public IReadOnlyList<CaseResult> Cases
+        {
+            get;
+        }
 
         /// <summary>Fraction of cases that pass all their checks with the skill enabled.</summary>
-        public double PassRateOn { get; }
+        public double PassRateOn
+        {
+            get;
+        }
 
         /// <summary>Fraction that pass with the skill disabled (the unaided-model baseline).</summary>
-        public double PassRateOff { get; }
+        public double PassRateOff
+        {
+            get;
+        }
 
         /// <summary>The skill's real value: <see cref="PassRateOn"/> − <see cref="PassRateOff"/>. Near zero
         /// means the bare model already does this — a candidate to retire.</summary>
         public double Lift => PassRateOn - PassRateOff;
 
         /// <summary>Fraction of cases where the skill (de)activated as expected (<c>ShouldTrigger</c>).</summary>
-        public double TriggerAccuracy { get; }
+        public double TriggerAccuracy
+        {
+            get;
+        }
 
         public SkillEvalReport(IReadOnlyList<CaseResult> cases)
         {

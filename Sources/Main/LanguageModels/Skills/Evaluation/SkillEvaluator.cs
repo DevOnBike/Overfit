@@ -28,7 +28,7 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Evaluation
             {
                 return false;
             }
-            
+
             for (var i = 0; i < checks.Count; i++)
             {
                 if (!checks[i].Pass)
@@ -36,7 +36,7 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Evaluation
                     return false;
                 }
             }
-            
+
             return true;
         }
 
@@ -47,7 +47,7 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Evaluation
             ArgumentNullException.ThrowIfNull(registry);
 
             var results = new List<SkillEvalReport.CaseResult>(cases.Count);
-            
+
             foreach (var c in cases)
             {
                 var on = runner.Run(c.Prompt, skillEnabled: true);

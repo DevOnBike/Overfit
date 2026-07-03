@@ -16,9 +16,18 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Optimization
         /// accepted (strict improvement), and a short note.</summary>
         public sealed record Step(int Round, string Instructions, double ValidationScore, bool Accepted, string Note);
 
-        public string BestInstructions { get; }
-        public double BestValidationScore { get; }
-        public IReadOnlyList<Step> Steps { get; }
+        public string BestInstructions
+        {
+            get;
+        }
+        public double BestValidationScore
+        {
+            get;
+        }
+        public IReadOnlyList<Step> Steps
+        {
+            get;
+        }
 
         public SkillOptResult(string bestInstructions, double bestValidationScore, IReadOnlyList<Step> steps)
         {

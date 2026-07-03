@@ -277,23 +277,23 @@ namespace DevOnBike.Overfit.Cli
                     var read = existing;
                     var lastReport = existing;
                     var stopwatch = ValueStopwatch.StartNew();
-                    
+
                     int n;
-                    
+
                     while ((n = await source.ReadAsync(buffer)) > 0)
                     {
                         await dest.WriteAsync(buffer.AsMemory(0, n));
                         hasher.AppendData(buffer, 0, n);
                         read += n;
-                        
+
                         if (read - lastReport >= (4L << 20))
                         {
                             Report(file, read, total, read - existing, stopwatch.GetElapsedTime().TotalSeconds);
-                            
+
                             lastReport = read;
                         }
                     }
-                    
+
                     Report(file, read, total, read - existing, stopwatch.GetElapsedTime().TotalSeconds);
                 }
                 Console.WriteLine();

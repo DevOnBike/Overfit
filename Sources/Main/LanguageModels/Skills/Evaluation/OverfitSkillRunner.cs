@@ -55,7 +55,7 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Evaluation
             var triggered = _measureTrigger && skillEnabled ? MeasureTrigger(prompt) : (bool?)null;
 
             _client.Reset();
-            
+
             if (skillEnabled && _skillInstructions.Length > 0)
             {
                 _client.AddSystem(_skillInstructions);

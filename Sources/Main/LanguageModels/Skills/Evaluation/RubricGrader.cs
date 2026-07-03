@@ -40,7 +40,10 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Evaluation
             Id = id;
         }
 
-        public string Id { get; }
+        public string Id
+        {
+            get;
+        }
 
         public GradeCheck Grade(SkillEvalCase testCase, SkillRunResult result)
         {

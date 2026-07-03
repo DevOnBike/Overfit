@@ -309,6 +309,24 @@ var doctorCommand = new Command("doctor",
 };
 doctorCommand.SetAction(parseResult => Commands.Doctor(parseResult.GetValue(doctorModel)!));
 
+// ── repack: offline pre-repack Q4_K weights to a sidecar → faster, RAM-free prefill by default. ──
+var repackModel = new Argument<string>("model")
+{
+    Description = "Model alias or path to a .gguf. Its repackable Q4_K matmul weights are converted to block_q4_Kx8.",
+};
+var repackOutput = new Option<string?>("--output", "-o")
+{
+    Description = "Sidecar output path; default is <model>.repack next to the GGUF (where the loader auto-discovers it).",
+};
+var repackCommand = new Command("repack",
+    "Pre-repack a Q4_K model to a memory-mapped sidecar — enables the faster register-tiled prefill by default at no extra RAM.")
+{
+    repackModel,
+    repackOutput,
+};
+repackCommand.SetAction(parseResult => Commands.Repack(
+    parseResult.GetValue(repackModel)!, parseResult.GetValue(repackOutput)));
+
 // ── score: run a trained XGBoost model (JSON) over a CSV of feature rows, pure-managed, zero-egress. ──
 var scoreModel = new Argument<string>("model")
 {
@@ -425,6 +443,7 @@ var rootCommand = new RootCommand("Overfit — run local LLMs, RAG and agents in
     chatCommand,
     serveCommand,
     doctorCommand,
+    repackCommand,
     mcpCommand,
     ttsCommand,
     voiceCommand,

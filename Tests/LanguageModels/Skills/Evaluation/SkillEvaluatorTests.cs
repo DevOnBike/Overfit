@@ -20,13 +20,16 @@ namespace DevOnBike.Overfit.Tests.LanguageModels.Skills.Evaluation
         private sealed class ContainsGrader : ISkillGrader
         {
             private readonly string _needle;
-            
+
             public ContainsGrader(string id, string needle)
             {
                 Id = id;
                 _needle = needle;
             }
-            public string Id { get; }
+            public string Id
+            {
+                get;
+            }
             public GradeCheck Grade(SkillEvalCase testCase, SkillRunResult result)
                 => new(Id, result.Output.Contains(_needle, StringComparison.Ordinal), _needle);
         }

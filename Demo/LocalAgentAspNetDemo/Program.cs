@@ -180,8 +180,14 @@ namespace DevOnBike.Overfit.Demo.LocalAgent
             app.MapGet("/healthz", () => Results.Ok(new { status = "live" }));
             app.MapGet("/readyz", (OverfitClient client) =>
                 client is not null
-                    ? Results.Ok(new { status = "ready" })
-                    : Results.Json(new { status = "loading" }, statusCode: StatusCodes.Status503ServiceUnavailable));
+                    ? Results.Ok(new
+                    {
+                        status = "ready"
+                    })
+                    : Results.Json(new
+                    {
+                        status = "loading"
+                    }, statusCode: StatusCodes.Status503ServiceUnavailable));
 
             app.MapPost("/chat", (ChatRequest req, OverfitClient client, MetricsCollector metrics) =>
             {

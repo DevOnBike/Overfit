@@ -95,21 +95,58 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// <summary>Resident size in bytes.</summary>
         public long ByteCount => Blocks.Length;
 
-        private byte[]? _repacked;
+        private ReadOnlyMemory<byte>? _repacked;
+        private bool _hasPrepacked;
 
         /// <summary>True when this weight can be repacked to <c>block_q4_Kx8</c> for the fast
         /// 8×8 decode GEMV (<see cref="Q4KGemvKernel"/>).</summary>
         public bool CanRepack => OutputSize % Q4KRepack.RowsInterleaved == 0 && InputSize % SuperBlockElements == 0;
 
+        /// <summary>True when a pre-repacked view has been attached (see <see cref="SetPrepacked"/>) — i.e. the
+        /// <c>block_q4_Kx8</c> layout is already resident (memory-mapped, zero heap), so routing through the
+        /// repacked kernels costs no extra RAM and can be default-on.</summary>
+        public bool IsPrepacked => _hasPrepacked;
+
+        /// <summary>Bytes the <c>block_q4_Kx8</c> repacked form occupies for this shape.</summary>
+        internal long RepackedByteCount =>
+            (long)(OutputSize / Q4KRepack.RowsInterleaved) * SuperBlocksPerRow * Q4KRepack.BlockKx8Bytes;
+
+        /// <summary>
+        /// Supplies an already-<c>block_q4_Kx8</c>-repacked view (e.g. a zero-copy memory-mapped slice from an
+        /// offline <see cref="Loading.RepackedWeightsFile"/> sidecar) so <see cref="EnsureRepacked"/> hands it
+        /// out directly instead of building a heap copy — the RAM-free default-on path. The region must outlive
+        /// this weight. Must be the exact repacked size and match <see cref="CanRepack"/>.
+        /// </summary>
+        internal void SetPrepacked(ReadOnlyMemory<byte> repacked)
+        {
+            if (!CanRepack)
+            {
+                throw new OverfitRuntimeException(
+                    $"Q4KWeight {InputSize}x{OutputSize} is not repackable; cannot attach a pre-repacked view.");
+            }
+            if (repacked.Length != RepackedByteCount)
+            {
+                throw new OverfitFormatException(
+                    $"Pre-repacked region is {repacked.Length} B, expected {RepackedByteCount} B for {InputSize}x{OutputSize}.");
+            }
+            _repacked = repacked;
+            _hasPrepacked = true;
+        }
+
         /// <summary>
         /// Lazily builds + caches the <c>block_q4_Kx8</c> repacked form (8 rows interleaved) for
-        /// <see cref="Q4KGemvKernel.GemvParallel"/>. Allocates a copy (~same size as the original)
-        /// on first call; safe to call repeatedly. Requires <see cref="CanRepack"/>.
+        /// <see cref="Q4KGemvKernel.GemvParallel"/>. Returns a pre-attached view (see
+        /// <see cref="SetPrepacked"/>) when present; otherwise allocates a copy (~same size as the original)
+        /// on first call. Safe to call repeatedly. Requires <see cref="CanRepack"/>.
         /// </summary>
         public ReadOnlySpan<byte> EnsureRepacked()
         {
-            _repacked ??= Q4KRepack.RepackMatrix(BlockSpan, OutputSize, InputSize);
-            return _repacked;
+            if (_repacked is null)
+            {
+                ReadOnlyMemory<byte> built = Q4KRepack.RepackMatrix(BlockSpan, OutputSize, InputSize);
+                _repacked = built;
+            }
+            return _repacked.Value.Span;
         }
 
         /// <summary>

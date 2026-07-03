@@ -184,7 +184,7 @@ namespace DevOnBike.Overfit.Tensors.Core
             {
                 return;
             }
-            
+
             NativeMemory.AlignedFree(_ptr);
             _ptr = null;
         }

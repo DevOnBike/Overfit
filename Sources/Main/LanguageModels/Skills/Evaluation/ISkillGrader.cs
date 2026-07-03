@@ -15,7 +15,10 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Evaluation
     public interface ISkillGrader
     {
         /// <summary>The check id — matched against <see cref="SkillEvalCase.ExpectedChecks"/>.</summary>
-        string Id { get; }
+        string Id
+        {
+            get;
+        }
 
         GradeCheck Grade(SkillEvalCase testCase, SkillRunResult result);
     }

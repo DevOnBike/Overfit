@@ -43,6 +43,13 @@ namespace DevOnBike.Overfit.LanguageModels.Runtime
         /// </summary>
         public static readonly bool AttnEnabled = ResolveFlag(OverfitEnvironment.RepackAttn);
 
+        /// <summary>
+        /// Opt-in (<c>OVERFIT_TILED_PREFILL=1</c>) for the register-tiled Q4_K prefill GEMM (<see cref="GemmTiled"/>)
+        /// in place of the weight-stationary kernel — measured ~3× per projection under real parallelism. Off by
+        /// default: it repacks the weight (adds ~model RAM) and is AVX2-only.
+        /// </summary>
+        public static readonly bool TiledPrefillEnabled = ResolveFlag(OverfitEnvironment.TiledPrefill);
+
         private static bool ResolveFlag(string envVar)
         {
             if (!CpuFeatures.HasAvx2)

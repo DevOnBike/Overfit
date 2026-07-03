@@ -46,7 +46,7 @@ on today versus what is still hardening. (Model-by-model support is in [Supporte
 | Tier | Capabilities |
 |---|---|
 | **Stable** — validated end-to-end, build a PoC on it | LocalAgent ASP.NET demo (chat · RAG · tools · JSON · metrics · Docker) · GGUF chat (Qwen 2/3, Llama, Mistral, Phi-3.5/4, Gemma-2, Mixtral, Bielik) · in-process RAG + `VectorStore` + **persistent index** (`PersistentVectorStore`) · guaranteed JSON (grammar **and** JSON-Schema subset) · OpenAI-compatible server (`overfit serve`, multi-session pool via `--sessions N`) · `Microsoft.Extensions.AI` adapter (`IChatClient` / `IEmbeddingGenerator`) · MCP tools profile · Whisper STT (tiny/base, EN + PL) · BERT embeddings (MiniLM / BGE / E5) · `overfit doctor` model inspector |
-| **Preview** — works and tested, newer / heavier / advanced | CPU QLoRA fine-tuning *(advanced moat)* · local preset-voice TTS · large MoE models (Qwen1.5-MoE, Mixtral-8x7B) · serving benchmark (`overfit bench`) · interpretability hooks (activation capture + logit lens) · XGBoost tabular scoring (read-only predictor, parity-validated vs XGBoost 3.3.0, zero-alloc) |
+| **Preview** — works and tested, newer / heavier / advanced | CPU QLoRA fine-tuning *(advanced moat)* · local preset-voice TTS · large MoE models (Qwen1.5-MoE, Mixtral-8x7B) · serving benchmark (`overfit bench`) · interpretability hooks (activation capture + logit lens) · XGBoost tabular scoring (read-only predictor, parity-validated vs XGBoost 3.3.0, zero-alloc) · offline Q4_K weight repack (`overfit repack`) for ~1.6× faster prefill at no extra RAM |
 | **Experimental** — opt-in / gated / incomplete | Voice cloning (consent + watermark gated) · whole-matrix Q4_K attention (`OVERFIT_REPACK_ATTN`, off by default) · multilingual / XLM-R (SentencePiece) embedders *(not yet)* · Qwen3-MoE & other new-arch loaders *(not yet)* |
 
 Every claim above maps to a runnable test, benchmark, demo, or CI guard — see [`docs/claim-to-test.md`](docs/claim-to-test.md) (the audit trail for regulated teams).
@@ -213,8 +213,16 @@ and the decode worker pool **parks when idle**, so a serving container at rest s
 overfit serve qwen2.5-3b --port 11434              # one self-contained binary; nothing leaves the box
 overfit serve qwen2.5-3b --port 11434 --sessions 4 # 4 concurrent sessions (shared weights, N× KV cache)
 overfit doctor C:\models\model.gguf                # inspect a GGUF: arch, quant, tokenizer, chat template, supported?
+overfit repack C:\models\qwen2.5-3b.q4km.gguf      # one-time: pre-repack Q4_K weights → faster prefill, no extra RAM
 overfit score model.json --input rows.csv          # score a CSV with a trained XGBoost model (JSON), pure-managed, zero-alloc
 ```
+
+`overfit repack` is a one-time offline step for Q4_K (`Q4_K_M`) models: it converts the matmul weights to the
+kernel's interleaved layout and writes a memory-mapped `<model>.repack` sidecar next to the GGUF. On the next
+load the sidecar is auto-discovered and mapped in, so prompt processing runs the register-tiled kernel **by
+default** — measured ~1.6× faster time-to-first-token on Qwen-3B — at **no extra RAM** (it is mmap'd, not
+copied) and with no change to what the model generates. Delete the sidecar to revert. Non-Q4_K models are
+unaffected.
 
 `overfit score` runs a model trained elsewhere (XGBoost `booster.save_model("model.json")`) over a CSV of
 feature rows — header auto-detected, an empty cell or `nan`/`na`/`?` is a missing value, `--margin` emits raw

@@ -49,6 +49,9 @@ namespace DevOnBike.Overfit.LanguageModels.LoRA
         /// final save. Enables a long/overnight fine-tune to survive an interruption and resume EXACTLY
         /// (see <see cref="QLoRAFineTuner.FineTune"/>'s <c>resume</c> flag).
         /// </summary>
-        public int CheckpointEvery { get; init; }
+        public int CheckpointEvery
+        {
+            get; init;
+        }
     }
 }

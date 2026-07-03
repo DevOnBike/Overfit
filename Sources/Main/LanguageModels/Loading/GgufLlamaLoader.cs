@@ -3,8 +3,10 @@
 // DevonBike Overfit is licensed under the GNU AGPLv3.
 // For commercial licensing options, contact: devonbike@gmail.com
 
+using System.IO;
 using DevOnBike.Overfit.DeepLearning;
 using DevOnBike.Overfit.LanguageModels.Runtime;
+using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Tensors;
 using DevOnBike.Overfit.Tensors.Core;
 using LayerWeightBuffers = DevOnBike.Overfit.LanguageModels.Runtime.CachedLlamaInferenceEngine.LayerWeightBuffers;
@@ -58,15 +60,41 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             // weights hold slices into the map, not the reader. On any failure during build
             // we own the map and must dispose it; on success ownership transfers to the engine.
             var blob = new MemoryMappedModelFile(path);
+            // Optional offline-repacked sidecar (block_q4_Kx8): mmap'd, its slices attach to the repackable
+            // Q4_K weights so the fast kernels cost zero extra heap. Missing/corrupt → runtime repack as before.
+            var repacked = TryOpenSidecar(path);
 
             try
             {
-                return LoadFromReader(reader, quantize, blob);
+                return LoadFromReader(reader, quantize, blob, repacked);
             }
             catch
             {
+                repacked?.Dispose();
                 blob.Dispose();
                 throw;
+            }
+        }
+
+        private static RepackedWeightsFile? TryOpenSidecar(string modelPath)
+        {
+            var sidecar = modelPath + ".repack";
+            if (!File.Exists(sidecar))
+            {
+                return null;
+            }
+
+            try
+            {
+                return RepackedWeightsFile.Open(sidecar);
+            }
+            catch (OverfitFormatException)
+            {
+                return null; // a corrupt/incompatible sidecar must never block loading
+            }
+            catch (IOException)
+            {
+                return null;
             }
         }
 
@@ -88,7 +116,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         }
 
         internal static CachedLlamaInferenceEngine LoadFromReader(
-            GgufReader reader, bool quantize = true, MemoryMappedModelFile? mmap = null)
+            GgufReader reader, bool quantize = true, MemoryMappedModelFile? mmap = null,
+            RepackedWeightsFile? repacked = null)
         {
             var arch = reader.GetMeta("general.architecture", "qwen2");
 
@@ -333,10 +362,10 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 // Output-major dims: Q/K/V contract over dModel; O contracts over nHeads·headDim. Dormant
                 // until the M3 OVERFIT_REPACK_ATTN decode path; the per-head wq/wk/wv/wo above stay active.
                 // (Note: whole-O reads the on-disk Q4_K bytes directly even though per-head O is dequantized.)
-                var wqWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_q.weight", nHeads * headDim, dModel, mmap);
-                var wkWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_k.weight", nKvHeads * headDim, dModel, mmap);
-                var wvWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_v.weight", nKvHeads * headDim, dModel, mmap);
-                var woWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_output.weight", dModel, nHeads * headDim, mmap);
+                var wqWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_q.weight", nHeads * headDim, dModel, mmap, repacked);
+                var wkWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_k.weight", nKvHeads * headDim, dModel, mmap, repacked);
+                var wvWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_v.weight", nKvHeads * headDim, dModel, mmap, repacked);
+                var woWhole = TryLoadWholeAttnQ4K(reader, $"blk.{l}.attn_output.weight", dModel, nHeads * headDim, mmap, repacked);
 
                 // Attention biases (optional — Qwen has them, Llama doesn't);
                 // always F32 in GGUF, never quantized.
@@ -401,9 +430,9 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 }
                 else if (quantize && dModel % Q8DotKernel.BlockSize == 0 && dFF % Q8DotKernel.BlockSize == 0)
                 {
-                    ffnGate = AllocAndLoadResident(reader, $"blk.{l}.ffn_gate.weight", dModel, dFF, mmap);
-                    ffnUp = AllocAndLoadResident(reader, $"blk.{l}.ffn_up.weight", dModel, dFF, mmap);
-                    ffnDown = AllocAndLoadResident(reader, $"blk.{l}.ffn_down.weight", dFF, dModel, mmap);
+                    ffnGate = AllocAndLoadResident(reader, $"blk.{l}.ffn_gate.weight", dModel, dFF, mmap, repacked);
+                    ffnUp = AllocAndLoadResident(reader, $"blk.{l}.ffn_up.weight", dModel, dFF, mmap, repacked);
+                    ffnDown = AllocAndLoadResident(reader, $"blk.{l}.ffn_down.weight", dFF, dModel, mmap, repacked);
                 }
                 else
                 {
@@ -465,7 +494,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
                 if (lmHeadInfo.Type == GgmlType.Q4_K && dModel % Q4KWeight.SuperBlockElements == 0)
                 {
                     // Native Q4_K — read the file's blocks straight in (step 3.2b).
-                    lmHead = LoadQ4KNative(reader, lmHeadInfo, dModel, vocab, mmap);
+                    lmHead = LoadQ4KNative(reader, lmHeadInfo, dModel, vocab, mmap, repacked);
                 }
                 else if (lmHeadInfo.Type == GgmlType.Q6_K && dModel % Q6KWeight.SuperBlockElements == 0)
                 {
@@ -527,7 +556,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             }
 
             return CachedLlamaInferenceEngine.CreateFromBuffers(
-                config, embedWeights, finalNormGamma, finalNormBeta, lmHead, layers, mmap);
+                config, embedWeights, finalNormGamma, finalNormBeta, lmHead, layers,
+                CompositeDisposable.Of(mmap, repacked));
         }
 
         // ─── Helpers ────────────────────────────────────────────────────────
@@ -828,7 +858,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// transpose any path.
         /// </summary>
         internal static DecodeWeight AllocAndLoadResident(
-            GgufReader reader, string name, int inDim, int outDim, MemoryMappedModelFile? mmap)
+            GgufReader reader, string name, int inDim, int outDim, MemoryMappedModelFile? mmap,
+            RepackedWeightsFile? repacked = null)
         {
             if (!reader.Tensors.TryGetValue(name, out var info))
             {
@@ -837,7 +868,7 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
 
             if (info.Type == GgmlType.Q4_K && inDim % Q4KWeight.SuperBlockElements == 0)
             {
-                return LoadQ4KNative(reader, info, inDim, outDim, mmap);
+                return LoadQ4KNative(reader, info, inDim, outDim, mmap, repacked);
             }
             if (info.Type == GgmlType.Q6_K && inDim % Q6KWeight.SuperBlockElements == 0)
             {
@@ -915,21 +946,44 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// Q4KWeight's output-major layout (step 3.2b).
         /// </summary>
         private static Q4KWeight LoadQ4KNative(
-            GgufReader reader, GgufTensorInfo info, int inDim, int outDim, MemoryMappedModelFile? mmap)
+            GgufReader reader, GgufTensorInfo info, int inDim, int outDim, MemoryMappedModelFile? mmap,
+            RepackedWeightsFile? repacked = null)
         {
             var blocksPerRow = inDim / Q4KWeight.SuperBlockElements;
             var totalBytes = checked((int)((long)outDim * blocksPerRow * Q4KWeight.SuperBlockBytes));
 
+            Q4KWeight weight;
             if (mmap is not null)
             {
                 // Zero-copy: the file's block bytes ARE Q4KWeight's layout, verbatim.
                 var slice = mmap.Slice(reader.DataStart + (long)info.Offset, totalBytes);
-                return new Q4KWeight(slice, inDim, outDim);
+                weight = new Q4KWeight(slice, inDim, outDim);
+            }
+            else
+            {
+                var bytes = new byte[totalBytes];
+                reader.LoadTensorQ4_KRaw(info, bytes);
+                weight = new Q4KWeight(bytes, inDim, outDim);
             }
 
-            var bytes = new byte[totalBytes];
-            reader.LoadTensorQ4_KRaw(info, bytes);
-            return new Q4KWeight(bytes, inDim, outDim);
+            AttachPrepacked(weight, info.Name, repacked);
+            return weight;
+        }
+
+        // Attaches the offline-repacked (block_q4_Kx8) mmap slice for this tensor when a sidecar carries it, so
+        // EnsureRepacked hands it out zero-copy instead of building a heap copy. No-op when there is no sidecar,
+        // no matching entry, the shape can't repack, or the dims disagree — always safe to call.
+        private static void AttachPrepacked(Q4KWeight weight, string tensorName, RepackedWeightsFile? repacked)
+        {
+            if (repacked is null || !weight.CanRepack)
+            {
+                return;
+            }
+            if (repacked.TryGet(tensorName, out var inputSize, out var outputSize, out var bytes)
+                && inputSize == weight.InputSize && outputSize == weight.OutputSize)
+            {
+                weight.SetPrepacked(bytes);
+            }
         }
 
         /// <summary>
@@ -1049,7 +1103,8 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
         /// per-head path. Output-major dims: Q/K/V are [nHeads·headDim, dModel]; O is [dModel, nHeads·headDim].
         /// </summary>
         private static DecodeWeight TryLoadWholeAttnQ4K(
-            GgufReader reader, string name, int outputSize, int inputSize, MemoryMappedModelFile? mmap)
+            GgufReader reader, string name, int outputSize, int inputSize, MemoryMappedModelFile? mmap,
+            RepackedWeightsFile? repacked = null)
         {
             if (mmap is null
                 || !reader.Tensors.TryGetValue(name, out var info)
@@ -1063,7 +1118,9 @@ namespace DevOnBike.Overfit.LanguageModels.Loading
             var bytesPerRow = inputSize / Q4KWeight.SuperBlockElements * Q4KWeight.SuperBlockBytes;
             var totalBytes = checked((int)((long)outputSize * bytesPerRow));
             var baseOffset = reader.DataStart + (long)info.Offset;
-            return new Q4KWeight(mmap.Slice(baseOffset, totalBytes), inputSize, outputSize);
+            var weight = new Q4KWeight(mmap.Slice(baseOffset, totalBytes), inputSize, outputSize);
+            AttachPrepacked(weight, name, repacked);
+            return weight;
         }
 
         /// <summary>

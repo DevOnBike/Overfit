@@ -14,8 +14,8 @@ using DevOnBike.Overfit.LanguageModels.Embeddings;
 using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.Whisper;
 using DevOnBike.Overfit.Mcp;
-using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Redaction;
+using DevOnBike.Overfit.Runtime;
 using DevOnBike.Overfit.Server;
 using DevOnBike.Overfit.Serving;
 using DevOnBike.Overfit.Trees;
@@ -305,6 +305,47 @@ namespace DevOnBike.Overfit.Cli
         /// warnings. Read-only (parses metadata + tensor headers; does not load weights) — answers the #1
         /// adoption question, "why doesn't my model work / is the tokenizer + template detected".
         /// </summary>
+        public static int Repack(string model, string? output)
+        {
+            var path = ModelCache.Resolve(model);
+            if (path is null)
+            {
+                Console.Error.WriteLine($"Model '{model}' not found in {ModelCache.Dir}.");
+                Console.Error.WriteLine($"Download it first:  overfit pull {model}   (or pass a .gguf path directly)");
+                return 1;
+            }
+
+            // Default sidecar path is what the loader auto-discovers: <model>.repack next to the GGUF.
+            var outPath = output ?? path + ".repack";
+
+            Console.WriteLine($"Repacking Q4_K matmul weights of {Path.GetFileName(path)} → block_q4_Kx8 …");
+            int count;
+            var sw = ValueStopwatch.StartNew();
+            try
+            {
+                count = RepackedWeightsFile.BuildFromGguf(path, outPath);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Repack failed: {ex.Message}");
+                return 1;
+            }
+
+            if (count == 0)
+            {
+                Console.WriteLine("No repackable Q4_K matmul weights found (model is not Q4_K, or shapes don't tile).");
+                Console.WriteLine("Nothing to accelerate — the sidecar was written empty and can be deleted.");
+                return 0;
+            }
+
+            var mb = new FileInfo(outPath).Length / (1024.0 * 1024.0);
+            Console.WriteLine($"Wrote {count} tensors ({mb:F0} MB) → {outPath}  in {sw.GetElapsedTime().TotalSeconds:F1}s");
+            Console.WriteLine(
+                "It is auto-loaded next to the model: prefill then uses the register-tiled kernel by default "
+                + "(~1.6× faster time-to-first-token), memory-mapped so it costs no extra RAM.");
+            return 0;
+        }
+
         public static int Doctor(string model)
         {
             var path = ModelCache.Resolve(model);

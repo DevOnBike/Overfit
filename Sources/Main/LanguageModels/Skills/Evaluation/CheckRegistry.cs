@@ -18,9 +18,9 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Evaluation
         public CheckRegistry Register(ISkillGrader grader)
         {
             ArgumentNullException.ThrowIfNull(grader);
-            
+
             _graders[grader.Id] = grader;
-            
+
             return this;
         }
 
@@ -30,7 +30,7 @@ namespace DevOnBike.Overfit.LanguageModels.Skills.Evaluation
             ArgumentNullException.ThrowIfNull(testCase);
 
             var checks = new List<GradeCheck>(testCase.ExpectedChecks.Count);
-            
+
             foreach (var id in testCase.ExpectedChecks)
             {
                 if (_graders.TryGetValue(id, out var grader))
