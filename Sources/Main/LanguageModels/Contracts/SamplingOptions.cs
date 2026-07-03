@@ -53,6 +53,38 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
                 minP: minP);
         }
 
+        /// <summary>
+        /// Top-nσ sampling (default n 1.0): keep tokens with logit ≥ <c>max − n·σ</c>, sample with
+        /// <paramref name="temperature"/> from the survivors. A strong, scale-adaptive tail-trimmer — good for
+        /// reducing hallucinations while keeping some diversity. Selects <see cref="SamplingStrategy.TopNSigma"/>.
+        /// </summary>
+        public static SamplingOptions WithTopNSigma(float nSigma = 1.0f, float temperature = 1.0f, int seed = 0)
+        {
+            return new SamplingOptions(
+                strategy: SamplingStrategy.TopNSigma,
+                temperature: temperature,
+                topK: 0,
+                topP: 1.0f,
+                seed: seed,
+                nSigma: nSigma);
+        }
+
+        /// <summary>
+        /// Locally typical sampling (default p 0.95): keep the tokens whose surprise is closest to the entropy
+        /// until their cumulative probability ≥ <paramref name="typicalP"/>, sample with
+        /// <paramref name="temperature"/>. Selects <see cref="SamplingStrategy.TypicalP"/>.
+        /// </summary>
+        public static SamplingOptions WithTypicalP(float typicalP = 0.95f, float temperature = 1.0f, int seed = 0)
+        {
+            return new SamplingOptions(
+                strategy: SamplingStrategy.TypicalP,
+                temperature: temperature,
+                topK: 0,
+                topP: 1.0f,
+                seed: seed,
+                typicalP: typicalP);
+        }
+
         public SamplingOptions(
             SamplingStrategy strategy,
             float temperature,
@@ -61,7 +93,9 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
             int seed,
             float repetitionPenalty = 1.0f,
             int repetitionPenaltyContextSize = 0,
-            float minP = 0f)
+            float minP = 0f,
+            float nSigma = 0f,
+            float typicalP = 1f)
         {
             Strategy = strategy;
             Temperature = temperature;
@@ -71,6 +105,8 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
             RepetitionPenalty = repetitionPenalty;
             RepetitionPenaltyContextSize = repetitionPenaltyContextSize;
             MinP = minP;
+            NSigma = nSigma;
+            TypicalP = typicalP;
         }
 
         public SamplingStrategy Strategy
@@ -126,6 +162,24 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
         /// Used by <see cref="SamplingStrategy.MinP"/>. 0 = disabled. Typical: 0.05–0.1.
         /// </summary>
         public float MinP
+        {
+            get;
+        }
+
+        /// <summary>
+        /// Top-nσ multiplier: a token survives if its logit ≥ <c>max − NSigma·σ</c>. Used by
+        /// <see cref="SamplingStrategy.TopNSigma"/>. Typical: 1.0. Larger = wider.
+        /// </summary>
+        public float NSigma
+        {
+            get;
+        }
+
+        /// <summary>
+        /// Locally-typical cumulative-probability threshold ∈ (0, 1]. Used by
+        /// <see cref="SamplingStrategy.TypicalP"/>. 1 = disabled. Typical: 0.95.
+        /// </summary>
+        public float TypicalP
         {
             get;
         }

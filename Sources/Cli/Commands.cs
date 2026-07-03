@@ -10,6 +10,7 @@ using DevOnBike.Overfit.Audio.Tts;
 using DevOnBike.Overfit.Audio.Tts.Orpheus;
 using DevOnBike.Overfit.Diagnostics;
 using DevOnBike.Overfit.LanguageModels;
+using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Embeddings;
 using DevOnBike.Overfit.LanguageModels.Loading;
 using DevOnBike.Overfit.LanguageModels.Whisper;
@@ -1230,7 +1231,66 @@ namespace DevOnBike.Overfit.Cli
             return result;
         }
 
-        public static int Chat(string model)
+        // Maps the CLI sampling flags to a single SamplingOptions strategy. 0 = off for each knob; if any
+        // truncation knob is set the temperature defaults to 1.0 (else the engine would run greedy and skip it).
+        private static SamplingOptions BuildSampling(
+            float temperature, int topK, float topP, float minP, float topNSigma, float typicalP)
+        {
+            var anyTrunc = topK > 0 || (topP > 0f && topP < 1f) || minP > 0f || topNSigma > 0f
+                || (typicalP > 0f && typicalP < 1f);
+            if (temperature <= 0f && !anyTrunc)
+            {
+                return SamplingOptions.Greedy;
+            }
+
+            var t = temperature > 0f ? temperature : 1.0f;
+            if (topNSigma > 0f)
+            {
+                return SamplingOptions.WithTopNSigma(topNSigma, t);
+            }
+            if (typicalP > 0f && typicalP < 1f)
+            {
+                return SamplingOptions.WithTypicalP(typicalP, t);
+            }
+            if (minP > 0f)
+            {
+                return SamplingOptions.WithMinP(minP, t);
+            }
+            if (topK > 0 && topP > 0f && topP < 1f)
+            {
+                return new SamplingOptions(SamplingStrategy.TopKTopP, t, topK, topP, seed: 0);
+            }
+            if (topP > 0f && topP < 1f)
+            {
+                return new SamplingOptions(SamplingStrategy.TopP, t, 0, topP, seed: 0);
+            }
+            if (topK > 0)
+            {
+                return new SamplingOptions(SamplingStrategy.TopK, t, topK, 1f, seed: 0);
+            }
+            return new SamplingOptions(SamplingStrategy.Temperature, t, 0, 1f, seed: 0);
+        }
+
+        private static string DescribeSampling(SamplingOptions s) => s.Strategy switch
+        {
+            SamplingStrategy.Greedy => "greedy (deterministic)",
+            SamplingStrategy.TopNSigma => $"top-nσ n={s.NSigma} · temp {s.Temperature}",
+            SamplingStrategy.TypicalP => $"typical-p {s.TypicalP} · temp {s.Temperature}",
+            SamplingStrategy.MinP => $"min-p {s.MinP} · temp {s.Temperature}",
+            SamplingStrategy.TopKTopP => $"top-k {s.TopK} + top-p {s.TopP} · temp {s.Temperature}",
+            SamplingStrategy.TopP => $"top-p {s.TopP} · temp {s.Temperature}",
+            SamplingStrategy.TopK => $"top-k {s.TopK} · temp {s.Temperature}",
+            _ => $"temperature {s.Temperature}",
+        };
+
+        public static int Chat(
+            string model,
+            float temperature = 0f,
+            int topK = 0,
+            float topP = 0f,
+            float minP = 0f,
+            float topNSigma = 0f,
+            float typicalP = 0f)
         {
             var path = ModelCache.Resolve(model);
             if (path is null)
@@ -1254,6 +1314,12 @@ namespace DevOnBike.Overfit.Cli
                 Console.Error.WriteLine("or a model whose hidden size is a multiple of 256 (e.g. qwen2.5-3b).");
                 return 1;
             }
+
+            var sampling = BuildSampling(temperature, topK, topP, minP, topNSigma, typicalP);
+            var o = client.Options;
+            client.Options = new GenerationOptions(
+                o.MaxNewTokens, o.MaxContextLength, sampling, o.StopOnEndOfTextToken, o.EndOfTextTokenId);
+            Console.WriteLine($"Sampling: {DescribeSampling(sampling)}");
 
             client.AddSystem("You are a concise, helpful assistant running locally in pure .NET.");
             Console.WriteLine("Ready. Type a message; /reset clears the conversation, /exit quits.");

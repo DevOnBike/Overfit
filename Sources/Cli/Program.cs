@@ -35,11 +35,33 @@ var chatModel = new Argument<string>("model")
 {
     Description = "A model name in the local store, or a path to a .gguf file.",
 };
+var chatTemp = new Option<float>("--temp", "-t")
+{
+    Description = "Sampling temperature. 0 (default) = greedy/deterministic; 0.2–0.4 factual; 0.7–1.0 creative.",
+};
+var chatTopK = new Option<int>("--top-k") { Description = "Keep only the K highest-probability tokens (0 = off)." };
+var chatTopP = new Option<float>("--top-p") { Description = "Nucleus sampling: keep the smallest set with cumulative probability ≥ P (1 = off)." };
+var chatMinP = new Option<float>("--min-p") { Description = "Min-P: keep tokens with probability ≥ minP × P(top) (0 = off). Scale-adaptive tail-trim." };
+var chatTopNSigma = new Option<float>("--top-n-sigma") { Description = "Top-nσ: keep tokens with logit ≥ max − n·σ (0 = off). Strong anti-hallucination tail-trim." };
+var chatTypicalP = new Option<float>("--typical-p") { Description = "Locally typical sampling: keep tokens near the entropy up to cumulative prob P (1 = off)." };
 var chatCommand = new Command("chat", "Chat with a local model interactively.")
 {
     chatModel,
+    chatTemp,
+    chatTopK,
+    chatTopP,
+    chatMinP,
+    chatTopNSigma,
+    chatTypicalP,
 };
-chatCommand.SetAction(parseResult => Commands.Chat(parseResult.GetValue(chatModel)!));
+chatCommand.SetAction(parseResult => Commands.Chat(
+    parseResult.GetValue(chatModel)!,
+    parseResult.GetValue(chatTemp),
+    parseResult.GetValue(chatTopK),
+    parseResult.GetValue(chatTopP),
+    parseResult.GetValue(chatMinP),
+    parseResult.GetValue(chatTopNSigma),
+    parseResult.GetValue(chatTypicalP)));
 
 var serveModel = new Argument<string>("model")
 {
