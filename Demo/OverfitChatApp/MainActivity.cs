@@ -14,6 +14,7 @@ using Android.Views;
 using Android.Views.Animations;
 using Android.Widget;
 using DevOnBike.Overfit.LanguageModels;
+using DevOnBike.Overfit.LanguageModels.Contracts;
 using DevOnBike.Overfit.LanguageModels.Loading;
 
 using DevOnBike.Overfit.LanguageModels.Whisper;
@@ -66,6 +67,9 @@ namespace DevOnBike.OverfitChat
         private readonly List<Android.Animation.Animator> _logoAnim = new(); // welcome-screen looping logo
 
         private OverfitClient? _client;
+        // Sampling preset chosen in the ⚙ dialog: 0 = Precise (greedy), 1 = Balanced (top-nσ), 2 = Creative (min-p).
+        // DRY anti-loop is applied on every preset. Default Balanced; re-applied to the client on each model load.
+        private int _samplingMode = 1;
         private ModelInfo? _modelInfo;
         private volatile bool _busy;
         private bool _inChat; // true while the chat screen is shown (drives Back → welcome instead of exit)
@@ -438,10 +442,67 @@ namespace DevOnBike.OverfitChat
             bar.AddView(titles, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f));
 
             bar.AddView(IconButton("?", ShowAbout));
+            bar.AddView(IconButton("⚙", ShowSamplingDialog));
             bar.AddView(IconButton("ⓘ", ShowModelInfo));
             bar.AddView(IconButton("⟳", () => ShowWelcome()));
 
             return bar;
+        }
+
+        // ⚙ "Response style": three presets over the sampler, each with the DRY anti-loop ON (small on-device
+        // models loop verbatim without it). Applied to _client.Options, so it takes effect from the next turn.
+        private void ShowSamplingDialog()
+        {
+            var labels = new[] { "Precise", "Balanced", "Creative" };
+            var options = new[]
+            {
+                "Precise — deterministic, fewest surprises",
+                "Balanced — a little variety (top-nσ)",
+                "Creative — most varied (min-p)",
+            };
+            AlertDialog? dlg = null;
+            dlg = new AlertDialog.Builder(this)!
+                .SetTitle("Response style")!
+                .SetSingleChoiceItems(options, _samplingMode, (_, e) =>
+                {
+                    ApplySampling(e.Which);
+                    Toast.MakeText(this, "Style: " + labels[e.Which], ToastLength.Short)!.Show();
+                    dlg?.Dismiss();
+                })!
+                .SetNegativeButton("Close", (_, _) => { })!
+                .Show();
+        }
+
+        // Builds the SamplingOptions for the chosen preset and installs it on the client (preserving the other
+        // GenerationOptions fields). DRY (Don't-Repeat-Yourself) is on for all three — it penalises would-be
+        // verbatim repetitions before sampling, so it breaks loops even under the deterministic "Precise" preset.
+        private void ApplySampling(int mode)
+        {
+            _samplingMode = mode;
+            var client = _client;
+            if (client is null)
+            {
+                return;
+            }
+
+            const float dryMul = 0.8f, dryBase = 1.75f;
+            const int dryAllowed = 2, dryLastN = 256;
+
+            var sampling = mode switch
+            {
+                2 => new SamplingOptions(
+                    SamplingStrategy.MinP, temperature: 1.0f, topK: 0, topP: 1.0f, seed: 0,
+                    minP: 0.05f, dryMultiplier: dryMul, dryBase: dryBase, dryAllowedLength: dryAllowed, dryPenaltyLastN: dryLastN),
+                1 => new SamplingOptions(
+                    SamplingStrategy.TopNSigma, temperature: 0.7f, topK: 0, topP: 1.0f, seed: 0,
+                    nSigma: 1.0f, dryMultiplier: dryMul, dryBase: dryBase, dryAllowedLength: dryAllowed, dryPenaltyLastN: dryLastN),
+                _ => new SamplingOptions(
+                    SamplingStrategy.Greedy, temperature: 1.0f, topK: 0, topP: 1.0f, seed: 0,
+                    dryMultiplier: dryMul, dryBase: dryBase, dryAllowedLength: dryAllowed, dryPenaltyLastN: dryLastN),
+            };
+
+            var o = client.Options;
+            client.Options = new GenerationOptions(o.MaxNewTokens, o.MaxContextLength, sampling, o.StopOnEndOfTextToken, o.EndOfTextTokenId);
         }
 
         private View BuildChatScroll()
@@ -826,6 +887,7 @@ namespace DevOnBike.OverfitChat
                     _client?.Dispose();
                     _client = client;
                     _modelInfo = info;
+                    ApplySampling(_samplingMode); // wire the chosen preset (incl. DRY) into the fresh client
                     Prefs.Edit()!.PutString("last_model_path", path)!.Apply();
                     ShowChat();
                 });

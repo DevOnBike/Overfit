@@ -38,4 +38,11 @@
 		<None Include="test_fixtures\**\*" CopyToOutputDirectory="PreserveNewest" />
 	</ItemGroup>
 
+	<!-- AotSmokeTest is its own AOT-publish exe project living under Tests/; exclude its sources from this
+	     xUnit project's default glob so its entry point (Program.cs) isn't compiled in twice. -->
+	<ItemGroup>
+		<Compile Remove="AotSmokeTest\**\*.cs" />
+		<None Remove="AotSmokeTest\**\*" />
+	</ItemGroup>
+
 </Project>

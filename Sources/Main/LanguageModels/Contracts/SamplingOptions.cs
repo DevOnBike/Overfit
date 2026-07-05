@@ -95,7 +95,11 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
             int repetitionPenaltyContextSize = 0,
             float minP = 0f,
             float nSigma = 0f,
-            float typicalP = 1f)
+            float typicalP = 1f,
+            float dryMultiplier = 0f,
+            float dryBase = 1.75f,
+            int dryAllowedLength = 2,
+            int dryPenaltyLastN = 0)
         {
             Strategy = strategy;
             Temperature = temperature;
@@ -107,6 +111,10 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
             MinP = minP;
             NSigma = nSigma;
             TypicalP = typicalP;
+            DryMultiplier = dryMultiplier;
+            DryBase = dryBase;
+            DryAllowedLength = dryAllowedLength;
+            DryPenaltyLastN = dryPenaltyLastN;
         }
 
         public SamplingStrategy Strategy
@@ -180,6 +188,42 @@ namespace DevOnBike.Overfit.LanguageModels.Contracts
         /// <see cref="SamplingStrategy.TypicalP"/>. 1 = disabled. Typical: 0.95.
         /// </summary>
         public float TypicalP
+        {
+            get;
+        }
+
+        /// <summary>
+        /// DRY (Don't Repeat Yourself) penalty weight. When &gt; 0 the engine subtracts
+        /// <c>DryMultiplier · DryBase^(L − DryAllowedLength)</c> from any token that would extend a verbatim
+        /// repetition of length <c>L ≥ DryAllowedLength</c> in the recent output. Orthogonal to the sampling
+        /// strategy — applied to the logits BEFORE selection, so it works even under greedy decode. 0 = disabled.
+        /// Typical: 0.8.
+        /// </summary>
+        public float DryMultiplier
+        {
+            get;
+        }
+
+        /// <summary>
+        /// DRY penalty growth base (per repetition character beyond <see cref="DryAllowedLength"/>). Typical: 1.75.
+        /// </summary>
+        public float DryBase
+        {
+            get;
+        }
+
+        /// <summary>
+        /// Repetition length that DRY tolerates before penalising (matches shorter than this are free). Typical: 2.
+        /// </summary>
+        public int DryAllowedLength
+        {
+            get;
+        }
+
+        /// <summary>
+        /// Window of recent output tokens DRY scans (0 = all tokens generated since Reset). Typical: 256.
+        /// </summary>
+        public int DryPenaltyLastN
         {
             get;
         }

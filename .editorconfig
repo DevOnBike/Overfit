@@ -8,6 +8,11 @@ dotnet_diagnostic.RS0030.severity = error
 # BannedApiAnalyzers 3.3.4 skipped generated files automatically; 5.6.0 analyses them, so scope RS0030 off.
 [**/obj/**]
 dotnet_diagnostic.RS0030.severity = none
+# NOTE: the System.Text.Json source-generated OverfitJsonContext is analysed under a SYNTHETIC path that
+# no editorconfig section (not [*.cs], [**/obj/**], nor [*.g.cs]) matches, so RS0030 falls back to its
+# analyzer-default Warning there. That warning is neutralised centrally via <WarningsNotAsErrors> in
+# Directory.Build.props (it would otherwise be promoted to an error under the aot-guard's
+# TreatWarningsAsErrors publish). Real .cs code still gets RS0030 = error from the [*.cs] section above.
 dotnet_diagnostic.CA2014.severity = error
 dotnet_diagnostic.IDE0073.severity = warning
 dotnet_diagnostic.IDE0055.severity = warning

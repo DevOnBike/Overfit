@@ -9,7 +9,7 @@
       AOT requires an executable entry point).
 
       The CI step is:
-          dotnet publish ./Sources/AotSmokeTest/AotSmokeTest.csproj
+          dotnet publish ./Tests/AotSmokeTest/AotSmokeTest.csproj
               -c Release -r linux-x64 -p:PublishAot=true
 
       If anything trim-incompatible or AOT-incompatible sneaks into Sources/Main and
@@ -39,7 +39,7 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\Main\Main.csproj" />
+        <ProjectReference Include="..\..\Sources\Main\Main.csproj" />
     </ItemGroup>
 
 </Project>

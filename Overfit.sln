@@ -9,7 +9,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Main", "Sources\Main\Main.c
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benchmarks", "Sources\Benchmark\Benchmarks.csproj", "{70B4CEFB-8FE1-74B4-0D78-678F5BA7E49D}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AotSmokeTest", "Sources\AotSmokeTest\AotSmokeTest.csproj", "{A07F2E10-DB02-4C8F-A0BC-B9B7E5C123F8}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AotSmokeTest", "Tests\AotSmokeTest\AotSmokeTest.csproj", "{A07F2E10-DB02-4C8F-A0BC-B9B7E5C123F8}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "items", "items", "{02EA681E-C7D8-13C7-8484-4AC65E1B71E8}"
 	ProjectSection(SolutionItems) = preProject

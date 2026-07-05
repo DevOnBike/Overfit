@@ -575,20 +575,53 @@ namespace DevOnBike.Overfit.LanguageModels.Sampling
                     return;
                 }
 
+
+                // Opt-in (pipeline) path allocates its Z-algorithm scratch; the zero-alloc engine hot path calls
+                // Apply directly with caller-owned rev/z buffers.
+                var rev = new int[m];
+                var z = new int[m];
+                Apply(logits, window, _multiplier, _base, _allowedLength, rev, z);
+            }
+
+            /// <summary>Zero-allocation DRY core: penalises the token that would extend the longest verbatim
+            /// repetition of <paramref name="window"/> (the recent token history). <paramref name="rev"/> and
+            /// <paramref name="z"/> are caller-owned scratch (each length ≥ window length) — so the decode hot
+            /// path can reuse fixed buffers instead of allocating per token. Both scratch spans are fully
+            /// (re)written here, so they may be dirty on entry.</summary>
+            internal static void Apply(
+                Span<float> logits,
+                ReadOnlySpan<int> window,
+                float multiplier,
+                float baseValue,
+                int allowedLength,
+                Span<int> rev,
+                Span<int> z)
+            {
+                if (multiplier <= 0f)
+                {
+                    return;
+                }
+                var m = window.Length;
+                if (m < 2 || rev.Length < m || z.Length < m)
+                {
+                    return;
+                }
+                allowedLength = Math.Max(1, allowedLength);
+
                 // Z-algorithm over the reversed window: rev[i]'s match length against the prefix tells us how
                 // long the current suffix repeats an earlier occurrence ending at window position m-1-i; the
                 // token that FOLLOWED that occurrence is window[m-i], the continuation we penalise.
-                var rev = new int[m];
                 for (var i = 0; i < m; i++)
                 {
                     rev[i] = window[m - 1 - i];
                 }
 
-                var z = new int[m];
+                z[0] = 0;
                 var l = 0;
                 var r = 0;
                 for (var i = 1; i < m; i++)
                 {
+                    z[i] = 0;
                     if (i < r)
                     {
                         z[i] = Math.Min(r - i, z[i - l]);
@@ -607,7 +640,7 @@ namespace DevOnBike.Overfit.LanguageModels.Sampling
                 for (var i = 1; i < m; i++)
                 {
                     var matchLen = z[i];
-                    if (matchLen < _allowedLength)
+                    if (matchLen < allowedLength)
                     {
                         continue;
                     }
@@ -616,8 +649,8 @@ namespace DevOnBike.Overfit.LanguageModels.Sampling
                     {
                         continue;
                     }
-                    var exponent = Math.Min(matchLen - _allowedLength, MaxExponent);
-                    var penalty = _multiplier * MathF.Pow(_base, exponent);
+                    var exponent = Math.Min(matchLen - allowedLength, MaxExponent);
+                    var penalty = multiplier * MathF.Pow(baseValue, exponent);
                     logits[candidate] -= penalty;
                 }
             }
